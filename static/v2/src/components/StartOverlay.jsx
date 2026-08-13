@@ -19,7 +19,8 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Icon } from './ui.jsx';
 import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
-import { PasswordModal, VibeSdrModal, vibesdrUri } from './StartExtras.jsx';
+import { PasswordModal, UberSdrAppModal, VibeSdrModal } from './StartExtras.jsx';
+import { ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
 import StartMap from './StartMap.jsx';
 
 // The pages v1 links from this overlay. Both open in a new tab, as v1's do.
@@ -43,6 +44,20 @@ const hostAutoStart = () => {
     try { return !!(window.ubersdrDesktop && window.ubersdrDesktop.autoStart); } catch (e) { return false; }
 };
 
+// Whether this page is already inside one of UberSDR's own apps.
+//
+// The same object answers it: `window.ubersdrDesktop` is set by the desktop
+// client's receiver preload and by the Android client's document-start script,
+// and by nothing in an ordinary browser. What it is used for here is leaving
+// out the "Open in App" link, which in an app would offer to open the receiver
+// that is open — a QR code to scan with the device holding it.
+//
+// VibeSDR's link stays, because that is a different app and handing this
+// receiver to it is still something to want.
+const insideApp = () => {
+    try { return !!window.ubersdrDesktop; } catch (e) { return false; }
+};
+
 export default function StartOverlay() {
     const { running, serverInfo, actions } = useRadio();
     const [check, setCheck] = useState(null);      // null until /connection answers
@@ -50,7 +65,7 @@ export default function StartOverlay() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [started, setStarted] = useState(false);
-    const [dialog, setDialog] = useState(null);   // 'vibesdr' | 'password' | null
+    const [dialog, setDialog] = useState(null);   // 'vibesdr' | 'app' | 'password' | null
     const buttonRef = useRef(null);
     const mobile = useMediaQuery(MOBILE_QUERY);
 
@@ -104,12 +119,24 @@ export default function StartOverlay() {
     // Only instances registered with the directory have one, and without it
     // there is nothing for the app to connect to — so no button, as in v1.
     const publicUuid = (serverInfo && serverInfo.public_uuid) || '';
+    const inApp = insideApp();
 
     // On a phone the deep link goes straight to the app: the QR dialog exists
     // to get the URI onto a *different* device, and this is that device.
+    //
+    // Both links work the same way and for the same reason. Nothing is torn
+    // down before leaving, unlike v1's version of this — v1 drops its sockets
+    // on the way out because the receiver is already running by the time the
+    // button exists, and here it has not started: this overlay *is* the thing
+    // standing between the page and its first connection.
     const vibesdr = () => {
         if (mobile) { window.location.href = vibesdrUri(publicUuid); return; }
         setDialog('vibesdr');
+    };
+
+    const openInApp = () => {
+        if (mobile) { window.location.href = ubersdrAppUri(publicUuid); return; }
+        setDialog('app');
     };
 
     const submitPassword = async (e) => {
@@ -194,6 +221,16 @@ export default function StartOverlay() {
                     <a className="start__link" href={DIRECTORY} target="_blank" rel="noopener noreferrer">
                         Instance directory
                     </a>
+                    {publicUuid && !inApp && (
+                        <button
+                            type="button"
+                            className="start__link start__link--btn"
+                            title="Open this receiver in the UberSDR desktop or Android app"
+                            onClick={openInApp}
+                        >
+                            Open in App
+                        </button>
+                    )}
                     {publicUuid && (
                         <button type="button" className="start__link start__link--btn" onClick={vibesdr}>
                             VibeSDR
@@ -217,6 +254,9 @@ export default function StartOverlay() {
 
             {dialog === 'vibesdr' && (
                 <VibeSdrModal publicUuid={publicUuid} onClose={() => setDialog(null)} />
+            )}
+            {dialog === 'app' && (
+                <UberSdrAppModal publicUuid={publicUuid} onClose={() => setDialog(null)} />
             )}
             {dialog === 'password' && (
                 <PasswordModal

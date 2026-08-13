@@ -24,7 +24,10 @@ import pkg from '../package.json';
 // the chooser's footer at a glance. The fallback is for a bundle built by hand.
 const BUILD_INFO = typeof __BUILD_INFO__ === 'string' ? __BUILD_INFO__ : '';
 
-const store = new InstanceStore();
+// The one store. Exported because deeplink.js is the other thing in this client
+// that connects to a receiver, and two stores over one Preferences key would be
+// two copies of the saved list, each overwriting the other's last write.
+export const store = new InstanceStore();
 
 // Which receiver is open, as far as the chooser is concerned.
 //
@@ -94,7 +97,7 @@ async function withSaved(rows) {
  * instance id and the native side reads the secret itself, so a value the
  * chooser must not hold does not pass through it on the way to the page.
  */
-async function connect(desc) {
+export async function connect(desc) {
     const entry = desc.id ? await store.get(desc.id) : await store.ensure(desc);
     if (!entry) throw new Error('unknown instance');
 

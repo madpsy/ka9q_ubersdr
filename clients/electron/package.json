@@ -18,9 +18,16 @@
     "electron": "^34.0.0",
     "electron-builder": "^26.15.3"
   },
+  "//protocols": "ubersdr://connect?uuid=… — see deeplink.js. This entry is what makes the association exist on two of the three platforms: electron-builder writes CFBundleURLTypes into the macOS Info.plist and MimeType=x-scheme-handler/ubersdr into the Linux .desktop entry (whose Exec already ends in %U, so the URL reaches argv). It writes nothing for NSIS — on Windows the registration is entirely app.setAsDefaultProtocolClient at startup, which is called on every platform anyway.",
   "build": {
     "appId": "org.ubersdr.desktop",
     "productName": "UberSDR",
+    "protocols": [
+      {
+        "name": "UberSDR receiver",
+        "schemes": ["ubersdr"]
+      }
+    ],
     "directories": {
       "buildResources": "assets",
       "output": "dist"
@@ -31,6 +38,7 @@
       "monitorserver.js",
       "mdns.js",
       "discovery.js",
+      "deeplink.js",
       "updates.js",
       "store.js",
       "prefs.js",

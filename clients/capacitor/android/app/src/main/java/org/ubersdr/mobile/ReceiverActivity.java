@@ -52,6 +52,7 @@ public class ReceiverActivity extends Activity {
     private static final String TAG = "UberSDR";
 
     static final String EXTRA_ID = "id";
+    static final String EXTRA_EPOCH = "epoch";
     static final String EXTRA_URL = "url";
     static final String EXTRA_LABEL = "label";
     static final String EXTRA_ORIGIN = "origin";
@@ -68,6 +69,9 @@ public class ReceiverActivity extends Activity {
 
     private WebView web;
     private String instanceId;
+    // Which launch this Activity is, so that reporting its end cannot be read
+    // as the end of the one after it. See UberSdrPlugin.receiverClosed.
+    private int epoch;
     private boolean insecureTLS;
     private String label = "UberSDR";
     private boolean playing;
@@ -79,6 +83,20 @@ public class ReceiverActivity extends Activity {
     static void finishCurrent() {
         ReceiverActivity activity = current.get();
         if (activity != null) activity.finish();
+    }
+
+    /**
+     * Whether there is a receiver on screen right now.
+     *
+     * <p>Not simply "the reference is non-null": it is set in onCreate and never
+     * cleared, so between an Activity finishing and the collector getting to it
+     * this answers for something that has already gone. What the caller is
+     * asking is whether an Intent sent now would land on a live Activity, and
+     * for one on its way out it would not — it would start a new one.
+     */
+    static boolean isOpen() {
+        ReceiverActivity activity = current.get();
+        return activity != null && !activity.isFinishing() && !activity.isDestroyed();
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -98,6 +116,7 @@ public class ReceiverActivity extends Activity {
 
         Intent intent = getIntent();
         instanceId = intent.getStringExtra(EXTRA_ID);
+        epoch = intent.getIntExtra(EXTRA_EPOCH, 0);
         String url = intent.getStringExtra(EXTRA_URL);
         String origin = intent.getStringExtra(EXTRA_ORIGIN);
         String upstream = intent.getStringExtra(EXTRA_UPSTREAM);
@@ -472,17 +491,33 @@ public class ReceiverActivity extends Activity {
     }
 
     /**
-     * A notification the operator tapped.
+     * A notification the operator tapped, or a different receiver to show.
      *
-     * <p>The Activity is singleTask, so this arrives here rather than starting
-     * a second one. The tag goes back to the page, which fires whatever it hung
-     * off that notification's `onclick` — the same thing clicking it does in a
-     * browser.
+     * <p>The Activity is singleTask, so both arrive here rather than starting a
+     * second one. A notification's tag goes back to the page, which fires
+     * whatever it hung off that notification's `onclick` — the same thing
+     * clicking it does in a browser.
+     *
+     * <p>An Intent naming a different receiver is the chooser (or a followed
+     * link) asking for a second receiver while this one is showing. The proxy
+     * behind this WebView has already been replaced by the time this runs, so
+     * the page on screen is pointed at an origin that now leads somewhere else:
+     * everything below it has to be built again, which is what recreate() does
+     * with the Intent set just above. Reloading the WebView instead would leave
+     * the label, the notification and the speech engine belonging to the
+     * receiver that had gone.
      */
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+
+        String id = intent == null ? null : intent.getStringExtra(EXTRA_ID);
+        if (id != null && !id.equals(instanceId)) {
+            recreate();
+            return;
+        }
+
         String tag = intent == null ? null : intent.getStringExtra(EXTRA_NOTICE_TAG);
         if (tag != null && reply != null) reply.postMessage("notice-click:" + tag);
     }
@@ -519,7 +554,7 @@ public class ReceiverActivity extends Activity {
             web.destroy();
             web = null;
         }
-        UberSdrPlugin.receiverClosed(instanceId);
+        UberSdrPlugin.receiverClosed(instanceId, epoch);
         super.onDestroy();
     }
 }

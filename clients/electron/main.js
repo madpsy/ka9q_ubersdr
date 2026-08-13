@@ -23,6 +23,7 @@ const { FlrigLink } = require('./flrig');
 const { RigctlLink } = require('./rigctl');
 const { TciServer } = require('./tciserver');
 const discovery = require('./discovery');
+const deeplink = require('./deeplink');
 const updates = require('./updates');
 const { browserUserAgent } = require('./useragent');
 
@@ -88,7 +89,88 @@ const localOrigins = new Set(); // origins our proxies currently serve
 if (!app.requestSingleInstanceLock()) {
     app.quit();
 } else {
-    app.on('second-instance', () => showChooser());
+    // The command line of the copy that was not allowed to start. On Windows
+    // and Linux that is where a followed ubersdr:// link is — the link starts
+    // the app, the lock sends it here, and the app that is already running is
+    // the one that opens the receiver.
+    app.on('second-instance', (_event, argv) => {
+        showChooser();
+        const url = deeplink.fromArgv(argv);
+        if (url) followDeepLink(url);
+    });
+}
+
+// ---- ubersdr:// links -------------------------------------------------------
+//
+// See deeplink.js for what a link says and how it is resolved. This is the part
+// that is Electron's: registering the scheme, and the three different ways the
+// three platforms deliver one.
+
+/**
+ * Register this app as the handler for ubersdr:// links.
+ *
+ * Packaging declares it too, and has to: electron-builder writes the scheme
+ * into the macOS Info.plist and the Linux .desktop entry (`protocols` in
+ * package.json), which is what makes the association exist at all on those two.
+ * This call is what claims it — on Windows it is the whole registration, since
+ * electron-builder's NSIS target writes no protocol keys.
+ *
+ * The `defaultApp` branch is for a working tree: under `electron .` the
+ * executable is Electron itself, so the registration has to carry the path to
+ * this app or following a link would start a bare Electron with no app in it.
+ */
+function registerProtocol() {
+    if (process.defaultApp) {
+        if (process.argv.length >= 2) {
+            app.setAsDefaultProtocolClient('ubersdr', process.execPath, [path.resolve(process.argv[1])]);
+        }
+    } else {
+        app.setAsDefaultProtocolClient('ubersdr');
+    }
+}
+
+// A link that arrived before there was an app ready to follow it. macOS
+// delivers open-url early — it is how a link starts the app there — and
+// whenReady flushes this.
+let pendingDeepLink = null;
+
+app.on('open-url', (event, url) => {
+    event.preventDefault();
+    if (!app.isReady()) {
+        pendingDeepLink = url;
+        return;
+    }
+    showChooser();
+    followDeepLink(url);
+});
+
+/**
+ * Follow one link, and say so if it does not work.
+ *
+ * A failure is a dialog rather than something in the chooser window: the
+ * chooser page is shared with the Android client (build.sh stages it there
+ * unmodified), a link is followed by the app rather than by anything on that
+ * page, and the case that actually needs saying is the one where no receiver
+ * window ever appears.
+ */
+async function followDeepLink(url) {
+    let target;
+    try {
+        target = deeplink.parse(url);
+    } catch (err) {
+        dialog.showErrorBox('UberSDR link', `${err.message}\n\n${url}`);
+        return;
+    }
+
+    try {
+        await deeplink.open(target.uuid, {
+            store,
+            lookupUuid: discovery.lookupUuid,
+            connect: connectInstance,
+        });
+    } catch (err) {
+        dialog.showErrorBox('UberSDR link', `Could not open that receiver.\n\n${err.message}`);
+    }
 }
 
 function showChooser() {
@@ -1063,10 +1145,19 @@ app.whenReady().then(() => {
     setupSession();
     setupMenu();
     setupIpc();
+    registerProtocol();
     showChooser();
     // Not awaited: the chooser opens now, and the menu gains an item later if
     // there is one to gain.
     checkForUpdate();
+
+    // A link that started the app: on macOS it arrived at open-url before this
+    // ran, and on Windows and Linux it is in this process's own command line.
+    // Not awaited either — the chooser is up, and the receiver window opens
+    // onto it a moment later.
+    const url = pendingDeepLink || deeplink.fromArgv(process.argv);
+    pendingDeepLink = null;
+    if (url) followDeepLink(url);
 });
 
 app.on('activate', () => showChooser());

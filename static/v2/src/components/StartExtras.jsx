@@ -1,20 +1,16 @@
-// The two dialogs the start overlay opens — v1's VibeSDR and bypass-password
-// modals, which live on its audio-start overlay too.
+// The dialogs the start overlay opens — v1's VibeSDR and bypass-password
+// modals, which live on its audio-start overlay too, and the same hand-off to
+// UberSDR's own apps.
 //
-// Both are here rather than in StartOverlay.jsx because neither is about
-// starting: one hands the instance to a phone, the other changes what the
-// server will allow. The overlay only decides when to offer them.
+// All of them are here rather than in StartOverlay.jsx because none is about
+// starting: two hand the instance to an app, the other changes what the server
+// will allow. The overlay only decides when to offer them.
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { Button, Modal } from './ui.jsx';
 import { loadScript } from '../lib/loadScript.js';
 import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
-
-// v1's scheme (app.js _buildVibeSDRUri). The public UUID is the instance's, not
-// the session's — it identifies the receiver to the directory.
-export function vibesdrUri(publicUuid) {
-    return publicUuid ? `vibesdr://connect?uuid=${publicUuid}` : null;
-}
+import { ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
 
 // v1's QR renderer, loaded on demand. 20 KB that only a phone-facing dialog
 // needs, so it stays out of the bundle and off the critical path — the same
@@ -55,14 +51,21 @@ function QrCode({ text, size = 200 }) {
 }
 
 /**
- * Hand this receiver to the VibeSDR app.
+ * Hand this receiver to an app, on a device that may not be this one.
  *
- * On a phone the deep link is followed straight away — v1 skips its own dialog
- * there, since the QR would only be scanned by the device already holding it.
- * The caller does that; this is the desktop half.
+ * Three ways out, because there are three situations and the dialog cannot tell
+ * which one it is in: the QR for a phone that is not this machine, the link
+ * itself for an app installed here, and the text for anywhere else it has to be
+ * pasted. Following a scheme nobody has claimed is not an error on any
+ * platform — the click simply does nothing — which is exactly why the URI is on
+ * screen rather than only behind the button.
+ *
+ * On a phone the deep link is followed straight away and this is never opened:
+ * a QR exists to get the URI onto a *different* device, and there it would be
+ * scanned by the device already holding it. The caller decides that; this is
+ * the desktop half.
  */
-export function VibeSdrModal({ publicUuid, onClose }) {
-    const uri = vibesdrUri(publicUuid);
+function AppLinkModal({ title, text, uri, action, note, onClose }) {
     const [copied, setCopied] = useState(false);
 
     const copy = async () => {
@@ -76,19 +79,55 @@ export function VibeSdrModal({ publicUuid, onClose }) {
     };
 
     return (
-        <Modal onClose={onClose} label="Open in VibeSDR">
+        <Modal onClose={onClose} label={title}>
             <div className="stack vibe">
-                <h2 className="vibe__title">Open in VibeSDR</h2>
-                <p className="vibe__text">Scan this with a phone to open this receiver in VibeSDR.</p>
+                <h2 className="vibe__title">{title}</h2>
+                <p className="vibe__text">{text}</p>
                 <QrCode text={uri} />
                 <code className="vibe__uri">{uri}</code>
                 <div className="vibe__row">
-                    <a className="btn btn--primary btn--sm" href={uri}>Open in VibeSDR</a>
+                    <a className="btn btn--primary btn--sm" href={uri}>{action}</a>
                     <Button size="sm" variant="ghost" onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button>
                 </div>
-                <p className="vibe__note">VibeSDR beta · instances.ubersdr.org</p>
+                <p className="vibe__note">{note}</p>
             </div>
         </Modal>
+    );
+}
+
+/** Hand this receiver to the VibeSDR app. */
+export function VibeSdrModal({ publicUuid, onClose }) {
+    return (
+        <AppLinkModal
+            title="Open in VibeSDR"
+            text="Scan this with a phone to open this receiver in VibeSDR."
+            uri={vibesdrUri(publicUuid)}
+            action="Open in VibeSDR"
+            note="VibeSDR beta · instances.ubersdr.org"
+            onClose={onClose}
+        />
+    );
+}
+
+/**
+ * Hand this receiver to UberSDR's own apps.
+ *
+ * The same dialog as VibeSDR's and a different audience: the desktop client
+ * registers ubersdr:// with the operating system, so on a machine that has it
+ * the button is the whole journey, and the Android client registers the same
+ * scheme, so the QR is the whole journey for a phone. One link covers both
+ * because the link names the receiver rather than an app — see lib/appLinks.js.
+ */
+export function UberSdrAppModal({ publicUuid, onClose }) {
+    return (
+        <AppLinkModal
+            title="Open in the UberSDR app"
+            text="Scan this with a phone, or open it on this computer if the desktop client is installed. Either way it connects to this receiver."
+            uri={ubersdrAppUri(publicUuid)}
+            action="Open in App"
+            note="Desktop and Android apps · instances.ubersdr.org"
+            onClose={onClose}
+        />
     );
 }
 

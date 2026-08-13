@@ -236,3 +236,71 @@ footer {
         display: none !important;
     }
 }
+
+/*
+ * A followed link, saying what it is doing.
+ *
+ * The one thing in this client with no counterpart in the chooser: an
+ * ubersdr://connect link opens the app and starts connecting on its own, and
+ * between the launcher animation and the receiver appearing there are a couple
+ * of seconds during which the chooser is on screen doing — as far as anyone
+ * watching can tell — nothing. This says which receiver, and if it does not
+ * work, says why, which is the case that actually needs the banner: the
+ * receiver never appears and the app has no other way to explain itself.
+ *
+ * Built in src/deeplink.js rather than in the page, because the page is
+ * clients/electron/chooser/ staged unmodified and this is an Android idea. The
+ * colours are all the chooser's own custom properties for the same reason a
+ * receiver looks the same in both clients.
+ */
+.deeplink {
+    position: fixed;
+    left: calc(8px + env(safe-area-inset-left));
+    right: calc(8px + env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--accent-dim);
+    border-radius: 10px;
+    background: var(--panel);
+    color: var(--text);
+    font: 14px/1.35 var(--font);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+
+.deeplink[hidden] {
+    display: none;
+}
+
+.deeplink-text {
+    flex: 1;
+}
+
+.deeplink--error {
+    border-color: var(--danger);
+}
+
+.deeplink--error .deeplink-text {
+    color: var(--danger);
+}
+
+/* Only on a failure — a step on the way is about to be replaced, and a button
+   that dismisses something already leaving is a target for a mis-tap. */
+.deeplink-close {
+    flex: none;
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--dim);
+    font-size: 22px;
+    line-height: 1;
+}
+
+.deeplink-close[hidden] {
+    display: none;
+}

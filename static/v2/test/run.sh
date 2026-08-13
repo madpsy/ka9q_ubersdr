@@ -74,6 +74,8 @@ esbuild ../src/lib/spectrumPeaks.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrumpeaks.cjs --log-level=warning
 esbuild ../src/lib/share.js --bundle --format=cjs --platform=node \
     --outfile=.build/share.cjs --log-level=warning
+esbuild ../src/lib/appLinks.js --bundle --format=cjs --platform=node \
+    --outfile=.build/applinks.cjs --log-level=warning
 esbuild ../src/lib/uiColors.js --bundle --format=cjs --platform=node \
     --outfile=.build/uicolors.cjs --log-level=warning
 esbuild ../src/lib/games/ttt.js --bundle --format=cjs --platform=node \
@@ -347,6 +349,7 @@ node sstvaddon.test.js
 node games.test.js
 node uicolors.test.js
 node share.test.js
+node applinks.test.js
 node spectrumstats.test.js
 node spectrumpeaks.test.js
 node audiosinks.test.js

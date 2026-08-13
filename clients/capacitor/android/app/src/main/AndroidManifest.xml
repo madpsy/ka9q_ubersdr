@@ -23,6 +23,29 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!--
+              ubersdr://connect?uuid=<public uuid> — a receiver, named by the
+              UUID the directory knows it as, from anywhere the phone can follow
+              a link: a QR code, a message, an instance's own page.
+
+              The filter is the scheme alone rather than scheme + host. What the
+              link asks for is then src/deeplink.js's to read and to refuse,
+              which is where a mistyped link can be answered with a sentence
+              instead of Android silently offering the browser instead. It also
+              means a second kind of link later is a change to one file.
+
+              MainActivity is singleTask, so a link followed while the app is
+              already running arrives at the instance that exists — see
+              UberSdrPlugin.handleOnNewIntent — rather than starting a second
+              chooser beside it.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="ubersdr" />
+            </intent-filter>
+
         </activity>
 
         <!--

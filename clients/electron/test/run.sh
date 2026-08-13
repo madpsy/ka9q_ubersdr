@@ -6,6 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 command -v node >/dev/null || { echo "node not found" >&2; exit 1; }
 node store.test.js
+node deeplink.test.js
 node chooser.test.js
 node updates.test.js
 node monitorserver.test.js

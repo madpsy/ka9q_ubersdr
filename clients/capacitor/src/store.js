@@ -121,6 +121,23 @@ export class InstanceStore {
     }
 
     /**
+     * The entry for a public UUID, if one of them is that receiver.
+     *
+     * Recorded by `ensure` for anything that arrived from the directory, so
+     * this answers for a receiver connected to at least once from the directory
+     * tab or a followed link. It is what lets a link open a saved receiver
+     * without asking the directory anything — including the receiver whose
+     * address has since changed under it, where the saved entry is wrong and
+     * the UUID is still right, so a lookup is still worth doing when there is a
+     * network to do it on.
+     */
+    async findByUuid(uuid) {
+        await this.ready;
+        if (!uuid) return null;
+        return this.data.instances.find((inst) => inst.uuid === uuid) || null;
+    }
+
+    /**
      * Returns the entry for a descriptor {host, port, tls, ...}, creating one
      * (with a fresh stable local port) on first contact. Metadata that the
      * probe or directory supplied refreshes the stored copy.
@@ -144,7 +161,10 @@ export class InstanceStore {
             this.data.instances.push(entry);
         }
         if (desc.insecureTLS) entry.insecureTLS = true;
-        for (const key of ['callsign', 'location', 'version']) {
+        // `uuid` is the directory's, and is only ever learned from it — a LAN
+        // scan and a typed address do not carry one, and must not clear one that
+        // an earlier directory connect to the same address recorded.
+        for (const key of ['uuid', 'callsign', 'location', 'version']) {
             if (desc[key]) entry[key] = desc[key];
         }
         entry.lastUsed = new Date().toISOString();

@@ -146,6 +146,76 @@ one is set. `ReceiverActivity` reads it directly when it opens a page and seeds
 `sessionStorage` under the key v2 already reads (`ubersdr.v2.password`, see
 `static/v2/src/radio/session.js`).
 
+## Links: `ubersdr://connect?uuid=…`
+
+A receiver, named in a link, from anywhere the phone can follow one — a QR code
+beside a radio, a message, an instance's own page:
+
+```
+ubersdr://connect?uuid=4907ba0a-32e6-40bb-a4ca-47f823331728
+```
+
+The UUID is the public one: the `id` on the instance's `/api/instances` entry at
+the directory, which is the `public_uuid` it reports itself under
+(`instance_reporter.go`). An address is deliberately not what a link carries,
+because an address is the part that changes — a tunnel hostname, a dynamic IP, a
+move from 8080 to 443 — and a link printed on a card next to an antenna should
+survive all of that. The UUID does not change.
+
+The scheme alone is registered (`AndroidManifest.xml`), not scheme + host, so
+what a link asks for is `src/deeplink.js`'s to read and to refuse: a mistyped
+link gets a sentence rather than Android quietly offering the browser instead,
+and a second kind of link later is a change to one file.
+
+Following one:
+
+1. **The saved list first**, by UUID — `store.ensure` records it for anything
+   that came from the directory. A receiver already used opens with no directory
+   round trip, which is also what makes a link work on a phone whose mobile data
+   has dropped but whose Wi-Fi still reaches the receiver.
+2. **Then the directory**, if there is no saved entry or the saved address has
+   stopped answering. `/api/instances/<uuid>`, falling back to filtering the
+   full list for a collector that does not have that route yet. A saved receiver
+   that has moved heals here, which is the case the UUID exists for.
+3. **Then the ordinary connect** — the same probe, the same store entry, the
+   same Activity as a row tapped in the directory tab.
+
+So nothing about a link is trusted beyond being a UUID to look up, and the worst
+a hostile one can do is open a public receiver somebody else chose, which is
+what the directory tab is a list of.
+
+`UberSdrPlugin.handleOnNewIntent` is where a followed link enters. Cold start and
+warm start are one path — Capacitor delivers the launching Intent through the
+same call — and the event is raised with `retainUntilConsumed`, so a link that
+started the app waits in the plugin until `src/deeplink.js` is listening rather
+than being missed while the page is still being parsed. A relaunch from the
+recents list is the one Intent deliberately ignored (`FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY`):
+Android re-delivers the original VIEW intent when a task is resumed after its
+process has gone, and following it would mean a receiver disconnected from
+yesterday reconnecting itself today.
+
+The banner it draws is the only piece of UI in this client that the chooser page
+does not — built in the DOM by `deeplink.js` and styled in `mobile.css`, because
+the chooser is staged unmodified and a deep link is an Android idea the desktop
+client has no equivalent of. It exists mostly for the failure: when the receiver
+never appears, nothing else in the app can explain why.
+
+The desktop client follows the same links, through the same ladder — see
+`clients/electron/deeplink.js`, which this file's counterpart is a port of. What
+differs is only how the platform hands one over and where a failure is shown.
+
+Where the links come from: the **Open in App** button on v2's start overlay
+(`static/v2/src/lib/appLinks.js` builds the URI, `StartExtras.jsx` draws the
+dialog). On a phone it follows the link straight away; on a desktop it shows a
+QR code, which is how a receiver open in a browser gets onto this app.
+
+Testing one without a link to tap:
+
+```sh
+adb shell am start -a android.intent.action.VIEW \
+    -d 'ubersdr://connect?uuid=4907ba0a-32e6-40bb-a4ca-47f823331728'
+```
+
 ## Leaving a receiver
 
 On a desktop each receiver is a window, and closing the window is how you leave
@@ -348,6 +418,8 @@ src/discovery.js
 src/useragent.js
               how this client names itself; owns the token the WebView appends
 src/native.js the plugin handle
+src/deeplink.js
+              ubersdr://connect?uuid=… — parsing, resolving and the banner
 src/main.js   the entry point: assigns window.ubersdr before chooser.js runs
 src/receiver.js
               what runs inside a receiver page, bundled with the v2 page API's

@@ -238,6 +238,64 @@ Same three sources as the other clients (`clients/tui`,
   http:80, http:8080). A self-signed certificate is refused by default and
   can be trusted per-receiver with an explicit click.
 
+## Links: `ubersdr://connect?uuid=…`
+
+A receiver, named in a link, from anywhere the desktop can follow one — a
+message, a web page, a QR code read on the phone next to you:
+
+```
+ubersdr://connect?uuid=4907ba0a-32e6-40bb-a4ca-47f823331728
+```
+
+The same scheme and the same behaviour as the Android client, deliberately:
+`deeplink.js` here and `clients/capacitor/src/deeplink.js` there are ports of
+each other, the way `discovery.js` and `store.js` are. A link that works on the
+phone works on the desktop, or it is not a link, it is a phone feature.
+
+The UUID is the public one: the `id` on the instance's `/api/instances` entry at
+the directory, which is the `public_uuid` it reports itself under
+(`instance_reporter.go`). An address is deliberately not what a link carries,
+because an address is the part that changes — a tunnel hostname, a dynamic IP, a
+move from 8080 to 443 — and a link should survive all of that.
+
+Following one: **the saved list first**, by UUID (`store.ensure` records it for
+anything that came from the directory, so a receiver already used opens with no
+directory round trip), **then the directory** (`/api/instances/<uuid>`, falling
+back to filtering the full list for a collector without that route), **then the
+ordinary connect** — the same probe, the same store entry, the same window as a
+row clicked in the directory tab. A saved receiver that has moved heals at the
+second step, which is the case the UUID exists for. Nothing about a link is
+trusted beyond being a UUID to look up.
+
+Three platforms deliver a followed link three ways, and `main.js` handles all
+three:
+
+| | |
+|---|---|
+| macOS | `app.on('open-url')`, which can fire before the app is ready — buffered and flushed by `whenReady` |
+| Windows, Linux | in the command line: `process.argv` when the link started the app, and the `second-instance` argv when one was already running |
+
+Registration is likewise split. `app.setAsDefaultProtocolClient('ubersdr')` at
+startup claims the scheme — on Windows that is the whole of it, since
+electron-builder's NSIS target writes no protocol keys — and the `protocols`
+entry in `package.json` is what makes the association exist on the other two:
+electron-builder writes `CFBundleURLTypes` into the macOS `Info.plist` and
+`MimeType=x-scheme-handler/ubersdr` into the Linux `.desktop` file, whose `Exec`
+already ends in `%U` so the URL reaches argv. In a working tree
+(`npm start`) the registration carries the app path explicitly, or following a
+link would start a bare Electron with no app in it.
+
+Where the links come from: the **Open in App** button on v2's start overlay
+(`static/v2/src/lib/appLinks.js` builds the URI, `StartExtras.jsx` draws the
+dialog). On a desktop it offers the link itself, which is what this client
+answers; the QR beside it is for the Android one. The button is left out
+entirely when the page is already running inside either client.
+
+A failure is a native dialog rather than something drawn in the chooser: the
+chooser page is shared with the Android client and a link is followed by the app
+rather than by anything on that page. The case that actually needs saying is the
+one where no receiver window ever appears.
+
 ## Desktop integration
 
 - **Web Serial** (FlexControl): Electron has no built-in port picker, so the
@@ -338,7 +396,10 @@ Same three sources as the other clients (`clients/tui`,
 main.js       app lifecycle, windows, IPC, serial/permission handlers
 proxy.js      per-instance localhost reverse proxy (HTTP + websocket upgrade)
 mdns.js       dependency-free mDNS-SD browser for _ubersdr._tcp
-discovery.js  directory fetch, GeoIP, LAN enrichment, manual-address resolution
+discovery.js  directory fetch, by-UUID lookup, GeoIP, LAN enrichment,
+              manual-address resolution
+deeplink.js   ubersdr://connect?uuid=… — parsing and resolving, with the
+              Electron-shaped half (registration, delivery) in main.js
 store.js      saved instances (JSON in userData), stable local ports, the
               optional per-instance password (keychain-sealed where there is a
               keychain), and the chooser's own state (open tab, directory sort,

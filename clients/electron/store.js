@@ -167,6 +167,19 @@ class InstanceStore {
     }
 
     /**
+     * The entry for a public UUID, if one of them is that receiver.
+     *
+     * Recorded by `ensure` for anything that arrived from the directory, so this
+     * answers for a receiver connected to at least once from the directory tab
+     * or a followed ubersdr:// link. It is what lets a link open a receiver that
+     * is already saved without asking the directory anything.
+     */
+    findByUuid(uuid) {
+        if (!uuid) return null;
+        return this.data.instances.find((inst) => inst.uuid === uuid) || null;
+    }
+
+    /**
      * Returns the entry for a descriptor {host, port, tls, ...}, creating one
      * (with a fresh stable local port) on first contact. Metadata that the
      * probe or directory supplied refreshes the stored copy.
@@ -191,7 +204,10 @@ class InstanceStore {
         // A password typed against a receiver that was not saved yet — one from
         // the LAN scan or the directory. It is saved at the moment the entry is.
         if (desc.password) entry.password = this._seal(String(desc.password));
-        for (const key of ['callsign', 'location', 'version']) {
+        // `uuid` is the directory's, and is only ever learned from it — a LAN
+        // scan and a typed address do not carry one, and must not clear one that
+        // an earlier directory connect to the same address recorded.
+        for (const key of ['uuid', 'callsign', 'location', 'version']) {
             if (desc[key]) entry[key] = desc[key];
         }
         entry.lastUsed = new Date().toISOString();

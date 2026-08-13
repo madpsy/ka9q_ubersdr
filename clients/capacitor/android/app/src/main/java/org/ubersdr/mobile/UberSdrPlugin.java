@@ -1,6 +1,7 @@
 package org.ubersdr.mobile;
 
 import android.content.Intent;
+import android.net.Uri;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -31,11 +32,51 @@ public class UberSdrPlugin extends Plugin {
     private Secrets secrets;
     private LocalProxy proxy;
     private String openId;
+    // Which receiver launch is the current one. See receiverClosed.
+    private int epoch;
 
     @Override
     public void load() {
         instance = this;
         secrets = new Secrets(getContext());
+    }
+
+    // --- deep links ----------------------------------------------------------
+
+    /**
+     * A followed ubersdr:// link, on its way to src/deeplink.js.
+     *
+     * <p>Capacitor calls this for the intent that started the Activity as well
+     * as for one delivered to it while it was running (BridgeActivity.load ends
+     * with onNewIntent(getIntent())), so cold start and warm start are the same
+     * path here. They differ in who is listening: on a cold start the page has
+     * not been parsed yet, let alone registered anything, which is what
+     * retainUntilConsumed is for — the event waits in the plugin until the
+     * listener exists and is delivered then.
+     *
+     * <p>The one intent deliberately ignored is a relaunch from the recents
+     * list. Android re-delivers the original VIEW intent when the app is
+     * resumed that way after its process has gone, and following it would mean
+     * a receiver the operator disconnected from yesterday reconnecting itself
+     * today because the link that first opened it is still attached to the task.
+     */
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        super.handleOnNewIntent(intent);
+        if (intent == null) return;
+        if ((intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return;
+
+        Uri uri = intent.getData();
+        if (uri == null || !"ubersdr".equalsIgnoreCase(uri.getScheme())) return;
+
+        // Consumed: the same Intent object is what getIntent() keeps returning,
+        // so clearing it stops a second delivery within this Activity's life
+        // from being read as a second tap.
+        intent.setData(null);
+
+        JSObject data = new JSObject();
+        data.put("url", uri.toString());
+        notifyListeners("deepLink", data, true);
     }
 
     // --- HTTP ----------------------------------------------------------------
@@ -150,6 +191,26 @@ public class UberSdrPlugin extends Plugin {
             return;
         }
 
+        // This receiver is already open: bring it forward and leave it alone.
+        //
+        // Restarting the proxy under a page that is using it would drop every
+        // socket the receiver has — the audio, the spectrum, the session — and
+        // then the page would reconnect through the new one, so the visible
+        // effect of asking for what is already there would be a gap in the
+        // audio. Two callers reach this: the chooser's button, which says
+        // "Show" rather than "Connect" for a running receiver, and a link
+        // followed for the receiver that is already playing.
+        //
+        // The Activity is singleTask, so an Intent carrying no id comes out at
+        // its onNewIntent, which ignores it and simply arrives in front.
+        if (proxy != null && id.equals(openId) && ReceiverActivity.isOpen()) {
+            getActivity().startActivity(new Intent(getContext(), ReceiverActivity.class));
+            JSObject shown = new JSObject();
+            shown.put("localPort", proxy.localPort());
+            call.resolve(shown);
+            return;
+        }
+
         // One receiver at a time. A phone shows one thing, and two receivers
         // playing at once would be two claims on the audio focus.
         stopProxy();
@@ -164,9 +225,11 @@ public class UberSdrPlugin extends Plugin {
         }
         proxy = started;
         openId = id;
+        epoch++;
 
         Intent intent = new Intent(getContext(), ReceiverActivity.class);
         intent.putExtra(ReceiverActivity.EXTRA_ID, id);
+        intent.putExtra(ReceiverActivity.EXTRA_EPOCH, epoch);
         intent.putExtra(ReceiverActivity.EXTRA_URL, started.origin() + "/v2/");
         intent.putExtra(ReceiverActivity.EXTRA_ORIGIN, started.origin());
         intent.putExtra(ReceiverActivity.EXTRA_UPSTREAM, started.upstreamOrigin());
@@ -196,11 +259,22 @@ public class UberSdrPlugin extends Plugin {
         call.resolve(out);
     }
 
-    /** Called by ReceiverActivity.onDestroy, however it came to be destroyed. */
-    static void receiverClosed(String id) {
+    /**
+     * Called by ReceiverActivity.onDestroy, however it came to be destroyed.
+     *
+     * <p>The epoch is which launch that Activity belonged to, and is the whole
+     * reason it exists: an Activity on its way out can report after the next one
+     * has started. Following a link for the receiver that is already open does
+     * exactly that — MainActivity is singleTask, so the launch itself destroys
+     * the Activity above it, and the connect that follows can start a new proxy
+     * before that Activity's onDestroy has run. Comparing ids would then have
+     * this stop the proxy it had just been given, for a receiver that is
+     * starting rather than one that has ended.
+     */
+    static void receiverClosed(String id, int closingEpoch) {
         UberSdrPlugin self = instance;
         if (self == null) return;
-        if (id != null && id.equals(self.openId)) {
+        if (closingEpoch == self.epoch) {
             self.stopProxy();
             self.openId = null;
         }

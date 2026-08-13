@@ -18,6 +18,11 @@ const DIRECTORY_HOST = 'https://instances.ubersdr.org';
 // answer falls out of the coordinates it already returns.
 const DIRECTORY_URL = `${DIRECTORY_HOST}/api/instances?conditions=true`;
 const MYIP_URL = `${DIRECTORY_HOST}/api/myip`;
+// One instance, by the UUID the directory knows it as — what a followed
+// ubersdr://connect?uuid=… link has to turn into a host and a port. No
+// conditions: a link is being followed, not a list drawn, and the badges this
+// would add are not going to be looked at on the way past.
+const directoryOneURL = (uuid) => `${DIRECTORY_HOST}/api/instances/${encodeURIComponent(uuid)}`;
 // Was a fixed string with no version in it. Shared with the browser user agent
 // now so the directory and a receiver's listener list name this client the same
 // way, and so a bug report that quotes either one says which build it came from.
@@ -94,6 +99,41 @@ async function probe(target) {
 // instance whose position the directory does not know.
 const coord = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
+/** One directory entry, as a row. */
+function directoryRow(inst) {
+    return {
+        // The directory's own UUID, and not `id` — that name belongs to the
+        // saved store, and main.js reads `desc.id` as "an instance already
+        // saved under this id" when it connects. A directory row carrying
+        // one would be looked up in a store it is not in.
+        uuid: inst.id || '',
+        name: inst.name || inst.callsign || `${inst.host}:${inst.port}`,
+        callsign: inst.callsign || '',
+        location: inst.location || inst.country_name || '',
+        version: inst.version || '',
+        availableClients: typeof inst.available_clients === 'number' ? inst.available_clients : -1,
+        maxClients: inst.max_clients || 0,
+        snr: inst.snr_0_30_mhz || 0,
+        host: inst.host,
+        port: inst.port || (inst.tls ? 443 : 80),
+        tls: !!inst.tls,
+        source: 'directory',
+
+        // What the map and the richer directory list draw. All optional:
+        // an instance with no position is listed and simply not pinned.
+        lat: coord(inst.latitude),
+        lon: coord(inst.longitude),
+        grid: inst.maidenhead || '',
+        countryCode: (inst.country_code || '').toLowerCase(),
+        countryName: inst.country_name || '',
+        online: inst.is_online !== false,
+        daylight: !!inst.is_daylight,
+        bandConditions: inst.band_conditions || null,
+        conditionsAt: inst.conditions_updated_at || '',
+        avgBandSnr: typeof inst.avg_band_snr === 'number' ? inst.avg_band_snr : null,
+    };
+}
+
 /** The public directory, most usable receivers first (free slots, then SNR). */
 async function fetchDirectory() {
     const res = await fetch(DIRECTORY_URL, {
@@ -104,39 +144,7 @@ async function fetchDirectory() {
     const body = await res.json();
     const instances = Array.isArray(body) ? body : body.instances || [];
 
-    const rows = instances
-        .filter((inst) => inst.host)
-        .map((inst) => ({
-            // The directory's own UUID, and not `id` — that name belongs to the
-            // saved store, and main.js reads `desc.id` as "an instance already
-            // saved under this id" when it connects. A directory row carrying
-            // one would be looked up in a store it is not in.
-            uuid: inst.id || '',
-            name: inst.name || inst.callsign || `${inst.host}:${inst.port}`,
-            callsign: inst.callsign || '',
-            location: inst.location || inst.country_name || '',
-            version: inst.version || '',
-            availableClients: typeof inst.available_clients === 'number' ? inst.available_clients : -1,
-            maxClients: inst.max_clients || 0,
-            snr: inst.snr_0_30_mhz || 0,
-            host: inst.host,
-            port: inst.port || (inst.tls ? 443 : 80),
-            tls: !!inst.tls,
-            source: 'directory',
-
-            // What the map and the richer directory list draw. All optional:
-            // an instance with no position is listed and simply not pinned.
-            lat: coord(inst.latitude),
-            lon: coord(inst.longitude),
-            grid: inst.maidenhead || '',
-            countryCode: (inst.country_code || '').toLowerCase(),
-            countryName: inst.country_name || '',
-            online: inst.is_online !== false,
-            daylight: !!inst.is_daylight,
-            bandConditions: inst.band_conditions || null,
-            conditionsAt: inst.conditions_updated_at || '',
-            avgBandSnr: typeof inst.avg_band_snr === 'number' ? inst.avg_band_snr : null,
-        }));
+    const rows = instances.filter((inst) => inst.host).map(directoryRow);
 
     rows.sort((a, b) => {
         const aFree = a.availableClients > 0;
@@ -145,6 +153,44 @@ async function fetchDirectory() {
         return b.snr - a.snr;
     });
     return rows;
+}
+
+/**
+ * Look one receiver up in the directory by its public UUID.
+ *
+ * The UUID is the only name a receiver has that survives it moving: the address
+ * in a link written today is whatever tunnel or dynamic hostname the operator
+ * was using when it was written, and the UUID is what the instance reports
+ * itself under whatever that turns out to be tomorrow. So a link carries the
+ * UUID and this turns it into an address, once, on the way to connecting.
+ *
+ * Falls back to the full list when the by-UUID endpoint is not there to be
+ * asked: it is a newer route than the directory itself, and a collector that
+ * has not been updated still answers the question — it just answers it with the
+ * whole directory and a filter rather than with one instance.
+ *
+ * Returns null when the directory does not know the UUID, which is the answer
+ * for a receiver that has been taken down or has never been public, and is
+ * different from throwing — the caller says so in different words.
+ */
+async function lookupUuid(uuid) {
+    try {
+        const res = await fetch(directoryOneURL(uuid), {
+            headers: { 'User-Agent': USER_AGENT },
+            signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) {
+            const body = await res.json();
+            if (body && body.host) return directoryRow(body);
+        }
+    } catch { /* below */ }
+
+    // Anything that was not a usable answer asks the same question the long
+    // way. A 404 is both "no such instance" and "no such route", so the two
+    // cannot be told apart here — and a directory that is genuinely unreachable
+    // fails again in a moment, reported in the words the chooser already uses.
+    const rows = await fetchDirectory();
+    return rows.find((r) => r.uuid === uuid) || null;
 }
 
 /**
@@ -256,5 +302,5 @@ async function resolveTarget(input, { insecureTLS = false } = {}) {
 // getJson is exported for main.js's Links menu, which reads /api/pages-menu
 // and /api/description straight from the instance a window is connected to.
 module.exports = {
-    fetchDirectory, fetchGeoIP, discoverLan, resolveTarget, probe, isCertError, getJson,
+    fetchDirectory, lookupUuid, fetchGeoIP, discoverLan, resolveTarget, probe, isCertError, getJson,
 };

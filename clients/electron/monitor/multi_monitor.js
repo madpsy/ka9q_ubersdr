@@ -1043,6 +1043,10 @@ async function toggleSelectPreview(id) {
         // Route audio to the user-selected output device (if supported)
         patchRadioOutputDevice(radio);
 
+        // The preview only exists while the user is listening to it, so it
+        // connects unmuted — this is here for PTT mute, which zeroes its volume.
+        attachServerMuteSync(radio);
+
         await radio.startPreview(currentFreqHz, currentMode);
 
         // Set bandwidth
@@ -1183,6 +1187,10 @@ function attachRelayCallbacksToActiveRadios(relayUpstream) {
         } else {
             radio.onAudioFrame = null;
         }
+        // Followers pick what they listen to for themselves, so relaying counts
+        // as listening: everything stays unmuted for the life of the share and
+        // drops back to volume-driven muting when it ends.
+        syncServerMute(radio);
     }
 }
 
@@ -1605,6 +1613,71 @@ function buildMeterTile(inst) {
     `;
 }
 
+// ─── Server-side mute ─────────────────────────────────────────────────────────
+// A grid of twenty tiles used to pull twenty full audio streams and throw
+// nineteen of them away at the gain node.  Instead each instance connects with
+// ?muted=1 and is unmuted only while something is actually listening to it, so
+// an idle tile costs the instance an Opus encode of silence and nothing more.
+// Signal-quality metering is untouched: the server keeps sending packets while
+// muted and the S-meter/SNR figures ride in their headers, not the audio.
+//
+// "Something is listening" means any of:
+//   • the tile is assigned to a channel, or Smart Listen picked it → volume > 0
+//   • Smart Listen is about to switch to it (see setPlayBestPreUnmute)
+//   • its frames are being relayed to shared-session followers, who choose what
+//     they listen to independently of what the owner has playing
+//
+// Volume is the signal for the first case, and there are a dozen places that
+// write it (channel buttons, Smart Listen, PTT mute, stop-all).  Rather than
+// teach each one about the server, attachServerMuteSync() turns currentVolume
+// into an accessor so every write — present and future — drives the mute state.
+
+/** True when this radio's audio is wanted by anyone. */
+function radioWantsAudio(radio) {
+    if (!radio) return false;
+    if (radio.onAudioFrame) return true;      // relayed to shared-session followers
+    if (radio._preUnmute) return true;        // Smart Listen is about to switch to it
+    return (radio.currentVolume || 0) > 0;
+}
+
+/** Push the current "is anyone listening" verdict to the server. */
+function syncServerMute(radio) {
+    if (radio && typeof radio.setServerMuted === 'function') {
+        radio.setServerMuted(!radioWantsAudio(radio));
+    }
+}
+
+/**
+ * Make every write to radio.currentVolume drive the server-side mute state.
+ * Call before startPreview() so the initial verdict lands in the connect URL
+ * rather than arriving a round trip after the audio does.
+ */
+function attachServerMuteSync(radio) {
+    let vol = radio.currentVolume;
+    Object.defineProperty(radio, 'currentVolume', {
+        configurable: true,
+        enumerable: true,
+        get() { return vol; },
+        set(v) { vol = v; syncServerMute(radio); },
+    });
+    syncServerMute(radio);
+}
+
+/**
+ * Keep one instance unmuted ahead of a Smart Listen switch, and only that one.
+ * Without this every switch would open with however long the unmute round trip
+ * takes as silence, and the NR engine would be adapting to digital silence at
+ * the moment the audio arrives.  Pass null to release.
+ */
+function setPlayBestPreUnmute(id) {
+    for (const [rid, radio] of Object.entries(activeRadios)) {
+        const want = rid === id;
+        if (!!radio._preUnmute === want) continue;
+        radio._preUnmute = want;
+        syncServerMute(radio);
+    }
+}
+
 // ─── Connection ───────────────────────────────────────────────────────────────
 
 async function connectInstance(inst) {
@@ -1630,6 +1703,12 @@ async function connectInstance(inst) {
             };
             console.log(`[Relay] connectInstance: attached onAudioFrame for ${inst.callsign} (${inst.id})`);
         }
+
+        // Volume 0 and no relay callback means nobody is listening yet, so this
+        // resolves to muted and startPreview() connects with ?muted=1 — the tile
+        // is never audible, not even for the first few frames.  Attached after
+        // the relay block above so an owner-mode session is seen as a listener.
+        attachServerMuteSync(radio);
 
         // Suppress the floating fixed-position signal bar that MinimalRadio normally
         // appends to document.body anchored to a Leaflet map marker.
@@ -2174,6 +2253,7 @@ function updateChannelUI() {
 
 function stopAllAudio() {
     // Mute all radios and clear channel assignments
+    setPlayBestPreUnmute(null);
     for (const radio of Object.values(activeRadios)) {
         radio.currentVolume = 0.0;
     }
@@ -2211,6 +2291,9 @@ function muteAllAudio(muted) {
     _muteActive = muted;
 
     if (muted) {
+        // Release any Smart Listen candidate too, or one stream would stay
+        // unmuted at the server for the length of the transmission.
+        setPlayBestPreUnmute(null);
         // Snapshot current volumes before silencing
         _muteSavedVolumes = {};
         for (const [id, radio] of Object.entries(activeRadios)) {
@@ -3611,6 +3694,9 @@ function closeSnrHistoryModal() {
     const overlay = document.getElementById('snrModalOverlay');
     if (overlay) overlay.classList.remove('open');
     if (snrModalUpdateTimer) { clearInterval(snrModalUpdateTimer); snrModalUpdateTimer = null; }
+    // Smart Listen stops ticking here, so nothing would ever release a pending
+    // candidate — whatever it last picked keeps playing on its own volume.
+    setPlayBestPreUnmute(null);
     stopSnrChartLoop();
     updateURL(); // remove smart=1 from URL
 }
@@ -3976,8 +4062,38 @@ function togglePlayBest(enabled) {
  * playBestHoldTicks consecutive ticks to prevent rapid churn.
  * Instances hidden via legend click in the SNR chart are excluded.
  * Called on every chart update tick while playBestEnabled is true.
+ *
+ * Wraps the routing decision so the pending candidate can be unmuted at the
+ * server while it serves out its hold time — by the time the switch commits its
+ * audio is already arriving, and the NR engine has had the hold period of real
+ * signal to adapt to.  The candidate is released whenever it stops being one,
+ * including on every path that clears play-best state.
  */
 function applyPlayBest() {
+    applyPlayBestRouting();
+    setPlayBestPreUnmute(playBestPreUnmuteTarget());
+}
+
+// How much lead-in a pending switch gets, in 100 ms ticks.  A second covers the
+// unmute round trip with enough real audio left over for the NR engine — which
+// works in 4096-sample blocks, about a third of a second each — to have adapted
+// to the band rather than to the silence it was being fed while muted.  Hold
+// times run from 1 s to 5 s, so at the shortest setting this means "as soon as
+// there is a candidate", which is the right answer there anyway.
+const PLAY_BEST_PRE_UNMUTE_TICKS = 10;
+
+/** The instance to unmute ahead of a switch, or null for none. */
+function playBestPreUnmuteTarget() {
+    if (!playBestEnabled || _muteActive) return null;
+    if (playBestCandidateId === null) return null;
+    // Only once the switch is imminent.  A candidate that flip-flops tick to
+    // tick never gets near committing, and unmuting each one as it went past
+    // would trade the gap we are removing for a stream of set_mute churn.
+    if (playBestCandidateTicks < playBestHoldTicks - PLAY_BEST_PRE_UNMUTE_TICKS) return null;
+    return playBestCandidateId;
+}
+
+function applyPlayBestRouting() {
     if (!playBestEnabled) return;
     if (_muteActive) return;   // don't fight the bridge mute while PTT is held
 

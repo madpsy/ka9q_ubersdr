@@ -42,6 +42,15 @@ class MinimalRadio {
         this.currentMode = 'usb';
         this.currentVolume = 0.5;
         this.isPlaying = false;
+
+        // Server-side mute.  When true the server substitutes silence for this
+        // session's audio instead of us throwing it away at the gain node, which
+        // saves the instance the encode and the link the bytes.  Packets keep
+        // flowing at full rate, so signal-quality metering is unaffected.
+        // Carried into the connect URL (?muted=1) so a session is never audible
+        // for the round trip it takes a set_mute message to arrive.
+        this.serverMuted = false;
+        this._connectMuted = false;  // serverMuted as it was when the URL was built
         
         // Fixed bandwidth for preview (2800 Hz)
         this.bandwidthLow = 50;
@@ -220,6 +229,19 @@ class MinimalRadio {
         console.log('Volume set to:', Math.round(this.currentVolume * 100) + '%');
     }
 
+    // Mute/unmute at the server.  Idempotent — repeated calls with the same
+    // value send nothing, so this is safe to drive from a per-tick loop.
+    // With no socket open the flag is simply remembered: connectWebSocket()
+    // carries it in the URL, so a reconnect comes up in the same state.
+    setServerMuted(muted) {
+        const want = !!muted;
+        if (want === this.serverMuted) return;
+        this.serverMuted = want;
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'set_mute', muted: want }));
+        }
+    }
+
     // Get target host and protocol (use baseUrl if set, otherwise current location)
     getTargetHostAndProtocol() {
         if (this.baseUrl) {
@@ -286,13 +308,26 @@ class MinimalRadio {
             // Determine host and protocol (reuse from earlier in function)
             const { host: wsHost, protocol: wsProtocol } = this.getTargetHostAndProtocol();
             const protocol = wsProtocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${wsHost}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus&version=2`;
+            let wsUrl = `${protocol}//${wsHost}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus&version=2`;
+            this._connectMuted = this.serverMuted;
+            if (this._connectMuted) wsUrl += '&muted=1';
 
             this.ws = new WebSocket(wsUrl);
 
             this.ws.onopen = () => {
                 console.log('WebSocket connected (Opus format, protocol version 2)');
                 this.sendTuneCommand();
+                // Re-assert the mute state unless we asked for audio and still
+                // want it.  Two reasons: the state can change while the socket
+                // is handshaking, and instances older than the ?muted= param
+                // silently ignore it — for those this message is the only thing
+                // that mutes them (one round trip later than we'd like, which
+                // the volume gain covers).  Both are no-ops on a current
+                // instance that already read the URL.
+                if (this.serverMuted || this._connectMuted) {
+                    this.ws.send(JSON.stringify({ type: 'set_mute', muted: this.serverMuted }));
+                    this._connectMuted = this.serverMuted;
+                }
             };
 
             this.ws.onmessage = async (event) => {
@@ -360,6 +395,9 @@ class MinimalRadio {
                 break;
             case 'pong':
                 // Keepalive response
+                break;
+            case 'mute_updated':
+                // Echo of our own set_mute — we already track the state locally.
                 break;
             default:
                 console.log('Unknown message type:', message.type);

@@ -12,9 +12,11 @@ collector's multi-monitor page:
 | `shared_session.js` | `collector/static/shared_session.js` |
 | `hamlib-control.js` | `collector/static/hamlib-control.js` |
 
-Copied on 2026-08-11. The five `.js` files are byte-for-byte identical and
-deliberately unmodified — they are the merge base that matters. `index.html` has
-one change, described under "What the page needs" below.
+Copied on 2026-08-11. Four of the five `.js` files are still byte-for-byte
+identical and deliberately unmodified — they are the merge base that matters.
+`multi_monitor.js` has since taken two local changes, listed under "What has
+diverged since". `index.html` has two, described under "What the page needs" and
+"Registering a session" below.
 
 ## Smart Listen
 
@@ -80,7 +82,8 @@ Two upstream stylesheets are **deliberately not** brought over:
 Until the restyle, that means one missing icon and system flag emoji. Both are
 cosmetic and neither stops the page working.
 
-`index.html` therefore differs from upstream in exactly one respect: those two
+`index.html` therefore differs from upstream in this respect — see "Registering
+a session" for the other one: those two
 stylesheet links are gone, and the remaining libraries are loaded from
 `vendor/` rather than flat beside the source. The alternative was staging them
 flat to keep the file identical, but `.gitignore` excludes staged libraries by
@@ -107,6 +110,51 @@ against upstream.
 
 Still outstanding: `logo.png` in the `<h1>`, which is a broken image until the
 restyle decides what belongs there.
+
+## Registering a session
+
+The one thing about being a desktop client that the page could not paper over
+itself.
+
+Before opening audio to an instance, `minimal-radio.js` POSTs `/connection` to
+it; the instance refuses `/ws` for a session UUID that never did. That POST
+carries JSON, so it is preflighted, and an instance only answers a preflight
+when its operator set `enable_cors` or when the request comes from the
+collector's own hostname. A page on `http://127.0.0.1` is neither. The OPTIONS
+fell through to a handler that takes POST only, came back 405, and the browser
+then never sent the POST — every tile failed and retried every five seconds,
+looking exactly like an instance being down. At the time of writing 44 of the 45
+instances in the directory report `cors_enabled: false`, so this was nearly all
+of them.
+
+Fixed in two places, because either alone is not enough:
+
+- **Here.** `../monitorserver.js` proxies `/connection?base=<instance>` the same
+  way it already proxies `/api/`, and a shim at the top of `index.html` points
+  the page's `fetch` at it. The shim rather than an edit to `minimal-radio.js`,
+  so that file stays a merge base — this is a fault of where the page runs, not
+  of what it does. Covered by `test/monitorserver.test.js`.
+- **In the server.** `corsMiddleware` now answers a preflight for `/connection`
+  from a loopback origin. That gives nothing away — CORS constrains browsers,
+  not software, and anything on the user's machine can already speak HTTP with
+  no Origin at all — but it only helps against instances new enough to have it,
+  which is why the proxy above exists.
+
+## What has diverged since
+
+`multi_monitor.js` is no longer byte-identical. Both changes are small and both
+are listed here so the next person diffing it knows what to expect:
+
+- **Country flags.** `countryFlag()` builds the flag from regional indicators
+  instead of `<img src="/flags/xx.svg">`, which was served from a collector
+  directory that does not exist here. Same treatment the chooser uses.
+- **The map view.** `updateMap()` only refits the bounds when the set of
+  stations has actually changed, so selecting one no longer zooms back out and
+  throws away wherever you had panned to.
+
+Server-side mute — instances connect muted and are unmuted only while something
+is listening — is *not* in this list: the identical change was made upstream and
+here at the same time, so it is common ground rather than drift.
 
 ## How it is served
 

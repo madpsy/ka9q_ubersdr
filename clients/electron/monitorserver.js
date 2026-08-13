@@ -48,6 +48,31 @@ const { API_USER_AGENT } = require('./useragent');
 const API_HOST = 'https://instances.ubersdr.org';
 const API_PREFIX = '/api/';
 
+// The one call the page makes to an instance rather than to the directory, and
+// the one that cannot be made from here directly.
+//
+// Before opening an audio socket, minimal-radio.js POSTs `/connection` to the
+// instance to register its session UUID; the instance refuses `/ws` for a UUID
+// that never did. That POST is JSON, so it is preflighted, and an instance only
+// answers a preflight when its operator has set `enable_cors` or when the
+// request comes from the collector's own hostname. A page on 127.0.0.1 is
+// neither: the OPTIONS falls through to a handler that takes POST only, comes
+// back 405, and the browser never sends the POST at all. Every tile then fails
+// with "Invalid session" and retries every five seconds. At the time of writing
+// 44 of the 45 instances in the directory report `cors_enabled: false`, so this
+// is nearly all of them, not an edge case.
+//
+// Proxying it here is the same move `/api/` already makes, for the same reason,
+// and it works against instances as they are rather than as they might be once
+// operators upgrade. A `base` query parameter says which instance to ask; the
+// page's fetch shim in index.html is what puts it there.
+const CONNECTION_PATH = '/connection';
+
+// A session registration is a few dozen bytes of JSON. The cap is not about
+// this server's memory — it is so that a local process that finds this port
+// cannot use it to push a large body at somebody else's receiver.
+const CONNECTION_MAX_BODY = 4096;
+
 // Same table as proxy.js, plus the one it has no reason to know about. A wasm
 // file served as application/octet-stream is refused by
 // WebAssembly.instantiateStreaming, which is exactly how hamlib arrives.
@@ -104,6 +129,13 @@ class MonitorServer {
         // refuse.
         if (pathname.startsWith(API_PREFIX)) {
             this.proxyApi(req, res);
+            return;
+        }
+
+        // Also before the method check, and for the same reason: this one is a
+        // POST. See CONNECTION_PATH.
+        if (pathname === CONNECTION_PATH) {
+            this.proxyConnection(req, res);
             return;
         }
 
@@ -208,6 +240,89 @@ class MonitorServer {
             res.end('{"error":"the instance directory could not be reached"}');
         });
 
+        req.pipe(out);
+    }
+
+    /**
+     * Registers the page's session with one instance, on its behalf.
+     *
+     * `?base=https://host` names the instance; the path asked for upstream is
+     * always `/connection`, never anything the caller supplies, so this is a
+     * proxy to one endpoint rather than an open one. Only POST, only http and
+     * https, and a body cap — see CONNECTION_MAX_BODY.
+     *
+     * The user agent is forwarded rather than replaced, which is the opposite
+     * of what proxyApi does and deliberate: the instance records it against the
+     * session, and moments later the same page opens a websocket to that
+     * instance directly, carrying Chromium's own. Substituting one here would
+     * make a single session look like two different clients in the operator's
+     * session list.
+     */
+    proxyConnection(req, res) {
+        const fail = (code, message) => {
+            res.writeHead(code, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ allowed: false, reason: message }));
+        };
+
+        if (req.method !== 'POST') {
+            res.writeHead(405, { Allow: 'POST' });
+            res.end();
+            return;
+        }
+
+        let base;
+        try {
+            base = new URL(new URL(req.url, 'http://127.0.0.1').searchParams.get('base') || '');
+        } catch {
+            fail(400, 'no instance to register with');
+            return;
+        }
+        if (base.protocol !== 'https:' && base.protocol !== 'http:') {
+            fail(400, 'instance URL is not http');
+            return;
+        }
+
+        const length = Number(req.headers['content-length'] || 0);
+        if (length > CONNECTION_MAX_BODY) {
+            fail(413, 'session registration too large');
+            return;
+        }
+
+        const transport = base.protocol === 'https:' ? https : http;
+        const out = transport.request({
+            hostname: base.hostname,
+            port: base.port || (base.protocol === 'https:' ? 443 : 80),
+            path: CONNECTION_PATH,
+            method: 'POST',
+            headers: {
+                'User-Agent': req.headers['user-agent'] || API_USER_AGENT,
+                'Content-Type': req.headers['content-type'] || 'application/json',
+                Accept: 'application/json',
+            },
+        }, (up) => {
+            const pass = {};
+            if (up.headers['content-type']) pass['content-type'] = up.headers['content-type'];
+            res.writeHead(up.statusCode || 502, pass);
+            up.pipe(res);
+        });
+
+        // Instances go offline, and the page has a tile per instance waiting on
+        // this. Ten seconds is long enough for a slow tunnel and short enough
+        // that a dead one shows as an error rather than as a tile that never
+        // resolves.
+        out.setTimeout(10000, () => out.destroy(new Error('timeout')));
+        out.on('error', () => {
+            if (res.headersSent) { res.destroy(); return; }
+            fail(502, 'the instance could not be reached');
+        });
+
+        // Anything past the cap is a caller that ignored the content-length it
+        // declared, so stop rather than forward it.
+        let seen = 0;
+        req.on('data', (chunk) => {
+            seen += chunk.length;
+            if (seen > CONNECTION_MAX_BODY) { req.destroy(); out.destroy(); }
+        });
         req.pipe(out);
     }
 }

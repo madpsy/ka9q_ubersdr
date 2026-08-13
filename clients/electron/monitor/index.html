@@ -15,6 +15,41 @@
          fonts.css and all.min.css are gone rather than staged — see README.md;
          between them they provide one icon and a @font-face the chooser
          already declares. -->
+    <!-- The second deviation, and the reason it is here rather than in
+         minimal-radio.js: that file is one of the five kept verbatim against
+         upstream, and this is a fault of where the page is running, not of what
+         it does.
+
+         It registers its session by POSTing /connection to each instance. From
+         the collector that is answered; from http://127.0.0.1 it is a
+         preflighted cross-origin request that all but one instance in the
+         directory refuses, so the POST never leaves the browser and every tile
+         fails. monitorserver.js explains it at length and proxies the call;
+         this points the page at that proxy. -->
+    <script>
+        (() => {
+            const nativeFetch = window.fetch.bind(window);
+            window.fetch = function (input, init) {
+                // Only plain URLs. A Request object carries its own body and
+                // headers, and rebuilding one to change its URL is a good way
+                // to lose something — the page never uses that form here.
+                if (typeof input === 'string' || input instanceof URL) {
+                    try {
+                        const target = new URL(String(input), location.href);
+                        if (target.origin !== location.origin && target.pathname === '/connection') {
+                            return nativeFetch(
+                                `/connection?base=${encodeURIComponent(target.origin)}`,
+                                init,
+                            );
+                        }
+                    } catch {
+                        // Not a URL this can make sense of — leave it be.
+                    }
+                }
+                return nativeFetch(input, init);
+            };
+        })();
+    </script>
     <link rel="stylesheet" href="vendor/leaflet.css">
     <script src="vendor/leaflet.js"></script>
     <script src="vendor/L.Terminator.js"></script>

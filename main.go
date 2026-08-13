@@ -329,6 +329,31 @@ func banMiddleware(config *Config, ipBanManager *IPBanManager, countryBanManager
 	})
 }
 
+// isLoopbackOrigin reports whether an Origin header names the machine its
+// browser is running on — "http://localhost:3000", "http://127.0.0.1:49500",
+// "http://[::1]:8080".  Used only to let a desktop client's embedded page
+// register a session; see the call site in corsMiddleware.
+func isLoopbackOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	// Anything in 127.0.0.0/8 or ::1.  Parsed rather than string-matched, so
+	// 127.0.0.2 and [::1] count as much as 127.0.0.1 does.
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // corsMiddleware adds CORS headers to all responses if enabled in config
 func corsMiddleware(config *Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +383,26 @@ func corsMiddleware(config *Config, next http.Handler) http.Handler {
 					shouldAddCORS = true
 				}
 			}
+		}
+
+		// Session registration from a page the user is running on their own
+		// machine.  Desktop clients that embed a web page — the multi-monitor
+		// window in the Electron client, served from http://127.0.0.1:<port> —
+		// must POST /connection before /ws will accept their session, and that
+		// POST is JSON, so it is preflighted.  Without this the preflight falls
+		// through to a handler that takes POST only, comes back 405, and the
+		// browser never sends the request: the client cannot connect at all
+		// unless the operator has enabled CORS outright.
+		//
+		// This gives away nothing.  CORS constrains browsers, not software:
+		// anything already running on that machine can speak HTTP to this
+		// server directly, with no Origin header and no preflight to satisfy.
+		// A page on a remote site cannot claim a loopback origin — the browser
+		// sets Origin from where the page came from, not from what it asks for.
+		// Kept to /connection rather than granted wholesale so that it stays a
+		// concession to one endpoint that is public and rate-limited anyway.
+		if !shouldAddCORS && r.URL.Path == "/connection" && isLoopbackOrigin(origin) {
+			shouldAddCORS = true
 		}
 
 		if shouldAddCORS {

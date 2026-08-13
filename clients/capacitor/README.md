@@ -281,6 +281,15 @@ lock screen's buttons back into the page's own handlers. The only control this
 client adds is **Stop**, which leaves the receiver — with the screen off, the
 notification is the only handle on the app.
 
+The artwork is v2's too, including the part that makes it fill the card. A
+receiver's logo is a launcher tile — transparent margin, rounded corners — and a
+media card is a black backing, so handed over as it ships it appears with black
+down both sides. `static/v2/src/radio/media/flatten.js` crops the margin, scales
+the mark to cover the frame and paints the corners a colour sampled from the
+tile itself, so it looks right here and in a plain browser alike.
+`PlaybackService.opaque` carries the same algorithm for anything that still
+reaches the notification with an alpha channel; running both is a no-op.
+
 Two answers v2 works out from the browser are wrong for this host, so the host
 says so with `window.ubersdrDesktop.mediaSession` (see
 `static/v2/src/radio/media/support.js`):

@@ -1648,13 +1648,21 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			}
 
 			currentSession.mu.Lock()
+			wasMuted := currentSession.Muted
 			currentSession.Muted = *msg.Muted
 			currentSession.mu.Unlock()
 
-			if *msg.Muted {
-				log.Printf("Session %s muted by client", currentSession.ID)
-			} else {
-				log.Printf("Session %s unmuted by client", currentSession.ID)
+			// Only log real transitions.  Clients re-assert the state on connect
+			// (older servers ignore the muted= query param, so that message is
+			// how they get muted at all) and a client that switches between
+			// several receivers can send this often — logging the no-ops would
+			// bury the changes that matter.
+			if wasMuted != *msg.Muted {
+				if *msg.Muted {
+					log.Printf("Session %s muted by client", currentSession.ID)
+				} else {
+					log.Printf("Session %s unmuted by client", currentSession.ID)
+				}
 			}
 
 			wsh.sendMessage(conn, ServerMessage{Type: "mute_updated", Info: map[string]interface{}{

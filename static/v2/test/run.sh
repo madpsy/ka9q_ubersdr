@@ -234,6 +234,8 @@ esbuild ../src/radio/media/support.js --bundle --format=cjs --platform=node \
     --outfile=.build/mediasupport.cjs --log-level=warning
 esbuild ../src/radio/media/lookup.js --bundle --format=cjs --platform=node \
     --outfile=.build/medialookup.cjs --log-level=warning
+esbuild ../src/radio/media/flatten.js --bundle --format=cjs --platform=node \
+    --outfile=.build/mediaflatten.cjs --log-level=warning
 esbuild ../src/lib/roomFor.js --bundle --format=cjs --platform=node \
     --outfile=.build/roomfor.cjs --log-level=warning
 esbuild ../src/lib/fitScale.js --bundle --format=cjs --platform=node \
@@ -356,6 +358,7 @@ node audiosinks.test.js
 node markernav.test.js
 node markernavsettings.test.js
 node medialookup.test.js
+node mediaflatten.test.js
 node roomfor.test.js
 node fitscale.test.js
 node panelscale.test.js

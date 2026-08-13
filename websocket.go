@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -653,6 +654,19 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Parse optional initial mute state from query string ("muted=1" / "true" / etc.).
+	// Same effect as sending set_mute immediately after connecting, but without the
+	// window where audio streams before the first client message is processed.
+	initialMuted := false
+	if v := query.Get("muted"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			wsh.sendError(conn, fmt.Sprintf("Invalid muted value '%s' (expected true/false)", v))
+			return
+		}
+		initialMuted = b
+	}
+
 	// Validate mode - "spectrum" is reserved for the spectrum manager
 	if mode == "spectrum" {
 		log.Printf("Rejected WebSocket connection: mode 'spectrum' is reserved")
@@ -686,6 +700,15 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	if initialGateMinSNR > -998 || initialGateMinPower > -998 {
 		log.Printf("Audio gate initialised for session %s: min_snr=%.1f min_power=%.1f",
 			session.ID, initialGateMinSNR, initialGateMinPower)
+	}
+
+	// Apply initial mute state from query param, before streamAudio() starts, so a
+	// client that asked to connect muted never receives a single audible packet.
+	if initialMuted {
+		session.mu.Lock()
+		session.Muted = true
+		session.mu.Unlock()
+		log.Printf("Session %s muted at connect (muted=1)", session.ID)
 	}
 
 	// Store WebSocket connection reference in session for kick functionality

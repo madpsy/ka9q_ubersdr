@@ -23,7 +23,7 @@ const DOWNLOAD_BASE = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/
 const FETCH_TIMEOUT_MS = 10000;
 
 // What each platform is published as, and the architecture it is built for —
-// build.sh packages the AppImage and the installer `--x64`, and the dmg is
+// build.sh packages the Linux and Windows artefacts `--x64`, and the dmg is
 // whatever the Mac it was built on was.
 //
 // An architecture not named here has no published asset, so it is sent to the
@@ -35,11 +35,36 @@ const ASSETS = {
     darwin: { arch: 'arm64', file: 'UberSDR-arm64.dmg' },
 };
 
+// Linux is published twice — an AppImage that runs anywhere, and a .deb that
+// installs properly on the Debian family — so unlike the other two, which asset
+// is *this* machine's is a question about the running app rather than about the
+// platform.
+//
+// Answered from where the app is running rather than from the distribution,
+// because the distribution is the wrong question: a Fedora user who fetched the
+// AppImage wants the AppImage, and offering a .deb because /etc/os-release said
+// something is how somebody is handed a file their package manager will not
+// open. Two facts settle it without guessing:
+//
+//   $APPIMAGE          set by the AppImage runtime, and only by it.
+//   /opt/UberSDR/…     where the .deb installs (electron-builder's layout).
+//
+// Neither present is a working tree, an unpacked dir, or a tarball somebody
+// arranged themselves — and there the AppImage is the right offer, being the
+// one build that needs no package manager to agree to it.
+const DEB_PREFIX = '/opt/UberSDR/';
+const DEB_FILE = 'UberSDR.deb';
+
 /** Where this machine should go to get the new build. */
-function downloadUrl(platform = process.platform, arch = process.arch) {
+function downloadUrl(platform = process.platform, arch = process.arch, proc = process) {
     const asset = ASSETS[platform];
     if (!asset || asset.arch !== arch) return RELEASES_URL;
-    return `${DOWNLOAD_BASE}/${asset.file}`;
+    const env = (proc && proc.env) || {};
+    const execPath = (proc && proc.execPath) || '';
+    const file = (platform === 'linux' && !env.APPIMAGE && String(execPath).startsWith(DEB_PREFIX))
+        ? DEB_FILE
+        : asset.file;
+    return `${DOWNLOAD_BASE}/${file}`;
 }
 
 /**

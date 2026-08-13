@@ -3,8 +3,10 @@
   "version": "0.2.0",
   "private": true,
   "description": "UberSDR desktop client — the v2 web UI in an Electron shell with an instance chooser",
-  "author": "MadPsy",
+  "author": "MadPsy <madpsy@users.noreply.github.com>",
   "license": "SEE LICENSE IN ../../LICENSE.TXT",
+  "//homepage": "Required by the deb target, not decoration: dpkg's control file has a Homepage field and electron-builder refuses to build a package without something to put in it. The same two facts are why `author` gained an email — Maintainer is mandatory too, and the noreply form is deliverable-ish without publishing an inbox.",
+  "homepage": "https://ubersdr.org",
   "main": "main.js",
   "//desktopName": "Read by Electron itself (app.setDesktopName) and by electron-builder, which writes it as StartupWMClass. They must agree or the desktop environment cannot match a running window to the .desktop entry, and the taskbar shows a generic icon. Electron's fallback is `${app.name}.desktop` = ubersdr-desktop.desktop, so that is the name to pin.",
   "desktopName": "ubersdr-desktop.desktop",
@@ -58,8 +60,12 @@
       "assets/icon.png"
     ],
     "linux": {
-      "target": "AppImage",
-      "category": "HamRadio",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "AudioVideo;Audio;HamRadio",
+      "synopsis": "Desktop client for UberSDR receivers",
       "syncDesktopName": true
     },
     "win": {
@@ -74,6 +80,15 @@
     },
     "appImage": {
       "artifactName": "${productName}.${ext}"
+    },
+    "deb": {
+      "artifactName": "${productName}.${ext}",
+      "packageCategory": "hamradio",
+      "priority": "optional",
+      "recommends": [
+        "speech-dispatcher",
+        "speech-dispatcher-espeak-ng"
+      ]
     },
     "nsis": {
       "artifactName": "${productName}.Setup.${ext}"

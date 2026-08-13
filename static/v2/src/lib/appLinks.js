@@ -52,7 +52,7 @@ export function ubersdrAppUri(publicUuid) {
 
 // Where the desktop client comes from, per platform.
 //
-// The same three artefacts the project's own site offers, from the same rolling
+// The same artefacts the project's own site offers, from the same rolling
 // `latest` release — the file names are fixed on purpose (see the artifactName
 // note in clients/electron/package.json) so a link written here does not 404 on
 // the next version bump.
@@ -61,6 +61,22 @@ export function ubersdrAppUri(publicUuid) {
 // Linux build is x86_64 only and the macOS build is Apple Silicon only, so a
 // button that said no more than "Download" would be offering an ARM Chromebook
 // an AppImage it cannot run.
+//
+// Linux appears twice, which is why `os` is not the identity here and `id` is.
+// The two are not the same download with a different extension:
+//
+//   AppImage   runs anywhere, on any distribution, without root and without a
+//              package manager agreeing to it. It is also not *installed* — a
+//              file in a downloads folder has no .desktop entry, so there is no
+//              application-menu item and ubersdr:// links do not open it, since
+//              a URL scheme is claimed by an installed entry and nothing else.
+//   .deb       the Debian family, installed properly: menu item, icon, and the
+//              scheme association that makes the "Open in App" link above this
+//              button work at all.
+//
+// So the choice is a real one and both are offered rather than one being picked
+// on somebody's behalf — the notes say which is which, because "Linux" alone
+// cannot.
 const RELEASE = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/latest';
 
 // The icons are the project site's own, at 64 px tall so a button can draw them
@@ -70,14 +86,19 @@ const RELEASE = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/latest
 const ICONS = '/images/os';
 
 export const APP_DOWNLOADS = [
-    { os: 'windows', label: 'Windows', note: 'Installer (.exe)', url: `${RELEASE}/UberSDR.Setup.exe`, icon: `${ICONS}/windows.png` },
-    { os: 'macos', label: 'macOS', note: 'Apple Silicon (.dmg)', url: `${RELEASE}/UberSDR-arm64.dmg`, icon: `${ICONS}/mac.png` },
-    { os: 'linux', label: 'Linux', note: 'AppImage, x86_64', url: `${RELEASE}/UberSDR.AppImage`, icon: `${ICONS}/linux.png` },
+    { id: 'windows', os: 'windows', label: 'Windows', note: 'Installer (.exe), x86_64', url: `${RELEASE}/UberSDR.Setup.exe`, icon: `${ICONS}/windows.png` },
+    { id: 'macos', os: 'macos', label: 'macOS', note: 'Apple Silicon (.dmg)', url: `${RELEASE}/UberSDR-arm64.dmg`, icon: `${ICONS}/mac.png` },
+    { id: 'linux-appimage', os: 'linux', label: 'Linux (AppImage)', note: 'AppImage — any distribution, no install needed. x86_64', url: `${RELEASE}/UberSDR.AppImage`, icon: `${ICONS}/linux.png` },
+    { id: 'linux-deb', os: 'linux', label: 'Linux (.deb)', note: '.deb — Debian and Ubuntu: adds a menu entry and opens ubersdr:// links. x86_64', url: `${RELEASE}/UberSDR.deb`, icon: `${ICONS}/linux.png` },
 ];
 
-/** The download for an os key from `detectDesktopOS`, or null. */
-export function appDownload(os) {
-    return APP_DOWNLOADS.find((d) => d.os === os) || null;
+/**
+ * The downloads for an os key from `detectDesktopOS` — an array, because Linux
+ * has two and neither is the obvious default. Empty for a platform this does
+ * not recognise, which callers show the whole list for rather than guessing.
+ */
+export function appDownloads(os) {
+    return os ? APP_DOWNLOADS.filter((d) => d.os === os) : [];
 }
 
 /**

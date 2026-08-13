@@ -12,7 +12,7 @@
 
 const assert = require('assert');
 const {
-    APP_DOWNLOADS, appDownload, detectDesktopOS, ubersdrAppUri, vibesdrUri,
+    APP_DOWNLOADS, appDownloads, detectDesktopOS, ubersdrAppUri, vibesdrUri,
 } = require('./.build/applinks.cjs');
 
 let pass = 0;
@@ -113,12 +113,39 @@ t('anything else is null rather than a guess', () => {
 
 t('every recognised platform has a download, and null has none', () => {
     for (const os of ['windows', 'macos', 'linux']) {
-        const d = appDownload(os);
-        assert.ok(d && d.url, os);
-        assert.ok(d.label && d.note, os);
+        const found = appDownloads(os);
+        assert.ok(found.length, os);
+        for (const d of found) {
+            assert.ok(d.url, d.id);
+            assert.ok(d.label && d.note, d.id);
+        }
     }
-    assert.strictEqual(appDownload(null), null);
-    assert.strictEqual(appDownload('haiku'), null);
+    assert.deepStrictEqual(appDownloads(null), []);
+    assert.deepStrictEqual(appDownloads('haiku'), []);
+});
+
+// Linux ships two builds that are not interchangeable — the AppImage runs
+// anywhere and installs nothing, the .deb is what makes ubersdr:// links and
+// the menu entry exist. Offering only the first match would quietly hide the
+// one somebody following an "Open in App" button actually needs.
+t('Linux offers both builds, and says which is which', () => {
+    const linux = appDownloads('linux');
+    assert.strictEqual(linux.length, 2);
+    assert.deepStrictEqual(linux.map((d) => d.id), ['linux-appimage', 'linux-deb']);
+    assert.ok(linux[0].label.includes('AppImage'), linux[0].label);
+    assert.ok(linux[1].label.includes('.deb'), linux[1].label);
+    // The other two are still single, or the dialog's one-button case is dead.
+    assert.strictEqual(appDownloads('windows').length, 1);
+    assert.strictEqual(appDownloads('macos').length, 1);
+});
+
+// `os` stopped being unique the moment Linux gained a second row, and it was
+// the React key in the dialog's list. A duplicate key there silently renders
+// one button.
+t('every download has an id of its own', () => {
+    const ids = APP_DOWNLOADS.map((d) => d.id);
+    assert.strictEqual(new Set(ids).size, ids.length, ids.join(', '));
+    for (const d of APP_DOWNLOADS) assert.ok(d.id, JSON.stringify(d));
 });
 
 // The file names are fixed on purpose so the links survive a version bump —
@@ -129,9 +156,9 @@ t('every platform icon is a file this server actually has', () => {
     const fs = require('fs');
     const path = require('path');
     for (const d of APP_DOWNLOADS) {
-        assert.ok(d.icon && d.icon.startsWith('/images/'), `${d.os}: ${d.icon}`);
+        assert.ok(d.icon && d.icon.startsWith('/images/'), `${d.id}: ${d.icon}`);
         const file = path.join(__dirname, '..', '..', d.icon.replace(/^\//, ''));
-        assert.ok(fs.existsSync(file), `${d.os}: ${file} is missing`);
+        assert.ok(fs.existsSync(file), `${d.id}: ${file} is missing`);
     }
 });
 
@@ -141,6 +168,7 @@ t('the downloads are the release assets the site links to', () => {
         `${RELEASE}/UberSDR.Setup.exe`,
         `${RELEASE}/UberSDR-arm64.dmg`,
         `${RELEASE}/UberSDR.AppImage`,
+        `${RELEASE}/UberSDR.deb`,
     ]);
     for (const d of APP_DOWNLOADS) assert.ok(!/\$\{|\bundefined\b/.test(d.url), d.url);
 });

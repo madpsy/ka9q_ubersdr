@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { Button, Modal } from './ui.jsx';
 import { loadScript } from '../lib/loadScript.js';
 import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
-import { APP_DOWNLOADS, appDownload, detectDesktopOS, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
+import { APP_DOWNLOADS, appDownloads, detectDesktopOS, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
 
 // v1's QR renderer, loaded on demand. 20 KB that only a phone-facing dialog
 // needs, so it stays out of the bundle and off the critical path — the same
@@ -149,7 +149,10 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
     const uri = ubersdrAppUri(publicUuid);
     // Read once, when the dialog opens: it is a property of the machine, and
     // nothing about it can change while this is on screen.
-    const [download] = useState(() => appDownload(detectDesktopOS()));
+    // Plural: Linux has two builds and they are a genuine choice, not the same
+    // file twice — see APP_DOWNLOADS. Empty for a platform this cannot name.
+    const [downloads] = useState(() => appDownloads(detectDesktopOS()));
+    const offered = downloads.length ? downloads : APP_DOWNLOADS;
 
     return (
         <Modal onClose={onClose} label="Open in the UberSDR app">
@@ -161,17 +164,22 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
                 </p>
                 <div className="vibe__row">
                     <a className="btn btn--primary btn--sm" href={uri}>Open in App</a>
-                    {download ? (
-                        <DownloadButton download={download} label={`Download for ${download.label}`} />
+                    {downloads.length === 1 ? (
+                        <DownloadButton download={offered[0]} label={`Download for ${offered[0].label}`} />
                     ) : (
-                        // Not a platform this recognises, so it says what it has
+                        // Either a platform with more than one build, or none
+                        // this recognises — in which case it says what it has
                         // rather than choosing wrongly on somebody's behalf.
-                        APP_DOWNLOADS.map((d) => (
-                            <DownloadButton key={d.os} download={d} label={d.label} />
+                        // Both want the short label: two "Download for …"
+                        // buttons beside "Open in App" is a row of sentences.
+                        offered.map((d) => (
+                            <DownloadButton key={d.id} download={d} label={d.label} />
                         ))
                     )}
                 </div>
-                {download && <p className="vibe__note">{download.note}</p>}
+                {downloads.map((d) => (
+                    <p key={d.id} className="vibe__note">{d.note}</p>
+                ))}
                 <code className="vibe__uri">{uri}</code>
                 <div className="vibe__row">
                     <CopyLink uri={uri} />

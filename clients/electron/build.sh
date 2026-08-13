@@ -11,11 +11,11 @@
 #   ./build.sh             build v2, stage it, npm-install if needed
 #   ./build.sh --skip-ui   skip the v2 build (keep the currently staged UI)
 #   ./build.sh --package   all of the above, then produce distributables in dist/:
-#                            on Linux   → AppImage + Windows zip + Windows installer
+#                            on Linux   → AppImage + .deb + Windows zip + installer
 #                            on macOS   → dmg
 #                            on Windows → NSIS installer
 #                          (macOS packages can only be built on a Mac)
-#   ./build.sh --linux     package the AppImage and nothing else. The Windows
+#   ./build.sh --linux     package the Linux artefacts and nothing else. The Windows
 #                          half of a Linux --package is most of its wall clock —
 #                          a second Electron download the first time, then the
 #                          zip, then a 4.7 GB container for the installer — and
@@ -99,6 +99,7 @@ WIN_IMAGE=electronuserland/builder:wine
 # what is not.
 RELEASE_ASSETS=(
     dist/UberSDR.AppImage
+    dist/UberSDR.deb
     dist/UberSDR.Setup.exe
     dist/UberSDR-arm64.dmg
     dist/UberSDR-x64.dmg
@@ -307,6 +308,32 @@ else
     cp assets/icon.png chooser/icon.png
 fi
 
+# The icon set the Linux packages install into the hicolor theme.
+#
+# Staged, not committed, for the reason above — and generated at all because a
+# .desktop entry names its icon rather than carrying one: `Icon=ubersdr-desktop`
+# is a *lookup*, and the theme only looks in the size directories its
+# index.theme lists. hicolor's stop at 512. Handed only assets/icon.png,
+# electron-builder installs one 1024x1024 file, which lands in a directory no
+# theme indexes — so the app menu shows the entry with a generic icon and
+# nothing anywhere says why.
+#
+# electron-builder finds this by convention: `<buildResources>/icons` is picked
+# up on its own if it exists (LinuxTargetHelper.computeDesktopIcons), which is
+# also why there is nothing about it in package.json and why a host without
+# ImageMagick simply gets the old single-icon behaviour rather than a failure.
+#
+# Every size here is one hicolor indexes. 1024 deliberately is not.
+if command -v convert >/dev/null 2>&1; then
+    rm -rf assets/icons
+    mkdir -p assets/icons
+    for size in 16 24 32 48 64 96 128 256 512; do
+        convert assets/icon.png -resize "${size}x${size}" "assets/icons/${size}x${size}.png" \
+            || { echo "warning: could not generate the ${size}px icon — the menu entry may show a generic one" >&2
+                 rm -rf assets/icons; break; }
+    done
+fi
+
 # The multi-monitor's libraries, staged the same way and for the same reason:
 # they are somebody else's, they live in static/, and a second committed copy is
 # a second thing to keep current. Every one of these is byte-identical to the
@@ -445,10 +472,10 @@ if [[ "$PACKAGE" -eq 1 ]]; then
         # for anywhere else this fails somewhere deep in a toolchain that is not
         # there, so it is refused here where the reason still fits on a line.
         if [[ "$(uname -s)" != Linux ]]; then
-            echo "--linux builds the AppImage, which needs a Linux host (this is $(uname -s))" >&2
+            echo "--linux builds the AppImage and the .deb, which need a Linux host (this is $(uname -s))" >&2
             exit 1
         fi
-        ./node_modules/.bin/electron-builder --linux AppImage --x64
+        ./node_modules/.bin/electron-builder --linux AppImage deb --x64
         # WIN_INSTALLER stays 0, so the Windows half below is skipped entirely.
     else
         case "$(uname -s)" in
@@ -457,7 +484,7 @@ if [[ "$PACKAGE" -eq 1 ]]; then
             # behind a flag somebody has to know about.
             # An `[[ ]] && x` here would be the last command of the branch, and
             # under `set -e` a false test would end the script.
-            Linux)  ./node_modules/.bin/electron-builder --linux AppImage --win zip --x64
+            Linux)  ./node_modules/.bin/electron-builder --linux AppImage deb --win zip --x64
                     if [[ "$WIN_INSTALLER" -eq 0 ]]; then WIN_INSTALLER=1; fi ;;
             # Said before the build rather than after: notarisation adds
             # several minutes of uploading and waiting to it, and finding out
@@ -635,10 +662,11 @@ else
     echo "done — the UI is built and staged, and nothing was packaged."
     echo
     echo "  ./build.sh --package    installable builds in dist/ — the AppImage,"
-    echo "                          the Windows zip and the Windows installer."
+    echo "                          the .deb, the Windows zip and the installer."
     echo "                          This is usually the one you want."
     echo
-    echo "  ./build.sh --linux      just the AppImage, skipping the Windows half."
+    echo "  ./build.sh --linux      just the AppImage and the .deb, skipping the"
+    echo "                          Windows half."
     echo
     echo "  npm start               run it from here without packaging."
 fi

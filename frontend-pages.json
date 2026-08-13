@@ -173,8 +173,13 @@
             },
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR.AppImage",
-              "name": "⬇️ Linux Download",
-              "description": "Download the Desktop Client AppImage for Linux (amd64)."
+              "name": "⬇️ Linux Download (AppImage)",
+              "description": "Download the Desktop Client AppImage for Linux (amd64). Runs on any distribution and needs no install — but nothing is registered with the desktop, so there is no application menu entry and ubersdr:// links will not open it."
+            },
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR.deb",
+              "name": "⬇️ Linux Download (.deb)",
+              "description": "Download the Desktop Client package for Debian and Ubuntu (amd64). Installs properly: application menu entry, icon, and ubersdr:// links open in the client."
             }
           ]
         },

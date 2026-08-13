@@ -441,21 +441,60 @@ build needs only esbuild, same as the rest of the repo.
 stages the UI and then runs `electron-builder`, leaving distributables in
 `dist/`:
 
-- on **Linux**: `UberSDR-<version>.AppImage`, `UberSDR-<version>-win.zip`
-  (unzip on Windows and run `UberSDR.exe`) and `UberSDR Setup <version>.exe`
-  (see below — built in Docker, and skipped with a note where Docker is
-  absent).
+- on **Linux**: `UberSDR.AppImage` and `UberSDR.deb` (see below),
+  `UberSDR-<version>-win.zip` (unzip on Windows and run `UberSDR.exe`) and
+  `UberSDR.Setup.exe` (see below — built in Docker, and skipped with a note
+  where Docker is absent).
 - on **macOS**: a dmg. Mac packages can only be built on a Mac — for all
   three platforms from one push, run `./build.sh --package` in a CI matrix
   (ubuntu / macos / windows runners).
 
-### Just the AppImage
+### The two Linux builds
+
+The AppImage is the one that runs anywhere: no package manager has to agree to
+it, no root is needed, and it is the right answer for a distribution that is
+not in the Debian family. What it is not is *installed*. An AppImage is a file
+in a downloads folder, and a file in a downloads folder has no `.desktop` entry
+— so there is no application-menu item, and `ubersdr://` links do not open it,
+because a URL scheme is claimed by an installed desktop entry and nothing else.
+
+The `.deb` is the same app, installed properly:
+
+- **the menu item** — `/usr/share/applications/ubersdr-desktop.desktop`, with
+  the mark installed into the hicolor theme at every size the theme indexes
+  (build.sh generates the set from `assets/icon.png`; handed only the 1024 px
+  original, electron-builder installs one file in a directory no theme looks
+  in, and the menu entry appears with a generic icon).
+- **`ubersdr://` links** — the entry carries
+  `MimeType=x-scheme-handler/ubersdr;` and an `Exec` ending in `%U`, and the
+  package's `postinst` runs `update-desktop-database`. That is what makes a
+  link in a browser, a chat window or a QR code reach `deeplink.js`. The
+  registration `main.js` performs at startup claims the association; this is
+  what makes there be one to claim.
+- **the window's identity** — `StartupWMClass=ubersdr-desktop` matches
+  `desktopName` in package.json, so the taskbar shows the app's own icon rather
+  than a generic one against a window it cannot place.
+- **`ubersdr-desktop` on `PATH`**, via `/usr/bin`, and an AppArmor profile for
+  Ubuntu 24+, whose restrictions on unprivileged user namespaces otherwise stop
+  the Chromium sandbox from starting.
+
+The in-app update check offers whichever of the two the running app came from —
+`$APPIMAGE` for one, the `/opt/UberSDR/` install path for the other, and the
+AppImage for anything else, since it is the build that needs no package manager
+(`updates.js`, `test/updates.test.js`).
+
+`lintian` reports the usual complaints about any bundled-Electron package —
+`dir-or-file-in-opt`, `embedded-library`, `unstripped-binary-or-object`. They
+are rules for packages going into the Debian archive rather than ones handed
+out as a download, and every Electron .deb trips them.
+
+### Just the Linux builds
 
 ```sh
 ./build.sh --linux
 ```
 
-The Linux artefact and nothing else. On Linux, `--package` also builds the
+The Linux artefacts and nothing else. On Linux, `--package` also builds the
 Windows zip — a second Electron download the first time — and then a Windows
 installer in a 4.7 GB container, none of which is wanted when what is being
 tested is the Linux build. It refuses to run on a non-Linux host rather than

@@ -62,6 +62,44 @@ t('each platform gets the asset built for it', () => {
     assert.ok(downloadUrl('darwin', 'arm64').endsWith('/UberSDR-arm64.dmg'));
 });
 
+// Linux has two builds, and which one a machine should be offered is a fact
+// about the running app, not about the distribution — see updates.js. Getting
+// this backwards hands somebody a file they cannot install, or replaces a
+// packaged install with a loose AppImage that no longer updates with it.
+t('a .deb install is offered the .deb', () => {
+    const proc = { env: {}, execPath: '/opt/UberSDR/ubersdr-desktop' };
+    assert.ok(downloadUrl('linux', 'x64', proc).endsWith('/UberSDR.deb'));
+});
+
+t('an AppImage is offered the AppImage, wherever it was run from', () => {
+    // $APPIMAGE wins outright: the runtime sets it, nothing else does, and an
+    // AppImage copied into /opt by hand is still an AppImage.
+    for (const execPath of ['/home/op/Downloads/UberSDR.AppImage', '/opt/UberSDR/ubersdr-desktop']) {
+        const proc = { env: { APPIMAGE: '/home/op/Downloads/UberSDR.AppImage' }, execPath };
+        assert.ok(downloadUrl('linux', 'x64', proc).endsWith('/UberSDR.AppImage'), execPath);
+    }
+});
+
+t('anything else on Linux is offered the AppImage', () => {
+    // A working tree, an unpacked dir, a tarball somebody arranged themselves,
+    // or a distribution with no dpkg at all. The AppImage is the build that
+    // needs no package manager to agree to it.
+    for (const execPath of ['', '/usr/lib/node_modules/electron/dist/electron', '/home/op/src/ka9q_ubersdr/clients/electron/node_modules/electron/dist/electron']) {
+        const proc = { env: {}, execPath };
+        assert.ok(downloadUrl('linux', 'x64', proc).endsWith('/UberSDR.AppImage'), execPath);
+    }
+    // A proc object with nothing on it at all must not throw.
+    assert.ok(downloadUrl('linux', 'x64', {}).endsWith('/UberSDR.AppImage'));
+});
+
+t('the two other platforms ignore all of that', () => {
+    // Only Linux ships twice. A Windows exe under /opt is not a thing, but the
+    // check must not be reachable from another platform's branch either way.
+    const proc = { env: { APPIMAGE: '/x' }, execPath: '/opt/UberSDR/ubersdr-desktop' };
+    assert.ok(downloadUrl('win32', 'x64', proc).endsWith('/UberSDR.Setup.exe'));
+    assert.ok(downloadUrl('darwin', 'arm64', proc).endsWith('/UberSDR-arm64.dmg'));
+});
+
 // build.sh packages the AppImage and the installer --x64, and the dmg is built
 // on an Apple Silicon Mac. Nothing is published for the other architectures, so
 // they are sent to the page rather than handed a file that cannot run.

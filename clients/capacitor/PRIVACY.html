@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UberSDR Mobile — Privacy Policy</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1c1f23;
+    --muted: #5a636e;
+    --rule: #e2e5e9;
+    --accent: #1d6fb8;
+    --card: #f6f8fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a;
+      --fg: #e7eaee;
+      --muted: #a3adb8;
+      --rule: #2b3138;
+      --accent: #5aa9e6;
+      --card: #1c2126;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 5rem;
+  }
+  h1 { font-size: 1.85rem; line-height: 1.25; margin: 0 0 .35rem; }
+  h2 { font-size: 1.2rem; margin: 2.4rem 0 .6rem; padding-top: .9rem; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1rem; margin: 1.5rem 0 .4rem; }
+  p, li { color: var(--fg); }
+  .sub { color: var(--muted); margin: 0 0 1.75rem; font-size: .95rem; }
+  ul { padding-left: 1.15rem; }
+  li { margin: .35rem 0; }
+  a { color: var(--accent); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .9em;
+    background: var(--card);
+    padding: .1em .35em;
+    border-radius: 4px;
+  }
+  .callout {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    margin: 1.25rem 0;
+  }
+  .callout p:first-child { margin-top: 0; }
+  .callout p:last-child { margin-bottom: 0; }
+  .table-wrap { overflow-x: auto; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .94rem; }
+  th, td { text-align: left; vertical-align: top; padding: .55rem .7rem; border-bottom: 1px solid var(--rule); }
+  th { font-weight: 600; }
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Privacy Policy — UberSDR Mobile</h1>
+<p class="sub">The UberSDR app for phones and tablets · Last updated 13 August 2026</p>
+
+<div class="callout">
+  <p><strong>In short:</strong> UberSDR does not have accounts, does not contain
+  advertising, analytics, tracking or crash-reporting components, and its
+  developer operates no server that collects personal information from you. Your
+  list of saved receivers, your settings and any receiver passwords stay on your
+  device. The app is a client for radio receivers run by other people: when you
+  connect to one, that receiver's operator sees your connection in the way any
+  website operator sees a visitor.</p>
+</div>
+
+<h2>1. Who this policy is from</h2>
+<p>This policy covers the UberSDR mobile application ("the app"), published by
+the UberSDR project (MadPsy), <a href="https://ubersdr.org">ubersdr.org</a>. The
+app is the mobile client for the open-source UberSDR software; its source code
+is at <a href="https://github.com/madpsy/ka9q_ubersdr">github.com/madpsy/ka9q_ubersdr</a>,
+and everything described below can be checked there. The same policy applies to
+every version of the app, whichever store or platform it was installed from.</p>
+
+<p>It does <em>not</em> cover the individual UberSDR receivers you choose to
+connect to. Those are run by independent operators — radio amateurs, clubs and
+enthusiasts — on their own equipment, under their own terms. See
+<a href="#receivers">section 4.2</a>.</p>
+
+<h2>2. No account, no profile, no tracking</h2>
+<ul>
+  <li>There is no sign-up, no login and no user account for the app itself.</li>
+  <li>The app contains no advertising, no analytics, no attribution or
+      measurement SDK, no crash reporter and no third-party tracking libraries.
+      Its only dependencies are the Capacitor runtime and its preferences
+      plugin, both of which run entirely on the device.</li>
+  <li>No advertising identifier, device identifier or persistent user identifier
+      is read, generated or transmitted. The app does not track you across other
+      apps or websites, and does not ask for permission to do so.</li>
+  <li>No personal information is sold, rented or shared for advertising.</li>
+</ul>
+
+<h2>3. What is stored on your device</h2>
+<p>All of the following is written to the app's private storage on your device.
+None of it is uploaded to the developer.</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>What</th><th>Why</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Your saved receivers — a label, hostname/address, port, public
+          identifier and whether you chose to accept a self-signed certificate
+          for it</td>
+      <td>So the list you built is there next time, and a link or a search does
+          not have to be repeated</td>
+    </tr>
+    <tr>
+      <td>Chooser preferences — the tab you were last on, the sort order, and an
+          optional "home" position (latitude/longitude) if you set one</td>
+      <td>To show receivers in a useful order and to work out how far away they
+          are. Distances are calculated on the device</td>
+    </tr>
+    <tr>
+      <td>Receiver access passwords, where a receiver requires one and you ask
+          the app to remember it</td>
+      <td>So it is not typed every time. Each one is encrypted using the
+          operating system's secure key store, with a key that never leaves the
+          device, and is sent only to the receiver it belongs to</td>
+    </tr>
+    <tr>
+      <td>The radio interface's own settings — panel layout, audio, filters,
+          bookmarks, notification choices, and the display name you type if you
+          use a receiver's chat</td>
+      <td>Ordinary browser <code>localStorage</code> belonging to the bundled
+          web interface, kept per receiver</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>The app does not read your contacts, calendar, photos, files, call history,
+messages or installed-app list, and has no permission to do so.</p>
+
+<h3>Device backup</h3>
+<p>The app's storage is included in the standard device backup provided by your
+platform if you have that turned on — iCloud Backup or Google backup, as
+applicable. Those backups are held by Apple or Google under their terms rather
+than ours, and you can exclude the app in your device's backup settings.</p>
+
+<h2>4. What leaves your device, and to whom</h2>
+
+<h3>4.1 The UberSDR directory (<code>instances.ubersdr.org</code>)</h3>
+<p>To show the list of public receivers, the app makes ordinary HTTPS requests to
+the project's directory service:</p>
+<ul>
+  <li><code>/api/instances</code> — the public list of receivers and current band
+      conditions. Nothing about you or your device is sent with it.</li>
+  <li><code>/api/instances/&lt;id&gt;</code> — the address of one receiver, when
+      you follow an <code>ubersdr://connect</code> link.</li>
+  <li><code>/api/myip</code> — asked at most once per app run, and only if you
+      have not set a home position manually. It returns an approximate location
+      derived from your IP address so that "distance to receiver" can be shown.
+      The result is used on the device; the app does not send your location to
+      the directory, and it never asks the operating system for your precise
+      location.</li>
+</ul>
+<p>As with any HTTPS request, the directory necessarily receives your IP address
+and the app's identifying User-Agent string in order to reply. These may appear
+in ordinary server logs kept for operating the service and preventing abuse.
+They are not used to build a profile of you, are not linked to an identity, and
+are not shared with advertisers.</p>
+
+<h3 id="receivers">4.2 Receivers you connect to</h3>
+<p>Choosing a receiver opens a direct connection from your device to that
+receiver's server. The operator of that server can see, as any web server can,
+your IP address, the app's User-Agent, and what you do on their receiver —
+frequencies and modes you tune, how long you listen, and anything you type into
+that receiver's chat or logbook features. Many UberSDR receivers show a list of
+current listeners, and some keep statistics or require a password.</p>
+<p>These operators are independent third parties. The developer of this app does
+not receive, collect or have access to that information, and each operator's own
+terms and privacy practices apply. Connect only to receivers you are content to
+be seen by.</p>
+
+<h3>4.3 Your local network</h3>
+<p>The "LAN" tab sends a standard multicast DNS service query
+(<code>_ubersdr._tcp</code>) over your local network to find receivers on it. The
+query and its replies stay on your network; no information about your network is
+sent anywhere else. On platforms that require your consent for local network
+access, the app asks the first time you use that feature, and the rest of the app
+works without it.</p>
+
+<h3>4.4 Other services used by features you choose to open</h3>
+<p>The bundled radio interface includes optional features that fetch from third
+parties when — and only when — you use them:</p>
+<ul>
+  <li><strong>Maps.</strong> Map tiles are loaded from OpenStreetMap
+      (<code>tile.openstreetmap.org</code>) when a map is displayed.</li>
+  <li><strong>News panel.</strong> Amateur-radio news headlines are relayed
+      through <code>api.rss2json.com</code>.</li>
+  <li><strong>Callsign links.</strong> Tapping a callsign link opens
+      <code>qrz.com</code> in your browser.</li>
+  <li><strong>Callsign and operator lookups</strong> shown inside a receiver's
+      panels are performed by that receiver's server, not by the app.</li>
+</ul>
+<p>Requests to these services carry your IP address to them in the normal way.
+Their own privacy policies apply.</p>
+
+<h2>5. Permissions the app asks for</h2>
+<p>The app asks for as little as the platform allows, and asks at the moment the
+feature is used rather than at launch. Nothing here is requested when you first
+open the app.</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Permission</th><th>Why it is needed</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Network access</td>
+      <td>To reach the directory and the receivers you select</td>
+    </tr>
+    <tr>
+      <td>Notifications</td>
+      <td>The playback notification you stop the receiver from, and the alerts
+          the radio interface raises (your callsign mentioned in chat, a recorder
+          warning, and similar). Asked for when audio starts or when you enable
+          an alert. The app works without it</td>
+    </tr>
+    <tr>
+      <td>Background audio</td>
+      <td>To keep a receiver playing, and its lock-screen controls working, while
+          the screen is off or another app is in front. Active only while a
+          receiver is open</td>
+    </tr>
+    <tr>
+      <td>Local network access</td>
+      <td>Only for finding receivers on your own network from the "LAN" tab, on
+          platforms that ask</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>The app requests no precise or background location, no microphone, no camera,
+no contacts, no photo library, no health or fitness data, no Bluetooth and no
+tracking permission.</p>
+
+<h2>6. Security</h2>
+<ul>
+  <li>Traffic to the directory uses HTTPS. Traffic to a receiver uses whatever
+      that receiver offers — many run HTTPS, and receivers on a home network
+      often use plain HTTP or a self-signed certificate.</li>
+  <li>If a receiver presents a certificate that cannot be verified, the app says
+      so and connects only if you explicitly choose to trust that receiver. That
+      choice is remembered for that receiver alone.</li>
+  <li>Saved receiver passwords are encrypted with a key held in the platform's
+      secure key store — the iOS Keychain or the Android Keystore — hardware
+      backed where the device provides it, and readable only by this app.</li>
+  <li>The radio interface is bundled inside the app rather than downloaded, and
+      is served to the receiver view over a loopback connection on the device
+      itself.</li>
+</ul>
+
+<h2>7. Retention and deletion</h2>
+<p>Because the developer holds no data about you, there is nothing to request
+deletion of from us. Data held on your device is under your control:</p>
+<ul>
+  <li>Deleting a receiver from the saved list removes its entry and any password
+      stored for it.</li>
+  <li>Your device's app settings offer a way to clear the app's stored data.</li>
+  <li>Uninstalling the app removes it all. If device backup is enabled, also
+      remove the app's backup in your iCloud or Google account settings.</li>
+</ul>
+<p>Any logs kept by the directory service or by an individual receiver operator
+are subject to their own retention practices; contact the relevant operator about
+those.</p>
+
+<h2>8. Children</h2>
+<p>The app is a general-audience amateur-radio tool. It is not directed at
+children, and it does not knowingly collect personal information from anyone,
+including children under 13 (or the equivalent age in your jurisdiction).</p>
+
+<h2>9. Your rights</h2>
+<p>Data-protection law — including the UK GDPR and EU GDPR, and the CCPA in
+California — gives you rights of access, correction, deletion, portability and
+objection over personal data held about you. The developer of this app holds no
+such data, so those rights are satisfied in practice by your control of the
+device as described in section 7. If you believe otherwise, contact us using the
+details below and we will respond.</p>
+
+<h2>10. Changes to this policy</h2>
+<p>If the app's behaviour changes in a way that affects this policy, the policy is
+updated and the date at the top changes with it. Previous versions are visible in
+the project's public source history.</p>
+
+<h2>11. Contact</h2>
+<p>Questions about this policy or about the app:</p>
+<ul>
+  <li>Website: <a href="https://ubersdr.org">ubersdr.org</a></li>
+  <li>Issues: <a href="https://github.com/madpsy/ka9q_ubersdr/issues">github.com/madpsy/ka9q_ubersdr/issues</a></li>
+</ul>
+
+<footer>
+  UberSDR Mobile · This policy describes the app as published; the source it
+  describes is public.
+</footer>
+
+</main>
+</body>
+</html>

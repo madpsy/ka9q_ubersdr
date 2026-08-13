@@ -562,31 +562,49 @@ if [[ "$PACKAGE" -eq 1 ]]; then
     build_ahead=$(newer "$version" "$published")
     advertised_ahead=$(newer "$published" "$version")
 
+    # Both files, always, whichever branch follows: the mistake this is here to
+    # catch is thinking there is only one.
     echo
-    echo "  this build is v$version, and latest.json advertises v$published"
+    echo "  Two files carry the version. This tree has them at:"
+    printf '      %-30s v%-9s %s\n' \
+        "clients/electron/package.json" "$version"   "what this build calls itself" \
+        "clients/electron/latest.json"  "$published" "what running clients are offered"
     echo
     if [[ "$version" == "$published" ]]; then
         # Nothing to announce: an upload now replaces the files behind a version
         # everybody already believes they have.
-        echo "  Already advertised. For a new release, bump the version in"
-        echo "      clients/electron/package.json"
-        echo "  and build again — then upload, and set latest.json to match."
+        echo "  Already advertised — both say v$version, so uploading now would replace"
+        echo "  the files behind a version clients believe they already have. A"
+        echo "  release is those two files moving, in this order:"
+        printf '      %d. %-38s %s\n' \
+            1 "bump   clients/electron/package.json" "to the new version" \
+            2 "./build.sh"                           "rebuilds at that version" \
+            3 "upload dist/ to the '$TAG' release"   "or ./build.sh --publish" \
+            4 "bump   clients/electron/latest.json"  "to the same version"
+        echo "  Step 4 is the announcement, and it is read raw from main — so it"
+        echo "  takes effect when it is committed and pushed, not when it is saved."
     elif [[ "$build_ahead" == 1 ]]; then
-        echo "  Ready to publish. Upload the files above to the '$TAG' release,"
-        echo "  then announce them by setting"
+        # package.json ahead of latest.json: the right way round, mid-release.
+        echo "  Ready to publish. package.json has moved and latest.json has not,"
+        echo "  which is the right way round — the build exists before it is"
+        echo "  announced. Upload the files above to the '$TAG' release, then"
+        echo "  announce them by setting"
         echo "      clients/electron/latest.json    version: \"$version\""
-        echo "  Clients check it on start and offer the download."
+        echo "  and pushing it to main. Clients check it on start and offer the"
+        echo "  download; until then this build is uploaded but unadvertised."
     elif [[ "$advertised_ahead" == 1 ]]; then
         # latest.json ahead of the build: everybody is being pointed at a
         # version that does not exist here. Worth saying loudly.
         echo "  latest.json is AHEAD of this build — clients are being offered a"
-        echo "  v$published that this tree does not produce. Fix one or the other"
-        echo "  before uploading anything."
+        echo "  v$published that this tree does not produce. Either package.json"
+        echo "  was never bumped to v$published, or latest.json was bumped early."
+        echo "  Fix one or the other before uploading anything."
     else
         # Neither is newer and they are not equal, so at least one is not a
         # version at all — a hand-edit, or a file that failed to parse.
-        echo "  Cannot compare v$version with v$published. Check that both are"
-        echo "  plain version numbers before publishing."
+        echo "  Cannot compare v$version with v$published. Check that both files"
+        echo "  hold a plain version number before publishing — a '?' above means"
+        echo "  that one of them would not parse."
     fi
     echo
 

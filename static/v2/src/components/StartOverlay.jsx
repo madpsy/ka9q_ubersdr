@@ -219,7 +219,7 @@ export default function StartOverlay() {
                         Statistics
                     </a>
                     <a className="start__link" href={DIRECTORY} target="_blank" rel="noopener noreferrer">
-                        Instance directory
+                        Directory
                     </a>
                     {publicUuid && !inApp && (
                         <button

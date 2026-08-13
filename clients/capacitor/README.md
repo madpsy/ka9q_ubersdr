@@ -395,8 +395,27 @@ export UBERSDR_KEY_PASSWORD='…'           # optional, defaults to the above
 ./build.sh --publish
 ```
 
-`build.sh` prints what it found before it starts, because discovering afterwards
-that there were no credentials is discovering it too late.
+Or nothing at all. With no `UBERSDR_KEYSTORE` set, `build.sh` looks for
+`~/keys/ubersdr-release.jks` and, beside it, `~/keys/ubersdr-release.password` —
+the whole file is the password, trailing newline ignored. Found, they are used;
+not found, the build is unsigned exactly as before. So the release machine needs
+no environment at all, and the environment still wins where it is set, which is
+what CI does.
+
+```
+~/keys/
+├── ubersdr-release.jks         # the keystore
+└── ubersdr-release.password    # its password, and nothing else
+```
+
+`UBERSDR_KEYS_DIR` moves that directory if `~/keys` is not where yours lives.
+The password is read from a file rather than exported into the shell because an
+environment variable is readable from every child process's `/proc` entry and
+ends up in a shell history sooner or later.
+
+`build.sh` prints what it found before it starts — including which of the two
+places the keystore came from — because discovering afterwards that there were
+no credentials is discovering it too late.
 
 **Keep the keystore.** Android identifies an app by its signature: an APK signed
 with a different key cannot be installed over one already on a device — it has

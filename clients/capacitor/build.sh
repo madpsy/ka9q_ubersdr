@@ -84,6 +84,57 @@ for arg in "$@"; do
     esac
 done
 
+# Where the release key lives when nobody has said otherwise.
+#
+# The environment still wins, and CI still sets it — this is the fallback for
+# the machine the releases actually come from, where exporting four variables
+# before every build was a step to forget, and forgetting it produced an APK
+# that looks built and cannot be installed by anyone.
+#
+# The password is read from a file beside the keystore rather than from the
+# environment, because a value in the environment is in every child process's
+# /proc entry and, sooner or later, in a shell history. A file read here and
+# exported only for gradle is not much better, but it is not written down twice.
+#
+# Both are exported rather than passed along: gradle is a child process and
+# android/app/build.gradle reads UBERSDR_* from the environment, which is the
+# interface these have always had.
+KEYS_DIR="${UBERSDR_KEYS_DIR:-$HOME/keys}"
+DEFAULT_KEYSTORE="$KEYS_DIR/ubersdr-release.jks"
+
+# Which of the two it was, for the report — "signed" is not the whole answer
+# when the interesting question is "with which key".
+KEYSTORE_FROM="UBERSDR_KEYSTORE"
+
+# Every exit from this is an explicit `return 0`, and that is not style.
+# The script runs under `set -e`, this is called bare, and a function whose last
+# command is a failed test returns that failure — so `return` on its own after
+# `[[ -f … ]]` would end the build, with no message, on every machine that does
+# not have a keystore in $KEYS_DIR. Which is all of them but this one.
+adopt_default_keystore() {
+    [[ -n "${UBERSDR_KEYSTORE:-}" ]] && return 0
+    [[ -f "$DEFAULT_KEYSTORE" ]] || return 0
+    export UBERSDR_KEYSTORE="$DEFAULT_KEYSTORE"
+    KEYSTORE_FROM="found in $KEYS_DIR"
+
+    # `<keystore>.password`, one line, no name and no quoting: the file is the
+    # value. $(<file) drops the trailing newline every editor adds, which would
+    # otherwise be part of the password and fail the build with "keystore
+    # password was incorrect" and nothing to see wrong.
+    if [[ -z "${UBERSDR_KEYSTORE_PASSWORD:-}" ]]; then
+        local pw_file="${DEFAULT_KEYSTORE%.jks}.password"
+        if [[ -f "$pw_file" ]]; then
+            export UBERSDR_KEYSTORE_PASSWORD="$(<"$pw_file")"
+        fi
+    fi
+    return 0
+}
+
+# Run now, before anything reads the environment: the signing report, gradle and
+# the publish check all have to see the same answer. A no-op when there is
+# nothing in $KEYS_DIR, which is every machine but this one.
+adopt_default_keystore
+
 # What the APK about to be built will and will not be, said before it is built.
 #
 # The desktop client reports its macOS signing the same way and for the same
@@ -96,16 +147,19 @@ android_signing_report() {
     echo "  Release signing"
     if [[ -n "${UBERSDR_KEYSTORE:-}" ]]; then
         if [[ -f "${UBERSDR_KEYSTORE}" ]]; then
-            echo "    keystore       ${UBERSDR_KEYSTORE}"
+            echo "    keystore       ${UBERSDR_KEYSTORE} (${KEYSTORE_FROM})"
             echo "    alias          ${UBERSDR_KEY_ALIAS:-ubersdr}"
             if [[ -z "${UBERSDR_KEYSTORE_PASSWORD:-}" ]]; then
-                echo "    password       UBERSDR_KEYSTORE_PASSWORD is not set — the build will fail"
+                echo "    password       not set — the build will fail"
+                echo "                   set UBERSDR_KEYSTORE_PASSWORD, or put it in"
+                echo "                   ${UBERSDR_KEYSTORE%.jks}.password"
             fi
         else
             echo "    keystore       ${UBERSDR_KEYSTORE} — not there"
         fi
     else
-        echo "    keystore       none (UBERSDR_KEYSTORE is not set)"
+        echo "    keystore       none (UBERSDR_KEYSTORE is not set, and there is"
+        echo "                   no $DEFAULT_KEYSTORE)"
         echo
         echo "    This APK will be unsigned, and Android will refuse to install"
         echo "    it. Fine for checking that it builds. See README.md."

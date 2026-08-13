@@ -22,6 +22,8 @@
 //                   broken icon at a moment decided by an unrelated consumer.
 //                   Nothing that renders should touch it.
 
+import { cardImage } from './cardArt.js';
+
 const KEY = 'ubersdr.v2.callsignPhoto';
 
 // --- the setting -------------------------------------------------------------
@@ -94,10 +96,20 @@ const pending = new Map();
 // Photos accumulate one blob per operator over a long session.
 const MAX_PHOTOS = 12;
 
+// The blob is squared on the way in, and it is squared *here* rather than in
+// radio/media/artwork.js because this cache is the thing that revokes it. Only
+// the lock screen ever sees a blob — photoUrl() is what renders, and it hands
+// out the proxy path untouched — so the Callsign panel still shows the photo as
+// the operator uploaded it, whole and in its own shape.
+//
+// Squaring is not cropping: a portrait is fitted entire over a blurred copy of
+// itself. See lib/cardArt.js for why a media card needs this at all and why the
+// logo is treated differently.
 async function toBlobUrl(url) {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return URL.createObjectURL(await resp.blob());
+    const blob = await resp.blob();
+    return URL.createObjectURL((await cardImage(blob)) || blob);
 }
 
 /**

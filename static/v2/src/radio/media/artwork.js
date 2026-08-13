@@ -12,14 +12,16 @@
 // local IP with a self-signed cert silently fails to load on a phone, and the
 // car stereo shows no art with no error anywhere.
 //
-// Owning the bytes buys one more thing: the logo is flattened on the way past.
+// Owning the bytes buys one more thing: the logo is redrawn on the way past.
 // It is a launcher tile — transparent margin, rounded corners — and a media
 // card is a black backing, so handed over as it ships it appears with black
-// down both sides. flatten.js is why it does not; the fallback paths below are
-// the unflattened files, because something to show beats nothing.
+// down both sides. lib/cardArt.js is why it does not, and the same call does
+// the same job for a portrait photo, which lands in a square slot with black
+// down both sides for the opposite reason. The fallback paths below are the
+// files as they ship, because something to show beats nothing.
 
 import { _resetPhotos, photoBlobUrl } from '../../lib/operatorPhoto.js';
-import { backdropColor, coverPlacement, measureArtwork } from './flatten.js';
+import { cardImage } from '../../lib/cardArt.js';
 
 const LOGO = [
     { path: '/images/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
@@ -50,62 +52,18 @@ export function logoNow() {
     return logoResolved || logoFallback();
 }
 
-// The flattened copy is re-encoded, and JPEG is the point: a format with no
-// alpha channel to carry, so nothing downstream — a canvas, an OS decoder, the
-// Android client's own bitmap pass — can find transparency to composite onto
-// black a second time.
-const FLAT_TYPE = 'image/jpeg';
-const FLAT_QUALITY = 0.92;
-
-// A transparent image, made opaque and edge to edge. Null when there is nothing
-// to do (the image already has no transparency, which is every photo) or
-// nothing that can be done (no canvas, a decode that failed, a tainted read) —
-// in which case the original is used, exactly as before.
-async function flatten(blob) {
-    if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return null;
-    let bitmap;
-    try {
-        bitmap = await createImageBitmap(blob);
-    } catch (err) {
-        return null;
-    }
-    try {
-        const w = bitmap.width;
-        const h = bitmap.height;
-        if (!w || !h) return null;
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        if (!ctx) return null;
-        ctx.drawImage(bitmap, 0, 0);
-        const { data } = ctx.getImageData(0, 0, w, h);
-        const { opaque, box } = measureArtwork(data, w, h);
-        if (opaque || !box) return null;
-        ctx.fillStyle = backdropColor(data, w, box);
-        ctx.fillRect(0, 0, w, h);
-        const p = coverPlacement(box, w, h);
-        ctx.drawImage(bitmap, p.sx, p.sy, p.sw, p.sh, p.dx, p.dy, p.dw, p.dh);
-        return await new Promise((resolve) => canvas.toBlob(resolve, FLAT_TYPE, FLAT_QUALITY));
-    } catch (err) {
-        return null;
-    } finally {
-        if (bitmap.close) bitmap.close();
-    }
-}
-
 // One logo image, fetched once and handed back as a MediaImage. The declared
-// type follows the bytes rather than the source file — a flattened one is no
+// type follows the bytes rather than the source file — a redrawn one is no
 // longer the PNG the path names.
 async function toArtwork({ path, sizes, type }) {
     const resp = await fetch(path);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const blob = await resp.blob();
-    const flat = await flatten(blob);
+    const card = await cardImage(blob);
     return {
-        src: URL.createObjectURL(flat || blob),
+        src: URL.createObjectURL(card || blob),
         sizes,
-        type: flat ? (flat.type || FLAT_TYPE) : type,
+        type: card ? (card.type || 'image/jpeg') : type,
     };
 }
 

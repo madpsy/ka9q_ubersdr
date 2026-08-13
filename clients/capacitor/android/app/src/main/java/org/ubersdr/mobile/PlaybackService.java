@@ -130,14 +130,15 @@ public class PlaybackService extends Service {
      * happens to be, rather than a constant that would be wrong for anybody
      * else's. A bitmap with no alpha is returned untouched, which is the photo.
      *
-     * <p>v2 now does the same thing to its logo before it ever hands it over
-     * (static/v2/src/radio/media/flatten.js), so the lock screen looks right in
-     * a plain browser too and what arrives here is already an opaque JPEG. This
-     * stays because it is not only the logo that can arrive with an alpha
-     * channel, and because an older page against a newer app should still look
-     * right; the two implement the same algorithm, so either alone is enough
-     * and both together are idempotent — a flattened bitmap measures as filling
-     * its own frame and is redrawn unchanged.
+     * <p>v2 now does the same thing to its logo before it ever hands it over,
+     * and squares a portrait photo besides (static/v2/src/lib/cardArt.js), so
+     * the lock screen looks right in a plain browser too and what arrives here
+     * is already an opaque JPEG. This stays because it is not only the logo
+     * that can arrive with an alpha channel, and because an older page against
+     * a newer app should still look right; the two implement the same
+     * algorithm, so either alone is enough and both together are idempotent —
+     * a flattened bitmap measures as filling its own frame and is redrawn
+     * unchanged.
      */
     private static android.graphics.Bitmap opaque(android.graphics.Bitmap src) {
         if (src == null || !src.hasAlpha()) return src;

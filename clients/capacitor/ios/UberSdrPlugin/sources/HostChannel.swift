@@ -122,6 +122,7 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         case "speak-cancel":  speech.stopSpeaking(at: .immediate)
         case "voices":        sendVoices()
         case "prefs":         savePrefs(message)
+        case "vibrate":       vibrate(message)
         default:              break
         }
     }
@@ -355,6 +356,53 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         deliver("voices:\(json)")
     }
 
+    // MARK: - Haptics
+
+    /// `navigator.vibrate`, which WebKit does not have.
+    ///
+    /// v2 asks for haptics through it (lib/haptics.js) and gates every call on
+    /// `typeof navigator.vibrate === 'function'` — so on iOS the feature was not
+    /// disabled, it was invisible: the setting existed, the code ran, and
+    /// nothing ever happened. The shim in ReceiverViewController provides the
+    /// function; this is what it reaches.
+    ///
+    /// iOS has no arbitrary-duration vibration to map onto. What it has is a
+    /// small set of *named* feedbacks played by the Taptic Engine, so a
+    /// duration is mapped to the nearest one: v2's vocabulary runs 6 ms (one
+    /// rung of a repeating gesture) to 18 ms (a drag taking hold), which is
+    /// exactly the light-to-heavy range these cover.
+    ///
+    /// An array is a pattern of alternating buzz and pause, as
+    /// `navigator.vibrate` defines it, so the even entries are played and the
+    /// odd ones are waited out.
+    ///
+    /// **This does nothing on an iPad.** No iPad has a Taptic Engine — the
+    /// generators exist and are silently inert — so this is an iPhone feature
+    /// that costs an iPad nothing.
+    private func vibrate(_ message: [String: Any]) {
+        guard let pattern = message["pattern"] as? [NSNumber], !pattern.isEmpty else { return }
+
+        var delay = 0.0
+        for (index, entry) in pattern.enumerated() {
+            let ms = max(0, entry.intValue)
+            if index % 2 == 1 {
+                delay += Double(ms) / 1000.0
+                continue
+            }
+            let style: UIImpactFeedbackGenerator.FeedbackStyle =
+                ms <= 8 ? .light : (ms <= 15 ? .medium : .heavy)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                let generator = UIImpactFeedbackGenerator(style: style)
+                // prepare() is what makes the first one land promptly; without
+                // it the engine spins up on demand and the tick arrives after
+                // the thing it was meant to confirm.
+                generator.prepare()
+                generator.impactOccurred()
+            }
+            delay += Double(ms) / 1000.0
+        }
+    }
+
     // MARK: - Shared settings
 
     /// One arrangement of the interface, on every receiver.
@@ -366,20 +414,62 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     /// (clients/electron/receiver-preload.js); the Android client is the one
     /// that has not caught up yet.
     private func savePrefs(_ message: [String: Any]) {
-        guard let map = message["map"] as? [String: String] else { return }
-        UserDefaults.standard.set(map, forKey: HostChannel.prefsKey)
+        guard let reported = message["map"] as? [String: String] else { return }
+
+        // Filtered here as well as in the page, which is the same decision
+        // Prefs.java makes and for the same reason: the sender is a WebView
+        // showing a remote instance's own code, so what it reports is checked
+        // rather than trusted. The list is the desktop client's:
+        //
+        //   * `ubersdr.v2.radio` — frequency, mode, filter edges, squelch and
+        //     volume. Carrying a frequency across would tune a receiver to a
+        //     band it may not cover, and a squelch set against one receiver's
+        //     noise floor can gate another's audio to silence, which reads as a
+        //     broken receiver rather than as a setting.
+        //   * the news panel's article cache, which is bulk rather than
+        //     settings.
+        //   * anything outside the `ubersdr.v2.` prefix — which is what keeps
+        //     the rotator and antenna-switch passwords per receiver, since they
+        //     are stored under v1's keys and a credential for one operator's
+        //     hardware must never be handed to another's.
+        //   * `ubersdr.v2.password`, the session bypass. It lives in
+        //     sessionStorage and cannot reach here anyway; named because "this
+        //     key is deliberately not shared" is a decision rather than an
+        //     accident of where a value happens to sit today.
+        var clean: [String: String] = [:]
+        for (key, value) in reported where Self.isShared(key) {
+            clean[key] = value
+        }
+
+        // Kept as JSON text rather than as a dictionary, which is what
+        // SharedPreferences holds on Android. A dictionary in UserDefaults has
+        // to be cast back to [String: String] to be read, and a single value
+        // that is not a string fails the whole cast — leaving the snapshot
+        // unreadable, every receiver seeded with nothing, and settings that
+        // look per-instance rather than shared.
+        guard let data = try? JSONSerialization.data(withJSONObject: clean),
+              let json = String(data: data, encoding: .utf8) else { return }
+        UserDefaults.standard.set(json, forKey: HostChannel.prefsKey)
     }
 
+    /// Where the snapshot lives. One key, holding JSON text.
     static let prefsKey = "ubersdr.shared.prefs"
 
-    /// The snapshot as a JSON object literal, for the seed script. `null` when
-    /// there is none — the first receiver ever opened is the one that supplies
-    /// it.
+    private static func isShared(_ key: String) -> Bool {
+        key.hasPrefix("ubersdr.v2.")
+            && !key.hasPrefix("ubersdr.v2.news.cache.")
+            && key != "ubersdr.v2.radio"
+            && key != "ubersdr.v2.password"
+    }
+
     static func prefsLiteral() -> String {
-        guard let map = UserDefaults.standard.dictionary(forKey: prefsKey) as? [String: String],
-              !map.isEmpty,
-              let data = try? JSONSerialization.data(withJSONObject: map),
-              let json = String(data: data, encoding: .utf8) else { return "null" }
+        // The stored text straight through — it is already the JSON object
+        // literal the seed script needs, exactly as Prefs.snapshot() is on
+        // Android. "null" when nothing has been kept yet, which is what tells
+        // receiver.js that this receiver is the template rather than one that
+        // arrived after somebody had already arranged things.
+        guard let json = UserDefaults.standard.string(forKey: prefsKey),
+              !json.isEmpty, json != "{}" else { return "null" }
         return json
     }
 }

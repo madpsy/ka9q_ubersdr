@@ -5,10 +5,11 @@
 // the native HTML5 API so no pointer bookkeeping is needed and the browser
 // supplies the drag image for free.
 
-import React, { useRef } from '../react.js';
+import React, { useEffect, useRef } from '../react.js';
 import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { Icon, Menu, MenuItem } from './ui.jsx';
 import { setDraggingPanel, dockBodyAt, nearestPanelGap } from '../lib/panelDrag.js';
+import { haptic } from '../lib/haptics.js';
 import useWakeProps from '../radio/useWake.js';
 import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
 import { useHeaderFits } from '../lib/useHeaderFits.js';
@@ -118,25 +119,42 @@ export default function Section({ panel, dock, index, weight, height, prev, next
         setWeights([[panel.id, w], [g.other, sum - w]]);
     };
 
-    // Moving a panel with a finger.
+    // Moving a panel with a finger: hold, then drag.
     //
     // The header is `draggable`, and the browser's own drag-and-drop is what
     // carries a panel between docks — with a mouse. A finger never starts one:
     // WebKit does not synthesise dragstart from touch at all, so on an iPad the
-    // header simply did nothing, while the resize grip beside it worked because
-    // it was pointer-driven all along. Chromium *does* synthesise it, which is
-    // why the Android client never showed this.
+    // header did nothing, while the resize grip beside it worked because it was
+    // pointer-driven all along. Chromium *does* synthesise it, which is why the
+    // Android client never showed this.
     //
-    // So touch gets the same gesture the floating windows already use
-    // (components/FloatingPanel.jsx): pointer events, `dockBodyAt` to find what
-    // is under the finger, `nearestPanelGap` to pick the gap, and the same
-    // `is-drop-*` classes for the line — so both ways of moving a panel promise
-    // the same thing in the same way, and a drop lands where the line was.
+    // A hold rather than a drag, and that is the whole design. The header is
+    // also the biggest thing in a dock to put a thumb on, so making any drag
+    // from it move the panel takes away the obvious way to scroll — and takes
+    // it away silently, which is worse than the missing feature was. Holding
+    // still for a moment is how every list on both platforms says "pick this
+    // up", and it costs nothing to somebody who only wanted to scroll.
     //
-    // Mouse is deliberately left alone: HTML5 drag-and-drop works there, gives
-    // the drag image for free, and replacing a working gesture is how the one
-    // that works stops working.
+    // Suppressing the scroll has to be done with a non-passive `touchmove`
+    // rather than with `touch-action: none`: CSS decides before the gesture
+    // starts, so it would answer the scroll question at the moment the finger
+    // lands — which is exactly the choice being deferred. Once the browser has
+    // begun scrolling the gesture cannot be taken back, so the listener is
+    // attached always and only acts once the hold has succeeded.
+    const HOLD_MS = 400;
+    const HOLD_SLOP = 10;
     const touchDrag = useRef(null);
+    const headEl = useRef(null);
+
+    useEffect(() => {
+        const el = headEl.current;
+        if (!el) return undefined;
+        const onTouchMove = (e) => {
+            if (touchDrag.current?.armed) e.preventDefault();
+        };
+        el.addEventListener('touchmove', onTouchMove, { passive: false });
+        return () => el.removeEventListener('touchmove', onTouchMove);
+    }, []);
 
     const clearDropLine = () => {
         const d = touchDrag.current;
@@ -144,21 +162,39 @@ export default function Section({ panel, dock, index, weight, height, prev, next
         if (d) d.gapEl = null;
     };
 
+    const cancelHold = () => {
+        const d = touchDrag.current;
+        if (d?.timer) clearTimeout(d.timer);
+        clearDropLine();
+        touchDrag.current = null;
+    };
+
     const onHeadPointerDown = (e) => {
         if (e.pointerType === 'mouse') return;
-        touchDrag.current = { x: e.clientX, y: e.clientY, moved: false, gapEl: null };
+        const pointerId = e.pointerId;
+        const target = e.currentTarget;
+        const d = { x: e.clientX, y: e.clientY, armed: false, gapEl: null, timer: null };
+        d.timer = setTimeout(() => {
+            if (touchDrag.current !== d) return;
+            d.armed = true;
+            setDraggingPanel(panel.id);
+            // The same confirmation a long press gives anywhere else: the
+            // panel has been picked up, and the scroll that would otherwise
+            // have happened is not going to.
+            haptic('grab');
+            try { target.setPointerCapture(pointerId); } catch (err) { /* ignore */ }
+        }, HOLD_MS);
+        touchDrag.current = d;
     };
 
     const onHeadPointerMove = (e) => {
         const d = touchDrag.current;
         if (!d) return;
-        if (!d.moved) {
-            // A threshold, so a tap on the header still collapses the panel and
-            // a small wobble is not a move.
-            if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 8) return;
-            d.moved = true;
-            setDraggingPanel(panel.id);
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        if (!d.armed) {
+            // Moved before the hold completed: this is a scroll, and the
+            // browser is already doing it.
+            if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > HOLD_SLOP) cancelHold();
+            return;
         }
         const found = dockBodyAt(e.clientX, e.clientY);
         const at = found
@@ -176,10 +212,13 @@ export default function Section({ panel, dock, index, weight, height, prev, next
     const onHeadPointerUp = (e) => {
         const d = touchDrag.current;
         if (!d) return;
+        const armed = d.armed;
         clearDropLine();
+        if (d.timer) clearTimeout(d.timer);
         touchDrag.current = null;
         try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        if (!d.moved) return;
+        // A tap, or a scroll: the header's own controls handle it from here.
+        if (!armed) return;
         setDraggingPanel(null);
         const found = dockBodyAt(e.clientX, e.clientY);
         if (!found) return;
@@ -201,6 +240,7 @@ export default function Section({ panel, dock, index, weight, height, prev, next
         >
             <header
                 className="section__head"
+                ref={headEl}
                 draggable
                 onDragStart={onDragStart}
                 onDragEnd={() => setDraggingPanel(null)}

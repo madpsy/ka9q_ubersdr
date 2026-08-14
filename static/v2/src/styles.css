@@ -1078,12 +1078,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
     padding-right: 5px;
     cursor: grab;
     user-select: none;
-    /* The header is a drag handle, so the browser must not claim the gesture
-       for scrolling first. Without this a finger dragging a panel scrolls the
-       dock instead and the pointermove handler never sees a second event —
-       which looks exactly like dragging being unimplemented, and is what it
-       looked like on the iPad. A tap still works: the move is thresholded. */
-    touch-action: none;
+    /* No touch-action here on purpose. Setting it to `none` does make dragging
+       work, and takes the obvious way to scroll a dock with it — the header is
+       the biggest thing in one to put a thumb on. The scroll is suppressed in
+       Section.jsx instead, and only once a hold has said the panel is being
+       picked up rather than scrolled past. */
 }
 .section__head:active { cursor: grabbing; }
 
@@ -1502,9 +1501,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .vibe__uri {
     display: block;
     width: 100%;
-    padding: 6px 8px;
+    /* Tight, because the string it holds is a fixed 59 characters and the box
+       was one short of them: `word-break: break-all` then filled the line and
+       put the last character on its own, which reads as broken rather than as
+       wrapped. Less padding and a slightly smaller face fit it on one line at
+       the default scale; a phone still wraps it, where two lines are honest
+       rather than odd. */
+    padding: 5px 6px;
     font-family: var(--mono);
-    font-size: calc(11px * var(--ui-scale));
+    font-size: calc(10.5px * var(--ui-scale));
+    line-height: 1.45;
     color: var(--accent);
     background: var(--surface-3);
     border-radius: var(--radius-sm);

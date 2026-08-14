@@ -73,6 +73,14 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         controller.addUserScript(WKUserScript(source: HostChannel.shim,
                                               injectionTime: .atDocumentStart,
                                               forMainFrameOnly: true))
+        // navigator.vibrate, which WebKit does not implement. Added after the
+        // host shim because it posts through it. v2 feature-tests for the
+        // function (lib/haptics.js), so providing it is the whole of turning
+        // haptics on — the mode and per-scope settings in the Haptics panel
+        // then work exactly as they do everywhere else.
+        controller.addUserScript(WKUserScript(source: Self.vibrateShim,
+                                              injectionTime: .atDocumentStart,
+                                              forMainFrameOnly: true))
         #if DEBUG
         // The page's console, into the device log.
         //
@@ -291,6 +299,29 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         return js
     }
 
+    /// `navigator.vibrate` in terms of the host channel.
+    ///
+    /// Returns true as the real one does: v2 does not read the answer, but a
+    /// shim that reports failure invites a caller to conclude the feature is
+    /// missing when it is not.
+    private static let vibrateShim = """
+    (function(){
+      try {
+        if (typeof navigator.vibrate === 'function') return;
+        navigator.vibrate = function(pattern) {
+          try {
+            var list = Array.isArray(pattern) ? pattern : [pattern];
+            window.ubersdrHost.postMessage(JSON.stringify({
+              type: 'vibrate',
+              pattern: list.map(function(n){ return Number(n) || 0; })
+            }));
+          } catch(e) {}
+          return true;
+        };
+      } catch(e) {}
+    })();
+    """
+
     /// The bundled page-API client — `src/receiver.js`, built by build.sh into
     /// www/receiver-bridge.js. It is bundled with the API's own client library
     /// (static/v2/src/bridge/client.js) exactly as the desktop client bundles it
@@ -309,6 +340,52 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     // MARK: - WKNavigationDelegate
+
+    /// Somebody else's website goes to Safari, not into this WebView.
+    ///
+    /// The Links and Share menus are full of them — Reddit, the ARRL, a
+    /// WhatsApp share, a QRZ lookup — and until this they opened inside the
+    /// receiver, replacing it. That is wrong twice over: the receiver is
+    /// running, with audio and a session, and a page that has navigated away
+    /// from it has stopped it; and a website inside a radio app has none of the
+    /// things a browser has for getting back out of one.
+    ///
+    /// Two origins stay in: the loopback proxy, which is the receiver itself,
+    /// and the instance's own host, because v1's popups — the callsign lookup,
+    /// the map, the CW graph — are opened by absolute URL and belong to the
+    /// receiver as much as anything served through the proxy does.
+    /// Three answers, not two, and the third is the one that is easy to miss.
+    ///
+    ///   * The page's own content — about:blank is how a page closes itself,
+    ///     data: and blob: are things it made — stays where it is.
+    ///   * http(s) to the loopback proxy or to the instance is the receiver.
+    ///   * **Everything else goes to the system**, and that includes schemes
+    ///     that are not http at all. `mailto:` is the one that proves it: the
+    ///     Share menu offers email (lib/share.js), a WebView cannot load a
+    ///     mailto: URL, and "not http, so leave it alone" means the button does
+    ///     nothing at all and says nothing about why. `tel:`, `sms:` and the
+    ///     messenger schemes are the same shape of problem.
+    private func isReceiverOwn(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return true }
+        if ["about", "data", "blob", "file"].contains(scheme) { return true }
+        guard scheme == "http" || scheme == "https" else { return false }
+        guard let host = url.host?.lowercased() else { return false }
+        if host == "127.0.0.1" || host == "localhost" { return true }
+        if let upstream = URL(string: proxy.upstreamOriginForPage)?.host?.lowercased() {
+            return host == upstream
+        }
+        return false
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = navigationAction.request.url, !isReceiverOwn(url) else {
+            decisionHandler(.allow)
+            return
+        }
+        decisionHandler(.cancel)
+        UIApplication.shared.open(url)
+    }
 
     /// The receiver is reached over loopback, so a certificate question here is
     /// not one the operator should ever see: the proxy made the TLS decision
@@ -476,7 +553,18 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
           host: !!window.ubersdrDesktop,
           chatFlag: window.ubersdrDesktop ? window.ubersdrDesktop.chat : 'unset',
           chatButton: !!document.querySelector('[aria-label="Chat"]'),
-          hostChannel: !!window.ubersdrHost
+          hostChannel: !!window.ubersdrHost,
+          prefsSeeded: window.ubersdrDesktop ? window.ubersdrDesktop.prefsSeeded : 'no host',
+          lsShared: (function(){
+            var n = 0;
+            try {
+              for (var i = 0; i < localStorage.length; i++) {
+                if (String(localStorage.key(i)).indexOf('ubersdr.v2.') === 0) n++;
+              }
+            } catch(e) { return 'blocked'; }
+            return n;
+          })(),
+          origin: location.origin
         })
         """) { result, error in
             NSLog("[UberSDR page] state %@ %@",
@@ -541,8 +629,16 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+        // `window.open` and target="_blank" arrive here rather than at
+        // decidePolicyFor, so the same question is asked again: v1's popups
+        // (callsign lookup, map, CW graph) are the receiver's own and load in
+        // place, and everything else is a website and goes to Safari.
+        guard navigationAction.targetFrame == nil,
+              let url = navigationAction.request.url else { return nil }
+        if isReceiverOwn(url) {
             webView.load(URLRequest(url: url))
+        } else {
+            UIApplication.shared.open(url)
         }
         return nil
     }

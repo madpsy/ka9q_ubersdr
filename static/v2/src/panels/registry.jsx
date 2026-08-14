@@ -842,15 +842,24 @@ export const PANELS = [
         minimal: true,
         Component: ChatPanel,
         Badge: ChatBadge,
-        // A host may say there is to be no chat here, and one does.
+        // Two ways there is no chat here, and neither should leave a panel in
+        // the dock explaining itself.
         //
-        // The chat belongs to whichever receiver you are on, and Apple's
-        // Guideline 1.2 requires an app carrying user-generated content to
-        // offer moderation, reporting and blocking for it — none of which this
-        // client can provide on somebody else's receiver. So the iOS client
-        // declares `chat: false` and the panel is not drawn. Absent means yes,
-        // so every other host — browser, desktop, Android — is unchanged.
-        requires: () => chatAllowed(),
+        // The receiver may not run one: `chat_enabled` is the server's own
+        // answer (see chat/ChatContext.jsx), and a panel that occupies a slot
+        // to say "Chat is not enabled on this receiver" is a panel offering a
+        // feature the receiver does not have. Every other optional panel —
+        // Doppler, NAVTEX, WEFAX — is simply absent instead, and this is now
+        // the same.
+        //
+        // Or a host may say there is to be no chat at all, and one does: the
+        // chat belongs to whichever receiver you are on, and Apple's Guideline
+        // 1.2 requires an app carrying user-generated content to offer
+        // moderation, reporting and blocking for it — none of which this client
+        // can provide on somebody else's receiver. So the iOS client declares
+        // `chat: false`. Absent means yes, so browser, desktop and Android are
+        // unchanged.
+        requires: (serverInfo) => chatAllowed() && !!(serverInfo && serverInfo.chat_enabled),
     },
     // Off by default: a diagnostic, not something to occupy a slot in the dock
     // until someone goes looking for it in the layout manager.

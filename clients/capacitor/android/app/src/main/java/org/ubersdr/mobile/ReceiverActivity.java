@@ -73,6 +73,10 @@ public class ReceiverActivity extends Activity {
     // as the end of the one after it. See UberSdrPlugin.receiverClosed.
     private int epoch;
     private boolean insecureTLS;
+    // The instance's own hostname. Kept because a link to it belongs in this
+    // WebView — v1's popups are opened by absolute URL — while a link anywhere
+    // else belongs in a browser. See openExternally.
+    private String upstreamHost;
     private String label = "UberSDR";
     private boolean playing;
     private androidx.webkit.JavaScriptReplyProxy reply;
@@ -122,6 +126,11 @@ public class ReceiverActivity extends Activity {
         String upstream = intent.getStringExtra(EXTRA_UPSTREAM);
         String product = intent.getStringExtra(EXTRA_PRODUCT);
         insecureTLS = intent.getBooleanExtra(EXTRA_INSECURE, false);
+        try {
+            if (upstream != null) upstreamHost = android.net.Uri.parse(upstream).getHost();
+        } catch (Exception e) {
+            Log.w(TAG, "could not read the instance host from " + upstream, e);
+        }
         if (intent.getStringExtra(EXTRA_LABEL) != null) label = intent.getStringExtra(EXTRA_LABEL);
         setTitle(label);
 
@@ -195,7 +204,7 @@ public class ReceiverActivity extends Activity {
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return false;
+                return openExternally(request.getUrl()) ? true : false;
             }
         });
 
@@ -276,6 +285,68 @@ public class ReceiverActivity extends Activity {
                 if (web != null) web.evaluateJavascript(js, null);
             }, delay);
         }
+    }
+
+    /**
+     * Somebody else's website goes to the browser, not into this WebView.
+     *
+     * <p>The Links and Share menus are full of them — Reddit, the ARRL, a
+     * WhatsApp share, a QRZ lookup — and until this they opened inside the
+     * receiver, replacing it. That is wrong twice over: the receiver is
+     * running, with audio and a session, and a page that has navigated away
+     * from it has stopped it; and a chat client inside a radio app has none of
+     * the things a browser has for getting back out.
+     *
+     * <p>Two origins stay in: the loopback proxy, which is the receiver itself,
+     * and the instance's own host, because v1's popups — the callsign lookup,
+     * the map, the CW graph — are opened by absolute URL and belong to the
+     * receiver as much as anything served through the proxy does.
+     *
+     * @return true when the URL was handed to the system, meaning the WebView
+     *         should not load it.
+     */
+    private boolean openExternally(android.net.Uri uri) {
+        if (uri == null) return false;
+        String scheme = uri.getScheme();
+        if (scheme == null) return false;
+        scheme = scheme.toLowerCase(java.util.Locale.ROOT);
+        // The page's own content, not a place to go: about:blank is how a page
+        // closes itself, data: and blob: are things it made.
+        if ("about".equals(scheme) || "data".equals(scheme)
+                || "blob".equals(scheme) || "file".equals(scheme)) {
+            return false;
+        }
+        // Anything that is not http at all belongs to the system, and this is
+        // the case that is easy to miss: the Share menu offers email
+        // (lib/share.js builds a mailto:), a WebView cannot load one, and
+        // treating "not http" as "not ours" means the button does nothing and
+        // says nothing about why. tel:, sms: and the messenger schemes are the
+        // same shape of problem.
+        if (!"http".equals(scheme) && !"https".equals(scheme)) {
+            return handOver(uri);
+        }
+
+        String host = uri.getHost();
+        if (host == null) return false;
+        if ("127.0.0.1".equals(host) || "localhost".equals(host)) return false;
+        if (upstreamHost != null && upstreamHost.equalsIgnoreCase(host)) return false;
+
+        return handOver(uri);
+    }
+
+    /** Hands a URL to whatever the system has for it. Always reports handled. */
+    private boolean handOver(android.net.Uri uri) {
+        try {
+            Intent out = new Intent(Intent.ACTION_VIEW, uri);
+            out.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(out);
+        } catch (Exception e) {
+            // Nothing installed that will take it. Better to leave the receiver
+            // alone than to navigate it somewhere it cannot come back from, so
+            // this still reports the URL as handled.
+            Log.w(TAG, "no app would open " + uri, e);
+        }
+        return true;
     }
 
     /**

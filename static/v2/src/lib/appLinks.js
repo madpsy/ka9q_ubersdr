@@ -122,6 +122,39 @@ export function appDownloads(os) {
  * `nav` is a parameter so this can be tested against the strings real browsers
  * send, which is the only way to know it is right.
  */
+/**
+ * Whether this device has a mobile UberSDR app to hand the link to.
+ *
+ * The question the "Open in App" button actually needs answered, and not the
+ * same question as "is the screen small". StartOverlay asked the second one — a
+ * width media query — which is right for a phone and wrong for every tablet:
+ * an iPad or a 10-inch Android tablet has the app and a wide screen, so it was
+ * shown the *desktop* dialog, offering an AppImage and a .deb to a device that
+ * cannot run either. On an iPad it was worse still, because `detectDesktopOS`
+ * correctly returns null there and the dialog then lists every platform it
+ * knows rather than guessing.
+ *
+ * A platform test, therefore, and the same awkward cases as below: Android
+ * says `Linux`, and iPadOS says `Macintosh` and has since iOS 13, which is what
+ * `maxTouchPoints` is for — a Mac with a touchscreen does not exist.
+ *
+ * `nav` is a parameter for the same reason it is one below: so this can be
+ * tested against the strings real devices send.
+ */
+export function hasMobileApp(nav) {
+    const n = nav || (typeof navigator !== 'undefined' ? navigator : null);
+    if (!n) return false;
+
+    const hints = n.userAgentData || null;
+    const ua = String(n.userAgent || '');
+    const text = `${(hints && hints.platform) || n.platform || ''} ${ua}`;
+
+    if (/Android|iPhone|iPod|iPad/i.test(text)) return true;
+    // iPadOS pretending to be a Mac.
+    if (/Mac/i.test(text) && Number(n.maxTouchPoints) > 1) return true;
+    return false;
+}
+
 export function detectDesktopOS(nav) {
     const n = nav || (typeof navigator !== 'undefined' ? navigator : null);
     if (!n) return null;

@@ -20,7 +20,7 @@ import { Button, Icon } from './ui.jsx';
 import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
 import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { PasswordModal, UberSdrAppModal, VibeSdrModal } from './StartExtras.jsx';
-import { ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
+import { hasMobileApp, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
 import StartMap from './StartMap.jsx';
 
 // The pages v1 links from this overlay. Both open in a new tab, as v1's do.
@@ -129,13 +129,19 @@ export default function StartOverlay() {
     // on the way out because the receiver is already running by the time the
     // button exists, and here it has not started: this overlay *is* the thing
     // standing between the page and its first connection.
+    // Whether to follow the link or to offer the dialog is a question about the
+    // *device*, not about the width of its screen. `mobile` is a media query —
+    // right for a phone, wrong for every tablet, which has the app and a wide
+    // screen and was being offered a Linux download because of it.
+    const appHere = hasMobileApp();
+
     const vibesdr = () => {
-        if (mobile) { window.location.href = vibesdrUri(publicUuid); return; }
+        if (appHere) { window.location.href = vibesdrUri(publicUuid); return; }
         setDialog('vibesdr');
     };
 
     const openInApp = () => {
-        if (mobile) { window.location.href = ubersdrAppUri(publicUuid); return; }
+        if (appHere) { window.location.href = ubersdrAppUri(publicUuid); return; }
         setDialog('app');
     };
 

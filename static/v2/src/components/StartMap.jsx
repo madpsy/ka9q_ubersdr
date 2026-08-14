@@ -38,7 +38,7 @@ function dayNight(lat, lon) {
     }
 }
 
-export default function StartMap({ receiver, mobile }) {
+export default function StartMap({ receiver, handheld }) {
     const box = useRef(null);
     const map = useRef(null);
     const [greet, setGreet] = useState('');
@@ -100,7 +100,7 @@ export default function StartMap({ receiver, mobile }) {
             const myip = await fetchMyIp();
             if (cancelled) return;
 
-            setGreet(greeting(myip, mobile));
+            setGreet(greeting(myip, handheld));
 
             const you = myipPosition(myip);
             if (!you) return;
@@ -126,7 +126,7 @@ export default function StartMap({ receiver, mobile }) {
                 map.current = null;
             }
         };
-    }, [gps && gps.lat, gps && gps.lon, mobile]);
+    }, [gps && gps.lat, gps && gps.lon, handheld]);
 
     // No position configured, or Leaflet did not load: no map, and no gap where
     // one would have been.

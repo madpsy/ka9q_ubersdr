@@ -63,7 +63,7 @@ export function hasPosition(gps) {
  * without a country reads as neither, a country without a distance still says
  * where you are, and the device is always known.
  */
-export function greeting(myip, mobile) {
+export function greeting(myip, handheld) {
     if (!myip || !myip.country) return '';
     const parts = [];
     if (myip.city) parts.push(myip.city);
@@ -71,7 +71,10 @@ export function greeting(myip, mobile) {
     parts.push(flag ? `${flag} ${myip.country}` : myip.country);
     const km = Number(myip.distance_km);
     const distance = Number.isFinite(km) ? ` (${Math.round(km)} km)` : '';
-    return `Hello ${parts.join(', ')}${distance} ${mobile ? '📱' : '🖥️'}`;
+    // Which of the two v1 offers, and the question is what kind of thing this
+    // is rather than how wide it is: a tablet held in two hands is the phone
+    // answer even in landscape, where a width test calls it a desktop.
+    return `Hello ${parts.join(', ')}${distance} ${handheld ? '📱' : '🖥️'}`;
 }
 
 /**

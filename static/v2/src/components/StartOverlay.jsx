@@ -18,7 +18,7 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Icon } from './ui.jsx';
 import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
-import { MOBILE_QUERY, useMediaQuery, PRIMARY_TOUCH_QUERY } from '../lib/useMediaQuery.js';
+import { MOBILE_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { PasswordModal, UberSdrAppModal, VibeSdrModal } from './StartExtras.jsx';
 import { hasMobileApp, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
 import StartMap from './StartMap.jsx';
@@ -68,9 +68,12 @@ export default function StartOverlay() {
     const [dialog, setDialog] = useState(null);   // 'vibesdr' | 'app' | 'password' | null
     const buttonRef = useRef(null);
     const mobile = useMediaQuery(MOBILE_QUERY);
-    // What to call the gesture, which is not the same question as whether the
-    // machine has a touchscreen — see PRIMARY_TOUCH_QUERY.
-    const tapNotClick = useMediaQuery(PRIMARY_TOUCH_QUERY);
+    // What to call the gesture. `any-pointer`, like every other touch decision
+    // here, and not `pointer`: an iPad with a keyboard case attached reports a
+    // *fine* primary pointer, so asking how the machine is usually driven told
+    // a tablet to click. Asking whether a finger is available at all is both
+    // simpler and true — the button can be tapped either way.
+    const tapNotClick = useMediaQuery(TOUCH_QUERY);
 
     // Up here rather than beside the button it belongs to, because the effect
     // below is a second caller and hooks run before this component's early
@@ -189,7 +192,7 @@ export default function StartOverlay() {
                 {/* Where it is, where you are, and how far apart — v1 puts the
                     same map here, and it is the question everybody has before
                     they press anything. */}
-                <StartMap receiver={rx} mobile={mobile} />
+                <StartMap receiver={rx} handheld={tapNotClick} />
 
                 {allowed ? (
                     <button

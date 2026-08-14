@@ -28,15 +28,6 @@ export const MOBILE_QUERY = '(max-width: 900px)';
 // machine that has room for docks and a screen worth spinning a drum on.
 export const TOUCH_QUERY = '(any-pointer: coarse)';
 
-// Is a finger the *usual* way this machine is driven?
-//
-// `pointer`, not `any-pointer`, and deliberately the opposite choice from the
-// query above — because the question is different. That one asks whether
-// something can be poked at all, which is what a control designed for a
-// fingertip needs to know. This one asks what to *call* the gesture, and a
-// convertible laptop with a mouse plugged in should still be told to click
-// even though it could be poked.
-export const PRIMARY_TOUCH_QUERY = '(pointer: coarse)';
 
 // Can a pointer be rested on something here?
 //

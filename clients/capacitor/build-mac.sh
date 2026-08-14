@@ -25,8 +25,13 @@
 #   ./build-mac.sh --shot=FILE ...and bring a screenshot back here
 #   ./build-mac.sh --release   build for a device rather than the simulator
 #                              (needs signing — see Requirements)
+#   ./build-mac.sh --device    build for a connected iPhone or iPad, sign it and
+#                              install it. Everything the App Store needs is a
+#                              step beyond this; everything a *test* needs is
+#                              this. Add --launch to start it afterwards.
 #   ./build-mac.sh --archive   archive and export dist/UberSDR.ipa, signed for
-#                              the App Store. Needs no attached device.
+#                              the App Store. Needs a device registered to the
+#                              team once — see Requirements.
 #   ./build-mac.sh --screenshots
 #                              build, then capture the App Store set into
 #                              screenshots/: an iPhone and an iPad, each in both
@@ -87,6 +92,12 @@ SIM_DEVICE="${SIM_DEVICE:-iPhone 17 Pro}"
 # than only in project.pbxproj so that a fork with its own account changes one
 # line and does not have to hunt through an Xcode project to find the other.
 TEAM_ID="${UBERSDR_TEAM_ID:-B7CM4Z8JW8}"
+# The Mac's login password, read here and sent over stdin, used to unlock its
+# keychain before anything signs. Same file and same reasoning as the desktop
+# client's build-mac.sh; see mac_signed.
+KEYCHAIN_PASSWORD_FILE="${MAC_KEYCHAIN_PASSWORD_FILE:-$HOME/keys/mac-keychain.password}"
+# Which device to build for. Empty means "the one that is connected".
+DEVICE_ID="${UBERSDR_DEVICE_ID:-}"
 
 # The devices the store set is captured on, as "label:simulator name".
 #
@@ -118,6 +129,8 @@ RUN=0
 RELEASE=0
 ARCHIVE=0
 SHOTS=0
+DEVICE=0
+LAUNCH=0
 KEEP=0
 SHOT=""
 
@@ -129,6 +142,8 @@ for arg in "$@"; do
         --release) RELEASE=1 ;;
         --archive) ARCHIVE=1 ;;
         --screenshots) SHOTS=1 ;;
+        --device) DEVICE=1 ;;
+        --launch) LAUNCH=1 ;;
         --keep) KEEP=1 ;;
         --shot=*) SHOT="${arg#--shot=}" ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
@@ -170,6 +185,118 @@ ship() {
     | ssh -o BatchMode=yes "$MAC_HOST" \
         "rm -rf ~/$dest && mkdir -p ~/$dest && cd ~/$dest && tar xzf -" \
         2> >(grep -v "X11 forwarding request failed" >&2)
+}
+
+# Run a remote command with the signing key reachable.
+#
+# Simulator builds need no signing, which is why most of this script uses plain
+# `mac`. A *device* build signs the app and every framework inside it, and over
+# ssh that fails with `errSecInternalComponent` — a message that mentions
+# neither keychains nor locks — unless two things happen first, in the same ssh
+# session as the signing:
+#
+#   * `unlock-keychain`, because a keychain locks on its own and an ssh session
+#     cannot answer the dialog that would otherwise ask;
+#   * `set-key-partition-list`, because a certificate imported by Xcode does not
+#     list codesign in its key's ACL for a non-GUI session. Unlocking alone
+#     leaves signing failing exactly as it did before.
+#
+# A separate unlock does not carry over: each ssh login gets a fresh security
+# context. Hence a wrapper rather than a setup step. The password goes over
+# stdin, never in a command line that `ps` on the Mac would show.
+mac_signed() {
+    if [[ ! -f "$KEYCHAIN_PASSWORD_FILE" ]]; then
+        mac "$@"
+        return
+    fi
+    printf '%s\n' "$(cat "$KEYCHAIN_PASSWORD_FILE")" \
+    | ssh -o BatchMode=yes "$MAC_HOST" "
+        export PATH=$BREW_BIN:\$PATH
+        export DEVELOPER_DIR=$DEVELOPER_DIR_REMOTE
+        IFS= read -r pw || true
+        kc=\$HOME/Library/Keychains/login.keychain-db
+        security unlock-keychain -p \"\$pw\" \$kc 2>/dev/null || true
+        security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k \"\$pw\" \$kc >/dev/null 2>&1 || true
+        unset pw
+        $*
+    " 2> >(grep -v "X11 forwarding request failed" >&2)
+}
+
+# The connected device, if one is and nobody named it.
+find_device() {
+    [[ -n "$DEVICE_ID" ]] && { echo "$DEVICE_ID"; return 0; }
+    mac "xcrun devicectl list devices --json-output /tmp/ubersdr-devices.json >/dev/null 2>&1;
+         python3 -c \"
+import json
+try:
+    d = json.load(open('/tmp/ubersdr-devices.json'))
+except Exception:
+    raise SystemExit
+for x in d.get('result', {}).get('devices', []):
+    if x.get('connectionProperties', {}).get('tunnelState') != 'unavailable':
+        print(x['hardwareProperties']['udid'])
+        break
+\"" 2>/dev/null | head -1
+}
+
+# Build for a real device, sign it, and put it on there.
+#
+# Three things gate this and each hides the next, so all three are named here
+# rather than discovered one failed build at a time:
+#
+#   1. **Developer Mode**, on the device: Settings → Privacy & Security →
+#      Developer Mode, then a restart. Absent, xcodebuild reports the
+#      destination as unavailable rather than as unconfigured.
+#   2. **Device registration** with the team. `-allowProvisioningUpdates` is not
+#      enough — registering a *device* is a separate permission and needs
+#      `-allowProvisioningDeviceRegistration` as well, without which the error
+#      is "Device isn't registered in your developer account" and no amount of
+#      re-running helps.
+#   3. **A concrete destination.** `generic/platform=iOS` tells Xcode nothing
+#      about the device in front of it, so it cannot register what it cannot
+#      see: the destination has to name the udid.
+#
+# Registering one device also unblocks --archive, which fails with "your team
+# has no devices" until at least one exists.
+device_build() {
+    local dir="$1"
+    local udid
+    udid="$(find_device)"
+    if [[ -z "$udid" ]]; then
+        echo "no device found." >&2
+        echo "  Connect an iPhone or iPad, unlock it, and trust the Mac." >&2
+        echo "  Then: Settings → Privacy & Security → Developer Mode → on," >&2
+        echo "  which needs a restart." >&2
+        exit 1
+    fi
+    echo "  device $udid"
+
+    echo "  pod install"
+    mac "cd ~/$dir/ios/App && pod install 2>&1 | tail -3"
+
+    echo "  xcodebuild (device, signed)"
+    if ! mac_signed "cd ~/$dir/ios/App && xcodebuild -workspace App.xcworkspace \
+            -scheme App -configuration Debug \
+            -destination 'platform=iOS,id=$udid' -derivedDataPath /tmp/dd-device \
+            DEVELOPMENT_TEAM=$TEAM_ID \
+            -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
+            build 2>&1 | tail -40" \
+         | tee /tmp/ubersdr-device.log | grep -q "BUILD SUCCEEDED"; then
+        echo >&2
+        echo "device build failed — see /tmp/ubersdr-device.log" >&2
+        exit 1
+    fi
+    echo "  BUILD SUCCEEDED"
+
+    echo "  installing"
+    mac "xcrun devicectl device install app --device $udid \
+        /tmp/dd-device/Build/Products/Debug-iphoneos/App.app 2>&1 | tail -3"
+
+    if [[ "$LAUNCH" -eq 1 ]]; then
+        mac "xcrun devicectl device process launch --device $udid $APP_ID 2>&1 | tail -2"
+    fi
+    echo "  installed on the device."
 }
 
 # ---------------------------------------------------------------------------
@@ -261,6 +388,16 @@ preflight() {
         [[ "$RELEASE" -eq 1 ]] && ok=1
     else
         echo "    signing        ${ids# }"
+    fi
+
+    # A connected device, which --device and --archive both want. Reported
+    # rather than required: everything else here works on a simulator.
+    local udid
+    udid="$(find_device || true)"
+    if [[ -n "$udid" ]]; then
+        echo "    device         $udid"
+    else
+        echo "    device         none connected (only --device and --archive need one)"
     fi
 
     echo "    disk           $(mac 'df -h / | tail -1' | awk '{print $4" free"}')"
@@ -379,10 +516,11 @@ archive_remote() {
     mac "cd ~/$dir/ios/App && pod install 2>&1 | tail -3"
 
     echo "  archiving (Apple Distribution, team $TEAM_ID)"
-    if ! mac "cd ~/$dir/ios/App && xcodebuild -workspace App.xcworkspace -scheme App \
+    if ! mac_signed "cd ~/$dir/ios/App && xcodebuild -workspace App.xcworkspace -scheme App \
                 -configuration Release -destination 'generic/platform=iOS' \
                 -archivePath /tmp/UberSDR.xcarchive archive \
-                DEVELOPMENT_TEAM=$TEAM_ID -allowProvisioningUpdates 2>&1 | tail -30" \
+                DEVELOPMENT_TEAM=$TEAM_ID -allowProvisioningUpdates \
+                -allowProvisioningDeviceRegistration 2>&1 | tail -30" \
          | tee /tmp/ubersdr-archive.log | grep -q "ARCHIVE SUCCEEDED"; then
         echo >&2
         echo "archive failed — see /tmp/ubersdr-archive.log" >&2
@@ -578,6 +716,11 @@ ship . "$MAC_DIR"
 
 if [[ "$ARCHIVE" -eq 1 ]]; then
     archive_remote "$MAC_DIR"
+    exit 0
+fi
+
+if [[ "$DEVICE" -eq 1 ]]; then
+    device_build "$MAC_DIR"
     exit 0
 fi
 

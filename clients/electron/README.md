@@ -554,22 +554,122 @@ xattr -cr "/Applications/UberSDR.app"
 
 Asking that of everybody who downloads it is not a plan, so:
 
-### Signing the macOS build
+### Building the macOS dmg from somewhere else
 
-Everything is configured; what is missing is the credentials, which are
-deliberately not in the repository. Signing runs only on a Mac — `codesign` is
-macOS-only — so this is `./build.sh --package` on a Mac, with an Apple Developer
-account.
+`./build-mac.sh` builds, signs and notarises on a Mac over ssh and brings the
+dmgs back into `dist/`, ready for `./build.sh --publish`. It exists because a
+dmg needs a Mac for exactly two steps — Apple's `codesign` and Apple's
+notarisation service — while the rest of this client is plain JavaScript with no
+native module in it.
+
+```sh
+./build-mac.sh --check      # can that Mac build, sign and notarise?
+./build-mac.sh              # both dmgs, signed and notarised, into dist/
+./build-mac.sh --publish    # ...and upload them to the `latest` release
+./build-mac.sh --unsigned   # a test build: runs on the Mac that made it, and
+                            # is refused by Gatekeeper anywhere else
+```
+
+`--publish` asks for no confirmation, which is a deliberate difference from
+`build.sh --publish`. What is worth guarding against here is not haste but
+shipping a dmg Gatekeeper refuses, and that is already guarded by something
+better than a keystroke: every file it uploads has been mounted, assessed with
+`spctl` and found to carry a stapled notarisation ticket. It uploads only the
+dmgs *this run built* — not whatever is lying in `dist/` — so a single-`--arch`
+build cannot drag an older dmg of the other architecture up with it. It refuses
+an unsigned build, a missing marker, a logged-out `gh`, and a missing release.
+
+Two credentials, which are different things: a **Developer ID Application
+certificate** in the Mac's login keychain signs the app, and **an Apple ID with
+an app-specific password** notarises it. `--check` reports both and validates
+the second against Apple, so a wrong password costs five seconds rather than ten
+minutes and an unshippable dmg.
+
+Three things about doing this over ssh are worth knowing, because none of them
+announce themselves:
+
+- **The keychain unlock has to happen in the same ssh session as the signing.**
+  A separate `security unlock-keychain` does not carry over, and codesign then
+  fails with `errSecInternalComponent`, which mentions neither keychains nor
+  locks.
+- **Unlocking is only half of it.** A certificate imported by Xcode does not
+  list `codesign` in its key's ACL for a non-GUI session, so
+  `set-key-partition-list` is needed too — without it, signing fails exactly as
+  it did before the unlock.
+- **`notarytool store-credentials` cannot be set up over ssh.** It validates,
+  prints "Success", and stores nothing a later session can read, because writing
+  a keychain item needs a session able to authorise the write. So the
+  credentials are passed to the build instead, on stdin.
+
+Passwords are read from files here and sent over stdin, never in a command line:
+`~/keys/mac-keychain.password` (the Mac's login password, to unlock the
+keychain) and `~/keys/app.password` (the app-specific password). That is the
+same convention `build.sh` uses for the Android keystore, and for the same
+reason — an environment variable is readable from every child process and ends
+up in a shell history.
+
+`--publish` will not upload a dmg unless `build-mac.sh` has confirmed with
+`spctl` that Gatekeeper accepts it, and written the `.gatekeeper-ok` marker
+beside it. An un-notarised dmg does not warn the person who downloads it: it is
+reported as damaged.
+
+## Signing the macOS build
 
 Two separate things have to happen, and **signing alone is not enough**: since
-Catalina, Gatekeeper rejects a downloaded app that is not also *notarised* by
-Apple. electron-builder does both, plus stapling the ticket into the dmg, as
-soon as it finds the credentials in the environment.
+Catalina, Gatekeeper rejects a *downloaded* app that is not also **notarised**
+by Apple, and reports it to whoever downloaded it as damaged rather than as
+unsigned. So both are needed:
 
-You need a **Developer ID Application** certificate — not "Mac App
-Distribution", which is App Store only and will not satisfy Gatekeeper for a
-direct download — and an **App Store Connect API key** (Users and Access →
-Integrations → Keys) for notarisation.
+- a **Developer ID Application** certificate — not "Mac App Distribution",
+  which is App Store only and will not satisfy Gatekeeper for a direct
+  download — and
+- **notarisation credentials**, which are a different thing and not derivable
+  from the certificate.
+
+There are two ways to get there, and they want different credentials.
+
+### From this machine, over ssh (what this project does)
+
+`./build-mac.sh` — see [Building the macOS dmg from somewhere
+else](#building-the-macos-dmg-from-somewhere-else) for what it does and the ssh
+traps involved. Set-up, once:
+
+1. **The certificate**, in the Mac's login keychain. Xcode → Settings →
+   Accounts → Manage Certificates → **+** → Developer ID Application.
+   `build-mac.sh --check` prints the one it finds.
+
+2. **Let an ssh session use its key.** Put the Mac's *login* password in
+   `~/keys/mac-keychain.password` here, one line and nothing else. The script
+   unlocks the keychain and fixes the key's ACL itself, in the same session as
+   the signing, with the password sent over stdin. Without this, codesign fails
+   with `errSecInternalComponent`.
+
+3. **An app-specific password** for notarisation, from appleid.apple.com →
+   Sign-In and Security → App-Specific Passwords. It is not your Apple ID
+   password and can be revoked on its own. Put it in `~/keys/app.password`,
+   one line.
+
+4. **Name the Apple ID** if it is not the default in the script:
+   `export APPLE_ID=you@example.com`. The team comes from the certificate.
+
+```sh
+./build-mac.sh --check      # says exactly which of these is missing
+./build-mac.sh --publish    # build, sign, notarise, verify, upload
+```
+
+`--check` validates the notarisation credentials against Apple rather than
+merely finding them, so a wrong app-specific password costs five seconds
+instead of a ten-minute build and an unshippable dmg.
+
+The two password files sit beside the Android keystore password `build.sh`
+reads the same way, and for the same reason: a password in an environment
+variable is readable from every child process and ends up in a shell history.
+
+### On the Mac itself
+
+`./build.sh --package` run on a Mac does the same job, taking its credentials
+from the environment instead. electron-builder signs, notarises and staples as
+soon as it finds them:
 
 ```sh
 # The certificate. Or import the .p12 into the keychain and set neither:
@@ -577,8 +677,8 @@ Integrations → Keys) for notarisation.
 export CSC_LINK=~/certs/developer-id.p12
 export CSC_KEY_PASSWORD='…'
 
-# Notarisation. An Apple ID with APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID
-# also works, but @electron/notarize recommends the API key.
+# Notarisation. An App Store Connect API key (Users and Access → Integrations
+# → Keys), or an Apple ID with APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID.
 export APPLE_API_KEY=~/private_keys/AuthKey_XXXXXXXXXX.p8
 export APPLE_API_KEY_ID=XXXXXXXXXX
 export APPLE_API_ISSUER=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
@@ -587,7 +687,7 @@ export APPLE_API_ISSUER=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
 `build.sh` prints what it found before it starts, because notarisation adds
-several minutes of uploading and waiting and discovering afterwards that there
+several minutes of uploading and waiting, and discovering afterwards that there
 were no credentials is discovering it too late:
 
 ```
@@ -596,8 +696,27 @@ were no credentials is discovering it too late:
     notarisation   App Store Connect API key
 ```
 
-Nothing is enforced — an unsigned build is what every test build is, and the
-report says plainly that the dmg will be refused on anyone else's Mac.
+### Verifying it worked
+
+A signed-and-notarised dmg and an unsigned one are the same file to look at, and
+the difference only shows on somebody else's Mac — a dmg built on the machine it
+runs on was never downloaded, carries no quarantine attribute, and works
+perfectly for the person who built it. That is the trap. `build-mac.sh` settles
+it by mounting each dmg and assessing the app inside:
+
+```sh
+spctl -a -t exec -vv /Volumes/UberSDR/UberSDR.app   # want: Notarized Developer ID
+xcrun stapler validate /Volumes/UberSDR/UberSDR.app # want: The validate action worked!
+```
+
+Note it assesses the *app*, not the dmg: electron-builder notarises and staples
+the app, then wraps it in a dmg it does not sign, so `spctl` against the dmg
+reports "no usable signature" on a perfectly good build.
+
+Nothing is enforced at build time — an unsigned build is what every test build
+is, and the report says plainly that the dmg will be refused on anyone else's
+Mac. Publishing is the exception: `build.sh --publish` and `build-mac.sh
+--publish` both refuse a dmg that has not been verified notarised.
 
 Then check it on a Mac that has never seen the file, downloading it from the
 release rather than copying it across, since quarantine is what triggers any of

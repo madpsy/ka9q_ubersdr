@@ -26,6 +26,15 @@
 #                          wherever it can, and fails rather than skipping if it
 #                          cannot. `--package` on Linux does it too, but skips
 #                          it with a note when Docker is absent.
+#   ./build-mac.sh         the macOS dmgs, built and signed and notarised on a
+#                          Mac over ssh, and brought back into dist/ ready for
+#                          --publish. A separate script because it is a separate
+#                          machine: see its header for what that Mac needs.
+#                          `./build-mac.sh --publish` uploads them on its own,
+#                          without the typed confirmation below, because a dmg
+#                          it has verified as notarised is a fact rather than a
+#                          judgement call. It touches nothing else on the
+#                          release.
 #   ./build.sh --publish   package, then upload the artefacts to the `latest`
 #                          release on GitHub with the gh CLI, replacing the ones
 #                          already there. Asks first, and only from a terminal:
@@ -96,7 +105,7 @@ WIN_IMAGE=electronuserland/builder:wine
 #
 # Not every one of these exists after any given build — a dmg needs a Mac, and
 # --linux skips the Windows half — so publishing uploads what is there and says
-# what is not.
+# what is not. The dmgs come from build-mac.sh, which puts them here.
 RELEASE_ASSETS=(
     dist/UberSDR.AppImage
     dist/UberSDR.deb
@@ -186,6 +195,35 @@ publish_release() {
     for asset in "${RELEASE_ASSETS[@]}"; do
         if [[ -f "$asset" ]]; then found+=("$asset"); else missing+=("$asset"); fi
     done
+    # A dmg nobody else can open is worse than no dmg.
+    #
+    # Gatekeeper refuses a downloaded app that is not signed *and* notarised,
+    # and reports it as damaged rather than as unsigned — so the person who
+    # receives it has no idea what went wrong and no reason to think it is
+    # fixable. Only a Mac can judge this, so build-mac.sh writes the verdict
+    # beside the file and this refuses to upload one without it. The Android
+    # half refuses an unsigned APK for the same reason.
+    local unsafe=()
+    local kept=()
+    for asset in "${found[@]}"; do
+        if [[ "$asset" == *.dmg && ! -f "$asset.gatekeeper-ok" ]]; then
+            unsafe+=("$asset")
+        else
+            kept+=("$asset")
+        fi
+    done
+    if [[ "${#unsafe[@]}" -gt 0 ]]; then
+        echo
+        echo "  Not uploading — signed and notarised is not optional for a dmg:"
+        for asset in "${unsafe[@]}"; do
+            echo "      $(basename "$asset")   no $(basename "$asset").gatekeeper-ok"
+        done
+        echo "  Build it with clients/electron/build-mac.sh, which checks with"
+        echo "  spctl on the Mac and writes that file when Gatekeeper accepts it."
+        echo
+        found=("${kept[@]+"${kept[@]}"}")
+    fi
+
     if [[ "${#found[@]}" -eq 0 ]]; then
         echo "not published: none of the release artefacts are in dist/." >&2
         return

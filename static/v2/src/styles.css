@@ -1078,6 +1078,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
     padding-right: 5px;
     cursor: grab;
     user-select: none;
+    /* The header is a drag handle, so the browser must not claim the gesture
+       for scrolling first. Without this a finger dragging a panel scrolls the
+       dock instead and the pointermove handler never sees a second event —
+       which looks exactly like dragging being unimplemented, and is what it
+       looked like on the iPad. A tap still works: the move is thresholded. */
+    touch-action: none;
 }
 .section__head:active { cursor: grabbing; }
 

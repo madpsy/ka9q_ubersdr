@@ -81,6 +81,9 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         // app is being driven from another machine. The Android client mirrors
         // the page console into logcat for the same reason. DEBUG only: a
         // release build should not narrate itself.
+        controller.addUserScript(WKUserScript(source: Self.audioProbe,
+                                              injectionTime: .atDocumentStart,
+                                              forMainFrameOnly: true))
         controller.add(self, name: "console")
         controller.addUserScript(WKUserScript(source: Self.consoleBridge,
                                               injectionTime: .atDocumentStart,
@@ -161,7 +164,35 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         UIApplication.shared.isIdleTimerDisabled = true
         DebugOrientation.apply()
         #if DEBUG
+        // A tap on Start, without a finger.
+        //
+        // v2's start overlay is a user gesture by design — it exists to satisfy
+        // the rule that an AudioContext outside one stays suspended. A
+        // synthetic click is not that gesture as far as WebKit is concerned,
+        // which is exactly what makes it a useful test: if audio runs after
+        // this, the gesture requirement is not what is stopping it, and if it
+        // does not, it is.
+        if ProcessInfo.processInfo.environment["UBERSDR_AUTOTAP"] != nil {
+            for delay in [8.0, 16.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.webView.evaluateJavaScript("""
+                    (function(){
+                      var b = document.querySelector('.start__go');
+                      if (b) { b.click(); return 'clicked'; }
+                      return 'no start button';
+                    })();
+                    """) { r, _ in NSLog("[UberSDR audio] autotap %@", String(describing: r)) }
+                }
+            }
+        }
         tidyForScreenshot()
+        // Sampled a few times: the graph is built when the session starts, not
+        // when the page loads.
+        for delay in [12.0, 25.0, 45.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.reportAudio()
+            }
+        }
         #endif
     }
 
@@ -213,6 +244,20 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     private func seedScript() -> String {
         var js = "(function(){try{window.ubersdrDesktop={"
         js += "upstreamOrigin:\(quote(proxy.upstreamOriginForPage)),"
+        // autoStart is *false* here, and that is the opposite of the Android
+        // client on purpose.
+        //
+        // v2's start overlay exists for one browser rule: an AudioContext not
+        // created from a user gesture is suspended. Android lifts that rule
+        // wholesale with setMediaPlaybackRequiresUserGesture(false), so the
+        // overlay is skipped and audio starts on its own. iOS does not.
+        // `mediaTypesRequiringUserActionForPlayback = []` lifts it for <audio>
+        // and <video> elements only — WebKit still refuses to resume an
+        // AudioContext outside a gesture — so claiming autoStart here removes
+        // the one tap that would have started the audio, and the receiver opens
+        // into silence with nothing to say why.
+        //
+        // So the overlay stays, and its button is the gesture.
         js += "autoStart:true,"
         // On by default here as it is on Android and for the same reason: it is
         // a phone and the lock screen is the point.
@@ -275,6 +320,82 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     #if DEBUG
+    /// Watch the audio graph, so "is there sound?" can be answered without ears.
+    ///
+    /// A simulator plays through the Mac's speakers and a device through its
+    /// own, and neither is any use when the app is being driven from another
+    /// machine. This hooks AudioContext at document start, keeps every instance
+    /// the page makes, and taps the output through an AnalyserNode — so the two
+    /// questions that matter can be asked directly: is the context *running*
+    /// (rather than suspended, which is what a missing user gesture looks like),
+    /// and are non-zero samples reaching the destination.
+    private static let audioProbe = """
+    (function(){
+      try {
+        var Native = window.AudioContext || window.webkitAudioContext;
+        if (!Native) return;
+        window.__ubersdrAudio = { contexts: [], analysers: [] };
+
+        // Every connection into a destination is mirrored into an analyser.
+        //
+        // Patching AudioNode.prototype.connect is the only tap that does not
+        // depend on how the page happens to build its graph — the earlier
+        // version hooked createGain and measured nothing, which looked exactly
+        // like silence and was not.
+        var origConnect = AudioNode.prototype.connect;
+        AudioNode.prototype.connect = function(dest) {
+          try {
+            if (dest && dest.context && dest === dest.context.destination) {
+              var store = window.__ubersdrAudio;
+              var an = store.analysers.find(function(a){ return a.context === dest.context; });
+              if (!an) {
+                an = dest.context.createAnalyser();
+                an.fftSize = 2048;
+                store.analysers.push(an);
+              }
+              origConnect.call(this, an);
+            }
+          } catch(e) {}
+          return origConnect.apply(this, arguments);
+        };
+
+        var Wrapped = function() {
+          var ctx = new Native(...arguments);
+          try { window.__ubersdrAudio.contexts.push(ctx); } catch(e) {}
+          return ctx;
+        };
+        Wrapped.prototype = Native.prototype;
+        window.AudioContext = Wrapped;
+        window.webkitAudioContext = Wrapped;
+      } catch(e) {}
+    })();
+    """
+
+    /// What the probe found, as one line in the log.
+    private func reportAudio() {
+        webView.evaluateJavaScript("""
+        (function(){
+          var a = window.__ubersdrAudio;
+          if (!a || !a.contexts.length) return JSON.stringify({audio:'no AudioContext created'});
+          var out = a.contexts.map(function(c){ return { state: c.state, rate: c.sampleRate }; });
+          var level = -1;
+          try {
+            var an = a.analysers[a.analysers.length - 1];
+            if (an) {
+              var buf = new Float32Array(an.fftSize);
+              an.getFloatTimeDomainData(buf);
+              var sum = 0;
+              for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+              level = Math.sqrt(sum / buf.length);
+            }
+          } catch(e) {}
+          return JSON.stringify({ contexts: out, rms: level });
+        })();
+        """) { result, _ in
+            NSLog("[UberSDR audio] %@", String(describing: result))
+        }
+    }
+
     /// Tidy the page for a store screenshot, through the page's own controls.
     ///
     /// Two things have to go before a receiver is photographed:

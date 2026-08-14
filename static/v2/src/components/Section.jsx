@@ -8,7 +8,7 @@
 import React, { useRef } from '../react.js';
 import { DOCKS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
 import { Icon, Menu, MenuItem } from './ui.jsx';
-import { setDraggingPanel } from '../lib/panelDrag.js';
+import { setDraggingPanel, dockBodyAt, nearestPanelGap } from '../lib/panelDrag.js';
 import useWakeProps from '../radio/useWake.js';
 import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
 import { useHeaderFits } from '../lib/useHeaderFits.js';
@@ -28,8 +28,8 @@ const snap = (v) => Math.round(v / SNAP) * SNAP;
 
 export default function Section({ panel, dock, index, weight, height, prev, next, dropEdge }) {
     const {
-        sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, swapPanels,
-        weights, setWeights, setPanelHeight,
+        sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, movePanelNear,
+        swapPanels, weights, setWeights, setPanelHeight,
     } = useLayout();
     const grip = useRef(null);
     // The title button, not the header: the button is `flex: 1` and would have
@@ -118,6 +118,76 @@ export default function Section({ panel, dock, index, weight, height, prev, next
         setWeights([[panel.id, w], [g.other, sum - w]]);
     };
 
+    // Moving a panel with a finger.
+    //
+    // The header is `draggable`, and the browser's own drag-and-drop is what
+    // carries a panel between docks — with a mouse. A finger never starts one:
+    // WebKit does not synthesise dragstart from touch at all, so on an iPad the
+    // header simply did nothing, while the resize grip beside it worked because
+    // it was pointer-driven all along. Chromium *does* synthesise it, which is
+    // why the Android client never showed this.
+    //
+    // So touch gets the same gesture the floating windows already use
+    // (components/FloatingPanel.jsx): pointer events, `dockBodyAt` to find what
+    // is under the finger, `nearestPanelGap` to pick the gap, and the same
+    // `is-drop-*` classes for the line — so both ways of moving a panel promise
+    // the same thing in the same way, and a drop lands where the line was.
+    //
+    // Mouse is deliberately left alone: HTML5 drag-and-drop works there, gives
+    // the drag image for free, and replacing a working gesture is how the one
+    // that works stops working.
+    const touchDrag = useRef(null);
+
+    const clearDropLine = () => {
+        const d = touchDrag.current;
+        if (d?.gapEl) d.gapEl.classList.remove('is-drop-before', 'is-drop-after');
+        if (d) d.gapEl = null;
+    };
+
+    const onHeadPointerDown = (e) => {
+        if (e.pointerType === 'mouse') return;
+        touchDrag.current = { x: e.clientX, y: e.clientY, moved: false, gapEl: null };
+    };
+
+    const onHeadPointerMove = (e) => {
+        const d = touchDrag.current;
+        if (!d) return;
+        if (!d.moved) {
+            // A threshold, so a tap on the header still collapses the panel and
+            // a small wobble is not a move.
+            if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 8) return;
+            d.moved = true;
+            setDraggingPanel(panel.id);
+            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        }
+        const found = dockBodyAt(e.clientX, e.clientY);
+        const at = found
+            ? nearestPanelGap(found.el, e.clientX, e.clientY, found.side, panel.id)
+            : null;
+        const el = at && found ? found.el.querySelector(`[data-panel="${at.id}"]`) : null;
+        if (el === d.gapEl) return;
+        clearDropLine();
+        if (el) {
+            el.classList.add(`is-drop-${at.edge}`);
+            d.gapEl = el;
+        }
+    };
+
+    const onHeadPointerUp = (e) => {
+        const d = touchDrag.current;
+        if (!d) return;
+        clearDropLine();
+        touchDrag.current = null;
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        if (!d.moved) return;
+        setDraggingPanel(null);
+        const found = dockBodyAt(e.clientX, e.clientY);
+        if (!found) return;
+        const at = nearestPanelGap(found.el, e.clientX, e.clientY, found.side, panel.id);
+        if (at) movePanelNear(panel.id, found.side, at.id, at.edge);
+        else movePanel(panel.id, found.side, null);
+    };
+
     const onGripUp = (e) => {
         grip.current = null;
         try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
@@ -134,6 +204,10 @@ export default function Section({ panel, dock, index, weight, height, prev, next
                 draggable
                 onDragStart={onDragStart}
                 onDragEnd={() => setDraggingPanel(null)}
+                onPointerDown={onHeadPointerDown}
+                onPointerMove={onHeadPointerMove}
+                onPointerUp={onHeadPointerUp}
+                onPointerCancel={onHeadPointerUp}
             >
                 <button
                     type="button"

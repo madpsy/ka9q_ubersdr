@@ -75,10 +75,31 @@ function filterMarks(notch, bandpass) {
     return marks;
 }
 
+// What the preview can be told to do right now, in words.
+//
+// Built from the same three facts the handlers use, so the line under the
+// canvas cannot promise something the canvas will not do — a hint that offers a
+// tap where a tap is ambiguous is worse than no hint at all.
+function previewHint(notch, bandpass, tap) {
+    const parts = [];
+    if (tap === 'bp') parts.push('tap to move the bandpass centre');
+    if (tap === 'notch') parts.push('tap to move notch 1');
+    if (bandpass.enabled) parts.push('drag the green lines for the bandpass and its width');
+    if (notch.enabled && notch.items.length > 0) {
+        parts.push(notch.items.length > 1
+            ? 'drag line 1 for notch 1 — the rest have sliders'
+            : 'drag line 1 for the notch');
+    }
+    if (!parts.length) return '';
+    // Capitalised as a sentence, however it was assembled.
+    const text = parts.join(', or ');
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 // The audio waterfall, with the active filters drawn over it. Shown only when
 // a notch or the bandpass is on: it exists to show you where they are sitting,
 // and it shares the audio scope's FFT rather than starting a second one.
-function Preview({ notch, bandpass, onBandpass, range }) {
+function Preview({ notch, bandpass, onBandpass, onNotch, range, tab }) {
     const { player, tuning } = useRadio();
     const display = useDisplay();
     const wfRef = useRef(null);
@@ -93,25 +114,54 @@ function Preview({ notch, bandpass, onBandpass, range }) {
     const drag = useRef(null);
     const [grab, setGrab] = useState(false);
 
-    // Which bandpass line is under the pointer, if any. Edges are what you
-    // reach for to set the width, the centre to move the whole filter.
-    const hitTest = (clientX, el) => {
+    // How near a line counts as being on it.
+    //
+    // Seven pixels is a fair answer for a pointer whose tip is one pixel and
+    // which the operator can see. It is the wrong answer for a finger: a
+    // fingertip covers something like forty pixels of glass, the point it
+    // reports is somewhere under the middle of that, and the line is hidden
+    // while it is being touched. Seven pixels made this a control that
+    // apparently did nothing on a phone — every press missed, and a miss looks
+    // exactly like a control nobody wired up.
+    //
+    // Twenty is what the spectrum's own filter edges give a finger, for the
+    // same reason (TOUCH_EDGE_MIN_PX there).
+    const GRAB_PX = 7;
+    const TOUCH_GRAB_PX = 20;
+
+    // Which filter line is under the pointer, if any. Edges are what you reach
+    // for to set a width, a centre to move the whole filter.
+    //
+    // The bandpass offers all three of its lines because there is only ever one
+    // bandpass — a line here can only mean one thing. Notches offer the first
+    // one's centre and no more, which is a deliberate limit rather than an
+    // unfinished job: with four notches on a narrow preview their marks sit
+    // within a few pixels of each other, and a finger-sized grab zone over that
+    // is a guess. Guessing wrong moves the wrong filter, which is worse than
+    // not moving one — the others have their sliders, where there is no doubt
+    // about which is which.
+    const hitTest = (clientX, el, touch) => {
         const f = frame.current;
-        if (!f || !bandpass.enabled) return null;
+        if (!f) return null;
         const r = el.getBoundingClientRect();
         const { startFreq, endFreq } = f;
         if (!(endFreq > startFreq)) return null;
         const xOf = (hz) => ((hz - startFreq) / (endFreq - startFreq)) * r.width;
         const x = clientX - r.left;
-        const targets = [
-            { what: 'low', x: xOf(bandpass.center - bandpass.width / 2) },
-            { what: 'high', x: xOf(bandpass.center + bandpass.width / 2) },
-            { what: 'center', x: xOf(bandpass.center) },
-        ];
+        const targets = [];
+        if (bandpass.enabled) {
+            targets.push({ what: 'low', x: xOf(bandpass.center - bandpass.width / 2) });
+            targets.push({ what: 'high', x: xOf(bandpass.center + bandpass.width / 2) });
+            targets.push({ what: 'center', x: xOf(bandpass.center) });
+        }
+        if (notch.enabled && notch.items.length > 0) {
+            targets.push({ what: 'notch', x: xOf(notch.items[0].center) });
+        }
+        const near = touch ? TOUCH_GRAB_PX : GRAB_PX;
         let best = null;
         for (const t of targets) {
             const d = Math.abs(t.x - x);
-            if (d <= 7 && (!best || d < best.d)) best = { what: t.what, d };
+            if (d <= near && (!best || d < best.d)) best = { what: t.what, d };
         }
         return best ? best.what : null;
     };
@@ -123,21 +173,60 @@ function Preview({ notch, bandpass, onBandpass, range }) {
         return f.startFreq + frac * (f.endFreq - f.startFreq);
     };
 
+    // Where a plain tap sends a centre.
+    //
+    // A press that grabs nothing still means something: "put it here" is the
+    // obvious reading of pressing a waterfall with a filter drawn on it, and it
+    // is the only reading available on a phone, where lining a fingertip up
+    // with a line you cannot see while you touch it is a poor way to spend
+    // somebody's afternoon.
+    //
+    // Which filter it means is decided by the tab, not by proximity. The
+    // preview sits directly above the tabs, so what is open under it is what
+    // the operator is working on — and where that says nothing (the EQ tab,
+    // say), a tap acts only when there is exactly one filter it could mean.
+    // Two enabled and no tab to break the tie is a guess, and a guess moves the
+    // wrong filter.
+    const tapTarget = () => {
+        const bpOn = bandpass.enabled;
+        const notchOn = notch.enabled && notch.items.length > 0;
+        if (tab === 'bandpass' && bpOn) return 'bp';
+        if (tab === 'notch' && notchOn) return 'notch';
+        if (bpOn && !notchOn) return 'bp';
+        if (notchOn && !bpOn) return 'notch';
+        return null;
+    };
+
     const onDown = (e) => {
-        const what = hitTest(e.clientX, e.currentTarget);
-        if (!what) return;
+        const touch = e.pointerType !== 'mouse';
+        const what = hitTest(e.clientX, e.currentTarget, touch);
+        // A press that grabbed nothing is still followed: it becomes a tap on
+        // release, unless it turns into a drag first.
+        if (!what && !tapTarget()) return;
         e.preventDefault();
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        drag.current = { what };
+        drag.current = { what, startX: e.clientX, moved: false };
     };
 
     const onMove = (e) => {
         const el = e.currentTarget;
         if (!drag.current) {
-            setGrab(!!hitTest(e.clientX, el));
+            // Only a pointer that hovers gets the grab cursor. A finger arriving
+            // here is already pressing, and there is no cursor to change.
+            if (e.pointerType === 'mouse') setGrab(!!hitTest(e.clientX, el, false));
             return;
         }
+        // Slop before a press counts as a drag, so a tap that wanders a pixel
+        // is still a tap. A press that grabbed no line moves nothing while it
+        // is down whatever it does — it is a tap or it is nothing.
+        if (Math.abs(e.clientX - drag.current.startX) > 3) drag.current.moved = true;
+        if (!drag.current.what) return;
+
         const hz = hzAt(e.clientX, el);
+        if (drag.current.what === 'notch') {
+            onNotch(0, { center: Math.round(Math.max(range.min, Math.min(range.max, hz)) / 10) * 10 });
+            return;
+        }
         if (drag.current.what === 'center') {
             onBandpass({ center: Math.round(Math.max(range.min, Math.min(range.max, hz)) / 10) * 10 });
         } else {
@@ -149,8 +238,20 @@ function Preview({ notch, bandpass, onBandpass, range }) {
     };
 
     const onUp = (e) => {
+        const d = drag.current;
         drag.current = null;
         try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        // A tap: pressed and let go without dragging, and without having taken
+        // hold of a line. Grabbing a line and letting go without moving is not
+        // a tap — it is a drag that changed nothing, and it must not then jump
+        // the filter to wherever the finger was resting.
+        if (!d || d.moved || d.what) return;
+        const target = tapTarget();
+        if (!target) return;
+        const hz = Math.max(range.min, Math.min(range.max, hzAt(e.clientX, e.currentTarget)));
+        const centre = Math.round(hz / 10) * 10;
+        if (target === 'bp') onBandpass({ center: centre });
+        else onNotch(0, { center: centre });
     };
 
     useEffect(() => subscribeAudioSpectrum(player, { fftSize: PREVIEW_FFT, bins: true }, (f) => {
@@ -174,7 +275,12 @@ function Preview({ notch, bandpass, onBandpass, range }) {
         <div className="scope">
             <canvas
                 ref={wfRef}
-                className={`scope__canvas${bandpass.enabled ? ' is-draggable' : ''}${grab ? ' is-grabbing' : ''}`}
+                // `is-draggable` is what turns the browser's own touch gestures
+                // off over this canvas (touch-action: none in styles.css), so it
+                // belongs on whenever there is something to drag. Keyed to the
+                // bandpass alone, dragging notch 1 on a phone scrolled the dock
+                // out from under the finger instead.
+                className={`scope__canvas${bandpass.enabled || notch.items.length > 0 ? ' is-draggable' : ''}${grab ? ' is-grabbing' : ''}`}
                 style={{ height: PREVIEW_H }}
                 onPointerDown={onDown}
                 onPointerMove={onMove}
@@ -183,8 +289,11 @@ function Preview({ notch, bandpass, onBandpass, range }) {
                 onPointerLeave={() => setGrab(false)}
             />
             <canvas ref={rulerRef} className="scope__canvas scope__ruler" style={{ height: 13 }} />
-            {bandpass.enabled && (
-                <div className="scope__hint">Drag the green lines to move the bandpass or set its width</div>
+            {(bandpass.enabled || (notch.enabled && notch.items.length > 0)) && (
+                // Says what the *next* press will do, which changes with the
+                // tab: the tap has to name its target or it is a control you
+                // find out about by moving the wrong filter.
+                <div className="scope__hint">{previewHint(notch, bandpass, tapTarget())}</div>
             )}
         </div>
     );
@@ -303,7 +412,14 @@ export default function AudioFiltersPanel() {
     return (
         <div className="stack">
             {showPreview && (
-                <Preview notch={notch} bandpass={{ ...bp, center: centre }} onBandpass={setBp} range={range} />
+                <Preview
+                    notch={notch}
+                    bandpass={{ ...bp, center: centre }}
+                    onBandpass={setBp}
+                    onNotch={setNotchAt}
+                    range={range}
+                    tab={tab}
+                />
             )}
 
             <Segmented

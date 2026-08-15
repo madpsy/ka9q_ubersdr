@@ -262,11 +262,69 @@ export default function Countries() {
     // drag that leaves the canvas should keep panning, and a scroll over a map
     // must not scroll the dock behind it.
     const drag = useRef(null);
-    const onDown = (e) => {
-        drag.current = { x: e.clientX, y: e.clientY };
-        e.currentTarget.setPointerCapture(e.pointerId);
+    // Live pointers, and the pinch two of them make. The map had neither: a
+    // second finger simply became a second panner, and the two took turns
+    // moving the map from wherever each had last been seen — which is what a
+    // pinch looked like here, a map lurching between two points and never
+    // zooming.
+    const pts = useRef(new Map());
+    const pinch = useRef(null);
+
+    // Where a gesture is anchored, in the canvas's own coordinates.
+    const at = (el, x, y) => {
+        const rect = el.getBoundingClientRect();
+        const scale = rect.width / W;
+        return { x: (x - rect.left) / scale, y: (y - rect.top) / scale };
     };
+
+    const onDown = (e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (pts.current.size === 2) {
+            const [a, b] = [...pts.current.values()];
+            const mid = at(e.currentTarget, (a.x + b.x) / 2, (a.y + b.y) / 2);
+            // The point the gesture turns about, fixed here rather than
+            // re-read as the fingers move. Fingers do not spread symmetrically
+            // — one travels further than the other, so the midpoint slides, and
+            // a map re-anchored every frame walks away across the ocean. The
+            // spectrum's pinch fixes its anchor for the same reason.
+            pinch.current = {
+                dist: Math.hypot(a.x - b.x, a.y - b.y),
+                z: view.current.z,
+                px: mid.x,
+                py: mid.y,
+                geo: unproject(mid.x, mid.y, view.current, W, H),
+            };
+            drag.current = null;
+            return;
+        }
+        if (pts.current.size === 1) drag.current = { x: e.clientX, y: e.clientY };
+    };
+
     const onMove = (e) => {
+        if (pts.current.has(e.pointerId)) {
+            pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }
+
+        if (pinch.current && pts.current.size >= 2) {
+            const [a, b] = [...pts.current.values()];
+            const dist = Math.hypot(a.x - b.x, a.y - b.y);
+            if (!(dist > 0) || !(pinch.current.dist > 0)) return;
+            const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN,
+                pinch.current.z * (dist / pinch.current.dist)));
+            // Then put the anchor back under the fingers, exactly as the wheel
+            // handler puts it back under the pointer.
+            const after = { ...view.current, z };
+            const [lon2, lat2] = unproject(pinch.current.px, pinch.current.py, after, W, H);
+            const [lon, lat] = pinch.current.geo;
+            view.current = clampView(
+                { z, lon: after.lon + (lon - lon2), lat: after.lat + (lat - lat2) }, W, H,
+            );
+            draw();
+            return;
+        }
+
         if (!drag.current) return;
         const rect = e.currentTarget.getBoundingClientRect();
         const scale = rect.width / W;
@@ -277,7 +335,15 @@ export default function Countries() {
         view.current = clampView({ ...view.current, lon, lat }, W, H);
         draw();
     };
-    const onUp = () => { drag.current = null; };
+    const onUp = (e) => {
+        pts.current.delete(e.pointerId);
+        if (pts.current.size < 2) pinch.current = null;
+        // A finger left resting after a pinch does not pick up a pan. It is
+        // still on the glass because the other one has only just left, and
+        // panning from there jerks the map by however far it had drifted during
+        // the zoom — so nothing moves again until the hand is off.
+        drag.current = null;
+    };
 
     useEffect(() => {
         const el = canvas.current;
@@ -377,7 +443,7 @@ export default function Countries() {
                     ref={canvas}
                     className="co__map"
                     style={{ aspectRatio: `${W} / ${H}` }}
-                    title="Drag to pan, scroll to zoom"
+                    title="Drag to pan, scroll or pinch to zoom"
                     onPointerDown={onDown}
                     onPointerMove={onMove}
                     onPointerUp={onUp}

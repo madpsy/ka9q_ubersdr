@@ -25,7 +25,7 @@ import { audioBins } from '../lib/audioBand.js';
 import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
 import {
     AUDIO_WF_RATE_MAX, AUDIO_WF_RATE_MIN,
-    cssVar, drawAudioRuler, drawAudioWaterfall, fmtHz, newRing, sizedCanvas,
+    cssVar, drawAudioBars, drawAudioRuler, drawAudioWaterfall, fmtHz, newBarLevel, newRing, sizedCanvas,
 } from '../lib/audioWaterfall.js';
 
 const VIEWS = [
@@ -66,6 +66,14 @@ export default function ScopePanel({ minimal }) {
     const [contrast, setContrast] = useState(display.scopeContrast || 1);
     const [wfRate, setWfRate] = useState(display.scopeRate || AUDIO_WF_RATE_MAX);   // rows/s
     const [rate, setRate] = useState(null);   // audio sample rate, once known
+    // What the top canvas is: the waveform, or the spectrum as bars.
+    //
+    // A tap on the picture rather than a control beside it. The two are the
+    // same thing seen two ways and the choice is made by looking — you switch
+    // because what is on screen is not answering the question — so the picture
+    // is the right place to press. It is also the only control the minimal view
+    // could have, where there is nothing but the canvases.
+    const [shape, setShape] = useState(display.scopeShape === 'bars' ? 'bars' : 'wave');
 
     const scopeRef = useRef(null);
     const wfRef = useRef(null);
@@ -81,9 +89,15 @@ export default function ScopePanel({ minimal }) {
     // Smoothed vertical gain for the scope, so the trace does not jump as the
     // gate opens and closes.
     const scope = useRef({ gain: 1 });
+    // The bar view's auto-level, which is its own: it and the waterfall ease
+    // towards the same target but are not the same instrument, and sharing one
+    // would have whichever drew second ease twice as fast.
+    const barLevel = useRef(newBarLevel());
+    const barRulerRef = useRef(null);
 
     const showScope = view !== 'waterfall';
     const showWf = view !== 'scope';
+    const bars = showScope && shape === 'bars';
 
     // Persist the choices with the other display settings.
     useEffect(() => {
@@ -93,15 +107,35 @@ export default function ScopePanel({ minimal }) {
             scopeTimebase: timebase,
             scopeContrast: contrast,
             scopeRate: wfRate,
+            scopeShape: shape,
         });
-    }, [view, fftSize, timebase, contrast, wfRate]);   // eslint-disable-line
+    }, [view, fftSize, timebase, contrast, wfRate, shape]);   // eslint-disable-line
 
     useEffect(() => {
         // One shared FFT: the filter panel's preview reads the same node, and
         // whichever of them is open drives it (see lib/audioSpectrum.js).
-        return subscribeAudioSpectrum(player, { fftSize, bins: showWf, wave: showScope }, (f) => {
+        // Bars need the spectrum, not the waveform — so what is asked of the
+        // analyser follows the shape, and a scope showing bars costs no
+        // time-domain read at all.
+        return subscribeAudioSpectrum(player, {
+            fftSize, bins: showWf || bars, wave: showScope && !bars,
+        }, (f) => {
             if (f.sampleRate !== rate) setRate(f.sampleRate);
-            if (showScope) drawScope(scopeRef.current, f.wave, f.sampleRate, timebase, scope.current);
+            if (bars) {
+                drawAudioBars({
+                    canvas: scopeRef.current,
+                    bins: f.bins,
+                    binCount: f.binCount,
+                    sampleRate: f.sampleRate,
+                    tuning,
+                    palette: display.palette,
+                    contrast,
+                    level: barLevel.current,
+                });
+                drawAudioRuler(barRulerRef.current, tuning, f.sampleRate, f.binCount);
+            } else if (showScope) {
+                drawScope(scopeRef.current, f.wave, f.sampleRate, timebase, scope.current);
+            }
             if (showWf) {
                 last.current = { bins: f.bins, sampleRate: f.sampleRate, binCount: f.binCount, tuning };
                 refreshTip(hover.current, last.current, tipAt, setTip);
@@ -119,7 +153,7 @@ export default function ScopePanel({ minimal }) {
                 drawAudioRuler(rulerRef.current, tuning, f.sampleRate, f.binCount);
             }
         });
-    }, [player, fftSize, showScope, showWf, timebase, tuning, display.palette, contrast, rate, wfRate]);
+    }, [player, fftSize, showScope, showWf, bars, timebase, tuning, display.palette, contrast, rate, wfRate]);
 
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
 
@@ -143,7 +177,23 @@ export default function ScopePanel({ minimal }) {
 
             {showScope && (
                 <div className="scope">
-                    <canvas ref={scopeRef} className="scope__canvas" style={{ height: SCOPE_H }} />
+                    <canvas
+                        ref={scopeRef}
+                        className="scope__canvas scope__canvas--tap"
+                        style={{ height: SCOPE_H }}
+                        title={bars ? 'Spectrum bars — tap for the waveform' : 'Waveform — tap for spectrum bars'}
+                        onClick={() => setShape(bars ? 'wave' : 'bars')}
+                    />
+                    {/* The frequencies the bars are standing on. Only with the
+                        bars: a waveform's x axis is time, and a frequency scale
+                        under it would be a scale for the wrong axis. */}
+                    {bars && (
+                        <canvas
+                            ref={barRulerRef}
+                            className="scope__canvas scope__ruler"
+                            style={{ height: RULER_H }}
+                        />
+                    )}
                 </div>
             )}
 

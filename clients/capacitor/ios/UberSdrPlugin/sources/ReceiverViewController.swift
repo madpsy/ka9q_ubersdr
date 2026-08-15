@@ -570,38 +570,6 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         }
     }
 
-    #if DEBUG
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard ProcessInfo.processInfo.environment["UBERSDR_BGTEST"] == "1" else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
-            webView.evaluateJavaScript("""
-            (function(){
-              var K = 'ubersdr.v2.radio';
-              var r = {}; try { r = JSON.parse(localStorage.getItem(K)) || {}; } catch(e) {}
-              if (r.audioFormat !== 'pcm-zstd') {
-                r.audioFormat = 'pcm-zstd';
-                localStorage.setItem(K, JSON.stringify(r));
-                location.reload();
-                return 'seeded, reloading';
-              }
-              var row = document.querySelector('.spectrum__meta');
-              var tag = document.querySelector('[data-optional=\"pcm\"]');
-              var kids = row ? Array.prototype.map.call(row.children, function(c){
-                  return (c.dataset.optional || c.className.split(' ')[0]) + ':' + c.offsetWidth;
-              }) : [];
-              return JSON.stringify({
-                fmt: r.audioFormat,
-                tagInDom: !!tag,
-                rowWidth: row ? row.clientWidth : null,
-                inner: row ? row.scrollWidth : null,
-                kids: kids
-              });
-            })();
-            """) { r, _ in NSLog("[UberSDR audio] pcm %@", String(describing: r)) }
-        }
-    }
-    #endif
-
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         NSLog("[UberSDR page] failed %@", error.localizedDescription)
     }

@@ -197,6 +197,98 @@ export function drawAudioWaterfall({
     }
 }
 
+/** State for the bar view's own auto-level, kept by whoever draws it. */
+export function newBarLevel() {
+    return { floor: -100, ceil: -30 };
+}
+
+/**
+ * The audio spectrum as bars, the other thing the scope canvas can be.
+ *
+ * Same frame, same window and same auto-level as the waterfall above — which is
+ * the point of it living here rather than in the panel. A bar view that
+ * disagreed with the waterfall under it about where 1 kHz is, or about how loud
+ * is loud, would be two instruments rather than two views.
+ *
+ * Bandwidth changes need no handling at all, and that is worth saying because
+ * it looks like it should: `audioBins` answers with the window the *current*
+ * mode carries, so the bars are re-laid across the passband on the first frame
+ * after a mode or filter change, exactly as the waterfall's columns are.
+ *
+ * The colour is a gradient over height rather than per bar, so a given colour
+ * always means the same level wherever it appears — a bar meter, in the same
+ * palette as everything else here. Colouring each bar by its own peak was the
+ * other option and reads worse: the whole display changes hue when one signal
+ * arrives, and the eye reports that as everything having got louder.
+ */
+export function drawAudioBars({
+    canvas, bins, binCount, sampleRate, tuning, palette, contrast, level,
+}) {
+    if (!canvas || !bins || bins.length !== binCount) return;
+    const { w, h, dpr } = sizedCanvas(canvas);
+    const c = canvas.getContext('2d', { alpha: false });
+    c.fillStyle = '#05070c';
+    c.fillRect(0, 0, w, h);
+
+    const { start, count } = audioBins(
+        tuning.bandwidthLow, tuning.bandwidthHigh, sampleRate, binCount,
+    );
+    if (!(count > 0)) return;
+
+    // Auto level, eased and bounded, exactly as the waterfall does it: with the
+    // gate closed the audio is a hundred dB down, and an unbounded range would
+    // stretch that noise over the whole display.
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = start; i < start + count; i++) {
+        const v = bins[i];
+        if (!Number.isFinite(v)) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+    }
+    if (Number.isFinite(min)) {
+        const targetFloor = Math.max(WF_FLOOR_DB, min - 3);
+        const targetCeil = Math.max(targetFloor + WF_MIN_SPAN_DB, max + 5);
+        level.floor += (targetFloor - level.floor) * 0.05;
+        level.ceil += (targetCeil - level.ceil) * 0.05;
+    }
+    const range = Math.max(WF_MIN_SPAN_DB, level.ceil - level.floor);
+
+    // Bar width in device pixels, from a target in CSS pixels. Whole pixels, or
+    // neighbouring bars round differently and the row develops a moiré of gaps
+    // that looks like missing data.
+    const target = Math.max(3, Math.round(7 * dpr));
+    const gap = dpr >= 2 ? 2 : 1;
+    const step = target + gap;
+    const bars = Math.max(1, Math.floor(w / step));
+
+    const lut = getPalette(palette);
+    const colour = (t) => {
+        const i = Math.max(0, Math.min(255, (t * 255) | 0)) * 3;
+        return `rgb(${lut[i]},${lut[i + 1]},${lut[i + 2]})`;
+    };
+
+    // One gradient for the whole canvas: bottom is the floor of the range, top
+    // is the ceiling, and each bar is a window onto it.
+    const grad = c.createLinearGradient(0, h, 0, 0);
+    for (let i = 0; i <= 8; i++) grad.addColorStop(i / 8, colour(i / 8));
+    c.fillStyle = grad;
+
+    for (let b = 0; b < bars; b++) {
+        const lo = start + Math.floor((b / bars) * count);
+        const hi = Math.max(lo + 1, start + Math.floor(((b + 1) / bars) * count));
+        let v = -Infinity;
+        for (let i = lo; i < hi; i++) if (bins[i] > v) v = bins[i];
+        let t = (v - level.floor) / range;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (contrast && contrast !== 1) t = Math.pow(t, 1 / contrast);
+        // A floor of one pixel: a bar of no height reads as a gap in the
+        // display rather than as silence, and silence is a thing to show.
+        const bh = Math.max(1, Math.round(t * h));
+        c.fillRect(b * step, h - bh, target, bh);
+    }
+}
+
 export function drawAudioRuler(canvas, tuning, sampleRate, binCount) {
     if (!canvas) return;
     const { w, h, dpr } = sizedCanvas(canvas);

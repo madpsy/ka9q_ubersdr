@@ -225,6 +225,9 @@ export const DEFAULTS = {
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope
+    // What the scope canvas draws: 'wave' (the oscilloscope) or 'bars' (the
+    // spectrum as a bar meter). Tapping the canvas swaps them — see ScopePanel.
+    scopeShape: 'wave',
     scopeContrast: 1.0,     // gamma on the audio waterfall's colour mapping
     // Signal panel meters: 'bar' or the analogue 'needle'. Clicking a meter
     // switches both — see SignalPanel.

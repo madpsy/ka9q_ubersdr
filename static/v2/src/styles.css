@@ -3087,6 +3087,10 @@ a.btn { text-decoration: none; }
 }
 .scope--hover { position: relative; cursor: crosshair; }
 .scope__canvas.is-draggable { touch-action: none; }
+/* A canvas that answers a press. Nothing but the cursor and the callout: the
+   press is a tap or a click and neither needs the browser's gestures held off,
+   so this stays scrollable inside a dock. */
+.scope__canvas--tap { cursor: pointer; -webkit-touch-callout: none; }
 .scope__canvas.is-grabbing { cursor: col-resize; }
 .scope__hint {
     padding: 3px 7px;

@@ -3,7 +3,8 @@
 
 import React, { useEffect, useRef } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
-import { useDisplay } from '../display/DisplayContext.jsx';
+import { resolveMaxFps, useDisplay } from '../display/DisplayContext.jsx';
+import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP } from '../radio/constants.js';
 import { Bar, Field, Readout, Slider } from '../components/ui.jsx';
 import {
@@ -18,8 +19,14 @@ import {
     angleAt, arcAngle, geometry, pointAt, stepPeak,
     LABEL_INSET, NEEDLE_GAP, TICK_IN, TICK_OUT,
 } from '../lib/needle.js';
+import {
+    drawLag, medianGap, strokeCurve, trimBefore, xAt, SPAN_MS,
+} from '../lib/rollingChart.js';
 
-const HISTORY = 120;   // ~10 s at 12 Hz
+// A little more than the span is kept, because the chart is drawn slightly
+// behind live and the segment crossing the left edge starts at a point that has
+// already scrolled off it.
+const KEEP_MS = 1000;
 
 // Printed scales, as [label, position 0..1]. The position is computed from the
 // same mapping the bar fill uses, because neither scale is linear in its own
@@ -271,12 +278,137 @@ function SquelchControl({ minimal }) {
     );
 }
 
+// Ready a canvas for this frame: size it to its box and hand back a context
+// with the box's pixel dimensions. Returns null when there is nothing to draw
+// on — a collapsed dock leaves the canvas at zero, and a chart drawn into
+// nothing is a frame's work thrown away.
+function surface(c) {
+    if (!c) return null;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.round(c.clientWidth * dpr);
+    const ht = Math.round(c.clientHeight * dpr);
+    if (!w || !ht) return null;
+    if (c.width !== w || c.height !== ht) { c.width = w; c.height = ht; }
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, w, ht);
+    return { ctx, w, ht, dpr };
+}
+
+// Where each reading sits on this frame's canvas.
+//
+// `now` is held one sample-interval back — see drawLag — so the right-hand edge
+// is a moment for which the trace is already known, and the newest reading
+// slides in from beyond the edge rather than appearing at it. Points either
+// side of the visible span are kept and simply drawn off it: the segments
+// crossing both edges have to come from somewhere, and the canvas clips.
+function place(points, now, w, y, value = (p) => p.v) {
+    const at = now - drawLag(medianGap(points));
+    const out = [];
+    for (const p of points) {
+        const v = value(p);
+        if (v == null) continue;
+        out.push({ x: xAt(p.t, at, SPAN_MS, w), y: y(v), p });
+    }
+    return out;
+}
+
+function drawSnr(canvas, points, now) {
+    const s = surface(canvas);
+    if (!s) return;
+    const { ctx, w, ht, dpr } = s;
+    const vals = points.filter((p) => p.v != null).map((p) => p.v);
+    if (vals.length < 2) return;
+
+    // v1's rule (app.js drawSnrHistoryChart): pad by 10% of the span with a
+    // 2 dB floor, never go below 0 dB, and always show at least 10 dB — so a
+    // quiet channel does not get magnified into a noise mountain. Forcing 0
+    // and 20 into view, as this used to, squashed the trace against the top:
+    // SNR here is power over noise *density*, which sits around 30–60 dB.
+    let lo = Math.min(...vals);
+    let hi = Math.max(...vals);
+    const pad = Math.max(2, (hi - lo) * 0.1);
+    lo = Math.max(0, lo - pad);
+    hi += pad;
+    if (hi - lo < 10) {
+        const mid = (hi + lo) / 2;
+        lo = Math.max(0, mid - 5);
+        hi = mid + 5;
+    }
+
+    const y = (v) => ht - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * ht;
+    // A break in the readings is a break in the line: a null is the meter
+    // saying it had nothing, and joining across it would draw a signal that was
+    // never measured. Each unbroken run is its own curve.
+    const runs = [];
+    let run = [];
+    for (const p of points) {
+        if (p.v == null) { if (run.length) runs.push(run); run = []; continue; }
+        run.push(p);
+    }
+    if (run.length) runs.push(run);
+
+    ctx.lineWidth = 1.6 * dpr;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (const r of runs) {
+        const pts = place(r, now, w, y);
+        // Coloured per segment on v1's ramp, so the trace says how good the
+        // signal is and not just how it moved.
+        strokeCurve(ctx, pts, (i) => snrColour(pts[i].p.v));
+    }
+}
+
+function drawBuffer(canvas, points, now, bufferSec) {
+    const s = surface(canvas);
+    if (!s) return;
+    const { ctx, w, ht, dpr } = s;
+    if (points.length < 2) return;
+
+    // The scale is the operator's own ceiling, not the data: this chart is
+    // read against "what did I ask for", and a trace that renormalised as
+    // the queue drained would hide exactly the drain worth seeing. A little
+    // headroom above it, because the queue is allowed to sit at the limit.
+    const ceiling = Math.max(50, (bufferSec || 0.2) * 1000);
+    const hi = Math.max(ceiling * 1.15, ...points.map((p) => p.v));
+    const y = (v) => ht - (Math.max(0, Math.min(hi, v)) / hi) * ht;
+    const pts = place(points, now, w, y);
+
+    // Dropouts first, so the trace is drawn over them rather than lost
+    // behind. Full height and red: this is the failure the whole panel is
+    // watching for, and it is a moment, not a level. Each keeps its place in
+    // time and scrolls with the trace, which is the point of marking it here
+    // rather than counting it in a corner.
+    ctx.fillStyle = cssVar('--bad', '#f2646a');
+    for (const q of pts) {
+        if (!q.p.drops) continue;
+        ctx.fillRect(Math.round(q.x) - dpr / 2, 0, Math.max(1, 1.5 * dpr), ht);
+    }
+
+    // What was asked for, as a line to read the trace against.
+    ctx.strokeStyle = cssVar('--border-strong', 'rgba(255,255,255,0.18)');
+    ctx.lineWidth = dpr;
+    ctx.setLineDash([3 * dpr, 3 * dpr]);
+    ctx.beginPath();
+    ctx.moveTo(0, y(ceiling));
+    ctx.lineTo(w, y(ceiling));
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const accent = cssVar('--accent', '#4aa8ff');
+    ctx.lineWidth = 1.6 * dpr;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    strokeCurve(ctx, pts, () => accent);
+}
+
 // `minimal` keeps the two meters and the squelch — what you watch and what you
 // ride — and drops the numeric readouts, the SNR trace and the buffer counters.
 // See the registry's `minimal`.
 export default function SignalPanel({ minimal }) {
     const { running, audio } = useRadio();
     const display = useDisplay();
+    const touch = useMediaQuery(TOUCH_QUERY);
+    const maxFps = resolveMaxFps(display.maxFps, touch);
     const m = useMeters(15);
     const canvasRef = useRef(null);
     const history = useRef([]);
@@ -288,61 +420,14 @@ export default function SignalPanel({ minimal }) {
     const bufHistory = useRef([]);
     const seenUnderruns = useRef(0);
 
+    // Sampling only. Both traces are drawn by the frame loop below, on the
+    // display's clock rather than the meters' — see lib/rollingChart.js.
     useEffect(() => {
         const h = history.current;
-        h.push(m.snr == null ? null : m.snr);
-        if (h.length > HISTORY) h.shift();
-
-        const c = canvasRef.current;
-        if (!c) return;
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
-        const w = c.clientWidth * dpr;
-        const ht = c.clientHeight * dpr;
-        if (c.width !== w || c.height !== ht) { c.width = w; c.height = ht; }
-        const ctx = c.getContext('2d');
-        ctx.clearRect(0, 0, w, ht);
-
-        const vals = h.filter((v) => v != null);
-        if (vals.length < 2) return;
-
-        // v1's rule (app.js drawSnrHistoryChart): pad by 10% of the span with a
-        // 2 dB floor, never go below 0 dB, and always show at least 10 dB — so a
-        // quiet channel does not get magnified into a noise mountain. Forcing 0
-        // and 20 into view, as this used to, squashed the trace against the top:
-        // SNR here is power over noise *density*, which sits around 30–60 dB.
-        let lo = Math.min(...vals);
-        let hi = Math.max(...vals);
-        const pad = Math.max(2, (hi - lo) * 0.1);
-        lo = Math.max(0, lo - pad);
-        hi += pad;
-        if (hi - lo < 10) {
-            const mid = (hi + lo) / 2;
-            lo = Math.max(0, mid - 5);
-            hi = mid + 5;
-        }
-
-        const x = (i) => (i / (HISTORY - 1)) * w;
-        const y = (v) => ht - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * ht;
-
-        // Coloured per sample on v1's ramp, so the trace says how good the
-        // signal is and not just how it moved.
-        ctx.lineWidth = 1.6 * dpr;
-        for (let i = 1; i < h.length; i++) {
-            if (h[i] == null || h[i - 1] == null) continue;
-            ctx.strokeStyle = snrColour(h[i]);
-            ctx.beginPath();
-            ctx.moveTo(x(i - 1), y(h[i - 1]));
-            ctx.lineTo(x(i), y(h[i]));
-            ctx.stroke();
-        }
+        h.push({ t: performance.now(), v: m.snr == null ? null : m.snr });
+        trimBefore(h, performance.now() - SPAN_MS - KEEP_MS);
     }, [m.snr]);
 
-    // Buffer depth over the same ten seconds, with every dropout marked.
-    //
-    // Two numbers that only mean something together: a queue reading of 40 ms
-    // is fine on its own and alarming if the audio broke twice while it was
-    // there. As counters they could only be read one at a time and neither
-    // said *when* — a dropout an hour ago and one just now were the same "3".
     useEffect(() => {
         const h = bufHistory.current;
         const total = Number.isFinite(m.underruns) ? m.underruns : 0;
@@ -351,54 +436,35 @@ export default function SignalPanel({ minimal }) {
         // negative burst.
         const drops = total > seenUnderruns.current ? total - seenUnderruns.current : 0;
         seenUnderruns.current = total;
-        h.push({ ms: Math.max(0, (m.queuedSec || 0) * 1000), drops });
-        if (h.length > HISTORY) h.shift();
+        h.push({ t: performance.now(), v: Math.max(0, (m.queuedSec || 0) * 1000), drops });
+        trimBefore(h, performance.now() - SPAN_MS - KEEP_MS);
+    }, [m.queuedSec, m.underruns]);
 
-        const c = bufRef.current;
-        if (!c) return;
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
-        const w = c.clientWidth * dpr;
-        const ht = c.clientHeight * dpr;
-        if (c.width !== w || c.height !== ht) { c.width = w; c.height = ht; }
-        const ctx = c.getContext('2d');
-        ctx.clearRect(0, 0, w, ht);
-        if (h.length < 2) return;
+    // One loop for both charts: they show the same ten seconds on the same
+    // clock, and two loops would be two wake-ups a frame for one panel.
+    useEffect(() => {
+        if (minimal) return undefined;
+        let raf = 0;
+        let timer = 0;
+        // The display's own frame cap, honoured here as everywhere: this panel
+        // is not worth a paint the spectrum has been told not to take. Capped,
+        // the wait is a timer and the paint is still an animation frame, so
+        // nothing is scheduled between ticks and a hidden tab stops dead — the
+        // same shape as the spectrum's loop, and the reason for it is written
+        // out there.
+        const capMs = maxFps > 0 ? 1000 / maxFps : 0;
 
-        // The scale is the operator's own ceiling, not the data: this chart is
-        // read against "what did I ask for", and a trace that renormalised as
-        // the queue drained would hide exactly the drain worth seeing. A little
-        // headroom above it, because the queue is allowed to sit at the limit.
-        const ceiling = Math.max(50, (audio.bufferSec || 0.2) * 1000);
-        const hi = Math.max(ceiling * 1.15, ...h.map((p) => p.ms));
-        const x = (i) => (i / (HISTORY - 1)) * w;
-        const y = (v) => ht - (Math.max(0, Math.min(hi, v)) / hi) * ht;
+        const frame = () => {
+            const now = performance.now();
+            drawSnr(canvasRef.current, history.current, now);
+            drawBuffer(bufRef.current, bufHistory.current, now, audio.bufferSec);
+            if (capMs) timer = setTimeout(() => { raf = requestAnimationFrame(frame); }, capMs);
+            else raf = requestAnimationFrame(frame);
+        };
+        raf = requestAnimationFrame(frame);
+        return () => { cancelAnimationFrame(raf); clearTimeout(timer); };
+    }, [minimal, maxFps, audio.bufferSec]);
 
-        // Dropouts first, so the trace is drawn over them rather than lost
-        // behind. Full height and red: this is the failure the whole panel is
-        // watching for, and it is a moment, not a level.
-        ctx.fillStyle = cssVar('--bad', '#f2646a');
-        for (let i = 0; i < h.length; i++) {
-            if (!h[i].drops) continue;
-            ctx.fillRect(Math.round(x(i)) - dpr / 2, 0, Math.max(1, 1.5 * dpr), ht);
-        }
-
-        // What was asked for, as a line to read the trace against.
-        ctx.strokeStyle = cssVar('--border-strong', 'rgba(255,255,255,0.18)');
-        ctx.lineWidth = dpr;
-        ctx.setLineDash([3 * dpr, 3 * dpr]);
-        ctx.beginPath();
-        ctx.moveTo(0, y(ceiling));
-        ctx.lineTo(w, y(ceiling));
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        ctx.strokeStyle = cssVar('--accent', '#4aa8ff');
-        ctx.lineWidth = 1.6 * dpr;
-        ctx.beginPath();
-        ctx.moveTo(x(0), y(h[0].ms));
-        for (let i = 1; i < h.length; i++) ctx.lineTo(x(i), y(h[i].ms));
-        ctx.stroke();
-    }, [m.queuedSec, m.underruns, audio.bufferSec]);
 
     const power = m.basebandPower;
     const snr = m.snr;

@@ -149,6 +149,10 @@ export const api = {
         // it: no hover, no tooltip, and a row too narrow to carry the address
         // the receiver is actually reached at.
         rowDetails: true,
+        // This host can open the operating system's own page for the app,
+        // which is the only way back from a notification permission that was
+        // refused: both platforms ask once and remember the answer.
+        appSettings: true,
         buildInfo: BUILD_INFO,
         version: pkg.version,
     }),
@@ -208,6 +212,50 @@ export const api = {
         if (openId === id) await UberSdr.closeReceiver();
         await UberSdr.secretClear({ id });
         await store.remove(id);
+    },
+
+    /**
+     * Throw away the interface settings, both scopes — see the plugin, which
+     * says what is and is not included. The saved receivers are not: that is
+     * the button below, and they are two different regrets.
+     */
+    resetPrefs: () => UberSdr.resetPrefs(),
+
+    /**
+     * Every saved receiver, and the passwords with them.
+     *
+     * The open one is closed first. Removing the entry a receiver is running
+     * from would leave a window with nothing behind it — and on a phone, a
+     * receiver the chooser can no longer name or stop.
+     */
+    clearReceivers: async () => {
+        await UberSdr.closeReceiver().catch(() => {});
+        for (const entry of await store.list()) {
+            await UberSdr.secretClear({ id: entry.id }).catch(() => {});
+            await store.remove(entry.id);
+        }
+        openId = null;
+        notifyChanged();
+    },
+
+    /** The app's own page in the system settings. */
+    openAppSettings: () => UberSdr.openAppSettings(),
+
+    /**
+     * Is this run following a link?
+     *
+     * Asked by the chooser before it acts on "open the last receiver on
+     * launch". Answered by the plugin from the Intent or the opened URL, not
+     * from whether deeplink.js has had the event yet: on a cold start those
+     * race, and the honest answer has to be available before the race is over.
+     */
+    linkPending: async () => {
+        try {
+            const { pending } = await UberSdr.linkPending();
+            return !!pending;
+        } catch {
+            return false;
+        }
     },
 
     sort: () => store.sort(),

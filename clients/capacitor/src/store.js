@@ -55,6 +55,13 @@ function sanitiseChooser(chooser) {
     if (DIR_SORTS.has(raw.dirSort)) out.dirSort = raw.dirSort;
     const home = sanitiseHome(raw.home);
     if (home) out.home = home;
+    // Settings, which live here rather than in a store of their own: they are
+    // the chooser's own state, saved the same way and sanitised in the same
+    // place. Absent means the default, which is why neither is written unless
+    // it differs — a stored `false` and a missing key must mean the same thing
+    // for a file written by an older version.
+    if (raw.prefsScope === 'receiver') out.prefsScope = 'receiver';
+    if (raw.autoConnect === true) out.autoConnect = true;
     return out;
 }
 

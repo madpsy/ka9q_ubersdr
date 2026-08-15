@@ -76,6 +76,8 @@ try { buildInfo = fs.readFileSync(path.join(__dirname, 'ui', 'BUILD_INFO'), 'utf
 let store;
 /** @type {SharedPrefs} */
 let prefs;
+// Set when a link started this run — see the chooser's auto-connect setting.
+let launchedFromLink = false;
 let chooserWin = null;
 // `{ version, url }` once a newer build has been found, null until then and if
 // there is none. Module-level rather than passed into menuTemplate, because the
@@ -1149,12 +1151,27 @@ function setupIpc() {
 
     // Shared settings. The seed is synchronous because the receiver preload
     // has to apply it before the page's own scripts read localStorage.
+    // Which store this window reads and writes: everybody's, or its own. The
+    // scope is the chooser's setting and the window is identified the way every
+    // other message from a receiver is — by its webContents, never by anything
+    // the page says about itself.
+    const prefsIdFor = (sender) => {
+        if (store.chooser.prefsScope !== 'receiver') return null;
+        const rec = recordFor(sender);
+        return rec ? rec.entry.id : null;
+    };
     ipcMain.on('prefs:seed', (event) => {
-        event.returnValue = { prefs: prefs.snapshot() };
+        event.returnValue = { prefs: prefs.snapshot(prefsIdFor(event.sender)) };
     });
-    ipcMain.on('prefs:push', (_e, map) => {
-        prefs.update(map);
+    ipcMain.on('prefs:push', (event, map) => {
+        prefs.update(map, prefsIdFor(event.sender));
     });
+
+    ipcMain.handle('settings:reset-prefs', () => { prefs.reset(); });
+
+    // Whether this launch is following a link. Read once by the chooser, and
+    // true for the rest of the run: the setting it guards only acts at startup.
+    ipcMain.handle('links:pending', () => launchedFromLink);
 
     ipcMain.handle('instances:disconnect', (_e, id) => {
         const active = running.get(id);
@@ -1165,6 +1182,19 @@ function setupIpc() {
         const active = running.get(id);
         if (active) active.win.close();
         store.remove(id);
+    });
+
+    // Every saved receiver, and the passwords with them.
+    //
+    // Separate from resetting the settings on purpose: these are two different
+    // regrets. Somebody who wants the panels back where they were has not asked
+    // to retype the address of every receiver they listen to, and a single
+    // button doing both would be one nobody could risk pressing.
+    ipcMain.handle('settings:clear-receivers', () => {
+        for (const rec of [...running.values()]) {
+            if (!rec.win.isDestroyed()) rec.win.close();
+        }
+        for (const entry of store.list()) store.remove(entry.id);
     });
 }
 
@@ -1189,7 +1219,14 @@ app.whenReady().then(() => {
     // onto it a moment later.
     const url = pendingDeepLink || deeplink.fromArgv(process.argv);
     pendingDeepLink = null;
-    if (url) followDeepLink(url);
+    if (url) {
+        // Remembered for the chooser, which has an "open the last receiver on
+        // launch" setting and must stand aside for a link: the link names a
+        // receiver somebody asked for, where the setting names one they asked
+        // for last time.
+        launchedFromLink = true;
+        followDeepLink(url);
+    }
 });
 
 app.on('activate', () => showChooser());

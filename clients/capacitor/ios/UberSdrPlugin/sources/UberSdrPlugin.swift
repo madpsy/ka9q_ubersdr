@@ -26,6 +26,9 @@ import UserNotifications
 public class UberSdrPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "UberSdrPlugin"
     public let jsName = "UberSdr"
+    /// Whether a ubersdr:// link started or reached this run.
+    private var linkSeen = false
+
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "getJson", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "mdnsBrowse", returnType: CAPPluginReturnPromise),
@@ -34,7 +37,10 @@ public class UberSdrPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "secretClear", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openReceiver", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "closeReceiver", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "receiverState", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "receiverState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "resetPrefs", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "linkPending", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openAppSettings", returnType: CAPPluginReturnPromise)
     ]
 
     /// Which receiver is open, if any. Nil until `openReceiver`, and back to nil
@@ -96,7 +102,24 @@ public class UberSdrPlugin: CAPPlugin, CAPBridgedPlugin {
         // gets a sentence rather than the OS quietly offering the browser
         // instead, and a second kind of link later is a change to one file.
         guard url.scheme?.lowercased() == "ubersdr" else { return }
+        // Remembered for the chooser, which has an "open the last receiver on
+        // launch" setting and must stand aside for a link: the link names a
+        // receiver somebody asked for now, where the setting names one they
+        // asked for last time. Never cleared — the setting it guards is read
+        // once, as the page starts.
+        linkSeen = true
         notifyListeners("deepLink", data: ["url": url.absoluteString], retainUntilConsumed: true)
+    }
+
+    /// Has a link been followed this run?
+    ///
+    /// Answered from the URL the app was opened with rather than from whether
+    /// the page has had the event yet, which is the point: on a cold start
+    /// those two race, and a chooser asking "is a receiver open?" would find
+    /// the answer no while a directory lookup was still in flight — and open a
+    /// different receiver over the top of the one that was asked for.
+    @objc func linkPending(_ call: CAPPluginCall) {
+        call.resolve(["pending": linkSeen])
     }
 
     // MARK: - HTTP
@@ -109,6 +132,36 @@ public class UberSdrPlugin: CAPPlugin, CAPBridgedPlugin {
     /// and `certError`, because `resolveTarget` reads those to decide whether to
     /// offer "trust this receiver anyway". A rejection would arrive as an
     /// exception with a string and none of that.
+    /// Throw away the interface settings the receivers share.
+    ///
+    /// Only what this app stored on the page's behalf — the v2 snapshot in
+    /// HostChannel.savePrefs. Not the saved receivers, not their passwords, and
+    /// not what a receiver has in its own localStorage: those are the
+    /// chooser's and the page's, and a "reset settings" that quietly took the
+    /// receiver list with it would be a button nobody could risk pressing.
+    @objc func resetPrefs(_ call: CAPPluginCall) {
+        HostChannel.resetPrefs()
+        call.resolve()
+    }
+
+    /// The app's own page in Settings.
+    ///
+    /// Notifications are the reason this exists: iOS asks once per install and
+    /// never again, so an operator who said no — or who said yes and later
+    /// turned them off — has no way back from inside the app, and no way of
+    /// knowing that is where the answer lives.
+    @objc func openAppSettings(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard let url = URL(string: UIApplication.openSettingsURLString),
+                  UIApplication.shared.canOpenURL(url) else {
+                call.reject("no settings page on this device")
+                return
+            }
+            UIApplication.shared.open(url)
+            call.resolve()
+        }
+    }
+
     @objc func getJson(_ call: CAPPluginCall) {
         guard let host = call.getString("host"), let path = call.getString("path") else {
             call.reject("host and path are required")
@@ -232,7 +285,8 @@ public class UberSdrPlugin: CAPPlugin, CAPBridgedPlugin {
             let receiver = ReceiverViewController(instanceId: id, label: label,
                                                   proxy: proxy, product: product,
                                                   password: password,
-                                                  notificationState: state)
+                                                  notificationState: state,
+                                                  prefsScope: call.getString("prefsScope"))
             receiver.modalPresentationStyle = .fullScreen
             receiver.onClosed = { [weak self] in
                 guard let self = self else { return }

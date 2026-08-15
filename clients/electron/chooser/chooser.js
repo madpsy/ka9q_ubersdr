@@ -184,6 +184,147 @@ function showModal(content) {
     return modal;
 }
 
+// ---- settings --------------------------------------------------------------
+//
+// Everything here is about what happens *after* a receiver is chosen, which is
+// why none of it is a tab: the tabs are four ways of finding one.
+//
+// The host decides what it can offer. `appInfo().appSettings` is the only
+// capability so far — a phone can open the operating system's own page for the
+// app and a desktop has no such page — and a control the host cannot honour is
+// left out rather than shown disabled, because a switch that does nothing when
+// pressed is worse than one that is not there.
+
+/** One row: a title, a sentence about it, and the control on the right. */
+function settingRow(title, note, control) {
+    const row = el('div', 'set-row');
+    const text = el('div', 'set-text');
+    text.appendChild(el('div', 'set-title', title));
+    if (note) text.appendChild(el('div', 'set-note', note));
+    row.appendChild(text);
+    const box = el('div', 'set-control');
+    box.appendChild(control);
+    row.appendChild(box);
+    return row;
+}
+
+/**
+ * A destructive button that asks first, in place.
+ *
+ * The second press is the confirmation — no second dialog on top of this one,
+ * which the modal helper could not stack anyway, and no "are you sure" that has
+ * to be read to find out what it is about. It goes back to its first state if
+ * it is not pressed again, so a stray tap cannot be left armed.
+ */
+function dangerButton(label, arm, run) {
+    const btn = el('button', 'danger', label);
+    let armed = false;
+    let timer = null;
+    btn.addEventListener('click', async () => {
+        if (!armed) {
+            armed = true;
+            btn.textContent = arm;
+            timer = setTimeout(() => { armed = false; btn.textContent = label; }, 4000);
+            return;
+        }
+        clearTimeout(timer);
+        armed = false;
+        btn.disabled = true;
+        btn.textContent = 'Done';
+        await run();
+        setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 1200);
+    });
+    return btn;
+}
+
+async function showSettings() {
+    const [info, state] = await Promise.all([api.appInfo(), api.chooser()]);
+
+    const modal = showModal([el('h3', null, 'Settings')]);
+
+    // Where the interface settings live. The wording is what it *does* rather
+    // than the word "scope": "shared" and "per receiver" are the two answers
+    // somebody has in mind before they open this.
+    const scope = el('select');
+    for (const [value, label] of [['shared', 'Shared'], ['receiver', 'Per receiver']]) {
+        const option = el('option', null, label);
+        option.value = value;
+        scope.appendChild(option);
+    }
+    scope.value = state.prefsScope === 'receiver' ? 'receiver' : 'shared';
+    scope.addEventListener('change', () => api.setChooser({ prefsScope: scope.value }));
+    modal.appendChild(settingRow(
+        'Panels and settings',
+        'Shared: every receiver opens with the same layout, filters and display '
+        + 'settings. Per receiver: each keeps its own. The two are stored apart, so '
+        + 'switching shows what that side last held — and takes effect on the next '
+        + 'receiver you open.',
+        scope,
+    ));
+
+    const auto = el('input', 'switch');
+    auto.type = 'checkbox';
+    auto.setAttribute('role', 'switch');
+    auto.checked = state.autoConnect === true;
+    auto.addEventListener('change', () => api.setChooser({ autoConnect: auto.checked }));
+    modal.appendChild(settingRow(
+        'Open the last receiver on launch',
+        'Straight into the one you used last, without stopping here. The chooser is '
+        + 'still behind it — stopping the receiver comes back to this page.',
+        auto,
+    ));
+
+    if (info.appSettings) {
+        const open = el('button', 'ghost', 'Open');
+        open.addEventListener('click', () => api.openAppSettings().catch(() => {}));
+        modal.appendChild(settingRow(
+            'Notifications',
+            'Asked for once, and the answer is remembered by the system rather than by '
+            + 'this app — so changing your mind is done in the system’s own settings.',
+            open,
+        ));
+    }
+
+    const danger = el('div', 'set-danger');
+    danger.appendChild(settingRow(
+        'Reset settings',
+        'Puts the interface back as it came: layout, panels, filters and display '
+        + 'settings, in both of the stores above. Your saved receivers are not touched.',
+        dangerButton('Reset', 'Press again', () => api.resetPrefs()),
+    ));
+    danger.appendChild(settingRow(
+        'Forget all receivers',
+        'Removes every saved receiver and the passwords stored with them. The list '
+        + 'itself, not the settings — these are two different regrets.',
+        dangerButton('Forget all', 'Press again', async () => {
+            await api.clearReceivers();
+            refreshSaved();
+        }),
+    ));
+    modal.appendChild(danger);
+
+    // What used to be along the bottom of the chooser, on the page that is
+    // actually about the app rather than under the list of receivers.
+    //
+    // Including the warning, which is the half worth keeping: a build with no
+    // interface staged still runs, and every receiver then opens with whatever
+    // UI it serves — which is a surprising thing to discover from the outside
+    // and impossible to guess at.
+    const about = el('div', 'set-about');
+    about.appendChild(el('div', null, `UberSDR ${info.version || ''}`.trim()));
+    about.appendChild(el('div', null, info.builtinAvailable
+        ? `interface: ${info.buildInfo || 'staged'}`
+        : 'no interface staged (run build.sh) — receivers open with the UI they serve'));
+    modal.appendChild(about);
+
+    const actions = el('div', 'modal-actions');
+    const done = el('button', null, 'Done');
+    done.addEventListener('click', closeModal);
+    actions.appendChild(done);
+    modal.appendChild(actions);
+    done.focus();
+}
+
 /**
  * @param {object} row     the receiver — a saved entry, or a LAN/directory row
  * @param {function} done  called with the new hasPassword once it is settled
@@ -1368,12 +1509,38 @@ api.onChanged(refreshSaved);
     rowDetails = info.rowDetails === true;
     sortBy = await api.sort();
     byId('saved-sort').value = sortBy;
-    byId('footer').textContent = builtinAvailable
-        ? `bundled v2 UI: ${info.buildInfo || 'staged'}`
-        : 'no bundled UI staged (run build.sh) — receivers open with the UI they serve';
+    byId('settings-open').addEventListener('click', showSettings);
 
     const state = await api.chooser();
     const savedCount = await refreshSaved();
+
+    // Straight to the last receiver, if that was asked for.
+    //
+    // After the saved list has been drawn rather than before it: this page is
+    // what the operator comes back to when they stop the receiver, and it
+    // should already be a chooser by then rather than a blank waiting to fill
+    // in.
+    //
+    // A link beats the setting, and asking the host is the only way to know in
+    // time. A link names a receiver somebody asked for *now*; the setting names
+    // the one they asked for last time. On a cold start the two race — the link
+    // may still be looking its receiver up in the directory — so "is a receiver
+    // open yet?" answers no and both would open, one over the top of the other.
+    // The host knows from the Intent or the opened URL, before anything has
+    // resolved. Hosts that cannot say answer false and keep the old behaviour.
+    const linked = api.linkPending ? await api.linkPending().catch(() => false) : false;
+    if (state.autoConnect && savedCount && !linked) {
+        const entries = await api.saved();
+        const last = entries.slice().sort(SORTS.recent)[0];
+        if (last && !entries.some((row) => row.running)) {
+            // Failures are the chooser's own: a receiver that has gone away
+            // since, or one that now wants a password, must leave somebody on
+            // this page reading why rather than looking at nothing.
+            const res = await api.connect(last);
+            if (!res.ok) showStatus(byId('add-status'), res.error, true);
+            else refreshSaved();
+        }
+    }
 
     // The directory unless there is a saved list to open on, which is the whole
     // point of having one — and the directory is where somebody with nothing

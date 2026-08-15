@@ -59,15 +59,52 @@ final class Prefs {
     private static final String SKIP_RADIO = "ubersdr.v2.radio";
     private static final String SKIP_PASSWORD = "ubersdr.v2.password";
 
-    private final SharedPreferences store;
+    /** Where a receiver's own snapshot lives, when settings are not shared. */
+    private static final String PER_RECEIVER = "prefs:";
 
-    Prefs(Context context) {
+    private final SharedPreferences store;
+    /** Which entry this receiver reads and writes — see {@link #keyFor}. */
+    private final String key;
+
+    Prefs(Context context, String scope, String instanceId) {
         this.store = context.getSharedPreferences(FILE, Context.MODE_PRIVATE);
+        this.key = keyFor(scope, instanceId);
+    }
+
+    /**
+     * One entry for everybody, or one per receiver — the operator's choice,
+     * made in the chooser's settings and carried in with the receiver.
+     *
+     * <p>Shared is the default and what most people want: arranging the panels
+     * once and finding them arranged on the next receiver is the whole reason
+     * these settings are the app's rather than the page's. Per receiver is for
+     * somebody who uses two very differently — a wideband monitor and an HF
+     * station — and wants each to keep its own shape.
+     *
+     * <p>The two stores never merge and neither is converted into the other:
+     * switching scope shows what that scope last held, which is one sentence to
+     * explain and is reversible.
+     */
+    private static String keyFor(String scope, String instanceId) {
+        if (!"receiver".equals(scope) || instanceId == null || instanceId.isEmpty()) return KEY;
+        return PER_RECEIVER + instanceId;
+    }
+
+    /**
+     * Throw away every stored snapshot, both scopes.
+     *
+     * <p>Both, deliberately: "reset settings" is pressed by somebody who wants
+     * the interface as it came out of the box, and leaving the other scope's
+     * copy behind would hand it back the moment they changed the switch — a
+     * reset that did not reset, discovered later.
+     */
+    static void resetAll(Context context) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().clear().apply();
     }
 
     /** The snapshot as JSON text, or "null" when nothing has been kept yet. */
     String snapshot() {
-        String saved = store.getString(KEY, null);
+        String saved = store.getString(key, null);
         return saved == null ? "null" : saved;
     }
 
@@ -86,7 +123,7 @@ final class Prefs {
                 Log.w(TAG, "shared setting " + key + " could not be kept", e);
             }
         }
-        store.edit().putString(KEY, clean.toString()).apply();
+        store.edit().putString(key, clean.toString()).apply();
     }
 
     private static boolean shared(String key) {

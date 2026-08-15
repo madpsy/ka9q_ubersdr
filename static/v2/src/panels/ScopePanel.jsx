@@ -107,6 +107,13 @@ export default function ScopePanel({ minimal }) {
     // would have whichever drew second ease twice as fast.
     const barLevel = useRef(newBarLevel());
     const barRulerRef = useRef(null);
+    // The bars get their own pointer state rather than sharing the waterfall's.
+    // With both views on screen there are two canvases and one pointer, and one
+    // shared record would put a tooltip over each of them — the one being
+    // pointed at, and a copy on the other.
+    const barHover = useRef(null);
+    const barTipAt = useRef(0);
+    const [barTip, setBarTip] = useState(null);
 
     const showScope = view !== 'waterfall';
     const showWf = view !== 'scope';
@@ -137,6 +144,10 @@ export default function ScopePanel({ minimal }) {
         }, (f) => {
             if (f.sampleRate !== rate) setRate(f.sampleRate);
             if (bars) {
+                // The frame the tooltip is answered from, kept whichever view
+                // drew it: the readings are the frame's, not the picture's.
+                last.current = { bins: f.bins, sampleRate: f.sampleRate, binCount: f.binCount, tuning };
+                refreshTip(barHover.current, last.current, barTipAt, setBarTip);
                 drawAudioBars({
                     canvas: scopeRef.current,
                     bins: f.bins,
@@ -186,6 +197,27 @@ export default function ScopePanel({ minimal }) {
 
     const tipText = (hz, db) => `${fmtHz(hz)} Hz | ${Number.isFinite(db) ? db.toFixed(1) : '-∞'} dB`;
 
+    // Cursor and peak, over whichever picture the pointer is on. Its own
+    // component because there are two of those now and the placement rules —
+    // flipping to the other side near the right edge so the box stays on the
+    // canvas — are worth having in one place rather than two.
+    const HoverTip = ({ tip: at }) => {
+        if (!at) return null;
+        return (
+            <div
+                className="spec-tip"
+                style={{
+                    left: at.x + (at.x > at.w - 150 ? -12 : 12),
+                    top: at.y + 10,
+                    transform: at.x > at.w - 150 ? 'translateX(-100%)' : undefined,
+                }}
+            >
+                <div>Cursor: {tipText(at.freq, at.db)}</div>
+                <div>Peak: {tipText(at.peakFreq, at.peakDb)}</div>
+            </div>
+        );
+    };
+
     return (
         <div className="stack">
             {/* Which of the two views is on is a setting like the rest, and the
@@ -194,13 +226,22 @@ export default function ScopePanel({ minimal }) {
             {!minimal && <Segmented options={VIEWS} value={view} onChange={setView} size="sm" />}
 
             {showScope && (
-                <div className="scope">
+                <div className={`scope${bars ? ' scope--hover' : ''}`}>
                     <canvas
                         ref={scopeRef}
                         className="scope__canvas scope__canvas--tap"
                         style={{ height: SCOPE_H }}
                         title={bars ? 'Spectrum bars — tap for the waveform' : 'Waveform — tap for spectrum bars'}
                         onClick={() => setShape(bars ? 'wave' : 'bars')}
+                        // Only the bars have a frequency under the pointer to
+                        // report. A waveform's x axis is time, and the same
+                        // readout over it would be answering a question nobody
+                        // asked of it.
+                        onPointerMove={bars ? (e) => {
+                            const r = e.currentTarget.getBoundingClientRect();
+                            barHover.current = { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width };
+                        } : undefined}
+                        onPointerLeave={bars ? () => { barHover.current = null; setBarTip(null); } : undefined}
                     />
                     {/* The frequencies the bars are standing on. Only with the
                         bars: a waveform's x axis is time, and a frequency scale
@@ -212,6 +253,7 @@ export default function ScopePanel({ minimal }) {
                             style={{ height: RULER_H }}
                         />
                     )}
+                    {bars && <HoverTip tip={barTip} />}
                 </div>
             )}
 
@@ -225,19 +267,7 @@ export default function ScopePanel({ minimal }) {
                         onPointerLeave={() => { hover.current = null; setTip(null); }}
                     />
                     <canvas ref={rulerRef} className="scope__canvas scope__ruler" style={{ height: RULER_H }} />
-                    {tip && (
-                        <div
-                            className="spec-tip"
-                            style={{
-                                left: tip.x + (tip.x > tip.w - 150 ? -12 : 12),
-                                top: tip.y + 10,
-                                transform: tip.x > tip.w - 150 ? 'translateX(-100%)' : undefined,
-                            }}
-                        >
-                            <div>Cursor: {tipText(tip.freq, tip.db)}</div>
-                            <div>Peak: {tipText(tip.peakFreq, tip.peakDb)}</div>
-                        </div>
-                    )}
+                    <HoverTip tip={tip} />
                 </div>
             )}
 

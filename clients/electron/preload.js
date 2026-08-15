@@ -22,6 +22,12 @@ contextBridge.exposeInMainWorld('ubersdr', {
     setSort: (value) => ipcRenderer.invoke('instances:set-sort', value),
     // Which tab was open, how the directory was sorted, and a home position the
     // operator typed in — remembered across launches.
+    // Settings, which the chooser's own page offers — see its cog. No
+    // `openAppSettings` here: a desktop has no per-app settings page to send
+    // anybody to, and appInfo says so rather than this failing when pressed.
+    linkPending: () => ipcRenderer.invoke('links:pending'),
+    resetPrefs: () => ipcRenderer.invoke('settings:reset-prefs'),
+    clearReceivers: () => ipcRenderer.invoke('settings:clear-receivers'),
     chooser: () => ipcRenderer.invoke('chooser:state'),
     setChooser: (patch) => ipcRenderer.invoke('chooser:set-state', patch),
     // Where to draw "you", and what the distance column measures from: the

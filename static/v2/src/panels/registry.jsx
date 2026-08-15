@@ -40,13 +40,16 @@
 //                { w, h, anchor }, the anchor being resolved against the
 //                floating layer once it has measured — see FloatingLayer.
 //   requires     optional (serverInfo, env) => bool; false hides the panel
-//                entirely — see usePanelApplies() at the foot of this file
+//                entirely — see usePanelApplies() at the foot of this file.
+//                A host can also hide any panel by id, without a predicate
+//                here: see lib/hostPanels.js
 //   Component    the panel body
 
 import React, { useCallback } from '../react.js';
 import Icon from '../components/icons.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
+import { hiddenByHost } from '../lib/hostPanels.js';
 
 import MultipadPanel from './MultipadPanel.jsx';
 import ReceiverPanel from './ReceiverPanel.jsx';
@@ -893,7 +896,10 @@ export function usePanelApplies() {
     const { serverInfo } = useRadio();
     const extensions = useExtensions();
     return useCallback(
-        (p) => !p.requires || p.requires(serverInfo, { extensions }),
+        // The host's list first, and it is not a question about this receiver:
+        // a client that does not want a panel does not want it whatever the
+        // receiver offers. See lib/hostPanels.js.
+        (p) => !hiddenByHost(p.id) && (!p.requires || p.requires(serverInfo, { extensions })),
         [serverInfo, extensions],
     );
 }

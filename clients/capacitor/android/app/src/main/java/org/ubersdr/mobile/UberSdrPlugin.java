@@ -43,6 +43,9 @@ public class UberSdrPlugin extends Plugin {
 
     // --- deep links ----------------------------------------------------------
 
+    /** Whether a ubersdr:// link started or reached this run. */
+    private boolean linkSeen = false;
+
     /**
      * A followed ubersdr:// link, on its way to src/deeplink.js.
      *
@@ -74,9 +77,32 @@ public class UberSdrPlugin extends Plugin {
         // from being read as a second tap.
         intent.setData(null);
 
+        // Remembered for the chooser, which has an "open the last receiver on
+        // launch" setting and must stand aside for a link: the link names a
+        // receiver somebody asked for now, where the setting names one they
+        // asked for last time. Never cleared — the setting it guards is only
+        // ever read once, as the page starts.
+        linkSeen = true;
+
         JSObject data = new JSObject();
         data.put("url", uri.toString());
         notifyListeners("deepLink", data, true);
+    }
+
+    /**
+     * Has a link been followed this run?
+     *
+     * <p>Answered from the Intent rather than from whether the page has
+     * received the event yet, which is the whole point: on a cold start the two
+     * race, and a chooser that asked "is a receiver open?" would find the
+     * answer no while a directory lookup was still in flight and open a
+     * different one.
+     */
+    @PluginMethod
+    public void linkPending(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("pending", linkSeen);
+        call.resolve(out);
     }
 
     // --- HTTP ----------------------------------------------------------------
@@ -236,6 +262,10 @@ public class UberSdrPlugin extends Plugin {
         intent.putExtra(ReceiverActivity.EXTRA_LABEL, label);
         intent.putExtra(ReceiverActivity.EXTRA_INSECURE, insecure);
         intent.putExtra(ReceiverActivity.EXTRA_PRODUCT, product);
+        // Whose settings this receiver reads and writes. Decided in the
+        // chooser and carried in, because the page is seeded before its first
+        // script runs and there is nothing to ask by then.
+        intent.putExtra(ReceiverActivity.EXTRA_PREFS_SCOPE, call.getString("prefsScope"));
         getActivity().startActivity(intent);
 
         JSObject out = new JSObject();
@@ -250,6 +280,42 @@ public class UberSdrPlugin extends Plugin {
         // receiver ends rather than two that must agree.
         ReceiverActivity.finishCurrent();
         call.resolve();
+    }
+
+    /**
+     * Throw away the interface settings the receivers share.
+     *
+     * <p>Only what this app stored on the page's behalf — the v2 snapshot in
+     * Prefs. Not the saved receivers, not their passwords, and not what a
+     * receiver keeps in its own localStorage: those belong to the chooser and
+     * to the page, and a "reset settings" that quietly took the receiver list
+     * with it would be a button nobody could risk pressing.
+     */
+    @PluginMethod
+    public void resetPrefs(PluginCall call) {
+        Prefs.resetAll(getContext());
+        call.resolve();
+    }
+
+    /**
+     * This app's page in Android's settings.
+     *
+     * <p>Notifications are the reason it exists: a refusal is remembered, and
+     * from Android 13 a second request is not even shown — so an operator who
+     * said no has no way back from inside the app, and no way of knowing that
+     * is where the answer lives.
+     */
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(android.net.Uri.fromParts("package", getContext().getPackageName(), null));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("no settings page on this device", e);
+        }
     }
 
     @PluginMethod

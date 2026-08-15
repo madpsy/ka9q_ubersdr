@@ -59,6 +59,8 @@ public class ReceiverActivity extends Activity {
     static final String EXTRA_UPSTREAM = "upstream";
     static final String EXTRA_INSECURE = "insecure";
     static final String EXTRA_PRODUCT = "product";
+    /** "shared" or "receiver" — see Prefs. Chosen in the chooser's settings. */
+    static final String EXTRA_PREFS_SCOPE = "prefsScope";
     static final String EXTRA_NOTICE_TAG = "noticeTag";
 
     // The one open receiver, so the chooser's Disconnect can end it. Weak
@@ -76,6 +78,21 @@ public class ReceiverActivity extends Activity {
     // The instance's own hostname. Kept because a link to it belongs in this
     // WebView — v1's popups are opened by absolute URL — while a link anywhere
     // else belongs in a browser. See openExternally.
+    /**
+     * Panels this client does not want — ids from
+     * static/v2/src/panels/registry.jsx. See static/v2/src/lib/hostPanels.js.
+     *
+     * <p>All three are controls for hardware attached to <em>this</em> machine,
+     * and a phone is not that machine. Shortcuts is a list of keyboard bindings
+     * on a device with no keyboard; Radio control drives a transceiver over
+     * hamlib/rigctl, and SDR control a local SDR — both of which reach the
+     * operator's shack over a serial port or a daemon this app cannot see.
+     * Shown here they would be panels that can only fail.
+     *
+     * <p>The iOS client carries the same list, for the same reasons.
+     */
+    private static final String HIDDEN_PANELS = "[\"shortcuts\",\"radiocontrol\",\"sdrcontrol\"]";
+
     private final AppLoad appLoad = new AppLoad();
     private String upstreamHost;
     /** Scheme, host and port — what a popup's loopback URL is rewritten to. */
@@ -112,7 +129,6 @@ public class ReceiverActivity extends Activity {
         super.onCreate(savedInstanceState);
         current = new java.lang.ref.WeakReference<>(this);
 
-        prefs = new Prefs(this);
         // Started now because the engine takes a moment to come up, and the
         // page asks for voices as soon as the Announcements panel is drawn.
         // When it is ready the list is pushed, which is what fires the page's
@@ -135,6 +151,9 @@ public class ReceiverActivity extends Activity {
         } catch (Exception e) {
             Log.w(TAG, "could not read the instance host from " + upstream, e);
         }
+        // After the intent has been read, which is where the scope and the
+        // instance id both come from.
+        prefs = new Prefs(this, intent.getStringExtra(EXTRA_PREFS_SCOPE), instanceId);
         if (intent.getStringExtra(EXTRA_LABEL) != null) label = intent.getStringExtra(EXTRA_LABEL);
         setTitle(label);
 
@@ -664,6 +683,7 @@ public class ReceiverActivity extends Activity {
           .append(JSONObject.quote(upstreamOrigin == null ? "" : upstreamOrigin))
           .append(",autoStart:true,mediaSession:true,notifications:")
           .append(JSONObject.quote(notifications))
+          .append(",hidePanels:").append(HIDDEN_PANELS)
           .append("};}catch(e){}");
         if (password != null && !password.isEmpty()) {
             sb.append("try{sessionStorage.setItem('ubersdr.v2.password',")

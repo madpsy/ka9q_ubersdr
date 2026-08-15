@@ -29,6 +29,10 @@
             <h1>UberSDR</h1>
             <span class="tagline">choose a receiver</span>
         </div>
+        <!-- Settings, at the far end of the header rather than in a tab: none
+             of it is about finding a receiver, and all of it is about what
+             happens after you have. -->
+        <button id="settings-open" class="ghost icon-btn" title="Settings" aria-label="Settings">⚙</button>
     </header>
 
     <!-- Every panel's Connect reports here, not only the Custom tab's, so it
@@ -129,8 +133,6 @@
             </div>
         </section>
     </main>
-
-    <footer id="footer"></footer>
 
     <script src="chooser.js"></script>
 </body>

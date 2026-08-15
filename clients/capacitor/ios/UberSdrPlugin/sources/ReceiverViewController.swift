@@ -24,6 +24,11 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// What the OS has already decided about notifications: "granted",
     /// "denied" or "default", which is the vocabulary receiver.js reads.
     private let notificationState: String
+    /// "shared" or "receiver": whose settings this receiver reads and writes.
+    /// Decided in the chooser and handed over with the receiver, because the
+    /// page must be seeded before its first script runs and there is no asking
+    /// anything by then.
+    private let prefsScope: String?
 
     /// Raised when this screen goes away, whichever way it went — v2's own
     /// power button, or the operator swiping back. `api.js` listens for it.
@@ -33,7 +38,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     private var host: HostChannel?
 
     init(instanceId: String, label: String, proxy: LocalProxy, product: String,
-         password: String?, notificationState: String) {
+         password: String?, notificationState: String, prefsScope: String?) {
+        self.prefsScope = prefsScope
         self.instanceId = instanceId
         self.label = label
         self.proxy = proxy
@@ -146,7 +152,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
 
-        host = HostChannel(webView: webView, instanceId: instanceId, label: label)
+        host = HostChannel(webView: webView, instanceId: instanceId, label: label,
+                           prefsScope: prefsScope)
         host?.onStopped = { [weak self] in
             // v2's own power button is the way back on a phone: there is no
             // window to close and no control was added to the interface to do
@@ -371,7 +378,12 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         // UNUserNotificationCenter drops what it is not authorised to show
         // without reporting anything.
         js += "notifications:\(quote(notificationState)),"
-        js += "chat:false"
+        js += "chat:false,"
+        // Panels this client does not want, whatever the receiver offers — see
+        // static/v2/src/lib/hostPanels.js. Hiding one more is a name in the
+        // list below and nothing else: no change to v2, no new flag, and the
+        // Android client has the same list for the same reason.
+        js += "hidePanels:\(Self.hiddenPanels)"
         js += "};}catch(e){}"
         if let password = password, !password.isEmpty {
             js += "try{sessionStorage.setItem('ubersdr.v2.password',\(quote(password)));}catch(e){}"
@@ -384,7 +396,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         // in how the shared ones are set. `prefsSeeded` tells receiver.js
         // whether there was a snapshot at all, because the first receiver ever
         // opened is the one that supplies it.
-        js += "try{var s=\(HostChannel.prefsLiteral());"
+        js += "try{var s=\(HostChannel.prefsLiteral(scope: prefsScope, instanceId: instanceId));"
         js += "window.ubersdrDesktop.prefsSeeded=!!s;"
         js += "if(s){for(var k in s){try{localStorage.setItem(k,s[k]);}catch(e){}}}"
         js += "}catch(e){}"
@@ -423,6 +435,20 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// Returns true as the real one does: v2 does not read the answer, but a
     /// shim that reports failure invites a caller to conclude the feature is
     /// missing when it is not.
+    /// Panels hidden on this platform — ids from static/v2/src/panels/registry.jsx.
+    ///
+    /// All three are controls for hardware attached to *this* machine, and a
+    /// phone is not that machine. Shortcuts is a list of keyboard bindings on a
+    /// device with no keyboard; Radio control drives a transceiver over
+    /// hamlib/rigctl, and SDR control a local SDR — both of which reach the
+    /// operator's shack over a serial port or a daemon this app cannot see.
+    /// Shown here they would be panels that can only fail.
+    ///
+    /// Chat is not in the list: it is switched off by its own flag above,
+    /// because "this client has no chat" is a statement about what the client
+    /// *can do*, where this list is what it would rather not show.
+    private static let hiddenPanels = #"["shortcuts","radiocontrol","sdrcontrol"]"#
+
     private static let vibrateShim = """
     (function(){
       try {

@@ -52,6 +52,8 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
 
     private weak var webView: WKWebView?
     private let instanceId: String
+    /// "shared" or "receiver" — which store this receiver's settings go to.
+    private let prefsScope: String?
     private let receiverLabel: String
 
     /// Raised when the page says the receiver has stopped — v2's own power
@@ -65,7 +67,8 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     private var nowPlaying: [String: Any] = [:]
     private var haveRemoteCommands = false
 
-    init(webView: WKWebView, instanceId: String, label: String) {
+    init(webView: WKWebView, instanceId: String, label: String, prefsScope: String?) {
+        self.prefsScope = prefsScope
         self.webView = webView
         self.instanceId = instanceId
         self.receiverLabel = label
@@ -453,11 +456,43 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         // look per-instance rather than shared.
         guard let data = try? JSONSerialization.data(withJSONObject: clean),
               let json = String(data: data, encoding: .utf8) else { return }
-        UserDefaults.standard.set(json, forKey: HostChannel.prefsKey)
+        UserDefaults.standard.set(json, forKey: Self.prefsKey(scope: prefsScope, instanceId: instanceId))
     }
 
-    /// Where the snapshot lives. One key, holding JSON text.
-    static let prefsKey = "ubersdr.shared.prefs"
+    /// Where a snapshot lives.
+    ///
+    /// One key for everybody, or one key per receiver — the operator's choice,
+    /// made in the chooser's settings and carried in with the receiver (see
+    /// UberSdrPlugin.openReceiver). Shared is the default and the one most
+    /// people want: arranging the panels once and finding them arranged on the
+    /// next receiver is the whole point of the settings being the app's rather
+    /// than the page's. Per receiver is for somebody who uses two very
+    /// differently — a wideband monitor and an HF station — and wants each to
+    /// keep its own shape.
+    ///
+    /// The two stores do not merge and are not converted into one another:
+    /// switching scope shows you what that scope last held, which is a rule
+    /// that can be explained in one sentence and is reversible.
+    static func prefsKey(scope: String?, instanceId: String) -> String {
+        scope == "receiver" ? "\(perReceiverPrefix)\(instanceId)" : sharedPrefsKey
+    }
+
+    static let sharedPrefsKey = "ubersdr.shared.prefs"
+    static let perReceiverPrefix = "ubersdr.prefs."
+
+    /// Throw away every stored snapshot, both scopes.
+    ///
+    /// Both, deliberately: "reset settings" is pressed by somebody who wants
+    /// the interface back as it was out of the box, and leaving the other
+    /// scope's copy behind would hand it straight back the moment they changed
+    /// the switch — a reset that did not reset, discovered later.
+    static func resetPrefs() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: sharedPrefsKey)
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(perReceiverPrefix) {
+            defaults.removeObject(forKey: key)
+        }
+    }
 
     private static func isShared(_ key: String) -> Bool {
         key.hasPrefix("ubersdr.v2.")
@@ -466,13 +501,13 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
             && key != "ubersdr.v2.password"
     }
 
-    static func prefsLiteral() -> String {
+    static func prefsLiteral(scope: String?, instanceId: String) -> String {
         // The stored text straight through — it is already the JSON object
         // literal the seed script needs, exactly as Prefs.snapshot() is on
         // Android. "null" when nothing has been kept yet, which is what tells
         // receiver.js that this receiver is the template rather than one that
         // arrived after somebody had already arranged things.
-        guard let json = UserDefaults.standard.string(forKey: prefsKey),
+        guard let json = UserDefaults.standard.string(forKey: prefsKey(scope: scope, instanceId: instanceId)),
               !json.isEmpty, json != "{}" else { return "null" }
         return json
     }

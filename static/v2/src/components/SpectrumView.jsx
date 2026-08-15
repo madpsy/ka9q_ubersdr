@@ -1264,7 +1264,7 @@ export default function SpectrumView() {
         let timer = 0;
         let lastRow = 0;
 
-        // Debug only: how long to wait between frames, 0 for the display's rate.
+        // How long a frame should last, 0 for the display's own rate.
         const capMs = display.maxFps > 0
             ? 1000 / display.maxFps
             : 0;
@@ -1283,9 +1283,41 @@ export default function SpectrumView() {
         // Still an animation frame at the end of the wait, rather than drawing
         // straight from the timer: that is what keeps the paint on a vsync
         // boundary, and what still stops the loop dead in a hidden tab.
+        // When the next frame is due, on the clock rather than as a delay.
+        //
+        // Waiting `capMs` from the moment the last one started is the obvious
+        // version and it is not what was asked for: the wait ends, an animation
+        // frame is requested, and the browser paints at its *next* vsync — so
+        // the real period is capMs plus however far away that was, up to a whole
+        // frame of the display. Asking for 30 on a 60 Hz panel gave a period
+        // wandering between 33 and 50 ms, which is 24 a second on average and
+        // visibly uneven, because each frame landed two or three vsyncs after
+        // the last rather than consistently two.
+        //
+        // So the target is absolute — each frame is due capMs after the one
+        // before *was due*, not after it happened — and the timer wakes a few
+        // milliseconds early so the request is already in when that vsync
+        // arrives. The result lands on a vsync boundary near the target and
+        // stays there: 30 asked for is 30 delivered, evenly, and the saving is
+        // untouched because between ticks there is still no outstanding frame
+        // request at all.
+        //
+        // Waking early cannot overshoot the cap on average: `due` advances by
+        // exactly capMs whatever the paint did, so a frame that landed early
+        // makes the next wait longer by the same amount.
+        const SLACK_MS = 6;
+        let due = 0;
+
         const arm = () => {
-            if (capMs > 0) timer = setTimeout(() => { raf = requestAnimationFrame(loop); }, capMs);
-            else raf = requestAnimationFrame(loop);
+            if (capMs <= 0) { raf = requestAnimationFrame(loop); return; }
+            const now = performance.now();
+            // First frame, or so far behind that catching up would mean a burst:
+            // start counting again from here rather than paying back a debt the
+            // machine has already shown it cannot afford.
+            if (!due || now - due > capMs * 4) due = now;
+            due += capMs;
+            timer = setTimeout(() => { raf = requestAnimationFrame(loop); },
+                Math.max(0, due - now - SLACK_MS));
         };
 
         const loop = () => {

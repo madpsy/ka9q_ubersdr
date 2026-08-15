@@ -614,8 +614,18 @@ export default function SignalPanel({ minimal }) {
                         its own. */}
                     <div className="sparkline">
                         <canvas ref={bufRef} />
-                        <span className="sparkline__label">
-                            {`Buffer ${(m.queuedSec * 1000).toFixed(0)} ms`}
+                        {/* The queue is a number that changes several times a
+                            second, and the caption is anchored by its right
+                            edge — so a reading going from 40 to 100 dragged
+                            every word before it sideways. The digits get a
+                            field of their own, wide enough for the three they
+                            can ever need and figures that are all one width, so
+                            the words either side hold still while the number
+                            underneath them changes. */}
+                        <span className="sparkline__label sparkline__label--bottom">
+                            {'Buffer '}
+                            <span className="sparkline__value">{(m.queuedSec * 1000).toFixed(0)}</span>
+                            {' ms'}
                             {m.underruns > 0 && ` · ${m.underruns} drop${m.underruns === 1 ? '' : 's'}`}
                             {', last 10 s'}
                         </span>

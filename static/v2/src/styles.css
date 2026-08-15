@@ -3205,6 +3205,25 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 
+/* Along the bottom instead, for a chart whose trace lives at the top of its
+   box. The buffer is drawn against a fixed ceiling — the queue the operator
+   asked for — so a healthy trace sits just under that line, which is exactly
+   where a top-right caption is. The SNR trace is scaled to its own data and
+   wanders, so it keeps the top corner. */
+.sparkline__label--bottom { top: auto; bottom: 0; }
+
+/* A live number in a caption that is pinned by its right edge. Three figures
+   covers any queue worth charting — a second of buffer is 1000 ms and the
+   chart's own ceiling is a fraction of that — and `tabular-nums` makes every
+   digit the same width, so 111 and 40 occupy the same field and the words
+   around them do not shuffle as it changes. */
+.sparkline__value {
+    display: inline-block;
+    min-width: 3ch;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Cursor/peak readout over the spectrum, the waterfall and the audio scope —
    v1 shows the same two lines on all of them. */
 .spec-tip {

@@ -426,7 +426,13 @@ export default function SignalPanel({ minimal }) {
         const h = history.current;
         h.push({ t: performance.now(), v: m.snr == null ? null : m.snr });
         trimBefore(h, performance.now() - SPAN_MS - KEEP_MS);
-    }, [m.snr]);
+        // Keyed on the whole snapshot rather than on the reading, so a sample
+        // is taken on every tick of the meter clock and not only when the
+        // number moves. A steady signal is a reading like any other: keyed on
+        // the value, a channel that sat still for ten seconds would have its
+        // last point scroll off the left with nothing behind it, and the chart
+        // would empty out exactly when it was reporting that all was well.
+    }, [m]);
 
     useEffect(() => {
         const h = bufHistory.current;
@@ -438,7 +444,8 @@ export default function SignalPanel({ minimal }) {
         seenUnderruns.current = total;
         h.push({ t: performance.now(), v: Math.max(0, (m.queuedSec || 0) * 1000), drops });
         trimBefore(h, performance.now() - SPAN_MS - KEEP_MS);
-    }, [m.queuedSec, m.underruns]);
+        // On the meter clock, as above.
+    }, [m]);
 
     // One loop for both charts: they show the same ten seconds on the same
     // clock, and two loops would be two wake-ups a frame for one panel.

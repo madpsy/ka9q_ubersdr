@@ -275,11 +275,18 @@ function SquelchControl({ minimal }) {
 // ride — and drops the numeric readouts, the SNR trace and the buffer counters.
 // See the registry's `minimal`.
 export default function SignalPanel({ minimal }) {
-    const { running } = useRadio();
+    const { running, audio } = useRadio();
     const display = useDisplay();
     const m = useMeters(15);
     const canvasRef = useRef(null);
     const history = useRef([]);
+    // The buffer's own trace, sampled on the same clock and drawn the same way.
+    // Each entry carries the queue depth and how many dropouts happened in that
+    // sample — `underruns` is a running total, so what matters for a chart is
+    // the *increase*, which is a moment rather than a level.
+    const bufRef = useRef(null);
+    const bufHistory = useRef([]);
+    const seenUnderruns = useRef(0);
 
     useEffect(() => {
         const h = history.current;
@@ -329,6 +336,69 @@ export default function SignalPanel({ minimal }) {
             ctx.stroke();
         }
     }, [m.snr]);
+
+    // Buffer depth over the same ten seconds, with every dropout marked.
+    //
+    // Two numbers that only mean something together: a queue reading of 40 ms
+    // is fine on its own and alarming if the audio broke twice while it was
+    // there. As counters they could only be read one at a time and neither
+    // said *when* — a dropout an hour ago and one just now were the same "3".
+    useEffect(() => {
+        const h = bufHistory.current;
+        const total = Number.isFinite(m.underruns) ? m.underruns : 0;
+        // Counters only ever climb, except across a reconnect where the player
+        // starts again from zero — treated as no dropouts rather than as a
+        // negative burst.
+        const drops = total > seenUnderruns.current ? total - seenUnderruns.current : 0;
+        seenUnderruns.current = total;
+        h.push({ ms: Math.max(0, (m.queuedSec || 0) * 1000), drops });
+        if (h.length > HISTORY) h.shift();
+
+        const c = bufRef.current;
+        if (!c) return;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = c.clientWidth * dpr;
+        const ht = c.clientHeight * dpr;
+        if (c.width !== w || c.height !== ht) { c.width = w; c.height = ht; }
+        const ctx = c.getContext('2d');
+        ctx.clearRect(0, 0, w, ht);
+        if (h.length < 2) return;
+
+        // The scale is the operator's own ceiling, not the data: this chart is
+        // read against "what did I ask for", and a trace that renormalised as
+        // the queue drained would hide exactly the drain worth seeing. A little
+        // headroom above it, because the queue is allowed to sit at the limit.
+        const ceiling = Math.max(50, (audio.bufferSec || 0.2) * 1000);
+        const hi = Math.max(ceiling * 1.15, ...h.map((p) => p.ms));
+        const x = (i) => (i / (HISTORY - 1)) * w;
+        const y = (v) => ht - (Math.max(0, Math.min(hi, v)) / hi) * ht;
+
+        // Dropouts first, so the trace is drawn over them rather than lost
+        // behind. Full height and red: this is the failure the whole panel is
+        // watching for, and it is a moment, not a level.
+        ctx.fillStyle = cssVar('--bad', '#f2646a');
+        for (let i = 0; i < h.length; i++) {
+            if (!h[i].drops) continue;
+            ctx.fillRect(Math.round(x(i)) - dpr / 2, 0, Math.max(1, 1.5 * dpr), ht);
+        }
+
+        // What was asked for, as a line to read the trace against.
+        ctx.strokeStyle = cssVar('--border-strong', 'rgba(255,255,255,0.18)');
+        ctx.lineWidth = dpr;
+        ctx.setLineDash([3 * dpr, 3 * dpr]);
+        ctx.beginPath();
+        ctx.moveTo(0, y(ceiling));
+        ctx.lineTo(w, y(ceiling));
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.strokeStyle = cssVar('--accent', '#4aa8ff');
+        ctx.lineWidth = 1.6 * dpr;
+        ctx.beginPath();
+        ctx.moveTo(x(0), y(h[0].ms));
+        for (let i = 1; i < h.length; i++) ctx.lineTo(x(i), y(h[i].ms));
+        ctx.stroke();
+    }, [m.queuedSec, m.underruns, audio.bufferSec]);
 
     const power = m.basebandPower;
     const snr = m.snr;
@@ -477,9 +547,17 @@ export default function SignalPanel({ minimal }) {
                         <span className="sparkline__label">SNR, last 10 s</span>
                     </div>
 
-                    <div className="readout-grid">
-                        <Readout label="Buffer" value={(m.queuedSec * 1000).toFixed(0)} unit="ms" tone={m.queuedSec < 0.05 ? 'weak' : 'ok'} />
-                        <Readout label="Underruns" value={m.underruns} />
+                    {/* The two counters that used to be here, as one picture.
+                        Their current values stay in the label: the chart says
+                        when and the label says what, and neither is any use on
+                        its own. */}
+                    <div className="sparkline">
+                        <canvas ref={bufRef} />
+                        <span className="sparkline__label">
+                            {`Buffer ${(m.queuedSec * 1000).toFixed(0)} ms`}
+                            {m.underruns > 0 && ` · ${m.underruns} drop${m.underruns === 1 ? '' : 's'}`}
+                            {', last 10 s'}
+                        </span>
                     </div>
 
                     {!running && <div className="note note--tight">Meters are live once the receiver is started.</div>}

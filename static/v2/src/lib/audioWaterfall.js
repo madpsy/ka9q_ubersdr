@@ -73,6 +73,58 @@ export function cssVar(name, fallback) {
     return v || fallback;
 }
 
+// The bottom of the manual scale, and how much of one a slider may ask for.
+// -120 is below the noise of any receiver worth listening to; -30 is as high a
+// floor as leaves room to see anything at all above it.
+export const SCOPE_FLOOR_MIN = -120;
+export const SCOPE_FLOOR_MAX = -30;
+export const SCOPE_FLOOR_DEFAULT = -90;
+
+/**
+ * The dB window a frame is drawn in: where the bottom of the scale sits, and
+ * how many dB it covers.
+ *
+ * Shared by the waterfall and the bars so the two cannot disagree about how
+ * loud is loud — they are two views of one thing, and a colour that means -60
+ * in one of them had better mean -60 in the other.
+ *
+ * **Auto** follows the frame: the floor eases to just under the quietest bin
+ * and the ceiling to just over the loudest, bounded so that the gate closing
+ * does not stretch a hundred dB of dither across the whole palette. It is the
+ * right default and it has one cost, which is that it is *relative* — quiet
+ * audio is magnified until it fills the display exactly as loud audio does, so
+ * the picture cannot tell you which you have.
+ *
+ * **Manual** pins the floor where the operator put it and puts the ceiling at
+ * full scale, which makes the display absolute: a quiet signal reads as low
+ * because it is low. That is the whole reason for the switch.
+ */
+export function levelWindow(bins, start, count, level, floorDb) {
+    if (Number.isFinite(floorDb)) {
+        const floor = Math.min(SCOPE_FLOOR_MAX, Math.max(SCOPE_FLOOR_MIN, floorDb));
+        // Up to 0 dBFS, which is what "full scale" means for audio that has
+        // already been through the volume control. Never zero-width, however
+        // the floor is clamped.
+        return { floor, range: Math.max(6, -floor) };
+    }
+
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = start; i < start + count; i++) {
+        const v = bins[i];
+        if (!Number.isFinite(v)) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+    }
+    if (Number.isFinite(min)) {
+        const targetFloor = Math.max(WF_FLOOR_DB, min - 3);
+        const targetCeil = Math.max(targetFloor + WF_MIN_SPAN_DB, max + 5);
+        level.floor += (targetFloor - level.floor) * 0.05;
+        level.ceil += (targetCeil - level.ceil) * 0.05;
+    }
+    return { floor: level.floor, range: Math.max(WF_MIN_SPAN_DB, level.ceil - level.floor) };
+}
+
 export function newRing() {
     return { canvas: null, ctx: null, w: 0, h: 0, head: 0, at: 0, level: { floor: -100, ceil: -30 } };
 }
@@ -84,7 +136,7 @@ export function newRing() {
  * several notches can be told apart at a glance.
  */
 export function drawAudioWaterfall({
-    canvas, ring, bins, binCount, sampleRate, tuning, palette, contrast, marks,
+    canvas, ring, bins, binCount, sampleRate, tuning, palette, contrast, marks, floorDb,
     rowsPerSec = DEFAULT_ROWS_PER_SEC,
 }) {
     if (!canvas || !bins || bins.length !== binCount) return;
@@ -108,25 +160,7 @@ export function drawAudioWaterfall({
         tuning.bandwidthLow, tuning.bandwidthHigh, sampleRate, binCount,
     );
 
-    // Auto level, eased and bounded: with the gate closed the audio is a
-    // hundred dB down, and an unbounded range would stretch that noise across
-    // the whole palette.
-    const level = ring.level;
-    let min = Infinity;
-    let max = -Infinity;
-    for (let i = start; i < start + count; i++) {
-        const v = bins[i];
-        if (!Number.isFinite(v)) continue;
-        if (v < min) min = v;
-        if (v > max) max = v;
-    }
-    if (Number.isFinite(min)) {
-        const targetFloor = Math.max(WF_FLOOR_DB, min - 3);
-        const targetCeil = Math.max(targetFloor + WF_MIN_SPAN_DB, max + 5);
-        level.floor += (targetFloor - level.floor) * 0.05;
-        level.ceil += (targetCeil - level.ceil) * 0.05;
-    }
-    const range = Math.max(WF_MIN_SPAN_DB, level.ceil - level.floor);
+    const { floor, range } = levelWindow(bins, start, count, ring.level, floorDb);
 
     // Frames arrive as fast as the analyser produces them; this decides how many
     // of them become history.
@@ -143,7 +177,7 @@ export function drawAudioWaterfall({
             const hi = Math.max(lo + 1, start + Math.floor(((x + 1) / w) * count));
             let v = -Infinity;
             for (let i = lo; i < hi; i++) if (bins[i] > v) v = bins[i];
-            let t = (v - level.floor) / range;
+            let t = (v - floor) / range;
             t = t < 0 ? 0 : t > 1 ? 1 : t;
             if (contrast && contrast !== 1) t = Math.pow(t, 1 / contrast);
             const idx = (t * 255) | 0;
@@ -222,7 +256,7 @@ export function newBarLevel() {
  * arrives, and the eye reports that as everything having got louder.
  */
 export function drawAudioBars({
-    canvas, bins, binCount, sampleRate, tuning, palette, contrast, level,
+    canvas, bins, binCount, sampleRate, tuning, palette, contrast, level, floorDb,
 }) {
     if (!canvas || !bins || bins.length !== binCount) return;
     const { w, h, dpr } = sizedCanvas(canvas);
@@ -235,24 +269,7 @@ export function drawAudioBars({
     );
     if (!(count > 0)) return;
 
-    // Auto level, eased and bounded, exactly as the waterfall does it: with the
-    // gate closed the audio is a hundred dB down, and an unbounded range would
-    // stretch that noise over the whole display.
-    let min = Infinity;
-    let max = -Infinity;
-    for (let i = start; i < start + count; i++) {
-        const v = bins[i];
-        if (!Number.isFinite(v)) continue;
-        if (v < min) min = v;
-        if (v > max) max = v;
-    }
-    if (Number.isFinite(min)) {
-        const targetFloor = Math.max(WF_FLOOR_DB, min - 3);
-        const targetCeil = Math.max(targetFloor + WF_MIN_SPAN_DB, max + 5);
-        level.floor += (targetFloor - level.floor) * 0.05;
-        level.ceil += (targetCeil - level.ceil) * 0.05;
-    }
-    const range = Math.max(WF_MIN_SPAN_DB, level.ceil - level.floor);
+    const { floor, range } = levelWindow(bins, start, count, level, floorDb);
 
     // Bar width in device pixels, from a target in CSS pixels. Whole pixels, or
     // neighbouring bars round differently and the row develops a moiré of gaps
@@ -279,7 +296,7 @@ export function drawAudioBars({
         const hi = Math.max(lo + 1, start + Math.floor(((b + 1) / bars) * count));
         let v = -Infinity;
         for (let i = lo; i < hi; i++) if (bins[i] > v) v = bins[i];
-        let t = (v - level.floor) / range;
+        let t = (v - floor) / range;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         if (contrast && contrast !== 1) t = Math.pow(t, 1 / contrast);
         // A floor of one pixel: a bar of no height reads as a gap in the

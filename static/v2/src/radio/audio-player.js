@@ -261,6 +261,30 @@ export class AudioPlayer extends Emitter {
     }
 
     _createContext(sampleRate) {
+        // Nothing from the last context survives into this one.
+        //
+        // The chain is nodes, and nodes belong to the AudioContext that made
+        // them. Left set, the setFilters below finds a chain whose *shape*
+        // matches the spec it is being given — because it is the same spec —
+        // and takes the retune path: it writes the operator's settings into
+        // nodes belonging to a context that has been closed, and never builds a
+        // chain in this one. The audio then plays unfiltered through the direct
+        // head→gain connection while every switch in the Audio filters panel
+        // still reads as on.
+        //
+        // That is not a rare path. `start()` opens a context at 48 kHz because
+        // no stream has arrived to say otherwise, and the first packet at the
+        // receiver's own rate — 12 kHz on SSB — rebuilds it immediately. So a
+        // receiver opened with saved filters came up with none of them working
+        // until each was switched off and on again, which changes the shape key
+        // and forces the rebuild this should have done.
+        this.chain = null;
+        clearInterval(this.gateTimer);
+        this.gateTimer = null;
+        clearInterval(this.makeupTimer);
+        this.makeupTimer = null;
+        this.makeupDb = 0;
+
         const Ctx = window.AudioContext || window.webkitAudioContext;
         this.requestedRate = sampleRate;
         try {

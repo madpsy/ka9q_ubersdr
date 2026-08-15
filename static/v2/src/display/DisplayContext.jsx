@@ -225,9 +225,20 @@ export const DEFAULTS = {
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope
-    // What the scope canvas draws: 'wave' (the oscilloscope) or 'bars' (the
-    // spectrum as a bar meter). Tapping the canvas swaps them — see ScopePanel.
-    scopeShape: 'wave',
+    // What the scope canvas draws: 'bars' (the spectrum as a bar meter) or
+    // 'wave' (the oscilloscope). Tapping the canvas swaps them — see
+    // ScopePanel.
+    //
+    // Bars by default because they answer the question most people open this
+    // panel with — what is in the audio — where the waveform answers a narrower
+    // one that mostly matters for CW and carriers. The waveform is one tap
+    // away and the choice is remembered.
+    scopeShape: 'bars',
+    // Whether the audio scope and waterfall find their own dB window or use a
+    // floor the operator set. Auto by default: it is right until the question
+    // is "how quiet is this", which is what the manual scale answers.
+    scopeAuto: true,
+    scopeFloor: -90,        // bottom of the manual scale, in dBFS
     scopeContrast: 1.0,     // gamma on the audio waterfall's colour mapping
     // Signal panel meters: 'bar' or the analogue 'needle'. Clicking a meter
     // switches both — see SignalPanel.

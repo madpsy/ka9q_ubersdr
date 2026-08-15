@@ -25,6 +25,7 @@ import { audioBins } from '../lib/audioBand.js';
 import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
 import {
     AUDIO_WF_RATE_MAX, AUDIO_WF_RATE_MIN,
+    SCOPE_FLOOR_DEFAULT, SCOPE_FLOOR_MAX, SCOPE_FLOOR_MIN,
     cssVar, drawAudioBars, drawAudioRuler, drawAudioWaterfall, fmtHz, newBarLevel, newRing, sizedCanvas,
 } from '../lib/audioWaterfall.js';
 
@@ -73,7 +74,19 @@ export default function ScopePanel({ minimal }) {
     // because what is on screen is not answering the question — so the picture
     // is the right place to press. It is also the only control the minimal view
     // could have, where there is nothing but the canvases.
-    const [shape, setShape] = useState(display.scopeShape === 'bars' ? 'bars' : 'wave');
+    const [shape, setShape] = useState(display.scopeShape === 'wave' ? 'wave' : 'bars');
+    // Auto ranging, or a floor the operator chose.
+    //
+    // Auto is right most of the time and has one cost: it is *relative*. The
+    // quietest bin sets the bottom of the scale, so quiet audio is magnified
+    // until it fills the display exactly as loud audio does — which makes the
+    // picture unable to answer "is this signal weak, or is my volume down".
+    // A fixed floor with the ceiling at full scale makes it absolute, and low
+    // levels read as low.
+    const [autoLevel, setAutoLevel] = useState(display.scopeAuto !== false);
+    const [floorDb, setFloorDb] = useState(
+        Number.isFinite(display.scopeFloor) ? display.scopeFloor : SCOPE_FLOOR_DEFAULT,
+    );
 
     const scopeRef = useRef(null);
     const wfRef = useRef(null);
@@ -108,8 +121,10 @@ export default function ScopePanel({ minimal }) {
             scopeContrast: contrast,
             scopeRate: wfRate,
             scopeShape: shape,
+            scopeAuto: autoLevel,
+            scopeFloor: floorDb,
         });
-    }, [view, fftSize, timebase, contrast, wfRate, shape]);   // eslint-disable-line
+    }, [view, fftSize, timebase, contrast, wfRate, shape, autoLevel, floorDb]);   // eslint-disable-line
 
     useEffect(() => {
         // One shared FFT: the filter panel's preview reads the same node, and
@@ -131,6 +146,7 @@ export default function ScopePanel({ minimal }) {
                     palette: display.palette,
                     contrast,
                     level: barLevel.current,
+                    floorDb: autoLevel ? null : floorDb,
                 });
                 drawAudioRuler(barRulerRef.current, tuning, f.sampleRate, f.binCount);
             } else if (showScope) {
@@ -149,11 +165,13 @@ export default function ScopePanel({ minimal }) {
                     palette: display.palette,
                     contrast,
                     rowsPerSec: wfRate,
+                    floorDb: autoLevel ? null : floorDb,
                 });
                 drawAudioRuler(rulerRef.current, tuning, f.sampleRate, f.binCount);
             }
         });
-    }, [player, fftSize, showScope, showWf, bars, timebase, tuning, display.palette, contrast, rate, wfRate]);
+    }, [player, fftSize, showScope, showWf, bars, timebase, tuning, display.palette, contrast, rate,
+        wfRate, autoLevel, floorDb]);
 
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
 
@@ -239,6 +257,37 @@ export default function ScopePanel({ minimal }) {
                         min={AUDIO_WF_RATE_MIN}
                         max={AUDIO_WF_RATE_MAX}
                         onChange={setWfRate}
+                    />
+                </Field>
+            )}
+
+            {/* Level ranging, and where the bottom of the scale sits when it is
+                not automatic. Offered whenever either picture is on, because
+                both are drawn in the same dB window — see levelWindow. */}
+            {!minimal && (showWf || bars) && (
+                <Field label="Levels" hint={autoLevel ? 'follows the audio' : `${Math.round(floorDb)} dB to full scale`}>
+                    <Segmented
+                        options={[
+                            { value: 'auto', label: 'Auto' },
+                            { value: 'manual', label: 'Manual' },
+                        ]}
+                        value={autoLevel ? 'auto' : 'manual'}
+                        onChange={(v) => setAutoLevel(v === 'auto')}
+                        size="sm"
+                    />
+                </Field>
+            )}
+
+            {/* Only with a manual scale: in auto it would be a control that
+                does nothing, which is worse than one that is not there. */}
+            {!minimal && (showWf || bars) && !autoLevel && (
+                <Field label="Floor" hint={`${Math.round(floorDb)} dB`}>
+                    <Slider
+                        value={floorDb}
+                        min={SCOPE_FLOOR_MIN}
+                        max={SCOPE_FLOOR_MAX}
+                        step={1}
+                        onChange={setFloorDb}
                     />
                 </Field>
             )}

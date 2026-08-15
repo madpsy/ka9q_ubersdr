@@ -193,6 +193,21 @@ const VIEW_TITLE = {
     waterfall: 'Waterfall only — click for both',
 };
 const NEXT_WF = { '2d': '3d', '3d': 'both', both: '2d' };
+
+// The same two settings as named choices, for the right-click menu — where a
+// cycle would be the wrong shape (see the menu). One list per setting, in the
+// order the buttons cycle through them, so the menu and the toolbar agree about
+// what these are called.
+const VIEW_CHOICES = [
+    { id: 'split', label: 'Show spectrum and waterfall' },
+    { id: 'spectrum', label: 'Show spectrum only' },
+    { id: 'waterfall', label: 'Show waterfall only' },
+];
+const WF_CHOICES = [
+    { id: '2d', label: 'Waterfall as a heat map' },
+    { id: '3d', label: 'Waterfall as a 3D surface' },
+    { id: 'both', label: 'Waterfall as both' },
+];
 const WF_STYLE_TITLE = {
     '2d': 'Waterfall as a heat map — click for the 3D surface',
     '3d': 'Waterfall as a 3D surface — click for both together',
@@ -2639,6 +2654,42 @@ export default function SpectrumView() {
                                 ),
                             };
                         }),
+                        // What the display shows, and how it draws it — the two
+                        // toolbar buttons above the spectrum, as named choices.
+                        //
+                        // Named rather than cycled, which is the difference
+                        // between a menu and a button: a button that cycles is
+                        // fine when it shows its own state and is one press
+                        // from anywhere, and a menu entry called "next view"
+                        // would be asking somebody to press it repeatedly with
+                        // the menu shutting each time. The current one is
+                        // disabled and says so, as the top bar's mode picker
+                        // does.
+                        { key: 'sep-view', separator: true },
+                        ...VIEW_CHOICES.map((choice) => ({
+                            key: `view-${choice.id}`,
+                            label: choice.label,
+                            disabled: viewMode === choice.id,
+                            title: viewMode === choice.id ? 'What the display is showing now' : undefined,
+                            onSelect: () => display.set({ viewMode: choice.id }),
+                        })),
+                        // How the waterfall is drawn, and only where there is
+                        // one: in spectrum-only view these three would set a
+                        // setting nothing on screen could show, and the toolbar
+                        // hides its own button for the same reason. Choosing a
+                        // *view* with a waterfall in it brings them back, which
+                        // is the dependency the right way round — the view
+                        // decides whether the style is a question at all.
+                        ...(viewMode === 'spectrum' ? [] : [
+                            { key: 'sep-wf', separator: true },
+                            ...WF_CHOICES.map((choice) => ({
+                                key: `wf-${choice.id}`,
+                                label: choice.label,
+                                disabled: wfMode === choice.id,
+                                title: wfMode === choice.id ? 'How the waterfall is drawn now' : undefined,
+                                onSelect: () => display.set({ waterfallMode: choice.id }),
+                            })),
+                        ]),
                     ]}
                 />
             )}

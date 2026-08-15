@@ -42,7 +42,7 @@ import {
     PEAK_GAP_PX, PEAK_REFRESH_MS, PEAK_TAU_MS, averageTrace, findPeaks, layoutPeakLabels,
     peakCount, peakPlace, peakSnr,
 } from '../lib/spectrumPeaks.js';
-import { LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { HOVER_QUERY, LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
 import { listSurfaces, onSurfaces } from '../controls/surfaces.js';
 import { providerStatus, onProviders } from '../controls/radioProviders.js';
@@ -1476,6 +1476,8 @@ export default function SpectrumView() {
     // has it, and the tags left of the zoom buttons are the scarcest row in the
     // layout there.
     const mobile = useMediaQuery(MOBILE_QUERY);
+    // Is anything here able to scroll a wheel? See the toolbar below.
+    const hasWheel = useMediaQuery(HOVER_QUERY);
 
     // The diagnostic readout in a corner of the waterfall, and which corner. Not
     // chosen resolves per device — see statsPlace — which is why it is worked out
@@ -2227,15 +2229,23 @@ export default function SpectrumView() {
                         {!mobile && <Button size="sm" variant="ghost" icon={<Icon.ZoomOut />} title="Zoom out around the tuned frequency" onClick={() => actions.zoomOut()} />}
                         {!mobile && <Button size="sm" variant="ghost" icon={<Icon.ZoomIn />} title="Zoom in on the tuned frequency" onClick={() => actions.zoomIn()} />}
                         {/* What the wheel does over the spectrum, mirroring the
-                            Display panel's setting. Not on mobile: there is no
-                            wheel there, and the row has no space to spare for a
-                            control that cannot be used.
+                            Display panel's setting. Only where there is a wheel
+                            to set — a control that cannot be used is worse than
+                            an absent one, and the row has no space to spare.
+
+                            Asked as "is a pointer driving this?" rather than by
+                            screen width, which is what it used to be. A tablet
+                            is wider than the mobile breakpoint and has no wheel,
+                            so this button sat in the toolbar of every iPad
+                            offering to change what an absent wheel did. The same
+                            query keeps it for a tablet with a trackpad
+                            attached, where a two-finger scroll *is* a wheel.
 
                             Highlighted when it tunes rather than carrying two
                             glyphs, because both states are the same wheel doing
                             something — and the anchor button beside it already
                             uses the two-icon form for a genuine either/or. */}
-                        {!mobile && (
+                        {hasWheel && (
                             <Button
                                 size="sm"
                                 variant="ghost"
@@ -2248,11 +2258,19 @@ export default function SpectrumView() {
                                 onClick={() => display.set({ wheelAction: wheelTunes ? 'zoom' : 'tune' })}
                             />
                         )}
-                        {/* Only while the wheel zooms — with the wheel set to tune
-                            there is nothing for an anchor to apply to. Shows the
-                            anchor in force rather than the one it would switch to,
-                            so the toolbar reads as state. */}
-                        {!wheelTunes && (
+                        {/* Only while there is a zoom for it to apply to. With a
+                            wheel that is the wheel set to zoom; without one it is
+                            always, because a pinch is a zoom and uses this same
+                            setting — see the pinch handler, which reads the
+                            anchor when it decides what the gesture turns about.
+                            Left as `!wheelTunes` alone, a touch device that had
+                            picked up "wheel tunes" from a desktop through the
+                            shared settings lost the only control over its own
+                            pinch.
+
+                            Shows the anchor in force rather than the one it
+                            would switch to, so the toolbar reads as state. */}
+                        {(!wheelTunes || !hasWheel) && (
                             <Button
                                 size="sm"
                                 variant="ghost"
@@ -2690,6 +2708,32 @@ export default function SpectrumView() {
                                 onSelect: () => display.set({ waterfallMode: choice.id }),
                             })),
                         ]),
+                        // What a zoom holds still, on the same terms as the
+                        // toolbar's anchor button: offered only where there is a
+                        // zoom for it to apply to, which is a wheel set to zoom
+                        // or a device that pinches instead.
+                        //
+                        // The second entry is named after the thing that will
+                        // actually be held — a pointer on a desktop, the fingers
+                        // on a tablet. The setting is one setting; what it is
+                        // called should still be true on the device reading it.
+                        ...(!wheelTunes || !hasWheel ? [
+                            { key: 'sep-anchor', separator: true },
+                            {
+                                key: 'anchor-tuned',
+                                label: 'Zoom about the tuned frequency',
+                                disabled: anchorTuned,
+                                title: anchorTuned ? 'What zooming holds still now' : undefined,
+                                onSelect: () => display.set({ zoomAnchor: 'tuned' }),
+                            },
+                            {
+                                key: 'anchor-cursor',
+                                label: hasWheel ? 'Zoom about the pointer' : 'Zoom about the pinch',
+                                disabled: !anchorTuned,
+                                title: !anchorTuned ? 'What zooming holds still now' : undefined,
+                                onSelect: () => display.set({ zoomAnchor: 'cursor' }),
+                            },
+                        ] : []),
                     ]}
                 />
             )}

@@ -74,9 +74,11 @@ function costOf(child, widths) {
  * @param widths the width cache, `{ key: { w, nested } }`, read and written.
  *               Held across renders by the caller so a child that is hidden
  *               right now still asks for the space it actually had.
+ * @param shown  what is up right now, `{ key: boolean }` — which decides which
+ *               of two questions each child is asked. See below.
  * @returns      { key: boolean }
  */
-export function measureRoom(el, specs, widths) {
+export function measureRoom(el, specs, widths, shown = {}) {
     const cs = getComputedStyle(el);
     const gap = parseFloat(cs.columnGap) || 0;
     const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
@@ -103,8 +105,23 @@ export function measureRoom(el, specs, widths) {
         const nested = !!(rec && rec.nested);
         const gaps = nested ? Math.max(0, count - 1) : count;
 
-        // n items already placed, plus this one, needs n gaps between them.
-        if (used + w + gap * gaps + CUSHION <= avail) {
+        // Two questions, not one, and this is the difference between a row that
+        // settles and a row that cannot.
+        //
+        // Asking "does it fit" of a child that is already up, with the same
+        // cushion that let it in, means a row sitting near the boundary drops
+        // it — and the moment it is gone there is room again, so it comes back,
+        // and so on for ever. That is not a flicker: each answer is a state
+        // change, so React re-renders, measures, and changes its mind again
+        // until it gives up and throws (#185), taking the interface with it.
+        // The top bar did exactly that on a phone once its buttons grew for
+        // touch and the row came to rest on the line.
+        //
+        // So: something already shown keeps its place while it merely fits, and
+        // something hidden has to clear the cushion before it comes back. The
+        // same hysteresis fitsInHeader has, for the same reason.
+        const room = shown[s.key] ? 0 : CUSHION;
+        if (used + w + gap * gaps + room <= avail) {
             fits[s.key] = true;
             used += w;
             if (!nested) count += 1;

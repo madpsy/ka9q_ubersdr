@@ -369,6 +369,20 @@ async function showSettings() {
     about.appendChild(el('div', null, info.builtinAvailable
         ? `interface: ${info.buildInfo || 'staged'}`
         : 'no interface staged (run build.sh) — receivers open with the UI they serve'));
+
+    // The same policy the stores link to, reachable from inside the app.
+    //
+    // An ordinary link, because both hosts already send an external URL to the
+    // system browser — Electron through setWindowOpenHandler, the mobile
+    // clients through the plugin's launchIntent — so nothing here has to know
+    // that a chooser window is not a browser.
+    const links = el('div', 'set-links');
+    const privacy = el('a', null, 'Privacy policy');
+    privacy.href = 'https://ubersdr.org/privacy-client.html';
+    privacy.target = '_blank';
+    privacy.rel = 'noopener';
+    links.appendChild(privacy);
+    about.appendChild(links);
     add(about);
 
     const done = el('button', null, 'Done');

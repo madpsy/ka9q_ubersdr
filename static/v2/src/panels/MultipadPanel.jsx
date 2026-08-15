@@ -434,7 +434,7 @@ function FreqWheel({ headRef, showBw }) {
                 onStep={tune}
                 ariaLabel="Frequency wheel"
                 className="barrel--freq"
-                strip={(
+                strip={((
                     <BarrelMarks
                         markers={markers.all}
                         current={markers.current}
@@ -443,7 +443,7 @@ function FreqWheel({ headRef, showBw }) {
                         width={width}
                         edges={navTypes.length > 0}
                     />
-                )}
+                ))}
             >
                 <SnrWash />
                 <MarkerEdges markers={markers} types={navTypes} />

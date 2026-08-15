@@ -97,6 +97,26 @@ t('a nested optional child does not oscillate', () => {
     );
 });
 
+t('a row resting on the boundary does not chase itself', () => {
+    // The failure this guards: with one rule for both states, a child that only
+    // just fits is dropped, which makes room, which brings it back. Each answer
+    // is a render, so React changes its mind until it throws and the interface
+    // goes blank — which is what a phone's top bar did once its buttons grew
+    // for touch.
+    for (let barWidth = 200; barWidth <= 500; barWidth += 1) {
+        const widths = {};
+        measureRoom(topBar({ barWidth, showWidth: true }), SPECS, widths);
+
+        // Whatever it decides from one state, asking again from the state that
+        // decision produces must give the same answer.
+        const first = measureRoom(topBar({ barWidth, showWidth: true }), SPECS, widths, { width: true });
+        const again = measureRoom(
+            topBar({ barWidth, showWidth: first.width }), SPECS, widths, first,
+        );
+        assert.strictEqual(again.width, first.width, `settles at ${barWidth}px`);
+    }
+});
+
 t('it is still shown when there is room and dropped when there is not', () => {
     const widths = {};
     assert.strictEqual(measureRoom(topBar({ barWidth: 900, showWidth: true }), SPECS, widths).width, true);

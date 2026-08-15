@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  What this app does with data, in the form Apple asks for it.
+
+	  Required since spring 2024: without it an upload is answered by an
+	  ITMS-91053 email naming the APIs used without a declared reason, and the
+	  build is held. The pods carry their own manifests (Capacitor ships one);
+	  this is the app's.
+
+	  It is also the honest answer, which is short. UberSDR is a client for
+	  somebody else's receiver: nothing is collected by this app, nothing is
+	  sent anywhere it does not have to be, and there is no analytics, no
+	  advertising and no account. What the operator's receiver sees of them —
+	  their address, what they tune to — is the receiver's, and the privacy
+	  policy says so plainly rather than being declared here as ours.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<!--
+	  Nothing. The interface settings, the saved receivers and their passwords
+	  stay on the device — see Prefs/HostChannel for the first two and the
+	  Keychain for the third — and none of it is transmitted to us.
+	-->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+
+	<!--
+	  The "required reason" APIs this app actually calls.
+
+	  UserDefaults, and only that: HostChannel keeps the shared interface
+	  snapshot there, and Capacitor's Preferences plugin keeps the saved
+	  receivers there. CA92.1 is the reason for reading and writing an app's own
+	  defaults — this app never touches another's, and never uses them to
+	  identify a device.
+	-->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

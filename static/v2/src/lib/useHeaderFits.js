@@ -9,6 +9,9 @@
 import { useCallback, useLayoutEffect, useRef, useState } from '../react.js';
 import { fitsInHeader, measureSlack } from './headerRoom.js';
 
+// How close together two changes of mind have to be to count as thrash.
+const SETTLE_MS = 400;
+
 export function useHeaderFits(ref, elastic, need) {
     // Shown to begin with: an element that has not been laid out yet measures
     // zero, and a control that blinked in on the second frame is worse than one
@@ -44,10 +47,13 @@ export function useHeaderFits(ref, elastic, need) {
     // ...and a floor under it all, for a case this cannot reason about: two
     // controls in one bar whose widths depend on each other, a font that loads
     // late, a browser that rounds differently in each state. Whatever the
-    // cause, a bar that has changed its mind this many times is not converging,
-    // and the honest end is to leave the control out. Cleared by a real resize,
-    // which is a new question rather than the same one again.
+    // cause, a bar that has changed its mind this often is not converging, and
+    // the honest end is to leave the control out.
+    //
+    // Counted within a window rather than reset by a resize — see useRoomFor,
+    // where resetting on resize turned the safety net into part of the loop.
     const flips = useRef(0);
+    const flipAt = useRef(0);
 
     const measure = useCallback(() => {
         const el = ref.current;
@@ -62,12 +68,17 @@ export function useHeaderFits(ref, elastic, need) {
             slackWhenHidden.current = slack;
         }
 
+        const now = Date.now();
+        if (now - flipAt.current > SETTLE_MS) flips.current = 0;
         const next = flips.current > 4 ? false : fitsInHeader(slack, real.current, shown.current);
-        setFits((prev) => {
-            if (prev === next) return prev;
-            flips.current += 1;
-            return next;
-        });
+        // Unchanged: don't call the setter — see useRoomFor, where setting a
+        // value React already holds, from an effect that runs after every
+        // render, is what blanked the interface.
+        if (next === shown.current) return;
+        shown.current = next;
+        flips.current += 1;
+        flipAt.current = now;
+        setFits(next);
     }, [ref, elastic, need]);
 
     // No dependency list, as useRoomFor: a title can change under a bar that has
@@ -77,12 +88,7 @@ export function useHeaderFits(ref, elastic, need) {
     useLayoutEffect(() => {
         const el = ref.current;
         if (!el || typeof ResizeObserver === 'undefined') return undefined;
-        const ro = new ResizeObserver(() => {
-            // A different bar is a different question: whatever it decided at
-            // the old size says nothing about this one.
-            flips.current = 0;
-            measure();
-        });
+        const ro = new ResizeObserver(measure);
         ro.observe(el);
         return () => ro.disconnect();
     }, [ref, measure]);

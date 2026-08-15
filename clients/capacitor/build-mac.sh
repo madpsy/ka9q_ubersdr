@@ -30,6 +30,10 @@
 #                              install it. Everything the App Store needs is a
 #                              step beyond this; everything a *test* needs is
 #                              this. Add --launch to start it afterwards.
+#   ./build-mac.sh --upload    ...and send it to App Store Connect, for
+#                              TestFlight or a review submission. Uses the same
+#                              Apple ID and app-specific password the desktop
+#                              client notarises with ($APPLE_PASSWORD_FILE).
 #   ./build-mac.sh --archive   archive and export dist/UberSDR.ipa, signed for
 #                              the App Store. Needs a device registered to the
 #                              team once — see Requirements.
@@ -93,6 +97,10 @@ SIM_DEVICE="${SIM_DEVICE:-iPhone 17 Pro}"
 # than only in project.pbxproj so that a fork with its own account changes one
 # line and does not have to hunt through an Xcode project to find the other.
 TEAM_ID="${UBERSDR_TEAM_ID:-B7CM4Z8JW8}"
+# For --upload. The same pair the desktop client's build-mac.sh notarises with,
+# deliberately: one Apple ID, one password file, two things that need it.
+APPLE_PASSWORD_FILE="${APPLE_PASSWORD_FILE:-$HOME/keys/app.password}"
+APPLE_ID_VALUE="${APPLE_ID:-nathan@nsamail.uk}"
 # The Mac's login password, read here and sent over stdin, used to unlock its
 # keychain before anything signs. Same file and same reasoning as the desktop
 # client's build-mac.sh; see mac_signed.
@@ -129,6 +137,7 @@ TEST=0
 RUN=0
 RELEASE=0
 ARCHIVE=0
+UPLOAD=0
 SHOTS=0
 DEVICE=0
 LAUNCH=0
@@ -144,6 +153,7 @@ for arg in "$@"; do
         --bgtest) BGTEST=1 ;;
         --release) RELEASE=1 ;;
         --archive) ARCHIVE=1 ;;
+        --upload) ARCHIVE=1; UPLOAD=1 ;;
         --screenshots) SHOTS=1 ;;
         --device) DEVICE=1 ;;
         --launch) LAUNCH=1 ;;
@@ -573,9 +583,65 @@ PLIST"
     ssh -o BatchMode=yes "$MAC_HOST" 'cat /tmp/ubersdr-ipa/App.ipa' > dist/UberSDR.ipa \
         2> >(grep -v "X11 forwarding request failed" >&2)
     echo "  built dist/UberSDR.ipa ($(du -h dist/UberSDR.ipa | cut -f1))"
+
+    if [[ "$UPLOAD" -eq 1 ]]; then
+        upload_remote
+        return
+    fi
     echo
-    echo "  The archive is at $MAC_HOST:/tmp/UberSDR.xcarchive — open it in"
-    echo "  Xcode's Organizer to upload, or use xcrun altool/notarytool."
+    echo "  Not uploaded. Add --upload to send it to App Store Connect, or open"
+    echo "  $MAC_HOST:/tmp/UberSDR.xcarchive in Xcode's Organizer."
+}
+
+# Send the exported .ipa to App Store Connect, where TestFlight and the review
+# queue pick it up.
+#
+# The same credentials the desktop client notarises with — an Apple ID and an
+# app-specific password, read from $APPLE_PASSWORD_FILE here and passed to the
+# Mac on stdin so it is never in an argv anybody can see in `ps`. An App Store
+# Connect API key would work too and is the better answer for a shared CI
+# machine; for one person's Mac this is one fewer secret to manage, and the
+# password is already there for the dmgs.
+#
+# `altool` rather than `notarytool`: they are different services. Notarisation
+# is a Gatekeeper check on a Mac binary; this is a submission to the store, and
+# only altool speaks it.
+#
+# What comes back is a build in App Store Connect, *not* a submission: it still
+# has to be given to TestFlight or attached to a version and sent for review.
+# Apple also takes a few minutes to process it, during which it shows as
+# "Processing" and cannot be selected — which looks like a failed upload and is
+# not.
+upload_remote() {
+    if [[ ! -f "$APPLE_PASSWORD_FILE" ]]; then
+        echo >&2
+        echo "not uploaded: no app-specific password at $APPLE_PASSWORD_FILE." >&2
+        echo "  Make one at appleid.apple.com and save it there — the desktop" >&2
+        echo "  client's notarisation uses the same file." >&2
+        exit 1
+    fi
+
+    echo "  uploading to App Store Connect as $APPLE_ID_VALUE"
+    if ! printf '%s\n' "$(cat "$APPLE_PASSWORD_FILE")" \
+        | ssh -o BatchMode=yes "$MAC_HOST" "
+            IFS= read -r apppw || true
+            export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+            xcrun altool --upload-app -f /tmp/ubersdr-ipa/App.ipa -t ios \
+                --apple-id '$APPLE_ID_VALUE' --team-id '$TEAM_ID' \
+                --password \"\$apppw\" 2>&1 | tail -20" \
+            2> >(grep -v "X11 forwarding request failed" >&2) \
+        | tee /tmp/ubersdr-upload.log | grep -qiE "No errors uploading|UPLOAD SUCCEEDED"; then
+        echo >&2
+        echo "upload failed — see /tmp/ubersdr-upload.log" >&2
+        echo >&2
+        echo "  A build number already used is the usual cause: App Store" >&2
+        echo "  Connect refuses a repeat, and the number comes from the version" >&2
+        echo "  in package.json (0.2.0 gives 200). Bump it and archive again." >&2
+        exit 1
+    fi
+    echo "  uploaded — it will show in App Store Connect once Apple has"
+    echo "  processed it, which takes a few minutes. Nothing is submitted for"
+    echo "  review by this; it is a build waiting to be used."
 }
 
 # The App Store set: two devices, two orientations, two screens each.

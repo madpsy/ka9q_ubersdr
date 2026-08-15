@@ -436,6 +436,12 @@ select {
    these are the two rows nobody should reach by accident. */
 .set-danger { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 .set-about { color: var(--dim); font-size: 12px; margin-top: 14px; line-height: 1.6; }
+/* Links under the version. A row, because there will be more of them — the
+   source and the site are the obvious next two — and one link centred in its
+   own line reads as a button nobody meant to make. */
+.set-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
+.set-links a { color: var(--accent); text-decoration: none; }
+.set-links a:hover { text-decoration: underline; }
 
 .dir-list { flex: 1; min-height: 0; overflow-y: auto; gap: 5px; padding-right: 4px; }
 .dir-status { padding-top: 8px; }

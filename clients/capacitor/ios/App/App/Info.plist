@@ -16,6 +16,14 @@
 	     the listing is the one set in App Store Connect. This is the macOS
 	     key, it is what Xcode's "App Category" setting writes, and it costs
 	     nothing to have the bundle say the same thing as the listing. -->
+	<!-- Export compliance, answered once here instead of on every upload.
+	     `false` means "uses no non-exempt encryption", which is the truthful
+	     answer: this app speaks HTTPS to receivers and to the directory, and
+	     keeps their passwords in the Keychain. All of that is the system's own
+	     cryptography, which is exactly what the exemption is for — nothing here
+	     implements or ships an algorithm of its own. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>CFBundleExecutable</key>

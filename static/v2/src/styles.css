@@ -1892,6 +1892,48 @@ a.btn { text-decoration: none; }
 .btn--icon { padding: 7px; }
 .btn--sm.btn--icon { padding: 5px; }
 
+/* Touch targets.
+ *
+ * Everything above is sized for a pointer whose tip is one pixel: a panel
+ * header is 24 px tall because a 16 px icon fits in it, and its buttons are
+ * 22 px squares. A fingertip covers nearer forty and hides what it is aiming
+ * at, so on a tablet the close button on a panel is a thing you go back and
+ * press again.
+ *
+ * Grown rather than faked. An invisible pseudo-element over each control keeps
+ * the layout identical and was the first attempt; in a row of buttons four
+ * pixels apart the expanded areas overlap, and whichever is later in the DOM
+ * quietly wins the overlap — so the *left* one of a pair gets harder to hit
+ * while looking unchanged. Real boxes cannot do that: what you see is what
+ * accepts the press.
+ *
+ * 34 px rather than the 44 the platforms ask for, which is the compromise worth
+ * naming. 44 would put a panel header at 44 px and cost a dock four or five
+ * rows of content down its length; 34 roughly doubles the area of every one of
+ * these controls and leaves the interface still dense enough to be an SDR
+ * rather than a phone app. `any-pointer: coarse`, so a tablet with a trackpad
+ * keeps both.
+ */
+@media (any-pointer: coarse) {
+    .btn--icon { padding: 10px; }
+    .btn--sm.btn--icon { padding: 9px; }
+    .btn--sm { padding: 8px 11px; }
+
+    /* Panel headers: the close, minimal, size and reorder controls. The header
+       grows with them, which is the point — it is also the drag handle and the
+       thing a thumb reaches for to scroll a dock. */
+    .section__grip { width: 32px; height: 32px; }
+    .section__head { gap: 6px; }
+    .section__toggle { padding: 7px 4px 7px 9px; }
+    /* The arrows stay a pair and stay narrow: a 220 px dock has to keep room
+       for the panel's name, and they are the two controls here that are used
+       once and then not again. */
+    .section__order .section__grip { width: 26px; }
+
+    /* Floating windows carry the same buttons under a different class. */
+    .floatwin__btn { width: 32px; height: 32px; }
+}
+
 .segmented {
     display: grid;
     grid-auto-flow: column;

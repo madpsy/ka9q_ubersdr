@@ -233,6 +233,14 @@ export const DEFAULTS = {
     // panel with — what is in the audio — where the waveform answers a narrower
     // one that mostly matters for CW and carriers. The waveform is one tap
     // away and the choice is remembered.
+    // Frames a second the spectrum loop may run at, 0 being the display's own
+    // rate and the default. Not a debug setting, though it started as one: it is
+    // the single largest thing an operator can do about what this page costs a
+    // machine, and a laptop on battery watching a quiet band has every reason to
+    // draw at fifteen. Armed from a timer rather than gated inside the animation
+    // frame — a loop that re-arms every frame and returns early keeps the tab
+    // continuously animating, which is the cost being avoided. See SpectrumView.
+    maxFps: 0,
     scopeShape: 'bars',
     // Whether the audio scope and waterfall find their own dB window or use a
     // floor the operator set. Auto by default: it is right until the question
@@ -311,12 +319,7 @@ export const DEFAULTS = {
     // Left drawing, just not composited, which separates "that layer costs" from
     // "drawing those lines costs".
     dbgWfMarks: true,
-    // Frames a second the spectrum loop is allowed to run at, 0 for the display's
-    // own rate. Armed from a timer rather than gated inside the animation frame:
-    // a loop that re-arms every frame and returns early keeps the tab in a
-    // continuously-animating state, which is the thing being measured, so gating
-    // inside it would prove nothing. See the loop in SpectrumView.
-    dbgMaxFps: 0,
+
     // Multiplier on the canvas backing stores, i.e. how many device pixels the
     // spectrum is rendered at. Cuts texture memory and upload bandwidth
     // quadratically; should *not* move a cost that is per-composited-frame,

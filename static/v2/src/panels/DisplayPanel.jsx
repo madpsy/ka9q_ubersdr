@@ -24,6 +24,11 @@ import {
 import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib/haptics.js';
 
 
+// Frames a second the spectrum loop may run at. Nothing above 60: the point of
+// a cap is to be under the display's rate, and on a 60 Hz panel every larger
+// number is the same number.
+const FPS_CHOICES = [0, 60, 30, 20, 15, 10];
+
 export default function DisplayPanel() {
     const d = useDisplay();
     const { serverInfo } = useRadio();
@@ -444,6 +449,28 @@ export default function DisplayPanel() {
                 </>
             )}
 
+            <div className="divider" />
+
+            {/* The one setting here that is about the machine rather than the
+                picture, and the largest lever on this page: a capped loop asks
+                the browser for no frame at all between ticks, so it is not
+                merely drawing less — it has stopped asking to be animated.
+                Worth a place among the ordinary settings rather than behind the
+                debug switch it was first written for. */}
+            <Field label="Frame rate" hint={d.maxFps > 0 ? `${d.maxFps}/s` : 'display rate'}>
+                <select
+                    className="select"
+                    value={String(d.maxFps || 0)}
+                    onChange={(e) => d.set({ maxFps: Number(e.target.value) })}
+                    title="Caps the spectrum's draw loop: less processor and less battery, at a less fluid waterfall. Below about 15 a second the waterfall starts dropping rows"
+                >
+                    {FPS_CHOICES.map((f) => (
+                        <option key={f} value={String(f)}>
+                            {f === 0 ? 'No limit' : `${f} a second`}
+                        </option>
+                    ))}
+                </select>
+            </Field>
             {/* No note under this one: the label says what it does. The tooltip
                 carries the part that is not obvious — that it is a collapsed
                 dock's rail, and that clicking still opens the dock for good. */}
@@ -781,11 +808,6 @@ function UiColors() {
     );
 }
 
-// Frames a second the spectrum loop may run at. Nothing above 60: the point of
-// a cap is to be under the display's rate, and on a 60 Hz panel every larger
-// number is the same number.
-const FPS_CHOICES = [0, 60, 30, 20, 15, 10];
-
 // How many device pixels the canvases are rendered at, as a fraction.
 const SCALE_CHOICES = [1, 0.75, 0.5, 0.35];
 
@@ -800,9 +822,13 @@ const SCALE_CHOICES = [1, 0.75, 0.5, 0.35];
  *
  * The order is the order worth trying them in: the two waterfall layers first,
  * since removing the waterfall from the DOM entirely is what produced the
- * largest reading, and the frame rate last, since stopping every draw in the
- * app produced one of the smallest. Each switch leaves the display otherwise
- * running, so what changes is one suspect and not the workload.
+ * largest reading. Each switch leaves the display otherwise running, so what
+ * changes is one suspect and not the workload.
+ *
+ * The frame rate used to be the last of these and is now an ordinary display
+ * setting, above. It left because of what the measurements showed: it is the
+ * one lever here that an operator has a reason to reach for on a working
+ * machine rather than while diagnosing one.
  */
 function RenderDebug() {
     const d = useDisplay();
@@ -885,26 +911,6 @@ function RenderDebug() {
                 If it does move it, the cost is the drawing after all.
             </div>
 
-            <Field label="Frame rate" hint={d.dbgMaxFps > 0 ? `${d.dbgMaxFps}/s` : undefined}>
-                <select
-                    className="select"
-                    value={String(d.dbgMaxFps || 0)}
-                    onChange={(e) => d.set({ dbgMaxFps: Number(e.target.value) })}
-                >
-                    {FPS_CHOICES.map((f) => (
-                        <option key={f} value={String(f)}>
-                            {f === 0 ? 'Display rate' : `${f} a second`}
-                        </option>
-                    ))}
-                </select>
-            </Field>
-            <div className="note note--tight">
-                Caps the spectrum's draw loop, and between ticks asks the browser for
-                no frame at all — so a capped display is not merely drawing less, it
-                has stopped asking to be animated. The stats overlay's FPS line reads
-                the same loop, so it shows whether the cap is in force. Below about 15
-                the waterfall starts dropping rows.
-            </div>
         </>
     );
 }

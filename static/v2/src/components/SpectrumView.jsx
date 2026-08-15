@@ -1265,8 +1265,8 @@ export default function SpectrumView() {
         let lastRow = 0;
 
         // Debug only: how long to wait between frames, 0 for the display's rate.
-        const capMs = display.debug && display.dbgMaxFps > 0
-            ? 1000 / display.dbgMaxFps
+        const capMs = display.maxFps > 0
+            ? 1000 / display.maxFps
             : 0;
 
         // Capped, the next frame is asked for by a timer and only *then* by the
@@ -1380,7 +1380,7 @@ export default function SpectrumView() {
                 g.scroll = null;
             }
         };
-    }, [sizes.w, specH, wfH, dssH, heatH, paused, display.debug, display.dbgMaxFps]);
+    }, [sizes.w, specH, wfH, dssH, heatH, paused, display.debug, display.maxFps]);
 
     // Redraw when a display setting changes even if no new frame arrived.
     useEffect(() => {

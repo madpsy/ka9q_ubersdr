@@ -29,6 +29,26 @@
 // worse than one that is absent.
 
 /**
+ * Is this page inside one of UberSDR's own applications?
+ *
+ * `window.ubersdrDesktop` is set by the desktop client's receiver preload and
+ * by the mobile clients' document-start script, and by nothing in an ordinary
+ * browser — so its presence is the question answered, not any field on it.
+ *
+ * What it is for is behaviour that only makes sense with a host: an app has its
+ * own windows, its own panels and nowhere sensible to put a second browser tab,
+ * so things that reach for one outside are answered inside instead. See the top
+ * bar's callsign lookup.
+ */
+export function insideApp() {
+    try {
+        return typeof window !== 'undefined' && !!window.ubersdrDesktop;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
  * Is `id` hidden by the host?
  *
  * `host` is `window.ubersdrDesktop` or anything shaped like it. Anything that

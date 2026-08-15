@@ -21,6 +21,7 @@ import SpectrumMenu from './SpectrumMenu.jsx';
 import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
+import { insideApp } from '../lib/hostPanels.js';
 import { onFreqEntry } from '../lib/freqEntry.js';
 import { HOVER_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
@@ -432,35 +433,48 @@ export default function TopBar({ compact }) {
         setLookupAt(null);
     }, []);
 
-    // Both surfaces, because either might be the one being looked at.
+    // Both surfaces in a browser, and only the panel inside an app.
     //
     // requestLookup is the in-app route — the same one a click on a spot takes — so the
     // Callsign panel fills in where one is open, and the announcer says the callsign if
-    // that is on. It does nothing at all when no panel is listening.
+    // that is on. It does nothing at all when no panel is listening, which is why the
+    // panel is revealed first: in an app it is the whole answer rather than half of it.
     //
-    // openCallsignLookup is the page, which is what this button has always meant: the bio,
-    // the map and the QSL details the panel does not carry. It opens one if there is none
-    // and reuses the window if there is.
+    // openCallsignLookup is the page, which is what this button has always meant in a
+    // browser: the bio, the map and the QSL details the panel does not carry, in a second
+    // tab beside the receiver. That trade does not survive being in an app. There the page
+    // leaves for the system browser — a different application, over the top of the
+    // receiver — and comes back, if it comes back, to an app that has been in the
+    // background. The panel is already here and answers the question that was asked.
     //
-    // The cost of doing both is one extra request for a callsign the server has just
-    // answered, and its cache allows a repeat at ten times the rate of a new lookup —
-    // which is the case this is.
+    // The cost of doing both, where both are done, is one extra request for a callsign the
+    // server has just answered, and its cache allows a repeat at ten times the rate of a
+    // new lookup — which is the case this is.
     const submitLookup = useCallback(() => {
         const call = lookupCall.trim().toUpperCase();
         if (!call) return;
+        revealPanel('callsign');
         requestLookup(call);
-        openCallsignLookup({ uuid: getSessionId(), callsign: call });
+        if (!insideApp()) openCallsignLookup({ uuid: getSessionId(), callsign: call });
         setLookupCall('');
         closeLookup();
-    }, [closeLookup, lookupCall]);
+    }, [closeLookup, lookupCall, revealPanel]);
 
     // The page with nothing in it, which is exactly what this button used to do: still
-    // worth having, because the page has its own search box, its own history and the QSL
-    // details, and sometimes the page itself is the destination.
+    // worth having in a browser, because the page has its own search box, its own history
+    // and the QSL details, and sometimes the page itself is the destination.
+    //
+    // Inside an app it is the panel instead, for the reason above — and the panel is the
+    // better answer to an empty box anyway, since it has a search box of its own.
     const openLookupPage = useCallback(() => {
+        if (insideApp()) {
+            revealPanel('callsign');
+            closeLookup();
+            return;
+        }
         openCallsignLookup({ uuid: getSessionId() });
         closeLookup();
-    }, [closeLookup]);
+    }, [closeLookup, revealPanel]);
 
     const filterWidth = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
     // The Receiver panel's slider does exactly this. Shared through

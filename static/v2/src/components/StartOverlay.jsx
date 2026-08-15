@@ -21,6 +21,12 @@ import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/
 import { MOBILE_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { PasswordModal, UberSdrAppModal, VibeSdrModal } from './StartExtras.jsx';
 import { hasMobileApp, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
+// The same question the top bar's callsign lookup asks, answered in one place.
+// What it is used for here is leaving out the "Open in App" link, which in an
+// app would offer to open the receiver that is open — a QR code to scan with
+// the device holding it. VibeSDR's link stays, because that is a different app
+// and handing this receiver to it is still something to want.
+import { insideApp } from '../lib/hostPanels.js';
 import StartMap from './StartMap.jsx';
 
 // The pages v1 links from this overlay. Both open in a new tab, as v1's do.
@@ -42,20 +48,6 @@ const DIRECTORY = 'https://instances.ubersdr.org/';
 // See clients/electron/receiver-preload.js, which exposes it.
 const hostAutoStart = () => {
     try { return !!(window.ubersdrDesktop && window.ubersdrDesktop.autoStart); } catch (e) { return false; }
-};
-
-// Whether this page is already inside one of UberSDR's own apps.
-//
-// The same object answers it: `window.ubersdrDesktop` is set by the desktop
-// client's receiver preload and by the Android client's document-start script,
-// and by nothing in an ordinary browser. What it is used for here is leaving
-// out the "Open in App" link, which in an app would offer to open the receiver
-// that is open — a QR code to scan with the device holding it.
-//
-// VibeSDR's link stays, because that is a different app and handing this
-// receiver to it is still something to want.
-const insideApp = () => {
-    try { return !!window.ubersdrDesktop; } catch (e) { return false; }
 };
 
 export default function StartOverlay() {

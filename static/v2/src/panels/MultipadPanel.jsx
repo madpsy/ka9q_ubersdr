@@ -26,12 +26,13 @@ import FreqEntry from '../components/FreqEntry.jsx';
 import NavTypes from '../components/NavTypes.jsx';
 import { Icon, Segmented, Slider } from '../components/ui.jsx';
 import { countryOf, shortMarkerName } from '../lib/markerNav.js';
+import { placeBarrelMarks } from '../lib/barrelMarks.js';
 import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
+import useTapThrough from '../lib/useTapThrough.js';
 import {
     clamp, countryFlag, formatFilterWidth, formatFreqShort, formatHz, snrColour, snrFraction,
 } from '../lib/format.js';
 import { useHeaderFits } from '../lib/useHeaderFits.js';
-import { isTap } from '../lib/barrel.js';
 import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
 import {
     bandTip, bandTone, getBandConditions, subscribeBandConditions,
@@ -122,49 +123,89 @@ function SnrWash() {
 // spin exactly as a press on the middle does, and only a press that goes nowhere
 // steps to the marker. See isTap in lib/barrel.js for the distinction and the
 // press handling below for why it is done with window listeners.
-function MarkerEdges() {
+// Markers along the drum, at their own place on the scale.
+//
+// The ends of the drum say what is nearby; these say *where*, which is the
+// question a scale exists to answer — "N7TWA" at the right-hand end could be
+// one turn away or twenty, and a mark on the scale settles it at a glance.
+//
+// Drawn inside the strip (see Barrel's `strip` prop) so a drag carries them
+// along with the numbers they belong to. Which of them survive, and whether any
+// do, is placeBarrelMarks — every rule about crowding lives there, testable and
+// out of this file.
+//
+// A mark can be tapped to tune to it, which is the obvious thing to try once
+// they are on screen — and it is a *tap*, not a press: the gesture is left to
+// reach the drum so a drag that starts on a name still spins the scale. See
+// useTapThrough, which is the same mechanism the step buttons at the ends use.
+function BarrelMarks({ markers, current, centreHz, stepHz, width, edges }) {
     const radio = useRadio();
-    const [types] = useNavTypes();
-    const markers = useMarkerNav(radio, types);
+    const press = useTapThrough();
+    // What was on screen last time, so a mark that is already being looked at
+    // keeps its place when two are too close for both — see placeBarrelMarks.
+    // A ref rather than state: it is an input to the next placement, not
+    // something to re-render for, and setting state here would be a render
+    // caused by the render that produced it.
+    const shown = useRef([]);
+    const marks = placeBarrelMarks({
+        markers,
+        centreHz,
+        stepHz,
+        detentPx: FREQ_DETENT,
+        widthPx: width,
+        edges,
+        currentHz: current ? current.freq : null,
+        keep: shown.current,
+    });
+    shown.current = marks.map((m) => m.id);
+    if (!marks.length) return null;
 
-    // A press in progress: which pointer, where it started, how far it has
-    // strayed since, and what to do if it turns out to have been a tap.
-    //
-    // Watched on the window rather than on the button, because by then the button
-    // cannot see it: the press is deliberately left to bubble to the barrel, which
-    // captures the pointer, and every move and release from that moment is
-    // delivered to the barrel and not to us. It still passes the window on its way
-    // up, which is the one place both halves of the gesture can be seen.
-    //
-    // The action is stored with the press rather than looked up on release, so
-    // these listeners never need re-binding as the markers change — the marker a
-    // tap steps to is the one that was under the thumb when it landed.
-    const press = useRef(null);
-    useEffect(() => {
-        const stray = (e) => {
-            const p = press.current;
-            if (!p || e.pointerId !== p.id) return;
-            p.dev = Math.max(p.dev, Math.abs(e.clientX - p.x), Math.abs(e.clientY - p.y));
-        };
-        const release = (e) => {
-            const p = press.current;
-            if (!p || e.pointerId !== p.id) return;
-            press.current = null;
-            if (isTap(p.dev, (e.timeStamp || performance.now()) - p.t)) p.act();
-        };
-        const drop = (e) => {
-            const p = press.current;
-            if (p && e.pointerId === p.id) press.current = null;
-        };
-        window.addEventListener('pointermove', stray);
-        window.addEventListener('pointerup', release);
-        window.addEventListener('pointercancel', drop);
-        return () => {
-            window.removeEventListener('pointermove', stray);
-            window.removeEventListener('pointerup', release);
-            window.removeEventListener('pointercancel', drop);
-        };
-    }, []);
+    return (
+        <>
+            {marks.map(({ id, x, marker, freq, maxWidthPx }) => {
+                const flag = countryOf(marker);
+                const name = shortMarkerName(marker) || formatFreqShort(marker.freq);
+                return (
+                    <span
+                        key={id}
+                        className={`barrel__mark${current && freq === current.freq ? ' is-current' : ''}`}
+                        style={{ transform: `translateX(${Math.round(x)}px)` }}
+                        data-type={marker.type}
+                    >
+                        {/* The name is the target; the tick below it is not.
+                            A real button, so the keyboard and a screen reader
+                            get it — the pointer never reaches its onClick,
+                            which is why that is safe to have as well as the
+                            press. */}
+                        <button
+                            type="button"
+                            className="barrel__mark-label"
+                            style={maxWidthPx ? { maxWidth: maxWidthPx } : undefined}
+                            title={`${marker.name || 'Marker'} — ${formatFreqShort(marker.freq)}`}
+                            onPointerDown={(e) => press(e, () => stepToMarker(radio.actions, marker))}
+                            onClick={(e) => {
+                                if (e.detail) return;      // a pointer's click; already dealt with
+                                stepToMarker(radio.actions, marker);
+                            }}
+                        >
+                            {flag && <span className="barrel__mark-flag" aria-hidden="true">{countryFlag(flag)}</span>}
+                            {name}
+                        </button>
+                        <i className="barrel__mark-tick" aria-hidden="true" />
+                    </span>
+                );
+            })}
+        </>
+    );
+}
+
+function MarkerEdges({ markers, types }) {
+    const radio = useRadio();
+
+    // Tapped, not pressed: the gesture reaches the drum so a drag that starts on
+    // a step button still spins the scale. See useTapThrough, which the marks
+    // along the middle use too.
+    const press = useTapThrough();
 
     // Nothing selected means no stepping, and no stepping means no buttons: the
     // ends of the drum go back to being drum, which is the point — they are also
@@ -211,10 +252,7 @@ function MarkerEdges() {
                    moved. */
                 onPointerDown={(e) => {
                     if (!m) return;
-                    press.current = {
-                        id: e.pointerId, x: e.clientX, y: e.clientY, dev: 0,
-                        t: e.timeStamp || performance.now(), act,
-                    };
+                    press(e, act);
                 }}
                 /* Keyboard only. A pointer's click is ignored here because the
                    press above has already dealt with it — and browsers disagree
@@ -251,8 +289,30 @@ function MarkerEdges() {
 const BW_W = 52;
 
 function FreqWheel({ headRef, showBw }) {
-    const { tuning, actions } = useRadio();
+    const radio = useRadio();
+    const { tuning, actions } = radio;
     const display = useDisplay();
+    // The markers to draw along the drum, and the same selection its ends step
+    // between — one source, so the two halves cannot disagree about what is out
+    // there. See BarrelMarks.
+    const [navTypes] = useNavTypes();
+    const markers = useMarkerNav(radio, navTypes);
+
+    // How wide the drum actually is, which decides how many marks fit and
+    // whether any do. Measured rather than assumed: this panel is drawn in a
+    // 220 px dock, in a floating window, and full-width on a phone, and the
+    // answer is different in all three. A resize is the only thing that changes
+    // it, so a ResizeObserver is the whole cost.
+    const wheelRef = useRef(null);
+    const [width, setWidth] = useState(0);
+    useEffect(() => {
+        const el = wheelRef.current;
+        if (!el || typeof ResizeObserver === 'undefined') return undefined;
+        const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+        ro.observe(el);
+        setWidth(el.clientWidth);
+        return () => ro.disconnect();
+    }, []);
     // Shared with click-to-tune on the spectrum and with the Receiver panel's
     // ± buttons, so the pad tunes on the same grid as everything else.
     const step = display.tuneStep || 500;
@@ -289,7 +349,7 @@ function FreqWheel({ headRef, showBw }) {
     };
 
     return (
-        <div className="pad-wheel">
+        <div className="pad-wheel" ref={wheelRef}>
             <div className="pad-wheel__head">
                 {editing ? (
                     <FreqEntry
@@ -369,13 +429,24 @@ function FreqWheel({ headRef, showBw }) {
             </div>
             <Barrel
                 detent={FREQ_DETENT}
+                centre={tuning.frequency}
                 label={label}
                 onStep={tune}
                 ariaLabel="Frequency wheel"
                 className="barrel--freq"
+                strip={(
+                    <BarrelMarks
+                        markers={markers.all}
+                        current={markers.current}
+                        centreHz={tuning.frequency}
+                        stepHz={step}
+                        width={width}
+                        edges={navTypes.length > 0}
+                    />
+                )}
             >
                 <SnrWash />
-                <MarkerEdges />
+                <MarkerEdges markers={markers} types={navTypes} />
             </Barrel>
         </div>
     );
@@ -453,6 +524,7 @@ function ZoomWheel() {
     return (
         <Barrel
             detent={ZOOM_DETENT}
+            centre={view.binBandwidth}
             label={label}
             onStep={zoom}
             onSettle={settle}

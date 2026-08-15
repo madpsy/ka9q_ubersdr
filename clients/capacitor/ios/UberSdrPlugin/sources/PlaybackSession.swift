@@ -98,7 +98,26 @@ enum PlaybackSession {
     /// Sharing the engine rather than starting a second one keeps the process
     /// assertion continuous: the silence and the audio hand over inside one
     /// graph instead of one stopping before the other has started.
+    /// Both of these change the graph, and a graph is changed on one thread.
+    ///
+    /// The caller is BackgroundAudio, which runs on its own queue: the stream
+    /// arrives there, the decode happens there, and attaching the node it feeds
+    /// happened there too. That is a running engine being restructured from a
+    /// thread that is not the one rendering it, and it does not fail where it is
+    /// written — it fails later and elsewhere, inside AURemoteIO's teardown,
+    /// as an abort with no line of ours in the stack.
+    ///
+    /// Marshalled rather than documented-as-forbidden: the call site has a good
+    /// reason to be where it is (the format is not known until the stream's
+    /// header arrives), and `sync` keeps it a plain function that returns
+    /// whether the node is attached. Safe from that queue because nothing on
+    /// the main thread ever waits on it.
     static func attach(_ node: AVAudioPlayerNode, format: AVAudioFormat) -> Bool {
+        if Thread.isMainThread { return attachNow(node, format: format) }
+        return DispatchQueue.main.sync { attachNow(node, format: format) }
+    }
+
+    private static func attachNow(_ node: AVAudioPlayerNode, format: AVAudioFormat) -> Bool {
         guard let engine = engine else { return false }
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: format)
@@ -107,6 +126,11 @@ enum PlaybackSession {
     }
 
     static func detach(_ node: AVAudioPlayerNode) {
+        if Thread.isMainThread { detachNow(node); return }
+        DispatchQueue.main.sync { detachNow(node) }
+    }
+
+    private static func detachNow(_ node: AVAudioPlayerNode) {
         guard let engine = engine else { return }
         engine.disconnectNodeOutput(node)
         engine.detach(node)

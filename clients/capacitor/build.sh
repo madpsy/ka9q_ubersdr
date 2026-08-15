@@ -27,8 +27,11 @@
 #   ./build.sh --release    assemble a release APK instead (signed if the
 #                           credentials are in the environment — see below), and
 #                           the .aab beside it, which is what Play takes
-#   ./build.sh --install    assemble the debug APK and adb-install it on the one
-#                           attached device
+#   ./build.sh --install    assemble the debug APK and adb-install it: the phone
+#                           on USB if there is one, otherwise the usual one over
+#                           Wi-Fi (UBERSDR_PHONE, default 192.168.9.93). An
+#                           emulator is never chosen on its own — name it with
+#                           --install=<serial> if that is what you want.
 #   ./build.sh --install=192.168.1.50
 #                           ...on a phone over Wi-Fi: connects to it first
 #                           (port 5555 unless one is given) and installs there.
@@ -323,6 +326,11 @@ SHOT_DEVICES=(
     "10in:UberSDR_Tablet_10:2560:1600:320"
 )
 SHOT_RECEIVER="${UBERSDR_SHOT_UUID:-4907ba0a-32e6-40bb-a4ca-47f823331728}"
+
+# The phone a bare --install lands on when there is none on USB. An address
+# rather than a serial: over Wi-Fi the serial *is* the address, and this one
+# does not change. Override with UBERSDR_PHONE for a different handset.
+PHONE_DEFAULT="${UBERSDR_PHONE:-192.168.9.93}"
 SHOT_DIR=screenshots
 
 # An AVD with the given geometry, if there is not one already.
@@ -848,8 +856,29 @@ if [[ "$INSTALL" -eq 1 ]]; then
     ADB="$ANDROID_HOME/platform-tools/adb"
     command -v adb >/dev/null 2>&1 && ADB=adb
 
-    # Where to install. Empty means "the one device attached", which is what adb
-    # does on its own and what fails as soon as there are two.
+    # Where to install, when nothing was named.
+    #
+    # adb's own rule is "the one device attached", which stops working the
+    # moment a screenshot emulator is booted — and this repo boots them. So a
+    # bare --install picks the *physical* device: an emulator is where the store
+    # screenshots are taken, a phone is where a build is tried.
+    #
+    # With no phone on USB it falls back to the one on Wi-Fi, which is how this
+    # phone is usually reached. A cable re-enumerates the device every time the
+    # screen locks and each re-enumeration needs its permissions again, so
+    # wireless is the normal way in rather than the exception. Override the
+    # address with UBERSDR_PHONE, or name anything else with --install=.
+    if [[ -z "$DEVICE" ]]; then
+        physical="$("$ADB" devices | awk '$2 == "device" && $1 !~ /^emulator-/ { print $1 }')"
+        if [[ "$(wc -l <<< "$physical")" -eq 1 && -n "$physical" ]]; then
+            DEVICE="$physical"
+            echo "  installing to $DEVICE"
+        else
+            DEVICE="$PHONE_DEFAULT"
+            echo "  no phone on USB — trying $DEVICE over Wi-Fi"
+        fi
+    fi
+
     TARGET=()
     if [[ -n "$DEVICE" ]]; then
         # An address is something to connect to first; anything else is taken as

@@ -2515,10 +2515,23 @@ a.btn { text-decoration: none; }
     transition: width 120ms linear, background 240ms linear;
 }
 
+/* Above the index line, which is a change of order and not only of number.
+ *
+ * The strip is transformed, so it is its own stacking context: everything
+ * inside it paints as one layer, and no z-index on a mark inside can lift that
+ * mark over a sibling of the strip. Either the whole scale is over the line or
+ * none of it is — so it is the whole scale, and the line sits behind the ticks,
+ * the numbers and the marker chips.
+ *
+ * The line loses nothing by it. It is 3 px wide, full height, and fades
+ * downwards; what crosses it are 1 px ticks, a row of digits and, at most, one
+ * chip. What it gains is the case that matters: the dial sitting *on* a marker,
+ * where the name is the thing worth reading and a bar through the middle of a
+ * callsign made it unreadable. */
 .barrel__strip {
     position: absolute;
     inset: 0;
-    z-index: 1;
+    z-index: 2;
     will-change: transform;
     /* The ends of the scale fall away, which is what makes it read as a curve
        and, incidentally, keeps a label from being cut in half at the edge. */
@@ -2560,6 +2573,15 @@ a.btn { text-decoration: none; }
 
 /* Fades downwards: the ticks are at the top of the drum and the labels below
    them, so a full-height line would strike through the reading it points at. */
+/* The index line: where the dial is, straight down the middle.
+ *
+ * Under the marks rather than over them, which is a change from when nothing
+ * was drawn in the middle of the drum. The line and a mark's name want the same
+ * few pixels when the dial is *on* that marker — which is exactly when the name
+ * matters most — and a 3 px accent bar through the middle of a callsign makes
+ * it unreadable. The line is still perfectly legible with a chip sitting on it:
+ * it runs the whole height of the drum and the chip is eight of those pixels.
+ */
 .barrel__index {
     position: absolute;
     left: 50%;
@@ -2567,7 +2589,7 @@ a.btn { text-decoration: none; }
     bottom: 0;
     width: 3px;
     margin-left: -1.5px;
-    z-index: 3;
+    z-index: 1;
     pointer-events: none;
     border-radius: 0 0 2px 2px;
     background: linear-gradient(180deg, var(--accent), rgba(0, 0, 0, 0) 70%);
@@ -2708,6 +2730,92 @@ a.btn { text-decoration: none; }
 .barrel__edge[data-type="dx"] { --edge-ink: var(--accent); }
 .barrel__edge[data-type="cw"] { --edge-ink: var(--good); }
 .barrel__edge[data-type="voice"] { --edge-ink: var(--warn); }
+
+/* A marker at its own place on the scale — see BarrelMarks. Inside the strip,
+   so it travels with the numbers under it.
+ *
+ * Two parts, and the split is what keeps the drum readable: a name in the band
+ * the ticks occupy, and a line from it down through them to the frequency it
+ * belongs to. The name has a background because it sits over the ticks and
+ * would otherwise be read through them; the line is what makes it a mark rather
+ * than a caption floating somewhere near.
+ *
+ * Never a target. The drum is one gesture surface — a mark that took a press
+ * would be a dead patch in the middle of it, and the two ends are what step to
+ * a marker. */
+.barrel__mark {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    /* Zero-width, so the frequency is a *line* and not a left edge.
+     *
+     * Absolutely positioned, this box was shrink-to-fit: its left edge sat on
+     * the marker's frequency and the pill and tick were centred inside it,
+     * which put them half a name's width to the right of the thing they were
+     * marking. With no width of its own the children overflow evenly either
+     * side, so the tick lands on the frequency — and on the centre line when
+     * the dial is on it, which is the check that shows it. */
+    width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* The name takes presses; nothing else here does. The tick is two pixels
+       of decoration, and a box the width of a name that swallowed a drag would
+       be a patch of the drum you cannot throw. */
+    pointer-events: none;
+    --mark-ink: var(--text-dim);
+}
+.barrel__mark[data-type="dx"] { --mark-ink: var(--accent); }
+.barrel__mark[data-type="cw"] { --mark-ink: var(--good); }
+.barrel__mark[data-type="voice"] { --mark-ink: var(--warn); }
+.barrel__mark-label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 120px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    /* A button, so it needs the usual undoing — and `pointer-events` back,
+       against the `none` on the box around it. */
+    border: 0;
+    pointer-events: auto;
+    cursor: pointer;
+    font-family: inherit;
+    background: var(--surface-3);
+    color: var(--mark-ink);
+    font-size: calc(9.5px * var(--ui-scale));
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.barrel__mark-flag { font-size: calc(9px * var(--ui-scale)); }
+/* Pressed, and only pressed: hover is left alone. A finger latches :hover on
+   whatever it last touched, and a mark that stayed lit after a tap would read
+   as the dial having stopped there when it has moved on. */
+.barrel__mark-label:active { background: var(--surface-hover); }
+/* Room for a fingertip on the one part of a mark that is a target. The chip
+   grows a little; the drum does not — it is 48 px tall and the band these sit
+   in has the room. */
+@media (any-pointer: coarse) {
+    .barrel__mark-label { padding: 3px 8px; }
+}
+/* Down to the scale, stopping short of the numbers: the line says which tick is
+   meant, and reaching the text would strike through it. */
+.barrel__mark-tick {
+    width: 1px;
+    height: 7px;
+    background: var(--mark-ink);
+    opacity: 0.75;
+}
+/* Where the dial is. The one mark that cannot be worked out from the numbers,
+   so it is the one that keeps its colour at full strength. */
+.barrel__mark.is-current .barrel__mark-label { box-shadow: 0 0 0 1px var(--mark-ink) inset; }
+/* The tick keeps out of the line's way for the same reason the chip does not:
+   under the dial they are the same pixel, and two marks of the same width in
+   the same place read as one blurred one. The line is the answer there. */
+.barrel__mark.is-current .barrel__mark-tick { opacity: 0; }
 
 /* Only a dozen rungs deep and every one of them labelled — "1×, 2×, 6×…", which
    is what says at a glance that this drum is the zoom and not a second scale —

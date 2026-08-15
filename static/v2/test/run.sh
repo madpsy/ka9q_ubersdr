@@ -174,6 +174,8 @@ esbuild ../src/lib/chatName.js --bundle --format=cjs --platform=node \
     --outfile=.build/chatname.cjs --log-level=warning
 esbuild ../src/lib/hostPanels.js --bundle --format=cjs --platform=node \
     --outfile=.build/hostpanels.cjs --log-level=warning
+esbuild ../src/lib/barrelMarks.js --bundle --format=cjs --platform=node \
+    --outfile=.build/barrelmarks.cjs --log-level=warning
 esbuild maxfps.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/displaycontext.cjs --log-level=warning
 esbuild ../src/extensions/protocol.js --bundle --format=cjs --platform=node \
@@ -420,3 +422,4 @@ node chatname.test.js
 node hostpanels.test.js
 node maxfps.test.js
 node shell.test.js
+node barrelmarks.test.js

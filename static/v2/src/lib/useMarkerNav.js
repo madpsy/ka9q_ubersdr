@@ -84,18 +84,31 @@ export default function useMarkerNav(radio, types) {
         return subscribeConfirmedVoice((list) => setConfirmed(list || []));
     }, [wantsConfirmed]);
 
-    return useMemo(() => findMarkers(
-        collectMarkers({
-            dx,
-            cw,
-            voice,
-            confirmed,
-            bookmarks: types.includes('bookmark-server') ? (catalog.bookmarks || []) : [],
-            local: types.includes('bookmark-local') ? (catalog.local || []) : [],
-        }),
-        tuning.frequency,
-        tuning.mode,
-        types,
-    ), [dx, cw, voice, confirmed, catalog.bookmarks, catalog.local,
-        tuning.frequency, tuning.mode, types]);
+    // Collected once per *feed*, and deliberately not per dial position.
+    //
+    // This builds an object for every spot, every detected signal and every
+    // bookmark — hundreds on a busy band. The dial has nothing to do with that
+    // list, but it used to be in the dependencies anyway, so a spin rebuilt the
+    // whole thing on every frame it stepped: hundreds of allocations per frame,
+    // on the one path in this panel that has to keep up with a thumb. The drum
+    // showed it as a flicker, and not only in the marks — the scale's own
+    // numbers strobed, which is what dropped frames look like.
+    const all = useMemo(() => collectMarkers({
+        dx,
+        cw,
+        voice,
+        confirmed,
+        bookmarks: types.includes('bookmark-server') ? (catalog.bookmarks || []) : [],
+        local: types.includes('bookmark-local') ? (catalog.local || []) : [],
+    }), [dx, cw, voice, confirmed, catalog.bookmarks, catalog.local, types]);
+
+    // ...and searched per dial position, which is a scan of that list and
+    // allocates three references. `all` comes back with it: the drum's ends
+    // want the nearest either way, and the marks along its middle want
+    // everything in view — one collection, so the two cannot disagree about
+    // what is out there.
+    return useMemo(
+        () => ({ ...findMarkers(all, tuning.frequency, tuning.mode, types), all }),
+        [all, tuning.frequency, tuning.mode, types],
+    );
 }

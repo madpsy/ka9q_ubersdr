@@ -22,7 +22,7 @@
 //   render rate are different clocks and mixing them is what makes a phone
 //   stutter.
 
-import React, { useCallback, useEffect, useRef } from '../react.js';
+import React, { useCallback, useEffect, useLayoutEffect, useRef } from '../react.js';
 import {
     clampSpeed, decayVelocity, flingVelocity, settleOffset, takeDetents,
 } from '../lib/barrel.js';
@@ -47,9 +47,23 @@ const HALF_STRIP_PX = 620;
  * class says (see .barrel__snr). A live reading belongs behind: it is there to
  * be seen while the thumb is on the drum, so it must not take the room the scale
  * needs or the touches it wants.
+ *
+ * `strip` is drawn inside the *moving* part, beside the detent cells, for
+ * anything that belongs to a place on the scale rather than to the box — the
+ * frequency drum's markers. It has to be here rather than in `children`
+ * because the strip is what a drag translates: a mark placed on the box would
+ * hold still while the scale slid under it, which is precisely the wrong half
+ * of the picture to keep steady.
  */
 export default function Barrel({
     detent = 46,
+    /**
+     * What the scale is centred on — the frequency for the tuning drum, the
+     * span for the zoom one. Not used for drawing: it is the signal that the
+     * owner's re-render has happened, which is when the strip may be re-based.
+     * See `lead` in move().
+     */
+    centre,
     label,
     onStep,
     onSettle,
@@ -57,9 +71,10 @@ export default function Barrel({
     ariaLabel,
     className = '',
     children,
+    strip,
 }) {
     const stripRef = useRef(null);
-    const state = useRef({ rest: 0, vel: 0, at: 0, samples: [], raf: 0, drag: null });
+    const state = useRef({ rest: 0, lead: 0, vel: 0, at: 0, samples: [], raf: 0, drag: null });
 
     // Latest handlers, without re-binding the gesture on every render: the owner
     // rebuilds these closures whenever its value changes, which is every step.
@@ -72,8 +87,20 @@ export default function Barrel({
 
     const draw = useCallback(() => {
         const el = stripRef.current;
-        if (el) el.style.transform = `translate3d(${state.current.rest}px,0,0)`;
+        if (!el) return;
+        const s = state.current;
+        el.style.transform = `translate3d(${s.rest + s.lead}px,0,0)`;
     }, []);
+
+    // The owner has caught up: its labels — and anything it places by value,
+    // like the frequency drum's markers — now agree with the detents the strip
+    // has taken, so the compensation goes and the strip sits where it belongs.
+    // Layout, not effect: this has to land in the same paint as the new labels,
+    // or the twitch it exists to prevent happens here instead.
+    useLayoutEffect(() => {
+        state.current.lead = 0;
+        draw();
+    }, [centre, draw]);
 
     // Moves the strip by dx px, taking whatever whole detents that crosses.
     // Returns false when a limit stopped it, which ends a spin.
@@ -95,6 +122,28 @@ export default function Barrel({
                 ok = false;
                 haptic('bump', 'spectrum');
             } else {
+                // Taken here, shown later — so hold the picture still until it
+                // catches up.
+                //
+                // Crossing a detent does two things that are meant to cancel:
+                // the strip is re-based by one detent (`rest` above), and the
+                // owner is told to move the value it labels the scale from. The
+                // first happens now, imperatively; the second is React state and
+                // lands on the next commit. In between, the strip has moved and
+                // the labels — and anything else placed by frequency, which is
+                // what the markers in the frequency drum are — have not.
+                //
+                // That gap was always here and was invisible while a commit
+                // landed inside the frame. Give the render more to do and it
+                // shows as the whole scale twitching a detent and back at every
+                // notch, which reads as flickering numbers.
+                //
+                // `lead` cancels the re-basing for exactly as long as it is
+                // wrong, and is dropped the moment `at` changes — see below.
+                // Only when the step was actually applied: at a band edge there
+                // is no new value coming, and a lead nothing will clear would
+                // leave the strip parked off its own scale.
+                s.lead += steps * detentRef.current;
                 haptic('step', 'spectrum');
             }
         }
@@ -241,7 +290,7 @@ export default function Barrel({
                buzz on top of the per-detent one. */
             data-haptic="off"
         >
-            <div className="barrel__strip" ref={stripRef}>{cells}</div>
+            <div className="barrel__strip" ref={stripRef}>{cells}{strip}</div>
             <span className="barrel__index" aria-hidden="true" />
             {children}
         </div>

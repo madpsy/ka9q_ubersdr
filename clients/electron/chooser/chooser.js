@@ -237,10 +237,29 @@ function dangerButton(label, arm, run) {
     return btn;
 }
 
+/** A heading over a run of settings. */
+function settingGroup(title) {
+    return el('div', 'set-group', title);
+}
+
 async function showSettings() {
     const [info, state] = await Promise.all([api.appInfo(), api.chooser()]);
 
-    const modal = showModal([el('h3', null, 'Settings')]);
+    // Three parts rather than one list, because this page is the one that grows:
+    // every setting anybody adds lands here, and a dialog that is simply a tall
+    // column puts its title off the top and its Done button off the bottom the
+    // moment it outgrows a screen. The title and the way out stay put; the rows
+    // between them scroll.
+    const modal = showModal([]);
+    modal.classList.add('modal--sheet');
+    const head = el('div', 'modal__head');
+    head.appendChild(el('h3', null, 'Settings'));
+    const body = el('div', 'modal__body');
+    const foot = el('div', 'modal__foot');
+    modal.append(head, body, foot);
+
+    // Everything below appends to the scrolling middle.
+    const add = (node) => body.appendChild(node);
 
     // Where the interface settings live. The wording is what it *does* rather
     // than the word "scope": "shared" and "per receiver" are the two answers
@@ -253,7 +272,8 @@ async function showSettings() {
     }
     scope.value = state.prefsScope === 'receiver' ? 'receiver' : 'shared';
     scope.addEventListener('change', () => api.setChooser({ prefsScope: scope.value }));
-    modal.appendChild(settingRow(
+    add(settingGroup('Interface'));
+    add(settingRow(
         'Panels and settings',
         'Shared: every receiver opens with the same layout, filters and display '
         + 'settings. Per receiver: each keeps its own. The two are stored apart, so '
@@ -267,13 +287,6 @@ async function showSettings() {
     auto.setAttribute('role', 'switch');
     auto.checked = state.autoConnect === true;
     auto.addEventListener('change', () => api.setChooser({ autoConnect: auto.checked }));
-    modal.appendChild(settingRow(
-        'Open the last receiver on launch',
-        'Straight into the one you used last, without stopping here. The chooser is '
-        + 'still behind it — stopping the receiver comes back to this page.',
-        auto,
-    ));
-
     // The receiver layout, where choosing is worth offering: a touchscreen with
     // room for both. This is v2's own setting, reached through the host — see
     // static/v2/src/lib/shellPref.js, which is also where the same rule about
@@ -297,7 +310,7 @@ async function showSettings() {
         }
         layout.value = stored === 'minimal' ? 'minimal' : 'full';
         layout.addEventListener('change', () => api.prefSet('ubersdr.v2.shell', layout.value));
-        modal.appendChild(settingRow(
+        add(settingRow(
             'Receiver layout',
             'Full: panels docked either side of the spectrum. Simple: one panel at a '
             + 'time over a full-width waterfall, as a phone gets. Takes effect on the '
@@ -306,10 +319,19 @@ async function showSettings() {
         ));
     }
 
+    add(settingGroup('Starting up'));
+    add(settingRow(
+        'Open the last receiver on launch',
+        'Straight into the one you used last, without stopping here. The chooser is '
+        + 'still behind it — stopping the receiver comes back to this page.',
+        auto,
+    ));
+
     if (info.appSettings) {
         const open = el('button', 'ghost', 'Open');
         open.addEventListener('click', () => api.openAppSettings().catch(() => {}));
-        modal.appendChild(settingRow(
+        add(settingGroup('This device'));
+        add(settingRow(
             'Notifications',
             'Asked for once, and the answer is remembered by the system rather than by '
             + 'this app — so changing your mind is done in the system’s own settings.',
@@ -333,7 +355,7 @@ async function showSettings() {
             refreshSaved();
         }),
     ));
-    modal.appendChild(danger);
+    add(danger);
 
     // What used to be along the bottom of the chooser, on the page that is
     // actually about the app rather than under the list of receivers.
@@ -347,13 +369,11 @@ async function showSettings() {
     about.appendChild(el('div', null, info.builtinAvailable
         ? `interface: ${info.buildInfo || 'staged'}`
         : 'no interface staged (run build.sh) — receivers open with the UI they serve'));
-    modal.appendChild(about);
+    add(about);
 
-    const actions = el('div', 'modal-actions');
     const done = el('button', null, 'Done');
     done.addEventListener('click', closeModal);
-    actions.appendChild(done);
-    modal.appendChild(actions);
+    foot.appendChild(done);
     done.focus();
 }
 

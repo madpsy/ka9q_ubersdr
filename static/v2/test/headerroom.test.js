@@ -132,4 +132,34 @@ t('a bar with no room at all does not carry it', () => {
     assert.strictEqual(fitsInHeader(measureSlack(shownBar, '.title'), ZOOM, true), false);
 });
 
+t('a control wider than its declared width loops, and correcting it settles', () => {
+    // The failure this guards against took the whole interface down: the
+    // buttons in these bars grew for touch, the constant beside the call did
+    // not, and "there is room to show it" and "it fits now that it is shown"
+    // disagreed for ever — show, overflow, hide, show, until React threw
+    // #185 and blanked the page.
+    const DECLARED = 40;
+    const REAL = 56;                     // what it grew to
+    const bar = { width: 270, text: 90, fixeds: CHROME };
+
+    const hidden = head(bar);
+    const shownBar = head({ ...bar, fixeds: [...CHROME, REAL] });
+    const slackHidden = measureSlack(hidden, '.title');
+    const slackShown = measureSlack(shownBar, '.title');
+
+    // Taken at face value, the two answers chase each other.
+    assert.strictEqual(fitsInHeader(slackHidden, DECLARED, false), true, 'would show it');
+    assert.strictEqual(fitsInHeader(slackShown, DECLARED, true), false, '...then hide it');
+
+    // What the hook does on seeing it overflow: believe the measurement. The
+    // correction is how far over it went, which is not the control's whole
+    // width — the point is not to recover that number but to stop asking for
+    // something the bar cannot give.
+    const corrected = DECLARED - slackShown;
+    assert.ok(corrected > DECLARED, 'the correction should raise the estimate');
+    // And now it holds still, from either side.
+    assert.strictEqual(fitsInHeader(slackHidden, corrected, false), false);
+    assert.strictEqual(fitsInHeader(slackShown, corrected, true), false);
+});
+
 console.log(`\n${pass} header room checks passed`);

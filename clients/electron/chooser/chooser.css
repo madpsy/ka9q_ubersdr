@@ -338,6 +338,51 @@ select {
     #settings-open { padding: 8px 14px; }
 }
 
+/* A dialog that is mostly a list — the settings page, which is the one that
+ * grows. Its head and foot stay; only the middle scrolls.
+ *
+ * The plain .modal scrolls as a whole, which is right for a dialog of three
+ * lines that has occasionally outgrown a small window. It is wrong for this
+ * one: the title scrolls off the top and, worse, the way out scrolls off the
+ * bottom, so the longer the page gets the further somebody has to travel to
+ * leave it. */
+.modal--sheet { padding: 0; gap: 0; overflow: hidden; }
+.modal--sheet .modal__head {
+    flex: none;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+}
+.modal--sheet .modal__body {
+    /* min-height: 0 is what lets a flex child scroll rather than stretch its
+       parent — without it the dialog grows to its content again and the
+       max-height above does the clipping instead. */
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 16px;
+}
+.modal--sheet .modal__foot {
+    flex: none;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--border);
+}
+
+/* The heading over a run of settings. Quiet: it is there to break a long list
+   into things you can skim past, not to be read on the way to one row. */
+.set-group {
+    margin: 16px 0 2px;
+    color: var(--dim);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+}
+.set-group:first-child { margin-top: 6px; }
+
 /* Settings rows: a label and its control, one per line, with the explanation
    under the label rather than beside it — this dialog is read on a phone as
    often as on a desktop, and a two-column row there is two columns of nothing. */
@@ -673,10 +718,26 @@ select {
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Never against the edges of the screen, and clear of a phone's notch and
+       home indicator. The insets are zero everywhere else, so the desktop sees
+       only the 16 px. */
+    padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+             calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
 }
 
 .modal {
     width: min(420px, calc(100vw - 36px));
+    /* Taller than the screen is a real case now: the settings dialog is a dozen
+       rows and their explanations, and on a handset that is more than a screen
+       — where a box sized purely by its content simply runs off both ends with
+       nothing to scroll. It was written for dialogs of three lines.
+       `dvh` after `vh` so a browser with a retracting toolbar measures what is
+       actually visible; the first line is what the rest fall back to. */
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    /* The page behind is not what a flick at the end of this list should move. */
+    overscroll-behavior: contain;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 10px;

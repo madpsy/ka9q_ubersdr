@@ -552,6 +552,7 @@ function ControlTags() {
     useEffect(() => onAnnounceSettings(setAnnounce), []);
     const [attached, setAttached] = useState(bridgeAttached);
     useEffect(() => onBridgeAttached(setAttached), []);
+    const mobile = useMediaQuery(MOBILE_QUERY);
     const flex = useSurface(getFlex, readConnected);
     const midi = useSurface(getMidi, readMidi);
     const provided = useProvidedSurfaces();
@@ -634,12 +635,18 @@ function ControlTags() {
                     SPEAK
                 </button>
             )}
-            {attached > 0 && (
+            {attached > 0 && !mobile && (
                 // Something outside this page — a browser extension, a
                 // userscript — is attached to the page API and can retune this
                 // receiver. Not clickable: switching the bridge off from here
                 // would be a one-way door with no way back on the same strip,
                 // and the SDR Control panel is where the switch lives.
+                //
+                // Desktop only, on the same grounds as the readouts that left
+                // this row: a handset cannot spare the width, and the things
+                // that attach — an extension, a userscript, a program on the
+                // same machine — are not what is driving a phone. The SDR
+                // Control panel still shows the count on every screen.
                 <span
                     className="tag tag--accent"
                     title={attached === 1
@@ -2482,7 +2489,16 @@ export default function SpectrumView() {
                             </span>
                         )}
                         <Button size="sm" variant="ghost" icon={<Icon.Target />} title="Centre on tuned frequency" onClick={actions.centerOnTuned} />
-                        <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
+                        {/* Not on a handset, where this row is the scarcest space in
+                            the layout and this is the one button in it that is not
+                            the only way to its action: the zoom ladder in the
+                            Multipad resets on its bottom rung — the same
+                            resetSpectrum, chosen there so the private radiod channel
+                            is handed back — and "Reset zoom" can be mapped to a pad.
+                            Centre-on-tuned beside it has neither, so it stays. */}
+                        {!mobile && (
+                            <Button size="sm" variant="ghost" icon={<Icon.Reset />} title="Full span" onClick={actions.resetSpectrum} />
+                        )}
                         {/* Pause by hand, next to the other things you do to the
                             whole display. Exactly what the idle pause does, so
                             the button reads as the switch for a thing the setting

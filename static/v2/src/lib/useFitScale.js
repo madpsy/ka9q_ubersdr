@@ -24,6 +24,13 @@ export function useFitScale(rowRef, elRef, on) {
     // that changed would be a resize observer per step.
     const scaleRef = useRef(1);
     scaleRef.current = scale;
+    // What was last asked for, which is not the same thing and must not be
+    // mixed up with it: `scaleRef` is the size the readout is *drawn* at, and
+    // the measurement divides the width it reads back out by it. A size that
+    // has been asked for but not yet rendered would divide this frame's width
+    // by next frame's size, which is a wrong answer used to pick the size after
+    // that. This is only here to spot a measurement that says nothing new.
+    const asked = useRef(1);
 
     // How many times the readout has changed size in quick succession, and the
     // size it is not allowed to grow past once that has gone on too long.
@@ -42,14 +49,24 @@ export function useFitScale(rowRef, elRef, on) {
     // the two and stops growing. Smaller is the safe end — it is the size that
     // was observed to fit — and the ceiling only lasts as long as the thrash,
     // so a genuine resize a moment later is measured afresh.
+    //
+    // A change of the row's width clears it too. The argument this guards
+    // against happens at one width — the readout is the only thing moving — so
+    // a new width is a new question rather than another round of the same one,
+    // and a bar being dragged must not run out of budget and stick.
     const flips = useRef(0);
     const flipAt = useRef(0);
+    const flipW = useRef(0);
     const ceiling = useRef(0);
 
     const measure = useCallback(() => {
         if (!on) return;
         const now = Date.now();
-        if (now - flipAt.current > SETTLE_MS) { flips.current = 0; ceiling.current = 0; }
+        const width = rowRef.current ? rowRef.current.clientWidth : 0;
+        if (now - flipAt.current > SETTLE_MS || width !== flipW.current) {
+            flips.current = 0;
+            ceiling.current = 0;
+        }
 
         let next = measureFit(rowRef.current, elRef.current, scaleRef.current, widths.current);
         if (ceiling.current) next = Math.min(next, ceiling.current);
@@ -58,17 +75,18 @@ export function useFitScale(rowRef, elRef, on) {
         // render, and a set React cannot discard (which is any set made while
         // that component has another update in flight) schedules a re-render,
         // which runs this, which sets again. See useRoomFor.
-        if (same(scaleRef.current, next)) return;
+        if (same(asked.current, next)) return;
 
         flips.current += 1;
         flipAt.current = now;
+        flipW.current = width;
         if (flips.current > 4) {
             next = Math.min(next, scaleRef.current);
             ceiling.current = next;
-            if (same(scaleRef.current, next)) return;
+            if (same(asked.current, next)) return;
         }
         // Read by the next call, which may come before React has re-rendered.
-        scaleRef.current = next;
+        asked.current = next;
         setScale(next);
     }, [rowRef, elRef, on]);
 
@@ -91,8 +109,8 @@ export function useFitScale(rowRef, elRef, on) {
             widths.current = {};
             flips.current = 0;
             ceiling.current = 0;
-            if (!same(scaleRef.current, 1)) {
-                scaleRef.current = 1;
+            if (!same(asked.current, 1)) {
+                asked.current = 1;
                 setScale(1);
             }
         }

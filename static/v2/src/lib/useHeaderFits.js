@@ -19,6 +19,12 @@ export function useHeaderFits(ref, elastic, need) {
     const [fits, setFits] = useState(true);
     const shown = useRef(true);
     shown.current = fits;
+    // What was last asked for, as against what is on screen — see useRoomFor.
+    // The difference matters more here: `shown` also says which of the two
+    // measurements below has just been taken, and a slack read off a bar that
+    // still has the control in it, filed as though the control were out, is a
+    // wrong answer to the one question this hook exists to learn.
+    const asked = useRef(true);
 
     // What the control *actually* costs, once that has been observed.
     //
@@ -52,8 +58,13 @@ export function useHeaderFits(ref, elastic, need) {
     //
     // Counted within a window rather than reset by a resize — see useRoomFor,
     // where resetting on resize turned the safety net into part of the loop.
+    //
+    // Reset by a change of width as well as by time, and only width: a bar
+    // being dragged is asked something new at every frame, and that is the
+    // control working rather than thrash. See useRoomFor.
     const flips = useRef(0);
     const flipAt = useRef(0);
+    const flipW = useRef(0);
 
     const measure = useCallback(() => {
         const el = ref.current;
@@ -69,15 +80,17 @@ export function useHeaderFits(ref, elastic, need) {
         }
 
         const now = Date.now();
-        if (now - flipAt.current > SETTLE_MS) flips.current = 0;
+        const width = el.clientWidth;
+        if (now - flipAt.current > SETTLE_MS || width !== flipW.current) flips.current = 0;
         const next = flips.current > 4 ? false : fitsInHeader(slack, real.current, shown.current);
         // Unchanged: don't call the setter — see useRoomFor, where setting a
         // value React already holds, from an effect that runs after every
         // render, is what blanked the interface.
-        if (next === shown.current) return;
-        shown.current = next;
+        if (next === asked.current) return;
+        asked.current = next;
         flips.current += 1;
         flipAt.current = now;
+        flipW.current = width;
         setFits(next);
     }, [ref, elastic, need]);
 

@@ -33,6 +33,15 @@ export function useRoomFor(rowRef, specs) {
     // over.
     const shown = useRef(fits);
     shown.current = fits;
+    // ...and what was last *asked* for, which is a different question and only
+    // used to spot a measurement that says nothing new. It has to be separate:
+    // an answer handed to the setter is not on screen until React has rendered
+    // and the browser has laid it out, and `shown` is read by the hysteresis,
+    // which is asking about the layout the widths were measured in. Writing the
+    // pending answer there would have the measurement reason about a row that
+    // does not exist yet — hidden things asked for the cushion they had already
+    // been granted, so a tag came down that had every right to stay up.
+    const asked = useRef(fits);
 
     // How many times this row has changed its mind in quick succession.
     //
@@ -48,14 +57,23 @@ export function useRoomFor(rowRef, specs) {
     // change when a child is dropped, so the observer fired on every lap and
     // cleared the counter each time. Thrash happens inside a frame or two; a
     // genuine change of circumstance is further apart than this.
+    //
+    // The width the counting applies to, though. A row being dragged wider is
+    // asked a genuinely new question at every frame of the drag, and answering
+    // several of them in a row is not thrash — it is the control working. Only
+    // the width, not the height: a row that has grown a line is the same
+    // question again, and this counter exists because that is where the
+    // argument happens.
     const flips = useRef(0);
     const flipAt = useRef(0);
+    const flipW = useRef(0);
 
     const measure = useCallback(() => {
         const el = rowRef.current;
         if (!el) return;
         const now = Date.now();
-        if (now - flipAt.current > SETTLE_MS) flips.current = 0;
+        const width = el.clientWidth;
+        if (now - flipAt.current > SETTLE_MS || width !== flipW.current) flips.current = 0;
         const next = flips.current > 4
             ? Object.fromEntries(specsRef.current.map((s) => [s.key, false]))
             : measureRoom(el, specsRef.current, widths.current, shown.current);
@@ -73,11 +91,12 @@ export function useRoomFor(rowRef, specs) {
         // (#185), taking the whole interface down with it. A receiver has
         // something arriving on nearly every frame, so the busy moment is all
         // the time.
-        if (sameFits(shown.current, next)) return;
+        if (sameFits(asked.current, next)) return;
         // Read by the *next* call, which may come before React has re-rendered.
-        shown.current = next;
+        asked.current = next;
         flips.current += 1;
         flipAt.current = now;
+        flipW.current = width;
         setFits(next);
     }, [rowRef]);
 

@@ -59,6 +59,9 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     var onStopped: (() -> Void)?
 
     private let speech = AVSpeechSynthesizer()
+    /// Measured on the way past rather than on a timer: the page only asks
+    /// while the stats readout is open. See AppLoad.
+    private let appLoad = AppLoad()
     private var nowPlaying: [String: Any] = [:]
     private var haveRemoteCommands = false
 
@@ -117,6 +120,7 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         case "artwork":       artwork(message)
         case "notice":        notice(message)
         case "notice-close":  closeNotice(message)
+        case "stats":         deliver("stats:\(appLoad.json())")
         case "notice-permission": askNotificationPermission()
         case "speak":         speak(message)
         case "speak-cancel":  speech.stopSpeaking(at: .immediate)

@@ -22,6 +22,7 @@
 # Usage:
 #   ./build.sh              build the UI, stage everything, sync the native project
 #   ./build.sh --skip-ui    skip the v2 build (keep what is staged)
+#   ./build.sh --stage-ui   build and stage everything www/ serves, and stop
 #   ./build.sh --apk        the above, then assemble a debug APK
 #   ./build.sh --release    assemble a release APK instead (signed if the
 #                           credentials are in the environment — see below), and
@@ -33,6 +34,8 @@
 #                           (port 5555 unless one is given) and installs there.
 #                           A serial from `adb devices` works in the same place.
 #                           Combine with --release to install that instead.
+#   ./build.sh --yes        answer the publish prompt in advance, for a run with
+#                           no terminal to ask on. Only meaningful with --publish.
 #   ./build.sh --publish    release-build, then upload it to the `latest`
 #                           release on GitHub with the gh CLI, replacing what is
 #                           there. Asks first, and only from a terminal.
@@ -90,6 +93,15 @@ CHOOSER=../electron/chooser
 ICON_SRC=../electron/assets/icon.png
 
 SKIP_UI=0
+# The publish confirmation, given in advance — see publish_release.
+ASSUME_YES=0
+# Build the web assets and stop. What build-mac.sh calls, so an iOS build ships
+# the interface it was just built with rather than whatever an Android build
+# staged last: www/ holds v2, the chooser and the receiver bridge, it is what
+# both platforms serve, and only this script fills it. Without this the two
+# apps can differ by however long it has been since anyone built the APK, which
+# is a hard difference to explain from the outside.
+STAGE_ONLY=0
 SHOTS=0
 APK=0
 RELEASE=0
@@ -101,11 +113,13 @@ PUBLISH=0
 for arg in "$@"; do
     case "$arg" in
         --skip-ui) SKIP_UI=1 ;;
+        --stage-ui) STAGE_ONLY=1 ;;
         --apk) APK=1 ;;
         --release) APK=1; RELEASE=1 ;;
         --install) APK=1; INSTALL=1 ;;
         --install=*) APK=1; INSTALL=1; DEVICE="${arg#--install=}" ;;
         --publish) APK=1; RELEASE=1; PUBLISH=1 ;;
+        --yes) ASSUME_YES=1 ;;
         --clean) CLEAN=1 ;;
         --screenshots) APK=1; SHOTS=1 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
@@ -238,15 +252,26 @@ publish_release() {
     echo "      $(basename "$ARTIFACT")   $(du -h "$ARTIFACT" | cut -f1)   version $(node -p "require('./package.json').version")"
     echo
 
-    # A terminal, or nothing happens. An unattended run publishing to the tag
-    # every download link points at is precisely what should not be possible by
-    # accident.
-    if [[ ! -t 0 ]]; then
+    local reply=''
+    # Asked for, one way or the other — the same rule the desktop client's
+    # build.sh follows, and worth keeping identical between the two.
+    #
+    # The prompt is the default and stays that way: publishing moves the tag
+    # every download link points at, and a run that reaches this point by
+    # accident must not be able to complete it. `--yes` changes only *when* the
+    # answer was given — on the command line rather than at the prompt, which is
+    # the same person saying the same thing.
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+        echo "  --yes given; uploading."
+        reply=yes
+    elif [[ ! -t 0 ]]; then
         echo "not published: --publish asks before uploading and there is no terminal to ask on." >&2
+        echo "  Pass --yes to answer it in advance." >&2
         return
     fi
-    local reply=''
-    read -r -p "  type 'yes' to upload: " reply || true
+    if [[ -z "$reply" ]]; then
+        read -r -p "  type 'yes' to upload: " reply || true
+    fi
     if [[ "$reply" != "yes" ]]; then
         echo "  not published."
         return
@@ -704,6 +729,12 @@ esbuild src/receiver.js \
     --outfile=www/receiver-bridge.js
 
 echo "bundled the receiver bridge into www/receiver-bridge.js"
+
+# Everything the app serves out of www/ now exists, which is where --stage-ui
+# stops. It has to be here and not after the v2 staging above: the bridge is
+# half of any change that spans the page and its host, and stopping before it
+# would ship the two halves from different days.
+[[ "$STAGE_ONLY" -eq 1 ]] && exit 0
 
 # ---- the native project -----------------------------------------------------
 

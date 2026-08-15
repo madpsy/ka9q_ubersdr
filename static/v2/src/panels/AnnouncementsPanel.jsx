@@ -12,7 +12,7 @@ import React, { useEffect, useState } from '../react.js';
 import { Field, Slider, Switch } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import {
-    announceSettings, chromiumSpeech, currentVoice, listVoices, onAnnounceSettings,
+    announceSettings, currentVoice, listVoices, onAnnounceSettings, speechUsable,
     setAnnounceSettings, speak, speechAvailable,
 } from '../lib/announce.js';
 
@@ -33,7 +33,7 @@ export default function AnnouncementsPanel({ minimal }) {
         return () => window.speechSynthesis.removeEventListener('voiceschanged', on);
     }, []);
 
-    const supported = chromiumSpeech() && speechAvailable();
+    const supported = speechUsable();
     const set = (patch) => setAnnounceSettings(patch);
 
     if (!supported) {

@@ -844,7 +844,39 @@ function recordFor(contents) {
     return null;
 }
 
+// What this app is costing the machine, for the stats readout over the
+// waterfall — see static/v2/src/lib/appStats.js, which defines the shape.
+//
+// The whole application and not this window: a receiver is a renderer process,
+// the audio and the spectrum arrive through the main one, and each open
+// receiver is another process again. Somebody watching this figure wants to
+// know what UberSDR is costing them, and answering for one process of four
+// would be reassuring and wrong.
+//
+// `percentCPUUsage` is a share of one core, which is what every system monitor
+// reports and what the readout says it is showing; `workingSetSize` is in
+// kilobytes, hence the multiply.
+function appLoad() {
+    try {
+        const metrics = app.getAppMetrics() || [];
+        let cpu = 0;
+        let mem = 0;
+        for (const m of metrics) {
+            if (m.cpu && Number.isFinite(m.cpu.percentCPUUsage)) cpu += m.cpu.percentCPUUsage;
+            if (m.memory && Number.isFinite(m.memory.workingSetSize)) mem += m.memory.workingSetSize * 1024;
+        }
+        return { cpu, mem };
+    } catch {
+        return null;
+    }
+}
+
 function setupIpc() {
+    // Takes nothing and reads nothing but this app's own totals, which is what
+    // makes it safe to reach from a receiver window — see receiver-preload.js,
+    // where the rest of that reasoning lives.
+    ipcMain.handle('app:load', () => appLoad());
+
     ipcMain.handle('app:info', () => ({
         builtinAvailable,
         buildInfo,

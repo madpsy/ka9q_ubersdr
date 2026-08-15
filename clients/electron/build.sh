@@ -35,6 +35,9 @@
 #                          it has verified as notarised is a fact rather than a
 #                          judgement call. It touches nothing else on the
 #                          release.
+#   ./build.sh --yes       answer the publish prompt in advance, for a run with
+#                          no terminal to ask on (a script, a cron, an agent).
+#                          Only meaningful with --publish.
 #   ./build.sh --publish   package, then upload the artefacts to the `latest`
 #                          release on GitHub with the gh CLI, replacing the ones
 #                          already there. Asks first, and only from a terminal:
@@ -48,6 +51,8 @@ STATIC=../../static
 V2="$STATIC/v2"
 
 SKIP_UI=0
+# The publish confirmation, given in advance — see publish_release.
+ASSUME_YES=0
 PACKAGE=0
 WIN_INSTALLER=0
 LINUX_ONLY=0
@@ -68,6 +73,7 @@ for arg in "$@"; do
         --skip-ui) SKIP_UI=1 ;;
         --package) PACKAGE=1 ;;
         --publish) PUBLISH=1; PACKAGE=1 ;;
+        --yes) ASSUME_YES=1 ;;
         --linux) LINUX_ONLY=1; PACKAGE=1 ;;
         # 2 rather than 1: asked for outright, so a missing Docker is an
         # error here and merely a skipped step when --package implies it.
@@ -241,18 +247,32 @@ publish_release() {
     fi
     echo
 
-    # A terminal, or nothing happens. An unattended run publishing to the tag
-    # every client downloads from is precisely what should not be possible by
-    # accident.
-    if [[ ! -t 0 ]]; then
+    # Asked for, one way or the other.
+    #
+    # The prompt is the default and stays that way: publishing moves the tag
+    # every client downloads from, and a run that reaches this point by accident
+    # must not be able to complete it. What `--yes` changes is only *when* the
+    # answer was given — typed on the command line rather than at the prompt,
+    # which is the same person saying the same thing and is what makes an
+    # unattended release possible at all.
+    #
+    # It is a flag rather than an environment variable on purpose. An exported
+    # variable is remembered by a shell and inherited by everything started from
+    # it, so a `yes` meant for one release would sit there quietly authorising
+    # the next; a flag is spent the moment the command ends.
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+        echo "  --yes given; uploading."
+    elif [[ ! -t 0 ]]; then
         echo "not published: --publish asks before uploading and there is no terminal to ask on." >&2
+        echo "  Pass --yes to answer it in advance." >&2
         return
-    fi
-    local reply=''
-    read -r -p "  type 'yes' to upload: " reply || true
-    if [[ "$reply" != "yes" ]]; then
-        echo "  not published."
-        return
+    else
+        local reply=''
+        read -r -p "  type 'yes' to upload: " reply || true
+        if [[ "$reply" != "yes" ]]; then
+            echo "  not published."
+            return
+        fi
     fi
 
     # --clobber because the names never change: without it the second release

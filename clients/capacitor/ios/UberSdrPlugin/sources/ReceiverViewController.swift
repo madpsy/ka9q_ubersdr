@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import WebKit
+import AVFoundation
 
 /// One receiver: its loopback proxy, its WebView, and the script that runs
 /// before the page's first.
@@ -81,6 +82,11 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         controller.addUserScript(WKUserScript(source: Self.vibrateShim,
                                               injectionTime: .atDocumentStart,
                                               forMainFrameOnly: true))
+        // Somewhere to find the audio graph again after the system has stopped
+        // it. Not a debugging aid: see resumeAudio.
+        controller.addUserScript(WKUserScript(source: Self.audioHandle,
+                                              injectionTime: .atDocumentStart,
+                                              forMainFrameOnly: true))
         #if DEBUG
         // The page's console, into the device log.
         //
@@ -89,9 +95,6 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         // app is being driven from another machine. The Android client mirrors
         // the page console into logcat for the same reason. DEBUG only: a
         // release build should not narrate itself.
-        controller.addUserScript(WKUserScript(source: Self.audioProbe,
-                                              injectionTime: .atDocumentStart,
-                                              forMainFrameOnly: true))
         controller.add(self, name: "console")
         controller.addUserScript(WKUserScript(source: Self.consoleBridge,
                                               injectionTime: .atDocumentStart,
@@ -155,9 +158,127 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
             }
         }
 
+        // Coming back to the app, and coming back from an interruption, are the
+        // two moments audio has to be picked up again. See resumeAudio.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appBecameActive),
+            name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(audioInterrupted(_:)),
+            name: AVAudioSession.interruptionNotification, object: nil)
+        // Started *before* the app suspends, which is the whole trick — see
+        // startBackgroundAudio.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appWillResignActive),
+            name: UIApplication.willResignActiveNotification, object: nil)
+        // And again once actually backgrounded, in case the first attempt was
+        // made before the page had a session to hand over. Harmless when it was
+        // not: startBackgroundAudio answers 'already' and does nothing.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appWillResignActive),
+            name: UIApplication.didEnterBackgroundNotification, object: nil)
+
         if let url = URL(string: proxy.origin + "/v2/") {
             webView.load(URLRequest(url: url))
         }
+
+        #if DEBUG
+        // The background path, exercised in the foreground.
+        //
+        // What it is for is a simulator: process suspension is not modelled
+        // there, so backgrounding proves nothing, while everything *else* that
+        // can go wrong on this path — no session id to hand over, a refused
+        // stream, a container we cannot parse, an Opus packet the system
+        // decoder rejects — fails the same way on both. See build-mac.sh
+        // --bgtest, which reads the log this writes.
+        if ProcessInfo.processInfo.environment["UBERSDR_BGTEST"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+                guard let self = self else { return }
+                NSLog("[UberSDR audio] bgtest: session id %@",
+                      self.proxy.audioSessionId ?? "(none captured)")
+                self.startBackgroundAudio()
+                // Twice, twenty seconds apart: the difference is the rate, and
+                // 48000 a second is the only right answer.
+                for tick in [10.0, 30.0] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + tick) { [weak self] in
+                        guard let self = self else { return }
+                        NSLog("[UberSDR audio] bgtest: %d frames after %.0fs",
+                              self.backgroundAudio.framesPlayed, tick)
+                    }
+                }
+            }
+        }
+        #endif
+    }
+
+    private let backgroundAudio = BackgroundAudio()
+
+    @objc private func appWillResignActive() {
+        startBackgroundAudio()
+    }
+
+    @objc private func appBecameActive() {
+        stopBackgroundAudio()
+        resumeAudio()
+    }
+
+    /// Keep playing with the app in the background.
+    ///
+    /// The audio moves out of the WebView and into the app — see
+    /// BackgroundAudio, which explains why it has to. Started on
+    /// `willResignActive` and again on `didEnterBackground`, because the first
+    /// of those can arrive before the page has a session id to hand over and
+    /// the second cannot; starting twice does nothing.
+    private func startBackgroundAudio() {
+        guard let session = proxy.audioSessionId, !session.isEmpty else { return }
+        backgroundAudio.start(origin: proxy.origin, sessionId: session)
+    }
+
+    /// Give the audio back to the page.
+    private func stopBackgroundAudio() {
+        guard backgroundAudio.isRunning else { return }
+        backgroundAudio.stop(origin: proxy.origin, sessionId: proxy.audioSessionId ?? "")
+    }
+
+    /// A phone call, Siri, another app taking the session — anything that
+    /// stopped the audio rather than the app being left.
+    @objc private func audioInterrupted(_ note: Notification) {
+        guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        // `.began` needs nothing: the system has already stopped it. What
+        // matters is being ready when it ends.
+        guard type == .ended else { return }
+        resumeAudio()
+    }
+
+    /// Start the audio again after the system has stopped it.
+    ///
+    /// Two halves, and both are needed. The **audio session** may have been
+    /// deactivated by an interruption, so it is claimed again — without that, a
+    /// resumed graph plays into nothing. And the **AudioContext** is left
+    /// suspended when the content process is thawed, which is the part that
+    /// makes this a host job at all: a page cannot notice that it was frozen,
+    /// so it never calls resume(), and audio that stopped when you switched
+    /// apps never comes back. Stopping and restarting the receiver was the only
+    /// way out, which is a poor thing to have to know.
+    private func resumeAudio() {
+        PlaybackSession.begin()
+        PlaybackSession.recover()
+        webView?.evaluateJavaScript("""
+        (function(){
+          var list = window.__ubersdrAudioContexts || [];
+          var resumed = 0;
+          for (var i = 0; i < list.length; i++) {
+            try {
+              if (list[i].state === 'suspended' || list[i].state === 'interrupted') {
+                list[i].resume();
+                resumed++;
+              }
+            } catch(e) {}
+          }
+          return resumed;
+        })();
+        """)
     }
 
     /// Keep the display awake while a receiver is on screen.
@@ -171,37 +292,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         super.viewDidAppear(animated)
         UIApplication.shared.isIdleTimerDisabled = true
         DebugOrientation.apply()
-        #if DEBUG
-        // A tap on Start, without a finger.
-        //
-        // v2's start overlay is a user gesture by design — it exists to satisfy
-        // the rule that an AudioContext outside one stays suspended. A
-        // synthetic click is not that gesture as far as WebKit is concerned,
-        // which is exactly what makes it a useful test: if audio runs after
-        // this, the gesture requirement is not what is stopping it, and if it
-        // does not, it is.
-        if ProcessInfo.processInfo.environment["UBERSDR_AUTOTAP"] != nil {
-            for delay in [8.0, 16.0] {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    self?.webView.evaluateJavaScript("""
-                    (function(){
-                      var b = document.querySelector('.start__go');
-                      if (b) { b.click(); return 'clicked'; }
-                      return 'no start button';
-                    })();
-                    """) { r, _ in NSLog("[UberSDR audio] autotap %@", String(describing: r)) }
-                }
-            }
-        }
         tidyForScreenshot()
-        // Sampled a few times: the graph is built when the session starts, not
-        // when the page loads.
-        for delay in [12.0, 25.0, 45.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.reportAudio()
-            }
-        }
-        #endif
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -222,6 +313,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// Stop the receiver and take the screen away.
     func close() {
         UIApplication.shared.isIdleTimerDisabled = false
+        // Before the proxy goes: the hand-back is sent through it.
+        stopBackgroundAudio()
         webView?.stopLoading()
         // Load about:blank before tearing down: it is what stops the audio
         // graph and closes the sockets from the page's own side, rather than
@@ -298,6 +391,32 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         js += "})();"
         return js
     }
+
+    /// Keeps a reference to every AudioContext the page makes.
+    ///
+    /// A page has no way to enumerate its own audio contexts, and this host
+    /// needs to reach them: iOS suspends a WKWebView's content process when the
+    /// app leaves the foreground, which suspends the graph with it, and nothing
+    /// resumes it on the way back. v2 cannot be expected to handle that — a page
+    /// in a browser is never suspended like this — so the host does it, and
+    /// this is how it finds what to resume.
+    private static let audioHandle = """
+    (function(){
+      try {
+        var Native = window.AudioContext || window.webkitAudioContext;
+        if (!Native || window.__ubersdrAudioContexts) return;
+        window.__ubersdrAudioContexts = [];
+        var Wrapped = function() {
+          var ctx = new Native(...arguments);
+          try { window.__ubersdrAudioContexts.push(ctx); } catch(e) {}
+          return ctx;
+        };
+        Wrapped.prototype = Native.prototype;
+        window.AudioContext = Wrapped;
+        window.webkitAudioContext = Wrapped;
+      } catch(e) {}
+    })();
+    """
 
     /// `navigator.vibrate` in terms of the host channel.
     ///
@@ -396,83 +515,6 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         NSLog("[UberSDR] receiver failed to load: %@", error.localizedDescription)
     }
 
-    #if DEBUG
-    /// Watch the audio graph, so "is there sound?" can be answered without ears.
-    ///
-    /// A simulator plays through the Mac's speakers and a device through its
-    /// own, and neither is any use when the app is being driven from another
-    /// machine. This hooks AudioContext at document start, keeps every instance
-    /// the page makes, and taps the output through an AnalyserNode — so the two
-    /// questions that matter can be asked directly: is the context *running*
-    /// (rather than suspended, which is what a missing user gesture looks like),
-    /// and are non-zero samples reaching the destination.
-    private static let audioProbe = """
-    (function(){
-      try {
-        var Native = window.AudioContext || window.webkitAudioContext;
-        if (!Native) return;
-        window.__ubersdrAudio = { contexts: [], analysers: [] };
-
-        // Every connection into a destination is mirrored into an analyser.
-        //
-        // Patching AudioNode.prototype.connect is the only tap that does not
-        // depend on how the page happens to build its graph — the earlier
-        // version hooked createGain and measured nothing, which looked exactly
-        // like silence and was not.
-        var origConnect = AudioNode.prototype.connect;
-        AudioNode.prototype.connect = function(dest) {
-          try {
-            if (dest && dest.context && dest === dest.context.destination) {
-              var store = window.__ubersdrAudio;
-              var an = store.analysers.find(function(a){ return a.context === dest.context; });
-              if (!an) {
-                an = dest.context.createAnalyser();
-                an.fftSize = 2048;
-                store.analysers.push(an);
-              }
-              origConnect.call(this, an);
-            }
-          } catch(e) {}
-          return origConnect.apply(this, arguments);
-        };
-
-        var Wrapped = function() {
-          var ctx = new Native(...arguments);
-          try { window.__ubersdrAudio.contexts.push(ctx); } catch(e) {}
-          return ctx;
-        };
-        Wrapped.prototype = Native.prototype;
-        window.AudioContext = Wrapped;
-        window.webkitAudioContext = Wrapped;
-      } catch(e) {}
-    })();
-    """
-
-    /// What the probe found, as one line in the log.
-    private func reportAudio() {
-        webView.evaluateJavaScript("""
-        (function(){
-          var a = window.__ubersdrAudio;
-          if (!a || !a.contexts.length) return JSON.stringify({audio:'no AudioContext created'});
-          var out = a.contexts.map(function(c){ return { state: c.state, rate: c.sampleRate }; });
-          var level = -1;
-          try {
-            var an = a.analysers[a.analysers.length - 1];
-            if (an) {
-              var buf = new Float32Array(an.fftSize);
-              an.getFloatTimeDomainData(buf);
-              var sum = 0;
-              for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-              level = Math.sqrt(sum / buf.length);
-            }
-          } catch(e) {}
-          return JSON.stringify({ contexts: out, rms: level });
-        })();
-        """) { result, _ in
-            NSLog("[UberSDR audio] %@", String(describing: result))
-        }
-    }
-
     /// Tidy the page for a store screenshot, through the page's own controls.
     ///
     /// Two things have to go before a receiver is photographed:
@@ -528,9 +570,37 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         }
     }
 
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        NSLog("[UberSDR page] committed %@", webView.url?.absoluteString ?? "?")
+    #if DEBUG
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard ProcessInfo.processInfo.environment["UBERSDR_BGTEST"] == "1" else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
+            webView.evaluateJavaScript("""
+            (function(){
+              var K = 'ubersdr.v2.radio';
+              var r = {}; try { r = JSON.parse(localStorage.getItem(K)) || {}; } catch(e) {}
+              if (r.audioFormat !== 'pcm-zstd') {
+                r.audioFormat = 'pcm-zstd';
+                localStorage.setItem(K, JSON.stringify(r));
+                location.reload();
+                return 'seeded, reloading';
+              }
+              var row = document.querySelector('.spectrum__meta');
+              var tag = document.querySelector('[data-optional=\"pcm\"]');
+              var kids = row ? Array.prototype.map.call(row.children, function(c){
+                  return (c.dataset.optional || c.className.split(' ')[0]) + ':' + c.offsetWidth;
+              }) : [];
+              return JSON.stringify({
+                fmt: r.audioFormat,
+                tagInDom: !!tag,
+                rowWidth: row ? row.clientWidth : null,
+                inner: row ? row.scrollWidth : null,
+                kids: kids
+              });
+            })();
+            """) { r, _ in NSLog("[UberSDR audio] pcm %@", String(describing: r)) }
+        }
     }
+    #endif
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         NSLog("[UberSDR page] failed %@", error.localizedDescription)
@@ -539,39 +609,6 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         NSLog("[UberSDR page] content process terminated")
     }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Deliberately checks the two things this host changes about the page:
-        // that it is a secure context (AudioWorklet, enumerateDevices and the
-        // rest depend on it, and `http://127.0.0.1` is only trustworthy if
-        // WebKit says so), and that the chat panel really is absent rather than
-        // merely declared absent.
-        webView.evaluateJavaScript("""
-        JSON.stringify({
-          ready: document.readyState,
-          secure: window.isSecureContext,
-          host: !!window.ubersdrDesktop,
-          chatFlag: window.ubersdrDesktop ? window.ubersdrDesktop.chat : 'unset',
-          chatButton: !!document.querySelector('[aria-label="Chat"]'),
-          hostChannel: !!window.ubersdrHost,
-          prefsSeeded: window.ubersdrDesktop ? window.ubersdrDesktop.prefsSeeded : 'no host',
-          lsShared: (function(){
-            var n = 0;
-            try {
-              for (var i = 0; i < localStorage.length; i++) {
-                if (String(localStorage.key(i)).indexOf('ubersdr.v2.') === 0) n++;
-              }
-            } catch(e) { return 'blocked'; }
-            return n;
-          })(),
-          origin: location.origin
-        })
-        """) { result, error in
-            NSLog("[UberSDR page] state %@ %@",
-                  String(describing: result), String(describing: error?.localizedDescription))
-        }
-    }
-    #endif
 
     // MARK: - The page's console
 
@@ -622,24 +659,45 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
 
     // MARK: - WKUIDelegate
 
-    /// v1's popups — the callsign lookup, the map, the CW graph — open with
-    /// window.open. Returning nil and loading it in the same view is the
-    /// smallest thing that works; the Android client does not handle these at
-    /// all yet.
+    /// A new window, which this app does not have.
+    ///
+    /// Everything in the Links menu opens with `window.open` — the external
+    /// ones directly, the receiver's own pages through a sized popup (see
+    /// LinksMenu.jsx) — and so do the Share menu, the callsign lookup and the
+    /// start overlay's Statistics link. None of them arrive at decidePolicyFor,
+    /// so this is the second half of the same policy.
+    ///
+    /// All of it goes to the browser, including the receiver's own pages, and
+    /// that last part is the correction. Loading them in place looked right —
+    /// they belong to the receiver as much as v2 does — but a phone has no
+    /// second window and no browser chrome, so it replaced the receiver with a
+    /// page having no way back to it: the interface, the audio and the session
+    /// gone, for a link somebody expected to open beside what they were
+    /// listening to. `window.open` means "somewhere else", and out here the
+    /// only somewhere else is the browser.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        // `window.open` and target="_blank" arrive here rather than at
-        // decidePolicyFor, so the same question is asked again: v1's popups
-        // (callsign lookup, map, CW graph) are the receiver's own and load in
-        // place, and everything else is a website and goes to Safari.
         guard navigationAction.targetFrame == nil,
               let url = navigationAction.request.url else { return nil }
-        if isReceiverOwn(url) {
-            webView.load(URLRequest(url: url))
-        } else {
-            UIApplication.shared.open(url)
-        }
+        UIApplication.shared.open(outsideURL(url))
         return nil
+    }
+
+    /// The same page, addressed the way something outside this app can reach it.
+    ///
+    /// v2's own pages are relative, so a popup resolves against the page's
+    /// origin — which is the loopback proxy, on a port that means nothing once
+    /// the receiver is closed and nothing at all to another device. The
+    /// instance's own origin is the address of the same page.
+    private func outsideURL(_ url: URL) -> URL {
+        guard let host = url.host?.lowercased(), host == "127.0.0.1" || host == "localhost",
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let upstream = URLComponents(string: proxy.upstreamOriginForPage),
+              upstream.host != nil else { return url }
+        parts.scheme = upstream.scheme
+        parts.host = upstream.host
+        parts.port = upstream.port
+        return parts.url ?? url
     }
 }

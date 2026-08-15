@@ -55,6 +55,7 @@ import {
     onSpectrumPaused, resumeSpectrum, setSpectrumPaused, spectrumPaused, suspendSpectrum,
 } from '../lib/spectrumPause.js';
 import { perSecond, statLines, statsPlace } from '../lib/spectrumStats.js';
+import { readAppStats } from '../lib/appStats.js';
 import { bandRate } from '../lib/bandSpectrum.js';
 import { subscribeListeners } from '../lib/listeners.js';
 import { useChat } from '../chat/ChatContext.jsx';
@@ -141,6 +142,14 @@ const TOUCH_EDGE_MIN_PX = EDGE_MIN_PX;
 // decided when the finger lands, so a tap meant to tune is still a tap, and only
 // a deliberate drag moves the filter.
 const TOUCH_SLOP_PX = 8;
+
+// How long a finger has to stay still to mean "right click", and how far it may
+// drift while doing it. Section.jsx times the same gesture for panel dragging
+// with the same numbers, deliberately: one hold on this interface ought to feel
+// like another, and a spectrum that wanted half a second while a panel wanted
+// four tenths would be a difference nobody could name but everybody would feel.
+const HOLD_MS = 400;
+const HOLD_SLOP = 10;
 
 // How often the stats readout re-reads its counters. A second is what a rate
 // like this is quoted in, and anything faster is a number too busy to read.
@@ -366,7 +375,13 @@ function AudioFormatTag() {
     return (
         <button
             type="button"
-            className="tag tag--button"
+            // Red, like the clip tag above it. Grey put it with the tags that
+            // report what the receiver is doing, and this is not one of those:
+            // it is the one setting here that keeps costing somebody else
+            // bandwidth for as long as it is left on, and the whole reason the
+            // badge exists is that it is easy to forget. A colour that says
+            // "still on" does the job the badge was added for.
+            className="tag tag--button tag--bad"
             data-optional="pcm"
             title="Audio is set to Uncompressed — four to eight times the bandwidth of Opus. Click to switch to Opus"
             onClick={() => actions.setAudioFormat('opus')}
@@ -834,6 +849,11 @@ function SpectrumStats({ place, bottom, gfx, onClose }) {
                 listeners: listeners.current,
                 chatUsers: chatRef.current,
                 ip: ip.current,
+                // Asked once a second, and the asking is what makes the host
+                // measure — see lib/appStats.js. Nothing is read here while the
+                // readout is off, which is the point: this is the only line
+                // whose cost is paid outside the page.
+                app: readAppStats(),
             }));
         };
         tick();
@@ -973,6 +993,8 @@ export default function SpectrumView() {
         autoCeil: -40,
         hover: null,         // {x, y} in CSS px
         drag: null,
+        hold: null,          // a finger being held still, waiting to become a menu
+        held: false,         // ...and whether it got there, which a tap must not undo
         pts: new Map(),      // live pointers, id -> {x, y}; two of them is a pinch
         pinch: null,         // {dist, bw, last} the view the fingers went down on
         bgImage: null,       // operator backdrop, split view only
@@ -1646,17 +1668,28 @@ export default function SpectrumView() {
         dispRef.current.set({ split: DISPLAY_DEFAULTS.split });
     }, [viewMode]);
 
-    const onContextMenu = useCallback((e) => {
-        const f = freqAtX(e.clientX, e.clientY);
-        if (f == null) return;   // no view yet; leave the browser menu alone
-        e.preventDefault();
-        // On a phone this arrives from a long press, which has no click and no
-        // release to tell you it worked — the menu simply appears, some way
-        // into a press you were holding for an unknown length of time. The
-        // pulse is what says "now", and it is the same one a right button gets.
+    // The menu, however it was asked for. Answers at most once per press: the
+    // two ways in below can both fire for the same finger, and the second must
+    // not re-open what the first opened or pulse a second time.
+    const openMenu = useCallback((x, y) => {
+        const g = gfx.current;
+        if (g.held) return false;
+        const f = freqAtX(x, y);
+        if (f == null) return false;   // no view yet; leave the browser menu alone
+        if (g.hold) { clearTimeout(g.hold.timer); g.hold = null; }
+        g.held = true;
+        // A long press has no click and no release to tell you it worked — the
+        // menu simply appears, some way into a press you were holding for an
+        // unknown length of time. The pulse is what says "now", and it is the
+        // same one a right button gets.
         haptic('grab', 'spectrum');
-        setMenu({ x: e.clientX, y: e.clientY, freq: Math.round(f) });
+        setMenu({ x, y, freq: Math.round(f) });
+        return true;
     }, [freqAtX]);
+
+    const onContextMenu = useCallback((e) => {
+        if (openMenu(e.clientX, e.clientY)) e.preventDefault();
+    }, [openMenu]);
 
     const onPointerDown = useCallback((e) => {
         // Right button: the context menu handler deals with it, and starting a
@@ -1667,11 +1700,16 @@ export default function SpectrumView() {
         el.setPointerCapture(e.pointerId);
         const g = gfx.current;
         g.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        // A fresh press: whatever the last one opened, this one has not.
+        g.held = false;
+        if (g.hold) { clearTimeout(g.hold.timer); g.hold = null; }
 
         // Second finger down: this is a pinch, not a drag. The first finger has
         // a drag open — drop it, or the release at the end of the pinch reads as
         // a tap and tunes the receiver to wherever the fingers happened to be.
         if (g.pts.size === 2) {
+            // Two fingers are a pinch and never a menu.
+            if (g.hold) { clearTimeout(g.hold.timer); g.hold = null; }
             g.drag = null;
             g.edge = null;
             g.hover = null;
@@ -1729,7 +1767,46 @@ export default function SpectrumView() {
             moved: false,
             pointerId: e.pointerId,
         };
-    }, [freqAtX, edgeAtX]);
+
+        // A finger held still is a right-click, timed here rather than left to
+        // the browser.
+        //
+        // Android's WebView answers a long press with a `contextmenu` event and
+        // iOS's does not — WebKit has no such event on a touchscreen at all, and
+        // answers the press with its own text callout instead. So the menu was
+        // reachable on one phone and not the other, from the same gesture,
+        // with nothing on screen to say why.
+        //
+        // Both paths go through openMenu and it answers once, so this changes
+        // nothing where the event does arrive: whichever gets there first opens
+        // the menu and the other finds it already open. The numbers are
+        // Section.jsx's, which times the same gesture for panel dragging — one
+        // hold ought to feel like another.
+        if (e.pointerType !== 'mouse') {
+            g.hold = {
+                x: e.clientX,
+                y: e.clientY,
+                timer: setTimeout(() => {
+                    const now = gfx.current;
+                    now.hold = null;
+                    // The drag and any pending edge grab are dropped, or the
+                    // finger that opened the menu would also pan the view out
+                    // from under it and tune on release.
+                    now.drag = null;
+                    now.edge = null;
+                    openMenu(e.clientX, e.clientY);
+                }, HOLD_MS),
+            };
+        }
+    }, [freqAtX, edgeAtX, openMenu]);
+
+    /// Nothing is being held any more — moved too far, lifted, or taken away.
+    const dropHold = useCallback(() => {
+        const g = gfx.current;
+        if (!g.hold) return;
+        clearTimeout(g.hold.timer);
+        g.hold = null;
+    }, []);
 
     const onPointerMove = useCallback((e) => {
         const el = wrapRef.current;
@@ -1738,6 +1815,12 @@ export default function SpectrumView() {
         const g = gfx.current;
 
         if (g.pts.has(e.pointerId)) g.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        // Moved too far to be a hold. Generous rather than exact: a finger
+        // resting on glass wanders a few pixels on its own, and a menu that
+        // refused to open because of that would look like a menu that does not
+        // work here either.
+        if (g.hold && Math.hypot(e.clientX - g.hold.x, e.clientY - g.hold.y) > HOLD_SLOP) dropHold();
 
         // ---- pinch ------------------------------------------------------
         //
@@ -1882,7 +1965,7 @@ export default function SpectrumView() {
                 actions.setSpectrumCenter(center);
             }
         }
-    }, [actions, freqAtX, edgeAtX, markAtX]);
+    }, [actions, freqAtX, edgeAtX, markAtX, dropHold]);
 
     // A release that means "tune here". Snapped to whatever the Receiver panel's
     // step is set to, so clicking the spectrum and pressing +/- agree about where
@@ -1901,6 +1984,17 @@ export default function SpectrumView() {
         const g = gfx.current;
         g.pts.delete(e.pointerId);
         try { wrapRef.current.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        dropHold();
+
+        // The press that opened the menu ends here and does nothing else. Without
+        // this the finger lifting off would read as a tap and tune the receiver
+        // to whatever is under the menu it just opened.
+        if (g.held) {
+            g.held = false;
+            g.drag = null;
+            g.edge = null;
+            return;
+        }
 
         // Lifting one finger of a pinch leaves the other one resting on the
         // spectrum. Stay out of the way until the hand is off entirely, or that
@@ -1929,7 +2023,7 @@ export default function SpectrumView() {
         if (!drag) return;
         if (drag.moved) return;
         tuneAt(e.clientX, e.clientY);
-    }, [tuneAt]);
+    }, [tuneAt, dropHold]);
 
     // A gesture taken away from us — the browser claiming it, the window losing
     // the pointer — is abandoned, not completed. Sharing onPointerUp would tune
@@ -1939,10 +2033,12 @@ export default function SpectrumView() {
         const g = gfx.current;
         g.pts.delete(e.pointerId);
         try { wrapRef.current.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        dropHold();
+        g.held = false;
         g.edge = null;
         g.drag = null;
         if (g.pts.size === 0) g.pinch = null;
-    }, []);
+    }, [dropHold]);
 
     // The readout has to follow the data, not the mouse: standing still over a
     // signal and watching it fade should change the numbers. Recomputed from

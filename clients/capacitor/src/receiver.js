@@ -401,6 +401,64 @@ function polyfillNotifications() {
     window.Notification = HostNotification;
 }
 
+// Tell the page its speech is worth using.
+//
+// v2 decides whether to offer the announcements by reading the user agent,
+// because in a browser that is the only way to guess at the voices behind
+// `speechSynthesis` — and it wants Chrome's or Microsoft's, having found what
+// Windows ships unintelligible for reading numbers. Inside this app the guess
+// is both unnecessary and wrong: on Android the voices are TextToSpeech's
+// through Speech.java, and on iOS they are AVSpeechSynthesizer's, which WebKit
+// offers to the page directly. Neither is what the user agent suggests.
+//
+// It was wrong in the way that matters, too. The iOS app reads "iPad" and is
+// told to use Chrome — on a device where Chrome is this same WebKit under
+// another name — while the callsign lookup in the next panel along speaks
+// perfectly well through the engine being refused.
+//
+// Declared rather than sniffed, like every other host flag: see announce.js,
+// which reads it, and support.js for the same pattern with the media session.
+function declareSpeech() {
+    try {
+        if (typeof window.speechSynthesis === 'undefined') return;
+        window.ubersdrDesktop = window.ubersdrDesktop || {};
+        window.ubersdrDesktop.speech = true;
+    } catch (e) { /* nothing to declare to */ }
+}
+
+// ---- what this app is costing ----------------------------------------------
+//
+// The stats readout over the waterfall can show the app's own processor and
+// memory use, and only a host can measure that: there is no browser API for it,
+// and Chrome's `performance.memory` is the JavaScript heap rather than the app.
+// See static/v2/src/lib/appStats.js, which defines what is installed here.
+//
+// Pull, not push. The page asks once a second while the readout is open, and
+// asking is what makes the host measure — so a receiver whose operator never
+// turns the readout on costs nothing at all. What `read()` returns is the
+// previous second's answer, which is what these two figures want anyway: CPU is
+// a rate and has to be averaged over an interval before it means anything.
+let appStats = null;
+
+function installAppStats() {
+    if (typeof window === 'undefined') return;
+    window.ubersdrAppStats = {
+        read() {
+            tellHost({ type: 'stats' });
+            return appStats;
+        },
+    };
+}
+
+function onAppStats(json) {
+    try {
+        const s = JSON.parse(json);
+        appStats = (s && (Number.isFinite(s.cpu) || Number.isFinite(s.mem))) ? s : null;
+    } catch (e) {
+        appStats = null;
+    }
+}
+
 function onHostMessage(data) {
     if (data.startsWith('action:')) {
         runAction(data.slice(7));
@@ -413,6 +471,10 @@ function onHostMessage(data) {
         if (notice && typeof notice.onclick === 'function') {
             try { notice.onclick(); } catch (e) { /* the page said no */ }
         }
+        return;
+    }
+    if (data.startsWith('stats:')) {
+        onAppStats(data.slice(6));
         return;
     }
     if (data.startsWith('voices:')) {
@@ -535,4 +597,6 @@ polyfillMediaSession();
 observeMediaSession();
 polyfillNotifications();
 polyfillSpeech();
+declareSpeech();
+installAppStats();
 watchShared();

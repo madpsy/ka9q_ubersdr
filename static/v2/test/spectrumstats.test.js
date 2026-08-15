@@ -253,4 +253,30 @@ t('a receiver still negotiating its geometry shows no FFT line', () => {
     assert.strictEqual(value(statLines({ binCount: 2048, binHz: 0.5 }), 'fft'), '2048 bins  0.50 Hz');
 });
 
+t('the app load line is absent unless a host reported one', () => {
+    // A browser tab cannot measure this, and a zero would read as "costing
+    // nothing" rather than "nobody asked".
+    assert.strictEqual(find(statLines({ fps: 20 }), 'app'), undefined);
+    assert.strictEqual(find(statLines({ fps: 20, app: null }), 'app'), undefined);
+    assert.strictEqual(find(statLines({ app: {} }), 'app'), undefined);
+});
+
+t('app load reads as whole percent and whole megabytes', () => {
+    assert.strictEqual(value(statLines({ app: { cpu: 12.4, mem: 193_000_000 } }), 'app'), '12%  193 MB');
+    // Either half alone, for a host that can measure one and not the other.
+    assert.strictEqual(value(statLines({ app: { cpu: 3 } }), 'app'), '3%');
+    assert.strictEqual(value(statLines({ app: { mem: 52_400_000 } }), 'app'), '52 MB');
+});
+
+t('a gigabyte is not four digits of megabytes', () => {
+    assert.strictEqual(value(statLines({ app: { mem: 1_240_000_000 } }), 'app'), '1.2 GB');
+    assert.strictEqual(value(statLines({ app: { mem: 999_000_000 } }), 'app'), '999 MB');
+});
+
+t('more than one core is a real reading, not a bug to clamp', () => {
+    // Every system monitor reports a share of one core, so a busy decoder on a
+    // multi-core machine legitimately passes 100.
+    assert.strictEqual(value(statLines({ app: { cpu: 148 } }), 'app'), '148%');
+});
+
 console.log(`\n${pass} ok`);

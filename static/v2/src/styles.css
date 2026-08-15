@@ -447,7 +447,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
     box-shadow: var(--shadow);
     z-index: 1;
 }
-.links__row:hover > .links__flyout { display: block; }
+.links__row:hover > .links__flyout,
+/* Tapped open — see LinksMenu.jsx. A touch cannot hover, and iOS's stand-in
+   for it lets go halfway down a nested menu. */
+.links__row.is-open > .links__flyout { display: block; }
 /* Ran out of room to the right — open back over the parent instead. */
 .links__flyout.is-flipped { left: auto; right: 100%; }
 
@@ -1564,6 +1567,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
     position: relative;
     cursor: crosshair;
     touch-action: none;
+    /* Held presses belong to the spectrum, not to WebKit. A long press here
+       opens the frequency menu (see SpectrumView), and iOS answers the same
+       gesture with its own callout unless told not to — two menus for one
+       finger, and the one nobody asked for on top. Stated here rather than left
+       to the coarse-pointer block at the foot of this file, which an iPad with
+       a keyboard case does not match: that device has a fine pointer and a
+       finger both, and this is about the finger. */
+    -webkit-touch-callout: none;
 }
 .spectrum__pane { display: block; flex: none; }
 .spectrum__pane--scale { border-block: 1px solid rgba(255, 255, 255, 0.06); }
@@ -2617,7 +2628,13 @@ a.btn { text-decoration: none; }
 
 /* Tighter than a stack of ordinary fields, and deliberately: the pad's claim is
    that all of it is on screen at once. */
-.pad { gap: 8px; padding-top: 4px; }
+/* A container, so what is inside can be sized against the pad rather than
+   against the window. The two stopped agreeing the moment this panel could be
+   docked: floating, it is about as wide as the viewport is tall and a viewport
+   unit is a fair guess at its width; docked in a 320 px column beside a
+   waterfall, the window is as wide as ever and the guess is wrong by a factor
+   of three. See .pad-wheel__freq, which is where that showed. */
+.pad { gap: 8px; padding-top: 4px; container-type: inline-size; }
 
 /* The frequency drum and what it is showing, as one control: the reading is
    part of the wheel rather than a separate row above it, which is what lets the
@@ -2639,8 +2656,18 @@ a.btn { text-decoration: none; }
     font-family: var(--mono);
     /* The floor is for a 320 px handset, where the head also carries the
        step and mode pickers and a 20 px readout no longer leaves room
-       for them. Anything wider is unaffected: 6vw passes 20 px at 334. */
+       for them. Anything wider is unaffected: 6vw passes 20 px at 334.
+
+       Declared twice on purpose. The first line is the viewport-sized rule as
+       it was, and it stays for browsers with no container queries; the second
+       overrides it where they exist, and is ignored as invalid where they do
+       not. `cqi` asks the pad how wide *it* is, which is the question this was
+       always trying to answer — the readout shares its row with the step and
+       mode pickers, so what it can afford has never had anything to do with
+       the size of the window. Docked, that difference is the frequency running
+       out over the edge of the panel. */
     font-size: clamp(18px, 6vw, 27px);
+    font-size: clamp(15px, 6.5cqi, 27px);
     font-variant-numeric: tabular-nums;
     cursor: pointer;
     transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
@@ -2656,6 +2683,12 @@ a.btn { text-decoration: none; }
    FreqWheel. `flex: none` because it is the thing being measured: a readout that
    shrank to fit would never report that it had run out of room. */
 .pad-wheel__digits { flex: none; }
+/* Narrower than any dock should be, and the unit is the first thing to go: the
+   digits are grouped in threes and read as a frequency without it, where a
+   frequency with a digit missing does not. */
+@container (max-width: 300px) {
+    .pad-wheel__unit { display: none; }
+}
 /* The passband, after the frequency. Sized like the top bar's chip rather than
    in proportion to a 27px readout, which at the same ratio would have been a
    second headline: this is the qualifier on the number beside it. Dimmer than

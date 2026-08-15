@@ -138,6 +138,24 @@ function formatHzPerBin(hz) {
  * @param s.ip         the address this page connected from, per /api/myip
  * @returns [{ key, label, value, title }]
  */
+// "12%  193 MB", with either half left out if the host did not report it.
+//
+// Whole percent and whole megabytes: both of these wander, and a decimal place
+// on a wandering number is a digit that changes every second and says nothing.
+// GB above a thousand, because four digits of megabytes is a number nobody
+// reads — and one decimal there, where the same wander is a hundredth of the
+// figure rather than a tenth.
+function appLoad(app) {
+    if (!app) return null;
+    const parts = [];
+    if (app.cpu != null) parts.push(`${Math.round(app.cpu)}%`);
+    if (app.mem != null) {
+        const mb = app.mem / 1e6;
+        parts.push(mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.round(mb)} MB`);
+    }
+    return parts.length ? parts.join('  ') : null;
+}
+
 export function statLines(s = {}) {
     const out = [];
     const add = (key, label, value, title) => {
@@ -187,6 +205,17 @@ export function statLines(s = {}) {
     // it here is to see which address a session is on — a VPN that dropped, a
     // phone that moved from wifi to mobile data — and that is the address itself.
     add('ip', 'IP', typeof s.ip === 'string' && s.ip ? s.ip : null, 'The address this page is connected from, as the receiver sees it — /api/myip, the same lookup behind the greeting on the start screen.');
+
+    // What this client is costing the machine, from a host that can measure its
+    // own process — see lib/appStats.js. Absent in a browser, which has no way
+    // to answer it honestly.
+    //
+    // Next to FPS in meaning if not in position: that line says the machine is
+    // struggling and this one says whether this app is the reason. The two
+    // figures are kept on one line because they are one question — a receiver
+    // left open all day drifts up in both — and because the corner of a
+    // waterfall is not the place to spend two.
+    add('app', 'APP', appLoad(s.app), 'What this app is costing the machine it is running on: processor time as a share of one core, and real memory. Only the Android, iOS and desktop clients can measure this — a browser tab has no way to ask.');
 
     add('audio', 'AUDIO', audio, 'Audio queued ahead of the playback clock plus what the output device adds — how far behind live you are, and how many dropouts there have been.');
 

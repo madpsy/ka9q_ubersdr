@@ -74,6 +74,17 @@ final class LocalProxy {
 
     var origin: String { "http://127.0.0.1:\(localPort)" }
 
+    /// The page's audio session id, seen in passing.
+    ///
+    /// `/audio/stream` is keyed by it, and the page keeps it in a module
+    /// variable — not in storage, so it cannot be read from outside. It does
+    /// however put it on the audio socket's query string
+    /// (`radio/audio-connection.js`, `user_session_id`), and every request goes
+    /// through here. So the proxy learns it by watching rather than by asking,
+    /// which also means it is always the *current* one: a reconnect mints a new
+    /// id and opens a new socket, and this sees that too.
+    private(set) var audioSessionId: String?
+
     /// What the instance's own origin is, for the page to be told. v2 uses it
     /// for links that must leave the proxy — see `window.ubersdrDesktop`.
     var upstreamOriginForPage: String { upstreamOrigin }
@@ -167,11 +178,26 @@ final class LocalProxy {
             #if DEBUG
             NSLog("[UberSDR proxy] %@", head.requestLine)
             #endif
+            self.noteSessionId(head)
             if head.path.hasPrefix("/v2/") && !head.isUpgrade {
                 self.serveBundled(head, to: client, reader: reader)
             } else {
                 self.forward(head, from: client, reader: reader, on: pairQueue)
             }
+        }
+    }
+
+    /// Watch for the audio socket's session id.
+    private func noteSessionId(_ head: RequestHead) {
+        guard head.isUpgrade else { return }
+        let target = head.requestLine.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+        guard let query = target.split(separator: "?", maxSplits: 1).dropFirst().first else { return }
+        for pair in query.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2, parts[0] == "user_session_id" else { continue }
+            let value = String(parts[1]).removingPercentEncoding ?? String(parts[1])
+            if !value.isEmpty { audioSessionId = value }
+            return
         }
     }
 

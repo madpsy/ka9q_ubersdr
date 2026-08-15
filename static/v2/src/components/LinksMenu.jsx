@@ -54,6 +54,14 @@ function LinkItem({ item, onDone }) {
 function GroupRow({ node, onDone }) {
     const ref = useRef(null);
     const [fit, setFit] = useState({ flip: false, shiftUp: 0 });
+    // Tapped open, for pointers that cannot hover. The CSS rule stays exactly
+    // as it was and this adds a second way in beside it, so a mouse still opens
+    // these by moving over them and nothing about the desktop menu changes.
+    //
+    // Without it these depend on the browser holding :hover after a tap, which
+    // iOS does — until it decides the tap was a click instead, and then a
+    // four-deep menu closes itself halfway down.
+    const [tapped, setTapped] = useState(false);
 
     const measure = () => {
         // The CSS :hover has applied by the next frame, so the panel is laid out
@@ -72,11 +80,19 @@ function GroupRow({ node, onDone }) {
 
     return (
         <div
-            className="links__row"
+            className={`links__row${tapped ? ' is-open' : ''}`}
             role="menuitem"
             aria-haspopup="true"
-            onMouseEnter={measure}
-            onMouseLeave={() => setFit({ flip: false, shiftUp: 0 })}
+            onPointerEnter={(e) => { if (e.pointerType === 'mouse') measure(); }}
+            onPointerLeave={(e) => { if (e.pointerType === 'mouse') setFit({ flip: false, shiftUp: 0 }); }}
+            onClick={(e) => {
+                // Only the row that was tapped, not every row it sits inside:
+                // this menu nests, so the click would otherwise close each
+                // ancestor on its way out.
+                if (e.target.closest('.links__row') !== e.currentTarget) return;
+                setTapped((was) => !was);
+                measure();
+            }}
         >
             <span className="links__label">{node.name}</span>
             <span className="links__arrow">{fit.flip ? '‹' : '›'}</span>
@@ -183,8 +199,17 @@ export default function LinksMenu({ serverInfo, compact }) {
             // Hover opens and leaving closes, as v1's does. The panel is a child
             // of this wrapper, so moving down into it never counts as leaving —
             // and its ::before bridges the gap under the button.
-            onMouseEnter={() => setOpen(true)}
-            onMouseLeave={() => setOpen(false)}
+            //
+            // Pointer events rather than mouse ones, and only for a real mouse.
+            // A tap synthesises the whole mouse sequence: enter (which opened
+            // it) and then click (which toggled it shut again), so the menu
+            // answered every other tap and felt broken rather than fussy. The
+            // pointer type is asked at the event instead of the device being
+            // asked in a media query, because an iPad with a trackpad is both
+            // — and this way it hovers with the trackpad and taps with a
+            // finger, which is what somebody holding one expects.
+            onPointerEnter={(e) => { if (e.pointerType === 'mouse') setOpen(true); }}
+            onPointerLeave={(e) => { if (e.pointerType === 'mouse') setOpen(false); }}
         >
             <button
                 type="button"

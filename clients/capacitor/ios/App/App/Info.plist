@@ -6,6 +6,18 @@
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
         <string>UberSDR</string>
+	<!-- What kind of app this is. A receiver for a radio somebody else is
+	     running is a tool before it is anything else: it has no content of
+	     its own, and what it is for is reaching equipment. Entertainment and
+	     Music were the other candidates and both describe the *signal*
+	     rather than the app.
+
+	     Belt and braces on iOS, where the category that actually appears on
+	     the listing is the one set in App Store Connect. This is the macOS
+	     key, it is what Xcode's "App Category" setting writes, and it costs
+	     nothing to have the bundle say the same thing as the listing. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

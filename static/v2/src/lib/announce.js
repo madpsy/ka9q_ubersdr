@@ -158,6 +158,31 @@ export function chromiumSpeech(ua = typeof navigator !== 'undefined' ? navigator
     return /Chrome\/|Chromium\/|Edg\//i.test(ua);
 }
 
+// A host that has said its own speech is fit for this.
+//
+// The rule above is about voices, and it reads them off the user agent because
+// in a browser that is the only thing there is to read. Inside one of UberSDR's
+// own apps there is something better: the client knows what engine its speech
+// actually reaches — Android's TextToSpeech, iOS's AVSpeechSynthesizer — and
+// says so. See clients/capacitor/src/receiver.js.
+//
+// Without this the iOS app fails the user-agent test and is told to use Chrome,
+// on a device where Chrome is the same WebKit wearing a different badge, and
+// while the callsign readout in the next panel along is speaking perfectly well
+// through the very engine being refused.
+function hostSpeech() {
+    try {
+        return !!(typeof window !== 'undefined' && window.ubersdrDesktop && window.ubersdrDesktop.speech);
+    } catch (e) {
+        return false;
+    }
+}
+
+/** Can this page speak, and with voices worth hearing numbers from? */
+export function speechUsable() {
+    return speechAvailable() && (hostSpeech() || chromiumSpeech());
+}
+
 /** Everything the operator may choose between, best first. */
 export function listVoices() {
     if (!speechAvailable()) return [];

@@ -1,8 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- `appCategory` is what Android groups this app under where it groups
+         apps by what they are: battery and mobile-data attribution in Settings,
+         and Digital Wellbeing. Undeclared, it lands in "Other" beside
+         everything else that never said — a poor answer for the app on the
+         phone most likely to be asked why the battery went.
+
+         `audio` rather than `productivity`, which is not the same choice as the
+         iOS category next door (Utilities), and deliberately. The two keys
+         answer different questions: Apple's is which shelf this belongs on in a
+         shop, where "a tool for reaching someone else's radio" is a utility.
+         Android's is what this app *does to the device*, and what it does is
+         play audio for hours with the screen off — it already declares a
+         `mediaPlayback` foreground service and puts controls on the lock
+         screen. Somebody looking through the battery list for what has been
+         playing all afternoon should find it where the other players are. -->
     <application
         android:allowBackup="true"
+        android:appCategory="audio"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security_config"

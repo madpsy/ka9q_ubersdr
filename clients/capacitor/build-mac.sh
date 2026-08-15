@@ -22,6 +22,7 @@
 #                              client's ios/ platform to exist yet.
 #   ./build-mac.sh             ship ios/ and build it (once ios/ exists)
 #   ./build-mac.sh --run       ...and install and launch it on a simulator
+#   ./build-mac.sh --bgtest    ...and exercise the native background audio path
 #   ./build-mac.sh --shot=FILE ...and bring a screenshot back here
 #   ./build-mac.sh --release   build for a device rather than the simulator
 #                              (needs signing — see Requirements)
@@ -133,12 +134,14 @@ DEVICE=0
 LAUNCH=0
 KEEP=0
 SHOT=""
+BGTEST=0
 
 for arg in "$@"; do
     case "$arg" in
         --check) CHECK=1 ;;
         --test) TEST=1 ;;
         --run) RUN=1 ;;
+        --bgtest) BGTEST=1 ;;
         --release) RELEASE=1 ;;
         --archive) ARCHIVE=1 ;;
         --screenshots) SHOTS=1 ;;
@@ -477,21 +480,34 @@ HTML
 # this was written on.
 build_remote() {
     local dir="$1" simulator="$2"
-    local dest sign
+    local dest sign cfg
     if [[ "$simulator" -eq 1 ]]; then
+        # Debug, and deliberately: the simulator build is the one --run,
+        # --screenshots and --bgtest drive, and all three need code that a
+        # release build leaves out.
         dest="generic/platform=iOS Simulator"
         sign="CODE_SIGNING_ALLOWED=NO"
+        cfg=Debug
     else
+        # Release for a device — the configuration is the whole point of the
+        # flag. Built as Debug it would carry the console bridge and the
+        # --bgtest hook into something meant to be shippable, which is a poor
+        # thing to discover from a build that said "release" and passed.
         dest="generic/platform=iOS"
         sign=""
+        cfg=Release
     fi
 
     echo "  pod install"
     mac "cd ~/$dir/ios/App && pod install 2>&1 | tail -3"
 
-    echo "  xcodebuild ($dest)"
-    if ! mac "cd ~/$dir/ios/App && xcodebuild -workspace App.xcworkspace -scheme App \
-                -configuration Debug -destination '$dest' \
+    echo "  xcodebuild ($dest, $cfg)"
+    # Signed builds need the keychain unlocked in the same ssh session — see
+    # mac_signed. A simulator build signs nothing and does not want it.
+    local run=mac
+    [[ "$simulator" -eq 1 ]] || run=mac_signed
+    if ! $run "cd ~/$dir/ios/App && xcodebuild -workspace App.xcworkspace -scheme App \
+                -configuration $cfg -destination '$dest' \
                 -derivedDataPath /tmp/dd-$dir build $sign 2>&1 | tail -40" \
          | tee /tmp/ubersdr-xcodebuild.log | grep -q "BUILD SUCCEEDED"; then
         echo >&2
@@ -663,6 +679,51 @@ capture() {
     echo "  screenshot → $out ($(identify -format '%wx%h' "$out" 2>/dev/null || echo '?'))"
 }
 
+# Exercise the native background audio path, and bring the log back.
+#
+# The path BackgroundAudio takes over — connect to /audio/stream, parse the
+# WebM, decode Opus, play it — is the same one whether the app is in front or
+# behind. What differs in the background is only whether the app is *allowed* to
+# keep doing it, and a simulator does not model that. So this runs it in the
+# foreground (UBERSDR_BGTEST, see ReceiverViewController) where every other way
+# it can fail still fails: no session id captured, a refused stream, a container
+# that will not parse, a packet the system decoder rejects.
+#
+# A device is still the only place background itself can be tested. This is for
+# everything that would waste a device round trip.
+bgtest() {
+    local dir="$1"
+    local app="/tmp/dd-$dir/Build/Products/Debug-iphonesimulator/App.app"
+
+    echo "  simulator: $SIM_DEVICE"
+    mac "xcrun simctl bootstatus '$SIM_DEVICE' -b >/dev/null 2>&1 || true"
+    mac "xcrun simctl terminate booted $APP_ID >/dev/null 2>&1 || true"
+    mac "xcrun simctl install booted '$app'"
+
+    # Started before the app, or the first lines are missed — the session id and
+    # the stream's first answer both happen within a second of the handover.
+    mac "nohup xcrun simctl spawn booted log stream --style compact \
+           --predicate 'eventMessage CONTAINS \"UberSDR audio\"' \
+           > /tmp/ubersdr-bg.log 2>&1 & echo \$! > /tmp/ubersdr-bg.pid"
+
+    mac "SIMCTL_CHILD_UBERSDR_OPEN='ubersdr://connect?uuid=$SHOT_RECEIVER' \
+         SIMCTL_CHILD_UBERSDR_BGTEST=1 \
+         xcrun simctl launch booted $APP_ID >/dev/null"
+
+    # 20 s for the receiver to be playing, then the handover, then half a minute
+    # of it — long enough for the frame count to be obviously moving or
+    # obviously not.
+    echo "  playing, handing over at 20s"
+    sleep 60
+    mac "kill \$(cat /tmp/ubersdr-bg.pid) 2>/dev/null || true"
+    mac "xcrun simctl terminate booted $APP_ID >/dev/null 2>&1 || true"
+
+    echo
+    ssh -o BatchMode=yes "$MAC_HOST" 'cat /tmp/ubersdr-bg.log' \
+        2> >(grep -v "X11 forwarding request failed" >&2) \
+        | sed 's/^/  /'
+}
+
 # ---------------------------------------------------------------------------
 
 if ! preflight; then
@@ -689,6 +750,16 @@ if [[ ! -d ios ]]; then
     echo "  Create the platform with:    npx cap add ios" >&2
     exit 1
 fi
+
+# The interface itself, before anything is copied anywhere.
+#
+# www/ is the interface on both platforms — the proxy serves /v2/* out of the
+# bundle rather than from the receiver, which is what lets this app open a v1
+# instance and still show v2, and www/receiver-bridge.js is the host half that
+# goes with it. Only build.sh fills either, so without this an iOS build ships
+# whatever the last *Android* build happened to stage.
+echo "  building the web assets"
+./build.sh --stage-ui
 
 echo "  staging the web assets"
 npx cap sync ios
@@ -728,6 +799,11 @@ build_remote "$MAC_DIR" "$([[ "$RELEASE" -eq 1 ]] && echo 0 || echo 1)"
 
 if [[ "$SHOTS" -eq 1 ]]; then
     screenshots "$MAC_DIR"
+    exit 0
+fi
+
+if [[ "$BGTEST" -eq 1 ]]; then
+    bgtest "$MAC_DIR"
     exit 0
 fi
 

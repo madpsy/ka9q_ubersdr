@@ -76,7 +76,10 @@ public class ReceiverActivity extends Activity {
     // The instance's own hostname. Kept because a link to it belongs in this
     // WebView — v1's popups are opened by absolute URL — while a link anywhere
     // else belongs in a browser. See openExternally.
+    private final AppLoad appLoad = new AppLoad();
     private String upstreamHost;
+    /** Scheme, host and port — what a popup's loopback URL is rewritten to. */
+    private String upstreamOrigin;
     private String label = "UberSDR";
     private boolean playing;
     private androidx.webkit.JavaScriptReplyProxy reply;
@@ -128,6 +131,7 @@ public class ReceiverActivity extends Activity {
         insecureTLS = intent.getBooleanExtra(EXTRA_INSECURE, false);
         try {
             if (upstream != null) upstreamHost = android.net.Uri.parse(upstream).getHost();
+            upstreamOrigin = upstream;
         } catch (Exception e) {
             Log.w(TAG, "could not read the instance host from " + upstream, e);
         }
@@ -208,7 +212,49 @@ public class ReceiverActivity extends Activity {
             }
         });
 
+        // The Links menu, the Share menu and the callsign lookup all open with
+        // window.open, and a WebView ignores it unless told otherwise — so
+        // without this the whole menu did nothing at all, silently.
+        web.getSettings().setSupportMultipleWindows(true);
+
         web.setWebChromeClient(new WebChromeClient() {
+            /**
+             * A new window, which this app does not have.
+             *
+             * <p>Everything goes to the browser, the receiver's own pages
+             * included. They belong to the receiver as much as v2 does, but a
+             * phone has no second window and no browser chrome: loading one in
+             * place would replace the receiver with a page having no way back
+             * to it — the interface, the audio and the session gone, for a link
+             * somebody expected to open beside what they were listening to.
+             *
+             * <p>The URL is not a parameter here, which is why this is more
+             * than three lines: WebView reports the *window*, and the address
+             * only arrives when something tries to load it. So a throwaway
+             * WebView is handed back to take delivery, and its first navigation
+             * is the URL that was asked for.
+             */
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog,
+                                          boolean isUserGesture, android.os.Message resultMsg) {
+                WebView catcher = new WebView(ReceiverActivity.this);
+                catcher.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
+                        handOver(outsideUri(request.getUrl()));
+                        // Not from inside its own callback: the WebView is in
+                        // the middle of using itself.
+                        v.post(v::destroy);
+                        return true;
+                    }
+                });
+                android.webkit.WebView.WebViewTransport transport =
+                        (android.webkit.WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(catcher);
+                resultMsg.sendToTarget();
+                return true;
+            }
+
             @Override
             public boolean onConsoleMessage(ConsoleMessage message) {
                 // Mirrored only in a debug build. The page is chatty by design
@@ -334,6 +380,31 @@ public class ReceiverActivity extends Activity {
         return handOver(uri);
     }
 
+    /**
+     * The same page, addressed the way something outside this app can reach it.
+     *
+     * <p>v2's own pages are relative, so a popup resolves against the page's
+     * origin — which is the loopback proxy, on a port that means nothing once
+     * the receiver is closed and nothing at all to another device. The
+     * instance's own origin is the address of the same page.
+     */
+    private android.net.Uri outsideUri(android.net.Uri uri) {
+        if (uri == null || upstreamOrigin == null) return uri;
+        String host = uri.getHost();
+        if (host == null) return uri;
+        if (!"127.0.0.1".equals(host) && !"localhost".equals(host)) return uri;
+        try {
+            android.net.Uri up = android.net.Uri.parse(upstreamOrigin);
+            if (up.getHost() == null) return uri;
+            return uri.buildUpon()
+                    .scheme(up.getScheme())
+                    .encodedAuthority(up.getEncodedAuthority())
+                    .build();
+        } catch (Exception e) {
+            return uri;
+        }
+    }
+
     /** Hands a URL to whatever the system has for it. Always reports handled. */
     private boolean handOver(android.net.Uri uri) {
         try {
@@ -429,6 +500,11 @@ public class ReceiverActivity extends Activity {
                 break;
             case "notice-close":
                 Notices.close(this, message.optString("tag", ""));
+                break;
+            case "stats":
+                // Measured on the way past rather than on a timer: the page
+                // only asks while the stats readout is open. See AppLoad.
+                if (reply != null) reply.postMessage("stats:" + appLoad.json(this));
                 break;
             case "notice-permission":
                 // The page asked, which means the operator pressed something

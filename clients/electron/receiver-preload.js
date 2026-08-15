@@ -714,6 +714,34 @@ if (location.pathname.startsWith('/v2')) {
         });
     } catch { /* nothing here is worth failing the whole preload for */ }
 
+    // What this app is costing the machine, for the stats readout over the
+    // waterfall — the contract is static/v2/src/lib/appStats.js, and the mobile
+    // clients answer the same one through their own hosts.
+    //
+    // The one thing here that reaches the main process, and it is worth being
+    // exact about why that is acceptable where the rest is not. It takes no
+    // argument, so there is nothing for a page to put in it; it returns two
+    // numbers about this application's own processes; and it can do nothing but
+    // read them. What must not exist in this window is a route from the
+    // operator's own pages to the desktop, and a function that answers "37% and
+    // 412 MB" is not one.
+    //
+    // Pull, not push. `read()` hands back the previous second's answer and asks
+    // for the next, so a window whose operator never opens the readout never
+    // measures anything — and CPU is a rate, which has to be averaged over an
+    // interval before it means anything anyway.
+    let appStats = null;
+    try {
+        contextBridge.exposeInMainWorld('ubersdrAppStats', {
+            read() {
+                ipcRenderer.invoke('app:load')
+                    .then((s) => { appStats = s && (s.cpu != null || s.mem != null) ? s : null; })
+                    .catch(() => { /* the window is going away */ });
+                return appStats;
+            },
+        });
+    } catch { /* as above */ }
+
     // The saved bypass password, put where the page already looks for one
     // (static/v2/src/radio/session.js reads `ubersdr.v2.password` from session
     // storage) rather than handed over as a value. The same seeding trick the

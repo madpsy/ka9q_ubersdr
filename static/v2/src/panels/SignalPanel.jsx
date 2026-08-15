@@ -513,11 +513,6 @@ export default function SignalPanel({ minimal }) {
 
             {!minimal && (
                 <>
-                    <div className="note note--tight">
-                        Gates audio below the threshold, server-side. The marker shows
-                        live SNR — set the threshold just above the noise.
-                    </div>
-
                     <div className="readout-grid">
                         <Readout label="Signal" value={power == null ? '—' : power.toFixed(1)} unit="dBFS" />
                         <Readout label="Noise" value={m.noiseDensity == null ? '—' : m.noiseDensity.toFixed(1)} unit="dBFS" />

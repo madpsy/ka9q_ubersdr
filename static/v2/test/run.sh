@@ -170,6 +170,8 @@ esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
     --outfile=.build/radiosync.cjs --log-level=warning
 esbuild ../src/radio/dxcluster-connection.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxcluster.cjs --log-level=warning
+esbuild ../src/lib/chatName.js --bundle --format=cjs --platform=node \
+    --outfile=.build/chatname.cjs --log-level=warning
 esbuild ../src/extensions/protocol.js --bundle --format=cjs --platform=node \
     --outfile=.build/extprotocol.cjs --log-level=warning
 esbuild ../src/extensions/frequencies.js --bundle --format=cjs --platform=node \
@@ -410,3 +412,4 @@ node radioproviders.test.js
 node surfaces.test.js
 node paneldrag.test.js
 node svgmarkup.test.js
+node chatname.test.js

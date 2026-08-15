@@ -4,6 +4,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
 import DockTooNarrow, { useDockRoom } from '../components/DockTooNarrow.jsx';
 import { USERNAME_MAX, validateUsername } from '../radio/dxcluster-connection.js';
+import { suggestUsername } from '../lib/chatName.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { followable, sortFollowFirst } from '../lib/chatFollow.js';
 import {
@@ -58,8 +59,40 @@ export default function ChatPanel({ minimal }) {
     const [draft, setDraft] = useState('');
     const [cursor, setCursor] = useState(0);
     const [sel, setSel] = useState(0);
-    const [name, setName] = useState(chat.username);
+    // The name to join with, and whether it is ours or merely offered.
+    //
+    // A saved name is used as it stands — that is somebody's choice, and the
+    // chat rejoins with it without being asked. With nothing saved the box is
+    // filled in rather than left empty: see lib/chatName.js.
+    const [name, setName] = useState(() => chat.username
+        || suggestUsername(chat.users.map((u) => u.username)));
+    // True while `name` is the suggestion and not something the operator typed.
+    // What it buys is the next few lines.
+    const [suggested, setSuggested] = useState(() => !chat.username);
     const [nameError, setNameError] = useState(null);
+
+    // The first thing typed replaces the suggestion instead of joining it.
+    //
+    // Otherwise a filled-in box is worse than an empty one: the caret sits at
+    // the end of "user417", and somebody typing the name they actually wanted
+    // gets "user417g4abc" — which is refused for length, or worse, is not, and
+    // they join under it. Selecting the text on focus does most of this, but
+    // only until a finger lands in the middle of the word and deselects it, so
+    // the rule is enforced here rather than left to the caret.
+    const onNameChange = (e) => {
+        const next = e.target.value;
+        setNameError(null);
+        if (!suggested) { setName(next); return; }
+        setSuggested(false);
+        // What was added, wherever it was added. A shorter value means they
+        // deleted from the suggestion instead, and what is left of it is not
+        // worth keeping either.
+        if (next.length > name.length && next.includes(name)) {
+            setName(next.replace(name, ''));
+            return;
+        }
+        setName(next.length < name.length ? '' : next);
+    };
     const [emojiOpen, setEmojiOpen] = useState(false);
     // The leave button asking to be sure. See the note on it.
     const [leaving, setLeaving] = useState(false);
@@ -171,7 +204,10 @@ export default function ChatPanel({ minimal }) {
         e.preventDefault();
         const err = validateUsername(name);
         setNameError(err);
-        if (!err) chat.actions.join(name.trim());
+        if (!err) {
+            setSuggested(false);
+            chat.actions.join(name.trim());
+        }
     };
 
     // Inserts at the caret and keeps focus, so several emoji (or an emoji and a
@@ -317,7 +353,11 @@ export default function ChatPanel({ minimal }) {
                             placeholder="Choose a name to chat…"
                             maxLength={USERNAME_MAX}
                             value={name}
-                            onChange={(e) => { setName(e.target.value); setNameError(null); }}
+                            // Selected on focus while it is only a suggestion,
+                            // so on a desktop the first keystroke replaces it
+                            // the way any pre-filled field does.
+                            onFocus={(e) => { if (suggested) e.target.select(); }}
+                            onChange={onNameChange}
                         />
                         <Button type="submit" variant="primary" size="sm">Join</Button>
                     </form>

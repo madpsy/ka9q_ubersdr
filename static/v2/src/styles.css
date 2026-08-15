@@ -2019,6 +2019,41 @@ a.btn { text-decoration: none; }
 .slider:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .slider:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Sliders, for a finger.
+ *
+ * A twenty-pixel-tall control is a comfortable target for a pointer whose tip
+ * is one pixel and which the operator can see. A fingertip covers something
+ * nearer forty and hides the thing it is aiming at, so on a phone these had to
+ * be hit rather than simply touched — and this interface has a great many of
+ * them: every filter, the EQ's twelve bands, the timebase, the buffer, the
+ * squelch.
+ *
+ * Only the *target* grows. The track stays four pixels and the thumb grows by
+ * four, so the control looks very nearly as it does on a desktop while the box
+ * that accepts a press is close to twice as tall — the browser centres the
+ * track in the element's box, so the extra height is padding above and below
+ * the visible bar and costs no alignment.
+ *
+ * `any-pointer` rather than `pointer`, as everywhere else here: an iPad with a
+ * keyboard case reports a *fine* primary pointer and still has the finger this
+ * is for. A trackpad user on that machine loses nothing but eight pixels of
+ * height.
+ */
+@media (any-pointer: coarse) {
+    .slider { height: 34px; }
+    .slider::-webkit-slider-thumb { width: 18px; height: 18px; margin-top: -7px; }
+    .slider::-moz-range-thumb { width: 18px; height: 18px; }
+    /* The EQ's ramp is a seven-pixel track, so its thumb sits differently. */
+    .slider--track::-webkit-slider-thumb { margin-top: -5.5px; }
+    /* The top bar has its own eight-pixel track and its own height, and the
+       bar is a fixed height that a 34 px control would push out of shape. */
+    .topbar__volume .slider { height: 22px; }
+    .topbar__volume .slider::-webkit-slider-thumb { margin-top: -5px; }
+    /* Drawn against the control's box, so it follows the height rather than
+       hanging off the top of a taller one. */
+    .slider-marker { height: 22px; }
+}
+
 .slider-wrap { position: relative; }
 .slider-marker {
     position: absolute;

@@ -1413,6 +1413,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .start__go:hover { filter: brightness(1.08); }
 .start__go:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
 
+/* The second way in, under the first: the same button quieter and smaller, so
+   the pair reads as one choice with a preferred answer rather than as two
+   equal ones. Outlined rather than filled — two accent blocks would be a
+   decision the overlay does not want anybody to have to make. */
+.start__go--alt {
+    margin-top: 8px;
+    padding: 10px 16px;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    font-size: calc(13px * var(--ui-scale));
+    font-weight: 600;
+}
+.start__go--alt:hover { filter: none; background: var(--surface-hover); color: var(--text); }
+
 .start__refused { width: 100%; display: flex; flex-direction: column; gap: 8px; }
 .start__pw { display: flex; gap: 6px; }
 .start__pw .input { flex: 1; min-width: 0; }

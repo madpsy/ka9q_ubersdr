@@ -61,6 +61,9 @@ final class Prefs {
 
     /** Where a receiver's own snapshot lives, when settings are not shared. */
     private static final String PER_RECEIVER = "prefs:";
+    /** Keys the chooser's settings page may read and write. See readOne. */
+    private static final java.util.Set<String> APP_LEVEL =
+            java.util.Collections.singleton("ubersdr.v2.shell");
 
     private final SharedPreferences store;
     /** Which entry this receiver reads and writes — see {@link #keyFor}. */
@@ -100,6 +103,62 @@ final class Prefs {
      */
     static void resetAll(Context context) {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().clear().apply();
+    }
+
+    /**
+     * One setting, read and written from outside a receiver.
+     *
+     * <p>For the chooser's settings page, which is a different page in a
+     * different origin and has no localStorage in common with the receivers.
+     * Only whitelisted keys: the snapshot is the page's own store and this app
+     * treats it as opaque everywhere else, so the two keys it *does* understand
+     * are named rather than left to a caller to choose.
+     *
+     * <p>Always the shared entry, even when receivers are keeping their
+     * settings apart. A setting offered in the app's own settings page is an
+     * app-wide answer by definition — so the per-receiver copies of that one
+     * key are cleared, or a choice made here would appear to do nothing on
+     * every receiver that had ever been arranged by hand.
+     */
+    static String readOne(Context context, String key) {
+        if (!APP_LEVEL.contains(key)) return null;
+        SharedPreferences store = context.getSharedPreferences(FILE, Context.MODE_PRIVATE);
+        try {
+            String saved = store.getString(KEY, null);
+            if (saved == null) return null;
+            JSONObject snapshot = new JSONObject(saved);
+            return snapshot.has(key) ? snapshot.optString(key, null) : null;
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
+    static void writeOne(Context context, String key, String value) {
+        if (!APP_LEVEL.contains(key)) return;
+        SharedPreferences store = context.getSharedPreferences(FILE, Context.MODE_PRIVATE);
+        SharedPreferences.Editor edit = store.edit();
+        for (String entry : store.getAll().keySet()) {
+            if (!KEY.equals(entry) && !entry.startsWith(PER_RECEIVER)) continue;
+            try {
+                String saved = store.getString(entry, null);
+                JSONObject snapshot = saved == null ? new JSONObject() : new JSONObject(saved);
+                // The shared entry gets the value; a receiver's own copy loses
+                // the key, so it falls back to this one.
+                if (KEY.equals(entry)) snapshot.put(key, value);
+                else snapshot.remove(key);
+                edit.putString(entry, snapshot.toString());
+            } catch (JSONException e) {
+                Log.w(TAG, "could not set " + key + " in " + entry, e);
+            }
+        }
+        if (store.getString(KEY, null) == null) {
+            try {
+                edit.putString(KEY, new JSONObject().put(key, value).toString());
+            } catch (JSONException e) {
+                Log.w(TAG, "could not create the shared snapshot", e);
+            }
+        }
+        edit.apply();
     }
 
     /** The snapshot as JSON text, or "null" when nothing has been kept yet. */

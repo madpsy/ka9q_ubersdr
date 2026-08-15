@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('ubersdr', {
     // anybody to, and appInfo says so rather than this failing when pressed.
     linkPending: () => ipcRenderer.invoke('links:pending'),
     resetPrefs: () => ipcRenderer.invoke('settings:reset-prefs'),
+    prefGet: (key) => ipcRenderer.invoke('settings:pref-get', key),
+    prefSet: (key, value) => ipcRenderer.invoke('settings:pref-set', key, value),
     clearReceivers: () => ipcRenderer.invoke('settings:clear-receivers'),
     chooser: () => ipcRenderer.invoke('chooser:state'),
     setChooser: (patch) => ipcRenderer.invoke('chooser:set-state', patch),

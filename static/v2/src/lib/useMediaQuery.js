@@ -54,3 +54,15 @@ export const HOVER_QUERY = '(hover: hover) and (pointer: fine)';
 // decides. 560 rather than 500 covers the taller handsets in landscape without
 // reaching an ordinary portrait phone.
 export const LANDSCAPE_QUERY = '(orientation: landscape) and (max-height: 560px)';
+
+// Is there room for the docks *on this device* — not "right now"?
+//
+// MOBILE_QUERY answers the second question, which is the right one for choosing
+// a layout to draw and the wrong one for deciding whether to offer a choice at
+// all. A tablet crosses the breakpoint every time it is turned over: an 11-inch
+// iPad is 820 px in portrait and 1180 in landscape, so a control offered on the
+// width of the moment appears and disappears as the machine is picked up, and
+// is missing exactly when somebody in portrait goes looking for it.
+//
+// So: wide enough in *either* orientation. The comma is an or.
+export const SHELL_ROOM_QUERY = '(min-width: 901px), (min-height: 901px)';

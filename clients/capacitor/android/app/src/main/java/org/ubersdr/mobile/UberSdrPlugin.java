@@ -291,6 +291,20 @@ public class UberSdrPlugin extends Plugin {
      * to the page, and a "reset settings" that quietly took the receiver list
      * with it would be a button nobody could risk pressing.
      */
+    /** One app-level setting, for the chooser's settings page. See Prefs. */
+    @PluginMethod
+    public void prefGet(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("value", Prefs.readOne(getContext(), call.getString("key")));
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void prefSet(PluginCall call) {
+        Prefs.writeOne(getContext(), call.getString("key"), call.getString("value"));
+        call.resolve();
+    }
+
     @PluginMethod
     public void resetPrefs(PluginCall call) {
         Prefs.resetAll(getContext());

@@ -419,3 +419,4 @@ node svgmarkup.test.js
 node chatname.test.js
 node hostpanels.test.js
 node maxfps.test.js
+node shell.test.js

@@ -480,6 +480,53 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     static let sharedPrefsKey = "ubersdr.shared.prefs"
     static let perReceiverPrefix = "ubersdr.prefs."
 
+    /// Keys the chooser's settings page may read and write. The snapshot is the
+    /// page's own store and this app treats it as opaque everywhere else, so
+    /// what it does understand is named rather than left to a caller.
+    static let appLevelKeys: Set<String> = ["ubersdr.v2.shell"]
+
+    /// One setting, read from outside a receiver — for the chooser's settings
+    /// page, which is a different page in a different origin with no
+    /// localStorage in common with the receivers.
+    static func readOne(_ key: String) -> String? {
+        guard appLevelKeys.contains(key) else { return nil }
+        guard let json = UserDefaults.standard.string(forKey: sharedPrefsKey),
+              let data = json.data(using: .utf8),
+              let map = (try? JSONSerialization.jsonObject(with: data)) as? [String: String]
+        else { return nil }
+        return map[key]
+    }
+
+    /// ...and written.
+    ///
+    /// Always to the shared entry, even where receivers keep their settings
+    /// apart, and the per-receiver copies of that one key are cleared: a
+    /// setting offered in the app's own settings page is an app-wide answer by
+    /// definition, and leaving a receiver's own copy in place would make the
+    /// choice appear to do nothing on every receiver arranged by hand.
+    static func writeOne(_ key: String, _ value: String) {
+        guard appLevelKeys.contains(key) else { return }
+        let defaults = UserDefaults.standard
+
+        func patch(_ storeKey: String, _ change: (inout [String: String]) -> Void) {
+            var map: [String: String] = [:]
+            if let json = defaults.string(forKey: storeKey), let data = json.data(using: .utf8),
+               let saved = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] {
+                map = saved
+            }
+            change(&map)
+            guard let data = try? JSONSerialization.data(withJSONObject: map),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            defaults.set(json, forKey: storeKey)
+        }
+
+        patch(sharedPrefsKey) { $0[key] = value }
+        for storeKey in defaults.dictionaryRepresentation().keys
+        where storeKey.hasPrefix(perReceiverPrefix) {
+            patch(storeKey) { $0.removeValue(forKey: key) }
+        }
+    }
+
     /// Throw away every stored snapshot, both scopes.
     ///
     /// Both, deliberately: "reset settings" is pressed by somebody who wants

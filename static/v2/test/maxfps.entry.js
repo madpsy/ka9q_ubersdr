@@ -3,3 +3,4 @@
 import './reactStub.js';
 
 export { resolveMaxFps } from '../src/display/DisplayContext.jsx';
+export { resolveShell, shellChoosable } from '../src/lib/shellPref.js';

@@ -16,9 +16,10 @@
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
+import { shellChoosable, writeShell } from '../lib/shellPref.js';
 import { Button, Icon } from './ui.jsx';
 import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
-import { MOBILE_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { MOBILE_QUERY, SHELL_ROOM_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { PasswordModal, UberSdrAppModal, VibeSdrModal } from './StartExtras.jsx';
 import { hasMobileApp, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
 // The same question the top bar's callsign lookup asks, answered in one place.
@@ -66,12 +67,18 @@ export default function StartOverlay() {
     // a tablet to click. Asking whether a finger is available at all is both
     // simpler and true — the button can be tapped either way.
     const tapNotClick = useMediaQuery(TOUCH_QUERY);
+    // Room for the docks in some orientation — see SHELL_ROOM_QUERY.
+    const roomy = useMediaQuery(SHELL_ROOM_QUERY);
 
     // Up here rather than beside the button it belongs to, because the effect
     // below is a second caller and hooks run before this component's early
     // return. One definition either way: the press and the desktop client's
     // automatic start are the same act and must stay so.
-    const start = () => {
+    // `shell` is written before powering on rather than left to the operator to
+    // find later: this is the one moment the question has an obvious answer, and
+    // the layout it chooses is the one the receiver then opens into.
+    const start = (shell) => {
+        if (shell) writeShell(shell);
         setStarted(true);
         actions.powerOn();
     };
@@ -132,6 +139,9 @@ export default function StartOverlay() {
     // right for a phone, wrong for every tablet, which has the app and a wide
     // screen and was being offered a Linux download because of it.
     const appHere = hasMobileApp();
+    // Where the two layouts are both possible: a touchscreen with room for the
+    // docks. See the buttons.
+    const simpleOffered = shellChoosable({ touch: tapNotClick, roomy });
 
     const vibesdr = () => {
         if (appHere) { window.location.href = vibesdrUri(publicUuid); return; }
@@ -187,16 +197,42 @@ export default function StartOverlay() {
                 <StartMap receiver={rx} handheld={tapNotClick} />
 
                 {allowed ? (
-                    <button
-                        ref={buttonRef}
-                        type="button"
-                        className="start__go"
-                        title={tapNotClick ? 'Start listening' : 'Press Return to start'}
-                        onClick={start}
-                    >
-                        <Icon.Power size={34} />
-                        <span>{tapNotClick ? 'Tap to start' : 'Click to start'}</span>
-                    </button>
+                    <>
+                        <button
+                            ref={buttonRef}
+                            type="button"
+                            className="start__go"
+                            title={tapNotClick ? 'Start listening' : 'Press Return to start'}
+                            onClick={() => start('full')}
+                        >
+                            <Icon.Power size={34} />
+                            <span>{tapNotClick ? 'Tap to start' : 'Click to start'}</span>
+                        </button>
+                        {/* The other layout, offered only where it is a choice.
+                            A narrow screen has no room for the docks and gets
+                            the simple one whatever anybody presses, so a second
+                            button there would be two buttons doing the same
+                            thing. A machine driven by a pointer is the case
+                            this is not for: the docks are what a pointer is
+                            good at, and somebody who wants the simple layout on
+                            one can still say so in the Display panel.
+
+                            So: touch, and wide enough for both. A tablet, in
+                            other words — the one machine where the interface
+                            genuinely could go either way and the app has been
+                            deciding on its own. */}
+                        {simpleOffered && (
+                            <button
+                                type="button"
+                                className="start__go start__go--alt"
+                                title="Start with the tabbed layout — one panel at a time over a full-width waterfall, as a phone gets"
+                                onClick={() => start('minimal')}
+                            >
+                                <Icon.Power size={22} />
+                                <span>Tap to start — simple layout</span>
+                            </button>
+                        )}
+                    </>
                 ) : (
                     <div className="start__refused">
                         <div className="note note--warn">{check.reason || 'This receiver is not accepting connections.'}</div>

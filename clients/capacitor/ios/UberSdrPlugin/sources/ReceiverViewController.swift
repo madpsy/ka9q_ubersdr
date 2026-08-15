@@ -352,20 +352,23 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     private func seedScript() -> String {
         var js = "(function(){try{window.ubersdrDesktop={"
         js += "upstreamOrigin:\(quote(proxy.upstreamOriginForPage)),"
-        // autoStart is *false* here, and that is the opposite of the Android
-        // client on purpose.
+        // autoStart, as on Android: the start overlay does not appear in either
+        // app, and a receiver opened from the chooser is already the gesture.
         //
-        // v2's start overlay exists for one browser rule: an AudioContext not
-        // created from a user gesture is suspended. Android lifts that rule
-        // wholesale with setMediaPlaybackRequiresUserGesture(false), so the
-        // overlay is skipped and audio starts on its own. iOS does not.
-        // `mediaTypesRequiringUserActionForPlayback = []` lifts it for <audio>
-        // and <video> elements only — WebKit still refuses to resume an
-        // AudioContext outside a gesture — so claiming autoStart here removes
-        // the one tap that would have started the audio, and the receiver opens
-        // into silence with nothing to say why.
+        // This comment used to say the opposite — that WebKit refuses to resume
+        // an AudioContext outside a user gesture, so the overlay had to stay and
+        // its button had to be the gesture. That is the rule in Safari and it is
+        // not the rule here: `mediaTypesRequiringUserActionForPlayback = []` on
+        // the configuration lifts it for this WebView, and receivers have been
+        // opening straight into audio ever since. The prose survived a change
+        // the code had already made, which is worth naming rather than deleting
+        // — the next person to read it will otherwise wonder which is true.
         //
-        // So the overlay stays, and its button is the gesture.
+        // One consequence, and it belongs here rather than in v2: the overlay's
+        // second start button (the simple layout — see lib/shellPref.js) can
+        // never be reached in these apps, because the overlay is never drawn.
+        // That choice lives in the chooser's settings page and in the Display
+        // panel instead.
         js += "autoStart:true,"
         // On by default here as it is on Android and for the same reason: it is
         // a phone and the lock screen is the point.

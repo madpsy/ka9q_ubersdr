@@ -27,6 +27,8 @@ const PREFIX = 'ubersdr.v2.';
 // because the sender is a renderer showing remote content: what it reports is
 // checked rather than trusted.
 const SKIP_EXACT = new Set(['ubersdr.v2.radio']);
+// Keys the chooser's settings page may read and write — see readOne.
+const APP_LEVEL = new Set(['ubersdr.v2.shell']);
 
 /**
  * The interface settings the receiver windows share, or keep apart.
@@ -73,6 +75,32 @@ class SharedPrefs {
     snapshot(id) {
         if (!id) return this.data.prefs;
         return this.data.byReceiver[id] || null;
+    }
+
+    /**
+     * One app-level setting, read and written from the chooser window.
+     *
+     * The chooser is a different window with no localStorage in common with a
+     * receiver, and the snapshot is the page's own store — treated as opaque
+     * everywhere else here, so the keys this understands are named rather than
+     * left to a caller. Always the shared snapshot, and the per-receiver copies
+     * of that key are cleared: a setting offered in the app's settings is an
+     * app-wide answer, and a receiver's own copy would silently outrank it.
+     */
+    readOne(key) {
+        if (!APP_LEVEL.has(key)) return null;
+        const map = this.data.prefs;
+        return map && typeof map[key] === 'string' ? map[key] : null;
+    }
+
+    writeOne(key, value) {
+        if (!APP_LEVEL.has(key) || typeof value !== 'string') return;
+        this.data.prefs = { ...(this.data.prefs || {}), [key]: value };
+        for (const id of Object.keys(this.data.byReceiver)) {
+            const { [key]: gone, ...rest } = this.data.byReceiver[id] || {};
+            this.data.byReceiver[id] = rest;
+        }
+        this.persist();
     }
 
     /**

@@ -1,12 +1,13 @@
-import React from '../react.js';
+import React, { useEffect, useState } from '../react.js';
 import { resolveMaxFps, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
+import { onShell, readShell, shellChoosable, writeShell } from '../lib/shellPref.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { markColors } from '../display/uiConfig.js';
 import { MAX_SECONDS, MIN_SECONDS } from '../lib/dss.js';
 import { clamp } from '../lib/format.js';
 import { Button, ColorPicker, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
-import { MOBILE_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { MOBILE_QUERY, SHELL_ROOM_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import {
     PAUSE_CHOICES, PAUSE_MIN_MOBILE, THROTTLE_CHOICES, THROTTLE_MIN_DESKTOP,
     THROTTLE_MIN_MOBILE, pauseMinutes, throttleMinutes,
@@ -39,7 +40,13 @@ export default function DisplayPanel() {
     const mobile = useMediaQuery(MOBILE_QUERY);
     // A third: the frame cap defaults to 30 on anything touch-driven, and the
     // dropdown has to open on the value in force there rather than "No limit".
-    const maxFps = resolveMaxFps(d.maxFps, useMediaQuery(TOUCH_QUERY));
+    const touch = useMediaQuery(TOUCH_QUERY);
+    const maxFps = resolveMaxFps(d.maxFps, touch);
+    // Kept in its own key rather than with the display settings, so the apps'
+    // settings page can set it too — see lib/shellPref.js.
+    const roomy = useMediaQuery(SHELL_ROOM_QUERY);
+    const [shell, setShell] = useState(readShell);
+    useEffect(() => onShell(setShell), []);
     // No vibrator, no setting: a switch that provably cannot do anything is
     // worse than none, and every desktop would carry it. See hapticsSupported.
     const canBuzz = hapticsSupported();
@@ -450,6 +457,34 @@ export default function DisplayPanel() {
                         />
                     </Field>
                 </>
+            )}
+
+            {/* Where the choice is real: a touchscreen with room for the docks.
+                A narrow screen only has the one layout and a pointer-driven
+                machine is what the docks are for — but the setting is still
+                honoured on both, so somebody who wants the simple layout on a
+                desktop can have it by other means. Same rule as the start
+                overlay's second button, which is where most people will meet
+                this. */}
+            {shellChoosable({ touch, roomy }) && (
+                <Field label="Layout" hint={shell === 'minimal' ? 'one panel at a time' : 'docks'}>
+                    <Segmented
+                        value={shell === 'minimal' ? 'minimal' : 'full'}
+                        onChange={(v) => { writeShell(v); setShell(v); }}
+                        options={[
+                            {
+                                value: 'full',
+                                label: 'Full',
+                                title: 'Docks either side of the spectrum, as a desktop gets',
+                            },
+                            {
+                                value: 'minimal',
+                                label: 'Simple',
+                                title: 'One panel at a time, over a full-width waterfall, as a phone gets',
+                            },
+                        ]}
+                    />
+                </Field>
             )}
 
             <div className="divider" />

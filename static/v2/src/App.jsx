@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from './react.js';
 import { RadioProvider, useRadio } from './radio/RadioContext.jsx';
 import { DisplayProvider } from './display/DisplayContext.jsx';
+import { onShell, readShell, resolveShell } from './lib/shellPref.js';
 import { LayoutProvider, useLayout } from './layout/LayoutContext.jsx';
 import { MOBILE_QUERY, useMediaQuery } from './lib/useMediaQuery.js';
 import Dock from './components/Dock.jsx';
@@ -173,8 +174,24 @@ function AudioDefaults() {
     return null;
 }
 
+// Which layout is drawn.
+//
+// The width still decides on a narrow screen — the docks do not fit and there
+// is nothing to choose between. Above that the operator chooses, from the start
+// overlay, the Display panel, or the apps' own settings page; never having
+// chosen means the docks, as it always did.
+//
+// Subscribed rather than read once: the Display panel changes this while the
+// receiver is running, and swapping shell is exactly the sort of change that
+// must not need a reload to appear.
+function Shell() {
+    const narrow = useMediaQuery(MOBILE_QUERY);
+    const [shell, setShell] = React.useState(readShell);
+    React.useEffect(() => onShell(setShell), []);
+    return resolveShell(shell, narrow) === 'minimal' ? <MobileShell /> : <DesktopShell />;
+}
+
 export default function App() {
-    const mobile = useMediaQuery(MOBILE_QUERY);
     return (
         <DisplayProvider>
             <LayoutProvider>
@@ -235,7 +252,7 @@ export default function App() {
                                 <LegacyBridge />
                                 <BridgeHost />
                                 <SpotStreams />
-                                {mobile ? <MobileShell /> : <DesktopShell />}
+                                <Shell />
                             </MediaSessionProvider>
                         </ExtensionsProvider>
                     </ChatProvider>

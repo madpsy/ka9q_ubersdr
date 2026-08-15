@@ -1168,6 +1168,8 @@ function setupIpc() {
     });
 
     ipcMain.handle('settings:reset-prefs', () => { prefs.reset(); });
+    ipcMain.handle('settings:pref-get', (_e, key) => prefs.readOne(key));
+    ipcMain.handle('settings:pref-set', (_e, key, value) => { prefs.writeOne(key, value); });
 
     // Whether this launch is following a link. Read once by the chooser, and
     // true for the rest of the run: the setting it guards only acts at startup.

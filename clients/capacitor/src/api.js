@@ -219,6 +219,24 @@ export const api = {
      * says what is and is not included. The saved receivers are not: that is
      * the button below, and they are two different regrets.
      */
+    /**
+     * One app-level interface setting, shared with the receivers.
+     *
+     * The chooser has no localStorage in common with a receiver — different
+     * page, different origin — so what it offers is read and written through
+     * the plugin, into the same snapshot the receivers are seeded from.
+     * Whitelisted at the far end; see Prefs.
+     */
+    prefGet: async (key) => {
+        try {
+            const { value } = await UberSdr.prefGet({ key });
+            return typeof value === 'string' ? value : null;
+        } catch {
+            return null;
+        }
+    },
+    prefSet: (key, value) => UberSdr.prefSet({ key, value: String(value) }),
+
     resetPrefs: () => UberSdr.resetPrefs(),
 
     /**

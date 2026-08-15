@@ -38,6 +38,8 @@ public class UberSdrPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "openReceiver", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "closeReceiver", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "receiverState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "prefGet", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "prefSet", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "resetPrefs", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "linkPending", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openAppSettings", returnType: CAPPluginReturnPromise)
@@ -139,6 +141,16 @@ public class UberSdrPlugin: CAPPlugin, CAPBridgedPlugin {
     /// not what a receiver has in its own localStorage: those are the
     /// chooser's and the page's, and a "reset settings" that quietly took the
     /// receiver list with it would be a button nobody could risk pressing.
+    /// One app-level setting, for the chooser's settings page. See HostChannel.
+    @objc func prefGet(_ call: CAPPluginCall) {
+        call.resolve(["value": HostChannel.readOne(call.getString("key") ?? "") as Any])
+    }
+
+    @objc func prefSet(_ call: CAPPluginCall) {
+        HostChannel.writeOne(call.getString("key") ?? "", call.getString("value") ?? "")
+        call.resolve()
+    }
+
     @objc func resetPrefs(_ call: CAPPluginCall) {
         HostChannel.resetPrefs()
         call.resolve()

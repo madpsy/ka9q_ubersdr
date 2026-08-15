@@ -274,6 +274,38 @@ async function showSettings() {
         auto,
     ));
 
+    // The receiver layout, where choosing is worth offering: a touchscreen with
+    // room for both. This is v2's own setting, reached through the host — see
+    // static/v2/src/lib/shellPref.js, which is also where the same rule about
+    // when to offer it lives. A phone has room for one layout and a
+    // pointer-driven machine is what the docks are for, so on either of those
+    // this row would be a control that changes nothing anybody would see.
+    // Room for the docks in *some* orientation, not in this one: a tablet
+    // crosses the breakpoint every time it is turned over, and a row that came
+    // and went with the orientation would be missing exactly when somebody in
+    // portrait went looking for it. Same rule and same queries as v2 — see
+    // SHELL_ROOM_QUERY there.
+    const touch = window.matchMedia('(any-pointer: coarse)').matches;
+    const roomy = window.matchMedia('(min-width: 901px), (min-height: 901px)').matches;
+    if (api.prefGet && touch && roomy) {
+        const stored = await api.prefGet('ubersdr.v2.shell').catch(() => null);
+        const layout = el('select');
+        for (const [value, label] of [['full', 'Full'], ['minimal', 'Simple']]) {
+            const option = el('option', null, label);
+            option.value = value;
+            layout.appendChild(option);
+        }
+        layout.value = stored === 'minimal' ? 'minimal' : 'full';
+        layout.addEventListener('change', () => api.prefSet('ubersdr.v2.shell', layout.value));
+        modal.appendChild(settingRow(
+            'Receiver layout',
+            'Full: panels docked either side of the spectrum. Simple: one panel at a '
+            + 'time over a full-width waterfall, as a phone gets. Takes effect on the '
+            + 'next receiver you open, and can also be changed in its Display panel.',
+            layout,
+        ));
+    }
+
     if (info.appSettings) {
         const open = el('button', 'ghost', 'Open');
         open.addEventListener('click', () => api.openAppSettings().catch(() => {}));

@@ -446,6 +446,59 @@ t('with nothing listening the caller is told, so it can fall back', () => {
     assert.strictEqual(cs.requestLookup('M0ABC'), false);
 });
 
+t('a retained request is delivered to the listener that arrives next', () => {
+    // The top bar inside an app reveals the Callsign panel and then asks.
+    // Revealing takes a render, so nothing is listening at that moment — and
+    // without retention the panel opened empty, which reads as a lookup that
+    // failed for reasons nobody can see.
+    cs._resetInFlight();
+    assert.strictEqual(cs.requestLookup('m0abc', { retain: true }), false);
+    const seen = [];
+    const off = cs.onLookupRequest((c, opts) => seen.push([c, opts.auto]));
+    assert.deepStrictEqual(seen, [['M0ABC', false]]);
+    off();
+});
+
+t('a retained request is delivered once, not to everyone who later listens', () => {
+    cs._resetInFlight();
+    cs.requestLookup('M0ABC', { retain: true });
+    const first = [];
+    const second = [];
+    const offA = cs.onLookupRequest((c) => first.push(c));
+    const offB = cs.onLookupRequest((c) => second.push(c));
+    assert.deepStrictEqual(first, ['M0ABC']);
+    assert.deepStrictEqual(second, []);
+    offA();
+    offB();
+});
+
+t('nothing is retained unless the caller asked for it', () => {
+    // The default has to stay as it was: the voice activity panel falls back to
+    // the v1 popup when nothing answered, and a request retained behind that
+    // would be looked up twice.
+    cs._resetInFlight();
+    assert.strictEqual(cs.requestLookup('M0ABC'), false);
+    const seen = [];
+    const off = cs.onLookupRequest((c) => seen.push(c));
+    assert.deepStrictEqual(seen, []);
+    off();
+});
+
+t('a retained request goes stale rather than waiting for ever', () => {
+    cs._resetInFlight();
+    cs.requestLookup('M0ABC', { retain: true });
+    const real = Date.now;
+    Date.now = () => real() + 60_000;
+    try {
+        const seen = [];
+        const off = cs.onLookupRequest((c) => seen.push(c));
+        assert.deepStrictEqual(seen, []);
+        off();
+    } finally {
+        Date.now = real;
+    }
+});
+
 t('unsubscribing really stops delivery', () => {
     const seen = [];
     const off = cs.onLookupRequest((c) => seen.push(c));

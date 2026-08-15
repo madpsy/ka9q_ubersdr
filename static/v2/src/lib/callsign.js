@@ -277,6 +277,7 @@ function lookupAnswered(call, data) {
 /** Test seam. */
 export function _resetInFlight() {
     inFlight.clear();
+    pending = null;
 }
 
 // --- in-app lookup requests -------------------------------------------------
@@ -287,8 +288,26 @@ export function _resetInFlight() {
 
 const listeners = new Set();
 
+// A request made a moment before anything was listening — see `retain` below.
+let pending = null;
+// How long one waits. A panel being revealed is listening on the next render,
+// so this only has to cover a frame or two; it is seconds rather than
+// milliseconds because a slow first mount is still the same gesture, and a
+// window this short cannot collect anything the operator has forgotten about.
+const PENDING_MS = 3000;
+
 export function onLookupRequest(fn) {
     listeners.add(fn);
+    // Whatever was asked for while this panel was still mounting. Consumed
+    // rather than broadcast: it was one request, and a second panel registering
+    // later must not answer it again.
+    if (pending && Date.now() - pending.at <= PENDING_MS) {
+        const { call, auto } = pending;
+        pending = null;
+        try { fn(call, { auto }); } catch (e) { console.error('lookup listener threw', e); }
+    } else {
+        pending = null;
+    }
     return () => listeners.delete(fn);
 }
 
@@ -303,10 +322,22 @@ export function onLookupRequest(fn) {
  * a lookup you asked for and cannot have should say why, and one that happened
  * on your behalf should fail quietly rather than putting an error on screen
  * about something you did not do.
+ *
+ * `retain` keeps the request for a listener that is about to exist, which is
+ * for one caller: the top bar's lookup inside an app reveals the Callsign panel
+ * and then asks. Revealing takes a render, so the panel is not listening yet —
+ * the panel opened and sat empty, which looked like a lookup that had silently
+ * failed. Off by default because the return value is a fallback signal
+ * elsewhere: the voice activity panel opens the v1 popup when nothing answered,
+ * and a request retained behind that would be looked up twice.
  */
-export function requestLookup(callsign, { auto = false } = {}) {
+export function requestLookup(callsign, { auto = false, retain = false } = {}) {
     const call = normaliseCallsign(callsign);
-    if (!call || listeners.size === 0) return false;
+    if (!call) return false;
+    if (listeners.size === 0) {
+        pending = retain ? { call, auto, at: Date.now() } : null;
+        return false;
+    }
     for (const fn of listeners) {
         try { fn(call, { auto }); } catch (e) { console.error('lookup listener threw', e); }
     }

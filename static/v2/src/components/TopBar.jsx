@@ -456,7 +456,10 @@ export default function TopBar({ compact }) {
         const call = lookupCall.trim().toUpperCase();
         if (!call) return;
         revealPanel('callsign');
-        requestLookup(call);
+        // Retained: revealing the panel takes a render, so it is not listening
+        // yet — see requestLookup. Without this the panel opened empty, which
+        // reads as a lookup that failed for reasons nobody can see.
+        requestLookup(call, { retain: true });
         if (!insideApp()) openCallsignLookup({ uuid: getSessionId(), callsign: call });
         setLookupCall('');
         closeLookup();

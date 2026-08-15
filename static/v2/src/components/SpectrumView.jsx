@@ -21,7 +21,7 @@ import {
     FILTER_WIDTH_STEP, MAX_FREQ, MIN_FREQ, MODE_BY_ID, SQUELCH_MIN,
     edgesForEdgeDrag, edgesForWidth, stepLabel,
 } from '../radio/constants.js';
-import { DEFAULTS as DISPLAY_DEFAULTS, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
+import { DEFAULTS as DISPLAY_DEFAULTS, resolveMaxFps, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
 import { Button, Icon, RangeSlider } from './ui.jsx';
 import MarkerBar from './MarkerBar.jsx';
@@ -42,7 +42,7 @@ import {
     PEAK_GAP_PX, PEAK_REFRESH_MS, PEAK_TAU_MS, averageTrace, findPeaks, layoutPeakLabels,
     peakCount, peakPlace, peakSnr,
 } from '../lib/spectrumPeaks.js';
-import { HOVER_QUERY, LANDSCAPE_QUERY, MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { HOVER_QUERY, LANDSCAPE_QUERY, MOBILE_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getSync } from '../controls/sources.js';
 import { listSurfaces, onSurfaces } from '../controls/surfaces.js';
 import { providerStatus, onProviders } from '../controls/radioProviders.js';
@@ -1099,6 +1099,13 @@ export default function SpectrumView() {
     // can be read against *both* pictures at once — and without it the surface's
     // front edge runs straight into the heat map's top row with nothing to say
     // they are the same instant.
+    // The frame cap in force — 30 by default on anything touch-driven, the
+    // display's rate elsewhere (see resolveMaxFps). Above the draw loop that
+    // reads it, which is not a style preference: this file has a test that
+    // fails a dependency declared below its effect.
+    const touch = useMediaQuery(TOUCH_QUERY);
+    const maxFps = resolveMaxFps(display.maxFps, touch);
+
     const wfMode = viewMode === 'spectrum' ? '2d' : (display.waterfallMode || '2d');
     const midH = wfMode === 'both' && wfH > WF_SCALE_H * 4 ? WF_SCALE_H : 0;
     const dssH = wfMode === '3d' ? wfH
@@ -1265,9 +1272,7 @@ export default function SpectrumView() {
         let lastRow = 0;
 
         // How long a frame should last, 0 for the display's own rate.
-        const capMs = display.maxFps > 0
-            ? 1000 / display.maxFps
-            : 0;
+        const capMs = maxFps > 0 ? 1000 / maxFps : 0;
 
         // Capped, the next frame is asked for by a timer and only *then* by the
         // animation frame — which is the whole difference between this and an
@@ -1446,7 +1451,7 @@ export default function SpectrumView() {
                 g.scroll = null;
             }
         };
-    }, [sizes.w, specH, wfH, dssH, heatH, paused, display.debug, display.maxFps]);
+    }, [sizes.w, specH, wfH, dssH, heatH, paused, display.debug, maxFps]);
 
     // Redraw when a display setting changes even if no new frame arrived.
     useEffect(() => {

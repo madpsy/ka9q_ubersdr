@@ -240,7 +240,11 @@ export const DEFAULTS = {
     // draw at fifteen. Armed from a timer rather than gated inside the animation
     // frame — a loop that re-arms every frame and returns early keeps the tab
     // continuously animating, which is the cost being avoided. See SpectrumView.
-    maxFps: 0,
+    //
+    // null is "not chosen", and the default splits by device — see
+    // resolveMaxFps. An explicit 0 is a choice like any other and survives,
+    // which is the same rule statsPlace and the idle delays follow.
+    maxFps: null,
     scopeShape: 'bars',
     // Whether the audio scope and waterfall find their own dB window or use a
     // floor the operator set. Auto by default: it is right until the question
@@ -355,7 +359,7 @@ export const UI_SCALE_STEP = 0.05;
 // to. Everything in this file is persisted, defaults included — the save effect
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
-const SETTINGS_VERSION = 6;
+const SETTINGS_VERSION = 7;
 
 
 
@@ -406,6 +410,15 @@ function migrate(saved) {
     // left alone by being the thing this does not touch.
     if (!(saved.v >= 6) && saved.waterfallPan === 'hold') delete saved.waterfallPan;
 
+    // maxFps briefly shipped with a stored default of 0 before the default
+    // became per-device, and settings are persisted whole — so everybody who
+    // ran that build has an explicit 0 that would hold the touch default off
+    // for ever. A stored 0 from then is indistinguishable from a deliberate
+    // "no limit", but under that build 0 *was* the default, so almost every
+    // copy of it is nobody's choice. Positive caps were always deliberate and
+    // are kept.
+    if (!(saved.v >= 7) && saved.maxFps === 0) delete saved.maxFps;
+
     return saved;
 }
 
@@ -416,6 +429,22 @@ function load() {
     } catch (e) {
         return { ...DEFAULTS, v: SETTINGS_VERSION };
     }
+}
+
+// The frame cap in force. Not chosen, it splits by device: anything driven by
+// touch — a phone or tablet in a browser, and both mobile apps — is capped at
+// 30, everything else runs at the display's rate.
+//
+// The split is about who pays. On a desktop the cost of an uncapped loop is
+// share of a machine that is plugged into a wall; on a handheld it is battery
+// and heat in somebody's hand, spent on frames a waterfall cannot show —
+// spectrum frames arrive well under 30 a second, so past that the loop is
+// mostly repainting the picture it already drew. Touch rather than screen
+// width, because width lies about tablets: an iPad in landscape is wider than
+// the mobile breakpoint and runs on the same battery.
+export function resolveMaxFps(value, touch) {
+    if (Number.isFinite(value)) return value;
+    return touch ? 30 : 0;
 }
 
 // Which anchor is in force. 'auto' is the default and splits by device: a phone

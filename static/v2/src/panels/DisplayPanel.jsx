@@ -1,12 +1,12 @@
 import React from '../react.js';
-import { resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
+import { resolveMaxFps, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { markColors } from '../display/uiConfig.js';
 import { MAX_SECONDS, MIN_SECONDS } from '../lib/dss.js';
 import { clamp } from '../lib/format.js';
 import { Button, ColorPicker, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
-import { MOBILE_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { MOBILE_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import {
     PAUSE_CHOICES, PAUSE_MIN_MOBILE, THROTTLE_CHOICES, THROTTLE_MIN_DESKTOP,
     THROTTLE_MIN_MOBILE, pauseMinutes, throttleMinutes,
@@ -37,6 +37,9 @@ export default function DisplayPanel() {
     // same query IdleWatch and the spectrum use to decide, so the control and
     // the behaviour cannot disagree.
     const mobile = useMediaQuery(MOBILE_QUERY);
+    // A third: the frame cap defaults to 30 on anything touch-driven, and the
+    // dropdown has to open on the value in force there rather than "No limit".
+    const maxFps = resolveMaxFps(d.maxFps, useMediaQuery(TOUCH_QUERY));
     // No vibrator, no setting: a switch that provably cannot do anything is
     // worse than none, and every desktop would carry it. See hapticsSupported.
     const canBuzz = hapticsSupported();
@@ -457,10 +460,10 @@ export default function DisplayPanel() {
                 merely drawing less — it has stopped asking to be animated.
                 Worth a place among the ordinary settings rather than behind the
                 debug switch it was first written for. */}
-            <Field label="Frame rate" hint={d.maxFps > 0 ? `${d.maxFps}/s` : 'display rate'}>
+            <Field label="Frame rate" hint={maxFps > 0 ? `${maxFps}/s` : 'display rate'}>
                 <select
                     className="select"
-                    value={String(d.maxFps || 0)}
+                    value={String(maxFps)}
                     onChange={(e) => d.set({ maxFps: Number(e.target.value) })}
                     title="Caps the spectrum's draw loop: less processor and less battery, at a less fluid waterfall. Below about 15 a second the waterfall starts dropping rows"
                 >

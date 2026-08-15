@@ -351,7 +351,9 @@ function TopMeter({ meters }) {
 export default function TopBar({ compact }) {
     const { tuning, running, actions, audioState, spectrumState, serverInfo } = useRadio();
     const display = useDisplay();
-    const { docks, toggleDock } = useLayout();
+    // revealPanel for the callsign lookup below — the panel is the answer to it
+    // inside an app, so it has to be brought out before the result arrives.
+    const { docks, toggleDock, revealPanel } = useLayout();
     // Eight was already close to this; ten so the two live readings in this bar
     // tick together rather than beating against each other, which is visible as
     // the strip repainting at the sum of the two rates rather than at either.

@@ -1283,45 +1283,74 @@ export default function SpectrumView() {
         // Still an animation frame at the end of the wait, rather than drawing
         // straight from the timer: that is what keeps the paint on a vsync
         // boundary, and what still stops the loop dead in a hidden tab.
-        // When the next frame is due, on the clock rather than as a delay.
+        // Capped, the schedule is built on the display's own grid, because that
+        // grid is where frames actually land. Three separate things made a
+        // plain "wait capMs, then ask" jerky, and each is handled by name:
         //
-        // Waiting `capMs` from the moment the last one started is the obvious
-        // version and it is not what was asked for: the wait ends, an animation
-        // frame is requested, and the browser paints at its *next* vsync — so
-        // the real period is capMs plus however far away that was, up to a whole
-        // frame of the display. Asking for 30 on a 60 Hz panel gave a period
-        // wandering between 33 and 50 ms, which is 24 a second on average and
-        // visibly uneven, because each frame landed two or three vsyncs after
-        // the last rather than consistently two.
+        //   * **Paints happen at vsyncs, so the period must be a whole number
+        //     of them.** 30 on a 60 Hz panel is every second frame and comes
+        //     out even; 20 on a 90 Hz panel is four and a half, which the
+        //     display delivers as 44 ms, 56 ms, 44 ms — jerk built into the
+        //     target itself. So the display's frame interval is measured (a
+        //     one-off burst of a few animation frames, below) and the period is
+        //     rounded *up* to whole frames. Up, never to nearest: nearest could
+        //     exceed the chosen rate, and the cap is a promise about cost
+        //     before it is one about smoothness.
         //
-        // So the target is absolute — each frame is due capMs after the one
-        // before *was due*, not after it happened — and the timer wakes a few
-        // milliseconds early so the request is already in when that vsync
-        // arrives. The result lands on a vsync boundary near the target and
-        // stays there: 30 asked for is 30 delivered, evenly, and the saving is
-        // untouched because between ticks there is still no outstanding frame
-        // request at all.
+        //   * **A late timer must not be paid back.** Each frame is anchored to
+        //     the timestamp of the one just painted — rephase, not catch-up. A
+        //     tick that slips a vsync is followed by evenly spaced frames from
+        //     where it landed; the old schedule followed it with a *short*
+        //     frame to make the average, and a long-short pair is the most
+        //     visible stutter there is. The cost of rephasing is that a slip
+        //     lowers the average rate slightly, which is the right side to err
+        //     on for both smoothness and cost.
         //
-        // Waking early cannot overshoot the cap on average: `due` advances by
-        // exactly capMs whatever the paint did, so a frame that landed early
-        // makes the next wait longer by the same amount.
-        const SLACK_MS = 6;
+        //   * **The wake has to beat the vsync it is aiming at.** setTimeout
+        //     runs late under load, and every late wake is a slipped frame. The
+        //     timer therefore wakes almost a whole display frame early — the
+        //     next vsync after the wake *is* the target, so waking early by
+        //     less than one frame cannot land a frame early, and the slack is
+        //     lateness budget for free.
+        //
+        // The saving is untouched by all of this: between ticks there is still
+        // no outstanding frame request at all, which is the whole difference
+        // between this and an early return inside the callback (see below).
+        let vsyncMs = 0;
         let due = 0;
 
-        const arm = () => {
+        const arm = (ts) => {
             if (capMs <= 0) { raf = requestAnimationFrame(loop); return; }
-            const now = performance.now();
-            // First frame, or so far behind that catching up would mean a burst:
-            // start counting again from here rather than paying back a debt the
-            // machine has already shown it cannot afford.
-            if (!due || now - due > capMs * 4) due = now;
-            due += capMs;
+            const measured = vsyncMs > 2;
+            const period = measured
+                ? Math.max(1, Math.ceil((capMs - 1) / vsyncMs)) * vsyncMs
+                : capMs;
+            const slack = measured ? Math.min(12, vsyncMs * 0.8) : 6;
+            due = (ts || performance.now()) + period;
             timer = setTimeout(() => { raf = requestAnimationFrame(loop); },
-                Math.max(0, due - now - SLACK_MS));
+                Math.max(0, due - performance.now() - slack));
         };
 
-        const loop = () => {
-            arm();
+        // The display's frame interval, measured rather than assumed: 60 Hz is
+        // only the common case, and phones and external monitors run at 90,
+        // 120 and 144. A short burst of consecutive animation frames, median
+        // of the gaps — the median because any one gap can be stretched by a
+        // busy main thread, and the middle of nine is not. Runs once per loop
+        // start; a window dragged to a different monitor picks the new rate up
+        // on the next cap change, pause or panel toggle, which is imperfect
+        // and cheap where a continuous measurement would be the pipeline this
+        // cap exists to stop.
+        const stamps = [];
+        const calibrate = (ts) => {
+            stamps.push(ts);
+            if (stamps.length < 10) { raf = requestAnimationFrame(calibrate); return; }
+            const gaps = stamps.slice(1).map((t, i) => t - stamps[i]).sort((a, b) => a - b);
+            vsyncMs = gaps[Math.floor(gaps.length / 2)];
+            loop(ts);
+        };
+
+        const loop = (ts) => {
+            arm(ts);
             const g = gfx.current;
             g.ticks++;              // before the early return: an idle frame is still a frame
             const d = dispRef.current;
@@ -1399,7 +1428,12 @@ export default function SpectrumView() {
             g.dirty = false;
         };
 
-        arm();
+        // Straight in uncapped; through the measurement burst when capped. The
+        // burst draws nothing and the first real frame follows it by a tenth of
+        // a second, which is not a delay anybody can see on a loop that runs
+        // for as long as the receiver does.
+        if (capMs > 0) raf = requestAnimationFrame(calibrate);
+        else arm();
         return () => {
             cancelAnimationFrame(raf);
             clearTimeout(timer);

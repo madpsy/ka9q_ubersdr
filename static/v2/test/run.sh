@@ -310,8 +310,12 @@ esbuild ../src/extensions/soundmodem/waterfall.js --bundle --format=cjs --platfo
     --outfile=.build/smwaterfall.cjs --log-level=warning
 esbuild ../src/lib/timeConstant.js --bundle --format=cjs --platform=node \
     --outfile=.build/timeconstant.cjs --log-level=warning
+esbuild ../src/radio/audio-player.js --bundle --format=cjs --platform=node \
+    --outfile=.build/audioplayer.cjs --log-level=warning
 esbuild ../src/lib/nr.js --bundle --format=cjs --platform=node \
     --outfile=.build/nr.cjs --log-level=warning
+esbuild ../src/lib/rmnoise.js --bundle --format=cjs --platform=node \
+    --outfile=.build/rmnoise.cjs --log-level=warning
 esbuild ../src/lib/nr2.js --bundle --format=cjs --platform=node \
     --outfile=.build/nr2.cjs --log-level=warning
 esbuild ../src/lib/noiseBlanker.js --bundle --format=cjs --platform=node \
@@ -367,6 +371,8 @@ node backup.test.js
 node radiosettings.test.js
 node format.test.js
 node clientnoise.test.js
+node rmnoise.test.js
+node noisegraph.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
 node games.test.js

@@ -42,13 +42,32 @@ const PREFIX = 'ubersdr.v2.';
 // decision that holds only because of where a value happens to be stored today
 // is one key move away from being wrong silently. Listing it here also means
 // that if a section ever claims one, keysFor filters it back out.
-export const SECRETS = [
+// Two kinds, and the difference is *whose* they are.
+//
+// An instance secret is the receiver's: the rotator on that operator's desk,
+// the antenna switch in that operator's garden, the bypass password for that
+// receiver. Carrying one to another receiver would be handing a credential to
+// a machine it does not belong to, so the desktop and mobile clients — which
+// otherwise copy the whole interface between receivers — must not carry these.
+export const INSTANCE_SECRETS = [
     'rotctl_password',          // rotator, v1 and v2
     'ant_switch_password',      // antenna switch, v1 and v2
-    'rmnoise_password',         // v1's noise-reduction panel
     'ubersdr_bypass_password',  // v1's session bypass
     'ubersdr.v2.password',      // v2's session bypass — sessionStorage, not local
 ];
+
+// A user secret is the operator's own account with somebody else: it has
+// nothing to do with which receiver is being listened to, and typing it again
+// for every receiver would be a chore with no safety bought by it. These do
+// travel between receivers in the apps — see the clients' shared-settings
+// code — and, like every secret here, still never appear in a backup file.
+export const USER_SECRETS = [
+    'rmnoise_password',         // v1's RM Noise login
+    'ubersdr.v2.rmnoise',       // v2's, which carries the password with it
+];
+
+// What a backup may never contain, which is both kinds.
+export const SECRETS = [...INSTANCE_SECRETS, ...USER_SECRETS];
 
 // `keys` is exhaustive for the section. `rest: true` marks the sweep, and
 // `bookmarks: true` the one section that is not localStorage at all.

@@ -20,7 +20,7 @@
 // exactly what that API exists to replace.
 
 import { createClient } from '../../../static/v2/src/bridge/client.js';
-import { SECRETS } from '../../../static/v2/src/lib/backup.js';
+import { INSTANCE_SECRETS } from '../../../static/v2/src/lib/backup.js';
 
 // The channel ReceiverActivity opens with addWebMessageListener. Absent on a
 // system WebView too old for it, in which case the receiver simply stays open
@@ -47,16 +47,20 @@ function tellHost(message) {
 // here is reported back so the next receiver opened inherits it.
 //
 // What is never shared is the judgement, and it is the desktop client's list
-// plus one addition: v2's own SECRETS (lib/backup.js), which is that file's
-// answer to the same question for the settings backup. Importing it rather than
-// restating it means a credential that moves — the rotator or antenna-switch
-// password gaining a `ubersdr.v2.` key, say — is excluded from both features by
+// plus one addition: v2's own INSTANCE_SECRETS (lib/backup.js). Importing it
+// rather than restating it means a credential that moves — the rotator or
+// antenna-switch password gaining a `ubersdr.v2.` key, say — is excluded by
 // the one edit. Today they are outside the prefix and could not travel anyway;
 // the point is that this holds when that stops being true.
+//
+// Instance secrets, note, and not every secret: an account the operator holds
+// with somebody else — the RM Noise login — belongs to the person rather than
+// to the receiver, and is meant to follow them between receivers. See
+// USER_SECRETS beside it.
 
 const PREFIX = 'ubersdr.v2.';
 const SKIP_PREFIX = 'ubersdr.v2.news.cache.';
-const SKIP_EXACT = new Set(['ubersdr.v2.radio', ...SECRETS]);
+const SKIP_EXACT = new Set(['ubersdr.v2.radio', ...INSTANCE_SECRETS]);
 
 // Settings change at human speed; this is a copy of a few kilobytes.
 const POLL_MS = 2000;

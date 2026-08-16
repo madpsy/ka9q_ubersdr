@@ -1,104 +1,123 @@
 // Client-side noise blanker: impulse noise cut out before it reaches the ear.
 //
 // The target is short broadband clicks — power-line arcing, ignition, electric
-// fences — which are milliseconds wide but tens of dB proud of the band. A
-// blanker's whole job is to remove exactly those samples and nothing else,
-// which makes it orthogonal to noise *reduction*: NR models the steady noise
-// floor and subtracts it, and an impulse is precisely what such a model must
-// not learn. The two are therefore composable — blank first, reduce after —
-// and the panel offers them as independent switches.
+// fences, static crashes — which are milliseconds wide but tens of dB proud of
+// the band. A blanker's whole job is to remove exactly those samples and
+// nothing else, which makes it orthogonal to noise *reduction*: NR models the
+// steady noise floor and subtracts it, and an impulse is precisely what such a
+// model must not learn. The two are therefore composable — blank first, reduce
+// after — and the panel offers them as independent switches.
 //
-// Not v1's design. That one detected a pulse and then attenuated *forward*
-// from it, so the rising edge of every click — the part with the energy — had
-// already been played by the time the gate closed; and it decided
-// "is this broadband?" with an O(N²) DFT per loud sample. This one takes the
-// standard hardware-blanker approach instead:
+// This is the classic design, and deliberately nothing more than it:
+//
+//   1. a slow average of |x| — what the band sounds like;
+//   2. a sample more than `thresholdDb` over that average is an impulse;
+//   3. blank a fixed `widthMs` around it, and go back to watching.
+//
+// Step 3 is the part worth defending, because getting it wrong is what makes a
+// blanker unusable. The blank is a **one-shot of fixed length**, not a gate
+// held shut until things go quiet. An earlier version of this file held the
+// cut until a short envelope fell back near the average, on the reasoning that
+// a crash is audible for twenty milliseconds and not one. It did remove more
+// of each crash — and it also meant that one trigger on a loud syllable held
+// the audio shut for the rest of the word, which is not a blanker
+// misbehaving, it is a downward expander working correctly. On a real 40 m
+// voice channel it was unusable.
+//
+// With a fixed one-shot, an occasional false trigger costs two milliseconds
+// and nobody hears it. That is the whole reason a blanker can afford to be
+// sensitive, and it is why every hardware one works this way.
+//
+// Two other pieces earn their place:
 //
 //   * the audio runs through a short delay line, so a pulse is detected
-//     *before* the delayed copy of it reaches the output — the gate closes
-//     over the whole click, leading edge included;
-//   * detection is a threshold over a slow envelope of |x| whose update is
-//     clamped, so the pulses being caught cannot inflate the average they are
-//     measured against (the classic failure on pulse trains: the first click
-//     raises the floor and the rest walk through);
-//   * the gate is a raised-cosine notch written into a gain schedule, so
-//     overlapping detections merge smoothly and the blanking itself cannot
-//     click.
+//     *before* the delayed copy of it reaches the output — the cut covers the
+//     whole click, leading edge included, where blanking forward from the
+//     detection leaves the loudest part already played;
+//   * each sample's contribution to the average is clamped, so a run of
+//     pulses cannot inflate the average they are measured against — the
+//     classic failure on pulse trains, where the first click raises the floor
+//     and the rest walk through.
 //
-// The cost is the delay-line latency — around 1.5 ms at the default width —
-// which is nothing against the audio buffer it sits inside.
+// Consecutive samples over the threshold extend the cut on their own, which is
+// why the width wants to stay short: it is the *shortest* blank, not the
+// length of every blank.
+//
+// Measured on 74 s of 10.125 MHz USB with static crashes every few seconds and
+// 49 s of a 40 m voice channel, both from the same receiver, at 48 kHz. "Loud
+// parts" is the energy in blocks standing more than 10 dB over the median —
+// the crashes in one recording, the syllables in the other:
+//
+//   threshold  blank    crash loud parts   voice loud parts   the rest
+//     12 dB     2 ms        -21.2 dB           -0.8 dB         -1.1 dB
+//     15 dB     2 ms        -13.0 dB           -0.4 dB         -0.3 dB
+//     18 dB     2 ms         -7.1 dB           -0.2 dB        -0.09 dB
+//     21 dB     2 ms         -4.4 dB           -0.1 dB        -0.03 dB
+//
+// The default is deliberately at the quiet end of that — 19 dB and a 4 ms
+// blank, chosen by ear on a live band rather than off the table. A blanker
+// that has to be turned down to be liked is a better default than one that
+// has to be turned down to be *usable*: the numbers say a low threshold takes
+// more of the crash, and the ear says the cost of a wrong trigger is worth
+// more than the table implies. 12 dB is there for a band where the crashes
+// matter more than the last decibel of everything else.
+//
+// The honest limit, for anyone tempted to wind it further down: a blanker on
+// demodulated, AGC'd, band-limited audio has already lost the wideband view
+// that makes a hardware IF blanker work. Gaussian peaks alone reach about
+// 12 dB over the mean of |x|, so below that it is gating the band rather than
+// the noise on it.
 //
 // Pure DSP: no AudioContext, Float32Arrays in and out, testable in node. The
 // ScriptProcessor wrapping lives in radio/audio-player.js.
 
 export const NB_DEFAULTS = {
     enabled: false,
-    thresholdDb: 10,    // how far above the running average a sample must poke
-    widthMs: 2,         // total width of the cut, ramps included
+    thresholdDb: 19,    // how far over the running average an impulse must stand
+    widthMs: 4,         // the shortest blank, ramps included
 };
 
-// The scale is measured, not guessed. Against band noise plus filtered clicks
-// at 12 kHz, sweeping the threshold gives (false triggers per second on clean
-// noise, then the share of clicks caught at each height over the noise floor):
-//
-//    6 dB   198/s     — gating the noise itself
-//    8 dB    20/s     20 dB: 72%   25 dB: 73%
-//    9 dB   2.5/s     20 dB: 84%   25 dB: 97%
-//   10 dB   0.1/s     20 dB: 68%   25 dB: 100%
-//   12 dB     0/s     20 dB: 26%   25 dB: 99%
-//   15 dB     0/s     20 dB:  0%   25 dB: 62%
-//
-// So the whole working range is 8–12 dB and the knee is at 10, which is the
-// default. It shipped at 15 — where nothing but the rarest spike triggers at
-// all, so the counter crept up and the audio was untouched, which is exactly
-// what it sounded like. Above 14 dB is dead space and is not offered.
-//
-// The other half of that table is worth knowing before reaching for the
-// slider: clicks less than ~15 dB over the floor are not reliably separable
-// from the noise's own peaks by any amplitude test, because that is where
-// Gaussian peaks live. A blanker on demodulated, AGC'd audio has already lost
-// the wideband view that makes an IF blanker work; this catches what is
-// plainly a click and leaves what is arguably noise.
-export const NB_THRESHOLD_MIN = 4;
-export const NB_THRESHOLD_MAX = 20;
+export const NB_THRESHOLD_MIN = 8;
+export const NB_THRESHOLD_MAX = 24;
 export const NB_WIDTH_MIN = 0.5;
 export const NB_WIDTH_MAX = 10;
 
-// Time constant for the "how much audio is being removed" readout.
-const CUT_TC_S = 3;
-
-// Envelope time constants — asymmetric on purpose. The release (downward) is
-// slow against speech syllables, so voice riding the reference does not drag
-// it around; the attack (upward) is fast, so audio returning after a stretch
-// of squelch-closed silence rebuilds the reference in tens of milliseconds
-// rather than blanking the first word. Fast attack does not hand the envelope
-// to the impulses — their contribution is clamped below.
+// The average: slow enough that speech rides on it rather than dragging it
+// about, and long against any blank.
 const ENV_TC_S = 0.05;
-const ENV_ATTACK_TC_S = 0.0125;
-// A sample may contribute at most this multiple of the current envelope to the
-// average — the clamp that keeps impulses from raising their own threshold.
+// A sample may contribute at most this multiple of the current average — the
+// clamp that stops impulses raising their own threshold.
 const ENV_CLAMP = 3;
-// Detection is off for the first stretch while the envelope finds the floor,
-// and the envelope settles faster than it tracks. In seconds.
+// No detection while the average finds its feet, and it charges faster than it
+// tracks while it does.
 const WARMUP_S = 0.15;
 const WARMUP_ALPHA = 1 / 32;
-// No detection below this envelope (−60 dBFS). A threshold *relative* to the
-// reference is meaningless when the reference is silence: with the squelch
-// closed the stream is decoder residue around −100 dBFS, every flutter of
-// which is "20 dB over the average", and the blanker sat there triggering
-// constantly on audio nobody could hear. Below this level there is nothing to
-// protect an ear from; a real signal is orders of magnitude above it, and the
-// fast attack has the envelope over the bar within milliseconds of the
-// squelch opening.
+// No detection below this average (-60 dBFS). A threshold *relative* to the
+// average is meaningless when the average is silence: with the squelch closed
+// the stream is decoder residue around -100 dBFS, every flutter of which is
+// "20 dB over", and the blanker sat there triggering on audio nobody could
+// hear.
 const SILENCE = 1e-3;
-// How long detection stays off after audio returns from under the silence
-// floor. The envelope has to climb from "nothing" back to the band's real
-// level, and while it is still on the way up every ordinary sample is far
-// "over the average" — so each squelch opening blanked its own first
-// syllable and flashed the tag. The reference is simply stale at that
-// moment; this re-runs a short warmup to rebuild it, the same answer the
-// first samples of the session get.
+// Coming back from under that floor re-runs a short warmup. The average has to
+// climb from nothing to the band's real level, and while it is on the way up
+// every ordinary sample stands far over it — so each squelch opening blanked
+// its own first syllable.
 const RESUME_S = 0.025;
+// Ramp either side of a blank, so the cut itself cannot click.
+const RAMP_S = 0.0003;
+
+// The trace behind the panel's chart: one bucket per TRACE_MS of audio, a few
+// seconds of them. Each bucket keeps how far the loudest sample in it stood
+// over the average, in dB, and what share of it was cut — a share rather than
+// a flag, because a flag set by one sample in four hundred paints the whole
+// bar red and says the burst was removed when almost none of it was.
+export const TRACE_MS = 10;
+export const TRACE_LEN = 300;      // 3 seconds
+const TRACE_MIN_DB = -6;
+const TRACE_MAX_DB = 40;
+
+// Time constant for the "how much is being removed" readouts.
+const CUT_TC_S = 3;
 
 export class NoiseBlanker {
     constructor(sampleRate = 12000) {
@@ -108,45 +127,50 @@ export class NoiseBlanker {
         this.widthMs = NB_DEFAULTS.widthMs;
 
         this.envAlpha = 1 / Math.max(1, Math.round(ENV_TC_S * sampleRate));
-        this.envAlphaUp = 1 / Math.max(1, Math.round(ENV_ATTACK_TC_S * sampleRate));
         this.warmupSamples = Math.round(WARMUP_S * sampleRate);
         this.resumeSamples = Math.round(RESUME_S * sampleRate);
 
-        // How many pulses the gate has closed on, and what share of the audio
-        // it is currently removing. The second is the one that answers "is
-        // this doing anything" — a count can climb while the cut is nothing.
+        // Impulses blanked, the share of the audio being removed, and what
+        // that costs in level — the last measured across the stage itself
+        // rather than inferred from the gate, because a blanker that counts
+        // pulses and reduces nothing reads 0.0 dB here.
         this.pulsesBlanked = 0;
         this.cutFraction = 0;
+        this.reductionDb = 0;
+        this._sumIn = 0;
+        this._sumOut = 0;
+
+        this.traceDb = new Float32Array(TRACE_LEN).fill(TRACE_MIN_DB);
+        this.traceCut = new Uint8Array(TRACE_LEN);
+        this.traceHead = 0;
+        this._bucketSamples = Math.max(1, Math.round((TRACE_MS / 1000) * sampleRate));
 
         this._rebuild();
     }
 
     setParameters({ thresholdDb = null, widthMs = null } = {}) {
-        if (thresholdDb !== null) {
-            this.thresholdDb = Number(thresholdDb);
-            this._ratio = Math.pow(10, this.thresholdDb / 20);
-        }
+        if (thresholdDb !== null) this.thresholdDb = Number(thresholdDb);
+        this._ratio = Math.pow(10, this.thresholdDb / 20);
         if (widthMs !== null && Number(widthMs) !== this.widthMs) {
             this.widthMs = Number(widthMs);
             this._rebuild();
         }
     }
 
-    // Sized from the width: the notch spans a plateau of the full width with a
-    // cosine ramp either side, the delay is exactly the reach-back the notch
-    // needs, and all of the state hangs off those lengths.
+    // Sized from the width: the blank spans a plateau with a cosine ramp either
+    // side, the delay is exactly the reach-back it needs, and the rest of the
+    // state hangs off those lengths.
     _rebuild() {
         const fs = this.sampleRate;
-        const halfW = Math.max(1, Math.round((this.widthMs / 2000) * fs));
-        const ramp = Math.max(2, Math.round(fs * 0.0005));   // 0.5 ms each side
+        const half = Math.max(1, Math.round((this.widthMs / 2000) * fs));
+        const ramp = Math.max(2, Math.round(fs * RAMP_S));
 
-        this._pre = halfW + ramp;                            // reach-back = latency
-        this._post = halfW + ramp;
+        this._pre = half + ramp;                       // reach-back = latency
+        this._post = half + ramp;
         const n = this._pre + this._post + 1;
 
-        // The notch, hung centred on the detected sample: ramp down, zero
-        // plateau, ramp up. Precomputed once — a detection is then a min()
-        // per entry, not trig.
+        // The blank, hung centred on the sample that fired it. Precomputed:
+        // firing is then a min() per entry rather than trigonometry.
         this._shape = new Float32Array(n);
         for (let j = 0; j < n; j++) {
             if (j < ramp) {
@@ -160,10 +184,10 @@ export class NoiseBlanker {
 
         this._delay = this._pre;
         this._buf = new Float32Array(this._delay);
-        // Gain for the output emitted at each of the next L2 steps; consumed
-        // and reset to 1 as each step passes. min()-merged on detection, so
-        // pulse trains extend the cut rather than fighting over it.
-        this._sched = new Float32Array(this._delay + this._post + 1).fill(1);
+        // The gain each of the next n outputs will be multiplied by, consumed
+        // and reset to 1 as each goes past. min()-merged when something fires,
+        // so overlapping blanks join into one longer cut rather than fighting.
+        this._sched = new Float32Array(n).fill(1);
         this._t = 0;
 
         this._ratio = Math.pow(10, this.thresholdDb / 20);
@@ -171,81 +195,119 @@ export class NoiseBlanker {
         this._warm = 0;
         this._quiet = true;     // under the silence floor just now
         this._hold = 0;         // resume-warmup samples left
+        this._openFor = 1e9;    // samples since the last trigger, for counting
+
+        this._bucketLeft = this._bucketSamples;
+        this._bucketPeak = 0;
+        this._bucketRef = 0;
+        this._bucketCut = 0;
     }
 
     reset() {
         this._rebuild();
         this.pulsesBlanked = 0;
         this.cutFraction = 0;
+        this.reductionDb = 0;
+        this._sumIn = 0;
+        this._sumOut = 0;
+        this.traceDb.fill(TRACE_MIN_DB);
+        this.traceCut.fill(0);
+        this.traceHead = 0;
     }
 
     process(input, output) {
         if (!this.enabled) {
-            // Bypassed entirely — no delay, no envelope. The line picks up
+            // Bypassed entirely — no delay, no average. The line picks up
             // fresh when re-enabled, which is what reset() guarantees.
             output.set(input);
             return;
         }
-
-        let cut = 0;
 
         const buf = this._buf;
         const sched = this._sched;
         const shape = this._shape;
         const L = this._delay;
         const L2 = sched.length;
-        const startK = L - this._pre;     // 0 by construction, kept for clarity
+        let cut = 0;
 
         for (let i = 0; i < input.length; i++) {
             const x = input[i];
             const ax = x < 0 ? -x : x;
 
             // Coming back from under the silence floor is a fresh start:
-            // whatever the envelope held is a memory of a different signal,
-            // so it is re-charged and detection waits — see RESUME_S.
+            // whatever the average held is a memory of a different signal.
             if (this._env < SILENCE) this._quiet = true;
             if (this._quiet && ax > SILENCE) {
                 this._hold = this.resumeSamples;
                 this._quiet = false;
             }
 
-            // Envelope, clamped — except while (re)warming, where it charges
-            // straight from the samples. The clamp has a floor besides: near
-            // silence a pure multiple of the envelope could never climb.
             const warm = this._warm < this.warmupSamples;
             const charging = warm || this._hold > 0;
             if (this._hold > 0) this._hold--;
             const c = charging ? ax : Math.min(ax, Math.max(ENV_CLAMP * this._env, 1e-4));
-            const alpha = charging ? WARMUP_ALPHA
-                : (c > this._env ? this.envAlphaUp : this.envAlpha);
-            this._env += (c - this._env) * alpha;
+            this._env += (c - this._env) * (charging ? WARMUP_ALPHA : this.envAlpha);
             if (warm) this._warm++;
 
-            // A pulse: schedule the notch over the delayed stream.
+            // An impulse: blank a fixed width around it and carry on. Nothing
+            // is left armed, nothing is held open, nothing has to be released.
             if (!charging && this._env > SILENCE && ax > this._env * this._ratio) {
-                if (sched[(this._t + L) % L2] === 1) this.pulsesBlanked++;
-                for (let j = 0; j < shape.length; j++) {
-                    const at = (this._t + startK + j) % L2;
+                // One count per impulse rather than per sample over the
+                // threshold: a single click crosses it several times.
+                if (this._openFor > this._pre + this._post) this.pulsesBlanked++;
+                this._openFor = 0;
+                for (let j = 0; j < L2; j++) {
+                    const at = (this._t + j) % L2;
                     if (shape[j] < sched[at]) sched[at] = shape[j];
                 }
+            } else if (this._openFor < 1e9) {
+                this._openFor++;
             }
 
-            // Emit the delayed sample through this step's gate, then recycle
-            // both slots.
             const slot = this._t % L;
             const gslot = this._t % L2;
-            if (sched[gslot] < 0.5) cut++;
-            output[i] = buf[slot] * sched[gslot];
+            const gain = sched[gslot];
+            if (gain < 0.5) cut++;
+
+            // The chart's bucket: the loudest sample, the average it stood
+            // against, and how much of the bucket was cut.
+            if (ax > this._bucketPeak) this._bucketPeak = ax;
+            if (this._env > this._bucketRef) this._bucketRef = this._env;
+            if (gain < 0.5) this._bucketCut++;
+            if (--this._bucketLeft <= 0) {
+                const ref = Math.max(this._bucketRef, 1e-9);
+                const db = 20 * Math.log10(Math.max(this._bucketPeak, 1e-9) / ref);
+                this.traceDb[this.traceHead] = Math.max(TRACE_MIN_DB, Math.min(TRACE_MAX_DB, db));
+                this.traceCut[this.traceHead] = Math.round(
+                    (255 * this._bucketCut) / this._bucketSamples,
+                );
+                this.traceHead = (this.traceHead + 1) % TRACE_LEN;
+                this._bucketLeft = this._bucketSamples;
+                this._bucketPeak = 0;
+                this._bucketRef = 0;
+                this._bucketCut = 0;
+            }
+
+            const out = buf[slot] * gain;
+            this._sumIn += x * x;
+            this._sumOut += out * out;
+            output[i] = out;
             sched[gslot] = 1;
             buf[slot] = x;
             this._t++;
         }
 
-        // Once per buffer rather than per sample: the readout is a percentage
-        // on a panel, and it settles over seconds either way.
+        // Once per buffer rather than per sample: these are numbers on a
+        // panel, and they settle over seconds either way.
         if (input.length) {
             const a = Math.min(1, input.length / (CUT_TC_S * this.sampleRate));
             this.cutFraction += (cut / input.length - this.cutFraction) * a;
+            if (this._sumIn > 0) {
+                const db = 10 * Math.log10(Math.max(this._sumOut, 1e-30) / this._sumIn);
+                this.reductionDb += (Math.max(-60, db) - this.reductionDb) * a;
+            }
+            this._sumIn = 0;
+            this._sumOut = 0;
         }
     }
 }

@@ -19,6 +19,7 @@ import { localBookmarks as localBookmarkStore, onLocalBookmarksChanged } from '.
 import { FILTER_DEFAULTS } from './audio-filters.js';
 import { NB_DEFAULTS } from '../lib/noiseBlanker.js';
 import { NR_DEFAULTS } from '../lib/nr.js';
+import { getRmNoise, rmModeSupported } from '../lib/rmnoise.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
     SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
@@ -547,6 +548,29 @@ export function RadioProvider({ children }) {
     // carrying it across a retune subtracts the old channel's noise from the
     // new one. v1 resets it on every frequency change, and so does this.
     useEffect(() => { player.resetNoiseLearning(); }, [tuning.frequency]);
+
+    // RM Noise is trained on voice bandwidth; on AM, FM and the rest what comes
+    // back is not worth hearing, so it takes itself out of the way. Switched
+    // off rather than left running, because a stage that is "on" and doing
+    // nothing useful is a claim the toolbar tag would repeat.
+    //
+    // Here rather than in the Noise panel, where it was: a collapsed dock
+    // section is unmounted, so a gate that lives in a panel is a gate that
+    // stops watching the moment somebody folds the panel away — and the mode
+    // is far more often changed from the Multipad or the top bar than from in
+    // front of this setting.
+    useEffect(() => {
+        if (!noise.nr.enabled || noise.nr.type !== 'rmn') return;
+        if (!rmModeSupported(tuning.mode)) {
+            actions.setNoise({ nr: { enabled: false } });
+            return;
+        }
+        // Supported, so the other half: the service trains a model per kind of
+        // signal, and the mode is what says which of them to ask for. Here for
+        // the same reason the gate above is — the panel that shows the model is
+        // usually not on screen when the mode changes.
+        getRmNoise().matchModel(tuning.mode);
+    }, [tuning.mode, noise.nr.enabled, noise.nr.type]);
 
     // Persist the parts of the session worth restoring.
     useEffect(() => {

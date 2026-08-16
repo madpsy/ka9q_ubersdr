@@ -8,6 +8,7 @@
 import { applyParams, buildChain, frameLevelDb, gateOpen, nextMakeupDb, shapeKey } from './audio-filters.js';
 import { NRProcessor } from '../lib/nr.js';
 import { NR2Processor } from '../lib/nr2.js';
+import { getRmNoise } from '../lib/rmnoise.js';
 import { NoiseBlanker } from '../lib/noiseBlanker.js';
 import { Emitter } from './emitter.js';
 
@@ -78,6 +79,9 @@ export class AudioPlayer extends Emitter {
         this.noiseSpec = null;
         this.nb = null;             // [left, right] NoiseBlanker instances
         this.nbNode = null;         // their ScriptProcessor
+        // Whether head→…→filterHead has been joined up in the *current*
+        // context. See _applyNoise.
+        this._noiseWired = false;
         this.nr = null;             // [left, right] NR instances
         this.nrType = '';           // which engine the instances are
         this.nrNode = null;
@@ -303,6 +307,7 @@ export class AudioPlayer extends Emitter {
         this.nr = null;
         this.nrNode = null;
         this.nrMakeup = null;
+        this._noiseWired = false;
         clearInterval(this.gateTimer);
         this.gateTimer = null;
         clearInterval(this.makeupTimer);
@@ -595,24 +600,68 @@ export class AudioPlayer extends Emitter {
         return Math.max(this.nb[0].cutFraction, this.nb[1].cutFraction);
     }
 
+    /**
+     * The blanker's recent history for the panel's chart, or null when it is
+     * not running. One channel's worth — on the usual mono-duplicated stream
+     * the two are the same picture, and two traces drawn over each other would
+     * say nothing the one does not.
+     *
+     * The arrays are the live ones, not copies: this is read on the same
+     * thread that writes them, a frame's worth of data either way, and a copy
+     * per redraw would be the only allocation in the whole path.
+     */
+    /** How much quieter the blanker's output is than its input, in dB. */
+    nbReductionDb() {
+        if (!this.nb) return 0;
+        return Math.min(this.nb[0].reductionDb, this.nb[1].reductionDb);
+    }
+
+    nbTrace() {
+        if (!this.nb) return null;
+        const b = this.nb[0];
+        return { db: b.traceDb, cut: b.traceCut, head: b.traceHead };
+    }
+
     /** The NR noise profile is per-frequency; the radio calls this on retune. */
     resetNoiseLearning() {
         if (this.nr) for (const n of this.nr) n.resetLearning();
+    }
+
+    /** The stream's rate changed under the network denoiser — see its own note. */
+    noiseSampleRateChanged(rate) {
+        if (this.nrType === 'rmn') getRmNoise().onSampleRateChange(rate);
     }
 
     _applyNoise() {
         const spec = this.noiseSpec || {};
         const nbOn = !!(spec.nb && spec.nb.enabled);
         const nrOn = !!(spec.nr && spec.nr.enabled);
-        const nrType = spec.nr && spec.nr.type === 'nr2' ? 'nr2' : 'lsa';
+        const nrType = spec.nr && ['nr2', 'rmn'].includes(spec.nr.type) ? spec.nr.type : 'lsa';
 
-        // Same stages, same engine: retune the instances in place. Sliders
-        // move often, and rebuilding a ScriptProcessor per move would tear
-        // the audio the way rebuilding biquads used to (see setFilters).
-        if (!!this.nbNode === nbOn && !!this.nrNode === nrOn
+        // Same stages, same engine, *and already wired into this context*:
+        // retune the instances in place. Sliders move often, and rebuilding a
+        // ScriptProcessor per move would tear the audio the way rebuilding
+        // biquads used to (see setFilters).
+        //
+        // `_noiseWired` is not a formality. Without it the fast path was taken
+        // on a *fresh* context whenever both stages were off — nbNode and
+        // nrNode are null then, which matches "no stages wanted" exactly — and
+        // it returned before connecting head to filterHead. The graph was left
+        // with nothing joining the audio to the output, so the receiver came
+        // up silent and stayed silent until something toggled a stage and
+        // forced the rebuild that does the wiring.
+        if (this._noiseWired && !!this.nbNode === nbOn && !!this.nrNode === nrOn
             && (!nrOn || this.nrType === nrType)) {
             this._tuneNoise(spec);
             return;
+        }
+
+        // Leaving the network engine means leaving the service: audio going
+        // to somebody else's servers for a stage nobody is listening through
+        // is their bandwidth and the operator's account, spent on nothing.
+        // Not a manual stop — choosing it again reconnects.
+        if (this.nrType === 'rmn' && !(nrOn && nrType === 'rmn')) {
+            getRmNoise().disconnect();
         }
 
         try { this.head.disconnect(); } catch (e) { /* not connected yet */ }
@@ -625,6 +674,13 @@ export class AudioPlayer extends Emitter {
         this.nrNode = null;
         this.nrMakeup = null;
 
+        // Blanker first, then NR — the order is the point, not an accident of
+        // how this reads. An impulse is exactly what a spectral noise model
+        // must not learn, so the clicks have to be gone before anything
+        // estimates a noise floor from the audio; the other way round, every
+        // crash would teach NR that the band is louder than it is, and the
+        // subtraction would follow it. Same order v1 uses, and the same order
+        // a receiver puts its IF blanker ahead of everything else.
         let node = this.head;
 
         if (nbOn) {
@@ -648,12 +704,49 @@ export class AudioPlayer extends Emitter {
         }
 
         if (nrOn) {
+            this.nrType = nrType;
+            const proc = this.ctx.createScriptProcessor(1024, 2, 2);
+
+            if (nrType === 'rmn') {
+                // Somebody else's denoiser, over the network — one mono stream,
+                // not one per channel: the two channels of this stream are the
+                // same audio, and sending both would be twice the bandwidth and
+                // twice the bill for the same answer. Channel 0 goes, and what
+                // comes back is written to both.
+                //
+                // `process` returns null until the far end is ready, which is
+                // "play what you already had" — the whole stage is a passthrough
+                // until the login, the signalling and the data channel are all
+                // done.
+                const rm = getRmNoise();
+                this.nr = null;
+                proc.onaudioprocess = (e) => {
+                    const inL = e.inputBuffer.getChannelData(0);
+                    const outL = e.outputBuffer.getChannelData(0);
+                    const outR = e.outputBuffer.getChannelData(1);
+                    let done = null;
+                    try {
+                        done = rm.process(inL, e.inputBuffer.sampleRate || this.sampleRate);
+                    } catch (err) {
+                        done = null;
+                    }
+                    if (done) { outL.set(done); outR.set(done); } else { outL.set(inL); outR.set(inL); }
+                };
+                node.connect(proc);
+                this.nrMakeup = this.ctx.createGain();
+                proc.connect(this.nrMakeup);
+                node = this.nrMakeup;
+                this.nrNode = proc;
+                this._tuneNoise(spec);
+                node.connect(this.filterHead);
+                this._noiseWired = true;
+                return;
+            }
+
             const nrs = nrType === 'nr2'
                 ? [new NR2Processor(2048, 4), new NR2Processor(2048, 4)]
                 : [new NRProcessor(this.ctx.sampleRate), new NRProcessor(this.ctx.sampleRate)];
             for (const r of nrs) r.enabled = true;
-            this.nrType = nrType;
-            const proc = this.ctx.createScriptProcessor(1024, 2, 2);
             proc.onaudioprocess = (e) => {
                 for (let ch = 0; ch < 2; ch++) {
                     nrs[ch].process(e.inputBuffer.getChannelData(ch), e.outputBuffer.getChannelData(ch));
@@ -669,6 +762,7 @@ export class AudioPlayer extends Emitter {
         }
 
         node.connect(this.filterHead);
+        this._noiseWired = true;
         this._tuneNoise(spec);
     }
 
@@ -678,6 +772,8 @@ export class AudioPlayer extends Emitter {
                 b.setParameters({ thresholdDb: spec.nb.thresholdDb, widthMs: spec.nb.widthMs });
             }
         }
+        // No instances for the network engine — its settings are an account and
+        // a model number, and they live on the bridge.
         if (this.nr && spec.nr) {
             for (const r of this.nr) {
                 if (this.nrType === 'nr2') r.setParameters(spec.nr.strength, spec.nr.floor, spec.nr.adaptRate);

@@ -18,20 +18,334 @@
 // on the band, and that is the operator's experiment to run, not this panel's
 // to forbid.
 
-import React, { useEffect, useState } from '../react.js';
+import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Field, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { Button, Field, Segmented, Slider, Switch } from '../components/ui.jsx';
 import DspControl from './DspControl.jsx';
 import {
-    NB_THRESHOLD_MAX, NB_THRESHOLD_MIN, NB_WIDTH_MAX, NB_WIDTH_MIN,
+    NB_THRESHOLD_MAX, NB_THRESHOLD_MIN, NB_WIDTH_MAX, NB_WIDTH_MIN, TRACE_LEN, TRACE_MS,
 } from '../lib/noiseBlanker.js';
+import { cssVar } from '../lib/audioWaterfall.js';
+import {
+    RM_REGISTER_URL, getRmNoise, rmCredentials, rmFamilyOfModel, rmModeSupported,
+    saveRmCredentials,
+} from '../lib/rmnoise.js';
+
+// What the blanker is hearing, and where it drew the line.
+//
+// Everything is plotted against the blanker's own reference rather than in
+// absolute level, which is the whole reason this is worth drawing: the
+// threshold becomes a horizontal line, and setting it stops being guesswork.
+// Bursts that stand over the line are the ones being cut — the chart shades
+// those buckets — and bursts that sit under it are the ones still audible,
+// which is the question every "is this thing doing anything" comes down to.
+//
+// Drawn from the blanker's own ring, on a timer rather than an animation
+// frame: three seconds of ten-millisecond buckets, and a panel that is often
+// on a phone. Ten redraws a second is plenty to watch a crash go past.
+const SCOPE_H = 64;
+const SCOPE_TOP_DB = 40;      // top of the scale, dB over the reference
+const SCOPE_BOTTOM_DB = -6;
+
+function NbScope({ thresholdDb }) {
+    const { player } = useRadio();
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const draw = () => {
+            const canvas = ref.current;
+            const trace = player.nbTrace();
+            if (!canvas || !trace) return;
+            const dpr = Math.min(2, window.devicePixelRatio || 1);
+            const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
+            const h = Math.round(SCOPE_H * dpr);
+            if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w;
+                canvas.height = h;
+            }
+            const c = canvas.getContext('2d');
+            c.clearRect(0, 0, w, h);
+
+            const y = (db) => h - ((Math.max(SCOPE_BOTTOM_DB, Math.min(SCOPE_TOP_DB, db)) - SCOPE_BOTTOM_DB)
+                / (SCOPE_TOP_DB - SCOPE_BOTTOM_DB)) * h;
+            const bw = w / TRACE_LEN;
+
+            // The buckets, oldest first: `head` is where the next one lands,
+            // so it is also the oldest one still held.
+            const accent = cssVar('--accent', '#4aa8ff');
+            const bad = cssVar('--bad', '#f2646a');
+            for (let i = 0; i < TRACE_LEN; i++) {
+                const k = (trace.head + i) % TRACE_LEN;
+                const top = y(trace.db[k]);
+                const x = i * bw;
+                const bar = Math.max(1, bw);
+                // The bar is what was heard; the red part of it is the share
+                // of that ten milliseconds the gate was shut for. A bucket
+                // half cut is drawn half red, so "it went red" and "it was
+                // removed" cannot come apart.
+                c.fillStyle = accent;
+                c.globalAlpha = 0.5;
+                c.fillRect(x, top, bar, h - top);
+                const share = trace.cut[k] / 255;
+                if (share > 0) {
+                    c.fillStyle = bad;
+                    c.globalAlpha = 0.95;
+                    c.fillRect(x, top, bar, (h - top) * share);
+                }
+            }
+            c.globalAlpha = 1;
+
+            // The line the threshold draws, over the top of the bars it is
+            // judging — the one thing on here that is a setting rather than a
+            // measurement, so it is drawn as one.
+            const ty = y(thresholdDb);
+            c.strokeStyle = cssVar('--text', '#e6ecf5');
+            c.lineWidth = Math.max(1, dpr);
+            c.setLineDash([4 * dpr, 3 * dpr]);
+            c.beginPath();
+            c.moveTo(0, ty);
+            c.lineTo(w, ty);
+            c.stroke();
+            c.setLineDash([]);
+        };
+        draw();
+        const t = setInterval(draw, 100);
+        return () => clearInterval(t);
+    }, [player, thresholdDb]);
+
+    return (
+        <div className="nb-scope">
+            <canvas ref={ref} style={{ height: SCOPE_H }} />
+            <span className="nb-scope__label">
+                peak over reference · {(TRACE_LEN * TRACE_MS) / 1000} s
+            </span>
+        </div>
+    );
+}
 
 // `minimal` keeps every switch — blanker, client NR, and the server insert
 // with its filter chips — and drops the sliders and the notes. Which stages
 // are working is what you change while listening; how hard they work is set
 // once against a band and left.
+// rmnoise.com: the account, the model, and whether it is actually connected.
+//
+// This is the only noise reducer here that can fail for reasons which have
+// nothing to do with radio — a password, somebody else's uptime, a network
+// path — so unlike the local engines it has to be able to say so. The bridge
+// (lib/rmnoise.js) owns the connection and outlives this component; a
+// collapsed panel must not drop a session that took a login to make.
+//
+// The password is kept in this browser's storage, in the same place v1 keeps
+// it, so moving between the two interfaces does not mean typing it again. That
+// is a real convenience and a real exposure, and the note under the fields
+// says so rather than leaving somebody to assume otherwise.
+function RmNoiseControls({ minimal }) {
+    const { tuning, actions } = useRadio();
+    const rm = getRmNoise();
+    const saved = rmCredentials();
+    const [, bump] = useState(0);
+    const [username, setUsername] = useState(saved.username);
+    // Deliberately empty even when one is stored. A stored password painted
+    // into the field is a password on screen for no reason: nothing here needs
+    // to read it, the browser offers to fill over it — which on iOS arrives as
+    // a generated string and reads as the saved one having been corrupted —
+    // and leaving the box blank means "keep the one that already works".
+    const [password, setPassword] = useState('');
+
+    useEffect(() => rm.on('change', () => bump((n) => n + 1)), [rm]);
+
+    // The connection *state* arrives as events; the two numbers do not. Latency
+    // is written for every frame that comes back — twenty a second — and the
+    // buffered figure changes on every audio callback, so neither can raise an
+    // event without turning this panel into a render loop. They are polled at
+    // reading speed instead, which is what the blanker's readouts do and for
+    // the same reason. Without this the numbers were live but never redrawn:
+    // whatever they happened to be at the last connection event, frozen.
+    useEffect(() => {
+        if (!rm.ready) return undefined;
+        const t = setInterval(() => bump((n) => n + 1), 500);
+        return () => clearInterval(t);
+    }, [rm, rm.ready]);
+
+    const supported = rmModeSupported(tuning.mode);
+
+    // Switching it off on an unsupported mode is RadioContext's job, because
+    // this panel is not always mounted to do it. What is left here is saying
+    // so, which only makes sense where somebody is looking.
+    useEffect(() => {
+        if (!supported && (rm.ready || rm.connecting)) {
+            rm.disconnect();      // not manual: the mode may come back
+        }
+    }, [supported]);
+
+    // Choosing this engine is the whole instruction, wherever it was chosen —
+    // this panel, or the Multipad's dropdown, which has no room to ask for a
+    // password. A login is only ever stored once it has worked, so if there is
+    // one there is nothing else to say: connect. Without one, the fields below
+    // are the next thing on screen.
+    //
+    // Once, and only once. Three separate things have to stop it trying again,
+    // and each of them was a way of hammering a rate-limited endpoint:
+    //
+    //   * `tried` — a single attempt per time this engine is selected. The
+    //     effect's own dependencies change as the attempt progresses, and
+    //     without this the failure of one attempt is the trigger for the next.
+    //   * `rm.stopped` — the operator pressed Disconnect. That means stay
+    //     disconnected, not "until the next render".
+    //   * `rm.authFailed` — rmnoise.com said no. The same password will be
+    //     refused again, and saying so twenty times is how an IP gets blocked.
+    //     Only pressing Connect clears it, because only that comes with the
+    //     operator having looked at what they typed.
+    const tried = useRef(false);
+    useEffect(() => {
+        if (!supported || rm.ready || rm.connecting) return;
+        if (tried.current || rm.stopped || rm.authFailed) return;
+        if (!saved.username || !saved.password) return;
+        tried.current = true;
+        rm.connect({ mode: tuning.mode }).catch(() => { /* the bridge keeps the message */ });
+    }, [supported, rm.ready, rm.connecting, saved.username, saved.password]);
+
+    const status = rm.ready ? 'connected'
+        : rm.connecting ? 'connecting…'
+            : rm.error ? 'failed'
+                : 'not connected';
+
+    // Saved *after* it works, never before. A password that has not been
+    // accepted is not a setting: storing it would put a wrong one into the
+    // credentials that follow the operator to every other receiver, and would
+    // arm the automatic connect above with something already known to fail.
+    const connect = async () => {
+        tried.current = true;
+        // Blank means the stored one, which is the only one that has ever been
+        // accepted; typing replaces it.
+        const pass = password || saved.password;
+        try {
+            await rm.connect({ username, password: pass, mode: tuning.mode });
+            saveRmCredentials({ username, password: pass });
+        } catch (e) { /* the bridge keeps the message; the panel reads it */ }
+    };
+
+    return (
+        <>
+            {/* Round trip, then how much denoised audio is in hand — the
+                reserve standing between the network and a gap. Not the jitter
+                buffer, which process() empties on every call and so reads zero
+                whatever is happening. */}
+            <Field
+                label="Status"
+                hint={rm.ready ? `${Math.round(rm.latencyMs)} ms · ${rm.bufferMs} ms buffered` : undefined}
+                inline
+            >
+                <span className={`badge badge--${rm.ready ? 'open' : rm.connecting ? 'idle' : rm.error ? 'closed' : 'idle'}`}>
+                    {status.toUpperCase()}
+                </span>
+            </Field>
+
+            {rm.error && (
+                <div className="note note--warn note--tight">
+                    {rm.authFailed
+                        ? `${rm.error} Check the username and password below and press Connect — nothing is tried again on its own.`
+                        : rm.error}
+                </div>
+            )}
+
+            {/* What it last did, in its own words — which model it chose and
+                why it changed. A service that picks a model on the operator's
+                behalf has to be able to say which one it picked; without this
+                the only way to tell a wrong choice from a choice that never
+                happened was to ask somebody to describe the dropdown. */}
+            {rm.lines.length > 0 && (
+                <div className="param-help">{rm.lines[rm.lines.length - 1].message}</div>
+            )}
+
+            {rm.ready && rm.availableFilters.length > 0 && (
+                <Field label="Model">
+                    <select
+                        className="select"
+                        value={rm.filterNumber}
+                        onChange={(e) => rm.setFilter(e.target.value)}
+                    >
+                        {rm.availableFilters.map((f) => {
+                            const family = rmFamilyOfModel(f.filterDesc);
+                            return (
+                                <option key={f.filterNumber} value={f.filterNumber}>
+                                    {f.filterDesc || `Filter ${f.filterNumber}`}
+                                    {family ? ` · ${family.toUpperCase()}` : ''}
+                                </option>
+                            );
+                        })}
+                    </select>
+                </Field>
+            )}
+
+            {!minimal && !rm.ready && (
+                <>
+                    {/* AutoFill is switched off on both, and the fields are
+                        not named as a login. They are an account with
+                        rmnoise.com, not with this receiver, and a browser
+                        offering the keychain's entry for *this* origin fills
+                        them with something that has nothing to do with the
+                        service — on iOS that arrives as a generated password
+                        and reads as the stored one having been corrupted. What
+                        was typed here is remembered by this panel anyway, and
+                        only once it has been accepted. */}
+                    <Field label="Username">
+                        <input
+                            className="input"
+                            name="rmnoise-account"
+                            value={username}
+                            autoComplete="off"
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            onChange={(e) => setUsername(e.target.value)}
+                        />
+                    </Field>
+                    <Field label="Password">
+                        <input
+                            className="input"
+                            name="rmnoise-secret"
+                            type="password"
+                            placeholder={saved.password ? 'stored — leave blank to keep' : ''}
+                            value={password}
+                            autoComplete="off"
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            onChange={(e) => setPassword(e.target.value)}
+                        />
+                    </Field>
+                    <div className="note note--tight">
+                        An <a href={RM_REGISTER_URL} target="_blank" rel="noopener noreferrer">rmnoise.com account</a> is
+                        needed. The audio goes to their servers and comes back denoised, and the
+                        password is kept in this browser — shared with the classic interface, so it
+                        is only typed once.
+                    </div>
+                </>
+            )}
+
+            <div className="chip-row chip-row--wrap">
+                {rm.ready || rm.connecting ? (
+                    <Button size="sm" variant="ghost" onClick={() => rm.disconnect({ manual: true })}>
+                        Disconnect
+                    </Button>
+                ) : (
+                    <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={!username || !(password || saved.password)}
+                        onClick={connect}
+                    >
+                        Connect
+                    </Button>
+                )}
+            </div>
+        </>
+    );
+}
+
 export default function NoisePanel({ minimal }) {
-    const { noise, dsp, player, actions } = useRadio();
+    const { noise, dsp, player, tuning, actions } = useRadio();
     const { nb, nr } = noise;
     const setNb = (patch) => actions.setNoise({ nb: patch });
     const setNr = (patch) => actions.setNoise({ nr: patch });
@@ -41,11 +355,15 @@ export default function NoisePanel({ minimal }) {
     // the blanker working, a count racing during clean speech means the
     // threshold is low and it is eating syllables. It restarts from zero when
     // the blanker is toggled, because the DSP is rebuilt then.
-    const [nbStats, setNbStats] = useState({ n: 0, cut: 0 });
+    const [nbStats, setNbStats] = useState({ n: 0, cut: 0, db: 0 });
     useEffect(() => {
-        if (!nb.enabled) { setNbStats({ n: 0, cut: 0 }); return undefined; }
+        if (!nb.enabled) { setNbStats({ n: 0, cut: 0, db: 0 }); return undefined; }
         const t = setInterval(
-            () => setNbStats({ n: player.nbPulses(), cut: player.nbCut() }),
+            () => setNbStats({
+                n: player.nbPulses(),
+                cut: player.nbCut(),
+                db: player.nbReductionDb(),
+            }),
             500,
         );
         return () => clearInterval(t);
@@ -60,15 +378,22 @@ export default function NoisePanel({ minimal }) {
         <div className="stack">
             <div className="section-label"><span>In this client</span></div>
 
-            {/* Pulses caught, then the share of the audio actually being
-                removed — "412 · 1.3%". The second number is the one that
-                settles "is this doing anything": a count can climb on the odd
-                spike while the cut rounds to nothing, which is what a
-                mis-set threshold looks like. */}
+            {/* A box each, because they are two independent machines that
+                happen to live in one panel: either can be on without the
+                other, they do different things to the audio, and read as one
+                list of switches and sliders they were a wall somebody had to
+                work out the grouping of. The border is the grouping. */}
+            <div className="noise-stage">
+            {/* Pulses caught, the share of the audio being removed and what
+                that costs in level — "412 · 1.3% · -0.4 dB". It lives in the
+                hint rather than under the chart because a line that appears
+                and disappears as the numbers cross a threshold is a flicker in
+                the corner of the eye; a hint that is always there is a
+                reading. */}
             <Field
                 label="Noise blanker"
                 hint={nb.enabled
-                    ? `${nbStats.n} · ${(nbStats.cut * 100).toFixed(1)}%`
+                    ? `${nbStats.n} · ${(nbStats.cut * 100).toFixed(1)}% · ${nbStats.db.toFixed(1)} dB`
                     : 'off'}
                 inline
             >
@@ -89,6 +414,9 @@ export default function NoisePanel({ minimal }) {
                             onChange={(v) => setNb({ thresholdDb: v })}
                         />
                     </Field>
+                    {/* The shortest blank. Runs of samples over the
+                        threshold extend it themselves, so this is a floor
+                        rather than the length of every cut. */}
                     <Field label="Width" hint={`${nb.widthMs} ms`}>
                         <Slider
                             value={nb.widthMs}
@@ -98,15 +426,12 @@ export default function NoisePanel({ minimal }) {
                             onChange={(v) => setNb({ widthMs: v })}
                         />
                     </Field>
-                    <div className="note note--tight">
-                        Cuts short clicks out of the audio before they reach anything
-                        else — lower the threshold until the crackle goes, raise it if
-                        speech starts dropping out. Works alongside any noise
-                        reduction, here or on the receiver.
-                    </div>
+                    <NbScope thresholdDb={nb.thresholdDb} />
                 </>
             )}
+            </div>
 
+            <div className="noise-stage">
             <Field label="NR" hint={nr.enabled ? 'on' : 'off'} inline>
                 <Switch
                     checked={nr.enabled}
@@ -120,7 +445,7 @@ export default function NoisePanel({ minimal }) {
             {nr.enabled && (
                 <Segmented
                     size="sm"
-                    value={nr.type === 'nr2' ? 'nr2' : 'lsa'}
+                    value={['nr2', 'rmn'].includes(nr.type) ? nr.type : 'lsa'}
                     onChange={(v) => setNr({ type: v })}
                     options={[
                         {
@@ -129,14 +454,37 @@ export default function NoisePanel({ minimal }) {
                             title: 'MMSE-LSA over tracked minima — no learning phase, best on voice',
                         },
                         {
+                            // Labelled NR, stored as 'nr2'. The label is what an
+                            // operator reads and there is no NR1 to tell it from;
+                            // the value is what saved settings already say, and
+                            // renaming that would silently move everybody to the
+                            // default engine.
                             value: 'nr2',
-                            label: 'NR2',
+                            label: 'NR',
                             title: 'Classic spectral subtraction, long window — v1\u2019s engine, suits narrowband',
+                        },
+                        {
+                            value: 'rmn',
+                            label: 'RMN',
+                            title: 'rmnoise.com — an AI denoiser over the network. Needs an account, and only works on SSB and CW',
                         },
                     ]}
                 />
             )}
-            {!minimal && nr.enabled && (
+            {/* Outside the `enabled` test on purpose: this is what explains an
+                engine that has just switched *itself* off, so it has to be
+                visible at exactly the moment its controls are not. */}
+            {nr.type === 'rmn' && !rmModeSupported(tuning.mode) && (
+                <div className="note note--warn note--tight">
+                    RM Noise only works on SSB and CW — the model is trained on voice
+                    bandwidth, and on {String(tuning.mode).toUpperCase()} what comes back is
+                    not worth hearing. Switch back to USB, LSB or CW to use it again.
+                </div>
+            )}
+
+            {nr.enabled && nr.type === 'rmn' && <RmNoiseControls minimal={minimal} />}
+
+            {!minimal && nr.enabled && nr.type !== 'rmn' && (
                 <>
                     <Field label="Strength" hint={`${nr.strength}%`}>
                         <Slider
@@ -196,11 +544,14 @@ export default function NoisePanel({ minimal }) {
                 </>
             )}
 
+            </div>
+
             {!serverAbsent && (
                 <>
-                    <div className="divider" />
                     <div className="section-label"><span>On the receiver</span></div>
-                    <DspControl minimal={minimal} />
+                    <div className="noise-stage">
+                        <DspControl minimal={minimal} />
+                    </div>
                 </>
             )}
         </div>

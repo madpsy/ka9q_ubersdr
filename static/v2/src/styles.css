@@ -2152,6 +2152,37 @@ a.btn { text-decoration: none; }
 .squelch-row .slider { flex: 1; min-width: 0; }
 .squelch-row .chip { flex: none; margin-left: 0; }
 
+/* One stage of the Noise panel — the blanker, the client NR, the receiver's
+   own inserts. Boxed rather than separated by rules: the stages each have a
+   switch and a handful of sliders, and a flat list of those reads as one long
+   form whose grouping has to be worked out from the labels. */
+.noise-stage {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 8px 9px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    min-width: 0;
+}
+/* The stack's own gap already spaces the boxes; the first control inside one
+   must not add the stack's top padding on top of the box's. */
+.noise-stage > .stack { padding-top: 0; }
+
+/* The noise blanker's scope — see NbScope. Sized like the Signal panel's
+   sparklines, and captioned the same way. */
+.nb-scope { position: relative; }
+.nb-scope canvas { width: 100%; display: block; }
+.nb-scope__label {
+    position: absolute;
+    top: 0;
+    right: 0;
+    font-size: calc(9px * var(--ui-scale));
+    color: var(--text-faint);
+    pointer-events: none;
+}
+
 .squelch-status { display: flex; align-items: center; gap: 6px; }
 .squelch-status__snr {
     flex: 1;

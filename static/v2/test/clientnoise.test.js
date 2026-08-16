@@ -368,29 +368,38 @@ t('audio returning after silence is not blanked wholesale', () => {
 });
 
 t('the threshold means what it says', () => {
-    const nb = new NoiseBlanker(FS);
-    nb.enabled = true;
-    nb.setParameters({ thresholdDb: NB_THRESHOLD_MAX });
+    // Stated against the band's own average, which is what the number is dB
+    // over — a peak fixed in absolute terms would only test whichever scale
+    // happened to be in force when it was written.
     const input = bandAudio(1, FS, 23);
-    // ~12 dB over the band average — loud speech peak, not an impulse.
-    input[9000] = Math.abs(input[9000]) + 0.25;
-    blank(nb, input);
-    assert.strictEqual(nb.pulsesBlanked, 0, 'a peak under threshold must pass');
-    // Same peak, threshold at the floor: now it is over.
-    const nb2 = new NoiseBlanker(FS);
-    nb2.enabled = true;
-    nb2.setParameters({ thresholdDb: NB_THRESHOLD_MIN });
-    blank(nb2, input);
-    assert.ok(nb2.pulsesBlanked >= 1, 'over threshold must trigger');
+    let mean = 0;
+    for (const v of input) mean += Math.abs(v);
+    mean /= input.length;
+    const peak = mean * Math.pow(10, 15 / 20);       // 15 dB over the average
+    input[9000] = peak;
+
+    const high = new NoiseBlanker(FS);
+    high.enabled = true;
+    high.setParameters({ thresholdDb: NB_THRESHOLD_MAX });   // 20 dB
+    blank(high, input);
+    assert.strictEqual(high.pulsesBlanked, 0, 'a peak under threshold must pass');
+
+    const low = new NoiseBlanker(FS);
+    low.enabled = true;
+    low.setParameters({ thresholdDb: NB_THRESHOLD_MIN });    // 10 dB
+    blank(low, input);
+    assert.ok(low.pulsesBlanked >= 1, 'over threshold must trigger');
 });
 
-t('the shipped threshold catches ordinary QRN, and says how much it cut', () => {
-    // The regression this is here for: it shipped at 15 dB, where clicks a
-    // plain 20 dB over the floor never triggered at all — the counter crept
-    // up on the rare spike and the audio was untouched. Defaults, nothing
-    // adjusted, clicks at a height any operator would call crackle.
+t('a keen threshold catches ordinary QRN, and says how much it cut', () => {
+    // The regression this is here for: the threshold scale was once set where
+    // clicks a plain 20 dB over the floor never triggered at all — the counter
+    // crept up on the rare spike and the audio was untouched. Stated at 13 dB
+    // rather than at the default, which sits deliberately at the quiet end of
+    // the range and is a matter of taste rather than of arithmetic.
     const nb = new NoiseBlanker(FS);
     nb.enabled = true;
+    nb.setParameters({ thresholdDb: 13 });
     const input = bandAudio(4, FS, 51);
     let mean = 0;
     for (const v of input) mean += Math.abs(v);
@@ -410,6 +419,86 @@ t('the shipped threshold catches ordinary QRN, and says how much it cut', () => 
         `only ${caught}/${at.length} clicks blanked at the shipped threshold`);
     // ...and the readout says so rather than leaving "is it working" to the ear.
     assert.ok(nb.cutFraction > 0.005, `cut fraction reads ${(100 * nb.cutFraction).toFixed(2)}%`);
+});
+
+t('a blank is a one-shot, so speech is never held shut', () => {
+    // The regression that matters most here, and the reason this file was
+    // rewritten: a release that held the cut until a short envelope fell back
+    // near the average removed more of each crash and made speech unlistenable
+    // — one trigger on a syllable held the audio shut for the rest of the
+    // word. A blank is a fixed length; runs of samples over the threshold
+    // extend it, but nothing holds it open.
+    const nb = new NoiseBlanker(FS);
+    nb.enabled = true;
+    const input = bandAudio(6, FS, 11);
+    for (let i = 0; i < input.length; i++) {
+        const env = Math.max(0, Math.sin((2 * Math.PI * 3 * i) / FS)) ** 3;
+        input[i] += 0.35 * env * Math.sin((2 * Math.PI * 500 * i) / FS)
+            * (0.6 + 0.4 * Math.sin((2 * Math.PI * 70 * i) / FS));
+    }
+    const out = blank(nb, input);
+    const d = nb._delay;
+    let run = 0;
+    let longest = 0;
+    for (let i = 0; i < input.length - d; i++) {
+        const a = Math.abs(input[i]);
+        if (a > 1e-4 && Math.abs(out[i + d]) < 0.3 * a) {
+            run++;
+            if (run > longest) longest = run;
+        } else {
+            run = 0;
+        }
+    }
+    const ms = (1000 * longest) / FS;
+    // Several blanks in a row over one syllable is fine; a tenth of a second
+    // of held silence is the expander coming back.
+    assert.ok(ms < 25, `speech was held shut for ${ms.toFixed(0)} ms at a time`);
+});
+
+t('a static crash is cut, and harder as the threshold comes down', () => {
+    // The crash shape is measured, not invented: 74 s of 10.125 MHz USB off a
+    // receiver with crashes every few seconds. Averaged over the twenty
+    // biggest, the envelope peaks about 20 dB over the band and decays through
+    // +12 dB at 2 ms, +8 dB at 6 ms and +4 dB at 10 ms. On that recording the
+    // shipped 15 dB takes 13 dB out of the crash blocks for 0.3 dB of
+    // everything else, and 12 dB takes 21 dB for 1.2 dB — which is the trade
+    // the threshold slider is.
+    const crashes = (thresholdDb) => {
+        const nb = new NoiseBlanker(FS);
+        nb.enabled = true;
+        nb.setParameters({ thresholdDb });
+        const input = bandAudio(4, FS, 81);
+        let mean = 0;
+        for (const v of input) mean += Math.abs(v);
+        mean /= input.length;
+        const rnd = prng(83);
+        const at = [];
+        const body = Math.round(0.02 * FS);
+        for (let t = 0.6 * FS; t < input.length - body; t += FS / 3) {
+            const k = Math.round(t);
+            at.push(k);
+            for (let j = 0; j < body; j++) {
+                const over = 20 - 1.2 * ((1000 * j) / FS);
+                if (over <= 0) break;
+                input[k + j] += mean * Math.pow(10, over / 20) * (0.5 + rnd());
+            }
+        }
+        const out = blank(nb, input);
+        const d = nb._delay;
+        let inE = 0;
+        let outE = 0;
+        for (const k of at) {
+            for (let j = 0; j < body; j++) { inE += input[k + j] ** 2; outE += out[k + j + d] ** 2; }
+        }
+        return -10 * Math.log10(outE / inE);
+    };
+    const keen = crashes(13);
+    assert.ok(keen > 3, `only ${keen.toFixed(1)} dB taken out at 13 dB`);
+    assert.ok(crashes(NB_THRESHOLD_MIN + 2) > keen + 2, 'a lower threshold must cut deeper');
+    // ...and the shipped default, wherever taste has put it, must still be
+    // inside the range its own sliders offer.
+    assert.ok(NB_DEFAULTS.thresholdDb >= NB_THRESHOLD_MIN
+        && NB_DEFAULTS.thresholdDb <= NB_THRESHOLD_MAX, 'the default threshold is off its slider');
 });
 
 t('the cut readout is ~0 when nothing is being caught', () => {

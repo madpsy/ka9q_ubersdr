@@ -574,8 +574,9 @@ function NoiseSelect() {
     if (!running) return null;
     const server = dsp.schemas && dsp.schemas.length > 0 ? dsp.schemas : [];
 
+    const clientType = ['nr2', 'rmn'].includes(noise.nr.type) ? noise.nr.type : 'lsa';
     const value = noise.nr.enabled
-        ? `client:${noise.nr.type === 'nr2' ? 'nr2' : 'lsa'}`
+        ? `client:${clientType}`
         : dsp.enabled && dsp.filter ? dsp.filter : 'off';
 
     const choose = (v) => {
@@ -603,7 +604,13 @@ function NoiseSelect() {
             <option value="off">NR Off</option>
             <optgroup label="This client">
                 <option value="client:lsa" title="MMSE-LSA over tracked minima — best on voice">LSA</option>
-                <option value="client:nr2" title="Classic spectral subtraction, long window">NR2</option>
+                <option value="client:nr2" title="Classic spectral subtraction, long window">NR</option>
+                {/* Picking it here is enough to start it, provided the login
+                    has been given once in the Noise panel — see RmNoiseControls.
+                    A dropdown on a thumb-sized pad is no place for a password,
+                    but it is a perfectly good place to switch between engines
+                    that are already set up. */}
+                <option value="client:rmn" title="rmnoise.com — an AI denoiser over the network, SSB and CW only">RMN</option>
             </optgroup>
             {server.length > 0 && (
                 <optgroup label="On the receiver">

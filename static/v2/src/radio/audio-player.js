@@ -7,6 +7,7 @@
 
 import { applyParams, buildChain, frameLevelDb, gateOpen, nextMakeupDb, shapeKey } from './audio-filters.js';
 import { NRProcessor } from '../lib/nr.js';
+import { NR2Processor } from '../lib/nr2.js';
 import { NoiseBlanker } from '../lib/noiseBlanker.js';
 import { Emitter } from './emitter.js';
 
@@ -78,6 +79,7 @@ export class AudioPlayer extends Emitter {
         this.nb = null;             // [left, right] NoiseBlanker instances
         this.nbNode = null;         // their ScriptProcessor
         this.nr = null;             // [left, right] NR instances
+        this.nrType = '';           // which engine the instances are
         this.nrNode = null;
         this.nrMakeup = null;       // plain gain after NR
         this.gateTimer = null;
@@ -564,7 +566,9 @@ export class AudioPlayer extends Emitter {
     //
     // ScriptProcessorNode on purpose, not AudioWorklet: the worklet needs a
     // secure context, and this interface is routinely served plain over a LAN.
-    // v1 made the same choice for the same reason, at the same buffer sizes.
+    // v1 made the same choice for the same reason. The NR buffer is 1024 where
+    // v1 used 2048 — both engines hop in 256 or 512 samples, so the larger
+    // buffer bought nothing but 85 ms of extra latency.
     // The nodes exist only while their stage is on — a bypassed
     // ScriptProcessor still costs a JS callback per buffer, so off is absent.
 
@@ -572,6 +576,17 @@ export class AudioPlayer extends Emitter {
     setNoise(spec) {
         this.noiseSpec = spec;
         if (this.ctx && this.filterHead) this._applyNoise();
+    }
+
+    /**
+     * Impulses the blanker has cut since it was switched on — 0 while it is
+     * off, and it restarts from 0 when toggled, because the instances are
+     * rebuilt then. The max of the two channels: on the usual mono-duplicated
+     * stream they agree, and on IQ either channel's pulse was a real pulse.
+     */
+    nbPulses() {
+        if (!this.nb) return 0;
+        return Math.max(this.nb[0].pulsesBlanked, this.nb[1].pulsesBlanked);
     }
 
     /** The NR noise profile is per-frequency; the radio calls this on retune. */
@@ -583,11 +598,13 @@ export class AudioPlayer extends Emitter {
         const spec = this.noiseSpec || {};
         const nbOn = !!(spec.nb && spec.nb.enabled);
         const nrOn = !!(spec.nr && spec.nr.enabled);
+        const nrType = spec.nr && spec.nr.type === 'nr2' ? 'nr2' : 'lsa';
 
-        // Same stages in the graph: retune the instances in place. Sliders
+        // Same stages, same engine: retune the instances in place. Sliders
         // move often, and rebuilding a ScriptProcessor per move would tear
         // the audio the way rebuilding biquads used to (see setFilters).
-        if (!!this.nbNode === nbOn && !!this.nrNode === nrOn) {
+        if (!!this.nbNode === nbOn && !!this.nrNode === nrOn
+            && (!nrOn || this.nrType === nrType)) {
             this._tuneNoise(spec);
             return;
         }
@@ -625,9 +642,12 @@ export class AudioPlayer extends Emitter {
         }
 
         if (nrOn) {
-            const nrs = [new NRProcessor(2048, 4), new NRProcessor(2048, 4)];
+            const nrs = nrType === 'nr2'
+                ? [new NR2Processor(2048, 4), new NR2Processor(2048, 4)]
+                : [new NRProcessor(this.ctx.sampleRate), new NRProcessor(this.ctx.sampleRate)];
             for (const r of nrs) r.enabled = true;
-            const proc = this.ctx.createScriptProcessor(2048, 2, 2);
+            this.nrType = nrType;
+            const proc = this.ctx.createScriptProcessor(1024, 2, 2);
             proc.onaudioprocess = (e) => {
                 for (let ch = 0; ch < 2; ch++) {
                     nrs[ch].process(e.inputBuffer.getChannelData(ch), e.outputBuffer.getChannelData(ch));
@@ -653,7 +673,10 @@ export class AudioPlayer extends Emitter {
             }
         }
         if (this.nr && spec.nr) {
-            for (const r of this.nr) r.setParameters(spec.nr.strength, spec.nr.floor, spec.nr.adaptRate);
+            for (const r of this.nr) {
+                if (this.nrType === 'nr2') r.setParameters(spec.nr.strength, spec.nr.floor, spec.nr.adaptRate);
+                else r.setParameters(spec.nr.strength);
+            }
         }
         if (this.nrMakeup && spec.nr) {
             this.nrMakeup.gain.value = Math.pow(10, (Number(spec.nr.makeupDb) || 0) / 20);

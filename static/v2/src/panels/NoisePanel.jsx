@@ -20,7 +20,7 @@
 
 import React from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Field, Slider, Switch } from '../components/ui.jsx';
+import { Field, Segmented, Slider, Switch } from '../components/ui.jsx';
 import DspControl from './DspControl.jsx';
 import {
     NB_THRESHOLD_MAX, NB_THRESHOLD_MIN, NB_WIDTH_MAX, NB_WIDTH_MIN,
@@ -85,9 +85,31 @@ export default function NoisePanel({ minimal }) {
                 <Switch
                     checked={nr.enabled}
                     onChange={(on) => setNr({ enabled: on })}
-                    title="Spectral subtraction against steady band noise"
+                    title="Reduce steady band noise under the audio"
                 />
             </Field>
+            {/* The engine picker stays in the minimal view, as the server
+                section's filter chips do: which engine is a real mid-session
+                change, its sliders are not. */}
+            {nr.enabled && (
+                <Segmented
+                    size="sm"
+                    value={nr.type === 'nr2' ? 'nr2' : 'lsa'}
+                    onChange={(v) => setNr({ type: v })}
+                    options={[
+                        {
+                            value: 'lsa',
+                            label: 'LSA',
+                            title: 'MMSE-LSA over tracked minima — no learning phase, best on voice',
+                        },
+                        {
+                            value: 'nr2',
+                            label: 'NR2',
+                            title: 'Classic spectral subtraction, long window — v1\u2019s engine, suits narrowband',
+                        },
+                    ]}
+                />
+            )}
             {!minimal && nr.enabled && (
                 <>
                     <Field label="Strength" hint={`${nr.strength}%`}>
@@ -99,24 +121,31 @@ export default function NoisePanel({ minimal }) {
                             onChange={(v) => setNr({ strength: v })}
                         />
                     </Field>
-                    <Field label="Spectral floor" hint={`${nr.floor}%`}>
-                        <Slider
-                            value={nr.floor}
-                            min={0}
-                            max={10}
-                            step={0.5}
-                            onChange={(v) => setNr({ floor: v })}
-                        />
-                    </Field>
-                    <Field label="Adaptation" hint={`${Number(nr.adaptRate).toFixed(1)}%`}>
-                        <Slider
-                            value={nr.adaptRate}
-                            min={0.1}
-                            max={5}
-                            step={0.1}
-                            onChange={(v) => setNr({ adaptRate: v })}
-                        />
-                    </Field>
+                    {/* NR2's own knobs; the LSA engine has no equivalents on
+                        purpose — its estimator constants interact, and every
+                        published implementation ships them fixed. */}
+                    {nr.type === 'nr2' && (
+                        <>
+                            <Field label="Spectral floor" hint={`${nr.floor}%`}>
+                                <Slider
+                                    value={nr.floor}
+                                    min={0}
+                                    max={10}
+                                    step={0.5}
+                                    onChange={(v) => setNr({ floor: v })}
+                                />
+                            </Field>
+                            <Field label="Adaptation" hint={`${Number(nr.adaptRate).toFixed(1)}%`}>
+                                <Slider
+                                    value={nr.adaptRate}
+                                    min={0.1}
+                                    max={5}
+                                    step={0.1}
+                                    onChange={(v) => setNr({ adaptRate: v })}
+                                />
+                            </Field>
+                        </>
+                    )}
                     <Field
                         label="Makeup gain"
                         hint={`${nr.makeupDb >= 0 ? '+' : ''}${nr.makeupDb} dB`}
@@ -130,9 +159,13 @@ export default function NoisePanel({ minimal }) {
                         />
                     </Field>
                     <div className="note note--tight">
-                        Learns the noise floor for half a second, then subtracts it —
-                        the profile re-learns on every retune. Raise the floor if the
-                        residue turns watery.
+                        {nr.type === 'nr2'
+                            ? 'Learns the noise floor for half a second, then subtracts it — '
+                              + 'the profile re-learns on every retune. Raise the floor if the '
+                              + 'residue turns watery.'
+                            : 'Tracks the noise floor continuously — nothing to learn and '
+                              + 'nothing to reset. Strength sets how deep the cut goes. A '
+                              + 'steady, unmodulated carrier reads as noise and fades too.'}
                     </div>
                 </>
             )}

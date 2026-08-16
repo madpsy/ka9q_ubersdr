@@ -338,26 +338,67 @@ function NoiseReductionTag() {
 // tooltips say "in this client" because the tag next door can read "NR2" for
 // the server's filter — two NR tags with nothing saying which machine each
 // lives on would be a row that needs the manual.
+//
+// The blanker's tag also carries its pulse count and blinks red as pulses are
+// cut, which is the whole feedback loop for setting its threshold: turn it
+// down until the tag starts answering the crackle you can hear, and if it is
+// flashing on every syllable it is eating speech. Polled from the player at a
+// few hertz rather than evented per pulse — a storm can run at hundreds of
+// pulses a second, and a React render per pulse would be the storm twice.
+function NbTag() {
+    const { noise, player, actions } = useRadio();
+    const on = noise.nb.enabled;
+    const [count, setCount] = useState(0);
+    const [hot, setHot] = useState(false);
+    const seen = useRef(0);
+    const cool = useRef(0);
+
+    useEffect(() => {
+        if (!on) { seen.current = 0; setCount(0); setHot(false); return undefined; }
+        const t = setInterval(() => {
+            const n = player.nbPulses();
+            if (n === seen.current) return;
+            // Backwards means the stage was rebuilt (re-toggled, new context)
+            // and the instances are fresh — follow it down without flashing.
+            if (n > seen.current) {
+                setHot(true);
+                clearTimeout(cool.current);
+                cool.current = setTimeout(() => setHot(false), 400);
+            }
+            seen.current = n;
+            setCount(n);
+        }, 200);
+        return () => { clearInterval(t); clearTimeout(cool.current); };
+    }, [on, player]);
+
+    if (!on) return null;
+    return (
+        <button
+            type="button"
+            className={`tag tag--button ${hot ? 'tag--bad' : 'tag--accent'}`}
+            title={`Noise blanker running in this client — ${count} pulse${count === 1 ? '' : 's'} cut. Click to switch it off`}
+            onClick={() => actions.setNoise({ nb: { enabled: false } })}
+        >
+            {count ? `NB ${count}` : 'NB'}
+        </button>
+    );
+}
+
 function ClientNoiseTags() {
     const { noise, actions } = useRadio();
-    const on = [
-        noise.nb.enabled && ['NB', 'nb', 'Noise blanker running in this client'],
-        noise.nr.enabled && ['NR', 'nr', 'Noise reduction running in this client'],
-    ].filter(Boolean);
-    if (!on.length) return null;
     return (
         <>
-            {on.map(([name, key, what]) => (
+            <NbTag />
+            {noise.nr.enabled && (
                 <button
-                    key={name}
                     type="button"
                     className="tag tag--button tag--accent"
-                    title={`${what} — click to switch it off`}
-                    onClick={() => actions.setNoise({ [key]: { enabled: false } })}
+                    title="Noise reduction running in this client — click to switch it off"
+                    onClick={() => actions.setNoise({ nr: { enabled: false } })}
                 >
-                    {name}
+                    NR
                 </button>
-            ))}
+            )}
         </>
     );
 }

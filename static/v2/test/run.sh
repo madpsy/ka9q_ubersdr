@@ -312,6 +312,8 @@ esbuild ../src/lib/timeConstant.js --bundle --format=cjs --platform=node \
     --outfile=.build/timeconstant.cjs --log-level=warning
 esbuild ../src/lib/nr.js --bundle --format=cjs --platform=node \
     --outfile=.build/nr.cjs --log-level=warning
+esbuild ../src/lib/nr2.js --bundle --format=cjs --platform=node \
+    --outfile=.build/nr2.cjs --log-level=warning
 esbuild ../src/lib/noiseBlanker.js --bundle --format=cjs --platform=node \
     --outfile=.build/noiseblanker.cjs --log-level=warning
 esbuild ../src/lib/waterfallRing.js --bundle --format=cjs --platform=node \

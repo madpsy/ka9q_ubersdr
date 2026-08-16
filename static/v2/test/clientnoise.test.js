@@ -1,13 +1,11 @@
-// The client noise stage: NR parity with v1, and the blanker's behaviour.
+// The client noise stage: the LSA engine's contract, NR2's parity with v1,
+// and the blanker's behaviour.
 //
-// NR is a copy of v1's nr2.js by construction, so the test is the strong kind:
-// it loads *v1's own file* and requires the two to produce identical output,
-// sample for sample, learning phase included. If someone "improves" the copy,
-// this is what says the two frontends no longer sound the same.
-//
-// The blanker is new (v1's is not ported — see lib/noiseBlanker.js for why),
-// so it is tested on its contract: impulses are removed leading edge included,
-// clean audio passes, silence recovery does not blank the first syllable.
+// Three different kinds of test because the three files make three different
+// promises. lib/nr2.js *is* v1's nr2.js, so it is held to sample-for-sample
+// identity with v1's own file, learning phase included. lib/nr.js (LSA) and
+// lib/noiseBlanker.js are new, so they are held to their contracts instead:
+// noise goes down, signal survives, silence and retunes do not confuse them.
 
 const assert = require('assert');
 const path = require('path');
@@ -15,9 +13,10 @@ const path = require('path');
 // v1's classes, loaded as v1 arranges them: fft.js defines the FFT global that
 // nr2.js reaches for.
 global.FFT = require(path.join(__dirname, '..', '..', 'fft.js'));
-const NR2Processor = require(path.join(__dirname, '..', '..', 'nr2.js'));
+const V1NR2 = require(path.join(__dirname, '..', '..', 'nr2.js'));
 
-const { NRProcessor: NR } = require('./.build/nr.cjs');
+const { NRProcessor: LSA, expint } = require('./.build/nr.cjs');
+const { NR2Processor: NR } = require('./.build/nr2.cjs');
 const { NoiseBlanker, NB_DEFAULTS } = require('./.build/noiseblanker.cjs');
 
 let pass = 0;
@@ -47,10 +46,10 @@ function bandAudio(seconds = 1, fs = 12000, seed = 7) {
 
 // ---- NR parity with v1 -------------------------------------------------------
 
-t('NR is v1 NR2, sample for sample', () => {
+t('NR2 is v1 NR2, sample for sample', () => {
     const input = bandAudio(2);
     const ours = new NR(2048, 4);
-    const theirs = new NR2Processor(null, 2048, 4);
+    const theirs = new V1NR2(null, 2048, 4);
     for (const p of [ours, theirs]) {
         p.setParameters(40, 10, 1.0);
         p.enabled = true;
@@ -70,10 +69,10 @@ t('NR is v1 NR2, sample for sample', () => {
     }
 });
 
-t('NR parity holds across a re-learn and a parameter change', () => {
+t('NR2 parity holds across a re-learn and a parameter change', () => {
     const input = bandAudio(1, 12000, 21);
     const ours = new NR(2048, 4);
-    const theirs = new NR2Processor(null, 2048, 4);
+    const theirs = new V1NR2(null, 2048, 4);
     for (const p of [ours, theirs]) { p.setParameters(70, 3, 2.5); p.enabled = true; }
 
     const chunk = 2048;
@@ -96,7 +95,7 @@ t('NR parity holds across a re-learn and a parameter change', () => {
     run(2);
 });
 
-t('NR actually reduces steady noise once learned', () => {
+t('NR2 actually reduces steady noise once learned', () => {
     // Not parity — sanity: after learning, pure noise comes out smaller.
     const rnd = prng(3);
     const fs = 12000;
@@ -117,6 +116,128 @@ t('NR actually reduces steady noise once learned', () => {
     }
     assert.ok(outRms < inRms * 0.5,
         `expected >3 dB of reduction, got in=${inRms.toExponential(2)} out=${outRms.toExponential(2)}`);
+});
+
+// ---- the LSA engine ----------------------------------------------------------
+
+const LSA_FS = 12000;
+
+// Amplitude of one frequency in a slice, via Goertzel — for asking "did the
+// voice survive" without an FFT in the test.
+function toneAmp(x, from, len, hz, fs = LSA_FS) {
+    const w = (2 * Math.PI * hz) / fs;
+    const c = 2 * Math.cos(w);
+    let s0 = 0;
+    let s1 = 0;
+    let s2 = 0;
+    for (let i = from; i < from + len; i++) {
+        s0 = x[i] + c * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    const power = s1 * s1 + s2 * s2 - c * s1 * s2;
+    return Math.sqrt(Math.max(0, power)) / (len / 2);
+}
+
+function runLsa(nr, input, chunk = 1024) {
+    const out = new Float32Array(input.length);
+    for (let at = 0; at < input.length; at += chunk) {
+        const n = Math.min(chunk, input.length - at);
+        nr.process(input.subarray(at, at + n), out.subarray(at, at + n));
+    }
+    return out;
+}
+
+t('expint matches the tables', () => {
+    // Abramowitz & Stegun: E1(0.5)=0.5598, E1(1)=0.2194, E1(2)=0.0489.
+    assert.ok(Math.abs(expint(0.5) - 0.5598) < 1e-3);
+    assert.ok(Math.abs(expint(1) - 0.21938) < 1e-3);
+    assert.ok(Math.abs(expint(2) - 0.04890) < 1e-3);
+});
+
+t('LSA disabled is bypass', () => {
+    const nr = new LSA(LSA_FS);
+    const input = bandAudio(0.2);
+    assert.deepStrictEqual(Array.from(runLsa(nr, input)), Array.from(input));
+});
+
+t('LSA cuts steady noise hard once converged', () => {
+    const rnd = prng(31);
+    const nr = new LSA(LSA_FS);
+    nr.enabled = true;
+    nr.setParameters(40);
+    const input = new Float32Array(3 * LSA_FS);
+    for (let i = 0; i < input.length; i++) input[i] = 0.05 * rnd();
+    const out = runLsa(nr, input);
+    let inP = 0;
+    let outP = 0;
+    for (let i = 2 * LSA_FS; i < input.length; i++) { inP += input[i] ** 2; outP += out[i] ** 2; }
+    assert.ok(outP < inP * 0.12, `residual noise ${(10 * Math.log10(outP / inP)).toFixed(1)} dB`);
+});
+
+t('LSA keeps a modulated signal while cutting the noise around it', () => {
+    // Tone bursts over noise — speech-shaped, as far as the estimator cares.
+    const rnd = prng(37);
+    const nr = new LSA(LSA_FS);
+    nr.enabled = true;
+    nr.setParameters(40);
+    const input = new Float32Array(4 * LSA_FS);
+    for (let i = 0; i < input.length; i++) {
+        const burst = Math.floor(i / (0.3 * LSA_FS)) % 2 === 0;
+        input[i] = 0.02 * rnd() + (burst ? 0.25 * Math.sin((2 * Math.PI * 800 * i) / LSA_FS) : 0);
+    }
+    const out = runLsa(nr, input);
+    // A late burst: the 512-sample latency is inside the 3600-sample burst,
+    // so measure the middle of it.
+    const burstAt = Math.round(3.6 * LSA_FS) + 900;
+    const kept = toneAmp(out, burstAt, 1800, 800) / toneAmp(input, burstAt, 1800, 800);
+    assert.ok(kept > 0.7, `tone survived at ${(20 * Math.log10(kept)).toFixed(1)} dB`);
+    // ...and a late gap is quieter than it came in.
+    const gapAt = Math.round(3.3 * LSA_FS) + 900;
+    let inP = 0;
+    let outP = 0;
+    for (let i = gapAt; i < gapAt + 1800; i++) { inP += input[i] ** 2; outP += out[i] ** 2; }
+    assert.ok(outP < inP * 0.5, `gap noise only fell to ${(outP / inP).toFixed(2)}×`);
+});
+
+t('LSA strength orders the residual', () => {
+    const residual = (strength) => {
+        const rnd = prng(41);
+        const nr = new LSA(LSA_FS);
+        nr.enabled = true;
+        nr.setParameters(strength);
+        const input = new Float32Array(3 * LSA_FS);
+        for (let i = 0; i < input.length; i++) input[i] = 0.05 * rnd();
+        const out = runLsa(nr, input);
+        let p = 0;
+        for (let i = 2 * LSA_FS; i < input.length; i++) p += out[i] ** 2;
+        return p;
+    };
+    assert.ok(residual(90) < residual(10) * 0.5, 'more strength must cut deeper');
+});
+
+t('LSA survives a reset and keeps working', () => {
+    const rnd = prng(43);
+    const nr = new LSA(LSA_FS);
+    nr.enabled = true;
+    nr.setParameters(60);
+    const noise = () => {
+        const b = new Float32Array(LSA_FS);
+        for (let i = 0; i < b.length; i++) b[i] = 0.05 * rnd();
+        return b;
+    };
+    runLsa(nr, noise());
+    nr.resetLearning();
+    const out = runLsa(nr, noise());
+    for (let i = 0; i < out.length; i++) {
+        assert.ok(Number.isFinite(out[i]), `non-finite sample after reset at ${i}`);
+    }
+    let p = 0;
+    let q = 0;
+    const tail = noise();
+    const out2 = runLsa(nr, tail);
+    for (let i = 0; i < tail.length; i++) { p += tail[i] ** 2; q += out2[i] ** 2; }
+    assert.ok(q < p * 0.2, 'still reducing after the reset');
 });
 
 // ---- the blanker -------------------------------------------------------------

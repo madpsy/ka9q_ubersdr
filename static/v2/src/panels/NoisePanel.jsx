@@ -1,25 +1,145 @@
-// Noise reduction, and in time everything else that is done to the audio on its
-// way out of the receiver.
+// Noise: what can be done about it, in two places.
 //
-// It was the bottom half of the Audio panel, under a divider. The move is not
-// tidying: Audio is a panel of things set once — the output device, the buffer,
-// the stream format — and this is the one worked at while listening, so it was
-// the part you scrolled past a settings block to reach, in the panel least
-// likely to be open. On a phone it was worse: the Audio sheet's cut-down view
-// was *only* this, so the volume and the channel had no minimal view at all.
+// The split that matters here is *where the work happens*, so that is the
+// split the panel wears. "In this browser" is client-side DSP on the decoded
+// audio — it exists on every receiver, costs the server nothing, and keeps
+// working when the instance offers no filters at all. "On the receiver" is the
+// server's own DSP inserts (DspControl), which act on the channel before the
+// audio is encoded — better placed in the chain, but only present where the
+// operator has installed them. The server section disappears entirely on a
+// receiver that has answered "none"; the client section is the reason this
+// panel never disappears.
 //
-// The panel is here whether or not the receiver offers any filters. DspControl
-// says which of the two it is — reading, unavailable, or a list to choose from —
-// and an empty panel that exists is what a filter appearing mid-session can
-// appear *in*.
+// The blanker is not an alternative to any of the reducers, and the layout
+// says so by giving it its own switch: an impulse blanker removes microsecond
+// clicks *before* anything models the noise floor — exactly the samples a
+// spectral NR must not learn — so it composes with client NR, server NR, or
+// both. Client NR alongside server NR is legal too; whether it helps depends
+// on the band, and that is the operator's experiment to run, not this panel's
+// to forbid.
 
 import React from '../react.js';
+import { useRadio } from '../radio/RadioContext.jsx';
+import { Field, Slider, Switch } from '../components/ui.jsx';
 import DspControl from './DspControl.jsx';
+import {
+    NB_THRESHOLD_MAX, NB_THRESHOLD_MIN, NB_WIDTH_MAX, NB_WIDTH_MIN,
+} from '../lib/noiseBlanker.js';
 
 export default function NoisePanel() {
+    const { noise, dsp, actions } = useRadio();
+    const { nb, nr } = noise;
+    const setNb = (patch) => actions.setNoise({ nb: patch });
+    const setNr = (patch) => actions.setNoise({ nr: patch });
+
+    // Hidden only when the server has *answered* that there is nothing —
+    // while the answer is pending (or the receiver is not running) DspControl
+    // says which, and vanishing-then-appearing would read as a glitch.
+    const serverAbsent = Array.isArray(dsp.schemas) && dsp.schemas.length === 0;
+
     return (
         <div className="stack">
-            <DspControl />
+            <div className="section-label"><span>In this browser</span></div>
+
+            <Field label="Noise blanker" hint={nb.enabled ? 'on' : 'off'} inline>
+                <Switch
+                    checked={nb.enabled}
+                    onChange={(on) => setNb({ enabled: on })}
+                    title="Cut impulse noise — ignition, power-line arcing, fences"
+                />
+            </Field>
+            {nb.enabled && (
+                <>
+                    <Field label="Threshold" hint={`${nb.thresholdDb} dB`}>
+                        <Slider
+                            value={nb.thresholdDb}
+                            min={NB_THRESHOLD_MIN}
+                            max={NB_THRESHOLD_MAX}
+                            step={1}
+                            onChange={(v) => setNb({ thresholdDb: v })}
+                        />
+                    </Field>
+                    <Field label="Width" hint={`${nb.widthMs} ms`}>
+                        <Slider
+                            value={nb.widthMs}
+                            min={NB_WIDTH_MIN}
+                            max={NB_WIDTH_MAX}
+                            step={0.5}
+                            onChange={(v) => setNb({ widthMs: v })}
+                        />
+                    </Field>
+                    <div className="note note--tight">
+                        Cuts short clicks out of the audio before they reach anything
+                        else — lower the threshold until the crackle goes, raise it if
+                        speech starts dropping out. Works alongside any noise
+                        reduction, here or on the receiver.
+                    </div>
+                </>
+            )}
+
+            <Field label="NR" hint={nr.enabled ? 'on' : 'off'} inline>
+                <Switch
+                    checked={nr.enabled}
+                    onChange={(on) => setNr({ enabled: on })}
+                    title="Spectral subtraction against steady band noise"
+                />
+            </Field>
+            {nr.enabled && (
+                <>
+                    <Field label="Strength" hint={`${nr.strength}%`}>
+                        <Slider
+                            value={nr.strength}
+                            min={0}
+                            max={100}
+                            step={5}
+                            onChange={(v) => setNr({ strength: v })}
+                        />
+                    </Field>
+                    <Field label="Spectral floor" hint={`${nr.floor}%`}>
+                        <Slider
+                            value={nr.floor}
+                            min={0}
+                            max={10}
+                            step={0.5}
+                            onChange={(v) => setNr({ floor: v })}
+                        />
+                    </Field>
+                    <Field label="Adaptation" hint={`${Number(nr.adaptRate).toFixed(1)}%`}>
+                        <Slider
+                            value={nr.adaptRate}
+                            min={0.1}
+                            max={5}
+                            step={0.1}
+                            onChange={(v) => setNr({ adaptRate: v })}
+                        />
+                    </Field>
+                    <Field
+                        label="Makeup gain"
+                        hint={`${nr.makeupDb >= 0 ? '+' : ''}${nr.makeupDb} dB`}
+                    >
+                        <Slider
+                            value={nr.makeupDb}
+                            min={-12}
+                            max={12}
+                            step={0.5}
+                            onChange={(v) => setNr({ makeupDb: v })}
+                        />
+                    </Field>
+                    <div className="note note--tight">
+                        Learns the noise floor for half a second, then subtracts it —
+                        the profile re-learns on every retune. Raise the floor if the
+                        residue turns watery.
+                    </div>
+                </>
+            )}
+
+            {!serverAbsent && (
+                <>
+                    <div className="divider" />
+                    <div className="section-label"><span>On the receiver</span></div>
+                    <DspControl />
+                </>
+            )}
         </div>
     );
 }

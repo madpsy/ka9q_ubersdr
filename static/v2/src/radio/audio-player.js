@@ -6,6 +6,8 @@
 // audible as a single gap instead of continuous stuttering.
 
 import { applyParams, buildChain, frameLevelDb, gateOpen, nextMakeupDb, shapeKey } from './audio-filters.js';
+import { NRProcessor } from '../lib/nr.js';
+import { NoiseBlanker } from '../lib/noiseBlanker.js';
 import { Emitter } from './emitter.js';
 
 // How often the gate looks at the level. 20 ms is well inside its own attack
@@ -63,9 +65,21 @@ export class AudioPlayer extends Emitter {
         // modes, and stereo Opus); a mono stream ignores it.
         this.channelMode = 'both';
         this.channels = 0;          // channels in the stream last scheduled
-        this.head = null;           // filter chain input
+        this.head = null;           // where scheduled audio enters the graph
         this.chain = null;          // active EQ/notch/bandpass nodes
         this.filterSpec = null;
+        // The client noise stage — blanker and NR — between `head` and the
+        // filter chain, in v1's order: impulses are cut before anything else
+        // measures the signal, and NR cleans what the EQ and the squelch then
+        // see. `filterHead` is the stable node after the stage; the filter
+        // chain hangs off that, so the two never rewire each other.
+        this.filterHead = null;
+        this.noiseSpec = null;
+        this.nb = null;             // [left, right] NoiseBlanker instances
+        this.nbNode = null;         // their ScriptProcessor
+        this.nr = null;             // [left, right] NR instances
+        this.nrNode = null;
+        this.nrMakeup = null;       // plain gain after NR
         this.gateTimer = null;
         this.makeupTimer = null;
         this.makeupDb = 0;          // live compressor makeup, dB
@@ -279,6 +293,14 @@ export class AudioPlayer extends Emitter {
         // until each was switched off and on again, which changes the shape key
         // and forces the rebuild this should have done.
         this.chain = null;
+        // As with the chain: nodes belong to the context that made them, and
+        // _applyNoise below must build fresh ones rather than reconnect these.
+        this.filterHead = null;
+        this.nb = null;
+        this.nbNode = null;
+        this.nr = null;
+        this.nrNode = null;
+        this.nrMakeup = null;
         clearInterval(this.gateTimer);
         this.gateTimer = null;
         clearInterval(this.makeupTimer);
@@ -314,7 +336,12 @@ export class AudioPlayer extends Emitter {
         // raises this while it is on screen (see acquireAnalyser).
         this.analyser.fftSize = this.analyserFft || ANALYSER_IDLE_FFT;
         this.analyser.smoothingTimeConstant = 0.5;
-        this.head.connect(this.gain);
+        // head reaches gain through the noise stage and the filter chain:
+        // head -> [blanker] -> [NR] -> filterHead -> [EQ/notch/...] -> gain.
+        // _applyNoise wires the first half, setFilters the second.
+        this.filterHead = this.ctx.createGain();
+        this.filterHead.connect(this.gain);
+        this._applyNoise();
         this.gain.connect(this.splitter);
         this.splitter.connect(this.leftGain, 0);
         this.splitter.connect(this.rightGain, 1);
@@ -497,7 +524,7 @@ export class AudioPlayer extends Emitter {
     // avoids the bookkeeping of reconnecting a chain whose shape can change.
     setFilters(spec) {
         this.filterSpec = spec;
-        if (!this.ctx || !this.head) return;
+        if (!this.ctx || !this.filterHead) return;
 
         // Same graph, different numbers: retune it. Rebuilding on every slider
         // move tore the audio, because tearing the chain down drops whatever
@@ -513,7 +540,7 @@ export class AudioPlayer extends Emitter {
         this.makeupTimer = null;
         this.makeupDb = 0;
 
-        try { this.head.disconnect(); } catch (e) { /* not connected yet */ }
+        try { this.filterHead.disconnect(); } catch (e) { /* not connected yet */ }
         if (this.chain) {
             for (const n of this.chain.nodes) {
                 try { n.disconnect(); } catch (e) { /* ignore */ }
@@ -523,13 +550,113 @@ export class AudioPlayer extends Emitter {
 
         const chain = spec ? buildChain(this.ctx, spec) : null;
         if (chain) {
-            this.head.connect(chain.input);
+            this.filterHead.connect(chain.input);
             chain.output.connect(this.gain);
             this.chain = chain;
             if (chain.gate) this._runGate(chain.gate);
             if (chain.compressor) this._runMakeup(chain.compressor);
         } else {
-            this.head.connect(this.gain);
+            this.filterHead.connect(this.gain);
+        }
+    }
+
+    // ---- client noise stage ------------------------------------------------
+    //
+    // ScriptProcessorNode on purpose, not AudioWorklet: the worklet needs a
+    // secure context, and this interface is routinely served plain over a LAN.
+    // v1 made the same choice for the same reason, at the same buffer sizes.
+    // The nodes exist only while their stage is on — a bypassed
+    // ScriptProcessor still costs a JS callback per buffer, so off is absent.
+
+    /** `{ nb: { enabled, thresholdDb, widthMs }, nr: { enabled, strength, floor, adaptRate, makeupDb } }` */
+    setNoise(spec) {
+        this.noiseSpec = spec;
+        if (this.ctx && this.filterHead) this._applyNoise();
+    }
+
+    /** The NR noise profile is per-frequency; the radio calls this on retune. */
+    resetNoiseLearning() {
+        if (this.nr) for (const n of this.nr) n.resetLearning();
+    }
+
+    _applyNoise() {
+        const spec = this.noiseSpec || {};
+        const nbOn = !!(spec.nb && spec.nb.enabled);
+        const nrOn = !!(spec.nr && spec.nr.enabled);
+
+        // Same stages in the graph: retune the instances in place. Sliders
+        // move often, and rebuilding a ScriptProcessor per move would tear
+        // the audio the way rebuilding biquads used to (see setFilters).
+        if (!!this.nbNode === nbOn && !!this.nrNode === nrOn) {
+            this._tuneNoise(spec);
+            return;
+        }
+
+        try { this.head.disconnect(); } catch (e) { /* not connected yet */ }
+        for (const n of [this.nbNode, this.nrNode, this.nrMakeup]) {
+            if (n) try { n.disconnect(); } catch (e) { /* ignore */ }
+        }
+        this.nb = null;
+        this.nbNode = null;
+        this.nr = null;
+        this.nrNode = null;
+        this.nrMakeup = null;
+
+        let node = this.head;
+
+        if (nbOn) {
+            // One blanker per channel. The stream is usually mono duplicated,
+            // where the second costs the same arithmetic on the same numbers —
+            // but IQ modes are genuinely stereo, and a single instance fed
+            // both channels in turn would corrupt its own envelope and delay
+            // line. (v1 shared one; that was a bug, not a saving.)
+            const nbs = [new NoiseBlanker(this.ctx.sampleRate), new NoiseBlanker(this.ctx.sampleRate)];
+            for (const b of nbs) b.enabled = true;
+            const proc = this.ctx.createScriptProcessor(512, 2, 2);
+            proc.onaudioprocess = (e) => {
+                for (let ch = 0; ch < 2; ch++) {
+                    nbs[ch].process(e.inputBuffer.getChannelData(ch), e.outputBuffer.getChannelData(ch));
+                }
+            };
+            node.connect(proc);
+            node = proc;
+            this.nb = nbs;
+            this.nbNode = proc;
+        }
+
+        if (nrOn) {
+            const nrs = [new NRProcessor(2048, 4), new NRProcessor(2048, 4)];
+            for (const r of nrs) r.enabled = true;
+            const proc = this.ctx.createScriptProcessor(2048, 2, 2);
+            proc.onaudioprocess = (e) => {
+                for (let ch = 0; ch < 2; ch++) {
+                    nrs[ch].process(e.inputBuffer.getChannelData(ch), e.outputBuffer.getChannelData(ch));
+                }
+            };
+            node.connect(proc);
+            // Makeup after the subtraction, exactly as v1 hangs it.
+            this.nrMakeup = this.ctx.createGain();
+            proc.connect(this.nrMakeup);
+            node = this.nrMakeup;
+            this.nr = nrs;
+            this.nrNode = proc;
+        }
+
+        node.connect(this.filterHead);
+        this._tuneNoise(spec);
+    }
+
+    _tuneNoise(spec) {
+        if (this.nb && spec.nb) {
+            for (const b of this.nb) {
+                b.setParameters({ thresholdDb: spec.nb.thresholdDb, widthMs: spec.nb.widthMs });
+            }
+        }
+        if (this.nr && spec.nr) {
+            for (const r of this.nr) r.setParameters(spec.nr.strength, spec.nr.floor, spec.nr.adaptRate);
+        }
+        if (this.nrMakeup && spec.nr) {
+            this.nrMakeup.gain.value = Math.pow(10, (Number(spec.nr.makeupDb) || 0) / 20);
         }
     }
 

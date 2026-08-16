@@ -1,0 +1,183 @@
+// Client-side noise blanker: impulse noise cut out before it reaches the ear.
+//
+// The target is short broadband clicks — power-line arcing, ignition, electric
+// fences — which are milliseconds wide but tens of dB proud of the band. A
+// blanker's whole job is to remove exactly those samples and nothing else,
+// which makes it orthogonal to noise *reduction*: NR models the steady noise
+// floor and subtracts it, and an impulse is precisely what such a model must
+// not learn. The two are therefore composable — blank first, reduce after —
+// and the panel offers them as independent switches.
+//
+// Not v1's design. That one detected a pulse and then attenuated *forward*
+// from it, so the rising edge of every click — the part with the energy — had
+// already been played by the time the gate closed; and it decided
+// "is this broadband?" with an O(N²) DFT per loud sample. This one takes the
+// standard hardware-blanker approach instead:
+//
+//   * the audio runs through a short delay line, so a pulse is detected
+//     *before* the delayed copy of it reaches the output — the gate closes
+//     over the whole click, leading edge included;
+//   * detection is a threshold over a slow envelope of |x| whose update is
+//     clamped, so the pulses being caught cannot inflate the average they are
+//     measured against (the classic failure on pulse trains: the first click
+//     raises the floor and the rest walk through);
+//   * the gate is a raised-cosine notch written into a gain schedule, so
+//     overlapping detections merge smoothly and the blanking itself cannot
+//     click.
+//
+// The cost is the delay-line latency — around 1.5 ms at the default width —
+// which is nothing against the audio buffer it sits inside.
+//
+// Pure DSP: no AudioContext, Float32Arrays in and out, testable in node. The
+// ScriptProcessor wrapping lives in radio/audio-player.js.
+
+export const NB_DEFAULTS = {
+    enabled: false,
+    thresholdDb: 15,    // how far above the running average a sample must poke
+    widthMs: 2,         // total width of the cut, ramps included
+};
+
+export const NB_THRESHOLD_MIN = 6;
+export const NB_THRESHOLD_MAX = 30;
+export const NB_WIDTH_MIN = 0.5;
+export const NB_WIDTH_MAX = 10;
+
+// Envelope time constants — asymmetric on purpose. The release (downward) is
+// slow against speech syllables, so voice riding the reference does not drag
+// it around; the attack (upward) is fast, so audio returning after a stretch
+// of squelch-closed silence rebuilds the reference in tens of milliseconds
+// rather than blanking the first word. Fast attack does not hand the envelope
+// to the impulses — their contribution is clamped below.
+const ENV_TC_S = 0.05;
+const ENV_ATTACK_TC_S = 0.0125;
+// A sample may contribute at most this multiple of the current envelope to the
+// average — the clamp that keeps impulses from raising their own threshold.
+const ENV_CLAMP = 3;
+// Detection is off for the first stretch while the envelope finds the floor,
+// and the envelope settles faster than it tracks. In seconds.
+const WARMUP_S = 0.15;
+const WARMUP_ALPHA = 1 / 32;
+
+export class NoiseBlanker {
+    constructor(sampleRate = 12000) {
+        this.sampleRate = sampleRate;
+        this.enabled = false;
+        this.thresholdDb = NB_DEFAULTS.thresholdDb;
+        this.widthMs = NB_DEFAULTS.widthMs;
+
+        this.envAlpha = 1 / Math.max(1, Math.round(ENV_TC_S * sampleRate));
+        this.envAlphaUp = 1 / Math.max(1, Math.round(ENV_ATTACK_TC_S * sampleRate));
+        this.warmupSamples = Math.round(WARMUP_S * sampleRate);
+
+        // How many pulses the gate has closed on, for anyone curious.
+        this.pulsesBlanked = 0;
+
+        this._rebuild();
+    }
+
+    setParameters({ thresholdDb = null, widthMs = null } = {}) {
+        if (thresholdDb !== null) {
+            this.thresholdDb = Number(thresholdDb);
+            this._ratio = Math.pow(10, this.thresholdDb / 20);
+        }
+        if (widthMs !== null && Number(widthMs) !== this.widthMs) {
+            this.widthMs = Number(widthMs);
+            this._rebuild();
+        }
+    }
+
+    // Sized from the width: the notch spans a plateau of the full width with a
+    // cosine ramp either side, the delay is exactly the reach-back the notch
+    // needs, and all of the state hangs off those lengths.
+    _rebuild() {
+        const fs = this.sampleRate;
+        const halfW = Math.max(1, Math.round((this.widthMs / 2000) * fs));
+        const ramp = Math.max(2, Math.round(fs * 0.0005));   // 0.5 ms each side
+
+        this._pre = halfW + ramp;                            // reach-back = latency
+        this._post = halfW + ramp;
+        const n = this._pre + this._post + 1;
+
+        // The notch, hung centred on the detected sample: ramp down, zero
+        // plateau, ramp up. Precomputed once — a detection is then a min()
+        // per entry, not trig.
+        this._shape = new Float32Array(n);
+        for (let j = 0; j < n; j++) {
+            if (j < ramp) {
+                this._shape[j] = 0.5 * (1 + Math.cos((Math.PI * (j + 1)) / (ramp + 1)));
+            } else if (j >= n - ramp) {
+                this._shape[j] = 0.5 * (1 + Math.cos((Math.PI * (n - j)) / (ramp + 1)));
+            } else {
+                this._shape[j] = 0;
+            }
+        }
+
+        this._delay = this._pre;
+        this._buf = new Float32Array(this._delay);
+        // Gain for the output emitted at each of the next L2 steps; consumed
+        // and reset to 1 as each step passes. min()-merged on detection, so
+        // pulse trains extend the cut rather than fighting over it.
+        this._sched = new Float32Array(this._delay + this._post + 1).fill(1);
+        this._t = 0;
+
+        this._ratio = Math.pow(10, this.thresholdDb / 20);
+        this._env = 0;
+        this._warm = 0;
+    }
+
+    reset() {
+        this._rebuild();
+        this.pulsesBlanked = 0;
+    }
+
+    process(input, output) {
+        if (!this.enabled) {
+            // Bypassed entirely — no delay, no envelope. The line picks up
+            // fresh when re-enabled, which is what reset() guarantees.
+            output.set(input);
+            return;
+        }
+
+        const buf = this._buf;
+        const sched = this._sched;
+        const shape = this._shape;
+        const L = this._delay;
+        const L2 = sched.length;
+        const startK = L - this._pre;     // 0 by construction, kept for clarity
+
+        for (let i = 0; i < input.length; i++) {
+            const x = input[i];
+            const ax = x < 0 ? -x : x;
+
+            // Envelope, clamped. Faster while warming up, no detection then.
+            // The clamp has a floor: after a stretch of near-silence (squelch
+            // closed) the envelope is ~0, and a pure multiple of it could
+            // never climb back when audio returns — everything would read as
+            // a pulse for a noticeable fraction of a second.
+            const warm = this._warm < this.warmupSamples;
+            const c = warm ? ax : Math.min(ax, Math.max(ENV_CLAMP * this._env, 1e-4));
+            const alpha = warm ? WARMUP_ALPHA
+                : (c > this._env ? this.envAlphaUp : this.envAlpha);
+            this._env += (c - this._env) * alpha;
+            if (warm) this._warm++;
+
+            // A pulse: schedule the notch over the delayed stream.
+            if (!warm && ax > Math.max(this._env, 1e-6) * this._ratio) {
+                if (sched[(this._t + L) % L2] === 1) this.pulsesBlanked++;
+                for (let j = 0; j < shape.length; j++) {
+                    const at = (this._t + startK + j) % L2;
+                    if (shape[j] < sched[at]) sched[at] = shape[j];
+                }
+            }
+
+            // Emit the delayed sample through this step's gate, then recycle
+            // both slots.
+            const slot = this._t % L;
+            const gslot = this._t % L2;
+            output[i] = buf[slot] * sched[gslot];
+            sched[gslot] = 1;
+            buf[slot] = x;
+            this._t++;
+        }
+    }
+}

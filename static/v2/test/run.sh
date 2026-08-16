@@ -310,6 +310,10 @@ esbuild ../src/extensions/soundmodem/waterfall.js --bundle --format=cjs --platfo
     --outfile=.build/smwaterfall.cjs --log-level=warning
 esbuild ../src/lib/timeConstant.js --bundle --format=cjs --platform=node \
     --outfile=.build/timeconstant.cjs --log-level=warning
+esbuild ../src/lib/nr.js --bundle --format=cjs --platform=node \
+    --outfile=.build/nr.cjs --log-level=warning
+esbuild ../src/lib/noiseBlanker.js --bundle --format=cjs --platform=node \
+    --outfile=.build/noiseblanker.cjs --log-level=warning
 esbuild ../src/lib/waterfallRing.js --bundle --format=cjs --platform=node \
     --outfile=.build/waterfallring.cjs --log-level=warning
 esbuild ../src/extensions/whisper/frames.js --bundle --format=cjs --platform=node \
@@ -360,6 +364,7 @@ node shortcuts.test.js
 node backup.test.js
 node radiosettings.test.js
 node format.test.js
+node clientnoise.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
 node games.test.js

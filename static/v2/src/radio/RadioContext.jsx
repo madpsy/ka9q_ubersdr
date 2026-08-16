@@ -17,6 +17,8 @@ import { AudioPlayer } from './audio-player.js';
 import { connectionCheck, newSessionId } from './session.js';
 import { localBookmarks as localBookmarkStore, onLocalBookmarksChanged } from '../lib/localBookmarks.js';
 import { FILTER_DEFAULTS } from './audio-filters.js';
+import { NB_DEFAULTS } from '../lib/noiseBlanker.js';
+import { NR_DEFAULTS } from '../lib/nr.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
     SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
@@ -167,6 +169,14 @@ export function RadioProvider({ children }) {
         }
         return merged;
     });
+    // Client-side noise blanker and NR, merged the same way for the same
+    // reason. Separate from `filters` because the player stages them
+    // separately: these sit before the chain, and rebuild ScriptProcessors
+    // rather than biquads.
+    const [noise, setNoiseState] = useState(() => ({
+        nb: { ...NB_DEFAULTS, ...((saved.noise || {}).nb || {}) },
+        nr: { ...NR_DEFAULTS, ...((saved.noise || {}).nr || {}) },
+    }));
 
     // Mutable, high-rate values. Never a dependency of a render.
     const meters = useRef({
@@ -277,6 +287,7 @@ export function RadioProvider({ children }) {
         player.setBufferSec(audio.bufferSec);
         player.setChannelMode(audio.channel);
         player.setFilters(filters);
+        player.setNoise(noise);
         // Belongs to the socket rather than the player, and for the same
         // reason: the first connect of the visit has to ask for the restored
         // format, not the built-in one.
@@ -532,6 +543,11 @@ export function RadioProvider({ children }) {
             .catch(() => { /* non-fatal — the UI just shows fewer details */ });
     }, []);
 
+    // The client NR's noise profile belongs to the frequency it was learned on;
+    // carrying it across a retune subtracts the old channel's noise from the
+    // new one. v1 resets it on every frequency change, and so does this.
+    useEffect(() => { player.resetNoiseLearning(); }, [tuning.frequency]);
+
     // Persist the parts of the session worth restoring.
     useEffect(() => {
         saveRadioSettings({
@@ -546,6 +562,7 @@ export function RadioProvider({ children }) {
             sinkId: audio.sinkId,
             audioFormat: audio.format,
             filters,
+            noise,
             squelchValue,
             dspFilter: dsp.filter,
             dspParams: dsp.params,
@@ -569,7 +586,7 @@ export function RadioProvider({ children }) {
                 }
                 : {}),
         });
-    }, [tuning, audio, squelchValue, dsp, followTuning, filters, view]);
+    }, [tuning, audio, squelchValue, dsp, followTuning, filters, noise, view]);
 
     // ---- actions --------------------------------------------------------
 
@@ -820,6 +837,18 @@ export function RadioProvider({ children }) {
             setBufferSec(sec) {
                 player.setBufferSec(sec);
                 setAudio((a) => ({ ...a, bufferSec: sec, bufferFromUser: true }));
+            },
+
+            // A patch per stage: { nb: {...} } leaves the NR settings alone.
+            setNoise(patch) {
+                setNoiseState((n) => {
+                    const next = {
+                        nb: { ...n.nb, ...(patch.nb || {}) },
+                        nr: { ...n.nr, ...(patch.nr || {}) },
+                    };
+                    player.setNoise(next);
+                    return next;
+                });
             },
 
             // A patch per section: { eq: {...} } leaves notch and bandpass alone.
@@ -1099,7 +1128,7 @@ export function RadioProvider({ children }) {
 
     const value = useMemo(() => ({
         tuning, audioState, spectrumState, view, running, serverInfo, log, session,
-        audio, squelch, agc, dsp, followTuning, filters,
+        audio, squelch, agc, dsp, followTuning, filters, noise,
         // `bookmarks` and `local` are what *propagates* — the marker bar, the
         // ⏮/⏭ neighbours, the lock screen, the Markers panel — so a hidden
         // group disappears from all of them without any of them knowing the
@@ -1115,7 +1144,7 @@ export function RadioProvider({ children }) {
         },
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, filters, catalog, localMarks, hidden, actions]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, filters, noise, catalog, localMarks, hidden, actions]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

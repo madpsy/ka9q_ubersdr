@@ -8,7 +8,7 @@
 // to a saved bookmark afterwards, which is tune to it. Nothing typed, nothing listed, so
 // the panel is two rows tall until it is being used.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
+import React, { useCallback, useEffect, useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import GroupPicker, { ALL } from '../components/GroupPicker.jsx';
 import { UNGROUPED, groupsOf, hiddenGroups, onGroupsChanged } from '../lib/bookmarkGroups.js';
@@ -21,6 +21,8 @@ import {
     EXPORT_FORMATS, downloadFile, exportText, importText,
     localBookmarks, mutate, onLocalBookmarksChanged, passbandFields,
 } from '../lib/localBookmarks.js';
+import { pickFile, readText } from '../lib/pickFile.js';
+import { pushNotification } from '../lib/notifications.js';
 
 const BLANK = {
     name: '', frequency: '', mode: 'usb', group: '', comment: '', low: '', high: '',
@@ -120,7 +122,6 @@ export default function LocalBookmarksPanel({ minimal }) {
     const [error, setError] = useState('');
     const [status, setStatus] = useState('');
     const [confirming, setConfirming] = useState(null);   // name awaiting a second click
-    const fileRef = useRef(null);
 
     const refresh = useCallback(() => {
         const m = localBookmarks();
@@ -216,17 +217,30 @@ export default function LocalBookmarksPanel({ minimal }) {
         }
     };
 
-    const onFile = async (e) => {
-        const file = e.target.files && e.target.files[0];
-        e.target.value = '';                      // allow re-importing the same file
+    // The picker is lib/pickFile.js rather than a hidden input in this markup,
+    // for the reason set out there: the panel need not survive the dialog it
+    // opened, and a change event on an unmounted input reaches nothing.
+    const doImport = async () => {
+        const file = await pickFile({ accept: '.json,.yaml,.yml,.csv' });
         if (!file) return;
         try {
-            const text = await file.text();
+            const text = await readText(file);
             const r = await mutate((m) => importText(m, file.name, text, 'merge'));
-            setStatus(`Imported ${r.imported}, skipped ${r.skipped}${r.errors ? `, ${r.errors} errors` : ''}`);
+            const line = `Imported ${r.imported}, skipped ${r.skipped}${r.errors ? `, ${r.errors} errors` : ''}`;
+            setStatus(line);
+            pushNotification({
+                severity: r.imported ? 'good' : 'warn',
+                title: `Bookmarks — ${file.name}`,
+                body: line,
+                key: 'bookmarks-import',
+            });
         } catch (err) {
+            const message = err.message || 'Import failed.';
             setStatus('');
-            setError(err.message || 'Import failed.');
+            setError(message);
+            pushNotification({
+                severity: 'bad', title: 'Bookmark import failed', body: message, key: 'bookmarks-import',
+            });
         }
     };
 
@@ -267,7 +281,7 @@ export default function LocalBookmarksPanel({ minimal }) {
                 >
                     Current
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => fileRef.current && fileRef.current.click()}>
+                <Button size="sm" variant="ghost" onClick={doImport}>
                     Import
                 </Button>
                 <Menu trigger={<span className="btn btn--ghost btn--sm">Export</span>}>
@@ -277,13 +291,6 @@ export default function LocalBookmarksPanel({ minimal }) {
                         </MenuItem>
                     ))}
                 </Menu>
-                <input
-                    ref={fileRef}
-                    type="file"
-                    accept=".json,.yaml,.yml,.csv"
-                    style={{ display: 'none' }}
-                    onChange={onFile}
-                />
             </div>
             )}
 

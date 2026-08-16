@@ -11,13 +11,14 @@
 // drops the per-section switches — the whole lot, which is what most people
 // want from a backup anyway.
 
-import React, { useCallback, useEffect, useRef, useState } from '../react.js';
+import React, { useCallback, useEffect, useState } from '../react.js';
 import { Button, Field, Icon, Segmented, Switch } from '../components/ui.jsx';
 import { downloadFile, localBookmarks, mutate } from '../lib/localBookmarks.js';
 import {
     SECTIONS, applyBundle, buildBundle, bundleFilename, inspect, presentCount,
 } from '../lib/backup.js';
 import { pushNotification } from '../lib/notifications.js';
+import { pickFile, readText } from '../lib/pickFile.js';
 
 const MODES = [
     { value: 'merge', label: 'Merge' },
@@ -48,12 +49,21 @@ function restoredLine(a) {
         + '.';
 }
 
+// The file that has been read and not yet applied, held outside the component.
+//
+// The panel may not survive the dialog it opened: a dock collapsed to a rail and
+// peeked by hovering unmounts as soon as the pointer leaves it, and opening the
+// file picker is the pointer leaving. Kept here so the panel that comes back is
+// looking at the file that was chosen rather than at a blank slate — the same
+// reason lib/pickFile.js does not put the input in the markup.
+let held = null;
+
 export default function BackupPanel({ minimal }) {
     // Everything is selected to begin with: a backup that quietly left a
     // section out is the failure this panel exists to prevent.
     const [chosen, setChosen] = useState(() => new Set(SECTIONS.map((s) => s.id)));
     const [counts, setCounts] = useState({});
-    const [file, setFile] = useState(null);      // { name, bundle, report }
+    const [file, setFile] = useState(held);      // { name, bundle, report }
     const [mode, setMode] = useState('merge');
     const [status, setStatus] = useState('');
     const [error, setError] = useState('');
@@ -61,7 +71,10 @@ export default function BackupPanel({ minimal }) {
     // stores still hold the old values and will write them back over the new
     // ones, so this is a state the panel has to be honest about.
     const [applied, setApplied] = useState(null);
-    const fileRef = useRef(null);
+
+    // One writer for both, so a remount cannot show a file the panel has
+    // finished with, or forget one it has not.
+    const keepFile = (next) => { held = next; setFile(next); };
 
     const refreshCounts = useCallback(() => {
         const next = {};
@@ -123,30 +136,29 @@ export default function BackupPanel({ minimal }) {
         severity, title, body, key: 'backup-import',
     });
 
-    const onFile = async (e) => {
-        const picked = e.target.files && e.target.files[0];
-        e.target.value = '';                      // so the same file can be picked twice
-        if (!picked) return;
+    const doImport = async () => {
+        const picked = await pickFile({ accept: '.json,application/json' });
+        if (!picked) return;                       // backed out of the dialog
         setStatus('');
         setError('');
         setApplied(null);
+        keepFile(null);
+
         let bundle = null;
         try {
-            bundle = JSON.parse(await picked.text());
+            bundle = JSON.parse(await readText(picked));
         } catch (err) {
-            setFile(null);
             setError('That file is not readable JSON.');
             say('bad', 'Import failed', `${picked.name} is not readable JSON.`);
             return;
         }
         const report = inspect(bundle);
         if (!report.ok) {
-            setFile(null);
             setError(report.error);
             say('bad', 'Import failed', report.error);
             return;
         }
-        setFile({ name: picked.name, bundle, report });
+        keepFile({ name: picked.name, bundle, report });
         // Only what the file actually carries, so Apply cannot claim to have
         // restored a section that was never in it.
         setChosen(new Set(report.sections.map((s) => s.id)));
@@ -213,21 +225,16 @@ export default function BackupPanel({ minimal }) {
                 >
                     Export
                 </Button>
+                {/* No hidden input beside this button: the picker belongs to
+                    lib/pickFile.js, and the reason is there. */}
                 <Button
                     size="sm"
                     variant="ghost"
                     icon={<Icon.Upload size={13} />}
-                    onClick={() => fileRef.current && fileRef.current.click()}
+                    onClick={doImport}
                 >
                     Import…
                 </Button>
-                <input
-                    ref={fileRef}
-                    type="file"
-                    accept=".json,application/json"
-                    style={{ display: 'none' }}
-                    onChange={onFile}
-                />
             </div>
 
             {status && <div className="note note--tight">{status}</div>}
@@ -297,15 +304,22 @@ export default function BackupPanel({ minimal }) {
                     </Field>
 
                     <div className="chip-row chip-row--wrap">
+                        {/* The top bar's Stop red, and for the same reason it
+                            is red there: this is the button that does the
+                            thing. Choosing a file only reads it — nothing has
+                            been written until this is pressed — and in the
+                            panel's own blue it read as one more step in a form
+                            rather than as the one that overwrites what this
+                            browser remembers. */}
                         <Button
                             size="sm"
-                            variant="primary"
+                            variant="danger"
                             onClick={apply}
                             disabled={chosen.size === 0 || !!applied}
                         >
                             {mode === 'replace' ? 'Replace settings' : 'Merge settings'}
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setFile(null); setApplied(null); }}>
+                        <Button size="sm" variant="ghost" onClick={() => { keepFile(null); setApplied(null); }}>
                             Cancel
                         </Button>
                     </div>

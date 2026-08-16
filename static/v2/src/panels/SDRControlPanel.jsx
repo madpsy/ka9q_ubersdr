@@ -32,6 +32,7 @@ import {
     catalogue, functionLabel, isEncoderFunction, isUnavailable, RETIRED,
 } from '../controls/functions.js';
 import { hardwareMessages } from '../controls/hardware.js';
+import { pickFile } from '../lib/pickFile.js';
 import { setLearnHandler, setManualOff, tryAutoConnect } from '../controls/dispatch.js';
 import {
     defaultThrottle, exportMappings, importMappings, normaliseMidiMappings,
@@ -295,7 +296,6 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     const [learn, setLearn] = useState(null);
     const [pick, setPick] = useState('');
     const [limit, setLimit] = useState(PAGE);
-    const fileRef = useRef(null);
 
     // Learning is the one part of control that belongs to the panel: it only
     // means anything while somebody is watching for the light to come on.
@@ -659,11 +659,32 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 >
                     Export
                 </Button>
+                {/* The picker is lib/pickFile.js, not a hidden input beside
+                    this button — see the note there: a panel need not survive
+                    the dialog it opened, and a change event on an unmounted
+                    input is delivered to nothing at all. */}
                 <Button
                     size="sm"
                     variant="ghost"
                     icon={<Icon.Upload size={13} />}
-                    onClick={() => fileRef.current && fileRef.current.click()}
+                    onClick={async () => {
+                        const file = await pickFile({ accept: 'application/json,.json' });
+                        if (!file) return;
+                        try {
+                            const m = await importMappings(file);
+                            // A v1 file carries no encoder flag — see
+                            // normaliseMidiMappings.
+                            const next = isMidi ? normaliseMidiMappings(m) : m;
+                            update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: next } }));
+                            // A fresh list, so back to the first page —
+                            // importing forty mappings must not leave the panel
+                            // forty rows tall.
+                            setLimit(PAGE);
+                            onMessage(`Imported ${Object.keys(next).length} mapping(s)`, 'good');
+                        } catch (err) {
+                            onMessage(`Import failed: ${err.message}`, 'error');
+                        }
+                    }}
                 >
                     Import
                 </Button>
@@ -680,31 +701,6 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 >
                     Clear
                 </Button>
-                <input
-                    ref={fileRef}
-                    type="file"
-                    accept="application/json,.json"
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                        const file = e.target.files && e.target.files[0];
-                        e.target.value = '';   // so the same file can be picked twice
-                        if (!file) return;
-                        importMappings(file).then(
-                            (m) => {
-                                // A v1 file carries no encoder flag — see
-                                // normaliseMidiMappings.
-                                const next = isMidi ? normaliseMidiMappings(m) : m;
-                                update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: next } }));
-                                // A fresh list, so back to the first page —
-                                // importing forty mappings must not leave the
-                                // panel forty rows tall.
-                                setLimit(PAGE);
-                                onMessage(`Imported ${Object.keys(next).length} mapping(s)`, 'good');
-                            },
-                            (err) => onMessage(`Import failed: ${err.message}`, 'error'),
-                        );
-                    }}
-                />
             </div>
         </>
     );

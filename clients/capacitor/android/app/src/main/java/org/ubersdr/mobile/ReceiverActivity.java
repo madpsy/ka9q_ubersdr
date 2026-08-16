@@ -9,11 +9,13 @@ import android.util.Log;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.ConsoleMessage;
+import android.webkit.MimeTypeMap;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.ValueCallback;
 import android.webkit.WebViewClient;
 import android.net.http.SslError;
 
@@ -22,7 +24,9 @@ import androidx.webkit.WebViewFeature;
 
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -102,6 +106,10 @@ public class ReceiverActivity extends Activity {
     private androidx.webkit.JavaScriptReplyProxy reply;
     private Prefs prefs;
     private Speech speech;
+
+    /** The page's outstanding &lt;input type="file"&gt;. See onShowFileChooser. */
+    private ValueCallback<android.net.Uri[]> filePick;
+    private static final int REQUEST_FILE = 4021;
 
     /** Ends the open receiver, if there is one. */
     static void finishCurrent() {
@@ -274,6 +282,55 @@ public class ReceiverActivity extends Activity {
                 return true;
             }
 
+            /**
+             * A file the page asked for, which a WebView will not go and get
+             * on its own.
+             *
+             * <p>&lt;input type="file"&gt; is inert in a plain WebView unless
+             * the host implements this: no picker opens, no error is raised,
+             * and the page is told nothing — the tap simply does nothing. That
+             * is what the Backup panel's Import did here while working on iOS,
+             * where WKWebView presents the document picker itself.
+             *
+             * <p>The intent is built here rather than taken from
+             * {@code params.createIntent()}, because what the page accepts is
+             * ".json,application/json" and half of that is a file extension.
+             * createIntent puts the accept list into EXTRA_MIME_TYPES as it
+             * stands, and a picker handed ".json" as a MIME type shows a
+             * chooser with nothing in it — which is the same dead end by a
+             * longer road. See mimeTypes.
+             */
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<android.net.Uri[]> callback,
+                                             FileChooserParams params) {
+                // At most one pick is outstanding. A callback dropped without
+                // an answer leaves the WebView believing a chooser is still
+                // open, and every later tap on the button does nothing.
+                if (filePick != null) filePick.onReceiveValue(null);
+                filePick = callback;
+
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                String[] types = mimeTypes(params.getAcceptTypes());
+                if (types.length > 0) intent.putExtra(Intent.EXTRA_MIME_TYPES, types);
+                if (params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                }
+                try {
+                    startActivityForResult(intent, REQUEST_FILE);
+                } catch (android.content.ActivityNotFoundException e) {
+                    // A device with no document provider at all. Answering
+                    // "nothing was picked" is what keeps the button working
+                    // afterwards; returning false without it does not.
+                    Log.w(TAG, "no file picker on this device", e);
+                    filePick = null;
+                    callback.onReceiveValue(null);
+                    return true;
+                }
+                return true;
+            }
+
             @Override
             public boolean onConsoleMessage(ConsoleMessage message) {
                 // Mirrored only in a debug build. The page is chatty by design
@@ -350,6 +407,55 @@ public class ReceiverActivity extends Activity {
                 if (web != null) web.evaluateJavascript(js, null);
             }, delay);
         }
+    }
+
+    /**
+     * What the page said it accepts, as MIME types a picker will understand.
+     *
+     * <p>An accept list is HTML's, not Android's: it may hold ".json" as well
+     * as "application/json", and an extension in EXTRA_MIME_TYPES matches
+     * nothing at all — the picker opens on an empty folder. Extensions are
+     * looked up instead, anything already a type is passed through, and a list
+     * that comes to nothing is dropped so the picker falls back to showing
+     * everything. Better a chooser with too much in it than one with nothing.
+     */
+    private static String[] mimeTypes(String[] accept) {
+        List<String> out = new ArrayList<>();
+        if (accept != null) {
+            for (String raw : accept) {
+                if (raw == null) continue;
+                String a = raw.trim();
+                if (a.isEmpty()) continue;
+                if (a.startsWith(".")) {
+                    String type = MimeTypeMap.getSingleton()
+                            .getMimeTypeFromExtension(a.substring(1).toLowerCase());
+                    if (type != null && !out.contains(type)) out.add(type);
+                } else if (a.contains("/") && !out.contains(a)) {
+                    out.add(a);
+                }
+            }
+        }
+        return out.toArray(new String[0]);
+    }
+
+    /**
+     * The answer to a file chooser this Activity opened.
+     *
+     * <p>The callback must be answered exactly once, cancellation included:
+     * parseResult turns "the user backed out" into null, which is what tells
+     * the WebView the input was left alone. Dropping it instead leaves the page
+     * waiting on a chooser that has already closed, and every later tap on the
+     * button does nothing.
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_FILE) return;
+        ValueCallback<android.net.Uri[]> callback = filePick;
+        filePick = null;
+        if (callback == null) return;
+        callback.onReceiveValue(
+                WebChromeClient.FileChooserParams.parseResult(resultCode, data));
     }
 
     /**

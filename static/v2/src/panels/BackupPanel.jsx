@@ -17,11 +17,36 @@ import { downloadFile, localBookmarks, mutate } from '../lib/localBookmarks.js';
 import {
     SECTIONS, applyBundle, buildBundle, bundleFilename, inspect, presentCount,
 } from '../lib/backup.js';
+import { pushNotification } from '../lib/notifications.js';
 
 const MODES = [
     { value: 'merge', label: 'Merge' },
     { value: 'replace', label: 'Replace' },
 ];
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// What a file turned out to hold, in one line. The bookmarks section counts
+// bookmarks and every other section counts settings, so the two are said
+// separately rather than added into a total that means neither.
+function summarise(report) {
+    const bookmarks = (report.sections.find((s) => s.id === 'bookmarks') || {}).count || 0;
+    const settings = report.sections
+        .filter((s) => s.id !== 'bookmarks')
+        .reduce((n, s) => n + s.count, 0);
+    const parts = [plural(settings, 'setting')];
+    if (bookmarks) parts.push(plural(bookmarks, 'bookmark'));
+    return parts.join(' and ');
+}
+
+// What an import did. One sentence, written once, so the note in the panel and
+// the toast over it cannot come to disagree about what just happened.
+function restoredLine(a) {
+    return `Restored ${plural(a.written, 'setting')}`
+        + (a.removed ? `, cleared ${a.removed}` : '')
+        + (a.bookmarks ? `, imported ${plural(a.bookmarks, 'bookmark')}` : '')
+        + '.';
+}
 
 export default function BackupPanel({ minimal }) {
     // Everything is selected to begin with: a backup that quietly left a
@@ -84,6 +109,20 @@ export default function BackupPanel({ minimal }) {
         }
     };
 
+    // Why an import says anything at all beyond the panel's own notes.
+    //
+    // Both halves of this are answered where the panel is, and on a phone the
+    // panel is a sheet: the file summary and the "restored N settings" note are
+    // several rows below the button that was tapped, and a picker closing over
+    // them is the moment they would have been read. So it looked as though
+    // choosing a file did nothing and applying it did nothing — the panel was
+    // saying so the whole time, out of sight. A toast is drawn over everything
+    // and follows the operator's own notification settings; the notes stay
+    // where they are, because they are the record and this is the interruption.
+    const say = (severity, title, body) => pushNotification({
+        severity, title, body, key: 'backup-import',
+    });
+
     const onFile = async (e) => {
         const picked = e.target.files && e.target.files[0];
         e.target.value = '';                      // so the same file can be picked twice
@@ -97,18 +136,24 @@ export default function BackupPanel({ minimal }) {
         } catch (err) {
             setFile(null);
             setError('That file is not readable JSON.');
+            say('bad', 'Import failed', `${picked.name} is not readable JSON.`);
             return;
         }
         const report = inspect(bundle);
         if (!report.ok) {
             setFile(null);
             setError(report.error);
+            say('bad', 'Import failed', report.error);
             return;
         }
         setFile({ name: picked.name, bundle, report });
         // Only what the file actually carries, so Apply cannot claim to have
         // restored a section that was never in it.
         setChosen(new Set(report.sections.map((s) => s.id)));
+        // What is in it, before anything has been written: the file has been
+        // read and nothing has changed yet, which is exactly the state that
+        // looked like a button doing nothing.
+        say('info', `Read ${picked.name}`, `${summarise(report)} — nothing applied yet.`);
     };
 
     const apply = async () => {
@@ -125,8 +170,21 @@ export default function BackupPanel({ minimal }) {
             setApplied({ ...r, bookmarks });
             setStatus('');
             refreshCounts();
+            // Held until it is dismissed. The reload is the half of this that
+            // has not happened yet, and a toast that takes itself away after
+            // four seconds is how somebody ends up believing the import failed
+            // and doing it again.
+            pushNotification({
+                severity: 'good',
+                title: 'Settings imported',
+                body: `${restoredLine({ ...r, bookmarks })} Reload to use them.`,
+                key: 'backup-import',
+                timeout: 0,
+            });
         } catch (e) {
-            setError(e.message || 'Import failed.');
+            const message = e.message || 'Import failed.';
+            setError(message);
+            say('bad', 'Import failed', message);
         }
     };
 
@@ -257,10 +315,8 @@ export default function BackupPanel({ minimal }) {
             {applied && (
                 <div className="note note--warn bk-note">
                     <span>
-                        Restored {applied.written} setting{applied.written === 1 ? '' : 's'}
-                        {applied.removed ? `, cleared ${applied.removed}` : ''}
-                        {applied.bookmarks ? `, imported ${applied.bookmarks} bookmarks` : ''}.
-                        Reload to use them — until then this page is still running the old ones.
+                        {restoredLine(applied)}
+                        {' '}Reload to use them — until then this page is still running the old ones.
                     </span>
                     <Button size="sm" variant="primary" onClick={() => location.reload()}>
                         Reload

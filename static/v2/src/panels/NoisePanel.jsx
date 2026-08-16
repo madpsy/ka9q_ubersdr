@@ -320,19 +320,32 @@ export default function NoisePanel({ minimal }) {
     // the blanker working, a count racing during clean speech means the
     // threshold is low and it is eating syllables. It restarts from zero when
     // the blanker is toggled, because the DSP is rebuilt then.
-    const [nbStats, setNbStats] = useState({ n: 0, cut: 0, db: 0 });
+    // The engine picker paints the RM Noise chip from the bridge's state, so it
+    // has to hear about that state changing. Only the controls below subscribed
+    // before, which is why the chip stayed red after a successful login: the
+    // login was accepted, the credentials were stored, and nothing asked this
+    // component to look again.
+    const rm = getRmNoise();
+    const [, bumpRm] = useState(0);
+    useEffect(() => rm.on('change', () => bumpRm((n) => n + 1)), [rm]);
+
+    const [nbStats, setNbStats] = useState({ n: 0, cut: 0 });
     useEffect(() => {
-        if (!nb.enabled) { setNbStats({ n: 0, cut: 0, db: 0 }); return undefined; }
+        if (!nb.enabled) { setNbStats({ n: 0, cut: 0 }); return undefined; }
         const t = setInterval(
-            () => setNbStats({
-                n: player.nbPulses(),
-                cut: player.nbCut(),
-                db: player.nbReductionDb(),
-            }),
+            () => setNbStats({ n: player.nbPulses(), cut: player.nbCut() }),
             500,
         );
         return () => clearInterval(t);
     }, [nb.enabled, player]);
+
+    // Chosen, not connected, and nothing stored to connect with: the stage is
+    // selected, the toolbar says NR, and the audio is going through untouched
+    // until somebody signs in. Judged on the bridge rather than on storage
+    // alone so that a session which is up counts, whatever storage says.
+    const rmCreds = rmCredentials();
+    const rmNeedsLogin = nr.type === 'rmn' && !rm.ready
+        && !(rmCreds.username && rmCreds.password);
 
     // Hidden only when the server has *answered* that there is nothing —
     // while the answer is pending (or the receiver is not running) DspControl
@@ -349,17 +362,15 @@ export default function NoisePanel({ minimal }) {
                 list of switches and sliders they were a wall somebody had to
                 work out the grouping of. The border is the grouping. */}
             <div className="noise-stage">
-            {/* Pulses caught, the share of the audio being removed and what
-                that costs in level — "412 · 1.3% · -0.4 dB". It lives in the
-                hint rather than under the chart because a line that appears
-                and disappears as the numbers cross a threshold is a flicker in
-                the corner of the eye; a hint that is always there is a
-                reading. */}
+            {/* Pulses caught and the share of the audio being removed —
+                "412 · 1.3%". The level change that used to sit beside them is
+                gone: it was there to settle whether the stage was doing
+                anything at all, back when that was in doubt, and two numbers
+                answering the same question is one number too many on a row
+                shared with a label and a switch. */}
             <Field
                 label="Noise blanker"
-                hint={nb.enabled
-                    ? `${nbStats.n} · ${(nbStats.cut * 100).toFixed(1)}% · ${nbStats.db.toFixed(1)} dB`
-                    : 'off'}
+                hint={nb.enabled ? `${nbStats.n} · ${(nbStats.cut * 100).toFixed(1)}%` : 'off'}
                 inline
             >
                 <Switch
@@ -439,9 +450,7 @@ export default function NoisePanel({ minimal }) {
                             // signs in. Unchosen it stays an ordinary option —
                             // colouring a choice nobody has made yet would be
                             // an alarm about a situation that does not exist.
-                            className: nr.type === 'rmn'
-                                && !(rmCredentials().username && rmCredentials().password)
-                                ? 'segmented__item--alert' : undefined,
+                            className: rmNeedsLogin ? 'segmented__item--alert' : undefined,
                             title: rmCredentials().username
                                 ? 'rmnoise.com — an AI denoiser over the network'
                                 : 'rmnoise.com — an AI denoiser over the network. Needs an account: choose this to enter it',

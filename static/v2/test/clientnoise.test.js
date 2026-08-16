@@ -17,7 +17,9 @@ const V1NR2 = require(path.join(__dirname, '..', '..', 'nr2.js'));
 
 const { NRProcessor: LSA, expint } = require('./.build/nr.cjs');
 const { NR2Processor: NR } = require('./.build/nr2.cjs');
-const { NoiseBlanker, NB_DEFAULTS } = require('./.build/noiseblanker.cjs');
+const {
+    NoiseBlanker, NB_DEFAULTS, NB_THRESHOLD_MAX, NB_THRESHOLD_MIN,
+} = require('./.build/noiseblanker.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -368,7 +370,7 @@ t('audio returning after silence is not blanked wholesale', () => {
 t('the threshold means what it says', () => {
     const nb = new NoiseBlanker(FS);
     nb.enabled = true;
-    nb.setParameters({ thresholdDb: 30 });
+    nb.setParameters({ thresholdDb: NB_THRESHOLD_MAX });
     const input = bandAudio(1, FS, 23);
     // ~12 dB over the band average — loud speech peak, not an impulse.
     input[9000] = Math.abs(input[9000]) + 0.25;
@@ -377,9 +379,44 @@ t('the threshold means what it says', () => {
     // Same peak, threshold at the floor: now it is over.
     const nb2 = new NoiseBlanker(FS);
     nb2.enabled = true;
-    nb2.setParameters({ thresholdDb: 6 });
+    nb2.setParameters({ thresholdDb: NB_THRESHOLD_MIN });
     blank(nb2, input);
     assert.ok(nb2.pulsesBlanked >= 1, 'over threshold must trigger');
+});
+
+t('the shipped threshold catches ordinary QRN, and says how much it cut', () => {
+    // The regression this is here for: it shipped at 15 dB, where clicks a
+    // plain 20 dB over the floor never triggered at all — the counter crept
+    // up on the rare spike and the audio was untouched. Defaults, nothing
+    // adjusted, clicks at a height any operator would call crackle.
+    const nb = new NoiseBlanker(FS);
+    nb.enabled = true;
+    const input = bandAudio(4, FS, 51);
+    let mean = 0;
+    for (const v of input) mean += Math.abs(v);
+    mean /= input.length;
+    const amp = mean * Math.pow(10, 22 / 20);
+    const at = [];
+    for (let t = 0.5 * FS; t < input.length; t += FS / 20) {
+        const k = Math.round(t);
+        at.push(k);
+        // Filtered click: a short ring, not a single sample.
+        for (let j = 0; j < 10; j++) input[k + j] += amp * Math.exp(-j / 2.5) * Math.sin((2 * Math.PI * 1400 * j) / FS);
+    }
+    const out = blank(nb, input);
+    const d = nb._delay;
+    const caught = at.filter((k) => Math.abs(out[k + d]) < 0.25 * amp).length;
+    assert.ok(caught > at.length * 0.6,
+        `only ${caught}/${at.length} clicks blanked at the shipped threshold`);
+    // ...and the readout says so rather than leaving "is it working" to the ear.
+    assert.ok(nb.cutFraction > 0.005, `cut fraction reads ${(100 * nb.cutFraction).toFixed(2)}%`);
+});
+
+t('the cut readout is ~0 when nothing is being caught', () => {
+    const nb = new NoiseBlanker(FS);
+    nb.enabled = true;
+    blank(nb, bandAudio(3, FS, 53));
+    assert.ok(nb.cutFraction < 0.001, `clean band reads ${(100 * nb.cutFraction).toFixed(2)}%`);
 });
 
 t('width changes rebuild cleanly and defaults are the panel’s', () => {

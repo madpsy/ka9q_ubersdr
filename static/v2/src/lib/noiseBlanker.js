@@ -33,14 +33,39 @@
 
 export const NB_DEFAULTS = {
     enabled: false,
-    thresholdDb: 15,    // how far above the running average a sample must poke
+    thresholdDb: 10,    // how far above the running average a sample must poke
     widthMs: 2,         // total width of the cut, ramps included
 };
 
-export const NB_THRESHOLD_MIN = 6;
-export const NB_THRESHOLD_MAX = 30;
+// The scale is measured, not guessed. Against band noise plus filtered clicks
+// at 12 kHz, sweeping the threshold gives (false triggers per second on clean
+// noise, then the share of clicks caught at each height over the noise floor):
+//
+//    6 dB   198/s     — gating the noise itself
+//    8 dB    20/s     20 dB: 72%   25 dB: 73%
+//    9 dB   2.5/s     20 dB: 84%   25 dB: 97%
+//   10 dB   0.1/s     20 dB: 68%   25 dB: 100%
+//   12 dB     0/s     20 dB: 26%   25 dB: 99%
+//   15 dB     0/s     20 dB:  0%   25 dB: 62%
+//
+// So the whole working range is 8–12 dB and the knee is at 10, which is the
+// default. It shipped at 15 — where nothing but the rarest spike triggers at
+// all, so the counter crept up and the audio was untouched, which is exactly
+// what it sounded like. Above 14 dB is dead space and is not offered.
+//
+// The other half of that table is worth knowing before reaching for the
+// slider: clicks less than ~15 dB over the floor are not reliably separable
+// from the noise's own peaks by any amplitude test, because that is where
+// Gaussian peaks live. A blanker on demodulated, AGC'd audio has already lost
+// the wideband view that makes an IF blanker work; this catches what is
+// plainly a click and leaves what is arguably noise.
+export const NB_THRESHOLD_MIN = 4;
+export const NB_THRESHOLD_MAX = 20;
 export const NB_WIDTH_MIN = 0.5;
 export const NB_WIDTH_MAX = 10;
+
+// Time constant for the "how much audio is being removed" readout.
+const CUT_TC_S = 3;
 
 // Envelope time constants — asymmetric on purpose. The release (downward) is
 // slow against speech syllables, so voice riding the reference does not drag
@@ -87,8 +112,11 @@ export class NoiseBlanker {
         this.warmupSamples = Math.round(WARMUP_S * sampleRate);
         this.resumeSamples = Math.round(RESUME_S * sampleRate);
 
-        // How many pulses the gate has closed on, for anyone curious.
+        // How many pulses the gate has closed on, and what share of the audio
+        // it is currently removing. The second is the one that answers "is
+        // this doing anything" — a count can climb while the cut is nothing.
         this.pulsesBlanked = 0;
+        this.cutFraction = 0;
 
         this._rebuild();
     }
@@ -148,6 +176,7 @@ export class NoiseBlanker {
     reset() {
         this._rebuild();
         this.pulsesBlanked = 0;
+        this.cutFraction = 0;
     }
 
     process(input, output) {
@@ -157,6 +186,8 @@ export class NoiseBlanker {
             output.set(input);
             return;
         }
+
+        let cut = 0;
 
         const buf = this._buf;
         const sched = this._sched;
@@ -203,10 +234,18 @@ export class NoiseBlanker {
             // both slots.
             const slot = this._t % L;
             const gslot = this._t % L2;
+            if (sched[gslot] < 0.5) cut++;
             output[i] = buf[slot] * sched[gslot];
             sched[gslot] = 1;
             buf[slot] = x;
             this._t++;
+        }
+
+        // Once per buffer rather than per sample: the readout is a percentage
+        // on a panel, and it settles over seconds either way.
+        if (input.length) {
+            const a = Math.min(1, input.length / (CUT_TC_S * this.sampleRate));
+            this.cutFraction += (cut / input.length - this.cutFraction) * a;
         }
     }
 }

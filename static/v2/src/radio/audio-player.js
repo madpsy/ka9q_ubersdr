@@ -589,6 +589,12 @@ export class AudioPlayer extends Emitter {
         return Math.max(this.nb[0].pulsesBlanked, this.nb[1].pulsesBlanked);
     }
 
+    /** Share of the audio the blanker is removing right now, 0..1. */
+    nbCut() {
+        if (!this.nb) return 0;
+        return Math.max(this.nb[0].cutFraction, this.nb[1].cutFraction);
+    }
+
     /** The NR noise profile is per-frequency; the radio calls this on retune. */
     resetNoiseLearning() {
         if (this.nr) for (const n of this.nr) n.resetLearning();

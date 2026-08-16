@@ -41,10 +41,13 @@ export default function NoisePanel({ minimal }) {
     // the blanker working, a count racing during clean speech means the
     // threshold is low and it is eating syllables. It restarts from zero when
     // the blanker is toggled, because the DSP is rebuilt then.
-    const [nbCount, setNbCount] = useState(0);
+    const [nbStats, setNbStats] = useState({ n: 0, cut: 0 });
     useEffect(() => {
-        if (!nb.enabled) { setNbCount(0); return undefined; }
-        const t = setInterval(() => setNbCount(player.nbPulses()), 500);
+        if (!nb.enabled) { setNbStats({ n: 0, cut: 0 }); return undefined; }
+        const t = setInterval(
+            () => setNbStats({ n: player.nbPulses(), cut: player.nbCut() }),
+            500,
+        );
         return () => clearInterval(t);
     }, [nb.enabled, player]);
 
@@ -57,12 +60,16 @@ export default function NoisePanel({ minimal }) {
         <div className="stack">
             <div className="section-label"><span>In this client</span></div>
 
-            {/* The hint is the pulse counter — "cut 3 421" — which is the
-                readout the threshold below is set against. Terse because the
-                hint shares its row with the label and the switch. */}
+            {/* Pulses caught, then the share of the audio actually being
+                removed — "412 · 1.3%". The second number is the one that
+                settles "is this doing anything": a count can climb on the odd
+                spike while the cut rounds to nothing, which is what a
+                mis-set threshold looks like. */}
             <Field
                 label="Noise blanker"
-                hint={nb.enabled ? `cut ${nbCount}` : 'off'}
+                hint={nb.enabled
+                    ? `${nbStats.n} · ${(nbStats.cut * 100).toFixed(1)}%`
+                    : 'off'}
                 inline
             >
                 <Switch

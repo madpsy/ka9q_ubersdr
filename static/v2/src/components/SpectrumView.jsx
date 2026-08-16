@@ -11,7 +11,7 @@
 // vertically keeps that history and only a width change throws it away — see
 // the ring allocation below for why the two differ.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { getPalette } from '../lib/palettes.js';
 import {
@@ -1061,6 +1061,10 @@ export default function SpectrumView() {
         gfx.current.dirty = true;
     }, [station, display.server.stationIdColor]);
 
+    // The display's frame interval, measured once and kept across restarts of
+    // the draw loop below. Why it cannot be measured per start: see the burst.
+    const vsyncRef = useRef(0);
+
     // ---- sizing ---------------------------------------------------------
 
     useEffect(() => {
@@ -1128,7 +1132,12 @@ export default function SpectrumView() {
         : 1;
 
     // Size the backing stores for device pixels and rebuild the waterfall ring.
-    useEffect(() => {
+    //
+    // A layout effect, not an ordinary one: this clears every canvas, and an
+    // ordinary effect runs after the browser has painted — which is a painted
+    // frame with nothing in it. Here the clearing, the ring rebuild and the
+    // redraw below all happen before that paint.
+    useLayoutEffect(() => {
         const dpr = Math.min(2, window.devicePixelRatio || 1) * renderScale;
         const g = gfx.current;
         g.dpr = dpr;
@@ -1272,7 +1281,11 @@ export default function SpectrumView() {
     // overlay covers the canvas so there is no hover to track, and resuming
     // re-runs this effect and starts a fresh loop. Nothing needs a frame in
     // between.
-    useEffect(() => {
+    // A layout effect, like the sizing above it and for the same reason: this is
+    // what puts the picture back after a resize has cleared it, and an ordinary
+    // effect runs after the browser has painted — which is one painted frame of
+    // empty canvas per resize, i.e. per frame of a splitter drag.
+    useLayoutEffect(() => {
         if (paused) return undefined;
         let raf = 0;
         let timer = 0;
@@ -1328,7 +1341,7 @@ export default function SpectrumView() {
         // The saving is untouched by all of this: between ticks there is still
         // no outstanding frame request at all, which is the whole difference
         // between this and an early return inside the callback (see below).
-        let vsyncMs = 0;
+        let vsyncMs = vsyncRef.current;
         let due = 0;
 
         const arm = (ts) => {
@@ -1347,22 +1360,30 @@ export default function SpectrumView() {
         // only the common case, and phones and external monitors run at 90,
         // 120 and 144. A short burst of consecutive animation frames, median
         // of the gaps — the median because any one gap can be stretched by a
-        // busy main thread, and the middle of nine is not. Runs once per loop
-        // start; a window dragged to a different monitor picks the new rate up
-        // on the next cap change, pause or panel toggle, which is imperfect
-        // and cheap where a continuous measurement would be the pipeline this
-        // cap exists to stop.
+        // busy main thread, and the middle of nine is not. Measured once and
+        // then remembered in vsyncRef, because this loop restarts far more
+        // often than the display changes — every resize, every cap change,
+        // every pause — and a burst that draws nothing on each of those is a
+        // pane that goes blank whenever it is re-sized. A window dragged to a
+        // different monitor keeps the old figure, which costs a rounding of the
+        // frame period and nothing else, where a continuous measurement would
+        // be the pipeline this cap exists to stop.
         const stamps = [];
         const calibrate = (ts) => {
             stamps.push(ts);
             if (stamps.length < 10) { raf = requestAnimationFrame(calibrate); return; }
             const gaps = stamps.slice(1).map((t, i) => t - stamps[i]).sort((a, b) => a - b);
             vsyncMs = gaps[Math.floor(gaps.length / 2)];
+            vsyncRef.current = vsyncMs;
             loop(ts);
         };
 
-        const loop = (ts) => {
-            arm(ts);
+        // Armed, then painted. The two were one function, and separating
+        // them is what lets a resize paint out of band without also asking for
+        // a second frame — see `repaint` and the sizing effect.
+        const loop = (ts) => { arm(ts); paint(ts); };
+
+        const paint = (ts) => {
             const g = gfx.current;
             g.ticks++;              // before the early return: an idle frame is still a frame
             const d = dispRef.current;
@@ -1440,11 +1461,21 @@ export default function SpectrumView() {
             g.dirty = false;
         };
 
-        // Straight in uncapped; through the measurement burst when capped. The
-        // burst draws nothing and the first real frame follows it by a tenth of
-        // a second, which is not a delay anybody can see on a loop that runs
-        // for as long as the receiver does.
-        if (capMs > 0) raf = requestAnimationFrame(calibrate);
+        // The picture, now: this effect restarts on every change of the sizes
+        // below, and the sizing effect has just cleared every canvas it is
+        // about to redraw. Before the arming, so that a burst of restarts —
+        // which is what a splitter drag is — still paints on each of them.
+        paint(performance.now());
+
+        // Straight in uncapped; through the measurement burst when capped, and
+        // only when the interval is not already known. The burst draws nothing
+        // and takes ten animation frames, which is fine once on a loop that
+        // runs for as long as the receiver does — and was the whole bug when it
+        // ran on every restart. Dragging the splitter restarts this loop on
+        // every frame of the drag, so the burst never finished, nothing was
+        // ever drawn, and the pane stayed black until the drag stopped. See
+        // vsyncRef.
+        if (capMs > 0 && !vsyncMs) raf = requestAnimationFrame(calibrate);
         else arm();
         return () => {
             cancelAnimationFrame(raf);
@@ -1458,7 +1489,7 @@ export default function SpectrumView() {
                 g.scroll = null;
             }
         };
-    }, [sizes.w, specH, wfH, dssH, heatH, paused, display.debug, maxFps]);
+    }, [sizes.w, specH, wfH, dssH, heatH, midH, paused, display.debug, maxFps]);
 
     // Redraw when a display setting changes even if no new frame arrived.
     useEffect(() => {

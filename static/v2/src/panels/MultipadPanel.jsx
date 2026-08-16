@@ -561,31 +561,82 @@ function ZoomWheel() {
 // a third of the row. Turning it off keeps the filter that was chosen, so
 // turning it back on returns to it.
 //
-// Absent entirely when the receiver has no filters to offer, rather than a
-// disabled control promising something that is not there.
+// Two groups since the client grew NR of its own: the engines running in this
+// client, then the receiver's inserts — the receiver's group absent when it
+// has none, exactly as the whole control used to be. One choice across both
+// on purpose: the pad is one hand on the dial, and "which NR" is one question
+// from there, so picking from either group switches the other off. Running
+// both at once is the Noise panel's game, and this control leaves it alone
+// until touched — with both on it shows the client's, being the nearer stage
+// to the ear.
 function NoiseSelect() {
-    const { dsp, actions, running } = useRadio();
-    if (!running || !dsp.schemas || dsp.schemas.length === 0) return null;
+    const { dsp, noise, actions, running } = useRadio();
+    if (!running) return null;
+    const server = dsp.schemas && dsp.schemas.length > 0 ? dsp.schemas : [];
+
+    const value = noise.nr.enabled
+        ? `client:${noise.nr.type === 'nr2' ? 'nr2' : 'lsa'}`
+        : dsp.enabled && dsp.filter ? dsp.filter : 'off';
+
+    const choose = (v) => {
+        if (v.startsWith('client:')) {
+            actions.setNoise({ nr: { enabled: true, type: v.slice(7) } });
+            if (dsp.enabled) actions.setDsp(dsp.filter, false);
+            return;
+        }
+        if (noise.nr.enabled) actions.setNoise({ nr: { enabled: false } });
+        if (v === 'off') {
+            if (dsp.enabled) actions.setDsp(dsp.filter, false);
+        } else {
+            actions.setDsp(v, true);
+        }
+    };
 
     return (
         <select
             className="select pad__nr"
-            value={dsp.enabled ? dsp.filter : 'off'}
-            onChange={(e) => {
-                const v = e.target.value;
-                if (v === 'off') actions.setDsp(dsp.filter, false);
-                else actions.setDsp(v, true);
-            }}
+            value={value}
+            onChange={(e) => choose(e.target.value)}
             title="Noise reduction"
             aria-label="Noise reduction"
         >
             <option value="off">NR Off</option>
-            {dsp.schemas.map((f) => (
-                <option key={f.name} value={f.name} title={f.description || f.name}>
-                    {f.name.toUpperCase()}
-                </option>
-            ))}
+            <optgroup label="This client">
+                <option value="client:lsa" title="MMSE-LSA over tracked minima — best on voice">LSA</option>
+                <option value="client:nr2" title="Classic spectral subtraction, long window">NR2</option>
+            </optgroup>
+            {server.length > 0 && (
+                <optgroup label="On the receiver">
+                    {server.map((f) => (
+                        <option key={f.name} value={f.name} title={f.description || f.name}>
+                            {f.name.toUpperCase()}
+                        </option>
+                    ))}
+                </optgroup>
+            )}
         </select>
+    );
+}
+
+// The blanker, beside the NR it composes with. A separate button rather than
+// an entry in the dropdown because it is not one of the NR choices — it cuts
+// impulses and runs alongside whichever NR is picked, or none — and a
+// dropdown whose options were not mutually exclusive would be lying about
+// being a dropdown.
+function NbToggle() {
+    const { noise, actions, running } = useRadio();
+    if (!running) return null;
+    const on = noise.nb.enabled;
+    return (
+        <button
+            type="button"
+            className={`chip chip--button pad__nb${on ? ' is-active' : ''}`}
+            title="Noise blanker — cuts impulse noise, works alongside any NR"
+            aria-pressed={on}
+            onClick={() => actions.setNoise({ nb: { enabled: !on } })}
+        >
+            NB
+        </button>
     );
 }
 
@@ -828,6 +879,7 @@ export default function MultipadPanel({ minimal }) {
             <div className="pad__zoomrow">
                 <ZoomWheel />
                 <NoiseSelect />
+                <NbToggle />
             </div>
 
             {!minimal && (

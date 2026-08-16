@@ -2173,6 +2173,19 @@ a.btn { text-decoration: none; }
 .badge--open { background: rgba(69, 214, 154, 0.16); color: var(--good); }
 .badge--closed { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
 
+/* The squelch gate's badge, which is the one badge whose text changes while you
+   are looking at it: OPEN, CLOSED and DISABLED are three different widths, so
+   the badge grew and shrank on every burst of speech and shoved the SNR reading
+   and the Off button along with it. Sized to the longest of the three and
+   centred, as the spectrum toolbar's tag is (.tag--sq) — same problem, same
+   answer.
+   The measure is not a guess: Inter at 700 sets "DISABLED" in 4.961em, its "0"
+   — which is what `ch` means — is 0.6743em, and the 0.09em of tracking on eight
+   characters adds 0.72em, so 5.68em, or 8.43ch. 8.5ch, and the 14px is .badge's
+   own 7px of padding either side, which box-sizing: border-box counts inside
+   the width. */
+.badge--sq { display: inline-block; min-width: calc(8.5ch + 14px); text-align: center; }
+
 .switch {
     display: inline-flex;
     align-items: center;
@@ -2551,13 +2564,20 @@ a.btn { text-decoration: none; }
     gap: 5px;
     padding-top: 7px;
 }
+/* Height is the only difference between a minor notch and a major one.
+   They were a different colour as well, and --border-strong is a hairline
+   colour: right for a 1 px edge between two filled areas, and far too dim for a
+   1 px mark on its own against the drum. The short notches were most of the
+   scale and all but invisible, so the drum read as five ticks with gaps rather
+   than as a scale — and the thing they are for, judging how far one drag has
+   turned it, wants every notch legible. */
 .barrel__tick {
     width: 1px;
     height: 8px;
     border-radius: 1px;
-    background: var(--border-strong);
+    background: var(--text-faint);
 }
-.barrel__cell.is-major .barrel__tick { height: 13px; background: var(--text-faint); }
+.barrel__cell.is-major .barrel__tick { height: 13px; }
 .barrel__text {
     font-family: var(--mono);
     font-size: calc(10.5px * var(--ui-scale));
@@ -3188,6 +3208,10 @@ a.btn { text-decoration: none; }
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
+/* Wide enough to hold whatever width Readout's `reserve` asks for, which only
+   the cards metering a live number ask for at all. `ch` is exact rather than
+   approximate because .readout__value is monospace and tabular. */
+.readout__num { display: inline-block; }
 .readout__unit { font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); margin-left: 3px; }
 .readout--good .readout__value { color: var(--good); }
 .readout--ok .readout__value { color: var(--text); }

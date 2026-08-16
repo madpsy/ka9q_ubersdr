@@ -175,6 +175,16 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
             NotificationCenter.default.addObserver(
                 self, selector: #selector(keyboardChanged(_:)), name: name, object: nil)
         }
+        // ...and again once the keyboard has finished arriving or leaving.
+        // WebKit reveals the focused field by scrolling its own scroll view, and
+        // does it after its own layout rather than with ours — so the correction
+        // has to happen at the end as well as during. See unscroll.
+        for name in [UIResponder.keyboardDidShowNotification,
+                     UIResponder.keyboardDidHideNotification,
+                     UIResponder.keyboardDidChangeFrameNotification] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(keyboardSettled), name: name, object: nil)
+        }
 
         host = HostChannel(webView: webView, instanceId: instanceId, label: label,
                            prefsScope: prefsScope)
@@ -272,25 +282,30 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
 
     /// Shorten the page to whatever the keyboard leaves, and put it back after.
     ///
-    /// The frame arrives in screen coordinates and is converted rather than
-    /// used directly: on an iPad the app may be in a Split View pane the
-    /// keyboard only partly covers, and the overlap is what matters. A
-    /// keyboard-will-hide gives a frame that is off the bottom of the screen,
-    /// so the same arithmetic answers zero without a special case.
+    /// Two coordinate spaces meet here and getting them wrong is silent. The
+    /// notification's frame is in *screen* coordinates; the view's bounds are
+    /// its own. Converting screen → window → view is the only route that holds
+    /// on an iPad, where the app's window need not fill the screen at all —
+    /// Split View, Slide Over, Stage Manager — so a comparison against the
+    /// screen answers "not covered" for a keyboard that is plainly covering the
+    /// page. Full screen on a phone it makes no difference, which is exactly
+    /// why the wrong version looked like it worked.
     ///
-    /// Animated alongside the keyboard, using the curve and duration it
-    /// published: the page shrinking a beat after the keys have arrived is more
-    /// noticeable than the shrink itself.
+    /// A will-hide notification gives a frame below the bottom of everything,
+    /// so the same arithmetic answers zero and no special case is needed.
+    ///
+    /// Animated with the curve and duration the keyboard published: the page
+    /// shrinking a beat after the keys have arrived is more noticeable than the
+    /// shrink itself.
     @objc private func keyboardChanged(_ note: Notification) {
         guard let webBottom = webBottom,
+              let window = view.window,
               let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
         else { return }
 
-        let inScreen = view.convert(view.bounds, to: nil)
-        let covered = max(0, inScreen.maxY - frame.minY)
-        // The home indicator's inset is already under the keyboard, so the two
-        // must not both be counted — this constraint is against the view's own
-        // bottom rather than the safe area, so there is nothing to subtract.
+        let inWindow = window.convert(frame, from: nil)
+        let inView = view.convert(inWindow, from: window)
+        let covered = max(0, view.bounds.maxY - inView.minY)
         let wanted = -covered
 
         guard abs(webBottom.constant - wanted) > 0.5 else { return }
@@ -301,7 +316,27 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         UIView.animate(withDuration: duration,
                        delay: 0,
                        options: UIView.AnimationOptions(rawValue: curve << 16),
-                       animations: { self.view.layoutIfNeeded() })
+                       animations: { self.view.layoutIfNeeded() },
+                       completion: { _ in self.unscroll() })
+    }
+
+    @objc private func keyboardSettled() { unscroll() }
+
+    /// Put back whatever WebKit scrolled to reveal the field.
+    ///
+    /// WKWebView reveals a focused input by scrolling its own scroll view, and
+    /// it does that whether or not the page needs it — this interface is
+    /// exactly one window tall, so there is nothing to scroll and the offset it
+    /// leaves is pure damage: the panel sits higher than it was, and stays
+    /// there after the keyboard has gone because nothing scrolls it back.
+    ///
+    /// Reset rather than prevented. The switch that would stop it is private
+    /// API and an app that used it could not be shipped; the offset is public
+    /// and belongs at zero on a page that does not scroll.
+    private func unscroll() {
+        let scroll = webView.scrollView
+        guard scroll.contentOffset.y != 0 || scroll.contentOffset.x != 0 else { return }
+        scroll.setContentOffset(.zero, animated: false)
     }
 
     @objc private func appWillResignActive() {

@@ -17,14 +17,13 @@
 //
 // `minimal` keeps the three markers and drops the type picker.
 
-import React, { useEffect, useMemo, useState } from '../react.js';
+import React from '../react.js';
 import { Empty, Icon } from '../components/ui.jsx';
 import NavTypes from '../components/NavTypes.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { getSessionId } from '../radio/session.js';
-import { callsignOf, countryOf } from '../lib/markerNav.js';
+import { countryOf } from '../lib/markerNav.js';
 import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
-import { onLookupResolved, peekLookup, startLookup } from '../radio/media/lookup.js';
+import useMarkerLookup from '../lib/useMarkerLookup.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
@@ -36,33 +35,11 @@ export default function MarkerNavPanel({ minimal }) {
     const [types] = useNavTypes();
     const markers = useMarkerNav(radio, types);
 
-    // The operator behind a callsign marker. Only for the one you are on:
-    // looking up the neighbours would be two more requests per turn of the dial.
+    // The operator behind a callsign marker, asked for and read in
+    // lib/useMarkerLookup.js — shared with the Multipad, whose drum shows the
+    // same marker and whose landing should mean the same thing.
     const current = markers.current;
-    // Not merely a callsign *type*: voice activity with no station decoded is
-    // labelled "Voice 20m", which is not something to look anybody up by.
-    const call = callsignOf(current);
-    const wantsLookup = !!(call && serverInfo && serverInfo.lookup_service);
-    useEffect(() => {
-        if (!wantsLookup) return;
-        // Ours, for the name and flag on this row.
-        startLookup(call, getSessionId());
-        // And the Callsign lookup panel, which is the one with the photo, the
-        // map and the rest of it. Only when the marker changes — landing on a
-        // station is the ask, not every render while you sit on it. The panel
-        // wins when it is open; otherwise v1's popup gets it, if that is. This
-        // never opens either of them. Marked automatic so a failure stays quiet:
-        // nobody asked for this one, so an error banner about it is noise.
-        if (!requestLookup(call, { auto: true })) lookupCallsign(call);
-    }, [wantsLookup, call]);
-
-    // The answer arrives a second or two after the request that asked for it.
-    const [tick, setTick] = useState(0);
-    useEffect(() => onLookupResolved(() => setTick((n) => n + 1)), []);
-    const lookup = useMemo(
-        () => (wantsLookup ? peekLookup(call) : null),
-        [wantsLookup, call, tick],
-    );
+    const { call, wantsLookup, lookup } = useMarkerLookup(current, serverInfo);
 
     const step = (m) => stepToMarker(radio.actions, m);
 

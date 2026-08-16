@@ -320,12 +320,24 @@ export function ColorPicker({
 
 // `tone` picks one of the themed colours; `color` overrides it outright, for
 // values that carry a continuous scale of their own (the SNR ramp).
-export function Readout({ label, value, unit, tone, color }) {
+//
+// `reserve` is a width in characters for the value, for a card metering
+// something live: a reading crossing -99.9 into -100.0 gains a character and
+// shoves its unit sideways. Opt-in per card rather than a width for all of
+// them, because the reservation is only ever the *widest* reading this
+// particular card can show — apply it where a number does not need it and the
+// unit is left stranded a gap away from a value that never grows into it.
+export function Readout({ label, value, unit, tone, color, reserve }) {
     return (
         <div className={`readout${tone ? ` readout--${tone}` : ''}`}>
             <div className="readout__label">{label}</div>
             <div className="readout__value" style={color ? { color } : undefined}>
-                {value}
+                <span
+                    className="readout__num"
+                    style={reserve ? { minWidth: `${reserve}ch` } : undefined}
+                >
+                    {value}
+                </span>
                 {unit && <span className="readout__unit">{unit}</span>}
             </div>
         </div>

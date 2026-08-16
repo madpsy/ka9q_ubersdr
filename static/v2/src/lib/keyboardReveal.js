@@ -124,13 +124,16 @@ export function startKeyboardReveal(win = window, doc = document) {
         const el = doc.activeElement;
         if (!isTextEntry(el) || typeof el.getBoundingClientRect !== 'function') return;
 
+        // The space the field has to be in. In the apps this is the whole
+        // window, because both of them shorten the page for the keyboard rather
+        // than letting it cover them (SystemBars.java, ReceiverViewController);
+        // in a browser it is the visual viewport, which is what shrinks there.
+        // Either way the field has to be inside it, and that is the same
+        // question — which is why there is no test here for "is a keyboard up".
+        // An earlier version had one, and it was exactly wrong: once the apps
+        // were fixed the window *was* the visible box, the test said "nothing
+        // to do", and the fields stayed under the keys.
         const view = visibleBox(win);
-        // Nothing is covering anything: no keyboard, or a keyboard the browser
-        // has already made room for by resizing. Either way there is nothing
-        // here to fix, and moving a scroller would only take the operator
-        // somewhere they did not ask to go.
-        if (view.bottom >= (win.innerHeight || 0) - 1 && view.top <= 1) return;
-
         const by = revealBy(el.getBoundingClientRect(), view);
         if (!by) return;
 

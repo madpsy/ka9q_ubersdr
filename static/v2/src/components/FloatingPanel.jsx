@@ -21,6 +21,8 @@ import { Icon, Menu, MenuItem } from './ui.jsx';
 import useWakeProps from '../radio/useWake.js';
 import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
 import { useHeaderFits } from '../lib/useHeaderFits.js';
+import { fitX, fitY } from '../lib/fitOnScreen.js';
+import { useViewport } from '../lib/useViewport.js';
 
 // What the pair costs this bar: two 22px buttons and the gap in front of them.
 // Wider than the docked header's, because a window's controls are — see
@@ -47,10 +49,23 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
     // other child is a fixed-width button, which is exactly the shape
     // measureSlack asks for. A dock section needs its title *button* instead —
     // see the note there.
+    // Where it is drawn, which is where it was put unless the page has since
+    // got smaller — see lib/fitOnScreen.js. The stored geometry is untouched,
+    // so a window pulled up by a keyboard goes back down when the keyboard
+    // does.
+    const viewport = useViewport();
+    const drawX = fitX(geom.x, geom.w, viewport.w);
+    const drawY = fitY(geom.y, geom.h, viewport.h);
+
     const head = useRef(null);
     const roomToZoom = useHeaderFits(head, '.floatwin__title', ZOOM_W);
     const { onMoveDown, onSizeDown, onMove, onEnd } = useFloatDrag({
-        geom,
+        // The drawn position, not the stored one: a window the viewport has
+        // pulled up is *there*, and a drag that began from where it is not
+        // would jump under the finger by however far it had been pulled.
+        // Dragging then writes that position down, which is right — a drag is
+        // somebody placing the window, whatever moved it beforehand.
+        geom: { ...geom, x: drawX, y: drawY },
         bounds,
         onChange: (patch) => setFloat(panel.id, patch),
         onRaise: () => raiseFloat(panel.id),
@@ -149,7 +164,7 @@ export default function FloatingPanel({ panel, geom, z, bounds, minimised }) {
     return (
         <section
             className={`floatwin${minimised ? ' floatwin--min' : ''}`}
-            style={{ left: geom.x, top: geom.y, width: geom.w, height: geom.h, zIndex: 10 + z, ...zoom.style }}
+            style={{ left: drawX, top: drawY, width: geom.w, height: geom.h, zIndex: 10 + z, ...zoom.style }}
             /* Hidden, not merely transparent: visibility takes it out of the
                accessibility tree and out of the tab order too, so a window on the
                strip cannot be tabbed into or read out from where it is not. */

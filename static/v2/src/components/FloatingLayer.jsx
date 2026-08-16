@@ -107,9 +107,22 @@ export default function FloatingLayer() {
                 setFloat(id, resolveAnchor(g, b));
                 continue;
             }
-            const x = Math.max(60 - g.w, Math.min(b.width - 60, g.x));
-            const y = Math.max(0, Math.min(b.height - 28, g.y));
-            if (x !== g.x || y !== g.y) setFloat(id, { x, y });
+            // Nothing else is written here, and that is the fix rather than an
+            // omission. This used to clamp every stored position into the layer
+            // whenever the layer resized, which is right for a window left
+            // off-screen by a browser window somebody made smaller and wrong for
+            // every other reason a layer resizes — above all the keyboard, which
+            // shortens the page in both apps (SystemBars.java,
+            // ReceiverViewController). A window pulled up to sit above the keys
+            // had its new position *saved*, so when the keyboard went it stayed
+            // there: a transient became a decision, and the only way back was to
+            // drag it down again.
+            //
+            // Being on screen is now a drawing question — see lib/fitOnScreen.js
+            // and FloatingPanel, which clamp where a window is painted and leave
+            // where it lives alone. That is reversible by construction: the
+            // keyboard closes, the layer grows, the window is painted where it
+            // was put.
         }
     }, [floats, setFloat, bounds.current && bounds.current.width, bounds.current && bounds.current.height]);
 

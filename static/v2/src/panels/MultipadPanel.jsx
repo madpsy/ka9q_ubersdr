@@ -28,6 +28,7 @@ import { Icon, Segmented, Slider } from '../components/ui.jsx';
 import { countryOf, shortMarkerName } from '../lib/markerNav.js';
 import { placeBarrelMarks } from '../lib/barrelMarks.js';
 import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
+import useMarkerLookup from '../lib/useMarkerLookup.js';
 import useTapThrough from '../lib/useTapThrough.js';
 import {
     clamp, countryFlag, formatFilterWidth, formatFreqShort, formatHz, snrColour, snrFraction,
@@ -297,6 +298,12 @@ function FreqWheel({ headRef, showBw }) {
     // there. See BarrelMarks.
     const [navTypes] = useNavTypes();
     const markers = useMarkerNav(radio, navTypes);
+    // Landing on a callsign marker looks the operator up, exactly as it does in
+    // the Markers panel — the drum is showing that marker, so this panel being
+    // the one on screen cannot be what decides whether the Callsign panel hears
+    // about it. Nothing is displayed from it here: the drum has room for a
+    // shortened name and no more. See lib/useMarkerLookup.js.
+    useMarkerLookup(markers.current, radio.serverInfo);
 
     // How wide the drum actually is, which decides how many marks fit and
     // whether any do. Measured rather than assumed: this panel is drawn in a

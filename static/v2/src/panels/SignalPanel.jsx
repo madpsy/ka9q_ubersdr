@@ -8,7 +8,7 @@ import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP } from '../radio/constants.js';
 import { Bar, Field, Readout, Slider } from '../components/ui.jsx';
 import {
-    audioLevelPercent, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
+    audioLevelPercent, padReading, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
     snrFraction, sUnitFraction, sUnitLabel, sUnitLabelAt,
     SNR_MAX, SNR_MIN, S_UNITS_MAX, S_UNITS_MIN,
 } from '../lib/format.js';
@@ -254,7 +254,9 @@ function SquelchControl({ minimal }) {
                 and dragging the slider to the floor is the same thing Off does. */}
             {!minimal && (
                 <div className="squelch-status">
-                    <span className={`badge badge--${!squelch.enabled ? 'idle' : open ? 'open' : 'closed'}`}>
+                    {/* badge--sq holds the width across all three words — see
+                        the spectrum toolbar's tag, which has the same problem. */}
+                    <span className={`badge badge--sq badge--${!squelch.enabled ? 'idle' : open ? 'open' : 'closed'}`}>
                         {!squelch.enabled ? 'DISABLED' : open ? 'OPEN' : 'CLOSED'}
                     </span>
                     <span className="squelch-status__snr">
@@ -587,8 +589,15 @@ export default function SignalPanel({ minimal }) {
             {!minimal && (
                 <>
                     <div className="readout-grid">
-                        <Readout label="Signal" value={power == null ? '—' : power.toFixed(1)} unit="dBFS" />
-                        <Readout label="Noise" value={m.noiseDensity == null ? '—' : m.noiseDensity.toFixed(1)} unit="dBFS" />
+                        {/* Both sit around -90 dBFS and wander past -100, which
+                            is a character more: the unit jumped sideways with
+                            every reading, and the digits shuffled under the
+                            sign. padReading holds the decimal point still and
+                            the reservation holds the box when there is nothing
+                            to show at all. Six is "-100.5". The other two cards
+                            do neither — see Readout. */}
+                        <Readout label="Signal" value={padReading(power)} unit="dBFS" reserve={6} />
+                        <Readout label="Noise" value={padReading(m.noiseDensity)} unit="dBFS" reserve={6} />
                         {/* Coloured on v1's ramp — red at 30 dB, green at 50 —
                             rather than on thresholds of 3 and 10 dB, which every
                             normal reading cleared, so the card was permanently

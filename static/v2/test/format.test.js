@@ -6,7 +6,7 @@
 
 const assert = require('assert');
 const {
-    formatFilterWidth, formatFreqExact, formatFreqShort, formatHz,
+    formatFilterWidth, formatFreqExact, formatFreqShort, formatHz, padReading,
 } = require('./.build/format.cjs');
 
 let pass = 0;
@@ -88,6 +88,42 @@ t('a passband with no width says nothing rather than zero', () => {
     assert.strictEqual(formatFilterWidth(0, 0), '');
     assert.strictEqual(formatFilterWidth(null, null), '');
     assert.strictEqual(formatFilterWidth(undefined, undefined), '');
+});
+
+// --- a live reading that holds its columns -----------------------------------
+//
+// The Signal and Noise cards meter something that wanders across -100 dBFS, and
+// the point of the padding is that the decimal point does not move when it does.
+
+const NBSP = '\u00a0';
+
+t('a reading past a hundred and one short of it are the same width', () => {
+    assert.strictEqual(padReading(-100.4), '-100.4');
+    assert.strictEqual(padReading(-90.5), `-${NBSP}90.5`);
+    assert.strictEqual(padReading(-90.5).length, padReading(-100.4).length);
+    // ...and the point lands in the same column, which is the part the eye reads.
+    assert.strictEqual(padReading(-90.5).indexOf('.'), padReading(-100.4).indexOf('.'));
+});
+
+t('the sign has a column of its own', () => {
+    // So a positive reading does not sit one place left of a negative one.
+    assert.strictEqual(padReading(9.5), `${NBSP}${NBSP}${NBSP}9.5`);
+    assert.strictEqual(padReading(9.5).length, padReading(-100.4).length);
+});
+
+t('the pad is a no-break space, because HTML eats the other kind', () => {
+    assert.ok(!padReading(-90.5).includes(' '), 'an ordinary space would collapse');
+});
+
+t('nothing to show is an em dash, not a padded zero', () => {
+    // The reservation on the card holds the width in this case — a placeholder
+    // padded out to six characters would read as a measurement of nothing.
+    for (const v of [null, undefined, NaN, Infinity]) assert.strictEqual(padReading(v), '\u2014');
+});
+
+t('a reading wider than the reservation is printed in full', () => {
+    // Never truncated: a meter that lies is worse than one that reflows.
+    assert.strictEqual(padReading(-1234.5), '-1234.5');
 });
 
 console.log(`\n${pass} ok`);

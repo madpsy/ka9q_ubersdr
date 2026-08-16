@@ -281,6 +281,32 @@ export function snrColourAt(fraction) {
     return snrColour(SNR_MIN + f * (SNR_MAX - SNR_MIN));
 }
 
+// A live decibel reading with its columns held still: "-100.4" and "- 90.5",
+// not "-100.4" and "-90.5".
+//
+// A reserved width alone stops the *unit* moving, which is what a card next to
+// it needs, but the number inside it still shuffles: the sign stays put, every
+// digit shifts one place, and a reading you are watching for a trend jitters
+// left and right as it crosses a hundred. Padding between the sign and the
+// digits is what makes the decimal point stand still, which is the column the
+// eye actually reads a meter by.
+//
+// The pad is a no-break space rather than an ordinary one because HTML collapses
+// a run of spaces and drops a leading one — and because in JetBrains Mono, which
+// is what these readings are set in, U+00A0 is a digit wide like everything
+// else. The sign gets a column of its own for the same reason the digits do.
+// Written as an escape rather than typed: a literal U+00A0 in source is a
+// space that looks like every other space, and the next person to touch this
+// line would replace it with one.
+const PAD = '\u00a0';
+
+export function padReading(v, intDigits = 3, decimals = 1) {
+    if (v == null || !Number.isFinite(v)) return '—';
+    const body = Math.abs(v).toFixed(decimals);
+    const whole = body.indexOf('.') === -1 ? body.length : body.indexOf('.');
+    return (v < 0 ? '-' : PAD) + PAD.repeat(Math.max(0, intDigits - whole)) + body;
+}
+
 // Audio level, on v1's VU scale (app.js updateVUMeter).
 //
 // The player reports a linear RMS amplitude, where ordinary speech sits around

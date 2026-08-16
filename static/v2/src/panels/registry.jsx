@@ -647,11 +647,14 @@ export const PANELS = [
     // No `requires`: the panel is shown whether or not the receiver runs any
     // filters, and DspControl says which it is. A receiver with none gets a
     // panel with a line explaining that, not a panel that is missing.
+    // Minimal: the switches — blanker, client NR, server filter and its chips
+    // — without the tuning sliders under them.
     {
         id: 'noise',
         title: 'Noise reduction',
         icon: <Icon.Waves />,
         dock: 'right',
+        minimal: true,
         Component: NoisePanel,
     },
     { id: 'filters', title: 'Audio filters', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: AudioFiltersPanel },

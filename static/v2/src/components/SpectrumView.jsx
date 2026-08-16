@@ -333,6 +333,35 @@ function NoiseReductionTag() {
     );
 }
 
+// The client noise stage, tagged exactly as the server's insert is: seeing at
+// a glance that the audio is being processed, and one click to stop it. The
+// tooltips say "in this client" because the tag next door can read "NR2" for
+// the server's filter — two NR tags with nothing saying which machine each
+// lives on would be a row that needs the manual.
+function ClientNoiseTags() {
+    const { noise, actions } = useRadio();
+    const on = [
+        noise.nb.enabled && ['NB', 'nb', 'Noise blanker running in this client'],
+        noise.nr.enabled && ['NR', 'nr', 'Noise reduction running in this client'],
+    ].filter(Boolean);
+    if (!on.length) return null;
+    return (
+        <>
+            {on.map(([name, key, what]) => (
+                <button
+                    key={name}
+                    type="button"
+                    className="tag tag--button tag--accent"
+                    title={`${what} — click to switch it off`}
+                    onClick={() => actions.setNoise({ [key]: { enabled: false } })}
+                >
+                    {name}
+                </button>
+            ))}
+        </>
+    );
+}
+
 // The client-side audio filters that are on. Just their names — the settings
 // live in the Audio filters panel; this is here so you can see at a glance that
 // the audio is being shaped, without hunting for which panel did it.
@@ -2296,6 +2325,10 @@ export default function SpectrumView() {
                         {!mobile && room.offset && <FreqOffsetTag />}
                         <SquelchTag />
                         <NoiseReductionTag />
+                        {/* Client stage after the server's, matching the audio
+                            path: the receiver's insert ran first, these run on
+                            what it sent. */}
+                        <ClientNoiseTags />
                         <FilterTags />
                         <ControlTags />
                         <ClipTag />

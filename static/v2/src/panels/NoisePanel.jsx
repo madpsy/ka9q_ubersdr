@@ -1,7 +1,7 @@
 // Noise: what can be done about it, in two places.
 //
 // The split that matters here is *where the work happens*, so that is the
-// split the panel wears. "In this browser" is client-side DSP on the decoded
+// split the panel wears. "In this client" is DSP on the decoded
 // audio — it exists on every receiver, costs the server nothing, and keeps
 // working when the instance offers no filters at all. "On the receiver" is the
 // server's own DSP inserts (DspControl), which act on the channel before the
@@ -26,7 +26,11 @@ import {
     NB_THRESHOLD_MAX, NB_THRESHOLD_MIN, NB_WIDTH_MAX, NB_WIDTH_MIN,
 } from '../lib/noiseBlanker.js';
 
-export default function NoisePanel() {
+// `minimal` keeps every switch — blanker, client NR, and the server insert
+// with its filter chips — and drops the sliders and the notes. Which stages
+// are working is what you change while listening; how hard they work is set
+// once against a band and left.
+export default function NoisePanel({ minimal }) {
     const { noise, dsp, actions } = useRadio();
     const { nb, nr } = noise;
     const setNb = (patch) => actions.setNoise({ nb: patch });
@@ -39,7 +43,7 @@ export default function NoisePanel() {
 
     return (
         <div className="stack">
-            <div className="section-label"><span>In this browser</span></div>
+            <div className="section-label"><span>In this client</span></div>
 
             <Field label="Noise blanker" hint={nb.enabled ? 'on' : 'off'} inline>
                 <Switch
@@ -48,7 +52,7 @@ export default function NoisePanel() {
                     title="Cut impulse noise — ignition, power-line arcing, fences"
                 />
             </Field>
-            {nb.enabled && (
+            {!minimal && nb.enabled && (
                 <>
                     <Field label="Threshold" hint={`${nb.thresholdDb} dB`}>
                         <Slider
@@ -84,7 +88,7 @@ export default function NoisePanel() {
                     title="Spectral subtraction against steady band noise"
                 />
             </Field>
-            {nr.enabled && (
+            {!minimal && nr.enabled && (
                 <>
                     <Field label="Strength" hint={`${nr.strength}%`}>
                         <Slider
@@ -137,7 +141,7 @@ export default function NoisePanel() {
                 <>
                     <div className="divider" />
                     <div className="section-label"><span>On the receiver</span></div>
-                    <DspControl />
+                    <DspControl minimal={minimal} />
                 </>
             )}
         </div>

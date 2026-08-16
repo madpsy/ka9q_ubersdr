@@ -76,7 +76,11 @@ function Param({ param, value, onChange }) {
     );
 }
 
-export default function DspControl() {
+// `minimal` keeps the switch and the filter chips — on, off, and which — and
+// drops the description, the parameters and their Defaults reset. The chips
+// stay because on a phone "NR3 instead of NR2" is a real mid-session change;
+// the parameters are tuning, done once at the desk.
+export default function DspControl({ minimal }) {
     const { dsp, actions, running } = useRadio();
 
     // Nothing is known until a session is up and the server has answered.
@@ -123,17 +127,17 @@ export default function DspControl() {
                 ))}
             </div>
 
-            {schema && schema.description && (
+            {!minimal && schema && schema.description && (
                 <div className="param-help">{schema.description}</div>
             )}
 
             {/* Parameters belong to the running filter, so they are only shown
                 — and only accepted by the server — while the insert is on. */}
-            {dsp.enabled && params.length === 0 && (
+            {!minimal && dsp.enabled && params.length === 0 && (
                 <div className="note note--tight">This filter has no adjustable settings.</div>
             )}
 
-            {dsp.enabled && params.length > 0 && (
+            {!minimal && dsp.enabled && params.length > 0 && (
                 <div className="section-label">
                     <span>Settings</span>
                     <button type="button" className="chip chip--button" onClick={actions.resetDspParams}>
@@ -142,7 +146,7 @@ export default function DspControl() {
                 </div>
             )}
 
-            {dsp.enabled && params.map((p) => (
+            {!minimal && dsp.enabled && params.map((p) => (
                 <Param
                     key={p.name}
                     param={p}

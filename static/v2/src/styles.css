@@ -2152,19 +2152,21 @@ a.btn { text-decoration: none; }
 .squelch-row .slider { flex: 1; min-width: 0; }
 .squelch-row .chip { flex: none; margin-left: 0; }
 
-/* A segmented option that needs something from the operator before it can do
-   anything — today the RM Noise engine with no account entered. The top bar's
-   Stop colour, because that is what red already means in this interface: not
-   "broken", but "this one is waiting on you". Selected, it goes back to the
-   ordinary active styling, since by then the panel below it is asking the
-   question and the chip repeating itself would be shouting. */
-.segmented__item--alert:not(.is-active) {
+/* A segmented option that has been chosen and cannot yet do its job — today
+   the RM Noise engine selected with no account entered. The top bar's Stop
+   colour, because that is what red already means here: not "broken", but "this
+   one is waiting on you".
+   Both selectors, and the second is the one that matters: .segmented__item
+   .is-active carries more specificity than a single class, so the ordinary
+   selected styling would otherwise paint straight over this. */
+.segmented__item--alert,
+.segmented__item--alert.is-active {
     background: var(--bad);
     border-color: var(--bad);
     color: #150406;
 }
 @media (hover: hover) {
-    .segmented__item--alert:not(.is-active):hover { filter: brightness(1.08); }
+    .segmented__item--alert:hover { filter: brightness(1.08); background: var(--bad); }
 }
 
 /* One stage of the Noise panel — the blanker, the client NR, the receiver's

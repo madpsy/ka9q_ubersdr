@@ -431,16 +431,17 @@ export default function NoisePanel({ minimal }) {
                         {
                             value: 'rmn',
                             label: 'RMN',
-                            // Red, in the top bar's Stop colour, until there is
-                            // a login to use. It is the one engine here that
-                            // cannot simply be switched on: without an account
-                            // it selects a stage that passes audio through, and
-                            // the only way to find that out was to choose it
-                            // and notice nothing happened. Red is the interface
-                            // already saying "this one needs you" everywhere
-                            // else, so it says it here.
-                            className: rmCredentials().username && rmCredentials().password
-                                ? undefined : 'segmented__item--alert',
+                            // Red, in the top bar's Stop colour, when it is the
+                            // engine *chosen* and there is no login to run it
+                            // with. That is the state worth shouting about: the
+                            // stage is selected, the toolbar says NR, and the
+                            // audio is going through untouched until somebody
+                            // signs in. Unchosen it stays an ordinary option —
+                            // colouring a choice nobody has made yet would be
+                            // an alarm about a situation that does not exist.
+                            className: nr.type === 'rmn'
+                                && !(rmCredentials().username && rmCredentials().password)
+                                ? 'segmented__item--alert' : undefined,
                             title: rmCredentials().username
                                 ? 'rmnoise.com — an AI denoiser over the network'
                                 : 'rmnoise.com — an AI denoiser over the network. Needs an account: choose this to enter it',

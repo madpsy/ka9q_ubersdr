@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Field, Icon, Modal, Segmented, Slider } from '../components/ui.jsx';
-import DspControl from './DspControl.jsx';
 import {
     listOutputDevices, micPermission, sinkLabel, sinkSupport, unlockDeviceLabels,
 } from '../lib/audioSinks.js';
@@ -253,8 +252,14 @@ function OutputDevicePicker() {
     );
 }
 
-// `minimal` keeps noise reduction — the one thing here you ride while
-// listening — and drops volume, channel and buffer, which are set once.
+// `minimal` keeps the volume and the channel — how loud, and out of which ear —
+// and drops the output device, the buffer and the stream format, which are set
+// once a session and not while listening.
+//
+// It used to keep noise reduction and drop all three of those, because noise
+// reduction was in this panel and was the only thing in it worth riding. That
+// is now its own panel (NoisePanel), so the cut-down view here is the two
+// controls somebody actually reaches for mid-session.
 //
 // Squelch used to live here and is now in the Signal panel, beside the SNR
 // meter it is a threshold on: the number you set it against is drawn there, and
@@ -265,43 +270,44 @@ export default function AudioPanel({ minimal }) {
 
     return (
         <div className="stack">
+            {/* `ducked` is not `muted`, and the difference is the whole
+                point of it: something else — a transmitting rig, an
+                extension speaking — has silenced the audio for a moment
+                without touching the setting the button shows. Saying so
+                here is what stops "the audio stopped and the volume
+                control looks fine" from reading as a broken receiver. */}
+            <div className={`volume-row${audio.ducked ? ' is-ducked' : ''}`}>
+                <Button
+                    variant="ghost"
+                    icon={audio.muted || audio.ducked ? <Icon.Mute /> : <Icon.Volume />}
+                    title={audio.ducked
+                        ? 'Silenced while the radio is transmitting — your mute is unchanged'
+                        : (audio.muted ? 'Unmute' : 'Mute')}
+                    active={audio.muted}
+                    onClick={actions.toggleMute}
+                />
+                {/* Disabled, not hidden — see the top bar. */}
+                <Slider
+                    value={Math.round(audio.volume * 100)}
+                    min={0}
+                    max={100}
+                    disabled={audio.muted}
+                    onChange={(v) => actions.setVolume(v / 100)}
+                />
+                <span className={`volume-row__value${audio.muted || audio.ducked ? ' is-muted' : ''}`}>
+                    {Math.round(audio.volume * 100)}
+                </span>
+            </div>
+            {audio.ducked && !audio.muted && (
+                <div className="note note--tight">
+                    Silenced while the radio transmits. Your mute and volume are untouched.
+                </div>
+            )}
+
+            <ChannelPicker />
+
             {!minimal && (
                 <>
-                    {/* `ducked` is not `muted`, and the difference is the whole
-                        point of it: something else — a transmitting rig, an
-                        extension speaking — has silenced the audio for a moment
-                        without touching the setting the button shows. Saying so
-                        here is what stops "the audio stopped and the volume
-                        control looks fine" from reading as a broken receiver. */}
-                    <div className={`volume-row${audio.ducked ? ' is-ducked' : ''}`}>
-                        <Button
-                            variant="ghost"
-                            icon={audio.muted || audio.ducked ? <Icon.Mute /> : <Icon.Volume />}
-                            title={audio.ducked
-                                ? 'Silenced while the radio is transmitting — your mute is unchanged'
-                                : (audio.muted ? 'Unmute' : 'Mute')}
-                            active={audio.muted}
-                            onClick={actions.toggleMute}
-                        />
-                        {/* Disabled, not hidden — see the top bar. */}
-                        <Slider
-                            value={Math.round(audio.volume * 100)}
-                            min={0}
-                            max={100}
-                            disabled={audio.muted}
-                            onChange={(v) => actions.setVolume(v / 100)}
-                        />
-                        <span className={`volume-row__value${audio.muted || audio.ducked ? ' is-muted' : ''}`}>
-                            {Math.round(audio.volume * 100)}
-                        </span>
-                    </div>
-                    {audio.ducked && !audio.muted && (
-                        <div className="note note--tight">
-                            Silenced while the radio transmits. Your mute and volume are untouched.
-                        </div>
-                    )}
-
-                    <ChannelPicker />
                     <OutputDevicePicker />
 
                     <Field label="Buffer" hint={`${Math.round(audio.bufferSec * 1000)} ms`}>
@@ -319,13 +325,8 @@ export default function AudioPanel({ minimal }) {
                     </div>
 
                     <FormatPicker />
-
-                    <div className="divider" />
                 </>
             )}
-
-            <DspControl />
-
         </div>
     );
 }

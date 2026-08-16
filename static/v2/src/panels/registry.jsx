@@ -59,6 +59,7 @@ import BookmarksPanel from './BookmarksPanel.jsx';
 import LocalBookmarksPanel from './LocalBookmarksPanel.jsx';
 import AudioPanel from './AudioPanel.jsx';
 import AudioFiltersPanel from './AudioFiltersPanel.jsx';
+import NoisePanel from './NoisePanel.jsx';
 import MediaSessionPanel from './MediaSessionPanel.jsx';
 import SignalPanel from './SignalPanel.jsx';
 import AnnouncementsPanel from './AnnouncementsPanel.jsx';
@@ -633,10 +634,26 @@ export const PANELS = [
         minimal: true,
         Component: ClocksPanel,
     },
-    // Minimal: noise reduction. Volume, channel and buffer are set once a
-    // session; that one is worked at while you listen. Squelch is in Signal,
-    // next to the SNR meter it thresholds.
+    // Minimal: volume and channel — the two worked at while listening. The
+    // device, the buffer and the stream format are set once a session, and
+    // noise reduction is its own panel below. Squelch is in Signal, next to the
+    // SNR meter it thresholds.
     { id: 'audio', title: 'Audio', icon: <Icon.Volume />, dock: 'right', minimal: true, Component: AudioPanel },
+    // Directly under Audio, which is where it was until it became a panel — see
+    // NoisePanel for why it moved. Registered here rather than appended, so an
+    // existing layout gets it in the same place a new one does: LayoutContext
+    // places a panel it has never seen beside its registry siblings.
+    //
+    // No `requires`: the panel is shown whether or not the receiver runs any
+    // filters, and DspControl says which it is. A receiver with none gets a
+    // panel with a line explaining that, not a panel that is missing.
+    {
+        id: 'noise',
+        title: 'Noise reduction',
+        icon: <Icon.Waves />,
+        dock: 'right',
+        Component: NoisePanel,
+    },
     { id: 'filters', title: 'Audio filters', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: AudioFiltersPanel },
     // Spoken frequency and mode, for operating without watching the screen.
     // Ships collapsed and switched off: a receiver that starts talking on its

@@ -79,7 +79,7 @@ export const GROUPS = [
         // because it carries the squelch, which is an audio gate — see
         // SignalPanel.
         panels: [
-            'audio', 'filters', 'signal', 'scope',
+            'audio', 'noise', 'filters', 'signal', 'scope',
             'recorder', 'mediasession', 'announcements',
         ],
     },

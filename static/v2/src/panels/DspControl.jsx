@@ -82,25 +82,17 @@ export default function DspControl() {
     // Nothing is known until a session is up and the server has answered.
     if (!running || dsp.schemas === null) {
         return (
-            <>
-                <div className="divider" />
-                <div className="section-label"><span>Noise reduction</span></div>
-                <div className="note note--tight">
-                    {running ? 'Reading filters from the receiver…' : 'Start the receiver to load noise reduction.'}
-                </div>
-            </>
+            <div className="note note--tight">
+                {running ? 'Reading filters from the receiver…' : 'Start the receiver to load noise reduction.'}
+            </div>
         );
     }
 
     if (dsp.schemas.length === 0) {
         return (
-            <>
-                <div className="divider" />
-                <div className="section-label"><span>Noise reduction</span></div>
-                <div className="note note--tight">
-                    {dsp.unavailableReason || 'Not available on this receiver.'}
-                </div>
-            </>
+            <div className="note note--tight">
+                {dsp.unavailableReason || 'Not available on this receiver.'}
+            </div>
         );
     }
 
@@ -110,16 +102,6 @@ export default function DspControl() {
 
     return (
         <>
-            <div className="divider" />
-            <div className="section-label">
-                <span>Noise reduction</span>
-                {dsp.enabled && params.length > 0 && (
-                    <button type="button" className="chip chip--button" onClick={actions.resetDspParams}>
-                        Defaults
-                    </button>
-                )}
-            </div>
-
             <Field label="Filter" hint={dsp.enabled ? 'on' : 'off'} inline>
                 <Switch
                     checked={dsp.enabled}
@@ -149,6 +131,15 @@ export default function DspControl() {
                 — and only accepted by the server — while the insert is on. */}
             {dsp.enabled && params.length === 0 && (
                 <div className="note note--tight">This filter has no adjustable settings.</div>
+            )}
+
+            {dsp.enabled && params.length > 0 && (
+                <div className="section-label">
+                    <span>Settings</span>
+                    <button type="button" className="chip chip--button" onClick={actions.resetDspParams}>
+                        Defaults
+                    </button>
+                </div>
             )}
 
             {dsp.enabled && params.map((p) => (

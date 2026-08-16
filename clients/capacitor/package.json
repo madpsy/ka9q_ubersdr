@@ -1,6 +1,6 @@
 {
   "name": "ubersdr-mobile",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "UberSDR Android client — the chooser and the v2 web UI in a Capacitor shell",
   "author": "MadPsy",

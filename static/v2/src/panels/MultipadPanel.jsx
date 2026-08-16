@@ -589,15 +589,22 @@ function NoiseSelect() {
     // would otherwise keep the entry here, where there is nothing to type into
     // and nothing that retries. Sorting that out is the Noise panel's job.
     //
-    // Shown regardless when it is what is already running, because a dropdown
-    // that cannot say what the receiver is doing is worse than one with an
-    // extra entry.
+    // Shown regardless when it is what is actually *running* — a dropdown that
+    // cannot say what the receiver is doing is worse than one with an extra
+    // entry. Running, not merely selected: with a refused login the engine is
+    // chosen and doing nothing, and "it is selected" was enough to keep the
+    // entry on screen through exactly the failure this hides it for.
     const rmCreds = rmCredentials();
     const rmUsable = !!rmCreds.username && !!rmCreds.password && !rm.authFailed;
-    const rmRunning = noise.nr.enabled && noise.nr.type === 'rmn';
+    const showRmn = rmUsable || rm.ready;
 
     const clientType = ['nr2', 'rmn'].includes(noise.nr.type) ? noise.nr.type : 'lsa';
-    const value = noise.nr.enabled
+    // Chosen but unable to run: no entry to point at, and nothing is being done
+    // to the audio, so this reads "off" rather than naming an engine that is
+    // passing everything straight through. The Noise panel is where that gets
+    // sorted out, and it says so in red.
+    const rmDead = clientType === 'rmn' && !showRmn;
+    const value = noise.nr.enabled && !rmDead
         ? `client:${clientType}`
         : dsp.enabled && dsp.filter ? dsp.filter : 'off';
 
@@ -627,7 +634,7 @@ function NoiseSelect() {
             <optgroup label="This client">
                 <option value="client:lsa" title="MMSE-LSA over tracked minima — best on voice">LSA</option>
                 <option value="client:nr2" title="Classic spectral subtraction, long window">NR</option>
-                {(rmUsable || rmRunning) && (
+                {showRmn && (
                     <option
                         value="client:rmn"
                         title="rmnoise.com — an AI denoiser over the network"

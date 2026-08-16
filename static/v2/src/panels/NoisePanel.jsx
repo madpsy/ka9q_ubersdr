@@ -57,9 +57,12 @@ export default function NoisePanel({ minimal }) {
         <div className="stack">
             <div className="section-label"><span>In this client</span></div>
 
+            {/* The hint is the pulse counter — "cut 3 421" — which is the
+                readout the threshold below is set against. Terse because the
+                hint shares its row with the label and the switch. */}
             <Field
                 label="Noise blanker"
-                hint={nb.enabled ? `${nbCount} pulse${nbCount === 1 ? '' : 's'} cut` : 'off'}
+                hint={nb.enabled ? `cut ${nbCount}` : 'off'}
                 inline
             >
                 <Switch

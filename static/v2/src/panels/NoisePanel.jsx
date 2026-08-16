@@ -139,8 +139,8 @@ function NbScope({ thresholdDb }) {
 // it, so moving between the two interfaces does not mean typing it again. That
 // is a real convenience and a real exposure, and the note under the fields
 // says so rather than leaving somebody to assume otherwise.
-function RmNoiseControls({ minimal }) {
-    const { tuning, actions } = useRadio();
+function RmNoiseControls() {
+    const { tuning } = useRadio();
     const rm = getRmNoise();
     const saved = rmCredentials();
     const [, bump] = useState(0);
@@ -167,43 +167,9 @@ function RmNoiseControls({ minimal }) {
         return () => clearInterval(t);
     }, [rm, rm.ready]);
 
-    const supported = rmModeSupported(tuning.mode);
-
-    // Switching it off on an unsupported mode is RadioContext's job, because
-    // this panel is not always mounted to do it. What is left here is saying
-    // so, which only makes sense where somebody is looking.
-    useEffect(() => {
-        if (!supported && (rm.ready || rm.connecting)) {
-            rm.disconnect();      // not manual: the mode may come back
-        }
-    }, [supported]);
-
-    // Choosing this engine is the whole instruction, wherever it was chosen —
-    // this panel, or the Multipad's dropdown, which has no room to ask for a
-    // password. A login is only ever stored once it has worked, so if there is
-    // one there is nothing else to say: connect. Without one, the fields below
-    // are the next thing on screen.
-    //
-    // Once, and only once. Three separate things have to stop it trying again,
-    // and each of them was a way of hammering a rate-limited endpoint:
-    //
-    //   * `tried` — a single attempt per time this engine is selected. The
-    //     effect's own dependencies change as the attempt progresses, and
-    //     without this the failure of one attempt is the trigger for the next.
-    //   * `rm.stopped` — the operator pressed Disconnect. That means stay
-    //     disconnected, not "until the next render".
-    //   * `rm.authFailed` — rmnoise.com said no. The same password will be
-    //     refused again, and saying so twenty times is how an IP gets blocked.
-    //     Only pressing Connect clears it, because only that comes with the
-    //     operator having looked at what they typed.
-    const tried = useRef(false);
-    useEffect(() => {
-        if (!supported || rm.ready || rm.connecting) return;
-        if (tried.current || rm.stopped || rm.authFailed) return;
-        if (!saved.username || !saved.password) return;
-        tried.current = true;
-        rm.connect({ mode: tuning.mode }).catch(() => { /* the bridge keeps the message */ });
-    }, [supported, rm.ready, rm.connecting, saved.username, saved.password]);
+    // Connecting when the engine is selected is RadioContext's job — see the
+    // note there. What this button does is the explicit version, with whatever
+    // has just been typed into the fields.
 
     const status = rm.ready ? 'connected'
         : rm.connecting ? 'connecting…'
@@ -215,7 +181,6 @@ function RmNoiseControls({ minimal }) {
     // credentials that follow the operator to every other receiver, and would
     // arm the automatic connect above with something already known to fail.
     const connect = async () => {
-        tried.current = true;
         // Blank means the stored one, which is the only one that has ever been
         // accepted; typing replaces it.
         const pass = password || saved.password;
@@ -278,7 +243,7 @@ function RmNoiseControls({ minimal }) {
                 </Field>
             )}
 
-            {!minimal && !rm.ready && (
+            {!rm.ready && (
                 <>
                     {/* AutoFill is switched off on both, and the fields are
                         not named as a login. They are an account with
@@ -466,7 +431,19 @@ export default function NoisePanel({ minimal }) {
                         {
                             value: 'rmn',
                             label: 'RMN',
-                            title: 'rmnoise.com — an AI denoiser over the network. Needs an account, and only works on SSB and CW',
+                            // Red, in the top bar's Stop colour, until there is
+                            // a login to use. It is the one engine here that
+                            // cannot simply be switched on: without an account
+                            // it selects a stage that passes audio through, and
+                            // the only way to find that out was to choose it
+                            // and notice nothing happened. Red is the interface
+                            // already saying "this one needs you" everywhere
+                            // else, so it says it here.
+                            className: rmCredentials().username && rmCredentials().password
+                                ? undefined : 'segmented__item--alert',
+                            title: rmCredentials().username
+                                ? 'rmnoise.com — an AI denoiser over the network'
+                                : 'rmnoise.com — an AI denoiser over the network. Needs an account: choose this to enter it',
                         },
                     ]}
                 />
@@ -474,7 +451,7 @@ export default function NoisePanel({ minimal }) {
             {/* Outside the `enabled` test on purpose: this is what explains an
                 engine that has just switched *itself* off, so it has to be
                 visible at exactly the moment its controls are not. */}
-            {nr.type === 'rmn' && !rmModeSupported(tuning.mode) && (
+            {!minimal && nr.type === 'rmn' && !rmModeSupported(tuning.mode) && (
                 <div className="note note--warn note--tight">
                     RM Noise only works on SSB and CW — the model is trained on voice
                     bandwidth, and on {String(tuning.mode).toUpperCase()} what comes back is
@@ -482,7 +459,12 @@ export default function NoisePanel({ minimal }) {
                 </div>
             )}
 
-            {nr.enabled && nr.type === 'rmn' && <RmNoiseControls minimal={minimal} />}
+            {/* Nothing of this in the cut-down view, which is switches and
+                pickers only — the same rule the other two engines follow, where
+                minimal drops their sliders and notes. The connection itself is
+                RadioContext's, so a cut-down panel still starts it; what is
+                dropped here is the reading of it, not the working of it. */}
+            {!minimal && nr.enabled && nr.type === 'rmn' && <RmNoiseControls />}
 
             {!minimal && nr.enabled && nr.type !== 'rmn' && (
                 <>

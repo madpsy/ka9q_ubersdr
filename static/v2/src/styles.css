@@ -2152,6 +2152,21 @@ a.btn { text-decoration: none; }
 .squelch-row .slider { flex: 1; min-width: 0; }
 .squelch-row .chip { flex: none; margin-left: 0; }
 
+/* A segmented option that needs something from the operator before it can do
+   anything — today the RM Noise engine with no account entered. The top bar's
+   Stop colour, because that is what red already means in this interface: not
+   "broken", but "this one is waiting on you". Selected, it goes back to the
+   ordinary active styling, since by then the panel below it is asking the
+   question and the chip repeating itself would be shouting. */
+.segmented__item--alert:not(.is-active) {
+    background: var(--bad);
+    border-color: var(--bad);
+    color: #150406;
+}
+@media (hover: hover) {
+    .segmented__item--alert:not(.is-active):hover { filter: brightness(1.08); }
+}
+
 /* One stage of the Noise panel — the blanker, the client NR, the receiver's
    own inserts. Boxed rather than separated by rules: the stages each have a
    switch and a handful of sliders, and a flat list of those reads as one long

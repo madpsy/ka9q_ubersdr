@@ -29,6 +29,7 @@ import { countryOf, shortMarkerName } from '../lib/markerNav.js';
 import { placeBarrelMarks } from '../lib/barrelMarks.js';
 import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
 import useMarkerLookup from '../lib/useMarkerLookup.js';
+import { rmCredentials } from '../lib/rmnoise.js';
 import useTapThrough from '../lib/useTapThrough.js';
 import {
     clamp, countryFlag, formatFilterWidth, formatFreqShort, formatHz, snrColour, snrFraction,
@@ -573,6 +574,15 @@ function NoiseSelect() {
     const { dsp, noise, actions, running } = useRadio();
     if (!running) return null;
     const server = dsp.schemas && dsp.schemas.length > 0 ? dsp.schemas : [];
+    // Only once there is a login to use. The pad has no room to ask for one,
+    // so an RMN offered here to somebody without an account is an option that
+    // can only fail quietly — the stage would sit passing audio through while
+    // the tag said it was on. Once the Noise panel has been used once, it is a
+    // perfectly good place to switch back to. Shown regardless when it is what
+    // is already running, because a dropdown that cannot say what the receiver
+    // is doing is worse than one with an extra entry.
+    const rmReady = !!rmCredentials().username && !!rmCredentials().password;
+    const rmRunning = noise.nr.enabled && noise.nr.type === 'rmn';
 
     const clientType = ['nr2', 'rmn'].includes(noise.nr.type) ? noise.nr.type : 'lsa';
     const value = noise.nr.enabled
@@ -605,12 +615,14 @@ function NoiseSelect() {
             <optgroup label="This client">
                 <option value="client:lsa" title="MMSE-LSA over tracked minima — best on voice">LSA</option>
                 <option value="client:nr2" title="Classic spectral subtraction, long window">NR</option>
-                {/* Picking it here is enough to start it, provided the login
-                    has been given once in the Noise panel — see RmNoiseControls.
-                    A dropdown on a thumb-sized pad is no place for a password,
-                    but it is a perfectly good place to switch between engines
-                    that are already set up. */}
-                <option value="client:rmn" title="rmnoise.com — an AI denoiser over the network, SSB and CW only">RMN</option>
+                {(rmReady || rmRunning) && (
+                    <option
+                        value="client:rmn"
+                        title="rmnoise.com — an AI denoiser over the network"
+                    >
+                        RMN
+                    </option>
+                )}
             </optgroup>
             {server.length > 0 && (
                 <optgroup label="On the receiver">

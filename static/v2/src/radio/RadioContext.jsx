@@ -19,7 +19,7 @@ import { localBookmarks as localBookmarkStore, onLocalBookmarksChanged } from '.
 import { FILTER_DEFAULTS } from './audio-filters.js';
 import { NB_DEFAULTS } from '../lib/noiseBlanker.js';
 import { NR_DEFAULTS } from '../lib/nr.js';
-import { getRmNoise, rmModeSupported } from '../lib/rmnoise.js';
+import { getRmNoise, rmCredentials, rmModeSupported } from '../lib/rmnoise.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
     SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
@@ -571,6 +571,29 @@ export function RadioProvider({ children }) {
         // usually not on screen when the mode changes.
         getRmNoise().matchModel(tuning.mode);
     }, [tuning.mode, noise.nr.enabled, noise.nr.type]);
+
+    // Choosing the network engine is the instruction to connect, wherever it
+    // was chosen from: the Noise panel, its cut-down view, or the Multipad's
+    // dropdown. It lives here rather than in the panel because the panel is not
+    // always mounted to do it — the same lesson as the mode gate above, and as
+    // the marker lookup elsewhere.
+    //
+    // Once per selection. Three things stop it trying again, and each was a way
+    // of hammering an endpoint that rate-limits by IP: `rmTried` for the
+    // attempt itself, `stopped` for the operator having pressed Disconnect, and
+    // `authFailed` for rmnoise.com having said no to this password.
+    const rmTried = useRef(false);
+    useEffect(() => {
+        const wanted = noise.nr.enabled && noise.nr.type === 'rmn'
+            && rmModeSupported(tuning.mode);
+        const rm = getRmNoise();
+        if (!wanted) { rmTried.current = false; return; }
+        if (rmTried.current || rm.ready || rm.connecting || rm.stopped || rm.authFailed) return;
+        const { username, password } = rmCredentials();
+        if (!username || !password) return;      // the panel asks for them
+        rmTried.current = true;
+        rm.connect({ mode: tuning.mode }).catch(() => { /* the bridge keeps the message */ });
+    }, [noise.nr.enabled, noise.nr.type, tuning.mode]);
 
     // Persist the parts of the session worth restoring.
     useEffect(() => {

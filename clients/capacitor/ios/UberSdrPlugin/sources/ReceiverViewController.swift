@@ -19,6 +19,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     private let instanceId: String
     private let label: String
     private let proxy: LocalProxy
+    /// The web view's bottom, held so a keyboard can shorten it. See viewDidLoad.
+    private var webBottom: NSLayoutConstraint?
     private let product: String
     private let password: String?
     /// What the OS has already decided about notifications: "granted",
@@ -145,12 +147,34 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         // purpose: the home indicator floats over the waterfall harmlessly,
         // and insetting there would leave a dark band under a panel that is
         // meant to reach the edge.
+        //
+        // ...except while a keyboard is up, which is what `webBottom` is held
+        // for. A WKWebView is not resized for the keyboard — the keys are drawn
+        // over the page and the field being typed into can be under them, which
+        // on a handset is most of them: the Multipad's frequency box, the
+        // callsign lookup, the bookmark search. WebKit pans its visual viewport
+        // to reveal the input, which works on a page that scrolls and does
+        // nothing for this one, because the interface is exactly one window
+        // tall and scrolls inside itself.
+        //
+        // So the web view is shortened instead, by exactly the height the
+        // keyboard covers, and the page lays out in what is left — the same
+        // answer Android reaches by applying the IME inset (SystemBars.java),
+        // and for the same reason: it needs nothing from the page, so every
+        // field in every panel is dealt with at once.
+        webBottom = webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            webBottom!,
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
+
+        for name in [UIResponder.keyboardWillChangeFrameNotification,
+                     UIResponder.keyboardWillHideNotification] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(keyboardChanged(_:)), name: name, object: nil)
+        }
 
         host = HostChannel(webView: webView, instanceId: instanceId, label: label,
                            prefsScope: prefsScope)
@@ -184,6 +208,32 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         NotificationCenter.default.addObserver(
             self, selector: #selector(appWillResignActive),
             name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+        // Where a saved file goes on this platform: to the operator, through
+        // the share sheet, to be put in Files or sent on. There is nowhere else
+        // for it to go — an app cannot write into the user's documents on their
+        // behalf, and a file left in this app's container is a file nobody can
+        // reach. See LocalProxy.receiveSave, which is what a v2 export reaches.
+        proxy.onSaveFile = { [weak self] url in
+            guard let self = self else { return }
+            let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            // Required on iPad, where a sheet with nothing to point at is a
+            // crash rather than a layout problem. The middle of the view is
+            // where the file conceptually came from — the page — and is the
+            // least surprising place for it to grow out of.
+            share.popoverPresentationController?.sourceView = self.view
+            share.popoverPresentationController?.sourceRect = CGRect(
+                x: self.view.bounds.midX, y: self.view.bounds.midY, width: 0, height: 0)
+            share.popoverPresentationController?.permittedArrowDirections = []
+            // The file is in a directory of its own under tmp; it goes when the
+            // sheet is done with it, whether or not anything was chosen. iOS
+            // clears tmp on its own eventually, but "eventually" for a 100 MB
+            // recording somebody cancelled out of is not good enough.
+            share.completionWithItemsHandler = { _, _, _, _ in
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+            self.present(share, animated: true)
+        }
 
         if let url = URL(string: proxy.origin + "/v2/") {
             webView.load(URLRequest(url: url))
@@ -219,6 +269,40 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     private let backgroundAudio = BackgroundAudio()
+
+    /// Shorten the page to whatever the keyboard leaves, and put it back after.
+    ///
+    /// The frame arrives in screen coordinates and is converted rather than
+    /// used directly: on an iPad the app may be in a Split View pane the
+    /// keyboard only partly covers, and the overlap is what matters. A
+    /// keyboard-will-hide gives a frame that is off the bottom of the screen,
+    /// so the same arithmetic answers zero without a special case.
+    ///
+    /// Animated alongside the keyboard, using the curve and duration it
+    /// published: the page shrinking a beat after the keys have arrived is more
+    /// noticeable than the shrink itself.
+    @objc private func keyboardChanged(_ note: Notification) {
+        guard let webBottom = webBottom,
+              let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+        else { return }
+
+        let inScreen = view.convert(view.bounds, to: nil)
+        let covered = max(0, inScreen.maxY - frame.minY)
+        // The home indicator's inset is already under the keyboard, so the two
+        // must not both be counted — this constraint is against the view's own
+        // bottom rather than the safe area, so there is nothing to subtract.
+        let wanted = -covered
+
+        guard abs(webBottom.constant - wanted) > 0.5 else { return }
+        webBottom.constant = wanted
+
+        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+        let curve = (note.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt) ?? 0
+        UIView.animate(withDuration: duration,
+                       delay: 0,
+                       options: UIView.AnimationOptions(rawValue: curve << 16),
+                       animations: { self.view.layoutIfNeeded() })
+    }
 
     @objc private func appWillResignActive() {
         startBackgroundAudio()

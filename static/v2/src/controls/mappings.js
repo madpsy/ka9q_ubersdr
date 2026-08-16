@@ -14,6 +14,7 @@
 
 import { isEncoderFunction, runFunction } from './functions.js';
 import { isCCKey } from './webmidi.js';
+import { saveFile } from '../lib/saveFile.js';
 
 const STORE_KEY = 'ubersdr.v2.radioControl';
 
@@ -255,14 +256,7 @@ export function exportMappings(source, mappings) {
         mappings,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${source}-mappings-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    saveFile(blob, `${source}-mappings-${new Date().toISOString().slice(0, 10)}.json`);
     return Object.keys(mappings).length;
 }
 

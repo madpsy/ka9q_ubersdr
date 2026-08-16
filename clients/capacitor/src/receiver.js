@@ -581,6 +581,37 @@ client.on('announce', () => {
 client.on('session', onSession);
 client.hello().catch(() => { /* nothing there yet; the announce will come */ });
 
+// --- saving a file ----------------------------------------------------------
+//
+// The page hands out files the only way a browser can: an anchor with a
+// `download` attribute pointed at a blob URL. Neither WebView does anything
+// with that — WKWebView ignores the attribute, and Android's routes only
+// http(s) downloads to its DownloadListener — so the recorder's ZIP, the
+// decoders' logs and images and the bookmark exports all quietly did nothing
+// here while working everywhere else.
+//
+// The way across is the proxy this page is already served through. POSTing to
+// it hands the bytes to the app as an ordinary request body: no base64, no
+// megabytes of string through the JavaScript bridge, and a 58 MB WAV goes over
+// as fast as the loopback socket will take it. What the app then does with them
+// is the platform's business — a share sheet on iOS, the Downloads folder on
+// Android — which is the other half of why this is not done in v2.
+//
+// Same origin as the page, so no scheme or host is written down here: a
+// receiver's port is allocated per instance and this file has no way to know
+// it. See static/v2/src/lib/saveFile.js for the other end.
+function installSaveFile() {
+    if (typeof window === 'undefined') return;
+    window.ubersdrSaveFile = async (blob, filename) => {
+        const response = await fetch(`/__save?name=${encodeURIComponent(filename || 'download')}`, {
+            method: 'POST',
+            headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+            body: blob,
+        });
+        if (!response.ok) throw new Error(`the app could not save the file (${response.status})`);
+    };
+}
+
 // The host's end of the channel: the lock screen's buttons, arriving as the
 // names v2 registered them under.
 const channel = host();
@@ -599,4 +630,5 @@ polyfillNotifications();
 polyfillSpeech();
 declareSpeech();
 installAppStats();
+installSaveFile();
 watchShared();

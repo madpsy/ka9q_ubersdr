@@ -40,6 +40,7 @@ import {
     fmtDuration, fmtShort, hannWindow, panView, pointToFreqTime, powerColumn, zoomView,
 } from './dsp.js';
 import { MARGINS, dbAt, drawFrame, plotSize } from './render.js';
+import { saveFile } from '../../lib/saveFile.js';
 
 const WORKLET_URL = '/qrss-ddc-worklet.js';
 const PROCESSOR = 'qrss-ddc-processor-v2';
@@ -497,14 +498,7 @@ export default function QrssExtension({ minimal }) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         c.toBlob((blob) => {
             if (!blob) return;
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `qrss_${band}_${ts}.png`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            saveFile(blob, `qrss_${band}_${ts}.png`);
         });
     };
 

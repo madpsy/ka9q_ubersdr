@@ -50,6 +50,11 @@ function fakeWin({ innerHeight = 800, visualViewport = false } = {}) {
     return win;
 }
 
+// Only the shell height. The module also publishes the visible box for fixed
+// overlays (--vv-top, --vv-height); tests about the height say so rather than
+// counting every property write and breaking when a second one is added.
+const heights = (doc) => doc.written.filter(([name]) => name === '--app-height');
+
 function fakeDoc() {
     const written = [];
     return {
@@ -69,7 +74,7 @@ t('the height is written immediately, before anything renders', () => {
     const win = fakeWin({ innerHeight: 812 });
     const doc = fakeDoc();
     startAppHeight(win, doc);
-    assert.deepStrictEqual(doc.written, [['--app-height', '812px']]);
+    assert.deepStrictEqual(heights(doc), [['--app-height', '812px']]);
 });
 
 t('a later settle corrects a height that was wrong at first paint', () => {
@@ -78,11 +83,11 @@ t('a later settle corrects a height that was wrong at first paint', () => {
     const win = fakeWin({ innerHeight: 900 });
     const doc = fakeDoc();
     startAppHeight(win, doc);
-    assert.deepStrictEqual(doc.written, [['--app-height', '900px']]);
+    assert.deepStrictEqual(heights(doc), [['--app-height', '900px']]);
 
     win.innerHeight = 748;
     win._runTimers();
-    assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '748px']);
+    assert.deepStrictEqual(heights(doc).pop(), ['--app-height', '748px']);
 });
 
 t('an unchanged height is not written again', () => {
@@ -94,7 +99,7 @@ t('an unchanged height is not written again', () => {
     // Visual-viewport scroll fires on every scrap of movement; each write here
     // would be a layout invalidation for nothing.
     for (let i = 0; i < 50; i++) win._fireVV('scroll');
-    assert.strictEqual(doc.written.length, 1, 'the same height was written more than once');
+    assert.strictEqual(heights(doc).length, 1, 'the same height was written more than once');
 });
 
 t('rotating updates it', () => {
@@ -103,7 +108,7 @@ t('rotating updates it', () => {
     startAppHeight(win, doc);
     win.innerHeight = 400;
     win._fire('orientationchange');
-    assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '400px']);
+    assert.deepStrictEqual(heights(doc).pop(), ['--app-height', '400px']);
 });
 
 t('coming back to a backgrounded app updates it', () => {
@@ -112,7 +117,7 @@ t('coming back to a backgrounded app updates it', () => {
     startAppHeight(win, doc);
     win.innerHeight = 780;
     win._fire('pageshow');
-    assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '780px']);
+    assert.deepStrictEqual(heights(doc).pop(), ['--app-height', '780px']);
 });
 
 t('the visual viewport is listened to, since innerHeight settles silently', () => {
@@ -121,7 +126,7 @@ t('the visual viewport is listened to, since innerHeight settles silently', () =
     startAppHeight(win, doc);
     win.innerHeight = 734;
     win._fireVV('resize');
-    assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '734px']);
+    assert.deepStrictEqual(heights(doc).pop(), ['--app-height', '734px']);
 });
 
 t('a keyboard reveal that fits on the page changes nothing', () => {
@@ -138,7 +143,7 @@ t('a keyboard reveal that fits on the page changes nothing', () => {
     win.visualViewport.height = 360;   // keyboard up; innerHeight unchanged
     win.visualViewport.offsetTop = 160;
     win._fireVV('resize');
-    assert.strictEqual(doc.written.length, 1, 'the shell moved for a reveal that fit');
+    assert.strictEqual(heights(doc).length, 1, 'the shell moved for a reveal that fit');
 });
 
 t('a reveal panned past the end of the page grows the shell to meet it', () => {
@@ -155,21 +160,21 @@ t('a reveal panned past the end of the page grows the shell to meet it', () => {
     win.visualViewport.height = 360;
     win.visualViewport.offsetTop = 460;   // 60 past the 760px document
     win._fireVV('resize');
-    assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '820px']);
+    assert.deepStrictEqual(heights(doc).pop(), ['--app-height', '820px']);
 
     // However the reveal was split between a layout scroll and a pan: the sum
     // is the bottom of what is on screen, and that is what the shell reaches.
     win.scrollY = 60;
     win.visualViewport.offsetTop = 420;
     win._fireVV('scroll');
-    assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '840px']);
+    assert.deepStrictEqual(heights(doc).pop(), ['--app-height', '840px']);
 
     // Blur closes the keyboard. `editing()` answers before the viewport does,
     // so the height is back before iOS gets round to saying anything.
     doc.activeElement = { tagName: 'BODY' };
     win.scrollY = 0;
     win._fireVV('resize');
-    assert.deepStrictEqual(doc.written[doc.written.length - 1], ['--app-height', '760px']);
+    assert.deepStrictEqual(heights(doc).pop(), ['--app-height', '760px']);
 });
 
 t('a shrunken viewport with nothing focused is not a keyboard', () => {
@@ -182,7 +187,7 @@ t('a shrunken viewport with nothing focused is not a keyboard', () => {
     win.visualViewport.height = 400;
     win.visualViewport.offsetTop = 500;
     win._fireVV('resize');
-    assert.strictEqual(doc.written.length, 1, 'the shell followed a viewport nobody was typing in');
+    assert.strictEqual(heights(doc).length, 1, 'the shell followed a viewport nobody was typing in');
 });
 
 t('pinch zoom is not a keyboard either', () => {
@@ -196,7 +201,7 @@ t('pinch zoom is not a keyboard either', () => {
     win.visualViewport.height = 400;
     win.visualViewport.offsetTop = 700;
     win._fireVV('resize');
-    assert.strictEqual(doc.written.length, 1, 'the shell followed a pinch');
+    assert.strictEqual(heights(doc).length, 1, 'the shell followed a pinch');
 });
 
 t('a leftover reveal scroll is put back once typing ends', () => {
@@ -214,7 +219,70 @@ t('a height of zero is never written', () => {
     const win = fakeWin({ innerHeight: 0 });
     const doc = fakeDoc();
     startAppHeight(win, doc);
-    assert.deepStrictEqual(doc.written, [], 'a zero height would collapse the shell');
+    assert.deepStrictEqual(heights(doc), [], 'a zero height would collapse the shell');
+});
+
+// --- the visible box, for fixed overlays -------------------------------------
+
+const boxOf = (doc, name) => doc.written.filter(([n]) => n === name).pop();
+
+t('the visible box is published alongside the height', () => {
+    const win = fakeWin({ innerHeight: 812, visualViewport: true });
+    win.visualViewport.height = 812;
+    win.visualViewport.offsetTop = 0;
+    const doc = fakeDoc();
+    startAppHeight(win, doc);
+    assert.deepStrictEqual(boxOf(doc, '--vv-top'), ['--vv-top', '0px']);
+    assert.deepStrictEqual(boxOf(doc, '--vv-height'), ['--vv-height', '812px']);
+});
+
+t('a keyboard shrinks the box and records the pan', () => {
+    // What a dialog needs and the shell deliberately ignores: where the visible
+    // region is now, so a fixed box can sit in it rather than behind the keys.
+    const win = fakeWin({ innerHeight: 812, visualViewport: true });
+    win.visualViewport.height = 812;
+    win.visualViewport.offsetTop = 0;
+    const doc = fakeDoc();
+    startAppHeight(win, doc);
+    doc.activeElement = { tagName: 'INPUT' };
+    win.visualViewport.scale = 1;
+    win.visualViewport.height = 420;
+    win.visualViewport.offsetTop = 96;
+    win._fireVV('resize');
+    assert.deepStrictEqual(boxOf(doc, '--vv-top'), ['--vv-top', '96px']);
+    assert.deepStrictEqual(boxOf(doc, '--vv-height'), ['--vv-height', '420px']);
+});
+
+t('the box comes back when the keyboard goes', () => {
+    const win = fakeWin({ innerHeight: 812, visualViewport: true });
+    win.visualViewport.height = 420;
+    win.visualViewport.offsetTop = 96;
+    const doc = fakeDoc();
+    startAppHeight(win, doc);
+    win.visualViewport.height = 812;
+    win.visualViewport.offsetTop = 0;
+    win._fireVV('resize');
+    assert.deepStrictEqual(boxOf(doc, '--vv-top'), ['--vv-top', '0px']);
+    assert.deepStrictEqual(boxOf(doc, '--vv-height'), ['--vv-height', '812px']);
+});
+
+t('an unchanged box is not written again', () => {
+    const win = fakeWin({ innerHeight: 812, visualViewport: true });
+    win.visualViewport.height = 812;
+    win.visualViewport.offsetTop = 0;
+    const doc = fakeDoc();
+    startAppHeight(win, doc);
+    win._fireVV('scroll');
+    win._fireVV('scroll');
+    assert.strictEqual(doc.written.filter(([n]) => n === '--vv-height').length, 1);
+});
+
+t('with no visual viewport the box is simply the window', () => {
+    const win = fakeWin({ innerHeight: 700 });
+    const doc = fakeDoc();
+    startAppHeight(win, doc);
+    assert.deepStrictEqual(boxOf(doc, '--vv-height'), ['--vv-height', '700px']);
+    assert.deepStrictEqual(boxOf(doc, '--vv-top'), ['--vv-top', '0px']);
 });
 
 t('stopping removes every listener and pending timer', () => {

@@ -116,4 +116,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Only for saving an export — a recording, a decoder log — into the
+         Downloads folder, and only on Android 9 and earlier, where that meant
+         writing a real file. From Android 10 a download is a MediaStore row
+         and needs no permission at all, which is what maxSdkVersion says here:
+         asking beyond 28 would be asking for something the app does not use
+         and the Play listing would have to justify. See Downloads.java. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 </manifest>

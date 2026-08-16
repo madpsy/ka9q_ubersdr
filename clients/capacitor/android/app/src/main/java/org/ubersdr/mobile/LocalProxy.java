@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.URLDecoder;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
@@ -71,6 +72,25 @@ final class LocalProxy {
     private int localPort;
     private volatile boolean running;
     private final ExecutorService pool = Executors.newCachedThreadPool();
+
+    /**
+     * What to do with a file the page has asked to save.
+     *
+     * The proxy knows how to receive it and nothing about where files go on
+     * this platform, which needs a Context it deliberately does not hold. The
+     * body arrives as a stream bounded to the length the sender promised, so an
+     * implementation can copy it straight out without holding a recording in
+     * memory. Throwing means the page is told the save failed.
+     */
+    interface SaveHandler {
+        void save(String name, String mime, InputStream body) throws IOException;
+    }
+
+    private volatile SaveHandler saveHandler;
+
+    void setSaveHandler(SaveHandler handler) {
+        this.saveHandler = handler;
+    }
 
     LocalProxy(String host, int port, boolean tls, boolean insecureTLS, AssetManager assets) {
         this.host = host;
@@ -177,6 +197,16 @@ final class LocalProxy {
             return;
         }
 
+        // The one path this proxy answers that upstream knows nothing about:
+        // a file the page wants saved. A WebView routes only http(s) downloads
+        // to its DownloadListener, so v2's `<a download>` on a blob URL did
+        // nothing at all here — see clients/capacitor/src/receiver.js, which
+        // POSTs to this instead, and static/v2/src/lib/saveFile.js for why.
+        if (path.equals(SAVE_PATH)) {
+            handleSave(requestLine, headers, in, out);
+            return;
+        }
+
         if (path.equals("/v2") ) {
             writeRedirect(out, "/v2/");
             return;
@@ -184,6 +214,104 @@ final class LocalProxy {
         if (path.startsWith("/v2/") && serveStatic(path, out)) return;
 
         proxyRequest(requestLine, headers, in, out);
+    }
+
+    // --- saving a file -------------------------------------------------------
+
+    /** Two underscores, so it cannot collide with a real path on a receiver. */
+    private static final String SAVE_PATH = "/__save";
+
+    private void handleSave(String requestLine, List<String> headers,
+                            InputStream in, OutputStream out) throws IOException {
+        if (!requestLine.toUpperCase(Locale.US).startsWith("POST ")) {
+            writeSimple(out, 405, "text/plain; charset=utf-8", "post only".getBytes("UTF-8"));
+            return;
+        }
+        SaveHandler handler = saveHandler;
+        if (handler == null) {
+            writeSimple(out, 501, "text/plain; charset=utf-8", "no way to save here".getBytes("UTF-8"));
+            return;
+        }
+
+        long length = -1;
+        String mime = "application/octet-stream";
+        for (String line : headers) {
+            String lower = line.toLowerCase(Locale.US);
+            if (lower.startsWith("content-length:")) {
+                try { length = Long.parseLong(line.split(":", 2)[1].trim()); }
+                catch (NumberFormatException e) { length = -1; }
+            } else if (lower.startsWith("content-type:")) {
+                String value = line.split(":", 2)[1].trim();
+                if (!value.isEmpty()) mime = value.split(";", 2)[0].trim();
+            }
+        }
+        if (length <= 0) {
+            writeSimple(out, 400, "text/plain; charset=utf-8", "nothing to save".getBytes("UTF-8"));
+            return;
+        }
+
+        try {
+            // Bounded rather than read whole: the body goes straight to wherever
+            // the handler puts it, so a twenty-minute WAV is copied through a
+            // buffer rather than held twice.
+            handler.save(saveName(requestLine), mime, new BoundedInput(in, length));
+        } catch (Exception e) {
+            writeSimple(out, 500, "text/plain; charset=utf-8",
+                    ("could not save: " + e.getMessage()).getBytes("UTF-8"));
+            return;
+        }
+        writeSimple(out, 200, "text/plain; charset=utf-8", "saved".getBytes("UTF-8"));
+    }
+
+    /**
+     * The filename from `?name=`, reduced to something that cannot be a path.
+     *
+     * v2 picks the name, but this arrives over a socket: separators and dot-dot
+     * come out here rather than being trusted anywhere downstream.
+     */
+    private static String saveName(String requestLine) {
+        String target = requestTarget(requestLine);
+        String name = "download";
+        int q = target.indexOf('?');
+        if (q >= 0) {
+            for (String pair : target.substring(q + 1).split("&")) {
+                String[] parts = pair.split("=", 2);
+                if (parts.length != 2 || !parts[0].equals("name")) continue;
+                try { name = URLDecoder.decode(parts[1], "UTF-8"); }
+                catch (Exception e) { name = parts[1]; }
+            }
+        }
+        name = name.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) name = name.substring(slash + 1);
+        name = name.replace("..", "").trim();
+        if (name.isEmpty()) name = "download";
+        return name.length() > 120 ? name.substring(0, 120) : name;
+    }
+
+    /** Reads at most `remaining` bytes, then reports end of stream. */
+    private static final class BoundedInput extends InputStream {
+        private final InputStream source;
+        private long remaining;
+
+        BoundedInput(InputStream source, long remaining) {
+            this.source = source;
+            this.remaining = remaining;
+        }
+
+        @Override public int read() throws IOException {
+            if (remaining <= 0) return -1;
+            int b = source.read();
+            if (b >= 0) remaining--;
+            return b;
+        }
+
+        @Override public int read(byte[] buf, int off, int len) throws IOException {
+            if (remaining <= 0) return -1;
+            int n = source.read(buf, off, (int) Math.min(len, remaining));
+            if (n > 0) remaining -= n;
+            return n;
+        }
     }
 
     // --- the bundled UI ------------------------------------------------------

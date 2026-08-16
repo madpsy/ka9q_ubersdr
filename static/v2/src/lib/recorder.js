@@ -23,6 +23,7 @@
 
 import { Emitter } from '../radio/emitter.js';
 import { loadScript } from './loadScript.js';
+import { saveFile } from './saveFile.js';
 
 // v1's cap, for the same reason: everything is held in memory until download,
 // and an unbounded recording is a tab that eventually dies.
@@ -371,7 +372,7 @@ export class Recorder extends Emitter {
         zip.file(`${base}-signal.csv`, this._signalCsv());
 
         const blob = await zip.generateAsync({ type: 'blob' });
-        saveBlob(blob, `${base}.zip`);
+        await saveFile(blob, `${base}.zip`);
     }
 
     // Byte-for-byte v1's metadata file (recorder.js downloadRecording). People
@@ -462,20 +463,6 @@ export function getRecorder(player) {
     if (!instance) instance = new Recorder(player);
     else if (player && instance.player !== player) instance.player = player;
     return instance;
-}
-
-function saveBlob(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-        a.remove();
-        URL.revokeObjectURL(url);
-    }, 100);
 }
 
 // Float32 frames -> a 16-bit PCM WAV file.

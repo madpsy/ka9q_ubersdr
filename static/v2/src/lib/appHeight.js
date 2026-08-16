@@ -37,6 +37,21 @@
 // on the keys. The pan clamps itself back to zero when the keyboard closes
 // (its ceiling is layout height minus viewport height, which returns to
 // nothing), and the height follows focus out the same moment.
+//
+// ── The visible box ─────────────────────────────────────────────────────────
+//
+// The same measurements answer a second question, for anything drawn *over* the
+// page rather than in it. A `position: fixed` box is laid out against the layout
+// viewport, which does not move when the keyboard pans the visual one — so a
+// dialog centred on the window is centred on where the window used to be, and
+// on a phone that is usually behind the keys.
+//
+// So the visible region is published as well: `--vv-top` is how far the visual
+// viewport has been panned and `--vv-height` is how much of the window is left
+// above the keyboard. A fixed element that pins itself to those two is inside
+// what can actually be seen, whatever the keyboard is doing. On Android they
+// stay 0 and the full height — the WebView resizes for its keyboard instead,
+// which needs nothing from anybody.
 
 // Re-reads after the first paint. Standalone mode on iOS settles some time after
 // load and does not always say so; these cost one property write each.
@@ -62,6 +77,8 @@ export function startAppHeight(win = window, doc = document) {
     };
 
     let last = 0;
+    let lastTop = null;
+    let lastBox = null;
     const apply = () => {
         const inner = Math.round(win.innerHeight || 0);
         if (!inner) return;
@@ -89,6 +106,19 @@ export function startAppHeight(win = window, doc = document) {
         if (h !== last) {
             last = h;
             doc.documentElement.style.setProperty('--app-height', `${h}px`);
+        }
+
+        // The visible region, for fixed overlays. Written whether or not
+        // anything is being edited: the keyboard closing has to put them back.
+        const top = vv ? Math.round(vv.offsetTop || 0) : 0;
+        const box = vv ? Math.round(vv.height) : inner;
+        if (top !== lastTop) {
+            lastTop = top;
+            doc.documentElement.style.setProperty('--vv-top', `${top}px`);
+        }
+        if (box !== lastBox) {
+            lastBox = box;
+            doc.documentElement.style.setProperty('--vv-height', `${box}px`);
         }
 
         // A reveal done with a layout scroll can survive the keyboard that

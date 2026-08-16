@@ -12,6 +12,7 @@
 // after a write.
 
 import LocalBookmarkManager from '../../../local-bookmarks.js';
+import { saveText } from './saveFile.js';
 
 let manager = null;
 const listeners = new Set();
@@ -103,13 +104,7 @@ export function exportText(m, format) {
 }
 
 export function downloadFile(text, filename, type) {
-    const url = URL.createObjectURL(new Blob([text], { type }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    // Revoking immediately can cancel the download in some browsers.
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    return saveText(text, filename, type);
 }
 
 // v1's file input accepts .json/.yaml/.yml/.csv and picks a parser from the

@@ -53,6 +53,7 @@ import {
 import { LANGUAGE_MENU, languageName } from './languages.js';
 import { RATE, preferredVoice, voiceForLanguage, voiceGroups } from './speech.js';
 import { useSpeech } from './useSpeech.js';
+import { saveFile } from '../../lib/saveFile.js';
 
 // Text size of the console, in px. v1's range and starting point. The console
 // doubles as a caption display in the minimal view, where the whole point is
@@ -407,14 +408,7 @@ export default function WhisperExtension({ minimal }) {
             to: last,
         });
         const blob = new Blob([`${text}\n`], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        saveFile(blob, name);
     };
 
     // The server summarises the last n *settled* lines it has kept, so the count

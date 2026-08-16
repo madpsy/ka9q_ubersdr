@@ -74,6 +74,13 @@ final class LocalProxy {
 
     var origin: String { "http://127.0.0.1:\(localPort)" }
 
+    /// Called with a file the page has asked to save — see `receiveSave`.
+    ///
+    /// A URL rather than the bytes, because what happens next is a share sheet
+    /// and UIActivityViewController wants a file on disk. Set by whoever owns
+    /// the view controller; nil means the page is told the app cannot save.
+    var onSaveFile: ((URL) -> Void)?
+
     /// The page's audio session id, seen in passing.
     ///
     /// `/audio/stream` is keyed by it, and the page keeps it in a module
@@ -179,7 +186,9 @@ final class LocalProxy {
             NSLog("[UberSDR proxy] %@", head.requestLine)
             #endif
             self.noteSessionId(head)
-            if head.path.hasPrefix("/v2/") && !head.isUpgrade {
+            if head.path == Self.savePath && !head.isUpgrade {
+                self.receiveSave(head, from: client, reader: reader)
+            } else if head.path.hasPrefix("/v2/") && !head.isUpgrade {
                 self.serveBundled(head, to: client, reader: reader)
             } else {
                 self.forward(head, from: client, reader: reader, on: pairQueue)
@@ -222,6 +231,98 @@ final class LocalProxy {
             return
         }
         send(status: "200 OK", body: body, type: Self.mime(safe), to: client, close: true)
+    }
+
+    // MARK: - Saving a file
+
+    /// The one path this proxy answers that upstream knows nothing about.
+    ///
+    /// A page cannot save a file in a WKWebView: the `download` attribute is
+    /// ignored, so every export in v2 quietly did nothing here. It can POST,
+    /// though, and it is already talking to this server — so the bytes come
+    /// over as an ordinary request body and the app puts them where files go on
+    /// this platform. See clients/capacitor/src/receiver.js for the other end
+    /// and static/v2/src/lib/saveFile.js for the decision to use it.
+    ///
+    /// Named with two underscores so it cannot collide with a real path on
+    /// somebody's receiver, and refused unless it is a POST.
+    static let savePath = "/__save"
+
+    /// As much as anybody should be able to hand over in one go. The recorder's
+    /// ceiling is twenty minutes of WAV, which is about 115 MB before the zip;
+    /// this is well clear of that and still bounded, because the body is held
+    /// in memory before it is written and the page on the other end is not
+    /// necessarily this app's own.
+    private static let saveLimit = 512 * 1024 * 1024
+
+    private func receiveSave(_ head: RequestHead, from client: NWConnection, reader: StreamReader) {
+        guard head.method == "POST" else {
+            send(status: "405 Method Not Allowed", body: Data("post only".utf8),
+                 type: "text/plain", to: client, close: true)
+            return
+        }
+        let length = head.contentLength ?? 0
+        guard length > 0, length <= Self.saveLimit else {
+            send(status: "413 Payload Too Large", body: Data("nothing to save".utf8),
+                 type: "text/plain", to: client, close: true)
+            return
+        }
+
+        reader.readBody(length: length) { [weak self] data in
+            guard let self = self else { return }
+            guard let data = data else {
+                self.send(status: "400 Bad Request", body: Data("short body".utf8),
+                          type: "text/plain", to: client, close: true)
+                return
+            }
+            guard let handler = self.onSaveFile else {
+                self.send(status: "501 Not Implemented", body: Data("no way to save here".utf8),
+                          type: "text/plain", to: client, close: true)
+                return
+            }
+
+            // Its own directory per file, so two saves of the same name cannot
+            // overwrite one another and the name the operator sees in the share
+            // sheet is the name the page chose rather than a mangled one.
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("save-\(UUID().uuidString)", isDirectory: true)
+            let file = dir.appendingPathComponent(Self.saveName(head))
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try data.write(to: file)
+            } catch {
+                self.send(status: "500 Internal Server Error", body: Data("could not write the file".utf8),
+                          type: "text/plain", to: client, close: true)
+                return
+            }
+            DispatchQueue.main.async { handler(file) }
+            self.send(status: "200 OK", body: Data("saved".utf8),
+                      type: "text/plain", to: client, close: true)
+        }
+    }
+
+    /// The filename from `?name=`, reduced to something that cannot be a path.
+    ///
+    /// The page picks the name and the page is v2, but this is a socket: the
+    /// only thing standing between a query string and the file system is this
+    /// function, so it keeps the last component and nothing that could climb
+    /// out of the directory.
+    private static func saveName(_ head: RequestHead) -> String {
+        let target = head.requestLine.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+        var name = "download"
+        if let query = target.split(separator: "?", maxSplits: 1).dropFirst().first {
+            for pair in query.split(separator: "&") {
+                let parts = pair.split(separator: "=", maxSplits: 1)
+                guard parts.count == 2, parts[0] == "name" else { continue }
+                let raw = String(parts[1]).replacingOccurrences(of: "+", with: " ")
+                name = raw.removingPercentEncoding ?? raw
+            }
+        }
+        name = name.components(separatedBy: "/").last ?? name
+        name = name.components(separatedBy: "\\").last ?? name
+        name = name.replacingOccurrences(of: "..", with: "")
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "download" : String(trimmed.prefix(120))
     }
 
     private func send(status: String, body: Data, type: String,
@@ -443,6 +544,35 @@ private final class StreamReader {
         }
     }
 
+    /// Exactly `length` bytes of body, held and handed over in one piece.
+    ///
+    /// Only for the paths this proxy answers itself, which are small in number
+    /// and known in size; everything else is spliced rather than read, because
+    /// a proxy that buffers a body is a proxy that cannot carry a stream. Nil
+    /// means the connection ended before the sender delivered what it promised.
+    func readBody(length: Int, _ completion: @escaping (Data?) -> Void) {
+        if buffer.count >= length {
+            let body = buffer.prefix(length)
+            buffer.removeFirst(length)
+            completion(Data(body))
+            return
+        }
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { data, _, isComplete, error in
+            if let data = data, !data.isEmpty { self.buffer.append(data) }
+            if self.buffer.count >= length {
+                let body = self.buffer.prefix(length)
+                self.buffer.removeFirst(length)
+                completion(Data(body))
+                return
+            }
+            if isComplete || error != nil {
+                completion(nil)
+                return
+            }
+            self.readBody(length: length, completion)
+        }
+    }
+
     /// Everything after the head, forever, in one direction.
     ///
     /// Two rules make this correct, and getting either wrong looks like a page
@@ -546,6 +676,21 @@ private struct RequestHead {
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2 else { return "/" }
         return String(parts[1].split(separator: "?", maxSplits: 1).first ?? "/")
+    }
+
+    /// GET, POST, and so on — upper-cased, as the wire has it.
+    var method: String {
+        String(requestLine.split(separator: " ").first ?? "").uppercased()
+    }
+
+    /// How long the body is, when the sender said. Nil is "did not say", which
+    /// for anything this proxy handles itself means there is nothing to read.
+    var contentLength: Int? {
+        for line in headerLines where line.lowercased().hasPrefix("content-length:") {
+            let value = line.split(separator: ":", maxSplits: 1).dropFirst().first ?? ""
+            return Int(value.trimmingCharacters(in: .whitespaces))
+        }
+        return nil
     }
 
     /// Audio, spectrum, the DX cluster feed and the chat all arrive here.

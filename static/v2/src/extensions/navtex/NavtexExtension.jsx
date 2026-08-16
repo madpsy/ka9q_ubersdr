@@ -32,6 +32,7 @@ import {
 import { MAX_AUDIO_HZ } from '../toneSpectrum.js';
 import { NAVTEX_CONFIG, NAVTEX_FREQUENCIES, parseMessages } from './messages.js';
 import { subjectOf } from '../../lib/navtexCodes.js';
+import { saveFile } from '../../lib/saveFile.js';
 
 // NAVTEX is received in USB, and the passband is the span the spectrum draws so
 // click-to-tune can reach anything it shows.
@@ -165,14 +166,7 @@ export default function NavtexExtension({ minimal }) {
 
     const save = () => {
         const blob = new Blob([`${text}\n`], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `navtex_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        saveFile(blob, `navtex_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`);
     };
 
     const statusLabel = !decoding

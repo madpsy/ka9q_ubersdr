@@ -44,6 +44,7 @@ import {
 } from '../teleprinter.js';
 import { MAX_AUDIO_HZ } from '../toneSpectrum.js';
 import { DEFAULT_PRESET, FSK_FREQUENCIES, PRESETS, presetConfig, presetOf } from './presets.js';
+import { saveFile } from '../../lib/saveFile.js';
 
 // The mode the decoder wants. FSK is demodulated as an audio pair, so the
 // receiver has to be in a sideband mode for the tones to exist at all; the
@@ -149,14 +150,7 @@ export default function FSKExtension({ minimal }) {
 
     const save = () => {
         const blob = new Blob([`${text}\n`], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `fsk_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        saveFile(blob, `fsk_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`);
     };
 
     const statusLabel = !decoding

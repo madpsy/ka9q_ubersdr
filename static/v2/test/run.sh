@@ -244,6 +244,8 @@ esbuild ../src/radio/media/lookup.js --bundle --format=cjs --platform=node \
     --outfile=.build/medialookup.cjs --log-level=warning
 esbuild ../src/lib/cardArt.js --bundle --format=cjs --platform=node \
     --outfile=.build/cardart.cjs --log-level=warning
+esbuild ../src/lib/keyboardReveal.js --bundle --format=cjs --platform=node \
+    --outfile=.build/keyboardreveal.cjs --log-level=warning
 esbuild ../src/lib/rollingChart.js --bundle --format=cjs --platform=node \
     --outfile=.build/rollingchart.cjs --log-level=warning
 esbuild ../src/lib/roomFor.js --bundle --format=cjs --platform=node \
@@ -369,6 +371,7 @@ node markernav.test.js
 node markernavsettings.test.js
 node medialookup.test.js
 node cardart.test.js
+node keyboardreveal.test.js
 node rollingchart.test.js
 node roomfor.test.js
 node fitscale.test.js

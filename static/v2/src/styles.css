@@ -3449,6 +3449,31 @@ a.btn { text-decoration: none; }
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
 }
+/* Never taller than what can be seen, and scrolling inside itself when it would
+   be. `--vv-height` is the visual viewport — see lib/appHeight.js — which with a
+   keyboard up is the gap above the keys and otherwise is simply the window, so
+   this is a no-op until it is needed. */
+.modal__body { overflow: auto; max-height: var(--vv-height, 100%); }
+
+/* The local bookmarks form, as a dialog. Wide enough for two fields side by
+   side and never wider than the phone it is on; the close button sits in the
+   corner, so the title keeps clear of it. */
+.lb-form--dialog {
+    box-sizing: border-box;
+    width: min(420px, calc(100vw - 32px));
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+.lb-form__title {
+    margin: 0 34px 4px 0;
+    font-size: calc(13px * var(--ui-scale));
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
 .modal__body { position: relative; max-width: 100%; max-height: 100%; display: flex; }
 .modal__close {
     position: absolute;

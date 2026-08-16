@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../rea
 import { useRadio } from '../radio/RadioContext.jsx';
 import GroupPicker, { ALL } from '../components/GroupPicker.jsx';
 import { UNGROUPED, groupsOf, hiddenGroups, onGroupsChanged } from '../lib/bookmarkGroups.js';
-import { Button, Empty, Icon, Menu, MenuItem } from '../components/ui.jsx';
+import { Button, Empty, Icon, Menu, MenuItem, Modal } from '../components/ui.jsx';
 import { MINIMAL_ROWS, PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
 import { formatFilterWidth, formatFreqShort } from '../lib/format.js';
 import { bookmarkTarget } from '../lib/bookmarkTune.js';
@@ -40,13 +40,27 @@ const BLANK = {
 // Blank means "not stored", and the mode's own passband is used when tuning. `extension` is
 // still preserved untouched: nothing in v2 sets it, so a form field for it would be a control
 // with nothing behind it.
+// In a dialog rather than in the panel, and the reason is the keyboard.
+//
+// Six fields opened *inside* the list pushed everything below them down, and on
+// a handset the keyboard then covered whichever one was being typed into —
+// worst for the last two, which are the ones somebody scrolls to. A dialog is
+// pinned to the visible region instead (see .modal and lib/appHeight.js), so
+// the form is above the keys wherever the list happens to be scrolled to, and
+// what is being edited is not competing for space with what is being listed.
+//
+// Every other text field in the interface is dealt with by lib/keyboardReveal.js
+// — one field in a row is worth revealing where it stands. A form is not: it is
+// the shape of the thing that makes a dialog the right answer here.
 function Form({ initial, onSave, onCancel, error }) {
     const [f, setF] = useState(initial);
     const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
     const def = MODE_BY_ID[f.mode] || {};
 
     return (
-        <div className="lb-form">
+        <Modal onClose={onCancel} label={initial && initial.name ? 'Edit bookmark' : 'New bookmark'}>
+        <div className="lb-form lb-form--dialog">
+            <h3 className="lb-form__title">{initial && initial.name ? 'Edit bookmark' : 'New bookmark'}</h3>
             <input className="input" placeholder="Name" value={f.name} onChange={set('name')} autoFocus />
             <div className="lb-form__row">
                 <input
@@ -92,6 +106,7 @@ function Form({ initial, onSave, onCancel, error }) {
                 <Button size="sm" variant="primary" onClick={() => onSave(f)}>Save</Button>
             </div>
         </div>
+        </Modal>
     );
 }
 

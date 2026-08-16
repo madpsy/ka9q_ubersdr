@@ -39,9 +39,9 @@
 #                              team once — see Requirements.
 #   ./build-mac.sh --screenshots
 #                              build, then capture the App Store set into
-#                              screenshots/: an iPhone and an iPad, each in both
-#                              orientations, each showing the chooser and a
-#                              running receiver. Four per device.
+#                              screenshots/: two iPhone sizes in both
+#                              orientations and an iPad in portrait, each
+#                              showing the chooser and a running receiver.
 #   ./build-mac.sh --keep      leave the remote directory behind afterwards
 #
 # Environment:
@@ -110,12 +110,36 @@ DEVICE_ID="${UBERSDR_DEVICE_ID:-}"
 
 # The devices the store set is captured on, as "label:simulator name".
 #
-# An iPhone and an iPad because App Store Connect asks for both, and these two
-# sizes because their screenshots are the ones it accepts for every smaller
-# class of device.
+# An iPhone and an iPad because App Store Connect asks for both, and the largest
+# of each because its screenshots are the ones accepted for every smaller class
+# of device.
+#
+# Two iPhones, though, and the second is not a smaller phone but the same
+# picture at an older size. App Store Connect has a slot per display class and
+# each one takes *exact* pixel dimensions, so a set that is right for one is
+# refused outright by another — no scaling, no nearest fit. The 17 Pro Max gives
+# 1320×2868, which is the 6.9-inch slot; the 14 Plus gives 1284×2778, which is
+# the 6.5-inch one and what an app whose listing was started against the older
+# class will be asked for. Capturing both costs a simulator boot and removes the
+# guess about which slot the listing wants.
+#
+# The pixel sizes are the simulators' own — nothing here scales an image, and
+# nothing should: a screenshot resized to fit a slot is soft, and one padded to
+# fit is rejected for the letterboxing.
+#
+# The third field is which orientations to photograph, and the iPad has only
+# one. Turning a simulator from a script means asking the app to turn itself
+# (see DebugOrientation), and iPadOS ignores that request from an app that can
+# be resized — which this one can, because refusing multitasking to make a
+# screenshot easier is the tail wagging the dog. The framebuffer is portrait
+# either way, so the run that asked for a landscape iPad got a portrait layout
+# in a portrait picture, turned on its side by the rotate below: a screenshot
+# with the status bar down the left edge. Better to take the one that is real.
+# App Store Connect is content with a portrait-only iPad set.
 SHOT_DEVICES=(
-    "iphone:iPhone 17 Pro Max"
-    "ipad:iPad Pro 13-inch (M5)"
+    "iphone:iPhone 17 Pro Max:portrait landscape"
+    "iphone65:iPhone 14 Plus:portrait landscape"
+    "ipad:iPad Pro 13-inch (M5):portrait"
 )
 # Which receiver the "connected" screenshots show. A public UUID, followed
 # exactly as a link would be — see the DEBUG hook in UberSdrPlugin.
@@ -569,8 +593,17 @@ archive_remote() {
 </plist>
 PLIST"
 
+    # Through mac_signed, like the archive above and for the same reason.
+    #
+    # Exporting is not a repackaging of something already signed: it re-signs
+    # the app and every framework inside it with the distribution identity, so
+    # it needs the keychain exactly as much as the build did. Sent as a plain
+    # `mac`, it ran in an ssh session of its own where the keychain had locked
+    # again, and codesign failed on the first framework it reached with
+    # `errSecInternalComponent` — which names nothing and reads like a corrupt
+    # certificate rather than a locked keychain.
     echo "  exporting the .ipa"
-    if ! mac "xcodebuild -exportArchive -archivePath /tmp/UberSDR.xcarchive \
+    if ! mac_signed "xcodebuild -exportArchive -archivePath /tmp/UberSDR.xcarchive \
                 -exportOptionsPlist $plist -exportPath /tmp/ubersdr-ipa \
                 -allowProvisioningUpdates 2>&1 | tail -20" \
          | tee -a /tmp/ubersdr-archive.log | grep -q "EXPORT SUCCEEDED"; then
@@ -621,14 +654,20 @@ upload_remote() {
         exit 1
     fi
 
+    # --username, not --apple-id. They read alike and are not alike: altool's
+    # --apple-id is the *app's* numeric identifier in App Store Connect, and
+    # giving an account name to it leaves the command with no credentials at
+    # all — answered by "Either JWT or username and app password authentication
+    # is required", which names the flags it wanted rather than the one it was
+    # given. Nor is --team-id an authentication flag; an account that belongs to
+    # several teams needs --asc-provider, and this one does not.
     echo "  uploading to App Store Connect as $APPLE_ID_VALUE"
     if ! printf '%s\n' "$(cat "$APPLE_PASSWORD_FILE")" \
         | ssh -o BatchMode=yes "$MAC_HOST" "
             IFS= read -r apppw || true
             export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
             xcrun altool --upload-app -f /tmp/ubersdr-ipa/App.ipa -t ios \
-                --apple-id '$APPLE_ID_VALUE' --team-id '$TEAM_ID' \
-                --password \"\$apppw\" 2>&1 | tail -20" \
+                --username '$APPLE_ID_VALUE' --password \"\$apppw\" 2>&1 | tail -20" \
             2> >(grep -v "X11 forwarding request failed" >&2) \
         | tee /tmp/ubersdr-upload.log | grep -qiE "No errors uploading|UPLOAD SUCCEEDED"; then
         echo >&2
@@ -660,15 +699,26 @@ screenshots() {
 
     for entry in "${SHOT_DEVICES[@]}"; do
         local label="${entry%%:*}"
-        local device="${entry#*:}"
+        local rest="${entry#*:}"
+        local device="${rest%%:*}"
+        local orientations="${rest#*:}"
 
         echo
         echo "  $device"
+        # Xcode ships the *type* and only makes a device of the few it wants in
+        # the picker, so a name that `simctl list devicetypes` knows perfectly
+        # well is still "Invalid device" to everything that takes one. Made here
+        # if it is missing, on the newest runtime installed, and left behind: it
+        # costs nothing shut down and the next run finds it.
+        mac "xcrun simctl list devices | grep -q '^ *$device (' || \
+             xcrun simctl create '$device' \
+               \"\$(xcrun simctl list devicetypes -j | python3 -c \"import json,sys;print([d['identifier'] for d in json.load(sys.stdin)['devicetypes'] if d['name']=='$device'][0])\")\" \
+               \"\$(xcrun simctl list runtimes -j | python3 -c \"import json,sys;rs=[r['identifier'] for r in json.load(sys.stdin)['runtimes'] if r['isAvailable'] and 'iOS' in r['name']];print(rs[-1])\")\" >/dev/null"
         # bootstatus boots it if it is not booted and returns when it is ready,
         # which a fixed sleep can only guess at.
         mac "xcrun simctl bootstatus '$device' -b >/dev/null 2>&1 || true"
 
-        for orientation in portrait landscape; do
+        for orientation in $orientations; do
             for screen in chooser connected; do
                 local env_open=""
                 [[ "$screen" == "connected" ]] && \

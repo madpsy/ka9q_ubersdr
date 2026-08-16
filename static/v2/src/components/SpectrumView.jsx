@@ -2447,18 +2447,30 @@ export default function SpectrumView() {
                             and the answer to that is two thumbs and a glance rather
                             than opening a panel.
 
-                            Highlighted while auto, so the toolbar reads as state. */}
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            active={display.autoRange}
-                            icon={<Icon.Gauge />}
-                            title={display.autoRange
-                                ? 'Levels follow the noise floor — click to set them by hand'
-                                : `Levels set by hand, ${display.floorDb} to ${display.ceilDb} dB — click to follow the noise floor`}
-                            aria-label="Level range"
-                            onClick={() => display.set({ autoRange: !display.autoRange })}
-                        />
+                            Highlighted while auto, so the toolbar reads as state.
+
+                            Not on a handset, where the row is the scarcest space in
+                            the layout and this is the least likely of its buttons to
+                            be wanted mid-listen: automatic is right nearly always,
+                            and the case for overriding it — a carrier dragging the
+                            colours — is one somebody sits down to fix rather than
+                            catches on a phone. The Display panel's "Auto level"
+                            switch is the same setting, so nothing is lost with it;
+                            the sliders below still appear there when it is off, so a
+                            range set on a desktop can still be adjusted. */}
+                        {!mobile && (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                active={display.autoRange}
+                                icon={<Icon.Gauge />}
+                                title={display.autoRange
+                                    ? 'Levels follow the noise floor — click to set them by hand'
+                                    : `Levels set by hand, ${display.floorDb} to ${display.ceilDb} dB — click to follow the noise floor`}
+                                aria-label="Level range"
+                                onClick={() => display.set({ autoRange: !display.autoRange })}
+                            />
+                        )}
                         {/* On a phone too. This was desktop-only on the grounds that the
                             tools row is the scarcest space in the layout, and that was
                             true until the four readouts left the row beside it — but it

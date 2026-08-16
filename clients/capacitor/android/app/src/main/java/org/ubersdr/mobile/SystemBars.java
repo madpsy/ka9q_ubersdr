@@ -29,6 +29,17 @@ import androidx.core.view.WindowInsetsCompat;
  * <p>The padding goes on the content view with the app's own background behind
  * it, so the strip under the status bar is the page's colour rather than
  * whatever the theme left there.
+ *
+ * <p>The keyboard is the same problem and is dealt with in the same place. An
+ * edge-to-edge window is not resized for the IME — that is what edge to edge
+ * means — so without this the WebView keeps its full height and the keys are
+ * simply drawn over the bottom of the page. Every text field low on the screen
+ * was then untypeable: the Multipad's frequency box, the callsign lookup, the
+ * bookmark search. Padding for the IME shortens the WebView instead, so the
+ * page lays out in what is left and the field being typed into is on it, with
+ * no page-side machinery at all — no visual-viewport arithmetic, no scrolling
+ * things under the operator's finger, and nothing for a panel to remember to
+ * do.
  */
 final class SystemBars {
 
@@ -42,7 +53,12 @@ final class SystemBars {
         content.setBackgroundColor(BACKGROUND);
         ViewCompat.setOnApplyWindowInsetsListener(content, (view, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            Insets keyboard = insets.getInsets(WindowInsetsCompat.Type.ime());
+            // The larger of the two, never their sum: the keyboard is drawn
+            // over the navigation bar, so adding both would leave a gap the
+            // height of the gesture bar between the page and the keys.
+            int bottom = Math.max(bars.bottom, keyboard.bottom);
+            view.setPadding(bars.left, bars.top, bars.right, bottom);
             return WindowInsetsCompat.CONSUMED;
         });
     }

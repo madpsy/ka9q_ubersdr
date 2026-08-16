@@ -35,6 +35,7 @@ import {
     KEEP_IMAGES, MIN_KEEPABLE_LINES, SSTV_CONFIG, SSTV_FREQUENCIES,
     attachParams, decodeFrame, keepOnComplete, progressOf, toRGBA,
 } from './frames.js';
+import { saveFile } from '../../lib/saveFile.js';
 
 const SSTV_MODE = 'usb';
 const PASSBAND_HZ = 3000;
@@ -293,9 +294,7 @@ export default function SstvExtension({ minimal }) {
         if (!s.canvas || !s.lines) return;
         s.canvas.toBlob((blob) => {
             if (!blob) return;
-            const url = URL.createObjectURL(blob);
-            download(url, `sstv_${stamp(s.at)}.png`);
-            URL.revokeObjectURL(url);
+            saveFile(blob, `sstv_${stamp(s.at)}.png`);
         }, 'image/png');
     };
 
@@ -464,11 +463,15 @@ export default function SstvExtension({ minimal }) {
     );
 }
 
-function download(url, name) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+// The images are held as blob URLs — that is what an <img> wants — and the
+// saver wants the bytes, so they are read back out here. `fetch` on a blob URL
+// hands over the same buffer rather than copying it, and the alternative would
+// be keeping every decoded picture twice for the sake of the one that gets
+// saved. See lib/saveFile.js for why an anchor is not enough.
+async function download(url, name) {
+    try {
+        await saveFile(await (await fetch(url)).blob(), name);
+    } catch (e) {
+        console.error('save failed', e);
+    }
 }

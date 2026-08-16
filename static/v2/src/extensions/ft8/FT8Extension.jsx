@@ -33,6 +33,7 @@ import {
     addMessage, cycleProgress, filterMessages, normaliseMessage, sortMessages, statsFrom, toCSV,
 } from './messages.js';
 import { drawSpectrum, labelsFor } from './spectrum.js';
+import { saveFile } from '../../lib/saveFile.js';
 
 // Rows rendered before "show more". A slot on a busy band is 30-50 decodes, so
 // a page shows one cycle of 20 m without a press.
@@ -242,14 +243,7 @@ export default function FT8Extension({ minimal }) {
 
     const exportCSV = () => {
         const blob = new Blob([toCSV(messages)], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `ft8_log_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        saveFile(blob, `ft8_log_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
     };
 
     // The in-app panel wins when it is open; otherwise the v1 popup, which is

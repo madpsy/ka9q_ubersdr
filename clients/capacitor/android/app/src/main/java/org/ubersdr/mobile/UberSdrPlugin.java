@@ -1,6 +1,9 @@
 package org.ubersdr.mobile;
 
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Toast;
 import android.net.Uri;
 
 import com.getcapacitor.JSArray;
@@ -249,6 +252,18 @@ public class UberSdrPlugin extends Plugin {
             call.reject("could not start the local proxy: " + e.getMessage());
             return;
         }
+        // Where a saved file goes on this platform. The proxy receives it and
+        // knows nothing about Downloads; this is the other half, and the toast
+        // is the whole of the feedback — a file that arrives silently in a
+        // folder the operator did not watch is indistinguishable from a button
+        // that did nothing, which is the bug this all exists to fix.
+        started.setSaveHandler((name, mime, body) -> {
+            String saved = Downloads.save(getContext(), name, mime, body);
+            final String message = "Saved " + saved + " to Downloads";
+            new Handler(Looper.getMainLooper()).post(() ->
+                    Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show());
+        });
+
         proxy = started;
         openId = id;
         epoch++;

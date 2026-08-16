@@ -33,6 +33,7 @@ import { formatTime, sidebandSign } from '../teleprinter.js';
 import {
     MIN_QUALITIES, appendDecode, decodeFrame, positive, toText, visibleChunks,
 } from './frames.js';
+import { saveFile } from '../../lib/saveFile.js';
 
 // What the server will accept — audio_extensions/morse/extension.go refuses
 // anything outside it, and a refused attach is an error the operator has to
@@ -167,14 +168,7 @@ export default function MorseExtension({ minimal }) {
 
     const save = () => {
         const blob = new Blob([`${text}\n`], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `cw_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        saveFile(blob, `cw_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`);
     };
 
     // Click-to-tune: move the dial so the note clicked lands where the decoder

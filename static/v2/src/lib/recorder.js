@@ -54,6 +54,14 @@ export class Recorder extends Emitter {
         // than in the panel so it survives the section being collapsed, which
         // unmounts the view.
         this.preferredFormat = 'webm';
+        // Whether Download hands over the whole archive or only the audio.
+        // Kept here for the same reason and with the same lifetime as the
+        // format above: a collapsed panel must not forget it, and it is a
+        // choice about the next download rather than about this recording.
+        // The archive is the default because it is the one that can be
+        // reconstructed from — the audio alone cannot say what frequency it
+        // was, and nobody remembers a fortnight later.
+        this.preferArchive = true;
         this.startedAt = 0;
         this.endedAt = 0;
         this.notice = '';           // why a recording ended on its own
@@ -346,11 +354,18 @@ export class Recorder extends Emitter {
         }, TICK_MS);
     }
 
-    // Builds the ZIP and hands it to the browser. Awaits the encoder's last
-    // chunk first, so a download taken immediately after Stop is complete.
+    // Hands the recording to the browser. Awaits the encoder's last chunk
+    // first, so a download taken immediately after Stop is complete.
     // (Named `save`, not `download`, so it does not shadow the unrelated
     // helper of that name in lib/localBookmarks.js.)
-    async save() {
+    //
+    // `archive` is the whole ZIP — audio, metadata and the signal log — which
+    // is what this has always produced and what the panel asks for by default.
+    // Without it the audio file goes over on its own: a recording somebody
+    // wants to send to a friend, put in a decoder or drop into an editor is one
+    // file, and unwrapping a ZIP to get at it is a step for nothing. Nothing
+    // else differs — same bytes, same name, no second encode either way.
+    async save({ archive = true } = {}) {
         if (!this.hasData && this.state !== 'recording') {
             throw new Error('There is no recording to download.');
         }
@@ -359,15 +374,24 @@ export class Recorder extends Emitter {
         const audio = await this.audioBlob();
         if (!audio) throw new Error('There is no recording to download.');
 
+        const wav = this.format === 'wav';
+        const base = `sdr-recording-${new Date(this.startedAt).toISOString().replace(/[:.]/g, '-').slice(0, -5)}`;
+        const name = `${base}.${wav ? 'wav' : 'webm'}`;
+
+        // Before JSZip is even fetched: the audio-only route has no business
+        // waiting on a library it is not going to use, and on a phone with a
+        // poor connection that was the slowest part of a download that did not
+        // need it.
+        if (!archive) {
+            await saveFile(audio, name);
+            return;
+        }
+
         await loadScript(JSZIP_URL);
         if (typeof JSZip === 'undefined') throw new Error('JSZip failed to load.');
 
-        const wav = this.format === 'wav';
-
-        const base = `sdr-recording-${new Date(this.startedAt).toISOString().replace(/[:.]/g, '-').slice(0, -5)}`;
-
         const zip = new JSZip();
-        zip.file(`${base}.${wav ? 'wav' : 'webm'}`, audio);
+        zip.file(name, audio);
         zip.file(`${base}.txt`, this._metadataText());
         zip.file(`${base}-signal.csv`, this._signalCsv());
 

@@ -19,6 +19,34 @@ const FORMATS = [
     { value: 'wav', label: 'WAV', title: 'Uncompressed 16-bit PCM — larger, no second encode' },
 ];
 
+const DELIVERY = [
+    {
+        value: 'archive',
+        label: 'Archive',
+        title: 'A ZIP: the audio, what it was recorded on, and the signal log',
+    },
+    {
+        value: 'audio',
+        label: 'Audio only',
+        title: 'The audio file on its own — nothing to unpack',
+    },
+];
+
+// What Download will hand over, in words, from the two controls that decide it.
+//
+// Both halves are chosen on screen — the format buttons above and the toggle
+// beside this — so the sentence follows them rather than describing one fixed
+// arrangement that was right for whichever way they happened to be set.
+function deliveryText(format, archive) {
+    const name = format === 'wav' ? 'WAV' : 'Opus';
+    const ext = format === 'wav' ? '.wav' : '.webm';
+    return archive
+        ? `The download is a ZIP holding the ${name} audio (${ext}), the frequency and mode it was`
+            + ' made on, and a CSV of the signal readings taken once a second.'
+        : `The download is the ${name} audio on its own (${ext}) — no metadata file and no signal`
+            + ' log.';
+}
+
 // `minimal` drops the format picker and the explainer, leaving the status, the
 // clock and the buttons. The format still applies — whatever was last chosen is
 // what the next recording uses. See the registry's `minimal`.
@@ -36,6 +64,9 @@ export default function RecorderPanel({ minimal }) {
     // not there. The choice itself is kept on the recorder, which outlives this
     // component being unmounted by a collapse.
     const [format, setFormat] = useState(() => rec.preferredFormat);
+    // Whole archive or bare audio. On the recorder for the same reason the
+    // format is — a collapsed panel is unmounted and must not forget it.
+    const [archive, setArchive] = useState(() => rec.preferArchive !== false);
     const [busyDownload, setBusyDownload] = useState(false);
     const [error, setError] = useState('');
 
@@ -169,7 +200,7 @@ export default function RecorderPanel({ minimal }) {
         setError('');
         setBusyDownload(true);
         try {
-            await rec.save();
+            await rec.save({ archive });
         } catch (err) {
             setError(err.message || String(err));
         } finally {
@@ -190,6 +221,12 @@ export default function RecorderPanel({ minimal }) {
     // length while audio was plainly playing, which is what made the bar look
     // broken rather than merely idle.
     const scrubbing = playing || playPos > 0;
+
+    // Which format the download text is about. The same rule the Format control
+    // itself follows: once a recording is held, the buttons are locked to what
+    // was actually captured, and a sentence describing the other one would be
+    // describing a file that does not exist.
+    const heldFormat = rec.busy ? rec.format : format;
 
     const status = recording ? 'recording' : playing ? 'playing' : rec.hasData ? 'ready' : 'idle';
     const statusLabel = {
@@ -327,9 +364,14 @@ export default function RecorderPanel({ minimal }) {
                     icon={<Icon.Download />}
                     size="sm"
                     disabled={!rec.hasData || recording || busyDownload}
+                    title={deliveryText(heldFormat, archive)}
                     onClick={download}
                 >
-                    {busyDownload ? 'Packaging…' : 'Download'}
+                    {/* "Packaging" is the ZIP being built, which is a real wait
+                        on a long WAV. There is none of it to do for the audio
+                        on its own, and saying so would be a progress message
+                        for a step that is not happening. */}
+                    {busyDownload ? (archive ? 'Packaging…' : 'Saving…') : 'Download'}
                 </Button>
                 <Button
                     icon={<Icon.Trash />}
@@ -349,12 +391,31 @@ export default function RecorderPanel({ minimal }) {
             )}
 
             {!minimal && (
-                <div className="note note--tight">
-                    Captures the processed audio as you hear it — filters, squelch
-                    and the volume setting included. The download is a ZIP holding
-                    the audio, the frequency and mode it was made on, and a CSV of
-                    the signal readings taken once a second.
-                </div>
+                <>
+                    {/* What the Download button will actually produce, next to
+                        the sentence describing it — the choice and its
+                        consequence in one place, rather than a switch up beside
+                        the format buttons and an explanation down here. */}
+                    <Field
+                        label="Download"
+                        hint={archive ? 'audio, metadata and signal log' : 'the audio file only'}
+                    >
+                        <Segmented
+                            options={DELIVERY}
+                            value={archive ? 'archive' : 'audio'}
+                            onChange={(v) => {
+                                const next = v === 'archive';
+                                rec.preferArchive = next;
+                                setArchive(next);
+                            }}
+                            size="sm"
+                        />
+                    </Field>
+                    <div className="note note--tight">
+                        Captures the processed audio as you hear it — filters, squelch
+                        and the volume setting included. {deliveryText(heldFormat, archive)}
+                    </div>
+                </>
             )}
         </div>
     );

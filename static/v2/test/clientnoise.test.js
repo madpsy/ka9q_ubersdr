@@ -315,6 +315,22 @@ t('a pulse train does not raise its own threshold', () => {
     }
 });
 
+t('decoder residue under a closed squelch never triggers', () => {
+    // The gate sends near-silence, not zeros: Opus decodes to dither around
+    // -100 dBFS, and every flutter of it is "20 dB over the average". The
+    // blanker used to sit there triggering constantly on audio nobody could
+    // hear; the silence floor is what stops it.
+    const nb = new NoiseBlanker(FS);
+    nb.enabled = true;
+    const rnd = prng(47);
+    const input = new Float32Array(2 * FS);
+    for (let i = 0; i < input.length; i++) input[i] = 1e-5 * rnd();
+    // With the occasional louder tick, still far below anything audible.
+    for (let at = FS / 4; at < input.length; at += FS / 3) input[Math.round(at)] = 3e-4;
+    blank(nb, input);
+    assert.strictEqual(nb.pulsesBlanked, 0, 'triggered on inaudible residue');
+});
+
 t('audio returning after silence is not blanked wholesale', () => {
     const nb = new NoiseBlanker(FS);
     nb.enabled = true;

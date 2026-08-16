@@ -18,7 +18,7 @@
 // on the band, and that is the operator's experiment to run, not this panel's
 // to forbid.
 
-import React from '../react.js';
+import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Field, Segmented, Slider, Switch } from '../components/ui.jsx';
 import DspControl from './DspControl.jsx';
@@ -31,10 +31,22 @@ import {
 // are working is what you change while listening; how hard they work is set
 // once against a band and left.
 export default function NoisePanel({ minimal }) {
-    const { noise, dsp, actions } = useRadio();
+    const { noise, dsp, player, actions } = useRadio();
     const { nb, nr } = noise;
     const setNb = (patch) => actions.setNoise({ nb: patch });
     const setNr = (patch) => actions.setNoise({ nr: patch });
+
+    // The blanker's running total, polled while it is on. This is the readout
+    // the threshold is set against — steady counting on a crackling band is
+    // the blanker working, a count racing during clean speech means the
+    // threshold is low and it is eating syllables. It restarts from zero when
+    // the blanker is toggled, because the DSP is rebuilt then.
+    const [nbCount, setNbCount] = useState(0);
+    useEffect(() => {
+        if (!nb.enabled) { setNbCount(0); return undefined; }
+        const t = setInterval(() => setNbCount(player.nbPulses()), 500);
+        return () => clearInterval(t);
+    }, [nb.enabled, player]);
 
     // Hidden only when the server has *answered* that there is nothing —
     // while the answer is pending (or the receiver is not running) DspControl
@@ -45,7 +57,11 @@ export default function NoisePanel({ minimal }) {
         <div className="stack">
             <div className="section-label"><span>In this client</span></div>
 
-            <Field label="Noise blanker" hint={nb.enabled ? 'on' : 'off'} inline>
+            <Field
+                label="Noise blanker"
+                hint={nb.enabled ? `${nbCount} pulse${nbCount === 1 ? '' : 's'} cut` : 'off'}
+                inline
+            >
                 <Switch
                     checked={nb.enabled}
                     onChange={(on) => setNb({ enabled: on })}

@@ -339,22 +339,22 @@ function NoiseReductionTag() {
 // the server's filter — two NR tags with nothing saying which machine each
 // lives on would be a row that needs the manual.
 //
-// The blanker's tag also carries its pulse count and blinks red as pulses are
-// cut, which is the whole feedback loop for setting its threshold: turn it
-// down until the tag starts answering the crackle you can hear, and if it is
-// flashing on every syllable it is eating speech. Polled from the player at a
-// few hertz rather than evented per pulse — a storm can run at hundreds of
-// pulses a second, and a React render per pulse would be the storm twice.
+// The blanker's tag blinks red as pulses are cut — the running total lives in
+// the Noise panel, next to the threshold it calibrates; here the flash alone
+// is the feedback: a tag answering the crackle you can hear is the threshold
+// set right, and one flashing on every syllable is eating speech. Polled from
+// the player at a few hertz rather than evented per pulse — a storm can run
+// at hundreds of pulses a second, and a React render per pulse would be the
+// storm twice.
 function NbTag() {
     const { noise, player, actions } = useRadio();
     const on = noise.nb.enabled;
-    const [count, setCount] = useState(0);
     const [hot, setHot] = useState(false);
     const seen = useRef(0);
     const cool = useRef(0);
 
     useEffect(() => {
-        if (!on) { seen.current = 0; setCount(0); setHot(false); return undefined; }
+        if (!on) { seen.current = 0; setHot(false); return undefined; }
         const t = setInterval(() => {
             const n = player.nbPulses();
             if (n === seen.current) return;
@@ -366,7 +366,6 @@ function NbTag() {
                 cool.current = setTimeout(() => setHot(false), 400);
             }
             seen.current = n;
-            setCount(n);
         }, 200);
         return () => { clearInterval(t); clearTimeout(cool.current); };
     }, [on, player]);
@@ -376,10 +375,10 @@ function NbTag() {
         <button
             type="button"
             className={`tag tag--button ${hot ? 'tag--bad' : 'tag--accent'}`}
-            title={`Noise blanker running in this client — ${count} pulse${count === 1 ? '' : 's'} cut. Click to switch it off`}
+            title="Noise blanker running in this client — click to switch it off"
             onClick={() => actions.setNoise({ nb: { enabled: false } })}
         >
-            {count ? `NB ${count}` : 'NB'}
+            NB
         </button>
     );
 }

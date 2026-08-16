@@ -57,6 +57,15 @@ const ENV_CLAMP = 3;
 // and the envelope settles faster than it tracks. In seconds.
 const WARMUP_S = 0.15;
 const WARMUP_ALPHA = 1 / 32;
+// No detection below this envelope (−60 dBFS). A threshold *relative* to the
+// reference is meaningless when the reference is silence: with the squelch
+// closed the stream is decoder residue around −100 dBFS, every flutter of
+// which is "20 dB over the average", and the blanker sat there triggering
+// constantly on audio nobody could hear. Below this level there is nothing to
+// protect an ear from; a real signal is orders of magnitude above it, and the
+// fast attack has the envelope over the bar within milliseconds of the
+// squelch opening.
+const SILENCE = 1e-3;
 
 export class NoiseBlanker {
     constructor(sampleRate = 12000) {
@@ -162,7 +171,7 @@ export class NoiseBlanker {
             if (warm) this._warm++;
 
             // A pulse: schedule the notch over the delayed stream.
-            if (!warm && ax > Math.max(this._env, 1e-6) * this._ratio) {
+            if (!warm && this._env > SILENCE && ax > this._env * this._ratio) {
                 if (sched[(this._t + L) % L2] === 1) this.pulsesBlanked++;
                 for (let j = 0; j < shape.length; j++) {
                     const at = (this._t + startK + j) % L2;

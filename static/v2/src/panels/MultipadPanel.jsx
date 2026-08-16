@@ -29,7 +29,7 @@ import { countryOf, shortMarkerName } from '../lib/markerNav.js';
 import { placeBarrelMarks } from '../lib/barrelMarks.js';
 import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
 import useMarkerLookup from '../lib/useMarkerLookup.js';
-import { rmCredentials } from '../lib/rmnoise.js';
+import { getRmNoise, rmCredentials } from '../lib/rmnoise.js';
 import useTapThrough from '../lib/useTapThrough.js';
 import {
     clamp, countryFlag, formatFilterWidth, formatFreqShort, formatHz, snrColour, snrFraction,
@@ -572,16 +572,28 @@ function ZoomWheel() {
 // to the ear.
 function NoiseSelect() {
     const { dsp, noise, actions, running } = useRadio();
+    // The entry below comes and goes with the bridge's state, so this has to
+    // hear about it changing rather than waiting for the next tuning event.
+    const rm = getRmNoise();
+    const [, bumpRm] = useState(0);
+    useEffect(() => rm.on('change', () => bumpRm((n) => n + 1)), [rm]);
     if (!running) return null;
     const server = dsp.schemas && dsp.schemas.length > 0 ? dsp.schemas : [];
-    // Only once there is a login to use. The pad has no room to ask for one,
-    // so an RMN offered here to somebody without an account is an option that
-    // can only fail quietly — the stage would sit passing audio through while
-    // the tag said it was on. Once the Noise panel has been used once, it is a
-    // perfectly good place to switch back to. Shown regardless when it is what
-    // is already running, because a dropdown that cannot say what the receiver
-    // is doing is worse than one with an extra entry.
-    const rmReady = !!rmCredentials().username && !!rmCredentials().password;
+    // Only once there is a login that works. The pad has no room to ask for
+    // one, so an RMN offered here to somebody who cannot use it is an option
+    // that can only fail quietly — the stage would sit passing audio through
+    // while the tag said it was on.
+    //
+    // "Works" and not merely "exists": a login stored from an earlier session
+    // survives being refused, so a password rmnoise.com is currently rejecting
+    // would otherwise keep the entry here, where there is nothing to type into
+    // and nothing that retries. Sorting that out is the Noise panel's job.
+    //
+    // Shown regardless when it is what is already running, because a dropdown
+    // that cannot say what the receiver is doing is worse than one with an
+    // extra entry.
+    const rmCreds = rmCredentials();
+    const rmUsable = !!rmCreds.username && !!rmCreds.password && !rm.authFailed;
     const rmRunning = noise.nr.enabled && noise.nr.type === 'rmn';
 
     const clientType = ['nr2', 'rmn'].includes(noise.nr.type) ? noise.nr.type : 'lsa';
@@ -615,7 +627,7 @@ function NoiseSelect() {
             <optgroup label="This client">
                 <option value="client:lsa" title="MMSE-LSA over tracked minima — best on voice">LSA</option>
                 <option value="client:nr2" title="Classic spectral subtraction, long window">NR</option>
-                {(rmReady || rmRunning) && (
+                {(rmUsable || rmRunning) && (
                     <option
                         value="client:rmn"
                         title="rmnoise.com — an AI denoiser over the network"

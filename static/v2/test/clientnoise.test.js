@@ -350,6 +350,19 @@ t('audio returning after silence is not blanked wholesale', () => {
         outR += out[i + d] ** 2;
     }
     assert.ok(outR > inR * 0.7, `audio after silence mostly missing: ${outR / inR}`);
+    // ...and the squelch opening itself is not read as a pulse: clean band,
+    // clean silence, clean return — nothing here is an impulse.
+    assert.strictEqual(nb.pulsesBlanked, 0, 'the squelch opening was blanked');
+    // The very onset is intact too, not just the audio a tenth later. The
+    // first millisecond is the envelope's to charge, so measure just past it.
+    const onset = s1 + Math.round(0.002 * FS);
+    let inO = 0;
+    let outO = 0;
+    for (let i = onset; i < onset + Math.round(0.05 * FS); i++) {
+        inO += input[i] ** 2;
+        outO += out[i + d] ** 2;
+    }
+    assert.ok(outO > inO * 0.7, `the first syllable after the squelch was eaten: ${outO / inO}`);
 });
 
 t('the threshold means what it says', () => {

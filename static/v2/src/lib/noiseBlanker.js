@@ -66,6 +66,14 @@ const WARMUP_ALPHA = 1 / 32;
 // fast attack has the envelope over the bar within milliseconds of the
 // squelch opening.
 const SILENCE = 1e-3;
+// How long detection stays off after audio returns from under the silence
+// floor. The envelope has to climb from "nothing" back to the band's real
+// level, and while it is still on the way up every ordinary sample is far
+// "over the average" — so each squelch opening blanked its own first
+// syllable and flashed the tag. The reference is simply stale at that
+// moment; this re-runs a short warmup to rebuild it, the same answer the
+// first samples of the session get.
+const RESUME_S = 0.025;
 
 export class NoiseBlanker {
     constructor(sampleRate = 12000) {
@@ -77,6 +85,7 @@ export class NoiseBlanker {
         this.envAlpha = 1 / Math.max(1, Math.round(ENV_TC_S * sampleRate));
         this.envAlphaUp = 1 / Math.max(1, Math.round(ENV_ATTACK_TC_S * sampleRate));
         this.warmupSamples = Math.round(WARMUP_S * sampleRate);
+        this.resumeSamples = Math.round(RESUME_S * sampleRate);
 
         // How many pulses the gate has closed on, for anyone curious.
         this.pulsesBlanked = 0;
@@ -132,6 +141,8 @@ export class NoiseBlanker {
         this._ratio = Math.pow(10, this.thresholdDb / 20);
         this._env = 0;
         this._warm = 0;
+        this._quiet = true;     // under the silence floor just now
+        this._hold = 0;         // resume-warmup samples left
     }
 
     reset() {
@@ -158,20 +169,29 @@ export class NoiseBlanker {
             const x = input[i];
             const ax = x < 0 ? -x : x;
 
-            // Envelope, clamped. Faster while warming up, no detection then.
-            // The clamp has a floor: after a stretch of near-silence (squelch
-            // closed) the envelope is ~0, and a pure multiple of it could
-            // never climb back when audio returns — everything would read as
-            // a pulse for a noticeable fraction of a second.
+            // Coming back from under the silence floor is a fresh start:
+            // whatever the envelope held is a memory of a different signal,
+            // so it is re-charged and detection waits — see RESUME_S.
+            if (this._env < SILENCE) this._quiet = true;
+            if (this._quiet && ax > SILENCE) {
+                this._hold = this.resumeSamples;
+                this._quiet = false;
+            }
+
+            // Envelope, clamped — except while (re)warming, where it charges
+            // straight from the samples. The clamp has a floor besides: near
+            // silence a pure multiple of the envelope could never climb.
             const warm = this._warm < this.warmupSamples;
-            const c = warm ? ax : Math.min(ax, Math.max(ENV_CLAMP * this._env, 1e-4));
-            const alpha = warm ? WARMUP_ALPHA
+            const charging = warm || this._hold > 0;
+            if (this._hold > 0) this._hold--;
+            const c = charging ? ax : Math.min(ax, Math.max(ENV_CLAMP * this._env, 1e-4));
+            const alpha = charging ? WARMUP_ALPHA
                 : (c > this._env ? this.envAlphaUp : this.envAlpha);
             this._env += (c - this._env) * alpha;
             if (warm) this._warm++;
 
             // A pulse: schedule the notch over the delayed stream.
-            if (!warm && this._env > SILENCE && ax > this._env * this._ratio) {
+            if (!charging && this._env > SILENCE && ax > this._env * this._ratio) {
                 if (sched[(this._t + L) % L2] === 1) this.pulsesBlanked++;
                 for (let j = 0; j < shape.length; j++) {
                     const at = (this._t + startK + j) % L2;

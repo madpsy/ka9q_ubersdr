@@ -339,13 +339,18 @@ export default function NoisePanel({ minimal }) {
         return () => clearInterval(t);
     }, [nb.enabled, player]);
 
-    // Chosen, not connected, and nothing stored to connect with: the stage is
-    // selected, the toolbar says NR, and the audio is going through untouched
-    // until somebody signs in. Judged on the bridge rather than on storage
-    // alone so that a session which is up counts, whatever storage says.
+    // Chosen, not connected, and waiting on the operator: either there is
+    // nothing stored to connect with, or what is stored was refused. The stage
+    // is selected, the toolbar says NR, and the audio is going through
+    // untouched until somebody signs in.
+    //
+    // Both halves are needed, and the second is the one that caught this out: a
+    // login stored from an earlier session is still a login, so "is there a
+    // password?" answered yes while rmnoise.com was refusing it. A refusal is
+    // exactly the case worth shouting about — nothing retries it on its own.
     const rmCreds = rmCredentials();
     const rmNeedsLogin = nr.type === 'rmn' && !rm.ready
-        && !(rmCreds.username && rmCreds.password);
+        && (rm.authFailed || !(rmCreds.username && rmCreds.password));
 
     // Hidden only when the server has *answered* that there is nothing —
     // while the answer is pending (or the receiver is not running) DspControl

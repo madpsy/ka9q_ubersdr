@@ -2,7 +2,7 @@
   "name": "ubersdr-mobile",
   "version": "0.3.0",
   "private": true,
-  "description": "UberSDR Android client — the chooser and the v2 web UI in a Capacitor shell",
+  "description": "UberSDR mobile client — the chooser and the v2 web UI in a Capacitor shell, on Android and iOS",
   "author": "MadPsy",
   "license": "SEE LICENSE IN ../../LICENSE.TXT",
   "//chooser": "The chooser page is not a copy: build.sh stages clients/electron/chooser/ into www/. Its one seam is `const api = window.ubersdr` (chooser.js), which src/api.js provides here over Capacitor plugins instead of over Electron IPC. Anything that changes the chooser changes both clients at once, which is the point.",

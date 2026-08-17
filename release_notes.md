@@ -19,7 +19,7 @@ Also be aware that customisations to the HTML head and body will be loaded in V2
 - XSS vulnerability in the legacy UI chat functionality. Thanks to @magicint1337 for finding and providing a suitable fix
 
 ### Other Announcements
-- An *Android* and *iOS* native app is in progress for V2, though the V2 interface will work on mobile/tablet via a web browser
+- An *Android* and *iOS* client app is in progress for V2, though the V2 interface will work on mobile/tablet via a web browser
 
 ## Version 0.1.58 - 14th Jul 2026
 

@@ -40,6 +40,35 @@ function freqMessage(frequency, mode) {
     return `${(frequency / 1000).toFixed(3)} KHz (${String(mode).toUpperCase()})`;
 }
 
+/**
+ * Everything a chat user's row knows, for its tooltip.
+ *
+ * The row itself shows the name and the dial, because those are what the list is read for
+ * — who is here, and where they are. The bin width and the idle time are worth knowing and
+ * are not worth the height: in a dock column narrow enough for chat they turn a one-line
+ * row into two, and two lines each is what makes a busy channel's user list unreadable at
+ * the moment it is most worth reading.
+ *
+ * So they go here. v1 built the same string for the same reason and put the same things in
+ * it (chat-ui.js, `tooltip`), which is also why the wording is its wording.
+ *
+ * One line each, because a `title` renders newlines and a run-on sentence of four facts
+ * does not read.
+ */
+function userTip(u, me) {
+    const lines = [u.username];
+    if (u.frequency) {
+        lines.push(`${formatFreqShort(u.frequency)}${u.mode ? ` ${u.mode.toUpperCase()}` : ''}`);
+    }
+    // How coarse their spectrum is — the thing "follow their zoom" copies across.
+    if (u.zoom_bw > 0) lines.push(`${Math.round(u.zoom_bw)} Hz/bin`);
+    if (u.is_idle && u.idle_minutes) lines.push(`Idle ${u.idle_minutes}m`);
+    // Last, and only where there is something to click: it is an instruction rather than a
+    // fact about them, and on our own row it would be an instruction to go nowhere.
+    if (u.frequency && u.username !== me) lines.push('Click to tune');
+    return lines.join('\n');
+}
+
 // A side dock is too narrow for it, and it says so rather than rendering badly there —
 // see components/DockTooNarrow.jsx. A line of chat is a name, a time and a sentence, with
 // the user list beside it; in 220 pixels every line wraps into three and the room becomes
@@ -525,6 +554,13 @@ export default function ChatPanel({ minimal }) {
                             key={u.username}
                             className={`chat__user-row${u.username === chat.following ? ' is-following' : ''}`
                                 + `${isIgnored(u.username) ? ' is-ignored' : ''}`}
+                            // On the row rather than on the button inside it: the button
+                            // is disabled for anybody whose client has published no
+                            // frequency, and a disabled control takes no pointer events,
+                            // so a tooltip on it is one those users would never show. The
+                            // follow and ignore buttons carry their own, which win over
+                            // this one while the pointer is on them.
+                            title={userTip(u, chat.username)}
                         >
                             <button
                                 type="button"
@@ -533,7 +569,6 @@ export default function ChatPanel({ minimal }) {
                                 // doubles as a way to go and listen to what they
                                 // are hearing.
                                 disabled={!u.frequency}
-                                title={u.frequency ? `Tune to ${formatFreqShort(u.frequency)}` : u.username}
                                 onClick={() => {
                                     if (!u.frequency) return;
                                     if (u.mode) radio.setMode(u.mode);
@@ -545,11 +580,14 @@ export default function ChatPanel({ minimal }) {
                                     {countryFlag(u.country_code)} {u.username}
                                     {u.tx && <span className="chip">TX</span>}
                                 </span>
+                                {/* The dial and nothing else. The bin width and how long
+                                    they have been quiet are real information and neither
+                                    is worth a row two lines deep in a dock column — they
+                                    are in the tooltip, which is where a detail that is
+                                    only occasionally wanted belongs. See userTip. */}
                                 <span className="chat__user-meta">
                                     {u.frequency ? formatFreqShort(u.frequency) : '—'}
                                     {u.mode ? ` ${u.mode.toUpperCase()}` : ''}
-                                    {u.zoom_bw > 0 ? ` · ${Math.round(u.zoom_bw)} Hz/bin` : ''}
-                                    {u.is_idle && u.idle_minutes ? ` · idle ${u.idle_minutes}m` : ''}
                                 </span>
                             </button>
                             {/* Not on our own row — we are already where we are — and not on

@@ -6,13 +6,13 @@
 - Configabble *Bin sizes and update rate* which essentially means how detailed and how fast spectrum data is pushed to clients. You can configure these by re-running the setup wizard (base url/setup-wizard.html) on your instance - they are in Step 2 under 'Resolution' and 'Update Rate'. I still default to 'Medium' for both as there are CPU and Network Bandwidth tradeoffs, but feel free to experiment
 
 ### Important information
-#### Data migration
+### Data migration
 When your instance updates to 0.1.59 it will undergo a data migration from JSON line format to an SQLite database. The progress is shown at the top of the admin page (remember to hard refresh the page if you don't see it). How long this takes depends on how much data there is and how fast your hardware is. Instances which have all band all mode decoding will take longer. It will run in the background and shouldn't take more than ~45 minutes. Once complete your instance will automatically restart - that is expected.
-#### V2 Toggle
+### V2 Toggle
 In the UI tab in Admin (again hard refresh browser if you don't see it) there is a toggle to enable the V2 interface by default. Changing this toggle does not require a restart (i.e. instant change when you open the UI). There is also a button on the old UI's on-load overlay directing users to V2.
-#### UI Customisations
+### UI Customisations
 Please note: Many of the UI customisations aren't fully integrated - this is explained at the top of the UI tab. Also, widgets are not loaded in V2. Most of the widgets I made are integrated directly into V2 but if you have your own be aware they will need modified for V2 when I finish integrating them.
-#### HTML/BODY customisations
+### HTML/BODY customisations
 Also be aware that customisations to the HTML head and body will be loaded in V2 but may not work as you expect as it's a completely different framework - one of the reasons why I didn't default a staight switch to V2.
 
 ### Security Fixes

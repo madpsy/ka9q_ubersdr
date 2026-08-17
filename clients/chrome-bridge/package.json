@@ -1,6 +1,6 @@
 {
   "name": "ubersdr-bridge-chrome",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Chrome extension for the UberSDR v2 page API — read and control the receiver, and sync with flrig",
   "private": true,
   "scripts": {

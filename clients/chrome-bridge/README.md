@@ -8,7 +8,7 @@ A Chrome extension (Manifest V3) that connects to any open UberSDR tab and lets 
 
 ```bash
 cd clients/chrome-bridge
-make build          # builds dist/ubersdr_bridge_chrome-2.0.0.zip
+make build          # builds dist/ubersdr_bridge_chrome-2.1.0.zip
 ```
 
 Or without make:

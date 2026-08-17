@@ -70,8 +70,70 @@ That produces static, dependency-free binaries in `build/`:
 | `linux-arm64` | Raspberry Pi 4/5 (64-bit OS), Apple silicon Linux VMs |
 | `linux-armv7` | Raspberry Pi 2/3, 32-bit OS |
 | `linux-armv6` | Raspberry Pi 1 / Zero |
-| `darwin-amd64`, `darwin-arm64` | |
+| `darwin-amd64`, `darwin-arm64` | must be notarised before publishing — see below |
 | `windows-amd64`, `windows-arm64` | Windows Terminal recommended |
+
+## Releasing
+
+The eight binaries hang off the rolling `latest` release on GitHub, under the
+names the download buttons at [ubersdr.org](https://ubersdr.org) point straight
+at — `ubersdr-tui-<platform>` — so those names are constants and a release
+replaces the assets rather than adding new ones.
+
+```bash
+./build.sh                       # all eight into build/
+./notarise-mac.sh --publish      # sign + notarise the two darwin ones, then upload them
+gh release upload latest \
+    build/ubersdr-tui-linux-{amd64,arm64,armv6,armv7} \
+    build/ubersdr-tui-windows-{amd64,arm64}.exe \
+    --clobber --repo madpsy/ka9q_ubersdr
+```
+
+The macOS pair cannot simply be uploaded. Gatekeeper refuses a *downloaded*
+binary that is not signed with a Developer ID certificate and notarised by
+Apple, and for a command-line tool the refusal is `zsh: killed` — exit 137, with
+nothing said about why, which reads as a broken download rather than as a policy.
+`notarise-mac.sh` is what makes them pass: it ships them to a Mac over ssh
+(`MAC_HOST`, default `macbook`), signs them with the hardened runtime, submits
+them to Apple's notary service, waits for the verdict, brings the signed binaries
+back, and writes a `build/<binary>.gatekeeper-ok` marker beside each one that
+Apple accepted. `--publish` then uploads only the binaries that got that far. It
+is the same shape, and mostly the same code, as `clients/electron/build-mac.sh`,
+which does this for the dmgs — its header documents the credentials both share.
+
+```bash
+./notarise-mac.sh --check        # can that Mac sign and notarise? nothing else
+./notarise-mac.sh                # sign, notarise and verify; no upload
+./notarise-mac.sh --arch=arm64   # just the one
+./notarise-mac.sh --build        # rebuild the darwin pair first
+```
+
+Two things about it are worth knowing before trusting its output:
+
+- **Nothing is stapled.** A notarisation ticket can only be stapled to an `.app`,
+  a `.dmg` or a `.pkg`; a bare Mach-O has nowhere to put one. Apple records the
+  ticket and Gatekeeper looks it up *online* on first run, which is why these
+  are still published as plain binaries — no installer, no renamed assets. A
+  first run with no network can still be refused. A `.pkg` would fix that and
+  would need a Developer ID **Installer** certificate, which this account does
+  not have.
+- **`spctl` is not the test.** `spctl -a -t exec` answers "rejected (the code is
+  valid but does not seem to be an app)" for a binary that is perfectly
+  notarised — it assesses bundles, not loose executables. The script therefore
+  gates on `notarytool` returning `status: Accepted` together with a passing
+  `codesign --verify`, and records the spctl line as information. Gating on
+  spctl, as the dmg script legitimately does, would block every good build here.
+
+To check the real thing rather than the metadata, quarantine a copy on a Mac
+exactly as a browser download would be and run it:
+
+```bash
+xattr -w com.apple.quarantine "0083;00000000;Safari;" ubersdr-tui-darwin-arm64
+./ubersdr-tui-darwin-arm64 -version    # exit 0 notarised, exit 137 (SIGKILL) not
+```
+
+The Linux and Windows binaries are unsigned and need no ceremony, though Windows
+does show a SmartScreen warning on first run.
 
 ## Run
 

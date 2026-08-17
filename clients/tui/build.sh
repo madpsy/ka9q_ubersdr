@@ -4,6 +4,14 @@
 # This client is deliberately pure Go (no PortAudio, no Opus, no libsamplerate),
 # so CGO stays off and every target builds from any host with no cross toolchain,
 # sysroot or emulator.
+#
+# The darwin pair is not finished when this script ends. Gatekeeper kills a
+# *downloaded* macOS binary that is not signed with a Developer ID certificate
+# and notarised by Apple — exit 137, with no explanation to the person who
+# downloaded it — so those two go through ./notarise-mac.sh before they are
+# published. That needs a Mac, which is why it is a separate script and why this
+# one still builds them here: the build is pure cross-compilation, and only the
+# signing needs the other machine. See the Releasing section of README.md.
 
 set -euo pipefail
 
@@ -60,9 +68,30 @@ for target in "${TARGETS[@]}"; do
   env CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOARM="$goarm" \
     go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$binary" .
 
+  # A fresh binary is not the notarised one, whatever is written beside it.
+  # notarise-mac.sh leaves a .gatekeeper-ok marker recording Apple's verdict on
+  # the exact file it signed, and a rebuild replaces that file — so the marker
+  # goes with it rather than being left to vouch for a binary Apple never saw.
+  rm -f "$binary.gatekeeper-ok"
+
   echo "$(du -h "$binary" | cut -f1)"
 done
 
 echo
 echo -e "${GREEN}Done.${NC} Binaries are in $OUT/:"
 ls -1 "$OUT"
+
+# Said here because nothing else will say it, and the way to find out otherwise
+# is a macOS user reporting that the download does not run. A signed binary that
+# was rebuilt has lost its signature along with everything else, so this is worth
+# repeating on every build that touched darwin — not only on the first.
+for target in "${TARGETS[@]}"; do
+  case "${target%%:*}" in darwin-*)
+    echo
+    echo "  The darwin binaries are unsigned as they stand, and Gatekeeper kills"
+    echo "  an unsigned download on somebody else's Mac. Before publishing them:"
+    echo "      ./notarise-mac.sh            sign, notarise and verify"
+    echo "      ./notarise-mac.sh --publish  ...and upload them to the release"
+    break ;;
+  esac
+done

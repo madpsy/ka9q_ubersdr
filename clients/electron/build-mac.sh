@@ -14,6 +14,12 @@
 # fetches the Electron binary for the target itself.
 #
 # Usage:
+# The terminal client has its own version of all this, in
+# clients/tui/notarise-mac.sh: the same ssh helper, the same keychain unlock and
+# the same .gatekeeper-ok convention, applied to two bare Go binaries rather than
+# to a dmg. Where the two differ is documented there — a ticket cannot be stapled
+# to a loose executable, so it gates on notarytool's verdict rather than spctl's.
+#
 #   ./build-mac.sh --check   preflight only: can that Mac build, sign, notarise?
 #   ./build-mac.sh           build both dmgs and bring them back to dist/
 #   ./build-mac.sh --arch=arm64

@@ -599,6 +599,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
     font-variant-numeric: tabular-nums;
     color: var(--text);
 }
+/* The slider with a step button either side. The slider takes the room the
+   buttons leave, so the track is as long as the popover allows rather than as
+   long as whatever the flex default worked out to. */
+.bwpop__row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.bwpop__row .slider { flex: 1; min-width: 0; }
+
 /* The edges the width works out to, the pair the Receiver panel prints under
    its own slider. Which one moves depends on the sideband. */
 .bwpop__edges {
@@ -2109,6 +2119,27 @@ a.btn { text-decoration: none; }
     /* Drawn against the control's box, so it follows the height rather than
        hanging off the top of a taller one. */
     .slider-marker { height: 22px; }
+
+    /* The filter width, which is the one slider people report fighting with on a
+       touchscreen — and the only one that lives in a popover.
+
+       `touch-action: none` so the WebView cannot decide that a drag along the thumb
+       was really an attempt to pan the page and take the gesture away mid-move. A
+       range input handles its own drag, and nothing inside a fixed popover scrolls,
+       so there is nothing here to give up. Scoped rather than put on `.slider`
+       everywhere for exactly that reason: the same rule on a slider inside a dock
+       would eat the scroll that gets you to the rest of the panel.
+
+       Bigger than the shared coarse figures above, because this popover is opened
+       with a fingertip and closes the moment one lands outside it — there is no
+       second chance at a near miss.
+
+       And wider, since precision here is pixels per hertz: the same range over
+       280 px rather than 200 is a third finer for the same gesture. */
+    .bwpop { min-width: 280px; }
+    .bwpop .slider { height: 44px; touch-action: none; }
+    .bwpop .slider::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -10px; }
+    .bwpop .slider::-moz-range-thumb { width: 24px; height: 24px; }
 }
 
 .slider-wrap { position: relative; }

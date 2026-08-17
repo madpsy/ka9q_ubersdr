@@ -602,13 +602,44 @@ export default function TopBar({ compact }) {
                             <span className="bwpop__label">Filter width</span>
                             <span className="bwpop__value">{(filterWidth / 1000).toFixed(2)} kHz</span>
                         </div>
-                        <Slider
-                            value={Math.min(filterWidth, maxFilterWidth(tuning.mode))}
-                            min={FILTER_WIDTH_MIN}
-                            max={maxFilterWidth(tuning.mode)}
-                            step={FILTER_WIDTH_STEP}
-                            onChange={setFilterWidth}
-                        />
+                        {/* A step either side of the slider, which is the tune row's
+                            bargain applied here: dragging is how you get somewhere
+                            near, and a button is how you land on a figure. On a
+                            touchscreen it is also the path that cannot be fumbled —
+                            a 50 Hz nudge needs no aim at all, where a thumb on a
+                            200 px track is fighting for single pixels. */}
+                        <div className="bwpop__row">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                icon={<Icon.Minus />}
+                                title={`Narrower — ${FILTER_WIDTH_STEP} Hz`}
+                                aria-label="Narrower"
+                                disabled={filterWidth <= FILTER_WIDTH_MIN}
+                                onClick={() => setFilterWidth(
+                                    Math.max(FILTER_WIDTH_MIN, filterWidth - FILTER_WIDTH_STEP),
+                                )}
+                            />
+                            <Slider
+                                value={Math.min(filterWidth, maxFilterWidth(tuning.mode))}
+                                min={FILTER_WIDTH_MIN}
+                                max={maxFilterWidth(tuning.mode)}
+                                step={FILTER_WIDTH_STEP}
+                                onChange={setFilterWidth}
+                            />
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                icon={<Icon.Plus />}
+                                title={`Wider — ${FILTER_WIDTH_STEP} Hz`}
+                                aria-label="Wider"
+                                disabled={filterWidth >= maxFilterWidth(tuning.mode)}
+                                onClick={() => setFilterWidth(
+                                    Math.min(maxFilterWidth(tuning.mode),
+                                        filterWidth + FILTER_WIDTH_STEP),
+                                )}
+                            />
+                        </div>
                         <div className="bwpop__edges">
                             <span>{tuning.bandwidthLow} Hz</span>
                             <span>{tuning.bandwidthHigh} Hz</span>

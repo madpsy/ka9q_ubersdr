@@ -362,6 +362,26 @@ starts, and when the page asks. Never at launch.
 only what a 430 px screen needs said differently: there is no hover, there is no
 room above the first row, and 24 px of icon is not a thumb target.
 
+### No chat, and why
+
+Both hosts declare `chat: false`, and v2 does not draw the panel
+(`panels/registry.jsx`, the same `requires` idiom the Doppler and NAVTEX panels
+use). Absent means yes, so the browser and the desktop client are unchanged.
+
+The rule that prompted it is Apple's Guideline 1.2 — an app carrying
+user-generated content has to offer moderation, reporting and blocking for it —
+and it was the iOS client's one deliberate difference for a while. It is not a
+difference any more. Google Play's user-generated content policy asks for the
+same things, and the reason neither client can offer them was never really about
+which store it was shipping to: the chat belongs to whichever receiver the
+operator has chosen, and neither app has any standing to moderate somebody
+else's channel.
+
+Said with the flag on both rather than by adding `chat` to each client's
+`hidePanels` list, which would hide the same panel. Two clients withdrawing the
+same thing for the same reason should do it by the same means, or the next
+person to change it finds one and not the other.
+
 ## The iOS half
 
 Everything above describes both platforms unless it names Android. This section
@@ -424,16 +444,6 @@ module, which is a two-attribute edit to XML rather than an Xcode session.
 The loopback origin is a secure context — verified on device rather than
 assumed, `window.isSecureContext === true` — so the page keeps `AudioWorklet`,
 `enumerateDevices` and the recorder exactly as it does on Android.
-
-### No chat, and why
-
-Apple's Guideline 1.2 requires an app carrying user-generated content to offer
-moderation, reporting and blocking for it. The chat belongs to whichever
-receiver you are on, and this client can provide none of that on somebody
-else's receiver — so the iOS host declares `chat: false` and v2 does not draw
-the panel (`panels/registry.jsx`, the same `requires` idiom the Doppler and
-NAVTEX panels use). Absent means yes, so the browser, the desktop client and
-Android are unchanged.
 
 ### App Transport Security
 

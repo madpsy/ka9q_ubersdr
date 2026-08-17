@@ -463,11 +463,17 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     ///   * the saved password, in sessionStorage under the key v2 already reads
     ///     (`ubersdr.v2.password`, see static/v2/src/radio/session.js), rather
     ///     than typed into a box the operator has already filled in once.
-    ///   * `chat: false`, which is this client's one deliberate difference from
-    ///     Android. Apple's Guideline 1.2 requires moderation, reporting and
-    ///     blocking for user-generated content; the chat belongs to whichever
-    ///     receiver you are on and this app cannot offer any of that for it, so
-    ///     the panel is not drawn here.
+    ///   * `chat: false`. Apple's Guideline 1.2 requires moderation, reporting
+    ///     and blocking for user-generated content; the chat belongs to
+    ///     whichever receiver you are on and this app cannot offer any of that
+    ///     for it, so the panel is not drawn here.
+    ///
+    ///     This was once the one deliberate difference from Android. It is not
+    ///     any more: the Android client sets the same flag to the same value,
+    ///     because Google Play asks for the same things and the reason neither
+    ///     client can offer them was never about which store it was — it is
+    ///     that the channel belongs to somebody else's receiver. See
+    ///     ReceiverActivity.seedScript.
     private func seedScript() -> String {
         var js = "(function(){try{window.ubersdrDesktop={"
         js += "upstreamOrigin:\(quote(proxy.upstreamOriginForPage)),"

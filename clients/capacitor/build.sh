@@ -856,6 +856,40 @@ if [[ "$INSTALL" -eq 1 ]]; then
     ADB="$ANDROID_HOME/platform-tools/adb"
     command -v adb >/dev/null 2>&1 && ADB=adb
 
+    # The wireless debugging port, asked of the phone rather than assumed.
+    #
+    # There are two wireless modes and they are not the same thing. `adb tcpip
+    # 5555` opens a fixed port and is what PHONE_DEFAULT assumes; Android 11's
+    # Wireless debugging panel allocates a *random* one instead, changes it
+    # every time the toggle is turned off and on, and never uses 5555. On a
+    # phone using the panel, a fixed default is wrong the first time and stays
+    # wrong — which is how this was found.
+    #
+    # Both modes advertise over mDNS, so the port is discoverable: the device
+    # publishes `_adb-tls-connect._tcp`, and adb has known how to list what it
+    # has seen since platform-tools 30. `_adb-tls-pairing._tcp` is the other
+    # service and is deliberately not matched — that one is the six-digit
+    # pairing code's port, which is useless without the code and is not where a
+    # paired host connects.
+    #
+    # An argument selects among several: the address to prefer when more than
+    # one device is advertising, which is the case whenever a screenshot
+    # emulator is up. Empty takes the first, since with one phone there is one.
+    # Never fails, deliberately. This script runs under `set -euo pipefail`, so a
+    # pipeline whose adb cannot reach its server would take the whole build down
+    # — and "mDNS told us nothing" is an ordinary answer here, not an error: it
+    # is what a phone that is simply switched off looks like. Empty output is
+    # the way it says so.
+    mdns_endpoint() {
+        local want="${1%%:*}"
+        "$ADB" mdns services 2>/dev/null | awk -v want="$want" '
+            $2 == "_adb-tls-connect._tcp" && $3 ~ /:[0-9]+$/ {
+                split($3, a, ":")
+                if (want == "" || a[1] == want) { print $3; exit }
+            }' || true
+        return 0
+    }
+
     # Where to install, when nothing was named.
     #
     # adb's own rule is "the one device attached", which stops working the
@@ -868,14 +902,29 @@ if [[ "$INSTALL" -eq 1 ]]; then
     # screen locks and each re-enumeration needs its permissions again, so
     # wireless is the normal way in rather than the exception. Override the
     # address with UBERSDR_PHONE, or name anything else with --install=.
+    #
+    # Asked before assumed: mDNS knows the port a phone is actually listening
+    # on, and PHONE_DEFAULT is only a guess at it — right for `adb tcpip 5555`
+    # and never right for Android 11's Wireless debugging. The guess is still
+    # the fallback, for a phone that is switched on but not advertising.
     if [[ -z "$DEVICE" ]]; then
         physical="$("$ADB" devices | awk '$2 == "device" && $1 !~ /^emulator-/ { print $1 }')"
         if [[ "$(wc -l <<< "$physical")" -eq 1 && -n "$physical" ]]; then
             DEVICE="$physical"
             echo "  installing to $DEVICE"
         else
-            DEVICE="$PHONE_DEFAULT"
-            echo "  no phone on USB — trying $DEVICE over Wi-Fi"
+            found="$(mdns_endpoint "$PHONE_DEFAULT")"
+            # Nothing at that address, but something is out there: take it. The
+            # phone's address changes on a DHCP lease as readily as its port
+            # changes on a toggle, and both are the same question — where is it.
+            [[ -n "$found" ]] || found="$(mdns_endpoint "")"
+            if [[ -n "$found" ]]; then
+                DEVICE="$found"
+                echo "  no phone on USB — found $DEVICE over mDNS"
+            else
+                DEVICE="$PHONE_DEFAULT"
+                echo "  no phone on USB and none advertising — trying $DEVICE over Wi-Fi"
+            fi
         fi
     fi
 
@@ -887,12 +936,27 @@ if [[ "$INSTALL" -eq 1 ]]; then
         # device every time the screen locks, and each re-enumeration is a new
         # node that needs its permissions again.
         if [[ "$DEVICE" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?$ ]]; then
-            [[ "$DEVICE" == *:* ]] || DEVICE="$DEVICE:5555"
+            # An address with no port is a question rather than an answer: ask
+            # mDNS what this phone is listening on before falling back to the
+            # `adb tcpip` port. A port that was given is used as given — somebody
+            # naming one knows something this does not.
+            if [[ "$DEVICE" != *:* ]]; then
+                found="$(mdns_endpoint "$DEVICE")"
+                DEVICE="${found:-$DEVICE:5555}"
+            fi
             echo "connecting to $DEVICE…"
             if ! "$ADB" connect "$DEVICE" | grep -qE "connected to"; then
                 echo "not installed: could not reach $DEVICE." >&2
-                echo "  The phone needs wireless debugging on, and its first" >&2
-                echo "  connection has to be made over USB with: adb tcpip 5555" >&2
+                echo >&2
+                echo "  Wireless debugging has two modes and only one uses a fixed port:" >&2
+                echo "    adb tcpip 5555        opens 5555, and needs one USB connection first." >&2
+                echo "    Wireless debugging    Android 11's panel: a random port, re-rolled" >&2
+                echo "                          every time the toggle is turned off and on, and" >&2
+                echo "                          a pairing code the first time. Once paired, this" >&2
+                echo "                          script finds the port itself over mDNS." >&2
+                echo >&2
+                echo "  What is advertising now:" >&2
+                "$ADB" mdns services 2>/dev/null | sed 's/^/    /' >&2
                 exit 1
             fi
         fi

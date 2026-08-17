@@ -764,6 +764,23 @@ public class ReceiverActivity extends Activity {
      * the client-side filters with it — a trade made to raise a widget this app
      * raises for itself. See static/v2/src/radio/media/support.js.
      *
+     * <p>`chat: false` withdraws the chat panel, the same flag and the same
+     * value the iOS client sets — see ReceiverViewController.seedScript and
+     * `chatAllowed` in static/v2/src/panels/registry.jsx. It was iOS's alone at
+     * first, on Apple's Guideline 1.2: an app carrying user-generated content
+     * has to offer moderation, reporting and blocking for it. Google Play's
+     * user-generated content policy asks for the same things, and the reason
+     * neither client can offer them is a fact about these clients rather than
+     * about either store — the chat belongs to whichever receiver the operator
+     * has chosen, and this app has no standing to moderate somebody else's
+     * channel. So both say it, and a chat panel is now something the browser
+     * and the desktop client have.
+     *
+     * <p>Said with the flag rather than by adding `chat` to HIDDEN_PANELS,
+     * which would have hidden the same panel. Two clients withdrawing the same
+     * thing for the same reason should do it by the same means, or the next
+     * person to change it finds one of them and not the other.
+     *
      * <p>The password goes where the page already looks for one — sessionStorage
      * under `ubersdr.v2.password`, see static/v2/src/radio/session.js — rather
      * than being handed to the page as a value.
@@ -789,6 +806,7 @@ public class ReceiverActivity extends Activity {
           .append(JSONObject.quote(upstreamOrigin == null ? "" : upstreamOrigin))
           .append(",autoStart:true,mediaSession:true,notifications:")
           .append(JSONObject.quote(notifications))
+          .append(",chat:false")
           .append(",hidePanels:").append(HIDDEN_PANELS)
           .append("};}catch(e){}");
         if (password != null && !password.isEmpty()) {

@@ -109,9 +109,10 @@ import BandSpectrumPanel from './BandSpectrumPanel.jsx';
  *
  * Declared by the host through `window.ubersdrDesktop.chat`, never sniffed, and
  * read the same way as the other host answers (see radio/media/support.js and
- * components/StartOverlay.jsx). Absent is yes: a page in a browser, the desktop
- * client and the Android client all carry on exactly as before, and only a host
- * that says `false` loses the panel.
+ * components/StartOverlay.jsx). Absent is yes: a page in a browser and the
+ * desktop client carry on exactly as before, and only a host that says `false`
+ * loses the panel — which today is both mobile clients, neither of which can
+ * offer moderation for a channel belonging to somebody else's receiver.
  */
 function chatAllowed() {
     try {

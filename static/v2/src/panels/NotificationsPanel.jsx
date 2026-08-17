@@ -18,11 +18,15 @@ import { Button, Empty, Field, Segmented, Switch } from '../components/ui.jsx';
 import { sinceLabel } from '../lib/format.js';
 import NoticeIcon from '../components/NoticeIcon.jsx';
 import {
-    NOTICE_PLACES, NOTICE_SOURCES, NOTICE_STYLES, NOTICE_TIMES, clearNotifications,
+    NOTICE_PLACES, NOTICE_STYLES, NOTICE_TIMES, clearNotifications,
     notificationState, onNotifications, pushNotification, setNotificationSettings,
-    setSourceEnabled, sourceEnabled, sourceLabel,
+    setSourceEnabled, sourceEnabled, sourceLabel, switchableSources,
 } from '../lib/notifications.js';
 import { nativePermission, requestNativePermission } from '../lib/nativeNotices.js';
+import { playNoticeDing } from '../lib/noticeSound.js';
+import { noticeActionLabel, runNoticeAction } from '../lib/noticeActions.js';
+import { useRadio } from '../radio/RadioContext.jsx';
+import { PANEL_BY_ID, usePanelApplies } from './registry.jsx';
 
 // How many the panel lists. Five is what fits a dock column without scrolling and about
 // as far back as anybody asks; the store keeps fifty, so the number here can grow without
@@ -52,6 +56,7 @@ function permissionNote(permission, style) {
 }
 
 export default function NotificationsPanel({ minimal }) {
+    const { actions } = useRadio();
     const [{ history, settings }, setState] = useState(notificationState);
     useEffect(() => onNotifications(setState), []);
     // Read rather than stored: the browser owns it, and it can change in the browser's own
@@ -84,6 +89,17 @@ export default function NotificationsPanel({ minimal }) {
 
     const shown = history.slice(0, SHOWN);
 
+    // Only the sources this receiver can actually raise. The gate is the panels' own, so a
+    // receiver with no rotator loses the rotator switch for the same reason and at the same
+    // moment it loses the rotator panel, and a host that has switched chat off loses both
+    // chat switches with the chat panel. A source whose panel is not registered is kept —
+    // see switchableSources.
+    const applies = usePanelApplies();
+    const sources = switchableSources((panelId) => {
+        const panel = PANEL_BY_ID[panelId];
+        return !panel || applies(panel);
+    });
+
     return (
         <div className="stack">
             {shown.length === 0 ? (
@@ -91,7 +107,24 @@ export default function NotificationsPanel({ minimal }) {
             ) : (
                 <ul className="notes">
                     {shown.map((n) => (
-                        <li key={n.id} className={`notes__row is-${n.severity}`}>
+                        <li
+                            key={n.id}
+                            className={`notes__row is-${n.severity}${n.action ? ' is-pressable' : ''}`}
+                        >
+                            {/* The same press the toast offers, still here after the toast
+                                has gone — which is most of why this list exists. A toast
+                                is five seconds; "what was that frequency?" is asked later
+                                than that. Laid over the row for the reason it is laid over
+                                the toast: see Toasts.jsx. */}
+                            {n.action && (
+                                <button
+                                    type="button"
+                                    className="notes__act"
+                                    title={noticeActionLabel(n.action)}
+                                    aria-label={noticeActionLabel(n.action)}
+                                    onClick={() => runNoticeAction(n.action, actions)}
+                                />
+                            )}
                             <div className="notes__head">
                                 <span className="notes__title">{n.title}</span>
                                 {n.count > 1 && <span className="notes__count">×{n.count}</span>}
@@ -204,6 +237,32 @@ export default function NotificationsPanel({ minimal }) {
                                     }))}
                                 />
                             </Field>
+                            {/* In the same block, and for the same reason: a desktop
+                                notification is announced by the system, with the
+                                system's own sound, and a ding underneath it would be
+                                this page talking over the operating system.
+
+                                Off until asked for. A receiver that started making
+                                noises at somebody who had not asked for any is the one
+                                default here that needs no argument. */}
+                            <Field
+                                label="Sound"
+                                hint={settings.sound ? undefined : 'silent'}
+                                inline
+                            >
+                                <Switch
+                                    checked={settings.sound}
+                                    onChange={(v) => {
+                                        setNotificationSettings({ sound: v });
+                                        // Switching it on plays it, because the only
+                                        // question anybody has about a sound is what it
+                                        // sounds like — and the press is also the
+                                        // gesture the browser wants before this page is
+                                        // allowed to make one at all.
+                                        if (v) playNoticeDing();
+                                    }}
+                                />
+                            </Field>
                             </>
                             )}
 
@@ -234,8 +293,6 @@ export default function NotificationsPanel({ minimal }) {
                         </>
                     )}
 
-                    <div className="divider" />
-
                     {/* One switch per thing that raises notifications, so "I do not care
                         about the rotator" is sayable without silencing everything.
 
@@ -244,26 +301,36 @@ export default function NotificationsPanel({ minimal }) {
                         right now, so it keeps the history; a source switch says you do not
                         want to know, and a log of things nobody wants to know is not worth
                         keeping. Muting the rotator also stops it being polled — see
-                        HardwareNoticeWatch. */}
-                    <div className="section-label"><span>From</span></div>
-                    {NOTICE_SOURCES.map((src) => (
-                        <Field
-                            key={src.id}
-                            label={(
-                                <span className="notes__switch">
-                                    <NoticeIcon source={src.id} className="notes__icon" />
-                                    {src.label}
-                                </span>
-                            )}
-                            hint={src.note}
-                            inline
-                        >
-                            <Switch
-                                checked={sourceEnabled(src.id)}
-                                onChange={(v) => setSourceEnabled(src.id, v)}
-                            />
-                        </Field>
-                    ))}
+                        HardwareNoticeWatch.
+
+                        The whole section goes when the receiver has none of them, heading
+                        and divider included: a receiver with no rotator, no antenna switch
+                        and no chat has nothing to say here, and "From" over an empty space
+                        is a question with the answer missing rather than absent. */}
+                    {sources.length > 0 && (
+                        <>
+                            <div className="divider" />
+                            <div className="section-label"><span>From</span></div>
+                            {sources.map((src) => (
+                                <Field
+                                    key={src.id}
+                                    label={(
+                                        <span className="notes__switch">
+                                            <NoticeIcon source={src.id} className="notes__icon" />
+                                            {src.label}
+                                        </span>
+                                    )}
+                                    hint={src.note}
+                                    inline
+                                >
+                                    <Switch
+                                        checked={sourceEnabled(src.id)}
+                                        onChange={(v) => setSourceEnabled(src.id, v)}
+                                    />
+                                </Field>
+                            ))}
+                        </>
+                    )}
                 </>
             )}
         </div>

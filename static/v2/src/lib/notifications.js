@@ -31,6 +31,8 @@
 // reason: the toast layer and the panel both read them, and neither is a good owner.
 
 import { nativePermission, nativeSupported, pageVisible } from './nativeNotices.js';
+import { playNoticeDing } from './noticeSound.js';
+import { normaliseNoticeAction } from './noticeActions.js';
 
 // Where toasts appear. Two axes, kept as one value because it is one decision and a
 // stored pair could disagree with itself.
@@ -95,9 +97,56 @@ export const NOTICE_SOURCES = [
         label: 'Chat arrivals',
         note: 'When somebody joins the channel',
     },
+    // The one source that ships *off*, and the only one where that is the right default.
+    //
+    // Everything else here is an event: the rotator finished, somebody said your name.
+    // This is a feed. A skimmer working three bands confirms a few callsigns a minute,
+    // and a receiver left on overnight would greet you with a wall of them — so the
+    // operator asks for it rather than switching it off, which is the opposite of the
+    // rule the rest of this panel follows and for the opposite reason. See defaultOff.
+    {
+        id: 'voice-callsign',
+        panel: 'voiceskimmer',
+        label: 'New callsigns',
+        note: 'When the Voice Skimmer confirms one it has not heard before',
+        defaultOff: true,
+    },
+    // Off for the same reason and a sharper one: a storm overhead is several strikes a
+    // second. What this raises is that lightning has started and how hard it is going —
+    // never one line per strike. See lib/lightningStream.js.
+    {
+        id: 'lightning',
+        panel: 'lightning',
+        label: 'Lightning',
+        note: 'When strikes start, and how hard while they continue',
+        defaultOff: true,
+    },
 ];
 
 const sourceEntry = (id) => NOTICE_SOURCES.find((s) => s.id === id) || null;
+
+/**
+ * The sources worth offering a switch for on this receiver.
+ *
+ * A switch for the rotator on a receiver with no rotator is a setting for something that
+ * can never happen, and a panel full of them reads as a receiver that has everything and
+ * says nothing. So the list is filtered by the same question the docks and the mobile tab
+ * bar already ask about the panel behind each source — see usePanelApplies — rather than
+ * by a second answer here that could drift from the first.
+ *
+ * The predicate is passed in rather than imported: this file is a plain store, and
+ * reaching into the panel registry from it would point a lib at the panels that use it.
+ * The caller does the lookup, exactly as NoticeIcon does for the icons.
+ *
+ * A source that names no panel, or names one the caller does not recognise, stays. That is
+ * the same way round as an unregistered source being unmutable: the cost of showing a
+ * switch nobody needs is a line in a panel, and the cost of hiding one is a notification
+ * that cannot be switched off.
+ */
+export function switchableSources(panelApplies) {
+    if (typeof panelApplies !== 'function') return NOTICE_SOURCES;
+    return NOTICE_SOURCES.filter((s) => !s.panel || panelApplies(s.panel));
+}
 
 export const sourceLabel = (id) => {
     const hit = sourceEntry(id);
@@ -176,6 +225,20 @@ export function deliveryFor({ style, permission, supported, visible } = {}) {
 // message, and the oldest is the one nobody is reading — so it goes.
 export const TOAST_MAX = 3;
 
+// How long two notifications saying exactly the same thing count as one.
+//
+// `key` is the deliberate version of this and is the better one: a caller that knows two
+// events are the same thing says so, and the coalescing then lasts as long as the history
+// does. This is the safety net under it — the same words, from the same source, twice in a
+// few seconds, is a repeat whether or not anybody thought to key it, and showing it twice
+// is a bug of the interface rather than news.
+//
+// Ten seconds because it has to be long enough to cover a feed that reconnects and replays,
+// and short enough that a station calling CQ every half minute is still reported every half
+// minute. Beyond the window they are two events again, which is the honest answer: the same
+// thing happening twice an hour apart is two things that happened.
+export const DEDUPE_MS = 10000;
+
 const KEY = 'ubersdr.v2.notifications';
 
 const DEFAULTS = {
@@ -192,11 +255,24 @@ const DEFAULTS = {
     // That is an argument about browsers, and defaultStyle below is where it stops
     // applying.
     style: 'toast',
+    // Whether a toast also makes a sound. Off, and this is the one default in this file
+    // that needs no argument: a receiver that started making noises at somebody who had
+    // not asked for any would be a fault. It goes with the toast rather than with the
+    // notification, because it is the in-page half — a desktop notification is announced
+    // by the system, with the system's own sound and the system's own settings, and a
+    // second ding underneath it would be this page talking over the operating system.
+    sound: false,
     // Which sources are silenced, by id. A list of the *off* ones rather than the on
     // ones, so a source added later arrives switched on without a migration — the
     // alternative is every new notification being invisible to everybody who has ever
     // touched this panel.
     muted: [],
+    // And the mirror of it, for the sources that ship off: the ones explicitly asked
+    // for. Two lists rather than one with a sign, because each is the exception to its
+    // own default, and that is what makes both of them survive a source being added —
+    // a stored list that named every source's state would have to guess at ids it has
+    // never seen. See sourceEnabled.
+    unmuted: [],
 };
 
 /**
@@ -235,7 +311,9 @@ function load() {
             place: NOTICE_PLACES.some((p) => p.id === saved.place) ? saved.place : DEFAULTS.place,
             seconds: NOTICE_TIMES.includes(Number(saved.seconds))
                 ? Number(saved.seconds) : DEFAULTS.seconds,
+            sound: saved.sound === true,
             muted: Array.isArray(saved.muted) ? saved.muted.map(String) : [],
+            unmuted: Array.isArray(saved.unmuted) ? saved.unmuted.map(String) : [],
             style: NOTICE_STYLES.some((x) => x.id === saved.style) ? saved.style : defaultStyle(),
         };
     } catch (e) {
@@ -271,9 +349,12 @@ export function setNotificationSettings(patch) {
     const style = patch.style === undefined ? settings.style : patch.style;
     settings = {
         enabled: patch.enabled === undefined ? settings.enabled : !!patch.enabled,
+        sound: patch.sound === undefined ? settings.sound : !!patch.sound,
         place: NOTICE_PLACES.some((p) => p.id === place) ? place : settings.place,
         seconds: NOTICE_TIMES.includes(seconds) ? seconds : settings.seconds,
         muted: patch.muted === undefined ? settings.muted : [...new Set(patch.muted.map(String))],
+        unmuted: patch.unmuted === undefined
+            ? settings.unmuted : [...new Set(patch.unmuted.map(String))],
         style: NOTICE_STYLES.some((x) => x.id === style) ? style : settings.style,
     };
     try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) { /* private mode */ }
@@ -284,13 +365,31 @@ export function setNotificationSettings(patch) {
     return settings;
 }
 
-/** Whether this source's notifications are wanted. Unknown sources always are. */
-export const sourceEnabled = (id) => !settings.muted.includes(String(id || ''));
+/**
+ * Whether this source's notifications are wanted.
+ *
+ * Unknown sources always are — an unregistered source is somebody forgetting to list it,
+ * and the failure of that should be a notification that gets through rather than one that
+ * vanishes. A `defaultOff` source is the other way round and reads the other list: it is
+ * wanted only where it has been asked for by name.
+ */
+export const sourceEnabled = (id) => {
+    const key = String(id || '');
+    const entry = sourceEntry(key);
+    if (entry && entry.defaultOff) return settings.unmuted.includes(key);
+    return !settings.muted.includes(key);
+};
 
-/** Turn one source on or off. */
+/** Turn one source on or off, in whichever list is the exception for it. */
 export function setSourceEnabled(id, on) {
     const key = String(id || '');
     if (!key) return settings;
+    const entry = sourceEntry(key);
+    if (entry && entry.defaultOff) {
+        const unmuted = on
+            ? [...settings.unmuted, key] : settings.unmuted.filter((m) => m !== key);
+        return setNotificationSettings({ unmuted });
+    }
     const muted = on ? settings.muted.filter((m) => m !== key) : [...settings.muted, key];
     return setNotificationSettings({ muted });
 }
@@ -340,6 +439,10 @@ export function pushNotification(spec = {}, now = Date.now()) {
         // and 0 means it waits to be dismissed. A caller only sets this when it knows
         // something the setting cannot — that this one has to be acted on.
         seconds: spec.timeout == null ? null : Math.max(0, Number(spec.timeout) || 0),
+        // What pressing it does, or null. Validated on the way in rather than on the way
+        // out: the history keeps a notification for fifty more, and a malformed action
+        // discovered at click time is a crash in a click handler. See lib/noticeActions.js.
+        action: normaliseNoticeAction(spec.action),
     };
 
     // Where this one goes, decided once, here.
@@ -356,12 +459,31 @@ export function pushNotification(spec = {}, now = Date.now()) {
     });
     item.native = how === 'native' || how === 'both';
 
-    if (key) {
-        const prevToast = toasts.find((t) => t.key === key);
-        const prevAny = prevToast || history.find((h) => h.key === key);
-        if (prevAny) item.count = prevAny.count + 1;
-        toasts = toasts.filter((t) => t.key !== key);
-        history = history.filter((h) => h.key !== key);
+    // What this one is a repeat of, if anything.
+    //
+    // Two ways of being the same notification, and they answer different questions. A key
+    // is the caller saying so, and it holds for as long as the history does — a
+    // reconnecting stream is the same story an hour later. Identical words from the same
+    // source inside DEDUPE_MS is this store noticing, for everything nobody keyed.
+    //
+    // Either way the answer is the same: replace the earlier one and carry a count, rather
+    // than say it twice.
+    const same = key
+        ? (h) => h.key === key
+        : (h) => !h.key && h.source === item.source && h.title === title && h.body === body
+            && (now - h.at) < DEDUPE_MS;
+
+    const prevAny = toasts.find(same) || history.find(same);
+    if (prevAny) {
+        item.count = prevAny.count + 1;
+        toasts = toasts.filter((t) => t.id !== prevAny.id);
+        history = history.filter((h) => h.id !== prevAny.id);
+        // A keyed notification can have several of its own in flight only if something
+        // has gone wrong upstream; clearing them all keeps that from accumulating.
+        if (key) {
+            toasts = toasts.filter((t) => t.key !== key);
+            history = history.filter((h) => h.key !== key);
+        }
     }
 
     history = [item, ...history].slice(0, HISTORY_MAX);
@@ -369,6 +491,12 @@ export function pushNotification(spec = {}, now = Date.now()) {
     // the answer appeared on the page, on the desktop, or was silenced by the master switch.
     if (settings.enabled && (how === 'toast' || how === 'both')) {
         toasts = [item, ...toasts].slice(0, TOAST_MAX);
+        // With the toast and only with the toast. A notification going to the desktop is
+        // announced by the system, which has its own sound and its own idea of whether
+        // this is a moment for one; and a notification silenced by the master switch or
+        // by its source is one the operator has said they do not want, which a noise
+        // would deliver anyway. See lib/noticeSound.js.
+        if (settings.sound) playNoticeDing(now);
     }
     notifyAll();
     return id;

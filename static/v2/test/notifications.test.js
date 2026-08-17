@@ -86,9 +86,41 @@ t('different keys are different notifications', () => {
     assert.strictEqual(n.notificationState().toasts.length, 2);
 });
 
-t('no key means no coalescing: two identical events are two events', () => {
-    n.pushNotification({ title: 'Strike' });
-    n.pushNotification({ title: 'Strike' });
+t('the same thing twice in a moment is one thing with a count', () => {
+    // The safety net under `key`: a caller that knows two events are the same says so,
+    // and this catches the repeats nobody thought to key. Saying it twice in the same
+    // breath is a bug of the interface rather than news.
+    n.pushNotification({ title: 'Strike', body: '14 dB', source: 'rotator' }, NOW);
+    n.pushNotification({ title: 'Strike', body: '14 dB', source: 'rotator' }, NOW + 2000);
+    const s = n.notificationState();
+    assert.strictEqual(s.history.length, 1);
+    assert.strictEqual(s.toasts.length, 1);
+    assert.strictEqual(s.history[0].count, 2);
+    // The newer arrival is the one kept, so its age reads from when it last happened.
+    assert.strictEqual(s.history[0].at, NOW + 2000);
+});
+
+t('past the window they are two events again, because they are', () => {
+    // The same thing happening twice an hour apart is two things that happened.
+    n.pushNotification({ title: 'Strike' }, NOW);
+    n.pushNotification({ title: 'Strike' }, NOW + n.DEDUPE_MS + 1);
+    assert.strictEqual(n.notificationState().history.length, 2);
+});
+
+t('only exactly the same thing: a different word is a different notification', () => {
+    n.pushNotification({ title: 'Strike', body: '14 dB' }, NOW);
+    n.pushNotification({ title: 'Strike', body: '31 dB' }, NOW + 1000);
+    assert.strictEqual(n.notificationState().history.length, 2, 'a different body');
+    n.pushNotification({ title: 'Strike', body: '14 dB', source: 'rotator' }, NOW + 2000);
+    assert.strictEqual(n.notificationState().history.length, 3, 'a different source');
+});
+
+t('the window does not reach past a keyed notification saying the same words', () => {
+    // A key is a stronger statement than a coincidence of wording, and the two must not
+    // coalesce into each other — otherwise an unkeyed one could swallow a keyed line that
+    // something else is still replacing.
+    n.pushNotification({ key: 'rotator-stopped', title: 'Same' }, NOW);
+    n.pushNotification({ title: 'Same' }, NOW + 1000);
     assert.strictEqual(n.notificationState().history.length, 2);
 });
 
@@ -333,9 +365,44 @@ t('every source is on until somebody says otherwise', () => {
     // without a migration — otherwise every new notification would be invisible to
     // everybody who had ever touched this panel.
     for (const src of n.NOTICE_SOURCES) {
+        if (src.defaultOff) continue;
         assert.strictEqual(n.sourceEnabled(src.id), true, src.id);
     }
     assert.deepStrictEqual(n.notificationSettings().muted, []);
+});
+
+// --- the sources that ship off -------------------------------------------------
+
+t('a defaultOff source is off until it is asked for by name', () => {
+    // A feed rather than an event: the skimmer confirms callsigns all day, and a
+    // receiver left running overnight would greet somebody with a wall of them. So this
+    // one is switched *on* rather than off, which is the opposite of every other source
+    // here and the opposite of the reason.
+    assert.strictEqual(n.sourceEnabled('voice-callsign'), false);
+    assert.strictEqual(n.pushNotification({ source: 'voice-callsign', title: 'MM3NDH' }), 0);
+    n.setSourceEnabled('voice-callsign', true);
+    assert.strictEqual(n.sourceEnabled('voice-callsign'), true);
+    assert.ok(n.pushNotification({ source: 'voice-callsign', title: 'MM3NDH' }) > 0);
+});
+
+t('the two defaults are kept in two lists, each naming its own exception', () => {
+    // Neither list can name a source it has never seen, which is what makes both
+    // defaults survive a source being added in a later version.
+    n.setSourceEnabled('voice-callsign', true);
+    n.setSourceEnabled('rotator', false);
+    assert.deepStrictEqual(n.notificationSettings().unmuted, ['voice-callsign']);
+    assert.deepStrictEqual(n.notificationSettings().muted, ['rotator']);
+    // And back again, each leaving the other alone.
+    n.setSourceEnabled('voice-callsign', false);
+    assert.deepStrictEqual(n.notificationSettings().unmuted, []);
+    assert.strictEqual(n.sourceEnabled('voice-callsign'), false);
+    assert.strictEqual(n.sourceEnabled('rotator'), false);
+});
+
+t('asking for one twice does not list it twice', () => {
+    n.setSourceEnabled('voice-callsign', true);
+    n.setSourceEnabled('voice-callsign', true);
+    assert.deepStrictEqual(n.notificationSettings().unmuted, ['voice-callsign']);
 });
 
 t('a muted source raises nothing at all, history included', () => {
@@ -443,6 +510,225 @@ t('a source with no switch of its own may still name a panel', () => {
     // A name that is neither a switch nor a panel resolves to a panel that does
     // not exist, and NoticeIcon draws nothing rather than the wrong glyph.
     assert.strictEqual(n.sourcePanel('something-new'), 'something-new');
+});
+
+// --- which switches the panel offers -------------------------------------------
+
+t('only sources the receiver actually has get a switch', () => {
+    // A switch for the rotator on a receiver with no rotator is a setting for something
+    // that can never happen. The predicate is the panels' own gate, passed in by the
+    // panel — see usePanelApplies — so the switch and the panel it belongs to appear and
+    // disappear together.
+    const ids = (applies) => n.switchableSources(applies).map((s) => s.id);
+    assert.deepStrictEqual(ids((p) => p === 'rotator'), ['rotator']);
+    // A host that has switched chat off loses both halves of it at once.
+    assert.deepStrictEqual(ids((p) => p !== 'chat'),
+        ['rotator', 'antenna', 'voice-callsign', 'lightning']);
+    // And a receiver without the voice skimmer addon does not offer its callsigns.
+    assert.ok(!ids((p) => p !== 'voiceskimmer').includes('voice-callsign'));
+    // A receiver with no rotator, no antenna switch and no chat has nothing to offer.
+    assert.deepStrictEqual(ids(() => false), []);
+});
+
+t('no predicate means every source, and an unknown panel keeps its source', () => {
+    // The store on its own cannot answer the question, and answering it wrongly would
+    // hide a switch for a notification that still arrives. So: everything.
+    assert.strictEqual(n.switchableSources().length, n.NOTICE_SOURCES.length);
+    assert.strictEqual(n.switchableSources(null).length, n.NOTICE_SOURCES.length);
+});
+
+t('a hidden source keeps whatever it was muted to', () => {
+    // The mute is stored by id and the panel never unsets it, so a rotator muted on one
+    // receiver is still muted when you come back to one that has a rotator. Nothing to
+    // migrate, and no setting silently reversed by a change of receiver.
+    n.setSourceEnabled('rotator', false);
+    assert.deepStrictEqual(n.switchableSources((p) => p !== 'rotator').map((s) => s.id),
+        ['antenna', 'chat-mention', 'chat-join', 'voice-callsign', 'lightning']);
+    assert.strictEqual(n.sourceEnabled('rotator'), false);
+});
+
+// --- the ding ------------------------------------------------------------------
+
+// A fake sound card, so the question "does a toast make a noise" can be asked in node.
+// It counts oscillators, which is the only externally visible thing a ding does.
+function withAudio(fn) {
+    let started = 0;
+    const param = () => ({
+        setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {},
+    });
+    const node = () => ({ connect() {}, gain: param() });
+    class FakeCtx {
+        constructor() { this.state = 'running'; this.currentTime = 0; this.destination = {}; }
+        createGain() { return node(); }
+        createOscillator() {
+            return {
+                type: '', frequency: param(), connect() {}, start() { started++; }, stop() {},
+            };
+        }
+        resume() {}
+        close() {}
+    }
+    const prev = global.window;
+    global.window = { AudioContext: FakeCtx };
+    try { fn(() => started); } finally {
+        n._resetNoticeSound();
+        if (prev === undefined) delete global.window; else global.window = prev;
+    }
+}
+
+t('the ding is off until it is asked for', () => {
+    assert.strictEqual(n.notificationSettings().sound, false);
+    withAudio((dings) => {
+        n.pushNotification({ title: 'Quiet' });
+        assert.strictEqual(dings(), 0);
+    });
+});
+
+t('with it on, a toast makes a noise', () => {
+    withAudio((dings) => {
+        n.setNotificationSettings({ sound: true });
+        n.pushNotification({ title: 'Ding' }, NOW);
+        // Two oscillators: the note and its partial, which is what makes it a chime
+        // rather than a beep.
+        assert.strictEqual(dings(), 2);
+    });
+});
+
+t('what makes no toast makes no noise', () => {
+    // Three ways a notification can fail to reach the page, and none of them should be
+    // delivered by sound instead: the master switch, a muted source, and nothing to say.
+    withAudio((dings) => {
+        n.setNotificationSettings({ sound: true, enabled: false });
+        n.pushNotification({ title: 'Silenced' }, NOW);
+        assert.strictEqual(dings(), 0, 'the master switch');
+
+        n.setNotificationSettings({ enabled: true });
+        n.setSourceEnabled('rotator', false);
+        n.pushNotification({ source: 'rotator', title: 'Stopped' }, NOW);
+        assert.strictEqual(dings(), 0, 'a muted source');
+
+        n.pushNotification({}, NOW);
+        assert.strictEqual(dings(), 0, 'nothing to say');
+    });
+});
+
+t('a notification that went to the desktop does not also ding', () => {
+    // The system announces it, with the system's own sound. A second one underneath is
+    // this page talking over the operating system.
+    withAudio((dings) => {
+        // What nativeSupported and nativePermission read, so this really does take the
+        // native branch rather than merely asserting about it.
+        function Notification() {}
+        Notification.permission = 'granted';
+        global.window.Notification = Notification;
+        n.setNotificationSettings({ sound: true, style: 'native' });
+        const id = n.pushNotification({ title: 'Desktop' }, NOW);
+        assert.ok(id > 0, 'it was still raised');
+        const s = n.notificationState();
+        assert.strictEqual(s.toasts.length, 0, 'and drew no toast');
+        assert.strictEqual(s.history[0].native, true, 'having gone to the system');
+        assert.strictEqual(dings(), 0);
+    });
+});
+
+t('a burst is one ding, not three at once', () => {
+    withAudio((dings) => {
+        n.setNotificationSettings({ sound: true });
+        n.pushNotification({ title: 'a' }, NOW);
+        n.pushNotification({ title: 'b' }, NOW + 10);
+        n.pushNotification({ title: 'c' }, NOW + 20);
+        assert.strictEqual(dings(), 2, 'one ding, of two oscillators');
+        // And once the gap has passed, it can be heard again.
+        n.pushNotification({ title: 'd' }, NOW + n.MIN_GAP_MS + 1);
+        assert.strictEqual(dings(), 4);
+    });
+});
+
+t('no sound card is not an error', () => {
+    // The ding is decoration on a message that has already been delivered.
+    n.setNotificationSettings({ sound: true });
+    assert.ok(n.pushNotification({ title: 'Still raised' }, NOW) > 0);
+});
+
+// --- pressing one --------------------------------------------------------------
+
+t('a notification can carry what pressing it should do', () => {
+    // The case it exists for: a notification that names a frequency and then makes you
+    // type it into the dial has told you something and made you do the work anyway.
+    n.pushNotification({
+        title: 'MM3NDH',
+        action: { kind: 'tune', frequency: 14205000, mode: 'usb' },
+    }, NOW);
+    assert.deepStrictEqual(n.notificationState().history[0].action,
+        { kind: 'tune', frequency: 14205000, mode: 'usb' });
+});
+
+t('an action that could not work is no action at all', () => {
+    // Worse than none, because it is pressable and looks like it should do something.
+    const bad = [
+        { kind: 'tune' },                               // nowhere to go
+        { kind: 'tune', frequency: 0 },
+        { kind: 'tune', frequency: -1 },
+        { kind: 'teleport', frequency: 14205000 },      // not a kind this build knows
+        'tune',
+        null,
+    ];
+    for (const action of bad) {
+        n.pushNotification({ title: 'x', action });
+        assert.strictEqual(n.notificationState().history[0].action, null, JSON.stringify(action));
+    }
+});
+
+t('a mode is carried when it is one, and dropped rather than guessed when it is not', () => {
+    // Tuning to an SSB station in the wrong sideband is the same as not tuning to it, and
+    // a mode nobody asked for would overwrite whatever the operator had chosen.
+    assert.deepStrictEqual(n.tuneAction({ frequency: 7150000, mode: 'lsb' }),
+        { kind: 'tune', frequency: 7150000, mode: 'lsb' });
+    assert.deepStrictEqual(n.tuneAction({ frequency: 7150000, mode: 'jt65' }),
+        { kind: 'tune', frequency: 7150000 });
+    assert.deepStrictEqual(n.tuneAction({ frequency: 7150000 }),
+        { kind: 'tune', frequency: 7150000 });
+    assert.strictEqual(n.tuneAction(null), null);
+});
+
+t('running one tunes the receiver and brings it into view', () => {
+    const calls = [];
+    const actions = {
+        tuneTo: (t2) => calls.push(['tuneTo', t2]),
+        ensureVisible: (hz) => calls.push(['ensureVisible', hz]),
+    };
+    const action = n.tuneAction({ frequency: 14205000, mode: 'usb' });
+    assert.strictEqual(n.runNoticeAction(action, actions), true);
+    assert.deepStrictEqual(calls, [
+        ['tuneTo', { frequency: 14205000, mode: 'usb' }],
+        ['ensureVisible', 14205000],
+    ]);
+    // `kind` is the store's word, not the radio's: it must not reach tuneTo.
+    assert.ok(!('kind' in calls[0][1]));
+});
+
+t('nothing to run, and nothing to run it with, are both survivable', () => {
+    // These are click handlers. A throw here is a dead button on a live page.
+    assert.strictEqual(n.runNoticeAction(null, {}), false);
+    assert.strictEqual(n.runNoticeAction({ kind: 'tune', frequency: 1 }, null), false);
+    assert.strictEqual(n.runNoticeAction({ kind: 'teleport' }, { tuneTo() {} }), false);
+    // ensureVisible is optional, because not every caller's action bag has one.
+    let tuned = 0;
+    assert.strictEqual(
+        n.runNoticeAction({ kind: 'tune', frequency: 1 }, { tuneTo: () => { tuned++; } }), true,
+    );
+    assert.strictEqual(tuned, 1);
+});
+
+t('the press says what it will do, because a button with no words is a guess', () => {
+    assert.strictEqual(
+        n.noticeActionLabel({ kind: 'tune', frequency: 14205000, mode: 'usb' }),
+        'Tune to 14.205 MHz USB',
+    );
+    assert.strictEqual(
+        n.noticeActionLabel({ kind: 'tune', frequency: 14205000 }), 'Tune to 14.205 MHz',
+    );
+    assert.strictEqual(n.noticeActionLabel(null), '');
 });
 
 if (process.exitCode) console.log('\nnotification tests FAILED');

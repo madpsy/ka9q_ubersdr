@@ -34,6 +34,8 @@ esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
     --outfile=.build/backoff.cjs --log-level=warning
 esbuild ../src/lib/lightning.js --bundle --format=cjs --platform=node \
     --outfile=.build/lightning.cjs --log-level=warning
+esbuild lightningstream.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/lightningstream.cjs --log-level=warning
 esbuild ../src/lib/packet.js --bundle --format=cjs --platform=node \
     --outfile=.build/packet.cjs --log-level=warning
 esbuild ../src/lib/packetMarkers.js --bundle --format=cjs --platform=node \
@@ -60,7 +62,7 @@ esbuild ../src/lib/freqEntry.js --bundle --format=cjs --platform=node \
     --outfile=.build/freqentry.cjs --log-level=warning
 esbuild ../src/lib/topClock.js --bundle --format=cjs --platform=node \
     --outfile=.build/topclock.cjs --log-level=warning
-esbuild ../src/lib/notifications.js --bundle --format=cjs --platform=node \
+esbuild notifications.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/notifications.cjs --log-level=warning
 esbuild notices.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/hardwarenotices.cjs --log-level=warning
@@ -126,7 +128,7 @@ esbuild ../src/lib/wake.js --bundle --format=cjs --platform=node \
     --outfile=.build/wake.cjs --log-level=warning
 esbuild ../src/lib/serverFeeds.js --bundle --format=cjs --platform=node \
     --outfile=.build/serverfeeds.cjs --log-level=warning
-esbuild ../src/lib/voiceConfirmed.js --bundle --format=cjs --platform=node \
+esbuild voiceconfirmed.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/voiceconfirmed.cjs --log-level=warning
 esbuild ../src/lib/ranking.js --bundle --format=cjs --platform=node \
     --outfile=.build/ranking.cjs --log-level=warning
@@ -420,6 +422,7 @@ node bridgeclient.test.js
 node spectrogram.test.js
 node bandspectrum.test.js
 node lightning.test.js
+node lightningstream.test.js
 node packet.test.js
 node doppler.test.js
 node freqref.test.js

@@ -9559,6 +9559,30 @@ a.btn { text-decoration: none; }
     cursor: pointer;
 }
 .toast__close:hover { background: var(--surface-hover); color: var(--text); }
+/* A notification you can press to do the obvious thing — tune to the frequency it just
+   told you about. The button is transparent and covers the whole toast, so the target is
+   the notification rather than a word inside it, which is what a thumb needs.
+
+   Positioned above the text and below the dismiss button: pressing the corner must always
+   mean "go away" and never "and also retune the receiver". */
+.toast__act {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    padding: 0;
+    border: 0;
+    border-radius: inherit;
+    background: none;
+    cursor: pointer;
+}
+.toast__close { position: relative; z-index: 2; }
+/* The whole toast lifts, rather than the invisible button showing itself: the affordance
+   belongs to the thing being pressed. */
+.toast.is-pressable:hover { border-color: var(--accent); }
+.toast__act:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
 .toasts__clear {
     align-self: flex-end;
     padding: 2px 7px;
@@ -9580,6 +9604,24 @@ a.btn { text-decoration: none; }
     border-left: 3px solid var(--accent);
     border-radius: 3px;
     background: var(--surface-2);
+}
+/* The same press the toast offers, still here after the toast has gone. See .toast__act —
+   this row has nothing else to click, so the overlay covers all of it. */
+.notes__row { position: relative; }
+.notes__act {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    padding: 0;
+    border: 0;
+    border-radius: inherit;
+    background: none;
+    cursor: pointer;
+}
+.notes__row.is-pressable:hover { border-color: var(--accent); }
+.notes__act:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
 }
 .notes__row.is-good { border-left-color: var(--good); }
 .notes__row.is-warn { border-left-color: var(--warn); }

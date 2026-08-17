@@ -16,6 +16,7 @@ import CallsignAnnounceWatch from './components/CallsignAnnounceWatch.jsx';
 import Toasts from './components/Toasts.jsx';
 import NativeNotices from './components/NativeNotices.jsx';
 import HardwareNoticeWatch from './components/HardwareNoticeWatch.jsx';
+import AddonNoticeWatch from './components/AddonNoticeWatch.jsx';
 import ShortcutWatch from './components/ShortcutWatch.jsx';
 import HapticWatch from './components/HapticWatch.jsx';
 import ControlWatch from './components/ControlWatch.jsx';
@@ -228,6 +229,11 @@ export default function App() {
                                     two changes worth a notification, with or without
                                     their panels open. */}
                                 <HardwareNoticeWatch />
+                                {/* And the addon feeds that raise one: new
+                                    callsigns from the voice skimmer, strikes from
+                                    the lightning detector. Both ship off, so this
+                                    holds nothing open until asked. */}
+                                <AddonNoticeWatch />
                                 <ShortcutWatch />
                                 {/* One delegated listener gives every button
                                     in the app its haptic tap; the gestures on

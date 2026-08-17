@@ -128,6 +128,133 @@ q('a failed poll keeps the markers that are up', () => {
     );
 });
 
+// --- a callsign nobody has heard before ----------------------------------------
+
+// Two stores in one bundle, so a poll here really does push into the notification store
+// the assertions read. See voiceconfirmed.entry.js.
+const CALL = (callsign, frequency, extra) => ({ ...ROW, callsign, frequency, ...extra });
+
+// The source ships off, so every one of these has to ask for it — which is the point.
+function withNotices(fn) {
+    cv._resetNotificationStore();
+    cv.setSourceEnabled('voice-callsign', true);
+    return Promise.resolve(fn()).finally(() => cv._resetNotificationStore());
+}
+
+const reply = (spots) => Promise.resolve({ ok: true, json: () => Promise.resolve({ spots }) });
+
+// One poll. feedInterval fires immediately on the first subscriber and then every 30 s,
+// so a second poll inside a test is a second subscribe rather than a wait — the store's
+// own state survives the gap, which is exactly what these are about.
+const poll = async () => {
+    const off = cv.subscribeConfirmedVoice(() => {});
+    await settle();
+    off();
+};
+
+q('the first list is a baseline, not fifty toasts', () => {
+    // It is what the skimmer heard before the page was opened. Greeting somebody with a
+    // wall of notifications about things that happened while they were away is the whole
+    // failure this guards.
+    return withNotices(() => withFetch(
+        () => reply([CALL('mm3ndh', 14205000), CALL('g0rql', 7150000)]),
+        async () => {
+            await poll();
+            assert.strictEqual(cv.notificationState().history.length, 0);
+        },
+    ));
+});
+
+q('a callsign that was not in the last list is announced, with flag and frequency', () => {
+    let n = 0;
+    return withNotices(() => withFetch(
+        () => (++n === 1
+            ? reply([CALL('mm3ndh', 14205000)])
+            : reply([CALL('g0rql', 7150000, { country: 'England', country_code: 'GB', band: '40m' }),
+                CALL('mm3ndh', 14205000)])),
+        async () => {
+            await poll();
+            await poll();
+            const { history } = cv.notificationState();
+            // The one that is new, and only that one.
+            assert.strictEqual(history.length, 1);
+            assert.strictEqual(history[0].title, '\u{1F1EC}\u{1F1E7} G0RQL');
+            assert.ok(history[0].body.includes('7.150 MHz'), history[0].body);
+            assert.ok(history[0].body.includes('40m'), history[0].body);
+            assert.ok(history[0].body.includes('England'), history[0].body);
+            // And pressing it goes there. A notification that names a frequency and then
+            // makes you type it into the dial has done half a job.
+            assert.deepStrictEqual(history[0].action,
+                { kind: 'tune', frequency: 7150000, mode: 'usb' });
+        },
+    ));
+});
+
+q('a burst has no action, because it names no one frequency', () => {
+    let n = 0;
+    const many = ['g0rql', 'dl1abc', 'f5xyz', 'ea1def'].map((c, i) => CALL(c, 7150000 + i * 1000));
+    return withNotices(() => withFetch(
+        () => (++n === 1 ? reply([CALL('mm3ndh', 14205000)]) : reply(many)),
+        async () => {
+            await poll();
+            await poll();
+            assert.strictEqual(cv.notificationState().history[0].action, null);
+        },
+    ));
+});
+
+q('the same station heard again is not news, on any frequency', () => {
+    // Deduplicated by callsign rather than by the sighting's key, which carries the
+    // frequency: a station that drifts 200 Hz between polls has not arrived twice.
+    let n = 0;
+    return withNotices(() => withFetch(
+        () => { n++; return reply([CALL('mm3ndh', 14205000 + (n - 1) * 200)]); },
+        async () => {
+            await poll();
+            await poll();
+            await poll();
+            assert.strictEqual(cv.notificationState().history.length, 0);
+        },
+    ));
+});
+
+q('a burst is a count, not a wall the toast layer would truncate', () => {
+    let n = 0;
+    const many = ['g0rql', 'dl1abc', 'f5xyz', 'ea1def', 'i0ghi'].map((c, i) => CALL(c, 7150000 + i * 1000));
+    return withNotices(() => withFetch(
+        () => (++n === 1 ? reply([CALL('mm3ndh', 14205000)]) : reply(many)),
+        async () => {
+            await poll();
+            await poll();
+            const { history } = cv.notificationState();
+            // Five at once, three toasts on screen: announcing each would be announcing
+            // three of them and silently dropping the rest.
+            assert.strictEqual(history.length, 1);
+            assert.strictEqual(history[0].title, '5 new callsigns');
+            assert.ok(history[0].body.includes('and 2 more'), history[0].body);
+        },
+    ));
+});
+
+q('switched off, the poll still moves the baseline', () => {
+    // Otherwise switching it on would fire a burst about everything heard while it was
+    // off — which is the same wall, just deferred.
+    let n = 0;
+    return withNotices(() => withFetch(
+        () => (++n === 1 ? reply([CALL('mm3ndh', 14205000)]) : reply([CALL('g0rql', 7150000)])),
+        async () => {
+            cv.setSourceEnabled('voice-callsign', false);
+            await poll();
+            await poll();
+            assert.strictEqual(cv.notificationState().history.length, 0);
+            // Now it is wanted, and G0RQL is old news rather than the first thing said.
+            cv.setSourceEnabled('voice-callsign', true);
+            await poll();
+            assert.strictEqual(cv.notificationState().history.length, 0);
+        },
+    ));
+});
+
 chain.then(() => {
     if (process.exitCode) console.log('\nconfirmed voice tests FAILED');
     else console.log(`\nall ${pass} confirmed voice tests passed`);

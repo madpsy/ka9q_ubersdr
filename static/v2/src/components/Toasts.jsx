@@ -15,6 +15,8 @@ import NoticeIcon from './NoticeIcon.jsx';
 import {
     dismissAll, dismissNotification, notificationState, onNotifications, sourceLabel, toastMs,
 } from '../lib/notifications.js';
+import { noticeActionLabel, runNoticeAction } from '../lib/noticeActions.js';
+import { useRadio } from '../radio/RadioContext.jsx';
 
 const ICON = {
     info: <Icon.Info size={14} />,
@@ -24,6 +26,7 @@ const ICON = {
 };
 
 export default function Toasts() {
+    const { actions } = useRadio();
     const [{ toasts, settings }, setState] = useState(notificationState);
     // One timer per toast, by id. A map rather than a timer per element, so a toast
     // replaced by another with the same key does not leave its old timer running to
@@ -62,7 +65,34 @@ export default function Toasts() {
                 first in the list, at the bottom it means last, so a new one never pushes
                 the one being read out from under the pointer. */}
             {(settings.place.startsWith('bottom') ? [...toasts].reverse() : toasts).map((t) => (
-                <div key={t.id} className={`toast is-${t.severity}`}>
+                <div key={t.id} className={`toast is-${t.severity}${t.action ? ' is-pressable' : ''}`}>
+                    {/* The action, as a transparent button over the whole toast rather
+                        than as a control inside it.
+
+                        A toast is small, it is read at a glance and it is often on a
+                        phone: the target worth offering is the notification itself, not a
+                        30 px word in the corner of it. Laid over rather than wrapped
+                        around because a <button> may not contain the blocks this is made
+                        of, and turning them into spans to satisfy that would be rewriting
+                        the layout to hold a click.
+
+                        It sits under the dismiss button, which keeps its own corner — the
+                        one press somebody must always be able to make without doing
+                        anything else. */}
+                    {t.action && (
+                        <button
+                            type="button"
+                            className="toast__act"
+                            title={noticeActionLabel(t.action)}
+                            aria-label={noticeActionLabel(t.action)}
+                            onClick={() => {
+                                // Dismissed only if something happened. An action that
+                                // could not run leaves the notification where it is,
+                                // rather than making the press look like it worked.
+                                if (runNoticeAction(t.action, actions)) dismissNotification(t.id);
+                            }}
+                        />
+                    )}
                     <span className="toast__icon">{ICON[t.severity] || ICON.info}</span>
                     <div className="toast__text">
                         <div className="toast__head">

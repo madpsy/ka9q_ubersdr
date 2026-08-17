@@ -4,24 +4,23 @@
 // addon's own page has the waveform captures, the spectrum, the map and the full log,
 // and there is a link to it at the bottom — this is the glance, not the workbench.
 //
-// The stream is the panel's: an EventSource opened on mount and closed on unmount, so a
-// collapsed section costs nothing. See lib/lightning.js for why it subscribes to the
-// compact stream, and lib/backoff.js for why a failed connection is reopened here
-// rather than left to the browser.
+// The stream is not the panel's any more: it lives in lib/lightningStream.js, because the
+// strikes are also worth a notification and a notification you only get while looking at
+// the panel is not a notification. Subscribing is still what opens it, so a collapsed
+// section with the notifications switched off costs exactly what it always did — nothing.
+// See lib/lightning.js for why it is the compact stream.
 //
 // `minimal` keeps the figures and the strip and drops the list and the link — the two
 // things that answer "is it striking, and how hard" from across the room.
 
-import React, { useCallback, useEffect, useRef, useState } from '../react.js';
+import React, { useEffect, useRef, useState } from '../react.js';
 import { Empty, Icon } from '../components/ui.jsx';
-import { retryDelay } from '../lib/backoff.js';
 import {
-    LIST_MAX, WINDOW_S, activityBuckets, addStrike, addonUrl, flashStrength, hourStats,
-    lightningAvailable, normaliseStrike, shortClock, snrBand, strikeRate, strikesUrl,
-    streamUrl, trimStrikes,
+    LIST_MAX, WINDOW_S, activityBuckets, addonUrl, flashStrength, hourStats,
+    lightningAvailable, shortClock, snrBand, strikeRate,
 } from '../lib/lightning.js';
+import { lightningState, subscribeLightning } from '../lib/lightningStream.js';
 import { sinceLabel } from '../lib/format.js';
-import useFeedsAllowed from '../lib/useServerFeeds.js';
 
 export { lightningAvailable };
 
@@ -84,115 +83,42 @@ function Stat({ label, value, sub, tone }) {
 }
 
 export default function LightningPanel({ minimal }) {
-    const feeds = useFeedsAllowed();
-    const [strikes, setStrikes] = useState([]);
-    const [live, setLive] = useState(false);
-    const [state, setState] = useState('loading');   // loading | ok | error
-    // Redrawn on the clock as well as on strikes — see TICK_MS.
+    // The stream, the hour of backfill and the list all belong to the store now; the panel
+    // subscribes, which is what opens it. See lib/lightningStream.js.
+    const [{ strikes, live, state, lastLive }, setSnap] = useState(lightningState);
+    useEffect(() => subscribeLightning(setSnap), []);
+
+    // Redrawn on the clock as well as on strikes — see TICK_MS. Every figure here is "in
+    // the last minute" or "how long ago", so they change with time and not only with the
+    // data: a panel whose "last strike" reads 4s for ten minutes because nothing new
+    // arrived is worse than one that says 10m.
     const [now, setNow] = useState(() => Date.now());
-    // The newest strike flashes the panel as it lands, as the addon's own page flashes
-    // the window. Held as the strike itself rather than a boolean: the id keys the
-    // element, so a second strike during the flash remounts it and starts the animation
-    // again instead of being swallowed by the one already running, and the SNR decides
-    // how bright it goes.
-    const [flash, setFlash] = useState(null);
-    const alive = useRef(true);
-
-    useEffect(() => () => { alive.current = false; }, []);
-
     useEffect(() => {
-        const id = setInterval(() => {
-            setNow(Date.now());
-            // Aged-out strikes go with the tick rather than on arrival: an hour after a
-            // storm the list would otherwise sit there full until the next strike.
-            setStrikes((list) => {
-                const kept = trimStrikes(list);
-                return kept.length === list.length ? list : kept;
-            });
-        }, TICK_MS);
+        const id = setInterval(() => setNow(Date.now()), TICK_MS);
         return () => clearInterval(id);
     }, []);
 
-    const take = useCallback((raw, arrivedAt) => {
-        const s = normaliseStrike(raw, arrivedAt);
-        if (!s) return;
-        setStrikes((list) => addStrike(list, s));
-        // Live strikes only. The hour of backfill arrives in one lump on open, and a
-        // panel that flashed sixty times on opening would be a fault, not a feature.
-        if (arrivedAt != null) setFlash(s);
-    }, []);
-
-    // The hour of history behind the strip and the headline figures. One request, on
-    // mount: the stream carries everything after it.
+    // The newest strike flashes the panel as it lands, as the addon's own page flashes the
+    // window. Held as the strike itself rather than a boolean: the id keys the element, so
+    // a second strike during the flash remounts it and starts the animation again instead
+    // of being swallowed by the one already running, and the SNR decides how bright it goes.
+    const [flash, setFlash] = useState(null);
+    // What was already the newest live strike when this panel opened. Without it, a panel
+    // opened during a storm flashes for a strike that happened before it was looking —
+    // and the store's own backfill never sets lastLive at all, so an hour of history
+    // arriving in one lump still flashes nothing.
+    const seenLive = useRef(null);
+    const primed = useRef(false);
     useEffect(() => {
-        fetch(strikesUrl())
-            .then((r) => {
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                return r.json();
-            })
-            .then((rows) => {
-                if (!alive.current) return;
-                const list = Array.isArray(rows) ? rows : [];
-                // The addon returns oldest first; the panel works newest first.
-                setStrikes(trimStrikes(list.map((r) => normaliseStrike(r)).filter(Boolean).reverse()));
-                setState('ok');
-            })
-            .catch(() => {
-                if (!alive.current) return;
-                // Not fatal: the stream may still connect, and a receiver that has just
-                // started has no history to send. The state only decides what an empty
-                // panel says.
-                setState('error');
-            });
-    }, []);
-
-    // ── The stream ───────────────────────────────────────────────────────────
-    //
-    // Same policy as the band spectrum panel: every failure closes it and reopens on the
-    // backoff curve, so there is one schedule rather than the browser's running
-    // alongside ours. Forever, because the panel is the subscription — closing the
-    // section is how you say stop — and so is stopping the receiver, which
-    // closes every feed on the page. See lib/serverFeeds.js.
-    useEffect(() => {
-        if (!feeds) return undefined;
-        let es = null;
-        let retry = null;
-        let attempts = 0;
-        let stopped = false;
-
-        const open = () => {
-            es = new EventSource(streamUrl());
-
-            es.addEventListener('open', () => setState('ok'));
-            // Unnamed messages are the strikes. In the compact stream they are the only
-            // thing sent besides the heartbeat.
-            es.addEventListener('message', (e) => {
-                attempts = 0;
-                setLive(true);
-                try { take(JSON.parse(e.data), Date.now()); } catch (err) { /* not a strike */ }
-            });
-            // Proof the addon is there on a night with no weather, which is most of
-            // them: without it, "connected" and "silent" look identical.
-            es.addEventListener('connected', () => { attempts = 0; setLive(true); });
-            es.addEventListener('heartbeat', () => { attempts = 0; setLive(true); });
-
-            es.addEventListener('error', () => {
-                if (es) { es.close(); es = null; }
-                setLive(false);
-                if (stopped || retry) return;
-                const wait = retryDelay(attempts);
-                attempts++;
-                retry = setTimeout(() => { retry = null; if (!stopped) open(); }, wait);
-            });
-        };
-
-        open();
-        return () => {
-            stopped = true;
-            clearTimeout(retry);
-            if (es) es.close();
-        };
-    }, [take, feeds]);
+        if (!primed.current) {
+            primed.current = true;
+            seenLive.current = lastLive ? lastLive.id : null;
+            return;
+        }
+        if (!lastLive || lastLive.id === seenLive.current) return;
+        seenLive.current = lastLive.id;
+        setFlash(lastLive);
+    }, [lastLive]);
 
     const rate = strikeRate(strikes, now);
     const { count, best } = hourStats(strikes, now);

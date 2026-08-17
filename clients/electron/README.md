@@ -441,7 +441,8 @@ build needs only esbuild, same as the rest of the repo.
 stages the UI and then runs `electron-builder`, leaving distributables in
 `dist/`:
 
-- on **Linux**: `UberSDR.AppImage` and `UberSDR.deb` (see below),
+- on **Linux**: `UberSDR.AppImage` and `UberSDR.deb`, plus
+  `UberSDR-arm64.AppImage` and `UberSDR-arm64.deb` (see below),
   `UberSDR-<version>-win.zip` (unzip on Windows and run `UberSDR.exe`) and
   `UberSDR.Setup.exe` (see below — built in Docker, and skipped with a note
   where Docker is absent).
@@ -482,6 +483,37 @@ The in-app update check offers whichever of the two the running app came from �
 `$APPIMAGE` for one, the `/opt/UberSDR/` install path for the other, and the
 AppImage for anything else, since it is the build that needs no package manager
 (`updates.js`, `test/updates.test.js`).
+
+### The two Linux architectures
+
+Both builds ship for x86_64 and for ARM64 (aarch64): a Raspberry Pi 5, an Asahi
+Mac, an ARM server. `build.sh` runs `electron-builder` twice — see `build_linux`
+— because nothing native is in the asar, so the second run is a repackage of the
+same JavaScript around the aarch64 Electron rather than a cross-compile, and
+either architecture can build for both.
+
+The file names are asymmetric on purpose:
+
+| | x86_64 | ARM64 |
+|---|---|---|
+| AppImage | `UberSDR.AppImage` | `UberSDR-arm64.AppImage` |
+| .deb | `UberSDR.deb` | `UberSDR-arm64.deb` |
+
+The bare pair belongs to x86_64 permanently. Those two URLs are what every
+client already installed fetches when it updates, so adding an `-x64` to them
+would 404 all of them at once — which is also why the arm64 names are set on
+`electron-builder`'s command line in `build_linux` rather than in package.json's
+`artifactName`, where one template has to serve both runs.
+
+An installed client offers its own architecture without being told: `updates.js`
+keys the asset table on `process.arch`, which in a packaged build is the
+architecture of that build. An x86_64 client running under emulation on an ARM
+box therefore stays on the x86_64 track, which is the right answer — that is the
+build that is working.
+
+The dependency list in package.json's `build.deb.depends` is shared by both, and
+is correct for both: the aarch64 binary's `DT_NEEDED` set is identical to the
+x86_64 one apart from the ELF interpreter.
 
 `lintian` reports the usual complaints about any bundled-Electron package —
 `dir-or-file-in-opt`, `embedded-library`, `unstripped-binary-or-object`. They
@@ -747,7 +779,11 @@ there is nothing to switch on. The parts that needed doing:
   the request is denied rather than prompted. It is in the inherit file too
   because Chromium captures audio from a helper process, not the main one.
 
-The dmg is arm64 only, and signing does not change that — an Intel Mac still
-cannot run it, which is why the update check sends `darwin/x64` to the releases
-page instead of a direct download. `electron-builder --mac --universal` builds
-one file for both, at roughly double the size.
+Two dmgs are built, not one: `build-mac.sh` passes `--mac --arm64 --x64`, and
+either kind of Mac builds both — electron-builder fetches the other
+architecture's Electron itself. `UberSDR-arm64.dmg` is Apple Silicon and
+`UberSDR-x64.dmg` is Intel, both are uploaded, and the update check and the
+download page offer whichever matches (`updates.js`, `static/v2/src/lib/appLinks.js`).
+`./build-mac.sh --arch=arm64` builds just the one when that is all that is
+wanted. `electron-builder --mac --universal` would instead build a single file
+holding both, at roughly double the size.

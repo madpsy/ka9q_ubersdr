@@ -11,7 +11,8 @@
 #   ./build.sh             build v2, stage it, npm-install if needed
 #   ./build.sh --skip-ui   skip the v2 build (keep the currently staged UI)
 #   ./build.sh --package   all of the above, then produce distributables in dist/:
-#                            on Linux   → AppImage + .deb + Windows zip + installer
+#                            on Linux   → AppImage + .deb, x64 and arm64, then the
+#                                         Windows zip + installer
 #                            on macOS   → dmg
 #                            on Windows → NSIS installer
 #                          (macOS packages can only be built on a Mac)
@@ -112,13 +113,49 @@ WIN_IMAGE=electronuserland/builder:wine
 # Not every one of these exists after any given build — a dmg needs a Mac, and
 # --linux skips the Windows half — so publishing uploads what is there and says
 # what is not. The dmgs come from build-mac.sh, which puts them here.
+#
+# Linux is published for two architectures and the names are asymmetric on
+# purpose: the bare pair is x64's for good, because every client already
+# installed fetches exactly those two URLs when it updates (see updates.js), and
+# renaming them to add an -x64 would 404 all of them at once. arm64 is the one
+# that gets a suffix — see build_linux for where that name is set.
 RELEASE_ASSETS=(
     dist/UberSDR.AppImage
     dist/UberSDR.deb
+    dist/UberSDR-arm64.AppImage
+    dist/UberSDR-arm64.deb
     dist/UberSDR.Setup.exe
     dist/UberSDR-arm64.dmg
     dist/UberSDR-x64.dmg
 )
+
+# The Linux artefacts, both architectures, in one function so that --linux and
+# --package cannot drift apart.
+#
+# Two electron-builder runs rather than `--x64 --arm64` in one, because of the
+# names. package.json pins the AppImage and the .deb to `${productName}.${ext}`
+# with no ${arch} in the template — deliberately, so the download URLs are
+# constants — and a second architecture built under that same template writes
+# the same two filenames, overwriting the x64 pair rather than joining it.
+#
+# So arm64's names are set here, on the command line, and only arm64's. Nothing
+# about the x64 artefacts changes.
+#
+# Nothing native ships in the asar (no runtime npm dependencies at all), so this
+# is a repackage rather than a cross-compile: electron-builder downloads the
+# aarch64 Electron and wraps the same JavaScript. It needs no toolchain the x64
+# build did not, and it can be built on either architecture.
+#
+# Extra arguments go to the x64 run, which is the one that also cross-builds the
+# Windows zip. Single-quoted so the templates reach electron-builder rather than
+# being expanded by the shell.
+ARM64_ARTIFACT='${productName}-arm64.${ext}'
+build_linux() {
+    ./node_modules/.bin/electron-builder --linux AppImage deb --x64 "$@"
+    ./node_modules/.bin/electron-builder --linux AppImage deb --arm64 \
+        -c.appImage.artifactName="$ARM64_ARTIFACT" \
+        -c.deb.artifactName="$ARM64_ARTIFACT"
+}
 
 # What the dmg about to be built will and will not be, said before it is built.
 #
@@ -533,7 +570,7 @@ if [[ "$PACKAGE" -eq 1 ]]; then
             echo "--linux builds the AppImage and the .deb, which need a Linux host (this is $(uname -s))" >&2
             exit 1
         fi
-        ./node_modules/.bin/electron-builder --linux AppImage deb --x64
+        build_linux
         # WIN_INSTALLER stays 0, so the Windows half below is skipped entirely.
     else
         case "$(uname -s)" in
@@ -542,7 +579,7 @@ if [[ "$PACKAGE" -eq 1 ]]; then
             # behind a flag somebody has to know about.
             # An `[[ ]] && x` here would be the last command of the branch, and
             # under `set -e` a false test would end the script.
-            Linux)  ./node_modules/.bin/electron-builder --linux AppImage deb --win zip --x64
+            Linux)  build_linux --win zip
                     if [[ "$WIN_INSTALLER" -eq 0 ]]; then WIN_INSTALLER=1; fi ;;
             # Said before the build rather than after: notarisation adds
             # several minutes of uploading and waiting to it, and finding out
@@ -719,11 +756,11 @@ else
     echo
     echo "done — the UI is built and staged, and nothing was packaged."
     echo
-    echo "  ./build.sh --package    installable builds in dist/ — the AppImage,"
-    echo "                          the .deb, the Windows zip and the installer."
-    echo "                          This is usually the one you want."
+    echo "  ./build.sh --package    installable builds in dist/ — the AppImage and"
+    echo "                          the .deb for x64 and arm64, the Windows zip and"
+    echo "                          the installer. This is usually the one you want."
     echo
-    echo "  ./build.sh --linux      just the AppImage and the .deb, skipping the"
+    echo "  ./build.sh --linux      just the AppImages and the .debs, skipping the"
     echo "                          Windows half."
     echo
     echo "  npm start               run it from here without packaging."

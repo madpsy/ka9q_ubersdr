@@ -85,17 +85,32 @@ const RELEASE = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/latest
 // the page itself came from.
 const ICONS = '/images/os';
 
+// Only Windows is a single row. macOS is published as two dmgs (build-mac.sh
+// builds `--mac --arm64 --x64` from either kind of Mac), and Linux appears four
+// times: the AppImage-and-.deb pair, for x86_64 and for aarch64 — a Raspberry Pi
+// 5, an Asahi Mac, an ARM Chromebook's container, an ARM server.
+//
+// `arch` is on every row so the tests can hold each label and URL to the
+// architecture it claims; nothing filters on it, for the reason below the list.
+//
+// The x86_64 Linux files are the ones with no architecture in the name. That
+// asymmetry is deliberate and permanent — see the RELEASE_ASSETS note in
+// clients/electron/build.sh. The dmgs name theirs either way.
 export const APP_DOWNLOADS = [
-    { id: 'windows', os: 'windows', label: 'Windows', note: 'Installer (.exe), x86_64', url: `${RELEASE}/UberSDR.Setup.exe`, icon: `${ICONS}/windows.png` },
-    { id: 'macos', os: 'macos', label: 'macOS', note: 'Apple Silicon (.dmg)', url: `${RELEASE}/UberSDR-arm64.dmg`, icon: `${ICONS}/mac.png` },
-    { id: 'linux-appimage', os: 'linux', label: 'Linux (AppImage)', note: 'AppImage — any distribution, no install needed. x86_64', url: `${RELEASE}/UberSDR.AppImage`, icon: `${ICONS}/linux.png` },
-    { id: 'linux-deb', os: 'linux', label: 'Linux (.deb)', note: '.deb — Debian and Ubuntu: adds a menu entry and opens ubersdr:// links. x86_64', url: `${RELEASE}/UberSDR.deb`, icon: `${ICONS}/linux.png` },
+    { id: 'windows', os: 'windows', arch: 'x64', label: 'Windows', note: 'Installer (.exe), x86_64', url: `${RELEASE}/UberSDR.Setup.exe`, icon: `${ICONS}/windows.png` },
+    { id: 'macos', os: 'macos', arch: 'arm64', label: 'macOS (Apple Silicon)', note: 'Apple Silicon (.dmg) — M1 and later', url: `${RELEASE}/UberSDR-arm64.dmg`, icon: `${ICONS}/mac.png` },
+    { id: 'macos-intel', os: 'macos', arch: 'x64', label: 'macOS (Intel)', note: 'Intel (.dmg) — the pre-Apple-Silicon Macs', url: `${RELEASE}/UberSDR-x64.dmg`, icon: `${ICONS}/mac.png` },
+    { id: 'linux-appimage', os: 'linux', arch: 'x64', label: 'Linux (AppImage, x86_64)', note: 'AppImage — any distribution, no install needed. x86_64', url: `${RELEASE}/UberSDR.AppImage`, icon: `${ICONS}/linux.png` },
+    { id: 'linux-deb', os: 'linux', arch: 'x64', label: 'Linux (.deb, x86_64)', note: '.deb — Debian and Ubuntu: adds a menu entry and opens ubersdr:// links. x86_64', url: `${RELEASE}/UberSDR.deb`, icon: `${ICONS}/linux.png` },
+    { id: 'linux-appimage-arm64', os: 'linux', arch: 'arm64', label: 'Linux (AppImage, ARM64)', note: 'AppImage — any distribution, no install needed. ARM64 (aarch64): Raspberry Pi 5, Asahi, ARM servers', url: `${RELEASE}/UberSDR-arm64.AppImage`, icon: `${ICONS}/linux.png` },
+    { id: 'linux-deb-arm64', os: 'linux', arch: 'arm64', label: 'Linux (.deb, ARM64)', note: '.deb — Debian and Ubuntu: adds a menu entry and opens ubersdr:// links. ARM64 (aarch64): Raspberry Pi 5, Asahi, ARM servers', url: `${RELEASE}/UberSDR-arm64.deb`, icon: `${ICONS}/linux.png` },
 ];
 
 /**
  * The downloads for an os key from `detectDesktopOS` — an array, because Linux
- * has two and neither is the obvious default. Empty for a platform this does
- * not recognise, which callers show the whole list for rather than guessing.
+ * has four and macOS two, and none of them is the obvious default. Empty for a
+ * platform this does not recognise, which callers show the whole list for rather
+ * than guessing.
  */
 export function appDownloads(os) {
     return os ? APP_DOWNLOADS.filter((d) => d.os === os) : [];
@@ -176,3 +191,24 @@ export function detectDesktopOS(nav) {
     if (/Linux|X11|BSD/i.test(text)) return 'linux';
     return null;
 }
+
+// Why there is no detectDesktopArch to go with detectDesktopOS, and why the
+// architecture is in every Linux label instead:
+//
+// A browser will not tell you. Both Chromium and Firefox freeze the platform
+// token in the user-agent string they send from Linux, so `X11; Linux x86_64`
+// arrives from an aarch64 machine as readily as from an x86 one — and
+// `navigator.platform` is frozen with it. Read as an architecture it is not
+// merely unreliable, it is wrong in exactly the direction that matters: it would
+// hand a Raspberry Pi the x86_64 AppImage and hide the one that runs.
+//
+// Client hints do state it, correctly, and cannot be used from here: the
+// architecture is high-entropy, which makes `getHighEntropyValues` async, and
+// these links are chosen during a render.
+//
+// macOS is worse still: every browser on Apple Silicon reports `Intel Mac OS X`,
+// deliberately and for ever, so the one string that looks like an answer is the
+// wrong one.
+//
+// So every build is offered and each says which it is, in the label rather than
+// only in the note, because the label is what a button shows.

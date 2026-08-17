@@ -149,8 +149,10 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
     const uri = ubersdrAppUri(publicUuid);
     // Read once, when the dialog opens: it is a property of the machine, and
     // nothing about it can change while this is on screen.
-    // Plural: Linux has two builds and they are a genuine choice, not the same
-    // file twice — see APP_DOWNLOADS. Empty for a platform this cannot name.
+    // Plural: Linux has four builds — an AppImage and a .deb, each for x86_64
+    // and for ARM64 — and they are a genuine choice rather than the same file
+    // several times. See APP_DOWNLOADS, which also says why the architecture is
+    // offered rather than detected. Empty for a platform this cannot name.
     const [downloads] = useState(() => appDownloads(detectDesktopOS()));
     const offered = downloads.length ? downloads : APP_DOWNLOADS;
 

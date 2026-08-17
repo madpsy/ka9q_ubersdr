@@ -22,17 +22,31 @@ const DOWNLOAD_BASE = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/
 
 const FETCH_TIMEOUT_MS = 10000;
 
-// What each platform is published as, and the architecture it is built for —
-// build.sh packages the Linux and Windows artefacts `--x64`, and the dmg is
-// whatever the Mac it was built on was.
+// What each platform is published as, keyed by platform and then by
+// architecture. Only Windows is single: build.sh packages Linux for both x64 and
+// arm64, build-mac.sh builds both dmgs (`--mac --arm64 --x64`, from either kind
+// of Mac), and the NSIS installer is x64 alone.
 //
-// An architecture not named here has no published asset, so it is sent to the
-// releases page instead of being handed a binary that cannot run: an ARM Linux
-// box and an Intel Mac would both otherwise download something useless.
+// A platform or an architecture not named here has no published asset, so it is
+// sent to the releases page instead of being handed a binary that cannot run — a
+// Windows-on-ARM box, or 32-bit anything.
+//
+// The Linux names are asymmetric because the bare pair is x64's for good: those
+// two URLs are what every client already installed fetches when it updates, and
+// adding an -x64 to them would 404 all of them at once. See build_linux in
+// build.sh, which is where arm64's names are set.
 const ASSETS = {
-    win32: { arch: 'x64', file: 'UberSDR.Setup.exe' },
-    linux: { arch: 'x64', file: 'UberSDR.AppImage' },
-    darwin: { arch: 'arm64', file: 'UberSDR-arm64.dmg' },
+    win32: {
+        x64: { file: 'UberSDR.Setup.exe' },
+    },
+    linux: {
+        x64: { file: 'UberSDR.AppImage', deb: 'UberSDR.deb' },
+        arm64: { file: 'UberSDR-arm64.AppImage', deb: 'UberSDR-arm64.deb' },
+    },
+    darwin: {
+        arm64: { file: 'UberSDR-arm64.dmg' },
+        x64: { file: 'UberSDR-x64.dmg' },
+    },
 };
 
 // Linux is published twice — an AppImage that runs anywhere, and a .deb that
@@ -53,16 +67,17 @@ const ASSETS = {
 // arranged themselves — and there the AppImage is the right offer, being the
 // one build that needs no package manager to agree to it.
 const DEB_PREFIX = '/opt/UberSDR/';
-const DEB_FILE = 'UberSDR.deb';
 
 /** Where this machine should go to get the new build. */
 function downloadUrl(platform = process.platform, arch = process.arch, proc = process) {
-    const asset = ASSETS[platform];
-    if (!asset || asset.arch !== arch) return RELEASES_URL;
+    const asset = (ASSETS[platform] || {})[arch];
+    if (!asset) return RELEASES_URL;
     const env = (proc && proc.env) || {};
     const execPath = (proc && proc.execPath) || '';
-    const file = (platform === 'linux' && !env.APPIMAGE && String(execPath).startsWith(DEB_PREFIX))
-        ? DEB_FILE
+    // `asset.deb` rather than a platform test: having a second, packaged build
+    // is what the question is about, and only the Linux entries carry one.
+    const file = (asset.deb && !env.APPIMAGE && String(execPath).startsWith(DEB_PREFIX))
+        ? asset.deb
         : asset.file;
     return `${DOWNLOAD_BASE}/${file}`;
 }

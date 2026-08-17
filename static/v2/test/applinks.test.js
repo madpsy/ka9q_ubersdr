@@ -128,15 +128,43 @@ t('every recognised platform has a download, and null has none', () => {
 // anywhere and installs nothing, the .deb is what makes ubersdr:// links and
 // the menu entry exist. Offering only the first match would quietly hide the
 // one somebody following an "Open in App" button actually needs.
-t('Linux offers both builds, and says which is which', () => {
+t('Linux offers every build, and says which is which', () => {
     const linux = appDownloads('linux');
-    assert.strictEqual(linux.length, 2);
-    assert.deepStrictEqual(linux.map((d) => d.id), ['linux-appimage', 'linux-deb']);
-    assert.ok(linux[0].label.includes('AppImage'), linux[0].label);
-    assert.ok(linux[1].label.includes('.deb'), linux[1].label);
-    // The other two are still single, or the dialog's one-button case is dead.
+    assert.strictEqual(linux.length, 4);
+    assert.deepStrictEqual(linux.map((d) => d.id), [
+        'linux-appimage', 'linux-deb', 'linux-appimage-arm64', 'linux-deb-arm64',
+    ]);
+    for (const d of linux) {
+        assert.ok(/AppImage|\.deb/.test(d.label), d.label);
+    }
+    // macOS ships both dmgs, and Windows is the only single one left — which is
+    // also the dialog's one-button case, so it has to stay single or that branch
+    // is dead code.
+    assert.strictEqual(appDownloads('macos').length, 2);
     assert.strictEqual(appDownloads('windows').length, 1);
-    assert.strictEqual(appDownloads('macos').length, 1);
+});
+
+// Nothing detects the architecture — a browser on Linux will not say, and says
+// x86_64 when it does, while a Mac says Intel whatever it is — so the label is
+// the only thing that tells an ARM64 or Apple Silicon user which button is
+// theirs. A row whose label, note and file name do not all agree is a download
+// that cannot run and looks like the site's fault.
+//
+// The vocabulary differs by platform on purpose: nobody calls a Mac x86_64, and
+// Apple's own words for the two are Intel and Apple Silicon.
+t('every download names its architecture in the label and the file', () => {
+    const NAMED = { x64: /x86_64|Intel/, arm64: /ARM64|Apple Silicon/ };
+    for (const d of APP_DOWNLOADS) {
+        // Windows alone is unqualified: one build, and "Windows" is the whole
+        // choice. Its architecture is in the note.
+        if (d.os !== 'windows') {
+            assert.ok(NAMED[d.arch].test(d.label), `${d.id}: ${d.label}`);
+        }
+        assert.ok(NAMED[d.arch].test(d.note), `${d.id}: ${d.note}`);
+        // Every arm64 file carries -arm64 and no x64 file does — swapping a pair
+        // is the copy-paste this catches.
+        assert.strictEqual(/-arm64\./.test(d.url), d.arch === 'arm64', `${d.id}: ${d.url}`);
+    }
 });
 
 // `os` stopped being unique the moment Linux gained a second row, and it was
@@ -167,8 +195,11 @@ t('the downloads are the release assets the site links to', () => {
     assert.deepStrictEqual(APP_DOWNLOADS.map((d) => d.url), [
         `${RELEASE}/UberSDR.Setup.exe`,
         `${RELEASE}/UberSDR-arm64.dmg`,
+        `${RELEASE}/UberSDR-x64.dmg`,
         `${RELEASE}/UberSDR.AppImage`,
         `${RELEASE}/UberSDR.deb`,
+        `${RELEASE}/UberSDR-arm64.AppImage`,
+        `${RELEASE}/UberSDR-arm64.deb`,
     ]);
     for (const d of APP_DOWNLOADS) assert.ok(!/\$\{|\bundefined\b/.test(d.url), d.url);
 });

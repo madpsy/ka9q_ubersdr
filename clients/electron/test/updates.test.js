@@ -62,6 +62,31 @@ t('each platform gets the asset built for it', () => {
     assert.ok(downloadUrl('darwin', 'arm64').endsWith('/UberSDR-arm64.dmg'));
 });
 
+// build-mac.sh has always built both dmgs and publishing has always uploaded
+// both, so an Intel Mac was being sent to the releases page to find a file that
+// was already sitting there.
+t('an Intel Mac gets the Intel dmg', () => {
+    assert.ok(downloadUrl('darwin', 'x64').endsWith('/UberSDR-x64.dmg'));
+});
+
+// Linux is published for both architectures, and an aarch64 box must be offered
+// the aarch64 build rather than the x64 one — the failure this whole table
+// exists to prevent, and the one an ARM machine hits on every update otherwise.
+t('Linux arm64 gets its own pair', () => {
+    assert.ok(downloadUrl('linux', 'arm64').endsWith('/UberSDR-arm64.AppImage'));
+    const proc = { env: {}, execPath: '/opt/UberSDR/ubersdr-desktop' };
+    assert.ok(downloadUrl('linux', 'arm64', proc).endsWith('/UberSDR-arm64.deb'));
+});
+
+// The bare names belong to x64 and must keep belonging to it: they are the URLs
+// every client already in the field fetches when it updates, so an -x64 creeping
+// into them 404s all of them at once.
+t('the x64 Linux names carry no architecture', () => {
+    const deb = { env: {}, execPath: '/opt/UberSDR/ubersdr-desktop' };
+    assert.ok(downloadUrl('linux', 'x64').endsWith('/UberSDR.AppImage'));
+    assert.ok(downloadUrl('linux', 'x64', deb).endsWith('/UberSDR.deb'));
+});
+
 // Linux has two builds, and which one a machine should be offered is a fact
 // about the running app, not about the distribution — see updates.js. Getting
 // this backwards hands somebody a file they cannot install, or replaces a
@@ -92,21 +117,25 @@ t('anything else on Linux is offered the AppImage', () => {
     assert.ok(downloadUrl('linux', 'x64', {}).endsWith('/UberSDR.AppImage'));
 });
 
-t('the two other platforms ignore all of that', () => {
-    // Only Linux ships twice. A Windows exe under /opt is not a thing, but the
-    // check must not be reachable from another platform's branch either way.
+t('the other platforms ignore all of that', () => {
+    // Only Linux ships in two package formats. A Windows exe under /opt is not a
+    // thing, but the check must not be reachable from another platform's branch
+    // either way — which is what keying it on the entry's own `deb` buys.
     const proc = { env: { APPIMAGE: '/x' }, execPath: '/opt/UberSDR/ubersdr-desktop' };
     assert.ok(downloadUrl('win32', 'x64', proc).endsWith('/UberSDR.Setup.exe'));
     assert.ok(downloadUrl('darwin', 'arm64', proc).endsWith('/UberSDR-arm64.dmg'));
+    assert.ok(downloadUrl('darwin', 'x64', proc).endsWith('/UberSDR-x64.dmg'));
 });
 
-// build.sh packages the AppImage and the installer --x64, and the dmg is built
-// on an Apple Silicon Mac. Nothing is published for the other architectures, so
-// they are sent to the page rather than handed a file that cannot run.
+// Linux and macOS are published for two architectures each; the Windows
+// installer is x64 alone. Nothing is published for the rest, so they are sent to
+// the page rather than handed a file that cannot run.
 t('an architecture with no build goes to the releases page', () => {
-    assert.strictEqual(downloadUrl('linux', 'arm64'), RELEASES_URL);
-    assert.strictEqual(downloadUrl('darwin', 'x64'), RELEASES_URL);
     assert.strictEqual(downloadUrl('win32', 'arm64'), RELEASES_URL);
+    // 32-bit ARM and 32-bit x86: neither has ever been built, and an aarch64
+    // release must not start answering for armv7l because both say "arm".
+    assert.strictEqual(downloadUrl('linux', 'arm'), RELEASES_URL);
+    assert.strictEqual(downloadUrl('linux', 'ia32'), RELEASES_URL);
 });
 
 t('an unknown platform goes to the releases page', () => {

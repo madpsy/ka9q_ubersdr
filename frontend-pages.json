@@ -168,18 +168,33 @@
             },
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR-arm64.dmg",
-              "name": "⬇️ macOS Download",
-              "description": "Download the Desktop Client for macOS on Apple Silicon (arm64)."
+              "name": "⬇️ macOS Download (Apple Silicon)",
+              "description": "Download the Desktop Client for macOS on Apple Silicon (arm64) — every Mac from the M1 onwards."
+            },
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR-x64.dmg",
+              "name": "⬇️ macOS Download (Intel)",
+              "description": "Download the Desktop Client for macOS on Intel (x86_64) — the Macs from before Apple Silicon."
             },
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR.AppImage",
-              "name": "⬇️ Linux Download (AppImage)",
+              "name": "⬇️ Linux Download (AppImage, x86_64)",
               "description": "Download the Desktop Client AppImage for Linux (amd64). Runs on any distribution and needs no install — but nothing is registered with the desktop, so there is no application menu entry and ubersdr:// links will not open it."
             },
             {
               "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR.deb",
-              "name": "⬇️ Linux Download (.deb)",
+              "name": "⬇️ Linux Download (.deb, x86_64)",
               "description": "Download the Desktop Client package for Debian and Ubuntu (amd64). Installs properly: application menu entry, icon, and ubersdr:// links open in the client."
+            },
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR-arm64.AppImage",
+              "name": "⬇️ Linux Download (AppImage, ARM64)",
+              "description": "Download the Desktop Client AppImage for Linux on ARM64 (aarch64) — a Raspberry Pi 5, an Asahi Mac, an ARM server. Runs on any distribution and needs no install, but registers nothing with the desktop, so there is no application menu entry and ubersdr:// links will not open it."
+            },
+            {
+              "path": "https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/UberSDR-arm64.deb",
+              "name": "⬇️ Linux Download (.deb, ARM64)",
+              "description": "Download the Desktop Client package for Debian and Ubuntu on ARM64 (aarch64) — a Raspberry Pi 5, an Asahi Mac, an ARM server. Installs properly: application menu entry, icon, and ubersdr:// links open in the client."
             }
           ]
         },

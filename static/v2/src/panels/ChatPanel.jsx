@@ -7,6 +7,7 @@ import { USERNAME_MAX, validateUsername } from '../radio/dxcluster-connection.js
 import { suggestUsername } from '../lib/chatName.js';
 import { countryFlag, formatFreqShort } from '../lib/format.js';
 import { followable, sortFollowFirst } from '../lib/chatFollow.js';
+import { absentIgnored, isIgnored, setIgnored, toggleIgnored } from '../lib/chatIgnore.js';
 import {
     EMOJI_SHORTCODES, applyCompletion, applyEmojiCompletion, emojiQuery, expandShortcodes,
     matchShortcodes, matchUsernames, mentionQuery, shortcodeFor, splitMessage,
@@ -522,7 +523,8 @@ export default function ChatPanel({ minimal }) {
                     {sortFollowFirst(chat.users, chat.following).map((u) => (
                         <div
                             key={u.username}
-                            className={`chat__user-row${u.username === chat.following ? ' is-following' : ''}`}
+                            className={`chat__user-row${u.username === chat.following ? ' is-following' : ''}`
+                                + `${isIgnored(u.username) ? ' is-ignored' : ''}`}
                         >
                             <button
                                 type="button"
@@ -566,8 +568,57 @@ export default function ChatPanel({ minimal }) {
                                     {u.username === chat.following ? <Icon.Tick size={12} /> : <Icon.Link size={12} />}
                                 </button>
                             )}
+                            {/* Not on our own row: ignoring yourself is not a thing
+                                anybody means to do, and the press would hide half the
+                                conversation with no obvious way back. */}
+                            {u.username !== chat.username && (
+                                <button
+                                    type="button"
+                                    className={`chat__ignore${isIgnored(u.username) ? ' is-on' : ''}`}
+                                    title={isIgnored(u.username)
+                                        ? `Stop ignoring ${u.username}`
+                                        : `Ignore ${u.username} — hide what they say, here only`}
+                                    aria-pressed={isIgnored(u.username)}
+                                    onClick={() => {
+                                        // Following somebody you have just decided not to
+                                        // read is a contradiction, and leaving their dial
+                                        // driving yours would be the surprising half of it.
+                                        if (!isIgnored(u.username) && chat.following === u.username) {
+                                            chat.actions.follow(u.username);
+                                        }
+                                        toggleIgnored(u.username);
+                                    }}
+                                >
+                                    {isIgnored(u.username) ? <Icon.EyeOff size={12} /> : <Icon.Eye size={12} />}
+                                </button>
+                            )}
                         </div>
                     ))}
+
+                    {/* The ones who are not here to be pressed.
+
+                        Without this, ignoring somebody who then leaves the channel is a
+                        decision with no way back — the row they would be un-ignored from
+                        is gone, and the only remaining route is the browser's storage.
+                        Only the absent ones, because the rest have their own button
+                        above. */}
+                    {absentIgnored(chat.ignored, chat.users).length > 0 && (
+                        <div className="chat__ignored">
+                            <span className="chat__ignored-label">Ignored, not here</span>
+                            {absentIgnored(chat.ignored, chat.users).map((name) => (
+                                <button
+                                    key={name}
+                                    type="button"
+                                    className="chip chip--button"
+                                    title={`Stop ignoring ${name}`}
+                                    onClick={() => setIgnored(name, false)}
+                                >
+                                    {name}
+                                    <Icon.Close size={10} />
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
         </div>

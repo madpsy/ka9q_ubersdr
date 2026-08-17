@@ -130,8 +130,10 @@ export const SECTIONS = [
     {
         id: 'chat',
         label: 'Chat',
-        hint: 'Your name and the chime',
-        keys: ['ubersdr.v2.chatName', 'ubersdr.v2.chatChime'],
+        hint: 'Your name, the chime, and who you are ignoring',
+        // The ignore list is v1's key, shared with the old interface for the reason
+        // lib/chatIgnore.js gives — so it travels between receivers with the rest of chat.
+        keys: ['ubersdr.v2.chatName', 'ubersdr.v2.chatChime', 'ubersdr_muted_users'],
     },
     {
         id: 'bookmarks',

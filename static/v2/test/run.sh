@@ -172,6 +172,8 @@ esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
     --outfile=.build/radiosync.cjs --log-level=warning
 esbuild ../src/radio/dxcluster-connection.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxcluster.cjs --log-level=warning
+esbuild ../src/lib/chatIgnore.js --bundle --format=cjs --platform=node \
+    --outfile=.build/chatignore.cjs --log-level=warning
 esbuild ../src/lib/chatName.js --bundle --format=cjs --platform=node \
     --outfile=.build/chatname.cjs --log-level=warning
 esbuild ../src/lib/hostPanels.js --bundle --format=cjs --platform=node \
@@ -444,6 +446,7 @@ node surfaces.test.js
 node paneldrag.test.js
 node svgmarkup.test.js
 node chatname.test.js
+node chatignore.test.js
 node hostpanels.test.js
 node maxfps.test.js
 node shell.test.js

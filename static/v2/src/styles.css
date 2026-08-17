@@ -6196,6 +6196,45 @@ a.btn { text-decoration: none; }
 }
 .chat__follow:hover { border-color: var(--accent); color: var(--text); }
 .chat__follow.is-on { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+/* The same shape as the follow button beside it, because they are the same kind of
+   thing: a per-person switch on that person's own row. */
+.chat__ignore {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    flex: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.chat__ignore:hover { border-color: var(--warn); color: var(--text); }
+/* Warn rather than accent: it is lit because something is being withheld, which is not
+   the same kind of "on" as following somebody. */
+.chat__ignore.is-on { border-color: var(--warn); color: var(--warn); }
+/* v1 dims the row and strikes the name through. Kept, because it is the right picture —
+   somebody who is here and is not being read — and because anyone moving between the two
+   interfaces should not have to learn it twice. The buttons keep their contrast, or the
+   way back would be as hard to see as the row. */
+.chat__user-row.is-ignored .chat__user { opacity: 0.45; text-decoration: line-through; }
+
+/* The ones who have left. Small, and only drawn when there are any. */
+.chat__ignored {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+}
+.chat__ignored-label {
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
 /* Said in words, not only as a lit button: the receiver is being tuned by somebody else. */
 .chat__following {
     display: flex;

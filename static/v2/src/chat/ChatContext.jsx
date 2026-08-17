@@ -7,6 +7,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { throttle } from '../lib/throttle.js';
 import { isMention } from '../lib/mentions.js';
+import { ignoredUsers, isIgnored, onChatIgnore } from '../lib/chatIgnore.js';
 import {
     followSignature, followTarget, followView, loadFollowZoom, saveFollowZoom,
 } from '../lib/chatFollow.js';
@@ -105,6 +106,13 @@ export function ChatProvider({ children }) {
     });
     const [joined, setJoined] = useState(false);
     const [unreadMentions, setUnreadMentions] = useState(0);
+    // Whom this browser has decided not to hear from. Held in a plain store rather than
+    // here because the panel writes it and this reads it, and because it outlives the
+    // provider — see lib/chatIgnore.js. Mirrored into state so a press redraws the log.
+    // Named apart from the store's own setIgnored, which acts on one person: a setter
+    // called setIgnored that replaces the whole list is a confusion waiting to be made.
+    const [ignored, ignoredTo] = useState(ignoredUsers);
+    useEffect(() => onChatIgnore(ignoredTo), []);
     // Whose dial is driving ours, or null — v1's "sync". One at a time, and not remembered
     // between visits: it is about who is on the channel now, and arriving to find the dial
     // being driven by a name you do not remember choosing is the wrong kind of surprise.
@@ -181,7 +189,12 @@ export function ChatProvider({ children }) {
             // is exactly what fails on the first load of a session, where every
             // replayed line is new to us. The second asks whether it was ever
             // ours to hear. It took both to make an arrival quiet.
-            if (mentioned && fresh && !saidBefore(since.current, m.timestamp)) {
+            // Somebody you have decided not to hear from cannot get your attention by
+            // saying your name — which is precisely the case worth having this for. The
+            // line is still kept, and reappears if you stop ignoring them; what is refused
+            // is the interruption. See lib/chatIgnore.js.
+            if (mentioned && fresh && !isIgnored(m.username)
+                && !saidBefore(since.current, m.timestamp)) {
                 setUnreadMentions((n) => n + 1);
                 if (chimeRef.current) playMentionChime();
                 // The same gate as the chime, and for the same reason — the server replays its
@@ -225,7 +238,9 @@ export function ChatProvider({ children }) {
             //   Not from before we got here. Joins are replayed with the buffer like
             //   everything else, so without this an arrival announced everyone who was
             //   already in the room — as though they had all walked in at once.
+            //   Not somebody you are ignoring. Their arrival is not news to you either.
             if (first && p.kind === 'joined' && p.username !== nameRef.current
+                && !isIgnored(p.username)
                 && !saidBefore(since.current, p.timestamp)) {
                 pushNotification({
                     source: 'chat-join',
@@ -503,12 +518,27 @@ export function ChatProvider({ children }) {
         // keeping it would rebuild every action object on every knob movement.
     }), [chat]);
 
+    // Hidden here rather than dropped as they arrive, which is what v1 does.
+    //
+    // The difference is only visible when somebody is un-ignored, and it is the whole
+    // difference: filtering on arrival makes the decision permanent for everything said
+    // while it stood, so changing your mind leaves a hole in the conversation. Kept and
+    // hidden, the log is whole again the moment you press the button — and the cost is a
+    // few strings in memory that were going to be there anyway.
+    //
+    // Presence lines go with the messages. Ignoring somebody who joins and leaves every
+    // two minutes and still watching them do it would not be ignoring them.
+    const visible = useMemo(
+        () => (ignored.length ? messages.filter((m) => !isIgnored(m.username)) : messages),
+        [messages, ignored],
+    );
+
     const value = useMemo(() => ({
-        enabled, state, messages, users, error, username, joined, actions,
-        unreadMentions, chimeOn, following, followZoom,
+        enabled, state, messages: visible, users, error, username, joined, actions,
+        unreadMentions, chimeOn, following, followZoom, ignored,
         connected: state === 'open',
-    }), [enabled, state, messages, users, error, username, joined, actions, unreadMentions,
-        chimeOn, following, followZoom]);
+    }), [enabled, state, visible, users, error, username, joined, actions, unreadMentions,
+        chimeOn, following, followZoom, ignored]);
 
     return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

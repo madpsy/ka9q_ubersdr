@@ -205,6 +205,10 @@ button.danger:hover { border-color: var(--danger); }
     font-weight: 600;
     margin-bottom: -1px;
 }
+/* Saved, when nothing is saved. The rules above set no `display`, so the
+   browser's own `[hidden]` would already do it — this is here so that adding
+   one later does not silently put the tab back. */
+.tab[hidden] { display: none; }
 .tab:hover { background: transparent; color: var(--text); }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 

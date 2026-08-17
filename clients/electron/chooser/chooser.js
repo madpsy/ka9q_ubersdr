@@ -701,12 +701,22 @@ function onHold(node, fn) {
 
 async function refreshSaved() {
     const list = byId('saved-list');
-    const empty = byId('saved-empty');
     const entries = await api.saved();
     entries.sort(SORTS[sortBy] || SORTS.used);
     list.replaceChildren();
-    empty.hidden = entries.length > 0;
     setCount('saved', entries.length);
+
+    // The tab goes away with the list. Saved is the one tab that is empty
+    // rather than merely slow — nothing saved yet, or everything forgotten —
+    // and the other three are each a way of filling it, so an empty Saved tab
+    // offers nothing to do from a page whose whole job is offering things to
+    // do. It comes back on its own: this runs on every change to the list.
+    byId('tab-saved').hidden = entries.length === 0;
+    // Standing on it when it goes is possible — the last receiver deleted from
+    // the row it is on, or the whole list forgotten from settings — and leaves
+    // an empty panel under no tab. Somewhere is better than nowhere, and the
+    // directory is where somebody with nothing saved starts anyway.
+    if (!entries.length && activeTab === 'saved') showTab('dir');
 
     for (const entry of entries) {
         let uiSelect = null;
@@ -1451,7 +1461,7 @@ function askHome() {
 
 // ---- tabs ------------------------------------------------------------------
 
-const TABS = ['saved', 'lan', 'dir', 'custom'];
+const TABS = ['saved', 'dir', 'lan', 'custom'];
 let activeTab = 'dir';
 
 function setCount(tab, n) {
@@ -1610,8 +1620,12 @@ api.onChanged(refreshSaved);
 
     // The directory unless there is a saved list to open on, which is the whole
     // point of having one — and the directory is where somebody with nothing
-    // saved has to start anyway. A tab chosen last time overrides both.
-    showTab(state.tab || (savedCount ? 'saved' : 'dir'), { persist: false });
+    // saved has to start anyway. A tab chosen last time overrides both, except
+    // for the one case where honouring it opens on nothing: "saved" outlives the
+    // receivers it was chosen for, and forgetting the last of them leaves the
+    // setting behind pointing at an empty list.
+    const wanted = state.tab === 'saved' && !savedCount ? null : state.tab;
+    showTab(wanted || (savedCount ? 'saved' : 'dir'), { persist: false });
 
     // Before the first render, so the first list already carries distances and
     // the map opens where the operator is rather than jumping there a moment

@@ -57,6 +57,11 @@ function freqMessage(frequency, mode) {
  */
 function userTip(u, me) {
     const lines = [u.username];
+    // Where they are, spelled out. The row already carries the flag, and a flag is the
+    // fastest thing on it to recognise and the easiest to get wrong — the entities a
+    // receiver hears most are exactly the ambiguous ones. The code is the fallback for a
+    // server that sent one without a name, which is what v1 falls back to as well.
+    if (u.country || u.country_code) lines.push(String(u.country || u.country_code));
     if (u.frequency) {
         lines.push(`${formatFreqShort(u.frequency)}${u.mode ? ` ${u.mode.toUpperCase()}` : ''}`);
     }

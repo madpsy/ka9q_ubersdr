@@ -21,7 +21,7 @@ Also be aware that customisations to the HTML head and body will be loaded in V2
 ### Other Announcements
 - An *Android* and *iOS* native app is in progress for V2, though the V2 interface will work on mobile/tablet via a web browser
 
-# Version 0.1.58 - 14th Jul 2026
+## Version 0.1.58 - 14th Jul 2026
 
 ### New Features
 - Added **Band Activity** dashboard (band_activity.html) which reuses the noise floor data to display per-band spectrum/waterfall as well as other data. Note: the update rate of these is governed by Admin -> Config -> Spectrum -> Background Poll Period ms (default 1000ms). Decreasing this value increases background CPU usage (constant) and Network throughput (when viewing the page). The default 1000 ms is probably a bit slow though, so try decreasing to 250ms to make it more useful without causing unncessarily high resource usage

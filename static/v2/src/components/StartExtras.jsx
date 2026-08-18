@@ -9,7 +9,7 @@
 import React, { useEffect, useRef, useState } from '../react.js';
 import { Button, Modal } from './ui.jsx';
 import { loadScript } from '../lib/loadScript.js';
-import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
+import { connectionCheck, getBypassPassword, setBypassPassword } from '../radio/session.js';
 import { APP_DOWNLOADS, appDownloads, detectDesktopOS, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
 
 // v1's QR renderer, loaded on demand. 20 KB that only a phone-facing dialog
@@ -217,11 +217,11 @@ export function PasswordModal({ onClose, onChanged }) {
         if (!pw) { setStatus({ ok: false, text: 'Enter a password.' }); return; }
         setBusy(true);
         setStatus(null);
-        // Stored first: checkConnection sends whatever is stored, and a
+        // Stored first: the check sends whatever is stored, and a
         // rejected one is cleared again rather than left to fail every later
         // request in the session.
         setBypassPassword(pw);
-        const r = await checkConnection();
+        const r = await connectionCheck();
         setBusy(false);
         if (r.allowed) {
             setStatus({ ok: true, text: 'Accepted. Connection limits are bypassed.' });

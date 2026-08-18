@@ -14,7 +14,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { AudioConnection } from './audio-connection.js';
 import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
-import { connectionCheck, newSessionId } from './session.js';
+import { connectionCheck, markSessionSpent, startSessionId } from './session.js';
 import { localBookmarks as localBookmarkStore, onLocalBookmarksChanged } from '../lib/localBookmarks.js';
 import { FILTER_DEFAULTS } from './audio-filters.js';
 import { NB_DEFAULTS } from '../lib/noiseBlanker.js';
@@ -296,6 +296,11 @@ export function RadioProvider({ children }) {
         // `lost` over a notice the operator may have just dismissed, and
         // powering off something already off.
         runningRef.current = false;
+        // 'identity' means this UUID itself is finished — blacklisted for an
+        // hour, or forgotten — so the next start has to be a new one. Not for
+        // 'blocked': a ban follows the client rather than the id, and minting
+        // a fresh one would only collect a second refusal.
+        if (kind === 'identity') markSessionSpent();
         setLost({ kind, message: failureMessage(kind, e.message), at: Date.now() });
         actionsRef.current.powerOff();
     }).current;
@@ -743,12 +748,19 @@ export function RadioProvider({ children }) {
             const ok = await player.start();
             if (!ok) pushLog('warn', 'Audio context did not start — tap again');
             setRunning(true);
-            // A new session gets a new identity. Minted before either socket
-            // opens so audio and spectrum are paired under the same UUID.
-            newSessionId();
+            // The identity for this session, settled before either socket opens
+            // so audio and spectrum are paired under the same UUID.
+            //
+            // Normally the one the Start overlay already registered when it
+            // asked whether there was room — reusing it is what makes a page
+            // load one /connection request instead of two, and the server
+            // treats a repeat as a reconnection and replaces the old session
+            // rather than stacking a new one. A fresh id only when the last one
+            // is spent, which is startSessionId's whole job.
+            startSessionId();
             // Registers the UUID and tells us how long this session may run.
-            // The sockets share the cached result, so this costs no extra
-            // request; v1 reads max_session_time from the same reply.
+            // Usually a cache hit on the overlay's own check, and the sockets
+            // share it too; v1 reads max_session_time from the same reply.
             connectionCheck().then((r) => {
                 if (r && r.maxSessionTime != null) {
                     setSession({

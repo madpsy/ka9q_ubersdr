@@ -15,31 +15,76 @@ function uuid() {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-// A fresh UUID is minted each time the user starts a session, and is not
-// persisted — v1 does the same, generating one per page load.
+// One UUID per page load, not per start, and not persisted — v1's rule.
 //
-// It stays fixed for the life of that session, including across automatic
-// reconnects, because the server keys real behaviour on it: it links the audio
-// and spectrum sessions into one user, detects a reconnect and replaces the old
-// session instead of stacking a second one, and rate-limits session creation
-// per UUID specifically to damp reconnect loops. Minting a new one mid-session
-// would defeat all three.
+// It stays fixed across power cycles as well as across automatic reconnects,
+// because the server keys real behaviour on it: it links the audio and spectrum
+// sessions into one user, detects a reconnect and *replaces* the old session
+// rather than stacking a second one (see the "reconnection detected" path in
+// session.go), and rate-limits session creation per UUID specifically to damp
+// reconnect loops. Minting a new one mid-session would defeat all three.
+//
+// Minting one per *start* defeated something quieter. Registering a UUID is a
+// POST to /connection, and the Start overlay has already made one to find out
+// whether there is room — so a fresh id at the press meant every page load
+// registered two, used one, and left the other to be swept up five minutes
+// later. It also cost two of the ten requests a minute that endpoint allows per
+// IP, which on a page somebody is reloading is the difference between working
+// and being told to wait.
+//
 // Generated lazily, never at module load: importing a connection module must
 // not touch `window`, or the module cannot be loaded outside a browser.
 let currentId = null;
+
+// Whether the server has finished with `currentId` — see markSessionSpent.
+let spent = false;
 
 export function getSessionId() {
     if (!currentId) currentId = uuid();
     return currentId;
 }
 
-// Called when starting a session. Both sockets must then use the same id — the
-// server pairs audio and spectrum by UUID.
+// Mints a new id unconditionally, discarding whatever the old one had.
+//
+// Only startSessionId() and the tests should need this: everything else wants
+// the id for this visit, and replacing it is a decision rather than a step.
 export function newSessionId() {
     currentId = uuid();
+    spent = false;
     registration = null;
     serverSessionId = null;
     return currentId;
+}
+
+// Records that the current id can no longer be used, so the next start replaces
+// it instead of reusing it.
+//
+// There is exactly one thing that does this, and it is not recoverable any
+// other way: the server reclaims an idle session by blacklisting its UUID for
+// an hour, and it forgets a UUID's registration five minutes after the last
+// session under it ends. Either way every endpoint answers that id with the
+// same refusal for as long as it takes, so reusing it would hand the operator a
+// receiver that cannot start — the thing that used to need a page reload.
+//
+// Deliberately not called for a ban or a bad password: those follow the client,
+// not the id, and a new one would only be a second refusal.
+export function markSessionSpent() {
+    spent = true;
+}
+
+/** Whether the next start will have to mint a new id. Exposed for tests. */
+export function sessionSpent() {
+    return spent;
+}
+
+// The id to start a session under: the visit's own, unless it is spent.
+//
+// Called by powerOn, and the one place that decides whether a start is a new
+// identity or a continuation of this one. Both sockets then use whatever this
+// returns — the server pairs audio and spectrum by UUID.
+export function startSessionId() {
+    if (currentId && !spent) return currentId;
+    return newSessionId();
 }
 
 // The *server's* id for this audio session, which is a different thing from the
@@ -127,7 +172,13 @@ export function setBypassPassword(password) {
 // — powerOn mints a new one — so reading getSessionId() again afterwards can
 // hand the socket an id the server has never been told about. The id that came
 // back with the answer is the one the answer is about.
-export async function checkConnection() {
+// Not exported. Asking /connection also *registers* the id it asks about, so
+// every caller that skips the cache buys a registration the next one pays for
+// again — which is exactly how a page load came to cost two requests out of the
+// ten a minute this endpoint allows per IP. connectionCheck() is the way in;
+// it re-asks whenever the id or the password changes, which covers every reason
+// anybody reached for this directly.
+async function checkConnection() {
     const id = getSessionId();
     const body = { user_session_id: id };
     const password = getBypassPassword();

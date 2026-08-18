@@ -18,7 +18,7 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { shellChoosable, writeShell } from '../lib/shellPref.js';
 import { Button, Icon } from './ui.jsx';
-import { checkConnection, getBypassPassword, setBypassPassword } from '../radio/session.js';
+import { connectionCheck, getBypassPassword, setBypassPassword } from '../radio/session.js';
 import { MOBILE_QUERY, SHELL_ROOM_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { PasswordModal, UberSdrAppModal, VibeSdrModal } from './StartExtras.jsx';
 import { hasMobileApp, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
@@ -87,9 +87,18 @@ export default function StartOverlay() {
     // endpoint is rate limited per IP, and the answer does not change on its
     // own — a receiver that was full stays full until somebody leaves, which
     // pressing Start will discover anyway.
+    //
+    // connectionCheck rather than checkConnection: the cached one. Asking
+    // /connection also *registers* the id it asks about, so this is not only a
+    // question — it is the registration the session will run under, and powerOn
+    // and all three sockets then share it instead of paying for it again. The
+    // raw call skips the cache, which is what made a page load cost two
+    // requests out of the ten a minute this IP is allowed. Submitting a
+    // password still asks afresh: setBypassPassword drops the cached answer,
+    // because it was given for different credentials.
     useEffect(() => {
         let cancelled = false;
-        checkConnection().then((r) => { if (!cancelled) setCheck(r); });
+        connectionCheck().then((r) => { if (!cancelled) setCheck(r); });
         return () => { cancelled = true; };
     }, []);
 
@@ -159,11 +168,11 @@ export default function StartOverlay() {
         if (!pw) { setError('Enter the password.'); return; }
         setBusy(true);
         setError('');
-        // Stored before the check, because that is where checkConnection reads
+        // Stored before the check, because that is where the check reads
         // it from — and cleared again if it is refused, so a wrong one is not
         // left to fail every later request.
         setBypassPassword(pw);
-        const r = await checkConnection();
+        const r = await connectionCheck();
         setBusy(false);
         if (r.allowed) {
             setCheck(r);

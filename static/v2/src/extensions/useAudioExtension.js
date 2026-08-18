@@ -108,7 +108,9 @@ export function useAudioExtension({ name, params, active, onResult, onEvent, par
                 // whole extension layer's presence in the log. Worth having:
                 // a decoder that never attaches looks exactly like a band with
                 // nothing on it.
-                logEvent('good', `${name} decoder started`);
+                // The server names the one it attached; the rest of its
+                // replies do not, so only this line can be sure.
+                logEvent('good', `${ev.name || name} decoder started`);
             } else if (ev.kind === 'error') {
                 if (isTransientAttachError(ev.error) && retries < MAX_RETRIES) {
                     retries += 1;
@@ -149,7 +151,14 @@ export function useAudioExtension({ name, params, active, onResult, onEvent, par
             clearTimeout(retryTimer);
             // Only if the socket is still up: after a drop there is nothing to
             // detach from, and the server has already torn the extension down.
-            if (attached && dxcluster.connected) dxcluster.send(detachMessage());
+            if (attached && dxcluster.connected) {
+                dxcluster.send(detachMessage());
+                // Logged here rather than waiting for the server's `detached`.
+                // That reply arrives after the listeners below have been
+                // removed, so on this path — the panel closing, or the decoder
+                // being switched off — nothing would ever have said it stopped.
+                logEvent('info', `${name} decoder stopped`);
+            }
             offBinary();
             offEvent();
             offOpen();

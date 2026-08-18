@@ -264,6 +264,11 @@ function stop() {
     clearInterval(trimTimer);
     trimTimer = null;
     if (es) { es.close(); es = null; }
+    // The last subscriber letting go, or the receiver stopping, is what closes
+    // this — and it is as worth a line as the connect was. See the band
+    // spectrum panel, which had the same gap.
+    logEvent('info', 'Lightning stream closed');
+    logged = false;
     live = false;
     notify();
 }

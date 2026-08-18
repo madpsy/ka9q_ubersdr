@@ -152,6 +152,9 @@ export default function DopplerPanel({ minimal }) {
             stopped = true;
             clearTimeout(retry);
             if (es) es.close();
+            // The panel unmounting is what closes this — see the band spectrum,
+            // which had the same gap.
+            logEvent('info', 'Doppler stream closed');
         };
     }, [feeds]);
 

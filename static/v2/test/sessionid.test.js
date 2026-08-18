@@ -13,9 +13,9 @@
 // nothing ever uses, and a reloading operator hitting a rate limit twice as
 // fast as they should.
 //
-// The exception is the one case where a new id is the only way forward: the
-// server reclaims an idle session by blacklisting its UUID for an hour, and
-// reusing a blacklisted id gives a receiver that cannot be started at all.
+// Which is only about the *first* start. Stopping and starting again is a new
+// session and gets a new id, as every session does — that one registration is
+// not waste, it is what the new session is registered under.
 
 const assert = require('assert');
 
@@ -102,55 +102,59 @@ t('the sockets add nothing — they share the registration', async () => {
     assert.strictEqual(posts.length, 1, `still one POST, got ${posts.length}`);
 });
 
-t('stopping and starting again reuses the id', async () => {
-    // The server reads a repeat as a reconnection and replaces the old session
-    // rather than stacking a second one, so there is nothing to re-register.
+t('stopping and starting again is a new session, with a new id', async () => {
+    // Only the *first* start adopts the overlay's registration. A later one is
+    // a new session and says so — the saving is the wasted id at page load, not
+    // the id a real session needs.
     await pageLoad();
     const first = s.getSessionId();
-    s.startSessionId();                    // powerOff, then powerOn
+
+    const next = s.startSessionId();       // powerOff, then powerOn
     await s.connectionCheck();
-    assert.strictEqual(s.getSessionId(), first, 'same identity');
-    assert.strictEqual(posts.length, 1, `no second registration, got ${posts.length}`);
+    assert.notStrictEqual(next, first, 'a new identity');
+    assert.strictEqual(posts.length, 2, 'and it is registered');
+    assert.strictEqual(posts[1], next);
+});
+
+t('each stop/start gets its own id, and registers it once', async () => {
+    await pageLoad();
+    const ids = [s.getSessionId()];
+    for (let i = 0; i < 3; i++) {
+        ids.push(s.startSessionId());
+        await s.connectionCheck();
+        await s.connectionCheck();         // the sockets, sharing it
+    }
+    assert.strictEqual(new Set(ids).size, ids.length, 'all different');
+    assert.strictEqual(posts.length, 4, `one POST per session, got ${posts.length}`);
 });
 
 // --- when a new id is the only way forward ------------------------------------
 
-t('a spent id is replaced on the next start', async () => {
+t('a session the server has finished with cannot be handed back', async () => {
+    // The idle timeout blacklists a UUID for an hour, so pressing Listen again
+    // has to be a different one or the receiver simply cannot start. Nothing
+    // tracks that: it falls out of every start but the first minting.
     await pageLoad();
-    const first = s.getSessionId();
-
-    // The server has reclaimed the session and blacklisted the UUID.
-    s.markSessionSpent();
-    assert.strictEqual(s.sessionSpent(), true);
-
+    const dead = s.getSessionId();
     const next = s.startSessionId();
-    assert.notStrictEqual(next, first, 'a blacklisted id cannot be reused');
-    assert.strictEqual(s.sessionSpent(), false, 'and the new one is not spent');
-
-    await s.connectionCheck();
-    assert.strictEqual(posts.length, 2, 'the replacement is registered');
-    assert.strictEqual(posts[1], next);
-});
-
-t('a spent id is replaced once, not on every start after it', async () => {
-    await pageLoad();
-    s.markSessionSpent();
-    const next = s.startSessionId();
-    await s.connectionCheck();
-    s.startSessionId();                    // stop, start again
-    await s.connectionCheck();
-    assert.strictEqual(s.getSessionId(), next, 'still the replacement');
-    assert.strictEqual(posts.length, 2, `no third registration, got ${posts.length}`);
+    assert.notStrictEqual(next, dead);
 });
 
 t('minting a new id drops the cached registration', async () => {
     // Or the sockets would open under an id the server has never been told
     // about, which every endpoint refuses.
     await pageLoad();
-    s.markSessionSpent();
     const next = s.startSessionId();
     const check = await s.connectionCheck();
     assert.strictEqual(check.sessionId, next, 'the check registered the new id');
+});
+
+t('the first start adopts the preflight id rather than replacing it', async () => {
+    await s.connectionCheck();             // StartOverlay, on mount
+    const registered = s.getSessionId();
+    assert.strictEqual(s.sessionStarted(), false, 'nothing has run under it yet');
+    assert.strictEqual(s.startSessionId(), registered, 'adopted');
+    assert.strictEqual(s.sessionStarted(), true);
 });
 
 // --- what the reply carries ---------------------------------------------------

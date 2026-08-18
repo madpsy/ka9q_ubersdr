@@ -485,6 +485,12 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
             clearTimeout(retry);
             clearInterval(rateTimer);
             if (es) es.close();
+            // Closing the panel closes the stream, and that was the one thing
+            // here the log did not say. The connect and the retries were both
+            // reported, so a collapsed dock left a "Band spectrum connected"
+            // as the last word on a stream that had stopped — or worse, a
+            // "retrying in 30s" for a retry that would never happen.
+            logEvent('info', `Band spectrum closed (${band})`);
             onRate(null);
             reportBandRate(null);
         };

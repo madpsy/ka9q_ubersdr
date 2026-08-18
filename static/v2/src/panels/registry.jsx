@@ -895,6 +895,10 @@ export const PANELS = [
         defaultOpen: false,
         defaultHidden: true,
         fill: true,
+        // Minimal: the entries and the Show more under them, without Export or
+        // Clear — see LogPanel. A diagnostic somebody wants *visible* while
+        // they work on something else is exactly the case for a minimal view.
+        minimal: true,
         Component: LogPanel,
     },
 ];

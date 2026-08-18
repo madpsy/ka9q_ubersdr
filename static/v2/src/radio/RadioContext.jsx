@@ -14,7 +14,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { AudioConnection } from './audio-connection.js';
 import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
-import { connectionCheck, markSessionSpent, startSessionId } from './session.js';
+import { connectionCheck, startSessionId } from './session.js';
 // Logging only — the socket belongs to its own module. See the wiring effect.
 import { dxcluster } from './dxcluster-connection.js';
 import { localBookmarks as localBookmarkStore, onLocalBookmarksChanged } from '../lib/localBookmarks.js';
@@ -304,11 +304,6 @@ export function RadioProvider({ children }) {
         // `lost` over a notice the operator may have just dismissed, and
         // powering off something already off.
         runningRef.current = false;
-        // 'identity' means this UUID itself is finished — blacklisted for an
-        // hour, or forgotten — so the next start has to be a new one. Not for
-        // 'blocked': a ban follows the client rather than the id, and minting
-        // a fresh one would only collect a second refusal.
-        if (kind === 'identity') markSessionSpent();
         setLost({ kind, message: failureMessage(kind, e.message), at: Date.now() });
         actionsRef.current.powerOff();
     }).current;
@@ -805,12 +800,10 @@ export function RadioProvider({ children }) {
             // The identity for this session, settled before either socket opens
             // so audio and spectrum are paired under the same UUID.
             //
-            // Normally the one the Start overlay already registered when it
-            // asked whether there was room — reusing it is what makes a page
-            // load one /connection request instead of two, and the server
-            // treats a repeat as a reconnection and replaces the old session
-            // rather than stacking a new one. A fresh id only when the last one
-            // is spent, which is startSessionId's whole job.
+            // A new one every time but the first, which adopts the id the Start
+            // overlay already registered when it asked whether there was room —
+            // that is what makes a page load cost one /connection request
+            // rather than two. See startSessionId.
             startSessionId();
             // Registers the UUID and tells us how long this session may run.
             // Usually a cache hit on the overlay's own check, and the sockets

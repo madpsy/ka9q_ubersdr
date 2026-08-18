@@ -989,7 +989,15 @@ body {
 
 #conditions-bar .cond-body {
     display: flex;
-    flex-wrap: wrap;
+    /* nowrap keeps the stats to the RIGHT of the band pills at every width.
+       With wrap, a flex line is broken up using each item's *base* size before
+       any shrinking happens — so the left column asking for its max-content
+       width (every pill on one line) pushed .cond-right onto a second line,
+       where it re-aligned to the left edge under the pills and took the space
+       the CW spot strip lives in. The pills are what should wrap, inside their
+       own column; .cond-right shrinks instead (it is flex-shrink 1 and already
+       clips with overflow:hidden), and is hidden outright below 768px. */
+    flex-wrap: nowrap;
     gap: 0;
     align-items: flex-start;
 }
@@ -1005,11 +1013,17 @@ body {
     align-items: flex-start;
 }
 
-/* ── Left column: band pills with CW spots filling the space below ── */
+/* ── Left column: band pills with CW spots below them ── */
 #conditions-bar .cond-left {
-    flex: 1 1 auto;
+    /* A fixed basis rather than auto: auto means "as wide as every pill on one
+       line", which on a merely narrowish window is wider than the bar and left
+       nothing for the stats. This asks for a readable minimum and then grows
+       into whatever the stats don't need, so the pills wrap inside the column
+       instead of squeezing the stats out of the row. When even this does not
+       fit, both columns shrink in proportion. */
+    flex: 1 1 360px;
     min-width: 0;
-    align-self: stretch;   /* match the right panel's height so spots can fill the gap */
+    align-self: stretch;
     display: flex;
     flex-direction: column;
 }
@@ -1114,11 +1128,19 @@ body {
 }
 
 #conditions-bar .cond-cw-spots {
-    /* Badges must not contribute to the left column's intrinsic width,
-       or adding badges pushes .cond-right onto a new row. */
+    /* Badges must not contribute to the left column's intrinsic width, or a
+       long spot run would widen the column at the stats' expense. */
     contain: inline-size;
-    /* Fill only the leftover height under the pills — never grow the bar. */
-    flex: 1 1 0;
+    /* Height comes from the badges themselves, capped at about two rows.
+       It used to be `flex: 1 1 0`, i.e. purely the space left over once the
+       pills were laid out inside a column stretched to the stats' height — so
+       whenever the stats were no taller than the pills (or had wrapped away to
+       their own line) the strip measured zero, _renderCWSpots()'s trim loop
+       dropped every badge, and spots silently never appeared. The bar grows by
+       up to this much when there are spots to show; _cwHandleSpot() already
+       re-runs the page layout for the new height. */
+    flex: 0 0 auto;
+    max-height: 64px;
     min-height: 0;
     overflow: hidden;
     border-top: 1px solid #1e1e2e;

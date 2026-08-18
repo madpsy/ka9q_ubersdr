@@ -7207,6 +7207,13 @@ function _syncConditionsPadding() {
     const bar = document.getElementById('conditions-bar');
     if (!bar || bar.style.display === 'none') return;
     requestAnimationFrame(() => {
+        // How many CW badges fit is a function of the strip's width, and the
+        // width changes here: a narrower bar wraps the band pills into more
+        // rows and leaves the strip narrower. _renderCWSpots() re-fits them to
+        // whatever room there is now — otherwise the count stays as it was when
+        // the last spot arrived, which on a quiet band could be minutes ago.
+        // Before the measurement below, since re-fitting changes the height.
+        _renderCWSpots();
         document.body.style.paddingBottom = bar.offsetHeight + 'px';
         scheduleLayout(); // bar height changes the space 'fit' can use
     });

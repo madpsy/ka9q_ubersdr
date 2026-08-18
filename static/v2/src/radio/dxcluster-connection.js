@@ -348,7 +348,7 @@ export class DXClusterConnection extends Emitter {
             this._onMessage(msg);
         };
         ws.onerror = () => this.emit('error', { message: 'dxcluster socket error' });
-        ws.onclose = () => this._onClose();
+        ws.onclose = (ev) => this._onClose(ev);
         return true;
     }
 
@@ -561,7 +561,7 @@ export class DXClusterConnection extends Emitter {
     // gave up on — disconnect(), or a replacement — is abandoned with its
     // handlers detached and reports its own closure, so nothing that arrives
     // here belongs to a socket that has already been superseded.
-    _onClose() {
+    _onClose(ev) {
         clearInterval(this.pingTimer);
         clearTimeout(this.settleTimer);
         this.pingTimer = null;
@@ -569,7 +569,7 @@ export class DXClusterConnection extends Emitter {
         this.ws = null;
         for (const stream of STREAMS) this.confirmed[stream] = false;
         this.identitySent = false;
-        this.emit('close');
+        this.emit('close', { code: ev && ev.code });
         if (this.closedByUser) {
             this._setState('idle');
             return;

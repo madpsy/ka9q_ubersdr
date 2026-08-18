@@ -188,7 +188,7 @@ export class SpectrumConnection extends Emitter {
         };
         ws.onmessage = (ev) => this._onMessage(ev);
         ws.onerror = () => this.emit('error', { kind: 'socket', message: 'spectrum socket error' });
-        ws.onclose = () => this._onClose();
+        ws.onclose = (ev) => this._onClose(ev);
         return true;
     }
 
@@ -463,11 +463,14 @@ export class SpectrumConnection extends Emitter {
         return this._out;
     }
 
-    _onClose() {
+    _onClose(ev) {
         this.ws = null;
         const failure = this.lastFailure;
         this.lastFailure = null;
-        this.emit('close', { failure });
+        // The code goes out with it, as the audio socket's does: 1000 is a
+        // deliberate close and 1006 is the connection being torn out, and
+        // nothing else on screen distinguishes them.
+        this.emit('close', { code: ev && ev.code, failure });
         if (this.closedByUser) {
             this._setState('idle');
             return;

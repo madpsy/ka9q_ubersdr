@@ -15,6 +15,8 @@ import { AudioConnection } from './audio-connection.js';
 import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
 import { connectionCheck, markSessionSpent, startSessionId } from './session.js';
+// Logging only — the socket belongs to its own module. See the wiring effect.
+import { dxcluster } from './dxcluster-connection.js';
 import { localBookmarks as localBookmarkStore, onLocalBookmarksChanged } from '../lib/localBookmarks.js';
 import { FILTER_DEFAULTS } from './audio-filters.js';
 import { NB_DEFAULTS } from '../lib/noiseBlanker.js';
@@ -438,7 +440,13 @@ export function RadioProvider({ children }) {
             pushLog('error', e.message || 'audio error');
             noteFailure(e);
         }));
-        offs.push(audioConn.on('close', () => pushLog('warn', 'Audio stream closed')));
+        // With the code, because that is the one thing that separates the
+        // cases: 1000 is somebody closing deliberately, 1006 is the connection
+        // being torn out from under us, and the difference is the difference
+        // between "the receiver ended this" and "the network did".
+        offs.push(audioConn.on('close', (ev) => pushLog(
+            'warn', `Audio stream closed${ev && ev.code ? ` (${ev.code})` : ''}`,
+        )));
         offs.push(audioConn.on('open', () => {
             pushLog('info', 'Audio stream connected');
             // Anything tuned while the socket was still opening commanded
@@ -487,6 +495,46 @@ export function RadioProvider({ children }) {
             noteFailure(e);
         }));
         offs.push(spectrumConn.on('open', () => pushLog('info', 'Spectrum connected')));
+        // The audio socket has always logged its closures and this one never
+        // did, which made the panel actively misleading: a spectrum that
+        // dropped and came back showed two "Spectrum connected" lines in a row
+        // and nothing between them, so a reconnect was indistinguishable from
+        // the display having been started twice.
+        offs.push(spectrumConn.on('close', (ev) => pushLog(
+            'warn', `Spectrum closed${ev && ev.code ? ` (${ev.code})` : ''}`,
+        )));
+
+        // What happened in the gap.
+        //
+        // Both sockets report every state change, and the panel logged only the
+        // two ends of one — connected, closed. So the interesting part, the
+        // eight seconds between a socket going and coming back, was blank, and
+        // whether that was one retry or six was not recoverable from anything
+        // on screen. The backoff is the rate limit here: these lines arrive at
+        // 1 s, 1.6 s, 2.6 s and so on to a 30 s ceiling, so a socket that is
+        // genuinely struggling says so without flooding.
+        const logRetries = (conn, what) => conn.on('state', (state) => {
+            if (state !== 'reconnecting') return;
+            pushLog('warn', `${what} reconnecting (attempt ${conn.attempts})`);
+        });
+        offs.push(logRetries(audioConn, 'Audio stream'));
+        offs.push(logRetries(spectrumConn, 'Spectrum'));
+
+        // The spot/chat socket, which reported nothing at all.
+        //
+        // It is owned by its own module rather than by this context — panels
+        // come and go and the socket must not follow them — so nothing here
+        // touches its lifecycle. This is only the log: it is the third
+        // connection the page makes, it is the one whose "Reconnecting…" the
+        // operator can actually see on the Spots panel, and having no record of
+        // it meant that badge could not be lined up against anything else that
+        // happened.
+        offs.push(dxcluster.on('open', () => pushLog('info', 'DX cluster connected')));
+        offs.push(dxcluster.on('close', (ev) => pushLog(
+            'warn', `DX cluster closed${ev && ev.code ? ` (${ev.code})` : ''}`,
+        )));
+        offs.push(dxcluster.on('error', (e) => pushLog('error', e.message || 'DX cluster error')));
+        offs.push(logRetries(dxcluster, 'DX cluster'));
 
         return () => offs.forEach((off) => off());
     }, []);

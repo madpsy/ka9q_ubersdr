@@ -5376,8 +5376,14 @@ function _cwHandleSpot(spot) {
 
 function _startCWSpots() {
     if (_cwSSE) return; // already connected
-    // Attempt connection regardless of _cwEnabled — server returns 503 if disabled,
-    // which onerror handles with a long backoff so we don't hammer a disabled endpoint.
+    // Only when the receiver reports a running skimmer (/api/description's
+    // cw_skimmer). Without this the stream is opened on every receiver, and a
+    // receiver with no skimmer answers 503 and gets asked again every 30 s for
+    // as long as the page is open.
+    //
+    // The 503 handling below still matters: cw_skimmer can be true while the
+    // subsystem is momentarily down, which is exactly the case worth retrying.
+    if (!_cwEnabled) return;
 
     function connect() {
         const es = new EventSource('/api/cwskimmer/stream');
@@ -5420,6 +5426,7 @@ function _startCWSpots() {
 // tracked, each independently toggleable. A combination drops off 5 minutes
 // after it was last (re-)seen — see _digiPruneExpired().
 let _digiSSE          = null;
+let _digiEnabled      = false; // set from /api/description's digital_decodes
 let _digiReconnectMs  = 5000;
 let _digiPanelEnabled = true;  // master "Digi" toolbar checkbox — panel visibility only
 let _digiFT8Enabled   = true;
@@ -5722,9 +5729,12 @@ function _startDigiAutoScroll() {
 
 function _startDigiSpots() {
     if (_digiSSE) return; // already connected
-    // Attempt connection regardless of whether the decoder subsystem is known
-    // to be enabled — server returns 503 if not, which onerror handles with a
-    // long backoff so we don't hammer a disabled endpoint.
+    // Only when the receiver reports a running decoder (/api/description's
+    // digital_decodes) — same reason as _startCWSpots(): without it a receiver
+    // that decodes nothing is asked for a stream every 30 s for as long as the
+    // page is open. The 503 handling below covers a decoder that is enabled but
+    // momentarily down.
+    if (!_digiEnabled) return;
 
     if (!_digiPruneTimer) _digiPruneTimer = setInterval(_digiPruneExpired, 30000);
 
@@ -7265,6 +7275,7 @@ async function init() {
             const tzOffset = desc.receiver?.timezone_offset;
             if (typeof tzOffset === 'number') _localTzOffsetMin = tzOffset;
             _cwEnabled        = !!(desc.cw_skimmer);
+            _digiEnabled      = !!(desc.digital_decodes);
 
             // Sunrise/sunset + floating map location, from the receiver's GPS coords
             const gps = desc.receiver?.gps;

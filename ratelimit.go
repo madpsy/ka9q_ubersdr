@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -1175,21 +1177,35 @@ func (rl *ImageProxyRateLimiter) GetStats() int {
 	return len(rl.limiters)
 }
 
+// defaultSSEMaxConnsPerIP is the cap every public SSE feed is created with.
+//
+// Three rather than two because a browser reconnecting legitimately holds two
+// slots for a moment — see Acquire — and a client with a page open plus a
+// reconnect in flight should not be at the limit.
+const defaultSSEMaxConnsPerIP = 3
+
 // SSEIPLimiter tracks the number of *concurrent* SSE connections per IP address.
 // Unlike token-bucket limiters, this counts live connections rather than request rate.
-// Each call to Acquire increments the counter; the returned release func decrements it.
-// If the IP already has maxConns active connections, Acquire returns (nil, false).
+// Each call to Acquire reserves a slot; the returned release func frees it.
+// If the IP is already at maxConns, its oldest connection is displaced (or, for
+// callers that opt out of displacement, Acquire returns (nil, false)).
 type SSEIPLimiter struct {
 	mu       sync.Mutex
-	counts   map[string]int
+	conns    map[string][]*sseSlot // per IP, oldest first
 	maxConns int
+}
+
+// sseSlot is one live connection. evict makes its handler return; it is nil for
+// callers that opted out of displacement.
+type sseSlot struct {
+	evict func()
 }
 
 // NewSSEIPLimiter creates a limiter that allows at most maxConns simultaneous
 // SSE connections from the same IP address.
 func NewSSEIPLimiter(maxConns int) *SSEIPLimiter {
 	return &SSEIPLimiter{
-		counts:   make(map[string]int),
+		conns:    make(map[string][]*sseSlot),
 		maxConns: maxConns,
 	}
 }
@@ -1197,26 +1213,71 @@ func NewSSEIPLimiter(maxConns int) *SSEIPLimiter {
 // Acquire attempts to reserve a connection slot for ip.
 // On success it returns a release function and true.
 // The release function is idempotent — it is safe to call multiple times
-// (e.g. from both a goroutine watching r.Context().Done() and a defer statement);
-// the counter is decremented exactly once regardless of how many times it is called.
-// On failure (limit reached) it returns nil, false.
-func (l *SSEIPLimiter) Acquire(ip string) (release func(), ok bool) {
+// (e.g. from both a goroutine watching the request context and a defer
+// statement); the slot is freed exactly once regardless of how many times it is
+// called. On failure it returns nil, false.
+//
+// evict is called when this connection is displaced by a newer one from the same
+// IP, and must make its handler return — cancelling the context the stream loop
+// selects on. Passing nil opts out: the connection can never be displaced, and a
+// full IP is rejected instead.
+//
+// Displacement rather than rejection is what makes a reconnect work. A client
+// that reopens a stream — a band toggle, a staleness watchdog, a tab waking up —
+// opens the new one before the server has learned the old one is gone, and the
+// news has to travel the whole way back through Caddy and the tunnel, which
+// takes seconds. Rejecting there answers "too many connections from your IP" to
+// a client that believes it has none, and its backoff then makes the next
+// attempt race the same stale slot. Only ever the same IP's own oldest
+// connection is displaced.
+func (l *SSEIPLimiter) Acquire(ip string, evict func()) (release func(), ok bool) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 
-	if l.counts[ip] >= l.maxConns {
-		return nil, false
+	slots := l.conns[ip]
+	var displaced *sseSlot
+	if len(slots) >= l.maxConns {
+		// Nothing to displace (maxConns == 0), the caller opted out, or the
+		// oldest connection did — reject.
+		if len(slots) == 0 || evict == nil || slots[0].evict == nil {
+			l.mu.Unlock()
+			return nil, false
+		}
+		displaced = slots[0]
+		slots = slots[1:]
 	}
-	l.counts[ip]++
+
+	// Copy rather than append in place: slots may alias the array the displaced
+	// entry still sits in.
+	slot := &sseSlot{evict: evict}
+	next := make([]*sseSlot, len(slots), len(slots)+1)
+	copy(next, slots)
+	l.conns[ip] = append(next, slot)
+
+	l.mu.Unlock()
+
+	// Outside the lock: the evicted handler frees its own slot, which takes it.
+	// (The displaced entry is already out of the accounting, so its release is a
+	// no-op and the count never exceeds maxConns while that handler unwinds.)
+	if displaced != nil {
+		displaced.evict()
+	}
 
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			l.mu.Lock()
 			defer l.mu.Unlock()
-			l.counts[ip]--
-			if l.counts[ip] <= 0 {
-				delete(l.counts, ip)
+			cur := l.conns[ip]
+			for i, s := range cur {
+				if s == slot {
+					cur = append(cur[:i], cur[i+1:]...)
+					break
+				}
+			}
+			if len(cur) == 0 {
+				delete(l.conns, ip)
+			} else {
+				l.conns[ip] = cur
 			}
 		})
 	}, true
@@ -1226,7 +1287,51 @@ func (l *SSEIPLimiter) Acquire(ip string) (release func(), ok bool) {
 func (l *SSEIPLimiter) Count(ip string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.counts[ip]
+	return len(l.conns[ip])
+}
+
+// acquireSSEConn is the admission check every public SSE feed opens with:
+// resolve the client, take a connection slot, and hand back the context the
+// stream loop must select on.
+//
+// That context is the request's, cancelled additionally when a newer connection
+// from the same IP displaces this one — so the loop has to use it rather than
+// r.Context(), or a displaced stream would keep running with its slot already
+// given away.
+//
+// On refusal it has already written 429 to w, and the handler should just
+// return. Otherwise the returned func must be deferred: it frees the slot.
+//
+// Four feeds had their own copy of this, each resolving the IP straight from
+// X-Forwarded-For without checking who sent it, which let any client choose the
+// identity it was counted as.
+func acquireSSEConn(
+	w http.ResponseWriter,
+	r *http.Request,
+	limiter *SSEIPLimiter,
+	serverConfig *ServerConfig,
+) (ctx context.Context, ip string, done func(), ok bool) {
+	ip = getClientIP(r)
+
+	streamCtx, cancel := context.WithCancel(r.Context())
+
+	// Bypassed IPs are exempt from the limit — and so from displacement.
+	if serverConfig.IsIPTimeoutBypassed(ip) {
+		return streamCtx, ip, cancel, true
+	}
+
+	release, acquired := limiter.Acquire(ip, cancel)
+	if !acquired {
+		cancel()
+		http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
+		return nil, ip, nil, false
+	}
+
+	// Free the slot as soon as the stream ends, even if the handler goroutine is
+	// still unwinding. release() is idempotent, so the deferred call is safe too.
+	go func() { <-streamCtx.Done(); release() }()
+
+	return streamCtx, ip, func() { cancel(); release() }, true
 }
 
 // MaidenheadRateLimiter manages per-IP rate limiters for the /api/maidenhead/country endpoint.

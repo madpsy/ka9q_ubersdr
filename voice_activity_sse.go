@@ -4,7 +4,7 @@ package main
 //
 // Endpoint:
 //
-//	GET /api/voice-activity/stream  — public, max 2 concurrent connections per IP
+//	GET /api/voice-activity/stream  — public, limited concurrent connections per IP
 //
 // Query params:
 //
@@ -34,7 +34,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -224,7 +223,9 @@ func (h *VoiceActivitySSEHub) heartbeatJSON() string {
 }
 
 // HandlePublicVoiceActivityStream is the HTTP handler for GET /api/voice-activity/stream.
-// It enforces a per-IP concurrent connection limit via limiter (typically 2 per IP).
+// It enforces a per-IP concurrent connection limit via limiter
+// (defaultSSEMaxConnsPerIP per IP; over that, this IP's oldest stream is
+// displaced rather than the new one refused).
 // Bypassed IPs (timeout_bypass_ips or bypass_password) are exempt from the limit.
 func HandlePublicVoiceActivityStream(hub *VoiceActivitySSEHub, limiter *SSEIPLimiter, serverConfig *ServerConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -234,32 +235,14 @@ func HandlePublicVoiceActivityStream(hub *VoiceActivitySSEHub, limiter *SSEIPLim
 			return
 		}
 
-		// Resolve the client IP (honour X-Forwarded-For set by a trusted reverse proxy).
-		ip := r.RemoteAddr
-		if host, _, err := net.SplitHostPort(ip); err == nil {
-			ip = host
+		// Resolve the client and take a per-IP connection slot. streamCtx ends
+		// when the client goes away or a newer connection from the same IP
+		// displaces this one.
+		streamCtx, ip, releaseSlot, admitted := acquireSSEConn(w, r, limiter, serverConfig)
+		if !admitted {
+			return
 		}
-		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			end := len(fwd)
-			for i, c := range fwd {
-				if c == ',' {
-					end = i
-					break
-				}
-			}
-			ip = fwd[:end]
-		}
-
-		// Bypassed IPs are exempt from the concurrent connection limit.
-		if !serverConfig.IsIPTimeoutBypassed(ip) {
-			release, ok := limiter.Acquire(ip)
-			if !ok {
-				http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
-				return
-			}
-			go func() { <-r.Context().Done(); release() }()
-			defer release()
-		}
+		defer releaseSlot()
 
 		// Verify the client supports SSE flushing.
 		flusher, ok := w.(http.Flusher)
@@ -297,7 +280,7 @@ func HandlePublicVoiceActivityStream(hub *VoiceActivitySSEHub, limiter *SSEIPLim
 
 		for {
 			select {
-			case <-r.Context().Done():
+			case <-streamCtx.Done():
 				log.Printf("VoiceActivitySSE: client disconnected (ip=%s)", ip)
 				return
 			case msg, ok := <-client.ch:

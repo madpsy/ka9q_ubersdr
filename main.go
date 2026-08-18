@@ -100,6 +100,16 @@ func (rw *responseWriter) Flush() {
 	}
 }
 
+// Unwrap exposes the ResponseWriter underneath, which is how
+// http.ResponseController reaches the connection's own methods through a
+// wrapper. Without it every ResponseController call fails with ErrNotSupported
+// as soon as this middleware is in the chain — including the SetWriteDeadline
+// the spectrum SSE stream relies on to bound a write to a peer that has stopped
+// reading. Silently, since there is no error to see: just no deadline.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 // httpLogger creates a logging middleware that logs requests in Apache combined log format
 func httpLogger(logFile *os.File, geoIPService *GeoIPService, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -3209,13 +3219,14 @@ func main() {
 	http.HandleFunc("/admin/decoder/stream", adminHandler.AuthMiddleware(HandleDecoderStream(decoderSSEHub)))
 	http.HandleFunc("/admin/cwskimmer/stream", adminHandler.AuthMiddleware(HandleCWSkimmerStream(cwSkimmerSSEHub)))
 
-	// Real-time SSE feeds (public, max 2 concurrent connections per IP)
+	// Real-time SSE feeds (public, defaultSSEMaxConnsPerIP concurrent connections
+	// per IP; over that, an IP's oldest stream is displaced by its newest).
 	// Bypassed IPs (timeout_bypass_ips) are exempt from the connection limit.
-	decoderSSELimiter := NewSSEIPLimiter(2)
-	cwSkimmerSSELimiter := NewSSEIPLimiter(2)
-	voiceActivitySSELimiter := NewSSEIPLimiter(2)
-	dxClusterSSELimiter := NewSSEIPLimiter(2)
-	noiseFloorSpectrumSSELimiter := NewSSEIPLimiter(2)
+	decoderSSELimiter := NewSSEIPLimiter(defaultSSEMaxConnsPerIP)
+	cwSkimmerSSELimiter := NewSSEIPLimiter(defaultSSEMaxConnsPerIP)
+	voiceActivitySSELimiter := NewSSEIPLimiter(defaultSSEMaxConnsPerIP)
+	dxClusterSSELimiter := NewSSEIPLimiter(defaultSSEMaxConnsPerIP)
+	noiseFloorSpectrumSSELimiter := NewSSEIPLimiter(defaultSSEMaxConnsPerIP)
 	http.HandleFunc("/api/decoder/stream", HandlePublicDecoderStream(decoderSSEHub, decoderSSELimiter, &config.Server))
 	http.HandleFunc("/api/cwskimmer/stream", HandlePublicCWSkimmerStream(cwSkimmerSSEHub, cwSkimmerSSELimiter, &config.Server))
 	http.HandleFunc("/api/voice-activity/stream", HandlePublicVoiceActivityStream(voiceActivitySSEHub, voiceActivitySSELimiter, &config.Server))
@@ -3225,7 +3236,7 @@ func main() {
 
 	// Public notification stream (SSE). Password-protected; returns 503 until the
 	// "sse_stream" notification channel is enabled in the admin UI.
-	notificationSSELimiter := NewSSEIPLimiter(2)
+	notificationSSELimiter := NewSSEIPLimiter(defaultSSEMaxConnsPerIP)
 	http.HandleFunc(sseStreamPath, HandleNotificationStream(notificationSSE, notificationSSELimiter, &config.Server))
 
 	// Widget management endpoints (admin auth, or a host listed in admin.widget_trusted_hosts)

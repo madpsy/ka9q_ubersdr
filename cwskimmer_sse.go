@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -19,7 +18,7 @@ import (
 // Endpoints:
 //
 //	GET /admin/cwskimmer/stream  — admin only (session cookie auth)
-//	GET /api/cwskimmer/stream    — public, max 2 concurrent connections per IP
+//	GET /api/cwskimmer/stream    — public, limited concurrent connections per IP
 //
 // Query params:
 //
@@ -245,7 +244,8 @@ func HandleCWSkimmerStream(hub *CWSkimmerSSEHub) http.HandlerFunc {
 
 // HandlePublicCWSkimmerStream is the HTTP handler for /api/cwskimmer/stream.
 // It is identical to HandleCWSkimmerStream but enforces a per-IP concurrent
-// connection limit via limiter (typically 2 connections per IP).
+// connection limit via limiter (defaultSSEMaxConnsPerIP connections per IP;
+// over that, this IP's oldest stream is displaced rather than the new one refused).
 // Bypassed IPs (timeout_bypass_ips or bypass_password) are exempt from the limit.
 func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter, serverConfig *ServerConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -255,39 +255,14 @@ func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter, se
 			return
 		}
 
-		// Resolve the client IP (honour X-Forwarded-For set by a trusted reverse proxy)
-		ip := r.RemoteAddr
-		if host, _, err := net.SplitHostPort(ip); err == nil {
-			ip = host
+		// Resolve the client and take a per-IP connection slot. streamCtx ends
+		// when the client goes away or a newer connection from the same IP
+		// displaces this one.
+		streamCtx, ip, releaseSlot, admitted := acquireSSEConn(w, r, limiter, serverConfig)
+		if !admitted {
+			return
 		}
-		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			// Take only the first (leftmost) address — the original client
-			end := len(fwd)
-			for i, c := range fwd {
-				if c == ',' {
-					end = i
-					break
-				}
-			}
-			ip = fwd[:end]
-		}
-
-		// Bypassed IPs are exempt from the concurrent connection limit.
-		if !serverConfig.IsIPTimeoutBypassed(ip) {
-			// Enforce concurrent connection limit.
-			// release() is idempotent (sync.Once) so it is safe to call from both
-			// the context-watcher goroutine below and the defer statement.
-			release, ok := limiter.Acquire(ip)
-			if !ok {
-				http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
-				return
-			}
-			// Release the slot as soon as the client disconnects, even if the
-			// handler goroutine is still unwinding (e.g. behind a reverse proxy
-			// that delays context cancellation propagation).
-			go func() { <-r.Context().Done(); release() }()
-			defer release()
-		}
+		defer releaseSlot()
 
 		// Verify the client supports SSE flushing
 		flusher, ok2 := w.(http.Flusher)
@@ -325,7 +300,7 @@ func HandlePublicCWSkimmerStream(hub *CWSkimmerSSEHub, limiter *SSEIPLimiter, se
 
 		for {
 			select {
-			case <-r.Context().Done():
+			case <-streamCtx.Done():
 				log.Printf("CWSkimmerSSE (public): client disconnected (ip=%s)", ip)
 				return
 			case msg, ok := <-client.ch:

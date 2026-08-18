@@ -114,7 +114,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -127,6 +126,12 @@ import (
 // nfSpectrumSSEHeartbeatInterval is how often a heartbeat event is sent to keep
 // NAT sessions alive and give clients a liveness signal.
 const nfSpectrumSSEHeartbeatInterval = 30 * time.Second
+
+// nfSpectrumSSEWriteTimeout bounds a single write to the client. It exists to
+// break the one case where a connection slot is held forever: a peer that stops
+// reading without closing (a wedged tunnel or proxy), where the write blocks
+// with no error and no context cancellation to end it.
+const nfSpectrumSSEWriteTimeout = 30 * time.Second
 
 // wideBandSSEName and wideBandSSECenterHz describe the synthetic "wideband"
 // pseudo-band exposed on this endpoint. It mirrors the 0-30 MHz channel used
@@ -307,32 +312,22 @@ func HandleNoiseFloorSpectrumStream(
 			return
 		}
 
-		// ── resolve client IP (honour trusted reverse-proxy headers) ──────────
-		ip := r.RemoteAddr
-		if host, _, err := net.SplitHostPort(ip); err == nil {
-			ip = host
+		// ── client identity and per-IP connection limit ───────────────────────
+		// acquireSSEConn resolves the IP through getClientIP, which reads
+		// X-Real-IP / X-Forwarded-For only when the request arrives from the
+		// configured tunnel server or a trusted proxy. Reading them from anyone
+		// would let a client pick which IP it is counted as — and so spend
+		// somebody else's connection slots, or share one identity with every
+		// other request carrying the same forged header.
+		//
+		// streamCtx ends when the client goes away or a newer connection from
+		// the same IP displaces this one; the loop below selects on it rather
+		// than on the request context.
+		streamCtx, ip, releaseSlot, admitted := acquireSSEConn(w, r, limiter, serverConfig)
+		if !admitted {
+			return
 		}
-		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			// Take only the first (leftmost) address — the real client IP.
-			if idx := strings.IndexByte(fwd, ','); idx >= 0 {
-				fwd = fwd[:idx]
-			}
-			ip = strings.TrimSpace(fwd)
-		}
-		if realIP := r.Header.Get("X-Real-IP"); realIP != "" && ip == "" {
-			ip = strings.TrimSpace(realIP)
-		}
-
-		// ── per-IP concurrent connection limit ────────────────────────────────
-		if !serverConfig.IsIPTimeoutBypassed(ip) {
-			release, acquired := limiter.Acquire(ip)
-			if !acquired {
-				http.Error(w, "too many connections from your IP", http.StatusTooManyRequests)
-				return
-			}
-			// Release when the request context is done (client disconnects).
-			defer release()
-		}
+		defer releaseSlot()
 
 		// ── build the set of configured bands (name → center frequency) ───────
 		// Includes a synthetic "wideband" entry (0-30 MHz, center 15 MHz) backed
@@ -418,7 +413,22 @@ func HandleNoiseFloorSpectrumStream(
 		log.Printf("NoiseFloorSpectrumSSE: client connected (ip=%s bands=%s)",
 			ip, strings.Join(bandNames, ","))
 
+		// ── write deadline ────────────────────────────────────────────────────
+		// A deadline on every write, so a peer that stops reading without
+		// closing cannot park this goroutine in Write forever. That is the one
+		// way the connection slot leaks permanently: no write error, no context
+		// cancellation, nothing left to notice the client is gone. Generous
+		// enough that a briefly congested tunnel is not mistaken for one —
+		// frames are a few KB at a few Hz.
+		rc := http.NewResponseController(w)
+		setWriteDeadline := func() {
+			// ErrNotSupported (a wrapped ResponseWriter in a test) just means no
+			// deadline; the stream still works.
+			_ = rc.SetWriteDeadline(time.Now().Add(nfSpectrumSSEWriteTimeout))
+		}
+
 		// ── send initial connection comment + retry hint ──────────────────────
+		setWriteDeadline()
 		fmt.Fprintf(w, ": connected to noise floor spectrum stream\nretry: 3000\n\n")
 		flusher.Flush()
 
@@ -432,14 +442,19 @@ func HandleNoiseFloorSpectrumStream(
 		heartbeatTicker := time.NewTicker(nfSpectrumSSEHeartbeatInterval)
 		defer heartbeatTicker.Stop()
 
-		ctx := r.Context()
-
 		// ── main event loop ───────────────────────────────────────────────────
 		for {
 			select {
-			case <-ctx.Done():
-				// Client disconnected or server shutting down.
-				log.Printf("NoiseFloorSpectrumSSE: client disconnected (ip=%s)", ip)
+			case <-streamCtx.Done():
+				// Client disconnected, server shutting down, or this stream was
+				// displaced by a newer one from the same IP — worth telling
+				// apart in the log, since a run of displacements is a client
+				// reconnecting rather than a client leaving.
+				if r.Context().Err() == nil {
+					log.Printf("NoiseFloorSpectrumSSE: stream displaced by a newer connection (ip=%s)", ip)
+				} else {
+					log.Printf("NoiseFloorSpectrumSSE: client disconnected (ip=%s)", ip)
+				}
 				return
 
 			case <-pollTicker.C:
@@ -453,6 +468,15 @@ func HandleNoiseFloorSpectrumStream(
 				// clients or how fast they're ticking. Keeping wideband on
 				// its own slower ticker after that would only have made it
 				// visibly lag every other band for no remaining benefit.
+				//
+				// Once per tick rather than once per write: the deadline has to
+				// cover the Flush below as well, which happens whether or not
+				// any band had data to send. A tick that writes nothing would
+				// otherwise reach Flush on a deadline set 30 s ago and break a
+				// perfectly healthy connection — bands are legitimately empty
+				// during startup or a source stall.
+				setWriteDeadline()
+
 				for _, b := range bands {
 					var fft *BandFFT
 					if b.name == wideBandSSEName {
@@ -487,6 +511,7 @@ func HandleNoiseFloorSpectrumStream(
 				ts := time.Now().UTC().Format(time.RFC3339)
 				hb := fmt.Sprintf(`{"bands":["%s"],"timestamp":%q}`,
 					strings.Join(bandNames, `","`), ts)
+				setWriteDeadline()
 				if _, err := fmt.Fprintf(w, "event: heartbeat\ndata: %s\n\n", hb); err != nil {
 					log.Printf("NoiseFloorSpectrumSSE: heartbeat write error (ip=%s): %v", ip, err)
 					return

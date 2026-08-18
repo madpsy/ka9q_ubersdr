@@ -39,6 +39,7 @@ package main
 // before.
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
@@ -639,9 +640,14 @@ func HandleNotificationStream(stream *notificationSSEStream, limiter *SSEIPLimit
 		}
 
 		// Per-IP concurrent connection limit (bypassed IPs are exempt, matching
-		// the other public SSE feeds).
+		// the other public SSE feeds). streamCtx is what a newer connection from
+		// the same IP displaces this one with, so a reconnecting subscriber is
+		// not refused by the slot its own previous stream has not yet given up.
+		streamCtx, cancelStream := context.WithCancel(r.Context())
+		defer cancelStream()
+
 		if serverConfig == nil || !serverConfig.IsIPTimeoutBypassed(ip) {
-			release, ok := limiter.Acquire(ip)
+			release, ok := limiter.Acquire(ip, cancelStream)
 			if !ok {
 				reject(w, http.StatusTooManyRequests, sseReasonIPLimited, "too many connections from your IP")
 				return
@@ -686,7 +692,7 @@ func HandleNotificationStream(stream *notificationSSEStream, limiter *SSEIPLimit
 
 		for {
 			select {
-			case <-r.Context().Done():
+			case <-streamCtx.Done():
 				return
 			case <-client.closed:
 				// Stream disabled or password rotated.

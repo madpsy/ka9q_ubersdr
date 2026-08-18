@@ -117,10 +117,19 @@ export function setBypassPassword(password) {
     registration = null;
 }
 
-// Returns { allowed, reason, clientIp }. A network failure is reported as
-// allowed so a flaky check never blocks an otherwise-working connection.
+// Returns { allowed, reason, clientIp, sessionId }. A network failure is
+// reported as allowed so a flaky check never blocks an otherwise-working
+// connection.
+//
+// `sessionId` is the id this particular check registered, and it is in the
+// reply because the sockets need it rather than because the caller asked. A
+// socket opens after awaiting the check, and the id can move during that await
+// — powerOn mints a new one — so reading getSessionId() again afterwards can
+// hand the socket an id the server has never been told about. The id that came
+// back with the answer is the one the answer is about.
 export async function checkConnection() {
-    const body = { user_session_id: getSessionId() };
+    const id = getSessionId();
+    const body = { user_session_id: id };
     const password = getBypassPassword();
     if (password) body.password = password;
 
@@ -145,6 +154,7 @@ export async function checkConnection() {
             // does: it depends on whether this client is bypassed.
             sessionTimeout: typeof data.session_timeout === 'number' ? data.session_timeout : null,
             status: res.status,
+            sessionId: id,
         };
     } catch (err) {
         return {
@@ -154,6 +164,7 @@ export async function checkConnection() {
             maxSessionTime: null,
             sessionTimeout: null,
             status: 0,
+            sessionId: id,
         };
     }
 }

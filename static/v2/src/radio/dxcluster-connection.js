@@ -54,6 +54,12 @@ export const USERNAME_MAX = 15;
 // `subscription_status` replies.
 export const STREAMS = ['dx_spots', 'digital_spots', 'cw_spots', 'chat', 'freedv_activity'];
 
+// How long a socket has to stay open before the reconnect budget is refilled.
+// Long enough that a connection the server upgrades and then refuses does not
+// count as a success, short enough that a real one is never penalised — see the
+// onopen handler.
+const SETTLED_MS = 5000;
+
 // Mirrors isAlphanumeric() server-side: letters, digits, and - _ / but never
 // leading or trailing. Checked here so a bad name is caught before a round trip.
 export function validateUsername(name) {
@@ -66,6 +72,31 @@ export function validateUsername(name) {
     return null;
 }
 
+// Drops a socket without letting its close event reach us.
+//
+// Closing is not instant: the event arrives when the server gets round to the
+// handshake, and on a fast link — a listener on the same subnet as the receiver
+// — that is comfortably *after* a replacement socket has been installed. With
+// the handlers still attached, that late event runs _onClose against state the
+// new socket now owns: it nulls `this.ws`, stops the ping timer and, because
+// connect() has already cleared closedByUser, books a reconnect. The result is
+// a panel reading "Reconnecting…" over a socket that is receiving perfectly
+// well, a send() that refuses to write to it, and a second later a third socket
+// while the second is left open and orphaned on the server.
+//
+// So a socket being replaced or deliberately closed is abandoned instead: its
+// handlers come off first, it can no longer report anything, and there is
+// exactly one socket answering for this connection at every instant. Whatever
+// the caller wants to tell the outside world about the closure, it says itself.
+function abandon(ws) {
+    if (!ws) return;
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+    try { ws.close(1000, 'client'); } catch (e) { /* ignore */ }
+}
+
 export class DXClusterConnection extends Emitter {
     constructor() {
         super();
@@ -76,6 +107,8 @@ export class DXClusterConnection extends Emitter {
         this.maxAttempts = 12;
         this.reconnectTimer = null;
         this.pingTimer = null;
+        // Refills `attempts` once a socket has proved itself — see onopen.
+        this.settleTimer = null;
         this.username = null;      // replayed on reconnect
         this.lastStatus = null;    // frequency/mode, likewise
         // Whether this socket has already been told who we are. The replay
@@ -154,18 +187,59 @@ export class DXClusterConnection extends Emitter {
     // behaviour on that: chat presence, and which audio session an extension
     // attaches to, which is why an attach on a stale socket comes back "no
     // active audio session found" while everything looks connected.
+    //
+    // Much rarer than it was. This socket used to open before the receiver had
+    // started — the marker bar subscribed to spots on page load — which made
+    // every visit begin with a socket on a session id that Start then replaced.
+    // Now nothing subscribes until there is a receiver running, and connect()
+    // opens under the id `/connection` registered rather than re-reading a
+    // global afterwards, so what is left here is the genuine case: a power
+    // cycle underneath a socket somebody is still holding.
     get stale() {
         return !!this.ws && this.openedWith !== getSessionId();
     }
 
     // Reopens a stale socket, and answers whether it did. Reopening restores
-    // the subscriptions — the ref counts survive a disconnect and are replayed
+    // the subscriptions — the ref counts survive a replacement and are replayed
     // on open — so this costs a round trip and nothing else.
     refresh() {
         if (!this.stale) return false;
-        this.disconnect();
-        this.connect();
+        this._replace();
         return true;
+    }
+
+    // Moves the connection onto the current session id.
+    //
+    // Deliberately not disconnect() followed by connect(). Those two share
+    // `this.ws`, `closedByUser`, the ping timer and the subscription flags, and
+    // sequencing them by hand means the old socket is still closing while the
+    // new one is being opened — see abandon() for what the late close event
+    // then does to the socket that replaced it. Between them there is also a
+    // moment of state 'idle' and possibly 'reconnecting', which the Spots panel
+    // draws, so a routine change of session id flashed "Reconnecting…" at the
+    // operator for no reason.
+    //
+    // One step instead: the old socket is abandoned, its close is reported
+    // once, and the new one opens. Nothing here ever sets closedByUser — this
+    // is a continuation of the same connection, not somebody leaving — so a
+    // failure to reopen still reaches the normal backoff.
+    _replace() {
+        const had = !!this.ws;
+        abandon(this.ws);
+        this.ws = null;
+        clearInterval(this.pingTimer);
+        this.pingTimer = null;
+        clearTimeout(this.settleTimer);
+        this.settleTimer = null;
+        // A new socket knows nothing about us; the ref counts are what survives.
+        for (const stream of STREAMS) this.confirmed[stream] = false;
+        this.identitySent = false;
+        // Said once, and only when there was something to close. Consumers that
+        // hold an attachment on this socket — the audio extensions — have to
+        // know it went, or they wait for results from a decoder the server tore
+        // down with the session behind it.
+        if (had) this.emit('close');
+        this.connect();
     }
 
     // Opens or closes to match demand. The last release closes the socket
@@ -198,7 +272,21 @@ export class DXClusterConnection extends Emitter {
         // Everyone may have let go while the check was in flight.
         if (this.closedByUser || !this._wanted()) return false;
 
-        const sessionId = getSessionId();
+        // The id `/connection` just registered, rather than whatever
+        // getSessionId() says by now. The two differ when the receiver was
+        // started or restarted during the await — powerOn mints a fresh id —
+        // and both readings are wrong to open with: the old one is the id the
+        // server has just been told to replace, and the new one is an id it has
+        // never been told about at all, which the endpoints refuse with
+        // "Invalid session. Please refresh the page and try again."
+        //
+        // That is the whole reason this socket ever went stale. Rather than
+        // opening under one and patching it up afterwards, a move restarts the
+        // dance under the id that won: connect() is re-entered, and the check
+        // it makes registers the new id before the socket carries it.
+        const sessionId = check.sessionId;
+        if (sessionId !== getSessionId()) return this.connect();
+
         const q = new URLSearchParams({ user_session_id: sessionId });
         const password = getBypassPassword();
         if (password) q.set('password', password);
@@ -222,7 +310,20 @@ export class DXClusterConnection extends Emitter {
         ws.binaryType = 'arraybuffer';
 
         ws.onopen = () => {
-            this.attempts = 0;
+            // Not `attempts = 0` here. The server accepts the upgrade and only
+            // then decides it will not have us — a session it has already
+            // reclaimed, a creation rate limit — so a refused connection still
+            // fires onopen and is closed a moment later. Clearing the count on
+            // the open event therefore reset the backoff on precisely the
+            // failure the backoff exists for, and the socket retried once a
+            // second for as long as the page was left up: the "Reconnecting…"
+            // that appears, clears, and appears again.
+            //
+            // The budget is earned by staying up instead. Anything that lasts
+            // this long is a working connection whatever it does afterwards,
+            // and anything refused is closed inside a round trip.
+            clearTimeout(this.settleTimer);
+            this.settleTimer = setTimeout(() => { this.attempts = 0; }, SETTLED_MS);
             this._setState('open');
             // Subscribing is what makes the socket carry anything at all, and
             // replays each stream's buffered history. Everything else waits for
@@ -256,13 +357,22 @@ export class DXClusterConnection extends Emitter {
         this.opening = false;
         clearTimeout(this.reconnectTimer);
         clearInterval(this.pingTimer);
+        clearTimeout(this.settleTimer);
         this.reconnectTimer = null;
+        this.pingTimer = null;
+        this.settleTimer = null;
         if (this.connected && this.username) this.send({ type: 'chat_leave' });
-        if (this.ws) {
-            try { this.ws.close(1000, 'client'); } catch (e) { /* ignore */ }
-        }
+        const had = !!this.ws;
+        // Abandoned rather than closed through _onClose, which would otherwise
+        // fire against whatever this connection is doing by then — see
+        // abandon(). 'close' is therefore emitted here, and now rather than a
+        // round trip later, which is also the order consumers want: the socket
+        // is gone the moment the last holder let go of it.
+        abandon(this.ws);
         this.ws = null;
         for (const stream of STREAMS) this.confirmed[stream] = false;
+        this.identitySent = false;
+        if (had) this.emit('close');
         this._setState('idle');
     }
 
@@ -447,10 +557,18 @@ export class DXClusterConnection extends Emitter {
         }
     }
 
+    // Only ever the live socket dropping on its own. A socket this connection
+    // gave up on — disconnect(), or a replacement — is abandoned with its
+    // handlers detached and reports its own closure, so nothing that arrives
+    // here belongs to a socket that has already been superseded.
     _onClose() {
         clearInterval(this.pingTimer);
+        clearTimeout(this.settleTimer);
+        this.pingTimer = null;
+        this.settleTimer = null;
         this.ws = null;
         for (const stream of STREAMS) this.confirmed[stream] = false;
+        this.identitySent = false;
         this.emit('close');
         if (this.closedByUser) {
             this._setState('idle');

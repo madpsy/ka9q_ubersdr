@@ -172,6 +172,8 @@ esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
     --outfile=.build/radiosync.cjs --log-level=warning
 esbuild ../src/radio/dxcluster-connection.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxcluster.cjs --log-level=warning
+esbuild dxcluster.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/dxclustertest.cjs --log-level=warning
 esbuild ../src/lib/chatIgnore.js --bundle --format=cjs --platform=node \
     --outfile=.build/chatignore.cjs --log-level=warning
 esbuild ../src/lib/chatName.js --bundle --format=cjs --platform=node \
@@ -377,6 +379,7 @@ node format.test.js
 node clientnoise.test.js
 node rmnoise.test.js
 node noisegraph.test.js
+node dxcluster.test.js
 node dxterminal.test.js
 node sstvaddon.test.js
 node games.test.js

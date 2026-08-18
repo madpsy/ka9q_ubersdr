@@ -118,8 +118,25 @@ export default function MarkerBar({ width }) {
     // low-rate — so a toggle here decides only what is drawn, and turning one on
     // shows the spots already collected rather than an empty bar. Digital spots
     // have no marker layer: a decoder band puts every station on one frequency.
-    const showDx = display.markerDxSpots !== false && !!(serverInfo && serverInfo.dx_cluster);
-    const showCw = display.markerCwSpots !== false && !!(serverInfo && serverInfo.cw_skimmer);
+    //
+    // `running` as well, and that is not belt and braces. Subscribing is what
+    // *opens* the spot socket when nobody else holds it — see spotStore — and
+    // these two toggles default to on, so before this the bar was the first
+    // subscriber on every page load: the socket opened behind the Start overlay
+    // and minted the page's session id as a side effect of doing so. Pressing
+    // Start then mints a fresh one for the audio and spectrum sessions, leaving
+    // the spot socket registered to an id with nothing behind it — which is what
+    // the connection's `stale` handling exists to clean up after. Everything
+    // else that reads these feeds already waits for the receiver (App.jsx,
+    // MediaSessionContext, useMarkerNav, SpotsPanel); this was the one that did
+    // not, and its comment above assumed somebody else had opened the stream.
+    //
+    // The visible consequence is that spot markers clear on Stop, which is what
+    // the voice layer beside them already does — its poll goes through the same
+    // gate — and what the Spots panel says in words.
+    const live = !!radio.running;
+    const showDx = live && display.markerDxSpots !== false && !!(serverInfo && serverInfo.dx_cluster);
+    const showCw = live && display.markerCwSpots !== false && !!(serverInfo && serverInfo.cw_skimmer);
     // Confirmed callsigns from the voice skimmer, gated on the addon being installed.
     const showConfirmed = display.markerVoiceConfirmed !== false
         && voiceSkimmerAvailable(serverInfo);

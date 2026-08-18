@@ -262,10 +262,14 @@ func (c *NTPConfig) ntpSyncTolerance() time.Duration {
 	return time.Duration(c.SyncToleranceMs) * time.Millisecond
 }
 
+// defaultAdminDescription is the operator blurb shown in the start overlay and
+// the receiver info panel. It is hardcoded rather than read from config.yaml.
+const defaultAdminDescription = `Welcome! This SDR is running <a href="https://ubersdr.org" target="_blank">UberSDR</a>`
+
 // AdminConfig contains admin authentication settings
 type AdminConfig struct {
 	Password             string    `yaml:"password"`
-	Description          string    `yaml:"description"`
+	Description          string    `yaml:"-"` // Not configurable: always defaultAdminDescription (see LoadConfig)
 	Name                 string    `yaml:"name"`
 	Email                string    `yaml:"email"`
 	Callsign             string    `yaml:"callsign"`
@@ -1147,9 +1151,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	// Set admin defaults if not specified
-	if config.Admin.Description == "" {
-		config.Admin.Description = `Welcome! This SDR is running <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a>`
-	}
+	// Description is deliberately not read from config.yaml — every instance
+	// gets the same blurb until the wizard grows a field to edit it.
+	config.Admin.Description = defaultAdminDescription
 	if config.Admin.Name == "" {
 		config.Admin.Name = "My SDR operated by myself!"
 	}

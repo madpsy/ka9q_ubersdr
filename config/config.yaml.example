@@ -6,10 +6,7 @@ admin:
   wizard: true
   # Admin password for configuration access
   password: "mypassword"
-  # Description HTML to display in the top right of the page
-  # This can include HTML tags like links
-  description: 'Welcome! This SDR is running <a href="https://ubersdr.org" target="_blank">UberSDR</a>'
-  # Name - similar to description without any HTML
+  # Name - plain text station name shown in the UI
   name: 'SDR with Active Loop'
   # Admin email address
   email: "me@example.com"

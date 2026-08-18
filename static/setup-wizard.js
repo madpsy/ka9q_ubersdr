@@ -574,7 +574,6 @@
                     setFieldValue('callsign', config.admin.callsign);
                     setFieldValue('stationName', config.admin.name);
                     setFieldValue('email', config.admin.email);
-                    setFieldValue('description', config.admin.description);
                     setFieldValue('location', config.admin.location);
                     setFieldValue('latitude', config.admin.gps?.lat);
                     setFieldValue('longitude', config.admin.gps?.lon);
@@ -733,7 +732,6 @@
                     callsign: formData.callsign.toUpperCase(),
                     name: formData.stationName,
                     email: formData.email,
-                    description: formData.description || '',
                     location: formData.location,
                     timezone: formData.timezone || 'UTC',
                     antenna: formData.antenna,

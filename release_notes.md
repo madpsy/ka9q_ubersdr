@@ -1,4 +1,11 @@
-# Latest Stable - 0.1.59 - 17th Aug 2026
+# Latest Stable - 0.1.60 - 18th Aug 2026
+
+## Version 0.1.60 - 18th Aug 2026
+
+### Bug Fixes
+- Minor issue - random rejection of spectrum data SSE endpoint (hopefully this fixes it)
+
+## Version 0.1.59 - 17th Aug 2026
 
 ### New Features
 - New **User Interface** aptly named 'V2'. This is a massive change to the UI to bring it a modern feel. Going forward this will be the interface which is worked on. The legecy interface is still the default, even in installations, for now. It will need to 'go away' at some point but giving instance owners and end users the ability to decide for now

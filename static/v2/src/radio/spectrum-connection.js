@@ -20,6 +20,7 @@
 import { Emitter } from './emitter.js';
 import { connectionCheck, frameSize, getBypassPassword, getSessionId, wsBase } from './session.js';
 import { clampCenter } from '../lib/zoom.js';
+import { failureKind } from '../lib/connectFailure.js';
 
 const HEADER_BYTES = 22;
 
@@ -36,6 +37,9 @@ export const MIN_ZOOM_SPAN_HZ = 10240;
 export class SpectrumConnection extends Emitter {
     constructor() {
         super();
+        // How the server last refused us, held only from the error message to
+        // the close that follows it — see _onMessage and _onClose.
+        this.lastFailure = null;
         this.ws = null;
         this.state = 'idle';
         this.closedByUser = false;
@@ -102,8 +106,17 @@ export class SpectrumConnection extends Emitter {
 
         const check = await connectionCheck();
         if (!check.allowed) {
+            // This used to stop here, full stop: no reconnect was scheduled for
+            // any refusal, so a receiver that was momentarily full or a client
+            // that had asked once too often left the waterfall blank until the
+            // page was reloaded. Which refusals are worth waiting out is
+            // lib/connectFailure.js.
+            const fail = failureKind(check.reason, check.status);
             this._setState('rejected');
-            this.emit('error', { kind: 'rejected', message: check.reason });
+            this.emit('error', {
+                kind: 'rejected', failure: fail, message: check.reason, status: check.status,
+            });
+            if (fail === 'retry') this._scheduleReconnect(initial);
             return false;
         }
 
@@ -149,7 +162,10 @@ export class SpectrumConnection extends Emitter {
         this._lastInitial = initial;
 
         ws.onopen = () => {
-            this.attempts = 0;
+            // Not refilled here — see the audio socket, which has the same
+            // shape and the same reason. The spectrum session is created after
+            // the upgrade too, so a refusal opens the socket first. _onFrame
+            // refills it once bins actually arrive.
             this._setState('open');
             this.emit('open');
             // No keepalive timer. Every message touches the session server
@@ -361,7 +377,15 @@ export class SpectrumConnection extends Emitter {
             return;
         }
         if (msg.type === 'error') {
-            this.emit('error', { kind: 'server', message: msg.error, status: msg.status });
+            // Sent after the upgrade and followed by a close — the spectrum
+            // session is created once the socket is already up, so this is
+            // where a creation rate limit or a reclaimed session lands. Held
+            // for _onClose, which otherwise cannot tell that close from any
+            // other. See the audio socket, which does the same.
+            this.lastFailure = failureKind(msg.error, msg.status);
+            this.emit('error', {
+                kind: 'server', failure: this.lastFailure, message: msg.error, status: msg.status,
+            });
             return;
         }
         if (msg.type === 'pong') return;
@@ -421,6 +445,9 @@ export class SpectrumConnection extends Emitter {
         }
 
         this.framesIn++;
+        // Bins on the wire: this session exists and is producing, which is the
+        // proof the reconnect budget waits for rather than the bare open event.
+        this.attempts = 0;
         this.emit('frame', { bins: this._unwrap(bins), frequency, timestamp });
     }
 
@@ -438,8 +465,18 @@ export class SpectrumConnection extends Emitter {
 
     _onClose() {
         this.ws = null;
-        this.emit('close');
+        const failure = this.lastFailure;
+        this.lastFailure = null;
+        this.emit('close', { failure });
         if (this.closedByUser) {
+            this._setState('idle');
+            return;
+        }
+        // A refusal the server explained a moment ago settles whether to try
+        // again — see _onMessage. Without it every refusal looked like a
+        // dropped connection and was retried on the same curve for ever,
+        // including the ones that can never succeed.
+        if (failure && failure !== 'retry') {
             this._setState('idle');
             return;
         }
@@ -450,7 +487,13 @@ export class SpectrumConnection extends Emitter {
         if (this.reconnectTimer || this.closedByUser) return;
         if (this.attempts >= this.maxAttempts) {
             this._setState('idle');
-            this.emit('error', { kind: 'give-up', message: 'Spectrum reconnect failed — reload the page.' });
+            // See the audio socket's give-up: a session this far gone is
+            // replaced rather than reloaded.
+            this.emit('error', {
+                kind: 'give-up',
+                failure: 'identity',
+                message: 'Lost the spectrum connection and could not get it back.',
+            });
             return;
         }
         const delay = Math.min(30000, 1000 * Math.pow(1.6, this.attempts));

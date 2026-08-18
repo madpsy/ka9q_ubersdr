@@ -40,7 +40,7 @@ const ACTIVITY = ['mousedown', 'mousemove', 'keydown', 'keypress', 'scroll', 'to
 const BURST_MS = 500;
 
 export default function IdleWatch() {
-    const { running, session, actions, audioConn, spectrumConn } = useRadio();
+    const { running, session, lost, actions, audioConn, spectrumConn } = useRadio();
     const mobile = useMediaQuery(MOBILE_QUERY);
     // How long the operator is prepared to be counted as away before the
     // spectrum drops to half rate — see the Display panel. null for never.
@@ -59,6 +59,9 @@ export default function IdleWatch() {
     const [phase, setPhase] = useState('watching');
     const [left, setLeft] = useState(CONFIRM_MS / 1000);
     const [idleFor, setIdleFor] = useState(0);
+    // Which `lost` the operator has already waved away, by its timestamp. Not a
+    // boolean: the next session can be ended too, and that one is news again.
+    const [dismissed, setDismissed] = useState(0);
     // Mirrored so the activity handler can tell whether the dialog is up
     // without re-binding itself every time the phase changes — and without
     // setting state on every mousemove.
@@ -141,6 +144,30 @@ export default function IdleWatch() {
         };
 
         const ask = () => {
+            // Nobody is looking, so there is nobody to ask.
+            //
+            // The dialog gives the operator thirty seconds to say they are
+            // still there, and the receiver is stopped if they do not. In a
+            // hidden tab that countdown is a setInterval, which Chrome throttles
+            // to roughly once a minute — so the stop that should land at the
+            // server's deadline lands well after it, and the server gets there
+            // first. Its version is not a stop: it *kicks the session id* and
+            // then refuses it for an hour, which leaves every socket on the page
+            // reconnecting into a refusal it can never satisfy. That is the tab
+            // you come back to with no audio and no waterfall.
+            //
+            // So when the tab is hidden the receiver stops now, cleanly, at the
+            // warning rather than at the deadline. It costs the thirty seconds
+            // of grace that a hidden tab could not have used anyway — nothing
+            // there can answer, and coming back to the tab is itself activity,
+            // which would have re-armed the timer had it happened in time — and
+            // it buys a session that ends the way both sides expect. Coming
+            // back then finds the receiver stopped rather than broken, and the
+            // first thing the operator touches starts it again.
+            if (document.hidden) {
+                timeout();
+                return;
+            }
             setPhase('asking');
             setIdleFor(Date.now() - at.current.activity);
             setLeft(CONFIRM_MS / 1000);
@@ -262,6 +289,29 @@ export default function IdleWatch() {
         setPhase('watching');
         at.current.activity = Date.now();
     };
+
+    // The receiver stopped and the operator did not ask it to — the same thing
+    // the 'out' dialog below says, for the other reason it happens. It lives
+    // here because this is already the component that explains an unasked-for
+    // stop, and having two of those would mean two dialogs racing to cover each
+    // other the one time both were true.
+    //
+    // Ahead of both: a session the server has ended is a fact, where the other
+    // two are this client's own reading of the silence, and when more than one
+    // is true the fact is the news.
+    // Dismissing only closes the dialog; what actually clears `lost` is
+    // starting again, which is what the button does.
+    if (lost && lost.at !== dismissed) {
+        return (
+            <Modal onClose={() => setDismissed(lost.at)} label="Session ended">
+                <div className="idle">
+                    <h2 className="idle__title">Session ended</h2>
+                    <p className="idle__text">{lost.message}</p>
+                    <Button variant="primary" onClick={() => actions.powerOn()}>Listen again</Button>
+                </div>
+            </Modal>
+        );
+    }
 
     if (phase === 'asking') {
         return (

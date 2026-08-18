@@ -34,6 +34,7 @@ import { hiddenGroups, onGroupsChanged, visibleBookmarks } from '../lib/bookmark
 import { readShareUrl, takeUrlView } from '../lib/share.js';
 import { shouldWake } from '../lib/wake.js';
 import { setFeedsAllowed } from '../lib/serverFeeds.js';
+import { failureMessage } from '../lib/connectFailure.js';
 import {
     CHECK_MS as SAM_CHECK_MS, createWatch as createSamWatch, notePower as noteSamPower,
     resetWatch as resetSamWatch, shouldFallBack as samShouldFallBack,
@@ -107,6 +108,11 @@ export function RadioProvider({ children }) {
     // sit inactive before the server reclaims it — what the idle watch counts
     // against. Both come from the one /connection reply, and 0 means neither.
     const [session, setSession] = useState({ maxSec: null, idleSec: null, startedAt: 0 });
+    // Why the last session ended, when it was not the operator who ended it —
+    // { kind, message, at }, or null. Set by noteFailure and cleared by the
+    // next start, so it describes the reason there is nothing running now
+    // rather than accumulating a history.
+    const [lost, setLost] = useState(null);
     const [log, setLog] = useState([]);
     const [audio, setAudio] = useState({
         volume: saved.volume != null ? saved.volume : 0.7,
@@ -259,6 +265,41 @@ export function RadioProvider({ children }) {
     // drag would start several sessions.
     const waking = useRef(false);
 
+    // What ends a session that the operator did not end.
+    //
+    // Both sockets can discover that this session is over: the server reclaims
+    // an idle one by blacklisting its id for an hour, and after that every
+    // reconnect with the same id is refused for as long as it takes. Nothing
+    // used to act on that. `running` stayed true, so the power button read
+    // "on", wake() refused to fire — it will not start a session while one is
+    // supposedly running — and the two sockets retried an id that could never
+    // be accepted until they gave up and wrote a line in the log. The page
+    // looked live, was dead, and only a reload cleared it. That is the
+    // "shift-refresh to get the audio back" this exists to end.
+    //
+    // So a session the server has finished with is *finished*: stop, which
+    // releases what is left of the slot, drops the feeds and flips the power
+    // button. Starting again mints a new id, and because wake() is live again
+    // the next thing the operator touches does exactly that — they do not have
+    // to know any of this happened. `lost` is kept so something can say so.
+    //
+    // Only the two kinds that mean it. A 'retry' failure is a busy receiver or
+    // a rate limit, both of which the backoff is already handling: ending the
+    // session over one would turn a ten-second wait into a stopped receiver.
+    const noteFailure = useRef((e) => {
+        const kind = e && e.failure;
+        if (!kind || kind === 'retry') return;
+        if (!runningRef.current) return;
+        // Eagerly, not left to the re-render powerOff triggers. Both sockets
+        // can discover the same dead session in one tick, and the second one
+        // would otherwise still read `running` as true — stamping a fresh
+        // `lost` over a notice the operator may have just dismissed, and
+        // powering off something already off.
+        runningRef.current = false;
+        setLost({ kind, message: failureMessage(kind, e.message), at: Date.now() });
+        actionsRef.current.powerOff();
+    }).current;
+
     // Adopts server-reported AGC values, ignoring an echo that would otherwise
     // snap a slider back while it is still being dragged.
     const applyServerAGC = useRef((incoming) => {
@@ -388,7 +429,10 @@ export function RadioProvider({ children }) {
                 });
             }
         }));
-        offs.push(audioConn.on('error', (e) => pushLog('error', e.message || 'audio error')));
+        offs.push(audioConn.on('error', (e) => {
+            pushLog('error', e.message || 'audio error');
+            noteFailure(e);
+        }));
         offs.push(audioConn.on('close', () => pushLog('warn', 'Audio stream closed')));
         offs.push(audioConn.on('open', () => {
             pushLog('info', 'Audio stream connected');
@@ -433,7 +477,10 @@ export function RadioProvider({ children }) {
             const m = meters.current;
             m.lastFrameAt = performance.now();
         }));
-        offs.push(spectrumConn.on('error', (e) => pushLog('error', e.message || 'spectrum error')));
+        offs.push(spectrumConn.on('error', (e) => {
+            pushLog('error', e.message || 'spectrum error');
+            noteFailure(e);
+        }));
         offs.push(spectrumConn.on('open', () => pushLog('info', 'Spectrum connected')));
 
         return () => offs.forEach((off) => off());
@@ -689,6 +736,10 @@ export function RadioProvider({ children }) {
         // Hoisted out of the actions object so wake() can call it — see there.
         const powerOn = async () => {
             everStarted.current = true;
+            // Whatever ended the last session is history the moment a new one
+            // is asked for, and this is the only place that can know that —
+            // including when the start *is* the operator answering the notice.
+            setLost(null);
             const ok = await player.start();
             if (!ok) pushLog('warn', 'Audio context did not start — tap again');
             setRunning(true);
@@ -1148,6 +1199,11 @@ export function RadioProvider({ children }) {
         };
     }, []);
 
+    // Read by noteFailure, which is subscribed to the sockets once on mount and
+    // so holds the first render's closure for the life of the page.
+    const actionsRef = useRef(null);
+    actionsRef.current = actions;
+
     // SAM gives up on a carrier that has stopped moving — see lib/samFallback.js
     // for why that is measured as a number holding still rather than as packets
     // failing to arrive.
@@ -1174,7 +1230,7 @@ export function RadioProvider({ children }) {
     }), [squelchValue]);
 
     const value = useMemo(() => ({
-        tuning, audioState, spectrumState, view, running, serverInfo, log, session,
+        tuning, audioState, spectrumState, view, running, serverInfo, log, session, lost,
         audio, squelch, agc, dsp, followTuning, filters, noise,
         // `bookmarks` and `local` are what *propagates* — the marker bar, the
         // ⏮/⏭ neighbours, the lock screen, the Markers panel — so a hidden
@@ -1191,7 +1247,7 @@ export function RadioProvider({ children }) {
         },
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, audio, squelch, agc, dsp, followTuning, filters, noise, catalog, localMarks, hidden, actions]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, catalog, localMarks, hidden, actions]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

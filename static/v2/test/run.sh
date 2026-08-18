@@ -32,6 +32,8 @@ esbuild ../src/lib/bandSpectrum.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandspectrum.cjs --log-level=warning
 esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
     --outfile=.build/backoff.cjs --log-level=warning
+esbuild ../src/lib/connectFailure.js --bundle --format=cjs --platform=node \
+    --outfile=.build/connectfailure.cjs --log-level=warning
 esbuild ../src/lib/lightning.js --bundle --format=cjs --platform=node \
     --outfile=.build/lightning.cjs --log-level=warning
 esbuild lightningstream.entry.js --bundle --format=cjs --platform=node \
@@ -379,6 +381,8 @@ node format.test.js
 node clientnoise.test.js
 node rmnoise.test.js
 node noisegraph.test.js
+node connectfailure.test.js
+node reconnect.test.js
 node dxcluster.test.js
 node dxterminal.test.js
 node sstvaddon.test.js

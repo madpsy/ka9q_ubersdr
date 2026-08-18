@@ -17,6 +17,7 @@
 // unavailable; that path is handled too so the UI still works on such a server.
 
 import { Emitter } from './emitter.js';
+import { failureKind } from '../lib/connectFailure.js';
 import { PCMStreamDecoder, isZstdFrame } from './pcm-stream.js';
 import {
     connectionCheck, frameSize, getBypassPassword, getSessionId, setServerSessionId, wsBase,
@@ -44,6 +45,9 @@ export class AudioConnection extends Emitter {
         // reader only has to take deltas — see the Receiver info panel, which
         // is the only thing that looks at it.
         this.bytesIn = 0;
+        // How the server last refused us, held only from the error message to
+        // the close that follows it — see _onMessage and _onClose.
+        this.lastFailure = null;
     }
 
     get connected() {
@@ -67,10 +71,17 @@ export class AudioConnection extends Emitter {
 
         const check = await connectionCheck();
         if (!check.allowed) {
+            // Three answers, not two — see lib/connectFailure.js. The /maximum/
+            // test that used to live here read "rate limit exceeded" and "your
+            // session has been terminated" as the same thing as a ban, so the
+            // socket gave up permanently on a refusal that clears itself in
+            // seconds, and the page had to be reloaded to get any audio at all.
+            const fail = failureKind(check.reason, check.status);
             this._setState('rejected');
-            this.emit('error', { kind: 'rejected', message: check.reason });
-            // Server-side capacity limits clear on their own; bans do not.
-            if (/maximum/i.test(check.reason)) this._scheduleReconnect();
+            this.emit('error', {
+                kind: 'rejected', failure: fail, message: check.reason, status: check.status,
+            });
+            if (fail === 'retry') this._scheduleReconnect();
             return false;
         }
 
@@ -109,7 +120,14 @@ export class AudioConnection extends Emitter {
 
         ws.onopen = () => {
             if (superseded()) return;
-            this.attempts = 0;
+            // The reconnect budget is deliberately *not* refilled here. The
+            // server upgrades the socket before it decides whether it will have
+            // us — the session is created afterwards — so a refusal arrives as
+            // open-then-error-then-close, and clearing the count on the open
+            // event reset the backoff on exactly the failure it exists for. A
+            // rate-limited client then retried once a second for as long as the
+            // page was up. _onMessage refills it instead, on the first packet:
+            // audio arriving is proof rather than promise.
             this._setState('open');
             this.emit('open');
             // The server sends no unsolicited status for binary audio formats,
@@ -229,7 +247,17 @@ export class AudioConnection extends Emitter {
             return;
         }
         if (msg.type === 'error') {
-            this.emit('error', { kind: 'server', message: msg.error, status: msg.status });
+            // The server upgrades the socket and only then decides whether it
+            // will have us — a session it has already reclaimed, a creation
+            // rate limit — so a refusal arrives here rather than as a failed
+            // handshake, and is followed by a close. Remembered so _onClose
+            // knows whether that close is worth retrying: by itself it looks
+            // like any other, and the clean code the server sends with it used
+            // to mean "the operator asked for this" and stop everything.
+            this.lastFailure = failureKind(msg.error, msg.status);
+            this.emit('error', {
+                kind: 'server', failure: this.lastFailure, message: msg.error, status: msg.status,
+            });
             return;
         }
         if (msg.type === 'pong') return;
@@ -250,6 +278,10 @@ export class AudioConnection extends Emitter {
                 for (let i = 0; i < frames; i++) plane[i] = pcm[i * channels + c] / 32768;
                 planes.push(plane);
             }
+            // Same proof as a binary frame, on the JSON fallback path — a
+            // server with no Opus encoder must not be left on a backoff that
+            // only the binary path can clear.
+            this.attempts = 0;
             this.emit('pcm', { planes, sampleRate: msg.sampleRate || 12000, channels });
             return;
         }
@@ -306,8 +338,27 @@ export class AudioConnection extends Emitter {
         this.ws = null;
         // The session it belonged to is gone; a reconnect is given a new one.
         setServerSessionId(null);
-        this.emit('close', { code: ev.code, reason: ev.reason });
-        if (this.closedByUser || ev.code === 1000 || ev.code === 1001) {
+        const failure = this.lastFailure;
+        this.lastFailure = null;
+        this.emit('close', { code: ev.code, reason: ev.reason, failure });
+        if (this.closedByUser) {
+            this._setState('idle');
+            return;
+        }
+        // A refusal the server explained a moment ago settles it, whatever code
+        // it closed with. This is the case that reads as "the audio just stopped
+        // and never came back": the server sends its error and then closes
+        // cleanly, and a clean code was taken as the operator having asked to
+        // stop — so a rate limit that clears in ten seconds ended the session
+        // for good.
+        if (failure) {
+            if (failure === 'retry') this._scheduleReconnect();
+            else this._setState('idle');
+            return;
+        }
+        // 1000 and 1001 with nothing said: a deliberate close from the other
+        // end, or the page going away. Neither is ours to argue with.
+        if (ev.code === 1000 || ev.code === 1001) {
             this._setState('idle');
             return;
         }
@@ -318,7 +369,16 @@ export class AudioConnection extends Emitter {
         if (this.reconnectTimer || !this.params || this.closedByUser) return;
         if (this.attempts >= this.maxAttempts) {
             this._setState('idle');
-            this.emit('error', { kind: 'give-up', message: 'Unable to reconnect — reload the page.' });
+            // 'identity', not a plea to reload. Twelve failures over two
+            // minutes is a session the server is not going to give back, and
+            // the answer to that is a new one — which is what the receiver
+            // stopping and being started again produces. Telling the operator
+            // to reload was the client admitting it had no way back; it has one.
+            this.emit('error', {
+                kind: 'give-up',
+                failure: 'identity',
+                message: 'Lost the audio connection and could not get it back.',
+            });
             return;
         }
         const delay = Math.min(30000, 1000 * Math.pow(1.6, this.attempts));

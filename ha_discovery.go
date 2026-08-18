@@ -36,6 +36,19 @@ type haDevice struct {
 	SerialNumber  string   `json:"serial_number,omitempty"`
 	SuggestedArea string   `json:"suggested_area,omitempty"`
 	ConfigURL     string   `json:"configuration_url,omitempty"`
+	// ViaDevice names the parent device's identifier. Home Assistant then nests
+	// this device under that parent ("connected via"). Used for addon child
+	// devices, which reach the broker through UberSDR's MQTT client — so the
+	// gateway relationship via_device describes is literally true here.
+	ViaDevice string `json:"via_device,omitempty"`
+}
+
+// haAvailability is one entry in an entity's multi-source availability list.
+// Home Assistant combines the entries according to availability_mode.
+type haAvailability struct {
+	Topic               string `json:"topic"`
+	PayloadAvailable    string `json:"payload_available,omitempty"`
+	PayloadNotAvailable string `json:"payload_not_available,omitempty"`
 }
 
 // haEntity is a single Home Assistant MQTT Discovery config payload. Fields are
@@ -69,10 +82,19 @@ type haEntity struct {
 	PayloadOn  string `json:"payload_on,omitempty"`
 	PayloadOff string `json:"payload_off,omitempty"`
 
-	// availability
+	// availability — single-topic form. Mutually exclusive with Availability
+	// below: Home Assistant rejects a config that carries both.
 	AvailabilityTopic   string `json:"availability_topic,omitempty"`
 	PayloadAvailable    string `json:"payload_available,omitempty"`
 	PayloadNotAvailable string `json:"payload_not_available,omitempty"`
+
+	// availability — multi-topic form, used by addon entities so they can depend
+	// on BOTH UberSDR's status (the LWT) and their own addon's status. With
+	// AvailabilityMode "all" the entity is available only when every listed
+	// topic says online, which correctly covers "UberSDR down" and "addon down
+	// while UberSDR is up" as separate cases.
+	Availability     []haAvailability `json:"availability,omitempty"`
+	AvailabilityMode string           `json:"availability_mode,omitempty"`
 
 	Device haDevice `json:"device"`
 
@@ -110,6 +132,13 @@ func (mp *MQTTPublisher) onConnectHomeAssistant() {
 
 	if cfg := mp.publisherConfig; cfg != nil {
 		mp.publishHADiscovery(cfg)
+		// Addon-declared entities are republished from the persisted registry.
+		// Their discovery configs are retained, but a broker restart or cleared
+		// session loses them — and the addon that declared them may be down, so
+		// waiting for it to re-declare is not good enough.
+		if reg := mp.addonHARegistry(); reg != nil {
+			reg.RepublishAll()
+		}
 	}
 }
 
@@ -132,12 +161,11 @@ func (mp *MQTTPublisher) publishHADiscovery(appConfig *Config) {
 	}
 
 	entities := mp.buildHAEntities(appConfig)
-	haPrefix := mp.config.HomeAssistantPrefix
 	nodeID := mp.haNodeID(appConfig)
 
 	published := 0
 	for _, e := range entities {
-		topic := fmt.Sprintf("%s/%s/%s/%s/config", haPrefix, e.component, nodeID, e.ObjectID)
+		topic := mp.haConfigTopic(nodeID, e)
 		data, err := json.Marshal(e)
 		if err != nil {
 			log.Printf("MQTT ERROR: Failed to marshal HA discovery entity %s: %v", e.ObjectID, err)
@@ -152,6 +180,13 @@ func (mp *MQTTPublisher) publishHADiscovery(appConfig *Config) {
 		published++
 	}
 	log.Printf("MQTT: Published %d Home Assistant discovery configs (node=%s)", published, nodeID)
+}
+
+// haConfigTopic returns the discovery config topic for an entity. Both the
+// publish path and the addon clear path go through it, so a cleared entity is
+// guaranteed to target the same topic it was published to.
+func (mp *MQTTPublisher) haConfigTopic(nodeID string, e haEntity) string {
+	return fmt.Sprintf("%s/%s/%s/%s/config", mp.config.HomeAssistantPrefix, e.component, nodeID, e.ObjectID)
 }
 
 // haNodeID derives a stable, topic-safe node id for this receiver from its
@@ -178,18 +213,17 @@ func (mp *MQTTPublisher) haSerialNumber() string {
 	return ""
 }
 
-// buildHAEntities returns the full list of discovery entities for the current
-// configuration. Only entities whose subsystem is enabled are included.
-func (mp *MQTTPublisher) buildHAEntities(appConfig *Config) []haEntity {
-	prefix := mp.config.TopicPrefix
-	statusTopic := prefix + "/status"
+// haBuildDevice returns the shared Home Assistant device block describing this
+// receiver. Every built-in entity references it, and addon child devices point
+// at its identifier via via_device.
+func (mp *MQTTPublisher) haBuildDevice(appConfig *Config) haDevice {
 	nodeID := mp.haNodeID(appConfig)
 
 	call := appConfig.Admin.Callsign
 	if call == "" {
 		call = "UberSDR"
 	}
-	device := haDevice{
+	return haDevice{
 		Identifiers:   []string{nodeID},
 		Name:          "UberSDR " + call,
 		Manufacturer:  "UberSDR",
@@ -200,32 +234,52 @@ func (mp *MQTTPublisher) buildHAEntities(appConfig *Config) []haEntity {
 		SuggestedArea: appConfig.Admin.Location, // HA groups the device under this area
 		ConfigURL:     appConfig.Admin.PublicURL,
 	}
+}
+
+// haFinalize fills in the boilerplate shared by every discovery entity:
+// unique_id, object_id, default_entity_id, availability and the device block.
+//
+// unique_id is callsign-scoped so it is globally unique (multiple UberSDR
+// instances into one HA never collide in the registry). default_entity_id —
+// which pins the entity_id — is deliberately callsign-FREE (e.g.
+// "sensor.ubersdr_active_users") so a dashboard can reference entities without
+// hardcoding any callsign or location. The per-instance identity still shows
+// via the device name and the receiver_info attributes.
+// (If two instances share one HA, the second instance's entity_ids get an
+// automatic _2 suffix; unique_ids stay distinct either way.)
+//
+// Addon-declared entities go through this exact function so their identity
+// scheme cannot drift from the built-in one; they differ only in the ObjectID
+// they arrive with (addon-namespaced) and the device block they are given.
+func haFinalize(e haEntity, nodeID, statusTopic string, device haDevice) haEntity {
+	slug := haSlug(e.ObjectID)
+	e.UniqueID = nodeID + "_" + slug
+	e.ObjectID = "ubersdr_" + slug
+	e.DefaultEntityID = e.component + ".ubersdr_" + slug
+	// Only default the single-topic availability when the caller supplied
+	// neither form — an entity carrying the multi-topic list must not also emit
+	// availability_topic, which HA rejects.
+	if !e.skipAvailability && e.AvailabilityTopic == "" && len(e.Availability) == 0 {
+		e.AvailabilityTopic = statusTopic
+		e.PayloadAvailable = "online"
+		e.PayloadNotAvailable = "offline"
+	}
+	e.Device = device
+	return e
+}
+
+// buildHAEntities returns the full list of discovery entities for the current
+// configuration. Only entities whose subsystem is enabled are included.
+func (mp *MQTTPublisher) buildHAEntities(appConfig *Config) []haEntity {
+	prefix := mp.config.TopicPrefix
+	statusTopic := prefix + "/status"
+	nodeID := mp.haNodeID(appConfig)
+	device := mp.haBuildDevice(appConfig)
 
 	var entities []haEntity
 
-	// add appends an entity, filling in the boilerplate shared by every entity:
-	// unique_id, object_id, availability topic and the device block.
-	//
-	// unique_id is callsign-scoped so it is globally unique (multiple UberSDR
-	// instances into one HA never collide in the registry). default_entity_id —
-	// which pins the entity_id — is deliberately callsign-FREE (e.g.
-	// "sensor.ubersdr_active_users") so a dashboard can reference entities
-	// without hardcoding any callsign or location. The per-instance identity
-	// still shows via the device name and the receiver_info attributes.
-	// (If two instances share one HA, the second instance's entity_ids get an
-	// automatic _2 suffix; unique_ids stay distinct either way.)
 	add := func(e haEntity) {
-		slug := haSlug(e.ObjectID)
-		e.UniqueID = nodeID + "_" + slug
-		e.ObjectID = "ubersdr_" + slug
-		e.DefaultEntityID = e.component + ".ubersdr_" + slug
-		if !e.skipAvailability && e.AvailabilityTopic == "" {
-			e.AvailabilityTopic = statusTopic
-			e.PayloadAvailable = "online"
-			e.PayloadNotAvailable = "offline"
-		}
-		e.Device = device
-		entities = append(entities, e)
+		entities = append(entities, haFinalize(e, nodeID, statusTopic, device))
 	}
 
 	// --- Availability / connectivity -------------------------------------

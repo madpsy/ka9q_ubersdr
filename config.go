@@ -399,6 +399,33 @@ type ServerConfig struct {
 	injectResolveNames              []string             // DX inject-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from dxcluster.inject_trusted_hosts)
 	widgetResolveNames              []string             // Widget-admin-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from admin.widget_trusted_hosts)
 	whisperResolveNames             []string             // Whisper-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from whisper.trusted_containers)
+	addonResolveFn                  func() []string      // Returns the CURRENT addon container hostnames (internal use, set from the live addons.yaml); nil when addon ingest is off
+	addonResolveMu                  sync.RWMutex         // Protects addonResolveFn
+}
+
+// SetAddonContainerResolver installs a callback returning the container
+// hostnames of the currently-enabled addons. The DNS refresh loop calls it on
+// every pass, so addons added or removed at runtime through the admin API are
+// picked up within one refresh interval without any restart or extra wiring.
+//
+// The resolved IPs are added to containerNameByIP for IsContainerIP matching
+// only — addon containers are never added to the trusted-proxy set, so they
+// cannot spoof X-Real-IP.
+func (sc *ServerConfig) SetAddonContainerResolver(fn func() []string) {
+	sc.addonResolveMu.Lock()
+	sc.addonResolveFn = fn
+	sc.addonResolveMu.Unlock()
+}
+
+// addonContainerNames returns the current addon container hostnames, or nil.
+func (sc *ServerConfig) addonContainerNames() []string {
+	sc.addonResolveMu.RLock()
+	fn := sc.addonResolveFn
+	sc.addonResolveMu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn()
 }
 
 // AudioConfig contains audio processing settings
@@ -688,6 +715,120 @@ type MQTTConfig struct {
 	HomeAssistant           bool          `yaml:"homeassistant_discovery"`   // Publish Home Assistant MQTT Discovery config messages so entities auto-appear in HA
 	HomeAssistantPrefix     string        `yaml:"homeassistant_prefix"`      // Home Assistant discovery topic prefix (default: "homeassistant")
 	TLS                     MQTTTLSConfig `yaml:"tls"`                       // TLS/SSL settings
+
+	// AddonIngest lets addon containers on the sdr-network push their own events
+	// through UberSDR's MQTT connection. Zero-config: enabled by default, and the
+	// set of permitted containers is derived from the enabled entries in
+	// addons.yaml, so installing an addon is all an operator has to do.
+	AddonIngest MQTTAddonIngestConfig `yaml:"addon_ingest"`
+}
+
+// MQTTAddonIngestConfig configures the addon → MQTT ingest listener.
+//
+// The listener binds a port that is deliberately NOT published in
+// docker-compose.yml, so it is reachable only from the sdr-network (and the
+// Docker host). Every request is additionally authenticated by matching the raw
+// TCP source IP against the addon container names from addons.yaml, exactly as
+// dxcluster_inject.go does — an addon's identity comes from the socket, never
+// from the request body.
+//
+// Addons never supply a topic. They supply a sub-topic tail which the server
+// validates and then places under {topic_prefix}/{topic_namespace}/{addon}/,
+// so one addon can neither overwrite UberSDR's own topics nor another addon's.
+type MQTTAddonIngestConfig struct {
+	// Enabled turns the ingest listener on. Defaults to TRUE when MQTT itself is
+	// enabled — set explicitly to false to turn it off. Pointer so that "absent"
+	// is distinguishable from "false".
+	Enabled *bool `yaml:"enabled"`
+
+	// Port is the TCP port the ingest listener binds. Must NOT be added to the
+	// docker-compose ports: list. Default: 6926.
+	Port int `yaml:"port"`
+
+	// TopicNamespace is the segment inserted between the topic prefix and the
+	// addon name. Default: "addons".
+	TopicNamespace string `yaml:"topic_namespace"`
+
+	// AllowedContainers optionally restricts ingest to specific container
+	// hostnames. Empty (the default) means "every enabled addon in addons.yaml",
+	// which is what makes this zero-config.
+	AllowedContainers []string `yaml:"allowed_containers"`
+
+	// MaxPayloadBytes caps a single published payload. Default: 65536.
+	MaxPayloadBytes int `yaml:"max_payload_bytes"`
+
+	// RateLimit is the maximum publishes per minute per addon. Default: 120.
+	RateLimit int `yaml:"rate_limit"`
+
+	// MaxQoS clamps the QoS an addon may request. Default: 1.
+	MaxQoS int `yaml:"max_qos"`
+
+	// AllowRetain permits addons to publish retained messages. Default: true.
+	AllowRetain *bool `yaml:"allow_retain"`
+
+	// OfflineAfterSec is how long an addon may go without publishing before its
+	// per-addon status topic flips to "offline" (which marks its Home Assistant
+	// entities unavailable). Default: 300.
+	OfflineAfterSec int `yaml:"offline_after_sec"`
+
+	// MaxEntities caps how many Home Assistant entities a single addon may
+	// declare. Default: 20.
+	MaxEntities int `yaml:"max_entities"`
+
+	// HomeAssistant controls whether addons may declare Home Assistant entities.
+	// Defaults to whatever mqtt.homeassistant_discovery is set to, so an operator
+	// who has already opted into HA discovery gets addon entities with no extra
+	// configuration. Set explicitly to false to allow data ingest but no
+	// discovery.
+	HomeAssistant *bool `yaml:"homeassistant_discovery"`
+}
+
+// IsEnabled reports whether the ingest listener should run.
+func (c *MQTTAddonIngestConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
+}
+
+// IsRetainAllowed reports whether addons may set the retain flag.
+func (c *MQTTAddonIngestConfig) IsRetainAllowed() bool {
+	return c.AllowRetain == nil || *c.AllowRetain
+}
+
+// IsHomeAssistantEnabled reports whether addons may declare HA entities.
+// haDiscovery is the value of mqtt.homeassistant_discovery, which this setting
+// inherits when not explicitly configured.
+func (c *MQTTAddonIngestConfig) IsHomeAssistantEnabled(haDiscovery bool) bool {
+	if c.HomeAssistant == nil {
+		return haDiscovery
+	}
+	return *c.HomeAssistant && haDiscovery
+}
+
+// applyDefaults fills in unset addon-ingest fields.
+func (c *MQTTAddonIngestConfig) applyDefaults() {
+	if c.Port == 0 {
+		c.Port = 6926
+	}
+	if c.TopicNamespace == "" {
+		c.TopicNamespace = "addons"
+	}
+	if c.MaxPayloadBytes == 0 {
+		c.MaxPayloadBytes = 65536
+	}
+	if c.RateLimit == 0 {
+		c.RateLimit = 120
+	}
+	if c.MaxQoS == 0 {
+		c.MaxQoS = 1
+	}
+	if c.MaxQoS < 0 || c.MaxQoS > 2 {
+		c.MaxQoS = 1
+	}
+	if c.OfflineAfterSec == 0 {
+		c.OfflineAfterSec = 300
+	}
+	if c.MaxEntities == 0 {
+		c.MaxEntities = 20
+	}
 }
 
 // MQTTTLSConfig contains MQTT TLS/SSL settings
@@ -1428,6 +1569,7 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.MQTT.HomeAssistantPrefix == "" {
 		config.MQTT.HomeAssistantPrefix = "homeassistant"
 	}
+	config.MQTT.AddonIngest.applyDefaults()
 
 	// Set instance reporting defaults if not specified
 	if config.InstanceReporting.Hostname == "" {
@@ -1908,6 +2050,23 @@ func (sc *ServerConfig) resolveContainerIPs() {
 	// attaches can set recognition parameters and bypass max_users, but NOT
 	// trusted as proxies.
 	for _, n := range sc.whisperResolveNames {
+		if n == "" {
+			continue
+		}
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+			lookupOnlySet[n] = true
+		}
+	}
+
+	// Merge in addon container names (from the live addons.yaml, via the
+	// resolver callback). Unlike the lists above this one is re-read on every
+	// pass, so addons installed or removed at runtime start or stop being
+	// recognised by the MQTT ingest listener within one refresh interval.
+	// Same semantics again: resolved for IsContainerIP matching, never trusted
+	// as a proxy.
+	for _, n := range sc.addonContainerNames() {
 		if n == "" {
 			continue
 		}

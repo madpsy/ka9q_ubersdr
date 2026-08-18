@@ -140,9 +140,12 @@ RUN chmod +x /entrypoint.sh
 # 8080 - Web interface (as configured in config.yaml)
 # 8073 - KiwiSDR protocol compatibility (if enabled in config)
 # 8901 - WebSDR protocol compatibility (if enabled in config)
+# 6926 - Addon → MQTT ingest (sdr-network only — deliberately NOT published in
+#        docker-compose.yml; addons reach it as http://ubersdr:6926)
 EXPOSE 8080/tcp
 EXPOSE 8073/tcp
 EXPOSE 8901/tcp
+EXPOSE 6926/tcp
 
 # Environment variables
 ENV TZ=UTC

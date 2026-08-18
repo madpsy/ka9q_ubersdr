@@ -1215,6 +1215,75 @@ mqtt:
   # "discovery prefix" setting (default: "homeassistant").
   homeassistant_prefix: "homeassistant"
 
+  # ---------------------------------------------------------------------------
+  # Addon → MQTT ingest
+  # ---------------------------------------------------------------------------
+  # Lets addon containers (see addons.yaml) publish their own events through
+  # UberSDR's MQTT connection, and declare their own Home Assistant entities,
+  # without having MQTT credentials of their own.
+  #
+  # NOTHING NEEDS CONFIGURING HERE. When MQTT is enabled this runs automatically,
+  # and every enabled addon in addons.yaml is permitted — installing an addon is
+  # all you have to do. The settings below exist only for tightening it.
+  #
+  # How it is kept safe:
+  #   * The listener binds a port that is NOT published in docker-compose.yml,
+  #     so it is only reachable from the sdr-network. Do not add it to "ports:".
+  #   * Every request is authenticated by matching the raw TCP source address
+  #     against the addon container names from addons.yaml, so an addon's
+  #     identity cannot be forged in a header or request body.
+  #   * Addons never supply a topic. They supply a sub-topic tail, which is
+  #     placed under {topic_prefix}/{topic_namespace}/{addon}/. One addon cannot
+  #     write to another addon's topics, to UberSDR's own topics, or to the Home
+  #     Assistant discovery tree.
+  #
+  # Addons publish with:
+  #   POST http://ubersdr:6926/publish/{sub_topic}   body = JSON payload
+  #   POST http://ubersdr:6926/discovery             body = HA entity declaration
+  #   GET  http://ubersdr:6926/health                (what UberSDR thinks you are)
+  addon_ingest:
+    # Master switch. Defaults to true when MQTT is enabled.
+    enabled: true
+
+    # Listener port. Must NOT appear in the docker-compose "ports:" list.
+    port: 6926
+
+    # Topic segment inserted between topic_prefix and the addon name, i.e.
+    # {topic_prefix}/{topic_namespace}/{addon}/{sub_topic}
+    topic_namespace: "addons"
+
+    # Optional allowlist of container hostnames. Empty (the default) means
+    # "every enabled addon in addons.yaml", which is what makes this zero-config.
+    allowed_containers: []
+
+    # Maximum size of a single published payload, in bytes.
+    max_payload_bytes: 65536
+
+    # Maximum publishes per minute, per addon.
+    rate_limit: 120
+
+    # Highest QoS an addon may request (requests above this are clamped).
+    max_qos: 1
+
+    # Whether addons may publish retained messages.
+    allow_retain: true
+
+    # How long an addon may go without publishing before UberSDR marks it
+    # offline on {topic_prefix}/{topic_namespace}/{addon}/status. Its Home
+    # Assistant entities then show as unavailable rather than showing a stale
+    # value as if it were live.
+    offline_after_sec: 300
+
+    # Maximum Home Assistant entities a single addon may declare.
+    max_entities: 20
+
+    # Whether addons may declare Home Assistant entities. Defaults to whatever
+    # homeassistant_discovery above is set to, so no extra opt-in is needed.
+    # Each addon appears as its own HA device, linked to the receiver, with a
+    # link straight through to the addon's own web UI. Set false to allow data
+    # publishing but no Home Assistant entities.
+    # homeassistant_discovery: true
+
   # TLS/SSL settings for secure connections
   tls:
     enabled: false

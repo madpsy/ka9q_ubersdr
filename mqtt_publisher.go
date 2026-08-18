@@ -43,6 +43,13 @@ type MQTTPublisher struct {
 	publisherCtx    context.Context
 	publisherConfig *Config
 
+	// Addon MQTT ingest (see mqtt_addon_ingest.go / mqtt_addon_ha.go). Attached
+	// after startup, and read from the MQTT connect handler's goroutine, so both
+	// are guarded by addonMu.
+	addonMu     sync.RWMutex
+	addonHA     *AddonHARegistry
+	addonIngest *AddonIngestServer
+
 	// Health tracking
 	mu              sync.RWMutex
 	connected       bool // authoritative connection state, set by handlers
@@ -2077,6 +2084,111 @@ func (mp *MQTTPublisher) PublishRBNStats(rec rbnStatsRecord) {
 	}()
 }
 
+// ── Addon ingest ──────────────────────────────────────────────────────────────
+//
+// See mqtt_addon_ingest.go for the listener that calls these, and
+// mqtt_addon_ha.go for the Home Assistant side. The topic is always built by
+// AddonDataTopic from an addon name the ingest listener authenticated from the
+// TCP source address — nothing here accepts a caller-supplied topic.
+
+// SetAddonHARegistry attaches the persisted addon Home Assistant entity
+// registry so its declarations are republished on every MQTT reconnect.
+func (mp *MQTTPublisher) SetAddonHARegistry(r *AddonHARegistry) {
+	mp.addonMu.Lock()
+	mp.addonHA = r
+	mp.addonMu.Unlock()
+}
+
+// addonHARegistry returns the attached registry, or nil.
+func (mp *MQTTPublisher) addonHARegistry() *AddonHARegistry {
+	mp.addonMu.RLock()
+	defer mp.addonMu.RUnlock()
+	return mp.addonHA
+}
+
+// SetAddonIngest attaches the ingest listener so its activity appears in the
+// MQTT health status.
+func (mp *MQTTPublisher) SetAddonIngest(s *AddonIngestServer) {
+	mp.addonMu.Lock()
+	mp.addonIngest = s
+	mp.addonMu.Unlock()
+}
+
+// addonIngestServer returns the attached ingest listener, or nil.
+func (mp *MQTTPublisher) addonIngestServer() *AddonIngestServer {
+	mp.addonMu.RLock()
+	defer mp.addonMu.RUnlock()
+	return mp.addonIngest
+}
+
+// addonPublishTimeout bounds a single addon publish. The ingest listener calls
+// this from an HTTP handler, so it must never block on a stalled broker.
+const addonPublishTimeout = 5 * time.Second
+
+// PublishAddonEvent publishes an addon's payload under the addon's own
+// namespace. addon must already have been authenticated by the caller, and
+// subTopic must already have passed validateAddonSubTopic.
+func (mp *MQTTPublisher) PublishAddonEvent(addon, subTopic string, payload []byte, qos byte, retain bool) error {
+	if mp == nil || mp.client == nil {
+		return fmt.Errorf("MQTT is not configured on this receiver")
+	}
+	if !mp.isConnected() {
+		return fmt.Errorf("not connected to the MQTT broker")
+	}
+
+	topic := mp.config.AddonDataTopic(addon, subTopic)
+	token := mp.client.Publish(topic, qos, retain, payload)
+	if !token.WaitTimeout(addonPublishTimeout) {
+		return fmt.Errorf("timed out publishing to the broker")
+	}
+	if err := token.Error(); err != nil {
+		mp.logPublishError("MQTT ERROR: Failed to publish addon event to %s: %v", topic, err)
+		return err
+	}
+
+	mp.mu.Lock()
+	mp.messagesSent++
+	mp.lastMessageTime = time.Now()
+	mp.mu.Unlock()
+	return nil
+}
+
+// publishRetainedString publishes a short retained string (used for the
+// per-addon availability topic).
+func (mp *MQTTPublisher) publishRetainedString(topic, payload string) {
+	if mp == nil || mp.client == nil || !mp.isConnected() {
+		return
+	}
+	token := mp.client.Publish(topic, 1, true, payload)
+	if token.WaitTimeout(addonPublishTimeout) && token.Error() != nil {
+		mp.logPublishError("MQTT ERROR: Failed to publish to %s: %v", topic, token.Error())
+	}
+}
+
+// clearRetained removes a retained message by publishing an empty payload,
+// which is how a retained topic is deleted from a broker. Used to tear down
+// Home Assistant discovery configs and data topics belonging to addons that
+// have been removed — without it they would persist on the broker forever.
+//
+// Returns false if the message could not be delivered (typically because the
+// broker is unreachable). Callers that are tearing something down must not
+// forget about it on a false return, or the retained topic is orphaned with
+// nothing left to clean it up.
+func (mp *MQTTPublisher) clearRetained(topic string) bool {
+	if mp == nil || mp.client == nil || !mp.isConnected() {
+		return false
+	}
+	token := mp.client.Publish(topic, 1, true, []byte{})
+	if !token.WaitTimeout(addonPublishTimeout) {
+		return false
+	}
+	if err := token.Error(); err != nil {
+		mp.logPublishError("MQTT ERROR: Failed to clear retained topic %s: %v", topic, err)
+		return false
+	}
+	return true
+}
+
 // Disconnect gracefully disconnects from the MQTT broker
 func (mp *MQTTPublisher) Disconnect() {
 	if mp.client != nil && mp.client.IsConnected() {
@@ -2087,6 +2199,13 @@ func (mp *MQTTPublisher) Disconnect() {
 
 // GetHealthStatus returns the current MQTT connection health status
 func (mp *MQTTPublisher) GetHealthStatus() map[string]interface{} {
+	// Read the addon ingest snapshot before taking mp.mu: the ingest server has
+	// its own lock and must not be called with mp.mu held.
+	var addonIngest map[string]interface{}
+	if s := mp.addonIngestServer(); s != nil {
+		addonIngest = s.GetStats()
+	}
+
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
@@ -2138,6 +2257,11 @@ func (mp *MQTTPublisher) GetHealthStatus() map[string]interface{} {
 		status["last_message_time"] = mp.lastMessageTime.Format(time.RFC3339)
 		timeSinceMessage := time.Since(mp.lastMessageTime)
 		status["seconds_since_message"] = int(timeSinceMessage.Seconds())
+	}
+
+	// Addon ingest activity (absent when the ingest listener is disabled)
+	if addonIngest != nil {
+		status["addon_ingest"] = addonIngest
 	}
 
 	return status

@@ -390,6 +390,7 @@ type AdminHandler struct {
 	addonsConfigPath    string                     // path to addons.yaml for read/write
 	addonsMu            sync.RWMutex               // protects addonsConfig during live edits
 	addonRouter         *AddonProxyRouter          // live dynamic router for /addon/ routes
+	addonHARegistry     *AddonHARegistry           // addon-declared Home Assistant entities (may be nil)
 	rbnStore            *RBNDataStore              // RBN skew and statistics data store
 	rbnFetcher          *RBNDataFetcher            // RBN fetcher (for manual refresh)
 	wsprRank            *WSPRRankFetcher           // WSPR Live receiver ranking fetcher

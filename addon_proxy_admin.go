@@ -342,6 +342,14 @@ func (ah *AdminHandler) handleUpdateAddonProxy(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// Tear down any Home Assistant entities that are now orphaned: the addon was
+	// disabled, or it was renamed and its entities live under the old name.
+	// Retained discovery configs outlive the addon otherwise, leaving a ghost
+	// device in Home Assistant forever.
+	if !updated.Enabled || updated.Name != name {
+		go ah.purgeAddonHAEntities(name)
+	}
+
 	log.Printf("Admin: updated addon proxy %q (enabled=%v, require_admin=%v)", updated.Name, updated.Enabled, updated.RequireAdmin)
 
 	w.WriteHeader(http.StatusOK)
@@ -392,6 +400,11 @@ func (ah *AdminHandler) handleDeleteAddonProxy(w http.ResponseWriter, r *http.Re
 		ah.addonRouter.Deregister(name)
 	}
 
+	// Clear the Home Assistant entities and retained topics the addon left
+	// behind, so it disappears from Home Assistant rather than lingering as an
+	// unavailable ghost device.
+	go ah.purgeAddonHAEntities(name)
+
 	log.Printf("Admin: deleted addon proxy %q", name)
 
 	w.WriteHeader(http.StatusOK)
@@ -399,6 +412,43 @@ func (ah *AdminHandler) handleDeleteAddonProxy(w http.ResponseWriter, r *http.Re
 		"status":  "success",
 		"message": fmt.Sprintf("Addon proxy %q deleted and removed immediately.", name),
 	})
+}
+
+// EnabledAddonEntries returns a snapshot of the currently-enabled addon proxy
+// entries. The MQTT ingest listener calls this on every request to decide which
+// container hostnames may publish, so an addon installed or removed through the
+// admin API takes effect immediately with no restart and no extra configuration.
+func (ah *AdminHandler) EnabledAddonEntries() []AddonProxyEntry {
+	ah.addonsMu.RLock()
+	defer ah.addonsMu.RUnlock()
+
+	if ah.addonsConfig == nil {
+		return nil
+	}
+	out := make([]AddonProxyEntry, 0, len(ah.addonsConfig.Proxies))
+	for _, e := range ah.addonsConfig.Proxies {
+		if e.Enabled {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// SetAddonHARegistry attaches the addon Home Assistant entity registry so that
+// removing or disabling an addon also tears down the entities it declared.
+func (ah *AdminHandler) SetAddonHARegistry(r *AddonHARegistry) {
+	ah.addonHARegistry = r
+}
+
+// purgeAddonHAEntities clears the Home Assistant entities an addon declared.
+//
+// Always call this in a goroutine from the addon admin handlers: they hold
+// addonsMu for the whole request, and purging performs retained-message
+// publishes to the broker, which must not run under that lock.
+func (ah *AdminHandler) purgeAddonHAEntities(name string) {
+	if ah.addonHARegistry != nil {
+		ah.addonHARegistry.PurgeAddon(name)
+	}
 }
 
 // saveAddonsConfig serialises ah.addonsConfig to addons.yaml (with timestamped backup).

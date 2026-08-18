@@ -40,6 +40,12 @@ Once configured, UberSDR appears in Home Assistant as one device,
 Everything is auto-populated per instance. The included dashboard uses generic,
 callsign-independent entity IDs, so it works as-is on any receiver.
 
+**Addons appear too.** Any installed addon that supports it can publish its own
+data and declare its own entities, which show up as a separate device linked to
+the receiver — with a link straight through to the addon's web UI. This needs no
+configuration beyond the `homeassistant_discovery` setting below: installing the
+addon is enough. Addon authors should read [addon_mqtt.md](addon_mqtt.md).
+
 ---
 
 ## Prerequisites

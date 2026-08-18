@@ -2627,6 +2627,72 @@ func main() {
 		addonRouter.Register(ap)
 	}
 
+	// ── Addon → MQTT ingest ───────────────────────────────────────────────────
+	// Lets addon containers publish their own events (and declare Home Assistant
+	// entities) through UberSDR's MQTT connection. See mqtt_addon_ingest.go.
+	//
+	// Deliberately zero-configuration: it runs whenever MQTT is enabled, and the
+	// set of permitted containers is derived from the enabled entries in
+	// addons.yaml, so installing an addon is all an operator has to do. The
+	// listener's port is NOT published in docker-compose.yml, so it is reachable
+	// only from the sdr-network, and every request is additionally authenticated
+	// against the addon container names.
+	if mqttPublisher != nil && config.MQTT.AddonIngest.IsEnabled() {
+		ingestCfg := &config.MQTT.AddonIngest
+
+		// Resolve addon container names for IsContainerIP matching. The callback
+		// is re-read by the DNS refresh loop every few seconds, so addons added
+		// or removed at runtime are picked up without a restart.
+		config.Server.SetAddonContainerResolver(func() []string {
+			entries := adminHandler.EnabledAddonEntries()
+			hosts := make([]string, 0, len(entries))
+			for _, e := range entries {
+				if e.Host != "" {
+					hosts = append(hosts, e.Host)
+				}
+			}
+			return hosts
+		})
+
+		// Resolve them now rather than waiting for the next refresh tick, so
+		// addons that publish immediately after startup are not rejected for the
+		// first few seconds. Off the startup path because each unresolvable name
+		// costs a DNS timeout.
+		go config.Server.resolveContainerIPs()
+
+		addonHAEnabled := ingestCfg.IsHomeAssistantEnabled(config.MQTT.HomeAssistant)
+
+		var addonHAReg *AddonHARegistry
+		if addonHAEnabled {
+			registryPath := "addon_ha_entities.yaml"
+			if *configDir != "." {
+				registryPath = *configDir + "/addon_ha_entities.yaml"
+			}
+			addonHAReg = NewAddonHARegistry(registryPath, mqttPublisher, config, ingestCfg.MaxEntities)
+			mqttPublisher.SetAddonHARegistry(addonHAReg)
+			adminHandler.SetAddonHARegistry(addonHAReg)
+
+			// Clear entities belonging to addons that are no longer installed —
+			// including ones removed by hand, or while UberSDR was not running.
+			// Discovery configs are retained, so without this they would haunt
+			// Home Assistant indefinitely.
+			known := make(map[string]bool)
+			for _, e := range adminHandler.EnabledAddonEntries() {
+				known[e.Name] = true
+			}
+			addonHAReg.Reconcile(known)
+		}
+
+		addonIngest := NewAddonIngestServer(ingestCfg, mqttPublisher, &config.Server,
+			addonHAReg, addonHAEnabled, adminHandler.EnabledAddonEntries)
+		if err := addonIngest.Start(); err != nil {
+			log.Printf("Warning: %v", err)
+		} else {
+			mqttPublisher.SetAddonIngest(addonIngest)
+			defer addonIngest.Stop()
+		}
+	}
+
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
 		handleConnectionCheck(w, r, sessions, ipBanManager, connectionEndpointRateLimiter)

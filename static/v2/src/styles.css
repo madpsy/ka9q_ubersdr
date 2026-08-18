@@ -4234,6 +4234,10 @@ a.btn { text-decoration: none; }
 .log__text { overflow-wrap: anywhere; }
 .log__row--error .log__text { color: var(--bad); }
 .log__row--warn .log__text { color: var(--warn); }
+/* How many times a line repeated in quick succession — see eventLog's REPEAT_MS.
+   Pushed to the end of the row so the counts line up down the right edge and a
+   run of retries reads as one column rather than as noise in the text. */
+.log__count { color: var(--text-faint); flex: none; margin-left: auto; padding-left: 8px; }
 .log__more { color: var(--text-faint); padding-top: 4px; }
 
 /* =========================================================================

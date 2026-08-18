@@ -36,6 +36,8 @@ esbuild ../src/lib/connectFailure.js --bundle --format=cjs --platform=node \
     --outfile=.build/connectfailure.cjs --log-level=warning
 esbuild ../src/radio/session.js --bundle --format=cjs --platform=node \
     --outfile=.build/sessionid.cjs --log-level=warning
+esbuild ../src/lib/eventLog.js --bundle --format=cjs --platform=node \
+    --outfile=.build/eventlog.cjs --log-level=warning
 esbuild ../src/lib/lightning.js --bundle --format=cjs --platform=node \
     --outfile=.build/lightning.cjs --log-level=warning
 esbuild lightningstream.entry.js --bundle --format=cjs --platform=node \
@@ -383,6 +385,7 @@ node format.test.js
 node clientnoise.test.js
 node rmnoise.test.js
 node noisegraph.test.js
+node eventlog.test.js
 node sessionid.test.js
 node connectfailure.test.js
 node reconnect.test.js

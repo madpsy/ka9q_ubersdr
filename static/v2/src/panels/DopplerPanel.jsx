@@ -16,6 +16,7 @@
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Empty, Icon } from '../components/ui.jsx';
 import { retryDelay } from '../lib/backoff.js';
+import { logEvent } from '../lib/eventLog.js';
 import {
     SPECTRUM_INTERVAL_S, STATIONS_POLL_MS, addonUrl, applyReading, baselineShift,
     clientToken, dopplerAvailable, dopplerSummary, formatShift, isLive, normaliseStation,
@@ -108,10 +109,19 @@ export default function DopplerPanel({ minimal }) {
             }).catch(() => {});
         };
 
+        // Reported once per attempt, not per reading — see the band spectrum
+        // panel, which does the same for the same reason.
+        let logged = false;
+        const up = () => {
+            if (logged) return;
+            logged = true;
+            logEvent('info', 'Doppler stream connected');
+        };
+
         const open = () => {
             es = new EventSource(streamUrl(token.current));
 
-            es.addEventListener('open', () => { setLive(true); slowSpectrum(); });
+            es.addEventListener('open', () => { up(); setLive(true); slowSpectrum(); });
             // Unnamed messages are the readings. The spectrum frames are named and are
             // deliberately not listened for.
             es.addEventListener('message', (e) => {
@@ -131,6 +141,8 @@ export default function DopplerPanel({ minimal }) {
                 if (stopped || retry) return;
                 const wait = retryDelay(attempts);
                 attempts++;
+                logEvent('warn', `Doppler stream lost — retrying in ${Math.round(wait / 1000)}s (attempt ${attempts})`);
+                logged = false;
                 retry = setTimeout(() => { retry = null; if (!stopped) open(); }, wait);
             });
         };

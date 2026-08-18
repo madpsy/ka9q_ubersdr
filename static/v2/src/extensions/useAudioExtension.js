@@ -38,6 +38,7 @@
 
 import { useEffect, useRef, useState } from '../react.js';
 import { dxcluster } from '../radio/dxcluster-connection.js';
+import { logEvent } from '../lib/eventLog.js';
 import {
     attachMessage, decodeResult, detachMessage, extensionEvent, isTransientAttachError,
 } from './protocol.js';
@@ -102,18 +103,27 @@ export function useAudioExtension({ name, params, active, onResult, onEvent, par
                 retries = 0;
                 setState('running');
                 setError(null);
+                // Every decoder on the page comes through here — SSTV, FT8,
+                // FSK, NAVTEX, morse, WEFAX, whisper — so this one line is the
+                // whole extension layer's presence in the log. Worth having:
+                // a decoder that never attaches looks exactly like a band with
+                // nothing on it.
+                logEvent('good', `${name} decoder started`);
             } else if (ev.kind === 'error') {
                 if (isTransientAttachError(ev.error) && retries < MAX_RETRIES) {
                     retries += 1;
                     setState('attaching');
+                    logEvent('warn', `${name} decoder retrying (${retries}/${MAX_RETRIES}): ${ev.error}`);
                     clearTimeout(retryTimer);
                     retryTimer = setTimeout(sendAttach, RETRY_MS);
                 } else {
                     setState('error');
                     setError(ev.error);
+                    logEvent('error', `${name} decoder failed: ${ev.error}`);
                 }
             } else if (ev.kind === 'detached') {
                 setState('idle');
+                logEvent('info', `${name} decoder stopped`);
             }
             if (eventRef.current) eventRef.current(ev);
         });

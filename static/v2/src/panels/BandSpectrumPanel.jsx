@@ -43,6 +43,7 @@ import {
     zoomHz,
 } from '../lib/bandSpectrum.js';
 import { retryDelay } from '../lib/backoff.js';
+import { logEvent } from '../lib/eventLog.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
 import { haptic } from '../lib/haptics.js';
 import { getVfos, onVfosChanged } from '../lib/vfos.js';
@@ -406,6 +407,11 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         let attempts = 0;
         let stopped = false;
         let seen = false;
+        // Whether this *attempt* has been reported as connected. Separate from
+        // `seen`, which says whether the stream has ever produced — the rate
+        // readout below leans on that to report a stall as 0 rather than as
+        // nothing, so it must survive a reconnect.
+        let logged = false;
 
         const open = () => {
             es = new EventSource(streamUrl(band));
@@ -419,6 +425,10 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
                 // accepts the connection and drops it immediately — a proxy with
                 // nothing behind it — would reset the delay on every attempt and
                 // turn this back into a fixed-rate retry.
+                // First frame after a (re)connect is the only one worth a line:
+                // this stream runs for as long as the panel is open, so logging
+                // every frame would be logging the whole session.
+                if (!logged) { logged = true; logEvent('info', `Band spectrum connected (${band})`); }
                 attempts = 0;
                 const frame = decodeFrame(e.data);
                 if (!frame) return;
@@ -441,6 +451,8 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
                 if (stopped || retry) return;
                 const wait = retryDelay(attempts);
                 attempts++;
+                logEvent('warn', `Band spectrum (${band}) lost — retrying in ${Math.round(wait / 1000)}s (attempt ${attempts})`);
+                logged = false;
                 retry = setTimeout(() => { retry = null; if (!stopped) open(); }, wait);
             });
         };

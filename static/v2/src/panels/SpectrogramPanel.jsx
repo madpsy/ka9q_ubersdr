@@ -29,6 +29,7 @@ import {
 } from '../lib/spectrogram.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
 import { feedInterval } from '../lib/serverFeeds.js';
+import { logEvent } from '../lib/eventLog.js';
 
 export { spectrogramEnabled };
 
@@ -59,7 +60,7 @@ export default function SpectrogramPanel({ minimal }) {
                 setBands(Array.isArray(info.bands) ? info.bands : []);
                 setRanges(info.band_ranges || null);
             })
-            .catch(() => { /* the image request will report the trouble */ });
+            .catch(() => logEvent('warn', 'Spectrogram list unavailable'));
     }, []);
 
     const range = bandLabel(band, ranges);
@@ -98,8 +99,16 @@ export default function SpectrogramPanel({ minimal }) {
                             className="sgram__img"
                             src={thumb}
                             alt={`Rolling 24-hour spectrogram, ${band}`}
-                            onError={() => setFailed(true)}
-                            onLoad={() => setFailed(false)}
+                            onError={() => {
+                                // Only the transition, so a panel that re-renders
+                                // while broken does not log once per render.
+                                if (!failed) logEvent('warn', `Spectrogram image failed to load (${band || 'HF'})`);
+                                setFailed(true);
+                            }}
+                            onLoad={() => {
+                                if (failed) logEvent('good', `Spectrogram image recovered (${band || 'HF'})`);
+                                setFailed(false);
+                            }}
                         />
                     )}
             </button>
@@ -168,7 +177,7 @@ function SpectrogramModal({ band, range, minute, tzOffset, onClose }) {
         fetch(metaUrl(band))
             .then((r) => (r.ok ? r.json() : Promise.reject(new Error('meta'))))
             .then((m) => { if (aliveRef.current) setMeta(m); })
-            .catch(() => { /* the picture is still worth showing without scales */ });
+            .catch(() => logEvent('warn', 'Spectrogram scales unavailable — the picture is still shown'));
     }, [band]);
 
     // The modal is sized off the viewport, so this settles once on open and

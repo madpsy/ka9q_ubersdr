@@ -37,6 +37,7 @@ import { readShareUrl, takeUrlView } from '../lib/share.js';
 import { shouldWake } from '../lib/wake.js';
 import { setFeedsAllowed } from '../lib/serverFeeds.js';
 import { failureMessage } from '../lib/connectFailure.js';
+import { clearEventLog, logEvent } from '../lib/eventLog.js';
 import {
     CHECK_MS as SAM_CHECK_MS, createWatch as createSamWatch, notePower as noteSamPower,
     resetWatch as resetSamWatch, shouldFallBack as samShouldFallBack,
@@ -115,7 +116,6 @@ export function RadioProvider({ children }) {
     // next start, so it describes the reason there is nothing running now
     // rather than accumulating a history.
     const [lost, setLost] = useState(null);
-    const [log, setLog] = useState([]);
     const [audio, setAudio] = useState({
         volume: saved.volume != null ? saved.volume : 0.7,
         muted: !!saved.muted,
@@ -218,12 +218,18 @@ export function RadioProvider({ children }) {
     }
     const { audio: audioConn, spectrum: spectrumConn, player } = conn.current;
 
-    const pushLog = useRef((level, text) => {
-        setLog((prev) => {
-            const next = prev.concat({ id: Date.now() + Math.random(), at: new Date(), level, text });
-            return next.length > 200 ? next.slice(-200) : next;
-        });
-    }).current;
+    // The log lives in lib/eventLog.js now, not in this state.
+    //
+    // It had to: everything else on the page that opens a connection — the
+    // three EventSource feeds, the audio extensions, the spectrogram loader —
+    // is outside this provider and could not reach `setLog`, so the panel only
+    // ever showed the two sockets this file happens to own. It also means a
+    // burst of reconnect lines no longer re-renders every consumer of
+    // useRadio(); the panel subscribes to the store by itself.
+    //
+    // Kept as a local name because this file calls it a dozen times, and still
+    // published as actions.log for anything holding the context.
+    const pushLog = logEvent;
 
     // Keep the latest tuning available to callbacks without re-subscribing.
     const tuningRef = useRef(tuning);
@@ -1254,7 +1260,7 @@ export function RadioProvider({ children }) {
 
             centerOnTuned() { spectrumConn.setView(tuningRef.current.frequency, null); },
 
-            clearLog() { setLog([]); },
+            clearLog() { clearEventLog(); },
             log: pushLog,
         };
     }, []);
@@ -1290,7 +1296,7 @@ export function RadioProvider({ children }) {
     }), [squelchValue]);
 
     const value = useMemo(() => ({
-        tuning, audioState, spectrumState, view, running, serverInfo, log, session, lost,
+        tuning, audioState, spectrumState, view, running, serverInfo, session, lost,
         audio, squelch, agc, dsp, followTuning, filters, noise,
         // `bookmarks` and `local` are what *propagates* — the marker bar, the
         // ⏮/⏭ neighbours, the lock screen, the Markers panel — so a hidden
@@ -1307,7 +1313,7 @@ export function RadioProvider({ children }) {
         },
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, log, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, catalog, localMarks, hidden, actions]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, catalog, localMarks, hidden, actions]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

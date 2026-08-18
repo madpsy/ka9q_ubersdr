@@ -16,6 +16,7 @@
 // stays that way. This is the connection and the list; that is the vocabulary.
 
 import { retryDelay } from './backoff.js';
+import { logEvent } from './eventLog.js';
 import {
     addStrike, normaliseStrike, shortClock, snrBand, strikesUrl, streamUrl, trimStrikes,
 } from './lightning.js';
@@ -194,13 +195,21 @@ function backfill() {
         });
 }
 
+// Whether the current attempt has been reported to the log. One line per
+// connect and one per drop, rather than one per strike.
+let logged = false;
+
 // The stream, with the band spectrum panel's policy: every failure closes it and reopens on
 // the backoff curve, so there is one schedule rather than the browser's running alongside
 // ours. See lib/backoff.js.
 function open() {
     es = new EventSource(streamUrl());
 
-    es.addEventListener('open', () => { state = 'ok'; notify(); });
+    es.addEventListener('open', () => {
+        state = 'ok';
+        if (!logged) { logged = true; logEvent('info', 'Lightning stream connected'); }
+        notify();
+    });
     // Unnamed messages are the strikes. In the compact stream they are the only thing sent
     // besides the heartbeat.
     es.addEventListener('message', (e) => {
@@ -222,6 +231,8 @@ function open() {
         if (!started || retryTimer) return;
         const wait = retryDelay(attempts);
         attempts++;
+        logEvent('warn', `Lightning stream lost — retrying in ${Math.round(wait / 1000)}s (attempt ${attempts})`);
+        logged = false;
         retryTimer = setTimeout(() => {
             retryTimer = null;
             if (started) open();

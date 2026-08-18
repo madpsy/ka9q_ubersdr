@@ -116,6 +116,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Haptic feedback. The whole of src/lib/haptics.js rests on this one
+         line: `navigator.vibrate` exists in a WebView whether or not the app
+         holds the permission, and Chromium's VibrationManagerImpl checks for it
+         per call, logs "Requires VIBRATE permission" and returns. So without
+         this the API answers, hapticsSupported() sees a function and a coarse
+         pointer, the Display panel offers the setting — and nothing ever
+         buzzes. In a browser it works, because Chrome itself holds this.
+
+         A normal permission, granted at install: nothing asks the operator and
+         there is no runtime request to make. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Only for saving an export — a recording, a decoder log — into the
          Downloads folder, and only on Android 9 and earlier, where that meant
          writing a real file. From Android 10 a download is a MediaStore row

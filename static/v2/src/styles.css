@@ -3241,8 +3241,10 @@ a.btn { text-decoration: none; }
 /* Nothing held yet: the slot stays in the layout, so the live reading does not
    shift when the first peak arrives. */
 .meter__num.is-blank { visibility: hidden; }
-/* "60.0 dB" is the longest the SNR readout gets, before the label below. */
-.meter__num--snr { min-width: 7ch; }
+/* The SNR readout is padReading'd to a fixed five columns plus " dB", so every
+   value is this wide and the centring above cannot shift it. The reservation is
+   what holds the slot open while the reading is "--". */
+.meter__num--snr { min-width: 8ch; }
 /* The name of the reading, after its unit. Sized in `em` rather than px so it
    stays in proportion to the number whatever the text scale is — the global one
    and this panel's own — instead of needing its own calc(). Not bold and not the

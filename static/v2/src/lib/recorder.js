@@ -306,11 +306,19 @@ export class Recorder extends Emitter {
     //   * −999 is v1's "no reading yet" sentinel and anything at or below
     //     −900 dBFS is treated as absent, not as a very quiet signal. v2's
     //     meters use null for the same thing, so both are checked.
-    //   * SNR is derived here rather than taken from the meter, but no longer
-    //     floored at 0 as v1 does. v1's floor rested on the old wire figure
-    //     being S/N0 in dB·Hz, which is positive for anything audible; a real
-    //     SNR goes negative on an empty channel, and clamping it away would log
-    //     "0.00" for both a dead band and a signal at the noise floor.
+    //   * SNR is derived here from the two powers rather than read off
+    //     `m.snr`, even though the meter now computes exactly the same
+    //     difference. This is deliberate duplication: `m.snr` is a display
+    //     value, and the day someone smooths it for the needle — an ordinary
+    //     thing to do to a meter — a log that borrowed it would quietly stop
+    //     being raw measurements, with nothing failing to say so. The CSV is
+    //     an archival record with a column contract and parity tests behind
+    //     it, so it derives from the packet's own figures.
+    //   * It is no longer floored at 0 as v1 does. v1's floor rested on the
+    //     old wire figure being S/N0 in dB·Hz, which is positive for anything
+    //     audible; a real SNR goes negative on an empty channel, and clamping
+    //     it away would log "0.00" for both a dead band and a signal sitting
+    //     at the noise floor.
     _pushSignal(now) {
         const m = this._sample() || {};
         const bp = m.basebandPower == null ? -999 : m.basebandPower;

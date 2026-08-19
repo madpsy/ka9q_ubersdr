@@ -260,7 +260,7 @@ function SquelchControl({ minimal }) {
                         {!squelch.enabled ? 'DISABLED' : open ? 'OPEN' : 'CLOSED'}
                     </span>
                     <span className="squelch-status__snr">
-                        SNR {snr == null ? '--' : snr.toFixed(1)}
+                        SNR {snr == null ? '--' : padReading(snr, 2)}
                     </span>
                     {/* Disabled rather than absent when the squelch is already
                         off, so the row keeps its shape and the control stays
@@ -581,8 +581,14 @@ export default function SignalPanel({ minimal }) {
                         as the label on the reading rather than part of it. Kept
                         when there is nothing to show, so the line does not change
                         shape the moment a signal arrives. */}
+                    {/* padReading, not toFixed: the slot is centred, so a
+                        reading that gains a minus sign gets a character wider
+                        and re-centres, shoving the whole line sideways. Now
+                        that the SNR crosses zero on ordinary quiet air that
+                        happens several times a second. Two integer digits
+                        covers the meter's -5..30 and then some. */}
                     <span className="meter__num meter__num--snr">
-                        {snr == null ? '--' : `${snr.toFixed(1)} dB`}
+                        {snr == null ? '--' : `${padReading(snr, 2)} dB`}
                         <span className="meter__unit">SNR</span>
                     </span>
                 </div>
@@ -616,10 +622,14 @@ export default function SignalPanel({ minimal }) {
                             old dB·Hz figure, which cleared them on empty air.
                             Against a real SNR those numbers mean what they
                             look like, and the ramp is close to them. */}
+                        {/* padReading and a reservation, as the two cards above
+                            have: without them a reading crossing zero changes
+                            width and the number walks about inside its card. */}
                         <Readout
                             label="SNR"
-                            value={snr == null ? '—' : snr.toFixed(1)}
+                            value={snr == null ? '—' : padReading(snr, 2)}
                             unit="dB"
+                            reserve={5}
                             color={snr == null ? undefined : snrColour(snr)}
                         />
                         {/* Red the moment the output hits full scale — the

@@ -2371,7 +2371,7 @@
                             <strong style="color: #283593; font-size: 14px;">🧩 Widgets</strong>
                             <p style="margin: 4px 0 0 0; font-size: 13px; color: #555;">Inject custom HTML/JavaScript into the web UI. Create your own widgets or enable community-shared ones. <strong>Classic interface only</strong> — they are not injected into v2.</p>
                         </div>
-                        <button class="btn" onclick="document.getElementById('widgetsSection').scrollIntoView({behavior:'smooth',block:'start'});" style="font-size: 13px; padding: 7px 16px; white-space: nowrap; flex-shrink: 0;">Go to Widgets ↓</button>
+                        <button class="btn" onclick="revealWidgets()" style="font-size: 13px; padding: 7px 16px; white-space: nowrap; flex-shrink: 0;">Go to Widgets ↓</button>
                     </div>
 
                     <div id="uiConfigForm" style="display: none;">
@@ -2858,8 +2858,17 @@
                     </div>
 
                     <!-- ── Custom Menu Links ────────────────────────────────────────── -->
-                    <div id="customLinksSection" style="margin-top: 32px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                        <h3 style="margin: 0 0 6px 0; color: #333; font-size: 16px;">🔗 Custom Menu Links</h3>
+                    <!-- Collapsed by default, like the widgets group below: both are
+                         editors rather than settings, and neither is what somebody
+                         opening this tab came for. Their content still loads either
+                         way, so opening one shows it rather than starting a fetch. -->
+                    <details id="uiGroupCustomLinks" class="ui-scope" style="margin-top: 32px;">
+                        <summary class="ui-scope__head">
+                            <span class="ui-scope__title">🔗 Custom Menu Links</span>
+                            <span class="ui-scope__note">Your own entries in the Links menu, shown by both interfaces</span>
+                        </summary>
+                        <div class="ui-scope__body">
+                    <div id="customLinksSection" style="padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
                         <p style="margin: 0 0 12px 0; color: #555; font-size: 13px;">
                             Add your own links to the <strong>Links</strong> menu visible to all users.
                             You can inject links into any existing built-in group, add links to existing subgroups,
@@ -2889,10 +2898,17 @@
                             </div>
                         </div>
                     </div>
+                        </div>
+                    </details>
 
                     <!-- ── Widgets ──────────────────────────────────────────────────── -->
-                    <div id="widgetsSection" style="margin-top: 32px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
-                        <h3 style="margin: 0 0 6px 0; color: #283593; font-size: 16px;">🧩 Widgets</h3>
+                    <details id="uiGroupWidgets" class="ui-scope" style="margin-top: 32px;">
+                        <summary class="ui-scope__head">
+                            <span class="ui-scope__title">🧩 Widgets</span>
+                            <span class="ui-scope__note">HTML injected into the classic interface — not into v2</span>
+                        </summary>
+                        <div class="ui-scope__body">
+                    <div id="widgetsSection" style="padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
                         <p style="margin: 0 0 16px 0; color: #555; font-size: 13px;">
                             Widgets are HTML code blocks which are injected directly into
                             <code>index.html</code> after the custom body HTML.
@@ -3054,6 +3070,8 @@
                             </div>
                         </div>
                     </div>
+                        </div>
+                    </details>
                     <!-- ── End Widgets ───────────────────────────────────────────────── -->
 
                 </div>
@@ -12839,6 +12857,22 @@ function resetStationIdColor() {
             } catch (e) {
                 showAlert('Error cloning widget: ' + e.message, 'error');
             }
+        }
+
+        /**
+         * Open the widgets group and scroll to it — what the shortcut card at the
+         * top of the UI tab does.
+         *
+         * The group is collapsed by default, and a scrollIntoView on a closed
+         * <details> lands on the summary bar with nothing under it, which reads as
+         * the button being broken. Opening it first is synchronous, so the scroll
+         * that follows measures the expanded section.
+         */
+        function revealWidgets() {
+            const group = document.getElementById('uiGroupWidgets');
+            if (group) group.open = true;
+            const section = document.getElementById('widgetsSection');
+            if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
         function openNewWidgetEditor() {

@@ -617,6 +617,13 @@ class CWSkimmerMap {
 
         this.map = L.map('map').setView([initialLat, initialLon], initialZoom);
 
+        // Dedicated canvas pane for the unclustered spot markers. z-index 450 keeps
+        // them above the greyline overlay (400) and below the receiver marker
+        // (markerPane, 600), matching the old stacking order.
+        this.map.createPane('spotsPane');
+        this.map.getPane('spotsPane').style.zIndex = 450;
+        this.spotsRenderer = L.canvas({ pane: 'spotsPane' });
+
         // Add OpenStreetMap tiles
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors',
@@ -1008,25 +1015,55 @@ class CWSkimmerMap {
         }
     }
 
+    /**
+     * Epoch milliseconds for a spot, parsed once and memoised on the spot itself.
+     * Every panel refresh used to re-parse the ISO timestamp of every spot; at
+     * 10k spots across half a dozen scans that was the bulk of the refresh cost.
+     */
+    spotTime(spot) {
+        let t = spot._t;
+        if (t === undefined) {
+            t = Date.parse(spot.timestamp);
+            if (Number.isNaN(t)) t = 0;
+            spot._t = t;
+        }
+        return t;
+    }
+
+    /**
+     * Snapshot of everything the filter predicate needs that is constant for a
+     * whole sweep, so parseFloat() runs once per sweep rather than once per spot.
+     */
+    filterContext() {
+        return {
+            now: Date.now(),
+            maxAgeMs: this.ageFilter === 'none' ? null : parseFloat(this.ageFilter) * 60 * 1000,
+            minSnr: this.snrFilter === 'none' ? null : parseFloat(this.snrFilter)
+        };
+    }
+
+    /**
+     * Single source of truth for "is this spot currently visible". This predicate
+     * was previously copy-pasted into the marker layer, the spot count, the
+     * distance stats, the rarest-entity stats, the live message list and the
+     * globe, each with its own subtly different spelling.
+     */
+    spotPasses(spot, ctx) {
+        if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) return false;
+        if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) return false;
+        if (this.stateFilter !== 'all' && spot.state !== this.stateFilter) return false;
+        if (this.continentFilter !== 'all' && spot.Continent !== this.continentFilter) return false;
+        if (ctx.minSnr !== null && !(spot.snr >= ctx.minSnr)) return false;
+        if (ctx.maxAgeMs !== null && (ctx.now - this.spotTime(spot)) > ctx.maxAgeMs) return false;
+        return true;
+    }
+
     getFilteredSpotsArray() {
-        const now = Date.now();
+        const ctx = this.filterContext();
         const result = [];
         this.spots.forEach(spot => {
             if (!spot.latitude || !spot.longitude) return;
-            const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-            const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
-            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-            const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-            let ageMatch = true;
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                const age = now - new Date(spot.timestamp).getTime();
-                ageMatch = age <= maxAgeMs;
-            }
-            if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
-                result.push(spot);
-            }
+            if (this.spotPasses(spot, ctx)) result.push(spot);
         });
         return result;
     }
@@ -1063,9 +1100,10 @@ class CWSkimmerMap {
     rebuildLeafletMarkers() {
         // Called once when switching globe→leaflet to create markers for spots
         // that arrived while the Leaflet map was hidden (globe mode).
+        const ctx = this.filterContext();
         for (const [key, spot] of this.spots.entries()) {
             if (!this.markers.has(key)) {
-                this.addOrUpdateMarker(key, spot);
+                this.addOrUpdateMarker(key, spot, ctx);
             }
         }
     }
@@ -1488,6 +1526,11 @@ class CWSkimmerMap {
             this.activeMarkerLayer.clearLayers();
         }
 
+        // The two containers hold different layer types (clustered spots must be
+        // L.Marker, unclustered ones are canvas circles), so drop the old layers
+        // and let applyFilters below rebuild them for the new container.
+        this.markers.clear();
+
         // Swap to the appropriate container and re-render markers
         this.activeMarkerLayer = enabled ? this.markerClusterGroup : this.markerLayerGroup;
         this.map.addLayer(this.activeMarkerLayer);
@@ -1599,33 +1642,20 @@ class CWSkimmerMap {
     }
 
     applyFilters() {
-        // In globe mode there are no Leaflet markers to show/hide; just refresh globe points.
+        // In globe mode there are no Leaflet markers to maintain; just refresh globe points.
         if (this.mapMode !== 'globe') {
-            // Clear active marker container and re-add filtered markers
-            this.activeMarkerLayer.clearLayers();
-
-            const now = Date.now();
-            this.markers.forEach((marker, key) => {
-                const spot = this.spots.get(key);
-                if (!spot) return;
-
-                const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-                const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-                const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
-                const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-                const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-
-                // Age filter check
-                let ageMatch = true;
-                if (this.ageFilter !== 'none') {
-                    const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000; // Convert minutes to milliseconds
-                    const spotTime = new Date(spot.timestamp).getTime();
-                    const age = now - spotTime;
-                    ageMatch = age <= maxAgeMs;
-                }
-
-                if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
-                    this.activeMarkerLayer.addLayer(marker);
+            const ctx = this.filterContext();
+            // Touch the layer only on a visibility transition. The old sweep tore
+            // down the whole cluster group and re-added every matching marker on
+            // each call — including the 60s age tick, where the visible set has
+            // usually not changed at all.
+            this.spots.forEach((spot, key) => {
+                const shown = this.markers.has(key);
+                const passes = this.spotPasses(spot, ctx);
+                if (passes && !shown) {
+                    this.addOrUpdateMarker(key, spot, ctx);
+                } else if (!passes && shown) {
+                    this.removeMarker(key);
                 }
             });
         }
@@ -1674,14 +1704,15 @@ class CWSkimmerMap {
             // If lookup_service is enabled and the user has no stored cluster preference,
             // default clusters to OFF for first-time visitors.
             if (data.lookup_service === true && localStorage.getItem('cwskimmer_showClusters') === null) {
-                this.clustersEnabled = false;
                 const checkbox = document.getElementById('show-clusters-checkbox');
                 if (checkbox) checkbox.checked = false;
-                // Swap the active marker layer from cluster group to plain layer group
-                if (this.map && this.activeMarkerLayer) {
-                    this.map.removeLayer(this.activeMarkerLayer);
-                    this.activeMarkerLayer = this.markerLayerGroup;
-                    this.map.addLayer(this.activeMarkerLayer);
+                // Go through setClustersEnabled rather than swapping the container by
+                // hand: spots can arrive over the WebSocket before this fetch resolves,
+                // and those markers were built for the container we are leaving.
+                if (this.map) {
+                    this.setClustersEnabled(false);
+                } else {
+                    this.clustersEnabled = false;
                 }
             }
         } catch (error) {
@@ -1882,6 +1913,9 @@ class CWSkimmerMap {
         // Use the mapped spot
         spot = mappedSpot;
 
+        // Parse the timestamp once here; every age comparison downstream reads spot._t.
+        this.spotTime(spot);
+
         // Track spot for rate calculation
         const now = Date.now();
         this.spotTimestamps.push(now);
@@ -1903,10 +1937,7 @@ class CWSkimmerMap {
         // Add or update marker — skip in globe mode (no Leaflet DOM needed while globe is active)
         if (this.mapMode === 'globe') {
             // If a stale marker exists from before the mode switch, remove it
-            if (this.markers.has(key)) {
-                this.activeMarkerLayer.removeLayer(this.markers.get(key));
-                this.markers.delete(key);
-            }
+            this.removeMarker(key);
             this.debouncedGlobeRefresh();
         } else {
             this.addOrUpdateMarker(key, spot);
@@ -1924,10 +1955,47 @@ class CWSkimmerMap {
         }
     }
 
-    addOrUpdateMarker(key, spot) {
-        // Remove existing marker if present
-        if (this.markers.has(key)) {
-            this.activeMarkerLayer.removeLayer(this.markers.get(key));
+    removeMarker(key) {
+        const marker = this.markers.get(key);
+        if (!marker) return;
+        this.activeMarkerLayer.removeLayer(marker);
+        this.markers.delete(key);
+    }
+
+    /**
+     * Position for a spot's dot, including the deterministic per-callsign jitter
+     * that stops co-located stations landing on the exact same pixel.
+     */
+    spotLatLng(spot) {
+        const zoom = this.map.getZoom();
+        const offset = this.getCallsignOffset(spot.callsign);
+        let latOffset = offset.lat;
+        let lonOffset = offset.lon;
+
+        // Increase spread when zoomed in (zoom 7+)
+        if (zoom >= 7 && zoom < 12) {
+            const spreadFactor = (zoom - 6) * 0.5; // Gradually increase spread
+            latOffset *= spreadFactor;
+            lonOffset *= spreadFactor;
+        } else if (zoom >= 12) {
+            // Maximum spread when very zoomed in
+            latOffset *= 3;
+            lonOffset *= 3;
+        }
+
+        return [spot.latitude + latOffset, spot.longitude + lonOffset];
+    }
+
+    addOrUpdateMarker(key, spot, ctx) {
+        const filterCtx = ctx || this.filterContext();
+
+        // A marker exists only while its spot is visible. Building a layer for
+        // every stored spot and then hiding most of them was the dominant cost:
+        // with maxSpots at 10000 and the default age filter, the overwhelming
+        // majority of those layers were never on screen.
+        if (!this.spotPasses(spot, filterCtx)) {
+            this.removeMarker(key);
+            return;
         }
 
         // Get color for band
@@ -1946,73 +2014,90 @@ class CWSkimmerMap {
             });
         }
 
-        // Create custom icon
-        const icon = L.divIcon({
-            className: 'custom-marker',
-            html: `<div style="width: 12px; height: 12px; background: ${color}; border-radius: 50%;"></div>`,
-            iconSize: [12, 12],
-            iconAnchor: [6, 6]
-        });
+        const latlng = this.spotLatLng(spot);
 
-        // Get current zoom level for dynamic offset
-        const zoom = this.map.getZoom();
-        
-        // Apply consistent offset based on callsign hash
-        const offset = this.getCallsignOffset(spot.callsign);
-        let latOffset = offset.lat;
-        let lonOffset = offset.lon;
-        
-        // Increase spread when zoomed in (zoom 7+)
-        if (zoom >= 7 && zoom < 12) {
-            const spreadFactor = (zoom - 6) * 0.5; // Gradually increase spread
-            latOffset *= spreadFactor;
-            lonOffset *= spreadFactor;
-        } else if (zoom >= 12) {
-            // Maximum spread when very zoomed in
-            latOffset *= 3;
-            lonOffset *= 3;
+        // Re-point the existing layer when a spot refreshes. Tearing the marker
+        // down and rebuilding it discarded and re-created both overlay bindings
+        // for what is usually an unchanged dot.
+        const existing = this.markers.get(key);
+        if (existing) {
+            existing.spot = spot;
+            const at = existing.getLatLng();
+            if (at.lat !== latlng[0] || at.lng !== latlng[1]) {
+                existing.setLatLng(latlng);
+            }
+            this.setMarkerColor(existing, color);
+            return;
         }
-        
-        const adjustedLat = spot.latitude + latOffset;
-        const adjustedLon = spot.longitude + lonOffset;
 
-        // Create marker with adjusted position
-        const marker = L.marker([adjustedLat, adjustedLon], { icon });
+        const marker = this.createSpotLayer(latlng, color);
+        // The bindings below close over the marker, so the popup always reflects
+        // the latest spot for this key rather than the one it was created with.
+        marker.spot = spot;
 
-        // Create popup content
-        const popupContent = this.createPopupContent(spot);
-        marker.bindPopup(popupContent);
-        marker.bindTooltip(popupContent, {
+        // Content is built on demand. Formatting it eagerly — and binding the
+        // same string twice — kept two copies of every popup body alive for
+        // every spot on the map.
+        marker.bindPopup(() => this.createPopupContent(marker.spot));
+        marker.bindTooltip(() => this.createPopupContent(marker.spot), {
             direction: 'top',
             offset: [0, -10]
         });
 
         // Geodesic hover line — pass the marker so we use its rendered (offset) position
-        marker.on('mouseover', () => this.showLeafletGeodesicHover(spot, marker));
+        marker.on('mouseover', () => this.showLeafletGeodesicHover(marker.spot, marker));
         marker.on('mouseout', () => this.clearLeafletGeodesicHover());
 
-        // Add to map only if it passes all filters
-        const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-        const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-        const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-        const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-        
-        // Age filter check
-        let ageMatch = true;
-        if (this.ageFilter !== 'none') {
-            const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-            const spotTime = new Date(spot.timestamp).getTime();
-            const age = Date.now() - spotTime;
-            ageMatch = age <= maxAgeMs;
-        }
-        
-        const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
-        if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
-            this.activeMarkerLayer.addLayer(marker);
-        }
-
-        // Store marker
+        this.activeMarkerLayer.addLayer(marker);
         this.markers.set(key, marker);
+    }
+
+    /**
+     * Build the layer for one spot.
+     *
+     * Unclustered, every spot is its own layer, so a divIcon there means two DOM
+     * nodes per spot — that is the case that falls over at high spot counts, and
+     * it gets a canvas circle instead.
+     *
+     * Clustered, Leaflet.markercluster only ever adds the in-view clusters and
+     * leaves to the map, so DOM count is already bounded by the viewport and the
+     * divIcon costs nothing. It also has to stay an L.Marker: markercluster
+     * installs clusterShow()/clusterHide() on L.Marker alone, both of which call
+     * setOpacity(), and spiderfyOnMaxZoom drives marker._icon directly. None of
+     * that exists on L.CircleMarker.
+     */
+    createSpotLayer(latlng, color) {
+        const marker = this.clustersEnabled
+            ? L.marker(latlng, {
+                icon: L.divIcon({
+                    className: 'custom-marker',
+                    html: `<div style="width: 12px; height: 12px; background: ${color}; border-radius: 50%;"></div>`,
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6]
+                })
+            })
+            : L.circleMarker(latlng, {
+                renderer: this.spotsRenderer,
+                radius: 6,
+                stroke: false,
+                fillColor: color,
+                fillOpacity: 1
+            });
+        marker._bandColor = color;
+        return marker;
+    }
+
+    setMarkerColor(marker, color) {
+        // Each setter queues a redraw, so only touch the layer on a real change.
+        if (marker._bandColor === color) return;
+        marker._bandColor = color;
+        if (marker.setStyle) {
+            marker.setStyle({ fillColor: color });
+            return;
+        }
+        const el = marker.getElement();
+        const dot = el && el.firstElementChild;
+        if (dot) dot.style.background = color;
     }
 
     createPopupContent(spot) {
@@ -2073,7 +2158,7 @@ class CWSkimmerMap {
         let oldestTime = Date.now();
 
         for (const [key, spot] of this.spots.entries()) {
-            const spotTime = new Date(spot.timestamp).getTime();
+            const spotTime = this.spotTime(spot);
             if (spotTime < oldestTime) {
                 oldestTime = spotTime;
                 oldestKey = key;
@@ -2086,13 +2171,7 @@ class CWSkimmerMap {
     }
 
     removeSpot(key) {
-        // Remove marker from cluster group
-        if (this.markers.has(key)) {
-            this.activeMarkerLayer.removeLayer(this.markers.get(key));
-            this.markers.delete(key);
-        }
-
-        // Remove spot from storage
+        this.removeMarker(key);
         this.spots.delete(key);
     }
 
@@ -2103,8 +2182,7 @@ class CWSkimmerMap {
             const keysToRemove = [];
 
             for (const [key, spot] of this.spots.entries()) {
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
+                const age = now - this.spotTime(spot);
 
                 // Remove spots older than maxAge (24 hours) only
                 // Age filter should only affect visibility, not storage
@@ -2147,24 +2225,9 @@ class CWSkimmerMap {
         if (countEl) {
             // Count only visible spots based on all filters
             let visibleCount = 0;
-            const now = Date.now();
+            const ctx = this.filterContext();
             this.spots.forEach(spot => {
-                const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-                const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-                const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-                const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-                
-                // Age filter check
-                let ageMatch = true;
-                if (this.ageFilter !== 'none') {
-                    const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                    const spotTime = new Date(spot.timestamp).getTime();
-                    const age = now - spotTime;
-                    ageMatch = age <= maxAgeMs;
-                }
-                
-                const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
-                if (ageMatch && bandMatch && countryMatch && stateMatch && continentMatch && snrMatch) {
+                if (this.spotPasses(spot, ctx)) {
                     visibleCount++;
                 }
             });
@@ -2522,39 +2585,13 @@ class CWSkimmerMap {
         // Collect all spots that pass filters
         const filteredSpots = [];
         const spotsWithDistance = [];
-        const now = Date.now();
-        
+        const ctx = this.filterContext();
+
         this.spots.forEach(spot => {
-            // Apply band filter
-            if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) {
+            if (!this.spotPasses(spot, ctx)) {
                 return;
             }
-            // Apply country filter
-            if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
-                return;
-            }
-            // Apply state filter
-            if (this.stateFilter !== 'all' && spot.state !== this.stateFilter) {
-                return;
-            }
-            // Apply continent filter
-            if (this.continentFilter !== 'all' && spot.Continent !== this.continentFilter) {
-                return;
-            }
-            // Apply SNR filter
-            if (this.snrFilter !== 'none' && spot.snr < parseFloat(this.snrFilter)) {
-                return;
-            }
-            // Apply age filter
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
-                if (age > maxAgeMs) {
-                    return;
-                }
-            }
-            
+
             filteredSpots.push(spot);
 
             if (spot.distance_km !== undefined && spot.distance_km !== null && spot.distance_km > 0) {
@@ -2852,49 +2889,14 @@ class CWSkimmerMap {
     }
 
     getFilteredMessages() {
-        const now = Date.now();
+        const ctx = this.filterContext();
         return this.liveMessages.filter(spot => {
             // Apply callsign filter
             if (this.liveMessagesCallsignFilter && !spot.callsign.toUpperCase().includes(this.liveMessagesCallsignFilter)) {
                 return false;
             }
 
-            // Apply band filter
-            if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) {
-                return false;
-            }
-
-            // Apply country filter
-            if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
-                return false;
-            }
-
-            // Apply state filter
-            if (this.stateFilter !== 'all' && spot.state !== this.stateFilter) {
-                return false;
-            }
-
-            // Apply continent filter
-            if (this.continentFilter !== 'all' && spot.Continent !== this.continentFilter) {
-                return false;
-            }
-
-            // Apply SNR filter
-            if (this.snrFilter !== 'none' && spot.snr < parseFloat(this.snrFilter)) {
-                return false;
-            }
-
-            // Apply age filter
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
-                if (age > maxAgeMs) {
-                    return false;
-                }
-            }
-
-            return true;
+            return this.spotPasses(spot, ctx);
         });
     }
 
@@ -3195,25 +3197,10 @@ class CWSkimmerMap {
         const continentSpots = {}; // Store a sample spot for each continent
         const countrySpots = {}; // Store a sample spot for each country
 
-        const now = Date.now();
+        const ctx = this.filterContext();
 
         this.spots.forEach(spot => {
-            // Apply filters
-            const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-            const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-
-            let ageMatch = true;
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
-                ageMatch = age <= maxAgeMs;
-            }
-
-            const stateMatch = this.stateFilter === 'all' || spot.state === this.stateFilter;
-            if (!ageMatch || !bandMatch || !countryMatch || !stateMatch || !continentMatch || !snrMatch) {
+            if (!this.spotPasses(spot, ctx)) {
                 return;
             }
 

@@ -610,6 +610,15 @@ class DigitalSpotsMap {
 
         this.map = L.map('map').setView([initialLat, initialLon], initialZoom);
 
+        // Dedicated canvas pane for spot markers. Every spot used to be a divIcon,
+        // i.e. two DOM nodes each — at several thousand spots that alone stalls the
+        // main thread. One canvas draws the lot instead.
+        // z-index 450 keeps spots above the greyline overlay (400) and below the
+        // receiver marker (markerPane, 600), matching the old stacking order.
+        this.map.createPane('spotsPane');
+        this.map.getPane('spotsPane').style.zIndex = 450;
+        this.spotsRenderer = L.canvas({ pane: 'spotsPane' });
+
         // Add OpenStreetMap tiles
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors',
@@ -976,25 +985,55 @@ class DigitalSpotsMap {
         }
     }
 
+    /**
+     * Epoch milliseconds for a spot, parsed once and memoised on the spot itself.
+     * Every panel refresh used to re-parse the ISO timestamp of every spot; at
+     * 10k spots across half a dozen scans that was the bulk of the refresh cost.
+     */
+    spotTime(spot) {
+        let t = spot._t;
+        if (t === undefined) {
+            t = Date.parse(spot.timestamp);
+            if (Number.isNaN(t)) t = 0;
+            spot._t = t;
+        }
+        return t;
+    }
+
+    /**
+     * Snapshot of everything the filter predicate needs that is constant for a
+     * whole sweep, so parseFloat() runs once per sweep rather than once per spot.
+     */
+    filterContext() {
+        return {
+            now: Date.now(),
+            maxAgeMs: this.ageFilter === 'none' ? null : parseFloat(this.ageFilter) * 60 * 1000,
+            minSnr: this.snrFilter === 'none' ? null : parseFloat(this.snrFilter)
+        };
+    }
+
+    /**
+     * Single source of truth for "is this spot currently visible". This predicate
+     * was previously copy-pasted into the marker layer, the spot count, the
+     * distance stats, the rarest-entity stats, the live message list and the
+     * globe, each with its own subtly different spelling.
+     */
+    spotPasses(spot, ctx) {
+        if (this.modeFilter !== 'all' && spot.mode !== this.modeFilter) return false;
+        if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) return false;
+        if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) return false;
+        if (this.continentFilter !== 'all' && spot.Continent !== this.continentFilter) return false;
+        if (ctx.minSnr !== null && !(spot.snr >= ctx.minSnr)) return false;
+        if (ctx.maxAgeMs !== null && (ctx.now - this.spotTime(spot)) > ctx.maxAgeMs) return false;
+        return true;
+    }
+
     getFilteredSpotsArray() {
-        const now = Date.now();
+        const ctx = this.filterContext();
         const result = [];
         this.spots.forEach(spot => {
             if (!spot.latitude || !spot.longitude) return;
-            const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
-            const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-            const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-            let ageMatch = true;
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                const age = now - new Date(spot.timestamp).getTime();
-                ageMatch = age <= maxAgeMs;
-            }
-            if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
-                result.push(spot);
-            }
+            if (this.spotPasses(spot, ctx)) result.push(spot);
         });
         return result;
     }
@@ -1031,9 +1070,10 @@ class DigitalSpotsMap {
     rebuildLeafletMarkers() {
         // Called once when switching globe→leaflet to create markers for spots
         // that arrived while the Leaflet map was hidden (globe mode).
+        const ctx = this.filterContext();
         for (const [key, spot] of this.spots.entries()) {
             if (!this.markers.has(key)) {
-                this.addOrUpdateMarker(key, spot);
+                this.addOrUpdateMarker(key, spot, ctx);
             }
         }
     }
@@ -1515,33 +1555,20 @@ class DigitalSpotsMap {
     }
 
     applyFilters() {
-        // Hide/show markers based on all filters — only in leaflet mode.
+        // Create/destroy markers to match the filters — only in leaflet mode.
         // In globe mode there are no Leaflet markers; the globe is refreshed below.
         if (this.mapMode === 'leaflet') {
-            const now = Date.now();
-            this.markers.forEach((marker, key) => {
-                const spot = this.spots.get(key);
-                if (!spot) return;
-
-                const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
-                const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-                const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-                const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-                const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-
-                // Age filter check
-                let ageMatch = true;
-                if (this.ageFilter !== 'none') {
-                    const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                    const spotTime = new Date(spot.timestamp).getTime();
-                    const age = now - spotTime;
-                    ageMatch = age <= maxAgeMs;
-                }
-
-                if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
-                    marker.addTo(this.map);
-                } else {
-                    marker.remove();
+            const ctx = this.filterContext();
+            // Touch the map only on a visibility transition. The old sweep called
+            // addTo()/remove() on every marker every time, including the 60s age
+            // tick where the visible set usually has not changed at all.
+            this.spots.forEach((spot, key) => {
+                const shown = this.markers.has(key);
+                const passes = this.spotPasses(spot, ctx);
+                if (passes && !shown) {
+                    this.addOrUpdateMarker(key, spot, ctx);
+                } else if (!passes && shown) {
+                    this.removeMarker(key);
                 }
             });
         }
@@ -1788,6 +1815,8 @@ class DigitalSpotsMap {
         if (!spot.timestamp) {
             spot.timestamp = new Date().toISOString();
         }
+        // Parse it once here; every age comparison downstream reads spot._t.
+        this.spotTime(spot);
 
         // Track spot for rate calculation
         const now = Date.now();
@@ -1813,10 +1842,7 @@ class DigitalSpotsMap {
         // Add or update marker — skip in globe mode (no Leaflet DOM needed while globe is active)
         if (this.mapMode === 'globe') {
             // If a stale marker exists from before the mode switch, remove it
-            if (this.markers.has(key)) {
-                this.markers.get(key).remove();
-                this.markers.delete(key);
-            }
+            this.removeMarker(key);
             this.debouncedGlobeRefresh();
         } else {
             this.addOrUpdateMarker(key, spot);
@@ -1834,10 +1860,23 @@ class DigitalSpotsMap {
         }
     }
 
-    addOrUpdateMarker(key, spot) {
-        // Remove existing marker if present
-        if (this.markers.has(key)) {
-            this.map.removeLayer(this.markers.get(key));
+    removeMarker(key) {
+        const marker = this.markers.get(key);
+        if (!marker) return;
+        marker.remove();
+        this.markers.delete(key);
+    }
+
+    addOrUpdateMarker(key, spot, ctx) {
+        const filterCtx = ctx || this.filterContext();
+
+        // A marker exists only while its spot is visible. Building a layer for
+        // every stored spot and then hiding most of them was the dominant cost:
+        // with maxSpots at 10000 and the default age filter, the overwhelming
+        // majority of those layers were never on screen.
+        if (!this.spotPasses(spot, filterCtx)) {
+            this.removeMarker(key);
+            return;
         }
 
         // Get color for band
@@ -1856,61 +1895,55 @@ class DigitalSpotsMap {
             });
         }
 
-        // Create custom icon
-        const icon = L.divIcon({
-            className: 'custom-marker',
-            html: `<div style="width: 12px; height: 12px; background: ${color}; border-radius: 50%;"></div>`,
-            iconSize: [12, 12],
-            iconAnchor: [6, 6]
-        });
-
         // Apply consistent offset based on callsign hash
         const offset = this.getCallsignOffset(spot.callsign);
-        const adjustedLat = spot.latitude + offset.lat;
-        const adjustedLon = spot.longitude + offset.lon;
+        const latlng = [spot.latitude + offset.lat, spot.longitude + offset.lon];
 
-        // Create marker with adjusted position
-        const marker = L.marker([adjustedLat, adjustedLon], { icon });
+        // Re-point the existing layer when a spot refreshes. Tearing the marker
+        // down and rebuilding it discarded and re-created both overlay bindings
+        // for what is usually an unchanged dot.
+        const existing = this.markers.get(key);
+        if (existing) {
+            existing.spot = spot;
+            // Only touch geometry/style when they actually changed — each setter
+            // queues a canvas redraw, and a re-spot of a known station normally
+            // lands on exactly the same dot.
+            const at = existing.getLatLng();
+            if (at.lat !== latlng[0] || at.lng !== latlng[1]) {
+                existing.setLatLng(latlng);
+            }
+            if (existing.options.fillColor !== color) {
+                existing.setStyle({ fillColor: color });
+            }
+            return;
+        }
 
-        // Create popup content
-        const popupContent = this.createPopupContent(spot);
-        marker.bindPopup(popupContent);
-        marker.bindTooltip(popupContent, {
+        const marker = L.circleMarker(latlng, {
+            renderer: this.spotsRenderer,
+            radius: 6,
+            stroke: false,
+            fillColor: color,
+            fillOpacity: 1
+        });
+        // The bindings below close over the marker, so the popup always reflects
+        // the latest spot for this key rather than the one it was created with.
+        marker.spot = spot;
+
+        // Content is built on demand. Formatting it eagerly — and binding the
+        // same string twice — kept two copies of every popup body alive for
+        // every spot on the map.
+        marker.bindPopup(() => this.createPopupContent(marker.spot));
+        marker.bindTooltip(() => this.createPopupContent(marker.spot), {
             direction: 'top',
             offset: [0, -10]
         });
 
         // Geodesic hover line
-        marker.on('mouseover', () => this.showLeafletGeodesicHover(spot, marker));
+        marker.on('mouseover', () => this.showLeafletGeodesicHover(marker.spot, marker));
         marker.on('mouseout', () => this.clearLeafletGeodesicHover());
 
-        // Add to map only if it passes all filters
-        const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
-        const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-        const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-        const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-        const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-        
-        // Age filter check
-        let ageMatch = true;
-        if (this.ageFilter !== 'none') {
-            const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-            const spotTime = new Date(spot.timestamp).getTime();
-            const age = Date.now() - spotTime;
-            ageMatch = age <= maxAgeMs;
-        }
-        
-        if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
-            marker.addTo(this.map);
-        }
-
-        // Store marker
+        marker.addTo(this.map);
         this.markers.set(key, marker);
-
-        // If in globe mode, debounce-refresh globe points (avoid per-spot overhead)
-        if (this.mapMode === 'globe') {
-            this.debouncedGlobeRefresh();
-        }
     }
 
     createPopupContent(spot) {
@@ -1959,7 +1992,7 @@ class DigitalSpotsMap {
         let oldestTime = Date.now();
 
         for (const [key, spot] of this.spots.entries()) {
-            const spotTime = new Date(spot.timestamp).getTime();
+            const spotTime = this.spotTime(spot);
             if (spotTime < oldestTime) {
                 oldestTime = spotTime;
                 oldestKey = key;
@@ -1972,13 +2005,7 @@ class DigitalSpotsMap {
     }
 
     removeSpot(key) {
-        // Remove marker from map
-        if (this.markers.has(key)) {
-            this.map.removeLayer(this.markers.get(key));
-            this.markers.delete(key);
-        }
-
-        // Remove spot from storage
+        this.removeMarker(key);
         this.spots.delete(key);
     }
 
@@ -1989,8 +2016,7 @@ class DigitalSpotsMap {
             const keysToRemove = [];
 
             for (const [key, spot] of this.spots.entries()) {
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
+                const age = now - this.spotTime(spot);
 
                 // Remove spots older than maxAge (24 hours) only
                 // Age filter should only affect visibility, not storage
@@ -2033,28 +2059,11 @@ class DigitalSpotsMap {
         if (countEl) {
             // Count only visible spots based on all filters
             let visibleCount = 0;
-            const now = Date.now();
+            const ctx = this.filterContext();
             this.spots.forEach(spot => {
-                const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
-                const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-                const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-                const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-                const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-                
-                // Age filter check
-                let ageMatch = true;
-                if (this.ageFilter !== 'none') {
-                    const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                    const spotTime = new Date(spot.timestamp).getTime();
-                    const age = now - spotTime;
-                    ageMatch = age <= maxAgeMs;
-                }
-                
-                if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
-                    visibleCount++;
-                }
+                if (this.spotPasses(spot, ctx)) visibleCount++;
             });
-            
+
             const allFiltersDefault = this.modeFilter === 'all' && this.ageFilter === 'none' &&
                                      this.bandFilter === 'all' && this.countryFilter === 'all' &&
                                      this.continentFilter === 'all' && this.snrFilter === 'none';
@@ -2399,39 +2408,13 @@ class DigitalSpotsMap {
         // Collect all spots that pass filters
         const filteredSpots = [];
         const spotsWithDistance = [];
-        const now = Date.now();
-        
+        const ctx = this.filterContext();
+
         this.spots.forEach(spot => {
-            // Apply mode filter
-            if (this.modeFilter !== 'all' && spot.mode !== this.modeFilter) {
+            if (!this.spotPasses(spot, ctx)) {
                 return;
             }
-            // Apply band filter
-            if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) {
-                return;
-            }
-            // Apply country filter
-            if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
-                return;
-            }
-            // Apply continent filter
-            if (this.continentFilter !== 'all' && spot.Continent !== this.continentFilter) {
-                return;
-            }
-            // Apply SNR filter
-            if (this.snrFilter !== 'none' && spot.snr < parseFloat(this.snrFilter)) {
-                return;
-            }
-            // Apply age filter
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
-                if (age > maxAgeMs) {
-                    return;
-                }
-            }
-            
+
             filteredSpots.push(spot);
 
             if (spot.distance_km !== undefined && spot.distance_km !== null && spot.distance_km > 0) {
@@ -2732,49 +2715,14 @@ class DigitalSpotsMap {
     }
 
     getFilteredMessages() {
-        const now = Date.now();
+        const ctx = this.filterContext();
         return this.liveMessages.filter(spot => {
             // Apply callsign filter
             if (this.liveMessagesCallsignFilter && !spot.callsign.toUpperCase().includes(this.liveMessagesCallsignFilter)) {
                 return false;
             }
 
-            // Apply mode filter
-            if (this.modeFilter !== 'all' && spot.mode !== this.modeFilter) {
-                return false;
-            }
-
-            // Apply band filter
-            if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) {
-                return false;
-            }
-
-            // Apply country filter
-            if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
-                return false;
-            }
-
-            // Apply continent filter
-            if (this.continentFilter !== 'all' && spot.Continent !== this.continentFilter) {
-                return false;
-            }
-
-            // Apply SNR filter
-            if (this.snrFilter !== 'none' && spot.snr < parseFloat(this.snrFilter)) {
-                return false;
-            }
-
-            // Apply age filter
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
-                if (age > maxAgeMs) {
-                    return false;
-                }
-            }
-
-            return true;
+            return this.spotPasses(spot, ctx);
         });
     }
 
@@ -3078,25 +3026,10 @@ class DigitalSpotsMap {
         const continentSpots = {}; // Store a sample spot for each continent
         const countrySpots = {}; // Store a sample spot for each country
 
-        const now = Date.now();
+        const ctx = this.filterContext();
 
         this.spots.forEach(spot => {
-            // Apply filters
-            const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
-            const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
-            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
-            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
-            const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
-
-            let ageMatch = true;
-            if (this.ageFilter !== 'none') {
-                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                const spotTime = new Date(spot.timestamp).getTime();
-                const age = now - spotTime;
-                ageMatch = age <= maxAgeMs;
-            }
-
-            if (!modeMatch || !ageMatch || !bandMatch || !countryMatch || !continentMatch || !snrMatch) {
+            if (!this.spotPasses(spot, ctx)) {
                 return;
             }
 

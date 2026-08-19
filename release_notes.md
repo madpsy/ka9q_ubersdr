@@ -1,4 +1,13 @@
-# Latest Stable - 0.1.60 - 18th Aug 2026
+# Latest Stable - 0.1.61
+
+## Version 0.1.61 - 18th Aug 2026
+
+### New Features
+- Added **v2 UI options** in Admin -> UI for default theme, spectrum colours, spectrum style etc
+
+### Bug Fixes
+- Fixed **SNR** values, which has been an issue since day one. The SNR values are now passband correct in the v2 UI (legacy UI won't be fixed)
+
 
 ## Version 0.1.60 - 18th Aug 2026
 

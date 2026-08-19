@@ -153,8 +153,15 @@ func NewFSKDemodulator(sampleRate int, centerFreq, shiftHz, baudRate float64, fr
 	d.bitSampleCount = int(d.sampleRate*d.bitDurationSeconds + 0.5)
 	d.halfBitSampleCount = d.bitSampleCount / 2
 
-	// Initialize zero crossing array
-	d.zeroCrossings = make([]int, d.bitSampleCount/d.zeroCrossingsDivisor)
+	// Initialize zero crossing array.
+	// index ranges 0..bitSampleCount-1, so the array needs ceil(bitSampleCount/divisor)
+	// entries - plain division truncates and leaves the last bucket unallocated
+	// whenever bitSampleCount is not a multiple of the divisor (e.g. 12000/36 = 333).
+	zeroCrossingBuckets := (d.bitSampleCount + d.zeroCrossingsDivisor - 1) / d.zeroCrossingsDivisor
+	if zeroCrossingBuckets < 1 {
+		zeroCrossingBuckets = 1
+	}
+	d.zeroCrossings = make([]int, zeroCrossingBuckets)
 
 	d.updateFilters()
 	d.state = StateNoSignal
@@ -248,7 +255,13 @@ func (d *FSKDemodulator) ProcessSamples(samples []int16) {
 			if (d.bitDuration % d.bitSampleCount) > d.halfBitSampleCount {
 				// Create a relative index for this zero crossing
 				index := (d.sampleCount - d.nextEventCount + d.bitSampleCount*8) % d.bitSampleCount
-				d.zeroCrossings[index/d.zeroCrossingsDivisor]++
+				bucket := index / d.zeroCrossingsDivisor
+				if bucket < 0 {
+					bucket = 0
+				} else if bucket >= len(d.zeroCrossings) {
+					bucket = len(d.zeroCrossings) - 1
+				}
+				d.zeroCrossings[bucket]++
 			}
 			d.bitDuration = 0
 		}

@@ -35,11 +35,16 @@ const CASES = [
     ['Daily time limit reached (60 minutes per 24 hours). Please try again later.', 429, 'retry'],
     ['connection check failed', 0, 'retry'],
 
+    // The server does not know this id, because it has forgotten it: the
+    // registration is dropped five minutes after the id's last session ends,
+    // and a restart drops every one of them. One POST under the same id puts it
+    // back, so this is the one refusal the client can answer for itself.
+    ['Invalid session. Please refresh the page and try again.', 400, 'reregister'],
+
     // The id is finished. Retrying it cannot work — a kicked UUID is refused
     // for an hour — so the session has to be replaced, not resumed.
     ['Your session has been terminated. Please refresh the page.', 410, 'identity'],
     ['Your session has been terminated. Please refresh the page.', 403, 'identity'],
-    ['Invalid session. Please refresh the page and try again.', 400, 'identity'],
     ['Invalid or missing user_session_id', 400, 'identity'],
     ['Session IP mismatch. Please refresh the page and try again.', 403, 'identity'],
     ['no active audio session found', 0, 'identity'],
@@ -59,6 +64,21 @@ t('every refusal the server can send is classified', () => {
             `${JSON.stringify(reason)} (${status}) should be ${want}`,
         );
     }
+});
+
+t('a forgotten id is separated from a finished one', () => {
+    // The distinction the recovery hangs on. Both used to be 'identity', which
+    // meant a receiver restarting under a listener ended their session and left
+    // them a notice; only one of the two is actually beyond help.
+    assert.strictEqual(
+        failureKind('Invalid session. Please refresh the page and try again.', 400), 'reregister',
+    );
+    assert.strictEqual(
+        failureKind('Your session has been terminated. Please refresh the page.', 403), 'identity',
+    );
+    // And a kicked id keeps its 410 answer whatever it says, so re-registering
+    // can never be attempted for one the server is refusing on purpose.
+    assert.strictEqual(failureKind('Invalid session', 410), 'identity');
 });
 
 t('a session id refused with 403 is replaced, not treated as a ban', () => {
@@ -93,8 +113,12 @@ t('case and surrounding text do not matter', () => {
 // --- the shorthand the sockets use ------------------------------------------
 
 t('shouldRetry agrees with the classification', () => {
+    // 'reregister' counts: the answer to it is another attempt, with one POST
+    // on the way past. Only 'identity' and 'blocked' stop.
     for (const [reason, status, want] of CASES) {
-        assert.strictEqual(shouldRetry(reason, status), want === 'retry', reason);
+        assert.strictEqual(
+            shouldRetry(reason, status), want === 'retry' || want === 'reregister', reason,
+        );
     }
 });
 
@@ -117,6 +141,9 @@ t('a transient failure says nothing at all', () => {
     // Nothing has gone wrong that the operator can act on, and a notice per
     // reconnect trains people to ignore all of them.
     assert.strictEqual(failureMessage('retry', 'Rate limit exceeded'), '');
+    // Including the one that recovers by making a request of its own: the
+    // socket puts it right before anybody could have read the notice.
+    assert.strictEqual(failureMessage('reregister', 'Invalid session.'), '');
 });
 
 if (!process.exitCode) console.log(`\n${pass} passed`);

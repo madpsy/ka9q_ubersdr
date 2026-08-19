@@ -294,9 +294,14 @@ export function RadioProvider({ children }) {
     // Only the two kinds that mean it. A 'retry' failure is a busy receiver or
     // a rate limit, both of which the backoff is already handling: ending the
     // session over one would turn a ten-second wait into a stopped receiver.
+    // 'reregister' is the same judgement for a different reason — the server
+    // has forgotten this id rather than finished with it, and the socket puts
+    // that right by itself on the next attempt. Ending the session over one
+    // would mean a receiver restart still cost the operator a press of Listen,
+    // which is exactly what it used to cost.
     const noteFailure = useRef((e) => {
         const kind = e && e.failure;
-        if (!kind || kind === 'retry') return;
+        if (!kind || kind === 'retry' || kind === 'reregister') return;
         if (!runningRef.current) return;
         // Eagerly, not left to the re-render powerOff triggers. Both sockets
         // can discover the same dead session in one tick, and the second one
@@ -437,10 +442,17 @@ export function RadioProvider({ children }) {
                 });
             }
         }));
-        offs.push(audioConn.on('error', (e) => {
-            pushLog('error', e.message || 'audio error');
+        // Quoting the server, except for the one refusal whose words are now
+        // wrong. "Invalid session. Please refresh the page and try again" is
+        // advice for a client that had no way back; this one registers again on
+        // the next attempt and says so when it does — see logReregister below.
+        // Left in the log as the server wrote it, that line asks the operator
+        // to reload a page that is already fixing itself.
+        const logFailure = (fallback) => (e) => {
+            if (!e || e.failure !== 'reregister') pushLog('error', (e && e.message) || fallback);
             noteFailure(e);
-        }));
+        };
+        offs.push(audioConn.on('error', logFailure('audio error')));
         // With the code, because that is the one thing that separates the
         // cases: 1000 is somebody closing deliberately, 1006 is the connection
         // being torn out from under us, and the difference is the difference
@@ -491,10 +503,7 @@ export function RadioProvider({ children }) {
             const m = meters.current;
             m.lastFrameAt = performance.now();
         }));
-        offs.push(spectrumConn.on('error', (e) => {
-            pushLog('error', e.message || 'spectrum error');
-            noteFailure(e);
-        }));
+        offs.push(spectrumConn.on('error', logFailure('spectrum error')));
         offs.push(spectrumConn.on('open', () => pushLog('info', 'Spectrum connected')));
         // The audio socket has always logged its closures and this one never
         // did, which made the panel actively misleading: a spectrum that
@@ -520,6 +529,21 @@ export function RadioProvider({ children }) {
         });
         offs.push(logRetries(audioConn, 'Audio stream'));
         offs.push(logRetries(spectrumConn, 'Spectrum'));
+
+        // The one request a reconnect is allowed to make, and the only account
+        // of it. A registration lapses without any event of its own — the
+        // server simply stops recognising the id, five minutes after this
+        // session's last socket ended or the instant it restarts — and the
+        // refusal that follows either arrives as a line the operator cannot act
+        // on ("Invalid session") or, on the endpoints that refuse before the
+        // upgrade, as nothing at all. So the recovery says so itself, or a POST
+        // in the middle of an outage has no explanation anywhere.
+        const logReregister = (conn, what) => conn.on('reregister', () => {
+            pushLog('warn', `${what}: session no longer registered — registering it again`);
+        });
+        offs.push(logReregister(audioConn, 'Audio stream'));
+        offs.push(logReregister(spectrumConn, 'Spectrum'));
+        offs.push(logReregister(dxcluster, 'DX cluster'));
 
         // The spot/chat socket, which reported nothing at all.
         //

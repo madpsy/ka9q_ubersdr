@@ -116,25 +116,66 @@ export function getServerSessionId() {
 // per session start (plus two more per reconnect) would eat that budget for no
 // benefit.
 //
-// The registration is cached only briefly. Server-side it survives while any
-// session is live and for five minutes after the last one ends, so a long
-// reconnect outage needs a fresh POST — this TTL is comfortably inside that
-// window while still collapsing the normal burst to one request.
-const REGISTRATION_TTL_MS = 120000;
+// Cached for the life of the id, and deliberately not on a timer. What used to
+// be here was a two-minute TTL, which made a reconnect re-register or not
+// depending on nothing but how long the outage had been running — the same
+// press of the spectrum's pause button made a request or did not, while the
+// hidden-tab pause five seconds later never did. It also put an HTTP round trip
+// in front of every retry, on the one path that runs when the network is
+// already unwell.
+//
+// So: one POST per id, and a retry costs nothing. Which is also what the
+// server's accounting expects. `max_session_time` runs from the first time the
+// server saw the UUID (`userSessionFirst`, written once with an `if !exists`
+// guard) and a retry keeps the same id, so re-registering cannot move that
+// clock — but a POST per attempt would still spend the rate-limit budget three
+// sockets share, and a 429 in the middle of an outage turns a connection that
+// was coming back into one that is not.
+//
+// The exception is a re-registration, and it is the one case a client can
+// actually fix. The server forgets a registration five minutes after the id's
+// last session ends, and a restart forgets it at once; every endpoint then
+// answers "Invalid session", and without asking again there is no way back.
+// So the sockets may ask again — under the *same* id, so the server's clock for
+// this session is untouched — but only on evidence (see `needsRegistration` in
+// the connections), and no more often than this floor. That makes it a response
+// to one specific refusal rather than a step in the retry loop.
+const REREGISTER_MIN_MS = 15000;
 let registration = null;
 
-export function connectionCheck() {
+/**
+ * @param {{reregister?: boolean}} [opts]  `reregister` asks for a fresh POST
+ *        under the current id, for a caller that has reason to believe the
+ *        server has forgotten it. Subject to the floor above; everything else
+ *        shares the one answer.
+ */
+export function connectionCheck({ reregister = false } = {}) {
     const id = getSessionId();
     const now = Date.now();
-    if (registration && registration.id === id && now - registration.at < REGISTRATION_TTL_MS) {
-        return registration.promise;
+    if (registration && registration.id === id) {
+        if (!reregister) return registration.promise;
+        // One at a time, and not on every attempt: three sockets discovering
+        // the same lapse in the same second must not make three POSTs of it.
+        if (registration.pending || now - registration.at < REREGISTER_MIN_MS) {
+            return registration.promise;
+        }
     }
     const promise = checkConnection();
-    registration = { id, at: now, promise };
-    // A refusal must not be cached — the next attempt should ask again.
-    promise.then((r) => {
-        if (!r || !r.allowed) registration = null;
-    }, () => { registration = null; });
+    const entry = { id, at: now, pending: true, promise };
+    registration = entry;
+    // Neither a refusal nor an unanswered request may be cached: the next
+    // attempt has to ask again rather than replay the no. `status === 0` is
+    // checkConnection's own mark for a fetch that did not complete, which it
+    // reports as *allowed* so a flaky check never blocks an otherwise-working
+    // connection — cached, that would be a permanent yes nothing could clear.
+    const settle = (keep) => {
+        entry.pending = false;
+        if (!keep && registration === entry) registration = null;
+    };
+    promise.then(
+        (r) => settle(!!(r && r.allowed && r.status !== 0)),
+        () => settle(false),
+    );
     return promise;
 }
 
@@ -174,9 +215,10 @@ export function setBypassPassword(password) {
 // Not exported. Asking /connection also *registers* the id it asks about, so
 // every caller that skips the cache buys a registration the next one pays for
 // again — which is exactly how a page load came to cost two requests out of the
-// ten a minute this endpoint allows per IP. connectionCheck() is the way in;
-// it re-asks whenever the id or the password changes, which covers every reason
-// anybody reached for this directly.
+// ten a minute this endpoint allows per IP. connectionCheck() is the way in; it
+// re-asks whenever the id or the password changes, and on request for a socket
+// the server has stopped recognising, which covers every reason anybody reached
+// for this directly.
 async function checkConnection() {
     const id = getSessionId();
     const body = { user_session_id: id };

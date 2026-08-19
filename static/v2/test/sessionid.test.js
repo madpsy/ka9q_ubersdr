@@ -22,6 +22,13 @@ const assert = require('assert');
 global.location = { protocol: 'http:', host: 'rx.test', search: '' };
 global.sessionStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 
+// The registration is cached for the life of the id and never on a timer, but
+// there is a floor under how often a *re*-registration may be asked for. So the
+// clock is steerable rather than real — the alternative is a test that waits
+// fifteen seconds to find out.
+let now = 1700000000000;
+Date.now = () => now;
+
 let minted = 0;
 Object.defineProperty(global, 'crypto', {
     value: {
@@ -62,6 +69,7 @@ async function run() {
     for (const [name, fn] of queue) {
         posts = [];
         allowed = true;
+        now += 3600000;                    // clear of any floor left behind
         s.newSessionId();                  // a fresh page load
         posts = [];
         try {
@@ -172,6 +180,91 @@ t('a refusal is not cached, so the next attempt asks again', async () => {
     assert.strictEqual(a.allowed, false);
     await s.connectionCheck();
     assert.strictEqual(posts.length, 2, 'asked again rather than replaying the no');
+});
+
+// --- how long an answer lasts -------------------------------------------------
+//
+// For the life of the id, and deliberately not for a couple of minutes. The TTL
+// that used to be here meant a reconnect re-registered or did not depending on
+// nothing but how long the outage had run — and it put an HTTP round trip in
+// front of every retry, on the one path that runs when the network is already
+// unwell. The server does not need it: max_session_time runs from the first
+// time it saw the id (userSessionFirst, written once), so re-registering the
+// same id moves nothing, and the rate limit this endpoint enforces is ten a
+// minute for all three sockets put together.
+
+t('an answer does not go stale on a timer', async () => {
+    await pageLoad();
+    now += 3600000;                        // an hour of listening
+    await s.connectionCheck();             // a socket reconnecting
+    assert.strictEqual(posts.length, 1, 'still the one registration');
+});
+
+t('a request that never completed is not remembered as a yes', async () => {
+    // The fetch failing is reported as allowed, so a flaky check never blocks a
+    // working connection. Cached, that would be a permanent yes nothing could
+    // clear — and the sockets would go on opening under an id the server has
+    // never been told about.
+    const fine = global.fetch;
+    global.fetch = async () => { throw new Error('offline'); };
+    const r = await s.connectionCheck();
+    assert.strictEqual(r.allowed, true, 'not blocked by it');
+    assert.strictEqual(r.status, 0, 'and marked as unanswered');
+    global.fetch = fine;
+    await s.connectionCheck();
+    assert.strictEqual(posts.length, 1, 'the next asking actually asked');
+});
+
+// --- asking again on purpose --------------------------------------------------
+
+t('re-registering asks again, under the same id', async () => {
+    // The whole recovery from a server that has forgotten this session. The id
+    // is what the server measures a session by, so minting a new one to get
+    // back in would restart the clock the operator is being timed against.
+    await pageLoad();
+    const id = s.getSessionId();
+    now += 20000;
+    await s.connectionCheck({ reregister: true });
+    assert.strictEqual(posts.length, 2, 'it asked');
+    assert.strictEqual(posts[1], id, 'and did not mint a new identity to do it');
+    assert.strictEqual(s.getSessionId(), id);
+});
+
+t('re-registering has a floor under it', async () => {
+    // Three sockets discovering the same lapse in the same second are one
+    // request, not three — and a backoff whose early steps are a second apart
+    // cannot turn into a POST per attempt.
+    await pageLoad();
+    now += 20000;
+    await s.connectionCheck({ reregister: true });
+    assert.strictEqual(posts.length, 2);
+    now += 1000;
+    await s.connectionCheck({ reregister: true });
+    await s.connectionCheck({ reregister: true });
+    assert.strictEqual(posts.length, 2, 'held off');
+    now += 20000;
+    await s.connectionCheck({ reregister: true });
+    assert.strictEqual(posts.length, 3, 'and allowed again once the floor passes');
+});
+
+t('a re-registration in flight is shared rather than repeated', async () => {
+    await pageLoad();
+    now += 20000;
+    const both = await Promise.all([
+        s.connectionCheck({ reregister: true }),
+        s.connectionCheck({ reregister: true }),
+    ]);
+    assert.strictEqual(posts.length, 2, 'one POST between them');
+    assert.strictEqual(both[0].sessionId, both[1].sessionId);
+});
+
+t('an ordinary check never asks again on its own', async () => {
+    // The property the sockets lean on: a reconnect is free. Only a caller with
+    // evidence that the server has forgotten the id may spend a request.
+    await pageLoad();
+    now += 20000;
+    for (let i = 0; i < 5; i++) await s.connectionCheck();
+    assert.strictEqual(posts.length, 1);
 });
 
 run();

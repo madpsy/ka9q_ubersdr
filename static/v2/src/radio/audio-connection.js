@@ -38,6 +38,17 @@ export class AudioConnection extends Emitter {
         this.format = 'opus';
         this.pcm = new PCMStreamDecoder();
         this.closedByUser = false;
+        // Whether the socket in hand ever reached open. This endpoint says most
+        // of what it has to say *after* the upgrade — see _onMessage — but the
+        // ban middleware and a malformed id are answered before it, and a
+        // browser reports a refused upgrade as a bare 1006 with no status and no
+        // reason, indistinguishable from the network dropping. See _onClose.
+        this.opened = false;
+        // Set when there is reason to think the server has forgotten this id,
+        // and consumed by the next connect() as one re-registration. Not a
+        // standing flag: it is cleared as it is spent, so a retry that fails the
+        // same way asks again and a retry that succeeds never asks at all.
+        this.needsRegistration = false;
         this.attempts = 0;
         this.maxAttempts = 12;
         this.reconnectTimer = null;
@@ -69,7 +80,22 @@ export class AudioConnection extends Emitter {
         // Whatever the last session announced does not describe this one.
         this.pcm.reset();
 
-        const check = await connectionCheck();
+        // Spent here, whatever the check then answers: a re-registration that
+        // was refused is not one to make again on the next attempt, and the
+        // refusal itself is what settles whether there is a next attempt.
+        const reregister = this.needsRegistration;
+        this.needsRegistration = false;
+        if (reregister) {
+            this.emit('reregister', { message: 'Registering this session with the receiver again' });
+        }
+        const check = await connectionCheck({ reregister });
+        // Somebody let go while the check was in flight — powerOff, or the idle
+        // watch stopping the receiver. Without this the socket opens anyway:
+        // disconnect() has already closed a socket that did not exist yet and
+        // set closedByUser on a connection that is about to clear it, so a
+        // receiver that was stopped comes up streaming. The DX cluster socket
+        // has always had this check.
+        if (this.closedByUser) return false;
         if (!check.allowed) {
             // Three answers, not two — see lib/connectFailure.js. The /maximum/
             // test that used to live here read "rate limit exceeded" and "your
@@ -108,6 +134,7 @@ export class AudioConnection extends Emitter {
         }
         ws.binaryType = 'arraybuffer';
         this.ws = ws;
+        this.opened = false;
 
         // Events from a socket that has since been replaced. Closing is not
         // instant — the handshake outlives the call — so a close-then-connect
@@ -120,6 +147,7 @@ export class AudioConnection extends Emitter {
 
         ws.onopen = () => {
             if (superseded()) return;
+            this.opened = true;
             // The reconnect budget is deliberately *not* refilled here. The
             // server upgrades the socket before it decides whether it will have
             // us — the session is created afterwards — so a refusal arrives as
@@ -340,6 +368,8 @@ export class AudioConnection extends Emitter {
         setServerSessionId(null);
         const failure = this.lastFailure;
         this.lastFailure = null;
+        const opened = this.opened;
+        this.opened = false;
         this.emit('close', { code: ev.code, reason: ev.reason, failure });
         if (this.closedByUser) {
             this._setState('idle');
@@ -352,7 +382,14 @@ export class AudioConnection extends Emitter {
         // stop — so a rate limit that clears in ten seconds ended the session
         // for good.
         if (failure) {
-            if (failure === 'retry') this._scheduleReconnect();
+            // The server does not know this id — because it has forgotten it,
+            // not because it has finished with it. One POST under the same id
+            // fixes that, and the next attempt makes it. Until this existed the
+            // two were one answer, so a receiver that restarted underneath a
+            // listener left them looking at a dead page with a notice telling
+            // them to press Listen.
+            if (failure === 'reregister') this.needsRegistration = true;
+            if (failure === 'retry' || failure === 'reregister') this._scheduleReconnect();
             else this._setState('idle');
             return;
         }
@@ -362,6 +399,12 @@ export class AudioConnection extends Emitter {
             this._setState('idle');
             return;
         }
+        // Nothing was ever open, and nothing was said. A refused upgrade looks
+        // exactly like a pulled cable from in here — 1006, no status, no reason
+        // — and one of the two is ours to mend, so the next attempt asks
+        // /connection which it was. One POST per outage: the flag is spent by
+        // that attempt and only set again by another close that never opened.
+        if (!opened) this.needsRegistration = true;
         this._scheduleReconnect();
     }
 

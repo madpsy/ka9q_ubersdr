@@ -43,6 +43,18 @@ export class SpectrumConnection extends Emitter {
         this.ws = null;
         this.state = 'idle';
         this.closedByUser = false;
+        // Whether the socket in hand ever reached open. The refusals this
+        // endpoint gives before the upgrade — an unregistered id, a kicked one,
+        // an IP that does not match — are plain HTTP errors, and a browser
+        // reports all of them as a bare 1006 with no status and no reason. So
+        // "it never opened" is the only evidence there is that the server said
+        // something rather than the network dropping it. See _onClose.
+        this.opened = false;
+        // Set when there is reason to think the server has forgotten this id,
+        // and consumed by the next connect() as one re-registration. Not a
+        // standing flag: it is cleared as it is spent, so a retry that fails the
+        // same way asks again and a retry that succeeds never asks at all.
+        this.needsRegistration = false;
         this.attempts = 0;
         this.maxAttempts = 12;
         this.reconnectTimer = null;
@@ -104,7 +116,22 @@ export class SpectrumConnection extends Emitter {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
 
-        const check = await connectionCheck();
+        // Spent here, whatever the check then answers: a re-registration that
+        // was refused is not one to make again on the next attempt, and the
+        // refusal itself is what settles whether there is a next attempt.
+        const reregister = this.needsRegistration;
+        this.needsRegistration = false;
+        if (reregister) {
+            this.emit('reregister', { message: 'Registering this session with the receiver again' });
+        }
+        const check = await connectionCheck({ reregister });
+        // Somebody let go while the check was in flight — the pause button, the
+        // idle watch, a tab going to the background, powerOff. Without this the
+        // socket opens anyway: disconnect() has already closed a socket that did
+        // not exist yet and set closedByUser on a connection that is about to
+        // clear it, leaving a spectrum that is paused on screen and streaming on
+        // the wire. The DX cluster socket has always had this check.
+        if (this.closedByUser) return false;
         if (!check.allowed) {
             // This used to stop here, full stop: no reconnect was scheduled for
             // any refusal, so a receiver that was momentarily full or a client
@@ -159,9 +186,24 @@ export class SpectrumConnection extends Emitter {
         }
         ws.binaryType = 'arraybuffer';
         this.ws = ws;
+        this.opened = false;
         this._lastInitial = initial;
 
+        // Events from a socket that has since been replaced, as the audio
+        // socket has always had. Closing is not instant — the handshake
+        // outlives the call — so a close-then-connect can land the old socket's
+        // close event after the new one is live, where _onClose sets `this.ws =
+        // null` and books a reconnect *on top of* a connection that is working.
+        // The result is two sockets, one of them unreachable, and a spectrum
+        // that pauses and comes back doubled. Now it also mattered for a second
+        // reason: that stale close arrives with `opened` already cleared by the
+        // connect below it, which reads as a refused handshake and spends a
+        // re-registration on nothing.
+        const superseded = () => this.ws && this.ws !== ws;
+
         ws.onopen = () => {
+            if (superseded()) return;
+            this.opened = true;
             // Not refilled here — see the audio socket, which has the same
             // shape and the same reason. The spectrum session is created after
             // the upgrade too, so a refusal opens the socket first. _onFrame
@@ -186,9 +228,12 @@ export class SpectrumConnection extends Emitter {
                 this.send({ type: 'zoom', ...p });
             }
         };
-        ws.onmessage = (ev) => this._onMessage(ev);
-        ws.onerror = () => this.emit('error', { kind: 'socket', message: 'spectrum socket error' });
-        ws.onclose = (ev) => this._onClose(ev);
+        ws.onmessage = (ev) => { if (!superseded()) this._onMessage(ev); };
+        ws.onerror = () => {
+            if (superseded()) return;
+            this.emit('error', { kind: 'socket', message: 'spectrum socket error' });
+        };
+        ws.onclose = (ev) => { if (!superseded()) this._onClose(ev); };
         return true;
     }
 
@@ -467,6 +512,8 @@ export class SpectrumConnection extends Emitter {
         this.ws = null;
         const failure = this.lastFailure;
         this.lastFailure = null;
+        const opened = this.opened;
+        this.opened = false;
         // The code goes out with it, as the audio socket's does: 1000 is a
         // deliberate close and 1006 is the connection being torn out, and
         // nothing else on screen distinguishes them.
@@ -479,10 +526,18 @@ export class SpectrumConnection extends Emitter {
         // again — see _onMessage. Without it every refusal looked like a
         // dropped connection and was retried on the same curve for ever,
         // including the ones that can never succeed.
-        if (failure && failure !== 'retry') {
+        if (failure && failure !== 'retry' && failure !== 'reregister') {
             this._setState('idle');
             return;
         }
+        // Nothing was ever open, and nothing was said. That is what a refused
+        // upgrade looks like from here: this endpoint answers an unregistered
+        // id with a 400 before it upgrades, and the browser hands us a bare
+        // 1006 for it — the same event a pulled network cable produces. Of the
+        // two, only one is ours to mend, so the next attempt asks /connection
+        // which of them it was. One POST per outage: the flag is spent by that
+        // attempt and only set again by another close that never opened.
+        if (failure === 'reregister' || !opened) this.needsRegistration = true;
         this._scheduleReconnect(this._lastInitial);
     }
 

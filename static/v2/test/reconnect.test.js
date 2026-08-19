@@ -72,16 +72,32 @@ global.window = global;
 // What /connection answers. Steered per test.
 let reply = { allowed: true, reason: '', status: 200 };
 
-global.fetch = async () => ({
-    status: reply.status,
-    json: async () => ({
-        allowed: reply.allowed,
-        reason: reply.reason,
-        client_ip: '10.0.0.9',
-        session_timeout: 0,
-        max_session_time: 0,
-    }),
-});
+// Every POST to /connection, by the id it registered. The count is the point:
+// a retry is not allowed to make one, and the recovery from a lapsed
+// registration is allowed exactly one — under the id already in use, because a
+// new id would be a new session and the server's clock for this one runs from
+// the first time it saw the old one.
+let posts = [];
+
+// A registration is cached for the life of the id, with a floor under how often
+// a re-registration may be attempted, so the clock has to be steerable: the
+// alternative is a test that waits fifteen seconds to find out.
+let now = 1700000000000;
+Date.now = () => now;
+
+global.fetch = async (url, opts) => {
+    posts.push(JSON.parse(opts.body).user_session_id);
+    return {
+        status: reply.status,
+        json: async () => ({
+            allowed: reply.allowed,
+            reason: reply.reason,
+            client_ip: '10.0.0.9',
+            session_timeout: 0,
+            max_session_time: 0,
+        }),
+    };
+};
 
 const { AudioConnection } = require('./.build/audio.cjs');
 const { SpectrumConnection } = require('./.build/spectrum.cjs');
@@ -106,6 +122,10 @@ async function run() {
     for (const [name, fn] of queue) {
         sockets.length = 0;
         reply = { allowed: true, reason: '', status: 200 };
+        posts = [];
+        // Far enough on that nothing is inside the re-registration floor left
+        // over from the last test.
+        now += 3600000;
         try {
             await fn();
             console.log('ok    ' + name);
@@ -225,7 +245,7 @@ t('spectrum: a session the server has ended stops rather than looping', async ()
     const conn = new SpectrumConnection();
     await conn.connect({ frequency: 7100000, binBandwidth: 100 });
     sockets[0].open();
-    sockets[0].deliver({ type: 'error', error: 'Invalid session. Please refresh the page and try again.' });
+    sockets[0].deliver({ type: 'error', error: 'Your session has been terminated. Please refresh the page.', status: 410 });
     sockets[0].land(1006);
     assert.strictEqual(conn.state, 'idle');
     assert.strictEqual(conn.reconnectTimer, null);
@@ -238,6 +258,178 @@ t('an ordinary drop is still retried, with nothing said about it', async () => {
     sockets[0].open();
     sockets[0].land(1006);                     // the network, not the server
     assert.strictEqual(conn.state, 'reconnecting');
+    conn.disconnect();
+});
+
+// --- what a retry costs, and the one request it may make ---------------------
+//
+// /connection is not part of the backoff. It registers the id both websocket
+// endpoints check for, and that registration lasts as long as the session does
+// — so a socket coming back after a drop has nothing to ask it, and asking
+// anyway spends a rate-limit budget (ten a minute, per IP, shared by all three
+// sockets) at exactly the moment the connection is already in trouble.
+//
+// The exception is the case where the server has *forgotten* the id: five
+// minutes after this session's last socket ended, or the instant it restarts.
+// Then one POST under the same id is the whole recovery. The same id matters —
+// a new one would be a new session, and the server's `max_session_time` runs
+// from the first time it saw the id it is measuring.
+
+const REGISTERED_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+for (const [kind, make, open] of KINDS) {
+    t(`${kind}: a drop that comes back asks /connection nothing`, async () => {
+        const conn = make();
+        await open(conn);
+        sockets[0].open();
+        const before = posts.length;
+        sockets[0].land(1006);                  // the network, not the server
+        assert.strictEqual(conn.needsRegistration, false, 'nothing to re-register');
+        conn.reconnectTimer = null;
+        await open(conn);                       // what the backoff would do
+        assert.strictEqual(posts.length, before, 'the retry made no request');
+        assert.strictEqual(sockets.length, 2, 'and still opened a socket');
+        conn.disconnect();
+    });
+
+    t(`${kind}: a handshake that never opened re-registers, once`, async () => {
+        // This is what a refused upgrade looks like from a browser: 1006, no
+        // status, no reason — the same event as a pulled cable. One of the two
+        // is ours to mend, so the next attempt asks which it was.
+        const conn = make();
+        await open(conn);
+        sockets[0].land(1006);                  // refused before it ever opened
+        assert.strictEqual(conn.needsRegistration, true);
+
+        const before = posts.length;
+        now += 20000;                           // past the floor
+        conn.reconnectTimer = null;
+        await open(conn);
+        assert.strictEqual(posts.length, before + 1, 'one POST');
+        assert.strictEqual(posts[posts.length - 1], REGISTERED_ID, 'under the same id');
+        assert.strictEqual(conn.needsRegistration, false, 'and it is spent');
+
+        // Spent, so the attempt after it does not ask again — the socket that
+        // failed a second time is what asks again, not the backoff itself.
+        sockets[1].open();
+        const after = posts.length;
+        sockets[1].land(1006);
+        conn.reconnectTimer = null;
+        await open(conn);
+        assert.strictEqual(posts.length, after, 'no second POST');
+        conn.disconnect();
+    });
+
+    t(`${kind}: re-registering is not attempted twice in fifteen seconds`, async () => {
+        // Three sockets discover the same lapse at the same moment. Between the
+        // floor and the shared cache that is one request, not three — and the
+        // one that is blocked still retries, it just retries without asking.
+        const conn = make();
+        await open(conn);
+        sockets[0].land(1006);
+        now += 20000;
+        conn.reconnectTimer = null;
+        await open(conn);                       // asks
+        const before = posts.length;
+
+        sockets[1].land(1006);                  // and fails again, at once
+        assert.strictEqual(conn.needsRegistration, true);
+        now += 1000;                            // inside the floor
+        conn.reconnectTimer = null;
+        await open(conn);
+        assert.strictEqual(posts.length, before, 'held off');
+        assert.strictEqual(sockets.length, 3, 'but it still tried the socket');
+        conn.disconnect();
+    });
+}
+
+t('audio: a forgotten registration is put back rather than ending the session', async () => {
+    // The audio endpoint upgrades first and refuses afterwards, so this arrives
+    // as a message. It used to be read as 'identity' — the same answer as a
+    // kicked id — which stopped the receiver and left a notice telling the
+    // operator to press Listen. A receiver that restarts under a listener now
+    // comes back on its own.
+    const conn = new AudioConnection();
+    const seen = [];
+    conn.on('error', (e) => seen.push(e));
+    await conn.connect(TUNING);
+    sockets[0].open();
+    sockets[0].deliver({ type: 'error', error: 'Invalid session. Please refresh the page and try again.' });
+    sockets[0].land(1006);
+    assert.strictEqual(conn.state, 'reconnecting', 'it is going to try again');
+    assert.strictEqual(conn.needsRegistration, true);
+    assert.ok(seen.some((e) => e.failure === 'reregister'), 'and said which kind it was');
+
+    const before = posts.length;
+    now += 20000;
+    conn.reconnectTimer = null;
+    await conn.connect(TUNING);
+    assert.strictEqual(posts.length, before + 1, 'one POST, under the same id');
+    assert.strictEqual(posts[posts.length - 1], REGISTERED_ID);
+    conn.disconnect();
+});
+
+t('audio: a re-registration the server refuses ends the session honestly', async () => {
+    // The other half of it. Asking again is only worth doing while the answer
+    // can change; a kicked id answers 410 whatever asks, and that has to reach
+    // the operator rather than becoming a loop with a POST in it.
+    const conn = new AudioConnection();
+    const seen = [];
+    conn.on('error', (e) => seen.push(e));
+    await conn.connect(TUNING);
+    sockets[0].open();
+    sockets[0].deliver({ type: 'error', error: 'Invalid session. Please refresh the page and try again.' });
+    sockets[0].land(1006);
+
+    reply = { allowed: false, reason: 'Your session has been terminated. Please refresh the page.', status: 410 };
+    now += 20000;
+    conn.reconnectTimer = null;
+    await conn.connect(TUNING);
+    assert.strictEqual(conn.state, 'rejected');
+    assert.strictEqual(conn.reconnectTimer, null, 'and stops');
+    assert.ok(seen.some((e) => e.failure === 'identity'), 'with the kind that ends a session');
+    conn.disconnect();
+});
+
+// --- letting go while the check is in flight ---------------------------------
+
+for (const [kind, make, open] of KINDS) {
+    t(`${kind}: pausing during the check does not open a socket anyway`, async () => {
+        // connect() awaits /connection before it opens anything, and disconnect()
+        // sets closedByUser on a connection that has already cleared it. Without
+        // a second look after the await, the pause button pressed at that moment
+        // leaves a spectrum that is paused on screen and streaming on the wire —
+        // and the next resume opens a second socket beside the first.
+        const conn = make();
+        const p = open(conn);
+        conn.disconnect();                      // the pause button, mid-check
+        await p;
+        await settle();
+        assert.strictEqual(sockets.length, 0, 'nothing was opened');
+        assert.strictEqual(conn.state, 'idle');
+    });
+}
+
+t('spectrum: a late close from a replaced socket leaves the live one alone', async () => {
+    // Closing is not instant, so a pause and a resume inside one round trip
+    // lands the old socket's close after the new one is up. Unguarded, that
+    // close takes the live socket's place away — `this.ws = null` — and books a
+    // reconnect beside it: two sockets, one of them unreachable. The audio
+    // socket has always guarded this; the spectrum did not.
+    const conn = new SpectrumConnection();
+    await conn.connect({ frequency: 7100000, binBandwidth: 100 });
+    const first = sockets[0];
+    first.open();
+
+    conn.disconnect();                          // pause
+    await conn.connect({ frequency: 7100000, binBandwidth: 100 });   // and resume
+    const second = sockets[1];
+    second.open();
+
+    first.land(1006);                           // the old one, catching up
+    assert.strictEqual(conn.ws, second, 'the live socket is still the live socket');
+    assert.strictEqual(conn.reconnectTimer, null, 'and nothing was booked on top of it');
+    assert.strictEqual(conn.needsRegistration, false, 'nor a registration spent on it');
     conn.disconnect();
 });
 

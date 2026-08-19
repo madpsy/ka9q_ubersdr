@@ -103,6 +103,14 @@ export class DXClusterConnection extends Emitter {
         this.ws = null;
         this.state = 'idle';
         this.closedByUser = false;
+        // Whether the socket in hand ever reached open. This endpoint refuses
+        // an id it does not recognise before the upgrade, and a browser reports
+        // that as a bare 1006 — the same event a dropped network produces. See
+        // _onClose, and the audio socket, which carries the same pair.
+        this.opened = false;
+        // Set when there is reason to think the server has forgotten this id,
+        // and consumed by the next connect() as one re-registration.
+        this.needsRegistration = false;
         this.attempts = 0;
         this.maxAttempts = 12;
         this.reconnectTimer = null;
@@ -262,7 +270,13 @@ export class DXClusterConnection extends Emitter {
         if (this.ws || this.opening) return true;
         this.opening = true;
 
-        const check = await connectionCheck();
+        // Spent here, whatever the check then answers — see the audio socket.
+        const reregister = this.needsRegistration;
+        this.needsRegistration = false;
+        if (reregister) {
+            this.emit('reregister', { message: 'Registering this session with the receiver again' });
+        }
+        const check = await connectionCheck({ reregister });
         this.opening = false;
         if (!check.allowed) {
             this._setState('rejected');
@@ -304,12 +318,14 @@ export class DXClusterConnection extends Emitter {
             return false;
         }
         this.ws = ws;
+        this.opened = false;
         // Decoder results arrive as binary frames. Asking for ArrayBuffers
         // rather than the default Blob keeps their handling synchronous, so a
         // result cannot be delivered after the extension has detached.
         ws.binaryType = 'arraybuffer';
 
         ws.onopen = () => {
+            this.opened = true;
             // Not `attempts = 0` here. The server accepts the upgrade and only
             // then decides it will not have us — a session it has already
             // reclaimed, a creation rate limit — so a refused connection still
@@ -567,6 +583,8 @@ export class DXClusterConnection extends Emitter {
         this.pingTimer = null;
         this.settleTimer = null;
         this.ws = null;
+        const opened = this.opened;
+        this.opened = false;
         for (const stream of STREAMS) this.confirmed[stream] = false;
         this.identitySent = false;
         this.emit('close', { code: ev && ev.code });
@@ -574,6 +592,10 @@ export class DXClusterConnection extends Emitter {
             this._setState('idle');
             return;
         }
+        // Never opened, nothing said: a refused upgrade and a dropped network
+        // are the same event from in here, and only one of them is ours to
+        // mend, so the next attempt asks /connection which it was.
+        if (!opened) this.needsRegistration = true;
         this._scheduleReconnect();
     }
 

@@ -552,8 +552,16 @@ export class RadioSync extends Emitter {
 
     async _pushMode(mode) {
         if (!this.connected && !this.handle) return;
+        const name = SDR_TO_HAMLIB[mode];
+        // An absent mapping means "no rig equivalent", and is obeyed rather
+        // than guessed around. IQ is the case that matters: it is a
+        // receiver-side baseband mode and no transceiver has one, so the old
+        // `mode.toUpperCase()` fallback would push a name every rig rejects and
+        // raise an error toast on each mode change. The frequency is pushed
+        // separately and still follows; only the mode is skipped.
+        if (!name) return;
         try {
-            await this.setMode(this.handle, SDR_TO_HAMLIB[mode] || mode.toUpperCase());
+            await this.setMode(this.handle, name);
         } catch (err) {
             this.emit('message', { text: `Could not set the radio's mode: ${err.message}`, tone: 'error' });
         }

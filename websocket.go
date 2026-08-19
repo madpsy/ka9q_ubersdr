@@ -1882,34 +1882,45 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 		log.Printf("Opus encoder rebuilt for %d Hz after sample rate change", rate)
 	}
 
-	if format == "pcm-zstd" {
-		// IQ modes carry wideband RF samples (essentially white noise) which are
-		// incompressible — zstd achieves ~0% size reduction on them. Use the fastest
-		// compression level for IQ modes to minimise CPU burn while keeping the
-		// protocol identical (clients still receive valid zstd-compressed packets).
-		// At high session counts (~60 IQ192 sessions = 2,820 compressions/second)
-		// SpeedDefault saturates CPU cores and starves the Go scheduler, causing all
-		// audio goroutines — including unrelated Opus channels — to stutter randomly.
-		// SpeedFastest uses ~3-5x less CPU with identical output size on random data.
-		isIQModeForEncoder := session.Mode == "iq" || session.Mode == "iq48" ||
-			session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
-
+	// Built on demand rather than only for a client that asked for pcm-zstd at
+	// connect.  IQ modes force the format regardless of what was negotiated (see
+	// the currentFormat switches below), so a client that connected asking for
+	// Opus and then tuned to IQ reached the pcm-zstd branch with no encoder —
+	// where the nil guard `return`s and takes the whole streaming goroutine with
+	// it, silencing the session until it reconnects.  Every existing IQ-capable
+	// client asks for pcm-zstd up front, which is why that has gone unnoticed.
+	//
+	// The compression level is deliberately not decided here: it follows the
+	// mode, which can change at any time, so it is set per packet instead (see
+	// SetFastMode).
+	ensurePCMEncoder := func() {
+		if pcmBinaryEncoder != nil {
+			return
+		}
+		// The PCM header version tracks the negotiated protocol version so the
+		// client can tell which noise figure the packet carries — 3 stamps the
+		// same 37-byte layout as 2 with passband noise power in place of N0.
+		pcmVersion := PCMBinaryVersion1
 		if version >= 2 {
-			// The PCM header version tracks the negotiated protocol version so the
-			// client can tell which noise figure the packet carries — 3 stamps the
-			// same 37-byte layout as 2 with passband noise power in place of N0.
-			pcmVersion := PCMBinaryVersion2
+			pcmVersion = PCMBinaryVersion2
 			if version >= 3 {
 				pcmVersion = PCMBinaryVersion3
 			}
-			pcmBinaryEncoder = NewPCMBinaryEncoderWithVersionAndLevel(isIQModeForEncoder, pcmVersion)
-			log.Printf("PCM binary encoder initialized with zstd compression (version %d, iq_fast=%v)", pcmVersion, isIQModeForEncoder)
-		} else {
-			pcmBinaryEncoder = NewPCMBinaryEncoderWithVersionAndLevel(isIQModeForEncoder, PCMBinaryVersion1)
-			log.Printf("PCM binary encoder initialized with zstd compression (version 1, iq_fast=%v)", isIQModeForEncoder)
 		}
-		defer pcmBinaryEncoder.Close()
+		pcmBinaryEncoder = NewPCMBinaryEncoderWithVersionAndLevel(false, pcmVersion)
+		log.Printf("PCM binary encoder initialized with zstd compression (version %d)", pcmVersion)
 	}
+
+	if format == "pcm-zstd" {
+		ensurePCMEncoder()
+	}
+	// Nil-checked: the encoder is created on demand and a session that never
+	// leaves Opus never has one.
+	defer func() {
+		if pcmBinaryEncoder != nil {
+			pcmBinaryEncoder.Close()
+		}
+	}()
 
 	// Signal quality update ticker for sending silence packets when squelch is closed
 	// This ensures clients continue to receive signal quality data even when no audio is present
@@ -1946,6 +1957,10 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				}
 				if currentFormat == "opus" && opusEncoder == nil {
 					currentFormat = "pcm-zstd"
+				}
+				if currentFormat == "pcm-zstd" {
+					ensurePCMEncoder()
+					pcmBinaryEncoder.SetFastMode(isIQMode)
 				}
 
 				// Send silence packet with signal quality data
@@ -2167,6 +2182,14 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			if currentFormat == "opus" && opusEncoder == nil {
 				log.Printf("Opus encoder not available, falling back to pcm-zstd")
 				currentFormat = "pcm-zstd"
+			}
+			// IQ samples are white noise and incompressible, so they take the
+			// fastest level; demodulated audio compresses ~2.5-3.5x and is worth
+			// the default.  Set per packet because the mode can change under a
+			// live session — see SetFastMode.
+			if currentFormat == "pcm-zstd" {
+				ensurePCMEncoder()
+				pcmBinaryEncoder.SetFastMode(isIQMode)
 			}
 
 			switch currentFormat {

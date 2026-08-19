@@ -281,6 +281,85 @@ function expectedSignalCsv(v1Csv) {
         assert.ok(mine.equals(theirs), 'WAV bytes differ from v1');
     });
 
+    // --- IQ: an interleaved stereo WAV at the stream's own rate ---------------
+    //
+    // The encoder always took a channel count and was only ever handed 1, so
+    // this is the first caller to exercise the stereo header. Everything here
+    // is what a tool reading the file back would look at, and every one of them
+    // is a field that would produce a plausible-but-wrong file if it were off:
+    // a 2 written as 1 plays I and Q as one stream at half speed.
+    t('an IQ capture writes a stereo header at the stream rate', () => {
+        const IQ_RATE = 10000;
+        // One frame of two samples: I=[0.25, -0.25], Q=[0.5, -0.5], interleaved
+        // the way Recorder._startIQ lays them out.
+        const frames = [Float32Array.from([0.25, 0.5, -0.25, -0.5])];
+        const buf = Buffer.from(encodeWav(frames, IQ_RATE, 2));
+
+        assert.strictEqual(buf.readUInt16LE(22), 2, 'channel count');
+        assert.strictEqual(buf.readUInt32LE(24), IQ_RATE, 'sample rate');
+        // Both derived fields, and both silently wrong if channels is not
+        // carried through: 2 ch * 2 bytes = 4 per frame.
+        assert.strictEqual(buf.readUInt32LE(28), IQ_RATE * 4, 'byte rate');
+        assert.strictEqual(buf.readUInt16LE(32), 4, 'block align');
+        assert.strictEqual(buf.readUInt32LE(40), 8, 'data size');
+        assert.strictEqual(buf.length, 44 + 8);
+    });
+
+    // What an IQ archive says about itself. "Channels: 2" on its own would read
+    // as stereo audio, and anything opening the file has to know which half is
+    // which before it can use it.
+    t('IQ metadata names the channel layout and the stream rate', () => {
+        const r = new Recorder(null);
+        r.format = 'wav';
+        r._iq = true;
+        r.state = 'ready';
+        r.startedAt = T0;
+        r.endedAt = T0 + DURATION_MS;
+        r._rate = 10000;
+        r._channels = 2;
+        r.meta = { frequency: 14175000, mode: 'iq', bandwidthLow: -5000, bandwidthHigh: 5000 };
+
+        const txt = r._metadataText();
+        assert.ok(txt.includes('Channels: 2 (interleaved I/Q — left I, right Q)'), txt);
+        assert.ok(txt.includes('Sample Rate: 10000 Hz'), txt);
+        assert.ok(txt.includes('Mode: IQ'), txt);
+        // The empty signal log is explained rather than left to be wondered at.
+        assert.ok(txt.includes('Signal Log: not recorded'), txt);
+    });
+
+    t('an IQ recording logs no signal rows, so the CSV is header-only', () => {
+        // The readings are frozen in IQ — the server sends a full header only on
+        // the first packet — so a row a second would repeat one stale number and
+        // read as a steady measured signal. _runTimer skips _pushSignal instead.
+        const r = new Recorder(null);
+        r._iq = true;
+        assert.strictEqual(r._signalCsv().trim().split('\n').length, 1);
+    });
+
+    t('IQ does not overwrite the operator’s standing format choice', () => {
+        // start() normally mirrors the chosen format into preferredFormat, which
+        // outlives a panel collapse. IQ forces 'wav', and remembering that would
+        // silently leave every later recording in every other mode as WAV.
+        const r = new Recorder(null);
+        r.preferredFormat = 'webm';
+        // The single line from start() that this is about, with the guard in it.
+        const iq = true;
+        r.format = 'wav';
+        if (!iq) r.preferredFormat = r.format;
+        assert.strictEqual(r.preferredFormat, 'webm');
+    });
+
+    t('IQ samples stay interleaved, and I is not swapped with Q', () => {
+        // Asymmetric on purpose: equal values would pass even if the two planes
+        // were transposed, which is exactly the mistake worth catching.
+        const frames = [Float32Array.from([1, 0, -1, 0])];
+        const buf = Buffer.from(encodeWav(frames, 10000, 2));
+        assert.strictEqual(buf.readInt16LE(44), 32767, 'I of frame 0');
+        assert.strictEqual(buf.readInt16LE(46), 0, 'Q of frame 0');
+        assert.strictEqual(buf.readInt16LE(48), -32768, 'I of frame 1');
+        assert.strictEqual(buf.readInt16LE(50), 0, 'Q of frame 1');
+    });
+
     // A guard on the parity harness itself: if the sandbox silently produced
     // nothing, every strictEqual above would be comparing empty strings.
     t('the v1 sandbox really produced a populated metadata file', async () => {

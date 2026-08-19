@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Button, Field, Icon, Modal, Segmented, Slider } from '../components/ui.jsx';
+import { isIQ } from '../radio/constants.js';
 import {
     listOutputDevices, micPermission, sinkLabel, sinkSupport, unlockDeviceLabels,
 } from '../lib/audioSinks.js';
@@ -9,6 +10,13 @@ const CHANNELS = [
     { value: 'both', label: 'Both' },
     { value: 'left', label: 'Left' },
     { value: 'right', label: 'Right' },
+];
+
+// The same routing, named for what the sides actually carry in IQ.
+const IQ_CHANNELS = [
+    { value: 'both', label: 'I+Q', title: 'Both halves of the quadrature pair' },
+    { value: 'left', label: 'I', title: 'In-phase only — silences Q' },
+    { value: 'right', label: 'Q', title: 'Quadrature only — silences I' },
 ];
 
 const FORMATS = [
@@ -25,12 +33,21 @@ const FORMATS = [
 // Only the expensive direction asks. Going back to Opus costs nothing and
 // stopping to confirm it would be a dialog in the way of the right answer.
 function FormatPicker() {
-    const { audio, actions } = useRadio();
+    const { audio, actions, tuning } = useRadio();
     const [confirming, setConfirming] = useState(false);
-    const current = audio.format || 'opus';
+    const saved = audio.format || 'opus';
+    // IQ is always uncompressed, so the control shows that and stops taking
+    // input — but `audio.format` is deliberately *not* written. It is the
+    // operator's standing preference, and the server restores it by itself the
+    // moment the mode is no longer IQ (websocket.go keeps the format the socket
+    // connected with and only overrides it per packet). Writing it here would
+    // save uncompressed over the top and leave them on it in every mode
+    // afterwards, having never chosen it.
+    const iq = isIQ(tuning.mode);
+    const current = iq ? 'pcm-zstd' : saved;
 
     const choose = (value) => {
-        if (value === current) return;
+        if (iq || value === current) return;
         if (value === 'pcm-zstd') {
             setConfirming(true);
             return;
@@ -46,12 +63,31 @@ function FormatPicker() {
     return (
         <>
             <Field label="Format" inline>
-                <Segmented options={FORMATS} value={current} onChange={choose} size="sm" />
+                {/* Both options are shown in IQ, not just the forced one: which
+                    of the two is unavailable is the information, and dropping
+                    Opus would read as the receiver not offering it at all. */}
+                <Segmented
+                    options={iq ? FORMATS.map((f) => ({ ...f, disabled: true })) : FORMATS}
+                    value={current}
+                    onChange={choose}
+                    size="sm"
+                />
             </Field>
             <div className="note note--tight">
-                Opus is compressed; uncompressed sends lossless 16-bit PCM at
-                four to eight times the bandwidth, depending on the mode.
-                Changing this reconnects the audio stream.
+                {iq ? (
+                    <>
+                        IQ is always uncompressed: Opus is a mono voice codec and
+                        cannot carry a stereo I/Q pair. Your usual choice
+                        (<strong>{saved === 'pcm-zstd' ? 'uncompressed' : 'Opus'}</strong>)
+                        comes back when you leave IQ.
+                    </>
+                ) : (
+                    <>
+                        Opus is compressed; uncompressed sends lossless 16-bit PCM at
+                        four to eight times the bandwidth, depending on the mode.
+                        Changing this reconnects the audio stream.
+                    </>
+                )}
             </div>
             {confirming && (
                 <Modal onClose={() => setConfirming(false)} label="High bandwidth warning">
@@ -85,14 +121,22 @@ function FormatPicker() {
 }
 
 // Which output side to listen on, as in v1's Left/Right checkboxes. This is
-// output routing, not a stereo decode: every buffer is scheduled with two
-// channels (a mono stream duplicated), so it works in every mode.
+// output routing, not a stereo decode: in every mode but IQ the two channels
+// are one mono stream duplicated, so picking a side only changes which ear it
+// arrives in.
+//
+// IQ is the one mode where the sides are genuinely different signals — left is
+// I and right is Q — so they are named for what they are. Choosing one is then
+// a real choice with a real consequence (it silences the other half of the
+// quadrature pair) rather than a seating preference, which is worth saying in
+// the label rather than leaving to be discovered.
 function ChannelPicker() {
-    const { audio, actions } = useRadio();
+    const { audio, actions, tuning } = useRadio();
+    const iq = isIQ(tuning.mode);
     return (
         <Field label="Channel" inline>
             <Segmented
-                options={CHANNELS}
+                options={iq ? IQ_CHANNELS : CHANNELS}
                 value={audio.channel || 'both'}
                 onChange={actions.setChannel}
                 size="sm"

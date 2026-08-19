@@ -20,7 +20,8 @@
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
-import { Field, Segmented, Slider } from '../components/ui.jsx';
+import { Empty, Field, Segmented, Slider } from '../components/ui.jsx';
+import { isIQ } from '../radio/constants.js';
 import { audioBins } from '../lib/audioBand.js';
 import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
 import {
@@ -118,6 +119,7 @@ export default function ScopePanel({ minimal }) {
     const barTipAt = useRef(0);
     const [barTip, setBarTip] = useState(null);
 
+    const iq = isIQ(tuning.mode);
     const showScope = view !== 'waterfall';
     const showWf = view !== 'scope';
     const bars = showScope && shape === 'bars';
@@ -137,6 +139,10 @@ export default function ScopePanel({ minimal }) {
     }, [view, fftSize, timebase, contrast, wfRate, shape, autoLevel, floorDb]);   // eslint-disable-line
 
     useEffect(() => {
+        // Nothing to look at in IQ, and nothing is read: no subscription means
+        // no FFT, since an AnalyserNode only transforms when something reads it.
+        // See the note by the empty state below for why there is no IQ view.
+        if (iq) return undefined;
         // One shared FFT: the filter panel's preview reads the same node, and
         // whichever of them is open drives it (see lib/audioSpectrum.js).
         // Bars need the spectrum, not the waveform — so what is asked of the
@@ -186,7 +192,7 @@ export default function ScopePanel({ minimal }) {
             }
         });
     }, [player, fftSize, showScope, showWf, bars, timebase, tuning, display.palette, contrast, rate,
-        wfRate, autoLevel, floorDb]);
+        wfRate, autoLevel, floorDb, iq]);
 
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
 
@@ -221,6 +227,30 @@ export default function ScopePanel({ minimal }) {
             </div>
         );
     };
+
+    // Both views read one AnalyserNode, which is a real-input FFT sitting after
+    // the channel merger — so in IQ it would transform I+Q summed, which is not
+    // a spectrum of anything. Showing I and Q as two separate real FFTs would
+    // not help either: each is mirror-symmetric about DC and so cannot tell
+    // +1 kHz from -1 kHz, and the two have near-identical magnitude spectra
+    // anyway, differing only in phase.
+    //
+    // The view that *would* be right is a complex FFT of I+jQ, and the RF
+    // waterfall already is one: MIN_ZOOM_SPAN_HZ is 10240, so at full zoom it
+    // shows a 10.24 kHz span — the whole of what a 10 kHz IQ stream carries, at
+    // the server's own resolution with the sidebands the correct way round.
+    // Rebuilding that here in JS would duplicate it, worse.
+    //
+    // Left in the dock rather than removed, so the reason is where the picture
+    // was instead of the panel quietly vanishing on a mode change.
+    if (iq) {
+        return (
+            <Empty>
+                Not available in IQ mode — the stream is a quadrature pair, not
+                audio. Use the main waterfall, which shows the same span.
+            </Empty>
+        );
+    }
 
     return (
         <div className="stack">

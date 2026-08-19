@@ -68,6 +68,10 @@ export class AudioPlayer extends Emitter {
         this.channelMode = 'both';
         this.channels = 0;          // channels in the stream last scheduled
         this.head = null;           // where scheduled audio enters the graph
+        // Whether the stream is a quadrature pair rather than audio. Set from
+        // the mode, not from the channel count, so it is known before the first
+        // packet arrives — see setIQ.
+        this.iq = false;
         this.chain = null;          // active EQ/notch/bandpass nodes
         this.filterSpec = null;
         // The client noise stage — blanker and NR — between `head` and the
@@ -533,11 +537,16 @@ export class AudioPlayer extends Emitter {
         this.filterSpec = spec;
         if (!this.ctx || !this.filterHead) return;
 
+        // Stored above, ignored here while the stream is I/Q — see setIQ. The
+        // spec is kept so leaving IQ puts the operator's filters back exactly
+        // as they were rather than silently resetting them.
+        const active = this.iq ? null : spec;
+
         // Same graph, different numbers: retune it. Rebuilding on every slider
         // move tore the audio, because tearing the chain down drops whatever
         // was in flight through it.
-        if (this.chain && spec && this.chain.shape === shapeKey(spec)) {
-            applyParams(this.chain, spec, this.ctx);
+        if (this.chain && active && this.chain.shape === shapeKey(active)) {
+            applyParams(this.chain, active, this.ctx);
             return;
         }
 
@@ -555,7 +564,7 @@ export class AudioPlayer extends Emitter {
             this.chain = null;
         }
 
-        const chain = spec ? buildChain(this.ctx, spec) : null;
+        const chain = active ? buildChain(this.ctx, active) : null;
         if (chain) {
             this.filterHead.connect(chain.input);
             chain.output.connect(this.gain);
@@ -581,6 +590,35 @@ export class AudioPlayer extends Emitter {
     setNoise(spec) {
         this.noiseSpec = spec;
         if (this.ctx && this.filterHead) this._applyNoise();
+    }
+
+    /**
+     * Whether the stream carries I/Q rather than demodulated audio.
+     *
+     * When it does, every stage between `head` and `gain` is wired out: the
+     * blanker, NR, the gate, the bandpass, the notches, the EQ, the compressor
+     * and the stereo widener. Not because they would crash — most of them are
+     * already per-channel — but because they are all *signal-dependent gain*,
+     * and applying it to I and Q independently is no longer the same complex
+     * signal. The widener is the plainest case: it synthesises a stereo pair
+     * from one channel, so it would overwrite Q outright.
+     *
+     * What is left in the graph is safe: volume, mute, ducking and the L/R
+     * routing are constant scalars, and scaling I and Q by the same number is
+     * only amplitude. (The one exception is choosing a single side, which
+     * silences I or Q — that is the operator asking for it.)
+     *
+     * The specs themselves are untouched, so this is reversible: leaving IQ
+     * re-applies whatever was set before, without the panels having to know
+     * anything about modes.
+     */
+    setIQ(on) {
+        const next = !!on;
+        if (next === this.iq) return;
+        this.iq = next;
+        if (!this.ctx || !this.filterHead) return;
+        this._applyNoise();
+        this.setFilters(this.filterSpec);
     }
 
     /**
@@ -633,7 +671,7 @@ export class AudioPlayer extends Emitter {
     }
 
     _applyNoise() {
-        const spec = this.noiseSpec || {};
+        const spec = this.iq ? {} : (this.noiseSpec || {});
         const nbOn = !!(spec.nb && spec.nb.enabled);
         const nrOn = !!(spec.nr && spec.nr.enabled);
         const nrType = spec.nr && ['nr2', 'rmn'].includes(spec.nr.type) ? spec.nr.type : 'lsa';

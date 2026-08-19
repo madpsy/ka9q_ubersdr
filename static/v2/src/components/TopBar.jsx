@@ -13,7 +13,7 @@ import {
 } from '../lib/format.js';
 import {
     FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MODES, MODE_BY_ID,
-    edgesForWidth, maxFilterWidth,
+    edgesForWidth, isIQ, maxFilterWidth,
 } from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
 import Popover from './Popover.jsx';
@@ -486,6 +486,9 @@ export default function TopBar({ compact }) {
     // edgesForWidth so the two, and the spectrum's edge dragging, cannot
     // disagree about which way a lower-sideband filter opens.
     const setFilterWidth = (w) => actions.setBandwidth(...edgesForWidth(tuning.mode, w, tuning));
+    // IQ's passband is the whole baseband and does not move — see
+    // actions.setBandwidth, which refuses it however it is asked.
+    const iqFixed = isIQ(tuning.mode);
 
     const linkTone = audioState === 'open' ? 'good'
         : audioState === 'reconnecting' || audioState === 'connecting' ? 'warn'
@@ -615,7 +618,7 @@ export default function TopBar({ compact }) {
                                 icon={<Icon.Minus />}
                                 title={`Narrower — ${FILTER_WIDTH_STEP} Hz`}
                                 aria-label="Narrower"
-                                disabled={filterWidth <= FILTER_WIDTH_MIN}
+                                disabled={iqFixed || filterWidth <= FILTER_WIDTH_MIN}
                                 onClick={() => setFilterWidth(
                                     Math.max(FILTER_WIDTH_MIN, filterWidth - FILTER_WIDTH_STEP),
                                 )}
@@ -626,6 +629,7 @@ export default function TopBar({ compact }) {
                                 max={maxFilterWidth(tuning.mode)}
                                 step={FILTER_WIDTH_STEP}
                                 onChange={setFilterWidth}
+                                disabled={iqFixed}
                             />
                             <Button
                                 variant="ghost"
@@ -633,7 +637,7 @@ export default function TopBar({ compact }) {
                                 icon={<Icon.Plus />}
                                 title={`Wider — ${FILTER_WIDTH_STEP} Hz`}
                                 aria-label="Wider"
-                                disabled={filterWidth >= maxFilterWidth(tuning.mode)}
+                                disabled={iqFixed || filterWidth >= maxFilterWidth(tuning.mode)}
                                 onClick={() => setFilterWidth(
                                     Math.min(maxFilterWidth(tuning.mode),
                                         filterWidth + FILTER_WIDTH_STEP),

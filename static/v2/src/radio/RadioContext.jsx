@@ -24,7 +24,7 @@ import { NR_DEFAULTS } from '../lib/nr.js';
 import { getRmNoise, rmCredentials, rmModeSupported } from '../lib/rmnoise.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
-    SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
+    isIQ, SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
     autoSquelchValue, squelchEnabled, squelchThreshold,
 } from './constants.js';
 import { clamp } from '../lib/format.js';
@@ -268,6 +268,16 @@ export function RadioProvider({ children }) {
     // lib/samFallback.js. A ref because it is fed from the packet handler, which
     // must not re-subscribe and must not re-render anything.
     const samWatch = useRef(createSamWatch());
+    // A tune into IQ waiting to be confirmed. The request is held whole rather
+    // than as a mode string, because tuneTo carries a frequency and a passband
+    // that would otherwise be lost across the dialog. In a ref so the actions
+    // object can read it without becoming a dependency of its own memo; the
+    // state beside it exists only to put the dialog on screen.
+    const pendingIQ = useRef(null);
+    const [iqPrompt, setIqPrompt] = useState(null);
+    // Whether the current mode is IQ, for the packet handlers — they subscribe
+    // once and cannot see the tuning state.
+    const iqRef = useRef(false);
     // Read by wake(), which lives in the actions object and so cannot see the
     // state.
     const runningRef = useRef(running);
@@ -372,6 +382,12 @@ export function RadioProvider({ children }) {
             player.pushPCM(planes, sampleRate);
         }));
         offs.push(audioConn.on('quality', ({ basebandPower, noisePower }) => {
+            // Dropped outright in IQ. One full-header packet arrives after the
+            // mode change carrying a genuine reading, and taking it would pin
+            // every meter to a number that then never moves — see the blanking
+            // effect. A ref because this handler is subscribed once and must not
+            // re-subscribe on every retune.
+            if (iqRef.current) return;
             // Before anything else: the figure only counts as evidence when it
             // changes, and the packet handler is the only place it is seen raw.
             noteSamPower(samWatch.current, basebandPower, Date.now());
@@ -689,6 +705,41 @@ export function RadioProvider({ children }) {
     // new one. v1 resets it on every frequency change, and so does this.
     useEffect(() => { player.resetNoiseLearning(); }, [tuning.frequency]);
 
+    // An I/Q stream is not audio, and the client DSP has to come out of circuit
+    // before any of it arrives — see AudioPlayer.setIQ for what that means and
+    // why. Here rather than in the Noise or Filter panels for the reason the RM
+    // Noise gate below is: a collapsed panel is unmounted, so a gate living in
+    // one would leave the whole chain in circuit for anyone who had folded it
+    // away. The player keeps the settings, so this reverses itself on the way
+    // out without the panels knowing anything happened.
+    useEffect(() => {
+        const iq = isIQ(tuning.mode);
+        iqRef.current = iq;
+        player.setIQ(iq);
+        if (!iq) return;
+        // Blank the signal meters, and keep them blank — see the guard in the
+        // 'quality' handler.
+        //
+        // IQ does carry one real reading: the server sends a full header on the
+        // first packet after the mode change and minimal ones from then on, so
+        // basebandPower and noisePower arrive once and never again. Showing that
+        // is the worst of the three options — a needle sitting at a plausible
+        // number, never moving, indistinguishable from a steady signal. Reading
+        // nothing is the honest one, and every meter already draws null as '--'.
+        //
+        // The history goes too, or the squelch's Auto would set a threshold from
+        // samples taken in another mode once IQ is left again.
+        const m = meters.current;
+        m.basebandPower = null;
+        m.noisePower = null;
+        m.snr = null;
+        m.snrHistory.length = 0;
+        // The server does not gate IQ at all, so the indicator must not claim it
+        // is holding anything closed.
+        m.squelchOpen = true;
+        m.lastGateOpenAt = performance.now();
+    }, [tuning.mode]);
+
     // RM Noise is trained on voice bandwidth; on AM, FM and the rest what comes
     // back is not worth hearing, so it takes itself out of the way. Switched
     // off rather than left running, because a stage that is "on" and doing
@@ -815,6 +866,59 @@ export function RadioProvider({ children }) {
             recenterIfNeeded(next);
         };
 
+        // radiod reloads its preset on a mode change and the server waits 500 ms
+        // before re-applying the operator's SSB AGC defaults, so ask for the
+        // settled values after that.
+        const refreshAGCSoon = (mode) => {
+            if (!hasAGCSettings(mode)) return;
+            clearTimeout(agcRefreshTimer.current);
+            agcRefreshTimer.current = setTimeout(() => audioConn.requestAGC(), 800);
+        };
+
+        const commitMode = (mode) => {
+            const def = MODE_BY_ID[mode];
+            if (!def) return;
+            applyTuning({ mode, bandwidthLow: def.low, bandwidthHigh: def.high });
+            refreshAGCSoon(mode);
+        };
+
+        const commitTune = ({ frequency, mode, bandwidthLow, bandwidthHigh }) => {
+            const t = tuningRef.current;
+            const next = MODE_BY_ID[mode] ? mode : t.mode;
+            const def = MODE_BY_ID[next];
+            const l = bandwidthLimits(next);
+            const lo = bandwidthLow != null ? bandwidthLow : (next === t.mode ? t.bandwidthLow : def.low);
+            const hi = bandwidthHigh != null ? bandwidthHigh : (next === t.mode ? t.bandwidthHigh : def.high);
+            applyTuning({
+                ...(frequency != null ? { frequency } : {}),
+                mode: next,
+                bandwidthLow: clamp(Math.round(lo), l.min, l.max),
+                bandwidthHigh: clamp(Math.round(hi), l.min, l.max),
+            });
+            if (next !== t.mode) refreshAGCSoon(next);
+        };
+
+        // Entering IQ is worth stopping for once: it is the only mode that costs
+        // the receiver's owner six times the bandwidth of Opus, and the only one
+        // where the audio chain, the squelch and the S-meter all go away. So it
+        // is confirmed rather than simply selected.
+        //
+        // The gate sits here, in front of both tuning actions, because the mode
+        // can be set from four places on screen plus a control surface plus the
+        // bridge, and a confirmation living in one of the panels would be a
+        // confirmation the other five walked straight past.
+        //
+        // Only on the way *in*, and only from a non-IQ mode: leaving IQ, or
+        // retuning while already there, costs nothing and asking again would be
+        // a dialog in the way of the answer. Returns true when it took the
+        // request, meaning the caller must not act on it.
+        const gateIQ = (pending) => {
+            if (!isIQ(pending.mode) || isIQ(tuningRef.current.mode)) return false;
+            pendingIQ.current = pending;
+            setIqPrompt({ mode: pending.mode });
+            return true;
+        };
+
         const applySquelch = (value) => {
             setSquelchValue(value);
             gateRef.current = squelchEnabled(value) ? squelchThreshold(value) : null;
@@ -934,14 +1038,24 @@ export function RadioProvider({ children }) {
             setMode(mode) {
                 const def = MODE_BY_ID[mode];
                 if (!def) return;
-                applyTuning({ mode, bandwidthLow: def.low, bandwidthHigh: def.high });
-                // radiod reloads its preset on a mode change and the server
-                // waits 500 ms before re-applying the operator's SSB AGC
-                // defaults, so ask for the settled values after that.
-                if (hasAGCSettings(mode)) {
-                    clearTimeout(agcRefreshTimer.current);
-                    agcRefreshTimer.current = setTimeout(() => audioConn.requestAGC(), 800);
-                }
+                if (gateIQ({ kind: 'mode', mode })) return;
+                commitMode(mode);
+            },
+
+            // Answers to the dialog gateIQ puts up. Confirm replays the request
+            // it held, whichever of the two actions made it.
+            confirmIQ() {
+                const p = pendingIQ.current;
+                pendingIQ.current = null;
+                setIqPrompt(null);
+                if (!p) return;
+                if (p.kind === 'tune') commitTune(p.req);
+                else commitMode(p.mode);
+            },
+
+            cancelIQ() {
+                pendingIQ.current = null;
+                setIqPrompt(null);
             },
 
             // Frequency, mode and passband in one tune. The v1 popup pages set
@@ -949,29 +1063,28 @@ export function RadioProvider({ children }) {
             // actions would walk the receiver through an intermediate state —
             // setMode resets the passband, so the old width would be sent for
             // the new mode before the real one arrived.
-            tuneTo({ frequency, mode, bandwidthLow, bandwidthHigh }) {
-                const t = tuningRef.current;
-                const next = MODE_BY_ID[mode] ? mode : t.mode;
-                const def = MODE_BY_ID[next];
-                const l = bandwidthLimits(next);
-                const lo = bandwidthLow != null ? bandwidthLow : (next === t.mode ? t.bandwidthLow : def.low);
-                const hi = bandwidthHigh != null ? bandwidthHigh : (next === t.mode ? t.bandwidthHigh : def.high);
-                applyTuning({
-                    ...(frequency != null ? { frequency } : {}),
-                    mode: next,
-                    bandwidthLow: clamp(Math.round(lo), l.min, l.max),
-                    bandwidthHigh: clamp(Math.round(hi), l.min, l.max),
-                });
-                // Same reason as setMode: radiod reloads its preset on a mode
-                // change and the server re-applies the operator's SSB AGC
-                // defaults 500 ms later.
-                if (next !== t.mode && hasAGCSettings(next)) {
-                    clearTimeout(agcRefreshTimer.current);
-                    agcRefreshTimer.current = setTimeout(() => audioConn.requestAGC(), 800);
-                }
+            tuneTo(req) {
+                const next = MODE_BY_ID[req.mode] ? req.mode : tuningRef.current.mode;
+                if (gateIQ({ kind: 'tune', mode: next, req })) return;
+                commitTune(req);
             },
 
             setBandwidth(low, high) {
+                // IQ's passband is fixed at the full ±5 kHz baseband.
+                //
+                // The server would accept a narrower one — plain iq takes edges,
+                // unlike the wide variants — but the *stream* would not change:
+                // GetSampleRateForMode returns 10 kHz for iq whatever the filter
+                // says. So narrowing only band-limits the samples, and the
+                // recording still claims 10 kHz of spectrum while most of it is
+                // empty, with nothing in the WAV to say so. That is a quiet way
+                // to ruin a capture, and the whole point of the mode is the
+                // capture. clients/go/frontend does the same.
+                //
+                // Refused here rather than only in the sliders because the
+                // spectrum's edge drag, the Multipad, the top bar, a control
+                // surface and the bridge all arrive through this one action.
+                if (isIQ(tuningRef.current.mode)) return;
                 // Clamped here rather than only in the slider, so a stored or
                 // deep-linked passband cannot exceed the mode's limit either.
                 const l = bandwidthLimits(tuningRef.current.mode);
@@ -1345,7 +1458,8 @@ export function RadioProvider({ children }) {
         },
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, catalog, localMarks, hidden, actions]);
+        iqPrompt,
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, catalog, localMarks, hidden, actions, iqPrompt]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

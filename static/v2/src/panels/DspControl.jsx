@@ -9,6 +9,7 @@
 import React from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Field, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { isIQ } from '../radio/constants.js';
 import {
     boolValue, computeStep, controlKind, formatParamName, formatParamValue,
     paramHelp, parseEnum, runtimeParams,
@@ -81,7 +82,20 @@ function Param({ param, value, onChange }) {
 // stay because on a phone "NR3 instead of NR2" is a real mid-session change;
 // the parameters are tuning, done once at the desk.
 export default function DspControl({ minimal }) {
-    const { dsp, actions, running } = useRadio();
+    const { dsp, actions, running, tuning } = useRadio();
+
+    // Refused by the server, not merely pointless: set_dsp on an IQ session is
+    // answered with "DSP insert cannot be used with IQ modes", and the insert
+    // is skipped in the streaming loop regardless. Said here so the answer is
+    // the panel's rather than an error arriving from the socket.
+    if (isIQ(tuning.mode)) {
+        return (
+            <div className="note note--tight">
+                Not available in IQ mode — the receiver only runs its noise
+                reduction on demodulated audio.
+            </div>
+        );
+    }
 
     // Nothing is known until a session is up and the server has answered.
     if (!running || dsp.schemas === null) {

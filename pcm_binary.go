@@ -173,6 +173,27 @@ func NewPCMBinaryEncoderWithVersionAndLevel(fastMode bool, version uint8) *PCMBi
 	}
 }
 
+// SetFastMode picks the compression level for subsequent packets.
+//
+// The level belongs to the data, not to the session. A client can change mode
+// whenever it likes, so the mode it connected with says nothing about what it
+// is streaming now, and setting this once at connect went stale in both
+// directions: switching into IQ left SpeedDefault grinding over incompressible
+// samples, and switching out of it left SpeedFastest on audio that zstd
+// genuinely compresses — which costs bandwidth for the rest of the session,
+// the more expensive of the two mistakes.
+//
+// Safe to flip between packets. EncodeAll emits one self-contained frame per
+// call with no history carried across, so the two shared encoders can be
+// alternated freely; the state that *is* carried between packets — the
+// lastSampleRate/lastChannels header tracking — lives on this struct and is
+// untouched by the level.
+func (e *PCMBinaryEncoder) SetFastMode(fast bool) {
+	e.encoderMu.Lock()
+	defer e.encoderMu.Unlock()
+	e.fastMode = fast
+}
+
 // EncodePCMPacket encodes a PCM audio packet with hybrid header strategy
 //
 // Parameters:

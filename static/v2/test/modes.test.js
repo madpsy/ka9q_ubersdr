@@ -178,7 +178,33 @@ t('an edge cannot be dragged through the other one', () => {
 const SYMMETRY = {
     usb: 'upper', lsb: 'lower',
     am: 'both', sam: 'both', nfm: 'both', fm: 'both', cwu: 'both', cwl: 'both',
+    // IQ is symmetric for the plainest possible reason: the passband is the
+    // whole complex baseband, so its edges are ±Nyquist of a 10 kHz stream and
+    // there is no sideband to be on.
+    iq: 'both',
 };
+
+t('IQ occupies its whole limit range: 10 kHz, symmetric, at maximum', () => {
+    // The passband is the entire complex baseband of a 10 kHz stream, so the
+    // default is also the widest the mode allows — there is no "wider" to go to.
+    // actions.setBandwidth refuses changes outright (narrowing would band-limit
+    // the samples while the stream stayed 10 kHz, quietly hollowing out a
+    // capture), and these numbers are what makes that a fixed full-width filter
+    // rather than a fixed arbitrary one.
+    const m = MODE_BY_ID.iq;
+    assert.strictEqual(m.low, -5000);
+    assert.strictEqual(m.high, 5000);
+    assert.strictEqual(m.high - m.low, 10000, 'IQ is 10 kHz wide');
+    assert.strictEqual(m.low + m.high, 0, 'IQ is symmetric about the dial');
+    assert.strictEqual(maxFilterWidth('iq'), 10000, 'the default is already the maximum');
+
+    const l = bandwidthLimits('iq');
+    assert.strictEqual(l.sideband, 'both');
+    // ±5 kHz is Nyquist for the 10 kHz stream: a wider filter could not be
+    // carried, whatever the server would accept.
+    assert.strictEqual(l.min, -5000);
+    assert.strictEqual(l.max, 5000);
+});
 
 t('every mode is covered by the symmetry table', () => {
     assert.deepStrictEqual(MODES.map((m) => m.id).sort(), Object.keys(SYMMETRY).sort());

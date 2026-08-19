@@ -20,7 +20,8 @@
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { Button, Field, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { Button, Empty, Field, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { isIQ } from '../radio/constants.js';
 import DspControl from './DspControl.jsx';
 import {
     NB_THRESHOLD_MAX, NB_THRESHOLD_MIN, NB_WIDTH_MAX, NB_WIDTH_MIN, TRACE_LEN, TRACE_MS,
@@ -356,6 +357,22 @@ export default function NoisePanel({ minimal }) {
     // while the answer is pending (or the receiver is not running) DspControl
     // says which, and vanishing-then-appearing would read as a glitch.
     const serverAbsent = Array.isArray(dsp.schemas) && dsp.schemas.length === 0;
+
+    // Every stage on this panel is wired out of the graph in IQ — see
+    // AudioPlayer.setIQ. The blanker and NR are signal-dependent gain, and
+    // applying it to I and Q independently stops the pair describing the same
+    // complex signal. The controls are shown rather than hidden, and inert
+    // rather than lying: the settings are still there and come back untouched
+    // on the way out, which is worth saying where they are.
+    if (isIQ(tuning.mode)) {
+        return (
+            <Empty>
+                Not available in IQ mode — noise reduction and the blanker are
+                bypassed, so the quadrature pair reaches the recorder and the
+                bridge exactly as the receiver sent it. Your settings are kept.
+            </Empty>
+        );
+    }
 
     return (
         <div className="stack">

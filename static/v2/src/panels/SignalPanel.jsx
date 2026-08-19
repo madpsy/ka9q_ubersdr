@@ -5,7 +5,7 @@ import React, { useEffect, useRef } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { resolveMaxFps, useDisplay } from '../display/DisplayContext.jsx';
 import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
-import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP } from '../radio/constants.js';
+import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP, isIQ } from '../radio/constants.js';
 import { Bar, Field, Readout, Slider } from '../components/ui.jsx';
 import {
     audioLevelPercent, padReading, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
@@ -211,10 +211,28 @@ function NeedleMeter({ ticks, fraction, peak, colourAt, title }) {
 // Split out so the 12 Hz meter sampling that drives the marker and the
 // open/closed badge re-renders only this control, not the whole panel.
 function SquelchControl({ minimal }) {
-    const { squelch, actions } = useRadio();
+    const { squelch, actions, tuning } = useRadio();
     const m = useMeters(12);
     const snr = m.snr;
     const open = m.squelchOpen;
+
+    // The server does not gate IQ at all — audioGateAllows is skipped outright
+    // for it, because a threshold on the SNR of raw RF samples gates nothing
+    // meaningful. Leaving the control live would be the worse failure of the
+    // two available: a slider that moves, a badge that says OPEN or CLOSED, and
+    // no effect on the audio whatsoever. There is also no SNR to set it
+    // against — IQ packets carry a minimal header, so the reading behind this
+    // is frozen at whatever arrived first.
+    if (isIQ(tuning.mode)) {
+        return (
+            <Field label="Squelch" hint="Unavailable">
+                <div className="note note--tight">
+                    Not available in IQ mode: the receiver does not gate a
+                    quadrature stream, and there is no live SNR to gate on.
+                </div>
+            </Field>
+        );
+    }
 
     return (
         <>

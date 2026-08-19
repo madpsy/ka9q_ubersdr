@@ -43,7 +43,7 @@ import { rungOfSpan, spanAtRung, zoomLadder } from '../lib/zoom.js';
 import { MIN_ZOOM_SPAN_HZ } from '../radio/spectrum-connection.js';
 import {
     FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MAX_FREQ, MIN_FREQ, MODES, SQUELCH_MAX, SQUELCH_MIN,
-    SQUELCH_STEP, TUNING_STEPS, edgesForWidth, maxFilterWidth, snapStep, stepLabel,
+    SQUELCH_STEP, TUNING_STEPS, edgesForWidth, isIQ, maxFilterWidth, snapStep, stepLabel,
 } from '../radio/constants.js';
 
 // Detent widths, CSS px. A detent is what one step of the gesture costs, so
@@ -807,6 +807,8 @@ function WidthRow({ minimal }) {
                 max={maxWidth}
                 step={FILTER_WIDTH_STEP}
                 onChange={(w) => actions.setBandwidth(...edgesForWidth(tuning.mode, w, tuning))}
+                /* Fixed at the full baseband in IQ — see actions.setBandwidth. */
+                disabled={isIQ(tuning.mode)}
             />
         </PadRow>
     );

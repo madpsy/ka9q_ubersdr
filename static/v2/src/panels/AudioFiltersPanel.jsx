@@ -8,7 +8,8 @@
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
-import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { Button, Empty, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { isIQ } from '../radio/constants.js';
 import { audioBins, audioWindow } from '../lib/audioBand.js';
 import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
 import { cssVar, drawAudioRuler, drawAudioWaterfall, newRing } from '../lib/audioWaterfall.js';
@@ -365,6 +366,20 @@ export default function AudioFiltersPanel() {
     // the user's own curve, so no button is lit and the label says so.
     const flat = eq.gains.every((g) => !g) && !eq.makeup;
     const preset = flat ? 'flat' : detectPreset(eq.gains);
+
+    // The whole chain is wired out of the graph in IQ — see AudioPlayer.setIQ.
+    // The stereo widener is the clearest reason why: it manufactures a stereo
+    // pair from one signal, so on a genuine quadrature pair it would overwrite
+    // Q outright. The rest are signal-dependent gain, which is no better.
+    if (isIQ(tuning.mode)) {
+        return (
+            <Empty>
+                Not available in IQ mode — the EQ, notches, bandpass, gate,
+                compressor and widener are all bypassed so the quadrature pair
+                passes through untouched. Your settings are kept.
+            </Empty>
+        );
+    }
 
     // The bandpass can only sit inside the audio this mode carries, which is
     // what v1 recomputes whenever the passband changes.

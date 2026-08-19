@@ -20,25 +20,39 @@
 import React from '../react.js';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
+import { isIQ } from '../radio/constants.js';
 
 export default function ExtensionsPanel() {
     const { list, activeId, minimised, toggle } = useExtensions();
-    const { running } = useRadio();
+    const { running, tuning } = useRadio();
+    // Every extension decodes demodulated audio, and IQ is not that. The rows
+    // stay listed and go dead, for the same reason an extension the operator
+    // has not enabled does: a missing row cannot say why it is missing.
+    // Anything open has already been closed by ExtensionsContext.
+    const iq = isIQ(tuning.mode);
 
     return (
         <div className="stack exts">
+            {iq && (
+                <div className="note note--tight">
+                    Not available in IQ mode — these decode demodulated audio,
+                    and IQ carries raw quadrature samples instead.
+                </div>
+            )}
             <div className="list">
                 {list.map((e) => {
                     const open = activeId === e.id;
-                    const reason = !e.enabled
-                        ? 'Not enabled on this receiver'
-                        : (e.requiresAudio && !running ? 'Start the receiver to use this' : null);
+                    const reason = iq
+                        ? 'Not available in IQ mode'
+                        : !e.enabled
+                            ? 'Not enabled on this receiver'
+                            : (e.requiresAudio && !running ? 'Start the receiver to use this' : null);
                     return (
                         <button
                             key={e.id}
                             type="button"
                             className={`list__row ext-row${open ? ' is-active' : ''}`}
-                            disabled={!e.enabled}
+                            disabled={iq || !e.enabled}
                             title={reason || e.summary}
                             onClick={() => toggle(e.id)}
                         >

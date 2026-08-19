@@ -75,6 +75,8 @@ export class Recorder extends Emitter {
         this._media = null;         // MediaRecorder
         this._dest = null;          // MediaStreamAudioDestinationNode
         this._worklet = null;
+        this._untap = null;         // unsubscribes the IQ tap
+        this._iq = false;           // this recording is a quadrature pair
         this._epoch = -1;
         this._timer = null;
         this._lastSignalAt = 0;
@@ -113,20 +115,34 @@ export class Recorder extends Emitter {
 
     // `meta` is a snapshot, not a live reference: the operator is free to retune
     // mid-recording, and the file should say where it started.
-    async start({ format, meta, sample }) {
+    async start({ format, meta, sample, iq }) {
         if (this.state === 'recording') return;
 
         const player = this.player;
         if (!player || !player.ctx || !player.recordTap) {
             throw new Error('Audio is not running — start the receiver first.');
         }
-        if (format === 'wav' && !wavSupported()) {
+        // WebM means MediaRecorder, which means Opus, which is a lossy mono
+        // voice codec — it would not merely degrade an I/Q pair, it would
+        // destroy the thing being recorded. WAV is the only answer in IQ, and
+        // the panel forces it; this is the backstop for any other caller.
+        if (iq && format !== 'wav') {
+            throw new Error('IQ can only be recorded as WAV — Opus cannot carry a quadrature pair.');
+        }
+        // The IQ path writes the decoded samples straight out and never touches
+        // the worklet, so it has nothing to do with a secure context.
+        if (format === 'wav' && !iq && !wavSupported()) {
             throw new Error('WAV recording needs a secure context (HTTPS).');
         }
 
         this._discard();
         this.format = format === 'wav' ? 'wav' : 'webm';
-        this.preferredFormat = this.format;
+        this._iq = !!iq;
+        // Not remembered when IQ forced it. `preferredFormat` is the operator's
+        // standing choice and survives the panel being collapsed, so writing the
+        // forced 'wav' into it would leave every later recording in every other
+        // mode as WAV, chosen by nobody.
+        if (!iq) this.preferredFormat = this.format;
         this.notice = '';
         this.meta = meta || {};
         this._sample = typeof sample === 'function' ? sample : null;
@@ -134,7 +150,8 @@ export class Recorder extends Emitter {
         this._rate = player.ctx.sampleRate;
 
         try {
-            if (this.format === 'wav') await this._startWav();
+            if (iq) this._startIQ();
+            else if (this.format === 'wav') await this._startWav();
             else this._startWebm();
         } catch (err) {
             this._teardown();
@@ -181,11 +198,53 @@ export class Recorder extends Emitter {
         this._media.start(1000);   // one chunk a second, as v1 does
     }
 
+    // IQ recording, taken from the player's pre-graph tap rather than through
+    // Web Audio at all.
+    //
+    // Three separate reasons it cannot use the path below:
+    //
+    //   recordTap hangs off `gain`, which is *after* volume and mute. IQ is not
+    //   worth listening to, so it will often be recorded with the receiver
+    //   turned down — and a muted receiver would write a file of zeros.
+    //
+    //   The worklet reads inputs[0][0] and is declared outputChannelCount [1],
+    //   so it would capture I and throw Q away — half of the only thing an IQ
+    //   recording is for.
+    //
+    //   A 10 kHz AudioContext is not guaranteed; the player falls back to the
+    //   browser's own rate if the constructor refuses, and the graph would then
+    //   resample the samples we are trying to capture exactly.
+    //
+    // The tap sidesteps all three: it delivers the decoded planes at the stream's
+    // own rate, before volume, mute, ducking and the routing. It is also immune
+    // to the context-rebuild check in _runTimer, since it is not attached to a
+    // context — but that check is harmless rather than wrong, so it is left alone.
+    _startIQ() {
+        this._channels = 2;
+        const pcm = this._pcm;   // captured, for the reason given in _startWebm
+        this._untap = this.player.onAudio((planes, frames, sampleRate) => {
+            if (!planes.length) return;
+            // The stream's rate, not the context's: those agree in the normal
+            // case and the fallback above is exactly when they do not.
+            if (sampleRate) this._rate = sampleRate;
+            const left = planes[0];
+            const right = planes.length > 1 ? planes[1] : planes[0];
+            // Interleaved, because that is what encodeWav writes and what every
+            // tool reading an I/Q WAV expects: L=I, R=Q, sample by sample.
+            const out = new Float32Array(frames * 2);
+            for (let i = 0; i < frames; i++) {
+                out[i * 2] = left[i];
+                out[i * 2 + 1] = right[i];
+            }
+            pcm.push(out);
+        });
+    }
+
     async _startWav() {
         const ctx = this.player.ctx;
-        // Mono: the tap carries a duplicated mono stream in every mode the
-        // receiver offers, so a second identical channel would double the file
-        // for nothing.
+        // Mono: outside IQ the tap carries a duplicated mono stream, so a second
+        // identical channel would double the file for nothing. IQ does not come
+        // through here at all — see _startIQ.
         this._channels = 1;
 
         try {
@@ -296,6 +355,10 @@ export class Recorder extends Emitter {
             try { this._worklet.disconnect(); } catch (e) { /* ignore */ }
             this._worklet = null;
         }
+        if (this._untap) {
+            this._untap();
+            this._untap = null;
+        }
         this._sample = null;
     }
 
@@ -354,7 +417,15 @@ export class Recorder extends Emitter {
             }
 
             const now = Date.now();
-            if (this._sample && now - this._lastSignalAt >= SIGNAL_MS) {
+            // Nothing is logged in IQ, and an empty log is the honest answer.
+            //
+            // The readings behind it come from the packet header, and the server
+            // sends a full header only on the *first* IQ packet — every one after
+            // it is minimal, so basebandPower and noisePower are frozen at
+            // whatever arrived when the mode changed. Writing that once a second
+            // would fill the file with a number that never moves, which reads as
+            // a steady measured signal rather than as no measurement at all.
+            if (!this._iq && this._sample && now - this._lastSignalAt >= SIGNAL_MS) {
                 this._lastSignalAt = now;
                 this._pushSignal(now);
             }
@@ -444,9 +515,21 @@ export class Recorder extends Emitter {
         // Minutes deliberately unpadded, seconds padded — as v1 writes it.
         const durationStr = `${Math.floor(durationSec / 60)}:${String(durationSec % 60).padStart(2, '0')}`;
 
-        const formatLine = this.format === 'wav'
-            ? `Container: WAV\nCodec: PCM (16-bit signed, little-endian)\nSample Rate: ${this._rate} Hz\nChannels: ${this._channels}`
-            : `Container: WebM\nCodec: Opus\nSample Rate: ${this._rate} Hz`;
+        // The channel layout is spelled out for IQ because "Channels: 2" alone
+        // would read as stereo audio, and anything opening the file needs to
+        // know which half is which before it can do anything with it. The rate
+        // is the stream's, taken from the tap rather than from the AudioContext
+        // — see _startIQ for why those can differ.
+        let formatLine;
+        if (this._iq) {
+            formatLine = `Container: WAV\nCodec: PCM (16-bit signed, little-endian)\n`
+                + `Sample Rate: ${this._rate} Hz\nChannels: 2 (interleaved I/Q — left I, right Q)\n`
+                + 'Signal Log: not recorded (IQ carries no per-packet signal quality)';
+        } else if (this.format === 'wav') {
+            formatLine = `Container: WAV\nCodec: PCM (16-bit signed, little-endian)\nSample Rate: ${this._rate} Hz\nChannels: ${this._channels}`;
+        } else {
+            formatLine = `Container: WebM\nCodec: Opus\nSample Rate: ${this._rate} Hz`;
+        }
 
         return `SDR Recording Metadata
 ========================

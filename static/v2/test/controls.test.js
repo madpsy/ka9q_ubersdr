@@ -249,8 +249,12 @@ t('every mode in the receiver is directly mappable', () => {
 });
 
 t('mode cycling wraps in both directions', () => {
-    const first = MODES[0].id;
-    const last = MODES[MODES.length - 1].id;
+    // The cycle is the mode list minus IQ — see MODE_CYCLE. A knob walking off
+    // the end of the list must land back at the start, not in a mode with no
+    // audio and a confirmation dialog it cannot answer.
+    const cycle = MODES.filter((m) => m.id !== 'iq');
+    const first = cycle[0].id;
+    const last = cycle[cycle.length - 1].id;
     const up = fakeRadio({ tuning: { frequency: 1e7, mode: last, bandwidthLow: 50, bandwidthHigh: 2700 } });
     runFunction('mode_next', TRIG, up);
     assert.deepStrictEqual(up.calls[0], ['setMode', first]);
@@ -575,10 +579,28 @@ t('an encoder’s detents reach the radio once it is marked as one', () => {
 
 // --- Hamlib mode table -------------------------------------------------------
 
-t('every receiver mode has a Hamlib name to push at a rig', () => {
+t('every demodulating mode has a Hamlib name to push at a rig', () => {
     for (const m of MODES) {
+        if (m.id === 'iq') continue;
         assert.ok(SDR_TO_HAMLIB[m.id], `${m.id} has no Hamlib equivalent`);
     }
+});
+
+t('IQ is reachable by name even though the cycle skips it', () => {
+    // Skipping it in MODE_CYCLE is about a blind walk landing somewhere
+    // surprising, not about putting IQ out of reach: a button mapped to it
+    // deliberately still has to work.
+    const r = fakeRadio();
+    runFunction('mode_iq', TRIG, r);
+    assert.deepStrictEqual(r.calls[0], ['setMode', 'iq']);
+});
+
+t('IQ has no Hamlib name, and that is the instruction not to push one', () => {
+    // No transceiver has an IQ mode — it is baseband from the receiver, not
+    // something a rig can be put into. _pushMode reads the absence as "skip"
+    // rather than falling back to mode.toUpperCase(), which would send every
+    // rig an 'IQ' it rejects and raise an error toast per mode change.
+    assert.strictEqual(SDR_TO_HAMLIB.iq, undefined);
 });
 
 t('the CW sidebands do not collapse onto one Hamlib mode', () => {

@@ -6,7 +6,7 @@ import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import { VFO_IDS, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import {
     AGC_CONTROLS, FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MODES, MODE_BY_ID, TUNING_STEPS,
-    bandwidthLimits, edgesForWidth, hasAGCSettings, maxFilterWidth, stepLabel,
+    bandwidthLimits, edgesForWidth, hasAGCSettings, isIQ, maxFilterWidth, stepLabel,
 } from '../radio/constants.js';
 
 // AGC, shown only for USB and LSB — the only modes v1 exposes it for.
@@ -107,6 +107,7 @@ export default function ReceiverPanel({ minimal }) {
     const mode = MODE_BY_ID[tuning.mode] || MODES[0];
     const limits = bandwidthLimits(tuning.mode);
     const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
+    const iq = isIQ(tuning.mode);
 
     // Lower-sideband modes are edited as a positive width around the carrier so
     // the sliders behave the same way regardless of sideband.
@@ -158,18 +159,33 @@ export default function ReceiverPanel({ minimal }) {
 
             {!minimal && (
                 <>
-                    <Field label="Filter width" hint={`${(width / 1000).toFixed(2)} kHz`}>
+                    {/* Fixed in IQ at the full ±5 kHz baseband — see the note on
+                        actions.setBandwidth. Shown rather than hidden, and
+                        reading 10.00 kHz, because the width is worth knowing
+                        even when it cannot be changed. */}
+                    <Field
+                        label="Filter width"
+                        hint={iq ? `${(width / 1000).toFixed(2)} kHz — fixed in IQ` : `${(width / 1000).toFixed(2)} kHz`}
+                    >
                         <Slider
                             value={Math.min(width, maxFilterWidth(tuning.mode))}
                             min={FILTER_WIDTH_MIN}
                             max={maxFilterWidth(tuning.mode)}
                             step={FILTER_WIDTH_STEP}
                             onChange={setWidth}
+                            disabled={iq}
                         />
                     </Field>
 
-                    <Field label="Filter shift" hint={`${Math.round(shift)} Hz`}>
-                        <Slider value={Math.round(shift)} min={-1500} max={1500} step={10} onChange={setShift} />
+                    <Field label="Filter shift" hint={iq ? '0 Hz — fixed in IQ' : `${Math.round(shift)} Hz`}>
+                        <Slider
+                            value={Math.round(shift)}
+                            min={-1500}
+                            max={1500}
+                            step={10}
+                            onChange={setShift}
+                            disabled={iq}
+                        />
                     </Field>
 
                     <div className="passband">

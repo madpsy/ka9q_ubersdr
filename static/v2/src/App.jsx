@@ -10,6 +10,7 @@ import SpectrumView from './components/SpectrumView.jsx';
 import MobileShell from './components/MobileShell.jsx';
 import FloatingLayer from './components/FloatingLayer.jsx';
 import IdleWatch from './components/IdleWatch.jsx';
+import IQConfirm from './components/IQConfirm.jsx';
 import VisibilityWatch from './components/VisibilityWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
 import CallsignAnnounceWatch from './components/CallsignAnnounceWatch.jsx';
@@ -207,6 +208,11 @@ export default function App() {
                                     about an operator who is here and idle, the
                                     other about a tab nobody is looking at. */}
                                 <VisibilityWatch />
+                                {/* Here for the same reason as the announcers
+                                    below: the mode can be changed from half a
+                                    dozen places, several of which are panels
+                                    that unmount when collapsed. */}
+                                <IQConfirm />
                                 <AnnounceWatch />
                                 {/* The other announcer: the receiver reads out its
                                     own tuning, this one reads out who a lookup

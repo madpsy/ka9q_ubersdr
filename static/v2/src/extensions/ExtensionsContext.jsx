@@ -18,6 +18,8 @@
 // one is decoding. Opening a second therefore closes the first.
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
+import { useRadio } from '../radio/RadioContext.jsx';
+import { isIQ } from '../radio/constants.js';
 import { EXTENSIONS, EXTENSION_BY_ID } from './registry.jsx';
 
 const STORAGE_KEY = 'ubersdr.v2.extensions';
@@ -62,6 +64,7 @@ function loadMinimal() {
 }
 
 export function ExtensionsProvider({ children }) {
+    const { tuning } = useRadio();
     // `null` until /api/extensions answers; an empty array afterwards means the
     // receiver really has none. The difference matters — "loading" and "none
     // enabled" must not read the same.
@@ -93,6 +96,20 @@ export function ExtensionsProvider({ children }) {
     useEffect(() => {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ floats, minimal })); } catch (e) { /* ignore */ }
     }, [floats, minimal]);
+
+    // Every extension here is a decoder over demodulated audio, and IQ carries
+    // none — the server hands an audio extension the session's own channel count
+    // and sample rate, so on a 10 kHz quadrature pair a decoder is being fed RF
+    // and told it is speech. Closed rather than left running behind the mode
+    // change: a window still on screen producing nothing reads as the decoder
+    // being broken.
+    //
+    // Here rather than in the panel because the panel is unmounted whenever its
+    // dock is collapsed, and an extension outlives the launcher that opened it.
+    const iq = isIQ(tuning.mode);
+    useEffect(() => {
+        if (iq) setActiveId(null);
+    }, [iq]);
 
     // The registry, annotated. `enabled` is null while the fetch is in flight,
     // and nothing is openable until it is known.

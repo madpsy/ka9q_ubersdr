@@ -10,6 +10,7 @@
 import React, { useEffect, useReducer, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Bar, Button, Field, Icon, Segmented } from '../components/ui.jsx';
+import { isIQ } from '../radio/constants.js';
 import {
     MAX_RECORDING_MS, formatElapsed, getRecorder, playbackDuration, wavSupported,
 } from '../lib/recorder.js';
@@ -120,18 +121,31 @@ export default function RecorderPanel({ minimal }) {
         setPlayDur(0);
     }, [held]);
 
-    const wavOk = wavSupported();
-    const options = FORMATS.map((f) => (
-        f.value === 'wav' && !wavOk
+    // IQ is captured from the player's pre-graph tap as an interleaved stereo
+    // WAV — see Recorder._startIQ. Opus is not offered rather than merely
+    // discouraged: it is a lossy mono voice codec, so it would not degrade a
+    // quadrature pair but destroy it. WAV's usual secure-context requirement
+    // does not apply either, because the IQ path never touches the worklet.
+    const iq = isIQ(tuning.mode);
+    const wavOk = wavSupported() || iq;
+    const effectiveFormat = iq ? 'wav' : format;
+    const options = FORMATS.map((f) => {
+        if (iq) {
+            return f.value === 'wav'
+                ? { ...f, title: 'Interleaved stereo — left I, right Q, at the stream\'s own rate' }
+                : { ...f, disabled: true, title: 'Opus cannot carry a quadrature pair' };
+        }
+        return f.value === 'wav' && !wavOk
             ? { ...f, label: 'WAV', title: 'WAV recording needs a secure context (HTTPS)' }
-            : f
-    ));
+            : f;
+    });
 
     const start = async () => {
         setError('');
         try {
             await rec.start({
-                format,
+                iq,
+                format: effectiveFormat,
                 meta: {
                     frequency: tuning.frequency,
                     mode: tuning.mode,
@@ -269,12 +283,19 @@ export default function RecorderPanel({ minimal }) {
             />
 
             {!minimal && (
-                <Field label="Format" hint={rec.busy ? 'locked while a recording is held' : undefined}>
+                <Field
+                    label="Format"
+                    hint={rec.busy ? 'locked while a recording is held' : (iq ? 'WAV only in IQ' : undefined)}
+                >
                     <Segmented
                         options={options}
-                        value={rec.busy ? rec.format : format}
+                        value={rec.busy ? rec.format : effectiveFormat}
                         onChange={(v) => {
-                            if (rec.busy) return;
+                            // Not merely ignored: `format` is remembered on the
+                            // recorder across a collapse, and letting IQ write
+                            // 'wav' into it would silently change the operator's
+                            // standing choice for every other mode.
+                            if (rec.busy || iq) return;
                             if (v === 'wav' && !wavOk) {
                                 setError('WAV recording needs a secure context (HTTPS).');
                                 return;

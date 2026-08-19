@@ -20,7 +20,7 @@
 // look mapped and do nothing.
 
 import {
-    MODES, MODE_BY_ID, bandwidthLimits, maxFilterWidth,
+    MODES, MODE_BY_ID, bandwidthLimits, isIQ, maxFilterWidth,
     SQUELCH_MIN, SQUELCH_MAX, SQUELCH_STEP, SQUELCH_DEFAULT_ON, squelchEnabled,
 } from '../radio/constants.js';
 import { VFO_IDS, getVfos, selectVfo, stepVfo } from '../lib/vfos.js';
@@ -48,7 +48,13 @@ export const BAND_FREQS = {
 
 // Cycled in the order the mode selector shows them, so "next mode" walks the
 // UI rather than a second order nothing else agrees with.
-const MODE_CYCLE = MODES.map((m) => m.id);
+//
+// IQ is the exception: it sits last in that list, so a knob walking off the end
+// of CW-U would land in a mode with no demodulated audio, no filters and a
+// confirmation dialog a knob cannot answer. It stays reachable by name — the
+// per-mode `mode_iq` function below is still generated from MODES — so a button
+// can be mapped to it deliberately. Only the blind walk skips it.
+const MODE_CYCLE = MODES.filter((m) => !isIQ(m.id)).map((m) => m.id);
 
 const REL = 'relative';
 const ABS = 'absolute';

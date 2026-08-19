@@ -8,8 +8,8 @@
 //   full header   [magic u16 0x5043][version u8][formatType u8]
 //                 [rtpTimestamp u64][wallClockMs u64][sampleRate u32]
 //                 [channels u8]
-//                 v2 only: [basebandPower f32][noiseDensity f32]
-//                 [reserved u32]                    37 bytes (v2), 29 (v1)
+//                 v2+ only: [basebandPower f32][noise f32]
+//                 [reserved u32]                    37 bytes (v2/v3), 29 (v1)
 //   minimal       [magic u16 0x504D][version u8][rtpTimestamp u64]
 //                 [reserved u16]                    13 bytes
 //
@@ -18,6 +18,12 @@
 // packet — that is where the per-packet signal quality rides — but the minimal
 // form is handled anyway: it costs a branch, and reading one as a full header
 // would play the metadata as audio rather than fail.
+//
+// The noise field is radiod's density N0 (dBFS/Hz) on header version 2 and the
+// noise power in the demodulator passband (dBFS) on version 3. Only the latter
+// can be subtracted from basebandPower to get an SNR, so a version 2 packet is
+// reported as having no noise reading rather than a misleading one — the UI
+// asks for version 3 and a server old enough to answer 2 predates the fix.
 //
 // See pcm_binary.go, which writes all of this.
 
@@ -30,6 +36,9 @@ const MAGIC_MINIMAL = 0x504D;   // "PM"
 const FULL_HEADER_V1 = 29;
 const FULL_HEADER_V2 = 37;
 const MINIMAL_HEADER = 13;
+
+// Header version that carries passband noise power rather than the density N0.
+const VERSION_NOISE_POWER = 3;
 
 // A zstd frame header, which every packet on this path starts with. Read as a
 // little-endian u32 the magic is 0xFD2FB528.
@@ -96,7 +105,9 @@ export class PCMStreamDecoder {
             if (version >= 2) {
                 signal = {
                     basebandPower: quality(view.getFloat32(25, true)),
-                    noiseDensity: quality(view.getFloat32(29, true)),
+                    noisePower: version >= VERSION_NOISE_POWER
+                        ? quality(view.getFloat32(29, true))
+                        : null,
                 };
             }
         } else if (magic === MAGIC_MINIMAL) {

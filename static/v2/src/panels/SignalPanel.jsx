@@ -37,7 +37,7 @@ const KEEP_MS = 1000;
 const S_TICKS = [['1', 1], ['3', 3], ['5', 5], ['7', 7], ['9', 9], ['+20', 11], ['+40', 13], ['+60', 15]]
     .map(([label, s]) => [label, (s - S_UNITS_MIN) / (S_UNITS_MAX - S_UNITS_MIN)]);
 
-const SNR_TICKS = [SNR_MIN, 40, 50, SNR_MAX].map((v) => [String(v), snrFraction(v)]);
+const SNR_TICKS = [SNR_MIN, 0, 10, 20, SNR_MAX].map((v) => [String(v), snrFraction(v)]);
 
 // Labels sit centred on their tick, except the outermost pair, which align to
 // the ends of the track so they cannot hang off the panel.
@@ -322,18 +322,23 @@ function drawSnr(canvas, points, now) {
     if (vals.length < 2) return;
 
     // v1's rule (app.js drawSnrHistoryChart): pad by 10% of the span with a
-    // 2 dB floor, never go below 0 dB, and always show at least 10 dB — so a
-    // quiet channel does not get magnified into a noise mountain. Forcing 0
-    // and 20 into view, as this used to, squashed the trace against the top:
-    // SNR here is power over noise *density*, which sits around 30–60 dB.
+    // 2 dB floor, and always show at least 10 dB — so a quiet channel does not
+    // get magnified into a noise mountain.
+    //
+    // v1 also clamps the floor at 0 dB, which this deliberately does not. That
+    // clamp was safe while the figure was power over noise *density*, sitting
+    // around 30–60 dB·Hz and never negative. A real SNR is negative on an empty
+    // channel, and holding the axis at 0 would flatten the trace against the
+    // bottom of the chart exactly when someone is looking to see whether there
+    // is anything there at all.
     let lo = Math.min(...vals);
     let hi = Math.max(...vals);
     const pad = Math.max(2, (hi - lo) * 0.1);
-    lo = Math.max(0, lo - pad);
+    lo -= pad;
     hi += pad;
     if (hi - lo < 10) {
         const mid = (hi + lo) / 2;
-        lo = Math.max(0, mid - 5);
+        lo = mid - 5;
         hi = mid + 5;
     }
 
@@ -547,9 +552,10 @@ export default function SignalPanel({ minimal }) {
                 </div>
             </button>
 
-            {/* SNR on v1's meter scale: 30 dB at the left, 60 at the right
-                (s-meter-needle.js snrMin/snrMax), in the same red→green ramp its
-                needle uses. No peak hold here, as in v1. */}
+            {/* SNR from SNR_MIN at the left to SNR_MAX at the right, in a
+                red→green ramp. No longer v1's 30–60 scale: that was calibrated
+                against the old S/N0 figure in dB·Hz, and this is an SNR in dB.
+                No peak hold here, as in v1. */}
             <button type="button" className="meter meter--swap" onClick={swap} title={hint}>
                 {needle ? (
                     <NeedleMeter
@@ -597,11 +603,19 @@ export default function SignalPanel({ minimal }) {
                             to show at all. Six is "-100.5". The other two cards
                             do neither — see Readout. */}
                         <Readout label="Signal" value={padReading(power)} unit="dBFS" reserve={6} />
-                        <Readout label="Noise" value={padReading(m.noiseDensity)} unit="dBFS" reserve={6} />
-                        {/* Coloured on v1's ramp — red at 30 dB, green at 50 —
-                            rather than on thresholds of 3 and 10 dB, which every
-                            normal reading cleared, so the card was permanently
-                            green. */}
+                        {/* The noise in the same passband the signal is measured
+                            over, so the two cards are directly comparable and
+                            their difference is the SNR card. This used to show
+                            radiod's density N0, which is dBFS/Hz — a number
+                            about 34 dB lower that could not be compared with
+                            the signal beside it. */}
+                        <Readout label="Noise" value={padReading(m.noisePower)} unit="dBFS" reserve={6} />
+                        {/* Red at 0 dB, green from 15 — see SNR_COLOUR_MIN/MAX.
+                            Thresholds of 3 and 10 dB were tried once and left
+                            the card permanently green, but that was against the
+                            old dB·Hz figure, which cleared them on empty air.
+                            Against a real SNR those numbers mean what they
+                            look like, and the ramp is close to them. */}
                         <Readout
                             label="SNR"
                             value={snr == null ? '—' : snr.toFixed(1)}

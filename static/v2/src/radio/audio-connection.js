@@ -1,9 +1,9 @@
 // Audio WebSocket client (/ws).
 //
-// Wire format, requested as `format=opus&version=2`:
+// Wire format, requested as `format=opus&version=3`:
 //
 //   binary frame: [timestamp u64][sampleRate u32][channels u8]
-//                 [basebandPower f32][noiseDensity f32][opus payload...]
+//                 [basebandPower f32][noisePower f32][opus payload...]
 //   text frame:   JSON control messages (status / error / pong / agc_state ...)
 //
 // The other format the server offers is `pcm-zstd`, lossless 16-bit PCM at
@@ -23,7 +23,17 @@ import {
     connectionCheck, frameSize, getBypassPassword, getSessionId, setServerSessionId, wsBase,
 } from './session.js';
 
-// Version 2 header: timestamp(8) sampleRate(4) channels(1) power(4) noise(4).
+// Protocol version asked for at connect.
+//
+// Version 3 differs from 2 only in the second signal-quality field: it carries
+// the noise power inside the demodulator passband rather than radiod's density
+// N0 in dBFS/Hz. That is what makes `basebandPower - noisePower` an SNR in dB —
+// on version 2 the same subtraction yields S/N0 in dB·Hz, reading about 34 dB
+// high on a 2.65 kHz filter and shifting whenever the filter width changed.
+// The byte layout is identical, so only the meaning of the field moves.
+const PROTOCOL_VERSION = 3;
+
+// Version 2/3 header: timestamp(8) sampleRate(4) channels(1) power(4) noise(4).
 const HEADER_BYTES = 21;
 
 export class AudioConnection extends Emitter {
@@ -118,7 +128,7 @@ export class AudioConnection extends Emitter {
             bandwidthHigh: String(Math.round(params.bandwidthHigh)),
             user_session_id: getSessionId(),
             format: this.format,
-            version: '2',
+            version: String(PROTOCOL_VERSION),
         });
         const password = getBypassPassword();
         if (password) q.set('password', password);
@@ -325,19 +335,21 @@ export class AudioConnection extends Emitter {
             return;
         }
 
-        // The header layout is fixed by the `version=2` we request at connect
-        // time, so it can be parsed unconditionally.
+        // The header layout is fixed by the version we request at connect time,
+        // so it can be parsed unconditionally.
         if (buffer.byteLength <= HEADER_BYTES) return;
         const view = new DataView(buffer);
         const sampleRate = view.getUint32(8, true);
         const channels = view.getUint8(12) || 1;
 
         let basebandPower = view.getFloat32(13, true);
-        let noiseDensity = view.getFloat32(17, true);
-        // -999 is the server's "no channel status available" sentinel.
+        let noisePower = view.getFloat32(17, true);
+        // -999 is the server's "no channel status available" sentinel. On
+        // version 3 the noise field is also -999 when radiod has reported no
+        // usable filter edges, since N0 without a bandwidth cannot be scaled.
         if (!(basebandPower > -998)) basebandPower = null;
-        if (!(noiseDensity > -998)) noiseDensity = null;
-        this.emit('quality', { basebandPower, noiseDensity });
+        if (!(noisePower > -998)) noisePower = null;
+        this.emit('quality', { basebandPower, noisePower });
 
         this.emit('opus', {
             data: new Uint8Array(buffer, HEADER_BYTES),

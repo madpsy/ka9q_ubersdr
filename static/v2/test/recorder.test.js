@@ -185,12 +185,17 @@ function runV2(format, receiver, meta) {
     r.meta = { ...meta, receiver };
 
     let bp = null;
-    let nd = null;
-    r._sample = () => ({ basebandPower: bp, noiseDensity: nd });
+    let np = null;
+    // The same readings v1 is given, as the noise figure each side now holds:
+    // v1 reads the density N0 off protocol version 2, v2 reads passband noise
+    // power off version 3. Feeding the identical numbers is what lets the two
+    // CSVs be compared at all — see the parity assertion below for the two
+    // places they are meant to differ.
+    r._sample = () => ({ basebandPower: bp, noisePower: np });
     READINGS.forEach(([b, n], i) => {
         // v2's meters carry null where v1 carries its -999 sentinel.
         bp = b === -999 ? null : b;
-        nd = n === -999 ? null : n;
+        np = n === -999 ? null : n;
         r._pushSignal(T0 + (i + 1) * 1000);
     });
 
@@ -213,6 +218,33 @@ const CASES = [
 
 const base = `sdr-recording-${new Date(T0).toISOString().replace(/[:.]/g, '-').slice(0, -5)}`;
 
+// v1's signal CSV, rewritten into the one v2 must now produce.
+//
+// The two used to be byte-identical and are still held to that everywhere the
+// SNR fix does not reach — timestamps, column order, the -999/null handling,
+// two decimal places. Exactly two things changed with protocol version 3, and
+// spelling them out here is what keeps the rest of the parity honest:
+//
+//   * the middle column is noise *power* over the passband, not the density N0
+//     v1 still reads, so the heading says so;
+//   * the SNR is no longer floored at 0. v1's floor made sense while the figure
+//     was S/N0 in dB·Hz, which is positive for anything audible; a real SNR is
+//     negative on an empty channel, and clamping would log "0.00" for both a
+//     dead band and a signal sitting on the noise floor.
+function expectedSignalCsv(v1Csv) {
+    const [header, ...rows] = v1Csv.split('\n');
+    const out = [header.replace('Noise Density (dBFS)', 'Noise Power (dBFS)')];
+    for (const row of rows) {
+        if (row === '') { out.push(row); continue; }
+        const [ts, power, noise, snr] = row.split(',');
+        out.push([
+            ts, power, noise,
+            power === 'N/A' || noise === 'N/A' ? snr : (Number(power) - Number(noise)).toFixed(2),
+        ].join(','));
+    }
+    return out.join('\n');
+}
+
 (async () => {
     for (const [label, rxKey, meta] of CASES) {
         for (const format of ['webm', 'wav']) {
@@ -228,8 +260,8 @@ const base = `sdr-recording-${new Date(T0).toISOString().replace(/[:.]/g, '-').s
             t(`${label} (${format}): metadata .txt matches v1 exactly`, () => {
                 assert.strictEqual(v2.txt, v1[`${base}.txt`]);
             });
-            t(`${label} (${format}): signal .csv matches v1 exactly`, () => {
-                assert.strictEqual(v2.csv, v1[`${base}-signal.csv`]);
+            t(`${label} (${format}): signal .csv matches v1 but for the SNR fix`, () => {
+                assert.strictEqual(v2.csv, expectedSignalCsv(v1[`${base}-signal.csv`]));
             });
         }
     }

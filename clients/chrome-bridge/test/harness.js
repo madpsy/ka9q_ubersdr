@@ -87,7 +87,7 @@ function makePage(over = {}) {
     const state = {
         tuning: { frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
         audio: { volume: 0.7, muted: false, channel: 'both', bufferSec: 0.2 },
-        squelch: { value: 24, enabled: false, threshold: null },
+        squelch: { value: -10, enabled: false, threshold: null },
         view: { centerFreq: 14100000, span: 204800, binBandwidth: 100, binCount: 2048 },
         dsp: { schemas: null },
     };
@@ -121,7 +121,7 @@ function makePage(over = {}) {
         audio: state.audio,
         squelch: state.squelch,
         view: state.view,
-        meters: over.meters || { basebandPower: -73, noiseDensity: -110, snr: 37, level: 0.4 },
+        meters: over.meters || { basebandPower: -73, noisePower: -83, snr: 10, level: 0.4 },
         running: over.running !== false,
         session: { maxSec: 0, idleSec: 300, startedAt: 0 },
         sessionId: 'sess-1',

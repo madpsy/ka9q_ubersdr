@@ -139,8 +139,17 @@ export function RadioProvider({ children }) {
     });
     // One number: the slider position. Its floor doubles as "off", which is how
     // v1 behaves and avoids an enabled flag that can disagree with the value.
+    // `squelchValueDb`, not the `squelchValue` this used to be saved under.
+    //
+    // The old key held a threshold on the server's pre-version-3 figure, which
+    // was S/N0 in dB·Hz — around 34 dB above the true SNR on a 2.65 kHz filter,
+    // and by a different amount on every other filter width. There is no way to
+    // convert one: the value does not record the bandwidth it was set at. Rather
+    // than guess and leave people either permanently muted or with no squelch at
+    // all, the old key is ignored and the gate starts off, which is also what a
+    // new browser gets.
     const [squelchValue, setSquelchValue] = useState(
-        saved.squelchValue != null ? saved.squelchValue : SQUELCH_MIN,
+        saved.squelchValueDb != null ? saved.squelchValueDb : SQUELCH_MIN,
     );
     // null until the server reports. `agc_state` carries the operator's
     // config.yaml `ssb_agc` values for anything this session has not
@@ -190,7 +199,7 @@ export function RadioProvider({ children }) {
     // Mutable, high-rate values. Never a dependency of a render.
     const meters = useRef({
         basebandPower: null,
-        noiseDensity: null,
+        noisePower: null,        // noise in the passband, dBFS — same units as basebandPower
         snr: null,
         level: 0,
         channels: 0,            // channels in the stream now playing
@@ -362,14 +371,20 @@ export function RadioProvider({ children }) {
         offs.push(audioConn.on('pcm', ({ planes, sampleRate }) => {
             player.pushPCM(planes, sampleRate);
         }));
-        offs.push(audioConn.on('quality', ({ basebandPower, noiseDensity }) => {
+        offs.push(audioConn.on('quality', ({ basebandPower, noisePower }) => {
             // Before anything else: the figure only counts as evidence when it
             // changes, and the packet handler is the only place it is seen raw.
             noteSamPower(samWatch.current, basebandPower, Date.now());
             const m = meters.current;
             m.basebandPower = basebandPower;
-            m.noiseDensity = noiseDensity;
-            m.snr = basebandPower != null && noiseDensity != null ? basebandPower - noiseDensity : null;
+            m.noisePower = noisePower;
+            // Both figures are powers over the same passband on protocol
+            // version 3, so this subtraction is an SNR in dB. It was not on
+            // version 2, where the server sent the noise *density* N0 in
+            // dBFS/Hz and the difference came out as S/N0 in dB·Hz — about
+            // 34 dB high on a 2.65 kHz filter, and moving with the filter
+            // width, which is what made the squelch shift between modes.
+            m.snr = basebandPower != null && noisePower != null ? basebandPower - noisePower : null;
             if (m.snr != null) {
                 m.snrHistory.push(m.snr);
                 if (m.snrHistory.length > SQUELCH_AUTO_SAMPLES) m.snrHistory.shift();
@@ -735,7 +750,7 @@ export function RadioProvider({ children }) {
             audioFormat: audio.format,
             filters,
             noise,
-            squelchValue,
+            squelchValueDb: squelchValue,
             dspFilter: dsp.filter,
             dspParams: dsp.params,
             followTuning,

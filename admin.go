@@ -3167,9 +3167,14 @@ func (ah *AdminHandler) HandleChannelStatus(w http.ResponseWriter, r *http.Reque
 		"freq_offset":       sanitizeFloat32(channelStatus.FreqOffset),
 		"doppler_frequency": sanitizeFloat64(channelStatus.DopplerFrequency),
 
-		// Signal Quality Metrics
+		// Signal Quality Metrics.
+		//
+		// noise_density is radiod's N0, a density in dBFS/Hz; noise_power is the
+		// same figure scaled to the filter width, and the only one of the two that
+		// can be subtracted from baseband_power to get an SNR in dB.
 		"baseband_power": sanitizeFloat32(channelStatus.BasebandPower),
 		"noise_density":  sanitizeFloat32(channelStatus.NoiseDensity),
+		"noise_power":    sanitizeFloat32(channelNoisePower(channelStatus.NoiseDensity, channelStatus.FilterBandwidthHz())),
 		"pll_snr":        sanitizeFloat32(channelStatus.PllSnr),
 		"fm_snr":         sanitizeFloat32(channelStatus.FmSnr),
 		"squelch_open":   sanitizeFloat32(channelStatus.SquelchOpen),

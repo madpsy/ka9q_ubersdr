@@ -329,7 +329,7 @@ const SOURCE = {
     squelch: { value: 40, enabled: true, threshold: 12 },
     squelchOpen: true,
     view: { centerFreq: 14100000, span: 204800, binBandwidth: 100, binCount: 2048 },
-    meters: { basebandPower: -73.04, noiseDensity: -110.2, snr: 37.16, level: 0.4321, clipping: false },
+    meters: { basebandPower: -73.04, noisePower: -110.2, snr: 37.16, level: 0.4321, clipping: false },
     follow: true,
     running: true,
     session: { maxSec: 0, idleSec: 300, startedAt: 1000 },
@@ -371,7 +371,7 @@ t('signal is rounded at the source, so diffing means something', () => {
 t('a non-reading is null rather than a very quiet signal', () => {
     // The server sends values below -900 to mean "nothing measured". Plotted
     // as a level they draw a cliff.
-    const s = signalSnapshot({ meters: { basebandPower: -999, noiseDensity: -999, snr: -999 } });
+    const s = signalSnapshot({ meters: { basebandPower: -999, noisePower: -999, snr: -999 } });
     assert.deepStrictEqual(s, { dbfs: null, noise: null, snr: null, s: null, level: null, clipping: false });
 });
 

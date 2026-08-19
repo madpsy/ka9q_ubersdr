@@ -68,7 +68,9 @@ export function signalSnapshot(src) {
     const dbfs = isReading(m.basebandPower) ? m.basebandPower : null;
     return {
         dbfs: round(dbfs, 1),
-        noise: isReading(m.noiseDensity) ? round(m.noiseDensity, 1) : null,
+        // Noise power over the demodulator passband, dBFS — the same units as
+        // `dbfs` above, so `dbfs - noise` is the `snr` beside it.
+        noise: isReading(m.noisePower) ? round(m.noisePower, 1) : null,
         snr: isReading(m.snr) ? round(m.snr, 1) : null,
         // The S-meter reading the page is showing, so a client's meter agrees
         // with the one on screen rather than re-deriving it from dBFS with a

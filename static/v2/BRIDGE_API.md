@@ -150,21 +150,34 @@ missing value, never an absent key. That is what makes patch merging safe.
 ### `audio`
 ```jsonc
 { "volume": 0.7, "muted": false, "ducked": false, "channel": "both", "bufferSec": 0.2,
-  "squelch": { "value": 40, "enabled": true, "threshold": 12, "open": true } }
+  "squelch": { "value": 6, "enabled": true, "threshold": 6, "open": true } }
 ```
 `muted` is the operator's setting; `ducked` is transient silence applied by
 something else (a transmitting rig, an extension speaking over the audio).
 They are separate so a client showing a mute button shows the *mute*.
 `squelch.open` is live — whether the gate is passing audio right now.
 
+`squelch.value` is a threshold in **dB of SNR**, running from −10 (the floor,
+which means off) to 46. It used to run 24–80 against the pre-version-3 S/N0
+figure in dB·Hz; a client with a hard-coded threshold from then is roughly 34 dB
+too high and will hold the gate shut. `threshold` is the same number, or absent
+when the squelch is off.
+
 ### `signal`
 ```jsonc
-{ "dbfs": -73, "noise": -110.2, "snr": 37.2, "s": 9, "level": 0.432, "clipping": false }
+{ "dbfs": -73, "noise": -83.4, "snr": 10.4, "s": 9, "level": 0.432, "clipping": false }
 ```
 `s` is the S-meter reading **the page itself is showing**, so a client's meter
 agrees with the one on screen instead of re-deriving it from dBFS with a
 different curve. Values are rounded at the source (0.1 dB); a reading that does
 not exist is `null`, never a very negative number.
+
+`dbfs` and `noise` are both powers over the demodulator passband, so `snr` is
+their difference in dB: below 0 the channel is empty, 3–10 dB is weak but
+readable speech, 20 dB and up is armchair copy. Before protocol version 3
+`noise` carried radiod's noise *density* N0 in dBFS/Hz, which made `snr` about
+34 dB higher on a 2.65 kHz filter and different again on every other filter
+width — a client with thresholds set against the old numbers needs them redone.
 
 This topic changes continuously. It is rate limited to **10 messages a second
 per client** by default; ask for less with `minIntervalMs`. A patch held back by

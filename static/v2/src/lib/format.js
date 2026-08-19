@@ -248,18 +248,24 @@ export function sUnitLabelAt(fraction) {
     return 'S9+' + Math.round((s - 9) * 10 + EPS);
 }
 
-// SNR meter, matching v1's scales so a signal reads the same in both UIs.
+// SNR meter.
 //
-// v1 puts SNR on a 30–60 dB meter (s-meter-needle.js `snrMin`/`snrMax`, mirrored
-// in signal-meter.js as SNR_MIN/SNR_MAX) and colours it on a shorter ramp: red
-// at or below 30 dB through yellow at 40 to green at or above 50
-// (s-meter-needle.js `snrColour`, app.js `snrColourForValue`). The two are
-// deliberately different: the meter has headroom above the point where a signal
-// is already as good as it gets.
-export const SNR_MIN = 30;
-export const SNR_MAX = 60;
-export const SNR_COLOUR_MIN = 30;
-export const SNR_COLOUR_MAX = 50;
+// These used to be v1's scales — a 30–60 meter with a red-to-green ramp from 30
+// to 50 — which made sense only because the figure being measured was not an
+// SNR. The server sent noise as a density, so `power - noise` came out as S/N0
+// in dB·Hz: about 34 dB above the true SNR on a 2.65 kHz filter, which is why a
+// 30 dB floor looked reasonable and why thresholds of 3 and 10 dB left the
+// DisplayPanel card permanently green.
+//
+// Protocol version 3 sends noise over the same passband as the signal, so this
+// is now an SNR in dB and the scale is the one that means: below 0 the channel
+// is empty, 3-10 dB is weak but readable speech, and 20 dB and up is armchair
+// copy. The ramp reaches green at 15 dB, where a signal stops improving in any
+// way the listener notices. See channelNoisePower in radiod_status.go.
+export const SNR_MIN = -5;
+export const SNR_MAX = 30;
+export const SNR_COLOUR_MIN = 0;
+export const SNR_COLOUR_MAX = 15;
 
 // Position on an SNR meter, 0..1.
 export function snrFraction(snr) {
@@ -267,7 +273,7 @@ export function snrFraction(snr) {
     return clamp((snr - SNR_MIN) / (SNR_MAX - SNR_MIN), 0, 1);
 }
 
-// v1's hue ramp: 0 (red) at 30 dB to 120 (green) at 50 dB.
+// Hue ramp: 0 (red) at SNR_COLOUR_MIN to 120 (green) at SNR_COLOUR_MAX.
 export function snrColour(snr) {
     if (snr == null || !Number.isFinite(snr)) return 'hsl(0, 0%, 55%)';
     const c = clamp(snr, SNR_COLOUR_MIN, SNR_COLOUR_MAX);

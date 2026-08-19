@@ -168,10 +168,19 @@ export function defaultAGC() {
 // ever sends squelchOpen -999, so the gate is the control users actually have.
 // The gate drops audio before encoding and keeps the signal-quality packets
 // flowing, so SNR stays live on screen while muted.
-export const SQUELCH_MIN = 24;        // far-left slider position — means "off"
-export const SQUELCH_MAX = 80;
+// The range is in dB of SNR, and moved with protocol version 3: it used to be
+// 24–80, which was calibrated against the server's old S/N0 figure in dB·Hz —
+// roughly 34 dB higher than the true SNR on a 2.65 kHz filter, and different
+// again on every other filter width, which is what made a threshold set on SSB
+// gate wrongly on CW. -10 to 46 is the same span in the units that now arrive.
+export const SQUELCH_MIN = -10;       // far-left slider position — means "off"
+export const SQUELCH_MAX = 46;
 export const SQUELCH_STEP = 0.5;
 export const SQUELCH_SENTINEL = -999; // value the server reads as "disabled"
+
+// Where the on/off toggle lands when switching the squelch back on: above the
+// noise but below anything worth hearing. Was 40 when the scale was dB·Hz.
+export const SQUELCH_DEFAULT_ON = 6;
 
 // Server-side gate behaviour, mirrored so the open/closed indicator matches
 // what the server is actually doing (see audioGateAllows in websocket.go).

@@ -51,9 +51,21 @@ import (
 // 20     | 4    | uint32  | Sample rate in Hz (e.g., 12000, 48000)
 // 24     | 1    | uint8   | Number of channels (1=mono, 2=stereo)
 // 25     | 4    | float32 | Baseband power in dBFS
-// 29     | 4    | float32 | Noise density (N0) in dBFS
+// 29     | 4    | float32 | Noise density (N0) in dBFS/Hz
 // 33     | 4    | uint32  | Reserved for future use
 // 37     | N    | []byte  | PCM audio data (big-endian int16 samples)
+//
+// Version 3 (37 bytes):
+// Identical to version 2 except for the meaning of the field at offset 29,
+// which carries the noise power inside the demodulator passband (dBFS) rather
+// than the density N0 (dBFS/Hz).  Only version 3 lets a client read the SNR as
+// `baseband_power - noise`; on version 2 that subtraction is out by
+// 10·log10(filter bandwidth), roughly 34 dB on a 2.65 kHz SSB filter, and moves
+// with the filter width.  See channelNoisePower in radiod_status.go.
+//
+// Version 2 is kept because separately-shipped clients (clients/electron,
+// clients/tui, clients/ubersdr-audio) have squelch thresholds and meter scales
+// calibrated against the old figure; they keep asking for 2 until rebuilt.
 //
 // MINIMAL HEADER FORMAT (13 bytes):
 // ---------------------------------
@@ -85,7 +97,8 @@ const (
 
 	// Versions for future compatibility
 	PCMBinaryVersion1 uint8 = 1 // Original format
-	PCMBinaryVersion2 uint8 = 2 // With signal quality fields
+	PCMBinaryVersion2 uint8 = 2 // With signal quality fields (noise as density N0)
+	PCMBinaryVersion3 uint8 = 3 // Same layout as 2, noise as power in the passband
 
 	// Format types
 	PCMFormatUncompressed uint8 = 0 // Raw PCM (no compression)
@@ -94,7 +107,7 @@ const (
 
 	// Header sizes
 	PCMFullHeaderSizeV1  = 29 // Full metadata header (version 1)
-	PCMFullHeaderSizeV2  = 37 // Full metadata header (version 2, with signal quality)
+	PCMFullHeaderSizeV2  = 37 // Full metadata header (versions 2 and 3, with signal quality)
 	PCMMinimalHeaderSize = 13 // Minimal header (timestamp only)
 )
 
@@ -183,13 +196,16 @@ func (e *PCMBinaryEncoder) EncodePCMPacket(pcmData []byte, gpsTimeNs int64, samp
 //   - sampleRate: Audio sample rate in Hz
 //   - channels: Number of audio channels (1=mono, 2=stereo)
 //   - basebandPower: Baseband signal power in dBFS (use -999.0 for no data)
-//   - noiseDensity: Noise density (N0) in dBFS (use -999.0 for no data)
+//   - noise: Noise figure in dBFS (use -999.0 for no data).  Which figure this
+//     is depends on the encoder's version: N0, a density in dBFS/Hz, on version
+//     2; the noise power in the demodulator passband on version 3.  The caller
+//     picks it to match — see signalQualityFor in websocket.go.
 //   - forceFullHeader: Always send a full header (e.g. for non-IQ modes that need per-packet signal data)
 //
 // Returns:
 //   - Encoded packet ready for WebSocket transmission
 //   - Error if encoding fails
-func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int, basebandPower, noiseDensity float32, forceFullHeader bool) ([]byte, error) {
+func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int, basebandPower, noise float32, forceFullHeader bool) ([]byte, error) {
 	e.encoderMu.Lock()
 	defer e.encoderMu.Unlock()
 
@@ -207,7 +223,7 @@ func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, gpsT
 
 	if needFullHeader {
 		// FULL HEADER PACKET (29 or 37 bytes + data, depending on version)
-		packet = e.buildFullHeaderPacket(pcmData, gpsTimeNs, sampleRate, channels, basebandPower, noiseDensity)
+		packet = e.buildFullHeaderPacket(pcmData, gpsTimeNs, sampleRate, channels, basebandPower, noise)
 
 		// Update tracking
 		e.lastSampleRate = sampleRate
@@ -235,7 +251,7 @@ func (e *PCMBinaryEncoder) EncodePCMPacketWithSignalQuality(pcmData []byte, gpsT
 }
 
 // buildFullHeaderPacket creates a packet with full metadata header (29 or 37 bytes depending on version)
-func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int, basebandPower, noiseDensity float32) []byte {
+func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, gpsTimeNs int64, sampleRate int, channels int, basebandPower, noise float32) []byte {
 	// Determine header size based on version
 	headerSize := PCMFullHeaderSizeV1
 	if e.version >= PCMBinaryVersion2 {
@@ -286,8 +302,9 @@ func (e *PCMBinaryEncoder) buildFullHeaderPacket(pcmData []byte, gpsTimeNs int64
 		binary.LittleEndian.PutUint32(packet[offset:], math.Float32bits(basebandPower))
 		offset += 4
 
-		// Noise density (4 bytes): N0 in dBFS
-		binary.LittleEndian.PutUint32(packet[offset:], math.Float32bits(noiseDensity))
+		// Noise (4 bytes): N0 in dBFS/Hz on version 2, passband noise power in
+		// dBFS on version 3
+		binary.LittleEndian.PutUint32(packet[offset:], math.Float32bits(noise))
 		offset += 4
 
 		// Reserved (4 bytes): For future use

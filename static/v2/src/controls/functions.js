@@ -21,7 +21,7 @@
 
 import {
     MODES, MODE_BY_ID, bandwidthLimits, maxFilterWidth,
-    SQUELCH_MIN, SQUELCH_MAX, SQUELCH_STEP, squelchEnabled,
+    SQUELCH_MIN, SQUELCH_MAX, SQUELCH_STEP, SQUELCH_DEFAULT_ON, squelchEnabled,
 } from '../radio/constants.js';
 import { VFO_IDS, getVfos, selectVfo, stepVfo } from '../lib/vfos.js';
 import { announceSettings, setAnnounceSettings } from '../lib/announce.js';
@@ -219,7 +219,7 @@ const AUDIO = group('Audio', [
             const sq = ctx.state().squelch;
             // Off is the floor; turning it back on restores a usable threshold
             // rather than the floor it would otherwise sit on.
-            ctx.actions.setSquelch(squelchEnabled(sq.value) ? SQUELCH_MIN : 40);
+            ctx.actions.setSquelch(squelchEnabled(sq.value) ? SQUELCH_MIN : SQUELCH_DEFAULT_ON);
         },
     },
     {

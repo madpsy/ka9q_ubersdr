@@ -410,6 +410,43 @@ for (const [kind, make, open] of KINDS) {
     });
 }
 
+t('spectrum: a resume that fails is retried, not left paused', async () => {
+    // The hidden-tab pause, end to end. VisibilityWatch closes the socket five
+    // seconds after the tab goes away and reopens it when it comes back — and
+    // reopening is the one connect in the app that nobody is watching, because
+    // the operator has just this moment returned to a page that looks fine.
+    //
+    // Two things had to be true for it to come back on its own: the resume
+    // clears closedByUser (or the backoff below refuses to book anything), and
+    // a handshake refused before the upgrade — a bare 1006, which is all a
+    // browser will say about it — still counts as worth retrying.
+    const conn = new SpectrumConnection();
+    const view = { frequency: 7100000, binBandwidth: 100 };
+    await conn.connect(view);
+    sockets[0].open();
+
+    conn.disconnect();                          // the tab went away
+    assert.strictEqual(conn.state, 'idle');
+
+    await conn.connect(view);                   // and came back
+    const before = posts.length;
+    sockets[1].land(1006);                      // ...to a receiver that refused
+
+    assert.strictEqual(conn.state, 'reconnecting', 'the resume is retried');
+    assert.ok(conn.reconnectTimer, 'and a retry is actually booked');
+    assert.strictEqual(conn.needsRegistration, true, 'asking why, on the next attempt');
+
+    now += 20000;
+    conn.reconnectTimer = null;
+    await conn.connect(view);
+    assert.strictEqual(posts.length, before + 1, 'which it did');
+    assert.deepStrictEqual(
+        sockets[2].url.includes('frequency=7100000'), true,
+        'and came back to the view it was left on',
+    );
+    conn.disconnect();
+});
+
 t('spectrum: a late close from a replaced socket leaves the live one alone', async () => {
     // Closing is not instant, so a pause and a resume inside one round trip
     // lands the old socket's close after the new one is up. Unguarded, that

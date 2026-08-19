@@ -52,9 +52,10 @@ type RadiodChannelInfo struct {
 	OutputSampratekHz string    `json:"output_samprate_khz"` // Formatted for display
 	FilterLow         float32   `json:"filter_low"`          // Hz
 	FilterHigh        float32   `json:"filter_high"`         // Hz
-	BasebandPower     float32   `json:"baseband_power"`      // dBFS
-	NoiseDensity      float32   `json:"noise_density"`       // dBFS
-	SNR               float32   `json:"snr"`                 // dB (calculated)
+	BasebandPower     float32   `json:"baseband_power"`      // dBFS, over the whole passband
+	NoiseDensity      float32   `json:"noise_density"`       // dBFS/Hz — a density (radiod's N0), not a power
+	NoisePower        float32   `json:"noise_power"`         // dBFS — noise_density scaled to filter_high − filter_low
+	SNR               float32   `json:"snr"`                 // dB (baseband_power − noise_power)
 	OutputDataPackets int64     `json:"output_data_packets"`
 	LastUpdate        time.Time `json:"last_update"`
 	TimeSinceUpdate   string    `json:"time_since_update"`
@@ -300,12 +301,17 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 			demodType = "Spectrum"
 		}
 
-		// Calculate SNR if we have both baseband power and noise density
+		// Calculate SNR if we have both baseband power and noise density.
+		//
+		// radiod reports noise as the density N0 in dBFS/Hz while baseband power
+		// is integrated over the whole passband, so the two can only be subtracted
+		// once the density has been scaled to the filter width — see
+		// channelNoisePower.  Without that this read 10·log10(bandwidth) high,
+		// about 34 dB on a 2.65 kHz SSB filter, and moved with the filter.
 		var snr float32
-		if status.BasebandPower > -200 && status.NoiseDensity > -200 {
-			// SNR = (Signal - Noise) / Noise in linear, then convert to dB
-			// In dBFS: SNR_dB = BasebandPower_dBFS - NoiseDensity_dBFS
-			snr = status.BasebandPower - status.NoiseDensity
+		noisePower := channelNoisePower(status.NoiseDensity, status.FilterBandwidthHz())
+		if status.BasebandPower > -200 && signalKnown(noisePower) {
+			snr = status.BasebandPower - noisePower
 		}
 
 		// Format time since update
@@ -403,6 +409,7 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 			FilterHigh:        sanitizeFloat32(status.HighEdge),
 			BasebandPower:     sanitizeFloat32(status.BasebandPower),
 			NoiseDensity:      sanitizeFloat32(status.NoiseDensity),
+			NoisePower:        sanitizeFloat32(noisePower),
 			SNR:               sanitizeFloat32(snr),
 			OutputDataPackets: status.OutputDataPackets,
 			LastUpdate:        status.LastUpdate,

@@ -329,7 +329,7 @@ type ClientMessage struct {
 	Params  map[string]interface{} `json:"params,omitempty"`  // set_dsp / set_dsp_params: filter parameters
 	// Audio gate fields (type: "set_audio_gate") — all optional; nil = keep current value.
 	// Valid range: -999 (disabled/sentinel) to +999.
-	MinSNR   *float32 `json:"min_snr,omitempty"`   // minimum SNR in dB (basebandPower − noiseDensity); -999 = disabled
+	MinSNR   *float32 `json:"min_snr,omitempty"`   // minimum SNR (basebandPower − noise, in the session's protocol version); -999 = disabled
 	MinPower *float32 `json:"min_power,omitempty"` // minimum baseband power in dBFS (e.g. -80.0); -999 = disabled
 	// Mute field (type: "set_mute") — true = mute audio, false = unmute.
 	Muted *bool `json:"muted,omitempty"`
@@ -420,10 +420,16 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	password := query.Get("password")
 
 	// Get protocol version from query string (optional, default v1)
+	//
+	// 1: no signal-quality fields in the audio header.
+	// 2: adds baseband power and the noise density N0 (dBFS/Hz).
+	// 3: same layout as 2, but the noise field is the noise power in the
+	//    demodulator passband (dBFS), so `baseband - noise` is a real SNR.
+	//    See channelNoisePower in radiod_status.go.
 	version := 1
 	if v := query.Get("version"); v != "" {
 		var parsedVer int
-		if _, err := fmt.Sscanf(v, "%d", &parsedVer); err == nil && parsedVer >= 1 && parsedVer <= 2 {
+		if _, err := fmt.Sscanf(v, "%d", &parsedVer); err == nil && parsedVer >= 1 && parsedVer <= 3 {
 			version = parsedVer
 		}
 	}
@@ -1590,8 +1596,12 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			// This is entirely internal to ubersdr — radiod is not involved.
 			// Default for new sessions: both thresholds are -999 (disabled).
 			//
-			// min_snr:   SNR threshold in dB (basebandPower − noiseDensity).
-			//            SNR is always ≥ 0 for a real signal. -999 = disabled.
+			// min_snr:   SNR threshold, as basebandPower − noise using whichever
+			//            noise figure this session's protocol version carries.  On
+			//            version 3 that is an SNR in dB, and a weak-but-readable
+			//            signal sits around 3-10 dB; on version 2 it is S/N0 in
+			//            dB·Hz and the same signal reads ~34 dB higher on a 2.65 kHz
+			//            filter.  -999 = disabled.
 			// min_power: Baseband power threshold in dBFS (a negative value, e.g. -80.0).
 			//            -999 = disabled.
 			//
@@ -1675,6 +1685,64 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 	}
 }
 
+// signalQualityFor returns the two figures the audio header carries for a
+// client that negotiated protocol `version`: baseband power and a noise figure,
+// both in dBFS and both already gain-adjusted.  SignalUnavailable for both when
+// radiod has no status for the channel.
+//
+// The noise figure depends on the version, and deliberately so.  radiod reports
+// noise as the density N0 in dBFS/Hz, which is what version 2 carries; version 3
+// carries the noise power in the demodulator passband instead, so that the
+// `baseband - noise` every client already computes is an SNR in dB rather than
+// S/N0 in dB·Hz.  Clients that have not been rebuilt keep asking for version 2
+// and keep the figure their meter scales and squelch thresholds were calibrated
+// against.  See channelNoisePower in radiod_status.go.
+//
+// The gain adjustment is the operator's spectrum calibration, applied so the
+// meter agrees with the waterfall.  It is added to both figures, so it cancels
+// out of the SNR and only moves the absolute readings.  Callers must NOT hold
+// session.mu.
+func (wsh *WebSocketHandler) signalQualityFor(session *Session, version int) (basebandPower, noise float32) {
+	basebandPower, noise = SignalUnavailable, SignalUnavailable
+	if version < 2 || wsh.sessions == nil || wsh.sessions.radiod == nil {
+		return
+	}
+	cs := wsh.sessions.radiod.GetChannelStatus(session.SSRC)
+	if cs == nil {
+		return
+	}
+
+	basebandPower = cs.BasebandPower
+	if version >= 3 {
+		noise = channelNoisePower(cs.NoiseDensity, cs.FilterBandwidthHz())
+	} else {
+		noise = cs.NoiseDensity
+	}
+
+	gainAdjustment := float32(wsh.config.Spectrum.GainDB)
+	if len(wsh.config.Spectrum.GainDBFrequencyRanges) > 0 {
+		session.mu.RLock()
+		tunedFreq := session.Frequency
+		session.mu.RUnlock()
+		for _, freqRange := range wsh.config.Spectrum.GainDBFrequencyRanges {
+			if tunedFreq >= freqRange.StartFreq && tunedFreq <= freqRange.EndFreq {
+				gainAdjustment += float32(freqRange.GainDB)
+				break
+			}
+		}
+	}
+
+	// Never lift the sentinel into the range of real readings: a missing
+	// bandwidth leaves the noise figure absent, and -999 + gain is not.
+	if signalKnown(basebandPower) {
+		basebandPower += gainAdjustment
+	}
+	if signalKnown(noise) {
+		noise += gainAdjustment
+	}
+	return
+}
+
 // Audio gate constants.
 const (
 	// audioGateHysteresis is the dB gap between the open and close thresholds.
@@ -1702,7 +1770,12 @@ const (
 //
 // The session's AudioGateLastOpenAt timestamp is updated (under mu) whenever
 // the gate passes a packet.  Callers must NOT hold session.mu.
-func audioGateAllows(session *Session, basebandPower, noiseDensity float32) bool {
+//
+// `noise` must be the same figure this session's protocol version puts on the
+// wire — see signalQualityFor — because min_snr is set by the client against
+// what its own meter shows.  A version 2 client's threshold is therefore in
+// dB·Hz and a version 3 client's in dB, and each gates on its own scale.
+func audioGateAllows(session *Session, basebandPower, noise float32) bool {
 	session.mu.RLock()
 	minSNR := session.AudioGateMinSNR
 	minPower := session.AudioGateMinPower
@@ -1714,12 +1787,16 @@ func audioGateAllows(session *Session, basebandPower, noiseDensity float32) bool
 		return true
 	}
 
-	snr := basebandPower - noiseDensity
+	// An absent reading is not a loud one.  Without this, a missing noise figure
+	// makes `basebandPower - noise` come out around +900 and holds the gate wide
+	// open, which is the one failure mode a squelch must not have.
+	snrKnown := signalKnown(basebandPower) && signalKnown(noise)
+	snr := basebandPower - noise
 
 	// Check open thresholds — if any active criterion is met, open the gate
 	// and reset the hang timer.
-	snrAboveOpen := minSNR > -998 && snr >= minSNR
-	powerAboveOpen := minPower > -998 && basebandPower >= minPower
+	snrAboveOpen := snrKnown && minSNR > -998 && snr >= minSNR
+	powerAboveOpen := signalKnown(basebandPower) && minPower > -998 && basebandPower >= minPower
 	if snrAboveOpen || powerAboveOpen {
 		session.mu.Lock()
 		session.AudioGateLastOpenAt = time.Now()
@@ -1818,8 +1895,15 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
 
 		if version >= 2 {
-			pcmBinaryEncoder = NewPCMBinaryEncoderWithVersionAndLevel(isIQModeForEncoder, PCMBinaryVersion2)
-			log.Printf("PCM binary encoder initialized with zstd compression (version 2, iq_fast=%v)", isIQModeForEncoder)
+			// The PCM header version tracks the negotiated protocol version so the
+			// client can tell which noise figure the packet carries — 3 stamps the
+			// same 37-byte layout as 2 with passband noise power in place of N0.
+			pcmVersion := PCMBinaryVersion2
+			if version >= 3 {
+				pcmVersion = PCMBinaryVersion3
+			}
+			pcmBinaryEncoder = NewPCMBinaryEncoderWithVersionAndLevel(isIQModeForEncoder, pcmVersion)
+			log.Printf("PCM binary encoder initialized with zstd compression (version %d, iq_fast=%v)", pcmVersion, isIQModeForEncoder)
 		} else {
 			pcmBinaryEncoder = NewPCMBinaryEncoderWithVersionAndLevel(isIQModeForEncoder, PCMBinaryVersion1)
 			log.Printf("PCM binary encoder initialized with zstd compression (version 1, iq_fast=%v)", isIQModeForEncoder)
@@ -1852,34 +1936,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 
 			if version >= 2 && timeSinceAudio > 200*time.Millisecond {
 				// Get current signal quality from radiod
-				var basebandPower, noiseDensity float32 = -999.0, -999.0
-				if wsh.sessions != nil && wsh.sessions.radiod != nil {
-					channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC)
-					if channelStatus != nil {
-						basebandPower = channelStatus.BasebandPower
-						noiseDensity = channelStatus.NoiseDensity
-
-						// Apply spectrum gain adjustments to match visual display
-						gainAdjustment := float32(wsh.config.Spectrum.GainDB)
-
-						// Apply frequency-specific gain if configured
-						if len(wsh.config.Spectrum.GainDBFrequencyRanges) > 0 {
-							session.mu.RLock()
-							tunedFreq := session.Frequency
-							session.mu.RUnlock()
-
-							for _, freqRange := range wsh.config.Spectrum.GainDBFrequencyRanges {
-								if tunedFreq >= freqRange.StartFreq && tunedFreq <= freqRange.EndFreq {
-									gainAdjustment += float32(freqRange.GainDB)
-									break
-								}
-							}
-						}
-
-						basebandPower += gainAdjustment
-						noiseDensity += gainAdjustment
-					}
-				}
+				basebandPower, noiseFigure := wsh.signalQualityFor(session, version)
 
 				// Determine format to use (handle IQ mode fallback)
 				isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
@@ -1916,7 +1973,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 						binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
 						packet[12] = byte(session.Channels)
 						binary.LittleEndian.PutUint32(packet[13:17], math.Float32bits(basebandPower))
-						binary.LittleEndian.PutUint32(packet[17:21], math.Float32bits(noiseDensity))
+						binary.LittleEndian.PutUint32(packet[17:21], math.Float32bits(noiseFigure))
 						copy(packet[21:], opusData)
 
 						conn.writeMu.Lock()
@@ -1956,7 +2013,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 							session.SampleRate,
 							session.Channels,
 							basebandPower,
-							noiseDensity,
+							noiseFigure,
 							!isIQModeSilence, // forceFullHeader for non-IQ modes
 						)
 						if err != nil {
@@ -2069,15 +2126,14 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			if hc != nil {
 				// Apply audio gate before forwarding to the HTTP stream (Android path).
 				// IQ modes carry raw RF samples — gating by SNR/power makes no sense there.
+				//
+				// Gated on the same figures the WebSocket sends, so the threshold the
+				// client set against its own meter means the same thing here.  This used
+				// to apply only the master gain and skip the per-frequency-range gain,
+				// which moved the power threshold on any receiver configured with one.
 				if !isIQMode {
-					var bbPower, ndDensity float32 = -999, -999
-					if wsh.sessions != nil && wsh.sessions.radiod != nil {
-						if cs := wsh.sessions.radiod.GetChannelStatus(session.SSRC); cs != nil {
-							bbPower = cs.BasebandPower + float32(wsh.config.Spectrum.GainDB)
-							ndDensity = cs.NoiseDensity + float32(wsh.config.Spectrum.GainDB)
-						}
-					}
-					if !audioGateAllows(session, bbPower, ndDensity) {
+					bbPower, noiseFigure := wsh.signalQualityFor(session, version)
+					if !audioGateAllows(session, bbPower, noiseFigure) {
 						// Gate closed — substitute silence so the media session stays alive.
 						// Zeroing the PCM data keeps packet timing intact (no gaps) which
 						// prevents Web Audio API stalls and MediaSession dismissal.
@@ -2118,50 +2174,21 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				// Binary Opus format: send raw Opus frames as binary WebSocket messages
 				// Version 1: [timestamp:8][sampleRate:4][channels:1][opusData...]
 				// Version 2: [timestamp:8][sampleRate:4][channels:1][basebandPower:4][noiseDensity:4][opusData...]
+				// Version 3: same layout, the noise field being the passband noise power
 
-				// Get channel status for signal quality metrics (version 2 only)
-				var basebandPower, noiseDensity float32 = -999.0, -999.0 // Default: no data
-				if version >= 2 && wsh.sessions != nil && wsh.sessions.radiod != nil {
-					if channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC); channelStatus != nil {
-						basebandPower = channelStatus.BasebandPower
-						noiseDensity = channelStatus.NoiseDensity
-
-						// Apply spectrum gain adjustments to match visual display
-						// This ensures signal quality values match what users see in the spectrum
-						gainAdjustment := float32(wsh.config.Spectrum.GainDB)
-
-						// Apply frequency-specific gain if configured
-						if len(wsh.config.Spectrum.GainDBFrequencyRanges) > 0 {
-							session.mu.RLock()
-							tunedFreq := session.Frequency
-							session.mu.RUnlock()
-
-							// Find matching frequency range and apply its gain
-							for _, freqRange := range wsh.config.Spectrum.GainDBFrequencyRanges {
-								if tunedFreq >= freqRange.StartFreq && tunedFreq <= freqRange.EndFreq {
-									// Apply frequency-specific gain (added to master gain)
-									gainAdjustment += float32(freqRange.GainDB)
-									break
-								}
-							}
-						}
-
-						// Apply total gain adjustment to both values
-						basebandPower += gainAdjustment
-						noiseDensity += gainAdjustment
-					}
-				}
+				// Get channel status for signal quality metrics (version 2+ only)
+				basebandPower, noiseFigure := wsh.signalQualityFor(session, version)
 
 				// Audio gate: 3 dB hysteresis + 500 ms hang timer.
 				// IQ modes carry raw RF samples — gating makes no sense there.
-				// basebandPower and noiseDensity are already fetched and gain-adjusted above.
+				// basebandPower and noiseFigure are already fetched and gain-adjusted above.
 				// When the gate is closed we substitute silence (all-zero PCM) rather than
 				// dropping the packet entirely.  This keeps the media session alive — the
 				// Web Audio API and MediaSession API both require a continuous audio stream.
 				// lastAudioTime is updated unconditionally so the signal-quality ticker does
 				// not fire extra silence frames on top of the main-path silence (which would
 				// overflow the client buffer and trigger false "dropped frames" warnings).
-				if !isIQMode && !audioGateAllows(session, basebandPower, noiseDensity) {
+				if !isIQMode && !audioGateAllows(session, basebandPower, noiseFigure) {
 					audioPacket.PCMData = make([]byte, len(audioPacket.PCMData))
 				}
 
@@ -2206,8 +2233,9 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					packet[12] = byte(session.Channels)
 					// Baseband power (4 bytes, float32)
 					binary.LittleEndian.PutUint32(packet[13:17], math.Float32bits(basebandPower))
-					// Noise density (4 bytes, float32)
-					binary.LittleEndian.PutUint32(packet[17:21], math.Float32bits(noiseDensity))
+					// Noise (4 bytes, float32): density N0 on version 2, passband
+					// noise power on version 3
+					binary.LittleEndian.PutUint32(packet[17:21], math.Float32bits(noiseFigure))
 					// Opus data
 					copy(packet[21:], opusData)
 				} else {
@@ -2266,53 +2294,25 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					return
 				}
 
-				// Get channel status for signal quality metrics (version 2 only)
-				var basebandPower, noiseDensity float32 = -999.0, -999.0 // Default: no data
-				if version >= 2 && wsh.sessions != nil && wsh.sessions.radiod != nil {
-					if channelStatus := wsh.sessions.radiod.GetChannelStatus(session.SSRC); channelStatus != nil {
-						basebandPower = channelStatus.BasebandPower
-						noiseDensity = channelStatus.NoiseDensity
-
-						// Apply spectrum gain adjustments to match visual display
-						gainAdjustment := float32(wsh.config.Spectrum.GainDB)
-
-						// Apply frequency-specific gain if configured
-						if len(wsh.config.Spectrum.GainDBFrequencyRanges) > 0 {
-							session.mu.RLock()
-							tunedFreq := session.Frequency
-							session.mu.RUnlock()
-
-							// Find matching frequency range and apply its gain
-							for _, freqRange := range wsh.config.Spectrum.GainDBFrequencyRanges {
-								if tunedFreq >= freqRange.StartFreq && tunedFreq <= freqRange.EndFreq {
-									gainAdjustment += float32(freqRange.GainDB)
-									break
-								}
-							}
-						}
-
-						// Apply total gain adjustment
-						basebandPower += gainAdjustment
-						noiseDensity += gainAdjustment
-					}
-				}
+				// Get channel status for signal quality metrics (version 2+ only)
+				basebandPower, noiseFigure := wsh.signalQualityFor(session, version)
 
 				// Audio gate: 3 dB hysteresis + 500 ms hang timer.
 				// IQ modes carry raw RF samples — gating makes no sense there.
-				// basebandPower and noiseDensity are already fetched and gain-adjusted above.
+				// basebandPower and noiseFigure are already fetched and gain-adjusted above.
 				// When the gate is closed we substitute silence (all-zero PCM) rather than
 				// dropping the packet entirely.  This keeps the media session alive — the
 				// Web Audio API and MediaSession API both require a continuous audio stream.
 				// lastAudioTime is updated unconditionally so the signal-quality ticker does
 				// not fire extra silence frames on top of the main-path silence (which would
 				// overflow the client buffer and trigger false "dropped frames" warnings).
-				if !isIQMode && !audioGateAllows(session, basebandPower, noiseDensity) {
+				if !isIQMode && !audioGateAllows(session, basebandPower, noiseFigure) {
 					audioPacket.PCMData = make([]byte, len(audioPacket.PCMData))
 				}
 
 				// Encode PCM packet with hybrid header strategy.
 				// Non-IQ modes force a full header on every packet so that signal quality
-				// data (basebandPower / noiseDensity) is delivered continuously, matching
+				// data (basebandPower / noiseFigure) is delivered continuously, matching
 				// the behaviour of the Opus v2 format.
 				// IQ modes keep the minimal-header optimisation to reduce bandwidth on
 				// high-rate streams where signal quality fields are less useful.
@@ -2324,7 +2324,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					audioPacket.SampleRate,
 					session.Channels,
 					basebandPower,
-					noiseDensity,
+					noiseFigure,
 					!isIQMode, // forceFullHeader for non-IQ modes
 				)
 				if err != nil {

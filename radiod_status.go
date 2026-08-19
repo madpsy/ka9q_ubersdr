@@ -253,6 +253,52 @@ type ChannelStatus struct {
 	Tp2 float32 // Test point 2
 }
 
+// SignalUnavailable is radiod's "no channel status" sentinel, as it travels over
+// our own wire protocols.  Anything at or below SignalUnavailableThreshold is
+// absent rather than very quiet.
+const (
+	SignalUnavailable          float32 = -999.0
+	SignalUnavailableThreshold float32 = -998.0
+)
+
+// signalKnown reports whether a dBFS figure is a measurement rather than the
+// "no data" sentinel.
+func signalKnown(v float32) bool {
+	return v > SignalUnavailableThreshold && !math.IsNaN(float64(v))
+}
+
+// FilterBandwidthHz is the width of the demodulator passband in Hz, or 0 when
+// radiod has not reported usable filter edges.
+func (cs *ChannelStatus) FilterBandwidthHz() float32 {
+	bw := cs.HighEdge - cs.LowEdge
+	if bw <= 0 || math.IsNaN(float64(bw)) || math.IsInf(float64(bw), 0) {
+		return 0
+	}
+	return bw
+}
+
+// channelNoisePower converts radiod's noise density into the noise power inside
+// a filter of bandwidthHz.
+//
+// radiod reports noise as N0, a power spectral *density* in dBFS/Hz (status tag
+// 47, NOISE_DENSITY), while BASEBAND_POWER is a power in dBFS integrated over
+// the whole passband.  Subtracting one from the other — which is what every
+// client of ours used to do — yields S/N0 in dB·Hz, not an SNR: it reads
+// 10·log10(bandwidth) too high, about 34 dB on a 2.65 kHz SSB filter and 25 dB
+// on a 300 Hz CW filter, so the figure also moved whenever the filter did.
+// Adding the bandwidth term here puts the noise in the same units as the signal,
+// which makes the plain subtraction correct.
+//
+// The "no data" sentinel is passed through, and so is an unusable bandwidth:
+// returning N0 unchanged in that case would be silently wrong by tens of dB,
+// which is worse than reporting nothing.
+func channelNoisePower(noiseDensity, bandwidthHz float32) float32 {
+	if !signalKnown(noiseDensity) || bandwidthHz <= 0 {
+		return SignalUnavailable
+	}
+	return noiseDensity + float32(10*math.Log10(float64(bandwidthHz)))
+}
+
 // FrontendStatusTracker manages frontend and channel status from radiod STATUS packets
 type FrontendStatusTracker struct {
 	mu             sync.RWMutex

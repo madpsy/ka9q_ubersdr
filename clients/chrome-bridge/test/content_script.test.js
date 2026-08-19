@@ -48,7 +48,7 @@ t('finding a receiver says so once, and only once', () => {
     p.advance(1000);
     p.publish('tuning', { frequency: 7100000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700, vfo: 'A', band: '40m' });
     p.advance(1000);
-    p.publish('signal', { dbfs: -50, noise: -110, snr: 60, s: 11, level: 0.9, clipping: false });
+    p.publish('signal', { dbfs: -50, noise: -60, snr: 10, s: 11, level: 0.9, clipping: false });
     assert.strictEqual(p.logs.length, 1, p.logs.join('|'));
 });
 
@@ -132,7 +132,7 @@ t('the S value comes from the page, so both meters agree', () => {
     // drift out of step with the one on screen.
     const p = attached();
     p.advance(1000);
-    p.publish('signal', { dbfs: -53, noise: -110, snr: 57, s: 11, level: 0.8, clipping: false });
+    p.publish('signal', { dbfs: -53, noise: -63, snr: 10, s: 11, level: 0.8, clipping: false });
     const state = p.sent('ubersdr:state')[0].state;
     assert.strictEqual(state.s, 11);
     assert.strictEqual(state.dbfs, -53);

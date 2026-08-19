@@ -19,9 +19,9 @@ const { UI_CONFIG_DEFAULTS, markColors, parseUiConfig } = require('./.build/uico
 const { PALETTE_NAMES, paletteMarks } = require('./.build/palettes.cjs');
 const {
     dbfsToSUnits, formatRate, freqInRange, freqToKHz, parseFreqInput,
-    sMeterColour, sMeterColourAt, snrColour, snrColourAt,
+    sMeterColour, sMeterColourAt, snrColour, snrColourAt, snrFraction,
     sUnitFraction, sUnitLabel, sUnitLabelAt,
-    S_UNITS_MIN, S_UNITS_MAX,
+    S_UNITS_MIN, S_UNITS_MAX, SNR_MIN, SNR_MAX,
 } = require('./.build/format.cjs');
 
 let pass = 0;
@@ -265,9 +265,11 @@ t('slider floor means off, and sends the sentinel', () => {
     assert.strictEqual(squelchThreshold(SQUELCH_MIN), SQUELCH_SENTINEL);
     assert.strictEqual(squelchEnabled(SQUELCH_MIN), false);
     // Anything at or below the floor is off, so a stale stored value cannot
-    // resurrect as a live threshold.
+    // resurrect as a live threshold. Written against SQUELCH_MIN rather than a
+    // literal: the floor is negative now that the scale is a true SNR, and 0 dB
+    // — once comfortably below it — is a usable threshold.
     assert.strictEqual(squelchThreshold(SQUELCH_MIN - 10), SQUELCH_SENTINEL);
-    assert.strictEqual(squelchEnabled(0), false);
+    assert.strictEqual(squelchEnabled(SQUELCH_MIN - 0.5), false);
 });
 
 t('above the floor the slider value is the threshold in dB SNR', () => {
@@ -774,8 +776,11 @@ t('a colour from a meter position matches the colour from the reading', () => {
     for (const dbfs of [-121, -109, -97, -85, -73, -53, -13]) {
         assert.strictEqual(sMeterColourAt(sUnitFraction(dbfs)), sMeterColour(dbfs), `${dbfs} dBFS`);
     }
-    for (const snr of [30, 35, 40, 45, 50, 60]) {
-        assert.strictEqual(snrColourAt((snr - 30) / 30), snrColour(snr), `${snr} dB`);
+    // Positions taken from snrFraction rather than an open-coded span, so the
+    // pair stays honest when the scale moves — as it did when the SNR stopped
+    // being S/N0 in dB·Hz and became an SNR in dB.
+    for (const snr of [SNR_MIN, -2, 0, 5, 10, 15, 20, SNR_MAX]) {
+        assert.strictEqual(snrColourAt(snrFraction(snr)), snrColour(snr), `${snr} dB`);
     }
 });
 
@@ -1194,7 +1199,7 @@ function audioPacket({ sampleRate = 12000, channels = 1, power = -55.5, noise = 
     return buf;
 }
 
-t('v2 audio header parses and strips the 21-byte prefix', () => {
+t('v3 audio header parses and strips the 21-byte prefix', () => {
     const a = new AudioConnection();
     let opus = null; let quality = null;
     a.on('opus', (x) => { opus = x; });
@@ -1204,7 +1209,7 @@ t('v2 audio header parses and strips the 21-byte prefix', () => {
     assert.strictEqual(opus.channels, 1);
     assert.deepStrictEqual([...opus.data], [9, 8, 7]);
     assert.ok(Math.abs(quality.basebandPower + 55.5) < 0.01);
-    assert.ok(Math.abs(quality.noiseDensity + 95.25) < 0.01);
+    assert.ok(Math.abs(quality.noisePower + 95.25) < 0.01);
 });
 
 t('-999 sentinels become null rather than a fake -999 dB reading', () => {
@@ -1213,7 +1218,7 @@ t('-999 sentinels become null rather than a fake -999 dB reading', () => {
     a.on('quality', (x) => { quality = x; });
     a._onBinary(audioPacket({ power: -999, noise: -999 }));
     assert.strictEqual(quality.basebandPower, null);
-    assert.strictEqual(quality.noiseDensity, null);
+    assert.strictEqual(quality.noisePower, null);
 });
 
 t('header-only packet is ignored', () => {

@@ -934,6 +934,10 @@ function SpectrumStats({ place, bottom, gfx, onClose }) {
                 binCount: spectrumConn.binCount,
                 binHz: spectrumConn.binBandwidth,
                 divisor: spectrumConn.rateDivisor,
+                // The stream's own figures, not the AudioContext's — see
+                // AudioPlayer.streamRate for when those two disagree.
+                streamRate: m.streamRate,
+                streamChannels: m.channels,
                 queuedSec: m.queuedSec,
                 outLatSec: m.outLatencySec,
                 underruns: m.underruns,

@@ -1,7 +1,18 @@
 import React, { useEffect, useRef, useState } from '../react.js';
-import { useRadio } from '../radio/RadioContext.jsx';
+import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { Empty } from '../components/ui.jsx';
+import { isIQ } from '../radio/constants.js';
 import { formatRate, formatSpan } from '../lib/format.js';
+
+// Hover note for the rate row. The stream's rate and the context's are two
+// different facts: the player asks for the former and falls back to the device
+// default if the browser refuses it, and everything is resampled from then on.
+// Only worth saying when they disagree — see AudioPanel's StreamFormat.
+function rateNote(m) {
+    if (!m.streamRate || !m.contextRate || m.contextRate === m.streamRate) return undefined;
+    return `Playing at ${(m.contextRate / 1000).toFixed(1)} kHz — this browser refused `
+        + 'the stream\'s own rate, so the audio is being resampled.';
+}
 
 // How often the throughput readout is refreshed, and the window it averages
 // over — they are the same thing: each tick reports the bytes since the last.
@@ -86,10 +97,14 @@ function Link({ state, rate }) {
 // operator's blurb, which are read once and then known. See the registry's
 // `minimal`.
 export default function StatusPanel({ minimal }) {
-    const { serverInfo, audioState, spectrumState, view, audioConn, spectrumConn } = useRadio();
+    const { serverInfo, audioState, spectrumState, view, audioConn, spectrumConn, tuning } = useRadio();
     // Before the early return: hooks cannot be called conditionally.
     const audioRate = useThroughput(audioConn);
     const spectrumRate = useThroughput(spectrumConn);
+    // 4 Hz: these change only on a mode change, so the meter rate the signal
+    // panel needs would be wasted here.
+    const m = useMeters(4);
+    const iq = isIQ(tuning.mode);
 
     // The link block needs no /api/description, so the minimal view has
     // nothing to wait for.
@@ -124,6 +139,26 @@ export default function StatusPanel({ minimal }) {
 
             <div className="kv-list">
                 <Row label="Audio link" value={<Link state={audioState} rate={audioRate} />} />
+                {/* What the stream actually is, rather than what the mode
+                    implies: 12 kHz mono on SSB, 24 on the AM family, and 10 kHz
+                    stereo in IQ where the two channels are I and Q rather than
+                    left and right. Out of the minimal view, which is the link
+                    block on its own. */}
+                {!minimal && (
+                    <>
+                        <Row
+                            label="Audio rate"
+                            title={rateNote(m)}
+                            value={m.streamRate ? `${(m.streamRate / 1000).toFixed(m.streamRate % 1000 ? 1 : 0)} kHz` : '—'}
+                        />
+                        <Row
+                            label="Audio channels"
+                            value={m.channels
+                                ? `${m.channels} (${m.channels === 2 ? (iq ? 'I/Q' : 'stereo') : 'mono'})`
+                                : '—'}
+                        />
+                    </>
+                )}
                 <Row label="Spectrum link" value={<Link state={spectrumState} rate={spectrumRate} />} />
                 <Row label="Span" value={view.span ? formatSpan(view.span) : '—'} />
                 <Row label="Bins" value={view.binCount || '—'} />

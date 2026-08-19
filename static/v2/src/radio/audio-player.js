@@ -67,6 +67,12 @@ export class AudioPlayer extends Emitter {
         // modes, and stereo Opus); a mono stream ignores it.
         this.channelMode = 'both';
         this.channels = 0;          // channels in the stream last scheduled
+        // Rate the *stream* arrives at, which is not always the rate the context
+        // runs at: _createContext asks for the stream's rate and falls back to
+        // the browser's default if it is refused, and the graph then resamples.
+        // Reported separately so a panel can show the difference rather than
+        // one number standing in for both.
+        this.streamRate = 0;
         this.head = null;           // where scheduled audio enters the graph
         // Whether the stream is a quadrature pair rather than audio. Set from
         // the mode, not from the channel count, so it is known before the first
@@ -964,6 +970,7 @@ export class AudioPlayer extends Emitter {
         // — v1 does the same. The output routing above can then select a side
         // in any mode, rather than only on the stereo IQ modes.
         this.channels = planes.length;
+        this.streamRate = sampleRate;
         const channels = Math.max(2, planes.length);
         const buffer = ctx.createBuffer(channels, frames, sampleRate);
         for (let c = 0; c < channels; c++) {

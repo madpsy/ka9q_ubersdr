@@ -253,6 +253,26 @@ t('a receiver still negotiating its geometry shows no FFT line', () => {
     assert.strictEqual(value(statLines({ binCount: 2048, binHz: 0.5 }), 'fft'), '2048 bins  0.50 Hz');
 });
 
+t('the stream line carries rate and channels on one line', () => {
+    // The three the receiver actually produces. Round rates lose the decimal;
+    // IQ's two channels are named for what they are, since "stereo" would read
+    // as two versions of the same audio.
+    assert.strictEqual(value(statLines({ streamRate: 12000, streamChannels: 1 }), 'stream'), '12 kHz  mono');
+    assert.strictEqual(value(statLines({ streamRate: 24000, streamChannels: 1 }), 'stream'), '24 kHz  mono');
+    assert.strictEqual(value(statLines({ streamRate: 10000, streamChannels: 2 }), 'stream'), '10 kHz  I/Q');
+    // An odd rate keeps a decimal rather than rounding to a rate it is not.
+    assert.strictEqual(value(statLines({ streamRate: 11025, streamChannels: 1 }), 'stream'), '11.0 kHz  mono');
+});
+
+t('the stream line waits for the first packet rather than showing zeros', () => {
+    // Both figures come from a scheduled buffer, so before one arrives there is
+    // nothing to say — and "0 kHz" would read as a stalled stream.
+    assert.strictEqual(find(statLines({ fps: 20 }), 'stream'), undefined);
+    assert.strictEqual(find(statLines({ streamRate: 0, streamChannels: 0 }), 'stream'), undefined);
+    // Half-known is still worth a line: the rate arrives with the same buffer.
+    assert.strictEqual(value(statLines({ streamRate: 12000 }), 'stream'), '12 kHz');
+});
+
 t('the app load line is absent unless a host reported one', () => {
     // A browser tab cannot measure this, and a zero would read as "costing
     // nothing" rather than "nobody asked".

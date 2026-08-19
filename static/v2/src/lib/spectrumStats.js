@@ -130,6 +130,8 @@ function formatHzPerBin(hz) {
  * @param s.binCount   bins across the view
  * @param s.binHz      Hz per bin
  * @param s.divisor    the server's poll divisor, 1 for full rate
+ * @param s.streamRate audio sample rate as it arrives, Hz
+ * @param s.streamChannels audio channels as they arrive — 2 only in IQ
  * @param s.queuedSec  audio queued ahead of the playback clock
  * @param s.outLatSec  what the hardware adds after that
  * @param s.underruns  dropouts since the session started
@@ -153,6 +155,21 @@ function appLoad(app) {
         const mb = app.mem / 1e6;
         parts.push(mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.round(mb)} MB`);
     }
+    return parts.length ? parts.join('  ') : null;
+}
+
+// "10 kHz  I/Q", "12 kHz  mono" — the audio stream on one line.
+//
+// Whole kHz where the rate is a round number, one decimal otherwise, so 10, 12
+// and 24 read cleanly without pinning an odd rate to the wrong value. Either
+// half may be missing before the first packet, and the line is dropped entirely
+// when both are.
+function formatStream(rate, channels) {
+    const parts = [];
+    if (rate > 0) parts.push(`${(rate / 1000).toFixed(rate % 1000 ? 1 : 0)} kHz`);
+    if (channels === 2) parts.push('I/Q');
+    else if (channels === 1) parts.push('mono');
+    else if (channels > 2) parts.push(`${channels} ch`);
     return parts.length ? parts.join('  ') : null;
 }
 
@@ -180,6 +197,13 @@ export function statLines(s = {}) {
     const fft = [s.binCount > 0 && `${s.binCount} bins`, formatHzPerBin(s.binHz)]
         .filter(Boolean).join('  ');
     add('fft', 'FFT', fft, 'Bins across the view, and what one bin is worth. The resolution decides whether two close carriers are one blob or two.');
+
+    // What the audio stream *is* — one line, because rate and channel count are
+    // one question. Both follow the mode without being asked for, which is the
+    // reason to show them: 12 kHz mono on SSB, 24 on the AM family, and 10 kHz
+    // with two genuinely different channels in IQ. Named I/Q rather than stereo
+    // there, since "stereo" would suggest two versions of the same audio.
+    add('stream', 'STREAM', formatStream(s.streamRate, s.streamChannels), 'The audio stream as it arrives: sample rate and channel count, both set by the mode. IQ is the only one where the two channels differ — left is I, right is Q.');
 
     add('net', 'NET', formatThroughput(s.bytesIn, s.audioBytes, s.bandBytes), 'Every stream this session is running — the main spectrum, the audio, and the band spectrum panel when it is open — and the total. What the connection is costing, and which part of it to do something about.');
 

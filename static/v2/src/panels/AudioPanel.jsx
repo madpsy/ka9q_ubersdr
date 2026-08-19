@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
-import { useRadio } from '../radio/RadioContext.jsx';
-import { Button, Field, Icon, Modal, Segmented, Slider } from '../components/ui.jsx';
+import { useMeters, useRadio } from '../radio/RadioContext.jsx';
+import { Button, Field, Icon, Modal, Readout, Segmented, Slider } from '../components/ui.jsx';
 import { isIQ } from '../radio/constants.js';
 import {
     listOutputDevices, micPermission, sinkLabel, sinkSupport, unlockDeviceLabels,
@@ -309,6 +309,46 @@ function OutputDevicePicker() {
 // meter it is a threshold on: the number you set it against is drawn there, and
 // having the two in different panels meant watching one while dragging the
 // other. See SquelchControl there.
+// What the stream actually is, as opposed to what was asked for.
+//
+// Two rates, because they are two different facts and can disagree. The stream
+// rate is what the server is sending; the context rate is what the browser
+// agreed to play at. _createContext asks for the former and silently falls back
+// to the device default if it is refused — at which point everything is being
+// resampled, which matters most in exactly the mode where it is most likely
+// (IQ asks for 10 kHz, an unusual rate to be granted). So the second is shown
+// only when it differs, where it is the answer to a real question.
+export function StreamFormat() {
+    const m = useMeters(4);
+    const rate = m.streamRate;
+    const ch = m.channels;
+    if (!rate && !ch) return null;
+
+    const resampled = rate && m.contextRate && m.contextRate !== rate;
+    return (
+        <>
+            <div className="readout-grid">
+                <Readout
+                    label="Sample rate"
+                    value={rate ? (rate / 1000).toFixed(rate % 1000 ? 1 : 0) : '—'}
+                    unit="kHz"
+                />
+                <Readout
+                    label="Channels"
+                    value={ch || '—'}
+                    unit={ch === 2 ? 'stereo' : ch === 1 ? 'mono' : ''}
+                />
+            </div>
+            {resampled && (
+                <div className="note note--tight">
+                    Playing at {(m.contextRate / 1000).toFixed(1)} kHz — this browser
+                    refused the stream&rsquo;s own rate, so the audio is being resampled.
+                </div>
+            )}
+        </>
+    );
+}
+
 export default function AudioPanel({ minimal }) {
     const { audio, actions } = useRadio();
 
@@ -352,6 +392,8 @@ export default function AudioPanel({ minimal }) {
 
             {!minimal && (
                 <>
+                    <StreamFormat />
+
                     <OutputDevicePicker />
 
                     <Field label="Buffer" hint={`${Math.round(audio.bufferSec * 1000)} ms`}>

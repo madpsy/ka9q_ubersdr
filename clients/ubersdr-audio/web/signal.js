@@ -19,15 +19,22 @@ const Signal = (() => {
   // Meter configuration: { barId, valueId, min, max }
   const METERS = {
     signal: { barId: 'signal-bar', valueId: 'signal-value', min: -120, max: -50 },
-    snr:    { barId: 'snr-bar',    valueId: 'snr-value',    min: 25,   max: 80  },
+    // SNR spans -5..30 dB. It was 25..80 while the server sent noise as a
+    // density, which made the figure S/N0 in dB·Hz rather than an SNR; audio
+    // protocol version 3 reports noise over the signal's own passband.
+    snr:    { barId: 'snr-bar',    valueId: 'snr-value',    min: -5,   max: 30  },
     audio:  { barId: 'audio-bar',  valueId: 'audio-value',  min: -60,  max: 0   },
   };
 
   // Squelch slider constants — must match the HTML min/max/step attributes.
   // Far LEFT (min) = off; sliding right increases the threshold.
-  const SQUELCH_MIN      = 24;   // slider value meaning "disabled" (far left)
-  const SQUELCH_MAX      = 80;   // dB — matches SNR bar max
-  const SQUELCH_OFF_VAL  = 24;   // slider value meaning "disabled"
+  // The slider is drawn on top of the SNR bar's track, so its range has to be
+  // the bar's: far left sits at the bar's minimum and means off, and the right
+  // end is the top of the meter. Both moved with audio protocol version 3 —
+  // 24..80 was calibrated against S/N0 in dB·Hz, this is an SNR in dB.
+  const SQUELCH_MIN      = -5;   // slider value meaning "disabled" (far left)
+  const SQUELCH_MAX      = 30;   // dB of SNR — matches the SNR bar max
+  const SQUELCH_OFF_VAL  = -5;   // slider value meaning "disabled"
   const SQUELCH_SENTINEL = -999; // value sent to API when disabled
 
   const NO_DATA = -999;

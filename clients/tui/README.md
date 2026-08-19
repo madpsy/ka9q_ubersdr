@@ -81,13 +81,23 @@ at — `ubersdr-tui-<platform>` — so those names are constants and a release
 replaces the assets rather than adding new ones.
 
 ```bash
-./build.sh                       # all eight into build/
+./build.sh --publish             # all eight into build/, then upload the six
+                                 # that need no signing. Asks before uploading;
+                                 # --yes answers it in advance.
 ./notarise-mac.sh --publish      # sign + notarise the two darwin ones, then upload them
-gh release upload latest \
-    build/ubersdr-tui-linux-{amd64,arm64,armv6,armv7} \
-    build/ubersdr-tui-windows-{amd64,arm64}.exe \
-    --clobber --repo madpsy/ka9q_ubersdr
 ```
+
+`--publish` uploads what *that run* built, not whatever is in `build/`: after
+`./build.sh linux-amd64 --publish` exactly one asset moves, so a partial build
+cannot quietly put a month-old binary back on the release under a name that says
+nothing about its age. The darwin pair is always held back — it has no
+`.gatekeeper-ok` marker until `notarise-mac.sh` writes one — and the run says so
+rather than skipping them silently.
+
+Build from a clean tree when publishing. The version is
+`git describe --tags --always --dirty`, stamped into the binary and printed by
+`-version`, so an uncommitted change ships as `…-dirty` and the eight binaries
+disagree about what they are.
 
 The macOS pair cannot simply be uploaded. Gatekeeper refuses a *downloaded*
 binary that is not signed with a Developer ID certificate and notarised by
@@ -459,11 +469,13 @@ edge exactly, in 50 Hz steps.
 **Signal meter**: a coloured bar at the right-hand end of the status row, red
 through green. **Click it, or press `g`,** to switch between absolute level and
 signal-to-noise.
-Both come straight from the audio packet header — baseband power and noise
-density — and the scales match `signal-meter.js` so a reading means the same
-here as in a browser: dBFS runs −127 … −33 (the S-meter's own span, S1 at −115
-with 6 dB per S-unit), and SNR runs 30 … 60, which is where this measurement
-actually sits on a live channel.
+Both come straight from the audio packet header — baseband power and, since
+audio protocol version 3, the noise power over the same passband. dBFS runs
+−127 … −33 (the S-meter's own span, S1 at −115 with 6 dB per S-unit), and SNR
+runs −5 … 30: below 0 the channel is empty, 3–10 dB is weak but readable
+speech, and 20 dB and up is armchair copy. That span was 30 … 60 while the
+header carried a noise *density*, which made the subtraction S/N0 in dB·Hz
+rather than an SNR.
 
 **Server-side DSP**: `n` cycles the noise-reduction inserts the receiver
 offers, starting from off, which is the default. The status bar always carries
@@ -486,11 +498,12 @@ Parameters for each filter are not exposed; the web UI is the place for that.
 **Squelch** gates the audio on signal-to-noise. `t` and `T` move the threshold
 a decibel at a time, as does the `d` panel. It defaults to off.
 
-The range is 20–80 dB, and stepping below 20 turns the gate off rather than
-leaving a threshold that could never fire: this SNR — baseband power over noise
-density — does not approach zero on a live channel, and the meter's own scale
-starts at 30. Off is sent as the server's `-999` sentinel rather than as `0`,
-since 0 dB is itself a valid threshold.
+The range is 1–46 dB, and stepping below 1 turns the gate off rather than
+leaving a threshold that could never fire: at 0 dB the signal is level with the
+noise and the gate would never close. Off is sent as the server's `-999`
+sentinel rather than as `0`, since 0 dB is itself a valid threshold. The range
+was 20–80 while the header carried a noise density and the figure being
+thresholded was S/N0 in dB·Hz, some 34 dB above the true SNR on SSB.
 
 The status bar shows `t SQ:` with the threshold and a **▼** while the gate is
 actually closed, so it is obvious when silence is the squelch rather than a dead

@@ -39,7 +39,7 @@ func NewPCMBinaryDecoder() (*PCMBinaryDecoder, error) {
 //	  [25:29] reserved
 //	  [29:]   PCM data (big-endian int16)
 //
-//	Full header v2 (37 bytes) — magic 0x5043 "PC", version 2:
+//	Full header v2/v3 (37 bytes) — magic 0x5043 "PC", version 2 or 3:
 //	  [0:2]   magic
 //	  [2]     version (2)
 //	  [3]     format type
@@ -48,7 +48,10 @@ func NewPCMBinaryDecoder() (*PCMBinaryDecoder, error) {
 //	  [20:24] sample rate (uint32 LE)
 //	  [24]    channels (uint8)
 //	  [25:29] baseband power (float32 LE, dBFS; -999 = no data)
-//	  [29:33] noise density (float32 LE, dBFS; -999 = no data)
+//	  [29:33] noise (float32 LE, dBFS; -999 = no data) — the density N0 in
+//	          dBFS/Hz on version 2, the noise power over the demodulator
+//	          passband on version 3, which is the one that makes
+//	          `baseband - noise` an SNR. The layout is the same either way.
 //	  [33:37] reserved
 //	  [37:]   PCM data (big-endian int16)
 //

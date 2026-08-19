@@ -510,7 +510,7 @@ Get the current SNR squelch gate threshold.
 ### `PUT /api/v1/audio/gate`
 
 Set the SNR squelch gate threshold.  When active, audio frames are suppressed
-server-side until the SNR (baseband power − noise density) meets or exceeds
+server-side until the SNR (baseband power − noise power) meets or exceeds
 the threshold.  Signal-quality data continues flowing regardless of gate state.
 
 This is a **client-side gate** applied by the ubersdr-audio client — radiod is
@@ -527,7 +527,11 @@ and re-applied automatically on reconnect.
 | `min_snr` | float | [-999, +999] | SNR threshold in dB; `-999` = disabled |
 
 **Behaviour:**
-- SNR is computed as `baseband_dbfs − noise_density_dbfs` (always ≥ 0 for a real signal)
+- SNR is computed as `baseband_dbfs − noise_density_dbfs`, and is a true
+  signal-to-noise ratio in dB: it can be negative on an empty channel, 3–10 dB
+  is weak but readable speech, and 20 dB and up is armchair copy. Both UIs here
+  offer -5 to 30 dB on the slider, matching the SNR meter, with the far-left
+  position sending `-999`; the endpoint itself accepts any value in range
 - When `min_snr > -999`: audio frames are dropped until `snr_db ≥ min_snr`
 - When `min_snr = -999`: gate is disabled; all audio flows normally (default)
 - IQ modes (`iq`, `iq48`, `iq96`, `iq192`, `iq384`) ignore the gate entirely
@@ -789,7 +793,13 @@ Returns the most recently received signal quality readings (snapshot).
 **Field notes:**
 - All numeric fields return `-999.0` when no data is available (IQ mode,
   not yet connected, or server not sending signal data)
-- `snr_db` is derived as `baseband_dbfs − noise_density_dbfs`
+- `snr_db` is derived as `baseband_dbfs − noise_density_dbfs`, a signal-to-noise
+  ratio in dB that may be negative when the channel is empty
+- `noise_density_dbfs` keeps its name for compatibility, but since audio
+  protocol version 3 it carries the noise **power** over the demodulator
+  passband (dBFS), not a density in dBFS/Hz. That is what makes the subtraction
+  above an SNR rather than S/N0 in dB·Hz, which read about 34 dB higher on a
+  2.65 kHz filter and shifted with every change of filter width
 - `updated_at` is the timestamp of the last received audio frame that
   contained signal data; `null` if never received
 

@@ -30,7 +30,7 @@ func TestServerEncoderRebuild(t *testing.T) {
 	q := url.Values{}
 	q.Set("user_session_id", sp.sessionID)
 	q.Set("format", "opus")
-	q.Set("version", "2")
+	q.Set("version", "3")
 	q.Set("frequency", "7100000")
 	q.Set("mode", "lsb")
 	scheme := "ws"

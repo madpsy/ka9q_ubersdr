@@ -60,6 +60,21 @@ cd clients/windows-audio
 # → produces UberSDRAudio.exe in clients/windows-audio/
 ```
 
+### Publishing
+
+`./build.sh --publish` builds as above and then uploads both binaries to the
+rolling `latest` release on `madpsy/ka9q_ubersdr`, replacing the pair already
+there. The asset names are the filenames the build writes — `UberSDRAudio` and
+`UberSDRAudio.exe` — because the download cards on the website link straight at
+`releases/download/latest/UberSDRAudio{,.exe}`, so those URLs must not move.
+
+It needs the [GitHub CLI](https://cli.github.com) logged in (`gh auth login`),
+and it asks before uploading. `--yes` answers that in advance for an unattended
+run; without a terminal and without `--yes` it declines rather than assuming.
+A build that skipped the Windows half (no mingw) uploads the Linux binary alone
+and leaves the `.exe` on the release untouched. This is the same arrangement as
+`clients/electron/build.sh`, which publishes to the same tag.
+
 Or manually:
 
 ```bash

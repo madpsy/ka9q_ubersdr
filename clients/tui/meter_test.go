@@ -16,12 +16,12 @@ func TestMeterScalesMatchWebUI(t *testing.T) {
 	}{
 		{"DBFS_MIN", meterDBFSMin, -127},
 		{"DBFS_MAX", meterDBFSMax, -33},
-		{"SNR_MIN", meterSNRMin, 30},
-		{"SNR_MAX", meterSNRMax, 60},
+		{"SNR_MIN", meterSNRMin, -5},
+		{"SNR_MAX", meterSNRMax, 30},
 		{"dBFS red at", meterDBFSRedAt, -121},
 		{"dBFS green at", meterDBFSGreenAt, -73},
-		{"SNR red at", meterSNRRedAt, 30},
-		{"SNR green at", meterSNRGreenAt, 50},
+		{"SNR red at", meterSNRRedAt, 0},
+		{"SNR green at", meterSNRGreenAt, 15},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
@@ -53,16 +53,16 @@ func TestMeterFillFraction(t *testing.T) {
 		}
 	}
 
-	// SNR spans 30..60, so 45 is the midpoint.
+	// SNR spans -5..30, so 12.5 is the midpoint.
 	u.meterSNR = true
 	for _, c := range []struct {
 		power, noise float32
 		want         float64
 	}{
-		{-90, -120, 0},   // SNR 30
-		{-75, -120, 0.5}, // SNR 45
-		{-60, -120, 1},   // SNR 60
-		{-119, -120, 0},  // SNR 1, below scale
+		{-125, -120, 0},     // SNR -5
+		{-107.5, -120, 0.5}, // SNR 12.5
+		{-90, -120, 1},      // SNR 30
+		{-130, -120, 0},     // SNR -10, below scale
 	} {
 		u.signal = Signal{Power: c.power, Noise: c.noise}
 		value, frac, ok := u.meterReading()
@@ -131,13 +131,13 @@ func TestMeterColourRamp(t *testing.T) {
 
 	// SNR uses its own span.
 	u.meterSNR = true
-	sr, sg, _ := u.meterColour(30).RGB()
+	sr, sg, _ := u.meterColour(0).RGB()
 	if sr <= sg {
-		t.Errorf("SNR 30 is not red: %d,%d", sr, sg)
+		t.Errorf("SNR 0 is not red: %d,%d", sr, sg)
 	}
-	er, eg, _ := u.meterColour(50).RGB()
+	er, eg, _ := u.meterColour(15).RGB()
 	if eg <= er {
-		t.Errorf("SNR 50 is not green: %d,%d", er, eg)
+		t.Errorf("SNR 15 is not green: %d,%d", er, eg)
 	}
 }
 

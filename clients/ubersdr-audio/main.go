@@ -993,10 +993,14 @@ func main() {
 	// Signal quality bars — declared before applyIQConstraints so the closure
 	// can call SetNoData() when entering an IQ mode (which sends no signal data).
 	// Signal: -120 dBFS (noise floor) → -50 dBFS (strong signal)
-	// SNR:      25 dB (weak)          →  80 dB (excellent)
+	// SNR:       -5 dB (empty channel) →  30 dB (armchair copy)
 	// Audio:   -60 dBFS (quiet)       →   0 dBFS (full scale)
+	//
+	// The SNR span was 25-80 while the server sent noise as a density and the
+	// figure was really S/N0 in dB·Hz. Protocol version 3 makes it an SNR: below
+	// 0 the channel is empty, 3-10 dB is weak but readable speech.
 	signalBar := NewLevelBar("Signal", -120, -50, "dBFS")
-	snrBar := NewLevelBar("SNR", 25, 80, "dB")
+	snrBar := NewLevelBar("SNR", -5, 30, "dB")
 	audioBar := NewLevelBar("Audio", -60, 0, "dBFS")
 
 	// applyIQConstraints enforces format/BW/channel UI state for the current mode.
@@ -2811,12 +2815,17 @@ func main() {
 	)
 
 	// SNR squelch slider — sits in the "SNR & Squelch" subsection of the Audio card.
-	// Range: 24 (off, far left) to 80 dB.
-	// Far LEFT (24) = disabled sentinel (-999 sent to server).
+	// Range: -5 (off, far left) to 30 dB of SNR.
+	// Far LEFT (-5) = disabled sentinel (-999 sent to server).
 	// Sliding right increases the threshold.
-	const snrSquelchOff = 24.0 // slider value meaning "disabled" (far left)
-	const snrSquelchMin = 24.0
-	const snrSquelchMax = 80.0
+	//
+	// Was 24-80, calibrated against the S/N0 in dB·Hz the server used to send.
+	// The span is the SNR bar's, matching the web UI, where the slider is drawn
+	// on the bar's own track: a threshold above the top of the meter could not
+	// be judged against a reading.
+	const snrSquelchOff = -5.0 // slider value meaning "disabled" (far left)
+	const snrSquelchMin = -5.0
+	const snrSquelchMax = 30.0
 
 	snrSquelchLabel := widget.NewLabel("Squelch: off")
 	snrSquelchSlider := widget.NewSlider(snrSquelchMin, snrSquelchMax)

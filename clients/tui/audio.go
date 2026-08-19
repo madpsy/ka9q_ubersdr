@@ -22,8 +22,15 @@ import (
 //	[8:12]  uint32 LE  sample rate of the source channel
 //	[12]    uint8      channel count
 //	[13:17] float32 LE baseband power, dBFS
-//	[17:21] float32 LE noise density
+//	[17:21] float32 LE noise power over the demodulator passband, dBFS
 //	[21:]              Opus packet
+//
+// The noise field is what protocol version 3 changed. Version 2 sent radiod's
+// noise density N0 in dBFS/Hz, so power minus noise came out as S/N0 in dB·Hz —
+// about 34 dB above the true SNR on a 2.65 kHz filter, and a different amount
+// on every other filter width, which is why a squelch set on SSB gated wrongly
+// on CW. Version 3 sends the noise over the same passband as the signal, so the
+// subtraction is an SNR in dB. The layout is otherwise identical.
 const audioHeaderLen = 21
 
 // opusOutputRate is what the decoder produces. Opus always reconstructs at
@@ -47,8 +54,8 @@ type DSPState struct {
 
 // Signal is one reading from an audio packet's header.
 type Signal struct {
-	Power float32 // baseband power, dBFS
-	Noise float32 // noise density, dBFS
+	Power float32 // baseband power over the passband, dBFS
+	Noise float32 // noise power over the same passband, dBFS
 
 	// SourceRate is the radio channel's sample rate, which changes with mode.
 	// It is reported for display only: Opus reconstructs at 48 kHz whatever it
@@ -57,8 +64,9 @@ type Signal struct {
 	Channels   int
 }
 
-// SNR is the difference the meter shows in SNR mode, matching
-// signal-meter.js. It is only meaningful when both halves were reported.
+// SNR is the difference the meter shows in SNR mode: a signal-to-noise ratio
+// in dB, both halves being powers over the same passband. It is only meaningful
+// when both were reported.
 func (s Signal) SNR() float32 { return s.Power - s.Noise }
 
 func (s Signal) Valid() bool      { return isReportedLevel(s.Power) }
@@ -177,7 +185,7 @@ func (a *AudioClient) session(ctx context.Context) error {
 	q := url.Values{}
 	q.Set("user_session_id", a.sessionID)
 	q.Set("format", "opus")
-	q.Set("version", "2")
+	q.Set("version", "3")
 	if a.password != "" {
 		q.Set("password", a.password)
 	}

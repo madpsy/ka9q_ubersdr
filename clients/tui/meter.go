@@ -12,22 +12,27 @@ import (
 // s-meter-needle.js).
 //
 // The dBFS span is the S-meter's: S1 sits at -115 dBFS and each S-unit is 6 dB,
-// so -127..-33 covers below S0 up to well past S9+. The SNR span starts at 30
-// rather than 0 because this is baseband power over noise density, which does
-// not approach zero on a live channel.
+// so -127..-33 covers below S0 up to well past S9+.
+//
+// The SNR span is -5..30 and moved there with audio protocol version 3. It used
+// to be 30..60, which made sense only while the figure was baseband power over
+// noise *density* — S/N0 in dB·Hz, some 34 dB above the true SNR on a 2.65 kHz
+// filter. Version 3 sends noise over the signal's own passband, so this is an
+// SNR: below 0 the channel is empty, 3-10 dB is weak but readable speech, and
+// 20 dB and up is armchair copy.
 const (
 	meterDBFSMin = -127.0
 	meterDBFSMax = -33.0
-	meterSNRMin  = 30.0
-	meterSNRMax  = 60.0
+	meterSNRMin  = -5.0
+	meterSNRMax  = 30.0
 
 	// Colour saturates over a narrower span than the bar fills, again matching
 	// the web UI: the bar keeps growing past the point where it is already
 	// unambiguously green.
 	meterDBFSRedAt   = -121.0
 	meterDBFSGreenAt = -73.0
-	meterSNRRedAt    = 30.0
-	meterSNRGreenAt  = 50.0
+	meterSNRRedAt    = 0.0
+	meterSNRGreenAt  = 15.0
 )
 
 // meterWidth is the number of cells in the bar itself, excluding the label,

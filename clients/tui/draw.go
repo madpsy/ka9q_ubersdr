@@ -724,13 +724,17 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	}
 }
 
-// Squelch threshold limits, in dB of SNR. The floor is not zero because this
-// SNR — baseband power over noise density — does not approach zero on a live
-// channel; the meter's own scale starts at 30, so a threshold below the floor
-// would never gate and is treated as off instead.
+// Squelch threshold limits, in dB of SNR. Stepping below the floor turns the
+// gate off rather than leaving a threshold that could never fire.
+//
+// The range moved with audio protocol version 3, which reports noise over the
+// signal's own passband instead of as a density: the figure being thresholded
+// is now a real SNR, some 34 dB below the S/N0 in dB·Hz that 20-80 was
+// calibrated against. 1 dB is the lowest threshold that still means anything —
+// at 0 the signal is level with the noise, and the gate would never close.
 const (
-	squelchMin = 20
-	squelchMax = 80
+	squelchMin = 1
+	squelchMax = 46
 )
 
 // chatLabels returns the two halves of the header's chat indicator: how many

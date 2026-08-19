@@ -172,7 +172,7 @@ func (d *opusDecoder) Close() {
 //	[8:12]  uint32 LE  sample rate
 //	[12]    uint8      channels
 //	[13:17] float32 LE baseband power
-//	[17:21] float32 LE noise density
+//	[17:21] float32 LE noise (density on version 2, passband power on 3)
 //	[21:]   bytes      raw Opus packet
 func decodeOpusFrame(data []byte, dec **opusDecoder) (pcm []byte, sampleRate, channels int, basebandPower, noiseDensity float32, err error) {
 	const headerV2 = 21

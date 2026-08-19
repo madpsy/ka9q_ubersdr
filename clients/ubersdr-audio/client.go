@@ -474,7 +474,14 @@ func (c *RadioClient) buildWSURL() (string, error) {
 	q.Set("frequency", fmt.Sprintf("%d", c.Frequency))
 	q.Set("mode", c.Mode)
 	q.Set("format", format)
-	q.Set("version", "2") // Request v2 headers with signal quality (basebandPower, noiseDensity)
+	// Version 3 headers: same 21-byte layout as version 2 (basebandPower, noise),
+	// but the noise field is the power over the demodulator passband rather than
+	// radiod's density N0 in dBFS/Hz, so `basebandPower - noise` is an SNR in dB
+	// instead of S/N0 in dB·Hz — about 34 dB lower on a 2.65 kHz filter, and a
+	// different amount on every other filter width. See channelNoisePower in
+	// radiod_status.go. A server older than 0.1.60 does not know version 3 and
+	// falls back to version 1, whose header has no signal-quality fields at all.
+	q.Set("version", "3")
 	q.Set("user_session_id", c.userSessionID)
 	if !isWideIQMode(c.Mode) {
 		q.Set("bandwidthLow", fmt.Sprintf("%d", c.BandwidthLow))

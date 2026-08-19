@@ -18,6 +18,8 @@ esbuild ../src/radio/audio-connection.js --bundle --format=cjs --platform=node \
     --outfile=.build/audio.cjs --log-level=warning
 esbuild ../src/radio/constants.js --bundle --format=cjs --platform=node \
     --outfile=.build/constants.cjs --log-level=warning
+esbuild ../src/radio/pcm-stream.js --bundle --format=cjs --platform=node \
+    --outfile=.build/pcmstream.cjs --log-level=warning
 esbuild ../src/lib/dsp.js --bundle --format=cjs --platform=node \
     --outfile=.build/dsp.cjs --log-level=warning
 esbuild ../src/display/uiConfig.js --bundle --format=cjs --platform=node \
@@ -346,6 +348,7 @@ esbuild ../src/extensions/whisper/languages.js --bundle --format=cjs --platform=
 node unresolved.js
 node protocol.test.js
 node modes.test.js
+node pcmstream.test.js
 node zoom.test.js
 node wake.test.js
 node serverfeeds.test.js

@@ -66,13 +66,15 @@ export class AudioPlayer extends Emitter {
         // 'both' | 'left' | 'right'. Only meaningful on a stereo stream (IQ
         // modes, and stereo Opus); a mono stream ignores it.
         this.channelMode = 'both';
-        this.channels = 0;          // channels in the stream last scheduled
-        // Rate the *stream* arrives at, which is not always the rate the context
-        // runs at: _createContext asks for the stream's rate and falls back to
-        // the browser's default if it is refused, and the graph then resamples.
-        // Reported separately so a panel can show the difference rather than
-        // one number standing in for both.
+        this.channels = 0;          // planes in the buffer last scheduled
+        // What the stream declares itself to be, from the packet header — see
+        // _noteStream. The rate is not always the rate the context runs at:
+        // _createContext asks for the stream's and falls back to the browser's
+        // default if refused, and the graph then resamples. Kept apart so a
+        // panel can show the difference rather than one number standing in for
+        // both. Zero means nothing has arrived yet.
         this.streamRate = 0;
+        this.streamChannels = 0;
         this.head = null;           // where scheduled audio enters the graph
         // Whether the stream is a quadrature pair rather than audio. Set from
         // the mode, not from the channel count, so it is known before the first
@@ -160,6 +162,7 @@ export class AudioPlayer extends Emitter {
 
     async suspend() {
         this.started = false;
+        this.forgetStream();
         if (this.ctx) await this.ctx.suspend().catch(() => {});
     }
 
@@ -221,6 +224,7 @@ export class AudioPlayer extends Emitter {
     // Feeds one Opus packet. Decoding is serialised so packets keep their order.
     pushOpus(data, sampleRate, channels) {
         if (!this.started) return;
+        this._noteStream(sampleRate, channels);
         // Copy: `data` is a view onto the WebSocket frame, which the decoder
         // may see after the next frame has overwritten it.
         const bytes = new Uint8Array(data);
@@ -229,11 +233,40 @@ export class AudioPlayer extends Emitter {
             .catch((err) => console.error('audio decode failed', err));
     }
 
-    // JSON-PCM fallback path: already-decoded planar float samples.
-    pushPCM(planes, sampleRate) {
+    // Lossless and JSON-PCM path: already-decoded planar float samples.
+    pushPCM(planes, sampleRate, channels) {
         if (!this.started || !planes.length) return;
+        this._noteStream(sampleRate, channels);
         this._ensureContext(sampleRate);
         this._schedule(planes, planes[0].length, sampleRate);
+    }
+
+    /**
+     * Record what the stream says it is, for the readouts.
+     *
+     * Taken from the packet header — the server's own declaration — and not
+     * from the decoded buffers, which cannot answer the question. `_schedule`
+     * duplicates a mono stream into two channels so the L/R routing works in
+     * every mode, and an Opus decoder hands back however many planes it was
+     * built for; inferring a *stream* property from either is reading the
+     * playback path and calling it the wire.
+     *
+     * Both figures are declared on every Opus packet and on every full pcm-zstd
+     * header, and pcm-stream.js carries them across minimal headers, so this is
+     * refreshed continuously rather than latched once.
+     */
+    _noteStream(sampleRate, channels) {
+        if (sampleRate > 0) this.streamRate = sampleRate;
+        if (channels > 0) this.streamChannels = channels;
+    }
+
+    // Nothing is playing, so there is nothing to describe. Without this the last
+    // reading survives — across a mode change, or a receiver that has been
+    // switched off — and a stale rate and channel count are worse than none:
+    // they read as current.
+    forgetStream() {
+        this.streamRate = 0;
+        this.streamChannels = 0;
     }
 
     async _decodeAndPlay(bytes, sampleRate, channels) {
@@ -970,7 +1003,6 @@ export class AudioPlayer extends Emitter {
         // — v1 does the same. The output routing above can then select a side
         // in any mode, rather than only on the stereo IQ modes.
         this.channels = planes.length;
-        this.streamRate = sampleRate;
         const channels = Math.max(2, planes.length);
         const buffer = ctx.createBuffer(channels, frames, sampleRate);
         for (let c = 0; c < channels; c++) {

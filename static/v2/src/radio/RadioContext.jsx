@@ -380,8 +380,10 @@ export function RadioProvider({ children }) {
         offs.push(audioConn.on('opus', ({ data, sampleRate, channels }) => {
             player.pushOpus(data, sampleRate, channels);
         }));
-        offs.push(audioConn.on('pcm', ({ planes, sampleRate }) => {
-            player.pushPCM(planes, sampleRate);
+        offs.push(audioConn.on('pcm', ({ planes, sampleRate, channels }) => {
+            // `channels` is the count the *header* declared, which is not the
+            // same question as how many planes came back — see _noteStream.
+            player.pushPCM(planes, sampleRate, channels);
         }));
         offs.push(audioConn.on('quality', ({ basebandPower, noisePower }) => {
             // Dropped outright in IQ. One full-header packet arrives after the
@@ -613,7 +615,7 @@ export function RadioProvider({ children }) {
             m.queuedSec = player.queuedSec;
             m.outLatencySec = player.outputLatencySec;
             m.underruns = player.underruns;
-            m.channels = player.channels;
+            m.channels = player.streamChannels;
             m.streamRate = player.streamRate;
             m.contextRate = player.sampleRate;
             m.makeupDb = player.makeupDb;
@@ -720,6 +722,16 @@ export function RadioProvider({ children }) {
         const iq = isIQ(tuning.mode);
         iqRef.current = iq;
         player.setIQ(iq);
+        // The rate and channel count belong to the mode, so the old mode's are
+        // wrong the instant it changes — and they are only refreshed when a
+        // packet arrives. A stream that has stopped (or a server that has
+        // stopped sending, which is what a dead streaming goroutine looks like
+        // from here) would otherwise leave the last mode's figures on screen
+        // reading as current. Blank until the new mode's first packet says.
+        player.forgetStream();
+        const sm = meters.current;
+        sm.streamRate = 0;
+        sm.channels = 0;
         if (!iq) return;
         // Blank the signal meters, and keep them blank — see the guard in the
         // 'quality' handler.

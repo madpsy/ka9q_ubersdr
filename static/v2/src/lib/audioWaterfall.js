@@ -80,6 +80,25 @@ export const SCOPE_FLOOR_MIN = -120;
 export const SCOPE_FLOOR_MAX = -30;
 export const SCOPE_FLOOR_DEFAULT = -90;
 
+// How wide a bar is, in CSS pixels, for each FFT size the Resolution control
+// offers. This is what makes the resolution choice visible in the bar view.
+//
+// It has to be done by width rather than by bin count, because there is never a
+// shortage of bins: even "Fast" puts several hundred across an SSB passband,
+// which is already more than a panel-width canvas has room for. Every setting
+// would therefore be pixel-limited to the same comb, and the control would look
+// broken. Widths instead, so each step is a visibly different display: coarse
+// and readable at one end, near-continuous at the other.
+//
+// Balanced keeps the 7 px the bars have always been drawn at, so the default
+// look does not move.
+const BAR_WIDTH_PX = { 2048: 14, 4096: 7, 8192: 4, 16384: 2 };
+const BAR_WIDTH_DEFAULT = 7;
+
+export function barWidth(fftSize) {
+    return BAR_WIDTH_PX[fftSize] || BAR_WIDTH_DEFAULT;
+}
+
 /**
  * The dB window a frame is drawn in: where the bottom of the scale sits, and
  * how many dB it covers.
@@ -254,9 +273,11 @@ export function newBarLevel() {
  * palette as everything else here. Colouring each bar by its own peak was the
  * other option and reads worse: the whole display changes hue when one signal
  * arrives, and the eye reports that as everything having got louder.
+ *
+ * `fftSize` sets how many bars there are, via barWidth below.
  */
 export function drawAudioBars({
-    canvas, bins, binCount, sampleRate, tuning, palette, contrast, level, floorDb,
+    canvas, bins, binCount, sampleRate, tuning, palette, contrast, level, floorDb, fftSize,
 }) {
     if (!canvas || !bins || bins.length !== binCount) return;
     const { w, h, dpr } = sizedCanvas(canvas);
@@ -274,8 +295,11 @@ export function drawAudioBars({
     // Bar width in device pixels, from a target in CSS pixels. Whole pixels, or
     // neighbouring bars round differently and the row develops a moiré of gaps
     // that looks like missing data.
-    const target = Math.max(3, Math.round(7 * dpr));
-    const gap = dpr >= 2 ? 2 : 1;
+    const target = Math.max(2, Math.round(barWidth(fftSize) * dpr));
+    // The gap has to give way as the bars narrow. A fixed 2 px beside a 4 px bar
+    // is a third of the row spent on nothing, and the display reads as sparse
+    // rather than as fine.
+    const gap = target >= 8 && dpr >= 2 ? 2 : 1;
     const step = target + gap;
     const bars = Math.max(1, Math.floor(w / step));
 

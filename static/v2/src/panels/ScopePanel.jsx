@@ -35,6 +35,9 @@ const VIEWS = [
     { value: 'waterfall', label: 'Waterfall' },
 ];
 
+// Analysis resolution. It sets the waterfall's Hz/bin, and — because the bars
+// have far more bins available than a canvas has room for at any of these — the
+// width of a bar, and so how many of them there are. See barWidth.
 const FFT_SIZES = [
     { value: 2048, label: 'Fast' },
     { value: 4096, label: 'Balanced' },
@@ -158,6 +161,7 @@ export default function ScopePanel({ minimal }) {
                     contrast,
                     level: barLevel.current,
                     floorDb: autoLevel ? null : floorDb,
+                    fftSize,
                 });
                 drawAudioRuler(barRulerRef.current, tuning, f.sampleRate, f.binCount);
             } else if (showScope) {
@@ -328,7 +332,11 @@ export default function ScopePanel({ minimal }) {
                 </Field>
             )}
 
-            {!minimal && showWf && (
+            {/* Offered for the bars as well as the waterfall: it sets how many
+                bars there are (lib/audioWaterfall.js barWidth), so gating it on
+                the waterfall would leave a scope-only bar view with a control
+                it can see the effect of but not reach. */}
+            {!minimal && (showWf || bars) && (
                 <Field label="Resolution" hint={rate ? `${Math.round(rate / fftSize)} Hz/bin` : ''}>
                     <Segmented
                         options={FFT_SIZES.map((f) => ({ value: String(f.value), label: f.label }))}

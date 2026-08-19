@@ -927,6 +927,18 @@ func (e *eventLoop) handleEvent(ev tcell.Event) (quit bool) {
 			}
 			return false
 		}
+		// The help overlay is a modal like the others: the wheel scrolls it
+		// rather than reaching the radio underneath.
+		if e.ui.showHelp {
+			buttons := ev.Buttons()
+			if buttons&tcell.WheelUp != 0 {
+				e.ui.helpScroll -= 3
+			}
+			if buttons&tcell.WheelDown != 0 {
+				e.ui.helpScroll += 3
+			}
+			return false
+		}
 		// A modal owns the screen it covers, so a click behind it must not
 		// tune the radio.
 		if e.bookmarkPanel == nil && e.chatPanel == nil {
@@ -1169,14 +1181,12 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 		return false
 	}
 
-	// Any key dismisses the help overlay, so it never traps the user.
+	// Any key dismisses the help overlay, bar the ones that scroll it — see
+	// handleHelpKey. Kept a separate function because the arrows mean something
+	// else while it is up, and a mode that reuses keys does not belong in the
+	// switch below.
 	if ui.showHelp {
-		ui.showHelp = false
-		if ev.Key() == tcell.KeyRune && (ev.Rune() == 'q' || ev.Rune() == 'Q') {
-			e.cancel()
-			return true
-		}
-		return false
+		return e.handleHelpKey(ev)
 	}
 
 	switch ev.Key() {
@@ -1265,12 +1275,7 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 				ui.status = map[bool]string{true: "muted", false: "unmuted"}[ui.muted]
 			}
 		case 'M':
-			idx := (modeIndex(ui.audioMode) + 1) % len(modes)
-			ui.ApplyMode(modes[idx].Name)
-			// Choosing a mode by hand means the 10 MHz convention should stop
-			// overriding it, unless the choice is itself a sideband.
-			ui.status = "mode " + strings.ToUpper(ui.audioMode)
-			e.retune()
+			e.cycleAudioMode()
 		case 'A':
 			ui.autoSideband = !ui.autoSideband
 			if ui.autoSideband {
@@ -1307,6 +1312,13 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 			} else {
 				ui.status = "wheel zooms"
 			}
+		case 'z', 'Z':
+			ui.zoomOnVFO = !ui.zoomOnVFO
+			if ui.zoomOnVFO {
+				ui.status = "zoom holds the dial"
+			} else {
+				ui.status = "zoom holds the centre"
+			}
 		case 's':
 			ui.stepIdx = (ui.stepIdx + 1) % len(tuningSteps)
 			ui.status = "step " + formatStep(ui.StepHz())
@@ -1334,6 +1346,9 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 			ui.splitRatio = math.Min(0.85, ui.splitRatio+0.05)
 		case '?', 'h', 'H':
 			ui.showHelp = true
+			// From the top, so the second look at the keys starts where the
+			// first one did rather than wherever it was left.
+			ui.helpScroll = 0
 		case ',':
 			ui.AdjustBandwidth(-100)
 			ui.status = fmt.Sprintf("filter %+d/%+d Hz", ui.bwLow, ui.bwHigh)
@@ -1343,6 +1358,77 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 			ui.status = fmt.Sprintf("filter %+d/%+d Hz", ui.bwLow, ui.bwHigh)
 			e.retune()
 		}
+	}
+	return false
+}
+
+// cycleAudioMode steps to the next demodulation mode. Shared by the M key and
+// by a click on the mode in the header, so the two cannot drift apart.
+func (e *eventLoop) cycleAudioMode() {
+	ui := e.ui
+	idx := (modeIndex(ui.audioMode) + 1) % len(modes)
+	ui.ApplyMode(modes[idx].Name)
+	// Choosing a mode by hand means the 10 MHz convention should stop
+	// overriding it, unless the choice is itself a sideband.
+	ui.status = "mode " + strings.ToUpper(ui.audioMode)
+	e.retune()
+}
+
+// handleHelpKey drives the help overlay while it is up. Returns whether the
+// loop should stop, like handleKey.
+//
+// The overlay scrolls because it is taller than most terminals — over fifty
+// lines of keys — and the bottom of it was otherwise unreachable: the box was
+// clipped at the screen edge with nothing to say that there was more.
+//
+// Only the scrolling keys are taken. Every other key still dismisses it, so it
+// cannot trap somebody who does not know which those are, and q still quits.
+// The page and end keys ask for more than they can know is there: drawHelp
+// clamps whatever lands in helpScroll against the box it actually drew, which
+// is also why helpViewport is only a hint here — it is zero until the first
+// frame, and a page falls back to one line.
+func (e *eventLoop) handleHelpKey(ev *tcell.EventKey) bool {
+	ui := e.ui
+	page := ui.helpViewport - 1
+	if page < 1 {
+		page = 1
+	}
+
+	switch ev.Key() {
+	case tcell.KeyUp:
+		ui.helpScroll--
+		return false
+	case tcell.KeyDown:
+		ui.helpScroll++
+		return false
+	case tcell.KeyPgUp:
+		ui.helpScroll -= page
+		return false
+	case tcell.KeyPgDn:
+		ui.helpScroll += page
+		return false
+	case tcell.KeyHome:
+		ui.helpScroll = 0
+		return false
+	case tcell.KeyEnd:
+		// Past the end on purpose: drawHelp pulls it back to the last page.
+		ui.helpScroll = len(helpLines)
+		return false
+	case tcell.KeyRune:
+		switch ev.Rune() {
+		case 'k':
+			ui.helpScroll--
+			return false
+		case 'j':
+			ui.helpScroll++
+			return false
+		}
+	}
+
+	ui.showHelp = false
+	if ev.Key() == tcell.KeyRune && (ev.Rune() == 'q' || ev.Rune() == 'Q') {
+		e.cancel()
+		return true
 	}
 	return false
 }
@@ -1385,6 +1471,18 @@ func (e *eventLoop) handleMouse(ev *tcell.EventMouse) {
 
 	if buttons&tcell.ButtonPrimary != 0 {
 		if !e.dragging {
+			// The header fields that carry a setting act as buttons for it,
+			// which is how somebody finds the key without reading the help.
+			if what, ok := ui.HeaderAt(x, y); ok {
+				switch what {
+				case headerVFO:
+					ui.prompting = true
+					ui.promptBuf = ""
+				case headerMode:
+					e.cycleAudioMode()
+				}
+				return
+			}
 			// Clicking the signal meter switches its scale, which is the
 			// discoverable way to find the g key.
 			if ui.MeterHit(l, x, y) {
@@ -1526,13 +1624,8 @@ func nextRung(rungs []float64, current float64, direction int) (float64, bool) {
 }
 
 // zoomStep moves one rung along the server's zoom ladder. direction is -1 to
-// zoom in and +1 to zoom out.
-//
-// Zooming in keeps `anchor` (the cursor) at the same screen position, so you
-// can point at a signal and dive into it. Zooming out instead holds the centre,
-// so the view widens symmetrically and converges on the full 0-30 MHz span —
-// anchoring the zoom-out to an off-centre cursor would slide the view sideways
-// instead of revealing more spectrum.
+// zoom in and +1 to zoom out. anchor is the frequency to hold still, or 0 for
+// the keyboard, which has no pointer to hold anything with — see zoomCentre.
 func (e *eventLoop) zoomStep(direction int, anchor float64) {
 	cfg := e.ui.cfg
 	if cfg.BinCount <= 0 || cfg.BinBandwidth <= 0 || cfg.TotalBandwidth <= 0 {
@@ -1563,14 +1656,55 @@ func (e *eventLoop) zoomStep(direction int, anchor float64) {
 		newSpan = maxSpan
 	}
 
-	newCentre := cfg.CenterFreq
-	if direction < 0 {
-		if anchor <= 0 {
-			anchor = cfg.CenterFreq
-		}
-		newCentre = anchor - (anchor-cfg.CenterFreq)*(newSpan/cfg.TotalBandwidth)
+	e.zoom(clampCenter(e.ui.zoomCentre(direction, anchor, newSpan), newSpan), newSpan)
+}
+
+// zoomCentre is where a zoom step lands the middle of the view.
+//
+// Zooming in keeps `anchor` at the same screen position, so pointing the mouse
+// at a signal and zooming dives into it. Zooming out instead holds the centre,
+// so the view widens symmetrically and converges on the full 0-30 MHz span —
+// anchoring a zoom-out to an off-centre cursor would slide the view sideways
+// instead of revealing more spectrum.
+//
+// The keyboard has no pointer, so it passes anchor 0 and gets whichever the `z`
+// toggle selects: the view centre, which is how + and - have always behaved, or
+// the dial. The dial is held on the way out as well as in — that it stays put
+// is the whole point of the toggle, and it is a frequency the operator chose
+// rather than wherever the mouse was left, so it does not slide the view the
+// way an arbitrary cursor position would.
+//
+// A dial outside the current view is centred on rather than held: holding keeps
+// the anchor at a fixed fraction across the screen, and a fraction outside 0..1
+// stays outside it, so the one thing the toggle promises — that zooming closes
+// in on what the radio is listening to — would never happen. Panning away and
+// then zooming brings the dial back instead of magnifying empty spectrum.
+func (u *UI) zoomCentre(direction int, anchor, newSpan float64) float64 {
+	cfg := u.cfg
+	if cfg.TotalBandwidth <= 0 {
+		return cfg.CenterFreq
 	}
-	e.zoom(clampCenter(newCentre, newSpan), newSpan)
+
+	dial := false
+	if anchor <= 0 && u.zoomOnVFO && u.vfo > 0 {
+		anchor, dial = u.vfo, true
+	}
+	if anchor <= 0 {
+		anchor = cfg.CenterFreq
+	}
+
+	if direction > 0 && !dial {
+		return cfg.CenterFreq
+	}
+
+	if dial {
+		start, span := u.viewRange()
+		if anchor < start || anchor > start+span {
+			return anchor
+		}
+	}
+
+	return anchor - (anchor-cfg.CenterFreq)*(newSpan/cfg.TotalBandwidth)
 }
 
 func (e *eventLoop) commitPrompt() {

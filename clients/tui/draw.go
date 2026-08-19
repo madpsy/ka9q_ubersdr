@@ -157,15 +157,28 @@ type UI struct {
 	showPeaks  bool
 	braille    bool
 	showHelp   bool
-	status     string
-	serverName string
-	connected  bool
-	fps        float64
+
+	// First help line on screen, and how many fit. The overlay is taller than
+	// most terminals — the keys run to over fifty lines — so it scrolls.
+	//
+	// Both are owned by drawHelp: it clamps helpScroll against the box it
+	// actually drew and writes back what it used, which is what lets the key
+	// handler ask for a page or for the end without knowing the geometry.
+	helpScroll   int
+	helpViewport int
+	status       string
+	serverName   string
+	connected    bool
+	fps          float64
 
 	// Wheel either zooms or steps the VFO, mirroring the Python client's
 	// scroll_mode. stepIdx selects the tuning step from tuningSteps.
 	wheelTunes bool
 	stepIdx    int
+
+	// What a keyboard zoom holds still: the middle of the view, or the dial.
+	// Off by default, which is how zooming has always behaved. See zoomCentre.
+	zoomOnVFO bool
 
 	// modePinned holds off the sideband convention for a mode that was asked
 	// for — on the command line, or by the receiver naming its own default —
@@ -201,6 +214,12 @@ type UI struct {
 	bands        []Band
 	bookmarks    []Bookmark
 	bookmarkHits []bookmarkHit
+
+	// Where the clickable header fields landed. The header sheds fields by
+	// priority as the terminal narrows and the ones that survive are laid out
+	// right to left, so their columns are only knowable at draw time — the same
+	// reason bookmarkHits exists.
+	headerHits []headerHit
 
 	// When this session runs out, from the receiver's own limit. sessionLimited
 	// is false on a receiver that does not limit sessions, which is a different
@@ -537,7 +556,40 @@ func (u *UI) render(s tcell.Screen) {
 	}
 }
 
+// headerField names a clickable field in the header.
+type headerField int
+
+const (
+	headerVFO  headerField = iota // opens the frequency prompt, as f does
+	headerMode                    // cycles the demodulation mode, as M does
+)
+
+// headerHit records where a clickable header field was drawn.
+type headerHit struct {
+	x0, x1 int // half-open column range on row 0
+	what   headerField
+}
+
+// HeaderAt reports which header field a screen position lands on, if any.
+//
+// The fields that carry a setting are clickable because that is how somebody
+// finds the key for it: the frequency opens the same prompt as f, and the mode
+// cycles as M does. Only the fields actually drawn are hit-tested, so a click
+// can never reach one the terminal was too narrow to show.
+func (u *UI) HeaderAt(x, y int) (headerField, bool) {
+	if y != 0 {
+		return 0, false
+	}
+	for _, h := range u.headerHits {
+		if x >= h.x0 && x < h.x1 {
+			return h.what, true
+		}
+	}
+	return 0, false
+}
+
 func (u *UI) drawHeader(s tcell.Screen, l Layout) {
+	u.headerHits = u.headerHits[:0]
 	x := 0
 	name := tcell.StyleDefault.Foreground(tcell.ColorWhite).Bold(true)
 	dim := tcell.StyleDefault.Foreground(tcell.ColorSilver)
@@ -639,8 +691,14 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 	// Order here is display order: the mode and filter width follow the
 	// frequency directly, since they qualify it — the rest of the row is
 	// settings, which do not.
+	// Which candidates carry a click, by index: they are appended
+	// conditionally, so the indexes cannot be written down in advance.
+	// Which candidates carry a click, by index: they are appended
+	// conditionally, so the indexes cannot be written down in advance.
 	candidates := []field{{vfoRuns, 0}}
+	vfoIdx, audioIdx := 0, -1
 	if u.audioOn {
+		audioIdx = len(candidates)
 		// The full audio field is wide. Where it will not fit beside the VFO,
 		// a compact form carries the part that matters — what is being
 		// demodulated — rather than the field being shed altogether.
@@ -656,6 +714,14 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 		field{plain(fmt.Sprintf("span %s", formatSpan(span))), 2},
 		field{plain(fmt.Sprintf("%s %.0f/%.0f dB", scaleMode, u.minDB, u.maxDB)), 4},
 		field{plain(wheel), 6},
+	)
+	// Only while it is on. The centre is the default and the way zooming has
+	// always worked, so a field saying so on every screen would be noise; what
+	// needs announcing is the setting that makes + and - move the view.
+	if u.zoomOnVFO {
+		candidates = append(candidates, field{plain("zoom dial"), 6})
+	}
+	candidates = append(candidates,
 		field{plain(u.mode.String()), 5},
 		field{plain(fmt.Sprintf("%3.0f fps", u.fps)), 7},
 	)
@@ -717,9 +783,21 @@ func (u *UI) drawHeader(s tcell.Screen, l Layout) {
 			cx += sepWidth
 		}
 		first = false
-		for _, r := range c.runs {
+		fieldStart := cx
+		for ri, r := range c.runs {
 			drawText(s, cx, 0, r.style, r.text)
+			// The mode is the first run of the audio field, and only it is
+			// clickable: the filter width and the rest of that field are not
+			// things a click could sensibly change.
+			if i == audioIdx && ri == 0 && runeLen(r.text) > 0 {
+				u.headerHits = append(u.headerHits, headerHit{cx, cx + runeLen(r.text), headerMode})
+			}
 			cx += runeLen(r.text)
+		}
+		// The whole VFO field, label included: somebody aiming at the frequency
+		// is aiming at the field, not at the digits.
+		if i == vfoIdx && cx > fieldStart {
+			u.headerHits = append(u.headerHits, headerHit{fieldStart, cx, headerVFO})
 		}
 	}
 }
@@ -1353,7 +1431,11 @@ func (u *UI) drawStatus(s tcell.Screen, l Layout) {
 		{"m mute", 4},
 		{"M mode", 10},
 		{"n NR:" + padRunes(u.dspLabel(), 4), 0},
-		{"t SQ:" + u.squelchField(), 1},
+		// Both keys, because the hint is where people look for them and one
+		// of them is not guessable: t raises the threshold, and nothing said
+		// that shift lowers it or that lowering it past the floor is how the
+		// gate is turned off.
+		{"t/T SQ:" + u.squelchField(), 1},
 		{"d audio", 8},
 		{"g meter", 9},
 		{"v view", 11},
@@ -1381,6 +1463,7 @@ func (u *UI) drawStatus(s tcell.Screen, l Layout) {
 var helpLines = []string{
 	"Tuning  (the VFO is what the radio is tuned to)",
 	"  click            set the VFO",
+	"  click the VFO    type a frequency, as f does",
 	"  click a bookmark tune to it, with its mode and filter",
 	"  b                browse and search the receiver's bookmarks",
 	"  f                type a frequency",
@@ -1397,7 +1480,8 @@ var helpLines = []string{
 	"Zoom and wheel",
 	"  wheel            zoom, in at the cursor and out from the centre",
 	"  w                switch the wheel between zoom and tune",
-	"  + -              zoom about the centre",
+	"  + -              zoom in / out",
+	"  z                zoom holds the centre or the dial",
 	"  0                reset to full span",
 	"",
 	"Display",
@@ -1408,13 +1492,13 @@ var helpLines = []string{
 	"",
 	"Audio",
 	"  m                mute / unmute",
-	"  M                cycle demodulation mode",
+	"  M                cycle demodulation mode, as clicking it does",
 	"  A                auto sideband either side of 10 MHz",
 	"  , .              narrow / widen the audio filter",
 	"  x                output channel: both / left / right",
 	"  g                signal meter: dBFS or SNR",
 	"  n                cycle server-side noise reduction",
-	"  t / T            raise / lower the squelch threshold (SNR)",
+	"  t / T            raise / lower the squelch; T past the floor is off",
 	"  d                audio settings: outputs, volume, filter",
 	"",
 	"Scaling  (the dB window, not the audio filter)",
@@ -1430,6 +1514,7 @@ var helpLines = []string{
 	"Receivers",
 	"  i                pick another receiver",
 	"",
+	"  ↑ ↓ PgUp PgDn    scroll this help",
 	"  ?                close this help      q  quit",
 }
 
@@ -1452,6 +1537,29 @@ func (u *UI) drawHelp(s tcell.Screen, l Layout) {
 	x0 := (l.W - width) / 2
 	y0 := (l.H - height) / 2
 
+	// Rows between the title and the bottom edge of the box.
+	visible := height - 2
+	if visible < 1 {
+		visible = 1
+	}
+
+	// Clamp here rather than where the key was pressed: this is the only place
+	// that knows how tall the box came out on this terminal, and the terminal
+	// can be resized under an open overlay. The clamped value is written back,
+	// so a scroll past the end leaves the view at the end rather than banking
+	// up an offset that has to be scrolled off again.
+	maxScroll := len(helpLines) - visible
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if u.helpScroll > maxScroll {
+		u.helpScroll = maxScroll
+	}
+	if u.helpScroll < 0 {
+		u.helpScroll = 0
+	}
+	u.helpViewport = visible
+
 	box := tcell.StyleDefault.Foreground(tcell.NewRGBColor(220, 220, 235)).
 		Background(tcell.NewRGBColor(28, 28, 38))
 	title := tcell.StyleDefault.Foreground(tcell.NewRGBColor(255, 205, 90)).
@@ -1460,19 +1568,35 @@ func (u *UI) drawHelp(s tcell.Screen, l Layout) {
 	for y := y0; y < y0+height; y++ {
 		drawText(s, x0, y, box, strings.Repeat(" ", width))
 	}
-	drawText(s, x0, y0, title, padTo(" Keys", width))
 
-	for i, line := range helpLines {
-		y := y0 + 1 + i
-		if y >= y0+height-1 {
+	// The title carries the position, because the alternative is an overlay
+	// that looks complete when it is not: the keys are cut off mid-list at the
+	// bottom edge with nothing to say that there is more, which is how this
+	// went unnoticed. Dropped on a box too narrow to hold it rather than
+	// crowding the heading.
+	heading := " Keys"
+	if maxScroll > 0 {
+		// Runes, not bytes: padTo and drawText both count cells, and the arrows
+		// are three bytes each.
+		pos := fmt.Sprintf("%d-%d of %d  ↑↓ ", u.helpScroll+1, u.helpScroll+visible, len(helpLines))
+		if len([]rune(heading))+len([]rune(pos))+2 <= width {
+			heading = padTo(heading, width-len([]rune(pos))) + pos
+		}
+	}
+	drawText(s, x0, y0, title, padTo(heading, width))
+
+	for i := 0; i < visible; i++ {
+		idx := u.helpScroll + i
+		if idx >= len(helpLines) {
 			break
 		}
+		line := helpLines[idx]
 		style := box
 		// Section headings are the unindented lines.
 		if line != "" && !strings.HasPrefix(line, " ") {
 			style = title
 		}
-		drawText(s, x0+1, y, style, padTo(" "+line, width-2))
+		drawText(s, x0+1, y0+1+i, style, padTo(" "+line, width-2))
 	}
 }
 

@@ -1504,10 +1504,12 @@ func TestSquelchStatusIndicator(t *testing.T) {
 		return string(row)
 	}
 
-	if got := statusRow(0, false); !strings.Contains(got, "t SQ:off") {
+	// Both keys are named: t alone left no way to find the one that lowers
+	// the threshold, which is also the only way to turn the gate off.
+	if got := statusRow(0, false); !strings.Contains(got, "t/T SQ:off") {
 		t.Errorf("status bar does not show squelch off: %q", got)
 	}
-	if got := statusRow(35, false); !strings.Contains(got, "t SQ:35") {
+	if got := statusRow(35, false); !strings.Contains(got, "t/T SQ:35") {
 		t.Errorf("status bar does not show the threshold: %q", got)
 	}
 	open := statusRow(35, false)

@@ -286,6 +286,8 @@ and the **view**, which is what the display shows. They have separate keys.
 | --- | --- |
 | **Tuning — moves the radio** | |
 | click | set the VFO |
+| click the frequency | type a frequency, as `f` does |
+| click the mode | cycle demodulation mode, as `M` does |
 | click a bookmark | tune to it, taking its mode and filter |
 | `b` | browse and search the receiver's bookmarks |
 | `f` | type a frequency |
@@ -300,7 +302,8 @@ and the **view**, which is what the display shows. They have separate keys.
 | **Zoom** | |
 | wheel | zoom, in at the cursor and out from the centre |
 | `w` | switch the wheel between zoom and tune |
-| `+` `-` | zoom about the centre |
+| `+` `-` | zoom in / out |
+| `z` | zoom holds the centre or the dial |
 | `0` | reset to full span |
 | **Display** | |
 | `v` | cycle spectrum / waterfall / split |
@@ -505,7 +508,7 @@ sentinel rather than as `0`, since 0 dB is itself a valid threshold. The range
 was 20–80 while the header carried a noise density and the figure being
 thresholded was S/N0 in dB·Hz, some 34 dB above the true SNR on SSB.
 
-The status bar shows `t SQ:` with the threshold and a **▼** while the gate is
+The status bar shows `t/T SQ:` with the threshold and a **▼** while the gate is
 actually closed, so it is obvious when silence is the squelch rather than a dead
 band. That indicator reads the audio itself: the server substitutes silence
 rather than dropping packets when gated, which is more reliable than
@@ -729,6 +732,16 @@ so you can point at a signal and dive into it. Zooming *out* holds the centre
 instead, so the view widens symmetrically and converges on the full 0–30 MHz
 span; anchoring zoom-out to an off-centre cursor would slide the view sideways
 rather than reveal more spectrum.
+
+`+` and `-` have no cursor to anchor to, so `z` chooses what they hold: the
+centre of the view, which is how they have always behaved, or the dial. On the
+dial they hold it at the same place on screen in *both* directions — that it
+stays put is the point, and unlike a cursor it is a frequency you chose, so
+holding it on the way out does not slide the view somewhere arbitrary. A dial
+outside the current view is centred on instead: holding keeps it at a fixed
+fraction across the screen, and a fraction outside the view stays outside it, so
+zooming after a pan would magnify empty spectrum forever. The header shows
+`zoom dial` while it is on.
 
 ## Protocol
 

@@ -1039,6 +1039,11 @@ type UIConfig struct {
 	StationIdColor            string            `yaml:"station_id_color"                json:"station_id_color"`
 	Theme                     map[string]string `yaml:"theme"                           json:"theme"`
 	AllowedPostMessageOrigins []string          `yaml:"allowed_postmessage_origins"     json:"allowed_postmessage_origins"`
+	// Defaults for the v2 interface only. Everything above this line is either
+	// shared by both interfaces or belongs to the classic one — see
+	// ui_config_v2_defaults.go for which is which and why the two are not
+	// merged.
+	V2 UIConfigV2 `yaml:"v2" json:"v2"`
 	// V2Interface makes / and /index.html redirect to the v2 interface at /v2/.
 	// Server-wide, applied before any of v1's page assets are sent. Visiting
 	// /?v1 bypasses the redirect, which is how v1 stays reachable once this is on.

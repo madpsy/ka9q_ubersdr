@@ -170,6 +170,12 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		"theme":                       effectiveTheme,
 		"allowed_postmessage_origins": allowedPMOrigins,
 		"v2_interface":                config.UI.V2Interface,
+		// The v2 interface's own defaults, and only the keys the operator
+		// actually set — every field is omitempty, so an untouched receiver
+		// sends "v2": {} and v2 keeps its built-in defaults. The distinction
+		// matters: "not chosen" has to reach the client as absent, or every
+		// listener would be held to whatever this file happened to marshal.
+		"v2": config.UI.V2,
 	}); err != nil {
 		log.Printf("Error encoding UI config response: %v", err)
 	}
@@ -193,6 +199,11 @@ func handleAdminGetUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"ui": config.UI,
+			// Not part of the config and never written back: the v2 group's
+			// controls are built from this, so the admin UI knows every colour
+			// scheme and every waterfall palette the interface has without
+			// either being listed in ui.yaml. See ui_config_v2_defaults.go.
+			"v2_settings": v2Settings,
 		}); err != nil {
 			log.Printf("Error encoding UI config response: %v", err)
 		}
@@ -237,6 +248,12 @@ func handleAdminGetUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		}
 	}
 
+	// The v2 group's option lists travel beside the config rather than in it,
+	// for the reason given on v2Settings: they are what the interface has, not
+	// what the operator chose, so storing them in ui.yaml would let a stale file
+	// hide a palette or a colour scheme that v2 has since gained.
+	rawConfig["v2_settings"] = v2Settings
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(rawConfig); err != nil {
 		log.Printf("Error encoding UI config response: %v", err)
@@ -256,6 +273,12 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// The v2 option lists are sent to the admin UI beside the config, not in it.
+	// A client that echoes the whole GET reply back must not write them into
+	// ui.yaml, where they would sit as a stale copy of what the interface had on
+	// the day somebody last pressed Save.
+	delete(body, "v2_settings")
 
 	// Re-marshal to YAML for storage
 	yamlData, err := yaml.Marshal(body)
@@ -353,6 +376,26 @@ func handleAdminPutUIConfig(w http.ResponseWriter, r *http.Request, configDir st
 			http.Error(w, fmt.Sprintf("theme.%s: invalid hex colour '%s' (expected #rrggbb)", key, val), http.StatusBadRequest)
 			return
 		}
+	}
+
+	// A client that did not render the v2 group must not clear it by saving the
+	// rest of the form. Absent means "leave as is", the same rule v2_interface
+	// above follows — and it matters more here, because every key in the block
+	// is optional, so a wipe looks exactly like an operator who set nothing.
+	if !uiBodyHasKey(body, "v2") {
+		parsed.UI.V2 = config.UI.V2
+		if uiMap, ok := body["ui"].(map[string]interface{}); ok {
+			uiMap["v2"] = parsed.UI.V2
+			if reYAML, err := yaml.Marshal(body); err == nil {
+				yamlData = reYAML
+			}
+		}
+	}
+
+	// Validate the v2 block against what that interface actually offers.
+	if err := validateUIConfigV2(parsed.UI.V2); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	// Write to ui.yaml

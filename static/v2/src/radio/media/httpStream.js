@@ -42,6 +42,16 @@ export function streamUrl(sessionId) {
     return `/audio/stream?session=${encodeURIComponent(sessionId)}`;
 }
 
+// The endpoint answering "no", as opposed to something going wrong with MSE.
+// Marked so start() can tell them apart, and carrying the server's own words —
+// it explains itself (no audio session yet, IQ mode) far better than a status
+// code does, and the panel shows whatever lands in `error`.
+function refused(status, detail) {
+    const err = new Error(detail || `HTTP ${status}`);
+    err.refusedStatus = status;
+    return err;
+}
+
 // Events: 'playing' once the element is stably playing (nothing may touch
 // MediaSession before this — see the controller), 'ended' when it stops for any
 // reason, 'error' with a message.
@@ -72,8 +82,14 @@ export class HttpAudioStream extends Emitter {
                 await this._startMSE(url);
                 return;
             } catch (err) {
-                console.warn('[media] MSE stream failed, falling back:', err.message);
                 this._teardownElement();
+                // A refusal is this endpoint's answer about this session, not a
+                // fault in MSE. The direct path would ask the same question and
+                // be told the same thing, so falling back only replaces a clear
+                // message ("IQ modes cannot be streamed") with the element's
+                // vague one, and burns a retry doing it.
+                if (err.refusedStatus) throw err;
+                console.warn('[media] MSE stream failed, falling back:', err.message);
             }
         }
         await this._startDirect(url);
@@ -151,7 +167,10 @@ export class HttpAudioStream extends Emitter {
         const abort = new AbortController();
         this._abort = abort;
         const resp = await fetch(url, { signal: abort.signal });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) {
+            const detail = await resp.text().catch(() => '');
+            throw refused(resp.status, detail.trim());
+        }
 
         el.play().catch((err) => console.warn('[media] play() rejected:', err.message));
         this._read(resp.body.getReader());

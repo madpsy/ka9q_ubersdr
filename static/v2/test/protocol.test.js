@@ -952,6 +952,114 @@ t("the operator's default audio buffer is read from the same reply", () => {
     assert.strictEqual(parseUiConfig({ default_buffer: '9000' }).bufferSec, 2);
 });
 
+// --- the operator's v2 defaults --------------------------------------------
+//
+// The `v2` block of the same reply: this interface's own defaults, which the
+// display context applies to a browser that has never stored settings of its
+// own. Everything in it is optional, so the tests below are mostly about the
+// difference between "not chosen" and "chose the thing that happens to be the
+// default" — getting that wrong freezes every listener on whatever the server
+// last serialised.
+
+t('an operator who set nothing produces no patch', () => {
+    assert.deepStrictEqual(parseUiConfig({}).v2Defaults, {});
+    assert.deepStrictEqual(parseUiConfig({ v2: {} }).v2Defaults, {});
+    // Not an object, from a server that means something else by the key.
+    assert.deepStrictEqual(parseUiConfig({ v2: 'yes' }).v2Defaults, {});
+    assert.deepStrictEqual(parseUiConfig({ v2: [1, 2] }).v2Defaults, {});
+    assert.deepStrictEqual(parseUiConfig({ v2: null }).v2Defaults, {});
+});
+
+t('a colour scheme carries its colours and its base together', () => {
+    // Exactly what the Colours menu does when somebody picks one, so an
+    // operator default and a listener's own choice land on identical settings.
+    const paper = parseUiConfig({ v2: { color_scheme: 'paper' } }).v2Defaults;
+    assert.strictEqual(paper.theme, 'light');
+    assert.strictEqual(paper.uiColors.accent, '#0a5ea8');
+    // A scheme that leaves a colour out clears it rather than leaving the
+    // previous scheme's behind.
+    assert.strictEqual(paper.uiColors.dim, null);
+
+    // The stock scheme sets no colours at all — it is what "nothing chosen"
+    // looks like — but it still says which base it is for.
+    const stock = parseUiConfig({ v2: { color_scheme: 'default' } }).v2Defaults;
+    assert.strictEqual(stock.theme, 'dark');
+    assert.deepStrictEqual(stock.uiColors, {
+        accent: null, text: null, dim: null, faint: null, station: null,
+    });
+
+    // A scheme this build does not have is ignored, not applied blank.
+    assert.deepStrictEqual(parseUiConfig({ v2: { color_scheme: 'chartreuse' } }).v2Defaults, {});
+});
+
+t('a palette is applied only if this build has it', () => {
+    assert.strictEqual(parseUiConfig({ v2: { palette: 'radar' } }).v2Defaults.palette, 'radar');
+    // jet is the classic interface's default and one this one does not have.
+    // Storing it would leave the listener on turbo (getPalette's fallback) with
+    // a settings blob claiming otherwise.
+    assert.deepStrictEqual(parseUiConfig({ v2: { palette: 'jet' } }).v2Defaults, {});
+});
+
+t('words are checked against the choices, switches against being booleans', () => {
+    const d = parseUiConfig({
+        v2: {
+            view_mode: 'waterfall', waterfall_mode: 'both', waterfall_pan: 'hold',
+            peak_hold: true, grid: false, fill: true, smooth_scroll: false,
+        },
+    }).v2Defaults;
+    assert.strictEqual(d.viewMode, 'waterfall');
+    assert.strictEqual(d.waterfallMode, 'both');
+    assert.strictEqual(d.waterfallPan, 'hold');
+    // false is a choice like any other and must survive.
+    assert.strictEqual(d.grid, false);
+    assert.strictEqual(d.smoothScroll, false);
+    assert.strictEqual(d.peakHold, true);
+    assert.strictEqual(d.fill, true);
+
+    // Neither a word off the list nor a string that looks like a switch.
+    const bad = parseUiConfig({
+        v2: { view_mode: 'panoramic', waterfall_mode: '4d', peak_hold: 'true', grid: 1 },
+    }).v2Defaults;
+    assert.deepStrictEqual(bad, {});
+});
+
+t('numbers are clamped to the sliders that set them', () => {
+    const d = parseUiConfig({
+        v2: {
+            ui_scale: 1.25, contrast: 1.4, smoothing: 0, waterfall_rate: 8,
+            row_height: 3, dss_seconds: 20,
+        },
+    }).v2Defaults;
+    assert.deepStrictEqual(d, {
+        uiScale: 1.25, contrast: 1.4, smoothing: 0, waterfallRate: 8,
+        rowHeight: 3, dssSeconds: 20,
+    });
+
+    // A hand-edited ui.yaml is the only way past the admin UI and the server's
+    // own check, and the nearest legal value beats ignoring it.
+    const wild = parseUiConfig({
+        v2: { ui_scale: 12, contrast: -3, smoothing: 5, row_height: 0 },
+    }).v2Defaults;
+    assert.deepStrictEqual(wild, {
+        uiScale: 1.6, contrast: 0.4, smoothing: 0.92, rowHeight: 1,
+    });
+
+    // Not a number at all is dropped, rather than clamped to a bound.
+    assert.deepStrictEqual(parseUiConfig({ v2: { contrast: 'high' } }).v2Defaults, {});
+});
+
+t('a key this build does not know is ignored', () => {
+    // A receiver may be running a server newer than its client. An unusable
+    // value written into the settings is one the listener then has to find.
+    const d = parseUiConfig({ v2: { palette: 'ice', spectrum_hologram: 'on' } }).v2Defaults;
+    assert.deepStrictEqual(d, { palette: 'ice' });
+});
+
+t('the v2 block is still kept verbatim under config', () => {
+    const cfg = { v2: { palette: 'ice', future_key: 7 } };
+    assert.deepStrictEqual(parseUiConfig(cfg).config.v2, cfg.v2);
+});
+
 // --- marker colours --------------------------------------------------------
 
 t('every palette names a dial and a passband colour', () => {

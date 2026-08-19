@@ -229,3 +229,73 @@ ui:
   #   - "https://other-trusted-site.net"
   #   - "http://localhost:8080"
   allowed_postmessage_origins: []
+
+  # ── v2 interface defaults ───────────────────────────────────────────────────
+  #
+  # Everything above this block belongs to the classic interface, or is read by
+  # both; this block is read only by v2. They are separate because several keys
+  # that look shared are not: `contrast` above is a symmetric dB offset on the
+  # auto-range window, while v2's below is a gamma on the amplitude-to-colour
+  # mapping, and of the seven palettes above v2 has two. One key covering both
+  # would mean a setting whose preview lies in one interface or the other.
+  #
+  # Keys read by BOTH interfaces, and therefore not repeated here:
+  #   station_id_overlay, station_id_color, min_span, default_buffer,
+  #   band_color_intensity, spectrum_bg_opacity (+ the uploaded image)
+  #
+  # Every key below is optional, and leaving one out is meaningful: it means the
+  # operator has not chosen, so v2 uses its own default — which is not the same
+  # as writing that default out here, because writing it out freezes it. A key
+  # that is set applies only to a visitor whose browser has no display settings
+  # of its own; anyone who has picked a palette keeps theirs.
+  #
+  # These are normally set from the admin UI's UI tab, which builds its controls
+  # from the interface's own option lists. Set by hand at your own risk: a value
+  # v2 does not recognise is ignored by the client and rejected by the admin API.
+  #
+  # v2:
+  #   # ── Interface ──
+  #   # One of v2's colour schemes, as its Colours menu lists them. Carries the
+  #   # accent, the text colours and whether the page is dark or light.
+  #   # One of: default (UberSDR), contrast (High contrast), amber, phosphor,
+  #   #         night, ice, violet, mono, paper (the light one).
+  #   color_scheme: "default"
+  #   # Multiplier on every font size, as the top bar's A- / A+ buttons set.
+  #   # 0.75-1.6. v2 default: 1.
+  #   ui_scale: 1.0
+  #
+  #   # ── Spectrum and waterfall ──
+  #   # Waterfall colour map. One of: turbo, viridis, inferno, magma, classic,
+  #   # mono, ice, radar. v2 default: classic. (Not the same list as `palette`
+  #   # above, which is the classic interface's.)
+  #   palette: "classic"
+  #   # Gamma on the amplitude-to-colour mapping: below 1 lifts weak signals,
+  #   # above 1 darkens the noise. 0.4-2.5. v2 default: 1.
+  #   contrast: 1.0
+  #   # Which panes the display opens with: split, spectrum, waterfall.
+  #   view_mode: "split"
+  #   # How the history is drawn: 2d (heat map), 3d (perspective), both.
+  #   waterfall_mode: "2d"
+  #   # Seconds of history the 3D surface reaches back. 1-30. Only applies where
+  #   # waterfall_mode is 3d or both.
+  #   dss_seconds: 10
+  #   # What existing rows do when the view is dragged or zoomed:
+  #   #   follow — rows shift with the axis, so a signal keeps its column
+  #   #   hold   — rows stay where they were painted, as the classic interface does
+  #   waterfall_pan: "follow"
+  #   # Committed rows per second. 2-40. v2 default: 20.
+  #   waterfall_rate: 20
+  #   # Device pixels per waterfall row. 1-4. v2 default: 2.
+  #   row_height: 2
+  #   # Temporal averaging of the spectrum trace, 0 being off. 0-0.92.
+  #   # v2 default: 0.5. (Not the classic interface's `smoothing`, which is spatial.)
+  #   smoothing: 0.5
+  #   # Slide each new row into view rather than letting it appear in one frame.
+  #   # The classic interface calls this GPU sub-pixel scroll. v2 default: true.
+  #   smooth_scroll: true
+  #   # Hold the highest trace seen, decaying slowly. v2 default: false.
+  #   peak_hold: false
+  #   # Solid area beneath the spectrum line. v2 default: true.
+  #   fill: true
+  #   # dB gridlines across the spectrum pane. v2 default: false.
+  #   grid: false

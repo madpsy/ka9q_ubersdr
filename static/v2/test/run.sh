@@ -254,6 +254,8 @@ esbuild ../src/radio/media/support.js --bundle --format=cjs --platform=node \
     --outfile=.build/mediasupport.cjs --log-level=warning
 esbuild ../src/radio/media/lookup.js --bundle --format=cjs --platform=node \
     --outfile=.build/medialookup.cjs --log-level=warning
+esbuild mediastream.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/mediastream.cjs --log-level=warning
 esbuild ../src/lib/cardArt.js --bundle --format=cjs --platform=node \
     --outfile=.build/cardart.cjs --log-level=warning
 esbuild ../src/lib/fitOnScreen.js --bundle --format=cjs --platform=node \
@@ -402,6 +404,7 @@ node audiosinks.test.js
 node markernav.test.js
 node markernavsettings.test.js
 node medialookup.test.js
+node mediastream.test.js
 node cardart.test.js
 node fitonscreen.test.js
 node keyboardreveal.test.js

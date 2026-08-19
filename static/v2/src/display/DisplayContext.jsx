@@ -2,7 +2,7 @@
 // the radio state so a display tweak never touches the signal path (and so the
 // canvas can read a single object out of a ref).
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from '../react.js';
 import { UI_CONFIG_DEFAULTS, parseUiConfig } from './uiConfig.js';
 import { UI_COLOR_VARS, uiColorVars } from '../lib/uiColors.js';
 import { invalidateThemeColors } from '../lib/spectrumTrace.js';
@@ -431,6 +431,14 @@ function load() {
     }
 }
 
+// Whether anything has been stored here before, which is how the operator's own
+// defaults know whether they are looking at a first visit. Deliberately not
+// derived from the loaded settings: those are the defaults filled in whatever
+// happened, so they look identical either way.
+function stored() {
+    try { return localStorage.getItem(STORAGE_KEY) != null; } catch (e) { return false; }
+}
+
 // The frame cap in force. Not chosen, it splits by device: anything driven by
 // touch — a phone or tablet in a browser, and both mobile apps — is capped at
 // 30, everything else runs at the display's rate.
@@ -460,13 +468,32 @@ const DisplayContext = createContext(null);
 export function DisplayProvider({ children }) {
     const [state, setState] = useState(load);
     const [server, setServer] = useState(UI_CONFIG_DEFAULTS);
+    // Whether this browser arrived with no display settings of its own, read
+    // *before* the save effect below writes the first copy — which it does on
+    // mount, defaults and all, so a moment later the question is unanswerable.
+    const firstVisit = useRef(!stored());
 
     useEffect(() => {
         let cancelled = false;
         fetch('/api/ui-config')
             .then((r) => r.json())
             .then((cfg) => {
-                if (!cancelled) setServer(parseUiConfig(cfg));
+                if (cancelled) return;
+                const parsed = parseUiConfig(cfg);
+                setServer(parsed);
+                // The operator's defaults for this interface, to somebody who
+                // has not been here before. Only then: they are a first
+                // impression, not a policy, and a listener who has chosen a
+                // palette should not find it changed on them because the
+                // receiver's owner set one. Same rule as v1's, and the same
+                // rule the audio buffer already follows in App.jsx.
+                //
+                // Applied once and stored like any other change, so the next
+                // load has settings and this does nothing.
+                if (!firstVisit.current) return;
+                firstVisit.current = false;
+                const patch = parsed.v2Defaults;
+                if (patch && Object.keys(patch).length) setState((s) => ({ ...s, ...patch }));
             })
             .catch(() => { /* non-fatal — the spectrum just has no backdrop */ });
         return () => { cancelled = true; };

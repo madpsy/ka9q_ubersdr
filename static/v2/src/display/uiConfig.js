@@ -14,13 +14,23 @@
 //   controls_opacity                         v1 control-bar transparency
 //   signal_meter_mode, smeter_mode, smeter_charts_visible, vu_meter_style
 //   mobile_tuning_mode, default_buffer, allowed_postmessage_origins
+//   v2 {…}                                   this interface's own defaults
 //
-// Only the backdrop and the station ID overlay are consumed so far. Values
-// that drive rendering are also
-// parsed and validated onto the top level, so the draw path never re-parses a
-// string, but nothing is dropped.
+// Most of that list is the classic interface's: the two disagree about what
+// several of the shared-looking keys mean — `contrast` is a dB offset there and
+// a gamma here, `smoothing` is spatial there and temporal here, and of its seven
+// palettes this interface has two — so what applies to this one arrives in its
+// own `v2` object rather than being read out of keys that mean something else.
+// See ui_config_v2_defaults.go, which is where its shape is defined.
+//
+// What is read from the top level is what genuinely means the same thing in both
+// interfaces: the backdrop, the station ID overlay, the auto-level minimum span
+// and the default audio buffer. Values that drive rendering are parsed and
+// validated onto the top level, so the draw path never re-parses a string, but
+// nothing is dropped.
 
-import { paletteMarks } from '../lib/palettes.js';
+import { paletteMarks, PALETTE_NAMES } from '../lib/palettes.js';
+import { UI_THEMES, uiColorsFrom } from '../lib/uiColors.js';
 
 export const UI_CONFIG_DEFAULTS = {
     loaded: false,
@@ -39,7 +49,109 @@ export const UI_CONFIG_DEFAULTS = {
     // milliseconds ("200"). null when the server did not say, which is not the
     // same as 0 — see the AudioDefaults bridge in App.jsx.
     bufferSec: null,
+    // The operator's defaults for this interface, already translated into a
+    // patch for the display settings — {} when they set none. Applied by
+    // DisplayProvider to a browser that has never stored any of its own; see
+    // the note on parseV2Defaults.
+    v2Defaults: {},
 };
+
+// ── The operator's v2 defaults ───────────────────────────────────────────────
+//
+// Three tables rather than one switch, because each kind needs a different
+// check, and because being tables is what lets the Go side test itself against
+// them: ui_config_v2_defaults_test.go reads this file and the two colour modules
+// and fails if the admin UI would offer a value this interface cannot act on, or
+// miss one it can. The lists are therefore written as plain literals — keep them
+// that way.
+//
+// The key on the left is what the server sends; `key` is the display setting it
+// sets. They differ in case only by convention (snake_case on the wire,
+// camelCase in the settings), which is deliberate: the wire names are an
+// operator-facing contract in ui.yaml and should not follow a rename in here.
+
+/** Numeric settings, with the bounds of the Display panel's own slider. */
+export const V2_RANGES = {
+    ui_scale: { key: 'uiScale', min: 0.75, max: 1.6 },
+    contrast: { key: 'contrast', min: 0.4, max: 2.5 },
+    dss_seconds: { key: 'dssSeconds', min: 1, max: 30 },
+    waterfall_rate: { key: 'waterfallRate', min: 2, max: 40 },
+    row_height: { key: 'rowHeight', min: 1, max: 4 },
+    smoothing: { key: 'smoothing', min: 0, max: 0.92 },
+};
+
+/** Settings that are one of a fixed set of words. */
+export const V2_ENUMS = {
+    view_mode: { key: 'viewMode', values: ['split', 'spectrum', 'waterfall'] },
+    waterfall_mode: { key: 'waterfallMode', values: ['2d', '3d', 'both'] },
+    waterfall_pan: { key: 'waterfallPan', values: ['follow', 'hold'] },
+};
+
+/** Plain switches. */
+export const V2_BOOLS = {
+    smooth_scroll: 'smoothScroll',
+    peak_hold: 'peakHold',
+    fill: 'fill',
+    grid: 'grid',
+};
+
+const clamp01 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+/**
+ * The operator's `ui.v2` block as a patch for the display settings.
+ *
+ * Absent is the whole point: every key is optional, and one that is not there
+ * means the operator did not choose — not that they chose what this interface
+ * already does. So an untouched receiver produces {} and nothing is applied,
+ * which is what keeps a default changed here reaching everybody rather than
+ * being frozen at whatever the server last serialised.
+ *
+ * This interface is the authority on what it can act on, not the server: a key
+ * it does not know, a palette it does not have, a word that is not one of the
+ * choices — all ignored rather than written into the settings, because a
+ * receiver may be running a server newer than its client (or the reverse), and
+ * an unusable value stored is one the listener then has to find and undo.
+ *
+ * Numbers are clamped rather than dropped. The admin UI cannot produce one out
+ * of range and the server rejects it on save, so the only way here is a
+ * hand-edited ui.yaml — where the nearest legal value is much likelier to be
+ * what was meant than nothing at all.
+ */
+export function parseV2Defaults(v2) {
+    if (!v2 || typeof v2 !== 'object' || Array.isArray(v2)) return {};
+    const out = {};
+
+    // A colour scheme is the accent, the text colours and the dark/light base
+    // together — the same one choice the Colours menu makes, applied the same
+    // way, so an operator default and a listener picking it by hand land on
+    // identical settings.
+    if (typeof v2.color_scheme === 'string') {
+        const preset = UI_THEMES.find((p) => p.id === v2.color_scheme);
+        if (preset) {
+            out.uiColors = uiColorsFrom(preset);
+            if (preset.theme) out.theme = preset.theme;
+        }
+    }
+
+    if (typeof v2.palette === 'string' && PALETTE_NAMES.includes(v2.palette)) {
+        out.palette = v2.palette;
+    }
+
+    for (const [wire, spec] of Object.entries(V2_ENUMS)) {
+        if (spec.values.includes(v2[wire])) out[spec.key] = v2[wire];
+    }
+
+    for (const [wire, key] of Object.entries(V2_BOOLS)) {
+        if (typeof v2[wire] === 'boolean') out[key] = v2[wire];
+    }
+
+    for (const [wire, spec] of Object.entries(V2_RANGES)) {
+        const n = parseFloat(v2[wire]);
+        if (Number.isFinite(n)) out[spec.key] = clamp01(n, spec.min, spec.max);
+    }
+
+    return out;
+}
 
 /**
  * What colour the dial line and the passband edges are drawn in.
@@ -122,5 +234,6 @@ export function parseUiConfig(cfg) {
         bufferSec: Number.isFinite(bufferMs) && bufferMs > 0
             ? Math.max(0.05, Math.min(2, bufferMs / 1000))
             : UI_CONFIG_DEFAULTS.bufferSec,
+        v2Defaults: parseV2Defaults(cfg.v2),
     };
 }

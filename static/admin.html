@@ -166,6 +166,102 @@
             display: block;
         }
 
+        /* ── UI tab scope groups ──────────────────────────────────────────────
+           The UI tab is one topic settled in up to two places, so its sections
+           are grouped by which interface reads them rather than split across two
+           tabs: the third of them that both interfaces share would then have had
+           either two homes or none. Collapsible, and never merely hidden — a
+           receiver whose visitors are split across /?v1 and /v2/ is an ordinary
+           setup, so the group that is not in use has to stay reachable. */
+        .ui-scope {
+            margin-bottom: 22px;
+            border: 1px solid #dbe0ea;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .ui-scope__head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 4px 12px;
+            padding: 12px 16px;
+            cursor: pointer;
+            border-radius: 7px;
+            background: #eef1f8;
+            list-style: none;
+        }
+
+        .ui-scope[open] > .ui-scope__head {
+            border-bottom: 1px solid #dbe0ea;
+            border-radius: 7px 7px 0 0;
+        }
+
+        .ui-scope__head::-webkit-details-marker { display: none; }
+
+        /* The disclosure triangle, drawn rather than inherited so it can sit
+           before the title on every browser and turn with the group. */
+        .ui-scope__head::before {
+            content: '▸';
+            color: #667eea;
+            font-size: 13px;
+            transition: transform 0.15s;
+        }
+
+        .ui-scope[open] > .ui-scope__head::before { transform: rotate(90deg); }
+
+        .ui-scope__title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #283593;
+        }
+
+        .ui-scope__note {
+            font-size: 12px;
+            color: #666;
+            flex: 1 1 260px;
+        }
+
+        .ui-scope__body { padding: 16px 16px 0 16px; }
+
+        /* One v2 setting: label and hint on the left, control on the right. */
+        .v2-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 16px;
+            padding: 10px 0;
+            border-top: 1px solid #eef0f4;
+        }
+
+        .v2-row:first-child { border-top: none; }
+        .v2-row__text { flex: 1 1 260px; min-width: 0; }
+        .v2-row__label { font-weight: 500; color: #444; font-size: 14px; }
+        .v2-row__hint { font-size: 12px; color: #777; margin-top: 2px; }
+        .v2-row__control { display: flex; align-items: center; gap: 10px; flex: 0 1 340px; }
+        .v2-row__control select { flex: 1 1 auto; min-width: 0; padding: 7px 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px; background: #fff; }
+        .v2-row__control input[type=range] { flex: 1 1 auto; min-width: 0; }
+        .v2-row__value { font-family: monospace; font-size: 12px; color: #667eea; min-width: 62px; text-align: right; }
+
+        /* Set / not set. Unset is the resting state and has to look like it:
+           the control beside it is dimmed, not disabled, so the operator can
+           still see what value it would take. */
+        .v2-row__set { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #666; white-space: nowrap; }
+        .v2-row--unset .v2-row__control select,
+        .v2-row--unset .v2-row__control input[type=range] { opacity: 0.45; }
+        .v2-row--unset .v2-row__value { opacity: 0.45; }
+
+        /* A colour scheme's accent, or a palette's gradient, beside its name —
+           the server sends each option's swatch, so the admin shows the same
+           thing the listener will see. */
+        .v2-swatch {
+            width: 46px;
+            height: 22px;
+            border-radius: 4px;
+            border: 1px solid #bbb;
+            flex-shrink: 0;
+        }
+
         .config-section {
             margin-bottom: 30px;
             padding: 20px;
@@ -2241,31 +2337,24 @@
                         </p>
                     </div>
 
-                    <!-- Shown only while v2 is the interface visitors get, because
-                         that is when the settings below stop describing what they
-                         see. Kept in step with what v2 actually reads from
-                         /api/ui-config — see static/v2/src/display/uiConfig.js. -->
+                    <!-- Which interface a setting reaches is answered by the group
+                         it sits in, below, rather than by a list here that would
+                         have to be kept in step with two codebases by hand. This
+                         says only where the receiver's own visitors are going, and
+                         which of the two things that are neither shared nor
+                         grouped — widgets and custom head/body HTML — apply. -->
                     <div id="v2InterfaceNotice" class="alert alert-warning" style="display: none; margin-bottom: 20px;">
-                        <strong>⚠️ Most settings below do not reach the v2 interface yet.</strong>
+                        <strong>⚠️ Visitors are getting the v2 interface.</strong>
                         <p style="margin: 8px 0 0 0;">
-                            v2 currently honours these:
-                        </p>
-                        <ul style="margin: 6px 0 0 0; padding-left: 22px; line-height: 1.7;">
-                            <li><strong>Spectrum background image</strong> and its opacity</li>
-                            <li><strong>Station ID overlay</strong> and its colour</li>
-                            <li><strong>Band colour intensity</strong></li>
-                            <li><strong>Minimum dynamic range</strong> (auto-level min span)</li>
-                            <li><strong>Default audio buffer</strong></li>
-                        </ul>
-                        <p style="margin: 8px 0 0 0;">
-                            Everything else here — waterfall palette, contrast, smoothing, peak hold, line graph, GPU scroll,
-                            meter modes, VU style, theme colours, controls opacity, bandwidth indicator colour, mobile tuning
-                            mode, postMessage origins — applies to the classic interface only. <strong>Widgets and custom links
-                            are not injected into v2 either.</strong> Custom head/body HTML <em>is</em> injected into both.
+                            The <strong>Classic interface (v1)</strong> group below therefore applies only to people who
+                            go to <a href="/?v1" target="_blank" rel="noopener">/?v1</a> — nothing in it reaches v2, which
+                            has its own group. Settings shared by both are grouped separately again.
                         </p>
                         <p style="margin: 8px 0 0 0; font-size: 13px;">
-                            Work in progress: v2 grows its own equivalents as they are built, so expect this list to shrink.
-                            Nothing below is lost in the meantime — it all still applies at <a href="/?v1" target="_blank" rel="noopener">/?v1</a>.
+                            Two things are not grouped because they are not per-interface defaults:
+                            <strong>widgets</strong> are injected into the classic interface only, and
+                            <strong>custom head/body HTML</strong> is injected into both.
+                            Custom menu links appear in both.
                         </p>
                     </div>
 
@@ -2280,12 +2369,196 @@
                     <div style="margin-bottom: 20px; padding: 14px 16px; background: #f0f4ff; border: 1px solid #c5cae9; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
                         <div>
                             <strong style="color: #283593; font-size: 14px;">🧩 Widgets</strong>
-                            <p style="margin: 4px 0 0 0; font-size: 13px; color: #555;">Inject custom HTML/JavaScript into the web UI. Create your own widgets or enable community-shared ones.</p>
+                            <p style="margin: 4px 0 0 0; font-size: 13px; color: #555;">Inject custom HTML/JavaScript into the web UI. Create your own widgets or enable community-shared ones. <strong>Classic interface only</strong> — they are not injected into v2.</p>
                         </div>
                         <button class="btn" onclick="document.getElementById('widgetsSection').scrollIntoView({behavior:'smooth',block:'start'});" style="font-size: 13px; padding: 7px 16px; white-space: nowrap; flex-shrink: 0;">Go to Widgets ↓</button>
                     </div>
 
                     <div id="uiConfigForm" style="display: none;">
+
+                        <details id="uiGroupShared" class="ui-scope" open>
+                            <summary class="ui-scope__head">
+                                <span class="ui-scope__title">🔗 Both interfaces</span>
+                                <span class="ui-scope__note">Read by the classic interface and by v2</span>
+                            </summary>
+                            <div class="ui-scope__body">
+
+                        <!-- Station ID Overlay -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">📡 Station ID Overlay</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Show the station callsign, name, and location in the top-right corner of the spectrum
+                                line graph. The first line shows <strong>&lt;callsign&gt; – &lt;name&gt;</strong> and
+                                the second line shows <strong>&lt;location&gt;</strong> in smaller text.
+                                Values come from the <strong>Station Info</strong> section of the main config.
+                                This is a server-wide setting; users cannot override it individually.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 14px;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; color: #555;">
+                                    <input type="checkbox" id="ui-station-id-overlay" style="width: 16px; height: 16px;">
+                                    Show station ID overlay on spectrum
+                                </label>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">Text colour</label>
+                                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                                    <input type="color"
+                                           id="ui-station-id-color"
+                                           value="#ffffff"
+                                           title="Station ID text colour"
+                                           style="width:44px; height:32px; padding:2px; border:1px solid #ddd; border-radius:4px; cursor:pointer; flex-shrink:0;"
+                                           oninput="syncStationIdHexFromPicker()">
+                                    <input type="text"
+                                           id="ui-station-id-color-hex"
+                                           value="#ffffff"
+                                           maxlength="7"
+                                           placeholder="#rrggbb"
+                                           style="width:88px; font-family:monospace; font-size:13px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; flex-shrink:0;"
+                                           oninput="syncStationIdPickerFromHex()">
+                                    <button class="btn btn-secondary"
+                                            onclick="resetStationIdColor()"
+                                            style="font-size:12px; padding:4px 10px; flex-shrink:0;"
+                                            title="Reset to default (#ffffff)">↺</button>
+                                    <div style="min-width:0;">
+                                        <div style="font-weight:500; font-size:14px; color:#333;">Overlay text colour</div>
+                                        <div style="font-size:12px; color:#666; margin-top:1px;">A 1 px black drop-shadow is always added for legibility over any background.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Minimum Dynamic Range — the one auto-spectrum setting both interfaces read -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔆 Minimum Dynamic Range</h3>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <p style="margin: 0 0 8px 0; color: #666; font-size: 12px;">
+                                    Guarantees at least this many dB are always shown in the auto-range window. Prevents the display from collapsing on very quiet bands.
+                                    0 = Auto (no minimum). Range: 0–60 dB. Default: 30 dB.
+                                </p>
+                                <label for="ui-min-span" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
+                                    Min Dynamic Range: <span id="ui-min-span-display" style="font-weight: bold; color: #667eea;">30</span> dB
+                                </label>
+                                <input type="range" id="ui-min-span" min="0" max="60" value="30" step="5"
+                                    style="width: 100%; max-width: 400px;"
+                                    oninput="document.getElementById('ui-min-span-display').textContent = this.value">
+                                <div style="display: flex; justify-content: space-between; max-width: 400px; font-size: 11px; color: #999; margin-top: 4px;">
+                                    <span>0 — Auto (no minimum)</span>
+                                    <span>60 dB — Wide minimum window</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Default Audio Buffer -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔊 Default Audio Buffer</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Sets the default maximum audio buffer size for new visitors before frames are dropped.
+                                Lower values reduce latency but may cause stuttering on slower connections.
+                                Users can change this at any time via the Audio Settings modal (click the buffer indicator).
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-default-buffer" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">Default Buffer</label>
+                                <select id="ui-default-buffer" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
+                                    <!-- Options populated dynamically from /admin/ui-config -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Band Colour Intensity -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🎨 Band Colour Intensity</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Controls how vivid the amateur band overlays appear in the bookmark area of the spectrum.
+                                0.50 is the default pastel appearance; 1.00 gives bold, fully saturated colours.
+                                This is a server-wide setting; users cannot override it individually.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-band-color-intensity" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
+                                    Intensity: <span id="ui-band-color-intensity-display" style="font-weight: bold; color: #667eea;">0.50</span>
+                                </label>
+                                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                    <input type="range" id="ui-band-color-intensity" min="0.5" max="1" step="0.025" value="0.5"
+                                           style="width: 100%; max-width: 360px;"
+                                           oninput="document.getElementById('ui-band-color-intensity-display').textContent = parseFloat(this.value).toFixed(3)">
+                                    <button class="btn btn-secondary" onclick="resetBandColorIntensity()"
+                                            style="font-size: 12px; padding: 4px 10px; flex-shrink: 0;"
+                                            title="Reset to default (0.50)">↺ Reset</button>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; max-width: 360px; font-size: 11px; color: #999; margin-top: 4px;">
+                                    <span>0.50 — Default pastel</span>
+                                    <span>1.00 — Vivid</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Spectrum Background Image -->
+                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🖼️ Spectrum Background Image</h3>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                Upload a custom PNG image to display behind the spectrum line graph (split view).
+                                The image is stretched to fill the 220 px spectrum drawing area below the frequency scale.
+                                PNG only · max 500 KB.
+                            </p>
+
+                            <!-- Current image preview -->
+                            <div id="spectrumBgPreviewWrap" style="display: none; margin-bottom: 12px;">
+                                <p style="margin: 0 0 6px 0; font-size: 13px; font-weight: 500; color: #555;">Current image:</p>
+                                <img id="spectrumBgPreview"
+                                     src=""
+                                     alt="Spectrum background preview"
+                                     style="max-width: 100%; max-height: 120px; border: 1px solid #dee2e6; border-radius: 4px; display: block;">
+                            </div>
+                            <p id="spectrumBgNone" style="margin: 0 0 12px 0; font-size: 13px; color: #999; font-style: italic;">No background image set.</p>
+
+                            <!-- File picker + upload -->
+                            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;">
+                                <input type="file" id="spectrumBgFile" accept="image/png"
+                                       style="flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px; background: white;"
+                                       onchange="uploadSpectrumBg()">
+                                <button class="btn" onclick="uploadSpectrumBg()" style="white-space: nowrap;">Upload Image</button>
+                                <button class="btn btn-danger" id="spectrumBgRemoveBtn" onclick="removeSpectrumBg()" style="white-space: nowrap; display: none;">Remove Image</button>
+                            </div>
+
+                            <!-- Opacity slider -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="ui-spectrum-bg-opacity" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
+                                    Background Opacity: <span id="ui-spectrum-bg-opacity-display" style="font-weight: bold; color: #667eea;">0.30</span>
+                                </label>
+                                <input type="range" id="ui-spectrum-bg-opacity" min="0" max="1" step="0.01" value="0.30"
+                                       style="width: 100%; max-width: 400px;"
+                                       oninput="document.getElementById('ui-spectrum-bg-opacity-display').textContent = parseFloat(this.value).toFixed(2)">
+                                <div style="display: flex; justify-content: space-between; max-width: 400px; font-size: 11px; color: #999; margin-top: 4px;">
+                                    <span>0.00 — Invisible</span>
+                                    <span>1.00 — Fully opaque</span>
+                                </div>
+                            </div>
+                        </div>
+
+                            </div>
+                        </details>
+
+                        <details id="uiGroupV2" class="ui-scope" open>
+                            <summary class="ui-scope__head">
+                                <span class="ui-scope__title">🚀 v2 interface</span>
+                                <span class="ui-scope__note">The interface new visitors get. Each setting is a default for somebody who has never been here before — a listener who has chosen for themselves keeps their choice.</span>
+                            </summary>
+                            <div class="ui-scope__body">
+
+                        <!-- Built by renderV2Settings() from the v2_settings list in the
+                             /admin/ui-config reply, which the server derives from the interface
+                             itself — so every colour scheme and waterfall palette v2 has appears
+                             here without this page being edited. See ui_config_v2_defaults.go. -->
+                        <div id="ui-v2-settings"></div>
+
+                            </div>
+                        </details>
+
+                        <details id="uiGroupV1" class="ui-scope" open>
+                            <summary class="ui-scope__head">
+                                <span class="ui-scope__title">🕰️ Classic interface (v1)</span>
+                                <span class="ui-scope__note">Reached at /?v1 while v2 is enabled. None of these apply to v2 — it has its own above.</span>
+                            </summary>
+                            <div class="ui-scope__body">
 
                         <!-- Signal Bar Meter Mode -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
@@ -2341,51 +2614,15 @@
                             </div>
                         </div>
 
-                        <!-- Controls Overlay Opacity -->
+                        <!-- Auto-spectrum contrast — classic only; v2 has its own, differently defined -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🪟 Controls Overlay Opacity</h3>
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔆 Auto Spectrum Contrast</h3>
                             <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
-                                Controls the background opacity of two overlapping UI elements:
+                                v2 has a contrast of its own, in the section above, and it is a different quantity —
+                                a gamma on the amplitude-to-colour mapping rather than a dB offset on the auto-range
+                                window — so the two are set separately.
                             </p>
-                            <ul style="margin: 0 0 12px 0; color: #666; font-size: 13px; padding-left: 20px; line-height: 1.7;">
-                                <li><strong>Docked controls panel</strong> — the receiver controls overlay that appears above the waterfall when docked. Set directly to this value.</li>
-                                <li><strong>Waterfall controls bar</strong> — the zoom/spectrum controls pinned to the bottom of the waterfall. Always set to this value <strong>+ 15%</strong> (capped at 100%), so it remains slightly more solid than the docked panel.</li>
-                            </ul>
-                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
-                                The current derived waterfall bar opacity is shown live next to the slider as you adjust.
-                                This is a server-wide setting; users cannot override it individually.
-                            </p>
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="ui-controls-opacity" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
-                                    Controls Opacity: <span id="ui-controls-opacity-display" style="font-weight: bold; color: #667eea;">0.50</span>
-                                    &nbsp;<span id="ui-waterfall-controls-opacity-hint" style="font-size: 12px; color: #999;">(waterfall bar: 0.65)</span>
-                                </label>
-                                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                                    <input type="range" id="ui-controls-opacity" min="0" max="1" step="0.01" value="0.50"
-                                           style="width: 100%; max-width: 360px;"
-                                           oninput="updateControlsOpacityDisplay()">
-                                    <button class="btn btn-secondary" onclick="resetControlsOpacity()"
-                                            style="font-size: 12px; padding: 4px 10px; flex-shrink: 0;"
-                                            title="Reset to default (0.50)">↺ Reset</button>
-                                </div>
-                                <div style="display: flex; justify-content: space-between; max-width: 360px; font-size: 11px; color: #999; margin-top: 4px;">
-                                    <span>0.00 — Fully transparent</span>
-                                    <span>1.00 — Fully opaque</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Auto Spectrum Sliders -->
-                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔆 Default Auto Spectrum</h3>
-                            <p style="margin: 0 0 16px 0; color: #666; font-size: 13px;">
-                                Controls the auto-range spectrum display defaults for new visitors.
-                                These match the two sliders shown in the spectrum controls when Manual mode is off.
-                            </p>
-
-                            <!-- Contrast sub-slider -->
                             <div class="form-group" style="margin-bottom: 16px;">
-                                <p style="margin: 0 0 6px 0; font-weight: 600; color: #444; font-size: 13px;">Contrast</p>
                                 <p style="margin: 0 0 8px 0; color: #666; font-size: 12px;">
                                     Symmetric dB offset applied to the auto-range window. The noise floor is raised by +N dB and the ceiling is lowered by -N dB, making signals pop out against the noise.
                                     Range: 0–20. Default: 10.
@@ -2399,25 +2636,6 @@
                                 <div style="display: flex; justify-content: space-between; max-width: 400px; font-size: 11px; color: #999; margin-top: 4px;">
                                     <span>0 — Wider dB window</span>
                                     <span>20 — Tighter dB window</span>
-                                </div>
-                            </div>
-
-                            <!-- Minimum Dynamic Range sub-slider -->
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <p style="margin: 0 0 6px 0; font-weight: 600; color: #444; font-size: 13px;">Minimum Dynamic Range</p>
-                                <p style="margin: 0 0 8px 0; color: #666; font-size: 12px;">
-                                    Guarantees at least this many dB are always shown in the auto-range window. Prevents the display from collapsing on very quiet bands.
-                                    0 = Auto (no minimum). Range: 0–60 dB. Default: 30 dB.
-                                </p>
-                                <label for="ui-min-span" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
-                                    Min Dynamic Range: <span id="ui-min-span-display" style="font-weight: bold; color: #667eea;">30</span> dB
-                                </label>
-                                <input type="range" id="ui-min-span" min="0" max="60" value="30" step="5"
-                                    style="width: 100%; max-width: 400px;"
-                                    oninput="document.getElementById('ui-min-span-display').textContent = this.value">
-                                <div style="display: flex; justify-content: space-between; max-width: 400px; font-size: 11px; color: #999; margin-top: 4px;">
-                                    <span>0 — Auto (no minimum)</span>
-                                    <span>60 dB — Wide minimum window</span>
                                 </div>
                             </div>
                         </div>
@@ -2476,44 +2694,40 @@
                             </div>
                         </div>
 
-                        <!-- Mobile Settings -->
+                        <!-- Controls Overlay Opacity -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">📱 Mobile Settings</h3>
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🪟 Controls Overlay Opacity</h3>
                             <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
-                                Settings that apply to visitors on narrow/mobile screens (≤1024 px wide).
-                                Users can always override these with the controls on the page — the server default only applies when no preference has been saved.
+                                Controls the background opacity of two overlapping UI elements:
                             </p>
-
-                            <!-- Default frequency console -->
+                            <ul style="margin: 0 0 12px 0; color: #666; font-size: 13px; padding-left: 20px; line-height: 1.7;">
+                                <li><strong>Docked controls panel</strong> — the receiver controls overlay that appears above the waterfall when docked. Set directly to this value.</li>
+                                <li><strong>Waterfall controls bar</strong> — the zoom/spectrum controls pinned to the bottom of the waterfall. Always set to this value <strong>+ 15%</strong> (capped at 100%), so it remains slightly more solid than the docked panel.</li>
+                            </ul>
+                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
+                                The current derived waterfall bar opacity is shown live next to the slider as you adjust.
+                                This is a server-wide setting; users cannot override it individually.
+                            </p>
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label for="ui-mobile-tuning-mode" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">Default Frequency Console</label>
-                                <p style="margin: 0 0 8px 0; color: #666; font-size: 13px;">
-                                    Controls whether new mobile visitors see the tuning <strong>Buttons</strong> or the drag <strong>Wheel</strong>
-                                    in the frequency console. Users can switch at any time using the Btns/Wheel radio toggle.
-                                </p>
-                                <select id="ui-mobile-tuning-mode" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
-                                    <!-- Options populated dynamically from /admin/ui-config -->
-                                </select>
+                                <label for="ui-controls-opacity" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
+                                    Controls Opacity: <span id="ui-controls-opacity-display" style="font-weight: bold; color: #667eea;">0.50</span>
+                                    &nbsp;<span id="ui-waterfall-controls-opacity-hint" style="font-size: 12px; color: #999;">(waterfall bar: 0.65)</span>
+                                </label>
+                                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                    <input type="range" id="ui-controls-opacity" min="0" max="1" step="0.01" value="0.50"
+                                           style="width: 100%; max-width: 360px;"
+                                           oninput="updateControlsOpacityDisplay()">
+                                    <button class="btn btn-secondary" onclick="resetControlsOpacity()"
+                                            style="font-size: 12px; padding: 4px 10px; flex-shrink: 0;"
+                                            title="Reset to default (0.50)">↺ Reset</button>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; max-width: 360px; font-size: 11px; color: #999; margin-top: 4px;">
+                                    <span>0.00 — Fully transparent</span>
+                                    <span>1.00 — Fully opaque</span>
+                                </div>
                             </div>
                         </div>
 
-                        <!-- Default Audio Buffer -->
-                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🔊 Default Audio Buffer</h3>
-                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
-                                Sets the default maximum audio buffer size for new visitors before frames are dropped.
-                                Lower values reduce latency but may cause stuttering on slower connections.
-                                Users can change this at any time via the Audio Settings modal (click the buffer indicator).
-                            </p>
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="ui-default-buffer" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">Default Buffer</label>
-                                <select id="ui-default-buffer" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
-                                    <!-- Options populated dynamically from /admin/ui-config -->
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Bandwidth Indicator Colour -->
                         <!-- Theme Colours -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
                             <h3 style="margin: 0 0 8px 0; color: #333; font-size: 16px;">🎨 Theme Colours</h3>
@@ -2576,117 +2790,24 @@
                             </div>
                         </div>
 
-                        <!-- Spectrum Background Image -->
+                        <!-- Mobile Settings -->
                         <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🖼️ Spectrum Background Image</h3>
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">📱 Mobile Settings</h3>
                             <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
-                                Upload a custom PNG image to display behind the spectrum line graph (split view).
-                                The image is stretched to fill the 220 px spectrum drawing area below the frequency scale.
-                                PNG only · max 500 KB.
+                                Settings that apply to visitors on narrow/mobile screens (≤1024 px wide).
+                                Users can always override these with the controls on the page — the server default only applies when no preference has been saved.
                             </p>
 
-                            <!-- Current image preview -->
-                            <div id="spectrumBgPreviewWrap" style="display: none; margin-bottom: 12px;">
-                                <p style="margin: 0 0 6px 0; font-size: 13px; font-weight: 500; color: #555;">Current image:</p>
-                                <img id="spectrumBgPreview"
-                                     src=""
-                                     alt="Spectrum background preview"
-                                     style="max-width: 100%; max-height: 120px; border: 1px solid #dee2e6; border-radius: 4px; display: block;">
-                            </div>
-                            <p id="spectrumBgNone" style="margin: 0 0 12px 0; font-size: 13px; color: #999; font-style: italic;">No background image set.</p>
-
-                            <!-- File picker + upload -->
-                            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;">
-                                <input type="file" id="spectrumBgFile" accept="image/png"
-                                       style="flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px; background: white;"
-                                       onchange="uploadSpectrumBg()">
-                                <button class="btn" onclick="uploadSpectrumBg()" style="white-space: nowrap;">Upload Image</button>
-                                <button class="btn btn-danger" id="spectrumBgRemoveBtn" onclick="removeSpectrumBg()" style="white-space: nowrap; display: none;">Remove Image</button>
-                            </div>
-
-                            <!-- Opacity slider -->
+                            <!-- Default frequency console -->
                             <div class="form-group" style="margin-bottom: 0;">
-                                <label for="ui-spectrum-bg-opacity" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
-                                    Background Opacity: <span id="ui-spectrum-bg-opacity-display" style="font-weight: bold; color: #667eea;">0.30</span>
-                                </label>
-                                <input type="range" id="ui-spectrum-bg-opacity" min="0" max="1" step="0.01" value="0.30"
-                                       style="width: 100%; max-width: 400px;"
-                                       oninput="document.getElementById('ui-spectrum-bg-opacity-display').textContent = parseFloat(this.value).toFixed(2)">
-                                <div style="display: flex; justify-content: space-between; max-width: 400px; font-size: 11px; color: #999; margin-top: 4px;">
-                                    <span>0.00 — Invisible</span>
-                                    <span>1.00 — Fully opaque</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Band Colour Intensity -->
-                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">🎨 Band Colour Intensity</h3>
-                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
-                                Controls how vivid the amateur band overlays appear in the bookmark area of the spectrum.
-                                0.50 is the default pastel appearance; 1.00 gives bold, fully saturated colours.
-                                This is a server-wide setting; users cannot override it individually.
-                            </p>
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="ui-band-color-intensity" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">
-                                    Intensity: <span id="ui-band-color-intensity-display" style="font-weight: bold; color: #667eea;">0.50</span>
-                                </label>
-                                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                                    <input type="range" id="ui-band-color-intensity" min="0.5" max="1" step="0.025" value="0.5"
-                                           style="width: 100%; max-width: 360px;"
-                                           oninput="document.getElementById('ui-band-color-intensity-display').textContent = parseFloat(this.value).toFixed(3)">
-                                    <button class="btn btn-secondary" onclick="resetBandColorIntensity()"
-                                            style="font-size: 12px; padding: 4px 10px; flex-shrink: 0;"
-                                            title="Reset to default (0.50)">↺ Reset</button>
-                                </div>
-                                <div style="display: flex; justify-content: space-between; max-width: 360px; font-size: 11px; color: #999; margin-top: 4px;">
-                                    <span>0.50 — Default pastel</span>
-                                    <span>1.00 — Vivid</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Station ID Overlay -->
-                        <div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">📡 Station ID Overlay</h3>
-                            <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">
-                                Show the station callsign, name, and location in the top-right corner of the spectrum
-                                line graph. The first line shows <strong>&lt;callsign&gt; – &lt;name&gt;</strong> and
-                                the second line shows <strong>&lt;location&gt;</strong> in smaller text.
-                                Values come from the <strong>Station Info</strong> section of the main config.
-                                This is a server-wide setting; users cannot override it individually.
-                            </p>
-                            <div class="form-group" style="margin-bottom: 14px;">
-                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; color: #555;">
-                                    <input type="checkbox" id="ui-station-id-overlay" style="width: 16px; height: 16px;">
-                                    Show station ID overlay on spectrum
-                                </label>
-                            </div>
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">Text colour</label>
-                                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                                    <input type="color"
-                                           id="ui-station-id-color"
-                                           value="#ffffff"
-                                           title="Station ID text colour"
-                                           style="width:44px; height:32px; padding:2px; border:1px solid #ddd; border-radius:4px; cursor:pointer; flex-shrink:0;"
-                                           oninput="syncStationIdHexFromPicker()">
-                                    <input type="text"
-                                           id="ui-station-id-color-hex"
-                                           value="#ffffff"
-                                           maxlength="7"
-                                           placeholder="#rrggbb"
-                                           style="width:88px; font-family:monospace; font-size:13px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; flex-shrink:0;"
-                                           oninput="syncStationIdPickerFromHex()">
-                                    <button class="btn btn-secondary"
-                                            onclick="resetStationIdColor()"
-                                            style="font-size:12px; padding:4px 10px; flex-shrink:0;"
-                                            title="Reset to default (#ffffff)">↺</button>
-                                    <div style="min-width:0;">
-                                        <div style="font-weight:500; font-size:14px; color:#333;">Overlay text colour</div>
-                                        <div style="font-size:12px; color:#666; margin-top:1px;">A 1 px black drop-shadow is always added for legibility over any background.</div>
-                                    </div>
-                                </div>
+                                <label for="ui-mobile-tuning-mode" style="display: block; margin-bottom: 6px; font-weight: 500; color: #555;">Default Frequency Console</label>
+                                <p style="margin: 0 0 8px 0; color: #666; font-size: 13px;">
+                                    Controls whether new mobile visitors see the tuning <strong>Buttons</strong> or the drag <strong>Wheel</strong>
+                                    in the frequency console. Users can switch at any time using the Btns/Wheel radio toggle.
+                                </p>
+                                <select id="ui-mobile-tuning-mode" style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: white;">
+                                    <!-- Options populated dynamically from /admin/ui-config -->
+                                </select>
                             </div>
                         </div>
 
@@ -2726,6 +2847,9 @@
                             </div>
                         </div>
 
+                            </div>
+                        </details>
+
                     </div>
 
                     <div id="uiConfigLoading" class="loading">
@@ -2741,6 +2865,8 @@
                             You can inject links into any existing built-in group, add links to existing subgroups,
                             nest subgroups inside subgroups, or create entirely new groups.
                             Built-in links are shown in grey and cannot be edited here.
+                            <strong>Both interfaces</strong> show these — the classic one from its Links button,
+                            v2 from the menu on its logo.
                         </p>
                         <div class="alert alert-info" style="margin-bottom: 16px; font-size: 13px;">
                             ✅ <strong>No server restart required.</strong> Changes take effect immediately after saving.
@@ -11160,6 +11286,11 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 const data = await response.json();
                 const ui = data.ui || data; // handle both {ui: {...}} and flat response
 
+                // The v2 group, before the switch below opens or closes it.
+                // Its controls come from the server's own list of what that
+                // interface offers — see renderV2Settings.
+                renderV2Settings(data.v2_settings, ui.v2);
+
                 // v2 interface switch — lives above the form and saves on change,
                 // so it is enabled only once we know its real state.
                 setV2InterfaceSwitch(Boolean(ui.v2_interface), true);
@@ -11621,6 +11752,180 @@ function resetStationIdColor() {
             }
         }
 
+        // ── v2 interface defaults ─────────────────────────────────────────────
+        //
+        // The controls in the v2 group are built from the `v2_settings` list the
+        // server sends beside the config, not written into this page. The server
+        // derives that list from the interface itself (ui_config_v2_defaults.go,
+        // checked against the v2 source by its test), so a colour scheme or a
+        // waterfall palette added to v2 turns up here on its own — an admin UI
+        // that silently knows about seven of eight palettes is exactly the sort
+        // of drift a hand-maintained copy produces.
+        //
+        // Every setting is optional, and that is the point: unset means the
+        // operator has not chosen, which is *not* the same as choosing what v2
+        // already does. So each row carries a "Set" box, and only the boxes that
+        // are ticked are sent. See the note on UIConfigV2.
+
+        let v2SettingsList = [];
+
+        /** The current state of one row: null when it is not set. */
+        function v2RowValue(setting) {
+            const row = document.getElementById('v2-row-' + setting.key);
+            if (!row) return null;
+            const set = document.getElementById('v2-set-' + setting.key);
+            if (!set || !set.checked) return null;
+            const input = document.getElementById('v2-input-' + setting.key);
+            if (!input) return null;
+            if (setting.kind === 'bool') return input.value === 'on';
+            if (setting.kind === 'range') return parseFloat(input.value);
+            return input.value;
+        }
+
+        /** Dim the control of an unset row, and show the number of a set one. */
+        function updateV2Row(setting) {
+            const row = document.getElementById('v2-row-' + setting.key);
+            const set = document.getElementById('v2-set-' + setting.key);
+            if (!row || !set) return;
+            row.classList.toggle('v2-row--unset', !set.checked);
+            const readout = document.getElementById('v2-value-' + setting.key);
+            const input = document.getElementById('v2-input-' + setting.key);
+            if (readout && input && setting.range) {
+                const step = setting.range.step || 1;
+                const dp = step < 1 ? String(step).split('.')[1].length : 0;
+                readout.textContent = parseFloat(input.value).toFixed(dp) + (setting.range.unit || '');
+            }
+            // Only a colour setting has swatches to keep in step.
+            const swatch = document.getElementById('v2-swatch-' + setting.key);
+            if (swatch && input) {
+                const opt = (setting.options || []).find(o => o.value === input.value);
+                const css = opt && opt.swatch ? opt.swatch : '';
+                swatch.style.background = css;
+                swatch.style.visibility = css ? 'visible' : 'hidden';
+            }
+        }
+
+        /** One row of the v2 group. */
+        function v2RowHtml(setting) {
+            const esc = s => String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            let control = '';
+            if (setting.kind === 'range') {
+                const r = setting.range || { min: 0, max: 1, step: 0.1, default: 0 };
+                control = `<input type="range" id="v2-input-${esc(setting.key)}"
+                                  min="${r.min}" max="${r.max}" step="${r.step || 1}" value="${r.default}">
+                           <span class="v2-row__value" id="v2-value-${esc(setting.key)}"></span>`;
+            } else if (setting.kind === 'bool') {
+                control = `<select id="v2-input-${esc(setting.key)}">
+                               <option value="on">On</option>
+                               <option value="off">Off</option>
+                           </select>`;
+            } else {
+                const opts = (setting.options || []).map(o =>
+                    `<option value="${esc(o.value)}">${esc(o.label || o.value)}${o.note ? ' — ' + esc(o.note) : ''}</option>`
+                ).join('');
+                const hasSwatch = (setting.options || []).some(o => o.swatch);
+                control = `<select id="v2-input-${esc(setting.key)}">${opts}</select>`
+                    + (hasSwatch ? `<span class="v2-swatch" id="v2-swatch-${esc(setting.key)}"></span>` : '');
+            }
+            // What v2 does when nothing is set, said plainly rather than left for
+            // the operator to work out from an empty control.
+            const unset = setting.default
+                ? `Not set — v2 uses ${esc(setting.default)}`
+                : (setting.range ? `Not set — v2 uses ${setting.range.default}${esc(setting.range.unit || '')}` : 'Not set');
+            return `<div class="v2-row v2-row--unset" id="v2-row-${esc(setting.key)}">
+                        <div class="v2-row__text">
+                            <div class="v2-row__label">${esc(setting.label)}</div>
+                            <div class="v2-row__hint">${esc(setting.hint || '')}</div>
+                        </div>
+                        <label class="v2-row__set" title="${unset}">
+                            <input type="checkbox" id="v2-set-${esc(setting.key)}"> Set
+                        </label>
+                        <div class="v2-row__control">${control}</div>
+                    </div>`;
+        }
+
+        /**
+         * Build the v2 group from the server's setting list and fill in the
+         * operator's stored values. `values` is the `ui.v2` block — only the keys
+         * they have actually chosen are in it.
+         */
+        function renderV2Settings(settings, values) {
+            const host = document.getElementById('ui-v2-settings');
+            if (!host) return;
+            v2SettingsList = Array.isArray(settings) ? settings : [];
+            const v2 = values && typeof values === 'object' ? values : {};
+
+            if (!v2SettingsList.length) {
+                host.innerHTML = '<p style="color:#888; font-size:13px; margin:0 0 16px 0;">'
+                    + 'This server did not send the v2 settings list — it may predate the v2 defaults.</p>';
+                return;
+            }
+
+            const GROUPS = [
+                { id: 'interface', title: '🎨 Interface', note: 'Colours and text size, as the Colours menu and the A- / A+ buttons set them.' },
+                { id: 'spectrum',  title: '📉 Spectrum and waterfall', note: 'The display a visitor opens on. Every one of these is in v2\'s own Display panel too.' },
+            ];
+            host.innerHTML = GROUPS.map(g => {
+                const rows = v2SettingsList.filter(s => s.group === g.id).map(v2RowHtml).join('');
+                if (!rows) return '';
+                return `<div style="margin-bottom: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 4px 0; color: #333; font-size: 16px;">${g.title}</h3>
+                            <p style="margin: 0 0 8px 0; color: #666; font-size: 13px;">${g.note}</p>
+                            ${rows}
+                        </div>`;
+            }).join('');
+
+            // Fill in what the operator has set, and wire each row up.
+            v2SettingsList.forEach(setting => {
+                const input = document.getElementById('v2-input-' + setting.key);
+                const set = document.getElementById('v2-set-' + setting.key);
+                if (!input || !set) return;
+                const stored = v2[setting.key];
+                const isSet = stored !== undefined && stored !== null;
+                set.checked = isSet;
+                if (isSet) {
+                    if (setting.kind === 'bool') input.value = stored ? 'on' : 'off';
+                    else input.value = stored;
+                } else if (setting.kind === 'bool') {
+                    input.value = setting.default === 'on' ? 'on' : 'off';
+                } else if (setting.kind === 'select' && setting.options && setting.options.length) {
+                    // Open on what v2 itself does, so an operator who ticks Set
+                    // without touching the list stores the current behaviour
+                    // rather than whichever option happened to be first.
+                    const match = setting.options.find(o => (o.label || o.value) === setting.default);
+                    input.value = match ? match.value : setting.options[0].value;
+                }
+                set.addEventListener('change', () => updateV2Row(setting));
+                input.addEventListener('input', () => {
+                    // Touching the control is how somebody says they want it set.
+                    if (!set.checked) set.checked = true;
+                    updateV2Row(setting);
+                });
+                updateV2Row(setting);
+            });
+        }
+
+        /**
+         * The `ui.v2` block to save: only the rows that are ticked.
+         *
+         * null when there is no group to read — a server too old to send the
+         * list, or a load that failed before the rows were built. The key is
+         * then left out of the save entirely and the server keeps what it has,
+         * because an empty block and a block that was never rendered are
+         * indistinguishable once sent, and one of them silently discards the
+         * operator's settings.
+         */
+        function collectV2Settings() {
+            if (!v2SettingsList.length) return null;
+            const out = {};
+            v2SettingsList.forEach(setting => {
+                const val = v2RowValue(setting);
+                if (val !== null && !(typeof val === 'number' && isNaN(val))) out[setting.key] = val;
+            });
+            return out;
+        }
+
         /**
          * Reflect the v2 interface state in the switch and its label.
          * enable=true also makes the switch operable (it starts disabled so it
@@ -11638,6 +11943,14 @@ function resetStationIdColor() {
             // what visitors actually get.
             const notice = document.getElementById('v2InterfaceNotice');
             if (notice) notice.style.display = enabled ? 'block' : 'none';
+            // The group for the interface nobody is being served starts closed.
+            // Closed and not hidden: a receiver whose visitors are split across
+            // /?v1 and /v2/ is an ordinary setup, and both groups have to stay
+            // one click away whichever way this switch is set.
+            const v2Group = document.getElementById('uiGroupV2');
+            const v1Group = document.getElementById('uiGroupV1');
+            if (v2Group) v2Group.open = enabled;
+            if (v1Group) v1Group.open = !enabled;
         }
 
         /**
@@ -11815,6 +12128,13 @@ function resetStationIdColor() {
                     })()
                 }
             };
+
+            // The v2 group. Only the rows the operator ticked, so an untouched
+            // receiver stores `v2: {}` and that interface keeps its own
+            // defaults. Left out altogether when there was no group to read —
+            // see collectV2Settings, and the matching rule on the server.
+            const v2 = collectV2Settings();
+            if (v2) body.ui.v2 = v2;
 
             try {
                 const response = await authenticatedFetch('/admin/ui-config', {

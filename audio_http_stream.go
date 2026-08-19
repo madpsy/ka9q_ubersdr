@@ -25,6 +25,10 @@ package main
 //     streamAudio() automatically resumes sending audio over the WebSocket.
 //   - The channel is NEVER closed — only the pointer is nilled — to avoid any
 //     send-on-closed-channel panic.
+//   - The WebM header and the Opus encoder are built once, from the session's
+//     sample rate at connect, and neither can be changed in place: MSE refuses
+//     a mid-stream track change.  So a sample-rate change ends the response and
+//     the client reconnects — see the rate check in the streaming loop.
 //
 // Bandwidth: identical to the current WebSocket-only path.  Audio bytes travel
 // once — either over WebSocket (normal) or over HTTP (when this endpoint is
@@ -190,6 +194,17 @@ func writeWebMCluster(w http.ResponseWriter, timecodeMs uint64, opusData []byte)
 	return n, err
 }
 
+// isIQAudioMode reports whether a mode carries raw IQ samples rather than
+// demodulated audio.  streamAudio() inlines the same test in several places;
+// this exists because the HTTP path needs it before a session is streaming.
+func isIQAudioMode(mode string) bool {
+	switch mode {
+	case "iq", "iq48", "iq96", "iq192", "iq384":
+		return true
+	}
+	return false
+}
+
 // concat concatenates byte slices.
 func concat(slices ...[]byte) []byte {
 	total := 0
@@ -243,6 +258,27 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 		}
 
 		// ── 4. Create Opus encoder ────────────────────────────────────────────
+		session.mu.RLock()
+		mode := session.Mode
+		sampleRate := session.SampleRate
+		channels := session.Channels
+		session.mu.RUnlock()
+
+		// IQ modes carry raw stereo RF samples at 10 kHz to 384 kHz.  Opus
+		// cannot represent that at all — the encoder below is mono, and every
+		// rate above 48 kHz is not even a valid Opus rate.  The WebSocket path
+		// deals with this by forcing lossless pcm-zstd; there is no equivalent
+		// in a WebM/Opus container, so refusing is the only honest answer.
+		// streamAudio() only forwards here while httpAudioChan is set, so a
+		// refusal leaves IQ audio on the WebSocket where it belongs.
+		// The message is shown to the operator — the client puts the body of a
+		// refusal straight into its Media Session panel — so it says what to do
+		// about it rather than naming the container.
+		if isIQAudioMode(mode) {
+			http.Error(w, "Lock-screen audio is not available in IQ modes", http.StatusConflict)
+			return
+		}
+
 		bitrate := config.Audio.Opus.Bitrate
 		if bitrate == 0 {
 			bitrate = 24000
@@ -252,11 +288,9 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 			complexity = 5
 		}
 
-		sampleRate := session.SampleRate
 		if sampleRate == 0 {
 			sampleRate = 12000
 		}
-		channels := session.Channels
 		if channels == 0 {
 			channels = 1
 		}
@@ -329,21 +363,44 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 					return
 				}
 
+				// A mode change moves the sample rate under a stream whose
+				// header has already gone out and whose encoder is fixed at the
+				// old rate, and nothing downstream notices: a 24 kHz buffer fed
+				// to the 12 kHz encoder is a valid 40 ms frame, so there is no
+				// error — the audio simply plays at half speed until the
+				// operator turns the feature off and on.  The session is
+				// updated in place on a mode change (UpdateSessionWithEdges),
+				// so session.Done never fires and this is the only thing that
+				// can catch it.  Ending the response is the fix: the client
+				// reconnects three seconds later (_scheduleRetry in
+				// media/controller.js) and gets a header and an encoder built
+				// for the new rate.
+				//
+				// This covers a channel count change too — the mono audio modes
+				// sit at 12/24 kHz and the stereo IQ modes at 10/48/96/192/384
+				// kHz, so channels never move without the rate moving with them
+				// (see GetSampleRateForMode).
+				if pkt.SampleRate != 0 && pkt.SampleRate != sampleRate {
+					log.Printf("[AudioStream] Sample rate changed %d → %d Hz for %s — ending HTTP stream so the client reconnects",
+						sampleRate, pkt.SampleRate, userSessionID)
+					return
+				}
+
 				opusData, err := enc.EncodeBinary(pkt.PCMData)
-					if err != nil || len(opusData) == 0 {
-						continue
-					}
-	
-					n, err := writeWebMCluster(w, timecodeMs, opusData)
-					if err != nil {
-						return
-					}
-					// Count HTTP audio bytes in the session so the admin panel
-					// audio_kbps figure remains accurate when HTTP audio is active.
-					// HTTP/1.1 chunked transfer has lower per-frame overhead than
-					// WebSocket framing, but we apply the same 1.33× factor used
-					// by AddAudioBytes for consistency across transports.
-					session.AddAudioBytes(uint64(n))
+				if err != nil || len(opusData) == 0 {
+					continue
+				}
+
+				n, err := writeWebMCluster(w, timecodeMs, opusData)
+				if err != nil {
+					return
+				}
+				// Count HTTP audio bytes in the session so the admin panel
+				// audio_kbps figure remains accurate when HTTP audio is active.
+				// HTTP/1.1 chunked transfer has lower per-frame overhead than
+				// WebSocket framing, but we apply the same 1.33× factor used
+				// by AddAudioBytes for consistency across transports.
+				session.AddAudioBytes(uint64(n))
 
 				// Advance timecode by frame duration in ms
 				// PCMData is big-endian int16 (2 bytes per sample per channel)

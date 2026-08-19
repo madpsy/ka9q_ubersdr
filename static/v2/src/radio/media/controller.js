@@ -402,8 +402,32 @@ export class MediaSessionController {
     // Called on every tuning change, marker change and lookup result. Cheap
     // when nothing has changed, which is the common case.
     update(snapshot) {
+        const wasMode = this.snapshot.mode;
         this.snapshot = { ...this.snapshot, ...snapshot };
+        // A mode change is the one thing the operator does that can make the
+        // stream anchor possible again: the server ends the HTTP stream when a
+        // mode change moves the sample rate, and refuses it outright in the IQ
+        // modes, whose raw stereo RF a mono Opus encoder cannot carry. Both are
+        // fixed by tuning somewhere else — but the retry budget would already
+        // be spent by then, so without this the widget stays dead until the
+        // switch is turned off and on, however long they sit in a mode that
+        // would have worked.
+        if (snapshot.mode && snapshot.mode !== wasMode) this._retryFromScratch();
         this._pushMetadata();
+    }
+
+    // Conditions changed in a way that is worth another attempt. Deliberately
+    // goes through the ordinary retry delay rather than starting now: the mode
+    // the panel is reporting is the one it asked for, which the receiver may
+    // not have applied yet, and a stream opened against the old sample rate
+    // ends on the first packet at the new one.
+    _retryFromScratch() {
+        if (!this.enabled || !this.running) return;
+        if (this.anchor !== 'stream' || this.stream) return;
+        this.retries = 0;
+        this.error = '';
+        this._scheduleRetry();
+        this._emit();
     }
 
     _pushMetadata() {

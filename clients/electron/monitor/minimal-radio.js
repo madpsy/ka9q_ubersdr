@@ -1,14 +1,50 @@
 // Minimal Radio - Lightweight audio preview for noise floor monitoring
 // Adapted from oldradio/radio.js with only essential audio functionality
 
+// Audio protocol version asked for at connect.
+//
+// Versions 2 and 3 share the same 21-byte header — timestamp(8) sampleRate(4)
+// channels(1) power(4) noise(4) — and differ only in the second signal-quality
+// field.  Version 2 carries radiod's noise *density* N0 in dBFS/Hz, so
+// `basebandPower - noise` comes out as S/N0 in dB·Hz: about 34 dB above the
+// true SNR on a 2.65 kHz filter, and a different amount on every other filter
+// width.  Version 3 carries the noise power over the demodulator passband
+// instead, which makes the same subtraction an SNR in dB.
+//
+// This file talks to whatever instance the user picked, not to the build that
+// served it, so the default stays at 2: an instance older than 0.1.60 clamps an
+// unrecognised version to 1, whose header is 13 bytes with no signal-quality
+// fields at all, and parsing that at offset 21 feeds garbage to the Opus
+// decoder — audio breaks, not just the meter.  Callers with the instance's
+// reported version in hand pass MinimalRadio.protocolVersionFor(v) instead.
+//
+// Either way this class exposes one scale: `signalSNR` and
+// `getSignalQuality().snr` are always a true SNR in dB, because a version 2
+// noise density is converted to passband noise power on arrival — see
+// _noisePowerFrom() and channelNoisePower in radiod_status.go.
+const DEFAULT_PROTOCOL_VERSION = 2;
+
+// The oldest instance release asked for version 3.
+//
+// Version 3 landed in 0.1.60; the gate sits one release later, so a receiver
+// has to be on a build that shipped after it rather than on the one that
+// introduced it.  Anything older, and anything that does not report a version
+// at all, keeps version 2 — which costs nothing but the wire format, since the
+// noise density is converted on arrival either way.
+const V3_MIN_INSTANCE_VERSION = [0, 1, 61];
+
 class MinimalRadio {
-    constructor(userSessionID = null, baseUrl = null) {
+    constructor(userSessionID = null, baseUrl = null, protocolVersion = DEFAULT_PROTOCOL_VERSION) {
         // Use provided session ID or generate new one
         this.userSessionID = userSessionID || this.generateUserSessionID();
-        
+
         // Base URL for connecting to remote instances (null = use current host)
         this.baseUrl = baseUrl;
-        
+
+        // Audio protocol version to request (2 or 3 — see above)
+        this.protocolVersion = (protocolVersion === 3) ? 3 : DEFAULT_PROTOCOL_VERSION;
+
+
         // Audio state
         this.ws = null;
         this.audioContext = null;
@@ -23,10 +59,10 @@ class MinimalRadio {
         this.opusDecoderSampleRate = null;
         this.opusDecoderChannels = null;
 
-        // Signal quality metrics (version 2 protocol)
-        this.basebandPower = null;  // Signal power in dBFS
-        this.noiseDensity = null;   // Noise density (N0) in dBFS
-        this.signalSNR = null;      // Calculated SNR in dB
+        // Signal quality metrics (from the audio header — see DEFAULT_PROTOCOL_VERSION)
+        this.basebandPower = null;  // Signal power in dBFS over the passband
+        this.noisePower = null;     // Noise power in dBFS over the same passband
+        this.signalSNR = null;      // Calculated SNR in dB (power - noise)
 
         // Signal quality display
         this.signalBarElement = null;
@@ -71,7 +107,33 @@ class MinimalRadio {
 
         console.log('MinimalRadio initialized, session:', this.userSessionID);
     }
-    
+
+    // The protocol version to ask an instance for, given the version string it
+    // reports to the collector (`version` on the /api/instances record).
+    //
+    // Anything unparseable or absent — an instance that predates the field, a
+    // page whose API does not carry it — is treated as old and gets version 2.
+    // A pre-release of the gate version ("0.1.61-rc1") counts as new enough:
+    // the numbers are what matter, and version 3 was already in 0.1.60.
+    static protocolVersionFor(instanceVersion) {
+        const v = MinimalRadio._parseVersion(instanceVersion);
+        if (!v) return DEFAULT_PROTOCOL_VERSION;
+        for (let i = 0; i < 3; i++) {
+            if (v[i] !== V3_MIN_INSTANCE_VERSION[i]) {
+                return v[i] > V3_MIN_INSTANCE_VERSION[i] ? 3 : DEFAULT_PROTOCOL_VERSION;
+            }
+        }
+        return 3;   // exactly the gate version
+    }
+
+    // "0.1.61", "v0.1.61", "0.1.61-rc1" → [0, 1, 61].  Null for anything else,
+    // including a two-part version, which is deliberately not guessed at.
+    static _parseVersion(version) {
+        if (typeof version !== 'string') return null;
+        const m = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
+        return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+    }
+
     // Start sending periodic heartbeats to keep connections alive
     startHeartbeat() {
         // Clear any existing interval
@@ -304,18 +366,19 @@ class MinimalRadio {
                 this.maxSessionTime = result.max_session_time || 0;
             }
             
-            // Create WebSocket connection with Opus format and version 2 protocol
+            // Create WebSocket connection with Opus format and the negotiated
+            // signal-quality protocol version (see DEFAULT_PROTOCOL_VERSION)
             // Determine host and protocol (reuse from earlier in function)
             const { host: wsHost, protocol: wsProtocol } = this.getTargetHostAndProtocol();
             const protocol = wsProtocol === 'https:' ? 'wss:' : 'ws:';
-            let wsUrl = `${protocol}//${wsHost}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus&version=2`;
+            let wsUrl = `${protocol}//${wsHost}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus&version=${this.protocolVersion}`;
             this._connectMuted = this.serverMuted;
             if (this._connectMuted) wsUrl += '&muted=1';
 
             this.ws = new WebSocket(wsUrl);
 
             this.ws.onopen = () => {
-                console.log('WebSocket connected (Opus format, protocol version 2)');
+                console.log(`WebSocket connected (Opus format, protocol version ${this.protocolVersion})`);
                 this.sendTuneCommand();
                 // Re-assert the mute state unless we asked for audio and still
                 // want it.  Two reasons: the state can change while the socket
@@ -404,7 +467,27 @@ class MinimalRadio {
         }
     }
     
-    // Handle binary Opus audio messages (version 2 protocol)
+    // Convert the header's noise field to noise power over the demodulator
+    // passband, which is what makes `basebandPower - noise` an SNR in dB.
+    //
+    // Version 3 sends that figure already.  Version 2 sends the density N0 in
+    // dBFS/Hz, so the bandwidth term has to be added here — the same
+    // `N0 + 10·log10(BW)` the server applies in channelNoisePower(), over the
+    // filter width we asked for in the tune command.  radiod may round that
+    // width to a bin edge, which moves the result by well under a dB.
+    //
+    // A missing reading (-999) and an unusable bandwidth both come back as
+    // "no data": returning the density unchanged would be silently wrong by
+    // tens of dB, which is worse than reporting nothing.
+    _noisePowerFrom(noise) {
+        if (!(noise > -900)) return noise;
+        if (this.protocolVersion >= 3) return noise;
+        const bandwidth = Math.abs(this.bandwidthHigh - this.bandwidthLow);
+        if (!(bandwidth > 0)) return -999;
+        return noise + 10 * Math.log10(bandwidth);
+    }
+
+    // Handle binary Opus audio messages (version 2/3 protocol)
     async handleBinaryMessage(data) {
         try {
             // Convert Blob to ArrayBuffer if needed
@@ -415,13 +498,12 @@ class MinimalRadio {
                 arrayBuffer = data;
             }
 
-            // Parse binary Opus packet header - Version 2 format
-            // We requested version=2, so always parse as version 2
-            // Format: [timestamp:8][sampleRate:4][channels:1][basebandPower:4][noiseDensity:4][opusData...]
+            // Parse binary Opus packet header - version 2/3 layout
+            // Format: [timestamp:8][sampleRate:4][channels:1][basebandPower:4][noise:4][opusData...]
             const view = new DataView(arrayBuffer);
 
             if (arrayBuffer.byteLength < 21) {
-                console.error('Binary packet too short for version 2:', arrayBuffer.byteLength, 'bytes (expected ≥21)');
+                console.error(`Binary packet too short for version ${this.protocolVersion}:`, arrayBuffer.byteLength, 'bytes (expected ≥21)');
                 return;
             }
 
@@ -430,27 +512,31 @@ class MinimalRadio {
             const sampleRate = view.getUint32(8, true);     // 4 bytes, little-endian
             const channels = view.getUint8(12);             // 1 byte
             const basebandPower = view.getFloat32(13, true); // 4 bytes, little-endian
-            const noiseDensity = view.getFloat32(17, true);  // 4 bytes, little-endian
+            // Density on version 2, passband power on version 3 — normalised to
+            // passband power either way so everything downstream sees one scale.
+            const noisePower = this._noisePowerFrom(view.getFloat32(17, true));
 
             // Store signal quality metrics
             this.basebandPower = basebandPower;
-            this.noiseDensity = noiseDensity;
+            this.noisePower = noisePower;
 
             // Calculate SNR if both values are valid (not -999.0)
-            if (basebandPower > -900 && noiseDensity > -900) {
-                this.signalSNR = basebandPower - noiseDensity;
+            if (basebandPower > -900 && noisePower > -900) {
+                this.signalSNR = basebandPower - noisePower;
             } else {
                 this.signalSNR = null;
             }
 
-            // Opus data starts at byte 21 for version 2
+            // Opus data starts at byte 21 on version 2/3
             const opusData = new Uint8Array(arrayBuffer, 21);
 
             // Relay callback — fires before decode so the owner can forward raw Opus bytes
             // without paying the cost of decoding twice. Signal metrics are included so
             // followers can update signal bars and SNR charts from the frame header alone.
+            // The noise figure passed on is the normalised one, so a follower's
+            // `power - noise` is an SNR whatever version the owner negotiated.
             if (this.onAudioFrame) {
-                this.onAudioFrame(sampleRate, channels, basebandPower, noiseDensity, opusData);
+                this.onAudioFrame(sampleRate, channels, basebandPower, noisePower, opusData);
             }
 
             // Initialize audio context on first binary packet if not already done
@@ -987,18 +1073,18 @@ class MinimalRadio {
         this.spectrumConfig = null;
     }
 
-    // Get current signal quality metrics (version 2 protocol)
+    // Get current signal quality metrics (from the audio header)
     getSignalQuality() {
         return {
-            basebandPower: this.basebandPower,  // dBFS
-            noiseDensity: this.noiseDensity,    // dBFS
-            snr: this.signalSNR                 // dB
+            basebandPower: this.basebandPower,  // dBFS over the passband
+            noisePower: this.noisePower,        // dBFS over the same passband
+            snr: this.signalSNR                 // dB (a true SNR — see DEFAULT_PROTOCOL_VERSION)
         };
     }
 
     // Check if signal quality data is available
     hasSignalQuality() {
-        return this.basebandPower !== null && this.noiseDensity !== null;
+        return this.basebandPower !== null && this.noisePower !== null;
     }
 
     // Start signal bar updates (100ms interval)

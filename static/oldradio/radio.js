@@ -756,12 +756,15 @@ function updateBandDisplay() {
 
 // Channel scanning — steps through channels at SCAN_STEP_MS per channel,
 // stopping on any channel whose SNR is at/above the squelch threshold.
-// With squelch off, SCAN_DEFAULT_SNR is used instead (the SNR at which the
-// first signal bar lights) so the scan still stops on active channels.
+// With squelch off, SCAN_DEFAULT_SNR is used instead — above the noise but
+// below anything worth hearing — so the scan still stops on active channels.
 let scanActive = false;
 let scanTimer = null;
 const SCAN_STEP_MS = 100;
-const SCAN_DEFAULT_SNR = 30;
+// In dB of SNR, matching v2's SQUELCH_DEFAULT_ON. Was 30 when the server sent
+// noise as a density and the figure was really S/N0 in dB·Hz — see the note on
+// SQUELCH_SNR_MIN below.
+const SCAN_DEFAULT_SNR = 6;
 
 function startScan() {
     if (!currentRadioConfig || !currentRadioConfig.channels) return;
@@ -1118,9 +1121,23 @@ function updateTuneDisplay() {
         : `${tuneOffset > 0 ? '+' : '-'}${Math.abs(tuneOffset)} Hz`;
 }
 
-// SNR squelch constants — mirror the main interface values
-const SQUELCH_SNR_MIN = 24;   // slider far-left = disabled (matches SNR_SQUELCH_OFF_VAL)
-const SQUELCH_SNR_MAX = 80;   // slider far-right = 80 dB threshold
+// SNR squelch constants — mirror the main interface values (v2 constants.js
+// SQUELCH_MIN/SQUELCH_MAX).
+//
+// The range is in dB of SNR and moved with audio protocol version 3: it used to
+// be 24–80, calibrated against the server's old S/N0 figure in dB·Hz, roughly
+// 34 dB above the true SNR on a 2.65 kHz filter and a different amount on every
+// other filter width — which is what made a threshold set on SSB gate wrongly
+// on CW. -10 to 46 is the same span in the units that now arrive.
+// (The v1 interface's own SNR_SQUELCH_OFF_VAL is still 24 because app.js still
+// asks for version 2 — its slider is calibrated against the figure it receives,
+// as this one is against the figure MinimalRadio now receives.)
+const SQUELCH_SNR_MIN = -10;  // slider far-left = disabled
+const SQUELCH_SNR_MAX = 46;   // slider far-right = 46 dB threshold
+
+// Signal LED meter window, in dB of SNR (v2 format.js SNR_MIN/SNR_MAX).
+const SNR_METER_MIN = -5;
+const SNR_METER_MAX = 30;
 const SQUELCH_SENTINEL = -999; // sent to server when disabled
 
 // Debounce timer for server-side gate command
@@ -1203,20 +1220,18 @@ function updateFrequencyDisplay() {
 
 // Update signal bars for CB radio with sub-bar dimming and squelch colouring.
 // Uses vuLevel (0-1) which is already updated by updateSignalLED() from live SNR data.
-// vuLevel 0 = SNR ≤ 30 dB (no bars), vuLevel 1 = SNR ≥ 60 dB (all 8 bars).
+// vuLevel 0 = SNR ≤ SNR_METER_MIN (no bars), vuLevel 1 = SNR ≥ SNR_METER_MAX (all 8 bars).
 // Bars below the squelch threshold are orange; bars at/above it are green.
 // The leading (partial) bar dims proportionally within its range for an analog feel.
 function updateSignalBars() {
     const NUM_BARS = 8;
-    const SNR_MIN = 30;
-    const SNR_MAX = 60;
     const activeBars = vuLevel * NUM_BARS; // e.g. 3.7 means bars 1-3 full, bar 4 at 70%
 
-    // Convert squelch SNR threshold to bar position (same 30-60 dB scale)
+    // Convert squelch SNR threshold to bar position (same window as the meter)
     // squelchBarPos = 0 means no squelch, > NUM_BARS means all bars are below threshold
     const squelchActive = currentSquelchSnr > SQUELCH_SENTINEL;
     const squelchBarPos = squelchActive
-        ? Math.max(0, (currentSquelchSnr - SNR_MIN) / (SNR_MAX - SNR_MIN) * NUM_BARS)
+        ? Math.max(0, (currentSquelchSnr - SNR_METER_MIN) / (SNR_METER_MAX - SNR_METER_MIN) * NUM_BARS)
         : 0;
 
     for (let i = 1; i <= NUM_BARS; i++) {
@@ -1275,9 +1290,10 @@ function updateSignalLED() {
     if (minimalRadio.hasSignalQuality && minimalRadio.hasSignalQuality()) {
         const signalQuality = minimalRadio.getSignalQuality();
         if (signalQuality && signalQuality.snr !== null) {
-            // Map SNR to 0-1 range using 30-60 dB window
-            // 30 dB = 0%, 60 dB = 100%
-            const snrPercentage = Math.max(0, Math.min(1, (signalQuality.snr - 30) / 30));
+            // Map SNR to 0-1 range using the -5..30 dB window the rest of the
+            // UI uses (v2 format.js SNR_MIN/SNR_MAX). Was 30-60 when this
+            // figure was S/N0 in dB·Hz rather than an SNR.
+            const snrPercentage = Math.max(0, Math.min(1, (signalQuality.snr - SNR_METER_MIN) / (SNR_METER_MAX - SNR_METER_MIN)));
 
             // Smooth the value
             vuLevel = vuLevel * 0.8 + snrPercentage * 0.2;

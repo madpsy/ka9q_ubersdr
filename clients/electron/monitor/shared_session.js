@@ -892,7 +892,11 @@ class RelayUpstream {
 
     // Called by multi_monitor.js onAudioFrame callback for each MinimalRadio.
     // Builds the 14-byte relay header and sends the frame to the server.
-    sendAudio(instanceId, sampleRate, channels, basebandPower, noiseDensity, opusBytes) {
+    //
+    // `noisePower` is the noise over the demodulator passband in dBFS, the
+    // figure MinimalRadio normalises to whatever protocol version the upstream
+    // instance speaks, so a follower's (power - noise) is an SNR in dB.
+    sendAudio(instanceId, sampleRate, channels, basebandPower, noisePower, opusBytes) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
         // Wait for relay_state from server before sending — drop frames until
@@ -907,7 +911,7 @@ class RelayUpstream {
         view.setUint32(1, sampleRate, true);       // 4 bytes LE
         view.setUint8(5, channels);                // 1 byte
         view.setFloat32(6, basebandPower, true);   // 4 bytes LE
-        view.setFloat32(10, noiseDensity, true);   // 4 bytes LE
+        view.setFloat32(10, noisePower, true);     // 4 bytes LE
         new Uint8Array(buf, 14).set(opusBytes);
 
         try {
@@ -1054,25 +1058,25 @@ class FollowerRelay {
 
     _handleBinaryFrame(data) {
         // Parse 14-byte relay header:
-        // [1: stream_index][4: sampleRate LE][1: channels][4: bp LE][4: nd LE][N: opus]
+        // [1: stream_index][4: sampleRate LE][1: channels][4: bp LE][4: noise LE][N: opus]
         if (data.byteLength < 14) return;
         const view = new DataView(data);
         const streamIndex    = view.getUint8(0);
         const sampleRate     = view.getUint32(1, true);
         const channels       = view.getUint8(5);
         const basebandPower  = view.getFloat32(6, true);
-        const noiseDensity   = view.getFloat32(10, true);
+        const noisePower     = view.getFloat32(10, true);
         const opusBytes      = new Uint8Array(data, 14);
 
         const instanceId = this.streamMap.get(streamIndex);
         if (!instanceId) return;
 
         // Compute SNR and update signal bar + SNR history chart
-        const snr = (basebandPower > -900 && noiseDensity > -900)
-            ? basebandPower - noiseDensity
+        const snr = (basebandPower > -900 && noisePower > -900)
+            ? basebandPower - noisePower
             : null;
         if (typeof updateMeterTileSignal === 'function') {
-            updateMeterTileSignal(instanceId, basebandPower, noiseDensity, snr);
+            updateMeterTileSignal(instanceId, basebandPower, noisePower, snr);
         }
 
         // Route audio to the player for this instance

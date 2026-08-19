@@ -33,6 +33,21 @@ const MAX_SELECTED = 5;
 const SIG_MIN_DB = -120;
 const SIG_MAX_DB = -40;
 
+// SNR meter range and colour steps, in dB (mirrors SNR_MIN/SNR_MAX and the
+// colour ramp in static/v2/src/lib/format.js).
+//
+// These were 30–80 with steps at 40 and 50, which made sense only because the
+// figure being measured was not an SNR: the server sent noise as a density, so
+// `power - noise` came out as S/N0 in dB·Hz, about 34 dB above the true SNR on
+// a 2.65 kHz filter. MinimalRadio now normalises that to a real SNR whatever
+// protocol version the instance speaks, so the scale is the one that means:
+// below 0 the channel is empty, 3-10 dB is weak but readable speech, and 20 dB
+// and up is armchair copy.
+const SNR_MIN_DB   = -5;
+const SNR_MAX_DB   = 30;
+const SNR_GREEN_DB = 15;   // at or above: signal stops improving audibly
+const SNR_AMBER_DB = 6;    // at or above: above the noise, worth listening to
+
 // How often to refresh the signal meter UI (ms)
 const METER_UPDATE_INTERVAL = 100;
 
@@ -1010,7 +1025,7 @@ function startPreviewMeter(id) {
             fill.style.width = '0%';
             fill.style.background = '#6b7280';
         } else {
-            const pct = Math.max(0, Math.min(100, ((snr - 30) / 30) * 100));
+            const pct = Math.max(0, Math.min(100, ((snr - SNR_MIN_DB) / (SNR_MAX_DB - SNR_MIN_DB)) * 100));
             fill.style.width = pct + '%';
             fill.style.background = monitorSnrColor(snr);
         }
@@ -1035,7 +1050,8 @@ async function toggleSelectPreview(id) {
     if (!inst || !inst.is_online || !inst.tls) return;
 
     try {
-        const radio = new MinimalRadio(null, inst.public_url);
+        const radio = new MinimalRadio(null, inst.public_url,
+            MinimalRadio.protocolVersionFor(inst.version));
         // Suppress the floating signal bar
         radio.startSignalBarUpdates = () => {};
         radio.stopSignalBarUpdates  = () => {};
@@ -1257,14 +1273,14 @@ window.startMonitoringFollower = startMonitoringFollower;
  *
  * @param {string} instanceId
  * @param {number} basebandPower  dBFS float
- * @param {number} noiseDensity   dBFS float
- * @param {number} snr            dB float (basebandPower - noiseDensity)
+ * @param {number} noisePower     dBFS float, over the same passband
+ * @param {number} snr            dB float (basebandPower - noisePower)
  */
 // Throttle timestamps for relay signal history (instanceId → last push time ms)
 // Relay frames arrive at ~50 Hz; we only push one history sample per METER_UPDATE_INTERVAL.
 const _relaySignalLastPush = {};
 
-function updateMeterTileSignal(instanceId, basebandPower, noiseDensity, snr) {
+function updateMeterTileSignal(instanceId, basebandPower, noisePower, snr) {
     const bar    = document.getElementById(`bar-${instanceId}`);
     const dbfsEl = document.getElementById(`dbfs-${instanceId}`);
     const snrEl  = document.getElementById(`snr-${instanceId}`);
@@ -1273,11 +1289,11 @@ function updateMeterTileSignal(instanceId, basebandPower, noiseDensity, snr) {
     const isSnrMode = chartMode[instanceId] === 'snr';
 
     if (isSnrMode && snr !== null && !isNaN(snr)) {
-        const pct = Math.max(0, Math.min(100, ((snr - 30) / 30) * 100));
+        const pct = Math.max(0, Math.min(100, ((snr - SNR_MIN_DB) / (SNR_MAX_DB - SNR_MIN_DB)) * 100));
         bar.style.width = pct + '%';
-        bar.style.background = snr >= 50
+        bar.style.background = snr >= SNR_GREEN_DB
             ? 'linear-gradient(90deg, #22c55e 0%, #4ade80 100%)'
-            : snr >= 40
+            : snr >= SNR_AMBER_DB
                 ? 'linear-gradient(90deg, #fbbf24 0%, #fcd34d 100%)'
                 : 'linear-gradient(90deg, #ef4444 0%, #f87171 100%)';
     } else {
@@ -1305,7 +1321,7 @@ function updateMeterTileSignal(instanceId, basebandPower, noiseDensity, snr) {
         if (!window._followerSignalCache) window._followerSignalCache = {};
         window._followerSignalCache[instanceId] = {
             power: basebandPower,
-            noiseDensity: (snr !== null && !isNaN(snr)) ? basebandPower - snr : null,
+            noisePower: (snr !== null && !isNaN(snr)) ? basebandPower - snr : null,
             snr: (snr !== null && !isNaN(snr)) ? snr : null,
         };
     }
@@ -1492,8 +1508,8 @@ function applyChartMode(id, mode) {
     // Update bar scale labels
     const scaleMin = document.getElementById(`bar-scale-min-${id}`);
     const scaleMax = document.getElementById(`bar-scale-max-${id}`);
-    if (scaleMin) scaleMin.textContent = isSnr ? '30 dB' : `${SIG_MIN_DB} dBFS`;
-    if (scaleMax) scaleMax.textContent = isSnr ? '80 dB' : `${SIG_MAX_DB} dBFS`;
+    if (scaleMin) scaleMin.textContent = isSnr ? `${SNR_MIN_DB} dB` : `${SIG_MIN_DB} dBFS`;
+    if (scaleMax) scaleMax.textContent = isSnr ? `${SNR_MAX_DB} dB` : `${SIG_MAX_DB} dBFS`;
 
     // Immediately update bar fill to reflect the new mode's current value
     const radio = activeRadios[id];
@@ -1502,11 +1518,13 @@ function applyChartMode(id, mode) {
         if (bar) {
             if (isSnr) {
                 const snr = radio.signalSNR;
-                const pct = snr !== null ? Math.max(0, Math.min(100, (snr / 60) * 100)) : 0;
+                const pct = snr !== null
+                    ? Math.max(0, Math.min(100, ((snr - SNR_MIN_DB) / (SNR_MAX_DB - SNR_MIN_DB)) * 100))
+                    : 0;
                 bar.style.width = pct + '%';
-                bar.style.background = snr !== null && snr > 30
+                bar.style.background = snr !== null && snr >= SNR_GREEN_DB
                     ? 'linear-gradient(90deg, #22c55e 0%, #4ade80 100%)'
-                    : snr !== null && snr > 10
+                    : snr !== null && snr >= SNR_AMBER_DB
                         ? 'linear-gradient(90deg, #fbbf24 0%, #fcd34d 100%)'
                         : 'linear-gradient(90deg, #ef4444 0%, #f87171 100%)';
             } else {
@@ -1527,8 +1545,8 @@ function applyChartMode(id, mode) {
     if (!chart) return;
 
     if (isSnr) {
-        chart.options.scales.y.min = 30;
-        chart.options.scales.y.max = 80;
+        chart.options.scales.y.min = SNR_MIN_DB;
+        chart.options.scales.y.max = SNR_MAX_DB;
         chart.data.datasets[0].borderColor      = 'rgba(34, 197, 94, 0.9)';  // green for SNR
         chart.data.datasets[0].backgroundColor  = 'rgba(34, 197, 94, 0.15)';
     } else {
@@ -1688,7 +1706,8 @@ async function connectInstance(inst) {
     }
 
     try {
-        const radio = new MinimalRadio(null, inst.public_url);
+        const radio = new MinimalRadio(null, inst.public_url,
+            MinimalRadio.protocolVersionFor(inst.version));
         activeRadios[inst.id] = radio;
 
         // Start muted — volume 0 until user assigns a channel
@@ -2506,13 +2525,13 @@ function refreshAllMeters() {
         // Bar fill — use SNR or dBFS depending on current chart mode
         const isSnrMode = chartMode[id] === 'snr';
         if (isSnrMode && snr !== null) {
-            const pct = Math.max(0, Math.min(100, ((snr - 30) / 30) * 100));
+            const pct = Math.max(0, Math.min(100, ((snr - SNR_MIN_DB) / (SNR_MAX_DB - SNR_MIN_DB)) * 100));
             bar.style.width = pct + '%';
-            bar.style.background = snr >= 50
-                ? 'linear-gradient(90deg, #22c55e 0%, #4ade80 100%)'   // green  ≥ 50 dB
-                : snr >= 40
-                    ? 'linear-gradient(90deg, #fbbf24 0%, #fcd34d 100%)' // amber 40–49 dB
-                    : 'linear-gradient(90deg, #ef4444 0%, #f87171 100%)'; // red   30–39 dB
+            bar.style.background = snr >= SNR_GREEN_DB
+                ? 'linear-gradient(90deg, #22c55e 0%, #4ade80 100%)'   // green  ≥ 15 dB
+                : snr >= SNR_AMBER_DB
+                    ? 'linear-gradient(90deg, #fbbf24 0%, #fcd34d 100%)' // amber 6–14 dB
+                    : 'linear-gradient(90deg, #ef4444 0%, #f87171 100%)'; // red   below 6 dB
         } else {
             const pct = Math.max(0, Math.min(100,
                 ((dbfs - SIG_MIN_DB) / (SIG_MAX_DB - SIG_MIN_DB)) * 100
@@ -3024,13 +3043,13 @@ function makeMarkerIcon(inst, selected, previewing = false) {
 /** Shared SNR → colour for monitor markers and geodesic lines. */
 function monitorSnrColor(snr) {
     return snr === null || snr === undefined ? '#94a3b8'  // grey = no data
-         : snr >= 50 ? '#22c55e'   // green  ≥ 50 dB
-         : snr >= 40 ? '#fbbf24'   // amber 40–49 dB
-         :             '#ef4444';  // red   30–39 dB (or below)
+         : snr >= SNR_GREEN_DB ? '#22c55e'   // green  ≥ 15 dB
+         : snr >= SNR_AMBER_DB ? '#fbbf24'   // amber 6–14 dB
+         :                       '#ef4444';  // red   below 6 dB
 }
 
 function makeMonitorMarkerIcon(snr, highlighted = false, channel = null) {
-    // Colour matches SNR bar thresholds (30–60 dB scale)
+    // Colour matches SNR bar thresholds (see SNR_MIN_DB)
     const color = monitorSnrColor(snr);
     // Halo: bright cyan ring + outer glow, no colour change to dot
     const shadow = highlighted
@@ -3823,8 +3842,13 @@ function buildSnrHistoryChart() {
                 },
                 y: {
                     display: true,
-                    min: 10,
-                    max: 80,
+                    // The Smart Listen traces are SNR in dB (see SNR_MIN_DB).
+                    // This axis was 10-80 while the figure was S/N0 in dB·Hz —
+                    // roughly 34 dB higher on a 2.65 kHz filter — which left
+                    // every trace pinned below the bottom gridline once
+                    // MinimalRadio started reporting a real SNR.
+                    min: SNR_MIN_DB,
+                    max: SNR_MAX_DB,
                     title: {
                         display: true,
                         text: 'SNR (dB)',
@@ -5024,7 +5048,12 @@ function escHtml(str) {
     // content script reads: window.currentBasebandPower / window.currentNoiseDensity.
     // In follower mode, activeRadios is empty; signal data is cached per-instance
     // by updateMeterTileSignal() into window._followerSignalCache.
-    window._followerSignalCache = {}; // { [instanceId]: { power, noiseDensity, snr } }
+    //
+    // currentNoiseDensity keeps its name because the page-world script reads it
+    // by that name, but the figure it carries is now noise power over the
+    // demodulator passband, so the script's (power - noise) is a true SNR in dB
+    // rather than S/N0 in dB·Hz. See DEFAULT_PROTOCOL_VERSION in minimal-radio.js.
+    window._followerSignalCache = {}; // { [instanceId]: { power, noisePower, snr } }
     setInterval(function () {
         var isFollower = typeof isFollowerMode !== 'undefined' && isFollowerMode;
         if (isFollower) {
@@ -5038,7 +5067,7 @@ function escHtml(str) {
                 if (entry && entry.snr !== null && (bestSnr === null || entry.snr > bestSnr)) {
                     bestSnr   = entry.snr;
                     bestPower = entry.power;
-                    bestNoise = entry.noiseDensity;
+                    bestNoise = entry.noisePower;
                 }
             }
             window.currentBasebandPower = bestPower;
@@ -5058,8 +5087,8 @@ function escHtml(str) {
                 }
             }
             window.currentBasebandPower = bestPower;
-            // content script computes SNR as (basebandPower - noiseDensity), so
-            // derive noiseDensity from the best radio's known SNR and power.
+            // content script computes SNR as (basebandPower - noise), so
+            // derive the noise figure from the best radio's known SNR and power.
             window.currentNoiseDensity  = (bestSnr !== null && bestPower !== null)
                 ? bestPower - bestSnr
                 : null;

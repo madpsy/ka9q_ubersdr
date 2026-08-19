@@ -1,5 +1,23 @@
 // Minimal Radio - Lightweight audio preview for noise floor monitoring
 
+// Audio protocol version asked for at connect.
+//
+// Version 3 has the same 21-byte header as version 2 — timestamp(8)
+// sampleRate(4) channels(1) power(4) noise(4) — and differs only in the second
+// signal-quality field: it carries the noise power inside the demodulator
+// passband rather than radiod's density N0 in dBFS/Hz. That is what makes
+// `basebandPower - noisePower` an SNR in dB. On version 2 the same subtraction
+// gave S/N0 in dB·Hz, about 34 dB high on a 2.65 kHz filter and a different
+// amount high on every other filter width, which is why a threshold set on SSB
+// gated wrongly on CW. See channelNoisePower in radiod_status.go.
+//
+// Safe to hardcode here because this file is served by the instance it talks
+// to. The copies under clients/electron/monitor and the collector connect to
+// arbitrary remote instances and negotiate instead — a server older than 0.1.60
+// clamps an unknown version to 1, whose header is 13 bytes with no
+// signal-quality fields at all, so parsing at offset 21 would break audio.
+const PROTOCOL_VERSION = 3;
+
 class MinimalRadio {
     constructor(userSessionID = null) {
         // Use provided session ID or generate new one
@@ -42,7 +60,7 @@ class MinimalRadio {
         this.spectrumConfig = null; // Store spectrum config (centerFreq, binCount, etc.)
         this.binarySpectrumData8 = null; // State for binary8 delta decoding
 
-        // Signal quality metrics (from version=2 protocol)
+        // Signal quality metrics (from the version 3 protocol header)
         this.signalQuality = null;
         this.signalQualityCallback = null;
 
@@ -313,9 +331,9 @@ class MinimalRadio {
                 this.connectionValidated = true;
             }
             
-            // Create WebSocket connection with Opus format and version 2 (for signal quality metrics)
+            // Create WebSocket connection with Opus format and version 3 (for signal quality metrics)
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus&version=2`;
+            const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus&version=${PROTOCOL_VERSION}`;
 
             this.ws = new WebSocket(wsUrl);
 
@@ -385,7 +403,7 @@ class MinimalRadio {
                 // Status updates (optional)
                 break;
             case 'signal_quality':
-                // Signal quality metrics from version=2 protocol
+                // Signal quality metrics from the version 2+ protocol
                 this.handleSignalQuality(message);
                 break;
             case 'error':
@@ -405,7 +423,8 @@ class MinimalRadio {
         this.signalQualityCallback = callback;
     }
 
-    // Get latest signal quality metrics (version 2 protocol)
+    // Get latest signal quality metrics: { basebandPower, noisePower, snr }, all
+    // in dB/dBFS, with snr a true SNR (see PROTOCOL_VERSION).
     getSignalQuality() {
         return this.signalQuality;
     }
@@ -414,10 +433,10 @@ class MinimalRadio {
     hasSignalQuality() {
         return this.signalQuality !== null &&
                this.signalQuality.basebandPower !== null &&
-               this.signalQuality.noiseDensity !== null;
+               this.signalQuality.noisePower !== null;
     }
-    
-    // Handle binary Opus audio messages (version 2 protocol)
+
+    // Handle binary Opus audio messages (version 2+ protocol)
     async handleBinaryMessage(data) {
         try {
             // Convert Blob to ArrayBuffer if needed
@@ -428,13 +447,12 @@ class MinimalRadio {
                 arrayBuffer = data;
             }
 
-            // Parse binary Opus packet header - Version 2 format
-            // We requested version=2, so always parse as version 2
-            // Format: [timestamp:8][sampleRate:4][channels:1][basebandPower:4][noiseDensity:4][opusData...]
+            // Parse binary Opus packet header - version 2/3 layout
+            // Format: [timestamp:8][sampleRate:4][channels:1][basebandPower:4][noisePower:4][opusData...]
             const view = new DataView(arrayBuffer);
 
             if (arrayBuffer.byteLength < 21) {
-                console.error('Binary packet too short for version 2:', arrayBuffer.byteLength, 'bytes (expected ≥21)');
+                console.error(`Binary packet too short for version ${PROTOCOL_VERSION}:`, arrayBuffer.byteLength, 'bytes (expected ≥21)');
                 return;
             }
 
@@ -443,13 +461,15 @@ class MinimalRadio {
             const sampleRate = view.getUint32(8, true);     // 4 bytes, little-endian
             const channels = view.getUint8(12);             // 1 byte
             const basebandPower = view.getFloat32(13, true); // 4 bytes, little-endian
-            const noiseDensity = view.getFloat32(17, true);  // 4 bytes, little-endian
+            const noisePower = view.getFloat32(17, true);    // 4 bytes, little-endian
 
-            // Store signal quality metrics
+            // Store signal quality metrics.  Both fields are dBFS over the
+            // demodulator passband on version 3, so the subtraction is an SNR
+            // in dB; -999 in either field means radiod had no status to report.
             this.signalQuality = {
                 basebandPower: basebandPower,
-                noiseDensity: noiseDensity,
-                snr: (basebandPower > -900 && noiseDensity > -900) ? basebandPower - noiseDensity : null,
+                noisePower: noisePower,
+                snr: (basebandPower > -900 && noisePower > -900) ? basebandPower - noisePower : null,
                 timestamp: Number(timestamp)
             };
 
@@ -458,7 +478,7 @@ class MinimalRadio {
                 this.signalQualityCallback(this.signalQuality);
             }
 
-            // Opus data starts at byte 21 for version 2
+            // Opus data starts at byte 21 on version 2/3
             const opusData = new Uint8Array(arrayBuffer, 21);
 
             // Initialize audio context on first binary packet if not already done

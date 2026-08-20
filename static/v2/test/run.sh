@@ -304,6 +304,10 @@ esbuild ../src/lib/visibilityPause.js --bundle --format=cjs --platform=node \
     --outfile=.build/visibilitypause.cjs --log-level=warning
 esbuild ../src/lib/bandConditions.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandconditions.cjs --log-level=warning
+esbuild bandnoise.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/bandnoise.cjs --log-level=warning
+esbuild bandstats.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/bandstats.cjs --log-level=warning
 esbuild dispatch.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dispatch.cjs --log-level=warning
 esbuild layout.entry.js --bundle --format=cjs --platform=node \
@@ -433,6 +437,8 @@ node chatfollow.test.js
 node sheetgesture.test.js
 node visibilitypause.test.js
 node bandconditions.test.js
+node bandnoise.test.js
+node bandstats.test.js
 node dispatch.test.js
 node layout.test.js
 node weather.test.js

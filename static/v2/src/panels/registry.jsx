@@ -73,6 +73,7 @@ import GamesPanel from './GamesPanel.jsx';
 import ScopePanel from './ScopePanel.jsx';
 import LogPanel from './LogPanel.jsx';
 import QuickBandsPanel from './QuickBandsPanel.jsx';
+import BandStatsPanel from './BandStatsPanel.jsx';
 import ChatPanel, { ChatBadge } from './ChatPanel.jsx';
 import AddonsPanel, { addonList } from './AddonsPanel.jsx';
 import RotatorPanel from './RotatorPanel.jsx';
@@ -573,8 +574,33 @@ export const PANELS = [
         minimal: true,
         Component: QuickBandsPanel,
     },
-    // Under Quick bands, for the same reason Quick bands sits under Signal:
-    // the band buttons say how each band is doing right now and this says why,
+    // Directly under Quick bands, because it is the same answer with the working
+    // shown: the keys above are a band painted green or amber, and this is the
+    // noise floor, the dynamic range and the FT8 SNR that decided the colour.
+    //
+    // Collapsed by default, and collapsed means silent: Section mounts a panel's
+    // body only while its section is open, so a closed one holds no timer and
+    // makes no request. Open, it is one request a minute — see lib/bandNoise.js,
+    // which enforces that as a floor rather than merely a timer period.
+    //
+    // Minimal: the band, its condition and the two figures that decide whether
+    // to stay on it, without the picker, the rest of the readouts and the
+    // all-bands table.
+    {
+        id: 'bandstats',
+        title: 'Bands',
+        icon: <Icon.Bars />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: BandStatsPanel,
+        // Every figure here is the noise floor monitor's; without it
+        // /api/noisefloor/latest is a 503 and the panel has nothing to show.
+        // Same gate the band spectrum panel uses.
+        requires: (serverInfo) => !!(serverInfo && serverInfo.noise_floor),
+    },
+    // Under the band panels, for the same reason Quick bands sits under Signal:
+    // those say how each band is doing right now and this says why,
     // and both are read as one answer to "where should I be listening".
     // Collapsed by default — the top bar already carries the summary, and its
     // click opens this — but the header is right there under the bands.

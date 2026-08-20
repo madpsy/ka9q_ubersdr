@@ -172,6 +172,12 @@ export const Icon = {
     ViewSpectrum: (p) => <Svg {...p}><path d="M3 20v-6M7.5 20V8M12 20V4M16.5 20v-9M21 20v-4" /></Svg>,
     ViewWaterfall: (p) => <Svg {...p}><path d="M3 6h4M9 6h6M17 6h4M3 12h6M11 12h3M16 12h5M3 18h3M8 18h7M17 18h4" /></Svg>,
     ViewSplit: (p) => <Svg {...p}><path d="M4 11V7.5M8 11V4M12 11V8M16 11V5.5M20 11V9" /><path d="M3 15.5h5M10 15.5h5M17 15.5h4M3 20h7M12 20h3M17 20h4" /></Svg>,
+
+    // A bar chart with an axis, for the band measurements panel. Deliberately
+    // not ViewSpectrum: that family is frameless columns and means "a picture of
+    // the RF", where this is a set of figures compared against each other, which
+    // is what the baseline says.
+    Bars: (p) => <Svg {...p}><path d="M4 4v16h16" /><path d="M8 20v-5M12.5 20V8M17 20v-8" /></Svg>,
 };
 
 export default Icon;

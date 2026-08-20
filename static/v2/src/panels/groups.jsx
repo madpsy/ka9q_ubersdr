@@ -59,9 +59,13 @@ export const GROUPS = [
         // belongs with the spots rather than with the weather: it answers "why
         // can I hear this", which is the same question the rest of the group is
         // asking.
+        // Band measurements are here rather than under Tune with the band keys:
+        // the keys are a way of getting somewhere, and this is a reading of what
+        // is there — the same question the spots and the space weather are
+        // asking, which is "where should I be listening".
         panels: [
             'spots', 'dxcluster', 'voice', 'callsign',
-            'bandspectrum', 'spectrogram', 'spaceweather', 'lightning',
+            'bandspectrum', 'spectrogram', 'bandstats', 'spaceweather', 'lightning',
         ],
     },
     {

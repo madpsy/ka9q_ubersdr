@@ -4133,6 +4133,157 @@ a.btn { text-decoration: none; }
 .sw-forecast .kv__k { flex: none; }
 
 /* =========================================================================
+   Bands panel (the noise floor monitor's measurements)
+   ========================================================================= */
+
+/* The picker and the age of what is on screen, on one row: the age belongs to
+   the reading rather than to any one figure, and putting it beside the band
+   name is what stops a stalled monitor reading as a live one. */
+.bst__pick { display: flex; align-items: center; gap: 6px; }
+.bst__pick .select { flex: 1; min-width: 0; }
+.bst__age {
+    flex: none;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+
+/* The headline. Same shape as the space weather panel's hero — a label, a big
+   value, a caption — because it is doing the same job at the top of a panel,
+   but its own rule: the tones here are the band conditions' four buckets, not
+   good/warn/bad, and sharing a class would tie two unrelated palettes together.
+   The colour is carried on the left border rather than the text, so a Good
+   amber stays readable at caption size on both themes. */
+.bst-hero {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+}
+.bst-hero__label {
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.bst-hero__value { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.bst-hero__band {
+    font-family: var(--mono);
+    font-size: calc(19px * var(--ui-scale));
+    font-weight: 650;
+    line-height: 1.15;
+}
+.bst-hero__grade {
+    font-size: calc(12px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.bst-hero__foot {
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+/* The four buckets, in the band keys' colours (see .band-keys above), so a
+   Good here is the same amber a Good band button is. */
+.bst-hero--excellent { border-left-color: #22c55e; }
+.bst-hero--excellent .bst-hero__grade { color: #22c55e; }
+.bst-hero--good { border-left-color: #fbbf24; }
+.bst-hero--good .bst-hero__grade { color: #fbbf24; }
+.bst-hero--fair { border-left-color: #ff9800; }
+.bst-hero--fair .bst-hero__grade { color: #ff9800; }
+.bst-hero--poor { border-left-color: #ef4444; }
+.bst-hero--poor .bst-hero__grade { color: #ef4444; }
+.bst-hero--none .bst-hero__grade { color: var(--text-faint); }
+
+/* A noise floor ranked against the rest of this receiver's bands. Quiet, and
+   only on the value: six tiles with coloured borders would be a traffic light
+   where the point is a comparison between two of them. */
+.bst-cell--good .readout__value { color: var(--good); }
+.bst-cell--warn .readout__value { color: var(--warn); }
+.bst-cell--bad .readout__value { color: var(--bad); }
+
+/* Band | Floor | FT8 SNR. The band column is sized to its content, as the
+   space weather table's is, so the two number columns stay equal — which is
+   what makes a column of figures readable as a column. */
+.bst-table { display: flex; flex-direction: column; gap: 2px; }
+.bst-table__head,
+.bst-table__row {
+    display: grid;
+    grid-template-columns: 3.4em minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4px;
+    align-items: center;
+}
+.bst-table__head {
+    padding: 0 2px 2px;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    text-align: right;
+}
+.bst-table__head span:first-child { text-align: left; }
+
+.bst-table__row {
+    padding: 1px 2px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+}
+.bst-table__row:hover:not(:disabled) { background: var(--surface-hover); }
+.bst-table__row:disabled { cursor: default; }
+/* The band the panel is reporting on, ringed the way the band buttons ring
+   the tuned one. */
+.bst-table__row.is-current { border-color: var(--border-strong); background: var(--surface-hover); }
+.bst-table__band {
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.bst-table__row.is-current .bst-table__band { color: var(--text); font-weight: 650; }
+.bst-table__num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(11px * var(--ui-scale));
+    text-align: right;
+    color: var(--text-dim);
+}
+/* Same rank colours as the readout above, so the tile and the row agree. */
+.bst-table__num.bst-cell--good { color: var(--good); }
+.bst-table__num.bst-cell--warn { color: var(--warn); }
+.bst-table__num.bst-cell--bad { color: var(--bad); }
+
+.bst-table__grade { justify-self: stretch; }
+/* The SNR figure, painted its bucket — the band keys' colours again. */
+.bst-grade {
+    padding: 1px 4px;
+    border-radius: 4px;
+    text-align: right;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10.5px * var(--ui-scale));
+    font-weight: 650;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.bst-grade--excellent { background: #22c55e; color: #fff; }
+.bst-grade--good { background: #fbbf24; color: #14202e; }
+.bst-grade--fair { background: #ff9800; color: #14202e; }
+.bst-grade--poor { background: #ef4444; color: #fff; }
+.bst-grade--none { background: var(--surface-3); color: var(--text-faint); }
+
+.bst__foot { display: flex; justify-content: flex-end; }
+
+/* =========================================================================
    Recorder panel
    ========================================================================= */
 

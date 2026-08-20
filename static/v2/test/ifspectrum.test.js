@@ -128,6 +128,52 @@ t('pixels with no bin behind them are NaN, not a floor', () => {
     assert.ok(!Number.isFinite(out[199]));
 });
 
+t('...at the left-hand end too, where a clamp used to draw bin 0 as a flat line', () => {
+    // The bug: off the left edge both ends of a pixel's bin range are negative,
+    // the start clamps to 0 and the `i0 + 1` floor under the end then makes it
+    // read bin 0 — so a part of the spectrum nobody has measured came back as a
+    // flat trace at a plausible level. The right-hand end escaped by accident,
+    // which is why it showed as an asymmetry.
+    const bins = flat(-100);
+    // The served view starts at 9.95 MHz and the window at 9.93, so the left
+    // half of the picture has nothing behind it and the right half is all data.
+    const win = { lo: 9_930_000, hi: 9_970_000, span: 40_000, half: 20_000, dial: 9_950_000 };
+    // Both regimes: more bins than pixels, and more pixels than bins. Only the
+    // first had the fault, but both have to answer the same way.
+    for (const px of [200, 4000]) {
+        const out = sliceToPixels(bins, CFG, win, new Float32Array(px));
+        const edge = px / 2;             // where the served view begins
+        for (let x = 0; x < edge - 1; x++) {
+            assert.ok(!Number.isFinite(out[x]),
+                `${px}px: pixel ${x} is off the left edge and came back as ${out[x]}`);
+        }
+        for (let x = edge + 1; x < px; x++) {
+            assert.ok(Number.isFinite(out[x]), `${px}px: pixel ${x} has data and did not report it`);
+        }
+    }
+});
+
+t('a window as wide as the view still hangs off it when the dial is off centre', () => {
+    // The second half of the same picture. The main display only recentres when
+    // the passband would leave the screen, so the dial sits off centre most of
+    // the time; a stop measured as a *span* let the window overhang by exactly
+    // that drift. The stop is the nearer edge instead.
+    const usb = { frequency: 14_074_000, bandwidthLow: 50, bandwidthHigh: 2700 };
+    const drifted = { centerFreq: 14_076_250, span: 2048 * 20, binCount: 2048 };
+    const win = windowFor(usb, clampZoom(99, maxZoomFor(drifted, usb)));
+    assert.strictEqual(coverageOf(drifted, win), 1, 'the widest window still overhangs');
+    // ...and it is genuinely narrower than the served span, by the drift.
+    assert.ok(win.span < drifted.span, `${win.span} is not inside ${drifted.span}`);
+
+    // Centred, the two agree again — nothing is given away for free.
+    const centred = { ...drifted, centerFreq: usb.frequency };
+    assert.ok(Math.abs(windowFor(usb, maxZoomFor(centred, usb)).span - centred.span) < 1);
+
+    // A dial outside the view has no window it can fill: back to the fit, and
+    // the gaps say the rest.
+    assert.strictEqual(maxZoomFor({ centerFreq: 21e6, span: 40_000, binCount: 2048 }, usb), ZOOM_MIN);
+});
+
 t('no view, no bins, or a zero span produces a row of NaN rather than a wrong picture', () => {
     const win = { lo: 1, hi: 2, span: 1, half: 0.5, dial: 1.5 };
     for (const [bins, cfg] of [

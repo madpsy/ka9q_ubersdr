@@ -71,20 +71,32 @@ export function clampZoom(v, max = ZOOM_MAX) {
  * three quarters of the panel with no measurement behind it, which looks like a
  * fault rather than like a choice.
  *
- * So the stop is wherever the window fills the served view. When the main
- * display is zoomed out to the whole band this never binds and the ceiling is
- * ZOOM_MAX again; when it is zoomed in, the two move together.
+ * So the stop is the widest window that is measured *all the way across*, and
+ * that is set by the nearer edge rather than by the span. The two are not the
+ * same thing: this window is centred on the dial and the served view is centred
+ * wherever the server last put it, and the main display only recentres when the
+ * passband would otherwise leave the screen — so the dial sits off centre most
+ * of the time. Measured as a span, a window as wide as the view still hangs off
+ * one end of it by however far the dial has drifted, which is the flat left-hand
+ * edge this replaces.
  *
- * The *fit* is deliberately not clamped by this. A window narrower than the
- * filter would break the one promise this pane makes, so a main view too narrow
- * to fill even the fitted window draws gaps at the edges instead — which is
- * true, and which the trace shows as gaps rather than as invented noise.
+ * When the main display is zoomed out to the whole band none of it binds and the
+ * ceiling is ZOOM_MAX again.
+ *
+ * The *fit* is deliberately not clamped by any of this. A window narrower than
+ * the filter would break the one promise this pane makes, so a view too narrow
+ * — or a dial too near its edge — to contain even the fitted window draws gaps
+ * instead, which is true and which reads as nothing rather than as signal.
  */
 export function maxZoomFor(cfg, tuning) {
     if (!cfg || !(cfg.span > 0) || !tuning) return ZOOM_MAX;
     const fit = halfSpanFor(tuning.bandwidthLow, tuning.bandwidthHigh, 1) * 2;
     if (!(fit > 0)) return ZOOM_MAX;
-    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, cfg.span / fit));
+    const dial = Number(tuning.frequency) || 0;
+    const reach = Math.min(dial - (cfg.centerFreq - cfg.span / 2),
+        (cfg.centerFreq + cfg.span / 2) - dial);
+    if (!(reach > 0)) return ZOOM_MIN;      // the dial is outside the view entirely
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, (reach * 2) / fit));
 }
 
 /** Whether the window has been opened past the fit — i.e. there is a reset to offer. */
@@ -201,6 +213,19 @@ export function sliceToPixels(bins, cfg, win, out) {
             // The bins this pixel spans, as a half-open range.
             const a = (win.lo + (x * win.span) / w - viewLo) / bw;
             const b = (win.lo + ((x + 1) * win.span) / w - viewLo) / bw;
+            // Wholly outside the served view. Tested *before* clamping, because
+            // the clamp is what hides it: a pixel off the left-hand end has both
+            // ends negative, Math.max(0, …) pulls its start to bin 0, and the
+            // `i0 + 1` floor under its end then guarantees it reads that bin. So
+            // every pixel past the left edge came back as bin 0's level — a flat
+            // line, at a plausible height, across a part of the spectrum nobody
+            // has measured. The right-hand end escaped by accident, since there
+            // the clamped range comes out empty; that asymmetry is what the
+            // picture showed.
+            if (b <= 0 || a >= n) {
+                out[x] = NaN;
+                continue;
+            }
             const i0 = Math.max(0, Math.floor(a));
             const i1 = Math.min(n, Math.max(i0 + 1, Math.ceil(b)));
             let m = -Infinity;
@@ -209,16 +234,28 @@ export function sliceToPixels(bins, cfg, win, out) {
             continue;
         }
 
-        // Where this pixel's centre falls between two bin centres. Bin i covers
-        // viewLo + i*bw .. viewLo + (i+1)*bw, so its centre is half a bin in —
-        // hence the -0.5, without which the whole trace sits half a bin off the
-        // frequency scale drawn under it.
+        // Where this pixel's centre falls in the served view, in bins.
+        //
+        // Whether there is anything there at all is asked in these terms rather
+        // than in the interpolator's, which are half a bin along: a pixel just
+        // outside the view is within half a bin of the first bin's *centre*, so
+        // judged there it looks like the clamp case below and comes back as bin
+        // 0. Sub-pixel at most, but it is the same mistake as the one that drew
+        // a flat left-hand edge, and the boundary is worth stating once.
         const hz = win.lo + ((x + 0.5) * win.span) / w;
-        const f = (hz - viewLo) / bw - 0.5;
-        const i = Math.floor(f);
-        if (i < -1 || i > n - 1) {
+        const rel = (hz - viewLo) / bw;
+        if (rel < 0 || rel > n) {
             out[x] = NaN;
-        } else if (i < 0) {
+            continue;
+        }
+        // Bin i covers viewLo + i*bw .. viewLo + (i+1)*bw, so its centre is half
+        // a bin in — hence the -0.5, without which the whole trace sits half a
+        // bin off the frequency scale drawn under it. Outside the outermost
+        // centres there is nothing to interpolate against, so the edge bin
+        // stands.
+        const f = rel - 0.5;
+        const i = Math.floor(f);
+        if (i < 0) {
             out[x] = bins[0];
         } else if (i >= n - 1) {
             out[x] = bins[n - 1];

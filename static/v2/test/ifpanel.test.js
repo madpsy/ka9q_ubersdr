@@ -157,6 +157,44 @@ t('the Shape view asks the main display for the zoom it needs, once', () => {
     assert.deepStrictEqual(asked, []);
 });
 
+t('the measured readout is optional, and is the same in every view', () => {
+    const readouts = (over, props) => {
+        reset();
+        const { tree } = render(IFSpectrumPanel, props || {}, context(over));
+        const grid = deep(tree).find((n) => String(n.props.className || '').includes('ifs__stats'));
+        return grid ? words(grid) : null;
+    };
+    // Off by default: it is a measurement, not part of the picture.
+    assert.strictEqual(DEFAULTS.ifStats, false);
+    assert.strictEqual(readouts({}), null);
+
+    // On, it is there whichever of the six pictures is showing — the numbers
+    // come from the averaging, not from the drawing.
+    for (const view of ['split', 'spectrum', 'waterfall', 'fusion', 'mirror', 'shape']) {
+        const w = readouts({ ifStats: true, ifView: view });
+        assert.ok(w, `no readout in the ${view} view`);
+        assert.match(w, /Peak/);
+        assert.match(w, /Occupancy/);
+        assert.match(w, /Noise/);
+    }
+
+    // ...including the minimal view, unlike the readout that is always there:
+    // this one was asked for, which is the difference between clutter and a
+    // request.
+    assert.ok(readouts({ ifStats: true }, { minimal: true }));
+
+    // Nothing is claimed while the pane cannot draw: over one spectrum bin there
+    // is no peak to find and no occupancy to count.
+    const blind = readouts({
+        ifStats: true,
+        view: {
+            centerFreq: 14_200_000, span: 30e6, binCount: 1024, binBandwidth: 30e6 / 1024,
+            defaultBinCount: 1024, defaultBinBandwidth: 30e6 / 1024,
+        },
+    });
+    assert.ok(!/dBFS/.test(blind), `it reported numbers it could not measure: ${blind}`);
+});
+
 t('the Shape view brings its own window and says what went into it', () => {
     reset();
     const { tree } = render(IFSpectrumPanel, {}, context({ ifView: 'shape' }));
@@ -384,7 +422,7 @@ t('the default view is the one the panel is designed around', () => {
 t('its display settings all have defaults, so a first visit is not undefined', () => {
     for (const key of [
         'ifView', 'ifSpan', 'ifRate', 'ifAuto', 'ifFloor', 'ifCeil', 'ifGestures',
-        'ifClickTune', 'ifShapeSec', 'ifShapeZoom',
+        'ifClickTune', 'ifShapeSec', 'ifShapeZoom', 'ifStats',
     ]) {
         assert.ok(DEFAULTS[key] !== undefined, `${key} has no default`);
     }

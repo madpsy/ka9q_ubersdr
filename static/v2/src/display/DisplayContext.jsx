@@ -309,6 +309,16 @@ export const DEFAULTS = {
     // it snap back. This way the last word is theirs, and the cover over the
     // picture offers the same zoom as a button if they want it again.
     ifShapeZoom: true,
+    // The measured readout under the chart: where the strongest thing in the
+    // passband is, how strong, what the noise under it is, and how much of the
+    // filter is occupied.
+    //
+    // Off, because it is a measurement rather than part of the picture — you
+    // turn it on to answer a question, and it costs an averaging window running
+    // in every view rather than only in Shape. On in any view once it is on: the
+    // numbers come from the averaging, not from the drawing, so which of the six
+    // pictures is showing has nothing to do with it.
+    ifStats: false,
     ifRate: 20,             // committed rows a second, as the main waterfall's
     // Auto by default and for the same reason the audio scope's is: it is right
     // until the question becomes "how strong is this", which is what an absolute

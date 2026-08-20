@@ -202,11 +202,6 @@ export function shapeStats(st, windowMs, nowMs, out = {}, band) {
     min.fill(Infinity);
     max.fill(-Infinity);
 
-    // The bins worth looking at: the filter, or the whole window when no filter
-    // was given. Everything outside is left at its zero count and comes out NaN,
-    // so it is never averaged, never drawn, and never allowed into the levels.
-    const first = band ? Math.max(0, band.first) : 0;
-    const last = band ? Math.min(n - 1, band.last) : n - 1;
 
     const cutoff = nowMs - Math.max(0, windowMs);
     let rows = 0;
@@ -223,7 +218,7 @@ export function shapeStats(st, windowMs, nowMs, out = {}, band) {
         if (!rows) oldest = at;
         newest = at;
         rows++;
-        for (let i = first; i <= last; i++) {
+        for (let i = 0; i < n; i++) {
             const db = v[i];
             if (!Number.isFinite(db)) continue;
             // dB to linear power. The average has to happen here — see the note
@@ -244,6 +239,27 @@ export function shapeStats(st, windowMs, nowMs, out = {}, band) {
             continue;
         }
         mean[i] = 10 * Math.log10(sum[i] / count[i]);
+    }
+
+    // The noise floor, from the *whole* window and before the filter mask is
+    // applied. The margin either side of the passband is usually the quietest
+    // part of the picture and it is free; measured from the passband alone, a
+    // channel full of signal would have no quiet quarter left to measure and the
+    // floor would land inside the signal.
+    if (!out.scratch || out.scratch.length !== n) out.scratch = new Float32Array(n);
+    out.floorDb = noiseFloorOf(mean, out.scratch);
+
+    // ...and only now the mask. Everything outside the filter is dropped rather
+    // than drawn: see the note at the top of this file.
+    if (band) {
+        const first = Math.max(0, band.first);
+        const last = Math.min(n - 1, band.last);
+        for (let i = 0; i < n; i++) {
+            if (i >= first && i <= last) continue;
+            mean[i] = NaN;
+            min[i] = NaN;
+            max[i] = NaN;
+        }
     }
 
     out.rows = rows;
@@ -311,6 +327,167 @@ export function shapeWantsZoom(cfg, win, coverage, floorSpan = 0) {
     if (!cfg || !(cfg.span > 0) || !win || !(win.span > 0)) return false;
     if (coverage < 1) return true;
     return cfg.span > shapeZoomSpan(win, floorSpan) * SHAPE_ZOOM_SLACK;
+}
+
+// ── Reading numbers off the shape ────────────────────────────────────────────
+//
+// Two questions the picture can be made to answer exactly rather than by eye:
+// what the strongest thing in the passband is and where, and how much of the
+// passband is occupied at all. Both are taken from the same time-averaged means
+// the Shape view draws, which is what makes them steady — an instantaneous
+// spectrum has a peak that hops between bins several times a second and an
+// occupancy that flickers with every noise spike.
+//
+// Both are reported for every view, not only for Shape. The averaging is the
+// measurement; the drawing is a separate question.
+
+// A signal has to stand this far above the noise before it is called one. Six
+// decibels on a two-second power average is well clear of what noise does on its
+// own, and is about where a signal becomes audible.
+export const SIGNAL_DB = 6;
+
+// The percentile of the window taken as the noise floor.
+//
+// A percentile rather than a mean, because a mean of a passband with a signal in
+// it is not the noise. Taken over the whole window rather than the passband
+// alone: the margin either side of the filter is usually the quietest part of
+// the picture, and it is free.
+//
+// Fifteen per cent, and the figure is set by that margin rather than picked for
+// tidiness. The window is the filter and a quarter, so the part outside the
+// filter is about a fifth of it — a little more on the narrow modes, where the
+// minimum window widens things further. A percentile above that has no quiet
+// bins left to land on the moment the passband fills up, and the floor rises
+// into the signal: at a quarter, a full passband measured its own noise floor as
+// thirty decibels too high and reported nothing occupied at all. Below the
+// margin it always has somewhere honest to land.
+//
+// It costs almost nothing on a quiet passband. What is being ranked is a *power
+// average over seconds*, not single frames, so the noise bins are within a few
+// tenths of a decibel of each other and it makes little difference which of them
+// is picked.
+//
+// The one case with no answer, stated because a single channel cannot do better:
+// if the whole window is lifted — a wideband signal across all of it, or a noise
+// floor that has risen everywhere — there is no quiet reference anywhere in the
+// picture, and occupancy reads low because nothing stands out from anything.
+export const NOISE_PCT = 0.15;
+
+/** The noise floor of a row of averaged bins, in dB — NOISE_PCT of what is there. */
+export function noiseFloorOf(mean, scratch) {
+    const n = mean.length;
+    const buf = scratch && scratch.length >= n ? scratch : new Float32Array(n);
+    let k = 0;
+    for (let i = 0; i < n; i++) if (Number.isFinite(mean[i])) buf[k++] = mean[i];
+    if (!k) return NaN;
+    const valid = buf.subarray(0, k);
+    valid.sort();
+    return valid[Math.min(k - 1, Math.round(NOISE_PCT * (k - 1)))];
+}
+
+/** What fraction of `band` stands SIGNAL_DB above the floor, 0..1. */
+export function occupancyOf(mean, band, floorDb) {
+    if (!band || band.last < band.first || !Number.isFinite(floorDb)) return null;
+    const gate = floorDb + SIGNAL_DB;
+    let total = 0;
+    let busy = 0;
+    for (let i = band.first; i <= band.last; i++) {
+        if (!Number.isFinite(mean[i])) continue;
+        total++;
+        if (mean[i] > gate) busy++;
+    }
+    return total ? busy / total : null;
+}
+
+// How much better a candidate has to be before the peak moves to it.
+//
+// Without this the reading swaps between two signals of similar strength — or
+// between two bins of one — every time the average tips one way, and a readout
+// that alternates between two frequencies is worse than one that is a little
+// slow. A decibel and a half is comfortably more than a settled average moves
+// and far less than the gap between two signals worth telling apart.
+export const PEAK_HOLD_DB = 1.5;
+
+/**
+ * The strongest point in the passband: `{ bin, offsetHz, db }`, or null.
+ *
+ * Null when nothing in the passband stands clear of the noise — which matters,
+ * because the strongest *bin* of a channel containing only noise is a random
+ * one and reporting it would be a frequency readout wandering over the whole
+ * filter.
+ *
+ * The frequency is refined between bins by fitting a parabola through the peak
+ * and its two neighbours, which is the standard estimator for a log-magnitude
+ * spectrum and is what stops the reading stepping a whole bin at a time. It is
+ * an estimate from the drawn grid, not a measurement of the receiver's own bins:
+ * useful to a few hertz on a steady carrier, and no better than the resolution
+ * behind it.
+ *
+ * `prev` is the last answer, for the hysteresis above; pass null to start again.
+ */
+export function measurePeak(mean, win, band, floorDb, prev) {
+    if (!band || band.last < band.first || !win || !(win.span > 0)) return null;
+
+    let best = -1;
+    for (let i = band.first; i <= band.last; i++) {
+        if (!Number.isFinite(mean[i])) continue;
+        if (best < 0 || mean[i] > mean[best]) best = i;
+    }
+    if (best < 0) return null;
+    if (Number.isFinite(floorDb) && mean[best] < floorDb + SIGNAL_DB) return null;
+
+    // Hold the previous peak unless the new one is clearly better. Only where
+    // the old bin is still in the passband and still has a reading: a filter
+    // that has moved or narrowed takes its peak with it.
+    let at = best;
+    if (prev && prev.bin >= band.first && prev.bin <= band.last
+        && Number.isFinite(mean[prev.bin])
+        && mean[best] - mean[prev.bin] < PEAK_HOLD_DB) {
+        at = prev.bin;
+    }
+
+    // Parabolic refinement, in dB. Guarded against the flat and the inverted
+    // cases, where the fit has no maximum and would place the peak anywhere.
+    let delta = 0;
+    let db = mean[at];
+    if (at > band.first && at < band.last) {
+        const y0 = mean[at - 1];
+        const y1 = mean[at];
+        const y2 = mean[at + 1];
+        const denom = y0 - 2 * y1 + y2;
+        if (Number.isFinite(y0) && Number.isFinite(y2) && denom < 0) {
+            delta = Math.max(-0.5, Math.min(0.5, (0.5 * (y0 - y2)) / denom));
+            db = y1 - 0.25 * (y0 - y2) * delta;
+        }
+    }
+
+    const perBin = win.span / mean.length;
+    return { bin: at, offsetHz: win.offLo + (at + 0.5 + delta) * perBin, db };
+}
+
+/**
+ * Everything the readout shows, from one pass over the averaged shape.
+ *
+ * `state` carries the previous peak between calls, which is what the hysteresis
+ * needs. Pass the same object back in.
+ */
+export function measureShape(stats, win, band, state = {}) {
+    if (!stats || !stats.rows) {
+        state.peak = null;
+        return { peak: null, occupancy: null, floorDb: NaN, rows: 0 };
+    }
+    // Taken over the whole window before the mask, which is why shapeStats
+    // works it out rather than this: by the time the arrays get here everything
+    // outside the filter is already NaN.
+    const { floorDb } = stats;
+    const peak = measurePeak(stats.mean, win, band, floorDb, state.peak);
+    state.peak = peak;
+    return {
+        peak,
+        occupancy: occupancyOf(stats.mean, band, floorDb),
+        floorDb,
+        rows: stats.rows,
+    };
 }
 
 // How few frames is too few to call it an average.

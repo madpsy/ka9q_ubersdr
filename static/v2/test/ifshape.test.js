@@ -12,8 +12,9 @@ const assert = require('assert');
 const {
     SHAPE_BINS, SHAPE_MAX_ROWS, SHAPE_MIN_ROWS, SHAPE_SEC_DEFAULT, SHAPE_SEC_MAX, SHAPE_SEC_MIN,
     SHAPE_ZOOM_MARGIN,
-    bandBins, clampShapeSec, createShape, formatShape, pushShapeRow, resetShape, shapeStats,
-    shapeWantsZoom, shapeZoomSpan,
+    PEAK_HOLD_DB, SIGNAL_DB,
+    bandBins, clampShapeSec, createShape, formatShape, measurePeak, measureShape, noiseFloorOf,
+    occupancyOf, pushShapeRow, resetShape, shapeStats, shapeWantsZoom, shapeZoomSpan,
 } = require('./.build/ifshape.cjs');
 
 let pass = 0;
@@ -294,6 +295,132 @@ t('nothing known yet is not a reason to move anything', () => {
     // No floor given falls back to the plain margin rather than to zero, which
     // would make every view look close enough.
     assert.strictEqual(shapeWantsZoom({ span: 30e6 }, { span: 3375 }, 1), true);
+});
+
+// ── Reading numbers off the shape ────────────────────────────────────────────
+
+// A window with a filter inside it, and a scene to put in it: noise everywhere,
+// a wide hump over part of the passband, a carrier on one bin.
+const WIN = { offLo: -337.5, offHi: 3037.5, span: 3375, dial: 14_074_000 };
+const TUNING = { bandwidthLow: 50, bandwidthHigh: 2700 };
+const BAND = bandBins(SHAPE_BINS, WIN, TUNING);
+const PER_BIN = WIN.span / SHAPE_BINS;
+
+function scene({ humpFrom = 120, humpTo = 250, humpDb = 14, carrier = 300, carrierDb = 45, frames = 30 } = {}) {
+    const st = createShape(SHAPE_BINS);
+    const r = new Float32Array(SHAPE_BINS);
+    for (let f = 0; f < frames; f++) {
+        for (let i = 0; i < SHAPE_BINS; i++) {
+            let db = -120 + Math.sin(f * 3.7 + i * 0.9) * 2.5;
+            if (i >= humpFrom && i < humpTo) db += humpDb;
+            if (i === carrier) db += carrierDb;
+            r[i] = db;
+        }
+        pushShapeRow(st, r, 1000 + f * 100, 4000);
+    }
+    return shapeStats(st, 4000, 1000 + (frames - 1) * 100, {}, BAND);
+}
+
+t('the noise floor is measured before the filter mask, over the whole window', () => {
+    // Measured from the passband alone, a filter full of signal would have no
+    // quiet quarter left and the floor would land inside the signal. The margin
+    // either side is the quietest part of the picture and it is free.
+    const stats = scene({ humpFrom: BAND.first, humpTo: BAND.last, humpDb: 30, carrier: -1 });
+    assert.ok(stats.floorDb < -110, `floor was ${stats.floorDb} with the passband full`);
+    // ...and the mask is still applied to what comes out.
+    assert.ok(Number.isNaN(stats.mean[0]) && Number.isFinite(stats.mean[BAND.first]));
+});
+
+t('the peak is the strongest point, refined between bins', () => {
+    const stats = scene();
+    const m = measureShape(stats, WIN, BAND, {});
+    // Bin 300's own centre, to a fraction of a bin: a reading that stepped a
+    // whole bin at a time would be visibly quantised on a steady carrier.
+    const exact = WIN.offLo + (300 + 0.5) * PER_BIN;
+    assert.ok(Math.abs(m.peak.offsetHz - exact) < PER_BIN / 2, `peak at ${m.peak.offsetHz}, bin at ${exact}`);
+    assert.ok(m.peak.db > -80 && m.peak.db < -70, `peak level ${m.peak.db}`);
+    // The frequency the panel shows is the dial plus the offset — an absolute
+    // frequency, not a distance from where you are listening.
+    assert.ok(Math.abs((WIN.dial + m.peak.offsetHz) - 14_075_643) < 2);
+});
+
+t('...and there is no peak at all in a passband of pure noise', () => {
+    // The strongest *bin* of a channel with nothing in it is a random one, and
+    // reporting it would be a frequency readout wandering over the whole filter.
+    const stats = scene({ humpDb: 0, carrier: -1 });
+    assert.strictEqual(measureShape(stats, WIN, BAND, {}).peak, null);
+    // A carrier only just clear of the noise is not one either.
+    const faint = scene({ humpDb: 0, carrierDb: SIGNAL_DB - 3 });
+    assert.strictEqual(measureShape(faint, WIN, BAND, {}).peak, null);
+});
+
+t('the peak holds rather than swapping between two signals of a size', () => {
+    // Two carriers a fraction of a decibel apart. Without hysteresis the reading
+    // alternates between two frequencies as the average tips one way and the
+    // other, which is worse than a reading that is a little slow.
+    const twin = (lead) => {
+        const st = createShape(SHAPE_BINS);
+        const r = new Float32Array(SHAPE_BINS);
+        for (let f = 0; f < 20; f++) {
+            r.fill(-120);
+            r[200] = -60;
+            r[400] = -60 + lead;
+            pushShapeRow(st, r, 1000 + f * 100, 4000);
+        }
+        return shapeStats(st, 4000, 2900, {}, BAND);
+    };
+    const state = {};
+    assert.strictEqual(measureShape(twin(0), WIN, BAND, state).peak.bin, 200);
+    // The other one edges ahead, but not by enough to take the reading.
+    assert.strictEqual(measureShape(twin(PEAK_HOLD_DB / 2), WIN, BAND, state).peak.bin, 200);
+    // Clearly ahead, and it does.
+    assert.strictEqual(measureShape(twin(PEAK_HOLD_DB + 4), WIN, BAND, state).peak.bin, 400);
+});
+
+t('occupancy counts bins that hold a signal, not how loud they are', () => {
+    const stats = scene();
+    const m = measureShape(stats, WIN, BAND, {});
+    // 130 hump bins plus the carrier, out of the passband's 403.
+    const expected = (250 - 120 + 1) / (BAND.last - BAND.first + 1);
+    assert.ok(Math.abs(m.occupancy - expected) < 0.02, `${m.occupancy} vs ${expected}`);
+
+    // Ten times the hump's strength is the same occupancy: what is counted is
+    // whether a bin is above the noise, not by how much.
+    const louder = measureShape(scene({ humpDb: 40 }), WIN, BAND, {});
+    assert.ok(Math.abs(louder.occupancy - m.occupancy) < 0.02, `${louder.occupancy} vs ${m.occupancy}`);
+
+    // The two ends of the scale.
+    assert.ok(measureShape(scene({ humpDb: 0, carrier: -1 }), WIN, BAND, {}).occupancy < 0.02);
+    const full = measureShape(
+        scene({ humpFrom: BAND.first, humpTo: BAND.last + 1, humpDb: 30, carrier: -1 }),
+        WIN, BAND, {},
+    );
+    assert.ok(full.occupancy > 0.98, `a full passband read ${full.occupancy}`);
+});
+
+t('a window lifted from end to end has no reference and says so quietly', () => {
+    // The one case a single channel cannot answer: with the margin raised as
+    // well, nothing in the picture is quiet, so nothing stands out from anything
+    // and occupancy reads low. Better that than inventing a floor.
+    const everything = scene({ humpFrom: 0, humpTo: SHAPE_BINS, humpDb: 30, carrier: -1 });
+    const m = measureShape(everything, WIN, BAND, {});
+    assert.ok(everything.floorDb > -95, `floor was ${everything.floorDb}`);
+    assert.ok(m.occupancy < 0.02, `${m.occupancy}`);
+});
+
+t('the pieces answer null rather than guessing when there is nothing to measure', () => {
+    const empty = { first: 0, last: -1 };
+    assert.strictEqual(occupancyOf(new Float32Array(8), empty, -100), null);
+    assert.strictEqual(occupancyOf(new Float32Array(8), { first: 0, last: 7 }, NaN), null);
+    assert.strictEqual(measurePeak(new Float32Array(8).fill(NaN), WIN, { first: 0, last: 7 }, -120, null), null);
+    assert.strictEqual(measurePeak(new Float32Array(8), WIN, empty, -120, null), null);
+    assert.ok(Number.isNaN(noiseFloorOf(new Float32Array(8).fill(NaN))));
+
+    const state = { peak: { bin: 3 } };
+    const none = measureShape({ rows: 0 }, WIN, BAND, state);
+    assert.strictEqual(none.peak, null);
+    assert.strictEqual(none.occupancy, null);
+    assert.strictEqual(state.peak, null, 'a stale peak survived an empty window');
 });
 
 console.log(`\n${pass} passed`);

@@ -28,7 +28,9 @@
 // that explains a *blank* pane, because one that says nothing reads as a fault.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
-import { Button, Field, Icon, RangeSlider, Segmented, Slider, Switch } from '../components/ui.jsx';
+import {
+    Button, Field, Icon, RangeSlider, Readout, Segmented, Slider, Switch,
+} from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
@@ -46,8 +48,8 @@ import { clamp, formatFreqExact, formatHz, formatSpan } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import {
     SHAPE_BINS, SHAPE_MIN_ROWS, SHAPE_SEC_MAX, SHAPE_SEC_MIN,
-    bandBins, clampShapeSec, createShape, formatShape, pushShapeRow, resetShape, shapeStats,
-    shapeWantsZoom, shapeZoomSpan,
+    bandBins, clampShapeSec, createShape, formatShape, measureShape, pushShapeRow, resetShape,
+    shapeStats, shapeWantsZoom, shapeZoomSpan,
 } from '../lib/ifShape.js';
 import {
     IF_RATE_MAX, IF_RATE_MIN, IF_VIEWS, ZOOM_MIN, ZOOM_STEP,
@@ -76,6 +78,11 @@ const ROW_BINS = 512;
 // move per frame is sixty of them a second; forty milliseconds is fast enough
 // that the picture tracks the finger and slow enough that the receiver keeps up.
 const DRAG_TUNE_MS = 40;
+
+// How often the measured readout is published into React. Four times a second
+// reads as live without spending a render on every frame — the same reasoning
+// as the hover tooltip's own refresh.
+const STATS_MS = 250;
 
 // Theme values this pane reads, through the same cached lookup the main
 // spectrum uses — getComputedStyle inside a draw loop costs more than the
@@ -125,6 +132,11 @@ export default function IFSpectrumPanel({ minimal }) {
     // opened this panel should not have to find the other one to use it.
     const [paused, setPaused] = useState(spectrumPaused);
     useEffect(() => onSpectrumPaused(setPaused), []);
+    // The measured numbers, sampled out of the draw loop a few times a second.
+    // They are worked out per frame like everything else here, but a readout
+    // that re-rendered React ten times a second to move a decimal is a readout
+    // that costs more than it says.
+    const [measured, setMeasured] = useState(null);
 
     // The window, recomputed whenever the dial or the filter moves. Memoised
     // only so the effects below can depend on its span without re-running on
@@ -165,6 +177,12 @@ export default function IFSpectrumPanel({ minimal }) {
         shapeRow: null,
         shapeOut: {},
         stats: null,
+        band: null,
+        // The measured readout, and the state its peak hysteresis lives in.
+        wantStats: false,
+        measure: {},
+        measured: null,
+        measuredAt: 0,
 
         cmap: null,
         ring: null, ringCtx: null, ringH: 0,
@@ -190,6 +208,9 @@ export default function IFSpectrumPanel({ minimal }) {
     st.rowH = Math.max(1, Math.round(display.rowHeight || 2));
     st.smooth = display.smoothScroll !== false;
     st.has = has;
+    // The averaging runs for the readout as well as for the Shape view, which is
+    // what lets the numbers be the same in all six.
+    st.wantStats = display.ifStats === true;
 
     // One draw, on the next animation frame, however many things asked for it.
     //
@@ -207,6 +228,13 @@ export default function IFSpectrumPanel({ minimal }) {
             if (st.ptr) {
                 const v = readAt(st, wrapRef.current, st.ptr);
                 if (v) setAt(v);
+            }
+            if (st.wantStats) {
+                const now = performance.now();
+                if (now - st.measuredAt >= STATS_MS) {
+                    st.measuredAt = now;
+                    setMeasured(st.measured);
+                }
             }
         });
     }, [st]);
@@ -543,6 +571,15 @@ export default function IFSpectrumPanel({ minimal }) {
     const rate = clampRate(display.ifRate);
     const shapeSec = clampShapeSec(display.ifShapeSec);
     const auto = display.ifAuto !== false;
+    const wantStats = display.ifStats === true;
+    // Nothing measured is worth reporting until the pane can draw at all: over
+    // one spectrum bin there is no peak to find and no occupancy to count, and
+    // a number there would be a confident answer to a question nobody could
+    // have answered. The cover over the picture says why.
+    const shown = wantStats && state.ok ? measured : null;
+    const peak = shown ? shown.peak : null;
+    const busy = shown ? shown.occupancy : null;
+    const floor = shown ? shown.floorDb : NaN;
     const floorDb = Number.isFinite(display.ifFloor) ? display.ifFloor : -110;
     const ceilDb = Number.isFinite(display.ifCeil) ? display.ifCeil : -20;
 
@@ -709,6 +746,31 @@ export default function IFSpectrumPanel({ minimal }) {
                 )}
             </div>
 
+            {/* What the averaging measured. Under the picture and above the
+                controls, because it is a reading off the picture rather than a
+                setting for it — and shown in the minimal view too, unlike the
+                readout below: that one is always there and this one was asked
+                for, which is the difference between clutter and a request. */}
+            {wantStats && (
+                <div className="readout-grid ifs__stats">
+                    <Readout
+                        label="Peak"
+                        value={peak ? formatHz(win.dial + peak.offsetHz) : '—'}
+                        unit={peak ? `${peak.db.toFixed(1)} dBFS` : ''}
+                    />
+                    <Readout
+                        label="Occupancy"
+                        value={busy == null ? '—' : Math.round(busy * 100)}
+                        unit={busy == null ? '' : '%'}
+                    />
+                    <Readout
+                        label="Noise"
+                        value={Number.isFinite(floor) ? floor.toFixed(1) : '—'}
+                        unit={Number.isFinite(floor) ? 'dBFS' : ''}
+                    />
+                </div>
+            )}
+
             {/* The dial, the window and what it is costing in resolution.
                 Dropped in the minimal view, which is the picture and nothing
                 else: the ruler already says how wide the window is, the dial is
@@ -792,7 +854,7 @@ export default function IFSpectrumPanel({ minimal }) {
             {/* Only in the Shape view, which is the only one that has a window
                 to set. Seconds rather than a frame count, because that is what
                 it actually is — see lib/ifShape.js. */}
-            {!minimal && has.shape && (
+            {!minimal && (has.shape || wantStats) && (
                 <Field
                     label="Average"
                     hint={state.ok ? formatShape(st.stats, shapeSec) : `${shapeSec.toFixed(1)} s`}
@@ -843,6 +905,12 @@ export default function IFSpectrumPanel({ minimal }) {
                         onChange={(v) => display.set({ ifClickTune: v })}
                         label="Click tune"
                         title="A click on the picture tunes to it. Off by default: this pane is for looking at the signal you are already on, and most reasons to point at it are reasons to read it rather than to move"
+                    />
+                    <Switch
+                        checked={wantStats}
+                        onChange={(v) => display.set({ ifStats: v })}
+                        label="Stats"
+                        title="Measure the passband rather than only drawing it: the strongest signal in it and where, the noise under it, and how much of the filter is occupied. Averaged over the window below, in whichever view is showing"
                     />
                 </div>
             )}
@@ -1040,8 +1108,11 @@ function drawAll(st, spec, wf, ov) {
     // grid the waterfall's rows use — and it keeps it from the *raw* row, not
     // the smoothed one: smoothing before averaging is averaging twice, and the
     // second one has a length nobody chose.
-    const stats = st.has.shape ? updateShape(st, now) : null;
+    const stats = st.has.shape || st.wantStats ? updateShape(st, now) : null;
     st.stats = stats;
+    st.measured = st.wantStats && stats
+        ? measureShape(stats, st.win, st.band, st.measure)
+        : null;
 
     let levels;
     if (st.d && st.d.ifAuto === false) {
@@ -1049,7 +1120,7 @@ function drawAll(st, spec, wf, ov) {
             Number.isFinite(st.d.ifFloor) ? st.d.ifFloor : -110,
             Number.isFinite(st.d.ifCeil) ? st.d.ifCeil : -20,
         );
-    } else if (stats) {
+    } else if (stats && st.has.shape) {
         // The floor from the average and the ceiling from the top of the
         // envelope — see updateLevels. The scale therefore fits the passband
         // rather than the window, which is all this view draws.
@@ -1062,7 +1133,7 @@ function drawAll(st, spec, wf, ov) {
 
     commitRow(st, now, levels);
 
-    if (spec && stats) drawShape(st, spec, stats, levels);
+    if (spec && stats && st.has.shape) drawShape(st, spec, stats, levels);
     else if (spec) drawTrace(st, spec, trace, levels, { mirror: st.has.mirror, over: false });
     if (wf) drawWaterfall(st, wf);
     if (ov) drawOverlay(st, ov, trace, levels);
@@ -1079,9 +1150,8 @@ function updateShape(st, now) {
     sliceToPixels(st.bins, st.cfg, st.win, st.shapeRow);
     const windowMs = clampShapeSec(st.d && st.d.ifShapeSec) * 1000;
     pushShapeRow(st.shape, st.shapeRow, now, windowMs);
-    return shapeStats(
-        st.shape, windowMs, now, st.shapeOut, bandBins(SHAPE_BINS, st.win, st.tuning),
-    );
+    st.band = bandBins(SHAPE_BINS, st.win, st.tuning);
+    return shapeStats(st.shape, windowMs, now, st.shapeOut, st.band);
 }
 
 // ── The history ──────────────────────────────────────────────────────────────

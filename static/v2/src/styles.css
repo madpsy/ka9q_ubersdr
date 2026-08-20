@@ -5046,8 +5046,16 @@ a.btn { text-decoration: none; }
     font-size: calc(11px * var(--ui-scale));
     color: var(--text-faint);
 }
-/* The two pointer switches on one row. Wraps rather than squeezing: in a narrow
-   dock two labels side by side would otherwise ellipse to nothing. */
+/* The measured readout. The peak takes the whole row — a frequency is ten
+   characters and a dBFS figure beside it is six more, which will not share a
+   dock column with anything — and the two single figures share the row under
+   it. */
+.ifs__stats > .readout:first-child { grid-column: 1 / -1; }
+.ifs__stats .readout__unit { white-space: nowrap; }
+
+/* The three pointer and readout switches on one row. Wraps rather than
+   squeezing: in a narrow dock the labels side by side would otherwise ellipse
+   to nothing. */
 .ifs__switches {
     display: flex;
     flex-wrap: wrap;

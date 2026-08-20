@@ -4403,6 +4403,10 @@ a.btn { text-decoration: none; }
 .kv { display: flex; justify-content: space-between; gap: 10px; line-height: 1.3; font-size: calc(12px * var(--ui-scale)); }
 .kv__k { color: var(--text-faint); }
 .kv__v { font-family: var(--mono); text-align: right; overflow-wrap: anywhere; }
+/* A reading that has become the reason to look at the panel — the session
+   countdown in its last five minutes. The same red the top bar's countdown
+   turns, so the two say the same thing in the same way. */
+.kv__v--low { color: var(--bad); font-weight: 650; }
 
 /* Throughput beside a link's state: dimmer, because the state is the thing you
    are looking for and the rate is what you check once you have found it. */

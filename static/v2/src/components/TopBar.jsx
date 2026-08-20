@@ -27,6 +27,7 @@ import { HOVER_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { useFitScale } from '../lib/useFitScale.js';
 import { gradeTone, subscribeSpaceWeather } from '../lib/spaceWeather.js';
+import { sessionClock, sessionTicks } from '../lib/sessionClock.js';
 
 // Widths to assume until each has been on screen once to measure. The order
 // they are dropped in is the keep order passed to useRoomFor below, not the
@@ -262,35 +263,32 @@ function VolumeSlider({ slider }) {
 // from the /connection reply: 0 means unlimited, anything else is the number of
 // seconds this session may run, counted from when it started. Under five
 // minutes it turns red, as v1 does.
+//
+// The arithmetic is lib/sessionClock.js, shared with the Receiver info panel,
+// which shows the same countdown as one of its rows — two copies of it worked
+// out separately would eventually disagree by a second on screen at once.
 function SessionClock() {
     const { session } = useRadio();
     const [, tick] = useState(0);
 
     useEffect(() => {
-        if (session.maxSec == null || session.maxSec === 0) return undefined;
+        if (!sessionTicks(session)) return undefined;
         const id = setInterval(() => tick((n) => n + 1), 1000);
         return () => clearInterval(id);
     }, [session.maxSec, session.startedAt]);
 
-    if (session.maxSec == null) return null;
-
-    if (session.maxSec === 0) {
-        return <span className="topbar__session" data-optional="session" title="Session time">Unlimited</span>;
-    }
-
-    const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
-    const left = Math.max(0, session.maxSec - elapsed);
-    const hh = String(Math.floor(left / 3600)).padStart(2, '0');
-    const mm = String(Math.floor((left % 3600) / 60)).padStart(2, '0');
-    const ss = String(left % 60).padStart(2, '0');
+    const clock = sessionClock(session);
+    // Nothing to say yet: the bar keeps its space for the reading rather than
+    // showing a dash where a countdown will be.
+    if (clock.state === 'none') return null;
 
     return (
         <span
-            className={`topbar__session${left < 300 ? ' is-low' : ''}`}
+            className={`topbar__session${clock.low ? ' is-low' : ''}`}
             data-optional="session"
-            title="Time left in this session"
+            title={clock.state === 'unlimited' ? 'Session time' : 'Time left in this session'}
         >
-            {hh}:{mm}:{ss}
+            {clock.label}
         </span>
     );
 }

@@ -3,6 +3,7 @@ import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { Empty } from '../components/ui.jsx';
 import { isIQ } from '../radio/constants.js';
 import { formatRate, formatSpan } from '../lib/format.js';
+import { sessionClock, sessionTicks } from '../lib/sessionClock.js';
 
 // Hover note for the rate row. The stream's rate and the context's are two
 // different facts: the player asks for the former and falls back to the device
@@ -92,12 +93,38 @@ function Link({ state, rate }) {
     );
 }
 
-// `minimal` keeps the link block — what the two sockets are doing and what the
-// spectrum view is set to — and drops the receiver's identity and the
-// operator's blurb, which are read once and then known. See the registry's
-// `minimal`.
+// The session countdown, redrawn once a second.
+//
+// The same reading the top bar carries, and the same arithmetic — see
+// lib/sessionClock.js. It is here as well as up there because the bar is the
+// one part of the interface an operator can hide or a host can replace, and
+// "how long have I got" is the sort of thing you go looking for in an info
+// panel rather than noticing in the corner of your eye.
+//
+// The timer runs only while there is something to count: a session with no
+// limit, or one the server has not described yet, would otherwise re-render the
+// panel sixty times a minute to redraw the word "Unlimited". And it runs only
+// while the panel is open at all, because Section unmounts a closed one.
+function useSessionCountdown(session) {
+    const [, tick] = useState(0);
+
+    useEffect(() => {
+        if (!sessionTicks(session)) return undefined;
+        const id = setInterval(() => tick((n) => n + 1), 1000);
+        return () => clearInterval(id);
+    }, [session.maxSec, session.startedAt]);
+
+    return sessionClock(session);
+}
+
+// `minimal` keeps the link block — what the two sockets are doing, how long the
+// session has left and what the spectrum view is set to — and drops the
+// receiver's identity and the operator's blurb, which are read once and then
+// known. See the registry's `minimal`.
 export default function StatusPanel({ minimal }) {
-    const { serverInfo, audioState, spectrumState, view, audioConn, spectrumConn, tuning } = useRadio();
+    const {
+        serverInfo, audioState, spectrumState, view, audioConn, spectrumConn, tuning, session,
+    } = useRadio();
     // Before the early return: hooks cannot be called conditionally.
     const audioRate = useThroughput(audioConn);
     const spectrumRate = useThroughput(spectrumConn);
@@ -105,6 +132,7 @@ export default function StatusPanel({ minimal }) {
     // panel needs would be wasted here.
     const m = useMeters(4);
     const iq = isIQ(tuning.mode);
+    const clock = useSessionCountdown(session);
 
     // The link block needs no /api/description, so the minimal view has
     // nothing to wait for.
@@ -138,6 +166,18 @@ export default function StatusPanel({ minimal }) {
             )}
 
             <div className="kv-list">
+                {/* First in the block, and in the minimal view with it: of
+                    everything here it is the one reading that decides what you
+                    do next. Red under five minutes, as the top bar's is. */}
+                <Row
+                    label="Session left"
+                    title={clock.state === 'unlimited'
+                        ? 'This session has no time limit'
+                        : clock.state === 'counting'
+                            ? 'Time left before the server ends this session'
+                            : 'No session running'}
+                    value={<span className={clock.low ? 'kv__v--low' : undefined}>{clock.label}</span>}
+                />
                 <Row label="Audio link" value={<Link state={audioState} rate={audioRate} />} />
                 {/* What the stream actually is, rather than what the mode
                     implies: 12 kHz mono on SSB, 24 on the AM family, and 10 kHz

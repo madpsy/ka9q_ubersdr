@@ -76,6 +76,8 @@ esbuild ../src/lib/freqEntry.js --bundle --format=cjs --platform=node \
     --outfile=.build/freqentry.cjs --log-level=warning
 esbuild ../src/lib/topClock.js --bundle --format=cjs --platform=node \
     --outfile=.build/topclock.cjs --log-level=warning
+esbuild ../src/lib/sessionClock.js --bundle --format=cjs --platform=node \
+    --outfile=.build/sessionclock.cjs --log-level=warning
 esbuild notifications.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/notifications.cjs --log-level=warning
 esbuild notices.entry.js --bundle --format=cjs --platform=node \
@@ -473,6 +475,7 @@ node hfdl.test.js
 node dockfocus.test.js
 node freqentry.test.js
 node topclock.test.js
+node sessionclock.test.js
 node notifications.test.js
 node hardwarenotices.test.js
 node spectrumtrace.test.js

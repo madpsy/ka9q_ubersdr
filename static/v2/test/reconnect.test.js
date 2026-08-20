@@ -136,6 +136,13 @@ async function run() {
         }
     }
     if (!process.exitCode) console.log(`\n${pass} passed`);
+    // Explicitly, because the connections left behind are still holding timers:
+    // most of these tests deliberately leave a socket mid-handshake, and a
+    // handshake has a deadline now (socket-health.js) which books a reconnect,
+    // which arms another one. That is the point of it and it is bounded in a
+    // browser — twelve attempts and it gives up — but it is minutes of a node
+    // process sitting there with nothing to do.
+    process.exit(process.exitCode || 0);
 }
 
 // --- a refusal from /connection ---------------------------------------------

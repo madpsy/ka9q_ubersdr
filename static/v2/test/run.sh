@@ -16,6 +16,8 @@ esbuild ../src/radio/spectrum-connection.js --bundle --format=cjs --platform=nod
     --outfile=.build/spectrum.cjs --log-level=warning
 esbuild ../src/radio/audio-connection.js --bundle --format=cjs --platform=node \
     --outfile=.build/audio.cjs --log-level=warning
+esbuild ../src/radio/socket-health.js --bundle --format=cjs --platform=node \
+    --outfile=.build/sockethealth.cjs --log-level=warning
 esbuild ../src/radio/constants.js --bundle --format=cjs --platform=node \
     --outfile=.build/constants.cjs --log-level=warning
 esbuild ../src/radio/pcm-stream.js --bundle --format=cjs --platform=node \
@@ -408,6 +410,7 @@ node eventlog.test.js
 node sessionid.test.js
 node connectfailure.test.js
 node reconnect.test.js
+node sockethealth.test.js
 node dxcluster.test.js
 node dxterminal.test.js
 node sstvaddon.test.js

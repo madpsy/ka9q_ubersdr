@@ -21,6 +21,9 @@ import { Emitter } from './emitter.js';
 import { connectionCheck, frameSize, getBypassPassword, getSessionId, wsBase } from './session.js';
 import { clampCenter } from '../lib/zoom.js';
 import { failureKind } from '../lib/connectFailure.js';
+import {
+    HANDSHAKE_TIMEOUT_MS, abandon, checkSocket, reviveOnWake,
+} from './socket-health.js';
 
 const HEADER_BYTES = 22;
 
@@ -50,6 +53,12 @@ export class SpectrumConnection extends Emitter {
         // "it never opened" is the only evidence there is that the server said
         // something rather than the network dropping it. See _onClose.
         this.opened = false;
+        // A connect that has not reached `new WebSocket` yet, because it is
+        // still waiting on /connection — see the guard in connect(). The
+        // spectrum has more ways into that race than the audio socket does:
+        // resumeSpectrum() has four callers, and the idle pause and the hidden
+        // tab can reach for it at the same moment.
+        this.opening = false;
         // Set when there is reason to think the server has forgotten this id,
         // and consumed by the next connect() as one re-registration. Not a
         // standing flag: it is cleared as it is spent, so a retry that fails the
@@ -58,6 +67,12 @@ export class SpectrumConnection extends Emitter {
         this.attempts = 0;
         this.maxAttempts = 12;
         this.reconnectTimer = null;
+        // Read by socket-health.js — the handshake deadline and the probe.
+        this.openedAt = 0;
+        this.lastRxAt = 0;
+        this.handshakeTimer = null;
+        this._probeTimer = null;
+        reviveOnWake(this);
         // Bytes taken off this socket, ever — see AudioConnection.bytesIn.
         this.bytesIn = 0;
         // Frames decoded off it, ever. Same shape as bytesIn and for the same
@@ -115,6 +130,14 @@ export class SpectrumConnection extends Emitter {
         this.closedByUser = false;
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
+        // One socket per connection, always — the audio socket carries the
+        // reasoning, and this one is reached for more often: a tab that is
+        // hidden and shown again suspends and resumes this socket and nothing
+        // else, which is precisely where a second connect() during the
+        // /connection check came from. The orphan it used to leave was silenced
+        // by superseded() and never closed.
+        if (this.ws || this.opening) return true;
+        this.opening = true;
 
         // Spent here, whatever the check then answers: a re-registration that
         // was refused is not one to make again on the next attempt, and the
@@ -125,6 +148,10 @@ export class SpectrumConnection extends Emitter {
             this.emit('reregister', { message: 'Registering this session with the receiver again' });
         }
         const check = await connectionCheck({ reregister });
+        // Cleared before anything can return, so every path out of here leaves
+        // the flag matching reality: from here down either a socket is assigned
+        // or there is none.
+        this.opening = false;
         // Somebody let go while the check was in flight — the pause button, the
         // idle watch, a tab going to the background, powerOff. Without this the
         // socket opens anyway: disconnect() has already closed a socket that did
@@ -188,6 +215,17 @@ export class SpectrumConnection extends Emitter {
         this.ws = ws;
         this.opened = false;
         this._lastInitial = initial;
+        this.openedAt = Date.now();
+        this.lastRxAt = this.openedAt;
+        // An upgrade nothing answers is invisible to everything else here: the
+        // reconnect hangs off onclose, and a socket that never opens never
+        // closes. See socket-health.js.
+        clearTimeout(this.handshakeTimer);
+        this.handshakeTimer = setTimeout(() => {
+            this.handshakeTimer = null;
+            if (this.ws !== ws || this.opened) return;
+            this._revive('handshake');
+        }, HANDSHAKE_TIMEOUT_MS);
 
         // Events from a socket that has since been replaced, as the audio
         // socket has always had. Closing is not instant — the handshake
@@ -204,6 +242,8 @@ export class SpectrumConnection extends Emitter {
         ws.onopen = () => {
             if (superseded()) return;
             this.opened = true;
+            clearTimeout(this.handshakeTimer);
+            this.handshakeTimer = null;
             // Not refilled here — see the audio socket, which has the same
             // shape and the same reason. The spectrum session is created after
             // the upgrade too, so a refusal opens the socket first. _onFrame
@@ -239,6 +279,8 @@ export class SpectrumConnection extends Emitter {
 
     disconnect() {
         this.closedByUser = true;
+        this.opening = false;
+        this._disarm();
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
         if (this.ws) {
@@ -246,6 +288,14 @@ export class SpectrumConnection extends Emitter {
         }
         this.ws = null;
         this._setState('idle');
+    }
+
+    // Is the socket still there? Asked by socket-health.js when the page comes
+    // back from being hidden, asleep or offline. It matters more here than
+    // anywhere: this is the socket a hidden tab deliberately closes and reopens,
+    // so it is the one most often in flight across a suspend.
+    checkAlive(timers) {
+        return checkSocket(this, timers);
     }
 
     // Keepalive, sent when the operator does something rather than on a timer —
@@ -336,6 +386,36 @@ export class SpectrumConnection extends Emitter {
     // What the view looks like from outside: the server's geometry, plus the
     // rate this client asked for. One shape, built in one place, so a field
     // added for the panel cannot go missing from whichever emitter forgot it.
+    // Timers that belong to the socket in hand rather than to the connection.
+    _disarm() {
+        clearTimeout(this.handshakeTimer);
+        clearTimeout(this._probeTimer);
+        this.handshakeTimer = null;
+        this._probeTimer = null;
+    }
+
+    // Let go of a socket that will never say anything for itself — a handshake
+    // nothing answered, or one left half-open by a machine that went to sleep.
+    // The close is reported from here because abandon() detaches the handlers,
+    // and it has to: a browser that eventually notices the dead connection would
+    // otherwise land its close on whatever socket has replaced this one.
+    _revive(reason) {
+        const ws = this.ws;
+        if (!ws) return;
+        this._disarm();
+        abandon(ws);
+        this.ws = null;
+        this.opened = false;
+        this.emit('close', { code: 1006, reason, failure: null });
+        if (this.closedByUser) {
+            this._setState('idle');
+            return;
+        }
+        // At the live view, as the reconnect timer does — a socket that dies
+        // while the tab is away must not come back at the default span.
+        this._scheduleReconnect({ frequency: this.centerFreq, binBandwidth: this.binBandwidth });
+    }
+
     _config() {
         return {
             centerFreq: this.centerFreq,
@@ -380,6 +460,10 @@ export class SpectrumConnection extends Emitter {
     }
 
     async _onMessage(ev) {
+        // Any frame at all, pong included: what this timestamp answers is
+        // whether the server is still there, not whether it said anything
+        // interesting.
+        this.lastRxAt = Date.now();
         this.bytesIn += frameSize(ev.data);
         if (!(ev.data instanceof ArrayBuffer)) {
             try { this._onControl(JSON.parse(ev.data)); } catch (e) { /* ignore */ }
@@ -510,6 +594,7 @@ export class SpectrumConnection extends Emitter {
 
     _onClose(ev) {
         this.ws = null;
+        this._disarm();
         const failure = this.lastFailure;
         this.lastFailure = null;
         const opened = this.opened;

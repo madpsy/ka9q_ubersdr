@@ -47,6 +47,9 @@
 
 import { Emitter } from './emitter.js';
 import { connectionCheck, getBypassPassword, getSessionId, wsBase } from './session.js';
+import {
+    HANDSHAKE_TIMEOUT_MS, abandon, checkSocket, reviveOnWake,
+} from './socket-health.js';
 
 export const USERNAME_MAX = 15;
 
@@ -88,14 +91,10 @@ export function validateUsername(name) {
 // handlers come off first, it can no longer report anything, and there is
 // exactly one socket answering for this connection at every instant. Whatever
 // the caller wants to tell the outside world about the closure, it says itself.
-function abandon(ws) {
-    if (!ws) return;
-    ws.onopen = null;
-    ws.onmessage = null;
-    ws.onerror = null;
-    ws.onclose = null;
-    try { ws.close(1000, 'client'); } catch (e) { /* ignore */ }
-}
+// abandon() now lives in socket-health.js, with the audio and spectrum sockets
+// as its other two callers: this one had it from the start and the other two
+// did not, which is the whole difference between a socket that is replaced and
+// one that is left running with nobody listening to it.
 
 export class DXClusterConnection extends Emitter {
     constructor() {
@@ -133,6 +132,16 @@ export class DXClusterConnection extends Emitter {
         this.opening = false;
         // The session UUID this socket was opened with — see `stale`.
         this.openedWith = null;
+        // Read by socket-health.js — the handshake deadline and the probe. This
+        // socket has the longest silences of the three (a quiet cluster says
+        // nothing for minutes), so the probe rather than the silence is what
+        // decides it is dead; the 20-second ping already keeps lastRxAt moving
+        // while a connection is healthy.
+        this.openedAt = 0;
+        this.lastRxAt = 0;
+        this.handshakeTimer = null;
+        this._probeTimer = null;
+        reviveOnWake(this);
     }
 
     get connected() {
@@ -233,6 +242,7 @@ export class DXClusterConnection extends Emitter {
     // failure to reopen still reaches the normal backoff.
     _replace() {
         const had = !!this.ws;
+        this._disarm();
         abandon(this.ws);
         this.ws = null;
         clearInterval(this.pingTimer);
@@ -319,6 +329,16 @@ export class DXClusterConnection extends Emitter {
         }
         this.ws = ws;
         this.opened = false;
+        this.openedAt = Date.now();
+        this.lastRxAt = this.openedAt;
+        // An upgrade nothing answers fires no event ever, and the backoff below
+        // is driven entirely by onclose — see socket-health.js.
+        clearTimeout(this.handshakeTimer);
+        this.handshakeTimer = setTimeout(() => {
+            this.handshakeTimer = null;
+            if (this.ws !== ws || this.opened) return;
+            this._revive('handshake');
+        }, HANDSHAKE_TIMEOUT_MS);
         // Decoder results arrive as binary frames. Asking for ArrayBuffers
         // rather than the default Blob keeps their handling synchronous, so a
         // result cannot be delivered after the extension has detached.
@@ -326,6 +346,8 @@ export class DXClusterConnection extends Emitter {
 
         ws.onopen = () => {
             this.opened = true;
+            clearTimeout(this.handshakeTimer);
+            this.handshakeTimer = null;
             // Not `attempts = 0` here. The server accepts the upgrade and only
             // then decides it will not have us — a session it has already
             // reclaimed, a creation rate limit — so a refused connection still
@@ -352,6 +374,9 @@ export class DXClusterConnection extends Emitter {
             this.emit('open');
         };
         ws.onmessage = (ev) => {
+            // Any frame at all, pong included: what this answers is whether the
+            // server is still there, not whether it said anything interesting.
+            this.lastRxAt = Date.now();
             // Binary frames are decoder results, one per frame. Emitted rather
             // than parsed here: this socket does not know what any extension's
             // payload means — see extensions/protocol.js.
@@ -374,6 +399,7 @@ export class DXClusterConnection extends Emitter {
         clearTimeout(this.reconnectTimer);
         clearInterval(this.pingTimer);
         clearTimeout(this.settleTimer);
+        this._disarm();
         this.reconnectTimer = null;
         this.pingTimer = null;
         this.settleTimer = null;
@@ -390,6 +416,59 @@ export class DXClusterConnection extends Emitter {
         this.identitySent = false;
         if (had) this.emit('close');
         this._setState('idle');
+    }
+
+    // What socket-health.js probes with. The keepalive interval sends the same
+    // message; this is the one that can be asked for on demand.
+    ping() {
+        return this.send({ type: 'ping' });
+    }
+
+    // Is the socket still there? Asked when the page comes back from being
+    // hidden, asleep or offline — see socket-health.js.
+    checkAlive(timers) {
+        return checkSocket(this, timers);
+    }
+
+    // Timers that belong to the socket in hand rather than to the connection.
+    _disarm() {
+        clearTimeout(this.handshakeTimer);
+        clearTimeout(this._probeTimer);
+        this.handshakeTimer = null;
+        this._probeTimer = null;
+    }
+
+    // Let go of a socket that will never say anything for itself — a handshake
+    // nothing answered, or one left half-open by a machine that went to sleep.
+    // Same bookkeeping as _onClose, which cannot run for it: abandon() detaches
+    // the handlers, and must, or a browser that eventually notices the dead
+    // connection lands its close on whatever socket has replaced this one.
+    _revive(reason) {
+        const ws = this.ws;
+        if (!ws) return;
+        this._disarm();
+        clearInterval(this.pingTimer);
+        clearTimeout(this.settleTimer);
+        this.pingTimer = null;
+        this.settleTimer = null;
+        abandon(ws);
+        this.ws = null;
+        this.opened = false;
+        for (const stream of STREAMS) this.confirmed[stream] = false;
+        this.identitySent = false;
+        this.emit('close', { code: 1006, reason });
+        if (this.closedByUser) {
+            this._setState('idle');
+            return;
+        }
+        // Only if somebody still wants it. Unlike the other two sockets this one
+        // exists on demand, and a wake that finds it dead while every panel that
+        // wanted it has been closed should leave it dead.
+        if (!this._wanted()) {
+            this._setState('idle');
+            return;
+        }
+        this._scheduleReconnect();
     }
 
     send(msg) {
@@ -578,6 +657,7 @@ export class DXClusterConnection extends Emitter {
     // handlers detached and reports its own closure, so nothing that arrives
     // here belongs to a socket that has already been superseded.
     _onClose(ev) {
+        this._disarm();
         clearInterval(this.pingTimer);
         clearTimeout(this.settleTimer);
         this.pingTimer = null;

@@ -17,6 +17,7 @@ import { AudioPlayer } from './audio-player.js';
 import { connectionCheck, startSessionId } from './session.js';
 // Logging only — the socket belongs to its own module. See the wiring effect.
 import { dxcluster } from './dxcluster-connection.js';
+import { reviveReason } from './socket-health.js';
 import { localBookmarks as localBookmarkStore, onLocalBookmarksChanged } from '../lib/localBookmarks.js';
 import { FILTER_DEFAULTS } from './audio-filters.js';
 import { NB_DEFAULTS } from '../lib/noiseBlanker.js';
@@ -376,6 +377,16 @@ export function RadioProvider({ children }) {
     useEffect(() => {
         const offs = [];
 
+        // The three sockets all report their closes to the log the same way,
+        // and the ones worth explaining are the ones nothing actually closed —
+        // a handshake nobody answered, a connection that died while the machine
+        // was asleep. See socket-health.js: without this they are all the same
+        // bare 1006 as a dropped network, which is the one thing they are not.
+        const why = (ev) => {
+            const text = reviveReason(ev && ev.reason);
+            return text ? ` — ${text}` : '';
+        };
+
         offs.push(audioConn.on('state', setAudioState));
         offs.push(audioConn.on('opus', ({ data, sampleRate, channels }) => {
             player.pushOpus(data, sampleRate, channels);
@@ -493,7 +504,8 @@ export function RadioProvider({ children }) {
         // being torn out from under us, and the difference is the difference
         // between "the receiver ended this" and "the network did".
         offs.push(audioConn.on('close', (ev) => pushLog(
-            'warn', `Audio stream closed${ev && ev.code ? ` (${ev.code})` : ''}`,
+            'warn', `Audio stream closed${ev && ev.code ? ` (${ev.code})` : ''}`
+                + why(ev),
         )));
         offs.push(audioConn.on('open', () => {
             pushLog('info', 'Audio stream connected');
@@ -546,7 +558,7 @@ export function RadioProvider({ children }) {
         // and nothing between them, so a reconnect was indistinguishable from
         // the display having been started twice.
         offs.push(spectrumConn.on('close', (ev) => pushLog(
-            'warn', `Spectrum closed${ev && ev.code ? ` (${ev.code})` : ''}`,
+            'warn', `Spectrum closed${ev && ev.code ? ` (${ev.code})` : ''}` + why(ev),
         )));
 
         // What happened in the gap.
@@ -591,7 +603,7 @@ export function RadioProvider({ children }) {
         // happened.
         offs.push(dxcluster.on('open', () => pushLog('info', 'DX cluster connected')));
         offs.push(dxcluster.on('close', (ev) => pushLog(
-            'warn', `DX cluster closed${ev && ev.code ? ` (${ev.code})` : ''}`,
+            'warn', `DX cluster closed${ev && ev.code ? ` (${ev.code})` : ''}` + why(ev),
         )));
         offs.push(dxcluster.on('error', (e) => pushLog('error', e.message || 'DX cluster error')));
         offs.push(logRetries(dxcluster, 'DX cluster'));

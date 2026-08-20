@@ -20,6 +20,9 @@ import { Emitter } from './emitter.js';
 import { failureKind } from '../lib/connectFailure.js';
 import { PCMStreamDecoder, isZstdFrame } from './pcm-stream.js';
 import {
+    HANDSHAKE_TIMEOUT_MS, abandon, checkSocket, reviveOnWake,
+} from './socket-health.js';
+import {
     connectionCheck, frameSize, getBypassPassword, getSessionId, setServerSessionId, wsBase,
 } from './session.js';
 
@@ -54,6 +57,11 @@ export class AudioConnection extends Emitter {
         // browser reports a refused upgrade as a bare 1006 with no status and no
         // reason, indistinguishable from the network dropping. See _onClose.
         this.opened = false;
+        // A connect that has not reached `new WebSocket` yet, because it is
+        // still waiting on /connection. Without it a second connect() during
+        // that await opens a second socket and orphans the first — see the
+        // guard in connect(), and socket-health.js for what an orphan costs.
+        this.opening = false;
         // Set when there is reason to think the server has forgotten this id,
         // and consumed by the next connect() as one re-registration. Not a
         // standing flag: it is cleared as it is spent, so a retry that fails the
@@ -62,6 +70,14 @@ export class AudioConnection extends Emitter {
         this.attempts = 0;
         this.maxAttempts = 12;
         this.reconnectTimer = null;
+        // When the socket in hand was created, and when it last heard anything.
+        // Both are read by socket-health.js: the first bounds the handshake, the
+        // second is what a probe watches for an answer.
+        this.openedAt = 0;
+        this.lastRxAt = 0;
+        this.handshakeTimer = null;
+        this._probeTimer = null;
+        reviveOnWake(this);
         // Bytes taken off this socket, ever. Cumulative and never reset, so a
         // reader only has to take deltas — see the Receiver info panel, which
         // is the only thing that looks at it.
@@ -86,6 +102,19 @@ export class AudioConnection extends Emitter {
         this.closedByUser = false;
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
+        // One socket per connection, always. `ws` is not assigned until after
+        // the await below, so without this a second caller during the check
+        // opens a second socket and the first is orphaned — silenced by
+        // superseded(), never closed, and left in CONNECTING for ever if the
+        // handshake had not landed yet. Two clicks on the power button, or the
+        // idle watch resuming while a wake is already in flight, was enough.
+        //
+        // Before `params` is recorded, deliberately: the socket that is already
+        // up is tuned to the old ones, and they are what a reconnect has to come
+        // back to. The reconnect timer above is still cleared first — a caller
+        // asking for a connection now should not be left waiting out a backoff.
+        if (this.ws || this.opening) return true;
+        this.opening = true;
         this.params = { ...params };
         // Whatever the last session announced does not describe this one.
         this.pcm.reset();
@@ -99,6 +128,10 @@ export class AudioConnection extends Emitter {
             this.emit('reregister', { message: 'Registering this session with the receiver again' });
         }
         const check = await connectionCheck({ reregister });
+        // Cleared the moment the await is over and before anything can return,
+        // so every path out of here leaves the flag matching reality: from here
+        // down either a socket is assigned or there is none.
+        this.opening = false;
         // Somebody let go while the check was in flight — powerOff, or the idle
         // watch stopping the receiver. Without this the socket opens anyway:
         // disconnect() has already closed a socket that did not exist yet and
@@ -145,6 +178,20 @@ export class AudioConnection extends Emitter {
         ws.binaryType = 'arraybuffer';
         this.ws = ws;
         this.opened = false;
+        this.openedAt = Date.now();
+        this.lastRxAt = this.openedAt;
+        // Nothing else in this client can see an upgrade that is never answered.
+        // The whole reconnect machinery hangs off onclose, and a socket that
+        // never opens never closes, so without a deadline the connection waits
+        // for an event that is not coming — which is what leaves the row in
+        // devtools Pending with no status and the page waiting on audio for
+        // ever. See socket-health.js.
+        clearTimeout(this.handshakeTimer);
+        this.handshakeTimer = setTimeout(() => {
+            this.handshakeTimer = null;
+            if (this.ws !== ws || this.opened) return;
+            this._revive('handshake');
+        }, HANDSHAKE_TIMEOUT_MS);
 
         // Events from a socket that has since been replaced. Closing is not
         // instant — the handshake outlives the call — so a close-then-connect
@@ -158,6 +205,8 @@ export class AudioConnection extends Emitter {
         ws.onopen = () => {
             if (superseded()) return;
             this.opened = true;
+            clearTimeout(this.handshakeTimer);
+            this.handshakeTimer = null;
             // The reconnect budget is deliberately *not* refilled here. The
             // server upgrades the socket before it decides whether it will have
             // us — the session is created afterwards — so a refusal arrives as
@@ -188,6 +237,8 @@ export class AudioConnection extends Emitter {
 
     disconnect() {
         this.closedByUser = true;
+        this.opening = false;
+        this._disarm();
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
         if (this.ws) {
@@ -195,6 +246,12 @@ export class AudioConnection extends Emitter {
         }
         this.ws = null;
         this._setState('idle');
+    }
+
+    // Is the socket still there? Asked by socket-health.js when the page comes
+    // back from being hidden, asleep or offline, and never on a timer.
+    checkAlive(timers) {
+        return checkSocket(this, timers);
     }
 
     // Keepalive, sent when the operator does something rather than on a timer —
@@ -271,7 +328,41 @@ export class AudioConnection extends Emitter {
         this.emit('state', state);
     }
 
+    // Timers that belong to the socket in hand rather than to the connection.
+    _disarm() {
+        clearTimeout(this.handshakeTimer);
+        clearTimeout(this._probeTimer);
+        this.handshakeTimer = null;
+        this._probeTimer = null;
+    }
+
+    // Let go of a socket that is not going to say anything for itself: a
+    // handshake nothing answered, or one that was open when the machine went to
+    // sleep and is half-open now. Neither will ever fire an event, so the close
+    // is reported here — _onClose cannot run, because abandon() detaches the
+    // handlers first, and it must: a browser that does eventually notice the
+    // dead connection would otherwise land a close on whatever socket has
+    // replaced this one by then.
+    _revive(reason) {
+        const ws = this.ws;
+        if (!ws) return;
+        this._disarm();
+        abandon(ws);
+        this.ws = null;
+        this.opened = false;
+        setServerSessionId(null);
+        this.emit('close', { code: 1006, reason, failure: null });
+        if (this.closedByUser) {
+            this._setState('idle');
+            return;
+        }
+        this._scheduleReconnect();
+    }
+
     _onMessage(ev) {
+        // Any frame at all, including the pong below: what this timestamp is
+        // for is answering "did the server say anything", not "was it useful".
+        this.lastRxAt = Date.now();
         this.bytesIn += frameSize(ev.data);
         if (ev.data instanceof ArrayBuffer) {
             this._onBinary(ev.data);
@@ -376,6 +467,7 @@ export class AudioConnection extends Emitter {
 
     _onClose(ev) {
         this.ws = null;
+        this._disarm();
         // The session it belonged to is gone; a reconnect is given a new one.
         setServerSessionId(null);
         const failure = this.lastFailure;

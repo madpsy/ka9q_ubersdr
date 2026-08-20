@@ -2,11 +2,12 @@
 //
 // A receiver's IF display is the close-up: the main waterfall says where in the
 // band you are, and this says where in the *signal* you are — whether the
-// carrier is centred, what is about to walk into the passband from the side you
-// cannot hear, how far off a CW note you have landed. It is deliberately not a
-// second waterfall at a different zoom: it follows the dial, it is symmetric
-// about it whatever the mode, and its scale is marked in offsets rather than in
-// megahertz, so 0 means "what I am listening to" and stays there while you tune.
+// carrier is centred, what is about to walk into the passband, how far off a CW
+// note you have landed. It is deliberately not a second waterfall at a different
+// zoom: it follows the dial, it is shaped like the mode you are listening in —
+// AM's window straddles the carrier, USB's sits above it, LSB's below — and its
+// scale is marked in offsets rather than in megahertz, so 0 means "what I am
+// listening to" and stays there while you tune.
 //
 // It costs the receiver nothing. There is one spectrum stream per session and
 // this pane reads the frames the main display is already receiving, cuts the
@@ -509,7 +510,7 @@ export default function IFSpectrumPanel({ minimal }) {
     const floorDb = Number.isFinite(display.ifFloor) ? display.ifFloor : -110;
     const ceilDb = Number.isFinite(display.ifCeil) ? display.ifCeil : -20;
 
-    const ticks = offsetTicks(win.half, size.w);
+    const ticks = offsetTicks(win.offLo, win.offHi, size.w);
     // The main view is zoomed in far enough that the fitted window already fills
     // it — there is no more spectrum to open into.
     const spanFixed = maxFactor <= ZOOM_MIN * 1.05;
@@ -525,7 +526,11 @@ export default function IFSpectrumPanel({ minimal }) {
     // than the window so the window is not sitting on the edges of the served
     // view — the server snaps the request to its own ladder anyway.
     const zoomMain = useCallback(() => {
-        actions.setSpectrumView(win.dial, win.span * 3);
+        // Centred on the window rather than on the dial: the two are not the
+        // same once the mode puts the passband to one side, and centring on the
+        // dial would leave the far end of a USB window nearer the edge of the
+        // new view than the near end.
+        actions.setSpectrumView((win.lo + win.hi) / 2, win.span * 3);
     }, [actions, win]);
 
     return (
@@ -630,7 +635,7 @@ export default function IFSpectrumPanel({ minimal }) {
                 it is the only thing that says what the picture is of. */}
             <div className="ifs__foot">
                 <span className="ifs__dial">{formatHz(win.dial)}</span>
-                <span className="ifs__span">±{formatSpan(win.half)}</span>
+                <span className="ifs__span">{formatSpan(win.span)} wide</span>
                 <span className="ifs__res">{formatBinWidth(binWidth)}</span>
             </div>
 
@@ -753,7 +758,7 @@ function readAt(st, wrap, pt) {
     const xFrac = Math.min(1, Math.max(0, (pt.x - r.left) / r.width));
     const xPct = xFrac * 100;
     const yPct = Math.min(100, Math.max(0, ((pt.y - r.top) / r.height) * 100));
-    const off = Math.round(-st.win.half + xFrac * st.win.span);
+    const off = Math.round(st.win.offLo + xFrac * st.win.span);
 
     // The live level under the pointer, and only where there is a live trace to
     // read it off. Over a bare waterfall the pixel under the pointer is a

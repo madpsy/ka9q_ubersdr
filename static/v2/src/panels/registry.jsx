@@ -175,10 +175,10 @@ export const PANELS = [
     // reach for occasionally.
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', minimal: true, Component: ReceiverPanel },
     // Directly under the Receiver, and it is the Receiver panel's picture: the
-    // few kHz either side of the dial, with the filter shaded on it. Where the
-    // main waterfall says which part of the band you are in, this says where in
-    // the *signal* you are — and it is symmetric about the dial whatever the
-    // mode, so the side of the carrier you cannot hear is on screen too.
+    // few kHz around the dial, with the filter shaded on it. Where the main
+    // waterfall says which part of the band you are in, this says where in the
+    // *signal* you are — and the window is shaped like the mode, so AM straddles
+    // the carrier while USB sits above it and LSB below.
     //
     // Free to run: it reads the frames the main display is already receiving
     // rather than opening anything of its own. See IFSpectrumPanel.

@@ -9,13 +9,16 @@
 // Two things make it worth its own panel rather than being "zoom in on the main
 // view":
 //
-//   * **It is centred on the dial, always, whatever the mode.** A USB passband
-//     lies entirely above the carrier and an LSB one entirely below it, so a
-//     view that merely covered the filter would show one side of the dial and
-//     not the other — and what you want an IF display for is usually the thing
-//     *just outside* the filter: the station about to walk into your passband,
-//     the carrier you are 300 Hz off. So the window is symmetric about the dial
-//     by construction (see halfSpanFor), and both sides are always on screen.
+//   * **It is shaped like the mode.** The window is what you are listening
+//     *through*: the passband and the dial, with a quarter again around them.
+//     AM's filter straddles the carrier so its window does too; USB's lies
+//     entirely above it, so the window is almost all above it, and LSB's is the
+//     mirror. It was symmetric about the dial at first, which reads well for AM
+//     and CW and wastes half the panel on SSB — three kilohertz of nothing below
+//     a carrier nobody is demodulating. The dial is always inside the window
+//     with a little room, because it is the reference everything else is read
+//     against, but it is not the middle. Zooming out is what adds equal context
+//     to both sides — see windowFor.
 //
 //   * **It is dial-relative.** Tune, and the window travels with you: a signal
 //     you are listening to sits at 0 and stays there. That is why the waterfall
@@ -34,12 +37,21 @@ import { approachFor } from './timeConstant.js';
 // the mode".
 export const FIT_MARGIN = 1.25;
 
-// ...and the narrowest half-window worth drawing. A 200 Hz CW filter fits in
-// 250 Hz, which is a legitimate thing to ask for and a hard thing to point at:
-// under a finger, 500 Hz across a dock column is about 8 Hz a pixel and every
-// tap lands on a different signal. This is a floor on the window, not on the
-// filter — the shading still shows the filter at whatever width it is.
-export const MIN_HALF_SPAN_HZ = 400;
+// ...and the narrowest window worth drawing. A 200 Hz CW filter fits in 500 Hz,
+// which is a legitimate thing to ask for and a hard thing to point at: under a
+// finger, 500 Hz across a dock column is about 8 Hz a pixel and every tap lands
+// on a different signal. This is a floor on the window, not on the filter — the
+// shading still shows the filter at whatever width it is.
+export const MIN_SPAN_HZ = 800;
+
+// The least room the dial itself gets, whatever the margin works out to.
+//
+// The dial is the thing every reading on this pane is relative to, and on the
+// sidebands the margin is all that keeps it on screen: a USB filter starts above
+// the carrier, so a narrowed one — 300 Hz to 800 Hz, which is a normal thing to
+// do to dig a signal out — would otherwise put its own window entirely above the
+// dial and lose the zero the ruler is built around.
+export const MIN_DIAL_PAD_HZ = 60;
 
 // How far out the window may be opened, as a multiple of the fit — and how far
 // in, which is not at all. Zooming past the fit would start cutting the filter
@@ -90,13 +102,17 @@ export function clampZoom(v, max = ZOOM_MAX) {
  */
 export function maxZoomFor(cfg, tuning) {
     if (!cfg || !(cfg.span > 0) || !tuning) return ZOOM_MAX;
-    const fit = halfSpanFor(tuning.bandwidthLow, tuning.bandwidthHigh, 1) * 2;
-    if (!(fit > 0)) return ZOOM_MAX;
+    const fit = fitWindow(tuning.bandwidthLow, tuning.bandwidthHigh);
+    if (!(fit.span > 0)) return ZOOM_MAX;
     const dial = Number(tuning.frequency) || 0;
-    const reach = Math.min(dial - (cfg.centerFreq - cfg.span / 2),
-        (cfg.centerFreq + cfg.span / 2) - dial);
-    if (!(reach > 0)) return ZOOM_MIN;      // the dial is outside the view entirely
-    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, (reach * 2) / fit));
+    // Zoom adds `extra` to each side, so the stop is whichever side runs out
+    // first — measured from the fitted edges, which are already off centre.
+    const extra = Math.min(
+        (dial + fit.lo) - (cfg.centerFreq - cfg.span / 2),
+        (cfg.centerFreq + cfg.span / 2) - (dial + fit.hi),
+    );
+    if (!(extra > 0)) return ZOOM_MIN;      // the fitted window already overhangs
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, 1 + (extra * 2) / fit.span));
 }
 
 /** Whether the window has been opened past the fit — i.e. there is a reset to offer. */
@@ -105,22 +121,48 @@ export function isZoomed(factor) {
 }
 
 /**
- * Half the window, in Hz, for a passband — the distance from the dial to either
- * edge of the picture.
+ * The fitted window as a pair of offsets from the dial — the shape the mode
+ * gives it, before any zoom.
  *
- * Taken from whichever filter edge is *furthest* from the dial, so the whole
- * passband is inside the window with the margin to spare on the wider side. For
- * SSB that means the empty side of the dial gets as much room as the occupied
- * one, which is exactly the asymmetry an IF display exists to show.
+ * What is being framed is the passband *and* the dial together, not the passband
+ * alone: including 0 in the extent is what keeps the carrier on screen for a
+ * one-sided filter, and what makes AM's window straddle the dial without any
+ * special case for it. A quarter of that extent is then shared between the two
+ * sides, which is the "bandwidth + 25%" the pane is built to.
+ *
+ * So USB comes out roughly −340 … +3040 against a 50–2700 filter, LSB the mirror
+ * of it, and AM a symmetric ±6250 — each of them the shape of what you are
+ * actually listening through.
  */
-export function halfSpanFor(low, high, factor = 1) {
-    const reach = Math.max(Math.abs(Number(low) || 0), Math.abs(Number(high) || 0));
-    const f = Number.isFinite(factor) && factor > 0 ? factor : 1;
-    return Math.max(MIN_HALF_SPAN_HZ, reach * FIT_MARGIN) * f;
+export function fitWindow(low, high) {
+    const l = Number(low) || 0;
+    const h = Number(high) || 0;
+    const lo0 = Math.min(0, l, h);
+    const hi0 = Math.max(0, l, h);
+    const pad = Math.max((hi0 - lo0) * (FIT_MARGIN - 1) / 2, MIN_DIAL_PAD_HZ);
+    let lo = lo0 - pad;
+    let hi = hi0 + pad;
+    // A filter too narrow to point at is opened out equally, which keeps
+    // whatever shape the mode gave it.
+    const short = MIN_SPAN_HZ - (hi - lo);
+    if (short > 0) {
+        lo -= short / 2;
+        hi += short / 2;
+    }
+    return { lo, hi, span: hi - lo };
 }
 
 /**
- * The window to draw, in Hz: `{ lo, hi, half, span }` about the dial.
+ * The window to draw, in Hz: `{ dial, lo, hi, span, offLo, offHi }`.
+ *
+ * Zoom adds the same amount to each side rather than scaling the offsets. The
+ * two are not the same, and the difference is the whole behaviour: scaled, a
+ * USB window opened eight times would reach 24 kHz above the dial and 2.7 kHz
+ * below it — the filter's own lopsidedness magnified into the context view,
+ * where it means nothing. Added equally, the asymmetry stays the fixed few
+ * hundred hertz the mode actually implies and everything beyond it is even. So
+ * the pane is shaped like the mode when it is fitted to the filter, and shaped
+ * like a spectrum when it is opened out to look around.
  *
  * Not clamped to the band. A dial at 20 kHz gives a window whose left edge is
  * below zero, and that is honest — there are no bins there, and sliceToPixels
@@ -129,8 +171,19 @@ export function halfSpanFor(low, high, factor = 1) {
  */
 export function windowFor(tuning, factor = 1) {
     const dial = Number(tuning && tuning.frequency) || 0;
-    const half = halfSpanFor(tuning && tuning.bandwidthLow, tuning && tuning.bandwidthHigh, factor);
-    return { dial, half, span: half * 2, lo: dial - half, hi: dial + half };
+    const fit = fitWindow(tuning && tuning.bandwidthLow, tuning && tuning.bandwidthHigh);
+    const f = Number.isFinite(factor) && factor > 0 ? factor : 1;
+    const extra = ((f - 1) * fit.span) / 2;
+    const offLo = fit.lo - extra;
+    const offHi = fit.hi + extra;
+    return {
+        dial,
+        offLo,
+        offHi,
+        span: offHi - offLo,
+        lo: dial + offLo,
+        hi: dial + offHi,
+    };
 }
 
 /**
@@ -377,20 +430,22 @@ export const OFFSET_MINORS = 5;
  */
 const RUNGS = [1, 2, 2.5, 5, 10];
 
-export function offsetStep(half, widthPx) {
+export function offsetStep(offLo, offHi, widthPx) {
+    const span = offHi - offLo;
     const want = Math.max(2, Math.floor((widthPx || 0) / OFFSET_LABEL_PX));
-    const rough = (half * 2) / want;
+    const rough = span / want;
     if (!(rough > 0)) return 1;
     const pow = Math.pow(10, Math.floor(Math.log10(rough)));
     let i = RUNGS.findIndex((m) => pow * m >= rough);
     if (i < 0) i = RUNGS.length - 1;
 
-    // Rounding up to a rung can overshoot the half-window, which leaves 0 as the
-    // only label on the strip: the ±1 step marks are off both ends. One rung
-    // down puts them back, and cannot crowd the labels — it is below the spacing
-    // the width asked for, which was itself at most the half-window.
-    if (pow * RUNGS[i] > half && i > 0) i -= 1;
-    else if (pow * RUNGS[i] > half) return (pow / 10) * RUNGS[RUNGS.length - 2];
+    // Rounding up to a rung can overshoot the window's longer side, which leaves
+    // 0 as the only label on the strip: every other multiple of the step is off
+    // the end of it. One rung down puts them back, and cannot crowd the labels —
+    // it is below the spacing the width asked for.
+    const reach = Math.max(-offLo, offHi);
+    if (pow * RUNGS[i] > reach && i > 0) i -= 1;
+    else if (pow * RUNGS[i] > reach) return (pow / 10) * RUNGS[RUNGS.length - 2];
     return pow * RUNGS[i];
 }
 
@@ -406,21 +461,24 @@ export const EDGE_FRAC = 0.07;
  * rather than for a number — "am I half a step off" — which is a question a
  * bare pair of labels cannot answer and five notches between them can.
  *
- * Both halves are stepped outward from zero rather than from the left edge, so
- * the ruler is symmetric about the dial however the window is zoomed. Stepped
- * from the edge, a window whose half-span is not a whole number of steps would
- * put its notches slightly off-centre and 0 would land between two of them.
+ * Stepped outward from zero rather than from the left edge, which is what puts
+ * a notch exactly on the dial. Stepped from the edge, a window whose width is
+ * not a whole number of steps would land 0 between two notches — and on a pane
+ * whose window is deliberately lopsided, that would be every window.
  */
-export function offsetTicks(half, widthPx) {
-    if (!(half > 0)) return [];
-    const step = offsetStep(half, widthPx);
+export function offsetTicks(offLo, offHi, widthPx) {
+    const span = offHi - offLo;
+    if (!(span > 0)) return [];
+    const step = offsetStep(offLo, offHi, widthPx);
     const minor = step / OFFSET_MINORS;
     const out = [];
-    const count = Math.floor(half / minor);
-    for (let i = -count; i <= count; i++) {
+    // Rounded inward at both ends, so no notch is drawn off the strip.
+    const first = Math.ceil(offLo / minor - 1e-9);
+    const last = Math.floor(offHi / minor + 1e-9);
+    for (let i = first; i <= last; i++) {
         const hz = i * minor;
         const major = i % OFFSET_MINORS === 0;
-        const frac = (hz + half) / (half * 2);
+        const frac = (hz - offLo) / span;
         out.push({
             hz,
             frac,
@@ -438,14 +496,23 @@ export function offsetTicks(half, widthPx) {
 }
 
 
-/** An offset for a label: `0`, `+1.5k`, `-600`. */
+/**
+ * An offset for a label: `0`, `+1.5k`, `-600`.
+ *
+ * The kilohertz form is only used where it is *exact*. One decimal place turned
+ * a 1250 Hz notch into "+1.3k", which on a strip whose whole purpose is reading
+ * a frequency offset to a few hundred hertz is not an abbreviation, it is a
+ * wrong number — and the 2.5 rung of the tick ladder produces those every time
+ * it is chosen. Anything that will not round-trip is printed in hertz instead,
+ * which is longer and true.
+ */
 export function formatOffset(hz) {
     if (!hz) return '0';
     const sign = hz < 0 ? '-' : '+';
     const v = Math.abs(hz);
     if (v >= 1000) {
-        const k = v / 1000;
-        return `${sign}${k % 1 ? k.toFixed(1) : k.toFixed(0)}k`;
+        const s = (v / 1000).toFixed(2).replace(/\.?0+$/, '');
+        if (Math.abs(parseFloat(s) * 1000 - v) < 0.5) return `${sign}${s}k`;
     }
     return `${sign}${Math.round(v)}`;
 }

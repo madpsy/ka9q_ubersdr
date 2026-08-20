@@ -201,7 +201,8 @@ t('an opened window is pulled back when the spectrum view cannot fill it', () =>
     const labels = walk(tree)
         .filter((n) => String(n.props.className || '').startsWith('ifs__tick'))
         .map((n) => n.children[0]);
-    assert.ok(labels.length >= 3, `only ${labels.length} labels`);
+    // Two is a legitimate ruler on a lopsided window — see offsetStep.
+    assert.ok(labels.length >= 2, `only ${labels.length} labels`);
     // 51.2 kHz of served view is +/-25.6 kHz, so nothing on the strip may claim
     // to be further out than that.
     for (const l of labels) {

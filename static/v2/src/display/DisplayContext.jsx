@@ -259,10 +259,11 @@ export const DEFAULTS = {
     // the pane under it is immediately legible as the same thing closer up. The
     // other four are one tap away.
     ifView: 'split',
-    // Multiplier on the fitted window — the filter and a quarter again, either
-    // side of the dial. 1 is the fit, which is the panel's whole proposition,
-    // and also the hard stop: the window can be opened but never closed past
-    // it. Continuous, because the wheel and the pinch move this value.
+    // Multiplier on the fitted window — the passband and the dial, with a
+    // quarter again around them, which is the shape the mode gives it. 1 is the
+    // fit, which is the panel's whole proposition, and also the hard stop: the
+    // window can be opened but never closed past it. Continuous, because the
+    // wheel and the pinch move this value.
     ifSpan: 1,
     // Whether the picture takes the wheel, a pinch and a drag at all. On,
     // because dragging the spectrum under the dial line is the best fine-tuning

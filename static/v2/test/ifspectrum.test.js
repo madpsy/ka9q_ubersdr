@@ -7,9 +7,9 @@
 
 const assert = require('assert');
 const {
-    COARSE_BINS, FIT_MARGIN, MIN_HALF_SPAN_HZ, OFFSET_LABEL_PX, ZOOM_MAX, ZOOM_MIN,
+    COARSE_BINS, FIT_MARGIN, MIN_SPAN_HZ, OFFSET_LABEL_PX, ZOOM_MAX, ZOOM_MIN,
     binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels,
-    formatBinWidth, formatOffset, halfSpanFor, isZoomed, levelsOf, manualLevels,
+    fitWindow, formatBinWidth, formatOffset, isZoomed, levelsOf, manualLevels,
     maxZoomFor, normaliseView, offsetStep, offsetTicks, sliceToPixels, updateLevels,
     viewHas, windowFor,
 } = require('./.build/ifspectrum.cjs');
@@ -29,38 +29,72 @@ const MODES = {
     fm: [-8000, 8000],
 };
 
-t('the window covers the filter and a quarter, both sides of the dial, in every mode', () => {
+t('the window covers the filter and a quarter, and keeps the dial, in every mode', () => {
     for (const [mode, [low, high]] of Object.entries(MODES)) {
         const win = windowFor({ frequency: 14_200_000, bandwidthLow: low, bandwidthHigh: high });
         // Both edges of the filter are inside.
         assert.ok(win.lo <= 14_200_000 + low, `${mode}: low edge outside the window`);
         assert.ok(win.hi >= 14_200_000 + high, `${mode}: high edge outside the window`);
-        // ...and both sides of the dial are on screen, which is the whole point:
-        // a USB window that merely covered 50..2700 would show nothing below the
-        // carrier.
-        assert.ok(win.lo < 14_200_000, `${mode}: nothing below the dial`);
-        assert.ok(win.hi > 14_200_000, `${mode}: nothing above the dial`);
-        // And it is at least the filter plus a quarter.
+        // ...and so is the dial, with room to draw its line and its 0. It is the
+        // reference every reading on this pane is taken against, so a one-sided
+        // filter must not be able to push it off the edge.
+        assert.ok(win.offLo < 0, `${mode}: the dial is at or past the left edge`);
+        assert.ok(win.offHi > 0, `${mode}: the dial is at or past the right edge`);
+        // And the window is at least the filter plus a quarter.
         assert.ok(win.span >= (high - low) * FIT_MARGIN, `${mode}: window narrower than the brief`);
     }
 });
 
-t('a narrow filter still gets a window big enough to point at', () => {
-    const win = windowFor({ frequency: 7_030_000, bandwidthLow: -50, bandwidthHigh: 50 });
-    assert.strictEqual(win.half, MIN_HALF_SPAN_HZ);
+t('the window is shaped like the mode, not centred on the dial', () => {
+    const at = (low, high) => {
+        const w = windowFor({ frequency: 14_200_000, bandwidthLow: low, bandwidthHigh: high });
+        return -w.offLo / w.span;        // where the dial sits across the picture
+    };
+    // A filter that straddles the carrier gets a window that straddles it too.
+    assert.ok(Math.abs(at(-5000, 5000) - 0.5) < 1e-9, 'AM should be centred');
+    assert.ok(Math.abs(at(-200, 200) - 0.5) < 1e-9, 'CW should be centred');
+    // A one-sided one does not: USB is nearly all above the dial, LSB the
+    // mirror. This is the whole change — a symmetric window spent half the panel
+    // on three kilohertz of nothing below an SSB carrier.
+    assert.ok(at(50, 2700) < 0.15, `USB put the dial at ${at(50, 2700)}`);
+    assert.ok(at(-2700, -50) > 0.85, `LSB put the dial at ${at(-2700, -50)}`);
+    // Mirrored modes are mirror images, to the hertz.
+    assert.ok(Math.abs(at(50, 2700) + at(-2700, -50) - 1) < 1e-9);
+    // A narrowed USB filter sits entirely above the carrier, and the dial has to
+    // survive that: 300..800 padded by an eighth is still above it.
+    assert.ok(at(300, 800) > 0, 'a narrow USB filter pushed the dial off the window');
 });
 
-t('the window is exactly symmetric about the dial', () => {
-    for (const factor of [1, 1.7, 8, 32]) {
-        const win = windowFor({ frequency: 3_650_000, bandwidthLow: -2700, bandwidthHigh: -50 }, factor);
-        assert.strictEqual(win.dial - win.lo, win.hi - win.dial);
-        assert.strictEqual(win.span, win.half * 2);
+t('a narrow filter still gets a window big enough to point at', () => {
+    const win = windowFor({ frequency: 7_030_000, bandwidthLow: -50, bandwidthHigh: 50 });
+    assert.strictEqual(win.span, MIN_SPAN_HZ);
+    // ...and opening it out keeps whatever shape the mode gave it.
+    assert.strictEqual(-win.offLo, win.offHi);
+});
+
+t('zooming out adds the same amount to each side rather than scaling the offsets', () => {
+    // Scaled, a USB window opened eight times would reach 24 kHz above the dial
+    // and 2.7 below — the filter's lopsidedness magnified into a context view
+    // where it means nothing. Added equally, the asymmetry stays put and
+    // everything beyond it is even.
+    const usb = { frequency: 14_200_000, bandwidthLow: 50, bandwidthHigh: 2700 };
+    const fit = windowFor(usb, 1);
+    for (const f of [2, 8, 32]) {
+        const win = windowFor(usb, f);
+        assert.ok(Math.abs(win.span - fit.span * f) < 1e-6, `x${f}: span is not the fit times ${f}`);
+        // The same Hz added at each end.
+        assert.ok(Math.abs((fit.offLo - win.offLo) - (win.offHi - fit.offHi)) < 1e-6,
+            `x${f}: the sides grew by different amounts`);
+        // ...so the picture tends towards even as it opens.
+        assert.ok(-win.offLo / win.span > -fit.offLo / fit.span,
+            `x${f}: the dial did not move towards the middle`);
     }
 });
 
 t('zoom opens the window and never closes it past the fit', () => {
-    const fit = halfSpanFor(50, 2700, 1);
-    assert.strictEqual(halfSpanFor(50, 2700, 4), fit * 4);
+    const fit = fitWindow(50, 2700).span;
+    assert.ok(Math.abs(windowFor({ frequency: 1e6, bandwidthLow: 50, bandwidthHigh: 2700 }, 4).span
+        - fit * 4) < 1e-6);
     assert.strictEqual(clampZoom(0.25), ZOOM_MIN);
     assert.strictEqual(clampZoom(0), ZOOM_MIN);
     assert.strictEqual(clampZoom(1e9), ZOOM_MAX);
@@ -165,9 +199,16 @@ t('a window as wide as the view still hangs off it when the dial is off centre',
     // ...and it is genuinely narrower than the served span, by the drift.
     assert.ok(win.span < drifted.span, `${win.span} is not inside ${drifted.span}`);
 
-    // Centred, the two agree again — nothing is given away for free.
-    const centred = { ...drifted, centerFreq: usb.frequency };
-    assert.ok(Math.abs(windowFor(usb, maxZoomFor(centred, usb)).span - centred.span) < 1);
+    // It is also the *largest* such window: a nudge past the stop overhangs.
+    // That is the property worth pinning, not any particular number — the fitted
+    // window is itself off centre for USB, so even a perfectly centred dial
+    // cannot use the whole span.
+    for (const cfg of [drifted, { ...drifted, centerFreq: usb.frequency }]) {
+        const stop = maxZoomFor(cfg, usb);
+        assert.strictEqual(coverageOf(cfg, windowFor(usb, stop)), 1, 'the stop already overhangs');
+        assert.ok(coverageOf(cfg, windowFor(usb, stop * 1.02)) < 1,
+            'the stop is short of where it could be');
+    }
 
     // A dial outside the view has no window it can fill: back to the fit, and
     // the gaps say the rest.
@@ -247,21 +288,21 @@ t('a manual scale is ordered and never degenerate', () => {
 
 // ── The ruler ────────────────────────────────────────────────────────────────
 
-t('the ruler has a zero, in the middle, and is symmetric about it', () => {
-    for (const half of [400, 3375, 27_000]) {
-        const ticks = offsetTicks(half, 320);
+t('the ruler has exactly one zero, and it is on the dial', () => {
+    // Stepped outward from zero, so the notch on the dial is exact whatever the
+    // window's shape — which on this pane is deliberately lopsided.
+    for (const [lo, hi] of [[-400, 400], [-337.5, 3037.5], [-3037.5, 337.5], [-27_000, 27_000]]) {
+        const ticks = offsetTicks(lo, hi, 320);
         const zero = ticks.filter((k) => k.zero);
-        assert.strictEqual(zero.length, 1, `half ${half}: ${zero.length} zeroes`);
-        assert.ok(Math.abs(zero[0].frac - 0.5) < 1e-9, `half ${half}: zero at ${zero[0].frac}`);
-        const offsets = ticks.map((k) => k.hz);
-        for (const hz of offsets) {
-            assert.ok(offsets.some((o) => Math.abs(o + hz) < 1e-6), `half ${half}: ${hz} has no mirror`);
-        }
+        assert.strictEqual(zero.length, 1, `${lo}..${hi}: ${zero.length} zeroes`);
+        assert.strictEqual(zero[0].hz, 0);
+        assert.ok(Math.abs(zero[0].frac - -lo / (hi - lo)) < 1e-9,
+            `${lo}..${hi}: zero is not where the dial is`);
     }
 });
 
 t('every notch is inside the window, and only the majors are labelled', () => {
-    const ticks = offsetTicks(3375, 320);
+    const ticks = offsetTicks(-337.5, 3037.5, 320);
     assert.ok(ticks.length > 4);
     for (const k of ticks) {
         assert.ok(k.frac >= 0 && k.frac <= 1, `frac ${k.frac}`);
@@ -271,16 +312,24 @@ t('every notch is inside the window, and only the majors are labelled', () => {
 });
 
 t('a window with no span produces no ruler rather than an endless loop', () => {
-    assert.deepStrictEqual(offsetTicks(0, 320), []);
-    assert.deepStrictEqual(offsetTicks(-5, 320), []);
+    assert.deepStrictEqual(offsetTicks(0, 0, 320), []);
+    assert.deepStrictEqual(offsetTicks(5, -5, 320), []);
 });
 
-t('offsets read as offsets', () => {
+t('offsets read as offsets, and the short form is never a rounded lie', () => {
     assert.strictEqual(formatOffset(0), '0');
     assert.strictEqual(formatOffset(500), '+500');
     assert.strictEqual(formatOffset(-500), '-500');
     assert.strictEqual(formatOffset(1000), '+1k');
     assert.strictEqual(formatOffset(-1500), '-1.5k');
+    // The 2.5 rung of the tick ladder produces these, and one decimal place
+    // printed 1250 Hz as "+1.3k" — on a strip read for offsets of a few hundred
+    // hertz that is a wrong number, not an abbreviation.
+    assert.strictEqual(formatOffset(1250), '+1.25k');
+    assert.strictEqual(formatOffset(-2750), '-2.75k');
+    assert.strictEqual(formatOffset(100_000), '+100k');
+    // Anything that will not round-trip stays in hertz.
+    assert.strictEqual(formatOffset(1234), '+1234');
 });
 
 t('the resolution readout says something at every zoom', () => {
@@ -350,20 +399,20 @@ t('the ruler never runs out of steps, however wide the window', () => {
     // this was found. The step is built from a decade instead.
     for (const half of [400, 3375, 27_000, 108_000, 400_000, 3_000_000]) {
         for (const width of [180, 215, 320, 900]) {
-            const ticks = offsetTicks(half, width);
+            const ticks = offsetTicks(-half, half, width);
             const majors = ticks.filter((k) => k.major);
             // Never more labels than the strip has room for, plus the two ends.
             const room = Math.max(2, Math.floor(width / OFFSET_LABEL_PX));
             assert.ok(majors.length <= room + 2,
                 `half ${half} at ${width}px: ${majors.length} labels, room for ~${room}`);
             assert.ok(majors.length >= 2, `half ${half} at ${width}px: ${majors.length} labels`);
-            assert.ok(offsetStep(half, width) > 0);
+            assert.ok(offsetStep(-half, half, width) > 0);
         }
     }
 });
 
 t('the outermost labels are pushed inward so they stay on the panel', () => {
-    const ticks = offsetTicks(108_000, 215).filter((k) => k.label != null);
+    const ticks = offsetTicks(-108_000, 108_000, 215).filter((k) => k.label != null);
     assert.strictEqual(ticks[0].align, 'start');
     assert.strictEqual(ticks[ticks.length - 1].align, 'end');
     assert.ok(ticks.find((k) => k.zero).align === 'center');

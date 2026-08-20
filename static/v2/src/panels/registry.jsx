@@ -186,11 +186,19 @@ export const PANELS = [
     // Minimal: the picture alone. The view, span, levels and speed are chosen
     // and then watched, and the readout under the chart is what the ruler and
     // the Receiver panel above already say.
+    //
+    // Ships collapsed, and collapsed means idle: Section mounts a panel's body
+    // only while its section is open, so a closed one has no frame subscription
+    // and no draw loop. It is also a panel with a precondition — it needs the
+    // main display zoomed in seven steps before it can say anything — and one
+    // that opened already covered by its own "zoom in" notice would be teaching
+    // that lesson to every session that never wanted it.
     {
         id: 'ifspectrum',
         title: 'IF Spectrum',
         icon: <Icon.Span />,
         dock: 'left',
+        defaultOpen: false,
         minimal: true,
         Component: IFSpectrumPanel,
     },

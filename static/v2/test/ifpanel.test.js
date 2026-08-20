@@ -31,7 +31,7 @@ globalThis.removeEventListener = (name) => {
 };
 
 const {
-    render, reset, walk, IFSpectrumPanel, PANEL_BY_ID, DEFAULTS, GROUPS,
+    deep, render, reset, walk, words, IFSpectrumPanel, PANEL_BY_ID, DEFAULTS, GROUPS,
 } = require('./.build/ifpanel.cjs');
 
 let pass = 0;
@@ -47,8 +47,15 @@ function context(over) {
         tuning: { frequency: 14_200_000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
         running: true,
         spectrumConn: { on: () => () => {} },
+        // Zoomed in past the gate (7 halvings of the full-span 29.3 kHz/bin) and
+        // centred on the dial, so the pane can actually draw — see paneState.
         view: {
-            centerFreq: 14_200_000, span: 200_000, binCount: 1024, binBandwidth: 195.3125,
+            centerFreq: 14_200_000,
+            span: 1024 * 100,
+            binCount: 1024,
+            binBandwidth: 100,
+            defaultBinCount: 1024,
+            defaultBinBandwidth: 30e6 / 1024,
         },
         actions: {
             setFrequency() {}, setSpectrumView() {}, centerOnTuned() {},
@@ -96,17 +103,41 @@ t('the pictures a view asks for are the pictures it gets', () => {
     assert.deepStrictEqual(count('fusion'), { spec: 0, wf: 1, ov: 1 });
 });
 
-t('a stopped receiver and a spectrum with no view are states, not crashes', () => {
-    for (const over of [
-        { running: false },
-        { view: { centerFreq: 0, span: 0, binCount: 0, binBandwidth: 0 } },
-        // Panned right away from the dial: the pane is blank and has to say why.
-        { view: { centerFreq: 3_600_000, span: 200_000, binCount: 1024, binBandwidth: 195.3125 } },
-    ]) {
+t('everything standing in the way is said on the picture, not under it', () => {
+    const veil = (over, props) => {
         reset();
-        const { tree } = render(IFSpectrumPanel, {}, context(over));
-        assert.ok(tree);
-    }
+        const { tree } = render(IFSpectrumPanel, props || {}, context(over));
+        // deep(), not walk(): the cover is drawn by a component of the panel's
+        // own, which the outer return only names.
+        const v = deep(tree).filter((n) => n.props.className === 'ifs__veil');
+        assert.ok(v.length <= 1, `${v.length} veils at once`);
+        return v[0] || null;
+    };
+
+    // Nothing in the way: the picture stands on its own.
+    assert.strictEqual(veil({}), null, 'a usable pane is covered anyway');
+
+    // Each of the four, and each of them is a different thing to do about it.
+    assert.match(words(veil({ running: false })), /stopped/i);
+    assert.match(words(veil({ view: { centerFreq: 0, span: 0, binCount: 0, binBandwidth: 0 } })), /waiting/i);
+    // Panned away from the dial — fine bins, none of them here.
+    assert.match(words(veil({
+        view: {
+            centerFreq: 3_600_000, span: 1024 * 100, binCount: 1024, binBandwidth: 100,
+            defaultBinCount: 1024, defaultBinBandwidth: 30e6 / 1024,
+        },
+    })), /dial/i);
+    // Zoomed out: the whole reason for the gate.
+    assert.match(words(veil({
+        view: {
+            centerFreq: 14_200_000, span: 30e6, binCount: 1024, binBandwidth: 30e6 / 1024,
+            defaultBinCount: 1024, defaultBinBandwidth: 30e6 / 1024,
+        },
+    })), /zoom/i);
+
+    // ...and it covers the minimal view too, which is the only text that view
+    // has: a blank pane that says nothing reads as a fault.
+    assert.ok(veil({ running: false }, { minimal: true }), 'the minimal view says nothing at all');
 });
 
 t('every mode gets a window, including the ones that are all on one side', () => {
@@ -164,6 +195,9 @@ t('the panel is registered, under the Receiver, and in a group', () => {
     assert.ok(p, 'not in the registry');
     assert.strictEqual(p.dock, 'left');
     assert.strictEqual(p.minimal, true);
+    // Collapsed, and collapsed means idle: Section only mounts an open panel's
+    // body, so a closed one holds no frame subscription and runs no draw loop.
+    assert.strictEqual(p.defaultOpen, false);
     assert.strictEqual(p.Component, IFSpectrumPanel);
     // No `requires`: it reads the spectrum every session already has, so there
     // is no receiver it does not apply to.
@@ -192,10 +226,9 @@ t('the minimal view is the picture and nothing under it', () => {
     assert.ok(text({}, {}).length > 0, 'the docked panel lost its readout');
     assert.strictEqual(text({ minimal: true }, {}).length, 0, 'the minimal view has text under it');
 
-    // ...with one exception, and it is the one that matters: a pane that cannot
-    // draw at all still says why, or it reads as a fault.
-    assert.ok(text({ minimal: true }, { running: false }).length > 0,
-        'a stopped receiver says nothing at all');
+    // ...in every state, because what would otherwise be said there is said on
+    // the picture instead — see the veil.
+    assert.strictEqual(text({ minimal: true }, { running: false }).length, 0);
 });
 
 t('the default view is the one the panel is designed around', () => {

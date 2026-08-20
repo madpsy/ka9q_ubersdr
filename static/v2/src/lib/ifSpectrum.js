@@ -202,14 +202,100 @@ export function binWidthOf(cfg) {
     return cfg.span / cfg.binCount;
 }
 
-// How many bins have to fall inside the window before the picture is showing
-// structure rather than an interpolation. Below this the panel says so.
-export const COARSE_BINS = 12;
-
 /** How many of the served bins land in the window. */
 export function binsInWindow(cfg, win) {
     const bw = binWidthOf(cfg);
     return bw > 0 ? win.span / bw : 0;
+}
+
+// ── Whether the pane can say anything at all ─────────────────────────────────
+//
+// Two conditions, and neither is a matter of degree:
+//
+//   * The main display has to be zoomed in. Every bin this pane draws is one of
+//     the main display's, so at full span there is a fraction of one inside the
+//     window and the picture is an interpolation between two numbers — smooth,
+//     plausible, and telling you nothing about the signal. Seven halvings from
+//     the full-span view is where a filter's worth of window starts holding a
+//     dozen or more bins, which is where shape appears.
+//
+//   * The dial has to be inside the served view. It usually is, but the main
+//     display only recentres when the passband would leave the screen, so a pan
+//     can put the dial off the end of what the server is sending — and then
+//     there are no bins for this window at all.
+//
+// Failing either, the pane draws what it has and says so over the top rather
+// than presenting an interpolation as a measurement. See the veil in
+// IFSpectrumPanel.
+
+export const MIN_ZOOM_STEPS = 7;
+
+// The band the full-span view covers, for working out what a step is when the
+// server has not yet said what its own default bin width is.
+export const FULL_SPAN_HZ = 30e6;
+
+/** Hz per bin of the whole-band view — the zero point the steps are counted from. */
+export function fullBinWidthOf(cfg) {
+    if (!cfg) return 0;
+    if (cfg.defaultBinBandwidth > 0) return cfg.defaultBinBandwidth;
+    const bins = cfg.defaultBinCount || cfg.binCount || 0;
+    return bins > 0 ? FULL_SPAN_HZ / bins : 0;
+}
+
+/**
+ * How many halvings in the served view is, as a real number.
+ *
+ * Not an integer, because the server snaps bin bandwidth to a ladder of its own
+ * (5000, 2000, 1000, 500, 300, 200 …) which is not powers of two — so a view is
+ * routinely six and a half steps in. Counted rather than rounded, so the
+ * "N more steps" the panel offers is never off by one.
+ */
+export function zoomStepsOf(cfg) {
+    const full = fullBinWidthOf(cfg);
+    if (!(full > 0) || !cfg || !(cfg.binBandwidth > 0)) return 0;
+    return Math.max(0, Math.log2(full / cfg.binBandwidth));
+}
+
+/** Whether the served view has any bins at the dial at all. */
+export function dialCovered(cfg, dial) {
+    if (!cfg || !(cfg.span > 0)) return false;
+    return dial >= cfg.centerFreq - cfg.span / 2 && dial <= cfg.centerFreq + cfg.span / 2;
+}
+
+/**
+ * What the pane can do right now: `{ ok, kind, steps, short }`.
+ *
+ * `kind` is 'ok', or the one thing standing in the way — 'stopped', 'waiting',
+ * 'offdial', 'coarse'. Ordered by what has to be true first, so the panel only
+ * ever has one thing to say and it is the one the operator can act on.
+ */
+export function paneState(cfg, tuning, running) {
+    if (!running) return { ok: false, kind: 'stopped', steps: 0, short: 0 };
+    if (!cfg || !(cfg.span > 0)) return { ok: false, kind: 'waiting', steps: 0, short: 0 };
+    const dial = Number(tuning && tuning.frequency) || 0;
+    if (!dialCovered(cfg, dial)) return { ok: false, kind: 'offdial', steps: 0, short: 0 };
+    const steps = zoomStepsOf(cfg);
+    if (steps < MIN_ZOOM_STEPS - 1e-9) {
+        return { ok: false, kind: 'coarse', steps, short: Math.ceil(MIN_ZOOM_STEPS - steps) };
+    }
+    return { ok: true, kind: 'ok', steps, short: 0 };
+}
+
+/**
+ * The span to ask the main display for, so that this pane becomes usable.
+ *
+ * Three times the *fitted* window — enough context around the filter to be worth
+ * looking at, and the fit rather than whatever the pane is currently opened to,
+ * which at a wide zoom could be hundreds of kilohertz and would not clear the
+ * gate at all. Capped at the span the gate itself opens on, so the button can
+ * never land somewhere it does not help.
+ */
+export function zoomTargetSpan(cfg, tuning) {
+    const fit = fitWindow(tuning && tuning.bandwidthLow, tuning && tuning.bandwidthHigh);
+    const full = fullBinWidthOf(cfg);
+    const bins = (cfg && cfg.binCount) || 0;
+    const atGate = full > 0 && bins > 0 ? bins * (full / 2 ** MIN_ZOOM_STEPS) : Infinity;
+    return Math.min(fit.span * 3, atGate);
 }
 
 /**

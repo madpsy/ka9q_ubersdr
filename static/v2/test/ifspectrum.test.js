@@ -7,9 +7,10 @@
 
 const assert = require('assert');
 const {
-    COARSE_BINS, FIT_MARGIN, IF_VIEWS, IF_VIEW_DEFAULT, MIN_SPAN_HZ, OFFSET_LABEL_PX,
+    FIT_MARGIN, IF_VIEWS, IF_VIEW_DEFAULT, MIN_SPAN_HZ, MIN_ZOOM_STEPS, OFFSET_LABEL_PX,
     ZOOM_MAX, ZOOM_MIN,
-    binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels,
+    binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels, dialCovered,
+    paneState, zoomStepsOf, zoomTargetSpan,
     fitWindow, formatBinWidth, formatOffset, isZoomed, levelsOf, manualLevels,
     maxZoomFor, normaliseView, offsetStep, offsetTicks, sliceToPixels, updateLevels,
     viewHas, windowFor,
@@ -240,7 +241,7 @@ t('the bin width and the count in the window are the served view, not a guess', 
     // and an SSB window is a quarter of one.
     const wide = { centerFreq: 15e6, span: 30e6, binCount: 1024 };
     assert.ok(binsInWindow(wide, win) < 1);
-    assert.ok(binsInWindow(wide, win) < COARSE_BINS);
+    assert.ok(binsInWindow(wide, win) < 1, 'the whole window is inside one bin');
 });
 
 t('coverage says how much of the window the server is actually sending', () => {
@@ -420,6 +421,84 @@ t('the outermost labels are pushed inward so they stay on the panel', () => {
     assert.strictEqual(ticks[0].align, 'start');
     assert.strictEqual(ticks[ticks.length - 1].align, 'end');
     assert.ok(ticks.find((k) => k.zero).align === 'center');
+});
+
+// ── Whether the pane can say anything ────────────────────────────────────────
+
+// A served view at a given bin width, with the dial in the middle of it.
+const at = (binBW, bins = 1024, centre = 14_074_000) => ({
+    centerFreq: centre,
+    binBandwidth: binBW,
+    binCount: bins,
+    span: binBW * bins,
+    defaultBinCount: bins,
+    defaultBinBandwidth: 30e6 / bins,
+});
+const USB = { frequency: 14_074_000, bandwidthLow: 50, bandwidthHigh: 2700 };
+
+t('the pane refuses to draw until the main display is zoomed in', () => {
+    // The rung the gate opens on. The server snaps bin width to a ladder that is
+    // not powers of two, so the step count is fractional and 200 Hz/bin is 7.19
+    // steps in — the first rung past the threshold.
+    assert.ok(!paneState(at(300), USB, true).ok, '300 Hz/bin should still be refused');
+    assert.ok(paneState(at(200), USB, true).ok, '200 Hz/bin should be enough');
+    assert.ok(paneState(at(20), USB, true).ok);
+
+    // ...and what it says is how much further to go, counting down.
+    const shorts = [29296.875, 5000, 1000, 500, 300].map((bw) => paneState(at(bw), USB, true).short);
+    assert.deepStrictEqual(shorts, [7, 5, 3, 2, 1]);
+    for (const bw of [29296.875, 5000, 1000]) {
+        assert.strictEqual(paneState(at(bw), USB, true).kind, 'coarse');
+    }
+});
+
+t('the step count is measured, not assumed to be whole', () => {
+    assert.strictEqual(zoomStepsOf(at(30e6 / 1024)), 0);
+    assert.ok(Math.abs(zoomStepsOf(at(30e6 / 1024 / 128)) - MIN_ZOOM_STEPS) < 1e-9);
+    // A ladder rung that is not a halving comes out fractional rather than
+    // rounded, which is what keeps "N more steps" from being off by one.
+    assert.ok(Math.abs(zoomStepsOf(at(300)) - 6.61) < 0.01);
+    // Nothing known yet is zero steps in, not NaN.
+    assert.strictEqual(zoomStepsOf(null), 0);
+    assert.strictEqual(zoomStepsOf({ binBandwidth: 0, binCount: 0 }), 0);
+});
+
+t('...and until the spectrum actually has bins at the dial', () => {
+    // Zoomed in plenty, but panned away: there is nothing to draw, however fine
+    // the bins are.
+    const panned = at(20, 1024, 14_500_000);
+    assert.ok(!dialCovered(panned, USB.frequency));
+    assert.strictEqual(paneState(panned, USB, true).kind, 'offdial');
+    // Right on the edge counts as covered — the window gaps, which is its own
+    // answer, rather than the whole pane being refused.
+    assert.ok(dialCovered(at(20), USB.frequency));
+});
+
+t('what is in the way is reported in the order it has to be fixed', () => {
+    // A stopped receiver is not a zoom problem, and a spectrum that has not
+    // reported its geometry yet is not a pan problem.
+    assert.strictEqual(paneState(at(20), USB, false).kind, 'stopped');
+    assert.strictEqual(paneState(null, USB, true).kind, 'waiting');
+    assert.strictEqual(paneState({ span: 0, centerFreq: 0, binCount: 0 }, USB, true).kind, 'waiting');
+    // Both wrong at once reports the one that has to be fixed first: a 1 MHz
+    // view parked on 20 MHz is too coarse *and* nowhere near the dial, and
+    // zooming it in would only make the second worse.
+    assert.strictEqual(paneState(at(1000, 1024, 20e6), USB, true).kind, 'offdial');
+});
+
+t('the zoom button lands somewhere that actually clears the gate', () => {
+    for (const [low, high] of [[50, 2700], [-2700, -50], [-5000, 5000], [-200, 200], [-8000, 8000]]) {
+        const tuning = { ...USB, bandwidthLow: low, bandwidthHigh: high };
+        const from = at(29296.875);
+        const span = zoomTargetSpan(from, tuning);
+        const landed = at(span / from.binCount);
+        assert.ok(paneState(landed, tuning, true).ok,
+            `${low}..${high}: the button lands at ${Math.round(span)} Hz, still refused`);
+        // ...and it is the fitted window it opens around, not the current one —
+        // so a pane already opened out wide does not ask for a span so large it
+        // fails the gate it was pressed to clear.
+        assert.ok(span <= fitWindow(low, high).span * 3 + 1);
+    }
 });
 
 console.log(`\n${pass} passed`);

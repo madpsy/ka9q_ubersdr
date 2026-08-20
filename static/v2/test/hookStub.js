@@ -102,3 +102,52 @@ export function walk(node, out = []) {
     walk(node.props && node.props.children, out);
     return out;
 }
+
+/**
+ * The same, but calling any function component it meets rather than stopping at
+ * it — so a tree can be asserted on by class name and by the words in it.
+ *
+ * walk() sees only what the component under test returned itself. A panel's own
+ * pieces are not exported (there is no reason for them to be), so anything drawn
+ * by one of them — an empty state, a cover over the picture — is invisible to a
+ * test that can only look at the outer return. That is precisely the part worth
+ * asserting on, because it is the part that only appears when something has gone
+ * wrong.
+ *
+ * Each expansion runs in its own hook frame, so a child that does use hooks
+ * cannot consume its parent's slots. Effects it registers are discarded: this is
+ * for reading a rendered tree, not for mounting one.
+ */
+export function deep(node, out = []) {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) {
+        for (const n of node) deep(n, out);
+        return out;
+    }
+    if (typeof node.type === 'function') {
+        const outer = { state: hooks.state, i: hooks.i, effects: hooks.effects };
+        hooks.state = [];
+        hooks.i = 0;
+        hooks.effects = [];
+        let inner;
+        try {
+            inner = node.type(node.props || {});
+        } finally {
+            hooks.state = outer.state;
+            hooks.i = outer.i;
+            hooks.effects = outer.effects;
+        }
+        return deep(inner, out);
+    }
+    out.push(node);
+    for (const c of node.children || []) deep(c, out);
+    deep(node.props && node.props.children, out);
+    return out;
+}
+
+/** The text a subtree reads as, for asserting on what a state actually says. */
+export function words(node) {
+    return deep(node)
+        .flatMap((n) => (n.children || []).filter((c) => typeof c === 'string'))
+        .join(' ');
+}

@@ -4969,6 +4969,35 @@ a.btn { text-decoration: none; }
 .ifs__tick--end { margin-right: 1px; }
 .ifs__tick--zero { font-weight: 700; }
 
+/* What is in the way, over the picture it is about. Translucent rather than
+   opaque so the trace shows through: watching it grow teeth as the main display
+   zooms in is what makes the rule obvious. */
+.ifs__veil {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: rgba(6, 9, 14, 0.78);
+    text-align: center;
+    line-height: 1.35;
+    cursor: default;
+}
+.ifs__veil-title {
+    font-size: calc(12px * var(--ui-scale));
+    font-weight: 600;
+    color: var(--text);
+}
+.ifs__veil-text {
+    max-width: 34ch;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
 /* Hover readout, the band spectrum's shape and placement rules. */
 .ifs__cross {
     position: absolute;

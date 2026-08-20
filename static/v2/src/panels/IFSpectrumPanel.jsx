@@ -16,11 +16,12 @@
 //
 // The one thing that is not free is *resolution*: the window is a few kHz of a
 // view whose bins are as wide as the main display's zoom makes them, so at full
-// zoom-out there is a fraction of one bin inside it and all this can honestly
-// draw is a smooth interpolation of a single measurement. The panel says so,
-// and offers the button that fixes it — which zooms the main view to this
-// window, at which point the two panes are showing the same thing at the same
-// resolution and this one is the ruler.
+// zoom-out there is a fraction of one bin inside it and all this could honestly
+// draw is a smooth interpolation of a single measurement. So it does not — it
+// draws the interpolation and puts a cover over it saying how much further the
+// main display has to zoom, with the button that does it. Same for a main view
+// panned off the dial, where there are no bins here at all. See paneState, and
+// the Veil at the foot of this file.
 //
 // `minimal` is the picture on its own — no readout, no controls. Everything
 // still applies, it is just not on show; the only text that survives is the line
@@ -41,10 +42,10 @@ import { throttle } from '../lib/throttle.js';
 import { clamp, formatFreqExact, formatHz, formatSpan } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import {
-    COARSE_BINS, IF_RATE_MAX, IF_RATE_MIN, IF_VIEWS, ZOOM_MIN, ZOOM_STEP,
-    binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels, formatBinWidth,
+    IF_RATE_MAX, IF_RATE_MIN, IF_VIEWS, ZOOM_MIN, ZOOM_STEP,
+    binWidthOf, binsInWindow, clampRate, clampZoom, createLevels, formatBinWidth,
     formatOffset, isZoomed, levelsOf, manualLevels, maxZoomFor, normaliseView, offsetTicks,
-    sliceToPixels, updateLevels, viewHas, windowFor,
+    paneState, sliceToPixels, updateLevels, viewHas, windowFor, zoomTargetSpan,
 } from '../lib/ifSpectrum.js';
 
 // The pane's proportions. Taller than the band panel's card because the window
@@ -118,7 +119,9 @@ export default function IFSpectrumPanel({ minimal }) {
 
     const binWidth = binWidthOf(view);
     const inWindow = binsInWindow(view, win);
-    const coverage = coverageOf(view, win);
+    // Whether the frames arriving can answer the question this pane asks — see
+    // paneState. Everything still draws when they cannot; the veil goes over it.
+    const state = paneState(view, tuning, running);
 
     // Everything the draw loop reads, on a mutable object rather than in state:
     // spectrum frames never reach React (see the note at the top of
@@ -515,24 +518,20 @@ export default function IFSpectrumPanel({ minimal }) {
     // The main view is zoomed in far enough that the fitted window already fills
     // it — there is no more spectrum to open into.
     const spanFixed = maxFactor <= ZOOM_MIN * 1.05;
-    const coarse = inWindow > 0 && inWindow < COARSE_BINS;
-    // Nothing at all, rather than merely a window whose edges run past what the
-    // server is sending. Partial coverage draws as a gap in the trace and needs
-    // no caption; an empty pane does, because otherwise it looks like a fault
-    // rather than a spectrum that has been panned away from the dial.
-    const blind = coverage <= 0.01;
 
     // What the button offers: the main view zoomed to this window, so both panes
     // show the same thing and this one becomes the ruler for it. A little wider
     // than the window so the window is not sitting on the edges of the served
     // view — the server snaps the request to its own ladder anyway.
     const zoomMain = useCallback(() => {
-        // Centred on the window rather than on the dial: the two are not the
-        // same once the mode puts the passband to one side, and centring on the
-        // dial would leave the far end of a USB window nearer the edge of the
-        // new view than the near end.
-        actions.setSpectrumView((win.lo + win.hi) / 2, win.span * 3);
-    }, [actions, win]);
+        // Centred on the *fitted* window rather than on the dial: the two are
+        // not the same once the mode puts the passband to one side, and
+        // centring on the dial would leave the far end of a USB window nearer
+        // the edge of the new view than the near end. The fit rather than the
+        // current window for the reason given at zoomTargetSpan.
+        const fit = windowFor(tuning, ZOOM_MIN);
+        actions.setSpectrumView((fit.lo + fit.hi) / 2, zoomTargetSpan(view, tuning));
+    }, [actions, tuning, view]);
 
     return (
         <div className="stack">
@@ -615,7 +614,14 @@ export default function IFSpectrumPanel({ minimal }) {
                     </button>
                 )}
 
-                {at && (
+                {/* Over the picture rather than under it, and last so it is
+                    over the readout too. The chart still draws underneath: at a
+                    wide zoom that is a smooth line, and watching it grow teeth
+                    as the main display zooms in says what the words mean better
+                    than the words do. */}
+                {!state.ok && <Veil state={state} inWindow={inWindow} onZoom={zoomMain} onCentre={() => actions.centerOnTuned()} />}
+
+                {at && state.ok && (
                     <>
                         <span className="ifs__cross" style={{ left: `${at.xPct}%` }} />
                         <span
@@ -646,30 +652,6 @@ export default function IFSpectrumPanel({ minimal }) {
                 </div>
             )}
 
-            {/* Why the picture is empty, and the one action that answers it.
-                These two survive the minimal view — a blank pane that says
-                nothing reads as a fault, and both of them are one click from
-                being fixed. The resolution hint below does not: it explains a
-                picture that is drawing perfectly well, only smoothly. */}
-            {!running && <div className="note note--tight">Start the receiver to see the IF.</div>}
-            {running && blind && (
-                <div className="note note--tight">
-                    The dial is outside the spectrum view.
-                    <Button size="sm" variant="ghost" onClick={() => actions.centerOnTuned()}>
-                        Bring it back
-                    </Button>
-                </div>
-            )}
-            {!minimal && running && !blind && coarse && (
-                <div className="note note--tight">
-                    {inWindow < 1
-                        ? 'Less than one spectrum bin lands in this window.'
-                        : `Only ${Math.round(inWindow)} bins land in this window.`}
-                    <Button size="sm" variant="ghost" onClick={zoomMain}>
-                        Zoom the main view here
-                    </Button>
-                </div>
-            )}
 
             {/* The same value the wheel and the pinch move, so the control and
                 the gesture are one setting rather than two. Logarithmic,
@@ -746,6 +728,64 @@ export default function IFSpectrumPanel({ minimal }) {
                     label="Wheel and drag"
                     title="Wheel and pinch set the span, and dragging the picture tunes. Off gives the wheel back to the dock column it sits in — the slider above and a click still work"
                 />
+            )}
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What is in the way
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The cover that goes over the picture when the frames cannot answer for it.
+ *
+ * On the chart rather than under it, for three reasons. It is *about* the
+ * picture, and a caption under a picture that is still being drawn reads as a
+ * footnote rather than as "do not believe this". It survives the minimal view,
+ * where there is deliberately nothing under the chart at all. And it leaves the
+ * trace visible underneath, so zooming the main display in shows the smooth line
+ * growing teeth and the cover lifting at the moment it becomes worth reading —
+ * which teaches the rule in one gesture.
+ *
+ * One line, one action. Every case here is something the operator can fix from
+ * this panel, except being stopped, which is not this panel's to fix.
+ */
+function Veil({ state, inWindow, onZoom, onCentre }) {
+    let title = '';
+    let detail = null;
+    let action = null;
+
+    if (state.kind === 'stopped') {
+        title = 'Receiver stopped';
+        detail = 'Start it to see the IF.';
+    } else if (state.kind === 'waiting') {
+        title = 'Waiting for the spectrum';
+    } else if (state.kind === 'offdial') {
+        title = 'No spectrum at the dial';
+        detail = 'The main view has been panned off it, so there are no bins here.';
+        action = { label: 'Show the dial', onClick: onCentre };
+    } else {
+        title = 'Zoom the main spectrum in';
+        // The bin count is the reason, in the terms the pane is drawn in: at a
+        // wide zoom the whole window is a fraction of one measurement, and that
+        // says it better than a step count does.
+        detail = inWindow < 1
+            ? `The whole window is less than one spectrum bin — ${state.short} more zoom `
+                + `${state.short === 1 ? 'step' : 'steps'} to go.`
+            : `Only ${Math.round(inWindow)} bins land in this window — ${state.short} more zoom `
+                + `${state.short === 1 ? 'step' : 'steps'} to go.`;
+        action = { label: 'Zoom here', onClick: onZoom };
+    }
+
+    return (
+        <div className="ifs__veil">
+            <div className="ifs__veil-title">{title}</div>
+            {detail && <div className="ifs__veil-text">{detail}</div>}
+            {action && (
+                <Button size="sm" variant="primary" onClick={action.onClick}>
+                    {action.label}
+                </Button>
             )}
         </div>
     );

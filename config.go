@@ -356,7 +356,7 @@ type ServerConfig struct {
 	MaxIdleTime                     int                  `yaml:"max_idle_time"`             // Maximum time a user can be idle in seconds (0 = unlimited)
 	SpectrumOnlyTimeout             int                  `yaml:"spectrum_only_timeout"`     // Seconds before a spectrum-only session (no audio) is kicked (0 = disabled, default: 60)
 	CmdRateLimit                    int                  `yaml:"cmd_rate_limit"`            // Commands per second per UUID per channel (0 = unlimited)
-	ConnRateLimit                   int                  `yaml:"conn_rate_limit"`           // WebSocket connections per second per IP (0 = unlimited)
+	ConnRateLimit                   int                  `yaml:"conn_rate_limit"`           // WebSocket connections per second per IP (0 = default 4, minimum 4, negative = unlimited)
 	SessionsPerMinute               int                  `yaml:"sessions_per_minute"`       // /connection endpoint requests per minute per IP (0 = unlimited)
 	SessionCreateRateLimit          int                  `yaml:"session_create_rate_limit"` // New sessions per minute per user (UUID), separately for audio and spectrum (0 = default 6, negative = unlimited)
 	SessionCreateBurst              int                  `yaml:"session_create_burst"`      // New sessions allowed back-to-back before the per-minute rate bites (0 = default 3)
@@ -1224,8 +1224,26 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Server.CmdRateLimit < 50 {
 		config.Server.CmdRateLimit = 50 // Minimum 50 commands/sec per channel (required for smooth spectrum dragging)
 	}
-	if config.Server.ConnRateLimit == 0 {
-		config.Server.ConnRateLimit = 2 // Default 2 connections/sec per IP
+	// A floor rather than only a default. A page load opens the audio and the
+	// spectrum socket microseconds apart, both are counted here, and this
+	// bucket's burst capacity *is* its rate (NewRateLimiter sets maxTokens =
+	// rate). So a limit below 4 leaves no headroom for an ordinary page load,
+	// let alone a reload landing on the heels of the last one, and what it
+	// refuses is a visitor's waterfall rather than anything abusive — the
+	// spectrum socket connects second, so it is always the one that loses.
+	//
+	// Sustained churn is caught by session_create_rate_limit, which counts
+	// session creations per UUID and is the right tool for it; this one is a
+	// cheap front gate on the upgrade itself.
+	//
+	// 0 means "not specified" and takes the default; a negative value disables
+	// the limit outright, as it does for session_create_rate_limit.
+	if config.Server.ConnRateLimit >= 0 && config.Server.ConnRateLimit < 4 {
+		if config.Server.ConnRateLimit > 0 {
+			log.Printf("Warning: server.conn_rate_limit %d is below the minimum of 4, raising it: a page load opens two websockets at once",
+				config.Server.ConnRateLimit)
+		}
+		config.Server.ConnRateLimit = 4 // Default and minimum: 4 connections/sec per IP
 	}
 	if config.Server.SessionsPerMinute == 0 {
 		config.Server.SessionsPerMinute = 10 // Default 10 /connection requests per minute per IP

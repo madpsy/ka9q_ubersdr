@@ -247,9 +247,14 @@ server:
   # WebSocket connection rate limit per IP (connections per second)
   # This limits how many new WebSocket connections can be established from a single IP per second
   # Helps prevent connection flooding and DoS attacks
-  # Set to 0 to disable rate limiting
-  # Recommended: 1 (allows normal reconnections while preventing abuse)
-  conn_rate_limit: 1
+  # Minimum 4, and values from 1 to 3 are raised to 4 automatically.
+  # A page load opens the audio and the spectrum socket at the same instant and both
+  # are counted here, so a lower limit refuses an ordinary visitor's waterfall rather
+  # than an abuser. Sustained reconnect churn is caught by session_create_rate_limit
+  # below, which is the better tool for it.
+  # Set to a negative value to disable (0 is treated as "not set" and becomes 4).
+  # Recommended: 4 (allows normal reconnections while preventing abuse)
+  conn_rate_limit: 4
   # /connection endpoint rate limit per IP (requests per minute)
   # This limits how many /connection pre-flight checks can be made from a single IP per minute
   # Helps prevent abuse of the connection check endpoint
@@ -610,8 +615,8 @@ server:
   # the cpu_temperature component is marked unhealthy and any matching
   # system_health notification rule fires (see config/notifications.yaml).
   # On systems with no readable thermal sensor the probe is silently skipped.
-  # Default: 80
-  cpu_temp_threshold_c: 80
+  # Default: 95
+  cpu_temp_threshold_c: 95
 
 # Audio settings
 audio:

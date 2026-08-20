@@ -37,7 +37,16 @@ window.React = {
         if (type === undefined || type === null) {
             throw new Error('createElement called with an undefined type — a component is missing from the imports');
         }
-        return { type, props: props || {}, children };
+        // Children go into props as well, because that is where React puts them
+        // and therefore where a component reads them from. Without this a
+        // component expanded by deep() renders with no children at all — a
+        // <Button>Resume</Button> comes out as an empty button, which looks like
+        // the label having been forgotten rather than like the stub having
+        // dropped it.
+        const p = { ...(props || {}) };
+        if (children.length === 1) [p.children] = children;
+        else if (children.length > 1) p.children = children;
+        return { type, props: p, children };
     },
     memo: (f) => f,
     useCallback: (fn) => fn,
@@ -90,6 +99,16 @@ export function reset() {
     hooks.effects = [];
 }
 
+// An element's children, from whichever place they were given. The two are the
+// same objects — createElement copies them into props — so exactly one of them
+// is followed, or every element below this one would be visited twice and every
+// count taken from a tree would be double.
+function kids(node) {
+    if (node.children && node.children.length) return node.children;
+    const c = node.props && node.props.children;
+    return c == null ? [] : [c];
+}
+
 /** Every element in a tree, depth first — for asserting what was drawn. */
 export function walk(node, out = []) {
     if (!node || typeof node !== 'object') return out;
@@ -98,8 +117,7 @@ export function walk(node, out = []) {
         return out;
     }
     out.push(node);
-    for (const c of node.children || []) walk(c, out);
-    walk(node.props && node.props.children, out);
+    for (const c of kids(node)) walk(c, out);
     return out;
 }
 
@@ -140,14 +158,13 @@ export function deep(node, out = []) {
         return deep(inner, out);
     }
     out.push(node);
-    for (const c of node.children || []) deep(c, out);
-    deep(node.props && node.props.children, out);
+    for (const c of kids(node)) deep(c, out);
     return out;
 }
 
 /** The text a subtree reads as, for asserting on what a state actually says. */
 export function words(node) {
     return deep(node)
-        .flatMap((n) => (n.children || []).filter((c) => typeof c === 'string'))
+        .flatMap((n) => kids(n).filter((c) => typeof c === 'string'))
         .join(' ');
 }

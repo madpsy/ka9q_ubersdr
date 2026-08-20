@@ -9,6 +9,7 @@ const assert = require('assert');
 const {
     FIT_MARGIN, IF_VIEWS, IF_VIEW_DEFAULT, MIN_SPAN_HZ, MIN_ZOOM_STEPS, OFFSET_LABEL_PX,
     ZOOM_MAX, ZOOM_MIN,
+    MIN_COVERAGE,
     binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels, dialCovered,
     paneState, zoomStepsOf, zoomTargetSpan,
     fitWindow, formatBinWidth, formatOffset, isZoomed, levelsOf, manualLevels,
@@ -474,6 +475,42 @@ t('...and until the spectrum actually has bins at the dial', () => {
     assert.ok(dialCovered(at(20), USB.frequency));
 });
 
+t('...and until it reaches the whole window, not just the dial', () => {
+    // The main display only recentres when the passband would leave the screen,
+    // so it sits panned with the dial near an edge as a matter of course — and
+    // then half the window has no bins. Drawn, that is not a narrower picture:
+    // the shading and the ruler still describe the whole window, so the hole
+    // reads as a dead band.
+    const dial = USB.frequency;
+    const panned = (offset) => at(20, 1024, dial - 10240 + offset);
+    const winIn = (cfg) => windowFor(USB, clampZoom(1, maxZoomFor(cfg, USB)));
+
+    for (const [offset, kind] of [[0, 'partial'], [2000, 'partial'], [3000, 'partial'], [5000, 'ok']]) {
+        const cfg = panned(offset);
+        assert.strictEqual(paneState(cfg, USB, true, winIn(cfg)).kind, kind,
+            `view centred ${offset - 10240} Hz from the dial`);
+    }
+
+    // A hair's overhang is not worth a cover over the whole panel — see
+    // MIN_COVERAGE — so the threshold is a proportion, not exactness.
+    const nearly = { ...at(20), span: 20 * 1024 };
+    const win = windowFor(USB, 1);
+    assert.ok(coverageOf(nearly, win) === 1 && paneState(nearly, USB, true, win).ok);
+    assert.ok(MIN_COVERAGE > 0.9 && MIN_COVERAGE < 1);
+
+    // Which way out depends on whether the view could hold the window at all.
+    // Recentring is enough when it could...
+    const wide = panned(0);
+    assert.strictEqual(paneState(wide, USB, true, winIn(wide)).canCentre, true);
+    // ...and is no help at maximum zoom on a filter wider than the whole view,
+    // where the only answer is to widen it.
+    const fm = { ...USB, bandwidthLow: -8000, bandwidthHigh: 8000 };
+    const deep = at(10, 1024);
+    const st = paneState(deep, fm, true, windowFor(fm, clampZoom(1, maxZoomFor(deep, fm))));
+    assert.strictEqual(st.kind, 'partial');
+    assert.strictEqual(st.canCentre, false, 'a 20 kHz window cannot be centred into a 10 kHz view');
+});
+
 t('what is in the way is reported in the order it has to be fixed', () => {
     // A stopped receiver is not a zoom problem, and a spectrum that has not
     // reported its geometry yet is not a pan problem.
@@ -484,6 +521,28 @@ t('what is in the way is reported in the order it has to be fixed', () => {
     // view parked on 20 MHz is too coarse *and* nowhere near the dial, and
     // zooming it in would only make the second worse.
     assert.strictEqual(paneState(at(1000, 1024, 20e6), USB, true).kind, 'offdial');
+    // Same reasoning one step down: whether the data exists comes before whether
+    // it is fine enough, because zooming in on a window that is already half off
+    // the view only takes more of it away.
+    const halfOff = at(300, 1024, USB.frequency - 300 * 512);
+    const win = windowFor(USB, 1);
+    assert.ok(coverageOf(halfOff, win) < 1 && zoomStepsOf(halfOff) < MIN_ZOOM_STEPS,
+        'this fixture is meant to be both');
+    assert.strictEqual(paneState(halfOff, USB, true, win).kind, 'partial');
+
+    // With no window given there is nothing to judge coverage against, and the
+    // pane falls back to the questions that do not need one.
+    assert.strictEqual(paneState(at(20), USB, true).kind, 'ok');
+
+    // A paused spectrum outranks everything about the data, because none of it
+    // is arriving — but not a stopped receiver, where resuming a socket would be
+    // a button that appears to do nothing.
+    assert.strictEqual(paneState(at(20), USB, true, windowFor(USB, 1), true).kind, 'paused');
+    assert.strictEqual(paneState(at(29296.875), USB, true, windowFor(USB, 1), true).kind, 'paused');
+    assert.strictEqual(paneState(null, USB, true, null, true).kind, 'paused');
+    assert.strictEqual(paneState(at(20), USB, false, windowFor(USB, 1), true).kind, 'stopped');
+    // Absent means running, so every existing call site keeps its answer.
+    assert.strictEqual(paneState(at(20), USB, true, windowFor(USB, 1)).kind, 'ok');
 });
 
 t('the zoom button lands somewhere that actually clears the gate', () => {

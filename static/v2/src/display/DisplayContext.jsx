@@ -274,6 +274,18 @@ export const DEFAULTS = {
     // win. Off gives the wheel back to the column; the span slider and
     // click-to-tune still work.
     ifGestures: true,
+    // Whether a plain click on the picture retunes.
+    //
+    // Off, unlike everywhere else in this interface, and the difference is what
+    // this pane is for. The main spectrum is a map you click to travel across;
+    // this one is a magnifier held over the signal you have already arrived at,
+    // and every reason to point at it — reading an offset off the ruler, finding
+    // the edge of an interfering carrier, checking where the passband sits — is
+    // a reason to *look*, not to move. A click that tuned by a few hundred hertz
+    // while you were studying a signal is a mistake you have to notice before
+    // you can undo it. Dragging stays live either way: that one cannot be done
+    // by accident, and it is the best fine-tuning control in the interface.
+    ifClickTune: false,
     ifRate: 20,             // committed rows a second, as the main waterfall's
     // Auto by default and for the same reason the audio scope's is: it is right
     // until the question becomes "how strong is this", which is what an absolute

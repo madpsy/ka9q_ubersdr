@@ -219,16 +219,27 @@ export function binsInWindow(cfg, win) {
 //     the full-span view is where a filter's worth of window starts holding a
 //     dozen or more bins, which is where shape appears.
 //
-//   * The dial has to be inside the served view. It usually is, but the main
-//     display only recentres when the passband would leave the screen, so a pan
-//     can put the dial off the end of what the server is sending — and then
-//     there are no bins for this window at all.
+//   * The served view has to *reach the whole window*. The main display only
+//     recentres when the passband would leave the screen, so it is routinely
+//     panned so far that the dial is near one edge — and then the window runs
+//     off the end of what the server is sending. Half a picture with a hole in
+//     the other half is not a narrower picture, it is a misleading one: the
+//     shading and the ruler still describe the whole window, so the gap reads as
+//     a dead band rather than as an absence of data. Losing the dial itself is
+//     the same fault at its limit, and is called out separately only because
+//     what to do about it is different.
 //
-// Failing either, the pane draws what it has and says so over the top rather
-// than presenting an interpolation as a measurement. See the veil in
-// IFSpectrumPanel.
+// Failing any of them, the pane draws what it has and says so over the top
+// rather than presenting an interpolation, or a hole, as a measurement. See the
+// veil in IFSpectrumPanel.
 
 export const MIN_ZOOM_STEPS = 7;
+
+// How much of the window may be missing before it is worth saying so. A hair's
+// overhang is a pixel at the edge, and snapping a cover over the whole panel for
+// it — every time a tune walks the window towards the edge of the view — would
+// be worse than the sliver. A percent of an SSB window is about 34 Hz.
+export const MIN_COVERAGE = 0.99;
 
 // The band the full-span view covers, for working out what a step is when the
 // server has not yet said what its own default bin width is.
@@ -263,22 +274,55 @@ export function dialCovered(cfg, dial) {
 }
 
 /**
- * What the pane can do right now: `{ ok, kind, steps, short }`.
+ * What the pane can do right now: `{ ok, kind, steps, short, cover, canCentre }`.
  *
- * `kind` is 'ok', or the one thing standing in the way — 'stopped', 'waiting',
- * 'offdial', 'coarse'. Ordered by what has to be true first, so the panel only
- * ever has one thing to say and it is the one the operator can act on.
+ * `kind` is 'ok', or the one thing standing in the way — 'stopped', 'paused',
+ * 'waiting', 'offdial', 'partial', 'coarse'. Ordered by what has to be true
+ * first, so the panel only ever has one thing to say and it is the one the
+ * operator can act on: whether the data exists comes before whether it is fine
+ * enough, which is why 'partial' is ahead of 'coarse'. Zooming in on a window
+ * that is already half off the view only takes more of it away.
+ *
+ * A stopped receiver outranks a paused spectrum, because resuming a socket for a
+ * receiver that is not running would be a button that appears to do nothing.
+ *
+ * `canCentre` says which way out of a coverage problem applies: bringing the
+ * main view back onto the dial is enough when its span could hold the window at
+ * all, and when it could not the only answer is to widen it.
+ *
+ * `paused` is last in the argument list and optional, so the three questions
+ * about the *data* stay together at the front. It is the spectrum socket's own
+ * flag — see lib/spectrumPause.js — not anything this module can work out.
  */
-export function paneState(cfg, tuning, running) {
-    if (!running) return { ok: false, kind: 'stopped', steps: 0, short: 0 };
-    if (!cfg || !(cfg.span > 0)) return { ok: false, kind: 'waiting', steps: 0, short: 0 };
+export function paneState(cfg, tuning, running, win, paused) {
+    const none = { ok: false, steps: 0, short: 0, cover: 0, canCentre: false };
+    if (!running) return { ...none, kind: 'stopped' };
+    if (paused) return { ...none, kind: 'paused' };
+    if (!cfg || !(cfg.span > 0)) return { ...none, kind: 'waiting' };
+
     const dial = Number(tuning && tuning.frequency) || 0;
-    if (!dialCovered(cfg, dial)) return { ok: false, kind: 'offdial', steps: 0, short: 0 };
+    if (!dialCovered(cfg, dial)) return { ...none, kind: 'offdial' };
+
+    const cover = win ? coverageOf(cfg, win) : 1;
+    if (cover < MIN_COVERAGE) {
+        // Centring on the dial covers the window only if the view is wide enough
+        // to hold it from there — and the window is not centred on the dial, so
+        // it is the further of the two edges that decides.
+        const reach = Math.max(-win.offLo, win.offHi);
+        return {
+            ...none, kind: 'partial', cover, canCentre: cfg.span / 2 >= reach,
+        };
+    }
+
     const steps = zoomStepsOf(cfg);
     if (steps < MIN_ZOOM_STEPS - 1e-9) {
-        return { ok: false, kind: 'coarse', steps, short: Math.ceil(MIN_ZOOM_STEPS - steps) };
+        return {
+            ...none, kind: 'coarse', steps, short: Math.ceil(MIN_ZOOM_STEPS - steps), cover,
+        };
     }
-    return { ok: true, kind: 'ok', steps, short: 0 };
+    return {
+        ok: true, kind: 'ok', steps, short: 0, cover, canCentre: true,
+    };
 }
 
 /**

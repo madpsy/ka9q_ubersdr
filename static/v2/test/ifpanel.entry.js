@@ -9,5 +9,6 @@ import IFSpectrumPanel from '../src/panels/IFSpectrumPanel.jsx';
 import { PANEL_BY_ID } from '../src/panels/registry.jsx';
 import { DEFAULTS } from '../src/display/DisplayContext.jsx';
 import { GROUPS } from '../src/panels/groups.jsx';
+import { setSpectrumPaused, spectrumPaused } from '../src/lib/spectrumPause.js';
 
-module.exports = { deep, render, reset, walk, words, IFSpectrumPanel, PANEL_BY_ID, DEFAULTS, GROUPS };
+module.exports = { deep, render, reset, walk, words, setSpectrumPaused, spectrumPaused, IFSpectrumPanel, PANEL_BY_ID, DEFAULTS, GROUPS };

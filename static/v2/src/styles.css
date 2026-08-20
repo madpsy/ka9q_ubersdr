@@ -5043,6 +5043,15 @@ a.btn { text-decoration: none; }
     font-size: calc(11px * var(--ui-scale));
     color: var(--text-faint);
 }
+/* The two pointer switches on one row. Wraps rather than squeezing: in a narrow
+   dock two labels side by side would otherwise ellipse to nothing. */
+.ifs__switches {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+}
+
 .ifs__dial { font-family: var(--mono); color: var(--text-dim); font-weight: 600; }
 .ifs__span { font-family: var(--mono); }
 /* What the window is costing in resolution — the one number that decides

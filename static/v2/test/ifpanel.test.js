@@ -31,7 +31,8 @@ globalThis.removeEventListener = (name) => {
 };
 
 const {
-    deep, render, reset, walk, words, IFSpectrumPanel, PANEL_BY_ID, DEFAULTS, GROUPS,
+    deep, render, reset, walk, words, setSpectrumPaused, spectrumPaused,
+    IFSpectrumPanel, PANEL_BY_ID, DEFAULTS, GROUPS,
 } = require('./.build/ifpanel.cjs');
 
 let pass = 0;
@@ -134,6 +135,37 @@ t('everything standing in the way is said on the picture, not under it', () => {
             defaultBinCount: 1024, defaultBinBandwidth: 30e6 / 1024,
         },
     })), /zoom/i);
+    // Zoomed in plenty and the dial is on screen, but panned so far that the
+    // window runs off the end of the view — half a picture with a hole in the
+    // other half, which the shading and the ruler would describe as a dead band.
+    assert.match(words(veil({
+        view: {
+            centerFreq: 14_200_000 - 1024 * 10, span: 1024 * 20, binCount: 1024, binBandwidth: 20,
+            defaultBinCount: 1024, defaultBinBandwidth: 30e6 / 1024,
+        },
+    })), /off the view/i);
+
+    // A paused spectrum is not a broken one, and the way out is offered here as
+    // well as on the main display — a listener who opened this panel should not
+    // have to go and find the other one.
+    setSpectrumPaused(true);
+    try {
+        assert.ok(spectrumPaused(), 'the pause flag did not take');
+        const v = veil({});
+        assert.match(words(v), /paused/i);
+        assert.match(words(v), /resume/i);
+        // ...and it outranks everything about the data: none of it is arriving.
+        assert.match(words(veil({
+            view: {
+                centerFreq: 14_200_000, span: 30e6, binCount: 1024, binBandwidth: 30e6 / 1024,
+                defaultBinCount: 1024, defaultBinBandwidth: 30e6 / 1024,
+            },
+        })), /paused/i);
+        // ...but not a stopped receiver, where resuming a socket would do nothing.
+        assert.match(words(veil({ running: false })), /stopped/i);
+    } finally {
+        setSpectrumPaused(false);
+    }
 
     // ...and it covers the minimal view too, which is the only text that view
     // has: a blank pane that says nothing reads as a fault.
@@ -229,6 +261,45 @@ t('the minimal view is the picture and nothing under it', () => {
     // ...in every state, because what would otherwise be said there is said on
     // the picture instead — see the veil.
     assert.strictEqual(text({ minimal: true }, { running: false }).length, 0);
+});
+
+t('a click only tunes when it has been asked to', () => {
+    const clickAt = (over) => {
+        reset();
+        const tuned = [];
+        const ctx = context({ ...over, actions: { ...context().actions, setFrequency: (hz) => tuned.push(hz) } });
+        const { tree } = render(IFSpectrumPanel, {}, ctx);
+        const chart = walk(tree).find((n) => String(n.props.className || '').startsWith('ifs__chart'));
+        // There is no layout in the shim, and the handler measures the chart
+        // before it does anything. The ref is right there in the props, so give
+        // it a box to measure — otherwise this test passes for the wrong reason.
+        chart.props.ref.current = {
+            getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }),
+        };
+        chart.props.onClick({ clientX: 100, target: {} });
+        return tuned;
+    };
+    // Off by default — this pane is for looking at the signal you are on.
+    assert.strictEqual(DEFAULTS.ifClickTune, false);
+    assert.deepStrictEqual(clickAt({}), [], 'a click retuned with click-tune off');
+    // ...and on, it does what it says.
+    const tuned = clickAt({ ifClickTune: true });
+    assert.strictEqual(tuned.length, 1, 'a click did not tune with click-tune on');
+    // Halfway across a USB window, which is above the dial rather than on it.
+    assert.ok(Number.isFinite(tuned[0]) && Math.abs(tuned[0] - 14_200_000) < 5000, tuned[0]);
+});
+
+t('the chart says what it will do, and never promises what it will not', () => {
+    const hint = (over) => {
+        reset();
+        const { tree } = render(IFSpectrumPanel, {}, context(over));
+        return walk(tree).find((n) => String(n.props.className || '').startsWith('ifs__chart')).props.title;
+    };
+    assert.match(hint({ ifGestures: true, ifClickTune: true }), /click or drag/i);
+    assert.match(hint({ ifGestures: true, ifClickTune: false }), /^drag to tune/i);
+    assert.match(hint({ ifGestures: false, ifClickTune: true }), /^click to tune/i);
+    // Both off, the chart is a readout — a tooltip offering to tune would be a lie.
+    assert.doesNotMatch(hint({ ifGestures: false, ifClickTune: false }), /tune/i);
 });
 
 t('the default view is the one the panel is designed around', () => {

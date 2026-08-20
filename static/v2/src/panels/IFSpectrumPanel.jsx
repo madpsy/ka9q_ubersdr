@@ -38,6 +38,9 @@ import { RING_BG, RING_PAD, ringSlices, smoothInterval } from '../lib/waterfallR
 import { retentionFor } from '../lib/timeConstant.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
 import { haptic } from '../lib/haptics.js';
+import {
+    onSpectrumPaused, resumeSpectrum, setSpectrumPaused, spectrumPaused,
+} from '../lib/spectrumPause.js';
 import { throttle } from '../lib/throttle.js';
 import { clamp, formatFreqExact, formatHz, formatSpan } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
@@ -109,6 +112,14 @@ export default function IFSpectrumPanel({ minimal }) {
 
     const [size, setSize] = useState({ w: 0, specH: 0, wfH: 0 });
     const [at, setAt] = useState(null);          // the hover readout
+    // The spectrum socket asleep — the idle saving, or the toolbar's toggle.
+    // Mirrored into state because it changes what this draws: no frames arrive,
+    // so the picture is whatever last landed, and saying so is the difference
+    // between a paused display and a broken one. The main display carries the
+    // same overlay; this offers the same way out of it, because a listener who
+    // opened this panel should not have to find the other one to use it.
+    const [paused, setPaused] = useState(spectrumPaused);
+    useEffect(() => onSpectrumPaused(setPaused), []);
 
     // The window, recomputed whenever the dial or the filter moves. Memoised
     // only so the effects below can depend on its span without re-running on
@@ -121,7 +132,7 @@ export default function IFSpectrumPanel({ minimal }) {
     const inWindow = binsInWindow(view, win);
     // Whether the frames arriving can answer the question this pane asks — see
     // paneState. Everything still draws when they cannot; the veil goes over it.
-    const state = paneState(view, tuning, running);
+    const state = paneState(view, tuning, running, win, paused);
 
     // Everything the draw loop reads, on a mutable object rather than in state:
     // spectrum frames never reach React (see the note at the top of
@@ -354,6 +365,9 @@ export default function IFSpectrumPanel({ minimal }) {
     // over it has two plausible meanings, and somebody who would rather scroll
     // the column should be able to say so.
     const gestures = display.ifGestures !== false;
+    // Off by default — see the note in DisplayContext. The drag is unaffected:
+    // that one cannot be done by accident.
+    const clickTune = !!display.ifClickTune;
     const zoomed = isZoomed(factor);
 
     // maxFactor through a ref for the same reason the zoom itself is: the
@@ -499,6 +513,7 @@ export default function IFSpectrumPanel({ minimal }) {
     // *corrected*, and a 500 Hz grid is wider than half of this window.
     const onClick = useCallback((e) => {
         if (st.moved) { st.moved = false; return; }
+        if (!clickTune) return;
         if (e.target.closest && e.target.closest('button')) return;
         const wrap = wrapRef.current;
         const r = wrap ? wrap.getBoundingClientRect() : null;
@@ -506,7 +521,7 @@ export default function IFSpectrumPanel({ minimal }) {
         const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
         actions.setFrequency(Math.round(win.lo + frac * win.span));
         haptic('tune', 'spectrum');
-    }, [actions, win, st]);
+    }, [actions, clickTune, win, st]);
 
     // ── Controls ─────────────────────────────────────────────────────────────
     const rate = clampRate(display.ifRate);
@@ -523,6 +538,11 @@ export default function IFSpectrumPanel({ minimal }) {
     // show the same thing and this one becomes the ruler for it. A little wider
     // than the window so the window is not sitting on the edges of the served
     // view — the server snaps the request to its own ladder anyway.
+    const resume = useCallback(() => {
+        resumeSpectrum(spectrumConn);
+        setSpectrumPaused(false);
+    }, [spectrumConn]);
+
     const zoomMain = useCallback(() => {
         // Centred on the *fitted* window rather than on the dial: the two are
         // not the same once the mode puts the passband to one side, and
@@ -555,9 +575,7 @@ export default function IFSpectrumPanel({ minimal }) {
                 onPointerLeave={leave}
                 onClick={onClick}
                 onDoubleClick={() => setFactor(ZOOM_MIN)}
-                title={gestures
-                    ? 'Click or drag to tune. Wheel or pinch to widen the window; double-click to fit it to the filter'
-                    : 'Click to tune here'}
+                title={chartHint(gestures, clickTune)}
             >
                 {showTrace && <canvas className="ifs__spec" ref={specRef} />}
 
@@ -619,7 +637,15 @@ export default function IFSpectrumPanel({ minimal }) {
                     wide zoom that is a smooth line, and watching it grow teeth
                     as the main display zooms in says what the words mean better
                     than the words do. */}
-                {!state.ok && <Veil state={state} inWindow={inWindow} onZoom={zoomMain} onCentre={() => actions.centerOnTuned()} />}
+                {!state.ok && (
+                    <Veil
+                        state={state}
+                        inWindow={inWindow}
+                        onZoom={zoomMain}
+                        onCentre={() => actions.centerOnTuned()}
+                        onResume={resume}
+                    />
+                )}
 
                 {at && state.ok && (
                     <>
@@ -721,16 +747,40 @@ export default function IFSpectrumPanel({ minimal }) {
                 </Field>
             )}
 
+            {/* The two ways the picture answers a pointer, side by side because
+                they are the same kind of choice: what a gesture over the chart
+                is allowed to do to the receiver. */}
             {!minimal && (
-                <Switch
-                    checked={gestures}
-                    onChange={(v) => display.set({ ifGestures: v })}
-                    label="Wheel and drag"
-                    title="Wheel and pinch set the span, and dragging the picture tunes. Off gives the wheel back to the dock column it sits in — the slider above and a click still work"
-                />
+                <div className="ifs__switches">
+                    <Switch
+                        checked={gestures}
+                        onChange={(v) => display.set({ ifGestures: v })}
+                        label="Drag"
+                        title="Dragging the picture tunes, and the wheel or a pinch sets the span. Off gives the wheel back to the dock column it sits in — the span slider above still works"
+                    />
+                    <Switch
+                        checked={clickTune}
+                        onChange={(v) => display.set({ ifClickTune: v })}
+                        label="Click tune"
+                        title="A click on the picture tunes to it. Off by default: this pane is for looking at the signal you are already on, and most reasons to point at it are reasons to read it rather than to move"
+                    />
+                </div>
             )}
         </div>
     );
+}
+
+// What the picture will do if you touch it, in the order you would try it.
+// Assembled rather than written out four times over: with both switches off the
+// chart is a readout, and a tooltip promising to tune would be wrong.
+function chartHint(gestures, clickTune) {
+    const parts = [];
+    if (gestures && clickTune) parts.push('Click or drag to tune.');
+    else if (gestures) parts.push('Drag to tune.');
+    else if (clickTune) parts.push('Click to tune here.');
+    if (gestures) parts.push('Wheel or pinch to widen the window; double-click to fit it to the filter.');
+    if (!parts.length) parts.push('Point at it to read the offset.');
+    return parts.join(' ');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -751,7 +801,7 @@ export default function IFSpectrumPanel({ minimal }) {
  * One line, one action. Every case here is something the operator can fix from
  * this panel, except being stopped, which is not this panel's to fix.
  */
-function Veil({ state, inWindow, onZoom, onCentre }) {
+function Veil({ state, inWindow, onZoom, onCentre, onResume }) {
     let title = '';
     let detail = null;
     let action = null;
@@ -759,12 +809,31 @@ function Veil({ state, inWindow, onZoom, onCentre }) {
     if (state.kind === 'stopped') {
         title = 'Receiver stopped';
         detail = 'Start it to see the IF.';
+    } else if (state.kind === 'paused') {
+        title = 'Spectrum paused';
+        // The same wording the main display's overlay uses, and it is the
+        // useful half: what has stopped is one socket, and the audio, the
+        // decoders and the session are all still running.
+        detail = 'The audio carries on. This pane draws the spectrum\u2019s own frames, so it has none.';
+        action = { label: 'Resume', onClick: onResume, icon: <Icon.Play size={13} /> };
     } else if (state.kind === 'waiting') {
         title = 'Waiting for the spectrum';
     } else if (state.kind === 'offdial') {
         title = 'No spectrum at the dial';
         detail = 'The main view has been panned off it, so there are no bins here.';
         action = { label: 'Show the dial', onClick: onCentre };
+    } else if (state.kind === 'partial') {
+        title = 'Part of this window is off the view';
+        // As a proportion, because that is what you can see is wrong: the
+        // shading and the ruler describe the whole window either way, so a gap
+        // in it reads as a dead band rather than as missing data.
+        detail = `The main spectrum reaches ${Math.round(state.cover * 100)}% of it — the rest `
+            + 'has no bins.';
+        // Recentring is the gentle fix and is enough whenever the view is wide
+        // enough to hold the window at all. When it is not, only widening it is.
+        action = state.canCentre
+            ? { label: 'Centre the view', onClick: onCentre }
+            : { label: 'Zoom here', onClick: onZoom };
     } else {
         title = 'Zoom the main spectrum in';
         // The bin count is the reason, in the terms the pane is drawn in: at a
@@ -783,7 +852,7 @@ function Veil({ state, inWindow, onZoom, onCentre }) {
             <div className="ifs__veil-title">{title}</div>
             {detail && <div className="ifs__veil-text">{detail}</div>}
             {action && (
-                <Button size="sm" variant="primary" onClick={action.onClick}>
+                <Button size="sm" variant="primary" icon={action.icon} onClick={action.onClick}>
                     {action.label}
                 </Button>
             )}

@@ -306,6 +306,8 @@ esbuild ../src/lib/bandConditions.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandconditions.cjs --log-level=warning
 esbuild bandnoise.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandnoise.cjs --log-level=warning
+esbuild noisetrend.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/noisetrend.cjs --log-level=warning
 esbuild bandstats.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandstats.cjs --log-level=warning
 esbuild dispatch.entry.js --bundle --format=cjs --platform=node \
@@ -438,6 +440,7 @@ node sheetgesture.test.js
 node visibilitypause.test.js
 node bandconditions.test.js
 node bandnoise.test.js
+node noisetrend.test.js
 node bandstats.test.js
 node dispatch.test.js
 node layout.test.js

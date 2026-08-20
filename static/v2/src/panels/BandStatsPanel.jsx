@@ -12,23 +12,35 @@
 // to. Same wording, same fallback when a pin names a band the monitor no longer
 // watches — see lib/bandNoise.js `followsDial`.
 //
-// The data is one request a minute for the whole panel, and only while the panel
-// is open: Section unmounts a closed section's body, so a collapsed panel holds
-// no timer and makes no request. The once-a-minute rule survives being opened
-// and closed repeatedly, which a bare timer would not — see lib/bandNoise.js.
+// Under the figures is the day behind them: noisefloor.html's four 24-hour
+// charts, which are four views of one array and are drawn here as one chart with
+// the metric on a selector. See lib/noiseTrend.js.
+//
+// Two feeds, both tied to the panel being open, because Section unmounts a
+// closed section's body: the readings above refresh every minute
+// (lib/bandNoise.js) and the day behind them every ten (lib/noiseTrend.js).
+// Both enforce that as a floor rather than a bare timer, so opening and closing
+// the panel cannot turn into a request per open.
 //
 // `minimal` is the band, its condition and the two figures that decide whether
-// to stay on it: the noise floor and the dynamic range. The picker, the rest of
-// the readouts and the all-bands table are what you expand for.
+// to stay on it: the noise floor and the dynamic range. The picker, the chart,
+// the rest of the readouts and the all-bands table are what you expand for —
+// and because the chart owns its own subscription, the minimal view does not
+// ask the server for a day of history at all.
 
-import React, { useEffect, useMemo, useState } from '../react.js';
-import { Empty, Icon } from '../components/ui.jsx';
+import React, { useEffect, useMemo, useRef, useState } from '../react.js';
+import { Empty, Icon, Segmented } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { bandForFrequency, bandRange, tuneToBand } from '../lib/bands.js';
 import {
     chooseBand, floorStats, floorTone, followsDial, formatFigure, getBandNoise, hasFT8,
     measuredMs, rowsFrom, saveBand, savedBand, snrLabel, snrTone, subscribeBandNoise,
 } from '../lib/bandNoise.js';
+import {
+    METRICS, WINDOW_MS, clockAt, conditionRuns, conditionSeries, getNoiseTrend,
+    hasTrend, hourTicks, levelTicks, metricByKey, nearest, niceRange, saveMetric,
+    savedMetric, seriesFor, spans, subscribeNoiseTrend,
+} from '../lib/noiseTrend.js';
 import { sinceLabel } from '../lib/format.js';
 
 // The full page, for the questions a dock column cannot answer — 24 hours of
@@ -40,6 +52,268 @@ const MONITOR_URL = '/noisefloor.html';
 // fresh one. Ten seconds is finer than the data and far cheaper than the second
 // ticks elsewhere in the app — this panel is otherwise static between polls.
 const TICK_MS = 10000;
+
+// ── The 24-hour chart ───────────────────────────────────────────────────────
+//
+// Hand-drawn, like every other picture in v2. There is no chart library here on
+// purpose: the spectrum, the waterfall, the scope and the spectrogram are all
+// canvas, and pulling one in for this would put a second set of fonts, colours
+// and interaction rules on the screen beside them.
+//
+// The proportions of a chart this small are mostly gutters, so they are named.
+const CHART_H = 116;             // CSS px, the whole block including its axes
+const PAD_L = 34;                // room for a "-128" label and a gap
+const PAD_R = 4;
+const PAD_T = 6;
+const STRIP_H = 5;               // the condition strip under the plot
+const STRIP_GAP = 3;
+const AXIS_H = 13;               // the row of times
+
+// The condition colours, matching .band-keys in styles.css. Canvas cannot use a
+// class, so this is the one place the four buckets are written twice; keep it in
+// step with the stylesheet.
+const TONE_COLOUR = {
+    excellent: '#22c55e',
+    good: '#fbbf24',
+    fair: '#ff9800',
+    poor: '#ef4444',
+    none: 'transparent',
+};
+
+// The theme, read straight rather than through lib/spectrumTrace.js's cache:
+// that cache is keyed on the theme alone and shared by every caller, so asking
+// it for a different set of variables than the spectrum panes ask for would
+// hand whichever ran second the other one's answer. This chart redraws on data,
+// size and hover — not per frame — so a getComputedStyle costs nothing here.
+function chartColours() {
+    const css = getComputedStyle(document.documentElement);
+    const v = (name) => css.getPropertyValue(name).trim();
+    return {
+        bg: v('--surface-3'),
+        grid: v('--border'),
+        label: v('--text-faint'),
+        trace: v('--accent'),
+        rule: v('--text-dim'),
+    };
+}
+
+function drawTrend(canvas, { width, series, runs, range, from, to, at }) {
+    const c = canvas.getContext('2d');
+    if (!c) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(width * dpr));
+    canvas.height = Math.round(CHART_H * dpr);
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const col = chartColours();
+    const plotW = Math.max(1, width - PAD_L - PAD_R);
+    const plotH = Math.max(1, CHART_H - PAD_T - AXIS_H - STRIP_H - STRIP_GAP);
+    const stripY = PAD_T + plotH + STRIP_GAP;
+
+    c.clearRect(0, 0, width, CHART_H);
+    c.fillStyle = col.bg;
+    c.fillRect(PAD_L, PAD_T, plotW, plotH);
+
+    const x = (t) => PAD_L + ((t - from) / (to - from)) * plotW;
+    const y = (v) => PAD_T + (1 - (v - range.min) / (range.max - range.min)) * plotH;
+
+    // The grid, and the labels that make it mean something. Half-pixel offsets
+    // so a 1px line is a line rather than a two-pixel smear.
+    // A literal stack, not var(--mono): the canvas font property does not
+    // resolve custom properties, and an unparseable value is silently ignored.
+    c.font = '9px ui-monospace, SFMono-Regular, monospace';
+    c.textBaseline = 'middle';
+    c.strokeStyle = col.grid;
+    c.lineWidth = 1;
+    c.fillStyle = col.label;
+    c.textAlign = 'right';
+    for (const level of levelTicks(range)) {
+        const ly = Math.round(y(level)) + 0.5;
+        if (ly < PAD_T || ly > PAD_T + plotH) continue;
+        c.beginPath();
+        c.moveTo(PAD_L, ly);
+        c.lineTo(PAD_L + plotW, ly);
+        c.stroke();
+        c.fillText(String(Math.round(level)), PAD_L - 4, ly);
+    }
+
+    c.textAlign = 'center';
+    for (const tick of hourTicks(from, to, Math.max(2, Math.floor(plotW / 56)))) {
+        const tx = Math.round(x(tick.t)) + 0.5;
+        c.beginPath();
+        c.moveTo(tx, PAD_T);
+        c.lineTo(tx, PAD_T + plotH);
+        c.stroke();
+        c.fillText(tick.label, tx, CHART_H - AXIS_H / 2);
+    }
+
+    // The condition strip: what the band was doing, hour by hour, under the
+    // metric being read. Runs, not buckets — see conditionRuns.
+    for (const run of runs) {
+        if (run.tone === 'none') continue;
+        const x0 = Math.max(PAD_L, x(run.from));
+        const x1 = Math.min(PAD_L + plotW, x(run.to));
+        if (!(x1 > x0)) continue;
+        c.fillStyle = TONE_COLOUR[run.tone] || 'transparent';
+        c.fillRect(x0, stripY, x1 - x0, STRIP_H);
+    }
+
+    // The trace, one path per unbroken stretch.
+    c.strokeStyle = col.trace;
+    c.lineWidth = 1.25;
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    for (const run of series) {
+        c.beginPath();
+        run.forEach((p, i) => (i ? c.lineTo(x(p.t), y(p.v)) : c.moveTo(x(p.t), y(p.v))));
+        // A stretch of one reading has no line in it, so it is drawn as the
+        // point it is rather than silently not drawn at all.
+        if (run.length === 1) c.lineTo(x(run[0].t) + 0.01, y(run[0].v));
+        c.stroke();
+    }
+
+    if (!at) return;
+    const hx = Math.round(x(at.t)) + 0.5;
+    c.strokeStyle = col.rule;
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(hx, PAD_T);
+    c.lineTo(hx, PAD_T + plotH);
+    c.stroke();
+    c.fillStyle = col.trace;
+    c.beginPath();
+    c.arc(x(at.t), y(at.v), 2.5, 0, Math.PI * 2);
+    c.fill();
+}
+
+/**
+ * One band's last 24 hours of one metric.
+ *
+ * Everything it draws comes from the array it is given — see lib/noiseTrend.js,
+ * which is also where the arithmetic that can be wrong lives.
+ */
+function TrendChart({ points, cond, metric }) {
+    const wrapRef = useRef(null);
+    const canvasRef = useRef(null);
+    const [width, setWidth] = useState(0);
+    const [at, setAt] = useState(null);
+
+    // The right-hand edge is "now", fixed at the moment the data arrived rather
+    // than at every render: recomputing it per render would slide the picture
+    // under the pointer, and between two polls it is ten minutes out at worst on
+    // a window of twenty-four hours.
+    const to = useMemo(() => Date.now(), [points]);
+    const from = to - WINDOW_MS;
+
+    const range = useMemo(() => niceRange(points), [points]);
+    const runs = useMemo(() => conditionRuns(cond), [cond]);
+    const paths = useMemo(() => spans(points), [points]);
+
+    useEffect(() => {
+        const wrap = wrapRef.current;
+        if (!wrap) return undefined;
+        const size = () => setWidth(Math.max(0, Math.round(wrap.clientWidth)));
+        size();
+        if (typeof ResizeObserver === 'undefined') return undefined;
+        const ro = new ResizeObserver(size);
+        ro.observe(wrap);
+        return () => ro.disconnect();
+    }, []);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !width || !range) return;
+        drawTrend(canvas, { width, series: paths, runs, range, from, to, at });
+    }, [width, paths, runs, range, from, to, at]);
+
+    const read = (e) => {
+        const canvas = canvasRef.current;
+        if (!canvas || !width) return;
+        const box = canvas.getBoundingClientRect();
+        const plotW = Math.max(1, width - PAD_L - PAD_R);
+        const frac = (e.clientX - box.left - PAD_L) / plotW;
+        setAt(nearest(points, from + Math.min(1, Math.max(0, frac)) * (to - from)));
+    };
+
+    if (!range) return null;
+
+    return (
+        <div className="bst-chart" ref={wrapRef}>
+            <canvas
+                ref={canvasRef}
+                className="bst-chart__canvas"
+                style={{ height: `${CHART_H}px` }}
+                onPointerMove={read}
+                onPointerDown={read}
+                onPointerLeave={() => setAt(null)}
+            />
+            {/* The readout sits over the chart rather than under it: a caption
+                that appears and disappears would move everything below it every
+                time the pointer crossed the picture. */}
+            <div className={`bst-chart__at${at ? ' is-on' : ''}`}>
+                {at ? `${clockAt(at.t)}  ${formatFigure(at.v)} ${metric.unit}` : ''}
+            </div>
+        </div>
+    );
+}
+
+// The chart and its selector, as one section.
+//
+// Its own component so that the subscription belongs to it: the section is
+// rendered only in the full view, so the minimal view holds no history feed and
+// makes no request for one. Same rule as the panel itself being unmounted while
+// its section is collapsed, one level down.
+function TrendSection({ band }) {
+    const [feed, setFeed] = useState(getNoiseTrend);
+    const [key, setKey] = useState(savedMetric);
+
+    useEffect(() => subscribeNoiseTrend(setFeed), []);
+
+    const pick = (k) => { saveMetric(k); setKey(k); };
+    const metric = metricByKey(key);
+    const points = useMemo(
+        () => (band ? seriesFor(feed.trends, band, metric) : []),
+        [feed.trends, band, metric],
+    );
+    const cond = useMemo(
+        () => (band ? conditionSeries(feed.trends, band) : []),
+        [feed.trends, band],
+    );
+
+    const known = hasTrend(feed.trends, band);
+
+    return (
+        <div className="stack stack--tight">
+            <div className="bst-chart__head">
+                <Segmented
+                    size="sm"
+                    value={key}
+                    onChange={pick}
+                    options={METRICS.map((m) => ({ value: m.key, label: m.label, title: m.title }))}
+                />
+                <span className="bst-chart__span">24 h</span>
+            </div>
+
+            {feed.trends === null && <div className="note note--tight">Loading history…</div>}
+            {feed.trends !== null && !known && (
+                <div className="note note--tight">
+                    {feed.error || `No history for ${band} yet.`}
+                </div>
+            )}
+            {/* Points but no range means every reading in the window was
+                unusable for this metric — an FT8 series on a band nobody has
+                called on, most often. Said rather than drawn as an empty box. */}
+            {known && points.length === 0 && (
+                <div className="note note--tight">
+                    Nothing recorded for {metric.label.toLowerCase()} on {band} in the last 24 hours.
+                </div>
+            )}
+            {known && points.length > 0 && (
+                <TrendChart points={points} cond={cond} metric={metric} />
+            )}
+        </div>
+    );
+}
 
 // One measurement, labelled. The unit lives on the cell rather than in the
 // value so a column of them lines up on the decimal point, which is the whole
@@ -206,6 +480,20 @@ export default function BandStatsPanel({ minimal }) {
                     </>
                 )}
             </div>
+
+            {/* Where the reading above came from. The figures are one moment;
+                this is the day behind them, which is what turns "the floor is
+                -118" into "the floor has been climbing since dusk".
+
+                Full view only, and that is what gates the request: the section
+                owns the subscription, so a panel shrunk to a glance holds no
+                history feed. See TrendSection. */}
+            {!minimal && (
+                <>
+                    <div className="divider" />
+                    <TrendSection band={band} />
+                </>
+            )}
 
             {!minimal && rows.length > 1 && (
                 <>

@@ -4200,6 +4200,47 @@ a.btn { text-decoration: none; }
 .bst-hero--poor .bst-hero__grade { color: #ef4444; }
 .bst-hero--none .bst-hero__grade { color: var(--text-faint); }
 
+/* The 24-hour chart: which metric, and how far back it goes. */
+.bst-chart__head { display: flex; align-items: center; gap: 6px; }
+.bst-chart__head > :first-child { flex: 1; min-width: 0; }
+.bst-chart__span {
+    flex: none;
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+}
+
+.bst-chart { position: relative; }
+/* Width from the column, height from the canvas's own style attribute — the
+   drawing sets the backing store from the measured width and the device pixel
+   ratio, so a CSS height here and nothing else is what keeps the two in step. */
+.bst-chart__canvas { display: block; width: 100%; touch-action: pan-y; }
+
+/* The hover readout, over the plot rather than under it: a caption that came
+   and went would move the table below every time the pointer crossed the
+   chart. Top right, which is the emptiest corner of a noise floor trace. */
+.bst-chart__at {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-dim);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+.bst-chart__at.is-on { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+    .bst-chart__at { transition: none; }
+}
+
 /* A noise floor ranked against the rest of this receiver's bands. Quiet, and
    only on the value: six tiles with coloured borders would be a traffic light
    where the point is a comparison between two of them. */

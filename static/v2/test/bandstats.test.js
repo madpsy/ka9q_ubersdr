@@ -7,7 +7,8 @@
 // every other test, and blank the interface the moment somebody opens the
 // panel. See hookStub.js for what "renders" means here.
 //
-// The arithmetic behind the readings is bandnoise.test.js; this is the panel.
+// The arithmetic behind the readings is bandnoise.test.js, and behind the chart
+// noisetrend.test.js; this is the panel.
 
 const assert = require('assert');
 
@@ -29,7 +30,7 @@ globalThis.removeEventListener = () => {};
 const {
     deep, render, reset, walk, words,
     BandStatsPanel, PANEL_BY_ID, GROUPS,
-    resetBandNoise, setFeedsAllowed, resetFeeds,
+    resetBandNoise, resetNoiseTrend, subscribeNoiseTrend, setFeedsAllowed, resetFeeds,
 } = require('./.build/bandstats.cjs');
 
 let pass = 0;
@@ -94,16 +95,36 @@ const mounted = [];
  * that sees the data, with the hook state carried over from the first, which is
  * exactly what React would have done.
  */
-async function mount(props, latest, over) {
+async function mount(props, latest, over, trends) {
     reset();
     resetBandNoise();
+    resetNoiseTrend();
     resetFeeds();
-    globalThis.fetch = () => Promise.resolve(
-        latest === undefined
-            ? { ok: false, status: 503 }
-            : { ok: true, status: 200, json: () => Promise.resolve(latest) },
+    // Two endpoints now: the minute-old readings and the day behind them. Routed
+    // by URL rather than answered with one reply, so a test can give the panel
+    // live figures and no history — which is what a receiver with no database
+    // looks like, and the state most likely to be got wrong.
+    globalThis.fetch = (url) => Promise.resolve(
+        String(url).includes('/trends')
+            ? (trends === undefined
+                ? { ok: false, status: 404, json: () => Promise.resolve({ error: 'no data available' }) }
+                : { ok: true, status: 200, json: () => Promise.resolve(trends) })
+            : (latest === undefined
+                ? { ok: false, status: 503 }
+                : { ok: true, status: 200, json: () => Promise.resolve(latest) }),
     );
     setFeedsAllowed(true);
+
+    // The history is seeded into its store rather than reached through the
+    // panel. TrendSection is a child component, and hookStub expands children
+    // only to read the tree — their effects are deliberately discarded — so the
+    // panel's own subscription never runs here. What the store holds when the
+    // section is expanded is what the section draws, which is the part worth
+    // asserting on.
+    const seed = subscribeNoiseTrend(() => {});
+    await settle();
+    seed();
+
     const ctx = context(over);
     const first = render(BandStatsPanel, props || {}, ctx);
     await settle();
@@ -116,6 +137,29 @@ async function mount(props, latest, over) {
 }
 
 const classes = (tree) => deep(tree).map((n) => String(n.props.className || ''));
+const hasClass = (tree, c) => classes(tree).some((n) => n.includes(c));
+
+// A day of 10-minute buckets for one band, with a hole in it — a receiver that
+// was off for a while is the ordinary case, not the exotic one.
+function day(band, { snr = 18 } = {}) {
+    const now = Date.now();
+    const rows = [];
+    for (let i = 143; i >= 0; i--) {
+        if (i > 40 && i < 70) continue;                  // five hours off air
+        rows.push({
+            timestamp: new Date(now - i * 10 * 60 * 1000).toISOString(),
+            band,
+            p5_db: -120 + Math.sin(i / 8) * 4,
+            p95_db: -80,
+            dynamic_range: 40 + Math.cos(i / 11) * 5,
+            occupancy_pct: 12,
+            // Nothing heard overnight, which is a gap in the SNR trace and a
+            // blank stretch on the condition strip.
+            ft8_snr: i > 100 ? 0 : snr,
+        });
+    }
+    return { [band]: rows };
+}
 
 // --- rendering --------------------------------------------------------------
 
@@ -164,7 +208,7 @@ t('the minimal view is the headline and two figures, nothing else', async () => 
 
     // The picker, the all-bands table and the link out are what expanding is
     // for. Every one of them is in the docked panel...
-    for (const c of ['bst__pick', 'bst-table', 'bst__foot']) {
+    for (const c of ['bst__pick', 'bst-table', 'bst__foot', 'bst-chart']) {
         assert.ok(classes(full.tree).some((n) => n.includes(c)), `the docked panel lost ${c}`);
         assert.ok(!classes(cut.tree).some((n) => n.includes(c)), `the minimal view still has ${c}`);
     }
@@ -223,6 +267,54 @@ t('a monitor that is switched off says why', async () => {
     unmount();
 });
 
+// --- the 24-hour chart ------------------------------------------------------
+
+t('the chart is drawn when there is a day to draw', async () => {
+    const { tree, unmount } = await mount({}, LATEST, {}, day('20m'));
+    assert.ok(hasClass(tree, 'bst-chart__canvas'), 'no chart');
+    // And the metric selector above it offers all three.
+    const text = words(tree);
+    for (const label of ['Floor', 'Range', 'SNR']) {
+        assert.match(text, new RegExp(label), `no ${label} option`);
+    }
+    unmount();
+});
+
+t('a receiver with no history says so instead of drawing an empty box', async () => {
+    // The live figures still work — this is a receiver whose monitor runs but
+    // whose history is not stored, which is a 404 from /trends and not a reason
+    // for the panel to be missing.
+    const { tree, unmount } = await mount({}, LATEST, {}, undefined);
+    assert.ok(!hasClass(tree, 'bst-chart__canvas'), 'it drew a chart with no data');
+    assert.match(words(tree), /No history recorded yet/);
+    // ...and the readings above it are untouched.
+    assert.match(words(tree), /20m/);
+    assert.match(words(tree), /Noise floor/);
+    unmount();
+});
+
+t('a band nobody has called on still gets its noise floor chart', async () => {
+    // No FT8 all day. The floor and the range were still measured, so the chart
+    // is there — it is only the SNR series that has nothing in it, and that is
+    // the metric's business rather than the section's.
+    const { tree, unmount } = await mount({}, LATEST, {}, day('20m', { snr: 0 }));
+    assert.ok(hasClass(tree, 'bst-chart__canvas'), 'the floor chart should still draw');
+    unmount();
+});
+
+t('the minimal view has no chart, and so holds no history feed', async () => {
+    // Structural on purpose. The subscription lives inside the section — that
+    // is what ties the request to the section being rendered — so the section
+    // being absent from the minimal tree *is* the assertion that the minimal
+    // view asks the server for nothing.
+    const full = await mount({}, LATEST, {}, day('20m'));
+    const cut = await mount({ minimal: true }, LATEST, {}, day('20m'));
+    assert.ok(hasClass(full.tree, 'bst-chart'), 'the docked panel lost its chart');
+    assert.ok(!hasClass(cut.tree, 'bst-chart'), 'the minimal view still has a chart');
+    full.unmount();
+    cut.unmount();
+});
+
 // --- where it lives ---------------------------------------------------------
 
 t('the panel is registered, under Quick bands, and gated on the monitor', () => {
@@ -265,6 +357,7 @@ t('a group claims it, so it exists on a phone', () => {
     }
     for (const off of mounted) { try { off(); } catch (e) { /* already unmounted */ } }
     resetBandNoise();
+    resetNoiseTrend();
     resetFeeds();
     console.log(`\n${pass} passed`);
 })();

@@ -9,10 +9,11 @@ import BandStatsPanel from '../src/panels/BandStatsPanel.jsx';
 import { PANEL_BY_ID } from '../src/panels/registry.jsx';
 import { GROUPS } from '../src/panels/groups.jsx';
 import { resetBandNoise } from '../src/lib/bandNoise.js';
+import { resetNoiseTrend, subscribeNoiseTrend } from '../src/lib/noiseTrend.js';
 import { setFeedsAllowed, resetFeeds } from '../src/lib/serverFeeds.js';
 
 module.exports = {
     deep, render, reset, walk, words,
     BandStatsPanel, PANEL_BY_ID, GROUPS,
-    resetBandNoise, setFeedsAllowed, resetFeeds,
+    resetBandNoise, resetNoiseTrend, subscribeNoiseTrend, setFeedsAllowed, resetFeeds,
 };

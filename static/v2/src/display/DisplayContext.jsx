@@ -295,6 +295,20 @@ export const DEFAULTS = {
     // holding a carrier perfectly still. Longer is for digging a weak steady
     // signal out; shorter is for watching something change.
     ifShapeSec: SHAPE_SEC_DEFAULT,
+    // Whether the Shape view zooms the main spectrum in for itself.
+    //
+    // On, because the view is unusable without it and the alternative is a
+    // panel that tells you to go and operate a different one. Every bin it
+    // averages is one of the main display's, so at a wide zoom there is a
+    // fraction of a bin in the passband and no shape to draw; at the deepest
+    // there are a few hundred.
+    //
+    // It fires on entering the view and when the window changes, never
+    // continuously — see the note in lib/ifShape.js. Held continuously it could
+    // not be overruled, and an operator zooming the main display out would watch
+    // it snap back. This way the last word is theirs, and the cover over the
+    // picture offers the same zoom as a button if they want it again.
+    ifShapeZoom: true,
     ifRate: 20,             // committed rows a second, as the main waterfall's
     // Auto by default and for the same reason the audio scope's is: it is right
     // until the question becomes "how strong is this", which is what an absolute

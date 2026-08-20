@@ -47,10 +47,11 @@ import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import {
     SHAPE_BINS, SHAPE_MIN_ROWS, SHAPE_SEC_MAX, SHAPE_SEC_MIN,
     bandBins, clampShapeSec, createShape, formatShape, pushShapeRow, resetShape, shapeStats,
+    shapeWantsZoom, shapeZoomSpan,
 } from '../lib/ifShape.js';
 import {
     IF_RATE_MAX, IF_RATE_MIN, IF_VIEWS, ZOOM_MIN, ZOOM_STEP,
-    binWidthOf, binsInWindow, clampRate, clampZoom, createLevels, formatBinWidth,
+    binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels, formatBinWidth,
     formatOffset, isZoomed, levelsOf, manualLevels, maxZoomFor, normaliseView, offsetTicks,
     paneState, sliceToPixels, updateLevels, viewHas, windowFor, zoomTargetSpan,
 } from '../lib/ifSpectrum.js';
@@ -554,6 +555,31 @@ export default function IFSpectrumPanel({ minimal }) {
     // show the same thing and this one becomes the ruler for it. A little wider
     // than the window so the window is not sitting on the edges of the served
     // view — the server snaps the request to its own ladder anyway.
+    // The Shape view asking the main display for the zoom it needs.
+    //
+    // Deliberately not a dependency on the served view: it runs when this view
+    // is opened and when the window itself changes, and reads the current
+    // geometry off `st` at that moment. Made to follow the view it is changing,
+    // it would re-fire on its own result and could never be overruled — see the
+    // note in lib/ifShape.js.
+    //
+    // `haveView` is in the list only so that opening the panel before the first
+    // config arrives still gets its one chance once the geometry is known.
+    const haveView = view.span > 0;
+    useEffect(() => {
+        if (!has.shape || display.ifShapeZoom === false || !running || !haveView) return;
+        const cfg = st.cfg;
+        const w = st.win;
+        // As far in as the zoom will go, so a mode whose window is narrower than
+        // that is recognised as already being there rather than asked to move to
+        // a span it cannot have.
+        const floor = spectrumConn.binCount
+            ? spectrumConn.minBinBandwidthForUI() * spectrumConn.binCount
+            : 0;
+        if (!shapeWantsZoom(cfg, w, coverageOf(cfg, w), floor)) return;
+        actions.setSpectrumView((w.lo + w.hi) / 2, shapeZoomSpan(w, floor));
+    }, [has.shape, display.ifShapeZoom, running, haveView, win.span, actions, spectrumConn, st]);
+
     const resume = useCallback(() => {
         resumeSpectrum(spectrumConn);
         setSpectrumPaused(false);
@@ -779,6 +805,15 @@ export default function IFSpectrumPanel({ minimal }) {
                         onChange={(v) => display.set({ ifShapeSec: clampShapeSec(v) })}
                     />
                 </Field>
+            )}
+
+            {!minimal && has.shape && (
+                <Switch
+                    checked={display.ifShapeZoom !== false}
+                    onChange={(v) => display.set({ ifShapeZoom: v })}
+                    label="Auto zoom"
+                    title="Zoom the main spectrum in far enough to draw a shape from. Every bin averaged here is one of that display's, so at a wide zoom there is a fraction of one in the passband. It moves the main view when this panel is opened and when the filter changes, never while you are working it"
+                />
             )}
 
             {!minimal && has.waterfall && (

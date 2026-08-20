@@ -251,6 +251,68 @@ export function shapeStats(st, windowMs, nowMs, out = {}, band) {
     return out;
 }
 
+// ── Driving the main display ─────────────────────────────────────────────────
+//
+// Every bin this view averages is one of the main spectrum's, so the quality of
+// the shape is decided by a control on a different panel: the more the main
+// display is zoomed in, the more bins land in the passband and the finer the
+// shape. At the interface's deepest zoom an SSB passband holds a few hundred of
+// them; at full span it holds a fraction of one.
+//
+// So the Shape view asks for the zoom it needs rather than waiting to be given
+// it. That is a real intrusion — the main waterfall is shared, and something
+// that moved it without being asked would be a panel reaching outside itself —
+// which is why it is a switch, and why it fires on *entering* the view and on
+// the window changing rather than continuously. Held continuously it could never
+// be overruled: an operator zooming the main display out would watch it snap
+// back, which is the worst behaviour a helpful default can have. Fired on entry,
+// the last word is always theirs.
+
+// How much wider than the window to ask for. Twice, so tuning inside the
+// passband does not immediately walk the window off the edge of the view and
+// spend a channel re-tune putting it back. For every mode narrower than about
+// five kilohertz this lands on the interface's zoom floor anyway, which is as
+// far in as it can go.
+export const SHAPE_ZOOM_MARGIN = 2;
+
+// ...and how far out the view has to be before it is worth moving. A view
+// already close to what is wanted is left alone: the request costs a channel
+// reload on the receiver, and one per panel switch is enough.
+export const SHAPE_ZOOM_SLACK = 1.5;
+
+/**
+ * The span to ask the main display for, given the window being drawn.
+ *
+ * `floorSpan` is as far in as the interface's zoom will go — the span at its
+ * narrowest bin width. Every mode below about five kilohertz wants less than
+ * that, so this is what they all actually land on, and saying so here rather
+ * than letting the request be silently clamped is what lets the test below know
+ * when asking would change nothing.
+ */
+export function shapeZoomSpan(win, floorSpan = 0) {
+    if (!win || !(win.span > 0)) return 0;
+    return Math.max(win.span * SHAPE_ZOOM_MARGIN, floorSpan > 0 ? floorSpan : 0);
+}
+
+/**
+ * Whether asking is worth the channel reload it costs.
+ *
+ * Two reasons to: the view is far wider than this window needs, or it does not
+ * cover the window at all. The same request fixes both, because it sets the
+ * centre as well as the span.
+ *
+ * Measured against where the request would actually *land*, not against what it
+ * would ask for. On a narrow mode the wanted span is below the interface's zoom
+ * floor and comes back clamped to it — so a view already sitting on that floor
+ * is already the answer, and a test that compared against the unclamped figure
+ * would send a reload every time the panel was opened to change nothing.
+ */
+export function shapeWantsZoom(cfg, win, coverage, floorSpan = 0) {
+    if (!cfg || !(cfg.span > 0) || !win || !(win.span > 0)) return false;
+    if (coverage < 1) return true;
+    return cfg.span > shapeZoomSpan(win, floorSpan) * SHAPE_ZOOM_SLACK;
+}
+
 // How few frames is too few to call it an average.
 //
 // Two is a pair of readings, not a shape; the band between them is whatever the

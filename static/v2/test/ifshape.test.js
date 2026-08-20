@@ -11,7 +11,9 @@
 const assert = require('assert');
 const {
     SHAPE_BINS, SHAPE_MAX_ROWS, SHAPE_MIN_ROWS, SHAPE_SEC_DEFAULT, SHAPE_SEC_MAX, SHAPE_SEC_MIN,
+    SHAPE_ZOOM_MARGIN,
     bandBins, clampShapeSec, createShape, formatShape, pushShapeRow, resetShape, shapeStats,
+    shapeWantsZoom, shapeZoomSpan,
 } = require('./.build/ifshape.cjs');
 
 let pass = 0;
@@ -240,6 +242,58 @@ t('the readout reports the time measured, not the time asked for', () => {
     assert.match(formatShape({ rows: 0, spanMs: 0 }, 2), /filling/);
     assert.match(formatShape(null, 2), /filling/);
     assert.ok(SHAPE_MIN_ROWS > 2, 'two readings are a pair, not a shape');
+});
+
+// ── Driving the main display ─────────────────────────────────────────────────
+
+// The interface's zoom floor: 1024 bins at its narrowest bin width.
+const FLOOR = 10240;
+
+t('the zoom it asks for is one the interface can actually give', () => {
+    // Every mode narrower than about five kilohertz wants less than the floor
+    // and lands on it — which is as far in as the zoom goes, and where the
+    // passband gets the most bins it ever will.
+    assert.strictEqual(shapeZoomSpan({ span: 3375 }, FLOOR), FLOOR);     // USB
+    assert.strictEqual(shapeZoomSpan({ span: 800 }, FLOOR), FLOOR);      // CW
+    // Wider modes ask for twice their window, which is above the floor.
+    assert.strictEqual(shapeZoomSpan({ span: 12500 }, FLOOR), 12500 * SHAPE_ZOOM_MARGIN);
+    assert.strictEqual(shapeZoomSpan({ span: 20000 }, FLOOR), 20000 * SHAPE_ZOOM_MARGIN);
+    // Nothing to draw, nothing to ask for.
+    assert.strictEqual(shapeZoomSpan(null, FLOOR), 0);
+    assert.strictEqual(shapeZoomSpan({ span: 0 }, FLOOR), 0);
+});
+
+t('it does not ask for a zoom it is already at', () => {
+    const usb = { span: 3375 };
+    // The whole band: worth moving.
+    assert.strictEqual(shapeWantsZoom({ span: 30e6 }, usb, 1, FLOOR), true);
+    // Already on the floor: asking again would be a channel reload on the
+    // receiver that changed nothing, once per time the panel is opened. This is
+    // the case a test against the *unclamped* wanted span gets wrong.
+    assert.strictEqual(shapeWantsZoom({ span: FLOOR }, usb, 1, FLOOR), false);
+    // Near enough is left alone — the slack is what stops it chasing a view
+    // that is already close.
+    assert.strictEqual(shapeWantsZoom({ span: FLOOR * 1.4 }, usb, 1, FLOOR), false);
+    assert.strictEqual(shapeWantsZoom({ span: FLOOR * 2 }, usb, 1, FLOOR), true);
+    // A wider mode judged against its own window rather than the floor.
+    assert.strictEqual(shapeWantsZoom({ span: 25000 }, { span: 12500 }, 1, FLOOR), false);
+});
+
+t('...but it does ask when the view is not on the window at all', () => {
+    // The same request sets the centre as well as the span, so it fixes this
+    // too — and a deep zoom pointed somewhere else has no bins here whatever
+    // its resolution.
+    assert.strictEqual(shapeWantsZoom({ span: FLOOR }, { span: 3375 }, 0.6, FLOOR), true);
+    assert.strictEqual(shapeWantsZoom({ span: FLOOR }, { span: 3375 }, 0, FLOOR), true);
+});
+
+t('nothing known yet is not a reason to move anything', () => {
+    assert.strictEqual(shapeWantsZoom(null, { span: 3375 }, 1, FLOOR), false);
+    assert.strictEqual(shapeWantsZoom({ span: 0 }, { span: 3375 }, 1, FLOOR), false);
+    assert.strictEqual(shapeWantsZoom({ span: 30e6 }, null, 1, FLOOR), false);
+    // No floor given falls back to the plain margin rather than to zero, which
+    // would make every view look close enough.
+    assert.strictEqual(shapeWantsZoom({ span: 30e6 }, { span: 3375 }, 1), true);
 });
 
 console.log(`\n${pass} passed`);

@@ -47,7 +47,10 @@ function context(over) {
     return {
         tuning: { frequency: 14_200_000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
         running: true,
-        spectrumConn: { on: () => () => {} },
+        // Enough of the connection for the panel to work out how far the zoom
+        // can go: 1024 bins at a 10 Hz floor is a 10.24 kHz span, which is what
+        // the interface actually stops at.
+        spectrumConn: { on: () => () => {}, binCount: 1024, minBinBandwidthForUI: () => 10 },
         // Zoomed in past the gate (7 halvings of the full-span 29.3 kHz/bin) and
         // centred on the dial, so the pane can actually draw — see paneState.
         view: {
@@ -105,6 +108,53 @@ t('the pictures a view asks for are the pictures it gets', () => {
     // Shape is a statistical view of the passband, and a waterfall of the live
     // frames beside it would be the picture it exists not to draw.
     assert.deepStrictEqual(count('shape'), { spec: 1, wf: 0, ov: 0 });
+});
+
+t('the Shape view asks the main display for the zoom it needs, once', () => {
+    const asked = [];
+    const ctx = (over) => {
+        const base = context(over);
+        return { ...base, actions: { ...base.actions, setSpectrumView: (hz, span) => asked.push({ hz, span }) } };
+    };
+    // Opened over the whole band: there is a fraction of a bin in the passband,
+    // so it asks.
+    const wide = {
+        centerFreq: 15e6, span: 30e6, binCount: 1024, binBandwidth: 30e6 / 1024,
+        defaultBinCount: 1024, defaultBinBandwidth: 30e6 / 1024,
+    };
+    reset();
+    render(IFSpectrumPanel, {}, ctx({ ifView: 'shape', view: wide }));
+    assert.strictEqual(asked.length, 1, 'it did not ask');
+    assert.ok(asked[0].span > 0 && asked[0].span < 1e6, JSON.stringify(asked[0]));
+
+    // ...and it asks for the deepest zoom, not merely one that clears the gate:
+    // the fixture's own view is fine enough to draw from and is still moved,
+    // because every extra bin in the passband is a finer shape.
+    assert.ok(asked[0].span <= 10240 * 1.01, `asked for ${asked[0].span}`);
+
+    // Already at the zoom floor: asking again would be a channel reload on the
+    // receiver that changed nothing, once per time the panel is opened.
+    asked.length = 0;
+    reset();
+    render(IFSpectrumPanel, {}, ctx({
+        ifView: 'shape',
+        view: {
+            centerFreq: 14_200_000, span: 10240, binCount: 1024, binBandwidth: 10,
+            defaultBinCount: 1024, defaultBinBandwidth: 30e6 / 1024,
+        },
+    }));
+    assert.deepStrictEqual(asked, [], 'it moved a view that was already right');
+
+    // Switched off, it never touches the main display — and neither does any
+    // other view, whatever the zoom.
+    asked.length = 0;
+    reset();
+    render(IFSpectrumPanel, {}, ctx({ ifView: 'shape', view: wide, ifShapeZoom: false }));
+    reset();
+    render(IFSpectrumPanel, {}, ctx({ ifView: 'split', view: wide }));
+    reset();
+    render(IFSpectrumPanel, {}, ctx({ ifView: 'shape', view: wide, running: false }));
+    assert.deepStrictEqual(asked, []);
 });
 
 t('the Shape view brings its own window and says what went into it', () => {
@@ -334,7 +384,7 @@ t('the default view is the one the panel is designed around', () => {
 t('its display settings all have defaults, so a first visit is not undefined', () => {
     for (const key of [
         'ifView', 'ifSpan', 'ifRate', 'ifAuto', 'ifFloor', 'ifCeil', 'ifGestures',
-        'ifClickTune', 'ifShapeSec',
+        'ifClickTune', 'ifShapeSec', 'ifShapeZoom',
     ]) {
         assert.ok(DEFAULTS[key] !== undefined, `${key} has no default`);
     }

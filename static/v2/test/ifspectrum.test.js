@@ -7,7 +7,8 @@
 
 const assert = require('assert');
 const {
-    COARSE_BINS, FIT_MARGIN, MIN_SPAN_HZ, OFFSET_LABEL_PX, ZOOM_MAX, ZOOM_MIN,
+    COARSE_BINS, FIT_MARGIN, IF_VIEWS, IF_VIEW_DEFAULT, MIN_SPAN_HZ, OFFSET_LABEL_PX,
+    ZOOM_MAX, ZOOM_MIN,
     binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels,
     fitWindow, formatBinWidth, formatOffset, isZoomed, levelsOf, manualLevels,
     maxZoomFor, normaliseView, offsetStep, offsetTicks, sliceToPixels, updateLevels,
@@ -348,8 +349,11 @@ t('every view draws at least one picture, and an unknown one falls back', () => 
         assert.ok(h.trace || h.waterfall, `${v} draws nothing`);
         assert.strictEqual(normaliseView(v), v);
     }
-    assert.strictEqual(normaliseView('nonsense'), 'split');
-    assert.strictEqual(normaliseView(undefined), 'split');
+    // An unreadable stored value lands on the default, not on some other view
+    // that happened to be first in the list.
+    assert.strictEqual(normaliseView('nonsense'), IF_VIEW_DEFAULT);
+    assert.strictEqual(normaliseView(undefined), IF_VIEW_DEFAULT);
+    assert.ok(IF_VIEWS.some((o) => o.value === IF_VIEW_DEFAULT), 'the default is not a view');
     // Fusion is the only one that puts both on one surface, and mirror the only
     // one that is symmetric — the panel's canvas layout turns on exactly these.
     assert.ok(viewHas('fusion').merged && viewHas('fusion').waterfall && viewHas('fusion').trace);

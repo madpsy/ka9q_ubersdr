@@ -183,9 +183,9 @@ export const PANELS = [
     // Free to run: it reads the frames the main display is already receiving
     // rather than opening anything of its own. See IFSpectrumPanel.
     //
-    // Minimal: the picture, the dial and the caption that says when the main
-    // view is too far out to feed it. The view, span, levels and speed are
-    // chosen and then watched.
+    // Minimal: the picture alone. The view, span, levels and speed are chosen
+    // and then watched, and the readout under the chart is what the ruler and
+    // the Receiver panel above already say.
     {
         id: 'ifspectrum',
         title: 'IF Spectrum',

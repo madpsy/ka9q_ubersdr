@@ -179,6 +179,36 @@ t('the panel is registered, under the Receiver, and in a group', () => {
     );
 });
 
+t('the minimal view is the picture and nothing under it', () => {
+    const text = (props, over) => {
+        reset();
+        const { tree } = render(IFSpectrumPanel, props, context(over));
+        return walk(tree).filter((n) => {
+            const c = String(n.props.className || '');
+            return c.startsWith('ifs__foot') || c.startsWith('note');
+        });
+    };
+    // Docked it carries the readout; shrunk to a glance it carries nothing.
+    assert.ok(text({}, {}).length > 0, 'the docked panel lost its readout');
+    assert.strictEqual(text({ minimal: true }, {}).length, 0, 'the minimal view has text under it');
+
+    // ...with one exception, and it is the one that matters: a pane that cannot
+    // draw at all still says why, or it reads as a fault.
+    assert.ok(text({ minimal: true }, { running: false }).length > 0,
+        'a stopped receiver says nothing at all');
+});
+
+t('the default view is the one the panel is designed around', () => {
+    assert.strictEqual(DEFAULTS.ifView, 'fusion');
+    // ...and an unreadable stored value lands on the same place, rather than on
+    // whichever view the fallback was written for first.
+    reset();
+    const { tree } = render(IFSpectrumPanel, {}, context({ ifView: 'nonsense' }));
+    const cs = canvases(tree);
+    assert.strictEqual(cs.filter((c) => c.props.className === 'ifs__spec').length, 0);
+    assert.strictEqual(cs.filter((c) => c.props.className === 'ifs__ov').length, 1);
+});
+
 t('its display settings all have defaults, so a first visit is not undefined', () => {
     for (const key of ['ifView', 'ifSpan', 'ifRate', 'ifAuto', 'ifFloor', 'ifCeil', 'ifGestures']) {
         assert.ok(DEFAULTS[key] !== undefined, `${key} has no default`);

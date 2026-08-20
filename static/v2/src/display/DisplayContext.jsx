@@ -6,6 +6,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { UI_CONFIG_DEFAULTS, parseUiConfig } from './uiConfig.js';
 import { UI_COLOR_VARS, uiColorVars } from '../lib/uiColors.js';
 import { invalidateThemeColors } from '../lib/spectrumTrace.js';
+import { IF_VIEW_DEFAULT } from '../lib/ifSpectrum.js';
 
 const STORAGE_KEY = 'ubersdr.v2.display';
 
@@ -255,10 +256,11 @@ export const DEFAULTS = {
     // *are* shared — those are what the display looks like, and two panes of one
     // instrument disagreeing about that would read as two instruments.
     //
-    // 'split' to begin with: it is the arrangement the main display ships in, so
-    // the pane under it is immediately legible as the same thing closer up. The
-    // other four are one tap away.
-    ifView: 'split',
+    // Which of the five pictures it draws. Fusion to begin with — the trace laid
+    // over its own waterfall rather than beside it. See IF_VIEW_DEFAULT for why:
+    // a dock column cannot afford to halve a pane this short, and the two layers
+    // are the same measurement at two ages, so they do not compete.
+    ifView: IF_VIEW_DEFAULT,
     // Multiplier on the fitted window — the passband and the dial, with a
     // quarter again around them, which is the shape the mode gives it. 1 is the
     // fit, which is the panel's whole proposition, and also the hard stop: the

@@ -22,8 +22,9 @@
 // window, at which point the two panes are showing the same thing at the same
 // resolution and this one is the ruler.
 //
-// `minimal` is the picture on its own: the view switch, the span, the levels
-// and the speed all still apply, they are just not on show.
+// `minimal` is the picture on its own — no readout, no controls. Everything
+// still applies, it is just not on show; the only text that survives is the line
+// that explains a *blank* pane, because one that says nothing reads as a fault.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { Button, Field, Icon, RangeSlider, Segmented, Slider, Switch } from '../components/ui.jsx';
@@ -631,17 +632,25 @@ export default function IFSpectrumPanel({ minimal }) {
                 )}
             </div>
 
-            {/* The dial and what the window covers, always — in the minimal view
-                it is the only thing that says what the picture is of. */}
-            <div className="ifs__foot">
-                <span className="ifs__dial">{formatHz(win.dial)}</span>
-                <span className="ifs__span">{formatSpan(win.span)} wide</span>
-                <span className="ifs__res">{formatBinWidth(binWidth)}</span>
-            </div>
+            {/* The dial, the window and what it is costing in resolution.
+                Dropped in the minimal view, which is the picture and nothing
+                else: the ruler already says how wide the window is, the dial is
+                on the top bar and in the Receiver panel above, and a line of
+                figures under a picture somebody shrank to a glance is exactly
+                the thing they shrank it to be rid of. */}
+            {!minimal && (
+                <div className="ifs__foot">
+                    <span className="ifs__dial">{formatHz(win.dial)}</span>
+                    <span className="ifs__span">{formatSpan(win.span)} wide</span>
+                    <span className="ifs__res">{formatBinWidth(binWidth)}</span>
+                </div>
+            )}
 
-            {/* Why the picture is smooth, or empty, and the one action that
-                answers it. Shown in the minimal view too: a pane that cannot
-                say anything useful should say why rather than look broken. */}
+            {/* Why the picture is empty, and the one action that answers it.
+                These two survive the minimal view — a blank pane that says
+                nothing reads as a fault, and both of them are one click from
+                being fixed. The resolution hint below does not: it explains a
+                picture that is drawing perfectly well, only smoothly. */}
             {!running && <div className="note note--tight">Start the receiver to see the IF.</div>}
             {running && blind && (
                 <div className="note note--tight">
@@ -651,7 +660,7 @@ export default function IFSpectrumPanel({ minimal }) {
                     </Button>
                 </div>
             )}
-            {running && !blind && coarse && (
+            {!minimal && running && !blind && coarse && (
                 <div className="note note--tight">
                     {inWindow < 1
                         ? 'Less than one spectrum bin lands in this window.'

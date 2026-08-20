@@ -551,8 +551,19 @@ export const IF_VIEWS = [
     { value: 'mirror', label: 'Mirror' },
 ];
 
+// The one a new visitor gets, and the one an unreadable stored value falls back
+// to — the same constant, so the two cannot drift apart. DisplayContext imports
+// it rather than repeating the word.
+//
+// Fusion rather than split: this pane is a dock column's worth of height, and
+// halving it gives two strips that are each too short to read. The trace and the
+// history are the same measurement anyway — one is where the signal is now, the
+// other where it has been — so laying them over each other costs nothing in
+// legibility and buys the whole panel for both. The other four are one tap away.
+export const IF_VIEW_DEFAULT = 'fusion';
+
 export function normaliseView(v) {
-    return IF_VIEWS.some((o) => o.value === v) ? v : 'split';
+    return IF_VIEWS.some((o) => o.value === v) ? v : IF_VIEW_DEFAULT;
 }
 
 /** Whether a view draws each half. Both is the split and the fusion. */

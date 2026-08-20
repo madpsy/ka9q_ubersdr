@@ -346,7 +346,7 @@ t('the resolution readout says something at every zoom', () => {
 // ── Views ────────────────────────────────────────────────────────────────────
 
 t('every view draws at least one picture, and an unknown one falls back', () => {
-    for (const v of ['split', 'spectrum', 'waterfall', 'fusion', 'mirror']) {
+    for (const v of ['split', 'spectrum', 'waterfall', 'fusion', 'mirror', 'shape']) {
         const h = viewHas(v);
         assert.ok(h.trace || h.waterfall, `${v} draws nothing`);
         assert.strictEqual(normaliseView(v), v);
@@ -362,6 +362,10 @@ t('every view draws at least one picture, and an unknown one falls back', () => 
     assert.ok(!viewHas('split').merged);
     assert.ok(viewHas('mirror').mirror && !viewHas('mirror').waterfall);
     assert.ok(!viewHas('waterfall').trace);
+    // Shape is the only one drawn from a window of frames rather than the last
+    // one, which is what earns it a history and a scale of its own.
+    assert.ok(viewHas('shape').shape && viewHas('shape').trace && !viewHas('shape').waterfall);
+    assert.ok(!viewHas('split').shape && !viewHas('mirror').shape);
 });
 
 t('the waterfall rate is clamped rather than trusted', () => {

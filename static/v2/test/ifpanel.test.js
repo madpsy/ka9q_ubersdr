@@ -71,7 +71,7 @@ function context(over) {
 const canvases = (tree) => walk(tree).filter((n) => n.type === 'canvas');
 
 t('it renders in every view, docked and minimal', () => {
-    for (const view of ['split', 'spectrum', 'waterfall', 'fusion', 'mirror']) {
+    for (const view of ['split', 'spectrum', 'waterfall', 'fusion', 'mirror', 'shape']) {
         for (const minimal of [false, true]) {
             reset();
             const { tree, cleanups } = render(IFSpectrumPanel, { minimal }, context({ ifView: view }));
@@ -102,6 +102,24 @@ t('the pictures a view asks for are the pictures it gets', () => {
     assert.deepStrictEqual(count('mirror'), { spec: 1, wf: 0, ov: 0 });
     assert.deepStrictEqual(count('waterfall'), { spec: 0, wf: 1, ov: 1 });
     assert.deepStrictEqual(count('fusion'), { spec: 0, wf: 1, ov: 1 });
+    // Shape is a statistical view of the passband, and a waterfall of the live
+    // frames beside it would be the picture it exists not to draw.
+    assert.deepStrictEqual(count('shape'), { spec: 1, wf: 0, ov: 0 });
+});
+
+t('the Shape view brings its own window and says what went into it', () => {
+    reset();
+    const { tree } = render(IFSpectrumPanel, {}, context({ ifView: 'shape' }));
+    const text = deep(tree).map((n) => n.props.className).filter((c) => typeof c === 'string');
+    // The averaging window is the one control only this view has...
+    assert.ok(text.includes('ifs__avg'), 'no readout of what the average covers');
+    // ...and it is absent from the others, where there is no window to set.
+    reset();
+    const other = render(IFSpectrumPanel, {}, context({ ifView: 'split' })).tree;
+    assert.ok(!deep(other).some((n) => n.props.className === 'ifs__avg'));
+
+    // Its default is a real number of seconds, not undefined.
+    assert.ok(DEFAULTS.ifShapeSec >= 0.5 && DEFAULTS.ifShapeSec <= 10);
 });
 
 t('everything standing in the way is said on the picture, not under it', () => {
@@ -314,7 +332,10 @@ t('the default view is the one the panel is designed around', () => {
 });
 
 t('its display settings all have defaults, so a first visit is not undefined', () => {
-    for (const key of ['ifView', 'ifSpan', 'ifRate', 'ifAuto', 'ifFloor', 'ifCeil', 'ifGestures']) {
+    for (const key of [
+        'ifView', 'ifSpan', 'ifRate', 'ifAuto', 'ifFloor', 'ifCeil', 'ifGestures',
+        'ifClickTune', 'ifShapeSec',
+    ]) {
         assert.ok(DEFAULTS[key] !== undefined, `${key} has no default`);
     }
     assert.strictEqual(DEFAULTS.ifSpan, 1, 'the pane must open fitted to the filter');

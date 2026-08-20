@@ -7,6 +7,7 @@ import { UI_CONFIG_DEFAULTS, parseUiConfig } from './uiConfig.js';
 import { UI_COLOR_VARS, uiColorVars } from '../lib/uiColors.js';
 import { invalidateThemeColors } from '../lib/spectrumTrace.js';
 import { IF_VIEW_DEFAULT } from '../lib/ifSpectrum.js';
+import { SHAPE_SEC_DEFAULT } from '../lib/ifShape.js';
 
 const STORAGE_KEY = 'ubersdr.v2.display';
 
@@ -286,6 +287,14 @@ export const DEFAULTS = {
     // you can undo it. Dragging stays live either way: that one cannot be done
     // by accident, and it is the best fine-tuning control in the interface.
     ifClickTune: false,
+    // Seconds of frames the Shape view averages over.
+    //
+    // Two, because that is about the shortest window that settles the noise
+    // without smearing what a voice is doing — a syllable is a couple of hundred
+    // milliseconds, so a two-second average still shows speech as a shape while
+    // holding a carrier perfectly still. Longer is for digging a weak steady
+    // signal out; shorter is for watching something change.
+    ifShapeSec: SHAPE_SEC_DEFAULT,
     ifRate: 20,             // committed rows a second, as the main waterfall's
     // Auto by default and for the same reason the audio scope's is: it is right
     // until the question becomes "how strong is this", which is what an absolute

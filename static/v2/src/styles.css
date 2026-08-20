@@ -5031,6 +5031,9 @@ a.btn { text-decoration: none; }
 .ifs__tip b { color: var(--text); font-weight: 600; }
 .ifs__tip-db { color: var(--text); }
 .ifs__tip-freq { color: var(--text-faint); }
+/* The peak beside the average, in the Shape view. Dimmer than the average it
+   sits under: the average is the reading and this is how far the band goes. */
+.ifs__tip-peak { margin-left: 6px; opacity: 0.75; }
 .ifs__tip--left { transform: translateX(-100%); margin-left: -10px; }
 .ifs__tip--above { transform: translateY(-100%); margin-top: -10px; }
 .ifs__tip--left.ifs__tip--above { transform: translate(-100%, -100%); }
@@ -5057,6 +5060,12 @@ a.btn { text-decoration: none; }
 /* What the window is costing in resolution — the one number that decides
    whether this pane is showing structure or an interpolation. Last, and
    pushed to the end, because it is a diagnostic rather than a reading. */
+/* What the Shape view's average actually covers. Marked when the feed could not
+   fill the window: a shape drawn from three frames is a shape drawn from three
+   frames, and this is the only place that says so. */
+.ifs__avg { font-family: var(--mono); }
+.ifs__avg.is-thin { color: var(--warn, #ffb020); }
+
 .ifs__res { margin-left: auto; font-family: var(--mono); }
 
 /* Rolling 24-hour spectrogram: a thumbnail in the panel, the full-resolution

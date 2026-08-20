@@ -45,6 +45,10 @@ import { throttle } from '../lib/throttle.js';
 import { clamp, formatFreqExact, formatHz, formatSpan } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import {
+    SHAPE_BINS, SHAPE_MIN_ROWS, SHAPE_SEC_MAX, SHAPE_SEC_MIN,
+    bandBins, clampShapeSec, createShape, formatShape, pushShapeRow, resetShape, shapeStats,
+} from '../lib/ifShape.js';
+import {
     IF_RATE_MAX, IF_RATE_MIN, IF_VIEWS, ZOOM_MIN, ZOOM_STEP,
     binWidthOf, binsInWindow, clampRate, clampZoom, createLevels, formatBinWidth,
     formatOffset, isZoomed, levelsOf, manualLevels, maxZoomFor, normaliseView, offsetTicks,
@@ -153,6 +157,14 @@ export default function IFSpectrumPanel({ minimal }) {
         levels: createLevels(),
         drawnAt: 0,
 
+        // The Shape view's own history and its last answer. Fed from the same
+        // offset grid the waterfall's rows are on, and only while that view is
+        // showing — see lib/ifShape.js.
+        shape: createShape(SHAPE_BINS),
+        shapeRow: null,
+        shapeOut: {},
+        stats: null,
+
         cmap: null,
         ring: null, ringCtx: null, ringH: 0,
         rowPx: null, rowBuf: null,
@@ -220,7 +232,7 @@ export default function IFSpectrumPanel({ minimal }) {
         schedule, tuning.frequency, tuning.bandwidthLow, tuning.bandwidthHigh, tuning.mode,
         viewMode, factor, size.w, size.specH, size.wfH,
         display.palette, display.contrast, display.fill, display.grid, display.smoothing,
-        display.ifAuto, display.ifFloor, display.ifCeil,
+        display.ifAuto, display.ifFloor, display.ifCeil, display.ifShapeSec,
     ]);
 
     // The palette as one packed pixel per level, which is what colouring a
@@ -242,9 +254,12 @@ export default function IFSpectrumPanel({ minimal }) {
     // A span change is a different x axis, so the history it was painted under
     // no longer means what the new scale says. Tuning is *not* such a change —
     // every column is an offset from the dial and stays true as the dial moves,
-    // which is the whole reason this pane is worth a history at all.
+    // which is the whole reason this pane is worth a history at all. Both
+    // histories are on that grid and both go.
     useEffect(() => {
         clearRing(st);
+        resetShape(st.shape, SHAPE_BINS);
+        st.stats = null;
         schedule();
     }, [win.span, schedule, st]);
 
@@ -525,6 +540,7 @@ export default function IFSpectrumPanel({ minimal }) {
 
     // ── Controls ─────────────────────────────────────────────────────────────
     const rate = clampRate(display.ifRate);
+    const shapeSec = clampShapeSec(display.ifShapeSec);
     const auto = display.ifAuto !== false;
     const floorDb = Number.isFinite(display.ifFloor) ? display.ifFloor : -110;
     const ceilDb = Number.isFinite(display.ifCeil) ? display.ifCeil : -20;
@@ -658,7 +674,10 @@ export default function IFSpectrumPanel({ minimal }) {
                                 <b>{at.offset}</b>
                                 {at.db != null && <span className="ifs__tip-db">{at.db}</span>}
                             </span>
-                            <span className="ifs__tip-freq">{at.freq}</span>
+                            <span className="ifs__tip-freq">
+                                {at.freq}
+                                {at.peak != null && <span className="ifs__tip-peak">{at.peak}</span>}
+                            </span>
                         </span>
                     </>
                 )}
@@ -674,6 +693,14 @@ export default function IFSpectrumPanel({ minimal }) {
                 <div className="ifs__foot">
                     <span className="ifs__dial">{formatHz(win.dial)}</span>
                     <span className="ifs__span">{formatSpan(win.span)} wide</span>
+                    {has.shape && state.ok && (
+                        <span
+                            className={`ifs__avg${st.stats && st.stats.rows < SHAPE_MIN_ROWS ? ' is-thin' : ''}`}
+                            title="How much signal actually went into the average — the time it covers and the number of frames. A window the feed cannot fill is a shape drawn from very few readings, and this is where that shows."
+                        >
+                            {formatShape(st.stats, shapeSec)}
+                        </span>
+                    )}
                     <span className="ifs__res">{formatBinWidth(binWidth)}</span>
                 </div>
             )}
@@ -732,6 +759,24 @@ export default function IFSpectrumPanel({ minimal }) {
                         step={1}
                         gap={10}
                         onChange={({ low, high }) => display.set({ ifFloor: low, ifCeil: high })}
+                    />
+                </Field>
+            )}
+
+            {/* Only in the Shape view, which is the only one that has a window
+                to set. Seconds rather than a frame count, because that is what
+                it actually is — see lib/ifShape.js. */}
+            {!minimal && has.shape && (
+                <Field
+                    label="Average"
+                    hint={state.ok ? formatShape(st.stats, shapeSec) : `${shapeSec.toFixed(1)} s`}
+                >
+                    <Slider
+                        value={shapeSec}
+                        min={SHAPE_SEC_MIN}
+                        max={SHAPE_SEC_MAX}
+                        step={0.5}
+                        onChange={(v) => display.set({ ifShapeSec: clampShapeSec(v) })}
                     />
                 </Field>
             )}
@@ -878,12 +923,26 @@ function readAt(st, wrap, pt) {
     const yPct = Math.min(100, Math.max(0, ((pt.y - r.top) / r.height) * 100));
     const off = Math.round(st.win.offLo + xFrac * st.win.span);
 
-    // The live level under the pointer, and only where there is a live trace to
+    // The level under the pointer, and only where there is something live to
     // read it off. Over a bare waterfall the pixel under the pointer is a
     // measurement from some seconds ago, and answering it with this frame's
     // number would be a readout for a row nobody is pointing at.
+    //
+    // In the Shape view it is the average rather than the last frame — the
+    // average is what is drawn, and reporting the instantaneous value beside a
+    // curve that deliberately is not it would be two different answers to the
+    // same question. The peak goes with it, because the gap between them is
+    // what the band's width means.
     let db = null;
-    if (st.has && st.has.trace && st.px && st.px.length) {
+    let peak = null;
+    if (st.has && st.has.shape && st.stats) {
+        const m = st.stats.mean;
+        const i = Math.min(m.length - 1, Math.round(xFrac * (m.length - 1)));
+        if (Number.isFinite(m[i])) {
+            db = `${m[i].toFixed(1)} dBFS`;
+            if (Number.isFinite(st.stats.max[i])) peak = `pk ${st.stats.max[i].toFixed(1)}`;
+        }
+    } else if (st.has && st.has.trace && st.px && st.px.length) {
         const i = Math.min(st.px.length - 1, Math.round(xFrac * (st.px.length - 1)));
         const v = st.px[i];
         if (Number.isFinite(v)) db = `${v.toFixed(1)} dBFS`;
@@ -893,6 +952,7 @@ function readAt(st, wrap, pt) {
         offset: `${formatOffset(off)} Hz`,
         freq: formatFreqExact(st.win.dial + off),
         db,
+        peak,
         xPct,
         yPct,
         ...tipPlacement(pt.type, xPct, yPct),
@@ -941,12 +1001,25 @@ function drawAll(st, spec, wf, ov) {
         trace = st.smoothed;
     }
 
+    // The Shape view keeps a window of frames of its own, on the same offset
+    // grid the waterfall's rows use — and it keeps it from the *raw* row, not
+    // the smoothed one: smoothing before averaging is averaging twice, and the
+    // second one has a length nobody chose.
+    const stats = st.has.shape ? updateShape(st, now) : null;
+    st.stats = stats;
+
     let levels;
     if (st.d && st.d.ifAuto === false) {
         levels = manualLevels(
             Number.isFinite(st.d.ifFloor) ? st.d.ifFloor : -110,
             Number.isFinite(st.d.ifCeil) ? st.d.ifCeil : -20,
         );
+    } else if (stats) {
+        // The floor from the average and the ceiling from the top of the
+        // envelope — see updateLevels. The scale therefore fits the passband
+        // rather than the window, which is all this view draws.
+        updateLevels(st.levels, stats.mean, dt, stats.max);
+        levels = levelsOf(st.levels);
     } else {
         updateLevels(st.levels, trace, dt);
         levels = levelsOf(st.levels);
@@ -954,9 +1027,26 @@ function drawAll(st, spec, wf, ov) {
 
     commitRow(st, now, levels);
 
-    if (spec) drawTrace(st, spec, trace, levels, { mirror: st.has.mirror, over: false });
+    if (spec && stats) drawShape(st, spec, stats, levels);
+    else if (spec) drawTrace(st, spec, trace, levels, { mirror: st.has.mirror, over: false });
     if (wf) drawWaterfall(st, wf);
     if (ov) drawOverlay(st, ov, trace, levels);
+}
+
+// One frame into the shape's window, and the answer back out.
+//
+// Resampled to the shape grid rather than reusing the trace: the trace is at the
+// canvas's device width, which changes when the panel is resized, and a history
+// whose columns moved with the layout would be describing several different
+// windows at once.
+function updateShape(st, now) {
+    if (!st.shapeRow || st.shapeRow.length !== SHAPE_BINS) st.shapeRow = new Float32Array(SHAPE_BINS);
+    sliceToPixels(st.bins, st.cfg, st.win, st.shapeRow);
+    const windowMs = clampShapeSec(st.d && st.d.ifShapeSec) * 1000;
+    pushShapeRow(st.shape, st.shapeRow, now, windowMs);
+    return shapeStats(
+        st.shape, windowMs, now, st.shapeOut, bandBins(SHAPE_BINS, st.win, st.tuning),
+    );
 }
 
 // ── The history ──────────────────────────────────────────────────────────────
@@ -1207,6 +1297,125 @@ function drawTrace(st, canvas, trace, levels, opts) {
             c.lineWidth = TRACE_WIDTH * st.dpr;
             c.stroke();
         }
+    });
+}
+
+// ── The shape ────────────────────────────────────────────────────────────────
+
+/**
+ * The passband's sustained shape: an envelope, an average through it, and a peak.
+ *
+ * Three layers, drawn from the back so each reads over the one behind it:
+ *
+ *   the band     min to max over the window, filled. Its *width* is the whole
+ *                point — that is how much this part of the passband moves, so a
+ *                carrier is a ribbon and noise is a wide grey stripe.
+ *   the average  the power mean, filled to the floor in the palette's own
+ *                gradient so it reads as the same instrument as the other views,
+ *                with a crisp line on top. This is the number.
+ *   the peak     a hairline along the top of the band, because the loudest thing
+ *                that happened is worth being able to point at.
+ *
+ * Nothing is drawn outside the filter. The shaded passband is therefore exactly
+ * the extent of the picture, which is the tidiest thing about this view: the
+ * shape sits *inside* the thing that produced it.
+ */
+function drawShape(st, canvas, stats, levels) {
+    const w = canvas.width;
+    const h = canvas.height;
+    if (!w || !h) return;
+    const d = st.d || {};
+    const c = canvas.getContext('2d', { alpha: false });
+    const col = themeColors(THEME_VARS);
+
+    ensureGradients(st, c, h, `${d.palette}|${d.contrast}|${h}|s`, canvas);
+
+    c.fillStyle = col['--spec-bg'] || '#0a0d14';
+    c.fillRect(0, 0, w, h);
+
+    const span = (levels.ceil - levels.floor) || 1;
+    const yOf = (db) => h - ((Math.max(levels.floor, Math.min(levels.ceil, db)) - levels.floor) / span) * h;
+
+    if (d.grid) {
+        c.strokeStyle = col['--spec-grid'] || 'rgba(255,255,255,0.06)';
+        c.lineWidth = 1;
+        const step = span > 80 ? 20 : 10;
+        for (let db = Math.ceil(levels.floor / step) * step; db < levels.ceil; db += step) {
+            const y = Math.round(yOf(db)) + 0.5;
+            c.beginPath();
+            c.moveTo(0, y);
+            c.lineTo(w, y);
+            c.stroke();
+        }
+    }
+
+    drawMarks(st, c, w, h, col, false);
+
+    // The grid is a fixed width and the canvas is not, so a bin is a fraction of
+    // a pixel or several — either way the mapping is the same one the ruler and
+    // the passband shading use, which is what keeps the shape inside its own
+    // filter edges to the pixel.
+    const n = stats.mean.length;
+    const xOf = (i) => ((i + 0.5) / n) * w;
+    const { mean, min, max } = stats;
+
+    // Palette hues for the two outer layers, so they belong to whatever colour
+    // map is in force rather than being a fixed grey laid over it.
+    const lut = getPalette(d.palette || 'classic');
+    const rgb = (t) => {
+        const k = Math.round(t * 255) * 3;
+        return `${lut[k]},${lut[k + 1]},${lut[k + 2]}`;
+    };
+    const bandCol = rgb(0.55);
+    const peakCol = rgb(0.92);
+
+    eachRun(mean, (from, to) => {
+        // A single sample has no run to draw and would leave a stray dot; the
+        // band and the line both need two.
+        if (to <= from) return;
+
+        // ── the band ─────────────────────────────────────────────────────────
+        c.beginPath();
+        for (let i = from; i <= to; i++) c.lineTo(xOf(i), yOf(max[i]));
+        for (let i = to; i >= from; i--) c.lineTo(xOf(i), yOf(min[i]));
+        c.closePath();
+        c.fillStyle = `rgba(${bandCol},0.22)`;
+        c.fill();
+
+        // ── the average ──────────────────────────────────────────────────────
+        c.beginPath();
+        c.moveTo(xOf(from), h);
+        for (let i = from; i <= to; i++) c.lineTo(xOf(i), yOf(mean[i]));
+        c.lineTo(xOf(to), h);
+        c.closePath();
+        // Under the band rather than over it, at a lower alpha than the other
+        // views use: the fill here is context for the line, and a solid block
+        // would swallow the bottom half of the envelope it is meant to sit in.
+        c.globalAlpha = d.fill === false ? 0 : 0.55;
+        c.fillStyle = st.fillGrad;
+        c.fill();
+        c.globalAlpha = 1;
+
+        // ── the peak ─────────────────────────────────────────────────────────
+        c.beginPath();
+        for (let i = from; i <= to; i++) {
+            const y = yOf(max[i]);
+            if (i === from) c.moveTo(xOf(i), y); else c.lineTo(xOf(i), y);
+        }
+        c.strokeStyle = `rgba(${peakCol},0.5)`;
+        c.lineWidth = Math.max(1, st.dpr);
+        c.stroke();
+
+        // ...and the average on top of everything, which is what is being read.
+        c.beginPath();
+        for (let i = from; i <= to; i++) {
+            const y = yOf(mean[i]);
+            if (i === from) c.moveTo(xOf(i), y); else c.lineTo(xOf(i), y);
+        }
+        c.strokeStyle = st.traceGrad;
+        c.lineWidth = (TRACE_WIDTH + 0.35) * st.dpr;
+        c.lineJoin = 'round';
+        c.stroke();
     });
 }
 

@@ -479,8 +479,16 @@ export function createLevels() {
  * leaves the levels exactly where they were, which is what keeps the scale
  * still while the dial is outside the served view instead of collapsing to
  * nothing and springing back.
+ *
+ * `peakFrom` is an optional second row to take the ceiling from. The floor is a
+ * percentile and wants the *typical* level; the ceiling is a peak and wants the
+ * highest thing that will be drawn. Normally those are the same row. In the
+ * shape view they are not: the floor belongs to the average and the ceiling to
+ * the top of the envelope above it, and taking both from the envelope would put
+ * the noise floor several dB high — the maximum of a noisy bin over a few
+ * seconds sits well above its mean.
  */
-export function updateLevels(st, px, dt) {
+export function updateLevels(st, px, dt, peakFrom) {
     const n = px.length;
     if (!st.scratch || st.scratch.length !== n) st.scratch = new Float32Array(n);
     let k = 0;
@@ -490,6 +498,12 @@ export function updateLevels(st, px, dt) {
         if (!Number.isFinite(v)) continue;
         st.scratch[k++] = v;
         if (v > peak) peak = v;
+    }
+    if (peakFrom && peakFrom.length === n) {
+        for (let i = 0; i < n; i++) {
+            const v = peakFrom[i];
+            if (Number.isFinite(v) && v > peak) peak = v;
+        }
     }
     if (k < 2) return levelsOf(st);
 
@@ -673,12 +687,17 @@ export function formatBinWidth(hz) {
 //           signal strength — and on a passband centred in the window that
 //           object is centred too, which is the whole "am I on frequency"
 //           question answered by shape instead of by reading a scale.
+//   shape   not a trace at all: the sustained level of the passband over a few
+//           seconds, with the spread around it. The other five draw what
+//           arrived; this one draws what is *there*, which on a signal buried in
+//           noise is a different picture. See lib/ifShape.js.
 export const IF_VIEWS = [
     { value: 'split', label: 'Split' },
     { value: 'spectrum', label: 'Spectrum' },
     { value: 'waterfall', label: 'Waterfall' },
     { value: 'fusion', label: 'Fusion' },
     { value: 'mirror', label: 'Mirror' },
+    { value: 'shape', label: 'Shape' },
 ];
 
 // The one a new visitor gets, and the one an unreadable stored value falls back
@@ -705,6 +724,10 @@ export function viewHas(view) {
         // One pane carrying both, rather than two stacked.
         merged: v === 'fusion',
         mirror: v === 'mirror',
+        // Drawn from a window of frames rather than from the last one, so it
+        // needs a history of its own and a scale that fits the passband — see
+        // lib/ifShape.js.
+        shape: v === 'shape',
     };
 }
 

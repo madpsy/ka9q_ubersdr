@@ -130,10 +130,10 @@ function formatHzPerBin(hz) {
  * @param s.binCount   bins across the view
  * @param s.binHz      Hz per bin
  * @param s.divisor    the server's poll divisor, 1 for full rate
- * @param s.streamRate audio sample rate as it arrives, Hz
- * @param s.streamChannels audio channels as they arrive — 2 only in IQ
  * @param s.queuedSec  audio queued ahead of the playback clock
  * @param s.outLatSec  what the hardware adds after that
+ * @param s.streamRate audio sample rate as it arrives, Hz — shown beside it
+ * @param s.streamChannels audio channels as they arrive — 2 only in IQ
  * @param s.underruns  dropouts since the session started
  * @param s.listeners  sessions on this receiver, this one included
  * @param s.chatUsers  how many of them are in chat, if chat is connected
@@ -158,19 +158,30 @@ function appLoad(app) {
     return parts.length ? parts.join('  ') : null;
 }
 
-// "10 kHz  I/Q", "12 kHz  mono" — the audio stream on one line.
+// "12K 1ch", "24K 1ch", "10K 2ch" — what the audio stream is, in the fewest
+// characters that still say it.
 //
-// Whole kHz where the rate is a round number, one decimal otherwise, so 10, 12
-// and 24 read cleanly without pinning an odd rate to the wrong value. Either
-// half may be missing before the first packet, and the line is dropped entirely
-// when both are.
-function formatStream(rate, channels) {
+// It rides on the AUDIO line rather than having one of its own. It used to have
+// one, spelt out as "12 kHz  mono", and that was a line of the readout spent on
+// two figures that only change when the mode does — while the line directly
+// under it was already the audio line. Both facts are about the same stream and
+// are read together ("how far behind am I, and on what"), so they belong on the
+// same row; the short units are what make that row fit a waterfall corner.
+//
+// Whole K where the rate is a round number of kilohertz, one decimal otherwise,
+// so 10, 12 and 24 read cleanly without pinning an odd rate to a value it does
+// not have. Channels are counted rather than named — the mode is what says
+// whether two of them are I/Q or stereo, and this corner is not where that is
+// explained.
+//
+// Either half may be missing before the first packet arrives, and both are
+// missing until then; nothing is shown as a zero, which would read as a stalled
+// stream rather than as one that has not started.
+function formatStreamShort(rate, channels) {
     const parts = [];
-    if (rate > 0) parts.push(`${(rate / 1000).toFixed(rate % 1000 ? 1 : 0)} kHz`);
-    if (channels === 2) parts.push('I/Q');
-    else if (channels === 1) parts.push('mono');
-    else if (channels > 2) parts.push(`${channels} ch`);
-    return parts.length ? parts.join('  ') : null;
+    if (rate > 0) parts.push(`${(rate / 1000).toFixed(rate % 1000 ? 1 : 0)}K`);
+    if (channels > 0) parts.push(`${Math.round(channels)}ch`);
+    return parts.length ? parts.join(' ') : null;
 }
 
 export function statLines(s = {}) {
@@ -198,22 +209,32 @@ export function statLines(s = {}) {
         .filter(Boolean).join('  ');
     add('fft', 'FFT', fft, 'Bins across the view, and what one bin is worth. The resolution decides whether two close carriers are one blob or two.');
 
-    // What the audio stream *is* — one line, because rate and channel count are
-    // one question. Both follow the mode without being asked for, which is the
-    // reason to show them: 12 kHz mono on SSB, 24 on the AM family, and 10 kHz
-    // with two genuinely different channels in IQ. Named I/Q rather than stereo
-    // there, since "stereo" would suggest two versions of the same audio.
-    add('stream', 'STREAM', formatStream(s.streamRate, s.streamChannels), 'The audio stream as it arrives: sample rate and channel count, both set by the mode. IQ is the only one where the two channels differ — left is I, right is Q.');
-
     add('net', 'NET', formatThroughput(s.bytesIn, s.audioBytes, s.bandBytes), 'Every stream this session is running — the main spectrum, the audio, and the band spectrum panel when it is open — and the total. What the connection is costing, and which part of it to do something about.');
 
-    // Queue plus hardware, because the operator's question is "how far behind am
-    // I", and answering with only the half this client controls is a figure that
-    // is always wrong in the same direction.
+    // Everything about the audio on one line: how far behind live it is, what
+    // stream that is, and whether any of it has been lost.
+    //
+    // The latency is queue plus hardware, because the operator's question is
+    // "how far behind am I" and answering with only the half this client
+    // controls is a figure that is always wrong in the same direction.
+    //
+    // The stream sits between the two rather than at the end, so it holds one
+    // position: dropouts are the exceptional part and appending them leaves the
+    // pair that is always there — the latency and what it is the latency of —
+    // side by side and still. Put in the middle, the format would shift right
+    // the first time a dropout happened, which is the moment the line is being
+    // read.
+    //
+    // Assembled from whichever parts are known. Before this the line was the
+    // latency or nothing, so a browser reporting no output latency on a silent
+    // channel lost the stream format with it — and that half is known from the
+    // first packet, whether or not anything is queued.
     const latency = (s.queuedSec || 0) + (s.outLatSec || 0);
-    const audio = latency > 0
-        ? `${Math.round(latency * 1000)} ms${s.underruns > 0 ? `  ${s.underruns} drop${s.underruns === 1 ? '' : 's'}` : ''}`
-        : null;
+    const audio = [
+        latency > 0 ? `${Math.round(latency * 1000)} ms` : null,
+        formatStreamShort(s.streamRate, s.streamChannels),
+        s.underruns > 0 ? `${s.underruns} drop${s.underruns === 1 ? '' : 's'}` : null,
+    ].filter(Boolean).join('  ') || null;
     // Listening, and how many of those are in chat — the bracket is left off
     // rather than shown as (0), because there are two different reasons for a
     // nought here and the readout cannot tell them apart: nobody in the room, or
@@ -241,7 +262,7 @@ export function statLines(s = {}) {
     // waterfall is not the place to spend two.
     add('app', 'APP', appLoad(s.app), 'What this app is costing the machine it is running on: processor time as a share of one core, and real memory. Only the Android, iOS and desktop clients can measure this — a browser tab has no way to ask.');
 
-    add('audio', 'AUDIO', audio, 'Audio queued ahead of the playback clock plus what the output device adds — how far behind live you are, and how many dropouts there have been.');
+    add('audio', 'AUDIO', audio, 'The audio stream: how far behind live you are — what is queued ahead of the playback clock plus what the output device adds — then its sample rate and channel count, both set by the mode, and how many dropouts there have been.');
 
     return out;
 }

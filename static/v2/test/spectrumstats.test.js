@@ -232,6 +232,13 @@ t('dropouts appear beside the latency, and only when there have been some', () =
     assert.strictEqual(value(statLines({ queuedSec: 0.2, underruns: 0 }), 'audio'), '200 ms');
     assert.strictEqual(value(statLines({ queuedSec: 0.2, underruns: 1 }), 'audio'), '200 ms  1 drop');
     assert.strictEqual(value(statLines({ queuedSec: 0.2, underruns: 4 }), 'audio'), '200 ms  4 drops');
+    // Last, after the stream format rather than before it: dropouts are the
+    // exceptional part, so appending them leaves the pair that is always there
+    // — the latency and what it is the latency of — side by side and still.
+    assert.strictEqual(
+        value(statLines({ queuedSec: 0.2, streamRate: 12000, streamChannels: 1, underruns: 1 }), 'audio'),
+        '200 ms  12K 1ch  1 drop',
+    );
 });
 
 t('silence is not a latency of zero', () => {
@@ -239,6 +246,9 @@ t('silence is not a latency of zero', () => {
     // audio arriving instantly.
     assert.strictEqual(find(statLines({ fps: 20 }), 'audio'), undefined);
     assert.strictEqual(find(statLines({ queuedSec: 0, outLatSec: 0 }), 'audio'), undefined);
+    // ...and with nothing else about the stream known either, there is no line
+    // at all rather than an empty one.
+    assert.strictEqual(find(statLines({ queuedSec: 0, streamRate: 0, streamChannels: 0 }), 'audio'), undefined);
 });
 
 t('rates read to one decimal only while they are small', () => {
@@ -253,24 +263,40 @@ t('a receiver still negotiating its geometry shows no FFT line', () => {
     assert.strictEqual(value(statLines({ binCount: 2048, binHz: 0.5 }), 'fft'), '2048 bins  0.50 Hz');
 });
 
-t('the stream line carries rate and channels on one line', () => {
-    // The three the receiver actually produces. Round rates lose the decimal;
-    // IQ's two channels are named for what they are, since "stereo" would read
-    // as two versions of the same audio.
-    assert.strictEqual(value(statLines({ streamRate: 12000, streamChannels: 1 }), 'stream'), '12 kHz  mono');
-    assert.strictEqual(value(statLines({ streamRate: 24000, streamChannels: 1 }), 'stream'), '24 kHz  mono');
-    assert.strictEqual(value(statLines({ streamRate: 10000, streamChannels: 2 }), 'stream'), '10 kHz  I/Q');
+t('the stream format rides on the audio line, in the shortest units that say it', () => {
+    // The three the receiver actually produces. Round rates lose the decimal,
+    // and the channels are counted rather than named — the mode is what says
+    // whether two of them are I/Q, and a waterfall corner is not where that is
+    // explained.
+    const audio = (over) => value(statLines({ queuedSec: 0.2, ...over }), 'audio');
+    assert.strictEqual(audio({ streamRate: 12000, streamChannels: 1 }), '200 ms  12K 1ch');
+    assert.strictEqual(audio({ streamRate: 24000, streamChannels: 1 }), '200 ms  24K 1ch');
+    assert.strictEqual(audio({ streamRate: 10000, streamChannels: 2 }), '200 ms  10K 2ch');
     // An odd rate keeps a decimal rather than rounding to a rate it is not.
-    assert.strictEqual(value(statLines({ streamRate: 11025, streamChannels: 1 }), 'stream'), '11.0 kHz  mono');
+    assert.strictEqual(audio({ streamRate: 11025, streamChannels: 1 }), '200 ms  11.0K 1ch');
+
+    // It had a line of its own and does not any more: both facts are about the
+    // same stream and were being read together, one directly under the other.
+    assert.strictEqual(find(statLines({ streamRate: 12000, streamChannels: 1 }), 'stream'), undefined);
 });
 
-t('the stream line waits for the first packet rather than showing zeros', () => {
+t('the stream format waits for the first packet rather than showing zeros', () => {
     // Both figures come from a scheduled buffer, so before one arrives there is
-    // nothing to say — and "0 kHz" would read as a stalled stream.
-    assert.strictEqual(find(statLines({ fps: 20 }), 'stream'), undefined);
-    assert.strictEqual(find(statLines({ streamRate: 0, streamChannels: 0 }), 'stream'), undefined);
-    // Half-known is still worth a line: the rate arrives with the same buffer.
-    assert.strictEqual(value(statLines({ streamRate: 12000 }), 'stream'), '12 kHz');
+    // nothing to say — and "0K" would read as a stalled stream.
+    assert.strictEqual(value(statLines({ queuedSec: 0.2 }), 'audio'), '200 ms');
+    assert.strictEqual(
+        value(statLines({ queuedSec: 0.2, streamRate: 0, streamChannels: 0 }), 'audio'), '200 ms',
+    );
+    // Half-known is still worth showing: the rate arrives with the same buffer.
+    assert.strictEqual(value(statLines({ queuedSec: 0.2, streamRate: 12000 }), 'audio'), '200 ms  12K');
+});
+
+t('the audio line survives a latency it cannot measure', () => {
+    // A browser that reports no output latency on a channel with nothing queued
+    // used to take the stream format down with it — and that half is known from
+    // the first packet, whether or not anything is waiting to be played.
+    assert.strictEqual(value(statLines({ streamRate: 12000, streamChannels: 1 }), 'audio'), '12K 1ch');
+    assert.strictEqual(value(statLines({ streamChannels: 1, underruns: 2 }), 'audio'), '1ch  2 drops');
 });
 
 t('the app load line is absent unless a host reported one', () => {

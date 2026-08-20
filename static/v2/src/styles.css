@@ -4961,12 +4961,12 @@ a.btn { text-decoration: none; }
 }
 .ifs__notch--major { height: 5px; opacity: 1; }
 .ifs__notch--zero { height: 15px; opacity: 0.55; }
-.ifs__tick {
-    position: absolute;
-    top: 0;
-    white-space: nowrap;
-    transform: translateX(-50%);
-}
+.ifs__tick { position: absolute; top: 0; white-space: nowrap; }
+.ifs__tick--center { transform: translateX(-50%); }
+/* The outermost labels are pushed inward off their notch rather than centred on
+   it: centred, half of "-100k" hangs outside the panel. */
+.ifs__tick--start { margin-left: 1px; }
+.ifs__tick--end { margin-right: 1px; }
 .ifs__tick--zero { font-weight: 700; }
 
 /* Hover readout, the band spectrum's shape and placement rules. */

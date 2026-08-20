@@ -39,9 +39,9 @@ import { throttle } from '../lib/throttle.js';
 import { clamp, formatFreqExact, formatHz, formatSpan } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import {
-    COARSE_BINS, IF_RATE_MAX, IF_RATE_MIN, IF_VIEWS, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP,
+    COARSE_BINS, IF_RATE_MAX, IF_RATE_MIN, IF_VIEWS, ZOOM_MIN, ZOOM_STEP,
     binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels, formatBinWidth,
-    formatOffset, isZoomed, levelsOf, manualLevels, normaliseView, offsetTicks,
+    formatOffset, isZoomed, levelsOf, manualLevels, maxZoomFor, normaliseView, offsetTicks,
     sliceToPixels, updateLevels, viewHas, windowFor,
 } from '../lib/ifSpectrum.js';
 
@@ -84,7 +84,15 @@ export default function IFSpectrumPanel({ minimal }) {
     const display = useDisplay();
 
     const viewMode = normaliseView(display.ifView);
-    const factor = clampZoom(display.ifSpan);
+    // The stored width, held against what the receiver is actually sending.
+    //
+    // Clamped on the way *out* rather than on the way in, so the operator's
+    // choice survives the main display being zoomed in and comes back when it
+    // is zoomed out again — the window narrows to follow the data and then
+    // reopens, instead of the preference being quietly overwritten by whatever
+    // the main view happened to be doing at the time. See maxZoomFor.
+    const maxFactor = maxZoomFor(view, tuning);
+    const factor = clampZoom(display.ifSpan, maxFactor);
     const has = viewHas(viewMode);
     // Which canvases exist, decided from the view rather than from the measured
     // heights: the measuring is what *sets* those heights, and it needs the
@@ -343,7 +351,16 @@ export default function IFSpectrumPanel({ minimal }) {
     const gestures = display.ifGestures !== false;
     const zoomed = isZoomed(factor);
 
-    const setFactor = useCallback((v) => display.set({ ifSpan: clampZoom(v) }), [display]);
+    // maxFactor through a ref for the same reason the zoom itself is: the
+    // handlers outlive the render they were made in, and the main display can
+    // zoom under them at any moment.
+    const maxRef = useRef(maxFactor);
+    maxRef.current = maxFactor;
+
+    const setFactor = useCallback(
+        (v) => display.set({ ifSpan: clampZoom(v, maxRef.current) }),
+        [display],
+    );
 
     // The live zoom, for the handlers to read rather than close over.
     //
@@ -493,6 +510,9 @@ export default function IFSpectrumPanel({ minimal }) {
     const ceilDb = Number.isFinite(display.ifCeil) ? display.ifCeil : -20;
 
     const ticks = offsetTicks(win.half, size.w);
+    // The main view is zoomed in far enough that the fitted window already fills
+    // it — there is no more spectrum to open into.
+    const spanFixed = maxFactor <= ZOOM_MIN * 1.05;
     const coarse = inWindow > 0 && inWindow < COARSE_BINS;
     // Nothing at all, rather than merely a window whose edges run past what the
     // server is sending. Partial coverage draws as a gap in the trace and needs
@@ -552,9 +572,11 @@ export default function IFSpectrumPanel({ minimal }) {
                             />
                             {k.label != null && (
                                 <span
-                                    className={`ifs__tick${k.zero ? ' ifs__tick--zero' : ''}`}
+                                    className={`ifs__tick ifs__tick--${k.align}${k.zero ? ' ifs__tick--zero' : ''}`}
                                     style={{
-                                        left: `${k.frac * 100}%`,
+                                        ...(k.align === 'end'
+                                            ? { right: `${(1 - k.frac) * 100}%` }
+                                            : { left: `${k.frac * 100}%` }),
                                         ...(k.zero ? { color: st.marks.dial } : null),
                                     }}
                                 >
@@ -642,13 +664,20 @@ export default function IFSpectrumPanel({ minimal }) {
             {!minimal && (
                 <Field
                     label="Span"
-                    hint={zoomed ? `${formatSpan(win.span)} — ×${factor.toFixed(1)}` : `${formatSpan(win.span)} — fit`}
+                    hint={spanFixed
+                        ? `${formatSpan(win.span)} — all the spectrum view has`
+                        : `${formatSpan(win.span)} — ${zoomed ? `×${factor.toFixed(1)}` : 'fit'}`}
                 >
+                    {/* Disabled rather than absent where the main display is
+                        zoomed in far enough that the fitted window already fills
+                        it: there is nowhere to go, and a control that vanished
+                        would look like the setting had. */}
                     <Slider
-                        value={Math.log2(factor)}
+                        value={spanFixed ? 0 : Math.log2(factor)}
                         min={0}
-                        max={Math.log2(ZOOM_MAX)}
+                        max={spanFixed ? 1 : Math.log2(maxFactor)}
                         step={0.05}
+                        disabled={spanFixed}
                         onChange={(v) => setFactor(2 ** v)}
                     />
                 </Field>

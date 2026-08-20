@@ -186,4 +186,40 @@ t('its display settings all have defaults, so a first visit is not undefined', (
     assert.strictEqual(DEFAULTS.ifSpan, 1, 'the pane must open fitted to the filter');
 });
 
+t('an opened window is pulled back when the spectrum view cannot fill it', () => {
+    // The screenshot bug: a x32 window is 216 kHz, the receiver was sending
+    // 51 kHz, and three quarters of the panel was empty canvas.
+    const narrow = { centerFreq: 7_669_000, span: 1024 * 50, binCount: 1024 };
+    reset();
+    const { tree } = render(IFSpectrumPanel, {}, context({
+        ifSpan: 32,
+        tuning: { frequency: 7_669_000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
+        view: { ...narrow, binBandwidth: 50 },
+    }));
+    // The ruler is built from the effective window, so its outermost label says
+    // how wide the pane actually went.
+    const labels = walk(tree)
+        .filter((n) => String(n.props.className || '').startsWith('ifs__tick'))
+        .map((n) => n.children[0]);
+    assert.ok(labels.length >= 3, `only ${labels.length} labels`);
+    // 51.2 kHz of served view is +/-25.6 kHz, so nothing on the strip may claim
+    // to be further out than that.
+    for (const l of labels) {
+        const hz = l === '0' ? 0 : parseFloat(l) * (String(l).endsWith('k') ? 1000 : 1);
+        assert.ok(Math.abs(hz) <= 25_700, `ruler runs to ${l}, past what is being sent`);
+    }
+});
+
+t('the ruler does not crowd, at any width the dock can be', () => {
+    for (const width of [0, 180, 320]) {
+        reset();
+        const { tree } = render(IFSpectrumPanel, {}, context({ ifSpan: 32 }));
+        const labels = walk(tree).filter((n) => String(n.props.className || '').startsWith('ifs__tick'));
+        // Nothing measured yet means the fallback of two ticks plus zero, and a
+        // measured strip never gets more than it has room for — the eleven
+        // overlapping labels this replaces.
+        assert.ok(labels.length <= 7, `${labels.length} labels at width ${width}`);
+    }
+});
+
 console.log(`\n${pass} passed`);

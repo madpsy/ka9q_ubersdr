@@ -7,10 +7,11 @@
 
 const assert = require('assert');
 const {
-    COARSE_BINS, FIT_MARGIN, MIN_HALF_SPAN_HZ, ZOOM_MAX, ZOOM_MIN,
+    COARSE_BINS, FIT_MARGIN, MIN_HALF_SPAN_HZ, OFFSET_LABEL_PX, ZOOM_MAX, ZOOM_MIN,
     binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels,
     formatBinWidth, formatOffset, halfSpanFor, isZoomed, levelsOf, manualLevels,
-    normaliseView, offsetTicks, sliceToPixels, updateLevels, viewHas, windowFor,
+    maxZoomFor, normaliseView, offsetStep, offsetTicks, sliceToPixels, updateLevels,
+    viewHas, windowFor,
 } = require('./.build/ifspectrum.cjs');
 
 let pass = 0;
@@ -267,6 +268,59 @@ t('the waterfall rate is clamped rather than trusted', () => {
     assert.strictEqual(clampRate(1000), 40);
     assert.strictEqual(clampRate(undefined), 20);
     assert.strictEqual(clampRate('20'), 20);
+});
+
+t('the window cannot be opened past what the receiver is sending', () => {
+    // The bug this is here for: at 50 Hz a bin the server sends 51.2 kHz, and a
+    // x32 window on an SSB filter is 216 kHz — three quarters of the panel with
+    // no measurement behind it, which reads as a broken display.
+    const narrow = { centerFreq: 7_669_000, span: 1024 * 50, binCount: 1024 };
+    const usb = { frequency: 7_669_000, bandwidthLow: 50, bandwidthHigh: 2700 };
+    const max = maxZoomFor(narrow, usb);
+    assert.ok(max < ZOOM_MAX, `stop at ${max}, which is no stop at all`);
+    const win = windowFor(usb, clampZoom(99, max));
+    assert.ok(win.span <= narrow.span + 1, `${win.span} Hz window in a ${narrow.span} Hz view`);
+    assert.strictEqual(coverageOf(narrow, win), 1, 'the widest window is still all measured');
+
+    // Zoomed out to the whole band the stop never binds.
+    const wide = { centerFreq: 15e6, span: 30e6, binCount: 1024 };
+    assert.strictEqual(maxZoomFor(wide, usb), ZOOM_MAX);
+
+    // ...and the fit is never clamped away, even where the served view is
+    // narrower than it: a window inside the filter would be a lie.
+    const tiny = { centerFreq: 7_669_000, span: 2000, binCount: 1024 };
+    assert.strictEqual(maxZoomFor(tiny, usb), ZOOM_MIN);
+    assert.strictEqual(windowFor(usb, clampZoom(4, maxZoomFor(tiny, usb))).span,
+        windowFor(usb, 1).span);
+
+    // Nothing known yet is not a reason to restrict anything.
+    assert.strictEqual(maxZoomFor(null, usb), ZOOM_MAX);
+    assert.strictEqual(maxZoomFor({ centerFreq: 1, span: 0, binCount: 0 }, usb), ZOOM_MAX);
+});
+
+t('the ruler never runs out of steps, however wide the window', () => {
+    // A fixed ladder sticks at its largest rung and fills the strip with
+    // overlapping labels — eleven of them across a dock column, which is how
+    // this was found. The step is built from a decade instead.
+    for (const half of [400, 3375, 27_000, 108_000, 400_000, 3_000_000]) {
+        for (const width of [180, 215, 320, 900]) {
+            const ticks = offsetTicks(half, width);
+            const majors = ticks.filter((k) => k.major);
+            // Never more labels than the strip has room for, plus the two ends.
+            const room = Math.max(2, Math.floor(width / OFFSET_LABEL_PX));
+            assert.ok(majors.length <= room + 2,
+                `half ${half} at ${width}px: ${majors.length} labels, room for ~${room}`);
+            assert.ok(majors.length >= 2, `half ${half} at ${width}px: ${majors.length} labels`);
+            assert.ok(offsetStep(half, width) > 0);
+        }
+    }
+});
+
+t('the outermost labels are pushed inward so they stay on the panel', () => {
+    const ticks = offsetTicks(108_000, 215).filter((k) => k.label != null);
+    assert.strictEqual(ticks[0].align, 'start');
+    assert.strictEqual(ticks[ticks.length - 1].align, 'end');
+    assert.ok(ticks.find((k) => k.zero).align === 'center');
 });
 
 console.log(`\n${pass} passed`);

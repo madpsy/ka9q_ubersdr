@@ -53,10 +53,38 @@ export const ZOOM_MAX = 32;
 // five octaves rather than a hundred: about eleven notches end to end.
 export const ZOOM_STEP = 1.35;
 
-export function clampZoom(v) {
+export function clampZoom(v, max = ZOOM_MAX) {
     const n = Number(v);
+    const hi = Math.max(ZOOM_MIN, Number.isFinite(max) ? max : ZOOM_MAX);
     if (!Number.isFinite(n) || n <= 0) return ZOOM_MIN;
-    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n));
+    return Math.min(hi, Math.max(ZOOM_MIN, n));
+}
+
+/**
+ * How far out this window may actually be opened, given what the server is
+ * sending.
+ *
+ * ZOOM_MAX is the ceiling in the abstract; this is the one that bites. The
+ * window can only ever be drawn from the bins in hand, so opening it past the
+ * span of the served view buys nothing but empty canvas: at 50 Hz a bin the
+ * receiver is sending 51 kHz, and a ×32 window on an SSB filter is 216 kHz —
+ * three quarters of the panel with no measurement behind it, which looks like a
+ * fault rather than like a choice.
+ *
+ * So the stop is wherever the window fills the served view. When the main
+ * display is zoomed out to the whole band this never binds and the ceiling is
+ * ZOOM_MAX again; when it is zoomed in, the two move together.
+ *
+ * The *fit* is deliberately not clamped by this. A window narrower than the
+ * filter would break the one promise this pane makes, so a main view too narrow
+ * to fill even the fitted window draws gaps at the edges instead — which is
+ * true, and which the trace shows as gaps rather than as invented noise.
+ */
+export function maxZoomFor(cfg, tuning) {
+    if (!cfg || !(cfg.span > 0) || !tuning) return ZOOM_MAX;
+    const fit = halfSpanFor(tuning.bandwidthLow, tuning.bandwidthHigh, 1) * 2;
+    if (!(fit > 0)) return ZOOM_MAX;
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, cfg.span / fit));
 }
 
 /** Whether the window has been opened past the fit — i.e. there is a reset to offer. */
@@ -292,8 +320,7 @@ export function manualLevels(floorDb, ceilDb) {
 // but "how far off am I, and is that inside the filter". Zero is always a tick,
 // and it is the dial.
 
-// Steps a ruler may use, and the room a label wants including its gap.
-const STEPS = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000];
+// The room a label wants, including the gap to its neighbour.
 export const OFFSET_LABEL_PX = 62;
 
 // Minor notches per labelled step. Five, as the main spectrum's ruler uses —
@@ -301,11 +328,38 @@ export const OFFSET_LABEL_PX = 62;
 // can be read to a couple of hundred hertz without a label under it.
 export const OFFSET_MINORS = 5;
 
+/**
+ * The gap between labelled notches, in Hz.
+ *
+ * Built from a decade rather than looked up in a list, exactly as the main
+ * spectrum's ruler is (frequencyTicks in lib/spectrumTrace.js). A fixed ladder
+ * is the same code with a maximum, and it fails silently the first time the
+ * window opens past the end of it: the step sticks at the largest rung and the
+ * strip fills with overlapping labels — eleven of them across a dock column,
+ * which is how this was found.
+ */
+const RUNGS = [1, 2, 2.5, 5, 10];
+
 export function offsetStep(half, widthPx) {
     const want = Math.max(2, Math.floor((widthPx || 0) / OFFSET_LABEL_PX));
     const rough = (half * 2) / want;
-    return STEPS.find((s) => s >= rough) || STEPS[STEPS.length - 1];
+    if (!(rough > 0)) return 1;
+    const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+    let i = RUNGS.findIndex((m) => pow * m >= rough);
+    if (i < 0) i = RUNGS.length - 1;
+
+    // Rounding up to a rung can overshoot the half-window, which leaves 0 as the
+    // only label on the strip: the ±1 step marks are off both ends. One rung
+    // down puts them back, and cannot crowd the labels — it is below the spacing
+    // the width asked for, which was itself at most the half-window.
+    if (pow * RUNGS[i] > half && i > 0) i -= 1;
+    else if (pow * RUNGS[i] > half) return (pow / 10) * RUNGS[RUNGS.length - 2];
+    return pow * RUNGS[i];
 }
+
+// How near an end a label has to be before it is pushed inward instead of
+// centred. About half a label's width on a dock-column-sized strip.
+export const EDGE_FRAC = 0.07;
 
 /**
  * Notches across the strip as `{ hz, frac, label, major, zero }`, hz being the
@@ -329,16 +383,23 @@ export function offsetTicks(half, widthPx) {
     for (let i = -count; i <= count; i++) {
         const hz = i * minor;
         const major = i % OFFSET_MINORS === 0;
+        const frac = (hz + half) / (half * 2);
         out.push({
             hz,
-            frac: (hz + half) / (half * 2),
+            frac,
             label: major ? formatOffset(hz) : null,
             major,
             zero: i === 0,
+            // A label centred on a notch this close to the end hangs half off
+            // the panel. Pushed inward instead, as the band chart's end labels
+            // are — the outermost number is the one that says how wide the
+            // window is, so losing it is worse than moving it.
+            align: frac < EDGE_FRAC ? 'start' : frac > 1 - EDGE_FRAC ? 'end' : 'center',
         });
     }
     return out;
 }
+
 
 /** An offset for a label: `0`, `+1.5k`, `-600`. */
 export function formatOffset(hz) {

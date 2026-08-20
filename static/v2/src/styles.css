@@ -4869,6 +4869,158 @@ a.btn { text-decoration: none; }
 .bsp__num { width: 9ch; padding: 2px 4px; font-family: var(--mono); text-align: right; }
 .bsp__unit { font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
 
+/* IF spectrum: the few kHz either side of the dial, cut out of the frames the
+   main display is already receiving. Built like the band spectrum's chart —
+   same frame, same clipped waterfall, same readout — because it is the same
+   kind of picture and two panes of one instrument should not have two looks.
+   What differs is the ruler, which is marked in offsets from the dial. */
+.ifs__chart {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: #000;
+    overflow: hidden;
+    line-height: 0;
+    cursor: crosshair;
+    /* A vertical drag stays the dock column's; a horizontal one is ours, and
+       is what tunes. Opened past the fit the chart claims both, so a pinch
+       closes the window instead of zooming the page. */
+    touch-action: pan-y;
+}
+.ifs__chart--zoomed { touch-action: none; }
+
+/* The way back to the fitted window. Ghosted until the pointer is over the
+   chart: it sits on the picture, and a button at full strength over a small
+   waterfall reads as chrome rather than as a control you reach for. */
+.ifs__reset {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.55);
+    color: var(--text-dim);
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    cursor: pointer;
+}
+.ifs__chart:hover .ifs__reset { opacity: 1; }
+.ifs__reset:hover { color: var(--text); border-color: var(--accent); }
+/* No hover on a touchscreen, so it is simply there. */
+@media (hover: none) {
+    .ifs__reset { opacity: 1; }
+}
+.ifs__spec { display: block; width: 100%; }
+/* Clipped by .ifs__chart's overflow: the canvas is RING_PAD taller than the
+   space it occupies, and the slide moves it within that. */
+.ifs__wf { display: block; width: 100%; will-change: transform; }
+.ifs__wfclip { position: relative; overflow: hidden; line-height: 0; }
+/* The marks ride above the waterfall rather than in it — the waterfall is
+   sliding, and a dial line drawn into it would travel down with the history. */
+.ifs__ov {
+    position: absolute;
+    inset: 0 0 auto 0;
+    display: block;
+    width: 100%;
+    pointer-events: none;
+}
+
+/* The offset ruler. Every label is centred on its notch including the two ends,
+   which would be half outside the panel — so the strip is allowed to clip them.
+   That is the right trade here: the numbers that matter are near the middle,
+   and 0 is always exactly in it. */
+.ifs__scale {
+    position: relative;
+    height: 15px;
+    flex: none;
+    background: var(--surface-3);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: calc(9px * var(--ui-scale));
+    line-height: 15px;
+    color: var(--text-faint);
+    overflow: hidden;
+}
+.ifs__notch {
+    position: absolute;
+    top: 0;
+    width: 1px;
+    height: 3px;
+    background: var(--border);
+    opacity: 0.7;
+}
+.ifs__notch--major { height: 5px; opacity: 1; }
+.ifs__notch--zero { height: 15px; opacity: 0.55; }
+.ifs__tick {
+    position: absolute;
+    top: 0;
+    white-space: nowrap;
+    transform: translateX(-50%);
+}
+.ifs__tick--zero { font-weight: 700; }
+
+/* Hover readout, the band spectrum's shape and placement rules. */
+.ifs__cross {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    pointer-events: none;
+    background: rgba(255, 255, 255, 0.55);
+}
+.ifs__tip {
+    position: absolute;
+    pointer-events: none;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: max-content;
+    gap: 1px;
+    margin: 10px 0 0 10px;
+    padding: 3px 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    line-height: 1.4;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.ifs__tip-row { display: flex; align-items: baseline; gap: 6px; }
+.ifs__tip b { color: var(--text); font-weight: 600; }
+.ifs__tip-db { color: var(--text); }
+.ifs__tip-freq { color: var(--text-faint); }
+.ifs__tip--left { transform: translateX(-100%); margin-left: -10px; }
+.ifs__tip--above { transform: translateY(-100%); margin-top: -10px; }
+.ifs__tip--left.ifs__tip--above { transform: translate(-100%, -100%); }
+
+.ifs__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.ifs__dial { font-family: var(--mono); color: var(--text-dim); font-weight: 600; }
+.ifs__span { font-family: var(--mono); }
+/* What the window is costing in resolution — the one number that decides
+   whether this pane is showing structure or an interpolation. Last, and
+   pushed to the end, because it is a diagnostic rather than a reading. */
+.ifs__res { margin-left: auto; font-family: var(--mono); }
+
 /* Rolling 24-hour spectrogram: a thumbnail in the panel, the full-resolution
    image with its scales in a modal. */
 .sgram__thumb {
@@ -9898,7 +10050,8 @@ a.btn { text-decoration: none; }
    mean three readings that each look like noise. */
 [data-dbg-ui-layers="off"] .topbar,
 [data-dbg-ui-layers="off"] .barrel__strip,
-[data-dbg-ui-layers="off"] .bsp__wf { will-change: auto; }
+[data-dbg-ui-layers="off"] .bsp__wf,
+[data-dbg-ui-layers="off"] .ifs__wf { will-change: auto; }
 
 /* ── Selection on a touchscreen ───────────────────────────────────────────────
  *

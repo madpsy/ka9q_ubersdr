@@ -246,6 +246,38 @@ export const DEFAULTS = {
     // which is the same rule statsPlace and the idle delays follow.
     maxFps: null,
     scopeShape: 'bars',
+    // ── The IF Spectrum panel ───────────────────────────────────────────────
+    //
+    // Its own settings rather than the main display's, because the two panes are
+    // watched for different things: the main waterfall is a survey of a band and
+    // wants a slow, wide, calm picture, and this one is a magnifier held over a
+    // signal you are working. The palette, contrast, fill, grid and smoothing
+    // *are* shared — those are what the display looks like, and two panes of one
+    // instrument disagreeing about that would read as two instruments.
+    //
+    // 'split' to begin with: it is the arrangement the main display ships in, so
+    // the pane under it is immediately legible as the same thing closer up. The
+    // other four are one tap away.
+    ifView: 'split',
+    // Multiplier on the fitted window — the filter and a quarter again, either
+    // side of the dial. 1 is the fit, which is the panel's whole proposition,
+    // and also the hard stop: the window can be opened but never closed past
+    // it. Continuous, because the wheel and the pinch move this value.
+    ifSpan: 1,
+    // Whether the picture takes the wheel, a pinch and a drag at all. On,
+    // because dragging the spectrum under the dial line is the best fine-tuning
+    // control in the interface — but it is a picture inside a scrolling dock
+    // column, so a wheel over it has two plausible meanings and only one can
+    // win. Off gives the wheel back to the column; the span slider and
+    // click-to-tune still work.
+    ifGestures: true,
+    ifRate: 20,             // committed rows a second, as the main waterfall's
+    // Auto by default and for the same reason the audio scope's is: it is right
+    // until the question becomes "how strong is this", which is what an absolute
+    // scale answers.
+    ifAuto: true,
+    ifFloor: -110,
+    ifCeil: -20,
     // Whether the audio scope and waterfall find their own dB window or use a
     // floor the operator set. Auto by default: it is right until the question
     // is "how quiet is this", which is what the manual scale answers.

@@ -41,8 +41,12 @@ export const GROUPS = [
         // and the antenna switch are here rather than with the rig control for
         // that reason: aiming at a signal is the same job as tuning to it, and
         // the operator reaching for one has usually just reached for the other.
+        // The IF spectrum is next to the Receiver panel here as it is in the
+        // dock: it is the picture of where the dial is sitting inside a signal,
+        // which is the same question the dial itself answers and not the "what
+        // is out there" that Activity's pictures answer.
         panels: [
-            'receiver', 'markernav', 'quickbands', 'bands',
+            'receiver', 'ifspectrum', 'markernav', 'quickbands', 'bands',
             'bookmarks', 'localbookmarks', 'topfreq',
             'doppler', 'rotator', 'antenna',
         ],

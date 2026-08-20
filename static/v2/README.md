@@ -51,6 +51,15 @@ filter or export — an attach with the wrong field name is answered with a
 generic error, and a numeric column compared as text still looks sorted. Needs
 only esbuild and node.
 
+One test does render a panel: `ifpanel.test.js`, over the hook shim in
+`hookStub.js`. Nothing else here touches the React tree and `unresolved.js` is a
+static check, so a component used before it is imported or an effect that throws
+on mount builds cleanly, passes everything, and then blanks the interface when
+the panel is opened. The shim gives real hook storage, a `createElement` that
+refuses an undefined type, and mount effects the test can run and unwind — which
+is enough to catch that. It is a pattern to copy for any panel worth the same
+guarantee, not a renderer.
+
 ## Layout
 
 ```

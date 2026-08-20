@@ -103,6 +103,7 @@ import VoiceSkimmerPanel, { voiceSkimmerAvailable } from './VoiceSkimmerPanel.js
 import HFDLPanel, { hfdlAvailable } from './HFDLPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
+import IFSpectrumPanel from './IFSpectrumPanel.jsx';
 
 /**
  * Whether the host allows a chat panel at all.
@@ -173,7 +174,27 @@ export const PANELS = [
     // with. The filter shift, the passband readout and AGC are settings you
     // reach for occasionally.
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', minimal: true, Component: ReceiverPanel },
-    // Directly under the Receiver, because it is about where the dial is: what
+    // Directly under the Receiver, and it is the Receiver panel's picture: the
+    // few kHz either side of the dial, with the filter shaded on it. Where the
+    // main waterfall says which part of the band you are in, this says where in
+    // the *signal* you are — and it is symmetric about the dial whatever the
+    // mode, so the side of the carrier you cannot hear is on screen too.
+    //
+    // Free to run: it reads the frames the main display is already receiving
+    // rather than opening anything of its own. See IFSpectrumPanel.
+    //
+    // Minimal: the picture, the dial and the caption that says when the main
+    // view is too far out to feed it. The view, span, levels and speed are
+    // chosen and then watched.
+    {
+        id: 'ifspectrum',
+        title: 'IF Spectrum',
+        icon: <Icon.Span />,
+        dock: 'left',
+        minimal: true,
+        Component: IFSpectrumPanel,
+    },
+    // Under the two of them, because it is about where the dial is: what
     // is on this frequency, and what is either side of it.
     // Minimal: the three markers and who is on this one, without the picker.
     {

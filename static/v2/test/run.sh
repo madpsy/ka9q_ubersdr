@@ -32,6 +32,10 @@ esbuild ../src/lib/spectrogram.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrogram.cjs --log-level=warning
 esbuild ../src/lib/bandSpectrum.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandspectrum.cjs --log-level=warning
+esbuild ../src/lib/ifSpectrum.js --bundle --format=cjs --platform=node \
+    --outfile=.build/ifspectrum.cjs --log-level=warning
+esbuild ifpanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/ifpanel.cjs --log-level=warning
 esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
     --outfile=.build/backoff.cjs --log-level=warning
 esbuild ../src/lib/connectFailure.js --bundle --format=cjs --platform=node \
@@ -442,6 +446,8 @@ node bridgecommands.test.js
 node bridgeclient.test.js
 node spectrogram.test.js
 node bandspectrum.test.js
+node ifspectrum.test.js
+node ifpanel.test.js
 node lightning.test.js
 node lightningstream.test.js
 node packet.test.js

@@ -223,6 +223,90 @@ type Session struct {
 	// and SNR data.  Default: false (unmuted).
 	// Protected by mu.
 	Muted bool
+
+	// What radiod last said this session's spectrum channel is actually doing,
+	// as against Frequency/BinBandwidth/BinCount above, which are what it has
+	// been asked to do.  The two are not the same thing and the difference is
+	// the whole point of these fields: a command is an unacknowledged datagram
+	// and radiod drops any that arrive while its short per-channel queue is
+	// busy, so a pan can be lost with nothing anywhere reporting an error.
+	//
+	// radiodSpectrumAt is when the report arrived, and spectrumSentAt when the
+	// last command went out.  A report cannot describe a change radiod had not
+	// been told about yet, and for a while afterwards it still will not, so the
+	// two are compared with spectrumSettleTime between them before any weight
+	// is put on the difference.
+	//
+	// Protected by mu.  Zero radiodSpectrumAt means nothing has been heard yet.
+	radiodFrequency    uint64
+	radiodBinBandwidth float64
+	radiodBinCount     int
+	radiodSpectrumAt   time.Time
+	spectrumSentAt     time.Time
+}
+
+// spectrumParamTolerance is how close two bin bandwidths must be to count as
+// equal.  Bin bandwidth crosses the wire as a float32 and comes back as one, so
+// an exact comparison would report a mismatch that no command could ever fix.
+const spectrumParamTolerance = 0.01
+
+// spectrumSettleTime is how long after a command goes to radiod a report about
+// that channel may still be describing how it was beforehand, and so cannot be
+// read as radiod having ignored us.
+//
+// It has to cover the whole round trip: the pacer may hold the command back
+// (spectrumUpdateMinGap), radiod applies it on a block boundary, and the change
+// is not visible until the next poll comes back (spectrum.poll_period_ms,
+// 100 ms by default).  Judging sooner would answer every ordinary retune with
+// one redundant re-send, from the status packet that was already in flight.
+const spectrumSettleTime = 250 * time.Millisecond
+
+// noteSpectrumCommand records that a command carrying this session's spectrum
+// geometry has just been sent to radiod.  Anything radiod reported before now
+// describes the channel as it was beforehand.
+func (s *Session) noteSpectrumCommand() {
+	s.mu.Lock()
+	s.spectrumSentAt = time.Now()
+	s.mu.Unlock()
+}
+
+// observeRadiodSpectrum records the geometry radiod reported for this session's
+// channel, stamped with when the status packet reached us.
+func (s *Session) observeRadiodSpectrum(frequency uint64, binBandwidth float64, binCount int, at time.Time) {
+	s.mu.Lock()
+	s.radiodFrequency = frequency
+	s.radiodBinBandwidth = binBandwidth
+	s.radiodBinCount = binCount
+	s.radiodSpectrumAt = at
+	s.mu.Unlock()
+}
+
+// spectrumIntent returns the geometry this session has asked radiod for, plus
+// the time of the last command that carried it.
+func (s *Session) spectrumIntent() (frequency uint64, binBandwidth float64, binCount int, sentAt time.Time) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Frequency, s.BinBandwidth, s.BinCount, s.spectrumSentAt
+}
+
+// radiodContradicts reports whether radiod is known to be running this channel
+// with a geometry other than the one given.
+//
+// "Known" is the load-bearing word.  It answers false when nothing has been
+// heard from radiod, when the last thing heard is too close behind the last
+// command to be describing its effect (see spectrumSettleTime), and for a
+// subscriber to the shared channel, whose geometry is the shared channel's
+// business and not any one subscriber's to re-assert.
+func (s *Session) radiodContradicts(frequency uint64, binBandwidth float64, binCount int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.IsSharedSubscriber || s.radiodSpectrumAt.IsZero() ||
+		s.radiodSpectrumAt.Sub(s.spectrumSentAt) < spectrumSettleTime {
+		return false
+	}
+	return s.radiodFrequency != frequency ||
+		s.radiodBinCount != binCount ||
+		math.Abs(s.radiodBinBandwidth-binBandwidth) >= spectrumParamTolerance
 }
 
 // SessionManager manages all active sessions
@@ -922,6 +1006,11 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 			sessionID, sdc.ssrc, frequency, binCount, binBandwidth, userSessionID, len(sdc.subscribers))
 	} else {
 		// ── Private channel path ─────────────────────────────────────────────
+		//
+		// Stamped as commanded before the create goes out, so the first status
+		// packet — which may well have been generated before radiod got round to
+		// creating the channel — is not read as radiod ignoring us.
+		session.spectrumSentAt = time.Now()
 		if err := sm.radiod.CreateSpectrumChannel(channelName, frequency, binCount, binBandwidth, ssrc); err != nil {
 			return nil, fmt.Errorf("failed to create radiod spectrum channel: %w", err)
 		}
@@ -1150,6 +1239,12 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		}
 
 		// Update session fields.
+		//
+		// The create command has just gone out and nothing has been heard back
+		// about the new SSRC, so both halves of the sync check are reset here:
+		// spectrumSentAt is stamped and the observation left at its zero value,
+		// which reads as "radiod has not been heard from" rather than as the
+		// previous channel's geometry.
 		session.mu.Lock()
 		session.SSRC = privateSSRC
 		session.ChannelName = privateName
@@ -1158,6 +1253,11 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		session.BinBandwidth = newBinBW
 		session.BinCount = newBinCount
 		session.LastActive = time.Now()
+		session.radiodFrequency = 0
+		session.radiodBinBandwidth = 0
+		session.radiodBinCount = 0
+		session.radiodSpectrumAt = time.Time{}
+		session.spectrumSentAt = time.Now()
 		session.mu.Unlock()
 
 		sm.ssrcToSession[privateSSRC] = session
@@ -1203,6 +1303,7 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	// The bin bandwidth is still the raw one, so a call that did not change it
 	// does not put it on the wire; the frequency always goes, because the clamp
 	// can have changed it when the caller did not.
+	session.noteSpectrumCommand()
 	if err := sm.radiod.UpdateSpectrumChannel(session.SSRC, newFreq, binBandwidth, session.BinCount, binCountChanged); err != nil {
 		return fmt.Errorf("failed to update radiod spectrum channel: %w", err)
 	}

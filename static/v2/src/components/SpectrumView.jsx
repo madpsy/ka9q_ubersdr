@@ -37,6 +37,7 @@ import {
     TRACE_WIDTH, binsToPixels, frequencyTicks, paletteGradients, themeColors,
 } from '../lib/spectrumTrace.js';
 import { approachFor, retentionFor } from '../lib/timeConstant.js';
+import { newPanPace, panFlush, panStep } from '../lib/panPacing.js';
 import { freqOffset, offsetBand, offsetLabel, offsetTitle } from '../lib/freqRef.js';
 import {
     PEAK_GAP_PX, PEAK_REFRESH_MS, PEAK_TAU_MS, averageTrace, findPeaks, layoutPeakLabels,
@@ -1965,6 +1966,7 @@ export default function SpectrumView() {
             startCenter: cfgRef.current.centerFreq,
             moved: false,
             pointerId: e.pointerId,
+            panPace: newPanPace(),
         };
 
         // A finger held still is a right-click, timed here rather than left to
@@ -2161,7 +2163,13 @@ export default function SpectrumView() {
                 } else {
                     g.drag.bumped = false;
                 }
-                actions.setSpectrumCenter(center);
+                // Paced, not sent outright. A pointermove per frame is several
+                // times what radiod will accept for one channel, and the
+                // surplus is dropped where it lands — including, often enough,
+                // the move that decided where the drag ended. See lib/panPacing.js;
+                // onPointerUp sends whatever this holds back.
+                const paced = panStep(g.drag.panPace, center, performance.now());
+                if (paced != null) actions.setSpectrumCenter(paced);
             }
         }
     }, [actions, freqAtX, edgeAtX, markAtX, dropHold]);
@@ -2220,9 +2228,17 @@ export default function SpectrumView() {
         const drag = g.drag;
         g.drag = null;
         if (!drag) return;
-        if (drag.moved) return;
+        if (drag.moved) {
+            // Where the finger left the view is where it has to stay. The last
+            // move of a drag is usually inside the pacing gap, so without this
+            // the view stops wherever the gap happened to fall — a pan that
+            // ends a little short of where it was aimed, every time.
+            const trailing = panFlush(drag.panPace, performance.now());
+            if (trailing != null) actions.setSpectrumCenter(trailing);
+            return;
+        }
         tuneAt(e.clientX, e.clientY);
-    }, [tuneAt, dropHold]);
+    }, [actions, tuneAt, dropHold]);
 
     // A gesture taken away from us — the browser claiming it, the window losing
     // the pointer — is abandoned, not completed. Sharing onPointerUp would tune
@@ -2235,9 +2251,19 @@ export default function SpectrumView() {
         dropHold();
         g.held = false;
         g.edge = null;
+        // The pan is not undone by the cancel — the moves already sent have
+        // moved the view — so the held one is still sent, leaving it where the
+        // gesture actually got to. That is not the same as completing the
+        // gesture: a cancel still must not tune, which is why this is not
+        // onPointerUp.
+        const drag = g.drag;
         g.drag = null;
+        if (drag && drag.moved) {
+            const trailing = panFlush(drag.panPace, performance.now());
+            if (trailing != null) actions.setSpectrumCenter(trailing);
+        }
         if (g.pts.size === 0) g.pinch = null;
-    }, [dropHold]);
+    }, [actions, dropHold]);
 
     // The readout has to follow the data, not the mouse: standing still over a
     // signal and watching it fade should change the numbers. Recomputed from

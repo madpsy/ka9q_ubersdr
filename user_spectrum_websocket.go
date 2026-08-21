@@ -405,9 +405,15 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 
 		case "zoom", "pan":
 			// Update spectrum parameters (zoom changes bin_bw, pan changes frequency)
-			newFreq := session.Frequency
-			newBinBW := session.BinBandwidth
-			newBinCount := session.BinCount
+			//
+			// One locked read of all three, so the geometry this request is
+			// built on top of is a geometry the session actually had: these are
+			// written under the session lock by UpdateSpectrumSession, which the
+			// KiwiSDR bridge can call from another goroutine.
+			curFreq, curBinBW, curBinCount, _ := session.spectrumIntent()
+			newFreq := curFreq
+			newBinBW := curBinBW
+			newBinCount := curBinCount
 
 			if msg.Frequency > 0 {
 				// Enforce center frequency within HF range (10 kHz – 30 MHz)
@@ -524,8 +530,19 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 				newBinBW = safeBinBW
 			}
 
-			// Only update if something changed
-			if newFreq != session.Frequency || newBinBW != session.BinBandwidth || newBinCount != session.BinCount {
+			// Only update if something changed — or if radiod is known not to
+			// have taken the view the session already believes it has.
+			//
+			// That second half matters because commands to radiod can be lost
+			// (see checkSpectrumParameterMismatch), and when one is, the session
+			// holds a centre the channel never took.  A client re-asserting its
+			// view then asks for exactly what the session already has, and
+			// without this the request is answered with a status message and
+			// nothing on the wire — so the one party in a position to notice the
+			// view is wrong is told everything is fine.  v1's periodic settings
+			// sync is exactly such a re-assert, and this is what makes it work.
+			changed := newFreq != curFreq || newBinBW != curBinBW || newBinCount != curBinCount
+			if changed || session.radiodContradicts(newFreq, newBinBW, newBinCount) {
 				if err := swsh.sessions.UpdateSpectrumSession(session.ID, newFreq, newBinBW, newBinCount); err != nil {
 					swsh.sendError(conn, "Failed to update spectrum: "+err.Error())
 					continue

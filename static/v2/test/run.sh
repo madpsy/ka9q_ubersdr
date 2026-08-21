@@ -142,6 +142,8 @@ esbuild ../src/lib/recorder.js --bundle --format=cjs --platform=node \
     --outfile=.build/recorder.cjs --log-level=warning
 esbuild ../src/lib/zoom.js --bundle --format=cjs --platform=node \
     --outfile=.build/zoom.cjs --log-level=warning
+esbuild ../src/lib/panPacing.js --bundle --format=cjs --platform=node \
+    --outfile=.build/panpacing.cjs --log-level=warning
 esbuild ../src/lib/wake.js --bundle --format=cjs --platform=node \
     --outfile=.build/wake.cjs --log-level=warning
 esbuild ../src/lib/serverFeeds.js --bundle --format=cjs --platform=node \
@@ -366,6 +368,7 @@ node protocol.test.js
 node modes.test.js
 node pcmstream.test.js
 node zoom.test.js
+node panpacing.test.js
 node wake.test.js
 node serverfeeds.test.js
 node voiceconfirmed.test.js

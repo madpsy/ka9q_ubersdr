@@ -187,6 +187,11 @@ func (usm *UserSpectrumManager) pollLoop() {
 	bgTicker := time.NewTicker(usm.backgroundPollInterval)
 	defer bgTicker.Stop()
 
+	// Housekeeping for the per-SSRC mismatch tracking maps, which are keyed by
+	// an identifier that is never reused.
+	pruneTicker := time.NewTicker(time.Minute)
+	defer pruneTicker.Stop()
+
 	// Start receiver goroutine
 	usm.wg.Add(1)
 	go usm.receiveLoop()
@@ -201,6 +206,8 @@ func (usm *UserSpectrumManager) pollLoop() {
 		case <-bgTicker.C:
 			// Poll background/internal spectrum sessions (noisefloor, frequency-reference) at a slower rate
 			usm.pollBackgroundSpectrumSessions()
+		case <-pruneTicker.C:
+			pruneMismatchTracking(mismatchTrackingMaxAge)
 		}
 	}
 }
@@ -541,8 +548,16 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 	// Handle spectrum channels
 	if foundSSRC && foundBinData {
 		// Check for parameter mismatches (with rate limiting to avoid log spam)
-		if foundBinBW && foundBinCount {
-			usm.checkSpectrumParameterMismatch(ssrc, radiodBinBW, radiodBinCount)
+		report := radiodSpectrumReport{
+			frequency:    radiodFreq,
+			binBW:        radiodBinBW,
+			binCount:     radiodBinCount,
+			hasFrequency: foundFreq,
+			hasBinBW:     foundBinBW,
+			hasBinCount:  foundBinCount,
+		}
+		if foundFreq || foundBinBW || foundBinCount {
+			usm.checkSpectrumParameterMismatch(ssrc, report)
 		}
 
 		// Dispatch distribution in a dedicated goroutine so the receive loop
@@ -582,11 +597,118 @@ var (
 	mismatchMutex     sync.Mutex
 	mismatchLogPeriod = 30 * time.Second // Only log once per 30 seconds per SSRC
 	retryPeriod       = 1 * time.Second  // Only retry once per second per SSRC
+	// Spectrum channels get a shorter leash than audio's one second.  A lost
+	// pan leaves the view labelled with a centre the bins were not measured at,
+	// which is visible immediately and on every frame, so the correction has to
+	// land in a frame or two.  It is the settle time because there is no point
+	// re-sending faster than the answer can come back: each re-send restarts
+	// that wait.
+	spectrumRetryPeriod = spectrumSettleTime
+	// How long an idle SSRC's entries are kept.  Both maps are keyed by SSRC and
+	// SSRCs are not reused, so without this they grow for the life of the
+	// process — slowly, since an entry only appears when something disagreed.
+	mismatchTrackingMaxAge = 5 * time.Minute
 )
+
+// pruneMismatchTracking drops tracking entries for SSRCs that have not
+// disagreed with us for a while — channels that have since been torn down, or
+// have simply been behaving.  A returning SSRC just gets a fresh entry.
+func pruneMismatchTracking(maxAge time.Duration) {
+	cutoff := time.Now().Add(-maxAge)
+	mismatchMutex.Lock()
+	defer mismatchMutex.Unlock()
+	for ssrc, t := range lastMismatchLog {
+		if t.Before(cutoff) {
+			delete(lastMismatchLog, ssrc)
+		}
+	}
+	for ssrc, t := range lastRetryTime {
+		if t.Before(cutoff) {
+			delete(lastRetryTime, ssrc)
+		}
+	}
+}
+
+// radiodSpectrumReport is what one STATUS packet said about a spectrum channel.
+// Each field carries a "was it there at all" flag because a parameter radiod
+// did not mention is not the same as one it reported as zero.
+type radiodSpectrumReport struct {
+	frequency    uint64
+	binBW        float32
+	binCount     int
+	hasFrequency bool
+	hasBinBW     bool
+	hasBinCount  bool
+}
+
+// spectrumGeometry is what a channel has been asked to do.
+type spectrumGeometry struct {
+	frequency uint64
+	binBW     float64
+	binCount  int
+}
+
+// spectrumMismatch is the set of parameters on which radiod and we disagree.
+type spectrumMismatch uint8
+
+const (
+	mismatchFrequency spectrumMismatch = 1 << iota
+	mismatchBinBW
+	mismatchBinCount
+)
+
+// params names the disagreeing parameters, for logs and metrics.  Only called
+// when something actually disagreed, so the allocation is off the hot path.
+func (m spectrumMismatch) params() []string {
+	var out []string
+	if m&mismatchFrequency != 0 {
+		out = append(out, "frequency")
+	}
+	if m&mismatchBinBW != 0 {
+		out = append(out, "bin_bw")
+	}
+	if m&mismatchBinCount != 0 {
+		out = append(out, "bin_count")
+	}
+	return out
+}
+
+// spectrumParamMismatch compares what a channel was asked to do against what
+// radiod says it is doing.  A parameter the report does not mention cannot
+// disagree.
+//
+// Frequency is compared exactly: it goes out as a double converted from an
+// integer number of Hz and radiod stores the value it was given, so the two are
+// equal or the command did not arrive.  Bin bandwidth crosses as a float32 and
+// gets a tolerance.
+func spectrumParamMismatch(want spectrumGeometry, got radiodSpectrumReport) spectrumMismatch {
+	var m spectrumMismatch
+	if got.hasFrequency && got.frequency != want.frequency {
+		m |= mismatchFrequency
+	}
+	if got.hasBinBW && math.Abs(float64(got.binBW)-want.binBW) >= spectrumParamTolerance {
+		m |= mismatchBinBW
+	}
+	if got.hasBinCount && got.binCount != want.binCount {
+		m |= mismatchBinCount
+	}
+	return m
+}
 
 // checkSpectrumParameterMismatch compares radiod's actual spectrum parameters with our session state
 // and automatically retries the update if they don't match (rate-limited to avoid spam)
-func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, radiodBinBW float32, radiodBinCount int) {
+//
+// The centre frequency is checked here alongside bin bandwidth and bin count,
+// and it is the one that matters most in practice.  A command to radiod is an
+// unacknowledged datagram, and radiod additionally drops any that arrive while
+// its short per-channel command queue is still busy — a burst of pans from one
+// drag can outrun it with nothing reporting an error at either end.  When the
+// lost command is the last of a drag, the session and the client both believe
+// the new centre while the bins keep arriving from the old one, and the view is
+// simply wrong until something else changes.  Nothing else notices: bin
+// bandwidth and bin count are untouched by a pan, so a check that looked only
+// at those saw a channel in perfect health.
+func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, got radiodSpectrumReport) {
 	// Check whether this SSRC belongs to the shared default channel.
 	// If so, compare against the canonical shared-channel parameters rather than
 	// an individual subscriber's session (which would be the same values anyway,
@@ -595,67 +717,90 @@ func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, radi
 	sdc, isShared := usm.sessions.ssrcToShared[ssrc]
 	usm.sessions.mu.RUnlock()
 
-	var sessionFreq uint64
-	var sessionBinBW float32
-	var sessionBinCount int
+	var want spectrumGeometry
+	var session *Session
 
 	if isShared {
 		// Use the shared channel's canonical (default) parameters.
 		def := usm.sessions.config.Spectrum.Default
-		sessionFreq = def.CenterFrequency
-		sessionBinBW = float32(def.BinBandwidth)
-		sessionBinCount = def.BinCount
+		want = spectrumGeometry{def.CenterFrequency, def.BinBandwidth, def.BinCount}
 		_ = sdc // used only for the isShared check
 	} else {
-		session, ok := usm.sessions.GetSessionBySSRC(ssrc)
+		var ok bool
+		session, ok = usm.sessions.GetSessionBySSRC(ssrc)
 		if !ok {
 			return
 		}
 		if !session.IsSpectrum {
 			return
 		}
-		session.mu.RLock()
-		sessionFreq = session.Frequency
-		sessionBinBW = float32(session.BinBandwidth)
-		sessionBinCount = session.BinCount
-		session.mu.RUnlock()
+		var sentAt time.Time
+		want.frequency, want.binBW, want.binCount, sentAt = session.spectrumIntent()
+
+		// Remember what radiod said, so the WebSocket handler can tell a request
+		// that changes nothing from one that re-asserts a view radiod never took.
+		if got.hasFrequency && got.hasBinBW && got.hasBinCount {
+			session.observeRadiodSpectrum(got.frequency, float64(got.binBW), got.binCount, time.Now())
+		}
+
+		// A report arriving hard on the heels of a command describes the
+		// channel as it was before that command, so it is no evidence of
+		// anything.  Without this every ordinary retune would provoke one
+		// pointless re-send, from the status packet already in flight when the
+		// command went out.
+		if !sentAt.IsZero() && time.Since(sentAt) < spectrumSettleTime {
+			return
+		}
 	}
 
-	// Check if parameters match (with small tolerance for floating point comparison)
-	const tolerance = 0.01
-	binBWMatch := math.Abs(float64(radiodBinBW-sessionBinBW)) < tolerance
-	binCountMatch := radiodBinCount == sessionBinCount
+	m := spectrumParamMismatch(want, got)
+	if m == 0 {
+		return
+	}
 
-	if !binBWMatch || !binCountMatch {
-		now := time.Now()
+	now := time.Now()
 
-		mismatchMutex.Lock()
-		lastLog, logExists := lastMismatchLog[ssrc]
-		lastRetry, retryExists := lastRetryTime[ssrc]
+	mismatchMutex.Lock()
+	lastLog, logExists := lastMismatchLog[ssrc]
+	lastRetry, retryExists := lastRetryTime[ssrc]
 
-		// Determine if we should log
-		shouldLog := !logExists || now.Sub(lastLog) > mismatchLogPeriod
+	// Determine if we should log
+	shouldLog := !logExists || now.Sub(lastLog) > mismatchLogPeriod
 
-		// Determine if we should retry (once per second)
-		shouldRetry := !retryExists || now.Sub(lastRetry) > retryPeriod
+	// Determine if we should retry
+	shouldRetry := !retryExists || now.Sub(lastRetry) > spectrumRetryPeriod
 
-		if shouldLog {
-			lastMismatchLog[ssrc] = now
-		}
-		if shouldRetry {
-			lastRetryTime[ssrc] = now
-		}
-		mismatchMutex.Unlock()
+	if shouldLog {
+		lastMismatchLog[ssrc] = now
+	}
+	if shouldRetry {
+		lastRetryTime[ssrc] = now
+	}
+	mismatchMutex.Unlock()
 
-		// Automatically retry sending the update command
-		if shouldRetry {
+	if shouldLog {
+		log.Printf("Spectrum channel 0x%08x disagrees on %v: radiod has freq=%d bin_bw=%.3f bins=%d, we asked for freq=%d bin_bw=%.3f bins=%d — re-sending",
+			ssrc, m.params(), got.frequency, got.binBW, got.binCount,
+			want.frequency, want.binBW, want.binCount)
+	}
 
-			// Determine if bin count changed (compare with radiod's current value)
-			binCountChanged := sessionBinCount != radiodBinCount
-
-			if err := usm.radiod.UpdateSpectrumChannel(ssrc, sessionFreq, float64(sessionBinBW), sessionBinCount, binCountChanged); err != nil {
-				log.Printf("ERROR: Failed to retry spectrum update for SSRC 0x%08x: %v", ssrc, err)
+	// Automatically retry sending the update command
+	if shouldRetry {
+		// Counted here rather than on every disagreeing packet, so the metric is
+		// commands re-sent and not polls that happened to arrive while one
+		// mismatch went unrepaired.
+		if usm.sessions.prometheusMetrics != nil {
+			for _, param := range m.params() {
+				usm.sessions.prometheusMetrics.RecordSpectrumResync(param)
 			}
+		}
+		// Send BIN_COUNT only when it is the parameter that disagrees: it is the
+		// one change that makes radiod tear down and rebuild the channel's FFT.
+		if session != nil {
+			session.noteSpectrumCommand()
+		}
+		if err := usm.radiod.UpdateSpectrumChannel(ssrc, want.frequency, want.binBW, want.binCount, m&mismatchBinCount != 0); err != nil {
+			log.Printf("ERROR: Failed to retry spectrum update for SSRC 0x%08x: %v", ssrc, err)
 		}
 	}
 }

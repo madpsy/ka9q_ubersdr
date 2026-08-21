@@ -174,19 +174,9 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 	// Get all channel status from radiod (via sessions)
 	allChannelStatus := ah.sessions.radiod.GetAllChannelStatus()
 
-	// Debug: log the count
-	log.Printf("DEBUG: Radiod Channels API - GetAllChannelStatus returned %d channels", len(allChannelStatus))
-
-	// Also log session count for comparison
-	ah.sessions.mu.RLock()
-	sessionCount := len(ah.sessions.sessions)
-	ah.sessions.mu.RUnlock()
-	log.Printf("DEBUG: Radiod Channels API - SessionManager has %d sessions", sessionCount)
-
 	// If no STATUS packets received yet, build channel list from sessions instead
 	// This ensures we show something even if radiod hasn't sent STATUS packets
 	if len(allChannelStatus) == 0 {
-		log.Printf("DEBUG: No STATUS packets received from radiod, building from sessions")
 		allChannelStatus = make(map[uint32]*ChannelStatus)
 
 		// Add all sessions to the channel status map with minimal info
@@ -201,8 +191,6 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		ah.sessions.mu.RUnlock()
-
-		log.Printf("DEBUG: Built %d channels from sessions", len(allChannelStatus))
 	}
 
 	// Build maps for quick lookup of different channel types
@@ -470,9 +458,6 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 	// Calculate other count (total - decoder - noisefloor)
 	otherCount := len(channels) - decoderCount - noiseFloorCount
 
-	log.Printf("DEBUG: Built %d channel info structs (decoder=%d, noisefloor=%d, user=%d, other=%d)",
-		len(channels), decoderCount, noiseFloorCount, userCount, otherCount)
-
 	response := RadiodChannelsResponse{
 		Channels:      channels,
 		TotalChannels: len(channels),
@@ -482,14 +467,10 @@ func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Requ
 		CPUStats:      cpuStats,
 	}
 
-	log.Printf("DEBUG: Sending response with %d channels", len(response.Channels))
-
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("ERROR: Failed to encode radiod channels response: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	log.Printf("DEBUG: Response sent successfully")
 }

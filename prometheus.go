@@ -114,6 +114,7 @@ type PrometheusMetrics struct {
 	radiodErrors          prometheus.Counter     // Radiod communication errors
 	rateLimitErrors       *prometheus.CounterVec // HTTP 429 rate limit errors (by type)
 	idleTimeoutKicks      *prometheus.CounterVec // Users kicked due to idle timeout (by type)
+	spectrumResyncs       *prometheus.CounterVec // Spectrum channel parameters re-sent because radiod disagreed (by parameter)
 
 	// Performance metrics
 	sessionDuration  *prometheus.HistogramVec // Session duration histogram (by type: audio, spectrum)
@@ -726,6 +727,17 @@ func (pm *PrometheusMetrics) InitializeSystemMetrics() {
 		},
 		[]string{"type"}, // audio, spectrum, mixed
 	)
+	pm.spectrumResyncs = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			// A command to radiod is a fire-and-forget datagram and radiod drops
+			// any that arrive while its short per-channel queue is busy, so the
+			// spectrum watchdog re-sends whatever it finds disagreeing. A steady
+			// rate here means clients are commanding faster than radiod drains.
+			Name: "ubersdr_spectrum_resyncs_total",
+			Help: "Total number of spectrum channel parameters re-sent to radiod after a mismatch, by parameter",
+		},
+		[]string{"param"}, // frequency, bin_bw, bin_count
+	)
 
 	// Performance metrics
 	pm.sessionDuration = promauto.NewHistogramVec(
@@ -1100,6 +1112,15 @@ func (pm *PrometheusMetrics) RecordRateLimitError(errorType string) {
 		return
 	}
 	pm.rateLimitErrors.WithLabelValues(errorType).Inc()
+}
+
+// RecordSpectrumResync counts one parameter found disagreeing between a
+// spectrum channel's session state and what radiod reported for it.
+func (pm *PrometheusMetrics) RecordSpectrumResync(param string) {
+	if pm == nil {
+		return
+	}
+	pm.spectrumResyncs.WithLabelValues(param).Inc()
 }
 
 func (pm *PrometheusMetrics) RecordIdleTimeoutKick(sessionType string) {

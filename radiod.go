@@ -28,6 +28,11 @@ type RadiodController struct {
 	// case fftAverages() falls back to the default rather than sending 0 -- radiod
 	// would clamp that to 1 and silently give the noisiest setting.
 	spectrumFFTAverages int
+
+	// Rate limit for spectrum retune commands, built on first use so that a
+	// zero-value controller still works. See radiod_spectrum_pacing.go.
+	pacerOnce sync.Once
+	pacer     *spectrumUpdatePacer
 }
 
 // SetSpectrumFFTAverages sets the SPECTRUM_AVG value used for new spectrum
@@ -502,6 +507,9 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 	log.Printf("CreateSpectrumChannel called: name=%s, freq=%d, bins=%d, bw=%.1f, ssrc=0x%08x",
 		name, frequency, binCount, binBandwidth, ssrc)
 
+	// Nothing held for a previous life of this SSRC may land on the new channel.
+	rc.spectrumPacer().Cancel(ssrc)
+
 	// Send command
 	if err := rc.sendCommand(buildCreateSpectrumCommand(frequency, binCount, binBandwidth, ssrc, rc.fftAverages())); err != nil {
 		return fmt.Errorf("failed to send create spectrum command: %w", err)
@@ -516,6 +524,19 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 // binCount is needed to calculate filter edges when binBandwidth changes
 // If binCount changes, it will also be sent to radiod
 func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool) error {
+	// Paced rather than sent outright: radiod drops commands that arrive faster
+	// than it drains them, and where a channel ends up then depends on which of
+	// a burst happened to survive. See radiod_spectrum_pacing.go.
+	return rc.spectrumPacer().Submit(ssrc, spectrumUpdate{
+		frequency:    frequency,
+		binBandwidth: binBandwidth,
+		binCount:     binCount,
+		sendBinCount: sendBinCount,
+	})
+}
+
+// buildUpdateSpectrumCommand encodes a spectrum retune command.
+func buildUpdateSpectrumCommand(ssrc uint32, u spectrumUpdate) []byte {
 	// Build control command to update spectrum parameters
 	buf := make([]byte, 0, 1500)
 
@@ -523,37 +544,32 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 	buf = append(buf, 1) // CMD = 1
 
 	// Add SSRC (tag 18 = 0x12)
-	buf = encodeInt32(&buf, 0x12, ssrc)
+	buf = encodeInt32(&buf, tagOutputSSRC, ssrc)
 
 	// Add RADIO_FREQUENCY (tag 33 = 0x21) if changed
-	if frequency > 0 {
-		buf = encodeDouble(&buf, 0x21, float64(frequency))
+	if u.frequency > 0 {
+		buf = encodeDouble(&buf, tagRadioFrequency, float64(u.frequency))
 	}
 
 	// Add BIN_COUNT (tag 94 = 0x5e) if it changed
-	if sendBinCount && binCount > 0 {
-		buf = encodeInt32(&buf, 0x5e, uint32(binCount))
+	if u.sendBinCount && u.binCount > 0 {
+		buf = encodeInt32(&buf, tagBinCount, uint32(u.binCount))
 	}
 
 	// Add NONCOHERENT_BIN_BW (tag 93 = 0x5d) if changed
 	// No LOW_EDGE/HIGH_EDGE follows: radiod recomputes the spectrum filter from
 	// bin count and bin bandwidth on its own.  See CreateSpectrumChannel.
-	if binBandwidth > 0 {
-		buf = encodeFloat(&buf, 0x5d, float32(binBandwidth))
+	if u.binBandwidth > 0 {
+		buf = encodeFloat(&buf, tagNoncoherentBinBw, float32(u.binBandwidth))
 	}
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
-	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+	buf = encodeInt32(&buf, tagCommandTag, uint32(time.Now().Unix()))
 
 	// Add EOL marker
-	buf = append(buf, 0)
+	buf = append(buf, tagEOL)
 
-	// Send command
-	if err := rc.sendCommand(buf); err != nil {
-		return fmt.Errorf("failed to send update spectrum command: %w", err)
-	}
-
-	return nil
+	return buf
 }
 
 // UpdateChannel updates an existing channel's frequency, mode, and/or bandwidth edges
@@ -799,6 +815,11 @@ func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
 // (the cleanupStaleEntries threshold), causing the admin panel to show the channel
 // long after radiod has expired it.
 func (rc *RadiodController) TerminateChannel(name string, ssrc uint32) error {
+	// Anything the pacer is holding must go first. A retune landing after the
+	// kill would not be ignored: radiod creates a channel for any command that
+	// carries parameters, so the trailing send would resurrect this one.
+	rc.spectrumPacer().Cancel(ssrc)
+
 	// DisableChannel carries both kill mechanisms; see buildTerminateCommand.
 	// Do not try to force termination with DEMOD_TYPE=-1 or an OUTPUT_SAMPRATE
 	// change: that makes radiod reload presets, which recreates the channel.

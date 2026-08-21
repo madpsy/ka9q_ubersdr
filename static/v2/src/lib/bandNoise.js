@@ -3,34 +3,47 @@
 // This is what static/noisefloor.html puts on its dashboard cards, from the same
 // endpoint: /api/noisefloor/latest returns one BandMeasurement per configured
 // band — noise floor, signal peak, dynamic range, occupancy and FT8 SNR — in a
-// single request. Nothing in v2 asked for it before; lib/bandConditions.js polls
-// /api/noisefloor/aggregate, which is a ten-minute *average* of one field
-// (ft8_snr) and is the right answer for colouring ten buttons and the wrong one
-// for a panel that wants the current reading with its working shown.
+// single request.
 //
-// Same store shape as lib/bandConditions.js and lib/spotStore.js: acquired on
-// the first subscriber, released with the last, and the last answer outlives any
-// one component so a panel reopened after a dock drag paints immediately instead
-// of sitting empty until the next minute comes round.
+// It is also where the band buttons' colours come from. The Quick bands panel
+// and the Multipad's band row want one field of it (ft8_snr) for the ten
+// amateur bands, and they used to fetch that separately from
+// /api/noisefloor/aggregate — a second request on a second timer, for a figure
+// already in this reply. So the conditions are a *view* of this store rather
+// than a store of their own (see `conditionsFrom` below): whichever of the
+// three panels is open, the receiver is asked once, and the colour on a Quick
+// bands key is the reading the Bands panel is showing beside it.
 //
-// ── The once-a-minute rule ──────────────────────────────────────────────────
+// Same store shape as lib/spotStore.js: acquired on the first subscriber,
+// released with the last, and the last answer outlives any one component so a
+// panel reopened after a dock drag paints immediately instead of sitting empty
+// until the next poll comes round.
 //
-// The monitor measures on its own schedule and nothing here is worth asking for
-// more often than that, so the poll is a minute — and it is a minute *floor*,
-// not just a timer period. Section unmounts a closed panel's body, so opening
-// and closing the panel releases and re-acquires this store, and a timer alone
-// would fetch on every re-acquire: a fidgety operator would be a request a
-// second. `lastRequestAt` is what actually enforces the rule, and it is stamped
-// when the request goes out rather than when it lands — a timer that fires at
-// exactly POLL_MS after the previous *response* would be a hair early every
-// time and skip every poll.
+// ── The poll floor ──────────────────────────────────────────────────────────
+//
+// Two minutes, and it is a *floor* rather than just a timer period.
+//
+// The monitor measures once a minute, so this is deliberately slower than the
+// data. Nothing here is a live reading: a noise floor, an occupancy figure and
+// a band's conditions all move over an evening, not over a minute, and the
+// Bands panel prints the age of the measurement it is showing rather than
+// implying it is current. Halving the requests from a client that may sit open
+// all day is worth more than a figure being a minute fresher.
+//
+// The floor is the part that matters. Section unmounts a closed panel's body,
+// so opening and closing the panel releases and re-acquires this store, and a
+// timer alone would fetch on every re-acquire: a fidgety operator would be a
+// request a second. `lastRequestAt` is what actually enforces it, and it is
+// stamped when the request goes out rather than when it lands — a timer that
+// fires at exactly POLL_MS after the previous *response* would be a hair early
+// every time and skip every poll.
 
-import { bandOrder } from './bands.js';
+import { BAND_NAMES, bandOrder } from './bands.js';
 import { classify } from './bandConditions.js';
 import { feedInterval } from './serverFeeds.js';
 
 export const LATEST_URL = '/api/noisefloor/latest';
-export const POLL_MS = 60 * 1000;
+export const POLL_MS = 2 * 60 * 1000;
 
 // Fewer measured bands than this and ranking one against the others says
 // nothing — with two bands, one of them is always "the worst on the receiver".
@@ -101,11 +114,10 @@ export function hasFT8(m) {
  * The condition bucket for a measurement's FT8 SNR — 'excellent' | 'good' |
  * 'fair' | 'poor' — or 'none' when there is no reading.
  *
- * Deliberately the band buttons' buckets (lib/bandConditions.js `classify`,
- * which is v1's), so a band this panel calls Good is the same amber the Quick
- * bands key is painted. The two are looking at different windows — this is the
- * latest measurement, the buttons are a ten-minute average — so they can differ
- * by a bucket at a boundary, but they cannot disagree about what Good means.
+ * The band buttons' buckets (lib/bandConditions.js `classify`, which is v1's),
+ * on the band buttons' reading: a band this panel calls Good is the same amber
+ * the Quick bands key is painted, because both are this measurement put through
+ * the same thresholds.
  */
 export function snrTone(m) {
     return hasFT8(m) ? classify(m.ft8_snr).toLowerCase() : 'none';
@@ -116,6 +128,32 @@ export function snrLabel(m) {
     if (!hasFT8(m)) return 'No FT8';
     const s = classify(m.ft8_snr);
     return s.charAt(0) + s.slice(1).toLowerCase();
+}
+
+/**
+ * The ten amateur bands' conditions, in the shape the band buttons want:
+ * `{ '20m': { status: 'GOOD', snr: 24.5 }, … }`, an entry per band whether or
+ * not the monitor watches it.
+ *
+ * This is the whole of what the Quick bands panel and the Multipad's band row
+ * take from the monitor, and the reason neither of them has a feed of its own.
+ * A band the receiver does not measure, or measures without hearing FT8, is
+ * UNKNOWN with no reading — which `bandTone` paints as open, as v1 does; a
+ * missing band and a quiet one are the same thing to somebody choosing where to
+ * listen.
+ *
+ * The status is upper case and the tone is lower: `classify` is v1's vocabulary
+ * and lib/bandConditions.js `bandTone` is what turns it into a class name.
+ */
+export function conditionsFrom(latest) {
+    const out = {};
+    for (const band of BAND_NAMES) {
+        const m = (latest || {})[band];
+        out[band] = hasFT8(m)
+            ? { status: classify(m.ft8_snr), snr: m.ft8_snr }
+            : { status: 'UNKNOWN', snr: null };
+    }
+    return out;
 }
 
 /**
@@ -243,8 +281,8 @@ function load() {
         .catch((err) => {
             inFlight = false;
             // The last good answer is kept and the failure is reported beside
-            // it: a minute-old set of noise floors is still worth reading, and
-            // the panel says which it is showing.
+            // it: a stale set of noise floors is still worth reading, and the
+            // panel says how old the one it is showing is.
             settle({ error: err.message || 'unavailable' });
         });
 }
@@ -263,23 +301,57 @@ export function subscribeBandNoise(fn) {
         if (subscribers.size > 0) return;
         if (timer) timer();
         timer = null;
-        // The answer is kept, as lib/bandConditions.js keeps its own: it is a
-        // measurement of the last minute, still true a moment later, and holding
-        // it is what lets a reopened panel paint at once.
+        // The answer is kept: it is a measurement of the last minute or two,
+        // still true a moment later, and holding it is what lets a reopened
+        // panel — or a band row on a phone whose sheet was swapped away —
+        // paint at once rather than sitting grey until the next poll.
     };
+}
+
+// ── The conditions view ─────────────────────────────────────────────────────
+//
+// The band buttons' half of the store: same subscription, same poll, the reply
+// put through `conditionsFrom` on the way out.
+//
+// Derived once per reply rather than once per subscriber per emit, and held on
+// to, because it goes straight into a `useState`: a fresh object every emit
+// would re-render every band row on a settle that changed nothing for them — a
+// failed refresh reports its error beside the measurement it kept, and the
+// colours are the same colours.
+
+let conditions = { from: undefined, states: {} };
+
+/** The conditions as they stand, for a component's initial state. */
+export function getBandConditions() {
+    if (conditions.from !== state.latest) {
+        conditions = { from: state.latest, states: conditionsFrom(state.latest) };
+    }
+    return conditions.states;
+}
+
+/**
+ * Subscribes to the conditions. Same contract as `subscribeBandNoise` — called
+ * with what is already known immediately, again on every refresh, returns the
+ * unsubscribe — and the same reference count, so a receiver with the Quick
+ * bands, the Multipad and the Bands panel all open is still one request every
+ * two minutes.
+ */
+export function subscribeBandConditions(fn) {
+    return subscribeBandNoise(() => fn(getBandConditions()));
 }
 
 /**
  * Test seam: drop every subscriber and the poll floor, so the next subscribe
  * polls again. `keepState` holds the last answer, which is how the "a failed
  * refresh keeps the previous measurement" path is reachable at all — the floor
- * otherwise makes a second request within the minute impossible by design.
+ * otherwise makes a second request inside the poll floor impossible by design.
  */
 export function resetBandNoise({ keepState = false } = {}) {
     subscribers.clear();
     if (timer) timer();
     timer = null;
     if (!keepState) state = { latest: null, error: null, at: 0 };
+    conditions = { from: undefined, states: {} };
     lastRequestAt = 0;
     inFlight = false;
 }

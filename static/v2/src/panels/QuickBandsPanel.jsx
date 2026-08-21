@@ -1,12 +1,15 @@
 // Band buttons, matching v1's band status bar.
 //
 // Top row: the ten HF amateur bands v1 shows, with the same ranges (app.js
-// `bandRanges`) and the same condition colouring — average FT8 SNR over the
-// last ten minutes from /api/noisefloor/aggregate, refreshed once a minute,
-// bucketed exactly as static/bands_state.js does it.
+// `bandRanges`) and condition colouring bucketed exactly as
+// static/bands_state.js does it — the noise floor monitor's FT8 SNR for the
+// band, refreshed every two minutes.
 //
-// The conditions themselves are in lib/bandConditions.js, shared with the
-// Multipad's band row: one poll, one answer, two panels that cannot disagree.
+// The reading comes from lib/bandNoise.js, the same store the Bands panel reads
+// its measurements from and shared with the Multipad's band row: one poll of
+// /api/noisefloor/latest however many of the three are open, one answer, and no
+// two of them saying different things about the same band. The thresholds are
+// in lib/bandConditions.js.
 //
 // Bottom row, under a divider: this instance's own quick-tune bands, i.e. the
 // entries in /api/bands that the operator gave a `button_name`. v1 renders
@@ -38,9 +41,8 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { Segmented, Switch } from '../components/ui.jsx';
 import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
-import {
-    bandTip, bandTone, getBandConditions, subscribeBandConditions,
-} from '../lib/bandConditions.js';
+import { bandTip, bandTone } from '../lib/bandConditions.js';
+import { getBandConditions, subscribeBandConditions } from '../lib/bandNoise.js';
 
 // Narrowest a key may be before the row wraps, CSS px.
 //
@@ -59,8 +61,8 @@ const CUSTOM_MIN_PX = 66;
 export default function QuickBandsPanel({ minimal }) {
     const { tuning, actions, serverInfo, catalog } = useRadio();
     const display = useDisplay();
-    // Shared with the Multipad's band row — see lib/bandConditions.js for why
-    // the poll is not this panel's own.
+    // Shared with the Multipad's band row and the Bands panel — see
+    // lib/bandNoise.js for why the poll is not this panel's own.
     const [states, setStates] = useState(getBandConditions);
 
     // Whether this receiver measures conditions at all, and whether the operator
@@ -71,9 +73,10 @@ export default function QuickBandsPanel({ minimal }) {
     const conditions = measured && painted;
 
     // No subscription while nothing is being painted with it: the poll is a
-    // request a minute for an answer the panel has stopped showing. The store is
-    // shared and reference-counted, so the Multipad's row keeps its own if it is
-    // open — see lib/bandConditions.js.
+    // request every two minutes for an answer the panel has stopped showing. The
+    // store is
+    // shared and reference-counted, so the Multipad's row and the Bands panel
+    // keep theirs if they are open — see lib/bandNoise.js.
     useEffect(
         () => (conditions ? subscribeBandConditions(setStates) : undefined),
         [conditions],
@@ -152,7 +155,7 @@ export default function QuickBandsPanel({ minimal }) {
                     <div className="divider" />
                     <Switch
                         label="Colour by conditions"
-                        title="Paint the amateur band keys with the average FT8 signal-to-noise over the last ten minutes — green excellent through red poor. Off leaves them plain, like the quick-tune keys below"
+                        title="Paint the amateur band keys with the latest FT8 signal-to-noise the receiver measured on each — green excellent through red poor. Off leaves them plain, like the quick-tune keys below"
                         checked={painted}
                         onChange={(v) => display.set({ bandColours: v })}
                     />

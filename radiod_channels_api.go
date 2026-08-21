@@ -163,49 +163,6 @@ func matchThreadToSSRC(threadStats map[string]threadStat, ssrc uint32) (threadSt
 	return threadStat{}, false
 }
 
-// getUnknownChannelSSRCs returns a list of SSRCs that exist in radiod but not in the session manager
-// This identifies orphaned channels that should be cleaned up
-func getUnknownChannelSSRCs(sessions *SessionManager, multiDecoder *MultiDecoder) []uint32 {
-	// Get all channel status from radiod
-	allChannelStatus := sessions.radiod.GetAllChannelStatus()
-	if len(allChannelStatus) == 0 {
-		return nil
-	}
-
-	// Build map of known SSRCs from sessions
-	knownSSRCs := make(map[uint32]bool)
-
-	sessions.mu.RLock()
-	for _, session := range sessions.sessions {
-		knownSSRCs[session.SSRC] = true
-	}
-	// Also mark the shared default spectrum channel SSRC as known so it is never
-	// treated as an orphan (shared subscribers carry the shared SSRC in session.SSRC
-	// so it is already covered above, but this is an explicit defence-in-depth guard).
-	for ssrc := range sessions.ssrcToShared {
-		knownSSRCs[ssrc] = true
-	}
-	sessions.mu.RUnlock()
-
-	// Also add decoder SSRCs if multiDecoder exists
-	// (though decoders should also have sessions, this is a safety check)
-	if multiDecoder != nil {
-		for _, band := range multiDecoder.decoderBands {
-			knownSSRCs[band.SSRC] = true
-		}
-	}
-
-	// Find unknown SSRCs (only count channels with non-zero frequency)
-	unknownSSRCs := make([]uint32, 0)
-	for ssrc, status := range allChannelStatus {
-		if !knownSSRCs[ssrc] && status.RadioFrequency != 0 {
-			unknownSSRCs = append(unknownSSRCs, ssrc)
-		}
-	}
-
-	return unknownSSRCs
-}
-
 // HandleRadiodChannels returns all active radiod channels
 // This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
 func (ah *AdminHandler) HandleRadiodChannels(w http.ResponseWriter, r *http.Request) {

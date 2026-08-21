@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/rand"
 	"sort"
 	"sync"
 	"time"
@@ -104,23 +103,15 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 		float64(frm.centerFreq)/1e6, frm.binBandwidth)
 
 	// Generate random SSRC
-	ssrc := uint32(rand.Int31())
-	if ssrc == 0 || ssrc == 0xffffffff {
-		ssrc = 1
-	}
-
-	// Ensure SSRC is unique
 	frm.sessions.mu.RLock()
-	for {
-		if _, exists := frm.sessions.ssrcToSession[ssrc]; !exists {
-			break
-		}
-		ssrc = uint32(rand.Int31())
-		if ssrc == 0 || ssrc == 0xffffffff {
-			ssrc = 1
-		}
-	}
+	ssrc, err := allocateSSRC(func(candidate uint32) bool {
+		_, exists := frm.sessions.ssrcToSession[candidate]
+		return exists
+	})
 	frm.sessions.mu.RUnlock()
+	if err != nil {
+		return err
+	}
 
 	// Create narrow spectrum channel (1 kHz wide centered on reference frequency)
 	channelName := "frequency-reference"

@@ -80,6 +80,39 @@ export function snrBand(db) {
     return 'lo';
 }
 
+// The strip's colours: the theme's, so the chart belongs to the interface it is sitting
+// in rather than to the addon's palette — the same three bands, and the same variables
+// the `.lx__stat-v` and `.lx__row` classes use, so a bar is the colour its row is.
+//
+// Resolved to real colours rather than handed to the canvas as `var(--bad)`. A canvas
+// context has no element to resolve a custom property against: the spec says an
+// unparseable fillStyle is *ignored*, so every bar was painted in the default black —
+// on a --spec-bg background, which is black. The strip looked empty however hard it was
+// striking.
+export const TONE_VARS = { hi: '--bad', med: '--warn', lo: '--accent' };
+
+// Where a variable is missing — a theme mid-swap, a canvas drawn before the stylesheet
+// has applied — the strip is drawn in these rather than in nothing. They are the dark
+// theme's values from styles.css.
+export const TONE_FALLBACK = { hi: '#f2646a', med: '#f2b544', lo: '#08a2fb' };
+
+/**
+ * The three band colours, given a way to read a CSS custom property.
+ *
+ * `read` is a `(name) => string`, i.e. a computed style's getPropertyValue bound to
+ * whatever element the canvas is in. Keeping the lookup a parameter is what makes this
+ * testable without a DOM, and what stops a `var(...)` string reaching the canvas again.
+ */
+export function stripTone(read) {
+    const out = {};
+    for (const band of Object.keys(TONE_VARS)) {
+        const raw = read ? read(TONE_VARS[band]) : '';
+        const value = typeof raw === 'string' ? raw.trim() : '';
+        out[band] = value && !value.startsWith('var(') ? value : TONE_FALLBACK[band];
+    }
+    return out;
+}
+
 /**
  * One strike, from either source, in the shape the panel uses.
  *
@@ -177,7 +210,13 @@ export function activityBuckets(list, now = Date.now(), windowS = WINDOW_S) {
 // is the best thing about it — you look up because the room changed, not because a
 // number did. The panel version is the same idea at panel size.
 //
-// Brightness scales with SNR rather than being fixed, because a fixed flash makes a
+// Brightness is the whole of what the strike says here. The hue is lightning's — a white
+// core in a yellow-white glow, see `.lx__flash` in styles.css — and not the strike's SNR
+// band, because a band colour puts a close strike behind the red this interface uses for
+// something being wrong. The bands still colour everything that is read rather than seen:
+// the figures, the strip and the list.
+//
+// So brightness scales with SNR rather than being fixed, because a fixed flash makes a
 // distant sferic look like a strike overhead. Floor and ceiling both matter: below the
 // floor a real strike would go unnoticed, and above the ceiling a busy storm is a
 // strobe. FLASH_FULL_DB is where it reaches full brightness — 30 dB is a close strike,

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/rand"
 	"os"
 	"sort"
 	"sync"
@@ -380,23 +379,15 @@ func (nfm *NoiseFloorMonitor) Start() error {
 
 	// Create wide-band spectrum session (0-30 MHz full HF coverage)
 	// Uses same parameters as main spectrum display
-	wideBandSSRC := uint32(rand.Int31())
-	if wideBandSSRC == 0 || wideBandSSRC == 0xffffffff {
-		wideBandSSRC = 1
-	}
-
-	// Ensure SSRC is unique
 	nfm.sessions.mu.RLock()
-	for {
-		if _, exists := nfm.sessions.ssrcToSession[wideBandSSRC]; !exists {
-			break
-		}
-		wideBandSSRC = uint32(rand.Int31())
-		if wideBandSSRC == 0 || wideBandSSRC == 0xffffffff {
-			wideBandSSRC = 1
-		}
-	}
+	wideBandSSRC, err := allocateSSRC(func(candidate uint32) bool {
+		_, exists := nfm.sessions.ssrcToSession[candidate]
+		return exists
+	})
 	nfm.sessions.mu.RUnlock()
+	if err != nil {
+		return err
+	}
 
 	// Create wide-band spectrum channel
 	// Parameters: 15 MHz center, 4096 bins, 7.32421875 kHz/bin for exact 0-30 MHz coverage
@@ -457,23 +448,15 @@ func (nfm *NoiseFloorMonitor) Start() error {
 	// Create a spectrum session for each band
 	for _, band := range nfm.config.NoiseFloor.Bands {
 		// Generate random SSRC for this band
-		ssrc := uint32(rand.Int31())
-		if ssrc == 0 || ssrc == 0xffffffff {
-			ssrc = 1 // Avoid reserved values
-		}
-
-		// Ensure SSRC is unique
 		nfm.sessions.mu.RLock()
-		for {
-			if _, exists := nfm.sessions.ssrcToSession[ssrc]; !exists {
-				break
-			}
-			ssrc = uint32(rand.Int31())
-			if ssrc == 0 || ssrc == 0xffffffff {
-				ssrc = 1
-			}
-		}
+		ssrc, err := allocateSSRC(func(candidate uint32) bool {
+			_, exists := nfm.sessions.ssrcToSession[candidate]
+			return exists
+		})
 		nfm.sessions.mu.RUnlock()
+		if err != nil {
+			return err
+		}
 
 		// Create spectrum channel for this band
 		channelName := fmt.Sprintf("noisefloor-%s", band.Name)

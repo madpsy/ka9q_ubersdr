@@ -113,21 +113,37 @@ const (
 	tagSquelchOpen  = 83 // SQUELCH_OPEN
 	tagSquelchClose = 84 // SQUELCH_CLOSE
 
-	// Spectrum analysis tags
-	tagCoherentBinSpacing = 92 // COHERENT_BIN_SPACING
-	tagNoncoherentBinBw   = 93 // NONCOHERENT_BIN_BW
-	tagBinCount           = 94 // BIN_COUNT
-	tagBinData            = 96 // BIN_DATA
+	// Spectrum analysis tags.
+	// Tag 93 is NONCOHERENT_BIN_BW in the forked radiod and RESOLUTION_BW
+	// upstream: same number, same meaning, so the name is kept.
+	tagNoncoherentBinBw = 93 // NONCOHERENT_BIN_BW / RESOLUTION_BW
+	tagBinCount         = 94 // BIN_COUNT
+	tagBinData          = 96 // BIN_DATA
+
+	// SPECTRUM_AVG is how many FFTs radiod averages into each spectrum response.
+	// Upstream only; the forked radiod has no decode case for tag 12 and ignores it.
+	tagSpectrumAvg = 12 // SPECTRUM_AVG
 
 	// Codec/encoding tags
 	tagOpusBitRate = 71 // OPUS_BIT_RATE
-	tagMinpacket   = 72 // MINPACKET
 
 	// Metadata/control tags
-	tagLock            = 78  // LOCK
-	tagPreset          = 85  // PRESET
-	tagBlocksSincePoll = 103 // BLOCKS_SINCE_POLL
-	tagStatusInterval  = 106 // STATUS_INTERVAL
+	tagPreset         = 85  // PRESET
+	tagStatusInterval = 106 // STATUS_INTERVAL
+
+	// LIFETIME is a self-destruct countdown in blocks.  radiod decrements it once
+	// per block and destroys the channel at zero, reloading it to the last value
+	// received on EVERY command for that SSRC -- so any command, including a bare
+	// poll, acts as a keepalive.  Zero means never count down.
+	// Upstream only; the forked radiod has no decode case for tag 117 and ignores it.
+	tagLifetime = 117 // LIFETIME
+
+	// Tags 72, 78, 92 and 103 are deliberately absent.  The forked radiod
+	// emitted MINPACKET (72) and BLOCKS_SINCE_POLL (103); upstream reused 72 as
+	// MAXDELAY and retired 103, and neither version has ever emitted LOCK (78)
+	// or decoded COHERENT_BIN_SPACING (92).  Nothing downstream read any of
+	// them, so they were dropped rather than carried as fields that are always
+	// zero or, in tag 72's case, mislabelled.
 
 	// Test points
 	tagTp1 = 79 // TP1
@@ -202,7 +218,6 @@ type ChannelStatus struct {
 	PllWraps            int64   // PLL phase rotations/wraps
 	Envelope            bool    // Envelope detection mode
 	SnrSquelch          bool    // SNR squelch enabled
-	Lock                bool    // Tuner locked (ignores retune commands)
 
 	// FM-specific
 	PeakDeviation float32 // FM peak deviation (Hz)
@@ -234,19 +249,16 @@ type ChannelStatus struct {
 	RtpPt                 int     // RTP payload type
 	OutputEncoding        int     // Output encoding format
 	OpusBitRate           int     // Opus codec bitrate
-	Minpacket             int     // Minimum packet size
 
 	// Spectrum analysis
-	CoherentBinSpacing float32 // Coherent bin spacing (Hz)
-	NoncoherentBinBw   float32 // Noncoherent bin bandwidth (Hz)
-	BinCount           int     // Number of spectrum bins
+	NoncoherentBinBw float32 // Noncoherent bin bandwidth (Hz)
+	BinCount         int     // Number of spectrum bins
 
 	// Metadata
-	Preset          string // Channel preset name
-	BlocksSincePoll int64  // Blocks since last poll
-	StatusInterval  int    // Status update interval
-	GpsTime         int64  // GPS timestamp (nanoseconds)
-	CmdCnt          int32  // Command packet count
+	Preset         string // Channel preset name
+	StatusInterval int    // Status update interval
+	GpsTime        int64  // GPS timestamp (nanoseconds)
+	CmdCnt         int32  // Command packet count
 
 	// Test points
 	Tp1 float32 // Test point 1
@@ -604,8 +616,6 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 			channelStatus.Envelope = decodeBool(value)
 		case tagSnrSquelch:
 			channelStatus.SnrSquelch = decodeBool(value)
-		case tagLock:
-			channelStatus.Lock = decodeBool(value)
 
 		// FM-specific tags
 		case tagPeakDeviation:
@@ -660,12 +670,8 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 			channelStatus.OutputEncoding = decodeInt(value)
 		case tagOpusBitRate:
 			channelStatus.OpusBitRate = decodeInt(value)
-		case tagMinpacket:
-			channelStatus.Minpacket = decodeInt(value)
 
 		// Spectrum analysis tags
-		case tagCoherentBinSpacing:
-			channelStatus.CoherentBinSpacing = decodeFloat(value)
 		case tagNoncoherentBinBw:
 			channelStatus.NoncoherentBinBw = decodeFloat(value)
 		case tagBinCount:
@@ -674,8 +680,6 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 		// Metadata tags
 		case tagPreset:
 			channelStatus.Preset = decodeString(value)
-		case tagBlocksSincePoll:
-			channelStatus.BlocksSincePoll = decodeInt64(value)
 		case tagStatusInterval:
 			channelStatus.StatusInterval = decodeInt(value)
 

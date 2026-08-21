@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -272,23 +271,15 @@ func (md *MultiDecoder) Start() error {
 // createBandSession creates an audio session for a decoder band
 func (md *MultiDecoder) createBandSession(bandConfig DecoderBandConfig) error {
 	// Generate unique SSRC
-	ssrc := uint32(rand.Int31())
-	if ssrc == 0 || ssrc == 0xffffffff {
-		ssrc = 1
-	}
-
-	// Ensure SSRC is unique
 	md.sessions.mu.RLock()
-	for {
-		if _, exists := md.sessions.ssrcToSession[ssrc]; !exists {
-			break
-		}
-		ssrc = uint32(rand.Int31())
-		if ssrc == 0 || ssrc == 0xffffffff {
-			ssrc = 1
-		}
-	}
+	ssrc, err := allocateSSRC(func(candidate uint32) bool {
+		_, exists := md.sessions.ssrcToSession[candidate]
+		return exists
+	})
 	md.sessions.mu.RUnlock()
+	if err != nil {
+		return err
+	}
 
 	// Create channel name
 	channelName := fmt.Sprintf("decoder-%s", bandConfig.Name)

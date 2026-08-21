@@ -36,9 +36,8 @@ import {
 } from '../lib/format.js';
 import { useHeaderFits } from '../lib/useHeaderFits.js';
 import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
-import {
-    bandTip, bandTone, getBandConditions, subscribeBandConditions,
-} from '../lib/bandConditions.js';
+import { bandTip, bandTone } from '../lib/bandConditions.js';
+import { getBandConditions, subscribeBandConditions } from '../lib/bandNoise.js';
 import { rungOfSpan, spanAtRung, zoomLadder } from '../lib/zoom.js';
 import { MIN_ZOOM_SPAN_HZ } from '../radio/spectrum-connection.js';
 import {
@@ -727,6 +726,11 @@ function ViewRow() {
 // The tuned band is the selected item, so which one you are in needs no separate
 // marking, and pressing one does exactly what the Quick bands panel does: the
 // middle of the band, its mode, and the spectrum zoomed to its width.
+//
+// The colours are a view of lib/bandNoise.js, the store the Bands panel reads
+// its measurements from: whichever of them is open, the receiver is asked once
+// every two minutes, and this row cannot disagree with the Quick bands keys
+// about a band.
 function BandRow() {
     const { tuning, actions, serverInfo } = useRadio();
     const [states, setStates] = useState(getBandConditions);

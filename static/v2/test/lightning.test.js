@@ -186,6 +186,41 @@ t('strikes outside the window are not in the strip at all', () => {
     assert.ok(buckets.every((b) => b.n === 0), 'too old, and one from the future');
 });
 
+// --- the strip's colours ---------------------------------------------------------
+
+t('the bars are painted in colours, not in a var() the canvas cannot read', () => {
+    // The bug this pins: a canvas context has no element to resolve a custom property
+    // against, so `fillStyle = 'var(--bad)'` is ignored and every bar was drawn in the
+    // default black — on a black background. The strip read as "nothing is striking"
+    // through a storm.
+    const theme = { '--bad': ' #f2646a ', '--warn': '#f2b544', '--accent': '#08a2fb' };
+    const tone = lx.stripTone((name) => theme[name]);
+    assert.deepStrictEqual(tone, { hi: '#f2646a', med: '#f2b544', lo: '#08a2fb' });
+    for (const band of Object.keys(lx.TONE_VARS)) {
+        assert.ok(!tone[band].includes('var('), `${band} must be a colour`);
+    }
+});
+
+t('a variable the stylesheet has not set falls back to a colour', () => {
+    // A canvas drawn before the stylesheet applies, or a theme mid-swap: the strip is
+    // drawn in the dark theme's values rather than in whatever the context was last set
+    // to, which is black.
+    assert.deepStrictEqual(lx.stripTone(() => ''), lx.TONE_FALLBACK);
+    assert.deepStrictEqual(lx.stripTone(() => undefined), lx.TONE_FALLBACK);
+    assert.deepStrictEqual(lx.stripTone(null), lx.TONE_FALLBACK);
+    assert.deepStrictEqual(lx.stripTone(() => 'var(--bad)'), lx.TONE_FALLBACK,
+        'and a var() that came back unresolved is not a colour either');
+});
+
+t('every band the strip can ask for has a colour to draw it in', () => {
+    // snrBand returns one of these three and the strip indexes the tone by it, so a
+    // band without an entry would be an undefined fillStyle — ignored, i.e. black.
+    const tone = lx.stripTone(() => '');
+    for (const db of [30, 20, 19, 12, 11, 0, undefined]) {
+        assert.ok(tone[lx.snrBand(db)], `no colour for ${db} dB`);
+    }
+});
+
 // --- how long ago ---------------------------------------------------------------
 
 t('the age reads in the unit that fits it', () => {

@@ -1,17 +1,19 @@
-// The Bands panel's data: which band it shows, how a reading is graded, and
-// the once-a-minute rule.
+// The Bands panel's data: which band it shows, how a reading is graded, the
+// band buttons' view of the same reply, and the poll floor.
 //
-// The rule is the part worth pinning. Section unmounts a closed panel's body,
+// The floor is the part worth pinning. Section unmounts a closed panel's body,
 // so opening and closing the panel releases and re-acquires the store, and a
 // bare setInterval would fetch on every re-acquire. The floor is what stops
 // that, and nothing in the panel would show it had gone.
 
 const assert = require('assert');
 const {
-    POLL_MS, RANK_MIN_BANDS, chooseBand, floorStats, floorTone, followsDial,
-    formatFigure, getBandNoise, hasFT8, measuredMs, resetBandNoise, rowsFrom,
-    setFeedsAllowed, resetFeeds, snrLabel, snrTone, subscribeBandNoise,
+    POLL_MS, RANK_MIN_BANDS, chooseBand, conditionsFrom, floorStats, floorTone,
+    followsDial, formatFigure, getBandConditions, getBandNoise, hasFT8, measuredMs,
+    resetBandNoise, rowsFrom, setFeedsAllowed, resetFeeds, snrLabel, snrTone,
+    subscribeBandConditions, subscribeBandNoise,
 } = require('./.build/bandnoise.cjs');
+const { BAND_NAMES } = require('./.build/bands.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -154,6 +156,45 @@ t('a band with no floor reading is not ranked', () => {
     assert.deepStrictEqual(floorStats(rows), { q1: -130, q3: -110 });
 });
 
+// --- the band buttons' view -------------------------------------------------
+
+t('every amateur band gets an entry, measured or not', () => {
+    const out = conditionsFrom({ '20m': m('20m', { ft8_snr: 25 }) });
+    assert.deepStrictEqual(Object.keys(out).sort(), [...BAND_NAMES].sort());
+    assert.deepStrictEqual(out['20m'], { status: 'GOOD', snr: 25 });
+    // A band this receiver does not watch reads the same as one it watches
+    // without hearing anything: nothing has been said about it.
+    assert.deepStrictEqual(out['10m'], { status: 'UNKNOWN', snr: null });
+});
+
+t('a zero FT8 reading is no reading, not 0 dB', () => {
+    // Same test as the panel's, and for the same reason: the field is a float32
+    // that is zero both when nothing was heard and before the FT8 pass runs.
+    // Bucketed rather than skipped it would paint the band red.
+    assert.deepStrictEqual(conditionsFrom({ '40m': m('40m', { ft8_snr: 0 }) })['40m'],
+        { status: 'UNKNOWN', snr: null });
+});
+
+t('the bands the monitor watches that are not amateur bands are not buttons', () => {
+    const out = conditionsFrom({ Marine: m('Marine'), '2200m': m('2200m') });
+    assert.strictEqual(out.Marine, undefined);
+    assert.strictEqual(out['2200m'], undefined);
+});
+
+t('a reply with nothing in it is not a crash', () => {
+    assert.strictEqual(conditionsFrom(null)['20m'].status, 'UNKNOWN');
+    assert.strictEqual(conditionsFrom({})['20m'].snr, null);
+});
+
+t('a key is the colour the Bands panel is showing for the same band', () => {
+    // The whole point of the two reading one store: snrTone and the buttons'
+    // classify are the same thresholds on the same measurement, so a band
+    // cannot be amber in one panel and green in the other.
+    const reading = m('20m', { ft8_snr: 19.9 });
+    assert.strictEqual(snrTone(reading), 'fair');
+    assert.strictEqual(conditionsFrom({ '20m': reading })['20m'].status, 'FAIR');
+});
+
 // --- formatting -------------------------------------------------------------
 
 t('a missing figure is a dash, not NaN', () => {
@@ -168,7 +209,7 @@ t('an unparseable timestamp is no time rather than a wrong one', () => {
     assert.strictEqual(measuredMs(null), null);
 });
 
-// --- the once-a-minute rule -------------------------------------------------
+// --- the poll floor ---------------------------------------------------------
 
 async function withFetch(reply, fn) {
     const calls = [];
@@ -186,8 +227,11 @@ async function withFetch(reply, fn) {
 
 const ok = () => ({ ok: true, status: 200, json: () => Promise.resolve({ '20m': m('20m') }) });
 
-t('the poll is a minute', () => {
-    assert.strictEqual(POLL_MS, 60000);
+t('the poll is two minutes', () => {
+    // Slower than the monitor, which measures once a minute: none of these
+    // readings move in a minute, and the Bands panel prints the age of the one
+    // it is showing rather than implying it is current.
+    assert.strictEqual(POLL_MS, 120000);
 });
 
 ta('nothing is fetched while the feeds gate is shut', () => withFetch(ok, async (calls) => {
@@ -204,8 +248,8 @@ ta('the first subscriber after the gate opens fetches once', () => withFetch(ok,
     assert.deepStrictEqual(calls, ['/api/noisefloor/latest']);
 }));
 
-ta('opening and closing the panel does not re-fetch inside the minute', () => withFetch(ok, async (calls) => {
-    // This is the rule. Each subscribe/unsubscribe pair is Section mounting and
+ta('opening and closing the panel does not re-fetch inside the floor', () => withFetch(ok, async (calls) => {
+    // This is the floor. Each subscribe/unsubscribe pair is Section mounting and
     // unmounting the panel body; without the floor every one of them is a
     // request, and the panel looks identical either way.
     setFeedsAllowed(true);
@@ -249,9 +293,9 @@ ta('a failed refresh keeps the last measurement and says so', () => withFetch(ok
     setFeedsAllowed(true);
     subscribeBandNoise(() => {});
     await settle();
-    // The floor makes a second request inside the minute impossible by design,
-    // so the seam opens it while keeping what the first one returned — see
-    // resetBandNoise. A minute-old set of noise floors is still worth reading;
+    // The floor makes a second request inside the poll period impossible by
+    // design, so the seam opens it while keeping what the first one returned —
+    // see resetBandNoise. A stale set of noise floors is still worth reading;
     // what must not happen is the panel emptying because one poll missed.
     resetBandNoise({ keepState: true });
     global.fetch = () => Promise.resolve({ ok: false, status: 500 });
@@ -271,6 +315,33 @@ ta('a 503 says the monitor is off rather than showing an HTTP code', () => withF
         assert.strictEqual(getBandNoise().latest, null);
     },
 ));
+
+ta('the band rows and the Bands panel share one poll', () => withFetch(ok, async (calls) => {
+    // Either panel open polls; both open is still one request. This is what the
+    // buttons' own fetch of /api/noisefloor/aggregate cost us.
+    setFeedsAllowed(true);
+    const a = subscribeBandConditions(() => {});
+    const b = subscribeBandNoise(() => {});
+    await settle();
+    assert.deepStrictEqual(calls, ['/api/noisefloor/latest']);
+    assert.strictEqual(getBandConditions()['20m'].status, 'GOOD');
+    a(); b();
+}));
+
+ta('a subscriber is handed the conditions immediately, and the same object twice', () => withFetch(ok, async () => {
+    setFeedsAllowed(true);
+    subscribeBandNoise(() => {})();
+    await settle();
+    // Reopened after the answer landed: painted at once rather than grey.
+    const seen = [];
+    const off = subscribeBandConditions((c) => seen.push(c));
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(seen[0]['20m'].snr, 20);
+    // Derived per reply, not per emit: a settle that changes nothing — a failed
+    // refresh keeping the last measurement — must not re-render the band rows.
+    assert.strictEqual(seen[0], getBandConditions());
+    off();
+}));
 
 (async () => {
     for (const [name, fn] of queued) {

@@ -298,15 +298,31 @@ func (usm *UserSpectrumManager) pollBackgroundSpectrumSessions() {
 	}
 }
 
-// sendPoll sends a poll command to request spectrum data for a specific SSRC
+// sendPoll sends a poll command to request spectrum data for a specific SSRC.
+//
+// The poll doubles as the keepalive for the channel's LIFETIME countdown: radiod
+// reloads that counter on every command it receives for the SSRC, so a spectrum
+// channel stays alive exactly as long as we keep polling it.
+//
+// LIFETIME is restated here rather than relying on that reload, to cover the
+// case where the poll RECREATES a channel instead of refreshing one.  Teardown
+// removes a session from the maps before terminating its channel
+// (DestroySession), but the poll loop snapshots its target list under a read
+// lock and then dispatches each poll in its own goroutine, so a poll can still
+// land just after a terminate.  Upstream radiod creates a channel for any
+// command, including a bare poll, and that channel would inherit the template's
+// lifetime -- infinite -- leaving an immortal orphan that nothing polls and the
+// orphan sweep cannot see.  Carrying LIFETIME means any such channel reaps
+// itself within spectrumLifetimeFrames instead.
+//
+// Trade-off on the forked radiod: its is_poll_only() guard only whitelists
+// COMMAND_TAG and OUTPUT_SSRC, so this extra tag stops a poll being recognised
+// as poll-only and a poll for a dead SSRC will briefly create a channel there.
+// That channel sits at 0 Hz and the fork expires it after Channel_idle_timeout
+// (~5 s), so the cost is a transient channel and a log line during the migration
+// window -- against a permanent orphan upstream, which is the case that matters.
 func (usm *UserSpectrumManager) sendPoll(ssrc uint32) error {
-	buf := make([]byte, 0, 256)
-	buf = append(buf, 1)                                     // CMD packet type
-	buf = encodeInt32(&buf, 0x12, ssrc)                      // OUTPUT_SSRC
-	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix())) // COMMAND_TAG
-	buf = append(buf, 0)                                     // EOL
-
-	return usm.radiod.sendCommand(buf)
+	return usm.radiod.sendCommand(buildPollCommand(ssrc))
 }
 
 // receiveLoop receives and processes STATUS packets

@@ -713,6 +713,10 @@ func main() {
 	}
 	defer radiod.Close()
 
+	// How many FFTs radiod averages into each spectrum response; see
+	// spectrum_fft_averages in config.yaml.example. Already clamped by LoadConfig.
+	radiod.SetSpectrumFFTAverages(config.Spectrum.FFTAverages)
+
 	// Initialize GeoIP service (internal use only, admin API access)
 	// Must be initialized BEFORE SessionManager so it can be passed to it
 	var geoIPService *GeoIPService

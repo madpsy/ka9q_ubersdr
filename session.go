@@ -38,9 +38,40 @@ type radiodController interface {
 	UpdateSquelch(ssrc uint32, squelchOpen, squelchClose float32) error
 	SetAGC(ssrc uint32, params AGCParams) error
 	GetFrontendStatus(ssrc uint32) *FrontendStatus
-	DisableChannelSilent(name string, ssrc uint32) error
+	RefreshAudioLifetime(ssrc uint32) error
 	GetAllChannelStatus() map[uint32]*ChannelStatus
 	GetChannelStatus(ssrc uint32) *ChannelStatus
+}
+
+// ssrcAllocAttempts bounds the retry loop in allocateSSRC.
+const ssrcAllocAttempts = 100
+
+// allocateSSRC returns an unused SSRC in the range [10000, 99999].
+//
+// The range is deliberately narrow. radiod names each demodulator thread
+// "<demod> <ssrc>" (ka9q-radio src/modes.c, "linear 41287"), Linux caps thread
+// names at 15 characters, and pthread_setname_np() fails with ERANGE rather
+// than truncating -- radiod ignores that error, so an over-long name leaves the
+// thread called "radiod".  readThreadStats/matchThreadToSSRC in
+// radiod_channels_api.go locate a channel's CPU usage by finding the decimal
+// SSRC as a token in the thread name, so an over-long name silently breaks
+// per-channel CPU attribution.  Five digits keeps even "spectrum2 99999"
+// (15 chars exactly) within budget, for every demod name and after any mode
+// change on a live channel.
+//
+// inUse reports whether an SSRC is already taken.  Callers hold whatever lock
+// guards the maps it consults; allocateSSRC does no locking of its own.
+//
+// 90000 values against the tens of channels ubersdr runs makes a collision
+// vanishingly unlikely, but the loop is bounded so a full range cannot hang.
+func allocateSSRC(inUse func(uint32) bool) (uint32, error) {
+	for i := 0; i < ssrcAllocAttempts; i++ {
+		ssrc := uint32(10000 + rand.Int31n(90000))
+		if !inUse(ssrc) {
+			return ssrc, nil
+		}
+	}
+	return 0, fmt.Errorf("failed to allocate unique SSRC after %d attempts", ssrcAllocAttempts)
 }
 
 // BytesSample represents a sample of bytes sent at a specific time
@@ -316,7 +347,7 @@ func NewSessionManager(config *Config, radiod radiodController, geoIPService *Ge
 	}
 
 	// Start orphaned channel cleanup goroutine
-	go sm.cleanupOrphanedChannels()
+	go sm.keepaliveAudioChannels()
 
 	return sm
 }
@@ -504,26 +535,12 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	// Generate random SSRC for this session
 	// Each user gets their own radiod channel with unique SSRC
 	// This allows multiple users to listen to the same frequency independently
-	ssrc := uint32(rand.Int31())
-	if ssrc == 0 || ssrc == 0xffffffff {
-		ssrc = 1 // Avoid reserved values
-	}
-
-	// Ensure SSRC is unique (collision is rare but possible with random generation)
-	attempts := 0
-	for {
-		if _, exists := sm.ssrcToSession[ssrc]; !exists {
-			break // Found unique SSRC
-		}
-		// Collision detected, try another random value
-		ssrc = uint32(rand.Int31())
-		if ssrc == 0 || ssrc == 0xffffffff {
-			ssrc = 1
-		}
-		attempts++
-		if attempts > 100 {
-			return nil, fmt.Errorf("failed to generate unique SSRC after %d attempts", attempts)
-		}
+	ssrc, err := allocateSSRC(func(candidate uint32) bool {
+		_, exists := sm.ssrcToSession[candidate]
+		return exists
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// Get sample rate for mode
@@ -836,25 +853,12 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	channelName := fmt.Sprintf("spectrum-%s", sessionID[:8])
 
 	// Generate random SSRC for this spectrum session
-	ssrc := uint32(rand.Int31())
-	if ssrc == 0 || ssrc == 0xffffffff {
-		ssrc = 1 // Avoid reserved values
-	}
-
-	// Ensure SSRC is unique
-	attempts := 0
-	for {
-		if _, exists := sm.ssrcToSession[ssrc]; !exists {
-			break
-		}
-		ssrc = uint32(rand.Int31())
-		if ssrc == 0 || ssrc == 0xffffffff {
-			ssrc = 1
-		}
-		attempts++
-		if attempts > 100 {
-			return nil, fmt.Errorf("failed to generate unique SSRC after %d attempts", attempts)
-		}
+	ssrc, err := allocateSSRC(func(candidate uint32) bool {
+		_, exists := sm.ssrcToSession[candidate]
+		return exists
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// Use default parameters from config
@@ -994,20 +998,13 @@ func (sm *SessionManager) subscribeToSharedChannel(session *Session) error {
 	sdc := sm.sharedDefaultChan
 	if sdc == nil || !sdc.active {
 		// First subscriber — spin up the shared radiod channel.
-		sharedSSRC := uint32(rand.Int31())
-		if sharedSSRC == 0 || sharedSSRC == 0xffffffff {
-			sharedSSRC = 1
-		}
-		for {
-			_, inSession := sm.ssrcToSession[sharedSSRC]
-			_, inShared := sm.ssrcToShared[sharedSSRC]
-			if !inSession && !inShared {
-				break
-			}
-			sharedSSRC = uint32(rand.Int31())
-			if sharedSSRC == 0 || sharedSSRC == 0xffffffff {
-				sharedSSRC = 1
-			}
+		sharedSSRC, err := allocateSSRC(func(candidate uint32) bool {
+			_, inSession := sm.ssrcToSession[candidate]
+			_, inShared := sm.ssrcToShared[candidate]
+			return inSession || inShared
+		})
+		if err != nil {
+			return err
 		}
 		def := sm.config.Spectrum.Default
 		sharedName := fmt.Sprintf("spectrum-shared-%08x", sharedSSRC)
@@ -1117,20 +1114,14 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		sm.mu.Lock()
 
 		// Generate a fresh private SSRC.
-		privateSSRC := uint32(rand.Int31())
-		if privateSSRC == 0 || privateSSRC == 0xffffffff {
-			privateSSRC = 1
-		}
-		for {
-			_, inSession := sm.ssrcToSession[privateSSRC]
-			_, inShared := sm.ssrcToShared[privateSSRC]
-			if !inSession && !inShared {
-				break
-			}
-			privateSSRC = uint32(rand.Int31())
-			if privateSSRC == 0 || privateSSRC == 0xffffffff {
-				privateSSRC = 1
-			}
+		privateSSRC, err := allocateSSRC(func(candidate uint32) bool {
+			_, inSession := sm.ssrcToSession[candidate]
+			_, inShared := sm.ssrcToShared[candidate]
+			return inSession || inShared
+		})
+		if err != nil {
+			sm.mu.Unlock()
+			return err
 		}
 
 		// Unsubscribe from the shared channel.
@@ -3527,33 +3518,44 @@ func (s *Session) SendAudioToExtension(audioSample AudioSample) {
 	}
 }
 
-// cleanupOrphanedChannels periodically disables radiod channels that don't have corresponding sessions
-// This prevents orphaned channels from accumulating when sessions are closed but radiod hasn't cleaned them up yet
-func (sm *SessionManager) cleanupOrphanedChannels() {
-	ticker := time.NewTicker(1 * time.Minute)
+// audioKeepaliveInterval is how often keepaliveAudioChannels refreshes the
+// lifetime of every live audio channel. Five of these fit inside
+// audioLifetimeFrames; see there for why that margin is the number it is.
+const audioKeepaliveInterval = 3 * time.Second
+
+// keepaliveAudioChannels refreshes the self-destruct timer on every live audio
+// channel, so radiod reaps them by itself if ubersdr stops running.
+//
+// This replaces the orphan sweep that used to run here. That sweep disabled any
+// SSRC present in radiod's status cache with no matching session, which meant it
+// would also tear down channels created by anything else sharing the same
+// radiod. Expressing the intent as a lifetime instead keeps cleanup scoped to
+// channels we created: radiod expires ours because we stopped refreshing them,
+// and never touches anyone else's.
+//
+// Spectrum channels are excluded -- they carry their own, shorter lifetime and
+// are already refreshed by the poll loop in user_spectrum.go.
+func (sm *SessionManager) keepaliveAudioChannels() {
+	ticker := time.NewTicker(audioKeepaliveInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Use shared logic to find unknown channels (pass nil for multiDecoder since we don't have access to it)
-		// The session map already includes decoder sessions, so this is safe
-		orphanedSSRCs := getUnknownChannelSSRCs(sm, nil)
-
-		if len(orphanedSSRCs) == 0 {
-			continue
+		// Snapshot under the lock and send outside it, so a slow socket cannot
+		// stall session creation or teardown.
+		sm.mu.RLock()
+		ssrcs := make([]uint32, 0, len(sm.sessions))
+		for _, session := range sm.sessions {
+			if session.IsSpectrum {
+				continue // refreshed by the spectrum poll loop
+			}
+			ssrcs = append(ssrcs, session.SSRC)
 		}
+		sm.mu.RUnlock()
 
-		// Disable each orphaned channel (silently - we log in bulk below)
-		for _, ssrc := range orphanedSSRCs {
-			if err := sm.radiod.DisableChannelSilent("orphaned", ssrc); err != nil {
-				log.Printf("Failed to disable orphaned channel 0x%08x: %v", ssrc, err)
+		for _, ssrc := range ssrcs {
+			if err := sm.radiod.RefreshAudioLifetime(ssrc); err != nil {
+				log.Printf("Failed to refresh lifetime for audio channel 0x%08x: %v", ssrc, err)
 			}
 		}
-
-		// Log all orphaned channels that were closed (single line)
-		ssrcStrings := make([]string, len(orphanedSSRCs))
-		for i, ssrc := range orphanedSSRCs {
-			ssrcStrings[i] = fmt.Sprintf("0x%08x", ssrc)
-		}
-		log.Printf("Cleaned up %d orphaned radiod channel(s): %s", len(orphanedSSRCs), strings.Join(ssrcStrings, ", "))
 	}
 }

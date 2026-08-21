@@ -8864,10 +8864,23 @@ a.btn { text-decoration: none; }
  *
  * The addon's own page flashes the whole window on every strike and it is the best
  * thing about it: you look up because the room changed, not because a number did. Same
- * gradient — a white-hot core falling away to the strike's own colour — and inset past
+ * gradient — a white-hot core falling away through the glow around it — and inset past
  * the panel's padding so the whole card lights rather than a rectangle inside it.
  *
- * The peak opacity comes from the strike: see flashStrength. */
+ * The colour is lightning's, not the interface's. It was the strike's own band colour —
+ * blue, amber, red — which made a hard strike flash like an alarm: red is what this
+ * interface uses for something being wrong, and a close strike is not something being
+ * wrong. Lightning is a white core in a yellow-white glow, so that is what it flashes,
+ * and the three bands only shift the tint: a distant sferic is the warmer, more amber
+ * one, a close strike is nearly white.
+ *
+ * How hard it struck is carried by brightness instead, which is the honest channel for
+ * it — a strike overhead lights the room and a distant one does not. See flashStrength
+ * for the peak opacity. The bands keep their colours everywhere they are read rather
+ * than seen: the figures, the strip and the list.
+ *
+ * The band colours are not usable here anyway — this is a real element, so var() works,
+ * but see lib/lightning.js `stripTone` for the canvas next door, where it does not. */
 .lx__flash {
     position: absolute;
     inset: -6px;
@@ -8876,15 +8889,21 @@ a.btn { text-decoration: none; }
     border-radius: var(--radius-sm);
     opacity: 0;
     animation: lx-strike 480ms ease-out;
+    --lx-core: #fffdf2;
+    --lx-glow: #ffd23f;
+    background: radial-gradient(ellipse at 50% 20%, var(--lx-core) 0%, var(--lx-glow) 33%, transparent 73%);
 }
 .lx__flash.is-lo {
-    background: radial-gradient(ellipse at 50% 20%, #fffbe0 0%, var(--accent) 32%, transparent 72%);
+    --lx-core: #fff8dc;
+    --lx-glow: #ffc02e;
 }
 .lx__flash.is-med {
-    background: radial-gradient(ellipse at 50% 20%, #fffbe0 0%, var(--warn) 32%, transparent 72%);
+    --lx-core: #fffbe8;
+    --lx-glow: #ffd23f;
 }
 .lx__flash.is-hi {
-    background: radial-gradient(ellipse at 50% 20%, #ffffff 0%, var(--bad) 34%, transparent 74%);
+    --lx-core: #ffffff;
+    --lx-glow: #ffe066;
 }
 /* Fast up and slow down — the shape of the thing it stands for. */
 @keyframes lx-strike {

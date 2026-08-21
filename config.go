@@ -468,6 +468,10 @@ type SpectrumConfig struct {
 	GainDBFrequencyRanges  map[string]FrequencyGainRange `yaml:"gain_db_frequency_ranges"` // Per-frequency gain adjustments (added to master gain_db), keyed by name
 	DeltaThresholdDB       float64                       `yaml:"delta_threshold_db"`       // Delta encoding threshold in dB for binary mode
 	Smoothing              SmoothingConfig               `yaml:"smoothing"`                // Smoothing settings for waterfall display
+	// FFTAverages is sent to radiod as SPECTRUM_AVG: how many FFTs it folds into
+	// each spectrum response. Trades update speed against noise — see
+	// spectrum_fft_averages in config.yaml.example. Clamped to [1, 10].
+	FFTAverages int `yaml:"spectrum_fft_averages"`
 }
 
 // SmoothingConfig contains smoothing parameters for spectrum data
@@ -1422,6 +1426,21 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Spectrum.BackgroundPollPeriodMs > 2000 {
 		config.Spectrum.BackgroundPollPeriodMs = 2000
+	}
+	if config.Spectrum.FFTAverages == 0 {
+		config.Spectrum.FFTAverages = defaultSpectrumFFTAverages
+	}
+	// Clamp to [1, 10]. Below 1 is meaningless and radiod clamps it to 1 anyway;
+	// above 10 is radiod's own default, which is slow enough to look broken.
+	if config.Spectrum.FFTAverages < minSpectrumFFTAverages {
+		log.Printf("spectrum_fft_averages %d below minimum, using %d",
+			config.Spectrum.FFTAverages, minSpectrumFFTAverages)
+		config.Spectrum.FFTAverages = minSpectrumFFTAverages
+	}
+	if config.Spectrum.FFTAverages > maxSpectrumFFTAverages {
+		log.Printf("spectrum_fft_averages %d above maximum, using %d",
+			config.Spectrum.FFTAverages, maxSpectrumFFTAverages)
+		config.Spectrum.FFTAverages = maxSpectrumFFTAverages
 	}
 	if config.Spectrum.MaxSessionsPerUser == 0 {
 		config.Spectrum.MaxSessionsPerUser = 2

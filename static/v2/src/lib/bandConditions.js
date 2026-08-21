@@ -1,24 +1,23 @@
-// How each amateur band is doing, from the FT8 traffic the receiver has heard.
+// What an FT8 signal-to-noise reading means, and how a band button reads it.
 //
-// One poll for everyone who colours a band button. The Quick bands panel and
-// the Multipad's band row draw the same ten buttons from the same endpoint, and
-// two components polling /api/noisefloor/aggregate on their own timers would ask
-// twice for one answer and then disagree about it for up to a minute at a time.
+// The buckets and the wording only — no state, no timer, no request. The
+// reading itself is the noise floor monitor's latest measurement, which
+// lib/bandNoise.js polls once for everyone who wants it: the Quick bands keys,
+// the Multipad's band row and the Bands panel are three views of one answer, so
+// they cannot disagree about a band and cost one request between them however
+// many of them are open.
 //
-// Same shape as lib/spotStore.js and for the same reasons: acquired on the first
-// subscriber, released with the last, and the last answer outlives any one
-// component — so a panel reopened after a dock drag, or a sheet swapped back to
-// on a phone, paints its colours at once instead of sitting grey until the next
-// minute comes round.
+// It was its own poll of /api/noisefloor/aggregate — a ten-minute average of
+// ft8_snr for the ten amateur bands — which was a second request on a second
+// timer for a figure /api/noisefloor/latest already carries, and a second
+// opinion about the same band whenever a bucket boundary fell between the
+// average and the reading the Bands panel was showing beside it. The window is
+// now the monitor's own minute rather than ten of them, so a band on a
+// threshold changes colour a little more readily than v1's buttons do; what it
+// says is the same reading the Bands panel is showing.
 //
-// The thresholds and the averaging are v1's (static/bands_state.js and app.js),
-// so both frontends call the same band the same colour.
-
-import { BAND_NAMES } from './bands.js';
-import { feedInterval } from './serverFeeds.js';
-
-export const POLL_MS = 60 * 1000;
-export const WINDOW_MIN = 10;      // minutes of history averaged
+// The thresholds are v1's (static/bands_state.js and app.js), so both frontends
+// call the same band the same colour.
 
 /** v1's buckets. */
 export function classify(snr) {
@@ -26,22 +25,6 @@ export function classify(snr) {
     if (snr < 20) return 'FAIR';
     if (snr < 30) return 'GOOD';
     return 'EXCELLENT';
-}
-
-/** Average ft8_snr per band over the returned window, as v1 does. */
-export function summarise(primary) {
-    const out = {};
-    for (const band of BAND_NAMES) {
-        const points = (primary || {})[band];
-        let total = 0;
-        let n = 0;
-        for (const p of points || []) {
-            const v = p.values && p.values.ft8_snr;
-            if (v != null) { total += v; n++; }
-        }
-        out[band] = n ? { status: classify(total / n), snr: total / n } : { status: 'UNKNOWN', snr: null };
-    }
-    return out;
 }
 
 /**
@@ -65,68 +48,4 @@ export function bandTip(name, state, conditions) {
     return state && state.snr != null
         ? `${name}: ${state.status}\nFT8 SNR: ${state.snr.toFixed(2)} dB`
         : `${name}: No data available`;
-}
-
-/** The request body, so the window and the fields are asked for in one place. */
-export function requestBody(to = new Date()) {
-    const from = new Date(to.getTime() - WINDOW_MIN * 60 * 1000);
-    return {
-        primary: { from: from.toISOString(), to: to.toISOString() },
-        bands: BAND_NAMES,
-        fields: ['ft8_snr'],
-        interval: 'minute',
-    };
-}
-
-// ---------------------------------------------------------------------------
-
-let states = {};
-const subscribers = new Set();
-let timer = null;
-
-export function getBandConditions() {
-    return states;
-}
-
-function emit() {
-    for (const fn of subscribers) {
-        try { fn(states); } catch (err) { console.error('band conditions subscriber threw', err); }
-    }
-}
-
-function load() {
-    fetch('/api/noisefloor/aggregate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody()),
-    })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-            if (!d) return;
-            states = summarise(d.primary);
-            emit();
-        })
-        .catch(() => { /* leave the last known conditions up */ });
-}
-
-/**
- * Subscribes to the conditions. `fn` is called with what is already known
- * immediately, and again on every refresh. Returns the unsubscribe.
- */
-export function subscribeBandConditions(fn) {
-    subscribers.add(fn);
-    if (subscribers.size === 1) {
-        timer = feedInterval(load, POLL_MS);
-    }
-    try { fn(states); } catch (err) { console.error('band conditions subscriber threw', err); }
-
-    return () => {
-        if (!subscribers.delete(fn)) return;
-        if (subscribers.size > 0) return;
-        timer();
-        timer = null;
-        // The last answer is deliberately kept: it is a ten-minute average, so
-        // it is still true a moment later, and holding it means a panel coming
-        // back paints immediately.
-    };
 }

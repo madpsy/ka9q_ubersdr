@@ -804,6 +804,26 @@ spectrum:
   # Note: Higher values reduce bandwidth but may miss weak signal variations
   delta_threshold_db: 3.0
 
+  # How many FFTs radiod averages into each spectrum response (SPECTRUM_AVG).
+  #
+  # This is the main trade-off between how fast the waterfall reacts and how
+  # noisy it looks, and it is applied inside radiod rather than here:
+  #   1  = no averaging. Fastest reaction, grainiest display.
+  #   4  = default. A good compromise for most receivers.
+  #   10 = radiod's own default. Smoothest, but transients take several frames
+  #        to appear and it can look like the spectrum has stalled.
+  #
+  # It also costs CPU in radiod, roughly proportionally: each average is a
+  # separate FFT run on every poll. radiod's spectrum thread is deliberately
+  # scheduled below the demodulators, so on a busy receiver a high value here is
+  # the first thing to fall behind — and when it does, polls are dropped rather
+  # than delayed, which shows up as missed frames.
+  #
+  # Applied when a spectrum channel is created, so a change needs the affected
+  # sessions to reconnect (or a restart) to take effect.
+  # Valid range 1-10; values outside it are clamped and logged. Default: 4
+  spectrum_fft_averages: 4
+
   # Smoothing settings for waterfall display
   # Reduces fuzziness and noise in the spectrum display
   smoothing:

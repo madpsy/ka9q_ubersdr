@@ -17,7 +17,7 @@
 // the metric on a selector. See lib/noiseTrend.js.
 //
 // Two feeds, both tied to the panel being open, because Section unmounts a
-// closed section's body: the readings above refresh every minute
+// closed section's body: the readings above refresh every two minutes
 // (lib/bandNoise.js) and the day behind them every ten (lib/noiseTrend.js).
 // Both enforce that as a floor rather than a bare timer, so opening and closing
 // the panel cannot turn into a request per open.

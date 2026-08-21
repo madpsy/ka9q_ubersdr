@@ -28768,23 +28768,13 @@ const tooltipLine2 = timeStr;
                 const calibrateValue = -ppmError; // Invert sign - opposite of offset
 
                 // Fetch current radiod config to check for existing calibration
+                // (stored as a reference frequency; see parseCalibrateFromConfig)
                 let existingCalibrate = 0;
                 try {
                     const radiodResponse = await authenticatedFetch('/admin/radiod-config');
                     if (radiodResponse && radiodResponse.ok) {
                         const radiodData = await radiodResponse.json();
-                        const configText = radiodData.config || '';
-
-                        // Extract existing calibration value
-                        const calibrateRegex = /^(\s*)calibrate\s*=\s*([^\n#]+)/m;
-                        const match = configText.match(calibrateRegex);
-                        if (match && match[2]) {
-                            const existingValue = match[2].trim();
-                            existingCalibrate = parseFloat(existingValue);
-                            if (isNaN(existingCalibrate)) {
-                                existingCalibrate = 0;
-                            }
-                        }
+                        existingCalibrate = parseCalibrateFromConfig(radiodData.config || '');
                     }
                 } catch (error) {
                     console.error('Error reading existing calibration:', error);
@@ -29496,43 +29486,52 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
 
                 let configText = editor.value;
 
-                // Extract existing calibration value if present
-                // This regex stops before any '#' so we only parse the numeric value
-                const calibrateValueRegex = /^(\s*)calibrate\s*=\s*([^\n#]+)/m;
-                // This regex consumes the ENTIRE line (including any existing comment) so the
-                // replacement completely overwrites it — prevents comments from compounding
-                const calibrateLineRegex = /^(\s*)calibrate\s*=\s*.*/m;
-                const match = configText.match(calibrateValueRegex);
-                let existingCalibrate = 0;
-
-                if (match && match[2]) {
-                    // Parse existing calibration value (handles scientific notation)
-                    const existingValue = match[2].trim();
-                    existingCalibrate = parseFloat(existingValue);
-                    if (isNaN(existingCalibrate)) {
-                        existingCalibrate = 0;
-                    }
-                }
+                // Existing correction, read back from the reference frequency
+                const match = configText.match(REFERENCE_VALUE_REGEX);
+                const existingCalibrate = parseCalibrateFromConfig(configText);
 
                 // Add the new correction to the existing calibration
                 // This is important because the measured offset is AFTER the existing calibration is applied
                 const newCalibrateValue = existingCalibrate + calculatedCalibrationValue;
+
+                // Sanity guard. radiod no longer range-checks the reference it is
+                // given, so a mistyped or wildly wrong measurement would go straight
+                // to the Si5351 and take the receiver off frequency entirely.
+                if (!isFinite(newCalibrateValue) || Math.abs(newCalibrateValue) >= MAX_CALIBRATE) {
+                    showAlert(
+                        `Refusing to apply: the resulting correction is ${(newCalibrateValue * 1e6).toFixed(1)} ppm, ` +
+                        `beyond the ±${(MAX_CALIBRATE * 1e6).toFixed(0)} ppm sanity limit. ` +
+                        `That usually means the reference signal was misidentified rather than that the clock is bad.`,
+                        'error');
+                    return;
+                }
+
+                const newReferenceHz = calibrateToReference(newCalibrateValue);
+                const referenceValueStr = newReferenceHz.toFixed(3);
                 const calibrateValueStr = newCalibrateValue.toExponential(6);
 
-                // Find and replace the calibrate line
-                // Use calibrateLineRegex (not calibrateValueRegex) so the entire line including
+                // Find and replace the reference line
+                // Use REFERENCE_LINE_REGEX (not the value one) so the entire line including
                 // any existing comment is replaced — avoids comments compounding on repeated runs
                 if (match) {
-                    // Replace existing calibrate line (whole line, including old comment)
-                    configText = configText.replace(calibrateLineRegex, `$1calibrate = ${calibrateValueStr}  # Auto-calibrated: ${existingCalibrate.toExponential(6)} + ${calculatedCalibrationValue.toExponential(6)}`);
+                    configText = configText.replace(REFERENCE_LINE_REGEX, `$1reference = ${referenceValueStr}  # Auto-calibrated: ${existingCalibrate.toExponential(6)} + ${calculatedCalibrationValue.toExponential(6)}`);
                 } else {
-                    // If calibrate line doesn't exist, add it after the [global] section or at the beginning
-                    const globalSectionRegex = /^\[global\]\s*$/m;
-                    if (globalSectionRegex.test(configText)) {
-                        configText = configText.replace(globalSectionRegex, `[global]\ncalibrate = ${calibrateValueStr}  # Auto-calibrated based on frequency reference tracking`);
+                    // No reference line yet. It belongs in the hardware section, NOT
+                    // [global] — radiod reads it from the section named by the
+                    // "hardware =" key, and would silently ignore it anywhere else.
+                    const hardwareMatch = configText.match(/^\s*hardware\s*=\s*([^\s#]+)/m);
+                    const hardwareSection = hardwareMatch ? hardwareMatch[1].trim() : 'rx888';
+                    const sectionRegex = new RegExp(`^\\[${hardwareSection}\\]\\s*$`, 'm');
+
+                    if (sectionRegex.test(configText)) {
+                        configText = configText.replace(sectionRegex,
+                            `[${hardwareSection}]\nreference = ${referenceValueStr}  # Auto-calibrated based on frequency reference tracking`);
                     } else {
-                        // Add at the very beginning
-                        configText = `calibrate = ${calibrateValueStr}  # Auto-calibrated based on frequency reference tracking\n\n` + configText;
+                        showAlert(
+                            `Cannot apply calibration: no [${hardwareSection}] section found in the radiod config. ` +
+                            `The reference frequency has to live in the hardware section to take effect.`,
+                            'error');
+                        return;
                     }
                 }
 
@@ -29540,9 +29539,9 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 editor.value = configText;
                 currentRadiodConfig = configText;
 
-                // Scroll to the calibrate line in the editor
+                // Scroll to the reference line in the editor
                 const lines = configText.split('\n');
-                const calibrateLineIndex = lines.findIndex(line => line.includes('calibrate ='));
+                const calibrateLineIndex = lines.findIndex(line => /^\s*reference\s*=/.test(line));
                 if (calibrateLineIndex >= 0) {
                     // Highlight the line by scrolling to it
                     editor.focus();
@@ -29557,7 +29556,8 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 const confirmRestart = confirm(
                     `✓ Calibration applied successfully!\n\n` +
                     `Average Offset: ${offsetHz >= 0 ? '+' : ''}${offsetHz.toFixed(2)} Hz\n` +
-                    `PPM Correction: ${calibrateValueStr} (${ppmValue} ppm)\n\n` +
+                    `PPM Correction: ${calibrateValueStr} (${ppmValue} ppm)\n` +
+                    `Reference: ${referenceValueStr} Hz\n\n` +
                     `Do you want to save and restart radiod now?\n\n` +
                     `Click OK to save & restart immediately.\n` +
                     `Click Cancel to review the changes first (you can save manually later).`
@@ -29588,23 +29588,56 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
         });
 
         // Fetch current calibration value from radiod config
+        // ── Clock calibration storage ────────────────────────────────────────────
+        //
+        // radiod's rx888 driver no longer has the fractional "calibrate" key: it
+        // takes the corrected Si5351 reference frequency directly. The two forms
+        // are exactly equivalent, because the old driver computed
+        // "reference * (1 + calibrate)" internally -- so this UI keeps working in
+        // the fractional (ppm) domain and converts only at the edges, where it
+        // reads and writes the config.
+        //
+        //     calibrate = reference / 27e6 - 1
+        //     reference = 27e6 * (1 + calibrate)
+        //
+        // Old configs are converted to "reference" by the radiod container's
+        // entrypoint, which leaves the original "calibrate" line behind as a
+        // comment. The regexes below are anchored at start-of-line so they match
+        // only an active setting, never that comment.
+        const NOMINAL_REFERENCE_HZ = 27e6;
+        // The old driver clamped |calibrate| >= 1e-4 (100 ppm) to zero as a typo
+        // guard. Current radiod applies "reference" with no range check at all, so
+        // the guard has to live here now.
+        const MAX_CALIBRATE = 1e-4;
+
+        const REFERENCE_VALUE_REGEX = /^(\s*)reference\s*=\s*([^\n#]+)/m;
+        const REFERENCE_LINE_REGEX = /^(\s*)reference\s*=\s*.*/m;
+
+        function referenceToCalibrate(referenceHz) {
+            if (!isFinite(referenceHz) || referenceHz <= 0) return 0;
+            return referenceHz / NOMINAL_REFERENCE_HZ - 1;
+        }
+
+        function calibrateToReference(calibrate) {
+            return NOMINAL_REFERENCE_HZ * (1 + calibrate);
+        }
+
+        // Read the configured reference frequency back as a fractional correction,
+        // so callers keep dealing in the same units they always did.
+        function parseCalibrateFromConfig(configText) {
+            const match = configText.match(REFERENCE_VALUE_REGEX);
+            if (!match || !match[2]) return 0;
+            const hz = parseFloat(match[2].trim());
+            return isNaN(hz) ? 0 : referenceToCalibrate(hz);
+        }
+
         async function fetchCurrentCalibration() {
             try {
                 const response = await authenticatedFetch('/admin/radiod-config');
                 if (!response || !response.ok) return null;
 
                 const data = await response.json();
-                const configText = data.config || '';
-
-                // Extract calibration value
-                const calibrateRegex = /^(\s*)calibrate\s*=\s*([^\n#]+)/m;
-                const match = configText.match(calibrateRegex);
-                if (match && match[2]) {
-                    const value = match[2].trim();
-                    const calibrate = parseFloat(value);
-                    return isNaN(calibrate) ? 0 : calibrate;
-                }
-                return 0; // Default to 0 if not found
+                return parseCalibrateFromConfig(data.config || '');
             } catch (error) {
                 console.error('Error fetching calibration value:', error);
                 return null;

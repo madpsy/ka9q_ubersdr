@@ -17,7 +17,7 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { Empty, Icon } from '../components/ui.jsx';
 import {
     LIST_MAX, WINDOW_S, activityBuckets, addonUrl, flashStrength, hourStats,
-    lightningAvailable, shortClock, snrBand, strikeRate,
+    lightningAvailable, shortClock, snrBand, strikeRate, stripTone,
 } from '../lib/lightning.js';
 import { lightningState, subscribeLightning } from '../lib/lightningStream.js';
 import { sinceLabel } from '../lib/format.js';
@@ -39,9 +39,14 @@ const STRIP_H = 34;
  *
  * Height is the count on a log scale, which is the only way one chart holds both a
  * distant storm at three a minute and one overhead at ten a second. A single strike is
- * already a third of the height, because on a quiet band one strike is the news.
+ * already a fifth of the height, because on a quiet band one strike is the news.
+ *
+ * The colours are read off the canvas's own computed style every draw — see
+ * lib/lightning.js `stripTone` for why they cannot be handed to the context as
+ * `var(--bad)`. Reading them here rather than once at module load is also what follows
+ * a theme change: the strip is redrawn every second anyway.
  */
-function ActivityStrip({ buckets, tone }) {
+function ActivityStrip({ buckets }) {
     const canvas = useRef(null);
 
     useEffect(() => {
@@ -57,17 +62,19 @@ function ActivityStrip({ buckets, tone }) {
         c.setTransform(dpr, 0, 0, dpr, 0, 0);
         c.clearRect(0, 0, w, STRIP_H);
 
+        const css = getComputedStyle(el);
+        const tone = stripTone((name) => css.getPropertyValue(name));
         const gap = 1;
         const bw = Math.max(1, (w - gap * (buckets.length - 1)) / buckets.length);
         buckets.forEach((b, i) => {
             if (!b.n) return;
-            // log2(n+1) against a ceiling of 32 a second: 1 strike is a third of the
-            // height, 3 is a half, 31 fills it.
+            // log2(n+1) against a ceiling of 32 a second: 1 strike is a fifth of the
+            // height, 3 is two fifths, 31 fills it.
             const h = Math.max(2, Math.min(1, Math.log2(b.n + 1) / 5) * STRIP_H);
             c.fillStyle = tone[snrBand(b.snr)];
             c.fillRect(i * (bw + gap), STRIP_H - h, bw, h);
         });
-    }, [buckets, tone]);
+    }, [buckets]);
 
     return <canvas ref={canvas} className="lx__strip" style={{ height: STRIP_H }} />;
 }
@@ -124,13 +131,6 @@ export default function LightningPanel({ minimal }) {
     const { count, best } = hourStats(strikes, now);
     const last = strikes[0];
     const buckets = activityBuckets(strikes, now);
-    // The strip's colours come from the theme rather than from the addon's palette, so
-    // it belongs to the interface it is sitting in.
-    const tone = {
-        hi: 'var(--bad)',
-        med: 'var(--warn)',
-        lo: 'var(--accent)',
-    };
 
     if (state === 'loading') return <Empty>Loading…</Empty>;
 
@@ -171,7 +171,7 @@ export default function LightningPanel({ minimal }) {
             {/* A minute of it. Always drawn, empty or not: a flat strip is the answer
                 "nothing is striking", and a panel that hid it would look broken on the
                 quiet nights that are most of them. */}
-            <ActivityStrip buckets={buckets} tone={tone} />
+            <ActivityStrip buckets={buckets} />
             <div className="lx__axis">
                 <span>{WINDOW_S}s ago</span>
                 <span className={`lx__live${live ? ' is-on' : ''}`}>

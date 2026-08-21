@@ -300,12 +300,15 @@ second copy of it, exactly as the pad's mode row is for the Receiver panel's.
 The band row is a `Segmented` like the mode row above it (one kind of button on a
 pad this small), with the tuned band as the selected item and each item painted
 with that band's conditions — which is what `options[].className` on `Segmented`
-is for. The colours come from `lib/bandConditions.js`, shared with the Quick
-bands panel: one poll of `/api/noisefloor/aggregate` a minute however many panels
-are drawing bands, acquired on the first subscriber and released with the last,
-with the last answer kept so a reopened panel paints immediately. Two panels
-polling separately would ask twice for one answer and then disagree about it for
-up to a minute.
+is for. The colours are the FT8 signal-to-noise in `lib/bandNoise.js`'s
+measurements, bucketed by `lib/bandConditions.js` and shared with the Quick bands
+panel and the Bands panel: one poll of `/api/noisefloor/latest` every two
+minutes however many of the three are open, acquired on the first subscriber and
+released with the last, with the last answer kept so a reopened panel paints
+immediately. The band rows used to poll `/api/noisefloor/aggregate` for a
+ten-minute average of a figure that reply already carries, which was a second
+request on a second timer and a second opinion about the same band whenever a
+bucket boundary fell between the two.
 
 Behind the frequency scale, at low opacity, is the SNR — the same reading and the
 same 30–60 dB ramp as the top bar's meter and the Signal panel's, filling from

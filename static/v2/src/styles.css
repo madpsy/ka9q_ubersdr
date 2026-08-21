@@ -2436,21 +2436,49 @@ a.btn { text-decoration: none; }
     display: flex;
     align-items: baseline;
     justify-content: center;
+    /* Centred overflow spills out of *both* ends, and the left half of it is
+       unreachable: there is nothing to scroll back to. `safe` falls back to
+       start alignment the moment the digits no longer fit, so the readout
+       loses its "Hz" off the right rather than its megahertz off the left.
+       Kept after the plain `center` above, which is what browsers without it
+       carry on using. */
+    justify-content: safe center;
     gap: 8px;
     padding: 10px 8px;
     background: var(--surface-3);
     border: 1px solid var(--border);
     border-radius: var(--radius);
+    /* A container, so the digits can be sized against the panel instead of
+       against the window — see .pad-wheel__freq for the same fix on the
+       multipad. Docked, the two have nothing to do with each other: a 1920 px
+       window pins the readout at its 28 px maximum while the dock it is in can
+       be dragged down to 220 px, which is 48 px less than the digits need. */
+    container-type: inline-size;
 }
 .dial__digits {
     display: flex;
     align-items: baseline;
     font-family: var(--mono);
-    font-size: clamp(20px, 4.4vw, 28px);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.01em;
     user-select: none;
     touch-action: none;
+    /* Declared twice: the viewport-sized rule as it was, for browsers with no
+       container queries, then the container-sized one that overrides it where
+       they exist and is ignored as invalid where they do not.
+
+       11cqi is what keeps the maximum at the default 320 px dock — eight mono
+       digits, two separators and the unit come to roughly 6x the font size
+       plus 44 px, so the coefficient is set to spend the width exactly. */
+    font-size: clamp(20px, 4.4vw, 28px);
+    font-size: clamp(13px, 11cqi, 28px);
+}
+/* Narrower than any dock or floating panel can be dragged, so this is reached
+   only at a large --ui-scale, which grows the unit while leaving the digits to
+   the clamp above. The unit is what goes: the digits are grouped in threes and
+   read as a frequency without it. */
+@container (max-width: 170px) {
+    .dial__unit { display: none; }
 }
 .dial__digit {
     padding: 2px 1px;

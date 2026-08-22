@@ -3005,6 +3005,11 @@
                                             onclick="openWidgetHtmlInCmEditor()"
                                             title="Open in CodeMirror editor">✏️ Open in Editor</button>
                                     </div>
+                                    <!-- What this content is, worked out as it is typed. A v2 panel and a
+                                         classic widget are the same field in the same store and are told
+                                         apart by the content itself, so the editor says which it is looking
+                                         at rather than leaving the author to find out when they save. -->
+                                    <div id="widgetKindNote" style="margin: 0 0 8px 0; padding: 8px 10px; border-radius: 6px; font-size: 13px; display: none;"></div>
                                     <div id="widgetHtmlDropZone" style="position:relative;">
                                         <textarea id="widgetEditorHTML" rows="12"
                                             placeholder="&lt;!-- Your widget HTML here --&gt;"
@@ -12361,7 +12366,7 @@ function resetStationIdColor() {
                 browsePane.style.display = 'block';
                 loadEnabledWidgets();
                 // Pre-load my widget IDs so community list can badge them, then load community
-                authenticatedFetch('/admin/widgets/mine').then(r => {
+                authenticatedFetch('/admin/widgets/mine?ui=any').then(r => {
                     if (r && r.ok) r.json().then(d => { myWidgetIDs = new Set((d.widgets || []).map(w => w.widget_id)); });
                 }).catch(() => {}).finally(() => loadCommunityWidgets());
             }
@@ -12373,7 +12378,7 @@ function resetStationIdColor() {
             const container = document.getElementById('myWidgetsList');
             container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading\u2026</p></div>';
             try {
-                const resp = await authenticatedFetch('/admin/widgets/mine');
+                const resp = await authenticatedFetch('/admin/widgets/mine?ui=any');
                 if (!resp) return;
                 if (!resp.ok) throw new Error(await resp.text());
                 const data = await resp.json();
@@ -12416,9 +12421,10 @@ function resetStationIdColor() {
                 row.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:${featuredBg};border-radius:6px;border:1px solid ${featuredBorder};margin-bottom:8px;gap:10px;`;
                 const isEnabled = enabledWidgetIDs.includes(w.widget_id);
                 const featuredBadge = isFeatured ? '<span style="margin-left:6px;padding:2px 8px;background:rgba(245,158,11,0.85);color:#fff;border-radius:10px;font-size:11px;font-weight:bold;white-space:nowrap;flex-shrink:0;vertical-align:middle;">⭐ featured</span>' : '';
+                const kindBadge = widgetKindBadge(w);
                 row.innerHTML = `
                     <div style="flex:1;min-width:0;">
-                        <div style="display:flex;align-items:center;gap:0;overflow:hidden;"><span style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${escapeHtml(w.name)}</span>${featuredBadge}</div>
+                        <div style="display:flex;align-items:center;gap:0;overflow:hidden;"><span style="font-weight:600;font-size:14px;color:#283593;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${escapeHtml(w.name)}</span>${featuredBadge}${kindBadge}</div>
                         ${w.description ? `<div style="font-size:12px;color:#555;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(w.description)}</div>` : ''}
                         <div style="font-size:11px;color:#888;margin-top:2px;">${w.is_public ? '\uD83C\uDF10 public' : '\uD83D\uDD12 private'} \u00b7 v${w.version}${(() => { const total = widgetEnabledByCount[w.widget_id] || 0; if (!total) return ''; const communityEntry = allCommunityWidgets.find(c => c.widget_id === w.widget_id); const selfIncluded = communityEntry && myInstanceUUID && (communityEntry.enabled_by || []).some(inst => inst.public_uuid === myInstanceUUID); return ` \u00b7 \uD83D\uDC65 ${total} instance${total === 1 ? '' : 's'}${selfIncluded ? ' (inc. this instance)' : ''}`; })()}</div>
                     </div>
@@ -12454,7 +12460,7 @@ function resetStationIdColor() {
                 // Ensure myWidgetIDs is populated so "yours" badges render correctly
                 // on the enabled list even before the user visits the "My Widgets" tab.
                 if (myWidgetIDs.size === 0) {
-                    const r = await authenticatedFetch('/admin/widgets/mine');
+                    const r = await authenticatedFetch('/admin/widgets/mine?ui=any');
                     if (r && r.ok) {
                         const d = await r.json();
                         myWidgetIDs = new Set((d.widgets || []).map(w => w.widget_id));
@@ -12522,7 +12528,7 @@ function resetStationIdColor() {
                         }
                     } catch (_) {}
                 }
-                const resp = await authenticatedFetch('/admin/widgets/public-with-instances');
+                const resp = await authenticatedFetch('/admin/widgets/public-with-instances?ui=any');
                 if (!resp) return;
                 if (!resp.ok) throw new Error(await resp.text());
                 const data = await resp.json();
@@ -12846,6 +12852,7 @@ function resetStationIdColor() {
                 document.getElementById('widgetEditorName').value        = cloneName;
                 document.getElementById('widgetEditorDescription').value = widgetDescription || '';
                 document.getElementById('widgetEditorHTML').value        = html;
+                updateWidgetKindNote();
                 document.getElementById('widgetEditorPublic').checked    = false;
                 document.getElementById('widgetEditorTitle').textContent = `New Widget (cloned from ${widgetName})`;
                 document.getElementById('widgetEditorPanel').style.display = 'block';
@@ -12881,6 +12888,7 @@ function resetStationIdColor() {
             document.getElementById('widgetEditorName').value        = '';
             document.getElementById('widgetEditorDescription').value = '';
             document.getElementById('widgetEditorHTML').value        = '';
+            updateWidgetKindNote();
             document.getElementById('widgetEditorPublic').checked    = false;
             document.getElementById('widgetEditorTitle').textContent = 'New Widget';
             document.getElementById('widgetEditorPanel').style.display  = 'block';
@@ -12905,7 +12913,7 @@ function resetStationIdColor() {
                     }
                 }
                 // Fetch meta
-                const allResp = await authenticatedFetch('/admin/widgets/mine');
+                const allResp = await authenticatedFetch('/admin/widgets/mine?ui=any');
                 let name = widgetID, description = '', isPublic = false;
                 if (allResp && allResp.ok) {
                     const allData = await allResp.json();
@@ -12917,6 +12925,7 @@ function resetStationIdColor() {
                 document.getElementById('widgetEditorName').value        = name;
                 document.getElementById('widgetEditorDescription').value = description;
                 document.getElementById('widgetEditorHTML').value        = html;
+                updateWidgetKindNote();
                 document.getElementById('widgetEditorPublic').checked    = isPublic;
                 document.getElementById('widgetEditorTitle').textContent = `Edit: ${name}`;
                 document.getElementById('widgetEditorPanel').style.display  = 'block';
@@ -12941,6 +12950,7 @@ function resetStationIdColor() {
             document.getElementById('widgetEditorName').value        = cloneName;
             document.getElementById('widgetEditorDescription').value = description;
             document.getElementById('widgetEditorHTML').value        = html;
+            updateWidgetKindNote();
             document.getElementById('widgetEditorPublic').checked    = false;
             document.getElementById('widgetEditorTitle').textContent = `New Widget (cloned from ${name || 'Widget'})`;
             updateWidgetPublicOverlay();
@@ -12970,6 +12980,7 @@ function resetStationIdColor() {
             const reader = new FileReader();
             reader.onload = function(e) {
                 document.getElementById('widgetEditorHTML').value = e.target.result;
+                updateWidgetKindNote();
                 showAlert(`Loaded "${file.name}" into editor.`, 'success');
             };
             reader.onerror = function() {
@@ -13052,6 +13063,7 @@ function resetStationIdColor() {
                 const reader = new FileReader();
                 reader.onload = function(ev) {
                     document.getElementById('widgetEditorHTML').value = ev.target.result;
+                    updateWidgetKindNote();
                     showAlert(`Loaded "${file.name}" into editor.`, 'success');
                 };
                 reader.onerror = function() {
@@ -13126,6 +13138,7 @@ function resetStationIdColor() {
             const title = widgetName ? `${widgetName} — HTML Content` : 'Widget HTML Content';
             openCmEditorModal(ta, null, title, function(v) {
                 document.getElementById('widgetEditorHTML').value = v;
+                updateWidgetKindNote();
             });
         }
 
@@ -13138,6 +13151,159 @@ function resetStationIdColor() {
             openEdtrBtn.disabled = false;
             openEdtrBtn.title    = 'Open in CodeMirror editor';
         }
+
+        // Which interface a record is for, from the collector's own index.
+        //
+        // `ui_version` is null for a classic widget and the interface number for
+        // a panel — derived from the content when it was published, so a listing
+        // can say which it is without carrying the whole thing. An older
+        // collector does not send it, and then neither kind is badged, which is
+        // the state everything was in before panels existed.
+        function widgetKindBadge(w) {
+            const ui = w && w.ui_version;
+            if (ui === null || ui === undefined) return '';
+            const runnable = Number(ui) === 2;
+            const bg = runnable ? 'rgba(46,125,50,0.85)' : 'rgba(120,120,120,0.85)';
+            const label = runnable ? 'panel' : 'panel v' + escapeHtml(String(ui));
+            const title = runnable
+                ? 'A v2 panel: it appears in the new interface, not the classic one.'
+                : 'Written for a different interface — this receiver cannot run it.';
+            return '<span title="' + title + '" style="margin-left:6px;padding:2px 8px;background:' + bg
+                + ';color:#fff;border-radius:10px;font-size:11px;font-weight:bold;white-space:nowrap;flex-shrink:0;vertical-align:middle;">'
+                + label + '</span>';
+        }
+
+        // ── Panels vs classic widgets ─────────────────────────────────────────
+        //
+        // The two live in the same store and are the same field; what tells them
+        // apart is the content. A panel is wrapped in <template id="ubersdr-panel">
+        // and carries a manifest, and this mirrors the parsers on the server
+        // (panels_api.go) and on the collector — deliberately, and strictly, so
+        // that what the editor calls a panel is what will actually be served.
+        const PANEL_TEMPLATE_RE = /<template[^>]*\bid\s*=\s*["']ubersdr-panel["'][^>]*>([\s\S]*?)<\/template>/i;
+        const PANEL_MANIFEST_RE = /<script[^>]*\btype\s*=\s*["']application\/ubersdr-panel\+json["'][^>]*>([\s\S]*?)<\/script>/i;
+
+        // The icon and group names a manifest may use, generated from the v2
+        // source at build time so this cannot drift from what the interface
+        // actually has. Absent (an older instance, a fetch that failed) simply
+        // means those two fields are not checked.
+        let panelMeta = null;
+        async function loadPanelMeta() {
+            if (panelMeta) return panelMeta;
+            try {
+                const r = await fetch('/v2/dist/panel-meta.json');
+                if (r.ok) panelMeta = await r.json();
+            } catch (_) { /* not fatal: the check is a courtesy */ }
+            return panelMeta;
+        }
+
+        function inspectWidgetContent(html) {
+            const tpl = PANEL_TEMPLATE_RE.exec(html || '');
+            if (!tpl) return { kind: 'classic' };
+
+            const block = PANEL_MANIFEST_RE.exec(tpl[1]);
+            if (!block) {
+                return { kind: 'broken', problem: 'It has the panel wrapper but no manifest block.' };
+            }
+            let manifest;
+            try {
+                manifest = JSON.parse(block[1].trim());
+            } catch (e) {
+                return { kind: 'broken', problem: 'Its manifest is not valid JSON: ' + e.message };
+            }
+
+            const problems = [];
+            for (const field of ['title', 'icon', 'group']) {
+                if (!manifest[field]) problems.push('"' + field + '" is missing');
+            }
+            if (Number(manifest.ui) !== 2) {
+                problems.push('"ui" is ' + JSON.stringify(manifest.ui) + ', and this receiver serves the v2 interface');
+            }
+            if (panelMeta) {
+                if (manifest.icon && !panelMeta.icons.includes(manifest.icon)) {
+                    problems.push('"' + manifest.icon + '" is not one of the icons — a generic one will be used');
+                }
+                if (manifest.group && !panelMeta.groups.includes(manifest.group)) {
+                    problems.push('"' + manifest.group + '" is not one of the phone groups (' + panelMeta.groups.join(', ') + ')');
+                }
+            }
+            // Its code has to be a module, or `await ubersdr.ready()` will not
+            // even parse in the frame. The collector refuses this too; saying so
+            // here means the author does not have to be refused to find out.
+            const body = tpl[1].replace(PANEL_MANIFEST_RE, '');
+            for (const m of body.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/gi)) {
+                if (!m[2].trim()) continue;
+                const type = /\btype\s*=\s*["']([^"']*)["']/i.exec(m[1]);
+                if (!type || type[1].toLowerCase() !== 'module') {
+                    problems.push('its code must be <script type="module">');
+                    break;
+                }
+            }
+            return { kind: 'panel', manifest, problems };
+        }
+
+        function updateWidgetKindNote() {
+            const note = document.getElementById('widgetKindNote');
+            const field = document.getElementById('widgetEditorHTML');
+            if (!note || !field) return;
+            const html = field.value || '';
+            if (!html.trim()) { note.style.display = 'none'; return; }
+
+            const found = inspectWidgetContent(html);
+            note.style.display = 'block';
+
+            if (found.kind === 'classic') {
+                note.style.background = '#f5f5f5';
+                note.style.border = '1px solid #ddd';
+                note.style.color = '#555';
+                note.innerHTML = '<strong>Classic widget</strong> — injected into the classic interface. '
+                    + 'To write a panel for the v2 interface instead, see '
+                    + '<a href="/v2/PANEL_AUTHORING.md" target="_blank">the panel guide</a>.';
+                return;
+            }
+            if (found.kind === 'broken') {
+                note.style.background = '#fff3e0';
+                note.style.border = '1px solid #ffb74d';
+                note.style.color = '#e65100';
+                note.innerHTML = '<strong>Not a usable panel.</strong> ' + escapeWidgetText(found.problem);
+                return;
+            }
+
+            const m = found.manifest;
+            const summary = '<strong>v2 panel</strong> — '
+                + escapeWidgetText(m.title || '(no title)')
+                + ', icon ' + escapeWidgetText(m.icon || '?')
+                + ', in the ' + escapeWidgetText(m.group || '?') + ' group'
+                + ', ' + escapeWidgetText(m.dock || 'left') + ' dock.';
+            if (found.problems.length) {
+                note.style.background = '#fff3e0';
+                note.style.border = '1px solid #ffb74d';
+                note.style.color = '#e65100';
+                note.innerHTML = summary + '<br>' + found.problems.map(escapeWidgetText).join('<br>');
+            } else {
+                note.style.background = '#e8f5e9';
+                note.style.border = '1px solid #a5d6a7';
+                note.style.color = '#2e7d32';
+                note.innerHTML = summary;
+            }
+        }
+
+        function escapeWidgetText(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // Whatever changes the field — typing, a paste, a dropped file, the
+        // CodeMirror editor writing back — the note follows it.
+        document.addEventListener('DOMContentLoaded', () => {
+            const field = document.getElementById('widgetEditorHTML');
+            if (!field) return;
+            loadPanelMeta().then(updateWidgetKindNote);
+            for (const ev of ['input', 'change', 'paste']) {
+                field.addEventListener(ev, () => setTimeout(updateWidgetKindNote, 0));
+            }
+        });
 
         async function saveWidget(closeAfter = true) {
             const id   = document.getElementById('widgetEditorID').value.trim();

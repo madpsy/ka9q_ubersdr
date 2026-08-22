@@ -3247,6 +3247,17 @@ func main() {
 	if len(config.Admin.WidgetTrustedHosts) > 0 {
 		log.Printf("Widget management: hosts %v may call /admin/widgets/* without the admin password", config.Admin.WidgetTrustedHosts)
 	}
+	// The v2 interface's own view of the enabled set: the manifests it builds its
+	// panel registry from, and the bundles it mounts. Public and unauthenticated,
+	// like every other v2 read — these are the panels this receiver serves to
+	// whoever is listening to it. See static/v2/CUSTOM_PANELS.md §3.2.
+	//
+	// Deliberately not the v1 injection path: the mobile and desktop clients load
+	// their own copy of the v2 shell and never reach the Go template, so anything
+	// templated into the page would exist in a browser and nowhere else.
+	http.HandleFunc("/api/v2/panels", widgetManager.HandlePanelList)
+	http.HandleFunc("/api/v2/panels/", widgetManager.HandlePanelBody)
+
 	http.HandleFunc("/admin/widgets/enabled", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandleEnabled))
 	http.HandleFunc("/admin/widgets/mine", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandleMine))
 	http.HandleFunc("/admin/widgets/public", widgetManager.AuthMiddleware(adminHandler, widgetManager.HandlePublic))

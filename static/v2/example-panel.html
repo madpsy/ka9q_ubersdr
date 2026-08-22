@@ -1,0 +1,117 @@
+<template id="ubersdr-panel">
+<script type="application/ubersdr-panel+json">
+{
+  "ui": 2,
+  "schema": 1,
+  "title": "Memories",
+  "icon": "Bookmark",
+  "group": "tune",
+  "dock": "left",
+  "minimal": true,
+  "height": 150,
+  "uses": {
+    "topics": ["tuning"],
+    "commands": ["tune"]
+  }
+}
+</script>
+
+<style>
+  .now { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .freq { font-family: var(--font-mono, monospace); font-size: 16px; }
+  .mode { color: var(--fg-dim, #9aa4b2); text-transform: uppercase; font-size: 11px; }
+  .list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+  .row { display: flex; align-items: center; gap: 6px; }
+  .row button.go { flex: 1; text-align: left; font-family: var(--font-mono, monospace); }
+  .row button.drop { padding: 2px 7px; color: var(--fg-dim, #9aa4b2); }
+  .empty { color: var(--fg-dim, #9aa4b2); }
+</style>
+
+<div class="now">
+  <span class="freq" id="freq">—</span>
+  <span class="mode" id="mode"></span>
+</div>
+<button id="remember">Remember this frequency</button>
+<div class="list" id="list"></div>
+
+<script type="module">
+// A worked example of a custom panel, and a real one: it remembers frequencies
+// and tunes back to them.
+//
+// Everything a panel can do is reachable from the object `ready()` resolves to.
+// The topics and commands are the ones in BRIDGE_API.md — the same set a browser
+// extension gets — plus `store`, `fetch` and `height`, which only a panel has.
+
+const sdr = await ubersdr.ready();
+
+const el = (id) => document.getElementById(id);
+const kHz = (hz) => (hz / 1000).toFixed(2);
+
+// The store arrives with the connection, so it can be read synchronously here
+// rather than awaited during the first render.
+let saved = sdr.store.all().memories || [];
+let current = null;
+
+// `on` gives the merged topic, not a patch — the client reassembles those.
+sdr.on('tuning', (t) => {
+    current = t;
+    el('freq').textContent = t.frequency ? kHz(t.frequency) + ' kHz' : '—';
+    el('mode').textContent = t.mode || '';
+});
+await sdr.subscribe(['tuning']);
+
+async function save(next) {
+    saved = next;
+    // Returns a message when the write was refused rather than failing silently,
+    // so a panel never shows settings it did not actually keep.
+    const problem = await sdr.store.set('memories', saved);
+    if (problem) console.warn('[memories]', problem);
+    render();
+}
+
+function render() {
+    const list = el('list');
+    list.textContent = '';
+    if (!saved.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'Nothing remembered yet.';
+        list.appendChild(empty);
+        return;
+    }
+    for (const [i, m] of saved.entries()) {
+        const row = document.createElement('div');
+        row.className = 'row';
+
+        const go = document.createElement('button');
+        go.className = 'go';
+        go.textContent = kHz(m.frequency) + ' kHz ' + (m.mode || '').toUpperCase();
+        // One call carries the mode with the frequency: sending them separately
+        // walks the receiver through an intermediate pair, which is audible.
+        go.onclick = () => sdr.command('tune', { frequency: m.frequency, mode: m.mode });
+
+        const drop = document.createElement('button');
+        drop.className = 'drop';
+        drop.title = 'Forget';
+        drop.textContent = '×';
+        drop.onclick = () => save(saved.filter((_, n) => n !== i));
+
+        row.append(go, drop);
+        list.appendChild(row);
+    }
+}
+
+el('remember').onclick = () => {
+    if (!current || !current.frequency) return;
+    if (saved.some((m) => m.frequency === current.frequency && m.mode === current.mode)) return;
+    save([...saved, { frequency: current.frequency, mode: current.mode }]);
+};
+
+// The operator can cut any panel down to what matters; the panel decides what
+// survives. Here the list stays and the button goes, because remembering is
+// something you do occasionally and tuning back is what the panel is for.
+if (sdr.minimal) el('remember').style.display = 'none';
+
+render();
+</script>
+</template>

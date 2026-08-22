@@ -308,20 +308,47 @@ Both need whatever CORS treatment the other v2 APIs give Capacitor's
 toast — not enough to build a registry from, on a response that is already large
 and served to everything on a different clock. It is left alone.
 
-### 3.3 Server-side changes
+### 3.3 Server-side changes — **done**
 
-`widget_manager.go` keeps its shape. Manifests are parsed **once, at cache
-time** — in `refreshAll()` (line 194) and `AddToCache()` (line 338), which
-already fetch only when the version has changed — and the parsed struct is
-stored on `widgetCacheEntry` beside `HTML`. Everything downstream reads a struct;
-nothing parses per request.
+Implemented in `panels_api.go` (new), with the cache wiring in
+`widget_manager.go` and the routes in `main.go`. Tests: `panels_api_test.go`.
 
-A record whose manifest is absent or will not parse is not a v2 panel. That is
-the discriminator, and it is also the error to report: `handlePostEnabled()`
-(line 525) already fetches each newly added widget before accepting the list and
-returns a 502 with a per-id message on failure. A bad manifest belongs in that
-same path — refusing at enable time with "this is not a v2 panel" beats a panel
-that silently never appears.
+`widget_manager.go` keeps its shape. Bundles are parsed **once, at cache time**,
+by `newWidgetCacheEntry()` — one constructor shared by `refreshAll()` and
+`AddToCache()`, rather than the two struct literals that were there before, so
+the refresh loop and a fresh enable cannot end up disagreeing about what is
+cached the first time only one of them learns something. The result is a
+`*ParsedPanel` on `widgetCacheEntry`, nil for a v1 widget. Nothing parses per
+request; the refresh loop already fetches only on a version change.
+
+**The manifest is carried through verbatim.** Beyond `ui` and `schema`, what a
+manifest means is the frontend's business — `panels/registry.jsx` decides the
+defaults and degrades on every unknown value (§4.3). A server with opinions
+about `icon` or `group` would be a second place to change every time the manifest
+grows.
+
+**A panel this build cannot run is refused at enable time**, through the path
+`handlePostEnabled()` already has for a failed fetch: the operator is told, while
+looking at the thing they just chose, that it is written for another interface or
+needs a newer receiver. Only newly added ids are checked — an entry already in
+the list whose author has since published for a later interface must not block
+the operator from saving a change to the rest of it.
+
+Note what is *not* rejected there: a v1 widget. The discriminator says it is not
+a panel, but v1 still exists in this build and its widgets are still legitimately
+enableable. That check belongs with v1's removal, not before it.
+
+`AssembleHTML` skips any entry that parsed as a panel. The `<template>` wrapper
+means it would render nothing anyway — that is what protects builds older than
+this one, which cannot be patched — but this build does not put it in the v1 page
+at all, and the operator gets a log line instead of an invisible widget.
+
+The body served by `/api/v2/panels/{id}` is the wrapper's contents with the
+manifest block removed: the manifest has already travelled in the listing, and
+the page assembles its own `srcdoc` around what is left.
+
+`HandleMine` now forwards its query string as the public listings already did,
+so the admin UI can pass `?ui=` through to the collector.
 
 `MaxEnabledWidgets = 10` stays, and now doubles as the frame budget.
 
@@ -329,8 +356,14 @@ The collector needs **no change at all**: same `html_content`, same version
 counter, same CRUD, same public/private.
 
 `widget-ai.sh` needs no infrastructure change either — it already publishes
-through `/admin/widgets/*` on trusted-host auth. Only its brief changes: this
-document plus `BRIDGE_API.md`.
+through the admin widget endpoints on trusted-host auth — and its brief is a
+*pointer*, not a copy. The `madpsy/ubersdr-claude` image is not built from this
+repository and mounts nothing from the host, so anything baked into it could not
+be updated alongside the format. But the container reaches the instance at
+`$BASE`, and everything under `/v2/` is served from `static/`, so the
+authoritative documents live there: `/v2/PANEL_AUTHORING.md`,
+`/v2/example-panel.html` and `/v2/BRIDGE_API.md`. The script's header records
+that.
 
 ---
 
@@ -503,19 +536,27 @@ untouched.
 `PANELS` in `panels/registry.jsx` becomes `[...BUILT_IN, ...fromManifests]`,
 built once at module init.
 
-The hazard is `reconcile()` in `layout/LayoutContext.jsx`. It filters every
-stored id through `PANEL_BY_ID` — floats (line 214), weights (237), heights
-(243), dock order (249) — and **drops** what it does not recognise, and the
-pruned result is what gets persisted. If manifests arrive over `fetch` after
-mount, then on every single load the custom panels are briefly unknown, get
-pruned out of the layout, and the pruning is saved. One reload and the operator's
-arrangement is gone.
+The hazard was `reconcile()` in `layout/LayoutContext.jsx`. It filtered every
+stored id through `PANEL_BY_ID` — floats, weights, heights, dock order — and
+**dropped** what it did not recognise. And `LayoutProvider` writes the layout
+back in a `useEffect` on `[layout]`, which runs on mount: the pruned result was
+persisted on the first render, before the operator had touched anything. If
+manifests arrive over `fetch` after mount, then on every load the custom panels
+are briefly unknown, pruned, and the pruning saved. One reload and the
+arrangement is gone with no way back.
 
 Two measures, and both are wanted:
 
-**Seed the registry synchronously from a `localStorage` manifest cache**, on the
-pattern `bridge/settings.js` and `lib/announce.js` already use — its own store,
-read at module init — then fetch the endpoint and revalidate.
+**Seed the registry synchronously from a `localStorage` manifest cache** —
+**done**, `panels/custom/cache.js`, on the pattern `bridge/settings.js` and
+`lib/announce.js` already use: its own store, read at module init, revalidated
+from the endpoint afterwards. `main.jsx` fires that revalidation without awaiting
+it, so a slow or elderly receiver never holds up the first frame.
+
+Anything that goes wrong — offline, a 304, a receiver too old to have the
+endpoint, a proxy answering with HTML — leaves the cache standing. The panels an
+operator enabled do not stop existing because one request failed, and clearing
+them would take the layout entries with them on the next load.
 
 The timing works out exactly. A stored layout can only mention a custom panel if
 some earlier load knew about it, and that load also wrote the cache. So the seed
@@ -526,25 +567,51 @@ the cache is empty, but so is the stored layout. No blocking fetch before
 This cache must stay `localStorage` — its whole job is to be readable
 *synchronously* before `LayoutProvider` reconciles, which IndexedDB cannot do.
 
-**Make `reconcile()` non-destructive**: park unknown ids rather than dropping
-them. `localStorage` is unavailable in private mode and can be cleared, and
-silently persisting a pruned layout is data loss whatever caused it. Worth fixing
-on its own merits, independent of this feature.
+**Make `reconcile()` non-destructive** — **done**. `localStorage` is unavailable
+in private mode and can be cleared, so this had to hold whatever the cause, and
+it is a data-loss fix on its own merits independent of custom panels.
+
+An id the registry does not know is now *parked* rather than discarded:
+`parkedIds()` collects them from the stored floats and dock lists, and a `keep()`
+predicate replaces the four `PANEL_BY_ID` filters (LayoutContext.jsx:271, 294,
+300, 306). Section state is preserved by a loop of its own, because that block is
+rebuilt from scratch and would otherwise still have dropped `hidden` — the one
+field that is an answer the operator already gave.
+
+Parking is bounded at `MAX_PARKED = 64`. Not an expectation about how many
+panels a receiver has, but a stop on a bug upstream — a manifest handing out a
+fresh id per fetch — growing a store that is a few megabytes for the whole
+origin.
+
+Nothing downstream needed changing, which is what makes it cheap: every consumer
+already filters on the registry before drawing — `Dock.jsx:220`'s `visible`,
+`FloatingLayer.jsx:129`'s `floatOrder` filter — while `MobileShell` and
+`LayoutPanel` iterate `PANELS` rather than the layout. A parked id renders as
+nothing and keeps its place.
+
+Covered by nine cases in `test/layout.test.js`: dock position, size, `hidden`
+survival, float geometry, reconcile-twice, no double placement when the panel
+returns, the cap, and that malformed entries are still discarded.
 
 Changes arriving after boot then have two safe paths and never touch registry
 deletion:
 
 - a panel added → lands through reconcile's existing new-panel placement
-  (LayoutContext.jsx:267), which puts it at its declared position rather than at
-  the bottom of an existing user's dock;
+  (LayoutContext.jsx:324), which puts it at its declared position rather than at
+  the bottom of an existing user's dock. A parked id counts as already placed, so
+  a panel coming back is not inserted a second time;
 - a panel removed → `requires` goes false. It leaves the docks, the Layout panel
   and the mobile tabs, and its stored placement is left intact so re-enabling
   restores it.
 
-### 4.2 `requires`
+### 4.2 `requires` — **done**
 
 `requires` for a custom panel tests **one thing: is this panel in the enabled set
 the endpoint returned.** Not whether its body has loaded.
+
+Implemented in `usePanelApplies` rather than as a `requires` predicate per entry,
+because the answer is the same for every custom panel and the set is a store the
+hook already has to watch: `!p.custom || live.has(p.id)`.
 
 Gating on load state would drop the row out of the Layout panel at exactly the
 moment somebody is there working out why a panel is not showing, and it
@@ -552,9 +619,9 @@ contradicts the rule that a failed body must be visible. Loading and failure are
 `CustomPanel`'s own business, rendered inside a panel that is already listed and
 already switchable.
 
-### 4.3 Manifest → registry entry
+### 4.3 Manifest → registry entry — **done**
 
-Validation degrades, never throws. This code runs before the first render, so
+`panels/custom/manifest.js`. Validation degrades, never throws. This code runs before the first render, so
 anything that throws is a white screen for the whole receiver.
 
 - unknown `dock` → the default; unknown `icon` → the fallback glyph; unknown
@@ -652,15 +719,36 @@ collector; "who wrote this and what is it" is fair to ask, and that row is the
 only place it gets asked. A divider and a heading separate the custom entries
 from the built-in ones, which otherwise differ only by position in the list.
 
-### 4.8 Lifecycle
+### 4.8 Lifecycle — **done**
 
 `refreshAll()` already polls versions every `widgetCacheTTL` (15 min) and evicts
-on 404. The page hears about it by polling `/api/v2/panels` and comparing — the
-set ETag makes that a 304 in the common case.
+on 404. The page hears about it from `startPanelPolling()` in
+`panels/custom/cache.js`, every two minutes, which the set ETag makes a 304 in
+the common case.
 
-- **version changed** → remount that frame with a new `srcdoc` and a fresh port.
-  In-frame state is lost, which is the correct semantics for an update.
-- **panel gone** → `requires` false, per §4.1.
+Quiet while the tab is hidden — nobody is looking at a panel there — and a
+refresh the moment it is looked at again rather than waiting out the rest of an
+interval that ran while nobody was there. Self-rescheduling rather than an
+interval, so a slow answer cannot let requests stack up behind it.
+
+- **version changed** → the frame remounts. A mounted panel watches the *cache*
+  for its version, not the registry entry it was built from: that entry is frozen
+  at module init and carries whatever was current then, so a panel whose author
+  had published since would have gone on running the old bundle until somebody
+  reloaded. The iframe is keyed on the version, so an update replaces the element
+  rather than reusing one whose document has already run. In-frame state is lost,
+  which is the correct semantics for an update.
+- **panel gone** → `requires` false, per §4.1. Its stored data is *not* deleted,
+  for the same reason its placement and hidden flag are not: removal is often
+  temporary, and data vanishing while placement survived would be the worst of
+  both. The per-panel cap bounds what an unused panel leaves behind.
+
+**What does not update live:** the manifest-derived half of a registry entry —
+title, icon, group, whether the panel offers a minimal view. Those are read once,
+at load, because the registry has to be complete before `LayoutProvider`
+reconciles against it (§4.1). So a new version's *body* runs immediately and its
+new title appears on the next load. The fields that decide placement are
+first-run defaults anyway (§2.2), so the ones that actually lag are cosmetic.
 
 ---
 
@@ -792,24 +880,34 @@ it has to be deployed before any instance can ask for panels.
    branch is untouched. Once it is live, panels can be authored and stored before
    anything can run one — a v1 instance that somehow enables one renders nothing
    (§2.6).
-2. **Harden `reconcile()`** — park unknown ids instead of pruning them
-   (LayoutContext.jsx:214, 237, 243, 249). Standalone, small, and a real
-   data-loss fix on its own merits.
-3. **Go side** — manifest parse and validation at cache time in `refreshAll` /
-   `AddToCache`; `Manifest` on `widgetCacheEntry`; the two endpoints; enable-time
-   rejection through the existing `handlePostEnabled` error path. Fully testable
-   with no frontend.
-4. **Registry merge and manifest cache** — with one hardcoded manifest, prove a
-   panel appears in its dock, in the Layout panel row, in the mobile tab bar, and
-   that it floats. No iframe yet.
-5. **`CustomPanel`** — body fetch, `srcdoc` assembly, frame mount, port handover,
-   the second `createHost` with its own transport, the client preamble,
-   `store` and `fetch`. The real work, and by now everything around it is
-   known-good.
-6. **Lifecycle poll** — version bump remounts, removal flips `requires`.
-7. **Author tooling** — retarget `widget-ai.sh`'s brief, add the icon picker and
-   manifest validity indicator to the admin editor, and write one real panel end
-   to end.
+2. ~~**Harden `reconcile()`**~~ — **done**, see §4.1. Unknown ids are parked
+   rather than pruned, bounded at 64, with section state preserved. Standalone,
+   small, and a real data-loss fix on its own merits.
+3. ~~**Go side**~~ — **done**, see §3.3. Parsing at cache time behind one shared
+   constructor, `*ParsedPanel` on `widgetCacheEntry`, the two endpoints with
+   ETag revalidation, enable-time refusal of a panel this build cannot run, and
+   an `AssembleHTML` skip. 13 tests, no frontend involved.
+4. ~~**Registry merge and manifest cache**~~ — **done**. `custom/manifest.js`
+   turns a listing into a registry entry, degrading on every field;
+   `custom/cache.js` is the synchronous seed and the revalidation;
+   `registry.jsx` merges the two and gates them in `usePanelApplies`;
+   `groups.jsx` honours a manifest's group. `custom/CustomPanel.jsx` is a
+   placeholder body until step 5. 21 tests in `test/custompanels.test.js`.
+5. ~~**`CustomPanel`**~~ — **done**. `custom/runtime.js` (the in-frame
+   `ubersdr`, built as its own bundle by `build.sh` and inlined into each
+   `srcdoc`), `custom/srcdoc.js`, `custom/hosts.js`, `custom/store.js`,
+   `custom/CustomPanel.jsx`, and the `BridgeHost` wiring. 14 tests in
+   `test/panelhost.test.js`, including an end-to-end round trip between the
+   runtime and a panel host over a mock message channel.
+6. ~~**Lifecycle poll**~~ — **done**, see §4.8. `startPanelPolling()`, a mounted
+   frame following the cache's version rather than its frozen registry entry,
+   and the iframe keyed on it. 4 tests.
+7. ~~**Author tooling**~~ — **done**. `PANEL_AUTHORING.md` served at
+   `/v2/PANEL_AUTHORING.md`, the worked example at `/v2/example-panel.html`, the
+   admin editor's live kind-and-manifest indicator, kind badges in the widget
+   lists, and `widget-ai.sh` pointing at the served spec. No icon *picker*: the
+   icon is a field inside the author's JSON, and checking the name is worth more
+   than editing their manifest for them.
 
 ## 8. Open decisions
 
@@ -847,39 +945,76 @@ it has to be deployed before any instance can ask for panels.
 
 **New**
 
-- `static/v2/src/panels/custom/manifest.js` — parse and validate, degrading.
-- `static/v2/src/panels/custom/cache.js` — the synchronous `localStorage` seed.
+- `static/v2/src/panels/custom/manifest.js` — parse and validate, degrading. **Done**.
+- `static/v2/src/panels/custom/cache.js` — the synchronous `localStorage` seed
+  and the revalidation. **Done**.
+- `static/v2/src/panels/custom/icons.jsx` — manifest icon name → element, with
+  the own-property check that keeps `"constructor"` from resolving to something
+  off `Object.prototype`. **Done**.
 - `static/v2/src/panels/custom/CustomPanel.jsx` — frame, handover, states.
-- `static/v2/src/panels/custom/host.js` — the second `createHost` and transport.
-- `static/v2/src/panels/custom/preamble.js` — the in-frame `ubersdr` client.
-- `static/v2/src/panels/custom/store.js` — parent-side IndexedDB.
-- `panels_api.go` — the two endpoints.
+  **Done**.
+- `static/v2/src/panels/custom/hosts.js` — a `createHost` per panel, the port
+  transport, and the fetch proxy. **Done**.
+- `static/v2/src/panels/custom/runtime.js` + `runtime.entry.js` — the in-frame
+  `ubersdr`, built to `dist/panel-runtime.js` and inlined into each frame.
+  **Done**.
+- `static/v2/src/panels/custom/srcdoc.js` — the document assembly, base
+  stylesheet and theme variables. **Done**.
+- `static/v2/src/panels/custom/store.js` — parent-side IndexedDB. **Done**.
+- `panels_api.go` — the bundle parser, `ParsedPanel`, the compatibility rule and
+  the two endpoints. **Done**, with `panels_api_test.go`.
 
 **Changed**
 
-- `widget_manager.go` — manifest parse at cache time, `Manifest` on the entry,
-  enable-time rejection, and an `AssembleHTML` skip for parsed panels until v1
-  goes (§2.6).
-- `main.go` — routes.
-- `static/v2/src/panels/registry.jsx` — merge custom entries.
-- `static/v2/src/layout/LayoutContext.jsx` — park unknown ids.
-- `static/v2/src/panels/groups.jsx` — runtime group insertion; fix the header
-  comment about ungrouped panels being a bug.
-- `static/v2/src/components/icons.jsx` — the fallback glyph, and a note that the
-  keys are an external contract.
-- `static/v2/src/panels/LayoutPanel.jsx` — provenance rows and the divider.
-- `static/admin.html` — icon picker, manifest validity, panel-vs-legacy marking.
-- `widget-ai.sh` — brief only.
+- `widget_manager.go` — **done**: `newWidgetCacheEntry()` parses at cache time,
+  `*ParsedPanel` on the entry, enable-time refusal of an unrunnable panel, an
+  `AssembleHTML` skip for panels until v1 goes (§2.6), and query forwarding on
+  `HandleMine`.
+- `main.go` — **done**: the two `/api/v2/panels` routes.
+- `static/v2/src/panels/registry.jsx` — **done**: `BUILT_IN` plus the merged
+  custom entries, and the live-set gate in `usePanelApplies`.
+- `static/v2/src/layout/LayoutContext.jsx` — park unknown ids. **Done**;
+  `test/layout.test.js` carries the cases.
+- `static/v2/src/panels/groups.jsx` — **done**: a panel may name its own group,
+  and the ungrouped fallback is documented as a fallback rather than a bug.
+- `static/v2/src/components/icons.jsx` — **done**: `Icon.Custom` as the fallback
+  glyph, and a note at the head of the map that the keys are a published
+  contract — add, never rename.
+- `static/v2/src/panels/LayoutPanel.jsx` — **done**: a provenance line under
+  each custom panel's row.
+- `static/admin.html` — **done**: a live indicator under the HTML field saying
+  whether this is a classic widget or a v2 panel and what is wrong with it;
+  `?ui=any` on the listings, without which an operator's own panels vanish from
+  their own editor; and a kind badge per row.
+- `static/v2/PANEL_AUTHORING.md` *(new)* — the author's guide. **Done**.
+- `static/v2/example-panel.html` *(new)* — a complete worked panel, pinned by
+  tests on both sides. **Done**.
+- `static/v2/build.sh` — also emits `dist/panel-meta.json`, the icon and group
+  names the admin editor checks a manifest against, generated from the source so
+  it cannot drift from what the interface has. **Done**.
+- `static/v2/src/bridge/BridgeHost.jsx` — **done**: one named deps object for
+  both kinds of host, and `publishAll` fanning every topic out to the panels.
+- `static/v2/build.sh` — **done**: the second bundle for the panel runtime.
+- `static/v2/src/styles.css` — **done**: `.custompanel`.
+- `widget-ai.sh` — **done**: header points at the served spec.
 
-**Collector** (`~/repos/ubersdr-aux/collector`, see §3.4)
+**Collector** (`~/repos/ubersdr-aux/collector`, see §3.4) — **done**
 
+- `panel_manifest.go` *(new)* — the bundle parser, `panelUIVersion`,
+  `validatePanelManifest`, `uiVersionPredicate`, `deriveWidgetUIVersions`.
 - `main.go` — `ui_version` column on `widgets`, plus the one-off derive pass.
 - `widgets.go` — derive `ui_version` from `manifest.ui` on create *and* update;
   validation branched on kind so the legacy path is unchanged byte for byte;
   `scriptTagRe` to skip non-JavaScript `<script type=…>` and module-mode
   `node --check` on the panel branch only; expose the field, and the opt-in `ui`
   filter on the list endpoints *only*.
-- `static/widgets.html` / `widgets.js` — label and filter the two kinds.
+- `static/widgets.js` — `?ui=any`, a classic/panel label per card, a panel count
+  in the stats bar.
+- `WIDGETS.md` — the "Two kinds of record" section and the `?ui=` table.
+- `panel_manifest_test.go`, `widgets_ui_test.go` *(new)* — 19 cases, including
+  the two that guard the destructive failure modes: a listing with no `?ui=`
+  returns legacy records only, and fetching by id or version history is never
+  filtered.
 
 **Deleted with v1**
 

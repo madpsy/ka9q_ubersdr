@@ -14,7 +14,7 @@
 // keyboard surfaces (useControlContext), so an extension setting the mode takes
 // the same path as the button that does it. There is no second way in.
 
-import React, { useEffect, useMemo, useRef, useState } from '../react.js';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { DOCKS, PLACEMENTS, UNHIDEABLE, useLayout } from '../layout/LayoutContext.jsx';
@@ -28,6 +28,7 @@ import { bandForFrequency } from '../lib/bands.js';
 import { getVfos, onVfosChanged } from '../lib/vfos.js';
 import { API_VERSION, EVENT_FROM_PAGE, EVENT_TO_PAGE, LIVE_TOPICS, STATIC_TOPICS, encodeMessage } from './protocol.js';
 import { createHost } from './host.js';
+import { closingPanels, publishToPanels, setPanelDeps, tickPanels } from '../panels/custom/hosts.js';
 import { createClient } from './client.js';
 import { COMMAND_NAMES, runCommand } from './commands.js';
 import { describePage, snapshotFor } from './snapshots.js';
@@ -243,7 +244,11 @@ export default function BridgeHost() {
     const caps = useRef(capabilities);
     caps.current = capabilities;
 
-    const host = useMemo(() => createHost({
+    // The dependencies, named rather than inlined, because two hosts are built
+    // from them: this one, and one per custom panel. A panel answers from the
+    // same describe/snapshot/command/run as the page, so the two can never
+    // disagree about what the receiver is doing.
+    const hostDeps = useMemo(() => ({
         send: (msg) => {
             window.dispatchEvent(new CustomEvent(EVENT_FROM_PAGE, { detail: encodeMessage(msg) }));
         },
@@ -279,6 +284,25 @@ export default function BridgeHost() {
         },
     }), []);
 
+    const host = useMemo(() => createHost(hostDeps), [hostDeps]);
+
+    // Custom panels are served by hosts of their own — same commands, same
+    // topics, a port each instead of the window events, and none of the bridge's
+    // accounting. See panels/custom/hosts.js for why they are not clients here.
+    //
+    // `send` and `enabled` are theirs rather than these: a panel's messages go
+    // down its own port, and the operator's switch for outside clients is not a
+    // switch for panels they installed on their own receiver.
+    useEffect(() => {
+        setPanelDeps(hostDeps);
+        return () => setPanelDeps(null);
+    }, [hostDeps]);
+
+    const publishAll = useCallback((topic, value) => {
+        host.publish(topic, value);
+        publishToPanels(topic, value);
+    }, [host]);
+
     // One listener for the whole page, registered once. Re-registering on every
     // state change would drop a message arriving in the gap.
     useEffect(() => {
@@ -287,7 +311,7 @@ export default function BridgeHost() {
         // In-page consumers — userscripts, the console — get a client of the
         // same channel rather than a private door into the host.
         window.UberSDR = createClient(window, { id: 'page' });
-        const onLeave = () => host.closing();
+        const onLeave = () => { host.closing(); closingPanels(); };
         window.addEventListener('pagehide', onLeave);
         return () => {
             window.removeEventListener(EVENT_TO_PAGE, onEvent);
@@ -322,32 +346,32 @@ export default function BridgeHost() {
     // --- state that React already tracks ------------------------------------
     const { tuning, audio, squelch, view, followTuning, session } = radio;
 
-    useEffect(() => { host.publish('tuning', snapshotFor('tuning', sources(live.current))); },
+    useEffect(() => { publishAll('tuning', snapshotFor('tuning', sources(live.current))); },
         [host, tuning, vfo]);
-    useEffect(() => { host.publish('audio', snapshotFor('audio', sources(live.current))); },
+    useEffect(() => { publishAll('audio', snapshotFor('audio', sources(live.current))); },
         [host, audio, squelch]);
-    useEffect(() => { host.publish('spectrum', snapshotFor('spectrum', sources(live.current))); },
+    useEffect(() => { publishAll('spectrum', snapshotFor('spectrum', sources(live.current))); },
         [host, view, followTuning]);
-    useEffect(() => { host.publish('session', snapshotFor('session', sources(live.current))); },
+    useEffect(() => { publishAll('session', snapshotFor('session', sources(live.current))); },
         [host, session, running, serverInfo]);
 
     // The title is derived from the tuning (see App's PageTitle), so this fires
     // with it rather than needing a MutationObserver of its own.
     // Arranging the page is a deliberate act, so this fires rarely — but it has
     // to fire, or a client's menu keeps showing where a panel used to be.
-    useEffect(() => { host.publish('layout', snapshotFor('layout', sources(live.current))); },
+    useEffect(() => { publishAll('layout', snapshotFor('layout', sources(live.current))); },
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [host, layout.layout]);
 
-    useEffect(() => { host.publish('radiocontrol', snapshotFor('radiocontrol', sources(live.current))); },
+    useEffect(() => { publishAll('radiocontrol', snapshotFor('radiocontrol', sources(live.current))); },
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [host, controls]);
 
-    useEffect(() => { host.publish('sdrcontrol', snapshotFor('sdrcontrol', sources(live.current))); },
+    useEffect(() => { publishAll('sdrcontrol', snapshotFor('sdrcontrol', sources(live.current))); },
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [host, controls]);
 
-    useEffect(() => { host.publish('page', snapshotFor('page', sources(live.current))); },
+    useEffect(() => { publishAll('page', snapshotFor('page', sources(live.current))); },
         [host, tuning, serverInfo]);
 
     // --- meters, which React does not track ---------------------------------
@@ -357,11 +381,12 @@ export default function BridgeHost() {
             // FFT twenty times a second and does not need a second snapshot
             // twenty times a second for an audience of none.
             if (host.clients().length) {
-                host.publish('signal', snapshotFor('signal', sources(live.current)));
+                publishAll('signal', snapshotFor('signal', sources(live.current)));
             }
             // Anything a rate limit held back goes out here, so a meter that
             // stops moving still ends on its true final value.
             host.tick();
+            tickPanels();
             // Same timer, because a badge does not deserve one of its own.
             setBridgeAttached(host.clients().length);
         }, SAMPLE_MS);

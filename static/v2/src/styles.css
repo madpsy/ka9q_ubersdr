@@ -10405,3 +10405,15 @@ a.btn { text-decoration: none; }
         -webkit-touch-callout: default;
     }
 }
+
+/* A custom panel's frame. Full width of whatever holds it, its height reported
+   from inside — the parent cannot measure an opaque-origin document — and no
+   border of its own, so a panel looks like the panel it is rather than like an
+   embedded page. */
+.custompanel {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color-scheme: normal;
+}

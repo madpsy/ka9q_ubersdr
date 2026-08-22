@@ -121,6 +121,19 @@ export const GROUPS = [
 // Every id the groups name, the solo panel included.
 const NAMED = new Set([SOLO, ...GROUPS.flatMap((g) => g.panels)]);
 
+// The group ids a panel may claim for itself.
+//
+// A custom panel is not in any list above — it is not in this build at all — so
+// it says where it belongs in its manifest and carries the answer on its
+// registry entry. `SOLO` is not a group and cannot be claimed: the panel a phone
+// opens on is this interface's decision, not a manifest's.
+const GROUP_IDS = new Set(GROUPS.map((g) => g.id));
+
+/** Panels that named this group themselves. */
+function claiming(panels, id) {
+    return panels.filter((p) => p.group === id);
+}
+
 /**
  * Registry panels that no group claims.
  *
@@ -128,9 +141,14 @@ const NAMED = new Set([SOLO, ...GROUPS.flatMap((g) => g.panels)]);
  * every phone, silently — the kind of omission that is found months later by
  * somebody who used to use it. So they are collected rather than dropped, and
  * the shell puts them at the end of the last group. See MobileShell.
+ *
+ * That is now a working fallback rather than the sign of a mistake it used to
+ * be: a custom panel whose manifest names no group, or names one this build does
+ * not have, lands here and stays reachable. A *built-in* panel missing from the
+ * lists above is still a bug.
  */
 export function ungrouped(panels) {
-    return panels.filter((p) => !NAMED.has(p.id));
+    return panels.filter((p) => !NAMED.has(p.id) && !(p.group && GROUP_IDS.has(p.group)));
 }
 
 /**
@@ -144,7 +162,10 @@ export function groupsFor(panels) {
     const by = new Map(panels.map((p) => [p.id, p]));
     const spare = ungrouped(panels);
     return GROUPS.map((g, i) => {
-        const mine = g.panels.map((id) => by.get(id)).filter(Boolean);
+        // The group's own list first, in the order it declares, then anything
+        // that asked to be here — which is a custom panel, and belongs after the
+        // panels this build ships rather than among them.
+        const mine = g.panels.map((id) => by.get(id)).filter(Boolean).concat(claiming(panels, g.id));
         // Anything unclaimed rides with the last group rather than being lost.
         const all = i === GROUPS.length - 1 ? mine.concat(spare) : mine;
         return { ...g, items: all };

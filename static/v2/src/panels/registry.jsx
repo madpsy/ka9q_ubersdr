@@ -45,11 +45,14 @@
 //                here: see lib/hostPanels.js
 //   Component    the panel body
 
-import React, { useCallback } from '../react.js';
+import React, { useCallback, useEffect, useState } from '../react.js';
 import Icon from '../components/icons.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 import { hiddenByHost } from '../lib/hostPanels.js';
+import { cachedPanels, onPanels, panelIds } from './custom/cache.js';
+import { panelEntries } from './custom/manifest.js';
+import CustomPanel from './custom/CustomPanel.jsx';
 
 import MultipadPanel from './MultipadPanel.jsx';
 import ReceiverPanel from './ReceiverPanel.jsx';
@@ -125,7 +128,7 @@ function chatAllowed() {
     }
 }
 
-export const PANELS = [
+const BUILT_IN = [
     // First, and first is the point: on a phone this is the panel that opens
     // with the app, because it is the one that covers the whole of listening —
     // frequency, mode, zoom, filter width and squelch, in the height the dial
@@ -958,6 +961,35 @@ export const PANELS = [
     },
 ];
 
+// The registry: what ships, then whatever this receiver's operator has enabled.
+//
+// Built once, at module init, from the synchronous manifest cache — never from a
+// fetch. `LayoutProvider` is the outermost provider in App.jsx and reconciles a
+// stored layout against this list before the first render, so a registry that
+// filled in afterwards would be a registry that is empty at exactly the moment
+// it is read. See custom/cache.js for why the cache holds what it needs to.
+//
+// Custom entries come last, so they land at the end of the layout manager's list
+// and, in a dock, below the panels that ship — which is the right default for
+// something added to a receiver rather than built into it.
+//
+// A panel enabled by the operator since this page loaded appears on the next
+// load. Making the registry itself reactive would mean panels arriving and
+// leaving underneath a reconciled layout, which is the problem this arrangement
+// exists to avoid; a panel *removed* needs no such thing, because that is
+// `usePanelApplies` below.
+export const PANELS = [
+    ...BUILT_IN,
+    // Bound to its own entry: a dock renders `<panel.Component minimal={…} />`
+    // and passes nothing else, so the manifest and the provenance have to travel
+    // with the component rather than as props.
+    ...panelEntries(
+        cachedPanels(),
+        (entry) => (props) => React.createElement(CustomPanel, { ...props, panel: entry }),
+        new Set(BUILT_IN.map((p) => p.id)),
+    ),
+];
+
 export const PANEL_BY_ID = Object.fromEntries(PANELS.map((p) => [p.id, p]));
 
 /**
@@ -975,11 +1007,38 @@ export const PANEL_BY_ID = Object.fromEntries(PANELS.map((p) => [p.id, p]));
 export function usePanelApplies() {
     const { serverInfo } = useRadio();
     const extensions = useExtensions();
+    const live = useLivePanelIds();
     return useCallback(
         // The host's list first, and it is not a question about this receiver:
         // a client that does not want a panel does not want it whatever the
         // receiver offers. See lib/hostPanels.js.
-        (p) => !hiddenByHost(p.id) && (!p.requires || p.requires(serverInfo, { extensions })),
-        [serverInfo, extensions],
+        (p) => !hiddenByHost(p.id)
+            // Then, for a custom panel, whether the operator still has it
+            // enabled. This is the whole of the removal story: the panel leaves
+            // the docks, the layout manager and the mobile tabs, while its
+            // stored placement and its hidden flag stay where they are — so
+            // enabling it again puts it back exactly as it was left.
+            //
+            // Note what this deliberately does *not* test: whether the panel's
+            // body has loaded. Gating on that would drop the row out of the
+            // layout manager at precisely the moment somebody is there working
+            // out why a panel is not showing. Loading and failure belong inside
+            // the panel, which is already listed and already switchable.
+            && (!p.custom || live.has(p.id))
+            && (!p.requires || p.requires(serverInfo, { extensions })),
+        [serverInfo, extensions, live],
     );
+}
+
+/**
+ * The custom panels the receiver currently serves.
+ *
+ * A store rather than a fetch in a component, on the pattern bridge/settings.js
+ * uses: the cache lives for the whole session while whatever watches it may
+ * never be mounted.
+ */
+function useLivePanelIds() {
+    const [ids, setIds] = useState(panelIds);
+    useEffect(() => onPanels(() => setIds(panelIds())), []);
+    return ids;
 }

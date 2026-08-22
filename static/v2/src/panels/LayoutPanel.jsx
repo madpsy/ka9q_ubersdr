@@ -9,6 +9,16 @@ import { Button, Field, Icon, Segmented, Slider, Switch } from '../components/ui
 
 const PLACEMENT_LABEL = { left: 'Left', right: 'Right', bottom: 'Bottom', float: 'Float' };
 
+/** One line of provenance for a custom panel: who published it, and which version. */
+function panelSource(from) {
+    const parts = [];
+    if (from.callsign) parts.push(`By ${from.callsign}`);
+    if (from.version) parts.push(`v${from.version}`);
+    const head = parts.join(' · ');
+    if (head && from.description) return `${head} — ${from.description}`;
+    return head || from.description || 'Added to this receiver';
+}
+
 // Lowest resting opacity offered for floating windows — below this an idle
 // window is hard to read and hard to aim at.
 const FLOAT_MIN_PCT = 50;
@@ -66,6 +76,19 @@ export default function LayoutPanel() {
                                 onChange={(on) => setSectionHidden(p.id, !on)}
                             />
                         </div>
+                        {/* Who wrote this one, for the panels that did not ship
+                            with the receiver. Whether to leave the switch above
+                            on is a question about code the operator pulled off a
+                            shared collector, and this row is the only place it
+                            gets asked — a built-in panel needs nothing of the
+                            sort. Turning it off does not merely hide it: a
+                            hidden panel is never mounted, so nothing of it
+                            runs. */}
+                        {p.custom && (
+                            <div className="note note--tight">
+                                {panelSource(p.custom)}
+                            </div>
+                        )}
                         <Segmented
                             size="sm"
                             value={placementOf(p.id)}

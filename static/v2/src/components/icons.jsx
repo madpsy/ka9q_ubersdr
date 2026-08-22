@@ -22,6 +22,11 @@ function Svg({ children, size = 16, ...rest }) {
     );
 }
 
+// The keys of this map are a **published contract**, not an implementation
+// detail. A custom panel's manifest names its icon by key (panels/custom/icons.jsx),
+// and those manifests live on a collector shared by every receiver — so renaming
+// a key here breaks that panel on every instance that has it enabled, with no
+// way to fix it from this side. Add freely; never rename, never remove.
 export const Icon = {
     Power: (p) => <Svg {...p}><path d="M12 3v9" /><path d="M18.4 6.6a9 9 0 1 1-12.8 0" /></Svg>,
     Chevron: (p) => <Svg {...p}><path d="m6 9 6 6 6-6" /></Svg>,
@@ -178,6 +183,13 @@ export const Icon = {
     // the RF", where this is a set of figures compared against each other, which
     // is what the baseline says.
     Bars: (p) => <Svg {...p}><path d="M4 4v16h16" /><path d="M8 20v-5M12.5 20V8M17 20v-8" /></Svg>,
+
+    // The fallback for a custom panel whose manifest names an icon this build
+    // does not have — a panel with something in it, which is all that can be
+    // said about one from here. Deliberately not Puzzle or Plug: those already
+    // mean Games and Extensions, and an icon that means two things means
+    // neither.
+    Custom: (p) => <Svg {...p}><rect x="2.5" y="3.5" width="19" height="17" rx="2.5" /><rect x="7" y="8" width="10" height="8" rx="1.5" /></Svg>,
 };
 
 export default Icon;

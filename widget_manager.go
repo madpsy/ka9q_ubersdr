@@ -44,7 +44,12 @@ type WidgetMeta struct {
 
 // widgetCacheEntry holds a fetched widget's HTML and metadata.
 type widgetCacheEntry struct {
-	HTML        string
+	HTML string
+	// Panel is set when the record is a v2 custom panel rather than a v1
+	// widget, and nil otherwise. Parsed once here, when the entry is cached,
+	// because the refresh loop already fetches only on a version change — so
+	// nothing parses per request. See panels_api.go.
+	Panel       *ParsedPanel
 	Name        string
 	Callsign    string
 	InstanceID  string
@@ -52,6 +57,37 @@ type widgetCacheEntry struct {
 	IsPublic    bool
 	Version     int
 	FetchedAt   time.Time
+}
+
+// newWidgetCacheEntry builds a cache entry from a fetched record, taking a panel
+// bundle apart on the way in.
+//
+// One constructor rather than two literals, so the refresh loop and a fresh
+// enable cannot end up disagreeing about what is cached — which they would, the
+// first time only one of them learned to parse a manifest.
+func newWidgetCacheEntry(meta *WidgetMeta) widgetCacheEntry {
+	entry := widgetCacheEntry{
+		HTML:        meta.HTMLContent,
+		Name:        meta.Name,
+		Callsign:    meta.Callsign,
+		InstanceID:  meta.InstanceID,
+		Description: meta.Description,
+		IsPublic:    meta.IsPublic,
+		Version:     meta.Version,
+		FetchedAt:   time.Now(),
+	}
+	if panel, ok := parsePanelBundle(meta.HTMLContent); ok {
+		entry.Panel = &panel
+		if why := panel.Unsupported(); why != "" {
+			// Cached but not served, and said once here rather than on every
+			// request. An operator who enabled this before updating, or who
+			// downgraded afterwards, gets a line explaining a panel that is
+			// simply absent from the interface.
+			log.Printf("[WidgetManager] Widget %s (%q) is a panel this build cannot run: %s",
+				meta.WidgetID, meta.Name, why)
+		}
+	}
+	return entry
 }
 
 // errWidgetGone is returned by fetchWidgetVersion when the collector responds
@@ -235,16 +271,7 @@ func (wm *WidgetManager) refreshAll() {
 			continue
 		}
 		wm.mu.Lock()
-		wm.entries[id] = widgetCacheEntry{
-			HTML:        meta.HTMLContent,
-			Name:        meta.Name,
-			Callsign:    meta.Callsign,
-			InstanceID:  meta.InstanceID,
-			Description: meta.Description,
-			IsPublic:    meta.IsPublic,
-			Version:     meta.Version,
-			FetchedAt:   time.Now(),
-		}
+		wm.entries[id] = newWidgetCacheEntry(meta)
 		wm.mu.Unlock()
 		if hasCached {
 			log.Printf("[WidgetManager] Widget %s (%q) updated v%d → v%d", id, meta.Name, cached.Version, meta.Version)
@@ -341,16 +368,7 @@ func (wm *WidgetManager) AddToCache(widgetID string) error {
 		return err
 	}
 	wm.mu.Lock()
-	wm.entries[widgetID] = widgetCacheEntry{
-		HTML:        meta.HTMLContent,
-		Name:        meta.Name,
-		Callsign:    meta.Callsign,
-		InstanceID:  meta.InstanceID,
-		Description: meta.Description,
-		IsPublic:    meta.IsPublic,
-		Version:     meta.Version,
-		FetchedAt:   time.Now(),
-	}
+	wm.entries[widgetID] = newWidgetCacheEntry(meta)
 	wm.mu.Unlock()
 	log.Printf("[WidgetManager] Added widget %s (%q) v%d to cache", widgetID, meta.Name, meta.Version)
 	return nil
@@ -423,6 +441,14 @@ func (wm *WidgetManager) AssembleHTML(enabledIDs []string) template.HTML {
 	for _, id := range enabledIDs {
 		entry, ok := wm.entries[id]
 		if !ok || entry.HTML == "" {
+			continue
+		}
+		// A panel is not a v1 widget and has no business in the v1 page. Its
+		// <template> wrapper means it would render nothing anyway — that is what
+		// protects instances running builds older than this one, which cannot be
+		// patched — but skipping it here keeps the page clean and is the reason
+		// the operator gets a log line rather than an invisible widget.
+		if entry.Panel != nil {
 			continue
 		}
 		fmt.Fprintf(&sb, "\n<!-- widget:%s -->\n%s\n<!-- /widget:%s -->\n", id, entry.HTML, id)
@@ -572,6 +598,36 @@ func (wm *WidgetManager) handlePostEnabled(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// A panel this build cannot run is refused here, while the operator is
+	// looking at the thing they just chose, rather than being accepted and then
+	// never appearing. Only newly added ones: an entry already in the list that
+	// has since become unrunnable — its author published a version for a later
+	// interface — must not block the operator from saving a change to the rest.
+	var unsupported []string
+	wm.mu.RLock()
+	for _, id := range deduped {
+		if oldSet[id] {
+			continue
+		}
+		entry, ok := wm.entries[id]
+		if !ok || entry.Panel == nil {
+			continue
+		}
+		if why := entry.Panel.Unsupported(); why != "" {
+			unsupported = append(unsupported, fmt.Sprintf("%q cannot be used here: %s", entry.Name, why))
+		}
+	}
+	wm.mu.RUnlock()
+	if len(unsupported) > 0 {
+		for _, id := range deduped {
+			if !oldSet[id] {
+				wm.RemoveFromCache(id)
+			}
+		}
+		http.Error(w, strings.Join(unsupported, "; "), http.StatusBadRequest)
+		return
+	}
+
 	// Evict removed widgets from cache.
 	for id := range oldSet {
 		if !newSet[id] {
@@ -664,7 +720,15 @@ func (wm *WidgetManager) HandleMine(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"widgets":[]}`))
 		return
 	}
-	wm.proxyWidgetList(w, "/api/widgets/mine", true)
+	// Query forwarded as the public listings already do theirs, so the admin UI
+	// can ask for panels with ?ui=. The collector returns v1 widgets alone when
+	// nothing is asked for, which is what keeps an instance older than that
+	// change seeing exactly what it saw before.
+	path := "/api/widgets/mine"
+	if q := r.URL.RawQuery; q != "" {
+		path += "?" + q
+	}
+	wm.proxyWidgetList(w, path, true)
 }
 
 // HandlePublic proxies GET /admin/widgets/public → collector GET /api/widgets

@@ -320,6 +320,10 @@ esbuild dispatch.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dispatch.cjs --log-level=warning
 esbuild layout.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/layout.cjs --log-level=warning
+esbuild custompanels.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/custompanels.cjs --log-level=warning
+esbuild panelhost.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/panelhost.cjs --log-level=warning
 esbuild ../src/lib/weather.js --bundle --format=cjs --platform=node \
     --outfile=.build/weather.cjs --log-level=warning
 esbuild ../src/lib/audioWaterfall.js --bundle --format=cjs --platform=node \
@@ -452,6 +456,8 @@ node noisetrend.test.js
 node bandstats.test.js
 node dispatch.test.js
 node layout.test.js
+node custompanels.test.js
+node panelhost.test.js
 node weather.test.js
 node radiosync.test.js
 node audiowaterfall.test.js

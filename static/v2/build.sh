@@ -59,16 +59,54 @@ COMMON=(
     --outfile="$OUT"
 )
 
+# The panel runtime is a bundle of its own: it runs inside each custom panel's
+# sandboxed frame rather than in the app, and srcdoc.js inlines it there. Same
+# esbuild, same settings, one entry point.
+RUNTIME=(
+    src/panels/custom/runtime.entry.js
+    --bundle
+    --format=iife
+    --target=es2020
+    --log-level=warning
+    --outfile=dist/panel-runtime.js
+)
+
+# The names a manifest may use, for the admin editor to check one against.
+#
+# Generated from the source rather than written out again: the icon keys and the
+# group ids are a published contract — a manifest out on the collector names one
+# — and a hand-kept copy of them has already been wrong twice. test/custompanels
+# pins this against the modules themselves, so a drift fails there rather than
+# misleading an author.
+panel_meta() {
+    mkdir -p dist
+    {
+        printf '{\n  "icons": [\n'
+        grep -oE '^    [A-Z][A-Za-z0-9]*: \(p\)' src/components/icons.jsx \
+            | sed -E 's/^    ([A-Za-z0-9]+).*/    "\1",/' | sed '$ s/,$//'
+        printf '  ],\n  "groups": [\n'
+        grep -oE "^        id: '[a-z]+'," src/panels/groups.jsx \
+            | sed -E "s/.*id: '([a-z]+)',/    \"\1\",/" | sed '$ s/,$//'
+        printf '  ]\n}\n'
+    } > dist/panel-meta.json
+}
+
 case "$MODE" in
     prod)
         esbuild "${COMMON[@]}" --minify
-        echo "built $OUT ($(numfmt --to=iec < <(wc -c < "$OUT"))) and dist/v2.css"
+        esbuild "${RUNTIME[@]}" --minify
+        panel_meta
+        echo "built $OUT ($(numfmt --to=iec < <(wc -c < "$OUT"))), dist/panel-runtime.js and dist/v2.css"
         ;;
     dev)
         esbuild "${COMMON[@]}" --sourcemap=inline
-        echo "built $OUT (dev)"
+        esbuild "${RUNTIME[@]}" --sourcemap=inline
+        panel_meta
+        echo "built $OUT and dist/panel-runtime.js (dev)"
         ;;
     watch)
+        esbuild "${RUNTIME[@]}" --sourcemap=inline
+        panel_meta
         esbuild "${COMMON[@]}" --sourcemap=inline --watch
         ;;
 esac

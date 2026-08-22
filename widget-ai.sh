@@ -26,6 +26,20 @@
 #   admin->widget_trusted_hosts config, so UberSDR accepts its /admin/widgets/*
 #   calls on the strength of its container IP alone.
 #
+#   What to build, and how, is served by the instance rather than baked into the
+#   image, so the spec cannot go stale against the receiver the assistant is
+#   actually publishing to. The container reaches it at $BASE:
+#
+#     $BASE/v2/PANEL_AUTHORING.md   how to write a panel for the v2 interface
+#     $BASE/v2/example-panel.html   a complete worked example to start from
+#     $BASE/v2/BRIDGE_API.md        the topics, commands and functions a panel drives
+#
+#   A "panel" is the v2 interface's version of a widget and is what new work
+#   should be: the classic interface is being retired, and a widget written for
+#   it will not appear in v2 at all. The two are the same store and the same
+#   endpoints — a panel is told apart by its content, which the guide above
+#   describes.
+#
 #   Env overrides:
 #     UBERSDR_DIR        installed instance dir (holds docker-compose.yml)
 #                                                         (default: $HOME/ubersdr)

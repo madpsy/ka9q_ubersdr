@@ -284,4 +284,112 @@ t('an anchor that is no longer there puts the panel at the end', () => {
     assert.deepStrictEqual(insertNear(['a', 'b'], 'z', 'gone', 'before'), ['a', 'b', 'z']);
 });
 
+// --- parked ids -------------------------------------------------------------
+//
+// An id a stored layout mentions and the registry does not know. It used to be
+// dropped, and LayoutProvider writes the layout back on mount — so the pruning
+// was persisted before the user had touched anything. A custom panel whose
+// manifest has not arrived yet, or whose fetch failed once, would silently lose
+// wherever the operator had put it.
+
+const PARKED = 'x:9f3ca1b2-0000-4000-8000-000000000001';
+
+// A stored layout with a custom panel placed in the right dock, sized, and
+// switched off — the state a real operator would have.
+const storedWithParked = () => {
+    const l = defaultLayout(MOUSE);
+    l.docks.right.panels = [PARKED, ...l.docks.right.panels];
+    l.weights[PARKED] = 2.5;
+    l.heights[PARKED] = 260;
+    l.sections[PARKED] = { open: false, hidden: true, minimal: true, minimalMobile: false, scale: 1.1 };
+    return l;
+};
+
+t('an unknown id keeps its place in the dock', () => {
+    const l = reconcile(storedWithParked(), MOUSE);
+    assert.strictEqual(l.docks.right.panels[0], PARKED, 'parked at the position it was stored at');
+});
+
+t('an unknown id keeps its size', () => {
+    const l = reconcile(storedWithParked(), MOUSE);
+    assert.strictEqual(l.weights[PARKED], 2.5);
+    assert.strictEqual(l.heights[PARKED], 260);
+});
+
+t('an unknown id keeps hidden, which is an answer somebody already gave', () => {
+    const l = reconcile(storedWithParked(), MOUSE);
+    assert.ok(l.sections[PARKED], 'section state survives');
+    assert.strictEqual(l.sections[PARKED].hidden, true);
+    assert.strictEqual(l.sections[PARKED].open, false);
+    assert.strictEqual(l.sections[PARKED].minimal, true);
+});
+
+t('an unknown id keeps its float geometry', () => {
+    const stored = defaultLayout(MOUSE);
+    stored.floats[PARKED] = { x: 40, y: 60, w: 300, h: 220, min: false };
+    stored.floatOrder = [PARKED, ...stored.floatOrder];
+    const l = reconcile(stored, MOUSE);
+    assert.deepStrictEqual(
+        { x: l.floats[PARKED].x, y: l.floats[PARKED].y, w: l.floats[PARKED].w, h: l.floats[PARKED].h },
+        { x: 40, y: 60, w: 300, h: 220 },
+    );
+    assert.ok(l.floatOrder.includes(PARKED), 'and its place in the float order');
+});
+
+t('reconciling twice does not lose a parked id', () => {
+    // What actually happens in the app: load, persist, reload. Two rounds is
+    // where a fix that only survives the first one shows up.
+    const once = reconcile(storedWithParked(), MOUSE);
+    const twice = reconcile(once, MOUSE);
+    assert.strictEqual(twice.docks.right.panels[0], PARKED);
+    assert.strictEqual(twice.weights[PARKED], 2.5);
+    assert.strictEqual(twice.sections[PARKED].hidden, true);
+});
+
+t('a parked id is not placed again when its panel comes back', () => {
+    // Registered panels that are already somewhere in the layout are left
+    // alone; the parked entry has to count as "already somewhere", or the panel
+    // would be inserted a second time when it returns.
+    const l = reconcile(storedWithParked(), MOUSE);
+    const all = DOCKS.flatMap((d) => l.docks[d].panels);
+    assert.strictEqual(all.filter((id) => id === PARKED).length, 1);
+});
+
+t('parking is bounded', () => {
+    const stored = defaultLayout(MOUSE);
+    const many = Array.from({ length: 400 }, (_, i) => `x:ghost-${i}`);
+    stored.docks.right.panels = [...many, ...stored.docks.right.panels];
+    const l = reconcile(stored, MOUSE);
+    const ghosts = l.docks.right.panels.filter((id) => id.startsWith('x:ghost-'));
+    assert.ok(ghosts.length > 0, 'some are kept');
+    assert.ok(ghosts.length <= 64, `kept ${ghosts.length}, want at most the cap`);
+});
+
+t('a registered panel is still placed and a parked one still renders as nothing', () => {
+    // The guarantee the whole thing rests on: nothing downstream has to know
+    // about parked ids, because every consumer filters on the registry first.
+    const l = reconcile(storedWithParked(), MOUSE);
+    for (const dock of DOCKS) {
+        for (const id of l.docks[dock].panels) {
+            assert.ok(PANEL_BY_ID[id] || id === PARKED, `unexpected id ${id}`);
+        }
+    }
+    assert.ok(PANEL_BY_ID.receiver, 'the registry is what draws them');
+    assert.strictEqual(PANEL_BY_ID[PARKED], undefined, 'and it does not know this one');
+});
+
+t('junk in a stored layout is still discarded', () => {
+    // Parking is for ids, not for anything a hand-edited file might contain.
+    const stored = defaultLayout(MOUSE);
+    stored.docks.right.panels = [null, 42, '', ...stored.docks.right.panels];
+    stored.weights['x:never-placed'] = 3;
+    const l = reconcile(stored, MOUSE);
+    for (const id of l.docks.right.panels) {
+        assert.strictEqual(typeof id, 'string');
+        assert.notStrictEqual(id, '');
+    }
+    assert.strictEqual(l.weights['x:never-placed'], undefined,
+        'a weight for an id that is nowhere in the layout is not kept');
+});
+
 console.log(`\n${pass} ok`);

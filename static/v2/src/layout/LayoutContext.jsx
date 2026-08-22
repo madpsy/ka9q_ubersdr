@@ -2,9 +2,13 @@
 //
 // Panels are registered declaratively (see panels/registry.js) and the layout
 // only ever stores their ids, so adding a panel later means adding one entry to
-// the registry — no layout migration, no component changes here. Unknown ids in
-// a stored layout are dropped and newly registered panels are appended to their
-// declared default dock, which keeps saved layouts working across releases.
+// the registry — no layout migration, no component changes here. Newly
+// registered panels are placed in their declared default dock, next to the
+// siblings the registry puts them beside, which keeps saved layouts working
+// across releases.
+//
+// An id the registry does not currently know is *parked*, not discarded — see
+// parkedIds below.
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
 import { PANELS, PANEL_BY_ID } from '../panels/registry.jsx';
@@ -200,10 +204,63 @@ export function defaultLayout(env = machine()) {
     };
 }
 
+// How many unknown ids a stored layout will carry.
+//
+// A bound rather than an expectation: the ids parked here come from panels that
+// existed on this receiver once, of which there can only ever be a few. The cap
+// is what stops a bug somewhere upstream — a manifest handing out a fresh id on
+// every fetch, say — growing this file without limit in a store that is a few
+// megabytes for the whole origin.
+const MAX_PARKED = 64;
+
+/**
+ * Ids in a stored layout that match no registered panel.
+ *
+ * These used to be dropped, and dropping them was a quiet way to destroy
+ * somebody's arrangement. `LayoutProvider` writes the layout back on mount, so
+ * a reconcile that pruned an id persisted the pruning immediately — before the
+ * user had touched anything, and with no way back.
+ *
+ * That is fine when a panel has genuinely been retired, and wrong every other
+ * time an id is briefly unknown:
+ *
+ *   - a custom panel whose manifest has not arrived yet, or whose fetch failed
+ *     once (see panels/custom and CUSTOM_PANELS.md §4.1);
+ *   - a panel the operator has disabled and will enable again, whose `hidden`
+ *     flag is the answer somebody already gave and should not be asked for
+ *     twice;
+ *   - a build that briefly ships without a panel, on a browser profile that
+ *     will meet the next one.
+ *
+ * So an unknown id keeps its place in the dock, its float geometry, its width,
+ * its height and its section state, and simply renders as nothing: every
+ * consumer already filters on `PANEL_BY_ID` before drawing — Dock.jsx's
+ * `visible`, FloatingLayer's `floatOrder` filter — and the mobile shell and the
+ * layout manager iterate the registry rather than the layout. Parking costs a
+ * few bytes in localStorage and saves an arrangement.
+ */
+function parkedIds(stored) {
+    const out = new Set();
+    const add = (id) => {
+        if (typeof id !== 'string' || !id) return;
+        if (PANEL_BY_ID[id] || out.has(id)) return;
+        if (out.size >= MAX_PARKED) return;
+        out.add(id);
+    };
+    for (const id of stored.floatOrder || Object.keys(stored.floats || {})) add(id);
+    for (const dock of DOCKS) for (const id of stored.docks?.[dock]?.panels || []) add(id);
+    return out;
+}
+
 // Merges a stored layout with the current panel registry.
 export function reconcile(stored, env = machine()) {
     const base = defaultLayout(env);
     if (!stored || stored.version !== VERSION) return base;
+
+    // Registered here, or parked from a previous life. Everything below asks
+    // this rather than the registry directly.
+    const parked = parkedIds(stored);
+    const keep = (id) => !!PANEL_BY_ID[id] || parked.has(id);
 
     // Floating panels belong to no dock, so they are resolved first and then
     // excluded from every dock list.
@@ -211,7 +268,7 @@ export function reconcile(stored, env = machine()) {
     const floatOrder = [];
     for (const id of stored.floatOrder || Object.keys(stored.floats || {})) {
         const g = (stored.floats || {})[id];
-        if (!PANEL_BY_ID[id] || !g || floats[id]) continue;
+        if (!keep(id) || !g || floats[id]) continue;
         floats[id] = {
             x: Number(g.x) || 0,
             y: Number(g.y) || 0,
@@ -234,19 +291,19 @@ export function reconcile(stored, env = machine()) {
     // at render time, so a newly registered panel needs no migration.
     base.weights = {};
     for (const [id, w] of Object.entries(stored.weights || {})) {
-        if (PANEL_BY_ID[id] && Number.isFinite(Number(w)) && Number(w) > 0) base.weights[id] = Number(w);
+        if (keep(id) && Number.isFinite(Number(w)) && Number(w) > 0) base.weights[id] = Number(w);
     }
     // Explicit heights for bottom-dock panels. Absent means "auto" — content
     // height, or the dock height for a `fill` panel.
     base.heights = {};
     for (const [id, h] of Object.entries(stored.heights || {})) {
-        if (PANEL_BY_ID[id] && Number.isFinite(Number(h)) && Number(h) > 0) base.heights[id] = Number(h);
+        if (keep(id) && Number.isFinite(Number(h)) && Number(h) > 0) base.heights[id] = Number(h);
     }
 
     const seen = new Set(floatOrder);
     for (const dock of DOCKS) {
         const list = (stored.docks?.[dock]?.panels || []).filter((id) => {
-            if (!PANEL_BY_ID[id] || seen.has(id)) return false;
+            if (!keep(id) || seen.has(id)) return false;
             seen.add(id);
             return true;
         });
@@ -314,6 +371,24 @@ export function reconcile(stored, env = machine()) {
             // here, and anything here ends up multiplying every font size in the
             // panel. See cleanScale.
             scale: cleanScale(s?.scale ?? d.scale),
+        };
+    }
+    // And the section state of the parked ids, kept as it was stored.
+    //
+    // `hidden` is the one that matters. A panel the operator disables and later
+    // enables again must come back exactly as the user left it — off, if they
+    // turned it off — because nothing has happened in between to ask them the
+    // question a second time. There is no registry entry to take defaults from,
+    // so each field falls back to what a panel gets when it has no opinion.
+    for (const id of parked) {
+        const s = stored.sections?.[id];
+        if (!s || typeof s !== 'object') continue;
+        base.sections[id] = {
+            open: s.open !== false,
+            hidden: !!s.hidden,
+            minimal: !!s.minimal,
+            minimalMobile: !!s.minimalMobile,
+            scale: cleanScale(s.scale),
         };
     }
     return migrateRev(base, stored, phone, touch);

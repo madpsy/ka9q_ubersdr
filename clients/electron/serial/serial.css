@@ -1,15 +1,63 @@
-/* The serial picker's list. Everything else — palette, header, .row, .empty,
+/* The serial picker's list. Everything else — palette, header, button,
    button.ghost — comes from chooser.css, which this page loads first. */
 
-/* The window is fixed-size and modal, so the list is the only thing that
-   scrolls; the header and the footer stay put. `main` already scrolls in
-   chooser.css, and this keeps it from growing the window instead. */
-.serial main { min-height: 0; }
+/* chooser.css lays `main` out as a row of full-height panels and clips what
+   overflows, which is right for the chooser's tabs and wrong here twice over:
+   the list became a shrink-to-fit column rather than filling the window, and
+   any port past the fold was unreachable because nothing scrolled and the
+   window would not resize. A column that scrolls is what a list of unknown
+   length needs. */
+.serial main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
 
-/* A row here is a control, not a row with controls in it: the whole thing is
-   the button, because there is exactly one thing to do with a port. */
+/* The filter box, above a list that can be any length. Full width because it
+   filters the whole row — name, path and USB IDs — and a box narrower than
+   what it searches suggests it only looks at the first field. */
+.filter { flex: none; margin-bottom: 10px; }
+.filter input { width: 100%; }
+/* Chromium's default placeholder is nearly as bright as typed text here, which
+   makes an empty box look like it already has a filter in it. The focus border
+   comes from chooser.css. */
+.filter input::placeholder { color: var(--text-faint); }
+
+/* Why a row survived the filter, marked in the row itself. Chromium's default
+   <mark> is black on yellow, which on this palette is the one thing on screen
+   that looks pasted in from another program. */
+mark {
+    background: rgba(76, 141, 255, 0.24);
+    color: var(--text);
+    border-radius: 3px;
+    padding: 0 1px;
+}
+.port .meta mark { color: var(--text); }
+
+/* The list is the only thing that scrolls; the header and the footer stay put.
+   The negative margin and matching padding let a focused row's outline sit
+   inside the scroll box instead of being shaved off by it. */
+/* `.list` in chooser.css sets `display: flex`, and an author rule beats the
+   browser's own `[hidden] { display: none }` — without this the empty list
+   would still take its share of the window and push the empty state off the
+   bottom. Same trap as `.status[hidden]` over there. */
+.serial #port-list[hidden] { display: none; }
+
+.serial #port-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    margin: -3px;
+    padding: 3px;
+}
+
+/* A row is a control, not a row with controls in it: the whole thing is the
+   target, because there is exactly one thing to do with a port. */
 .port {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 11px;
     width: 100%;
     text-align: left;
     background: var(--panel);
@@ -19,16 +67,40 @@
     color: var(--text);
     font: inherit;
     cursor: pointer;
+    user-select: none;
 }
 .port:hover { background: var(--panel-hover); border-color: var(--accent-dim); }
-/* Focus is how this page is driven from the keyboard, so it has to be as
-   legible as hover — the arrow keys move focus and Enter presses it. */
-.port:focus-visible,
-.port:focus {
-    outline: none;
+
+/* Selection has to be visible from across a desk, because pressing Connect
+   hands a real device to a page: the tint and the border do the work, and the
+   dot says which row is armed even where the tint is hard to see. */
+.port[aria-selected="true"] {
     background: var(--panel-hover);
     border-color: var(--accent);
 }
+
+/* The radio-style mark. Drawn rather than an image so it inherits the accent
+   and needs nothing past the CSP's `default-src 'self'`. */
+.port .dot {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border-strong, var(--border));
+    background: transparent;
+}
+.port:hover .dot { border-color: var(--accent-dim); }
+.port[aria-selected="true"] .dot {
+    border-color: var(--accent);
+    /* The filled centre, as a ring drawn by the border against the accent. */
+    background: var(--accent);
+    box-shadow: inset 0 0 0 2px var(--panel-hover);
+}
+
+/* min-width:0 is what lets the ellipsis below actually happen — without it a
+   flex item refuses to shrink past its content and the name overflows the
+   row instead of being clipped. */
+.port .info { min-width: 0; flex: 1; }
 
 .port .name {
     font-weight: 600;
@@ -42,13 +114,62 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    margin-top: 2px;
 }
+/* The device path in the same face the rest of the app uses for identifiers —
+   /dev/ttyUSB0 and COM3 are paths, and a proportional face makes two of them
+   hard to compare at a glance. */
+.port .meta .ident { font-family: var(--mono); }
+.port .meta .sep { opacity: 0.55; margin: 0 6px; }
+
+/* The keyboard drives the container, not the rows, so the focus ring belongs
+   to the container — and only when it was reached by keyboard, or clicking a
+   row would draw a ring around the whole list. */
+.serial #port-list:focus { outline: none; }
+.serial #port-list:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    border-radius: 8px;
+}
+
+/* Centred in the space the list would have used: an empty state pinned to the
+   top left of a window reads as a list that failed to draw. */
+.serial .empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    text-align: center;
+    padding: 8px 18px;
+}
+.serial .empty[hidden] { display: none; }
+.empty-title { color: var(--text); font-weight: 600; font-size: 14px; }
+.empty-body { color: var(--dim); font-size: 13px; }
 
 footer {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 18px;
+    padding: 12px 18px;
     border-top: 1px solid var(--border);
 }
 #hint { color: var(--dim); font-size: 12px; margin-right: auto; }
+
+/* Title over subtitle rather than beside it: chooser.css puts the pair on one
+   row, which fits "UberSDR · pick a receiver" and does not fit a hostname in a
+   window this narrow. */
+.serial .brand {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    min-width: 0;
+}
+.serial header { min-width: 0; }
+.serial .tagline {
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

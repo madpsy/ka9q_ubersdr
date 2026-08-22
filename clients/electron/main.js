@@ -377,8 +377,40 @@ app.on('web-contents-created', (_event, contents) => {
 // It also shows what a button label could not — the device path and the
 // vendor/product IDs beneath each name — and stays live while it is open.
 
-/** The open picker, or null. @type {{win: BrowserWindow, ports: object[], finish: (id: string) => void} | null} */
+/** The open picker, or null. @type {{win: BrowserWindow, ports: object[], origin: string, finish: (id: string) => void} | null} */
 let serialPicker = null;
+
+// The window is sized to the list rather than left at one guessed height: one
+// port in a 440px window is mostly empty space, and six in it were unreachable
+// because the list could not scroll and the window could not be resized. It can
+// do both now, and this is only the height it opens at.
+const SERIAL_ROW_HEIGHT = 64;     // a two-line row, plus the gap beneath it
+const SERIAL_CHROME_HEIGHT = 190; // header + filter box + footer + main's padding
+const SERIAL_MIN_HEIGHT = 280;
+const SERIAL_MAX_HEIGHT = 620;
+
+function serialWindowHeight(count) {
+    const wanted = SERIAL_CHROME_HEIGHT + Math.max(count, 1) * SERIAL_ROW_HEIGHT;
+    return Math.min(SERIAL_MAX_HEIGHT, Math.max(SERIAL_MIN_HEIGHT, wanted));
+}
+
+/**
+ * Who is asking, for the picker's subtitle. A serial port is a real device on
+ * somebody's desk and the page asking for it is served by whichever instance
+ * they connected to, so the request is worth attributing — a browser names the
+ * site in its own picker for the same reason.
+ */
+function serialRequestOrigin(webContents) {
+    try {
+        if (!webContents || webContents.isDestroyed()) return '';
+        const url = webContents.getURL();
+        if (!url) return '';
+        const parsed = new URL(url);
+        return parsed.protocol === 'file:' ? '' : parsed.host;
+    } catch {
+        return '';
+    }
+}
 
 // Only the fields the page needs, and only strings: the port objects come from
 // Chromium's device layer, and nothing but this is worth handing to a renderer.
@@ -412,20 +444,43 @@ function serialPortsChanged(kind, port) {
  * handed a serial device without anybody naming it, and the page is content
  * served by whichever instance was connected to.
  */
-function chooseSerialPort(parent, portList) {
+function chooseSerialPort(parent, portList, origin) {
     // One at a time: a second request while a picker is open is refused rather
-    // than stacking modal windows on top of each other.
-    if (serialPicker) return Promise.resolve('');
+    // than stacking modal windows on top of each other. The open one is brought
+    // forward, because a refusal with nothing on screen looks like the click did
+    // nothing — the picker is usually just behind the window that asked.
+    if (serialPicker) {
+        if (!serialPicker.win.isDestroyed()) serialPicker.win.focus();
+        return Promise.resolve('');
+    }
+
+    const ports = portList.map(describePort);
 
     return new Promise((resolve) => {
         const win = new BrowserWindow({
-            width: 460,
-            height: 440,
+            width: 520,
+            height: serialWindowHeight(ports.length),
+            minWidth: 380,
+            minHeight: SERIAL_MIN_HEIGHT,
+            // width/height above are the page's, not the frame's: a title bar
+            // varies by platform and would otherwise eat a row off the bottom.
+            // (minWidth/minHeight stay frame measurements whatever this says,
+            // which costs a title bar's worth of slack at the floor and nothing
+            // anybody will notice.)
+            useContentSize: true,
             parent: parent || undefined,
             modal: !!parent,
-            resizable: false,
+            // Resizable, because the list is of unknown length and the port
+            // paths are of unknown width. Long names ellipsize, but somebody
+            // telling two identical adapters apart should be able to just widen
+            // the window instead.
+            resizable: true,
             minimizable: false,
             maximizable: false,
+            // Shown on ready-to-show rather than immediately: a modal that
+            // appears as an empty dark rectangle and fills in afterwards reads
+            // as a window that failed to load.
+            show: false,
             backgroundColor: '#0b0e14',
             title: 'Select serial port',
             icon: APP_ICON,
@@ -445,10 +500,14 @@ function chooseSerialPort(parent, portList) {
             if (!win.isDestroyed()) win.close();
         };
 
-        serialPicker = { win, ports: portList.map(describePort), finish };
+        serialPicker = { win, ports, origin: String(origin || ''), finish };
         // Closed by the window controls, or by the parent going away: either
         // way the page is told nothing was chosen rather than left hanging.
         win.on('closed', () => finish(''));
+        win.once('ready-to-show', () => win.show());
+        // A picker that cannot draw itself must not sit invisible holding the
+        // page's requestPort() open for ever.
+        win.webContents.on('did-fail-load', () => finish(''));
         win.loadFile(path.join(__dirname, 'serial', 'index.html'));
     });
 }
@@ -476,8 +535,11 @@ function setupSession() {
     // requestPort() would hang without these.
     ses.on('select-serial-port', (event, portList, webContents, callback) => {
         event.preventDefault();
-        chooseSerialPort(BrowserWindow.fromWebContents(webContents), portList)
-            .then(callback);
+        chooseSerialPort(
+            BrowserWindow.fromWebContents(webContents),
+            portList,
+            serialRequestOrigin(webContents),
+        ).then(callback);
     });
     // The list can change while the picker is open — this is a knob somebody
     // plugs in, and often the reason it was not in the list is that they had
@@ -1035,7 +1097,11 @@ function setupIpc() {
         if (res && !res.ok) console.warn('[ubersdr] layout command refused:', res.error);
     });
 
-    ipcMain.handle('serial:ports', () => (serialPicker ? serialPicker.ports : []));
+    // The page's one read: the list plus who asked for it. The origin never
+    // changes while a picker is open, so only the list is pushed after this.
+    ipcMain.handle('serial:info', () => (serialPicker
+        ? { ports: serialPicker.ports, origin: serialPicker.origin }
+        : { ports: [], origin: '' }));
     ipcMain.on('serial:choose', (_e, portId) => {
         if (serialPicker) serialPicker.finish(portId);
     });

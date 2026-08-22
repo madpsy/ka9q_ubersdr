@@ -12,21 +12,39 @@
 <body class="serial">
     <header>
         <div class="brand">
-            <h1>Select serial port</h1>
-            <span class="tagline" id="subtitle">choose the device to hand to the receiver page</span>
+            <h1>Select a serial port</h1>
+            <!-- Filled in from the request: which page asked, and how many
+                 devices are attached. Empty until then rather than carrying
+                 placeholder text that flashes and is replaced. -->
+            <span class="tagline" id="subtitle"></span>
         </div>
     </header>
 
     <main>
-        <div id="port-list" class="list" role="listbox" aria-label="Serial ports"></div>
+        <!-- Always present rather than appearing once the list is long enough:
+             a box that materialises because somebody plugged a dongle in shifts
+             the list down under the pointer, mid-decision. -->
+        <div class="filter">
+            <input id="filter" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="Filter by name, path or USB ID" aria-label="Filter ports"
+                   aria-controls="port-list">
+        </div>
+
+        <!-- One listbox, driven by the arrow keys, with the selection held on
+             the container rather than on whichever row happens to have focus. -->
+        <div id="port-list" class="list" role="listbox" tabindex="0" aria-label="Serial ports"></div>
+        <!-- Two different nothings — no devices at all, and none matching what
+             was typed — so the text is written from serial.js. -->
         <div id="port-empty" class="empty" hidden>
-            No serial ports found. Plug the device in — this list updates on its own.
+            <div class="empty-title" id="empty-title"></div>
+            <div class="empty-body" id="empty-body"></div>
         </div>
     </main>
 
     <footer>
-        <span id="hint">Enter connects · Esc cancels</span>
-        <button id="cancel" class="ghost">Cancel</button>
+        <span id="hint"></span>
+        <button id="cancel" type="button" class="ghost">Cancel</button>
+        <button id="connect" type="button" disabled>Connect</button>
     </footer>
 
     <script src="serial.js"></script>

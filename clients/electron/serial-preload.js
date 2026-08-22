@@ -6,7 +6,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('serialPicker', {
-    ports: () => ipcRenderer.invoke('serial:ports'),
+    // The list plus the host of the page that asked for a port. One call: the
+    // origin cannot change while the picker is open, so only the list is pushed.
+    info: () => ipcRenderer.invoke('serial:info'),
     // '' means "none of them" — the window's own controls close it the same way.
     choose: (portId) => ipcRenderer.send('serial:choose', String(portId || '')),
     onPorts: (cb) => {

@@ -131,7 +131,9 @@ func NewFSKDecoder(sampleRate int, centerFreq, shiftHz, baudRate float64, framin
 	}
 
 	// Initialize zero crossing array
-	d.zeroCrossings = make([]int, d.bitSampleCount/d.zeroCrossingsDivisor)
+	// Round up: bitSampleCount is not necessarily a multiple of the divisor,
+	// and indices run up to bitSampleCount-1 before being divided down.
+	d.zeroCrossings = make([]int, (d.bitSampleCount+d.zeroCrossingsDivisor-1)/d.zeroCrossingsDivisor)
 
 	d.updateFilters()
 	d.state = StateNoSignal
@@ -216,7 +218,12 @@ func (d *FSKDecoder) ProcessSamples(samples []int16) {
 			if (d.bitDuration % d.bitSampleCount) > d.halfBitSampleCount {
 				// Create a relative index for this zero crossing
 				index := (d.sampleCount - d.nextEventCount + d.bitSampleCount*8) % d.bitSampleCount
-				d.zeroCrossings[index/d.zeroCrossingsDivisor]++
+				if index < 0 {
+					index += d.bitSampleCount
+				}
+				if bucket := index / d.zeroCrossingsDivisor; bucket < len(d.zeroCrossings) {
+					d.zeroCrossings[bucket]++
+				}
 			}
 			d.bitDuration = 0
 		}

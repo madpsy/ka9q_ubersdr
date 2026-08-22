@@ -834,6 +834,8 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	// Cleanup
 	currentSession := sessionHolder.getSession()
+	log.Printf("Audio WebSocket closed: session %s (SSRC 0x%08x), tearing down",
+		currentSession.ID, currentSession.SSRC)
 	wsh.audioReceiver.ReleaseChannelAudio(currentSession)
 	wsh.sessions.DestroySession(currentSession.ID)
 }

@@ -207,6 +207,20 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         NotificationCenter.default.addObserver(
             self, selector: #selector(audioInterrupted(_:)),
             name: AVAudioSession.interruptionNotification, object: nil)
+        // The audio session category is not this app's alone: WebKit sets it for
+        // the page's own media and can leave it somewhere the ring switch
+        // silences. See PlaybackSession.reassert — a category change is posted
+        // here, as a route change with that reason.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(routeChanged(_:)),
+            name: AVAudioSession.routeChangeNotification, object: nil)
+        // Every session, engine and converter in the process becomes invalid at
+        // once, and an app is expected to rebuild rather than carry on. Nothing
+        // here did, and what was left was a receiver playing into a graph that
+        // no longer existed.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(mediaServicesReset),
+            name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
         // Started *before* the app suspends, which is the whole trick — see
         // startBackgroundAudio.
         NotificationCenter.default.addObserver(
@@ -249,6 +263,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
             webView.load(URLRequest(url: url))
         }
 
+        startAudioWatch()
+
         #if DEBUG
         // The background path, exercised in the foreground.
         //
@@ -279,6 +295,11 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     private let backgroundAudio = BackgroundAudio()
+    /// See startAudioWatch. Held so close() can stop it.
+    private var audioWatch: Timer?
+    /// Whether the one-line description of the session has been logged for this
+    /// receiver — see PlaybackSession.describe.
+    private var describedAudio = false
 
     /// Shorten the page to whatever the keyboard leaves, and put it back after.
     ///
@@ -377,6 +398,59 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         resumeAudio()
     }
 
+    /// The route changed — which is also how a *category* change arrives.
+    @objc private func routeChanged(_ note: Notification) {
+        PlaybackSession.reassert()
+    }
+
+    /// The audio system was reset under everything.
+    ///
+    /// The session and the silent engine are rebuilt, the page's contexts are
+    /// resumed, and any background stream is started again rather than resumed:
+    /// its converter and its player node went with the media server, and what
+    /// replaces them cannot be built until the stream's header arrives. A beat
+    /// later, because the hand-back unwinds on the stream's own queue.
+    @objc private func mediaServicesReset() {
+        PlaybackSession.describe("media services reset")
+        let wasBackground = backgroundAudio.isRunning
+        stopBackgroundAudio()
+        PlaybackSession.rebuild()
+        resumeAudio()
+        guard wasBackground else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.startBackgroundAudio()
+        }
+    }
+
+    /// Is the audio session still ours, while there is audio to lose?
+    ///
+    /// `routeChangeNotification` is the right hook for a category change and
+    /// not a complete one: it is posted when the new category moves the *route*,
+    /// and a page being moved from playback to ambient need not move anything at
+    /// all. So the category is looked at on a timer as well.
+    ///
+    /// It costs a property read. Where nothing has gone wrong the category is
+    /// already `.playback` and `reassert` returns having touched nothing, so
+    /// this cannot thrash the session on the devices that work — only on one
+    /// that is already silent.
+    private func startAudioWatch() {
+        guard audioWatch == nil else { return }
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            // Not before the audio socket is up: until then there is nothing
+            // playing, nothing to reclaim the session for, and no reason to
+            // argue with whatever category WebKit has chosen.
+            guard let id = self.proxy.audioSessionId, !id.isEmpty else { return }
+            if !self.describedAudio {
+                self.describedAudio = true
+                PlaybackSession.describe("audio started")
+            }
+            PlaybackSession.reassert()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        audioWatch = timer
+    }
+
     /// Start the audio again after the system has stopped it.
     ///
     /// Two halves, and both are needed. The **audio session** may have been
@@ -439,6 +513,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// Stop the receiver and take the screen away.
     func close() {
         UIApplication.shared.isIdleTimerDisabled = false
+        audioWatch?.invalidate()
+        audioWatch = nil
         // Before the proxy goes: the hand-back is sent through it.
         stopBackgroundAudio()
         webView?.stopLoading()

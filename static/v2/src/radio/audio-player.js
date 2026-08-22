@@ -425,6 +425,7 @@ export class AudioPlayer extends Emitter {
         this.recordTap = this.ctx.createGain();
         this.gain.connect(this.recordTap);
         this.contextEpoch++;
+        this._watchContextState(this.ctx, this.contextEpoch);
         this._applyGain();
         this._applyChannelMode();
         if (this.filterSpec) this.setFilters(this.filterSpec);
@@ -439,6 +440,42 @@ export class AudioPlayer extends Emitter {
         // that audio is really playing has to be told again.
         this._flowed = false;
         this.nextPlayTime = this.ctx.currentTime + this._primeSec();
+    }
+
+    // Nothing else notices a context that has stopped running.
+    //
+    // WebKit interrupts an AudioContext for reasons the page cannot see — a
+    // call arriving, another app taking the audio session, the host app being
+    // left — and leaves it in 'interrupted' with no way back of its own accord.
+    // A page has no equivalent of a media element's 'pause': the graph simply
+    // stops, every scheduled buffer is dropped on the floor, and the meters go
+    // to zero while everything still says it is playing.
+    //
+    // In a browser tab that is rare enough to live with. In the iOS client it
+    // was silence that only closing and reopening the receiver could clear,
+    // because the host's own rescue (ReceiverViewController.resumeAudio) runs
+    // on didBecomeActive — and a receiver opened while the app is already in
+    // front never sees one.
+    //
+    // Three guards, and each of them is load-bearing:
+    //
+    //   `started`  so a deliberate suspend() is not immediately undone.
+    //   the epoch  so a context being replaced by a rate change is left to go
+    //              quietly; _createContext has already moved on by then.
+    //   the clock  so a context the system is holding down — backgrounded, or
+    //              interrupted by a call still in progress — cannot turn a
+    //              refused resume() into a loop. It answers with a statechange
+    //              of its own, which is the shape a loop needs.
+    _watchContextState(ctx, epoch) {
+        let last = 0;
+        ctx.addEventListener('statechange', () => {
+            if (this.ctx !== ctx || this.contextEpoch !== epoch) return;
+            if (!this.started || ctx.state === 'running' || ctx.state === 'closed') return;
+            const now = Date.now();
+            if (now - last < 1000) return;
+            last = now;
+            ctx.resume().catch(() => {});
+        });
     }
 
     // ---- output routing ----------------------------------------------------

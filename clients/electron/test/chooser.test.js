@@ -221,7 +221,10 @@ function load(api, { ids, leaflet } = {}) {
         console: { log() {}, error() {} },
         setTimeout,
         clearTimeout,
+        // The LAN tab keeps looking while it is open and stops on the way out,
+        // so the pair has to exist here — see chooser.js, startLanScan.
         setInterval: () => 0,
+        clearInterval: () => {},
     };
     if (leaflet) {
         ctx.window.L = fakeLeaflet(log, document);
@@ -503,6 +506,37 @@ ta('and a tab chosen last time beats both', async () => {
     }));
     await settled();
     assert.strictEqual(tabOpen(ctx), 'lan');
+});
+
+ta('the local network tab keeps what it has found when a pass misses it', async () => {
+    // mDNS answers a browse with whatever happened to be announcing in those
+    // three seconds, which on a phone is regularly nothing. Dropping the rows
+    // on that would make a receiver that is plainly there blink in and out of
+    // the list.
+    let pass = 0;
+    const api = fakeApi({ lan: async () => (pass++ === 0 ? [{ ...FOUND }] : []) });
+    const ctx = load(api, { });
+    await settled();
+    ctx.document.getElementById('tab-lan').click();
+    await settled();
+    assert.strictEqual(ctx.document.getElementById('lan-list').children.length, 1,
+        'the first pass did not list what it found');
+
+    await ctx.scanLan();
+    assert.strictEqual(ctx.document.getElementById('lan-list').children.length, 1,
+        'a pass that found nothing emptied the list');
+    assert.strictEqual(ctx.document.getElementById('lan-status').textContent, '1 found');
+});
+
+ta('an empty local network says it is still looking, and nothing else', async () => {
+    // It used to say "none found" and point at install-ubersdr-mdns.sh — a
+    // verdict after one sample, and advice nobody holding a phone can act on.
+    const ctx = load(fakeApi());
+    await settled();
+    ctx.document.getElementById('tab-lan').click();
+    await settled();
+    // Exactly this, and in particular not a verdict with advice attached.
+    assert.strictEqual(ctx.document.getElementById('lan-status').textContent, 'searching…');
 });
 
 ta('choosing a tab shows one panel, and is remembered', async () => {

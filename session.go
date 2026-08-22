@@ -1736,6 +1736,9 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	session, ok := sm.sessions[sessionID]
 	if !ok {
 		sm.mu.Unlock()
+		// Silent until now, and every caller discards the error: a teardown that
+		// lands here sends no terminate at all.
+		log.Printf("Teardown %s: session not found, nothing terminated", sessionID)
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
@@ -1794,6 +1797,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		session, ok = sm.sessions[sessionID]
 		if !ok {
 			sm.mu.Unlock()
+			log.Printf("Teardown %s: session vanished while the activity log was written, nothing terminated", sessionID)
 			return fmt.Errorf("session was removed while logging activity")
 		}
 	}
@@ -1913,8 +1917,8 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		close(session.Done)
 	}
 
-	// Terminate radiod channel (set demod_type to -1 to properly clean up)
-	// This immediately stops the demod thread and prevents orphaned channels at freq=0.
+	// Terminate the radiod channel by expiring its LIFETIME, which stops the
+	// demod thread on radiod's next pass and prevents orphaned channels.
 	// For shared subscribers we only terminate when the last subscriber has left
 	// (detected above in the shared-channel cleanup block — sharedDefaultChan is nil
 	// and active is false when we reach here in that case).
@@ -1932,9 +1936,14 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		sm.mu.RUnlock()
 		if !stillActive {
 			// We were the last subscriber; terminate the shared radiod channel.
+			log.Printf("Teardown %s: terminating shared channel %s (SSRC 0x%08x), last subscriber gone",
+				sessionID, session.ChannelName, session.SSRC)
 			if err := sm.radiod.TerminateChannel(session.ChannelName, session.SSRC); err != nil {
 				log.Printf("Warning: failed to terminate shared spectrum channel %s: %v", session.ChannelName, err)
 			}
+		} else {
+			log.Printf("Teardown %s: leaving shared channel %s (SSRC 0x%08x) up, other subscribers remain",
+				sessionID, session.ChannelName, session.SSRC)
 		}
 	}
 

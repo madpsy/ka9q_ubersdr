@@ -313,12 +313,15 @@ export const DEFAULTS = {
     // passband is, how strong, what the noise under it is, and how much of the
     // filter is occupied.
     //
-    // Off, because it is a measurement rather than part of the picture — you
-    // turn it on to answer a question, and it costs an averaging window running
-    // in every view rather than only in Shape. On in any view once it is on: the
-    // numbers come from the averaging, not from the drawing, so which of the six
-    // pictures is showing has nothing to do with it.
-    ifStats: false,
+    // On, because those four numbers are the questions this panel is opened to
+    // answer — a magnifier held over one signal is being looked at to find out
+    // how strong it is and how it sits in the filter — and reading them off the
+    // trace by eye is exactly the work the readout saves. The averaging window
+    // it costs runs in every view rather than only in Shape, which is cheap
+    // beside the drawing it is already doing. On in any view: the numbers come
+    // from the averaging, not from the drawing, so which of the six pictures is
+    // showing has nothing to do with it. Off is a switch away in the panel.
+    ifStats: true,
     ifRate: 20,             // committed rows a second, as the main waterfall's
     // Auto by default and for the same reason the audio scope's is: it is right
     // until the question becomes "how strong is this", which is what an absolute
@@ -439,7 +442,7 @@ export const UI_SCALE_STEP = 0.05;
 // to. Everything in this file is persisted, defaults included — the save effect
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
-const SETTINGS_VERSION = 7;
+const SETTINGS_VERSION = 8;
 
 
 
@@ -498,6 +501,15 @@ function migrate(saved) {
     // copy of it is nobody's choice. Positive caps were always deliberate and
     // are kept.
     if (!(saved.v >= 7) && saved.maxFps === 0) delete saved.maxFps;
+
+    // v8: the IF panel's stats readout is on by default.
+    //
+    // A stored false from before this is the old default written out on first
+    // load — settings are persisted whole — and it would hold the new default
+    // off for ever. A stored true was already somebody asking for it, and is
+    // what this leaves alone. Anyone who turned it off under the old default
+    // was turning off something already off, so there is nothing to preserve.
+    if (!(saved.v >= 8) && saved.ifStats === false) delete saved.ifStats;
 
     return saved;
 }

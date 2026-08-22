@@ -33,6 +33,11 @@ type RadiodController struct {
 	// zero-value controller still works. See radiod_spectrum_pacing.go.
 	pacerOnce sync.Once
 	pacer     *spectrumUpdatePacer
+
+	// SSRCs torn down within the last terminatedSSRCTTL, and refused until it
+	// expires. See markTerminated.
+	terminatedMu sync.Mutex
+	terminated   map[uint32]time.Time
 }
 
 // SetSpectrumFFTAverages sets the SPECTRUM_AVG value used for new spectrum
@@ -180,6 +185,10 @@ func NewRadiodController(statusGroup, dataGroup, ifaceName string) (*RadiodContr
 		iface:           iface,
 		frontendTracker: NewFrontendStatusTracker(),
 	}
+
+	// Status for an SSRC we have just terminated is stale on arrival; see the
+	// check in handleStatusPacket.
+	rc.frontendTracker.suppressed = rc.terminatedRecently
 
 	// Start STATUS packet listener to receive frontend status
 	if err := rc.frontendTracker.StartStatusListener(statusAddr, iface); err != nil {
@@ -346,6 +355,12 @@ func (rc *RadiodController) SetAGC(ssrc uint32, params AGCParams) error {
 		buf = encodeFloat(&buf, tagAgcThreshold, *params.Threshold)
 	}
 
+	// LIFETIME, so that an update racing a teardown cannot leave an immortal
+	// channel behind: radiod creates a channel for any command naming an unknown
+	// SSRC, and one created from the template inherits an infinite lifetime.
+	// markTerminated is what normally stops that; this is the backstop.
+	buf = encodeInt32(&buf, tagLifetime, audioLifetimeFrames)
+
 	buf = encodeInt32(&buf, tagCommandTag, uint32(time.Now().Unix()))
 	buf = append(buf, tagEOL)
 
@@ -414,6 +429,10 @@ func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint
 
 	// Add EOL marker
 	buf = append(buf, 0)
+
+	// A create is the one command that legitimately follows a teardown of the
+	// same SSRC; see clearTerminated.
+	rc.clearTerminated(ssrc)
 
 	if DebugMode {
 		log.Printf("DEBUG: Sending CreateChannel command (%d bytes) to %s", len(buf), rc.statusAddr)
@@ -509,6 +528,8 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 
 	// Nothing held for a previous life of this SSRC may land on the new channel.
 	rc.spectrumPacer().Cancel(ssrc)
+	// ...and this SSRC is wanted again; see clearTerminated.
+	rc.clearTerminated(ssrc)
 
 	// Send command
 	if err := rc.sendCommand(buildCreateSpectrumCommand(frequency, binCount, binBandwidth, ssrc, rc.fftAverages())); err != nil {
@@ -562,6 +583,12 @@ func buildUpdateSpectrumCommand(ssrc uint32, u spectrumUpdate) []byte {
 	if u.binBandwidth > 0 {
 		buf = encodeFloat(&buf, tagNoncoherentBinBw, float32(u.binBandwidth))
 	}
+
+	// LIFETIME, so that an update racing a teardown cannot leave an immortal
+	// channel behind: radiod creates a channel for any command naming an unknown
+	// SSRC, and one created from the template inherits an infinite lifetime.
+	// markTerminated is what normally stops that; this is the backstop.
+	buf = encodeInt32(&buf, tagLifetime, spectrumLifetimeFrames)
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, tagCommandTag, uint32(time.Now().Unix()))
@@ -632,6 +659,12 @@ func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint
 	// which reset output_interval to the preset default (25 frames = 500ms)
 	buf = encodeInt32(&buf, 0x6A, 5)
 
+	// LIFETIME, so that an update racing a teardown cannot leave an immortal
+	// channel behind: radiod creates a channel for any command naming an unknown
+	// SSRC, and one created from the template inherits an infinite lifetime.
+	// markTerminated is what normally stops that; this is the backstop.
+	buf = encodeInt32(&buf, tagLifetime, audioLifetimeFrames)
+
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
 
@@ -679,6 +712,12 @@ func (rc *RadiodController) UpdateSquelch(ssrc uint32, squelchOpen, squelchClose
 		buf = encodeFloat(&buf, tagSquelchOpen, squelchOpen)
 		buf = encodeFloat(&buf, tagSquelchClose, squelchClose)
 	}
+
+	// LIFETIME, so that an update racing a teardown cannot leave an immortal
+	// channel behind: radiod creates a channel for any command naming an unknown
+	// SSRC, and one created from the template inherits an infinite lifetime.
+	// markTerminated is what normally stops that; this is the backstop.
+	buf = encodeInt32(&buf, tagLifetime, audioLifetimeFrames)
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
@@ -730,28 +769,21 @@ const audioLifetimeFrames = 750
 
 // terminateLifetimeFrames is the LIFETIME value sent to tear a channel down:
 // one block, so radiod destroys the channel on its next pass through
-// downconvert().  The lifetime check is the first thing in that loop, so it
-// runs even though frequency 0 leaves the channel with no front end coverage.
+// downconvert().  The lifetime check is the first thing in that loop, so the
+// channel goes silent on that same pass.
 const terminateLifetimeFrames = 1
 
 // buildTerminateCommand builds the packet that tears down a channel.
 //
-// It carries two things, because the two radiod versions kill channels
-// differently and this has to work on both during the migration:
-//
-//   - RADIO_FREQUENCY = 0 mutes the channel immediately on either version, and
-//     is what actually destroys it on the forked radiod (which expires channels
-//     parked at 0 Hz after Channel_idle_timeout).
-//   - LIFETIME = 1 is what destroys it upstream, where the freq == 0 special
-//     case was removed and the default lifetime is infinite.  The forked radiod
-//     has no decode case for tag 117 and silently ignores it.
-//
-// Sending both means teardown works before, during and after the radiod swap.
+// LIFETIME = 1 is the whole mechanism: the channel expires on radiod's next pass
+// through downconvert().  The packet used to carry RADIO_FREQUENCY = 0 as well,
+// which is how the forked radiod killed channels (it expired ones parked at
+// 0 Hz after Channel_idle_timeout); upstream removed that special case, and the
+// fork is no longer deployed, so the tag is gone.
 func buildTerminateCommand(ssrc uint32) []byte {
 	buf := make([]byte, 0, 64)
 	buf = append(buf, pktTypeCmd)
 	buf = encodeInt32(&buf, tagOutputSSRC, ssrc)
-	buf = encodeDouble(&buf, tagRadioFrequency, 0)
 	buf = encodeInt32(&buf, tagLifetime, terminateLifetimeFrames)
 	buf = encodeInt32(&buf, tagCommandTag, uint32(time.Now().Unix()))
 	buf = append(buf, tagEOL)
@@ -797,10 +829,142 @@ func (rc *RadiodController) RefreshAudioLifetime(ssrc uint32) error {
 	return nil
 }
 
-// DisableChannel tears down a channel: frequency 0 to mute it, LIFETIME to
-// destroy it.  See buildTerminateCommand.
+// terminatedSSRCTTL is how long a torn-down SSRC keeps refusing commands.
+//
+// It only has to outlast whatever was already in flight for that SSRC when the
+// teardown happened: a keepalive SessionManager snapshotted before the session
+// left the map, a spectrum poll dispatched in its own goroutine, or the initial
+// AGC push that websocket.go delays by 500 ms. Ten seconds covers all of those
+// with room to spare, and is short of audioLifetimeFrames, so even a leaked
+// entry could not keep a legitimate channel down longer than radiod's own reap.
+const terminatedSSRCTTL = 10 * time.Second
+
+// markTerminated starts refusing commands for an SSRC we have just torn down.
+//
+// radiod creates a channel for ANY command naming an unknown SSRC (upstream
+// lookup_or_create_chan), so a command that lands after the terminate does not
+// get ignored -- it brings the channel back, at 0 Hz with the template's
+// parameters, making no audio and belonging to no session. Measured against the
+// pinned radiod (upstream cce087e2, run under a sig_gen front end): a keepalive
+// 150 ms after a terminate resurrects the channel carrying LIFETIME =
+// audioLifetimeFrames, and it then sits there for the full 15 seconds before
+// reaping itself -- which is exactly what "sessions take 15 seconds to go away"
+// looks like from outside. A command with no LIFETIME tag is worse: the
+// template's lifetime is infinite, so that channel never goes away at all.
+//
+// Ordering alone cannot fix this. Polls go out in their own goroutines and
+// keepaliveAudioChannels snapshots its targets under a read lock and sends
+// outside it, so there is always a send that can already be in flight when the
+// terminate goes out. The refusal therefore lives at the socket, which every
+// sender has to pass through.
+func (rc *RadiodController) markTerminated(ssrc uint32) {
+	now := time.Now()
+
+	rc.terminatedMu.Lock()
+	if rc.terminated == nil {
+		rc.terminated = make(map[uint32]time.Time)
+	}
+	// Expire on the way past rather than from a timer: entries are only added on
+	// teardown, so sweeping here keeps the map bounded without another goroutine.
+	for s, at := range rc.terminated {
+		if now.Sub(at) > terminatedSSRCTTL {
+			delete(rc.terminated, s)
+		}
+	}
+	rc.terminated[ssrc] = now
+	rc.terminatedMu.Unlock()
+
+	// Drop it from the status cache in the same breath, so the admin panel stops
+	// showing the channel at once rather than waiting for the stale sweep. Taken
+	// after terminatedMu is released: the status listener consults
+	// terminatedRecently before it takes fst.mu, and the two must not nest in
+	// opposite orders.
+	if rc.frontendTracker != nil {
+		rc.frontendTracker.mu.Lock()
+		delete(rc.frontendTracker.channelStatus, ssrc)
+		delete(rc.frontendTracker.frontendStatus, ssrc)
+		rc.frontendTracker.mu.Unlock()
+	}
+}
+
+// clearTerminated readmits an SSRC.
+//
+// Creating a channel is the one command that legitimately follows a teardown of
+// the same SSRC: allocateSSRC can hand the number straight back out, and
+// noise_floor's reconnectBand deliberately reuses its own.
+func (rc *RadiodController) clearTerminated(ssrc uint32) {
+	rc.terminatedMu.Lock()
+	delete(rc.terminated, ssrc)
+	rc.terminatedMu.Unlock()
+}
+
+// terminatedRecently reports whether commands for ssrc are currently refused.
+func (rc *RadiodController) terminatedRecently(ssrc uint32) bool {
+	rc.terminatedMu.Lock()
+	defer rc.terminatedMu.Unlock()
+	at, ok := rc.terminated[ssrc]
+	if !ok {
+		return false
+	}
+	if time.Since(at) > terminatedSSRCTTL {
+		delete(rc.terminated, ssrc)
+		return false
+	}
+	return true
+}
+
+// commandSSRC returns the OUTPUT_SSRC a command packet carries.
+//
+// It mirrors radiod's own get_ssrc() (upstream decode_status.c): walk the TLVs
+// and take the first OUTPUT_SSRC. Reading the SSRC back out of the encoded
+// packet, rather than threading it through every call site, is deliberate --
+// the check then covers every sender, including any that builds a packet inline.
+func commandSSRC(cmd []byte) (uint32, bool) {
+	if len(cmd) < 3 || cmd[0] != pktTypeCmd {
+		return 0, false
+	}
+	buf := cmd[1:]
+	for i := 0; i < len(buf); {
+		tag := buf[i]
+		i++
+		if tag == tagEOL || i >= len(buf) {
+			return 0, false
+		}
+		optlen := int(buf[i])
+		i++
+		if optlen&0x80 != 0 {
+			n := optlen & 0x7f
+			optlen = 0
+			for ; n > 0 && i < len(buf); n-- {
+				optlen = optlen<<8 | int(buf[i])
+				i++
+			}
+		}
+		if i+optlen > len(buf) {
+			return 0, false
+		}
+		if tag == tagOutputSSRC {
+			var v uint32
+			for _, b := range buf[i : i+optlen] {
+				v = v<<8 | uint32(b)
+			}
+			return v, true
+		}
+		i += optlen
+	}
+	return 0, false
+}
+
+// DisableChannel tears down a channel by expiring its LIFETIME.
+// See buildTerminateCommand.
 func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
-	if err := rc.sendCommand(buildTerminateCommand(ssrc)); err != nil {
+	// Refuse further commands for this SSRC BEFORE the terminate goes out, so a
+	// send already queued behind cmdMu cannot slip past it and resurrect the
+	// channel. The terminate itself bypasses the check by going out raw.
+	rc.markTerminated(ssrc)
+
+	if err := rc.sendCommandRaw(buildTerminateCommand(ssrc)); err != nil {
+		log.Printf("Terminate for SSRC 0x%08x was NOT sent: %v", ssrc, err)
 		return fmt.Errorf("failed to send disable command: %w", err)
 	}
 
@@ -820,18 +984,12 @@ func (rc *RadiodController) TerminateChannel(name string, ssrc uint32) error {
 	// carries parameters, so the trailing send would resurrect this one.
 	rc.spectrumPacer().Cancel(ssrc)
 
-	// DisableChannel carries both kill mechanisms; see buildTerminateCommand.
+	// DisableChannel expires the channel's LIFETIME; see buildTerminateCommand.
 	// Do not try to force termination with DEMOD_TYPE=-1 or an OUTPUT_SAMPRATE
 	// change: that makes radiod reload presets, which recreates the channel.
-	err := rc.DisableChannel(name, ssrc)
-	// Eagerly remove from the status cache so the admin panel reflects the
-	// termination immediately rather than waiting up to 30 s for stale cleanup.
-	if rc.frontendTracker != nil {
-		rc.frontendTracker.mu.Lock()
-		delete(rc.frontendTracker.channelStatus, ssrc)
-		rc.frontendTracker.mu.Unlock()
-	}
-	return err
+	// DisableChannel also evicts the SSRC from the status cache and refuses its
+	// late status packets; see markTerminated.
+	return rc.DisableChannel(name, ssrc)
 }
 
 // encodeInt32 encodes a 32-bit integer with leading zero suppression
@@ -950,6 +1108,20 @@ func encodeString(buf *[]byte, tag byte, value string) []byte {
 // sendCommand sends a command packet to radiod
 // Thread-safe: protected by mutex for parallel polling
 func (rc *RadiodController) sendCommand(cmd []byte) error {
+	if ssrc, ok := commandSSRC(cmd); ok && rc.terminatedRecently(ssrc) {
+		// Sending this would recreate the channel we just tore down; see
+		// markTerminated. Not an error: the caller raced a teardown, which is
+		// exactly what this is here to absorb.
+		log.Printf("Dropped command for SSRC 0x%08x: channel torn down within the last %v", ssrc, terminatedSSRCTTL)
+		return nil
+	}
+	return rc.sendCommandRaw(cmd)
+}
+
+// sendCommandRaw writes a command packet to radiod with no terminated-SSRC
+// check. Only the teardown path uses it directly; everything else goes through
+// sendCommand.
+func (rc *RadiodController) sendCommandRaw(cmd []byte) error {
 	rc.cmdMu.Lock()
 	defer rc.cmdMu.Unlock()
 

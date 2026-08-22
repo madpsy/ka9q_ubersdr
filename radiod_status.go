@@ -319,6 +319,10 @@ type FrontendStatusTracker struct {
 	statusListener *net.UDPConn
 	stopListener   chan struct{}
 	debugLogged    map[uint32]bool // Track which SSRCs we've logged debug info for
+
+	// suppressed reports whether an SSRC has just been torn down, so its dying
+	// status packet must not be filed. Set by NewRadiodController; nil in tests.
+	suppressed func(uint32) bool
 }
 
 // NewFrontendStatusTracker creates a new frontend status tracker
@@ -695,6 +699,19 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 
 	// Store status if we got an SSRC
 	if frontendStatus.SSRC != 0 {
+		// ...unless we have just torn this channel down.
+		//
+		// radiod answers every command with a status packet, and the terminate is
+		// a command: measured against the real radiod, the reply lands ~10 ms
+		// after the terminate goes out, carrying LIFETIME=0. That is later than
+		// the eager cache eviction in markTerminated, so it used to re-file the
+		// entry for a channel that no longer exists -- and because nothing ever
+		// updated it again, the admin panel showed a row with no session ("user:
+		// unknown") whose "last" column counted up until cleanupStaleEntries swept
+		// it 30-40 s later. The channel was long gone; only the row was left.
+		if fst.suppressed != nil && fst.suppressed(frontendStatus.SSRC) {
+			return
+		}
 		fst.mu.Lock()
 		fst.frontendStatus[frontendStatus.SSRC] = frontendStatus
 		fst.channelStatus[channelStatus.SSRC] = channelStatus

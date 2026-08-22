@@ -318,7 +318,10 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	// CRITICAL: Wait for streaming goroutine to exit before closing channel
 	// This prevents "panic: send on closed channel" race condition where
 	// streamSpectrum tries to send after closeSpectrumWriter() closes the channel
+	log.Printf("Spectrum WebSocket closed: session %s (SSRC 0x%08x), waiting for the stream goroutine",
+		session.ID, session.SSRC)
 	<-streamDone
+	log.Printf("Spectrum stream goroutine exited: session %s, tearing down", session.ID)
 
 	// Cleanup
 	swsh.sessions.DestroySession(session.ID)

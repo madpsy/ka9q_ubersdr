@@ -164,12 +164,13 @@ t('the measured readout is optional, and is the same in every view', () => {
         const grid = deep(tree).find((n) => String(n.props.className || '').includes('ifs__stats'));
         return grid ? words(grid) : null;
     };
-    // Off by default: it is a measurement, not part of the picture.
-    assert.strictEqual(DEFAULTS.ifStats, false);
-    assert.strictEqual(readouts({}), null);
+    // On by default: the four numbers are what the panel is opened to find out.
+    assert.strictEqual(DEFAULTS.ifStats, true);
+    // ...and it can be turned off, which takes the whole grid with it.
+    assert.strictEqual(readouts({ ifStats: false }), null);
 
-    // On, it is there whichever of the six pictures is showing — the numbers
-    // come from the averaging, not from the drawing.
+    // It is there whichever of the six pictures is showing — the numbers come
+    // from the averaging, not from the drawing.
     for (const view of ['split', 'spectrum', 'waterfall', 'fusion', 'mirror', 'shape']) {
         const w = readouts({ ifStats: true, ifView: view });
         assert.ok(w, `no readout in the ${view} view`);

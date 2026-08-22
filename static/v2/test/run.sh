@@ -497,3 +497,4 @@ node hostpanels.test.js
 node maxfps.test.js
 node shell.test.js
 node barrelmarks.test.js
+node audioresume.test.js

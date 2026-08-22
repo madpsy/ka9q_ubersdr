@@ -148,6 +148,66 @@ enum PlaybackSession {
         }
     }
 
+    /// Put the category back after WebKit has moved it.
+    ///
+    /// The category is not this app's alone. WebKit sets it for the page's own
+    /// media, and where it lands is its decision rather than ours — a page whose
+    /// audio it does not read as playback gets an *ambient* category, which is
+    /// the one kind the ring switch silences. The app's own engine is not
+    /// affected by that, which is exactly how it presented: silent in the app,
+    /// and audible the moment it was backgrounded, with BackgroundAudio playing
+    /// over the very session that had just refused the page.
+    ///
+    /// Claimed once at open and never looked at again, that state had no way
+    /// back. So it is checked whenever the route changes and while a receiver is
+    /// making audio — see ReceiverViewController.routeChanged and audioWatch.
+    ///
+    /// Only from ambient, deliberately. `.playAndRecord` is WebKit capturing,
+    /// and the one thing that captures here is the output picker asking for the
+    /// microphone so that iOS will name the devices (lib/audioSinks.js,
+    /// unlockDeviceLabels). Taking the category out from under that would break
+    /// the names it was opened to reveal — and the ring switch is not a problem
+    /// there anyway, because playAndRecord ignores it too.
+    static func reassert() {
+        let session = AVAudioSession.sharedInstance()
+        guard session.category == .ambient || session.category == .soloAmbient else { return }
+        NSLog("[UberSDR audio] session was %@ — reclaiming playback", session.category.rawValue)
+        do {
+            try session.setCategory(.playback, mode: .default, options: [])
+            try session.setActive(true)
+        } catch {
+            NSLog("[UberSDR audio] could not reclaim the session: %@", error.localizedDescription)
+        }
+    }
+
+    /// The audio system went away and came back.
+    ///
+    /// `mediaServicesWereReset` invalidates every session, engine and converter
+    /// in the process at once, and Apple is explicit that an app has to rebuild
+    /// rather than carry on. Nothing did: what was left was a receiver playing
+    /// into a graph that no longer existed, which is silence with no error
+    /// anywhere and no way out but closing the receiver.
+    static func rebuild() {
+        stopSilentEngine()
+        begin()
+    }
+
+    /// What the session actually is, in one line.
+    ///
+    /// This is here because the failure it exists for was reported from a phone
+    /// that is not on this desk, and its two plausible causes — an ambient
+    /// category, or an AudioContext left interrupted — look identical from the
+    /// outside. The category, the route and the volume tell them apart the next
+    /// time it happens, which is worth more than picking one now.
+    static func describe(_ when: String) {
+        let session = AVAudioSession.sharedInstance()
+        let outputs = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        NSLog("[UberSDR audio] %@: category=%@ mode=%@ route=%@ volume=%.2f others=%@",
+              when, session.category.rawValue, session.mode.rawValue,
+              outputs.isEmpty ? "(none)" : outputs, session.outputVolume,
+              session.isOtherAudioPlaying ? "yes" : "no")
+    }
+
     /// Claimed before the page starts, released when the receiver closes.
     ///
     /// `.playback` rather than `.ambient` because this is the thing the

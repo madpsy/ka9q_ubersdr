@@ -42,6 +42,16 @@ function fakeContext() {
         createDynamicsCompressor: () => node('comp'),
         resume: () => Promise.resolve(),
         close: () => Promise.resolve(),
+        // A real AudioContext is an EventTarget, and the player listens on it
+        // for 'statechange' — see AudioPlayer._watchContextState. `fire` is this
+        // stub's own, so a test can be the system taking the audio away.
+        listeners: {},
+        addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+        removeEventListener(type, fn) {
+            const at = (this.listeners[type] || []).indexOf(fn);
+            if (at >= 0) this.listeners[type].splice(at, 1);
+        },
+        fire(type) { for (const fn of this.listeners[type] || []) fn(); },
     };
 }
 

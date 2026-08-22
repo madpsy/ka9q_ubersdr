@@ -5983,6 +5983,13 @@ func (ah *AdminHandler) HandleSessionActivityChartData(w http.ResponseWriter, r 
 		}
 	}
 
+	// Every bucket in the range is returned now (including idle ones), so keep the
+	// point count sane for pathological range/bucket-size combinations.
+	const maxChartPoints = 10000
+	for bucketMinutes < 1440 && int(duration/(time.Duration(bucketMinutes)*time.Minute)) > maxChartPoints {
+		bucketMinutes *= 2
+	}
+
 	logs, err := ReadActivityLogsFromDB(ah.dbManager.ReadDB(), startTime, endTime)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
@@ -6009,31 +6016,58 @@ func (ah *AdminHandler) HandleSessionActivityChartData(w http.ResponseWriter, r 
 }
 
 // aggregateLogsIntoBuckets aggregates session activity logs into time buckets
-// Returns only the data needed for the chart: timestamp and auth method counts
+// Returns only the data needed for the chart: timestamp and auth method counts.
+//
+// Every bucket between startTime and endTime is emitted, including the ones with
+// no rows behind them. Idle periods produce no database rows at all (a snapshot
+// with nobody connected writes nothing), so omitting those buckets left the chart
+// joining the surviving points into a flat plateau that never returned to zero.
 func aggregateLogsIntoBuckets(logs []SessionActivityLog, startTime, endTime time.Time, bucketMinutes int) []map[string]interface{} {
-	if len(logs) == 0 {
+	if bucketMinutes <= 0 {
+		bucketMinutes = 5
+	}
+	bucketDuration := time.Duration(bucketMinutes) * time.Minute
+
+	// Align the grid to the same boundaries Truncate() puts the logs on, so every
+	// log in [startTime, endTime] lands on a bucket that exists.
+	firstBucket := startTime.Truncate(bucketDuration)
+	lastBucket := endTime.Truncate(bucketDuration)
+	if lastBucket.Before(firstBucket) {
 		return []map[string]interface{}{}
 	}
+	numBuckets := int(lastBucket.Sub(firstBucket)/bucketDuration) + 1
 
-	bucketDuration := time.Duration(bucketMinutes) * time.Minute
-	numBuckets := int(endTime.Sub(startTime)/bucketDuration) + 1
-
-	// Initialize buckets
-	buckets := make([]map[string]interface{}, 0, numBuckets)
-	bucketData := make(map[int64]map[string]int) // timestamp -> auth counts
+	// Initialize every bucket at zero
+	bucketData := make(map[int64]map[string]int, numBuckets) // timestamp -> auth counts
+	timestamps := make([]int64, 0, numBuckets)
+	for i := 0; i < numBuckets; i++ {
+		ts := firstBucket.Add(time.Duration(i) * bucketDuration).Unix()
+		bucketData[ts] = map[string]int{
+			"regular":  0,
+			"password": 0,
+			"bypassed": 0,
+		}
+		timestamps = append(timestamps, ts)
+	}
 
 	// Aggregate logs into buckets
 	for _, log := range logs {
+		// session_destroyed rows are not a snapshot of who was connected: they carry
+		// a single minimal entry for the departing session with no auth method, so
+		// counting them would report one "regular" user after everyone had left.
+		// The session is already covered by the session_created/snapshot rows written
+		// while it was alive.
+		if log.EventType == "session_destroyed" {
+			continue
+		}
+
 		// Calculate which bucket this log belongs to
 		bucketTime := log.Timestamp.Truncate(bucketDuration)
 		bucketKey := bucketTime.Unix()
 
-		if _, exists := bucketData[bucketKey]; !exists {
-			bucketData[bucketKey] = map[string]int{
-				"regular":  0,
-				"password": 0,
-				"bypassed": 0,
-			}
+		counts, exists := bucketData[bucketKey]
+		if !exists {
+			continue // outside the requested range
 		}
 
 		// Count unique users per auth method in this snapshot
@@ -6056,21 +6090,14 @@ func aggregateLogsIntoBuckets(logs []SessionActivityLog, startTime, endTime time
 		// Take the maximum count seen in this bucket (peak concurrent users)
 		for authMethod, users := range uniqueInSnapshot {
 			count := len(users)
-			if count > bucketData[bucketKey][authMethod] {
-				bucketData[bucketKey][authMethod] = count
+			if count > counts[authMethod] {
+				counts[authMethod] = count
 			}
 		}
 	}
 
-	// Convert to sorted timeline
-	timestamps := make([]int64, 0, len(bucketData))
-	for ts := range bucketData {
-		timestamps = append(timestamps, ts)
-	}
-	sort.Slice(timestamps, func(i, j int) bool {
-		return timestamps[i] < timestamps[j]
-	})
-
+	// Convert to timeline (timestamps are already in ascending order)
+	buckets := make([]map[string]interface{}, 0, numBuckets)
 	for _, ts := range timestamps {
 		counts := bucketData[ts]
 		buckets = append(buckets, map[string]interface{}{

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"testing"
 	"time"
 )
@@ -63,10 +64,10 @@ func findTLV(tlvs []tlv, tag byte) (tlv, bool) {
 	return tlv{}, false
 }
 
-// TestBuildTerminateCommand covers the teardown packet, which has to work on
-// both radiod versions: frequency 0 is what the forked radiod kills on, LIFETIME
-// is what upstream kills on.  Dropping either one silently leaks channels on the
-// corresponding version.
+// TestBuildTerminateCommand covers the teardown packet: LIFETIME is what radiod
+// kills the channel on, and dropping it silently leaks channels.  RADIO_FREQUENCY
+// must NOT be there -- it only ever served the forked radiod, and a command that
+// carries parameters recreates a channel that has already gone.
 func TestBuildTerminateCommand(t *testing.T) {
 	const ssrc = 41287
 
@@ -84,14 +85,8 @@ func TestBuildTerminateCommand(t *testing.T) {
 		t.Errorf("OUTPUT_SSRC = %d, want %d", v, ssrc)
 	}
 
-	// Frequency 0 encodes to a zero-length value under leading-zero suppression;
-	// radiod's decode_double() maps that back to 0.0.
-	got, ok = findTLV(tlvs, tagRadioFrequency)
-	if !ok {
-		t.Fatal("no RADIO_FREQUENCY in terminate packet: the forked radiod would never kill the channel")
-	}
-	if v := decodeDouble(got.value); v != 0 {
-		t.Errorf("RADIO_FREQUENCY = %v, want 0", v)
+	if _, ok := findTLV(tlvs, tagRadioFrequency); ok {
+		t.Error("terminate packet carries RADIO_FREQUENCY; the forked radiod it was for is gone")
 	}
 
 	got, ok = findTLV(tlvs, tagLifetime)
@@ -295,5 +290,269 @@ func TestAudioLifetimeOutlastsKeepalive(t *testing.T) {
 		t.Errorf("audio LIFETIME is %v but keepalive runs every %v; too little margin "+
 			"for a delayed tick, and the failure mode is killing a live session",
 			lifetime, audioKeepaliveInterval)
+	}
+}
+
+// newLoopbackRadiod returns a controller whose commands land in a UDP socket the
+// test can read, so the packets the send paths build can be inspected without a
+// radiod. Every send path goes through sendCommandRaw's single WriteTo, so a
+// plain unicast socket stands in for the multicast group faithfully enough.
+func newLoopbackRadiod(t *testing.T) (*RadiodController, *net.UDPConn) {
+	t.Helper()
+	sink, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("listen sink: %v", err)
+	}
+	sender, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		sink.Close()
+		t.Fatalf("listen sender: %v", err)
+	}
+	t.Cleanup(func() { sink.Close(); sender.Close() })
+	return &RadiodController{conn: sender, statusAddr: sink.LocalAddr().(*net.UDPAddr)}, sink
+}
+
+// nextPacket returns the next command packet to reach the sink, or ok=false if
+// none arrives. A dropped command is indistinguishable from one never sent,
+// which is exactly what is being asserted.
+func nextPacket(t *testing.T, sink *net.UDPConn) ([]byte, bool) {
+	t.Helper()
+	if err := sink.SetReadDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	buf := make([]byte, 2048)
+	n, _, err := sink.ReadFromUDP(buf)
+	if err != nil {
+		return nil, false
+	}
+	return buf[:n], true
+}
+
+// TestCommandSSRC covers the SSRC the terminated-SSRC check reads back out of an
+// encoded packet. It has to agree with radiod's own get_ssrc() for every packet
+// ubersdr sends, or the check either misses a sender or blocks the wrong channel.
+func TestCommandSSRC(t *testing.T) {
+	const ssrc = 41287
+
+	packets := map[string][]byte{
+		"terminate":       buildTerminateCommand(ssrc),
+		"keepalive":       buildKeepaliveCommand(ssrc, audioLifetimeFrames),
+		"poll":            buildPollCommand(ssrc),
+		"spectrum create": buildCreateSpectrumCommand(14_000_000, 1024, 100, ssrc, 4),
+		"spectrum update": buildUpdateSpectrumCommand(ssrc, spectrumUpdate{frequency: 14_000_000, binBandwidth: 100}),
+	}
+	for name, pkt := range packets {
+		got, ok := commandSSRC(pkt)
+		if !ok {
+			t.Errorf("%s: no SSRC found; the terminated-SSRC check would not cover this sender", name)
+			continue
+		}
+		if got != ssrc {
+			t.Errorf("%s: SSRC = %d, want %d", name, got, ssrc)
+		}
+	}
+
+	if _, ok := commandSSRC([]byte{pktTypeStatus, tagOutputSSRC, 2, 0xa1, 0x47, tagEOL}); ok {
+		t.Error("status packet reported an SSRC; only commands may be filtered")
+	}
+	if _, ok := commandSSRC([]byte{pktTypeCmd, tagEOL}); ok {
+		t.Error("empty command reported an SSRC")
+	}
+	if _, ok := commandSSRC([]byte{pktTypeCmd, tagOutputSSRC, 4, 0x00}); ok {
+		t.Error("truncated TLV reported an SSRC")
+	}
+}
+
+// TestTerminatedSSRCBlocksResurrection is the regression test for channels that
+// outlived their session by exactly audioLifetimeFrames.
+//
+// radiod creates a channel for any command naming an unknown SSRC, so a
+// keepalive that was already in flight when the terminate went out brought the
+// channel back at 0 Hz, where it sat for the full 15 seconds. Verified against
+// the real radiod (upstream cce087e2): the terminate itself works, the
+// resurrection is what did not. See markTerminated.
+func TestTerminatedSSRCBlocksResurrection(t *testing.T) {
+	rc, sink := newLoopbackRadiod(t)
+	const ssrc, other = 41287, 41288
+
+	if err := rc.DisableChannel("test", ssrc); err != nil {
+		t.Fatalf("DisableChannel: %v", err)
+	}
+	pkt, ok := nextPacket(t, sink)
+	if !ok {
+		t.Fatal("terminate was not sent: the tombstone must not block the terminate itself")
+	}
+	if _, tlvs := parseCommandPacket(t, pkt); func() bool { _, ok := findTLV(tlvs, tagLifetime); return !ok }() {
+		t.Error("packet on the wire is not the terminate")
+	}
+
+	// Everything that could resurrect the channel is now refused.
+	if err := rc.RefreshAudioLifetime(ssrc); err != nil {
+		t.Errorf("RefreshAudioLifetime after teardown: %v (a raced keepalive is not an error)", err)
+	}
+	if _, ok := nextPacket(t, sink); ok {
+		t.Error("keepalive for a torn-down SSRC reached radiod: it would recreate the channel for 15 s")
+	}
+	if err := rc.sendCommand(buildPollCommand(ssrc)); err != nil {
+		t.Errorf("poll after teardown: %v", err)
+	}
+	if _, ok := nextPacket(t, sink); ok {
+		t.Error("poll for a torn-down SSRC reached radiod")
+	}
+	if err := rc.SetAGC(ssrc, AGCParams{Threshold: float32Ptr(-15)}); err != nil {
+		t.Errorf("SetAGC after teardown: %v", err)
+	}
+	if _, ok := nextPacket(t, sink); ok {
+		t.Error("AGC update for a torn-down SSRC reached radiod: with no session to refresh it, that channel is immortal")
+	}
+
+	// Other channels are untouched.
+	if err := rc.RefreshAudioLifetime(other); err != nil {
+		t.Fatalf("RefreshAudioLifetime(other): %v", err)
+	}
+	if _, ok := nextPacket(t, sink); !ok {
+		t.Error("keepalive for a live SSRC was dropped")
+	}
+
+	// Creating the channel again readmits the SSRC.
+	if err := rc.CreateChannel("test", 14_000_000, "usb", 12000, ssrc); err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if _, ok := nextPacket(t, sink); !ok {
+		t.Fatal("create for a torn-down SSRC was dropped; the channel could never come back")
+	}
+	if err := rc.RefreshAudioLifetime(ssrc); err != nil {
+		t.Fatalf("RefreshAudioLifetime after re-create: %v", err)
+	}
+	if _, ok := nextPacket(t, sink); !ok {
+		t.Error("keepalive still blocked after the channel was re-created: it would be reaped after 15 s")
+	}
+}
+
+// TestTerminatedSSRCExpires covers the TTL: the tombstone must not outlive the
+// in-flight commands it exists to absorb, or a re-used SSRC stays mute.
+func TestTerminatedSSRCExpires(t *testing.T) {
+	rc, sink := newLoopbackRadiod(t)
+	const ssrc = 41287
+
+	rc.markTerminated(ssrc)
+	if !rc.terminatedRecently(ssrc) {
+		t.Fatal("SSRC not refused immediately after teardown")
+	}
+
+	rc.terminatedMu.Lock()
+	rc.terminated[ssrc] = time.Now().Add(-terminatedSSRCTTL - time.Second)
+	rc.terminatedMu.Unlock()
+
+	if rc.terminatedRecently(ssrc) {
+		t.Error("SSRC still refused after the TTL expired")
+	}
+	if err := rc.RefreshAudioLifetime(ssrc); err != nil {
+		t.Fatalf("RefreshAudioLifetime: %v", err)
+	}
+	if _, ok := nextPacket(t, sink); !ok {
+		t.Error("command dropped after the tombstone expired")
+	}
+}
+
+// TestUpdatePathsCarryLifetime is the backstop for the same bug: if a command
+// ever does land on a torn-down SSRC, radiod creates the channel from its
+// template, whose lifetime is infinite. Carrying LIFETIME turns that permanent
+// orphan into one that reaps itself.
+func TestUpdatePathsCarryLifetime(t *testing.T) {
+	rc, sink := newLoopbackRadiod(t)
+	const ssrc = 41287
+
+	send := func(name string, fn func() error, want uint32) {
+		t.Helper()
+		if err := fn(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		pkt, ok := nextPacket(t, sink)
+		if !ok {
+			t.Fatalf("%s: nothing sent", name)
+		}
+		_, tlvs := parseCommandPacket(t, pkt)
+		got, ok := findTLV(tlvs, tagLifetime)
+		if !ok {
+			t.Errorf("%s: no LIFETIME; a command racing a teardown would create an immortal channel", name)
+			return
+		}
+		if v := uint32(decodeInt(got.value)); v != want {
+			t.Errorf("%s: LIFETIME = %d, want %d", name, v, want)
+		}
+	}
+
+	send("SetAGC", func() error { return rc.SetAGC(ssrc, AGCParams{Threshold: float32Ptr(-15)}) }, audioLifetimeFrames)
+	send("UpdateChannel", func() error {
+		return rc.UpdateChannel(ssrc, 14_000_000, "usb", 50, 3000, true)
+	}, audioLifetimeFrames)
+	send("UpdateSquelch", func() error { return rc.UpdateSquelch(ssrc, -10, -12) }, audioLifetimeFrames)
+
+	pkt := buildUpdateSpectrumCommand(ssrc, spectrumUpdate{frequency: 14_000_000, binBandwidth: 100})
+	_, tlvs := parseCommandPacket(t, pkt)
+	got, ok := findTLV(tlvs, tagLifetime)
+	if !ok {
+		t.Fatal("spectrum update carries no LIFETIME")
+	}
+	if v := uint32(decodeInt(got.value)); v != spectrumLifetimeFrames {
+		t.Errorf("spectrum update LIFETIME = %d, want %d", v, spectrumLifetimeFrames)
+	}
+}
+
+func float32Ptr(v float32) *float32 { return &v }
+
+// TestTerminatedChannelLeavesTheStatusCache covers the admin panel's side of a
+// teardown.
+//
+// radiod answers every command with a status packet, and the terminate is a
+// command -- its reply arrives about 10 ms later, after markTerminated has
+// already evicted the SSRC. Filing that reply put the row back for a channel
+// that no longer existed, and since nothing refreshed it again the panel showed
+// it with no session and a "last" column counting up until the 30 s stale sweep.
+func TestTerminatedChannelLeavesTheStatusCache(t *testing.T) {
+	rc, _ := newLoopbackRadiod(t)
+	rc.frontendTracker = NewFrontendStatusTracker()
+	rc.frontendTracker.suppressed = rc.terminatedRecently
+	const ssrc = 41287
+
+	fileStatus := func() {
+		rc.frontendTracker.mu.Lock()
+		rc.frontendTracker.channelStatus[ssrc] = &ChannelStatus{SSRC: ssrc, LastUpdate: time.Now()}
+		rc.frontendTracker.frontendStatus[ssrc] = &FrontendStatus{SSRC: ssrc, LastUpdate: time.Now()}
+		rc.frontendTracker.mu.Unlock()
+	}
+	cached := func() bool {
+		rc.frontendTracker.mu.RLock()
+		defer rc.frontendTracker.mu.RUnlock()
+		_, ok := rc.frontendTracker.channelStatus[ssrc]
+		return ok
+	}
+
+	fileStatus()
+	if !cached() {
+		t.Fatal("status was not cached to begin with")
+	}
+
+	if err := rc.DisableChannel("test", ssrc); err != nil {
+		t.Fatalf("DisableChannel: %v", err)
+	}
+	if cached() {
+		t.Error("terminated channel still in the status cache")
+	}
+	if !rc.frontendTracker.suppressed(ssrc) {
+		t.Error("status for a just-terminated SSRC is not being refused; its dying packet would re-file the row")
+	}
+
+	// A channel created again under the same SSRC must show up as normal.
+	if err := rc.CreateChannel("test", 14_000_000, "usb", 12000, ssrc); err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if rc.frontendTracker.suppressed(ssrc) {
+		t.Fatal("status still refused after the channel was re-created")
+	}
+	fileStatus()
+	if !cached() {
+		t.Error("status for a re-created channel was not cached")
 	}
 }

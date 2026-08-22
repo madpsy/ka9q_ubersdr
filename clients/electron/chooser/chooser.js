@@ -755,33 +755,87 @@ async function refreshSaved() {
 }
 
 // ---- LAN discovery ---------------------------------------------------------
+//
+// A rolling scan, rather than one shot reported as a verdict.
+//
+// mDNS is not a question with an answer so much as a signal that comes and
+// goes. A browse can return nothing with the receiver sitting right there —
+// the announcement has not been repeated yet, Wi-Fi has just woken, the phone
+// has moved between access points, or the local-network permission the first
+// browse exists to ask for has not been granted at the moment it asks. One
+// sample of that reported as "none found" is wrong more often than it is right.
+//
+// It used to be reported that way, and with advice to go and run
+// install-ubersdr-mdns.sh, which is worse than nothing on a phone: there is no
+// shell to run it in, it is the *receiver's* machine that would need it anyway,
+// and the receiver it is telling you about usually turns up a few seconds
+// later. So the tab simply keeps looking while it is open, and says only what
+// it has.
+//
+// What it has found stays found. Rows accumulate in `lanFound` rather than
+// being replaced each pass, so a receiver that answered once does not flicker
+// out of the list because the next browse happened to miss it — the same
+// bargain the saved list makes, and the right one here: something you can see
+// and connect to beats an empty list that is momentarily more truthful.
 
-let lanScanned = false;
+const LAN_RESCAN_MS = 5000;
+
+// host:port -> row, in the order first seen. A Map, so a receiver that answers
+// every pass is updated in place rather than listed again.
+const lanFound = new Map();
+let lanTimer = null;
+let lanScanning = false;
+// What the list was last drawn from. Redrawing only on a real change keeps a
+// five-second timer from rebuilding the rows under somebody's finger.
+let lanDrawn = '';
+
+const lanKey = (row) => `${row.host}:${row.port}`;
+
+function renderLan() {
+    const list = byId('lan-list');
+    list.replaceChildren();
+    for (const row of lanFound.values()) {
+        list.appendChild(makeRow(row, [
+            keyButton(row),
+            connectButton(row, byId('add-status')),
+        ]));
+    }
+    setCount('lan', lanFound.size);
+}
 
 async function scanLan() {
-    lanScanned = true;
-    const btn = byId('lan-scan');
+    // One at a time, and not at all while nobody can see the result: a browse
+    // costs a multicast round trip and three seconds of radio.
+    if (lanScanning || document.hidden) return;
+    lanScanning = true;
     const status = byId('lan-status');
-    const list = byId('lan-list');
-    btn.disabled = true;
-    status.textContent = 'scanning…';
     try {
-        const rows = await api.lan();
-        list.replaceChildren();
-        for (const row of rows) {
-            list.appendChild(makeRow(row, [
-                keyButton(row),
-                connectButton(row, byId('add-status')),
-            ]));
+        for (const row of await api.lan()) lanFound.set(lanKey(row), row);
+        const drawn = JSON.stringify([...lanFound.values()]);
+        if (drawn !== lanDrawn) {
+            lanDrawn = drawn;
+            renderLan();
         }
-        setCount('lan', rows.length);
-        status.textContent = rows.length
-            ? `${rows.length} found`
-            : 'none found (instances advertise via mDNS — see install-ubersdr-mdns.sh)';
+        status.textContent = lanFound.size ? `${lanFound.size} found` : 'searching…';
     } catch (err) {
-        status.textContent = `scan failed: ${err.message}`;
+        // Said, but not dwelt on: the next pass is seconds away, and whatever
+        // has already been found is still on the screen and still connectable.
+        status.textContent = lanFound.size
+            ? `${lanFound.size} found`
+            : `scan failed: ${err.message}`;
     }
-    btn.disabled = false;
+    lanScanning = false;
+}
+
+function startLanScan() {
+    if (lanTimer) return;
+    scanLan();
+    lanTimer = setInterval(scanLan, LAN_RESCAN_MS);
+}
+
+function stopLanScan() {
+    clearInterval(lanTimer);
+    lanTimer = null;
 }
 
 // ---- the map ---------------------------------------------------------------
@@ -1480,8 +1534,10 @@ function showTab(name, { persist = true } = {}) {
     // Deferred until the tab is first opened rather than run at startup: an
     // mDNS browse takes three seconds and the directory is a network round
     // trip, and neither is worth doing for somebody who came here to click the
-    // receiver they always use.
-    if (activeTab === 'lan' && !lanScanned) scanLan();
+    // receiver they always use. Stopped again on the way out for the same
+    // reason — see startLanScan.
+    if (activeTab === 'lan') startLanScan();
+    else stopLanScan();
     // Building it, drawing whatever the list is already showing, and fitting the
     // view now that the panel has a size to measure — all of which drawMarkers
     // does, and none of which can happen while the tab is shut.

@@ -392,4 +392,53 @@ t('junk in a stored layout is still discarded', () => {
         'a weight for an id that is nowhere in the layout is not kept');
 });
 
+// ── The minimal flag on a phone ──────────────────────────────────────────────
+//
+// Older builds wrote `minimalMobile: false` for every panel that had no minimal
+// view yet, so a panel that gained one afterwards came up whole on a phone while
+// its neighbours came up cut down. See MINIMAL_LATECOMERS.
+
+// A layout as one of those builds left it: the flag on every panel, and no
+// record of the repair having run.
+const storedPreRepair = (over = {}) => {
+    const l = defaultLayout(PHONE);
+    delete l.minimalRepaired;
+    for (const s of Object.values(l.sections)) {
+        s.minimal = !!s.minimal;
+        s.minimalMobile = false;
+    }
+    return { ...l, ...over };
+};
+
+t('a panel that gained a minimal view opens cut down on a phone', () => {
+    const l = reconcile(storedPreRepair(), PHONE);
+    assert.strictEqual(l.sections.layout.minimalMobile, true);
+    assert.strictEqual(l.minimalRepaired, true, 'and the layout records that it is done');
+});
+
+t('the repair does not run a second time', () => {
+    const once = reconcile(storedPreRepair(), PHONE);
+    once.sections.layout.minimalMobile = false;   // expanded by hand, afterwards
+    assert.strictEqual(reconcile(once, PHONE).sections.layout.minimalMobile, false);
+});
+
+t('a panel that has always had one keeps the answer somebody gave', () => {
+    // Not a latecomer, so its stored `false` is a choice rather than a flag
+    // nobody set.
+    const l = reconcile(storedPreRepair(), PHONE);
+    assert.strictEqual(l.sections.chat.minimalMobile, false);
+});
+
+t('nothing is stored for a panel with no minimal view at all', () => {
+    // The `false` that started all this is never written again, so absent stays
+    // absent and the next panel to gain a minimal view needs no repair.
+    assert.ok(!PANEL_BY_ID.display.minimal, 'the Display panel is one of those');
+    for (const l of [defaultLayout(PHONE), reconcile(storedPreRepair(), PHONE)]) {
+        assert.strictEqual(l.sections.display.minimalMobile, undefined);
+        assert.strictEqual(l.sections.display.minimal, undefined);
+        assert.ok(!('minimalMobile' in JSON.parse(JSON.stringify(l)).sections.display),
+            'and it does not survive a round trip through localStorage');
+    }
+});
+
 console.log(`\n${pass} ok`);

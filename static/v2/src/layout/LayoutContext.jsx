@@ -46,6 +46,29 @@ const FLOAT_DEFAULT = { w: 320, h: 320 };
 // anybody made. A float at any other height was, and is left alone — which is
 // the rule every migration here has to satisfy.
 const OUTGROWN_FLOAT_HEIGHTS = { multipad: [188] };
+
+// Panels whose minimal view arrived after `minimalMobile` did.
+//
+// Between the two, every layout written recorded `minimalMobile: false` for a
+// panel with no minimal view — a flag with nothing behind it, and one nobody
+// chose. When such a panel later declares one, that stored `false` reads as the
+// operator having asked for the full view and pins it there: on a phone it
+// opened whole while every one of its neighbours opened cut down. The Layout
+// panel is the one that made this visible, being the most recent of them.
+//
+// So their stored answer is ignored exactly once — see `repairMinimal` in
+// reconcile — and after that the layout is written by a build that no longer
+// coins the flag, so absent means absent and a panel that gains a minimal view
+// from here on takes the default with nothing to undo. Which is why this list
+// can never need another entry, and why it is a list rather than a rule: a
+// blanket reset would also throw away the answers people did give.
+const MINIMAL_LATECOMERS = new Set([
+    'antenna', 'bands', 'bandspectrum', 'bandstats', 'bookmarks', 'clocks',
+    'doppler', 'games', 'hfdl', 'ifspectrum', 'layout', 'lightning',
+    'localbookmarks', 'log', 'multipad', 'navtex', 'news', 'noise',
+    'notifications', 'packet', 'ranking', 'rotator', 'spectrogram',
+    'topfreq', 'vfos', 'voiceskimmer', 'weather', 'wefax',
+]);
 // The Layout panel: the one panel that cannot be hidden, because it is the one that
 // brings the others back. Named here rather than tested for inline so the reason has
 // somewhere to live and the id appears once.
@@ -115,14 +138,19 @@ function firstRun(p, phone, touch) {
     return {
         open: p.defaultOpen !== false,
         hidden: m.hidden != null ? !!m.hidden : !!p.defaultHidden,
-        minimal: !!p.minimal && !!m.minimal,
+        // `undefined` rather than `false` where the panel has no cut-down view
+        // at all, so that nothing is stored for it. A `false` written here is
+        // indistinguishable later from one the operator chose, and a panel that
+        // gains a minimal view in a later build would then be held at "full" by
+        // an answer nobody gave — see MINIMAL_LATECOMERS.
+        minimal: p.minimal ? !!m.minimal : undefined,
         // On a phone every panel starts cut down, this one included. A sheet
         // over the spectrum has a fraction of a dock's room, and the minimal
         // view is the part of a panel worth having in that space — see
         // minimalMobile below. One rule for all of them: a panel that opened
         // whole where its neighbours opened trimmed would read as one that had
         // forgotten the setting rather than as one making a point.
-        minimalMobile: true,
+        minimalMobile: p.minimal ? true : undefined,
         // Text size, as an offset from the global one — see lib/panelScale.js.
         // Nobody's first run wants a panel out of step with the rest.
         scale: 0,
@@ -195,6 +223,11 @@ export function defaultLayout(env = machine()) {
         // A layout built on a machine the rev-N additions do not apply to has
         // not really been offered them — see migrateRev.
         rev: touch ? REV : 0,
+        // Nothing to repair in a layout this build wrote from scratch — see
+        // MINIMAL_LATECOMERS. Its own flag rather than a rev, because the rev
+        // migrations are for touchscreen desktops and skip phones entirely,
+        // which is the one machine this matters on.
+        minimalRepaired: true,
         docks,
         sections,
         floats,
@@ -342,6 +375,9 @@ export function reconcile(stored, env = machine()) {
     for (const dock of DOCKS) {
         base.docks[dock].panels = base.docks[dock].panels.filter((id) => !floats[id]);
     }
+    // Once per stored layout, and recorded by `base` already carrying the flag
+    // from defaultLayout.
+    const repairMinimal = !stored.minimalRepaired;
     base.sections = {};
     const { phone, touch } = env;
     for (const p of PANELS) {
@@ -361,11 +397,18 @@ export function reconcile(stored, env = machine()) {
             // rather than leaving the panel stuck showing nothing extra.
             // `?? d.minimal` for the same reason as minimalMobile below: a panel
             // with no stored entry is new here, and takes the default.
-            minimal: !!p.minimal && (s?.minimal ?? d.minimal),
+            minimal: p.minimal ? (s?.minimal ?? d.minimal) : undefined,
             // `?? d.minimalMobile` rather than `!!`: absent means a layout
             // stored before this existed, and those should get the default like
             // everybody else, not be pinned to full because the key was missing.
-            minimalMobile: !!p.minimal && (s?.minimalMobile ?? d.minimalMobile),
+            //
+            // A latecomer's stored answer is dropped once, because it is not an
+            // answer: it is the `false` older builds wrote for every panel that
+            // had no minimal view yet. See MINIMAL_LATECOMERS.
+            minimalMobile: p.minimal
+                ? ((repairMinimal && MINIMAL_LATECOMERS.has(p.id) ? undefined : s?.minimalMobile)
+                    ?? d.minimalMobile)
+                : undefined,
             // Cleaned rather than trusted: this one is a free number rather than
             // a flag, so a hand-edited or half-written layout can put anything
             // here, and anything here ends up multiplying every font size in the
@@ -386,8 +429,11 @@ export function reconcile(stored, env = machine()) {
         base.sections[id] = {
             open: s.open !== false,
             hidden: !!s.hidden,
-            minimal: !!s.minimal,
-            minimalMobile: !!s.minimalMobile,
+            // As above: absent stays absent, so a panel that comes back with a
+            // minimal view it did not have takes the default rather than a
+            // `false` this line invented.
+            minimal: s.minimal == null ? undefined : !!s.minimal,
+            minimalMobile: s.minimalMobile == null ? undefined : !!s.minimalMobile,
             scale: cleanScale(s.scale),
         };
     }

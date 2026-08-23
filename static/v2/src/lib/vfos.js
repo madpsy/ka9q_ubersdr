@@ -237,3 +237,45 @@ export function markableVfos(state, liveHz) {
     }
     return out;
 }
+
+// --- scanning ---------------------------------------------------------------
+//
+// A scan is a switch repeated on a timer, so it is the same selectVfo every
+// other caller uses — nothing here tunes on its own. What does belong here is
+// *which* VFOs a scan may visit, because getting that wrong writes to the
+// store: switching to an unused slot seeds it with a copy of what is live, so a
+// scan that stepped through all four would fill the empty ones with the
+// frequency it happened to be sitting on and there would be nothing left to
+// scan. Only slots that already hold something are visited.
+
+/**
+ * The VFOs a scan can step through, in A–D order.
+ *
+ * The active slot counts whenever the receiver is tuned somewhere real: its
+ * stored copy is deliberately stale — written only when you switch away — so it
+ * is judged on live tuning rather than on what the store says about it.
+ */
+export function scannableVfos(state, tuning) {
+    const out = [];
+    if (!state) return out;
+    for (const id of VFO_IDS) {
+        if (state.active === id) {
+            if (tuning && num(tuning.frequency) > 0) out.push(id);
+        } else if (cleanSlot(state.slots && state.slots[id])) {
+            out.push(id);
+        }
+    }
+    return out;
+}
+
+/**
+ * Where a scan goes after `from`, wrapping.
+ *
+ * null when there is nowhere to go: fewer than two VFOs hold anything, and a
+ * scan of one channel is just sitting on it.
+ */
+export function nextScanVfo(ids, from) {
+    if (!ids || ids.length < 2) return null;
+    const i = ids.indexOf(from);
+    return i < 0 ? ids[0] : ids[(i + 1) % ids.length];
+}

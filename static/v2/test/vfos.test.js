@@ -6,8 +6,8 @@
 
 const assert = require('assert');
 const {
-    VFO_IDS, cleanSlot, copyVfo, getVfos, markableVfos, selectVfo, setVfos, storeInto, switchTo,
-    vfoSnapshot,
+    VFO_IDS, cleanSlot, copyVfo, getVfos, markableVfos, nextScanVfo, scannableVfos, selectVfo,
+    setVfos, storeInto, switchTo, vfoSnapshot,
 } = require('./.build/vfos.cjs');
 
 let pass = 0;
@@ -305,6 +305,53 @@ t('copying overwrites what was there, without touching the rest', () => {
     assert.strictEqual(after.slots.B.frequency, 14074000, 'B was not overwritten');
     assert.strictEqual(after.slots.C.frequency, 3573000, 'C was disturbed');
     assert.strictEqual(after.slots.D, null);
+});
+
+// --- what a scan may visit --------------------------------------------------
+//
+// The rule that matters: a scan only ever steps onto slots that already hold
+// something. Switching to an unused one seeds it with a copy of what is live, so
+// a scan that took all four would fill the empties with whatever it was sitting
+// on — and then there would be four copies of one frequency to scan.
+
+t('a scan visits the slots in use, and the active one', () => {
+    const state = {
+        active: 'A',
+        slots: { A: null, B: slot(7100000, 200), C: null, D: slot(3573000, 200) },
+    };
+    assert.deepStrictEqual(scannableVfos(state, tuning(14074000)), ['A', 'B', 'D']);
+});
+
+t('a scan never visits an unused slot, which switching would fill', () => {
+    const state = { active: 'A', slots: { A: null, B: null, C: null, D: null } };
+    assert.deepStrictEqual(scannableVfos(state, tuning(14074000)), ['A']);
+});
+
+t('the active slot is judged on live tuning, not on its stale stored copy', () => {
+    // The store is only written when you switch away, so the active slot is
+    // routinely null while the receiver is tuned somewhere perfectly real.
+    const state = { active: 'C', slots: { A: null, B: slot(7100000, 200), C: null, D: null } };
+    assert.deepStrictEqual(scannableVfos(state, tuning(14074000)), ['B', 'C']);
+    assert.deepStrictEqual(scannableVfos(state, null), ['B'], 'nothing is tuned');
+});
+
+t('a scan steps A B D and wraps, skipping what it cannot visit', () => {
+    const ids = ['A', 'B', 'D'];
+    assert.strictEqual(nextScanVfo(ids, 'A'), 'B');
+    assert.strictEqual(nextScanVfo(ids, 'B'), 'D');
+    assert.strictEqual(nextScanVfo(ids, 'D'), 'A');
+});
+
+t('there is nowhere to scan with fewer than two VFOs in use', () => {
+    assert.strictEqual(nextScanVfo(['A'], 'A'), null);
+    assert.strictEqual(nextScanVfo([], 'A'), null);
+});
+
+t('a scan started from a VFO it cannot visit goes to the first one it can', () => {
+    // The dial can be moved onto an empty slot while a scan is running — the
+    // list is recomputed, and the step must still land somewhere real rather
+    // than stalling on a VFO that is not in it.
+    assert.strictEqual(nextScanVfo(['B', 'C'], 'A'), 'B');
 });
 
 console.log(`\n${pass} VFO checks passed`);

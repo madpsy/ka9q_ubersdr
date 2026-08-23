@@ -13,11 +13,19 @@
 // menu and a MIDI mapping all call — a VFO must be switched exactly one way or
 // two of them disagree about what "B" holds.
 
-import React, { useEffect, useState } from '../react.js';
+import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { VFO_IDS, copyVfo, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
+import {
+    VFO_IDS, copyVfo, getVfos, nextScanVfo, onVfosChanged, scannableVfos, selectVfo,
+} from '../lib/vfos.js';
 import { formatFilterWidth, formatHz } from '../lib/format.js';
 import { bandForFrequency } from '../lib/bands.js';
+import { isIQ } from '../radio/constants.js';
+
+// How long the scan sits on each VFO before moving on. Short enough that four
+// channels come round in a second, long enough that the server's audio has
+// arrived and been metered — the gate is judged on packets, not on the tune.
+const SCAN_DWELL_MS = 250;
 
 /**
  * What each slot holds, with the active one taken from live tuning.
@@ -45,6 +53,80 @@ function rowsFor(vfos, tuning) {
     });
 }
 
+// After a switch, the packets already in flight were produced on the VFO we
+// just left, so the gate they open is the old channel's, not this one's. A
+// signal on B would otherwise stop the scan on C, one hop late and every time.
+// Judged from a moment after the tune instead — well inside a 250 ms dwell, so
+// there is still a run of packets left to hear this channel on.
+const SCAN_SETTLE_MS = 100;
+
+/**
+ * The scan: step the VFOs on a timer and stop on the first one carrying a
+ * signal.
+ *
+ * "Carrying a signal" is the squelch's own answer, so what stops the scan is
+ * exactly what would have let audio through — but taken from `lastGateOpenAt`
+ * rather than `squelchOpen`, which is the same reading with the gate's 500 ms
+ * hang on it. The hang is what makes the badge steady through the gaps in
+ * speech; on a 250 ms dwell it would also still be reading "open" from the
+ * previous VFO when the next one is judged, and the scan would stop one place
+ * past every signal it found.
+ *
+ * The scan is deliberately not a hold-and-resume: it stops, and the button goes
+ * back to saying Scan, so the panel never shows an active scan that is not
+ * moving.
+ */
+function useScan(radio, vfos) {
+    const { squelch, meters, tuning } = radio;
+    const [scanning, setScanning] = useState(false);
+
+    // Only VFOs that hold something: switching to an unused slot seeds it with
+    // a copy of what is live, so scanning through the empties would quietly
+    // fill all four with the same frequency.
+    const ids = scannableVfos(vfos, tuning);
+    const blocked = ids.length < 2
+        ? 'Needs two VFOs in use'
+        : isIQ(tuning.mode)
+            ? 'No squelch in IQ mode'
+            : !squelch.enabled
+                ? 'Squelch off, so nothing would stop it'
+                : null;
+
+    // What the timer must read live. The interval is started once per scan and
+    // must not be torn down and rebuilt on every retune — and a `radio` captured
+    // at the start would hand a stale frequency to selectVfo, which stores what
+    // it is given into the VFO being left.
+    const live = useRef(null);
+    live.current = { radio, ids, blocked };
+
+    useEffect(() => {
+        if (!scanning) return undefined;
+        let judgeFrom = performance.now() + SCAN_SETTLE_MS;
+        const timer = setInterval(() => {
+            const now = live.current;
+            // Something went out from under the scan — the last-but-one VFO
+            // cleared, the squelch switched off, IQ selected. Stopping is the
+            // honest answer; carrying on would be stepping with nothing able to
+            // halt it.
+            if (now.blocked) { setScanning(false); return; }
+            if (meters.current.lastGateOpenAt > judgeFrom) { setScanning(false); return; }
+            const next = nextScanVfo(now.ids, getVfos().active);
+            if (!next) { setScanning(false); return; }
+            selectVfo(now.radio, next);
+            judgeFrom = performance.now() + SCAN_SETTLE_MS;
+        }, SCAN_DWELL_MS);
+        return () => clearInterval(timer);
+    }, [scanning, meters]);
+
+    return {
+        scanning,
+        ids,
+        blocked,
+        stop: () => setScanning(false),
+        toggle: () => setScanning((on) => (on ? false : !blocked)),
+    };
+}
+
 export default function VfosPanel({ minimal }) {
     const radio = useRadio();
     const { tuning } = radio;
@@ -54,11 +136,12 @@ export default function VfosPanel({ minimal }) {
 
     useEffect(() => onVfosChanged(setLocal), []);
 
+    const scan = useScan(radio, vfos);
     const rows = rowsFor(vfos, tuning);
 
     return (
         <div className="stack stack--tight">
-            <div className="vfos">
+            <div className={`vfos${scan.scanning ? ' is-scanning' : ''}`}>
                 {rows.map((v) => (
                     <button
                         key={v.id}
@@ -73,7 +156,9 @@ export default function VfosPanel({ minimal }) {
                             : v.empty
                                 ? `Switch to VFO ${v.id} — unused, so it takes the current settings`
                                 : `Switch to VFO ${v.id}`}
-                        onClick={() => selectVfo(radio, v.id)}
+                        // Picking a VFO by hand is taking the dial back, so it
+                        // ends the scan rather than being stepped off 250 ms later.
+                        onClick={() => { scan.stop(); selectVfo(radio, v.id); }}
                     >
                         {/* Every row emits the same cells, whether or not it
                             has anything to put in them. Rendering a cell only
@@ -95,6 +180,26 @@ export default function VfosPanel({ minimal }) {
                         {!minimal && <span className="vfos__band">{v.empty ? '' : (v.band || '')}</span>}
                     </button>
                 ))}
+            </div>
+            {/* Stepping the VFOs on a timer until something is heard. Above the
+                copy row because it acts on all four, which is what this panel
+                is; the copy row acts on one. */}
+            <div className="vfos__scan">
+                <button
+                    type="button"
+                    className={`vfos__scan-btn${scan.scanning ? ' is-scanning' : ''}`}
+                    aria-pressed={scan.scanning}
+                    disabled={!scan.scanning && !!scan.blocked}
+                    title={scan.scanning
+                        ? 'Stop scanning'
+                        : scan.blocked || `Step through the VFOs every ${SCAN_DWELL_MS} ms and stop on the first one the squelch opens on`}
+                    onClick={scan.toggle}
+                >
+                    {scan.scanning ? 'Scanning' : 'Scan'}
+                </button>
+                <span className="vfos__scan-note">
+                    {scan.blocked || (scan.scanning ? 'Stops on a signal' : `${scan.ids.length} VFOs, ${SCAN_DWELL_MS} ms each`)}
+                </span>
             </div>
             {/* Sending the current settings somewhere, as opposed to going
                 there — which is what clicking a row does. The two are easy to

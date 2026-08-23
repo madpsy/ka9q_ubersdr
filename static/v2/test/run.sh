@@ -316,6 +316,8 @@ esbuild noisetrend.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/noisetrend.cjs --log-level=warning
 esbuild bandstats.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandstats.cjs --log-level=warning
+esbuild vfospanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/vfospanel.cjs --log-level=warning
 esbuild dispatch.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dispatch.cjs --log-level=warning
 esbuild layout.entry.js --bundle --format=cjs --platform=node \
@@ -380,6 +382,7 @@ node ranking.test.js
 node dss.test.js
 node samfallback.test.js
 node vfos.test.js
+node vfospanel.test.js
 node needle.test.js
 node listeners.test.js
 node idle.test.js

@@ -10546,6 +10546,67 @@ a.btn { text-decoration: none; }
     .vfos__width { display: none; }
 }
 
+/* The scan control: one toggle and a line saying what it will do, or why it
+   cannot. Its own row above the copy row because it acts on all four VFOs. */
+.vfos__scan {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+.vfos__scan-btn {
+    flex-shrink: 0;
+    min-width: 5.2em;
+    padding: 2px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    font-weight: 600;
+    cursor: pointer;
+}
+.vfos__scan-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--surface-hover);
+    color: var(--text);
+}
+.vfos__scan-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Running: filled and pulsing, for the reason the recorder's badge is. A scan
+   moves the dial by itself every quarter second, so it must not be possible to
+   leave one running without noticing — and the row it lands on is not the clue,
+   because a row is accented when it is simply the one you chose. */
+.vfos__scan-btn.is-scanning {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+    animation: vfo-scan-pulse 1s ease-in-out infinite;
+}
+.vfos__scan-btn.is-scanning:hover { background: var(--accent); color: var(--bg); }
+
+.vfos__scan-note {
+    min-width: 0;
+    font-size: 0.8em;
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The VFO being visited, while a scan is running. The same accent the active
+   row always carries, breathing with the button, so the two read as one thing
+   in motion rather than as a selection that keeps changing on its own. */
+.vfos.is-scanning .vfos__row.is-active {
+    animation: vfo-scan-pulse 1s ease-in-out infinite;
+}
+
+@keyframes vfo-scan-pulse { 50% { opacity: 0.55; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .vfos__scan-btn.is-scanning,
+    .vfos.is-scanning .vfos__row.is-active { animation: none; }
+}
+
 /* "Copy A to  [B] [C] [D]" — sending the live settings into another VFO without
    going there. Set apart from the rows above it because it does something to
    them rather than being one of them. */

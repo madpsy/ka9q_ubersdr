@@ -18,6 +18,10 @@ const THEME_VARS = [
     '--bg', '--bg-raised', '--bg-sunken', '--fg', '--fg-dim', '--fg-faint',
     '--line', '--accent', '--accent-fg', '--ok', '--warn', '--bad',
     '--font', '--font-mono',
+    // The operator's per-panel zoom. Custom properties do not cross into a
+    // frame, so without carrying it explicitly a custom panel would be the one
+    // panel in the dock that ignored the zoom buttons in its own header.
+    '--ui-scale',
 ];
 
 /** The theme, as declarations to put on the frame's own :root. */
@@ -46,7 +50,11 @@ const BASE_CSS = `
 html,body{margin:0;padding:0}
 body{
   background:transparent;color:var(--fg,#e8eaed);
-  font-family:var(--font,system-ui,sans-serif);font-size:13px;line-height:1.45;
+  font-family:var(--font,system-ui,sans-serif);
+  /* Scaled by the operator's zoom for this panel, so anything sized in em or
+     rem follows it. A panel using px throughout opts itself out. */
+  font-size:calc(13px * var(--ui-scale, 1));
+  line-height:1.45;
   -webkit-text-size-adjust:100%;
 }
 a{color:var(--accent,#7aa2f7)}

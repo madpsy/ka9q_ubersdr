@@ -63,6 +63,19 @@ export function publishToPanels(topic, value) {
     for (const entry of hosts.values()) entry.host.publish(topic, value);
 }
 
+/**
+ * Push a new palette to every attached panel.
+ *
+ * A frame does not inherit the parent's custom properties, so a theme switch or
+ * a zoom press reaches an open panel only by being sent. Broadcast rather than
+ * per-panel: the palette is the page's, and every panel is showing the same one.
+ */
+export function themeToPanels(css) {
+    for (const entry of hosts.values()) {
+        try { entry.port.postMessage({ p: 'theme', css }); } catch (e) { /* gone */ }
+    }
+}
+
 /** The rate-limit tick, for the same reason the bridge has one. */
 export function tickPanels() {
     for (const entry of hosts.values()) entry.host.tick();
@@ -87,13 +100,13 @@ export function attachedPanelIds() {
  * Same-origin only, and with the operator's credentials, which is parity with a
  * built-in panel: they are same-origin and carry the session too.
  *
- * The admin endpoints are the single deviation from that parity. Nothing a
- * built-in panel calls one, so denying them costs an author nothing they would
- * ever notice — and it is the difference between a bad panel being an annoyance
- * and a bad panel taking the receiver, on a page where the operator may well be
- * signed into admin in the same browser. A denylist rather than an allowlist,
- * because an allowlist has to be kept correct for ever and this has to be
- * correct once.
+ * The privileged endpoints are the single deviation from that parity, and what
+ * a panel may reach is stated positively rather than by exclusion — see the
+ * allowlist below for why the first attempt at this was wrong twice over. It
+ * costs an author nothing they would notice: nothing a built-in panel does
+ * calls anything outside `/api/`. It is the difference between a bad panel
+ * being an annoyance and a bad panel taking the receiver, on a page where the
+ * operator may well be signed into admin in the same browser.
  */
 export async function fetchForPanel(path, init) {
     let url;
@@ -109,8 +122,44 @@ export async function fetchForPanel(path, init) {
             error: 'sdr.fetch is for this receiver; use fetch() directly for anything else',
         };
     }
-    if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
-        return { ok: false, status: 0, error: 'panels may not call admin endpoints' };
+
+    // An allowlist, and it started life as a denylist of the admin endpoints.
+    // Two things were wrong with that, and both are the kind of wrong a
+    // denylist is always one route away from:
+    //
+    //   * It named the wrong set. `/admin` is not the only prefix behind the
+    //     operator's session — `/terminal/` proxies to the shell container,
+    //     which exposes an unauthenticated exec API, and `/gpsdo/` and any
+    //     addon marked `require_admin` are gated the same way. A panel reaching
+    //     `/terminal/api/exec` is command execution on the receiver's host, not
+    //     an annoyance.
+    //   * It compared the wrong string. `URL.pathname` keeps percent-encoding
+    //     as written, while Go's router decodes each segment before matching —
+    //     so `/%61dmin/...` misses a `startsWith('/admin/')` test and still
+    //     arrives at the admin handler.
+    //
+    // Naming what is permitted fixes both at once and cannot be reopened by the
+    // next privileged route somebody adds. `/api/` is what a panel legitimately
+    // needs, and it is what the authoring guide has always described.
+    //
+    // Both forms of the path are checked: the raw one stops `/%61pi/…` being
+    // read as `/api/…` by the server, and the decoded one stops `/api/%2e%2e/…`
+    // climbing out. Encoding *within* a segment stays legal, because a callsign
+    // with a slash in it is a real thing to look up.
+    let decoded;
+    try {
+        decoded = decodeURIComponent(url.pathname);
+    } catch (e) {
+        return { ok: false, status: 0, error: 'that path cannot be decoded' };
+    }
+    const permitted = (p) => p === '/api' || p.startsWith('/api/');
+    const climbs = decoded.split('/').includes('..');
+    if (!permitted(url.pathname) || !permitted(decoded) || climbs) {
+        return {
+            ok: false,
+            status: 0,
+            error: 'panels may only call this receiver\'s /api/ endpoints',
+        };
     }
 
     try {

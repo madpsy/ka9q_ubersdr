@@ -11,7 +11,7 @@ globalThis.location = { origin: 'https://rx.example' };
 
 const {
     attachPanel, detachPanel, setPanelDeps, resetPanelHosts, fetchForPanel,
-    publishToPanels, attachedPanelIds,
+    publishToPanels, themeToPanels, attachedPanelIds,
     buildSrcdoc, startPanelRuntime, writeKey, readAll,
 } = require('./.build/panelhost.cjs');
 
@@ -76,15 +76,65 @@ function fakeDeps(over = {}) {
 // --- sdr.fetch ---------------------------------------------------------------
 
 (async () => {
-    await ta('sdr.fetch refuses admin endpoints', async () => {
+    await ta('sdr.fetch reaches only this receiver\'s /api/ endpoints', async () => {
         // The one deviation from "a custom panel may do anything a built-in panel
         // may do". The parent performs the request, so it carries the operator's
         // session — and the operator may well be signed into admin in this very
         // browser.
-        for (const path of ['/admin', '/admin/', '/admin/widgets/enabled', '/admin/config?x=1']) {
+        //
+        // Stated positively, and that is the point. This began as a denylist of
+        // `/admin`, which was wrong twice: it named the wrong set of privileged
+        // prefixes, and it compared the wrong string.
+        const refused = [
+            // The admin API itself.
+            '/admin', '/admin/', '/admin/widgets/enabled', '/admin/config?x=1',
+
+            // Percent-encoded, which is the bypass a denylist could not see:
+            // URL.pathname keeps the encoding as written, while Go's router
+            // decodes each segment before matching — so this misses a
+            // startsWith('/admin/') test and still arrives at the admin handler.
+            '/%61dmin/config', '/%61dmin/widgets/enabled', '/ad%6din/config',
+            '/admin%2fconfig', '/%2fadmin/config',
+
+            // Prefixes that are behind the same admin session but are not
+            // /admin. /terminal/ proxies to the shell container, whose exec API
+            // takes no authentication of its own: reaching it is command
+            // execution on the receiver's host.
+            '/terminal/api/exec', '/terminal/', '/gpsdo/json', '/addon/anything',
+
+            // Climbing out of /api/ afterwards, encoded or not.
+            '/api/../admin/config', '/api/%2e%2e/admin/config', '/api/v2/../../admin/config',
+
+            // And anything that is simply not the API.
+            '/', '/index.html', '/v2/dist/v2.js',
+        ];
+        for (const path of refused) {
             const res = await fetchForPanel(path);
             assert.strictEqual(res.ok, false, path + ' was allowed');
-            assert.ok(/admin/.test(res.error), path + ' was refused for the wrong reason');
+        }
+    });
+
+    await ta('sdr.fetch still allows what a panel legitimately needs', async () => {
+        const saved = globalThis.fetch;
+        const asked = [];
+        globalThis.fetch = async (url) => {
+            asked.push(url);
+            return { ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => '[]' };
+        };
+        try {
+            for (const path of [
+                '/api/cty/countries',
+                '/api/maidenhead/country?grid=IO91',
+                // Encoding *within* a segment stays legal: a callsign with a
+                // slash in it is a real thing to look up.
+                '/api/lookup/M0ABC%2FP',
+            ]) {
+                const res = await fetchForPanel(path);
+                assert.strictEqual(res.ok, true, path + ' was refused');
+            }
+            assert.strictEqual(asked.length, 3);
+        } finally {
+            globalThis.fetch = saved;
         }
     });
 
@@ -95,13 +145,6 @@ function fakeDeps(over = {}) {
         for (const url of ['https://elsewhere.example/x', '//elsewhere.example/x']) {
             const res = await fetchForPanel(url);
             assert.strictEqual(res.ok, false, url + ' was allowed');
-        }
-    });
-
-    await ta('sdr.fetch cannot be walked back to admin with traversal', async () => {
-        for (const path of ['/api/../admin/widgets/enabled', '/api/v2/../../admin/config']) {
-            const res = await fetchForPanel(path);
-            assert.strictEqual(res.ok, false, path + ' resolved past the denial');
         }
     });
 
@@ -264,6 +307,41 @@ function fakeDeps(over = {}) {
         resetPanelHosts();
     });
 
+    await ta('a panel can identify the receiver it is on', async () => {
+        // sdr.receiver read a property the client does not have, so it was null
+        // for ever without ever looking broken — a panel keying anything by
+        // receiver would have keyed it by nothing.
+        resetPanelHosts();
+        setPanelDeps(fakeDeps());
+        const scope = fakeFrame();
+        const api = startPanelRuntime(scope);
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+
+        const sdr = await api.ready();
+        assert.ok(sdr.receiver, 'sdr.receiver is null — the panel cannot tell which receiver it is on');
+        assert.strictEqual(sdr.receiver.callsign, 'M9PSY');
+        assert.strictEqual(sdr.receiver.id, 'rx-1');
+        resetPanelHosts();
+    });
+
+    await ta('a panel can read a subscribed topic synchronously', async () => {
+        resetPanelHosts();
+        setPanelDeps(fakeDeps());
+        const scope = fakeFrame();
+        const api = startPanelRuntime(scope);
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+
+        const sdr = await api.ready();
+        await sdr.subscribe(['tuning']);
+        assert.strictEqual(sdr.state('tuning').frequency, 14074000,
+            'state() did not return the snapshot subscribe already delivered');
+        resetPanelHosts();
+    });
+
     await ta('a panel hears a topic it subscribed to', async () => {
         resetPanelHosts();
         setPanelDeps(fakeDeps());
@@ -282,6 +360,35 @@ function fakeDeps(over = {}) {
 
         assert.ok(seen.length, 'the panel heard nothing');
         assert.strictEqual(seen[seen.length - 1].frequency, 7100000);
+        resetPanelHosts();
+    });
+
+    await ta('a palette change reaches an open panel', async () => {
+        // A frame inherits none of the parent's custom properties, so without
+        // this an open panel keeps the colours it was born with — and the zoom
+        // buttons in its own header do nothing to its contents.
+        resetPanelHosts();
+        setPanelDeps(fakeDeps());
+        const scope = fakeFrame();
+        const applied = [];
+        globalThis.document = {
+            documentElement: {
+                scrollHeight: 220,
+                setAttribute: (name, value) => { if (name === 'style') applied.push(value); },
+            },
+            body: {},
+        };
+        const api = startPanelRuntime(scope);
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+        await api.ready();
+
+        themeToPanels('--fg:#000;--ui-scale:1.25;');
+        await settle();
+
+        assert.ok(applied.some((v) => v.includes('--ui-scale:1.25')),
+            'the panel never applied the pushed palette: ' + JSON.stringify(applied));
         resetPanelHosts();
     });
 

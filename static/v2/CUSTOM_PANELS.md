@@ -810,10 +810,27 @@ problem, and hiding it stops it.
 `credentials: 'include'` — which makes `/admin/*` reachable whenever the operator
 happens to be signed into admin in that browser.
 
-No built-in panel calls admin endpoints, so **denying `/admin/*`** costs a custom
-panel nothing an author would notice, and it is the difference between a bad
-panel being annoying and a bad panel taking the receiver. One denylist line, not
-an allowlist to maintain forever.
+No built-in panel calls anything outside `/api/`, so **allowing only `/api/`**
+costs a custom panel nothing an author would notice, and it is the difference
+between a bad panel being annoying and a bad panel taking the receiver.
+
+It is an **allowlist**, and the first attempt at it was a denylist of `/admin`,
+which the security review broke twice over:
+
+- **It named the wrong set.** `/admin` is not the only prefix behind the
+  operator's session. `/terminal/` proxies to the shell container, whose exec
+  API takes no authentication of its own — a panel reaching it is arbitrary
+  command execution on the receiver's host. `/gpsdo/` and any addon marked
+  `require_admin` are gated the same way.
+- **It compared the wrong string.** `URL.pathname` preserves percent-encoding as
+  written, while Go's router decodes each segment before matching, so
+  `/%61dmin/config` missed a `startsWith('/admin/')` test and still arrived at
+  the admin handler — with the panel's method, headers and body, and the
+  operator's session attached. Config write is receiver takeover.
+
+Both raw and decoded forms of the path are checked, and a `..` segment is
+refused, so neither trick works against the allowlist — and the next privileged
+route somebody adds cannot silently reopen it.
 
 For everything else `sdr.fetch` behaves as a page fetch. A panel can also call
 plain `fetch()` itself for third-party APIs that send permissive CORS — an

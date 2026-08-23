@@ -295,10 +295,27 @@ func (wm *WidgetManager) HandlePanelBody(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// The bundle's contents, unwrapped. The frontend puts this inside a
-	// sandboxed iframe with its own runtime preamble and the theme variables in
-	// front of it; the <template> and the manifest block have both done their
-	// job by now.
+	// Served as inert text, never as HTML, and this is load-bearing rather than
+	// fastidious.
+	//
+	// The body is a third party's markup and script. The whole isolation
+	// argument — CUSTOM_PANELS.md §6 — is that it only ever executes inside
+	// `<iframe sandbox="allow-scripts">`, on an opaque origin, reaching the
+	// receiver through one port. But a URL that answers `text/html` can be
+	// opened as a *top-level document*, and there the sandbox does not exist: a
+	// link to this endpoint would run the author's script first-party on the
+	// receiver's origin, with this origin's storage and its credentials, which
+	// is precisely what the frame is there to prevent.
+	//
+	// The only consumer reads it with `res.text()` and never looks at the type
+	// (CustomPanel.jsx), so nothing is lost by refusing to be a document. Four
+	// headers rather than one because they fail independently: the type is the
+	// rule, `nosniff` stops a browser second-guessing it, `sandbox` denies the
+	// response an origin at all if it is rendered anyway, and the disposition
+	// makes a direct navigation a download rather than a page.
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	w.Header().Set("Content-Disposition", "attachment")
 	w.Write([]byte(entry.Panel.Body))
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -250,6 +251,42 @@ func TestPanelBodyEndpoint(t *testing.T) {
 	}
 }
 
+// A panel's body must never be servable as a document.
+//
+// The isolation this feature rests on is that a third party's script only ever
+// runs inside a sandboxed, opaque-origin frame. An endpoint answering text/html
+// undoes that on its own: the same URL opened top-level executes that script
+// first-party on the receiver's origin, with this origin's storage and the
+// operator's credentials. The consumer reads the response with res.text() and
+// never inspects the type, so refusing to be a document costs nothing.
+func TestPanelBodyIsNotServedAsADocument(t *testing.T) {
+	wm := mixedManager(t)
+	rec := httptest.NewRecorder()
+	wm.HandlePanelBody(rec, httptest.NewRequest(http.MethodGet, "/api/v2/panels/panel-v2", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); strings.Contains(strings.ToLower(ct), "html") {
+		t.Fatalf("Content-Type is %q — a link to this URL would run the author's script on this origin", ct)
+	}
+	for header, want := range map[string]string{
+		"X-Content-Type-Options":  "nosniff",
+		"Content-Disposition":     "attachment",
+		"Content-Security-Policy": "sandbox",
+	} {
+		got := rec.Header().Get(header)
+		if !strings.Contains(got, want) {
+			t.Fatalf("%s is %q, want it to contain %q", header, got, want)
+		}
+	}
+
+	// And the body itself is still intact, because the frame needs it whole.
+	if !strings.Contains(rec.Body.String(), "await ubersdr.ready()") {
+		t.Fatal("the bundle body was altered")
+	}
+}
+
 func TestPanelBodyNotServedWhenDisabled(t *testing.T) {
 	wm := mixedManager(t)
 	wm.config.Server.EnabledWidgets = []string{"legacy-1"}
@@ -370,5 +407,54 @@ func TestExamplePanelIsServable(t *testing.T) {
 	// example must not be the thing that teaches the wrong lesson.
 	if !strings.Contains(panel.Body, `<script type="module">`) {
 		t.Fatal(`the example's code is not <script type="module">`)
+	}
+}
+
+// The skeleton the admin editor prefills, through the real server parser.
+//
+// It is the first thing most authors will publish, so it has to be a panel this
+// build would actually serve — not merely something the editor is happy with.
+// Extracted from admin.html rather than duplicated here, so the two cannot
+// drift.
+func TestNewPanelSkeletonIsServable(t *testing.T) {
+	admin, err := os.ReadFile("static/admin.html")
+	if err != nil {
+		t.Fatalf("read admin.html: %v", err)
+	}
+	src := string(admin)
+
+	start := strings.Index(src, "const NEW_PANEL_SKELETON")
+	if start < 0 {
+		t.Fatal("the admin editor no longer prefills a panel skeleton")
+	}
+	end := strings.Index(src[start:], "function openNewWidgetEditor")
+	if end < 0 {
+		t.Fatal("could not find the end of the skeleton")
+	}
+
+	// The skeleton is a JS array of single-quoted lines joined by newlines.
+	// Rebuilding it exactly is not the point — what matters is that the wrapper,
+	// the manifest and a module script all survive into something the parser
+	// accepts, so the quoted lines are unescaped and joined the same way.
+	region := src[start : start+end]
+	var lines []string
+	for _, raw := range regexp.MustCompile(`'((?:[^'\\]|\\.)*)'`).FindAllStringSubmatch(region, -1) {
+		lit := raw[1]
+		lit = strings.ReplaceAll(lit, `\'`, `'`)
+		lit = strings.ReplaceAll(lit, `\\`, `\`)
+		lit = strings.ReplaceAll(lit, `<\/script>`, `</script>`)
+		lines = append(lines, lit)
+	}
+	skeleton := strings.Join(lines, "\n")
+
+	panel, ok := parsePanelBundle(skeleton)
+	if !ok {
+		t.Fatalf("the prefilled skeleton does not parse as a panel:\n%s", skeleton)
+	}
+	if why := panel.Unsupported(); why != "" {
+		t.Fatalf("the prefilled skeleton is not one this build can run: %s", why)
+	}
+	if !strings.Contains(panel.Body, `<script type="module">`) {
+		t.Fatal(`the prefilled skeleton's code is not <script type="module">`)
 	}
 }

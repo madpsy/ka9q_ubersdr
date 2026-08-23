@@ -148,6 +148,7 @@ sdr.receiver                      // { id, name, callsign, location, url, … }
 await sdr.subscribe(['tuning', 'signal']);
 sdr.on('tuning', (t) => { /* t.frequency, t.mode, t.bandwidthLow, … */ });
 const now = await sdr.get('signal');   // one-off read
+sdr.state('tuning');                   // last value, synchronously, once subscribed
 
 // ── Driving it ───────────────────────────────────────────────────────────────
 await sdr.command('tune', { frequency: 14074000, mode: 'usb' });
@@ -160,11 +161,13 @@ sdr.store.get('cities')
 await sdr.store.set('cities', [...]);  // returns null, or why it was refused
 
 // ── The receiver's API ───────────────────────────────────────────────────────
-const res = await sdr.fetch('/api/cty/countries');
+const res = await sdr.fetch('/api/cty/countries');   // /api/ only
 if (res.ok) JSON.parse(res.body);
 
 // ── Presentation ─────────────────────────────────────────────────────────────
 sdr.minimal                            // is the operator showing you cut down?
+                                       // (a value, not an event: changing it
+                                       //  restarts the panel with the new answer)
 sdr.height(180);                       // usually unnecessary — see §6
 ```
 
@@ -191,8 +194,10 @@ they have not, for exactly the same reason.
 Your panel runs in a sandboxed frame with an opaque origin. It cannot reach the
 receiver page's DOM, its storage or its cookies, and it cannot see another panel.
 
-`sdr.fetch` reaches this receiver only, and refuses the admin endpoints. For
-anything else on the internet, call `fetch()` directly — that works for any
+`sdr.fetch` reaches this receiver's `/api/` endpoints and nothing else. It runs
+in the page rather than in your frame, so it carries the operator's session, and
+that is why it is limited to the read API rather than to everything on the host.
+For anything else on the internet, call `fetch()` directly — that works for any
 service sending permissive CORS headers, and your requests carry no cookies.
 
 ---
@@ -204,9 +209,26 @@ reported, so write ordinary flowing HTML and it will fit. `sdr.height(px)` is
 there for the rare case where you are drawing to a canvas that has no natural
 height.
 
-**Width is not yours to choose.** A panel may be in a 220 px dock column, a
-floating window or a phone sheet. Use relative widths; put wide tables and
-diagrams in something that scrolls.
+**Width is not yours to choose, and it changes under you.** A side dock is
+220–560 px and the operator drags its edge; a floating window starts at 320×320
+and is resized freely; the bottom dock is the window's width; a phone sheet is
+the screen's. Design for **220 px first**, then let the panel use more room.
+
+**Media queries inside your bundle measure the panel, not the screen** — it is a
+document in its own frame, so its viewport *is* the panel. This is the tool for
+adapting, and it needs no JavaScript:
+
+```css
+@media (max-width: 280px) { .side-by-side { flex-direction: column; } }
+```
+
+**Put `min-width: 0` on flex children that grow**, or a long callsign or URL
+pushes the panel wider than its dock and the whole thing gets a scrollbar. Wide
+tables and diagrams go in their own `overflow-x: auto` container.
+
+**Never use `vh`/`vw`, `height: 100%` on `body`, or `position: fixed`.** The
+viewport they refer to is the frame, whose height is whatever your panel last
+reported — a circular measurement. Give a canvas an explicit pixel height.
 
 **Colours come from the operator's theme**, as CSS custom properties. Use them
 and your panel follows the interface, including when they switch:
@@ -218,6 +240,11 @@ and your panel follows the interface, including when they switch:
 ```
 
 Always give a fallback: `color: var(--fg-dim, #9aa4b2)`.
+
+`--ui-scale` carries the operator's zoom for this panel, and the frame's base
+font size already applies it — so **size text in `em`/`rem` and the zoom buttons
+in your panel's header work**. Sizing everything in `px` opts out of them.
+Palette and zoom changes are pushed to an open panel; you need not poll.
 
 **The minimal view** is the operator saying "keep this, but smaller". If you
 declare `"minimal": true`, honour `sdr.minimal` by dropping what is set-and-forget

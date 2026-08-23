@@ -3012,7 +3012,7 @@
                                     <div id="widgetKindNote" style="margin: 0 0 8px 0; padding: 8px 10px; border-radius: 6px; font-size: 13px; display: none;"></div>
                                     <div id="widgetHtmlDropZone" style="position:relative;">
                                         <textarea id="widgetEditorHTML" rows="12"
-                                            placeholder="&lt;!-- Your widget HTML here --&gt;"
+                                            placeholder="&lt;!-- Your panel HTML here --&gt;"
                                             style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; font-family: monospace; box-sizing: border-box; resize: vertical;"></textarea>
                                         <!-- Transparent capture layer — shown only during a file drag so it sits above
                                              the textarea and receives dragover/drop events (textareas don't fire drop
@@ -12628,7 +12628,7 @@ function resetStationIdColor() {
                     <div style="min-width:0;margin-bottom:10px;">
                         <div style="font-size:10px;color:#888;line-height:1.4;">
                             by <strong style="color:#3f51b5;">${w.instance_id ? `<a href="https://instances.ubersdr.org/?uuid=${encodeURIComponent(w.instance_id)}" target="_blank" rel="noopener" style="color:#3f51b5;text-decoration:underline;">${escapeHtml(w.callsign || w.instance_id)}</a>` : escapeHtml(w.callsign || 'unknown')}</strong>
-                            &middot; v${w.version}
+                            &middot; v${w.version}${widgetKindBadge(w, true)}
                             ${isMine ? '<span style="margin-left:5px;padding:1px 5px;background:#3f51b5;color:#fff;border-radius:8px;font-size:9px;font-weight:600;vertical-align:middle;">yours</span>' : ''}
                         </div>
                         ${enabledByRow}
@@ -12882,15 +12882,59 @@ function resetStationIdColor() {
             if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
+        // What a new widget starts as.
+        //
+        // A v2 panel, because that is what new work should be: the classic
+        // interface is being retired and a widget written for it will not appear
+        // in v2 at all. An empty box defaulted to the wrong one silently — the
+        // indicator below the field could only tell you afterwards, once you had
+        // already written something for the old interface.
+        //
+        // Deliberately the smallest thing that actually runs, rather than a
+        // feature-tour: it subscribes, draws one value, and is a panel. The
+        // worked example at /v2/example-panel.html is the next step, and the
+        // guide at /v2/PANEL_AUTHORING.md is linked from the indicator.
+        const NEW_PANEL_SKELETON = [
+            '<template id="ubersdr-panel">',
+            '<script type="application/ubersdr-panel+json">',
+            '{',
+            '  "ui": 2,',
+            '  "schema": 1,',
+            '  "title": "My panel",',
+            '  "icon": "Custom",',
+            '  "group": "shack",',
+            '  "dock": "left"',
+            '}',
+            '<\/script>',
+            '',
+            '<style>',
+            '  .out { font-family: var(--font-mono, monospace); }',
+            '</style>',
+            '',
+            '<div class="out" id="out">Starting\u2026</div>',
+            '',
+            '<!-- type="module" is required: await needs it. -->',
+            '<script type="module">',
+            'const sdr = await ubersdr.ready();',
+            '',
+            'sdr.on(\'tuning\', (t) => {',
+            '    document.getElementById(\'out\').textContent =',
+            '        (t.frequency / 1000).toFixed(2) + \' kHz \' + (t.mode || \'\').toUpperCase();',
+            '});',
+            'await sdr.subscribe([\'tuning\']);',
+            '<\/script>',
+            '</template>',
+        ].join('\n');
+
         function openNewWidgetEditor() {
             document.getElementById('widgetEditorID').value          = '';
             document.getElementById('widgetEditorVersion').value     = '';
             document.getElementById('widgetEditorName').value        = '';
             document.getElementById('widgetEditorDescription').value = '';
-            document.getElementById('widgetEditorHTML').value        = '';
+            document.getElementById('widgetEditorHTML').value        = NEW_PANEL_SKELETON;
             updateWidgetKindNote();
             document.getElementById('widgetEditorPublic').checked    = false;
-            document.getElementById('widgetEditorTitle').textContent = 'New Widget';
+            document.getElementById('widgetEditorTitle').textContent = 'New Panel';
             document.getElementById('widgetEditorPanel').style.display  = 'block';
             updateWidgetPublicOverlay();
             document.getElementById('widgetEditorName').focus();
@@ -13159,18 +13203,30 @@ function resetStationIdColor() {
         // can say which it is without carrying the whole thing. An older
         // collector does not send it, and then neither kind is badged, which is
         // the state everything was in before panels existed.
-        function widgetKindBadge(w) {
+        function widgetKindBadge(w, small) {
             const ui = w && w.ui_version;
-            if (ui === null || ui === undefined) return '';
-            const runnable = Number(ui) === 2;
-            const bg = runnable ? 'rgba(46,125,50,0.85)' : 'rgba(120,120,120,0.85)';
-            const label = runnable ? 'panel' : 'panel v' + escapeHtml(String(ui));
-            const title = runnable
-                ? 'A v2 panel: it appears in the new interface, not the classic one.'
-                : 'Written for a different interface — this receiver cannot run it.';
-            return '<span title="' + title + '" style="margin-left:6px;padding:2px 8px;background:' + bg
-                + ';color:#fff;border-radius:10px;font-size:11px;font-weight:bold;white-space:nowrap;flex-shrink:0;vertical-align:middle;">'
+            const pad = small ? '1px 6px' : '2px 8px';
+            const size = small ? '9px' : '11px';
+            const chip = (bg, label, title) =>
+                '<span title="' + title + '" style="margin-left:5px;padding:' + pad + ';background:' + bg
+                + ';color:#fff;border-radius:10px;font-size:' + size
+                + ';font-weight:600;white-space:nowrap;flex-shrink:0;vertical-align:middle;">'
                 + label + '</span>';
+
+            // Legacy records are labelled too. Saying nothing was worse than it
+            // sounds: an unlabelled row is indistinguishable from one whose kind
+            // has not loaded, so nothing on the page ever asserted "this is for
+            // the interface that is going away".
+            if (ui === null || ui === undefined) {
+                return chip('rgba(120,120,120,0.85)', 'classic',
+                    'A classic widget: it appears in the classic interface only, which is being retired.');
+            }
+            if (Number(ui) === 2) {
+                return chip('rgba(46,125,50,0.85)', 'panel',
+                    'A v2 panel: it appears in the current interface.');
+            }
+            return chip('rgba(198,40,40,0.85)', 'panel v' + escapeHtml(String(ui)),
+                'Written for the v' + escapeHtml(String(ui)) + ' interface — this receiver cannot run it.');
         }
 
         // ── Panels vs classic widgets ─────────────────────────────────────────

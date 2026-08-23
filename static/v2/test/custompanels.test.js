@@ -397,6 +397,36 @@ const reply = (status, body, etag) => async () => ({
             'the editor did not notice a classic script: ' + flagged.problems.join('; '));
     });
 
+    t('a new widget starts as a valid panel', () => {
+        // The admin editor prefills this, so it is the first thing most authors
+        // will ever publish. If it does not itself pass, every new panel starts
+        // broken.
+        const admin = fs.readFileSync(path.join(__dirname, '..', '..', 'admin.html'), 'utf8');
+        const from = admin.indexOf('const NEW_PANEL_SKELETON');
+        assert.ok(from > 0, 'the editor no longer prefills a panel skeleton');
+        const to = admin.indexOf('function openNewWidgetEditor', from);
+        // eslint-disable-next-line no-new-func
+        const skeleton = new Function(admin.slice(from, to) + '; return NEW_PANEL_SKELETON;')();
+
+        // Through the editor's own detection, which mirrors the server's.
+        const insFrom = admin.indexOf('const PANEL_TEMPLATE_RE');
+        const insTo = admin.indexOf('function updateWidgetKindNote');
+        // eslint-disable-next-line no-new-func
+        const inspect = new Function(admin.slice(insFrom, insTo) + '; return inspectWidgetContent;')();
+
+        const found = inspect(skeleton);
+        assert.strictEqual(found.kind, 'panel', 'the prefilled skeleton is not a panel');
+        assert.deepStrictEqual(found.problems, [], 'the prefilled skeleton has problems');
+
+        // And it names things that exist, which is what the fallbacks would
+        // otherwise quietly paper over.
+        assert.ok(PANEL_ICONS.includes(found.manifest.icon), 'skeleton icon does not exist');
+        assert.ok(GROUPS.some((g) => g.id === found.manifest.group), 'skeleton group does not exist');
+
+        // The rule that catches authors out: await needs a module.
+        assert.ok(/<script type="module">/.test(skeleton), 'the skeleton uses a classic script');
+    });
+
     t('the worked example uses a real icon and a real group', () => {
         // /v2/example-panel.html is what an author is pointed at first. If it
         // names something that does not exist, it teaches the fallback as if it

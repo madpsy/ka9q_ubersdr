@@ -68,6 +68,18 @@ export function startPanelRuntime(global) {
         port.addEventListener('message', (ev) => {
             const data = ev.data;
             if (typeof data === 'string' || !data || typeof data !== 'object') return;
+
+            // The operator changed the palette, or zoomed this panel. Custom
+            // properties do not cross a frame boundary, so they are pushed and
+            // re-applied here rather than inherited — otherwise a panel would
+            // keep the colours it was born with until something remounted it.
+            if (data.p === 'theme') {
+                try {
+                    document.documentElement.setAttribute('style', String(data.css || ''));
+                } catch (e) { /* nothing sensible to do */ }
+                return;
+            }
+
             const pending = waiting.get(data.rid);
             if (!pending) return;
             waiting.delete(data.rid);
@@ -112,7 +124,6 @@ export function startPanelRuntime(global) {
         };
 
         const config = scope.__ubersdrPanel || {};
-        const minimalListeners = new Set();
         // Declared ahead of the object that closes over it: `store.all()` is
         // synchronous for the author, so the value has to exist before anything
         // can be handed a reference to it.
@@ -125,7 +136,17 @@ export function startPanelRuntime(global) {
             subscribe: (topics, opts) => client.subscribe(topics, opts),
             command: (name, args) => client.command(name, args),
             run: (fn, event) => client.run(fn, event),
-            get receiver() { return client.descriptor ? client.descriptor.receiver : null; },
+            // `describe()` rather than a property: the client keeps the last
+            // announce behind a method, and reading a field that does not exist
+            // returned null for ever without ever looking wrong.
+            get receiver() {
+                const d = client.describe();
+                return d ? d.receiver : null;
+            },
+            // The last value of a topic already subscribed to, synchronously —
+            // for a redraw that needs the current reading and should not wait a
+            // round trip for something it has already been told.
+            state: (topic) => client.state(topic),
             client,
 
             // Panel-only.
@@ -149,8 +170,12 @@ export function startPanelRuntime(global) {
 
             // Whether the operator has this panel cut down. The panel decides
             // what survives; nothing here does it for them.
+            //
+            // A value rather than an event, and that is not a gap: switching the
+            // minimal view rebuilds the frame's document, so a panel is started
+            // afresh with the new answer and there is no moment at which this is
+            // stale. A listener here could never fire.
             get minimal() { return !!config.minimal; },
-            onMinimal: (fn) => { minimalListeners.add(fn); return () => minimalListeners.delete(fn); },
         };
 
         ask('store.all').then((all) => {

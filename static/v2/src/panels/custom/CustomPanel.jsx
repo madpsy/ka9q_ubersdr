@@ -12,7 +12,7 @@
 // dock and no fetch, no document and no code running.
 
 import React, { useEffect, useRef, useState } from '../../react.js';
-import { attachPanel, detachPanel } from './hosts.js';
+import { attachPanel, detachPanel, themeToPanels } from './hosts.js';
 import { onPanels, panelVersion } from './cache.js';
 import { buildSrcdoc, themeDeclarations } from './srcdoc.js';
 
@@ -153,6 +153,35 @@ export default function CustomPanel({ panel, minimal }) {
             else detachPanel(id);
         };
     }, [doc, id]);
+
+    // Follow the operator's palette and zoom for as long as the panel is open.
+    //
+    // The document was built with the values that were current when it mounted,
+    // and a frame inherits nothing afterwards — so a theme switch would leave
+    // every open panel on the old colours, and the zoom buttons in a panel's own
+    // header would do nothing to its contents. Both live on the root element's
+    // attributes, so watching those is the whole of it.
+    useEffect(() => {
+        if (typeof MutationObserver !== 'function' || !doc) return undefined;
+        let pending = null;
+        const push = () => {
+            pending = null;
+            themeToPanels(themeDeclarations());
+        };
+        const observer = new MutationObserver(() => {
+            // Coalesced: a theme switch rewrites many properties at once, and
+            // one message per property would be one message per repaint.
+            if (pending === null) pending = setTimeout(push, 50);
+        });
+        observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['style', 'class', 'data-theme'],
+        });
+        return () => {
+            observer.disconnect();
+            if (pending !== null) clearTimeout(pending);
+        };
+    }, [doc]);
 
     if (failed) {
         return (

@@ -557,6 +557,64 @@ function fakeDeps(over = {}) {
         resetPanelHosts();
     });
 
+    // The bug this catches: the spot feeds are started only when a host reports
+    // that somebody wants them, and a panel host that never reported its edges
+    // subscribed to a topic the page had not switched on. The panel's handler
+    // was registered, the topic was live, and nothing was ever published to it —
+    // a silence indistinguishable from a quiet band.
+    await ta('a panel subscribing to a lazily acquired feed asks the page for it', async () => {
+        resetPanelHosts();
+        const demands = [];
+        setPanelDeps(fakeDeps({ onDemand: (topic, wanted) => demands.push([topic, wanted]) }));
+        const scope = fakeFrame();
+        const api = startPanelRuntime(scope);
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+
+        const sdr = await api.ready();
+        await sdr.subscribe(['spots']);
+        await settle();
+        assert.deepStrictEqual(demands, [['spots', true]],
+            'the page was never told a panel wants the spot feeds');
+
+        detachPanel('x:a');
+        await settle();
+        assert.deepStrictEqual(demands[demands.length - 1], ['spots', false],
+            'a panel that goes away must let the feeds stop');
+        resetPanelHosts();
+    });
+
+    await ta('two panels wanting the same feed each report, so neither ends the other', async () => {
+        resetPanelHosts();
+        const demands = [];
+        setPanelDeps(fakeDeps({ onDemand: (topic, wanted) => demands.push([topic, wanted]) }));
+        const panels = [];
+        for (const id of ['x:a', 'x:b']) {
+            const scope = fakeFrame();
+            const api = startPanelRuntime(scope);
+            const { port1, port2 } = makeChannel();
+            attachPanel({ id, port: port1, onHeight: () => {} });
+            scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+            const sdr = await api.ready();
+            await sdr.subscribe(['spots']);
+            panels.push(id);
+        }
+        await settle();
+        // Both edges, not one: the page counts them, and a host that stayed
+        // quiet because another had already asked would leave the survivor
+        // holding a released feed.
+        assert.deepStrictEqual(demands, [['spots', true], ['spots', true]]);
+
+        detachPanel('x:a');
+        await settle();
+        assert.deepStrictEqual(demands, [['spots', true], ['spots', true], ['spots', false]]);
+        detachPanel('x:b');
+        await settle();
+        assert.strictEqual(demands.length, 4);
+        resetPanelHosts();
+    });
+
     await ta('a palette change reaches an open panel', async () => {
         // A frame inherits none of the parent's custom properties, so without
         // this an open panel keeps the colours it was born with — and the zoom

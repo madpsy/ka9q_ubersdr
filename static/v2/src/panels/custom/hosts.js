@@ -237,6 +237,15 @@ export function attachPanel({ id, port, onHeight }) {
             if (!deps) throw new Error('the receiver is not ready yet');
             return deps.run(fn, event);
         },
+        // A panel's demand is demand. The spot feeds are acquired only while
+        // something is listening, so a host that never reports its edges asks
+        // the page for a topic the page has not started — the panel subscribes,
+        // the feed stays shut, and nothing is ever published to it. Bridge
+        // clients worked because BridgeHost's own host reports; panels are the
+        // other half of the same refcount.
+        onDemand: (topic, wanted) => {
+            if (deps && deps.onDemand) deps.onDemand(topic, wanted);
+        },
         // Not the operator's bridge switch: that is about clients outside this
         // page, and a panel is inside it. See the note at the top of this file.
         enabled: () => true,

@@ -426,21 +426,28 @@ export default function BridgeHost() {
     const host = useMemo(() => createHost(hostDeps), [hostDeps]);
 
     // Spot feeds are held while any client — here or in a panel — is subscribed
-    // to a topic that needs them, and released when the last one goes. Counted
-    // rather than boolean because several hosts report demand independently.
-    const spotRelease = useRef({});
+    // to a topic that needs them, and released when the last one goes.
+    //
+    // One hold per report rather than one per topic. Every host reports its own
+    // edges — the bridge's own, and one per attached panel — so the same topic
+    // arrives `true` several times over, and a single hold keyed by topic would
+    // ignore all but the first and then let the *first* host's last unsubscribe
+    // shut the feed while a panel was still watching. The releases stack: n
+    // trues, n falses, and the feed stops when the last one is popped.
+    const spotHolds = useRef({});
     const onDemand = useCallback((topic, wanted) => {
         if (topic !== 'spots' && topic !== 'markers') return;
-        const held = spotRelease.current;
-        if (wanted && !held[topic]) {
-            held[topic] = acquireSpots(() => {
+        const held = spotHolds.current;
+        const stack = held[topic] || (held[topic] = []);
+        if (wanted) {
+            stack.push(acquireSpots(() => {
                 publishAllRef.current('spots', snapshotFor('spots', sources(live.current)));
                 publishAllRef.current('markers', snapshotFor('markers', sources(live.current)));
-            });
-        } else if (!wanted && held[topic]) {
-            held[topic]();
-            delete held[topic];
+            }));
+            return;
         }
+        const release = stack.pop();
+        if (release) release();
     }, []);
 
     // Custom panels are served by hosts of their own — same commands, same

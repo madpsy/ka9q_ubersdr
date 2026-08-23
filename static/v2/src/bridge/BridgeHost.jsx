@@ -26,6 +26,10 @@ import { runFunction } from '../controls/functions.js';
 import { getSessionId } from '../radio/session.js';
 import { bandForFrequency } from '../lib/bands.js';
 import { getVfos, onVfosChanged, VFO_IDS } from '../lib/vfos.js';
+import { pushNotification } from '../lib/notifications.js';
+import { subscribeSpots } from '../lib/spotStore.js';
+import { collectMarkers, findMarkers } from '../lib/markerNav.js';
+import { savedNavTypes } from '../lib/markerNavSettings.js';
 import { API_VERSION, EVENT_FROM_PAGE, EVENT_TO_PAGE, LIVE_TOPICS, STATIC_TOPICS, encodeMessage } from './protocol.js';
 import { createHost } from './host.js';
 import { closingPanels, publishToPanels, setPanelDeps, tickPanels } from '../panels/custom/hosts.js';
@@ -34,7 +38,7 @@ import { COMMAND_NAMES, runCommand } from './commands.js';
 import { describePage, snapshotFor } from './snapshots.js';
 import { bridgeSettings, onBridgeSettings, setBridgeAttached } from './settings.js';
 import { controlState, onControlState, updateControlState } from '../controls/mappings.js';
-import { EVENT_AUDIO_PORT } from '../controls/surfaces.js';
+import { EVENT_AUDIO_PORT, EVENT_SPECTRUM_PORT } from '../controls/surfaces.js';
 
 // The meters are a mutable ref written by the audio path rather than React
 // state — see RadioContext — so the signal topic is sampled rather than
@@ -127,7 +131,7 @@ function groupIconMarkup(group) {
  * radio/audio-player.js.
  */
 let audioTap = null;
-function openAudioPort(player, id) {
+function openAudioPort(player, id, deliver) {
     if (audioTap) { audioTap(); audioTap = null; }
     if (!id) return { streaming: false };
     if (!player || typeof player.onAudio !== 'function') {
@@ -160,8 +164,125 @@ function openAudioPort(player, id) {
         channel.port1.postMessage({ sampleRate, frames, pcm: out.buffer });
     });
 
-    window.postMessage({ [EVENT_AUDIO_PORT]: id }, window.location.origin, [channel.port2]);
+    // How the far end is handed its port, and why it is a parameter.
+    //
+    // Posting to `window` is right for a client that is *in* the page — an
+    // extension's content script shares this origin and this window, and that is
+    // what BRIDGE_API.md documents. It is exactly wrong for a custom panel: a
+    // panel is a sandboxed frame on an opaque origin, so it is neither listening
+    // on this window nor able to receive a message targeted at this origin. The
+    // command reported `streaming: true` and the panel waited for a port that
+    // had gone somewhere it could never see.
+    //
+    // So the caller says where to put it. panels/custom/hosts.js passes a
+    // deliverer that sends it down that panel's own channel.
+    if (typeof deliver === 'function') deliver({ [EVENT_AUDIO_PORT]: id }, channel.port2);
+    else window.postMessage({ [EVENT_AUDIO_PORT]: id }, window.location.origin, [channel.port2]);
     return { streaming: true, id };
+}
+
+/**
+ * The spectrum, as the audio is: a port rather than a topic.
+ *
+ * `spectrum` reports where the view is pointed — centre, span, bin width — and
+ * never carried a single bin, so nothing outside the page could draw a scope, a
+ * waterfall or a band-activity strip. The page has the frames already; this
+ * hands a copy to whoever asks.
+ *
+ * A port and not a topic for the same reason audio is: a frame is thousands of
+ * floats arriving continuously, and JSON on a CustomEvent is the wrong shape for
+ * it by two orders of magnitude.
+ *
+ * `everyNth` is the client's own throttle. The display runs as fast as the
+ * receiver sends, which is far more than a slow chart wants, and a client that
+ * needs one frame a second should not be made to drop nineteen itself.
+ */
+let spectrumTap = null;
+function openSpectrumPort(connection, id, everyNth, deliver) {
+    if (spectrumTap) { spectrumTap(); spectrumTap = null; }
+    if (!id) return { streaming: false };
+    if (!connection || typeof connection.on !== 'function') {
+        return { streaming: false, reason: 'no spectrum to hand out yet' };
+    }
+
+    const stride = Math.max(1, Math.min(600, Math.round(Number(everyNth) || 1)));
+    const channel = new MessageChannel();
+    let seen = 0;
+
+    spectrumTap = connection.on('frame', ({ bins, frequency, timestamp }) => {
+        seen += 1;
+        if (seen % stride !== 0) return;
+        if (!bins || !bins.length) return;
+        // A copy, and cloned rather than transferred — the same reasoning as the
+        // audio port above: the far end may be in another process, and Electron
+        // deserialises a transferred ArrayBuffer as null.
+        const out = Float32Array.from(bins);
+        channel.port1.postMessage({
+            bins: out.buffer,
+            binCount: out.length,
+            centerFreq: frequency,
+            timestamp,
+        });
+    });
+
+    if (typeof deliver === 'function') deliver({ [EVENT_SPECTRUM_PORT]: id }, channel.port2);
+    else window.postMessage({ [EVENT_SPECTRUM_PORT]: id }, window.location.origin, [channel.port2]);
+    return { streaming: true, id, everyNth: stride };
+}
+
+/**
+ * The spot feeds, acquired only while something is listening.
+ *
+ * The server sends nothing until a stream is *acquired* (lib/spotStore.js), so
+ * subscribing on the chance a client might want spots would open three streams
+ * for every visitor to a shared receiver. Both the `spots` and `markers` topics
+ * need them — markers are built partly from spots — so one refcount serves both,
+ * and the feeds stop when the last interested client goes away.
+ *
+ * Module-level rather than per-host because the page has one set of feeds
+ * however many hosts are asking: the bridge's own, and one per custom panel.
+ */
+const spotFeeds = { refs: 0, offs: [], lists: { dx: [], cw: [], digital: [] } };
+
+function acquireSpots(onUpdate) {
+    spotFeeds.refs += 1;
+    if (spotFeeds.refs === 1) {
+        for (const kind of ['dx', 'cw', 'digital']) {
+            spotFeeds.offs.push(subscribeSpots(kind, (list) => {
+                spotFeeds.lists = { ...spotFeeds.lists, [kind]: list };
+                onUpdate();
+            }));
+        }
+    }
+    return () => {
+        spotFeeds.refs = Math.max(0, spotFeeds.refs - 1);
+        if (spotFeeds.refs > 0) return;
+        for (const off of spotFeeds.offs) { try { off(); } catch (e) { /* gone */ } }
+        spotFeeds.offs = [];
+    };
+}
+
+/**
+ * What the marker snapshot needs, worked out here rather than in snapshots.js.
+ *
+ * The merge and the "which of these is at the dial" search are the page's own
+ * (lib/markerNav.js), shared with the marker bar and the Markers panel, so a
+ * client sees exactly what the operator sees rather than a second opinion
+ * assembled from the same parts.
+ */
+function markerSources(radio) {
+    const catalog = radio.catalog || {};
+    const markers = collectMarkers({
+        dx: spotFeeds.lists.dx,
+        cw: spotFeeds.lists.cw,
+        bookmarks: catalog.bookmarks || [],
+        local: radio.localMarks || [],
+    });
+    const t = radio.tuning || {};
+    return {
+        markersAtDial: findMarkers(markers, t.frequency, t.mode, savedNavTypes()),
+        markerCount: markers.length,
+    };
 }
 
 function layoutFacade(layout) {
@@ -256,6 +377,7 @@ export default function BridgeHost() {
     // same describe/snapshot/command/run as the page, so the two can never
     // disagree about what the receiver is doing.
     const hostDeps = useMemo(() => ({
+        onDemand: (topic, wanted) => onDemandRef.current(topic, wanted),
         send: (msg) => {
             window.dispatchEvent(new CustomEvent(EVENT_FROM_PAGE, { detail: encodeMessage(msg) }));
         },
@@ -271,13 +393,23 @@ export default function BridgeHost() {
         // The layout rides alongside the control context rather than inside it:
         // useControlContext is the surface the MIDI, FlexControl and keyboard
         // panels share, and none of them arranges the page.
-        command: (name, args) => runCommand(name, args, {
+        command: (name, args, extra) => runCommand(name, args, {
             ...live.current.ctx,
             layout: live.current.layout,
             setRadioControl,
             // The player is the receiver's, not this module's — see
             // RadioContext, which owns it for the life of the page.
-            openAudioPort: (id) => openAudioPort(live.current.radio.player, id),
+            // `extra` is how a caller says where its port should go. Absent
+            // for a client in the page, which is served by window.postMessage;
+            // supplied by a custom panel's host, whose frame cannot see that.
+            openAudioPort: (id) => openAudioPort(live.current.radio.player, id, extra && extra.deliverPort),
+            // Through the operator's own notification settings, deliberately:
+            // where a notice appears and whether it appears at all is theirs.
+            // The source is fixed so they can switch these off as a group
+            // without losing the receiver's own notices.
+            pushNotice: (spec) => pushNotification({ ...spec, source: 'bridge' }),
+            openSpectrumPort: (id, everyNth) => openSpectrumPort(
+                live.current.radio.spectrumConn, id, everyNth, extra && extra.deliverPort),
         }),
         // Dispatched, not "done": the catalogue's functions are fire-and-forget
         // because a knob has no reply path, so a rotator function on a receiver
@@ -292,6 +424,24 @@ export default function BridgeHost() {
     }), []);
 
     const host = useMemo(() => createHost(hostDeps), [hostDeps]);
+
+    // Spot feeds are held while any client — here or in a panel — is subscribed
+    // to a topic that needs them, and released when the last one goes. Counted
+    // rather than boolean because several hosts report demand independently.
+    const spotRelease = useRef({});
+    const onDemand = useCallback((topic, wanted) => {
+        if (topic !== 'spots' && topic !== 'markers') return;
+        const held = spotRelease.current;
+        if (wanted && !held[topic]) {
+            held[topic] = acquireSpots(() => {
+                publishAllRef.current('spots', snapshotFor('spots', sources(live.current)));
+                publishAllRef.current('markers', snapshotFor('markers', sources(live.current)));
+            });
+        } else if (!wanted && held[topic]) {
+            held[topic]();
+            delete held[topic];
+        }
+    }, []);
 
     // Custom panels are served by hosts of their own — same commands, same
     // topics, a port each instead of the window events, and none of the bridge's
@@ -309,6 +459,13 @@ export default function BridgeHost() {
         host.publish(topic, value);
         publishToPanels(topic, value);
     }, [host]);
+
+    // Through refs so `hostDeps` can stay built once: it is what both kinds of
+    // host are made from, and rebuilding it would rebuild them.
+    const publishAllRef = useRef(publishAll);
+    publishAllRef.current = publishAll;
+    const onDemandRef = useRef(onDemand);
+    onDemandRef.current = onDemand;
 
     // One listener for the whole page, registered once. Re-registering on every
     // state change would drop a message arriving in the gap.
@@ -352,6 +509,9 @@ export default function BridgeHost() {
 
     // --- state that React already tracks ------------------------------------
     const { tuning, audio, squelch, view, followTuning, session } = radio;
+
+    useEffect(() => { publishAll('markers', snapshotFor('markers', sources(live.current))); },
+        [host, tuning]);
 
     useEffect(() => { publishAll('vfos', snapshotFor('vfos', sources(live.current))); },
         [host, tuning, vfos]);
@@ -429,6 +589,8 @@ function sources(l) {
         serverInfo: r.serverInfo,
         vfo,
         vfos: vfos ? { ...vfos, ids: VFO_IDS } : null,
+        spots: spotFeeds.lists,
+        ...markerSources(r),
         band: bandForFrequency(r.tuning.frequency),
         url: typeof location !== 'undefined' ? location.href : null,
         title: typeof document !== 'undefined' ? document.title : null,

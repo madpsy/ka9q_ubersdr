@@ -92,8 +92,11 @@ t('the command set is the published one', () => {
         ['tune', 'mode', 'passband', 'volume', 'mute', 'duck', 'squelch', 'vfo', 'spectrum', 'power',
             'panel',      // 1.1
             'radio',      // 1.2
-            'surface',    // 1.4 — a control surface something else provides
-            'audio']);    // 1.4 — the receiver's sound, handed over as a port
+            'surface',       // 1.4 — a control surface something else provides
+            'audio',         // 1.4 — the receiver's sound, handed over as a port
+            'spectrumdata',  // 1.6 — its frames, the same way; the `spectrum`
+                             //       command is the view, this is the data
+            'notice']);      // 1.6 — say something where the operator will see it
 });
 
 // Commands are only ever added, and only at the end. A client tests for one by

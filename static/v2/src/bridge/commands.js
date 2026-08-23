@@ -480,6 +480,95 @@ export const COMMANDS = {
         if (action !== 'start') throw new BridgeError(ERR.BAD_ARGS, 'action must be start or stop');
         return ctx.openAudioPort(String(args.id || ''));
     },
+
+    /**
+     * The spectrum's own frames, as a MessagePort — the same handover as
+     * `audio`, for the same reason.
+     *
+     * The `spectrum` *topic* says where the view is pointed: centre, span, bin
+     * width, how many bins. It has never carried a single one of them, so
+     * nothing outside the page could draw a scope, a waterfall or a picture of a
+     * band. The page is already receiving the frames; this hands a copy on.
+     *
+     *     window.addEventListener('message', (e) => {
+     *         if (!e.data || !e.data['ubersdr.spectrum-port']) return;
+     *         const port = e.ports[0];
+     *         port.onmessage = ({ data }) => {
+     *             // data.bins        ArrayBuffer of float32, one per bin
+     *             // data.binCount    how many
+     *             // data.centerFreq  the middle of the span, in Hz
+     *             // data.timestamp   the receiver's own
+     *         };
+     *         port.start();
+     *     });
+     *     await client.command('spectrumdata', { action: 'start', id: 'scope' });
+     *
+     * Two things to know about what comes out of it.
+     *
+     * **The bins are in ascending frequency order**, not the raw FFT order the
+     * receiver sends — the halves are already swapped. Width and position come
+     * from the `spectrum` topic, which is where the view geometry lives; a frame
+     * carries its own `centerFreq` because the operator can pan between frames.
+     *
+     * **It runs as fast as the receiver sends**, which is far quicker than a
+     * chart usually wants. `everyNth` drops the rest at the source, so a client
+     * that wants one frame in twenty says so rather than receiving twenty and
+     * discarding nineteen.
+     *
+     * One stream, as with audio: asking again replaces it, `{action:'stop'}`
+     * ends it.
+     */
+    spectrumdata(args, ctx) {
+        if (!ctx.openSpectrumPort) {
+            throw new BridgeError(ERR.UNSUPPORTED, 'this page cannot hand out spectrum frames');
+        }
+        const action = String(args.action || 'start');
+        if (action === 'stop') return ctx.openSpectrumPort(null);
+        if (action !== 'start') throw new BridgeError(ERR.BAD_ARGS, 'action must be start or stop');
+        return ctx.openSpectrumPort(String(args.id || ''), args.everyNth);
+    },
+
+    /**
+     * Say something, where the operator will see it.
+     *
+     * A client can put anything it likes in its own window, and a custom panel
+     * in its own frame — but neither can reach an operator who is looking at
+     * something else. That is what a notice is for: a callsign heard, a band
+     * opening, a decode finished.
+     *
+     *     await client.command('notice', {
+     *         title: 'FT8 opening', body: '20m to VK', severity: 'good',
+     *         key: 'band-open-20m',
+     *     });
+     *
+     * `severity` is `info` (default), `good`, `warn` or `bad`. `key` collapses
+     * repeats — the same key arriving again is counted on the existing notice
+     * rather than stacking another one up, which is what makes a per-decode
+     * notice bearable.
+     *
+     * It goes through the operator's own notification settings: where notices
+     * appear, how long they stay, and whether they are switched off entirely are
+     * theirs to decide, not the caller's. So this may legitimately show nothing,
+     * and answers `{ shown: false }` when it does — which is not an error and
+     * must not be retried.
+     */
+    notice(args, ctx) {
+        if (!ctx.pushNotice) {
+            throw new BridgeError(ERR.UNSUPPORTED, 'this page cannot show notices');
+        }
+        const title = String(args.title || '').trim();
+        const body = String(args.body || '').trim();
+        if (!title && !body) {
+            throw new BridgeError(ERR.BAD_ARGS, 'a notice needs a title or a body');
+        }
+        const id = ctx.pushNotice({
+            title: title.slice(0, 120),
+            body: body.slice(0, 400),
+            severity: args.severity,
+            key: args.key ? String(args.key).slice(0, 80) : '',
+        });
+        return { shown: !!id, id: id || null };
+    },
 };
 
 function viewOf(ctx) {

@@ -70,6 +70,21 @@ export const NOTICE_TIMES = [3, 5, 8, 15, 0];
 // the lookup — see NoticeIcon.
 export const NOTICE_SOURCES = [
     {
+        // Anything outside the page that the operator has let in: a custom
+        // panel, a browser extension, the desktop client's own integrations.
+        // One switch for the lot, deliberately — they are not this receiver's
+        // notices and an operator who wants quiet should not have to find them
+        // one at a time. No `panel`, because there is no one panel to open.
+        id: 'bridge',
+        // The Layout panel, because it is the one that is always there and its
+        // icon reads as "a panel". A source needs a panel for its toast icon —
+        // a notification that has to be read to be recognised is one a toast has
+        // no time for — and there is no single panel these come from.
+        panel: 'layout',
+        label: 'Panels and extensions',
+        note: 'Notices raised by custom panels and browser extensions',
+    },
+    {
         id: 'rotator',
         panel: 'rotator',
         label: 'Rotator',

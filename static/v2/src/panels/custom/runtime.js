@@ -69,6 +69,23 @@ export function startPanelRuntime(global) {
             const data = ev.data;
             if (typeof data === 'string' || !data || typeof data !== 'object') return;
 
+            // A handed-over stream — audio samples or spectrum frames. It
+            // arrives with a port of its own rather than as a reply, because it
+            // is not an answer to anything: the command that asked for it
+            // returned long ago.
+            if (ev.ports && ev.ports.length) {
+                const name = data['ubersdr.audio-port'] ? 'audio'
+                    : (data['ubersdr.spectrum-port'] ? 'spectrum' : null);
+                if (name) {
+                    const handler = streams.get(name);
+                    const p = ev.ports[0];
+                    try { p.start(); } catch (e) { /* already started */ }
+                    if (handler) handler(p);
+                    else pendingStreams.set(name, p);
+                    return;
+                }
+            }
+
             // The operator changed the palette, or zoomed this panel. Custom
             // properties do not cross a frame boundary, so they are pushed and
             // re-applied here rather than inherited — otherwise a panel would
@@ -133,6 +150,12 @@ export function startPanelRuntime(global) {
             observer.observe(document.documentElement);
             observer.observe(document.body);
         };
+
+        // Streams handed over rather than requested-and-returned. A panel may
+        // register its handler before or after asking for the stream, so
+        // whichever comes second finds the other waiting.
+        const streams = new Map();
+        const pendingStreams = new Map();
 
         const config = scope.__ubersdrPanel || {};
         // Declared ahead of the object that closes over it: `store.all()` is
@@ -235,6 +258,42 @@ export function startPanelRuntime(global) {
                 },
             },
             fetch: (path, init) => ask('fetch', { path: String(path), init: init || null }),
+
+            /**
+             * The receiver's audio, as float32 frames.
+             *
+             * Taken *ahead of volume, mute and ducking* — a panel feeding a
+             * decoder must keep receiving while the operator has the speakers
+             * silenced, so muting the receiver does not mute this. The sample
+             * rate follows the mode (12000 for SSB, for instance) and is on
+             * every message: read it rather than assuming 48000.
+             */
+            onAudio: (fn) => {
+                streams.set('audio', (p) => { p.onmessage = ({ data }) => fn(data); });
+                const waiting = pendingStreams.get('audio');
+                if (waiting) { pendingStreams.delete('audio'); streams.get('audio')(waiting); }
+                return sdr.command('audio', { action: 'start', id: 'panel' });
+            },
+            stopAudio: () => { streams.delete('audio'); return sdr.command('audio', { action: 'stop' }); },
+
+            /**
+             * The spectrum's own frames: float32 bins in ascending frequency
+             * order, with the centre frequency of each frame.
+             *
+             * `everyNth` drops frames at the source — the receiver sends far
+             * faster than a chart wants, and asking for one in twenty is kinder
+             * than receiving twenty and discarding nineteen.
+             */
+            onSpectrum: (fn, everyNth) => {
+                streams.set('spectrum', (p) => { p.onmessage = ({ data }) => fn(data); });
+                const waiting = pendingStreams.get('spectrum');
+                if (waiting) { pendingStreams.delete('spectrum'); streams.get('spectrum')(waiting); }
+                return sdr.command('spectrumdata', { action: 'start', id: 'panel', everyNth });
+            },
+            stopSpectrum: () => {
+                streams.delete('spectrum');
+                return sdr.command('spectrumdata', { action: 'stop' });
+            },
             height,
 
             // Whether the operator has this panel cut down. The panel decides

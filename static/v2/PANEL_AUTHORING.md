@@ -233,11 +233,19 @@ sdr.minimal                            // is the operator showing you cut down?
 sdr.height(180);                       // usually unnecessary — see §6
 ```
 
-The topics (`tuning`, `vfos`, `audio`, `signal`, `spectrum`, `session`, `page`,
-`layout`, `modes`, `bands`, `functions`), the commands and the `run` catalogue
+The topics (`tuning`, `vfos`, `markers`, `spots`, `audio`, `signal`, `spectrum`,
+`session`, `page`, `layout`, `modes`, `bands`, `functions`), the commands and the
+`run` catalogue
 are all documented in **`BRIDGE_API.md`**, and behave here exactly as they do
 there. Three notes worth repeating:
 
+- **`markers` is how you ask "what station is this?"** — the dial's marker and the
+  ones either side, merged from server bookmarks, the operator's *local*
+  bookmarks and the spot feeds. The local ones live only in the page, so no API
+  call can reconstruct this.
+- **`spots` is held only while something is subscribed.** The receiver sends
+  nothing until a feed is acquired, so subscribe rather than `get` if you want
+  them, and unsubscribe when your panel is done.
 - **`vfos` is the only way to see a VFO that is not the active one.** `tuning`
   reports the active VFO; switching to another to read it really retunes the
   receiver, which is audible to everyone listening. Subscribe to `vfos` instead.
@@ -334,6 +342,41 @@ older than a variable will not send it.
 font size already applies it — so **size text in `em`/`rem` and the zoom buttons
 in your panel's header work**. Sizing everything in `px` opts out of them.
 Palette and zoom changes are pushed to an open panel; you need not poll.
+
+### Audio and spectrum
+
+Both arrive as a stream rather than a topic, because thousands of floats
+continuously is the wrong shape for JSON:
+
+```js
+// The receiver's sound. Taken *ahead of volume, mute and ducking* — a panel
+// feeding a decoder must keep receiving while the operator has the speakers
+// silenced. The sample rate follows the mode (12000 for SSB) and is on every
+// message: read it rather than assuming 48000.
+await sdr.onAudio(({ pcm, frames, sampleRate }) => { … });
+await sdr.stopAudio();
+
+// The spectrum's own bins, in ascending frequency order. `everyNth` drops
+// frames at the source — the receiver sends far faster than a chart wants.
+await sdr.onSpectrum(({ bins, binCount, centerFreq, timestamp }) => { … }, 4);
+await sdr.stopSpectrum();
+```
+
+`bins` and `pcm` are `ArrayBuffer`s of float32. Width and span come from the
+`spectrum` topic; each frame carries its own `centerFreq` because the operator
+can pan between them.
+
+### Saying something outside your panel
+
+```js
+await sdr.command('notice', { title: 'FT8 opening', body: '20m to VK',
+                              severity: 'good', key: 'band-open-20m' });
+```
+
+For something the operator should see when they are looking at another panel.
+`key` collapses repeats. It obeys their notification settings and may show
+nothing, answering `{ shown: false }` — not an error, and not to be retried.
+Use it sparingly: it is their screen.
 
 ## 6a. Making it look designed
 

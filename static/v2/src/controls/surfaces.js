@@ -17,6 +17,11 @@ import { FIELD_TYPES } from './radioProviders.js';
 // whatever is listening for it agree without either hard-coding a string.
 export const EVENT_AUDIO_PORT = 'ubersdr.audio-port';
 
+// The same handover for spectrum frames. Its own name rather than a field on the
+// audio one: a client may want either without the other, and they are opened by
+// separate commands.
+export const EVENT_SPECTRUM_PORT = 'ubersdr.spectrum-port';
+
 const surfaces = new Map();    // id -> descriptor
 const status = new Map();      // id -> last reported state
 const listeners = new Set();

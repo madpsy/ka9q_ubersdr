@@ -31,18 +31,21 @@ t('the two event names are the published ones', () => {
     // `radiocontrol` topic and the `radio` command; 1.3 its `configure` action;
     // 1.4 the `surface` and `audio` commands and the `sdrcontrol` topic; 1.5 the
     // `vfos` topic, which is the only way to see a VFO that is not the active
-    // one without switching to it and really retuning the receiver.
+    // one without switching to it and really retuning the receiver; 1.6 the
+    // `markers` and `spots` topics, the `spectrumdata` and `notice` commands,
+    // and the demand hook that keeps the spot feeds unacquired until something
+    // asks for them.
     // The envelope never changed, so PROTOCOL stays 1 and a 1.0 client keeps
     // working — which is what the major number is for, and why only the minor
     // has ever moved.
-    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 5 });
+    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 6 });
 });
 
 t('the topic lists are what a client is promised', () => {
     assert.deepStrictEqual(
         LIVE_TOPICS,
         ['tuning', 'audio', 'signal', 'spectrum', 'session', 'page', 'layout', 'radiocontrol',
-            'sdrcontrol', 'vfos'],
+            'sdrcontrol', 'vfos', 'markers', 'spots'],
     );
     assert.deepStrictEqual(STATIC_TOPICS, ['modes', 'bands', 'functions']);
     assert.deepStrictEqual(TOPICS, [...LIVE_TOPICS, ...STATIC_TOPICS]);
@@ -472,6 +475,64 @@ t('a state patch is shaped the way clients merge it', () => {
     assert.deepStrictEqual(stateMessage('tuning', { frequency: 1 }, 'c1'), {
         v: 1, from: 'page', type: 'state', client: 'c1', topic: 'tuning', patch: { frequency: 1 },
     });
+});
+
+// --- demand ------------------------------------------------------------------
+//
+// Most topics cost nothing to publish. The spot feeds have to be acquired from
+// the server before it sends anything, so the host reports when a topic is
+// actually wanted and the page acquires them only then — otherwise every
+// visitor to a shared receiver opens three streams on the chance somebody might
+// ask.
+
+t('demand is reported on the edges only, and released when the last client goes', () => {
+    const seen = [];
+    const sent = [];
+    const host = createHost({
+        send: (m) => sent.push(m),
+        now: () => 1000,
+        enabled: () => true,
+        describe: () => ({ app: 'ubersdr' }),
+        snapshot: () => ({}),
+        command: () => ({}),
+        run: () => ({}),
+        onDemand: (topic, wanted) => seen.push([topic, wanted]),
+    });
+    const say = (client, id, type, fields) =>
+        host.handle(encodeMessage(clientMessage(client, id, type, fields)));
+
+    say('c1', 1, MSG.SUBSCRIBE, { topics: ['spots'] });
+    assert.deepStrictEqual(seen, [['spots', true]]);
+
+    // A second client wanting the same topic is not a second acquisition.
+    say('c2', 1, MSG.SUBSCRIBE, { topics: ['spots'] });
+    assert.strictEqual(seen.length, 1, 'demand was reported twice for one topic');
+
+    // Still wanted while anybody has it.
+    say('c1', 2, MSG.UNSUBSCRIBE, { topics: ['spots'] });
+    assert.strictEqual(seen.length, 1, 'released while another client was still subscribed');
+
+    say('c2', 2, MSG.UNSUBSCRIBE, { topics: ['spots'] });
+    assert.deepStrictEqual(seen[seen.length - 1], ['spots', false]);
+});
+
+t('a client going away releases what it was holding', () => {
+    const seen = [];
+    const host = createHost({
+        send: () => {},
+        now: () => 1000,
+        enabled: () => true,
+        describe: () => ({ app: 'ubersdr' }),
+        snapshot: () => ({}),
+        command: () => ({}),
+        run: () => ({}),
+        onDemand: (topic, wanted) => seen.push([topic, wanted]),
+    });
+    host.handle(encodeMessage(clientMessage('c1', 1, MSG.SUBSCRIBE, { topics: ['spots'] })));
+    assert.deepStrictEqual(seen, [['spots', true]]);
+    host.closing();
+    assert.deepStrictEqual(seen[seen.length - 1], ['spots', false],
+        'the page would go on holding feeds for a client that has gone');
 });
 
 console.log(`\n${pass} ok`);

@@ -92,6 +92,68 @@ export function vfosSnapshot(src) {
     };
 }
 
+/**
+ * What is on the dial, and what is either side of it.
+ *
+ * The most common thing a client wants to know about a receiver after the
+ * frequency itself — "what station is this?" — and until this existed there was
+ * no way to ask. Server bookmarks could be fetched from the API, but the
+ * operator's *local* bookmarks live only in the page, and the merged answer for
+ * the current dial was computed in the page and never left it.
+ *
+ * `at` is what the dial is sitting on, `prev` and `next` are the nearest either
+ * side. All three are null when nothing matches, which on a quiet band is most
+ * of the time.
+ */
+export function markersSnapshot(src) {
+    const near = src.markersAtDial || {};
+    const one = (m) => (m ? {
+        frequency: num(m.freq),
+        mode: m.mode || null,
+        name: m.name || '',
+        callsign: m.call || '',
+        type: m.type || null,
+        countryCode: m.countryCode || '',
+    } : null);
+    return {
+        at: one(near.at),
+        prev: one(near.prev),
+        next: one(near.next),
+        count: Number.isFinite(Number(src.markerCount)) ? Number(src.markerCount) : 0,
+    };
+}
+
+/**
+ * DX, CW and digital spots, as the page already has them.
+ *
+ * A client can reach the same feeds itself, and several doing so means several
+ * streams off one receiver for the same data. The page multiplexes them into one
+ * store (lib/spotStore.js); this shares it.
+ *
+ * Acquired lazily. The server sends nothing until a stream is asked for, so the
+ * page subscribes only while somebody is subscribed to this topic — see the
+ * demand hook in host.js. A client that merely `get`s it once will find whatever
+ * happens to be held, which may be nothing.
+ */
+export function spotsSnapshot(src) {
+    const feeds = src.spots || {};
+    const trim = (list) => (Array.isArray(list) ? list : []).slice(0, 100).map((sp) => ({
+        frequency: num(sp.frequency),
+        mode: sp.mode || null,
+        callsign: sp.callsign || '',
+        spotter: sp.spotter || '',
+        comment: sp.comment || '',
+        countryCode: sp.countryCode || '',
+        snr: num(sp.snr),
+        at: num(sp.at),
+    }));
+    return {
+        dx: trim(feeds.dx),
+        cw: trim(feeds.cw),
+        digital: trim(feeds.digital),
+    };
+}
+
 export function audioSnapshot(src) {
     const a = src.audio || {};
     const sq = src.squelch || {};
@@ -292,6 +354,8 @@ export function sdrControlSnapshot(src) {
 export const SNAPSHOTS = {
     tuning: tuningSnapshot,
     vfos: vfosSnapshot,
+    markers: markersSnapshot,
+    spots: spotsSnapshot,
     layout: layoutSnapshot,
     radiocontrol: radioControlSnapshot,
     sdrcontrol: sdrControlSnapshot,

@@ -39,14 +39,18 @@ function makeChannel() {
         start() { this.started = true; },
         close() { this.closed = true; },
         addEventListener(type, fn) { if (type === 'message') this._handlers.push(fn); },
-        postMessage(data) {
+        postMessage(data, transfer) {
             const to = this.other;
             if (!to || to.closed) return;
+            // The transfer list is carried, because a port handed down a port is
+            // exactly what the audio and spectrum handovers do — a mock that
+            // dropped it would pass while the real thing delivered nothing.
+            const ports = Array.isArray(transfer) ? transfer : [];
             // Asynchronous, as a real port is: a test that passed only because
             // both ends ran in one tick would not be testing the real thing.
             queueMicrotask(() => {
-                if (to.onmessage) to.onmessage({ data });
-                for (const fn of to._handlers) fn({ data });
+                if (to.onmessage) to.onmessage({ data, ports });
+                for (const fn of to._handlers) fn({ data, ports });
             });
         },
     });
@@ -455,6 +459,80 @@ function fakeDeps(over = {}) {
         assert.strictEqual(vfos.slots[0].frequency, 7100000, 'an inactive VFO is readable');
         assert.strictEqual(vfos.slots[1].active, true);
         assert.strictEqual(vfos.slots[2].frequency, null, 'a never-used slot is null, not absent');
+        resetPanelHosts();
+    });
+
+    await ta('audio and spectrum ports reach the frame, not the page window', async () => {
+        // The bug: the page hands these ports to `window`, targeted at its own
+        // origin. That is right for an extension, which shares both, and useless
+        // for a panel — a sandboxed frame on an opaque origin. The command
+        // answered `streaming: true` and the panel waited for a port that had
+        // gone somewhere it could never see.
+        resetPanelHosts();
+
+        let deliverer = null;
+        setPanelDeps(fakeDeps({
+            command: (name, args, extra) => {
+                if (name === 'spectrumdata' && args.action === 'start') {
+                    deliverer = extra && extra.deliverPort;
+                    return { streaming: true };
+                }
+                return { ran: name };
+            },
+        }));
+
+        const scope = fakeFrame();
+        const api = startPanelRuntime(scope);
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+        const sdr = await api.ready();
+
+        const frames = [];
+        await sdr.onSpectrum((f) => frames.push(f), 4);
+        assert.ok(typeof deliverer === 'function',
+            'the command was not told where to put the port — it would go to the page window');
+
+        // The page delivers, as BridgeHost would.
+        const stream = makeChannel();
+        deliverer({ 'ubersdr.spectrum-port': 'panel' }, stream.port2);
+        await settle();
+        stream.port1.postMessage({ binCount: 3, centerFreq: 14100000, timestamp: 7 });
+        await settle();
+
+        assert.strictEqual(frames.length, 1, 'the frame never reached the panel');
+        assert.strictEqual(frames[0].centerFreq, 14100000);
+        resetPanelHosts();
+    });
+
+    await ta('a stream that arrives before its handler is not lost', async () => {
+        // The command resolves before the port is delivered, so a panel that
+        // awaits it and *then* registers would miss the handover. Whichever
+        // comes second finds the other waiting.
+        resetPanelHosts();
+        let deliverer = null;
+        setPanelDeps(fakeDeps({
+            command: (name, args, extra) => {
+                if (name === 'audio') { deliverer = extra && extra.deliverPort; return { streaming: true }; }
+                return { ran: name };
+            },
+        }));
+        const scope = fakeFrame();
+        const api = startPanelRuntime(scope);
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+        const sdr = await api.ready();
+
+        const heard = [];
+        await sdr.onAudio((a) => heard.push(a));
+        const stream = makeChannel();
+        deliverer({ 'ubersdr.audio-port': 'panel' }, stream.port2);
+        await settle();
+        stream.port1.postMessage({ sampleRate: 12000, frames: 2 });
+        await settle();
+        assert.strictEqual(heard.length, 1);
+        assert.strictEqual(heard[0].sampleRate, 12000, 'the rate follows the mode; a panel must read it');
         resetPanelHosts();
     });
 

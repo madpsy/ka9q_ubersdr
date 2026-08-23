@@ -202,6 +202,8 @@ export function attachPanel({ id, port, onHeight }) {
     // two protocols. So the two must not share a sender: putting a panel-only
     // reply through `send` would stringify it, and the frame would read its own
     // answer as bridge traffic and drop it.
+    const entryPort = port;
+
     const send = (msg) => {
         try { port.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg)); } catch (e) { /* gone */ }
     };
@@ -217,7 +219,19 @@ export function attachPanel({ id, port, onHeight }) {
         snapshot: (topic) => (deps ? deps.snapshot(topic) : null),
         command: (name, args) => {
             if (!deps) throw new Error('the receiver is not ready yet');
-            return deps.command(name, args);
+            // `deliverPort` is how the audio and spectrum handovers reach a
+            // frame. The page hands those ports to `window`, which is right for
+            // a client that shares this origin and useless for a panel: it is a
+            // sandboxed frame that neither listens on that window nor could
+            // accept a message addressed to this origin. Left to itself the
+            // command reported success and the panel waited for a port that had
+            // gone somewhere it could never see.
+            return deps.command(name, args, {
+                deliverPort: (msg, port) => {
+                    try { port.start(); } catch (e) { /* already started */ }
+                    try { entryPort.postMessage(msg, [port]); } catch (e) { /* gone */ }
+                },
+            });
         },
         run: (fn, event) => {
             if (!deps) throw new Error('the receiver is not ready yet');

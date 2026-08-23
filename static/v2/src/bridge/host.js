@@ -55,6 +55,34 @@ export function diff(prev, next) {
 
 export function createHost(deps) {
     const now = deps.now || (() => Date.now());
+
+    /**
+     * Which topics anybody is actually listening to.
+     *
+     * Most topics are free — the page has the value whether or not anyone asked
+     * for it, and publishing costs a diff. A few are not: the spot feeds have to
+     * be *acquired* from the server before it sends anything, so subscribing to
+     * them on the chance that a client might one day want them would open three
+     * streams for every visitor to a shared receiver.
+     *
+     * So the host reports demand, and the page decides what to do about it. Only
+     * the edges are reported — first subscriber in, last one out — because that
+     * is when something has to start or stop.
+     */
+    const demand = new Set();
+    function reviewDemand() {
+        if (typeof deps.onDemand !== 'function') return;
+        const wanted = new Set();
+        for (const entry of clients.values()) {
+            for (const topic of entry.subs.keys()) wanted.add(topic);
+        }
+        for (const topic of wanted) {
+            if (!demand.has(topic)) { demand.add(topic); deps.onDemand(topic, true); }
+        }
+        for (const topic of Array.from(demand)) {
+            if (!wanted.has(topic)) { demand.delete(topic); deps.onDemand(topic, false); }
+        }
+    }
     const send = deps.send;
     const enabled = deps.enabled || (() => true);
 
@@ -76,6 +104,7 @@ export function createHost(deps) {
                 pending: false,
             };
             entry.subs.set(topic, sub);
+            reviewDemand();
         } else if (minIntervalMs != null) {
             sub.minIntervalMs = minIntervalMs;
         }
@@ -110,6 +139,7 @@ export function createHost(deps) {
         }
         if (!victim) return;
         clients.delete(victim);
+        reviewDemand();
         send(closingMessage(victim));
     }
 
@@ -187,6 +217,7 @@ export function createHost(deps) {
 
             case MSG.BYE:
                 clients.delete(client);
+                reviewDemand();
                 send(okMessage(id, client, { attached: clients.size }));
                 return;
 
@@ -215,6 +246,7 @@ export function createHost(deps) {
                 const topics = topicList(msg.topics, LIVE_TOPICS);
                 const entry = clients.get(client);
                 for (const topic of topics) entry.subs.delete(topic);
+                reviewDemand();
                 send(okMessage(id, client, { subscribed: [...entry.subs.keys()] }));
                 return;
             }
@@ -317,6 +349,7 @@ export function createHost(deps) {
         closing() {
             if (clients.size) send(closingMessage());
             clients.clear();
+            reviewDemand();
         },
 
         /** Attached client ids — what the "something is driving this" badge counts. */
@@ -328,6 +361,7 @@ export function createHost(deps) {
         reset() {
             clients.clear();
             latest.clear();
+            reviewDemand();
         },
     };
 }

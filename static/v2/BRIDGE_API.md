@@ -10,7 +10,7 @@ client library), `BridgeHost.jsx` (the wiring). Tests: `test/bridge.test.js`,
 specification — if one has to change, the change is a breaking one.
 
 - Protocol (envelope) version: **1**
-- API version: **1.5**
+- API version: **1.6**
 
 ---
 
@@ -206,6 +206,37 @@ The active slot is reported from live tuning, not from its stored copy — the
 page deliberately leaves that copy stale while a VFO is selected, writing it only
 when you switch away, so reading it would give wherever the dial was when that
 VFO was last left.
+
+### `markers` *(since 1.6)*
+```jsonc
+{ "at":   { "frequency": 14074000, "mode": "usb", "name": "FT8", "callsign": "",
+            "type": "bookmark", "countryCode": "" },
+  "prev": { … }, "next": { … },
+  "count": 412 }
+```
+What is on the dial and what is nearest either side, merged from the operator's
+server bookmarks, their *local* bookmarks and the spot feeds — the same merge and
+the same search the marker bar and the Markers panel use, so a client sees what
+the operator sees rather than a second opinion assembled from the same parts.
+Any of the three is `null` when nothing matches.
+
+The local bookmarks are the reason this exists: they live only in the page, so no
+amount of calling the API could reconstruct this.
+
+### `spots` *(since 1.6)*
+```jsonc
+{ "dx": [{ "frequency": 14025000, "mode": "cw", "callsign": "VK9XX",
+           "spotter": "G4ABC", "comment": "up 2", "countryCode": "XR",
+           "snr": null, "at": 1750000000000 }],
+  "cw": [ … ], "digital": [ … ] }
+```
+Capped at the most recent 100 per feed.
+
+**Acquired only while something is subscribed.** The receiver sends nothing until
+a stream is asked for, so the page holds these feeds only while a client is
+subscribed to `spots` or `markers`, and drops them when the last one goes. A bare
+`get` returns whatever happens to be held, which may be nothing — subscribe if
+you want them.
 
 ### `session`
 ```jsonc
@@ -467,6 +498,59 @@ does not mute this.
 **The sample rate is the receiver's, not 48 kHz.** It follows the mode — 12000
 for SSB, for instance — and is on every message, so read it rather than assume.
 A client that needs a fixed rate has to resample.
+
+### `spectrumdata` — the frames themselves *(since 1.6)*
+
+The `spectrum` topic says where the view is pointed. It has never carried a
+single bin, so nothing outside the page could draw a scope, a waterfall or a
+picture of a band. This hands over a copy of the frames the page is already
+receiving, the same way `audio` does:
+
+```js
+window.addEventListener('message', (e) => {
+    if (!e.data || !e.data['ubersdr.spectrum-port']) return;
+    const port = e.ports[0];
+    port.onmessage = ({ data }) => {
+        // data.bins        ArrayBuffer of float32, one per bin
+        // data.binCount    how many
+        // data.centerFreq  the middle of the span, in Hz
+        // data.timestamp   the receiver's own
+    };
+    port.start();
+});
+await client.command('spectrumdata', { action: 'start', id: 'scope', everyNth: 4 });
+```
+
+**The bins are in ascending frequency order** — the halves are already swapped,
+so this is not the raw FFT order the receiver sends. Span and bin width come from
+the `spectrum` topic; each frame carries its own `centerFreq` because the
+operator can pan between frames.
+
+**`everyNth` drops frames at the source.** The receiver sends far faster than a
+chart wants, and a client that needs one frame in twenty should say so rather
+than receive twenty and discard nineteen.
+
+One stream, as with audio: asking again replaces it, `{action:'stop'}` ends it.
+
+### `notice` — say something the operator will see *(since 1.6)*
+
+A client can put anything it likes in its own window, and a custom panel in its
+own frame, but neither reaches an operator who is looking at something else.
+
+```js
+await client.command('notice', {
+    title: 'FT8 opening', body: '20m to VK', severity: 'good', key: 'band-open-20m',
+});
+```
+
+`severity` is `info` (default), `good`, `warn` or `bad`. `key` collapses repeats:
+the same key arriving again is counted on the existing notice rather than
+stacking another one up.
+
+It goes through the operator's own notification settings — where notices appear,
+how long they stay, and whether they are switched off at all are theirs, under
+"Panels and extensions". So it may legitimately show nothing and answer
+`{ shown: false }`. That is not an error and must not be retried.
 
 ## 8. Errors
 

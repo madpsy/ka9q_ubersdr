@@ -519,7 +519,10 @@ t('only sources the receiver actually has get a switch', () => {
     // that can never happen. The predicate is the panels' own gate, passed in by the
     // panel — see usePanelApplies — so the switch and the panel it belongs to appear and
     // disappear together.
-    const ids = (applies) => n.switchableSources(applies).map((s) => s.id);
+    // `bridge` is dropped from these comparisons rather than written into each
+    // one: it hangs off the Layout panel, which every receiver has, so it is in
+    // every list and says nothing about what this test is checking.
+    const ids = (applies) => n.switchableSources(applies).map((s) => s.id).filter((id) => id !== 'bridge');
     assert.deepStrictEqual(ids((p) => p === 'rotator'), ['rotator']);
     // A host that has switched chat off loses both halves of it at once.
     assert.deepStrictEqual(ids((p) => p !== 'chat'),
@@ -542,7 +545,8 @@ t('a hidden source keeps whatever it was muted to', () => {
     // receiver is still muted when you come back to one that has a rotator. Nothing to
     // migrate, and no setting silently reversed by a change of receiver.
     n.setSourceEnabled('rotator', false);
-    assert.deepStrictEqual(n.switchableSources((p) => p !== 'rotator').map((s) => s.id),
+    assert.deepStrictEqual(
+        n.switchableSources((p) => p !== 'rotator').map((s) => s.id).filter((id) => id !== 'bridge'),
         ['antenna', 'chat-mention', 'chat-join', 'voice-callsign', 'lightning']);
     assert.strictEqual(n.sourceEnabled('rotator'), false);
 });

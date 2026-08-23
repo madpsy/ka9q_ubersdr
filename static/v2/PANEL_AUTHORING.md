@@ -268,6 +268,47 @@ font size already applies it — so **size text in `em`/`rem` and the zoom butto
 in your panel's header work**. Sizing everything in `px` opts out of them.
 Palette and zoom changes are pushed to an open panel; you need not poll.
 
+## 6a. Making it look designed
+
+Correct is not the same as finished. A panel whose content sits flush in the
+top-left at body size looks like a debug readout, however good its code is. The
+interface has a house look — these patterns are taken from its own meters:
+
+**A single reading is centred, large, monospace, and accent-coloured**, with the
+unit small and faint *after* the number and the name a quiet label:
+
+```css
+.reading {
+    display: flex; justify-content: center; align-items: baseline; gap: 10px;
+    font-family: var(--mono, monospace); font-size: 1.7em; font-weight: 600;
+    color: var(--accent, #7aa2f7); font-variant-numeric: tabular-nums;
+}
+.reading__value { min-width: 5ch; text-align: center; }
+.reading__unit  { font-size: 0.6em; font-weight: 400; letter-spacing: 0.08em;
+                  color: var(--text-faint, #6b7482); }
+.reading__name  { text-align: center; font-size: 0.85em; color: var(--text-dim, #9aa4b2); }
+```
+
+**Reserve a live value's width in `ch`.** A number growing from `7.2` to `-12.4`
+shifts everything around it on every update; `min-width: 5ch` holds the slot. Hide
+an absent value with `visibility: hidden`, not `display: none`, for the same
+reason.
+
+**Several numbers go in a two-up grid** of small boxed cells
+(`--surface-3` background, `--border`, `--radius-sm`), collapsing to one column
+below about 260 px — not a list of rows.
+
+**Centre a display; left-align a list.** A reading, a clock or a gauge is
+centred. Anything scannable needs a fixed left edge. Numbers in a column are
+right-aligned with `tabular-nums`.
+
+**One accent per panel.** It marks the thing that matters. If three things are
+accented, none of them is.
+
+**Rhythm:** 9 px between blocks, 4–6 px between tight related rows.
+
+---
+
 **The minimal view** is the operator saying "keep this, but smaller". If you
 declare `"minimal": true`, honour `sdr.minimal` by dropping what is set-and-forget
 and keeping what is watched. You decide what survives; nothing does it for you.

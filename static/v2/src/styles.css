@@ -10475,11 +10475,13 @@ a.btn { text-decoration: none; }
    all of it between the VFO letter and the digits. The row was full by
    construction — so the band and the filter width were being dropped for want of
    space that was sitting there, visibly empty, on the left.
-   Sized instead to the widest dial reading it will hold, which is what keeps the
-   digits aligned down the column, and the slack now collects at the end of the
-   row where it reads as margin. */
+   Sized instead to the widest dial reading it will hold — ten characters
+   including the grouping dots, which at 0.6em of mono advance is 6em, and this
+   receiver stops at 30 MHz — which is what keeps the digits aligned down the
+   column. 7.2em was a guess and left over an em of dead space inside the cell on
+   top of everything else. */
 .vfos__freq {
-    flex: 0 0 7.2em;
+    flex: 0 0 6.2em;
     min-width: 0;
     font-family: var(--mono);
     font-variant-numeric: tabular-nums;
@@ -10493,24 +10495,31 @@ a.btn { text-decoration: none; }
    cell after it, so a VFO with no band — outside the ham bands, or unused —
    pushed its neighbours out of line with the rows above. Each column now holds
    its place whether or not it has anything in it. */
+/* The qualifiers share whatever is left, at every width.
+   They used to sit in fixed boxes with the remainder trailing off the end of the
+   row, which is the gap this panel kept being asked about — first at the left of
+   the frequency, then at the right of the band. A floor keeps the columns lined
+   up between rows; there is deliberately no ceiling, because a ceiling is just
+   the trailing gap again on a dock dragged wide. */
+.vfos__mode,
+.vfos__width,
+.vfos__band {
+    flex: 1 1 0;
+    min-width: 2.6em;
+}
+
 .vfos__mode {
-    flex-shrink: 0;
-    width: 2.6em;
     font-size: 0.85em;
     color: var(--text-dim);
 }
 .vfos__width {
-    flex-shrink: 0;
-    width: 3.2em;
-    text-align: right;
+    min-width: 3.2em;
     font-variant-numeric: tabular-nums;
     font-size: 0.8em;
     color: var(--text-faint);
 }
 .vfos__band {
-    flex-shrink: 0;
-    width: 2.8em;
-    text-align: right;
+    min-width: 2.8em;
     font-size: 0.8em;
     color: var(--text-faint);
 }
@@ -10526,12 +10535,13 @@ a.btn { text-decoration: none; }
    The band first — it is derivable from the number beside it — then the filter
    width. The frequency and the mode are the panel, and they stay. */
 /* The thresholds are measured, not guessed: with the cells above, a row needs
-   about 262px of column to hold all five, 219px without the band and 172px
+   about 249px of column to hold all five, 206px without the band and 159px
    without the filter width too. Each cut is made just before the row would
-   otherwise have to clip the frequency. */
-@container (max-width: 268px) {
+   otherwise have to clip the frequency — and above them the qualifiers grow into
+   the spare width rather than leaving it at the end of the row. */
+@container (max-width: 252px) {
     .vfos__band { display: none; }
 }
-@container (max-width: 224px) {
+@container (max-width: 210px) {
     .vfos__width { display: none; }
 }

@@ -151,7 +151,12 @@ export default function ReceiverPanel({ minimal }) {
                 <Button variant="ghost" icon={<Icon.Plus />} title={`+ ${stepLabel(step)}`} onClick={() => actions.stepBy(step, 1)} />
             </div>
 
-            <Field label="Mode">
+            {/* No visible label: eight buttons reading USB, LSB, AM, FM… are
+                what a mode picker looks like, and a word above them only
+                restates it. The name is kept for anyone who cannot see the
+                shape — a screen reader would otherwise meet eight unexplained
+                buttons — hence the group rather than a bare div. */}
+            <div role="group" aria-label="Mode">
                 {/* Wraps to as many rows as the dock width needs: 4x2 at the
                     default width, never fewer than 3 columns when narrowed. */}
                 <Segmented
@@ -161,7 +166,7 @@ export default function ReceiverPanel({ minimal }) {
                     onChange={actions.setMode}
                     options={MODES.map((m) => ({ value: m.id, label: m.label }))}
                 />
-            </Field>
+            </div>
 
             {!minimal && (
                 <>

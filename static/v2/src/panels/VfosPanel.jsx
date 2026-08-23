@@ -75,20 +75,24 @@ export default function VfosPanel({ minimal }) {
                                 : `Switch to VFO ${v.id}`}
                         onClick={() => selectVfo(radio, v.id)}
                     >
+                        {/* Every row emits the same cells, whether or not it
+                            has anything to put in them. Rendering a cell only
+                            when it has content lets the ones after it slide
+                            along: a VFO outside a ham band has no band to show,
+                            so its mode and filter width ended up somewhere the
+                            rows above and below did not have them, and four
+                            frequencies that cannot be read down a column are the
+                            one thing this panel exists to avoid. */}
                         <span className="vfos__id">{v.id}</span>
-                        {v.empty ? (
-                            <span className="vfos__empty">unused</span>
-                        ) : (
-                            <>
-                                <span className="vfos__freq">{formatHz(v.frequency)}</span>
-                                <span className="vfos__mode">{v.mode}</span>
-                                {/* The filter width and the band are what a
-                                    narrow dock loses first: they qualify the
-                                    frequency rather than being it. */}
-                                {!minimal && v.width && <span className="vfos__width">{v.width}</span>}
-                                {!minimal && v.band && <span className="vfos__band">{v.band}</span>}
-                            </>
-                        )}
+                        <span className={`vfos__freq${v.empty ? ' is-empty' : ''}`}>
+                            {v.empty ? 'unused' : formatHz(v.frequency)}
+                        </span>
+                        <span className="vfos__mode">{v.empty ? '' : v.mode}</span>
+                        {/* The filter width and the band qualify the frequency
+                            rather than being it, so they are what a cut-down
+                            view drops first. */}
+                        {!minimal && <span className="vfos__width">{v.empty ? '' : v.width}</span>}
+                        {!minimal && <span className="vfos__band">{v.empty ? '' : (v.band || '')}</span>}
                     </button>
                 ))}
             </div>

@@ -10420,7 +10420,17 @@ a.btn { text-decoration: none; }
 /* The VFOs panel: four rows, one per VFO, laid out rather than collapsed into
    the Receiver panel's row of buttons. A row is a button because clicking it
    switches; it reads as a table because that is what it is for. */
-.vfos { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vfos {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    /* Measured against the dock column, not the window. A side dock is 220–560px
+       wide and the operator drags that edge, so a viewport media query would ask
+       about the wrong thing entirely — it would still be answering "desktop"
+       while the column was squeezed to nothing. */
+    container-type: inline-size;
+}
 
 .vfos__row {
     display: flex;
@@ -10455,21 +10465,60 @@ a.btn { text-decoration: none; }
 }
 
 /* Reserved width, tabular figures: these change as the dial moves and a column
-   that reflows on every turn is unreadable. */
+   that reflows on every turn is unreadable.
+   `overflow: hidden` is the guard that stops the number drawing *over* the mode
+   beside it: a flex item with min-width 0 will happily shrink its box while its
+   text keeps its own width, and the two then occupy the same pixels. */
 .vfos__freq {
     flex: 1;
     min-width: 0;
     font-family: var(--mono);
     font-variant-numeric: tabular-nums;
     text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.vfos__mode { flex-shrink: 0; width: 3.2em; font-size: 0.85em; color: var(--text-dim); }
-.vfos__width { flex-shrink: 0; font-size: 0.8em; color: var(--text-faint); }
-.vfos__band { flex-shrink: 0; font-size: 0.8em; color: var(--text-faint); }
-.vfos__empty { flex: 1; font-size: 0.85em; color: var(--text-faint); }
+/* Fixed widths, not shrink-to-fit. A cell that sizes to its content moves every
+   cell after it, so a VFO with no band — outside the ham bands, or unused —
+   pushed its neighbours out of line with the rows above. Each column now holds
+   its place whether or not it has anything in it. */
+.vfos__mode {
+    flex-shrink: 0;
+    width: 3.2em;
+    font-size: 0.85em;
+    color: var(--text-dim);
+}
+.vfos__width {
+    flex-shrink: 0;
+    width: 3.4em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8em;
+    color: var(--text-faint);
+}
+.vfos__band {
+    flex-shrink: 0;
+    width: 3em;
+    text-align: right;
+    font-size: 0.8em;
+    color: var(--text-faint);
+}
+/* An unused slot says so in the frequency's own column, so the word sits where
+   the numbers do rather than starting a layout of its own. */
+.vfos__freq.is-empty {
+    font-family: var(--font);
+    font-size: 0.85em;
+    color: var(--text-faint);
+}
 
-/* Narrow dock: the qualifiers go before the frequency does. */
-@media (max-width: 260px) {
+/* Narrow dock: the qualifiers go before the frequency does, one at a time.
+   The band first — it is derivable from the number beside it — then the filter
+   width. The frequency and the mode are the panel, and they stay. */
+@container (max-width: 300px) {
     .vfos__band { display: none; }
+}
+@container (max-width: 240px) {
+    .vfos__width { display: none; }
 }

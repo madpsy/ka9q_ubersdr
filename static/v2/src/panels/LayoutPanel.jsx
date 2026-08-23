@@ -25,7 +25,7 @@ function panelSource(from) {
 const FLOAT_MIN_PCT = 50;
 
 /** One panel: whether it is shown at all, and which dock it lives in. */
-function PanelRow({ panel, hidden, onShown, placement, onPlace }) {
+function PanelRow({ panel, hidden, onShown, placement, onPlace, minimal }) {
     return (
         <div className="layout-row">
             <div className="layout-row__head">
@@ -38,8 +38,12 @@ function PanelRow({ panel, hidden, onShown, placement, onPlace }) {
                 about code the operator pulled off a shared collector, and this
                 row is the only place it gets asked — a built-in panel needs
                 nothing of the sort. Turning it off does not merely hide it: a
-                hidden panel is never mounted, so nothing of it runs. */}
-            {panel.custom && (
+                hidden panel is never mounted, so nothing of it runs.
+
+                It is a paragraph per custom panel, which is why the minimal view
+                drops it: read once when the panel arrives, and never again. The
+                full view is a scroll away. */}
+            {panel.custom && !minimal && (
                 <div className="note note--tight">{panelSource(panel.custom)}</div>
             )}
             <Segmented
@@ -52,7 +56,7 @@ function PanelRow({ panel, hidden, onShown, placement, onPlace }) {
     );
 }
 
-export default function LayoutPanel() {
+export default function LayoutPanel({ minimal }) {
     const { sections, movePanel, setSectionHidden, resetLayout, placementOf } = useLayout();
     const d = useDisplay();
     const applies = usePanelApplies();
@@ -91,6 +95,7 @@ export default function LayoutPanel() {
             onShown={(on) => setSectionHidden(p.id, !on)}
             placement={placementOf(p.id)}
             onPlace={(dock) => movePanel(p.id, dock, null)}
+            minimal={minimal}
         />
     );
 
@@ -100,42 +105,51 @@ export default function LayoutPanel() {
 
     return (
         <div className="stack">
-            <Field
-                label="Float opacity"
-                hint={floatPct < 100 ? `${floatPct} %` : 'solid'}
-            >
-                <Slider
-                    value={floatPct}
-                    min={FLOAT_MIN_PCT}
-                    max={100}
-                    step={5}
-                    onChange={(v) => d.set({ floatOpacity: v / 100 })}
-                />
-            </Field>
-            <div className="note note--tight">
-                Floating windows rest at this opacity and go solid when you
-                point at them. At 100 % they are always solid.
-            </div>
+            {/* Everything above the list is set once and left — the resting
+                opacity of a floating window, what the dock chooser and the
+                window buttons mean, and whether the list is grouped. The list
+                itself is what the panel is opened for, so it is all the minimal
+                view keeps. */}
+            {!minimal && (
+                <>
+                    <Field
+                        label="Float opacity"
+                        hint={floatPct < 100 ? `${floatPct} %` : 'solid'}
+                    >
+                        <Slider
+                            value={floatPct}
+                            min={FLOAT_MIN_PCT}
+                            max={100}
+                            step={5}
+                            onChange={(v) => d.set({ floatOpacity: v / 100 })}
+                        />
+                    </Field>
+                    <div className="note note--tight">
+                        Floating windows rest at this opacity and go solid when
+                        you point at them. At 100 % they are always solid.
+                    </div>
 
-            <div className="divider" />
+                    <div className="divider" />
 
-            <div className="note note--tight">
-                Drag a panel by its header to move it between docks, or set its
-                place here. Drag a dock edge to resize. <strong>Float</strong>
-                detaches a panel into a window you can move and resize; − parks
-                it in the strip along the bottom, and × drops it back into its
-                dock.
-            </div>
+                    <div className="note note--tight">
+                        Drag a panel by its header to move it between docks, or
+                        set its place here. Drag a dock edge to resize.{' '}
+                        <strong>Float</strong> detaches a panel into a window you
+                        can move and resize; − parks it in the strip along the
+                        bottom, and × drops it back into its dock.
+                    </div>
 
-            <Segmented
-                size="sm"
-                value={grouped ? 'groups' : 'all'}
-                onChange={(v) => setGrouped(v === 'groups')}
-                options={[
-                    { value: 'groups', label: 'Grouped', title: 'The same groups the phone tab bar uses' },
-                    { value: 'all', label: 'All', title: 'Every panel in one list' },
-                ]}
-            />
+                    <Segmented
+                        size="sm"
+                        value={grouped ? 'groups' : 'all'}
+                        onChange={(v) => setGrouped(v === 'groups')}
+                        options={[
+                            { value: 'groups', label: 'Grouped', title: 'The same groups the phone tab bar uses' },
+                            { value: 'all', label: 'All', title: 'Every panel in one list' },
+                        ]}
+                    />
+                </>
+            )}
             {grouped && (
                 <div className="layout-groupbar">
                     <Button
@@ -188,9 +202,11 @@ export default function LayoutPanel() {
                 <div className="layout-list">{shown.map(row)}</div>
             )}
 
-            <div className="row-end">
-                <Button size="sm" variant="ghost" icon={<Icon.Reset />} onClick={resetLayout}>Reset layout</Button>
-            </div>
+            {!minimal && (
+                <div className="row-end">
+                    <Button size="sm" variant="ghost" icon={<Icon.Reset />} onClick={resetLayout}>Reset layout</Button>
+                </div>
+            )}
         </div>
     );
 }

@@ -25,7 +25,7 @@ globalThis.removeEventListener = () => {};
 
 const {
     deep, render, reset, walk, words,
-    LayoutPanel, PANELS, DEFAULTS, GROUPS, SOLO, allGroupsFor,
+    LayoutPanel, PANEL_BY_ID, PANELS, DEFAULTS, GROUPS, SOLO, allGroupsFor,
 } = require('./.build/layoutpanel.cjs');
 
 let pass = 0;
@@ -148,6 +148,47 @@ t('All lists every panel at once', () => {
     assert.strictEqual(rows, listed().length);
     // And with no grouping there is nothing to collapse.
     assert.ok(!words(out.tree).includes('Collapse all'));
+});
+
+// --- the minimal view --------------------------------------------------------
+
+t('the header offers a minimal view at all', () => {
+    // Without this the toggle never appears and the branch below is dead code.
+    assert.strictEqual(PANEL_BY_ID.layout.minimal, true);
+});
+
+t('minimal keeps the list and drops everything set once', () => {
+    reset();
+    const { tree } = render(LayoutPanel, { minimal: true }, context());
+    const text = words(tree);
+    assert.ok(!text.includes('Float opacity'), 'no opacity slider');
+    assert.ok(!text.includes('always solid'), 'nor the line under it');
+    assert.ok(!text.includes('Grouped'), 'no grouped/flat choice');
+    assert.ok(!text.includes('Reset layout'));
+    assert.ok(!walk(tree).some((n) => n.props?.className === 'divider'));
+    // What it is for: the groups, and the collapse pair that works them.
+    assert.ok(text.includes('Collapse all'));
+    const heads = deep(tree).filter((n) => n.props?.className === 'layout-group__head');
+    assert.strictEqual(heads.length, allGroupsFor(listed()).length);
+});
+
+t('minimal drops a custom panel\'s provenance line', () => {
+    reset();
+    const mine = { id: 'mine', title: 'Mine', group: 'shack', custom: { callsign: 'M0ABC', version: '1.2' } };
+    const props = {
+        panel: mine, hidden: false, onShown() {}, placement: 'left', onPlace() {},
+    };
+    // The row component itself, both ways round: no custom panel ships in this
+    // build, so the provenance line has to be provoked rather than found. Open a
+    // group first — a collapsed one draws no rows to take the component from.
+    let out = render(LayoutPanel, {}, context());
+    walk(out.tree).find((n) => n.props?.className === 'layout-group__head').props.onClick();
+    out = render(LayoutPanel, {}, context());
+    const Row = walk(out.tree).find((n) => typeof n.type === 'function' && n.props?.panel).type;
+    reset();
+    assert.ok(words(Row({ ...props })).includes('M0ABC'), 'the full row says who wrote it');
+    reset();
+    assert.ok(!words(Row({ ...props, minimal: true })).includes('M0ABC'));
 });
 
 t('the count beside a group is how many of it are on', () => {

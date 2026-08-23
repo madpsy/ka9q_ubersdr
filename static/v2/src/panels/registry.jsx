@@ -829,7 +829,18 @@ const BUILT_IN = [
         minimal: true,
         Component: GamesPanel,
     },
-    { id: 'layout', title: 'Layout', icon: <Icon.Layers />, dock: 'right', defaultOpen: false, Component: LayoutPanel },
+    // Minimal: the list of panels alone, in its groups. The float opacity, what
+    // the dock chooser means and the grouped/flat choice are all set once and
+    // left; what brings somebody back here is turning one panel on or off.
+    {
+        id: 'layout',
+        title: 'Layout',
+        icon: <Icon.Layers />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: LayoutPanel,
+    },
     // What the receiver has told you lately, and how much it is allowed to interrupt.
     // Closed by default: the toasts are the feature and they need no panel open to
     // appear — this is where you come to read one you missed or to turn them down.

@@ -377,6 +377,52 @@ function fakeDeps(over = {}) {
         resetPanelHosts();
     });
 
+    await ta('a handler is given the current value, not only later changes', async () => {
+        // The failure this prevents: the page API is a patch protocol, so a
+        // topic that does not change after subscribing produces no message at
+        // all. A panel that draws only from its handler then never draws — and
+        // the first panel anybody wrote did exactly that, sitting on its own
+        // "Loading…" for ever once the session had settled.
+        resetPanelHosts();
+        setPanelDeps(fakeDeps());
+        const scope = fakeFrame();
+        const api = startPanelRuntime(scope);
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+
+        const sdr = await api.ready();
+        const seen = [];
+        sdr.on('tuning', (t) => seen.push(t));
+        await sdr.subscribe(['tuning']);
+        await settle();
+
+        // Nothing has *changed* — no publish has happened at all — and the
+        // handler must still have been given the opening value.
+        assert.ok(seen.length > 0, 'the handler was never given the current value');
+        assert.strictEqual(seen[0].frequency, 14074000);
+        resetPanelHosts();
+    });
+
+    await ta('a handler registered after subscribing is given it too', async () => {
+        resetPanelHosts();
+        setPanelDeps(fakeDeps());
+        const scope = fakeFrame();
+        const api = startPanelRuntime(scope);
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+
+        const sdr = await api.ready();
+        await sdr.subscribe(['tuning']);
+        const seen = [];
+        sdr.on('tuning', (t) => seen.push(t));
+        await settle();
+
+        assert.ok(seen.length > 0, 'a late handler was never given the current value');
+        resetPanelHosts();
+    });
+
     await ta('a panel hears a topic it subscribed to', async () => {
         resetPanelHosts();
         setPanelDeps(fakeDeps());

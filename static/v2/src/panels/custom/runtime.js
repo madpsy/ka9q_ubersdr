@@ -140,11 +140,69 @@ export function startPanelRuntime(global) {
         // can be handed a reference to it.
         let storeSnapshot = {};
 
+        // `on` and `subscribe`, with the opening value delivered.
+        //
+        // The page API is a *patch* protocol: subscribing answers with a
+        // snapshot, and everything after that is a diff against what this client
+        // was last sent. A topic that does not change therefore produces no
+        // further message at all — correct, and a trap.
+        //
+        // The natural way to write a panel is to register a handler and let it
+        // draw whatever arrives:
+        //
+        //     sdr.on('session', (s) => { running = s.running; render(); });
+        //     await sdr.subscribe(['session']);
+        //
+        // which never draws anything if the session is already running and
+        // stays that way. The panel sits on its own "Loading…" for ever, and it
+        // looks like a broken panel rather than a misread contract. It bit the
+        // first panel anybody wrote, and it would bite every one after it.
+        //
+        // So here a handler is given the current value as soon as there is one,
+        // and subscribing delivers its snapshot to the handlers already
+        // registered. `client.state(topic)` is still the synchronous read for
+        // anyone who wants it. This is the panel runtime's own courtesy — the
+        // shared client keeps the strict protocol, which is what extensions and
+        // the tests in test/bridge*.test.js are written against.
+        const deliverSoon = (fn, value) => {
+            if (value === null || value === undefined) return;
+            Promise.resolve().then(() => {
+                try { fn(value); } catch (e) { console.error('[ubersdr] handler threw', e); }
+            });
+        };
+
+        const localListeners = new Map();
+        const emitLocal = (topic, value) => {
+            const set = localListeners.get(topic);
+            if (!set || value === null || value === undefined) return;
+            for (const fn of Array.from(set)) deliverSoon(fn, value);
+        };
+
+        const on = (topic, fn) => {
+            const off = client.on(topic, fn);
+            if (!localListeners.has(topic)) localListeners.set(topic, new Set());
+            localListeners.get(topic).add(fn);
+            deliverSoon(fn, client.state(topic));
+            return () => {
+                const set = localListeners.get(topic);
+                if (set) set.delete(fn);
+                return off();
+            };
+        };
+
+        const subscribe = async (topics, opts) => {
+            const value = await client.subscribe(topics, opts);
+            for (const topic of Array.isArray(topics) ? topics : [topics]) {
+                emitLocal(topic, client.state(topic));
+            }
+            return value;
+        };
+
         const sdr = {
-            // Everything BRIDGE_API.md documents, unchanged.
-            on: (topic, fn) => client.on(topic, fn),
+            // Everything BRIDGE_API.md documents, plus the opening value.
+            on,
             get: (topic) => client.get(topic),
-            subscribe: (topics, opts) => client.subscribe(topics, opts),
+            subscribe,
             command: (name, args) => client.command(name, args),
             run: (fn, event) => client.run(fn, event),
             // `describe()` rather than a property: the client keeps the last

@@ -149,6 +149,17 @@ await sdr.subscribe(['tuning', 'signal']);
 sdr.on('tuning', (t) => { /* t.frequency, t.mode, t.bandwidthLow, … */ });
 const now = await sdr.get('signal');   // one-off read
 sdr.state('tuning');                   // last value, synchronously, once subscribed
+```
+
+**`on` is given the current value, not only later changes.** Underneath, the page
+API is a *patch* protocol — subscribing answers with a snapshot and everything
+after is a diff — so a topic that does not change produces no further message at
+all. A handler that drew only from its own callback would never draw on a
+receiver that was already tuned and running, and the panel would sit on its own
+"Loading…" for ever. The panel runtime seeds your handler with the opening value,
+whether you register it before or after `subscribe`.
+
+```js
 
 // ── Driving it ───────────────────────────────────────────────────────────────
 await sdr.command('tune', { frequency: 14074000, mode: 'usb' });

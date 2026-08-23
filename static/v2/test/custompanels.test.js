@@ -338,6 +338,26 @@ const reply = (status, body, etag) => async () => ({
         assert.deepStrictEqual(invented, [], 'icons the guide promises that do not exist');
     });
 
+    t('the guide and the skill list the real built-in panel titles', () => {
+        // These are copies, and a copy of a list is a thing that goes stale. If
+        // they drift, an author is told a name is free when it is not.
+        const meta = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'dist', 'panel-meta.json'), 'utf8'));
+        const skillPath = '/home/nathan/repos/ubersdr-claude/skills/create-panel/SKILL.md';
+        const docs = [['the guide', guide]];
+        if (fs.existsSync(skillPath)) docs.push(['the skill', fs.readFileSync(skillPath, 'utf8')]);
+
+        for (const [what, text] of docs) {
+            const from = text.indexOf('pick a title that is yours');
+            assert.ok(from > 0, what + ' no longer names the taken titles');
+            const block = text.slice(text.indexOf('```', from) + 3);
+            // Split on the separator *and* on line ends: the list wraps, and a
+            // wrapped line has no separator at its break.
+            const listed = block.slice(0, block.indexOf('```')).split(/[·\n]/).map((t) => t.trim()).filter(Boolean);
+            const missing = meta.titles.filter((t) => !listed.includes(t));
+            assert.deepStrictEqual(missing, [], what + ' omits taken titles');
+        }
+    });
+
     t('the guide lists exactly the groups that exist', () => {
         // Scoped to the Groups section: the manifest table above it is also rows
         // of backticked lowercase names, and matching those made this pass for
@@ -450,6 +470,36 @@ const reply = (status, body, etag) => async () => ({
             const invented = [...new Set(used)].filter((v) => !real.has(v));
             assert.deepStrictEqual(invented, [], what + ' uses variables that do not exist');
         }
+    });
+
+    t('the generated meta lists the built-in titles, so a clash can be warned about', () => {
+        const meta = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'dist', 'panel-meta.json'), 'utf8'));
+        const real = PANELS.filter((p) => !p.custom).map((p) => p.title).sort();
+        assert.deepStrictEqual((meta.titles || []).slice().sort(), [...new Set(real)].sort());
+    });
+
+    t('a custom panel can never take a built-in panel\'s id, whatever it is called', () => {
+        // Titles can collide and that is only confusing. Ids cannot, and that is
+        // the part that would actually break something: PANEL_BY_ID is a map, so
+        // a duplicate would shadow the real panel — and if it shadowed the
+        // Layout panel, the way to unhide anything would go with it.
+        const hostile = PANELS.filter((p) => !p.custom).slice(0, 8).map((p) => ({
+            id: p.id,                       // the built-in's own id
+            version: 1,
+            manifest: { ui: 2, title: p.title, icon: 'Custom', group: 'shack' },
+        }));
+        const out = panelEntries(hostile, makeStub, new Set(PANELS.map((p) => p.id)));
+        assert.deepStrictEqual(out, [], 'a manifest claimed a built-in id');
+
+        // And the same title on a properly namespaced id is allowed through —
+        // it is a display clash, not a structural one.
+        const twin = panelEntries(
+            [{ id: 'x:twin', version: 1, manifest: { ui: 2, title: 'Signal', icon: 'Custom', group: 'shack' } }],
+            makeStub,
+        );
+        assert.strictEqual(twin.length, 1);
+        assert.strictEqual(twin[0].title, 'Signal');
+        assert.notStrictEqual(twin[0].id, 'signal');
     });
 
     t('the worked example uses a real icon and a real group', () => {

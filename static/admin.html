@@ -13282,6 +13282,16 @@ function resetStationIdColor() {
                 if (manifest.group && !panelMeta.groups.includes(manifest.group)) {
                     problems.push('"' + manifest.group + '" is not one of the phone groups (' + panelMeta.groups.join(', ') + ')');
                 }
+                // A title clash is not an error — ids cannot collide, so nothing
+                // breaks — but two rows with the same name in the layout manager
+                // and two identical tabs on a phone are worth avoiding while the
+                // author is still looking at the field.
+                const clash = (panelMeta.titles || []).find(
+                    (t) => manifest.title && t.toLowerCase() === String(manifest.title).toLowerCase());
+                if (clash) {
+                    problems.push('a built-in panel is already called "' + clash
+                        + '" — both will appear under that name in the layout manager');
+                }
             }
             // Its code has to be a module, or `await ubersdr.ready()` will not
             // even parse in the frame. The collector refuses this too; saying so

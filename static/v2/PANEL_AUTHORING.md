@@ -90,6 +90,50 @@ field, not the panel.
 
 ---
 
+### Names and clashes
+
+Two different things, and only one of them matters.
+
+**Ids cannot collide.** A panel's registry id is `x:` plus the collector's own
+UUID, so it can never be the same as another panel's or as a built-in's
+(`receiver`, `layout`, `signal`). A manifest cannot choose it and cannot claim
+one. This is the part that would actually break something — the registry is a
+map, and a duplicate would shadow the real panel — so it is prevented
+structurally rather than by convention.
+
+**Titles can collide, and nothing stops them.** Call your panel "Signal" and
+there will be two rows called Signal in the layout manager, two identical tabs on
+a phone, and two identical dock headers. Nothing breaks; the operator just cannot
+tell them apart. The admin editor warns when a title matches a built-in, but a
+clash with another *custom* panel it cannot see coming.
+
+So: **pick a title that is yours.** These names are already taken by the
+interface's own panels:
+
+```
+Addons · Announcements · Antenna switch · Audio · Audio filters
+Audio scope · Backup · Band plan · Bands · Band Spectrum · Bookmarks
+Callsign lookup · Chat · Display · Doppler · DX cluster · Events
+Extensions · HFDL · IF Spectrum · Layout · Lightning · Listeners
+Local bookmarks · Markers · Media controls · Mini Games · Most used
+Multipad · NAVTEX · News · Noise reduction · Notifications · Packet
+Quick bands · Radio control · Ranking · Receiver · Receiver info
+Recorder · Rotator · SDR control · Shortcuts · Signal · Space weather
+Spectrogram · Spots · SSTV · Voice activity · Voice skimmer · Weather
+Weather fax · World clocks
+```
+
+The authoritative list for this receiver is in `/v2/dist/panel-meta.json` under
+`titles`. If your panel does much the same job as a built-in one, say what is
+different about it — "Spots (CW only)" — rather than reusing the name.
+
+Nothing else clashes. Unlike the classic interface, where every widget shared one
+page, a panel is its own document: your CSS, your element ids, your variables and
+your stored keys are yours alone and cannot touch another panel's or the
+receiver's.
+
+---
+
 ## 3. Icons
 
 `icon` names one of the interface's own glyphs, so your panel looks like the ones

@@ -87,6 +87,13 @@ panel_meta() {
         printf '  ],\n  "groups": [\n'
         grep -oE "^        id: '[a-z]+'," src/panels/groups.jsx \
             | sed -E "s/.*id: '([a-z]+)',/    \"\1\",/" | sed '$ s/,$//'
+        # The names already taken. Nothing stops a custom panel reusing one —
+        # ids cannot collide, titles can — but two rows called "Signal" in the
+        # layout manager is something the editor should warn about rather than
+        # let an operator discover.
+        printf '  ],\n  "titles": [\n'
+        grep -oE "title: '[^']+'" src/panels/registry.jsx \
+            | sed -E "s/title: '(.*)'/    \"\1\",/" | sort -u | sed '$ s/,$//'
         printf '  ]\n}\n'
     } > dist/panel-meta.json
 }

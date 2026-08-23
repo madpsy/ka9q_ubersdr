@@ -8,7 +8,7 @@
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useLayout } from '../layout/LayoutContext.jsx';
-import { PANEL_BY_ID } from '../panels/registry.jsx';
+import { PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import ExtensionWindow from '../extensions/ExtensionWindow.jsx';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 import FloatingPanel from './FloatingPanel.jsx';
@@ -126,7 +126,18 @@ export default function FloatingLayer() {
         }
     }, [floats, setFloat, bounds.current && bounds.current.width, bounds.current && bounds.current.height]);
 
-    const visible = floatOrder.filter((id) => PANEL_BY_ID[id] && !sections[id]?.hidden);
+    // The same gate the docks, the mobile tabs and the layout manager apply —
+    // see usePanelApplies. Floating was the one place that listed panels without
+    // asking, and a custom panel is the case where that shows: its placement is
+    // a shared preference while the panel itself belongs to one receiver, so a
+    // window floated on the receiver that has it opened on the receiver that
+    // does not, drew, and sat there saying it could not be loaded. Docked, the
+    // same panel simply did not appear.
+    const applies = usePanelApplies();
+    const visible = floatOrder.filter((id) => {
+        const p = PANEL_BY_ID[id];
+        return p && !sections[id]?.hidden && applies(p);
+    });
     // The chip strip keeps floatOrder, so minimising a window does not shuffle
     // the row; z-order among the remaining windows is unaffected either. The
     // extension chip goes last, matching where its window paints.

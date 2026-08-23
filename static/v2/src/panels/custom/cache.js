@@ -105,17 +105,39 @@ function publish(list) {
 /**
  * Fetch the enabled set and revalidate the cache.
  *
- * A 304 means nothing has changed and the cache stands. Anything else that goes
- * wrong — offline, a receiver too old to have this endpoint, a proxy returning
- * HTML — leaves the cache alone as well: the panels an operator enabled do not
- * stop existing because one request failed, and clearing them would take the
- * layout entries with them on the next load.
+ * A 304 means nothing has changed and the cache stands. A request that *failed*
+ * — offline, a timeout, a 5xx, a proxy returning HTML — leaves the cache alone
+ * as well: the panels an operator enabled do not stop existing because one
+ * request failed.
+ *
+ * A 404 is neither of those, and treating it as a failure was a bug. It is the
+ * receiver answering: there is no such endpoint here, so there are no custom
+ * panels here. Keeping a list across that answer only matters when the list came
+ * from somewhere else — and it can, because the desktop and mobile clients share
+ * settings between receivers, so an arrangement made on the receiver that has a
+ * panel is carried to the one that does not. The stale entry then passes the
+ * gate in registry.jsx (which asks this cache what is enabled), the panel is
+ * drawn, and its body 404s too: "This panel could not be loaded", permanently,
+ * on a receiver that never had it.
+ *
+ * Clearing is safe in the way the old comment feared it was not. A layout entry
+ * for a panel the registry does not know is *parked*, not destroyed — see
+ * reconcile() in layout/LayoutContext.jsx — so going back to the receiver that
+ * does serve the panel puts it back where it was.
  */
+const GONE = new Set([404, 410]);
+
 export async function refreshPanels() {
     try {
         const headers = etag ? { 'If-None-Match': etag } : undefined;
         const res = await fetch(ENDPOINT, { headers, cache: 'no-store' });
         if (res.status === 304) return cachedPanels();
+        // The receiver has answered, and the answer is "nothing". Note the etag
+        // goes too: whatever it was validating is not on this receiver.
+        if (GONE.has(res.status)) {
+            etag = null;
+            return publish([]);
+        }
         if (!res.ok) return cachedPanels();
 
         const body = await res.json();

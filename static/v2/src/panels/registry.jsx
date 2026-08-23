@@ -1009,9 +1009,10 @@ export const PANEL_BY_ID = Object.fromEntries(PANELS.map((p) => [p.id, p]));
 /**
  * A predicate for "does this panel apply to the receiver we are connected to".
  *
- * Every place that lists panels — both docks, the mobile tab bar and the layout
- * manager — has to agree, or a panel could be hidden in one and offered in
- * another. So the gate lives here rather than being spelled out three times.
+ * Every place that lists panels — both docks, the floating layer, the mobile tab
+ * bar and the layout manager — has to agree, or a panel could be hidden in one
+ * and offered in another. So the gate lives here rather than being spelled out
+ * four times.
  *
  * `requires` gets `/api/description` first, because that is what nearly every
  * gate asks about, and an environment object second for the ones that need

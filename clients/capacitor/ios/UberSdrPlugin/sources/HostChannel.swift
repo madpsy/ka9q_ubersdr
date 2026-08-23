@@ -418,8 +418,9 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     /// localStorage — without this every receiver would open at the defaults.
     /// receiver.js reports what changed; the next receiver opened is seeded with
     /// it from the document-start script. The desktop client does the same
-    /// (clients/electron/receiver-preload.js); the Android client is the one
-    /// that has not caught up yet.
+    /// (clients/electron/receiver-preload.js), and so does the Android client
+    /// (Prefs.java) — all three keep the same exclusion list, so a key that
+    /// stops being shared has to stop in all of them.
     private func savePrefs(_ message: [String: Any]) {
         guard let reported = message["map"] as? [String: String] else { return }
 
@@ -443,6 +444,11 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         //     sessionStorage and cannot reach here anyway; named because "this
         //     key is deliberately not shared" is a decision rather than an
         //     accident of where a value happens to sit today.
+        //   * `ubersdr.v2.panels`, the custom panels this receiver serves.
+        //     A fact about the receiver rather than a preference: seeded into
+        //     another instance it registers panels that instance has never
+        //     heard of, and the operator is shown "This panel could not be
+        //     loaded" for one of them.
         var clean: [String: String] = [:]
         for (key, value) in reported where Self.isShared(key) {
             clean[key] = value
@@ -546,16 +552,37 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
             && !key.hasPrefix("ubersdr.v2.news.cache.")
             && key != "ubersdr.v2.radio"
             && key != "ubersdr.v2.password"
+            // Which custom panels a receiver serves: a fact about that
+            // receiver rather than a preference. Shared, it seeds one
+            // instance's panel registry from another's, and the operator is
+            // shown "This panel could not be loaded" for a panel that receiver
+            // never had. Excluded first by the desktop client, then here.
+            && key != "ubersdr.v2.panels"
     }
 
     static func prefsLiteral(scope: String?, instanceId: String) -> String {
-        // The stored text straight through — it is already the JSON object
-        // literal the seed script needs, exactly as Prefs.snapshot() is on
-        // Android. "null" when nothing has been kept yet, which is what tells
+        // "null" when nothing has been kept yet, which is what tells
         // receiver.js that this receiver is the template rather than one that
         // arrived after somebody had already arranged things.
         guard let json = UserDefaults.standard.string(forKey: prefsKey(scope: scope, instanceId: instanceId)),
               !json.isEmpty, json != "{}" else { return "null" }
-        return json
+
+        // Filtered on the way out as well as on the way in, exactly as
+        // Prefs.snapshot() is on Android. savePrefs replaces the stored blob
+        // whole, so a key that stops being shared leaves the store only when
+        // some receiver next reports — and until then the seed script writes
+        // whatever it is handed straight into localStorage before the page's
+        // first script runs. Without this, a newly excluded key goes on being
+        // seeded for one more launch, which is one more launch of the bug it
+        // was excluded to fix.
+        guard let data = json.data(using: .utf8),
+              let stored = (try? JSONSerialization.jsonObject(with: data)) as? [String: String]
+        else { return "null" }
+        let clean = stored.filter { isShared($0.key) }
+        guard !clean.isEmpty,
+              let out = try? JSONSerialization.data(withJSONObject: clean),
+              let text = String(data: out, encoding: .utf8)
+        else { return "null" }
+        return text
     }
 }

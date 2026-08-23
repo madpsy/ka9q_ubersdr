@@ -60,7 +60,28 @@ function tellHost(message) {
 
 const PREFIX = 'ubersdr.v2.';
 const SKIP_PREFIX = 'ubersdr.v2.news.cache.';
-const SKIP_EXACT = new Set(['ubersdr.v2.radio', ...INSTANCE_SECRETS]);
+const SKIP_EXACT = new Set([
+    'ubersdr.v2.radio',
+    // Which custom panels a receiver serves is a fact about *that* receiver,
+    // not a preference to be adopted from another one — the same exclusion, and
+    // the same reasoning, as clients/electron/receiver-preload.js, which see.
+    //
+    // Shared, it seeds the panel registry from the wrong instance: the
+    // arrangement carries a placement for the foreign panel, the registry is
+    // built from this cache before the first render, and the enabled set the
+    // panel is gated on comes from this cache too — so it is registered, placed
+    // and drawn, and then cannot fetch a body this receiver has never heard of.
+    // What the operator sees is "This panel could not be loaded" on a receiver
+    // that never had the panel. Where /api/v2/panels answers, the next poll
+    // corrects it; where it does not — an older receiver, or one without the
+    // addon — the stale list stands and the message is permanent.
+    //
+    // The layout beside it is deliberately still shared: an arrangement is a
+    // preference, and a placement for a panel this receiver does not have is
+    // parked harmlessly rather than dropped.
+    'ubersdr.v2.panels',
+    ...INSTANCE_SECRETS,
+]);
 
 // Settings change at human speed; this is a copy of a few kilobytes.
 const POLL_MS = 2000;

@@ -220,6 +220,47 @@ const reply = (status, body, etag) => async () => ({
         assert.strictEqual(cachedPanels().length, 1);
     });
 
+    await ta('a 404 clears it — the receiver has answered', async () => {
+        // Not a failed request: the receiver has said there is no such endpoint,
+        // so there are no custom panels here. Keeping the list matters only when
+        // it came from another receiver, which is exactly what the desktop and
+        // mobile clients' shared settings do — and then the stale entry passes
+        // the gate, the panel is drawn, and it says it could not be loaded on a
+        // receiver that never had it. Permanently, because every later poll gets
+        // the same 404 and kept the list too.
+        resetPanelCache(SEEDED.slice(0, 1));
+        await withFetch(reply(404, null), async () => { await refreshPanels(); });
+        assert.deepStrictEqual(cachedPanels(), [], 'a 404 must empty the cache');
+        assert.strictEqual(panelIds().size, 0, 'the gate still thinks it is enabled');
+    });
+
+    await ta('a 410 does the same', async () => {
+        resetPanelCache(SEEDED.slice(0, 1));
+        await withFetch(reply(410, null), async () => { await refreshPanels(); });
+        assert.deepStrictEqual(cachedPanels(), []);
+    });
+
+    await ta('a 404 after a good answer drops the etag with the list', async () => {
+        // Or the next receiver to answer 200 would be asked to validate against
+        // an etag from a different one, and could reply 304 — leaving the empty
+        // list standing on a receiver that does serve panels.
+        resetPanelCache([]);
+        await withFetch(reply(200, { etag: '"a"', panels: SEEDED }, '"a"'), async () => {
+            await refreshPanels();
+        });
+        assert.ok(cachedPanels().length > 0);
+        await withFetch(reply(404, null), async () => { await refreshPanels(); });
+        assert.deepStrictEqual(cachedPanels(), []);
+
+        let sentMatch = 'unset';
+        await withFetch(async (url, init) => {
+            sentMatch = init && init.headers ? init.headers['If-None-Match'] : undefined;
+            return { status: 200, ok: true, headers: { get: () => '"b"' }, json: async () => ({ panels: SEEDED }) };
+        }, async () => { await refreshPanels(); });
+        assert.strictEqual(sentMatch, undefined, 'a stale etag was sent after the 404');
+        assert.ok(cachedPanels().length > 0, 'the list did not come back');
+    });
+
     await ta('a good answer replaces it, and is written back', async () => {
         resetPanelCache([]);
         await withFetch(reply(200, { etag: '"x"', panels: SEEDED }, '"x"'), async () => {

@@ -58,6 +58,14 @@ final class Prefs {
     private static final String SKIP_PREFIX = "ubersdr.v2.news.cache.";
     private static final String SKIP_RADIO = "ubersdr.v2.radio";
     private static final String SKIP_PASSWORD = "ubersdr.v2.password";
+    /**
+     * The custom panels a receiver serves. A fact about that receiver, not a
+     * preference — see clients/electron/receiver-preload.js, which excluded it
+     * first, and src/receiver.js here. Shared, it seeds one instance's panel
+     * registry from another's, and the operator is shown "This panel could not
+     * be loaded" for a panel the receiver never had.
+     */
+    private static final String SKIP_PANELS = "ubersdr.v2.panels";
 
     /** Where a receiver's own snapshot lives, when settings are not shared. */
     private static final String PER_RECEIVER = "prefs:";
@@ -161,10 +169,38 @@ final class Prefs {
         edit.apply();
     }
 
-    /** The snapshot as JSON text, or "null" when nothing has been kept yet. */
+    /**
+     * The snapshot as JSON text, or "null" when nothing has been kept yet.
+     *
+     * Filtered on the way out as well as on the way in, and that is not
+     * belt-and-braces: {@link #update} rewrites the stored blob whole, so a key
+     * that stops being shared leaves the store only when some receiver next
+     * reports. Until then it is still in there, and the seed script writes
+     * whatever it is handed straight into localStorage before the page's first
+     * script runs — so a newly excluded key would go on being seeded for one
+     * more launch, which is one more launch of exactly the bug it was excluded
+     * to fix.
+     */
     String snapshot() {
         String saved = store.getString(key, null);
-        return saved == null ? "null" : saved;
+        if (saved == null) return "null";
+        try {
+            JSONObject stored = new JSONObject(saved);
+            JSONObject clean = new JSONObject();
+            for (Iterator<String> keys = stored.keys(); keys.hasNext(); ) {
+                String k = keys.next();
+                if (!shared(k)) continue;
+                String value = stored.optString(k, null);
+                if (value != null) clean.put(k, value);
+            }
+            return clean.toString();
+        } catch (JSONException e) {
+            // Written by update() and nothing else, so this is a store somebody
+            // has been at by hand or a half-written value. Seeding nothing is
+            // the safe answer: this receiver becomes the template.
+            Log.w(TAG, "shared settings could not be read", e);
+            return "null";
+        }
     }
 
     /** Replaces the snapshot with what a receiver reported, filtered. */
@@ -190,6 +226,7 @@ final class Prefs {
                 && key.startsWith(PREFIX)
                 && !key.startsWith(SKIP_PREFIX)
                 && !SKIP_RADIO.equals(key)
-                && !SKIP_PASSWORD.equals(key);
+                && !SKIP_PASSWORD.equals(key)
+                && !SKIP_PANELS.equals(key);
     }
 }

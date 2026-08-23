@@ -464,6 +464,7 @@ node layout.test.js
 node custompanels.test.js
 node panelhost.test.js
 node floatdrag.test.js
+node panelgate.test.js
 node weather.test.js
 node radiosync.test.js
 node audiowaterfall.test.js

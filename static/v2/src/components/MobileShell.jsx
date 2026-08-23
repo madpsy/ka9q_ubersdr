@@ -173,7 +173,15 @@ export default function MobileShell() {
     const menu = menuId ? groups.find((g) => g.id === menuId) || null : null;
     // The extension wins the sheet: opening one is the more recent choice, and
     // it is opened from a panel that would otherwise sit on top of it.
-    const panel = extension ? null : (openId ? PANEL_BY_ID[openId] : null);
+    // Through `visible`, not through PANEL_BY_ID: the row is gated and the sheet
+    // has to be gated with it. A sheet chosen by id alone would draw a panel
+    // this receiver does not serve — the row would not offer it, and it would be
+    // on screen anyway. `openId` is not remembered between visits, so this is a
+    // guard rather than a thing that happens daily; it is here because every
+    // other surface that draws a panel asks the same question, and the one that
+    // did not is what put "This panel could not be loaded" on a receiver that
+    // never had the panel. See usePanelApplies.
+    const panel = extension ? null : (openId ? visible.find((p) => p.id === openId) || null : null);
     // A group is lit when the sheet showing belongs to it, which is the only way
     // to tell where you are once the row is groups rather than panels. Below
     // `panel` and not above it: a const read before its declaration is a

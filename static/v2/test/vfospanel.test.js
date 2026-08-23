@@ -35,11 +35,14 @@ globalThis.cancelAnimationFrame = () => {};
 globalThis.addEventListener = () => {};
 globalThis.removeEventListener = () => {};
 
-// The scan's timer, held rather than run: setInterval here hands back the
-// callback so a tick is a function call and 250 ms of real time never passes.
+// The scan's timer, held rather than run: setTimeout here hands back the
+// callback so a tick is a function call and no real time ever passes. The scan
+// reschedules per hop rather than running one interval, because a hop that
+// changes mode dwells longer than one that does not — so `timer` is whatever
+// the last hop asked for, and timer.ms is the dwell being asserted on.
 let timer = null;
-globalThis.setInterval = (fn, ms) => { timer = { fn, ms }; return timer; };
-globalThis.clearInterval = (h) => { if (h === timer) timer = null; };
+globalThis.setTimeout = (fn, ms) => { timer = { fn, ms }; return timer; };
+globalThis.clearTimeout = (h) => { if (h === timer) timer = null; };
 
 const { render, reset, walk, VfosPanel, getVfos, setVfos } = require('./.build/vfospanel.cjs');
 
@@ -80,6 +83,9 @@ function context(over = {}) {
         ...over,
     };
 }
+
+// One dwell elapsing: the held callback runs and schedules the next hop.
+const fire = () => { const t = timer; timer = null; t.fn(); };
 
 const byClass = (tree, cls) => walk(tree).filter((n) => (
     typeof n.props?.className === 'string' && n.props.className.split(' ').includes(cls)
@@ -127,12 +133,12 @@ t('scanning steps to the next VFO in use, skipping the empty one', () => {
 
     // A quiet channel: the gate has not opened since we landed.
     clock += 250;
-    timer.fn();
+    fire();
     assert.strictEqual(getVfos().active, 'C');
 
     // D holds nothing, so the cycle wraps past it rather than seeding it.
     clock += 250;
-    timer.fn();
+    fire();
     assert.strictEqual(getVfos().active, 'A', 'the scan stepped onto the unused VFO');
     assert.strictEqual(getVfos().slots.D, null, 'the unused VFO was filled by the scan');
 });
@@ -169,7 +175,7 @@ t('the scan stops where the squelch opens', () => {
     clock += 200;
     ctx.meters.current.lastGateOpenAt = clock;
     clock += 50;
-    timer.fn();
+    fire();
 
     assert.strictEqual(getVfos().active, 'B', 'the scan stepped off a signal');
     const stopped = render(VfosPanel, {}, ctx).tree;
@@ -196,8 +202,58 @@ t('a gate left open by the VFO before this one does not stop the scan', () => {
     // Nothing further arrives, so that stale reading is all there is: it must
     // not be taken as a signal on B.
     clock += 250;
-    timer.fn();
+    fire();
     assert.strictEqual(getVfos().active, 'C', 'the scan stopped on the VFO after the signal');
+});
+
+t('a hop that changes mode dwells long enough to hear it', () => {
+    // The server holds the audio gate shut across a mode change: radiod reloads
+    // a preset, rebuilds the filter and restarts the demodulator, and until it
+    // confirms the new channel there is deliberately nothing to hear. A hop
+    // judged inside that window finds silence on a busy VFO and steps over it,
+    // which is the same missed signal as stopping on noise, in the other
+    // direction.
+    reset();
+    setVfos({
+        active: 'A',
+        slots: {
+            A: null,
+            B: { ...slot(7100000), mode: 'am' },   // usb -> am
+            C: slot(3573000),                      // am -> usb
+            D: null,
+        },
+    });
+    const ctx = context();
+    render(VfosPanel, {}, ctx);
+    scanBtn(render(VfosPanel, {}, ctx).tree).props.onClick();
+    render(VfosPanel, {}, ctx);
+
+    assert.strictEqual(getVfos().active, 'B');
+    assert.strictEqual(timer.ms, 600, 'a hop onto another mode took the plain dwell');
+
+    // A signal arriving inside the settling window is the server's silence
+    // ending, not this VFO answering, so it must not stop the scan.
+    clock += 200;
+    ctx.meters.current.lastGateOpenAt = clock;
+    clock += 400;
+    fire();
+    assert.strictEqual(getVfos().active, 'C', 'the scan stopped inside the settling window');
+});
+
+t('a hop that keeps the mode keeps the short dwell', () => {
+    // Only mode changes cost anything, so the common case must not be slowed
+    // down: four same-mode VFOs still come round in a second.
+    reset();
+    threeInUse();
+    const ctx = context();
+    render(VfosPanel, {}, ctx);
+    scanBtn(render(VfosPanel, {}, ctx).tree).props.onClick();
+    render(VfosPanel, {}, ctx);
+
+    assert.strictEqual(timer.ms, 250, 'a same-mode hop took the mode-change dwell');
+    clock += 250;
+    fire();
+    assert.strictEqual(timer.ms, 250);
 });
 
 t('picking a VFO by hand ends the scan', () => {
@@ -259,7 +315,7 @@ t('the squelch going off under a running scan stops it', () => {
     // matters is that the next dwell does not.
     const parked = getVfos().active;
     clock += 250;
-    timer.fn();
+    fire();
     assert.strictEqual(getVfos().active, parked, 'the scan kept stepping with nothing to stop it');
     assert.strictEqual(scanBtn(render(VfosPanel, {}, ctx).tree).props.children, 'Scan');
 });

@@ -38,6 +38,12 @@ type RadiodController struct {
 	// expires. See markTerminated.
 	terminatedMu sync.Mutex
 	terminated   map[uint32]time.Time
+
+	// Spacing between commands to one audio channel, so two of ours never land
+	// in the same radiod block and get one of them dropped. See
+	// radiod_audio_pacing.go.
+	audioPacerOnce sync.Once
+	audioCmdPacer  *audioCommandPacer
 }
 
 // SetSpectrumFFTAverages sets the SPECTRUM_AVG value used for new spectrum
@@ -364,7 +370,7 @@ func (rc *RadiodController) SetAGC(ssrc uint32, params AGCParams) error {
 	buf = encodeInt32(&buf, tagCommandTag, uint32(time.Now().Unix()))
 	buf = append(buf, tagEOL)
 
-	if err := rc.sendCommand(buf); err != nil {
+	if err := rc.sendAudioCommand(ssrc, buf); err != nil {
 		return fmt.Errorf("failed to send AGC params for SSRC 0x%08x: %w", ssrc, err)
 	}
 	return nil
@@ -442,7 +448,7 @@ func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint
 	}
 
 	// Send command
-	if err := rc.sendCommand(buf); err != nil {
+	if err := rc.sendAudioCommand(ssrc, buf); err != nil {
 		return fmt.Errorf("failed to send create command: %w", err)
 	}
 
@@ -604,39 +610,103 @@ func buildUpdateSpectrumCommand(ssrc uint32, u spectrumUpdate) []byte {
 // bandwidthLow and bandwidthHigh are the filter edges in Hz (can be negative for low edge)
 // sendBandwidth controls whether to send bandwidth parameters
 func (rc *RadiodController) UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error {
-	return rc.UpdateChannelWithSquelch(ssrc, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, nil, nil)
+	return rc.UpdateChannelWithAGC(ssrc, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, nil)
+}
+
+// UpdateChannelWithAGC updates a channel and, in the same command, overrides the
+// AGC parameters the preset would otherwise impose.  agc == nil leaves the AGC alone.
+//
+// One command, not three.  See buildUpdateCommand for why that matters.
+func (rc *RadiodController) UpdateChannelWithAGC(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, agc *AGCParams) error {
+	return rc.UpdateChannelFull(ssrc, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, nil, nil, agc)
 }
 
 // UpdateChannelWithSquelch updates an existing channel including optional squelch parameters
 // squelchOpen and squelchClose are pointers to allow nil (no change) vs 0.0 (valid value)
 // Special value: squelchOpen=-999 sets "always open" mode (sends -999 for both thresholds)
 func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, squelchOpen, squelchClose *float32) error {
-	// Build control command with SSRC to identify the channel
+	return rc.UpdateChannelFull(ssrc, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, squelchOpen, squelchClose, nil)
+}
+
+// UpdateChannelFull is the one place a channel update is sent, carrying every
+// parameter that may have to change together.
+func (rc *RadiodController) UpdateChannelFull(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, squelchOpen, squelchClose *float32, agc *AGCParams) error {
+	if err := rc.sendAudioCommand(ssrc, buildUpdateCommand(ssrc, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, squelchOpen, squelchClose, agc)); err != nil {
+		return fmt.Errorf("failed to send update command: %w", err)
+	}
+	return nil
+}
+
+// buildUpdateCommand builds the channel update packet.
+//
+// Everything a retune changes travels in this one packet, and the tag order is
+// load-bearing.  Both facts come from how radiod handles commands:
+//
+//   - Its per-channel command queue holds exactly one entry, and a command
+//     arriving while that entry is still pending is DROPPED, silently
+//     (ka9q-radio src/radio_status.c, "An entry already exists. Drop ours").
+//     The channel thread drains the queue once per block, so two commands sent
+//     back to back are a coin toss.  This is what a mode change used to work
+//     around by sleeping 500 ms between sending the mode and sending the
+//     bandwidth -- half a second in which the channel ran the preset's filter
+//     and the preset's AGC instead of the ones asked for.  One packet cannot
+//     race itself.
+//
+//   - Tags are decoded in packet order (decode_radio_commands), and PRESET
+//     loads a preset that overwrites the filter edges and the AGC settings.
+//     So PRESET goes first and everything it would clobber goes after it,
+//     where it wins: LOW_EDGE/HIGH_EDGE assign chan->filter.min_IF/max_IF
+//     directly, and AGC_HANGTIME/AGC_RECOVERY_RATE/AGC_THRESHOLD assign
+//     chan->linear.*.  If the preset also changed the demod type or sample
+//     rate, radiod restarts the demod thread afterwards and rebuilds the
+//     filter from those same overridden edges.
+//
+// Moving PRESET after the edges, or splitting this packet in two, silently
+// restores the old behaviour -- see TestBuildUpdateCommandOrdering.
+func buildUpdateCommand(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, squelchOpen, squelchClose *float32, agc *AGCParams) []byte {
 	buf := make([]byte, 0, 1500)
 
 	// Start with CMD packet type
-	buf = append(buf, 1) // CMD = 1
+	buf = append(buf, pktTypeCmd)
 
 	// Add SSRC (tag 18 = 0x12) - identifies which channel to update
-	buf = encodeInt32(&buf, 0x12, ssrc)
+	buf = encodeInt32(&buf, tagOutputSSRC, ssrc)
 
 	// Add RADIO_FREQUENCY (tag 33 = 0x21) if provided
 	if frequency > 0 {
-		buf = encodeDouble(&buf, 0x21, float64(frequency))
+		buf = encodeDouble(&buf, tagRadioFrequency, float64(frequency))
 	}
 
-	// Add PRESET (tag 85 = 0x55) if provided
+	// Add PRESET (tag 85 = 0x55) if provided.  Everything below overrides it.
 	if mode != "" {
-		buf = encodeString(&buf, 0x55, mode)
+		buf = encodeString(&buf, tagPreset, mode)
 	}
 
 	// Add bandwidth via LOW_EDGE and HIGH_EDGE if requested
 	if sendBandwidth {
-		// Add LOW_EDGE (tag 39 = 0x27)
-		buf = encodeFloat(&buf, 0x27, float32(bandwidthLow))
+		buf = encodeFloat(&buf, tagLowEdge, float32(bandwidthLow))
+		buf = encodeFloat(&buf, tagHighEdge, float32(bandwidthHigh))
+	}
 
-		// Add HIGH_EDGE (tag 40 = 0x28)
-		buf = encodeFloat(&buf, 0x28, float32(bandwidthHigh))
+	// AGC overrides.  A preset reload resets all of these, so on a mode change
+	// they have to ride along with the mode rather than chase it.
+	if agc != nil {
+		if agc.Enable != nil {
+			val := byte(0)
+			if *agc.Enable {
+				val = 1
+			}
+			buf = encodeByte(&buf, tagAgcEnable, val)
+		}
+		if agc.HangTime != nil {
+			buf = encodeFloat(&buf, tagAgcHangtime, *agc.HangTime)
+		}
+		if agc.RecoveryRate != nil {
+			buf = encodeFloat(&buf, tagAgcRecoveryRate, *agc.RecoveryRate)
+		}
+		if agc.Threshold != nil {
+			buf = encodeFloat(&buf, tagAgcThreshold, *agc.Threshold)
+		}
 	}
 
 	// Add optional squelch parameters
@@ -657,7 +727,7 @@ func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint
 	// With default blocktime of 20ms, 5 frames = 100ms (10 Hz update rate)
 	// This must be sent with every update because mode changes reload presets
 	// which reset output_interval to the preset default (25 frames = 500ms)
-	buf = encodeInt32(&buf, 0x6A, 5)
+	buf = encodeInt32(&buf, tagStatusInterval, 5)
 
 	// LIFETIME, so that an update racing a teardown cannot leave an immortal
 	// channel behind: radiod creates a channel for any command naming an unknown
@@ -666,17 +736,12 @@ func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint
 	buf = encodeInt32(&buf, tagLifetime, audioLifetimeFrames)
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
-	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+	buf = encodeInt32(&buf, tagCommandTag, uint32(time.Now().Unix()))
 
 	// Add EOL marker
-	buf = append(buf, 0)
+	buf = append(buf, tagEOL)
 
-	// Send command
-	if err := rc.sendCommand(buf); err != nil {
-		return fmt.Errorf("failed to send update command: %w", err)
-	}
-
-	return nil
+	return buf
 }
 
 // UpdateSquelch updates only the squelch thresholds for an existing channel
@@ -726,7 +791,7 @@ func (rc *RadiodController) UpdateSquelch(ssrc uint32, squelchOpen, squelchClose
 	buf = append(buf, 0)
 
 	// Send command
-	if err := rc.sendCommand(buf); err != nil {
+	if err := rc.sendAudioCommand(ssrc, buf); err != nil {
 		return fmt.Errorf("failed to send squelch update command: %w", err)
 	}
 
@@ -823,7 +888,7 @@ func buildKeepaliveCommand(ssrc uint32, lifetimeFrames uint32) []byte {
 
 // RefreshAudioLifetime resets the self-destruct timer on an audio channel.
 func (rc *RadiodController) RefreshAudioLifetime(ssrc uint32) error {
-	if err := rc.sendCommand(buildKeepaliveCommand(ssrc, audioLifetimeFrames)); err != nil {
+	if err := rc.sendAudioCommand(ssrc, buildKeepaliveCommand(ssrc, audioLifetimeFrames)); err != nil {
 		return fmt.Errorf("failed to refresh lifetime for SSRC 0x%08x: %w", ssrc, err)
 	}
 	return nil
@@ -873,6 +938,11 @@ func (rc *RadiodController) markTerminated(ssrc uint32) {
 	}
 	rc.terminated[ssrc] = now
 	rc.terminatedMu.Unlock()
+
+	// Nothing more will be sent to this channel, so stop tracking when it last
+	// was -- otherwise a long-lived receiver keeps one entry per session it has
+	// ever served.
+	rc.audioPacer().Forget(ssrc)
 
 	// Drop it from the status cache in the same breath, so the admin panel stops
 	// showing the channel at once rather than waiting for the stale sweep. Taken

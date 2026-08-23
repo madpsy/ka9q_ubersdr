@@ -720,52 +720,29 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	// Store WebSocket connection reference in session for kick functionality
 	session.WSConn = conn
 
-	// Apply bandwidth parameters (either from URL or mode-specific defaults)
-	// Wide IQ modes (iq48, iq96, iq192, iq384) should use their preset bandwidth values
-	// Note: wideIQModes is already defined earlier in this function
-
+	// Apply the bandwidth, and with it the AGC overrides for USB/LSB.
+	//
+	// One command, for the same reason a mode change is one command: the create
+	// that just went out loaded a preset, which set both the filter edges and
+	// the AGC, and radiod's per-channel command queue holds a single entry and
+	// silently drops anything arriving while it is occupied.  This used to be
+	// two commands with a 500 ms sleep between them, on a goroutine, to keep
+	// them apart.
+	//
+	// Wide IQ modes (iq48, iq96, iq192, iq384) keep their preset bandwidth, and
+	// are never USB or LSB, so they need no command at all here.
 	if !wideIQModes[mode] {
-		// Not a wide IQ mode - apply bandwidth settings
-		var bwl, bwh int
+		bwl, bwh := defaultBandwidthForMode(mode)
 		if bandwidthLow != nil && bandwidthHigh != nil {
 			// Both bandwidth parameters provided in URL - use them
 			bwl = *bandwidthLow
 			bwh = *bandwidthHigh
-
 		} else {
-			// No bandwidth parameters in URL - apply mode-specific defaults
-			// These match the defaults in app.js setMode() function
-			switch mode {
-			case "usb":
-				bwl = 50
-				bwh = 2700
-			case "lsb":
-				bwl = -2700
-				bwh = -50
-			case "am", "sam":
-				bwl = -5000
-				bwh = 5000
-			case "cwu", "cwl":
-				bwl = -200
-				bwh = 200
-			case "fm":
-				bwl = -8000
-				bwh = 8000
-			case "nfm":
-				bwl = -5000
-				bwh = 5000
-			case "iq":
-				bwl = -5000
-				bwh = 5000
-			default:
-				bwl = 50
-				bwh = 3000
-			}
 			log.Printf("Applying mode-specific bandwidth defaults for %s: %d to %d Hz", mode, bwl, bwh)
 		}
 
-		// Update session with bandwidth
-		if err := wsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", bwl, bwh, true); err != nil {
+		if err := wsh.sessions.UpdateSessionChannel(session.ID, 0, "", bwl, bwh, true,
+			wsh.ssbAGCFor(session, mode)); err != nil {
 			log.Printf("Failed to apply bandwidth: %v", err)
 			wsh.sendError(conn, "Failed to apply bandwidth: "+err.Error())
 			wsh.sessions.DestroySession(session.ID)
@@ -774,47 +751,6 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	} else {
 		// Wide IQ mode - use preset bandwidth values, don't override
 		log.Printf("WIDEIQ_SKIP_BANDWIDTH: mode=%s session=%s", mode, session.ID)
-	}
-
-	// Push AGC defaults to radiod after session creation for USB/LSB modes.
-	// radiod loads its preset asynchronously when a channel is created, which resets AGC
-	// to preset defaults. We must wait for that preset load to complete before sending
-	// our overrides — the same race that affects mode changes (see time.Sleep at line ~967).
-	// Done in a goroutine so the 500ms wait does not block connection setup or audio streaming.
-	// For USB/LSB only — other modes (AM, FM, CW, etc.) have appropriate AGC in their own presets.
-	// Priority: user override (always nil on a brand-new session) > operator config default.
-	if mode == "usb" || mode == "lsb" {
-		cfgHang := float32(1.1)
-		cfgRecov := float32(20.0)
-		cfgThresh := float32(-15.0)
-		if wsh.config != nil {
-			if wsh.config.Server.SSBAgcDefaults.HangTimeS != nil {
-				cfgHang = *wsh.config.Server.SSBAgcDefaults.HangTimeS
-			}
-			if wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS != nil {
-				cfgRecov = *wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS
-			}
-			if wsh.config.Server.SSBAgcDefaults.ThresholdDb != nil {
-				cfgThresh = *wsh.config.Server.SSBAgcDefaults.ThresholdDb
-			}
-		}
-		session.mu.RLock()
-		initialAGC := AGCParams{
-			HangTime:     coalesceF32(session.UserAGCHangTime, cfgHang),
-			RecoveryRate: coalesceF32(session.UserAGCRecoveryRate, cfgRecov),
-			Threshold:    coalesceF32(session.UserAGCThreshold, cfgThresh),
-		}
-		session.mu.RUnlock()
-		sessionID := session.ID
-		go func() {
-			// Wait for radiod to finish loading the preset before applying overrides.
-			// Same delay used after mode changes for the same reason.
-			time.Sleep(500 * time.Millisecond)
-			if err := wsh.sessions.UpdateAGC(sessionID, initialAGC); err != nil {
-				log.Printf("Warning: failed to apply initial AGC for session %s: %v", sessionID, err)
-				// Non-fatal — radiod will use its own preset values
-			}
-		}()
 	}
 
 	// Subscribe to audio
@@ -838,6 +774,70 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		currentSession.ID, currentSession.SSRC)
 	wsh.audioReceiver.ReleaseChannelAudio(currentSession)
 	wsh.sessions.DestroySession(currentSession.ID)
+}
+
+// defaultBandwidthForMode is the filter a mode gets when nothing more specific
+// was asked for.  These match the defaults the frontends apply, so a mode change
+// made from the UI and one made straight over the WebSocket land on the same
+// passband.
+//
+// radiod's own preset would otherwise decide, and its presets are wider than
+// what a listener wants -- which is audible as a burst of extra noise for as
+// long as the preset filter is the one in circuit.
+func defaultBandwidthForMode(mode string) (low, high int) {
+	switch mode {
+	case "usb":
+		return 50, 2700
+	case "lsb":
+		return -2700, -50
+	case "am", "sam":
+		return -5000, 5000
+	case "cwu", "cwl":
+		return -200, 200
+	case "fm":
+		return -8000, 8000
+	case "nfm":
+		return -5000, 5000
+	case "iq":
+		return -5000, 5000
+	default:
+		return 50, 3000
+	}
+}
+
+// ssbAGCFor is the AGC to send with a change to `mode`, or nil to leave radiod's
+// preset alone.
+//
+// USB and LSB only.  Their presets carry AGC settings that suit a data channel
+// rather than a listener, so the operator's defaults -- or the user's overrides
+// on top of them -- are applied every time the preset reloads.  Every other mode
+// keeps what its preset says.
+func (wsh *WebSocketHandler) ssbAGCFor(session *Session, mode string) *AGCParams {
+	if mode != "usb" && mode != "lsb" {
+		return nil
+	}
+	// presets.conf values, used only if LoadConfig somehow left these nil.
+	cfgHang := float32(1.1)
+	cfgRecov := float32(20.0)
+	cfgThresh := float32(-15.0)
+	if wsh.config != nil {
+		if wsh.config.Server.SSBAgcDefaults.HangTimeS != nil {
+			cfgHang = *wsh.config.Server.SSBAgcDefaults.HangTimeS
+		}
+		if wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS != nil {
+			cfgRecov = *wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS
+		}
+		if wsh.config.Server.SSBAgcDefaults.ThresholdDb != nil {
+			cfgThresh = *wsh.config.Server.SSBAgcDefaults.ThresholdDb
+		}
+	}
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return &AGCParams{
+		HangTime:     coalesceF32(session.UserAGCHangTime, cfgHang),
+		RecoveryRate: coalesceF32(session.UserAGCRecoveryRate, cfgRecov),
+		Threshold:    coalesceF32(session.UserAGCThreshold, cfgThresh),
+	}
 }
 
 // handleMessages processes incoming WebSocket messages
@@ -987,111 +987,40 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				}
 
 				// Special handling when mode changes:
-				// Mode change triggers preset reload in radiod which resets bandwidth
-				// So we need to send mode first, then send bandwidth separately with mode-specific defaults
+				// A mode change reloads radiod's preset, which resets both the
+				// filter edges and the AGC.  Mode, edges and AGC therefore go in
+				// one command: radiod's command queue is one deep and drops what
+				// it cannot hold, so a follow-up command is not just late, it may
+				// be lost -- which is what the 500 ms sleep that used to sit here
+				// was really working around, at the cost of half a second of
+				// preset-width audio through a reset AGC on every mode change.
 				if modeChanged {
-					// Step 1: Send mode change (and frequency if it also changed)
 					updateFreq := uint64(0)
 					if freqChanged {
 						updateFreq = newFreq
 					}
 
-					if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, updateFreq, newMode, 0, 0, false); err != nil {
-						wsh.sendError(conn, "Failed to update mode: "+err.Error())
-						continue
-					}
-
-					// CRITICAL: Wait for radiod to process mode change and load preset
-					// Without this delay, the bandwidth command arrives before preset is loaded
-					// 500ms gives radiod enough time to fully process the preset
-					time.Sleep(500 * time.Millisecond)
-
-					// Apply AGC parameters after preset reload.
-					// The preset reload triggered by the mode change resets radiod's AGC to preset defaults.
-					// For USB/LSB: always apply — using user overrides if set, operator config defaults otherwise.
-					// For other modes (AM, FM, CW, etc.): do nothing — their presets set appropriate AGC values.
-					if newMode == "usb" || newMode == "lsb" {
-						// Read config defaults, falling back to presets.conf values if nil (should not happen after LoadConfig).
-						cfgHang := float32(1.1)
-						cfgRecov := float32(20.0)
-						cfgThresh := float32(-15.0)
-						if wsh.config != nil {
-							if wsh.config.Server.SSBAgcDefaults.HangTimeS != nil {
-								cfgHang = *wsh.config.Server.SSBAgcDefaults.HangTimeS
-							}
-							if wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS != nil {
-								cfgRecov = *wsh.config.Server.SSBAgcDefaults.RecoveryRateDbS
-							}
-							if wsh.config.Server.SSBAgcDefaults.ThresholdDb != nil {
-								cfgThresh = *wsh.config.Server.SSBAgcDefaults.ThresholdDb
-							}
-						}
-						currentSession.mu.RLock()
-						reapplyAGC := AGCParams{
-							HangTime:     coalesceF32(currentSession.UserAGCHangTime, cfgHang),
-							RecoveryRate: coalesceF32(currentSession.UserAGCRecoveryRate, cfgRecov),
-							Threshold:    coalesceF32(currentSession.UserAGCThreshold, cfgThresh),
-						}
-						currentSession.mu.RUnlock()
-						if err := wsh.sessions.UpdateAGC(currentSession.ID, reapplyAGC); err != nil {
-							log.Printf("Warning: failed to apply AGC after mode change to %s for session %s: %v", newMode, currentSession.ID, err)
-							// Non-fatal — continue with bandwidth update
-						}
-					}
-
-					// Step 2: Send bandwidth values that match frontend defaults for this mode
-					// Wide IQ modes (iq48, iq96, iq192, iq384) should use their preset bandwidth values
-					// Define wideIQModes for this scope
+					// Wide IQ modes (iq48, iq96, iq192, iq384) keep their preset
+					// bandwidth; everything else gets the mode's own defaults
+					// unless this tune asked for something specific.
 					wideIQModesForModeChange := map[string]bool{
 						"iq48": true, "iq96": true, "iq192": true, "iq384": true,
 					}
-
-					if !wideIQModesForModeChange[newMode] {
-						// Not a wide IQ mode - apply bandwidth settings
-						// These match the defaults in app.js setMode() function
-						var defaultLow, defaultHigh int
-						switch newMode {
-						case "usb":
-							defaultLow = 50
-							defaultHigh = 2700
-						case "lsb":
-							defaultLow = -2700
-							defaultHigh = -50
-						case "am", "sam":
-							defaultLow = -5000
-							defaultHigh = 5000
-						case "cwu", "cwl":
-							defaultLow = -200
-							defaultHigh = 200
-						case "fm":
-							defaultLow = -8000
-							defaultHigh = 8000
-						case "nfm":
-							defaultLow = -5000
-							defaultHigh = 5000
-						case "iq":
-							defaultLow = -5000
-							defaultHigh = 5000
-						default:
-							defaultLow = 50
-							defaultHigh = 3000
-						}
-
-						// Use custom bandwidth if provided, otherwise use mode defaults
-						sendBandwidthLow := defaultLow
-						sendBandwidthHigh := defaultHigh
-						if bandwidthChanged {
-							sendBandwidthLow = newBandwidthLow
-							sendBandwidthHigh = newBandwidthHigh
-						}
-
-						if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, 0, "", sendBandwidthLow, sendBandwidthHigh, true); err != nil {
-							wsh.sendError(conn, "Failed to update bandwidth after mode change: "+err.Error())
-							continue
-						}
-					} else {
-						// Wide IQ mode - use preset bandwidth values, don't override
+					sendBandwidth := !wideIQModesForModeChange[newMode]
+					sendBandwidthLow, sendBandwidthHigh := defaultBandwidthForMode(newMode)
+					if bandwidthChanged {
+						sendBandwidthLow = newBandwidthLow
+						sendBandwidthHigh = newBandwidthHigh
+					}
+					if !sendBandwidth {
 						log.Printf("Using preset bandwidth for wide IQ mode after mode change: %s", newMode)
+					}
+
+					if err := wsh.sessions.UpdateSessionChannel(currentSession.ID, updateFreq, newMode,
+						sendBandwidthLow, sendBandwidthHigh, sendBandwidth,
+						wsh.ssbAGCFor(currentSession, newMode)); err != nil {
+						wsh.sendError(conn, "Failed to update mode: "+err.Error())
+						continue
 					}
 				} else {
 					// No mode change - send frequency and/or bandwidth changes together
@@ -1704,12 +1633,27 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 // meter agrees with the waterfall.  It is added to both figures, so it cancels
 // out of the SNR and only moves the absolute readings.  Callers must NOT hold
 // session.mu.
+//
+// This is also where a retune settles.  The cached channel status keeps
+// describing the previous channel until radiod answers the mode change, and
+// reporting those figures as current would be a measurement of a channel nobody
+// is listening to any more -- read by the S-meter, and read by the audio gate,
+// which is how a squelch ends up opening on a mode it never measured.  So the
+// figures are withheld until the new channel has answered, and settleRetune is
+// driven from here because this runs on every packet and already holds the
+// status the decision needs.
 func (wsh *WebSocketHandler) signalQualityFor(session *Session, version int) (basebandPower, noise float32) {
 	basebandPower, noise = SignalUnavailable, SignalUnavailable
 	if version < 2 || wsh.sessions == nil || wsh.sessions.radiod == nil {
+		// No way to observe radiod answering, so a settling window here would
+		// only ever expire on its timeout.  Abandon it instead.
+		session.settleRetune(nil, false, time.Now())
 		return
 	}
 	cs := wsh.sessions.radiod.GetChannelStatus(session.SSRC)
+	if !session.settleRetune(cs, true, time.Now()) {
+		return
+	}
 	if cs == nil {
 		return
 	}
@@ -1778,6 +1722,21 @@ const (
 // what its own meter shows.  A version 2 client's threshold is therefore in
 // dB·Hz and a version 3 client's in dB, and each gates on its own scale.
 func audioGateAllows(session *Session, basebandPower, noise float32) bool {
+	// A retune in progress closes the gate outright, ahead of every threshold
+	// including "disabled".
+	//
+	// What is coming out during that window is the previous channel's audio
+	// followed by the new channel's filter and AGC transient -- neither of them
+	// a measurement of anything, and both loud.  Holding it back is not a
+	// squelch decision, so it does not wait to be asked: with the squelch off
+	// the burst is simply the wrong audio, and a fifth of a second of silence
+	// is a better account of a mode change than a whoosh is.
+	//
+	// signalQualityFor advances this window; see settleRetune.
+	if session.retuning() {
+		return false
+	}
+
 	session.mu.RLock()
 	minSNR := session.AudioGateMinSNR
 	minPower := session.AudioGateMinPower

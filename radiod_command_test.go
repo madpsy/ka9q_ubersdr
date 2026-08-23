@@ -556,3 +556,92 @@ func TestTerminatedChannelLeavesTheStatusCache(t *testing.T) {
 		t.Error("status for a re-created channel was not cached")
 	}
 }
+
+// TestBuildUpdateCommandOrdering covers the channel update packet.
+//
+// Two invariants, both silent when broken and both expensive.
+//
+// Everything a retune changes must be in ONE packet: radiod's per-channel
+// command queue holds a single entry and drops anything arriving while it is
+// occupied, so a bandwidth or AGC command sent after the mode is not merely late
+// but may never be applied.  And PRESET must come FIRST, because radiod decodes
+// tags in packet order and PRESET loads a preset that overwrites both the filter
+// edges and the AGC settings -- so anything it would clobber has to be decoded
+// after it to survive.
+//
+// Get either wrong and the channel runs the preset's wide filter and the
+// preset's AGC for as long as it takes something else to fix it, which sounds
+// exactly like a burst of noise on every mode change.
+func TestBuildUpdateCommandOrdering(t *testing.T) {
+	hang, recov, thresh := float32(1.1), float32(20), float32(-15)
+	agc := &AGCParams{HangTime: &hang, RecoveryRate: &recov, Threshold: &thresh}
+
+	_, tlvs := parseCommandPacket(t, buildUpdateCommand(4242, 14_074_000, "usb", 50, 2700, true, nil, nil, agc))
+
+	indexOf := func(tag byte) int {
+		for i, e := range tlvs {
+			if e.tag == tag {
+				return i
+			}
+		}
+		return -1
+	}
+
+	preset := indexOf(tagPreset)
+	if preset < 0 {
+		t.Fatal("no PRESET in the update packet")
+	}
+	for _, c := range []struct {
+		tag  byte
+		name string
+	}{
+		{tagLowEdge, "LOW_EDGE"},
+		{tagHighEdge, "HIGH_EDGE"},
+		{tagAgcHangtime, "AGC_HANGTIME"},
+		{tagAgcRecoveryRate, "AGC_RECOVERY_RATE"},
+		{tagAgcThreshold, "AGC_THRESHOLD"},
+	} {
+		i := indexOf(c.tag)
+		if i < 0 {
+			t.Errorf("no %s in the update packet: the preset's value would stand", c.name)
+			continue
+		}
+		if i < preset {
+			t.Errorf("%s is decoded before PRESET, so the preset reload overwrites it", c.name)
+		}
+	}
+
+	if _, ok := findTLV(tlvs, tagRadioFrequency); !ok {
+		t.Error("no RADIO_FREQUENCY in the update packet")
+	}
+	if _, ok := findTLV(tlvs, tagLifetime); !ok {
+		t.Error("no LIFETIME in the update packet: an update racing a teardown would leave an immortal channel")
+	}
+	if _, ok := findTLV(tlvs, tagStatusInterval); !ok {
+		t.Error("no STATUS_INTERVAL: a preset reload resets radiod to 500 ms status updates")
+	}
+}
+
+// A retune that is not changing the AGC must not mention it. Sending the tags
+// with stale values would override the preset of whatever mode is being switched
+// to, which is precisely what the AGC override exists to do deliberately.
+func TestBuildUpdateCommandOmitsUnsetParameters(t *testing.T) {
+	_, tlvs := parseCommandPacket(t, buildUpdateCommand(4242, 0, "", 0, 0, false, nil, nil, nil))
+
+	for _, c := range []struct {
+		tag  byte
+		name string
+	}{
+		{tagPreset, "PRESET"},
+		{tagLowEdge, "LOW_EDGE"},
+		{tagHighEdge, "HIGH_EDGE"},
+		{tagAgcHangtime, "AGC_HANGTIME"},
+		{tagAgcRecoveryRate, "AGC_RECOVERY_RATE"},
+		{tagAgcThreshold, "AGC_THRESHOLD"},
+		{tagRadioFrequency, "RADIO_FREQUENCY"},
+	} {
+		if _, ok := findTLV(tlvs, c.tag); ok {
+			t.Errorf("update packet carries %s when nothing asked for it", c.name)
+		}
+	}
+}

@@ -35,6 +35,7 @@ type radiodController interface {
 	TerminateChannel(name string, ssrc uint32) error
 	UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool) error
 	UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error
+	UpdateChannelWithAGC(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, agc *AGCParams) error
 	UpdateSquelch(ssrc uint32, squelchOpen, squelchClose float32) error
 	SetAGC(ssrc uint32, params AGCParams) error
 	GetFrontendStatus(ssrc uint32) *FrontendStatus
@@ -208,6 +209,29 @@ type Session struct {
 	AudioGateMinSNR     float32
 	AudioGateMinPower   float32
 	AudioGateLastOpenAt time.Time // zero = gate never opened; reset each time a packet passes
+
+	// Retune settling.
+	//
+	// A mode change makes radiod reload a preset, which rebuilds the channel
+	// filter and restarts the demodulator.  For the block or two that takes,
+	// three things are true at once and all of them lie: the audio still coming
+	// out was demodulated by the previous channel, the cached ChannelStatus
+	// still describes the previous channel, and radiod's own AGC and noise
+	// estimate have not converged on the new one.  Judging the audio gate on any
+	// of that opens it on noise -- the reported symptom being a VFO scan that
+	// halts on empty channels whenever the mode changes between them.
+	//
+	// So a mode change opens a window in which no audio is passed and no signal
+	// figure is reported.  retuneAt is when the command went out; the window
+	// closes retuneSettleTail after radiod answers it, because radiod answers
+	// every command with a status packet (ka9q-radio src/radio.c) and the first
+	// one stamped after the command proves the new preset is in force.
+	// retuneSettleTimeout is the backstop: a status we never see must not mute
+	// the session for ever.
+	//
+	// Protected by mu.  Zero retuneAt means settled, which is the normal state.
+	retuneAt        time.Time
+	retuneSettledAt time.Time
 
 	// User-overridden AGC parameters (radiod-side — sent via set_agc).
 	// nil means the user has not overridden this field; the radiod preset value is used.
@@ -1527,18 +1551,119 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 	return nil
 }
 
+// Retune settling window.  See the retuneAt field on Session for what this is
+// protecting against.
+const (
+	// retuneSettleTail is how long after radiod acknowledges a mode change the
+	// window stays shut.  radiod sends its status response from the command
+	// decode, before the demodulator thread has restarted and rebuilt the
+	// filter, so the acknowledgement is the start of convergence rather than
+	// the end of it.  A few block times covers the rebuild and the first
+	// filter transient.
+	retuneSettleTail = 200 * time.Millisecond
+
+	// retuneSettleTimeout bounds the whole window.  If radiod never answers,
+	// something is wrong with the status path and holding the audio shut adds
+	// nothing -- there is no signal figure to gate on either, so a client with
+	// the squelch on stays quiet regardless.
+	retuneSettleTimeout = 600 * time.Millisecond
+)
+
+// beginRetune opens the settling window.  Called when a mode change is
+// commanded, before the command goes out.
+func (s *Session) beginRetune(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retuneAt = now
+	s.retuneSettledAt = time.Time{}
+	// The gate's hang timer belongs to the channel that opened it.  Left alone,
+	// up to 500 ms of the previous mode's hang carries over and holds the gate
+	// open on the new one -- which is a squelch opening on a channel it has
+	// never measured.
+	s.AudioGateLastOpenAt = time.Time{}
+}
+
+// settleRetune advances the settling window with what this packet knows, and
+// reports whether the session has settled.
+//
+// cs is the channel status as it stands, or nil if there is none.  observable
+// says whether channel status is reachable for this session at all: when it is
+// not, there is no way to see radiod answer, so the window is abandoned rather
+// than waited out.  Silence a client could never explain is worse than a
+// transient it can.
+func (s *Session) settleRetune(cs *ChannelStatus, observable bool, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.retuneAt.IsZero() {
+		return true
+	}
+	if !observable {
+		s.retuneAt = time.Time{}
+		s.retuneSettledAt = time.Time{}
+		return true
+	}
+	// Already acknowledged; just waiting out the tail.
+	if !s.retuneSettledAt.IsZero() {
+		if now.Before(s.retuneSettledAt) {
+			return false
+		}
+		s.retuneAt = time.Time{}
+		s.retuneSettledAt = time.Time{}
+		return true
+	}
+	// radiod answers every command it decodes with a status packet, so a status
+	// stamped after the command is proof that the whole command -- preset,
+	// filter edges and AGC alike -- has been applied.
+	if cs != nil && cs.LastUpdate.After(s.retuneAt) {
+		s.retuneSettledAt = now.Add(retuneSettleTail)
+		return false
+	}
+	if now.Sub(s.retuneAt) >= retuneSettleTimeout {
+		s.retuneAt = time.Time{}
+		s.retuneSettledAt = time.Time{}
+		return true
+	}
+	return false
+}
+
+// retuning reports whether the settling window is open, without advancing it.
+// settleRetune is what moves the window along; this is for the readers that
+// come after it in the same packet.
+func (s *Session) retuning() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.retuneAt.IsZero()
+}
+
 // UpdateSessionWithEdges updates an existing session's frequency, mode, and/or bandwidth edges
 // This reuses the existing channel instead of destroying and recreating it
 // Parameters with value 0 (for numbers) or "" (for strings) mean "don't change"
 // sendBandwidth controls whether to send bandwidth parameters to radiod
 func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error {
+	return sm.UpdateSessionChannel(sessionID, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, nil)
+}
+
+// UpdateSessionChannel is UpdateSessionWithEdges plus the AGC parameters, all of
+// it reaching radiod as a single command.
+//
+// Everything a mode change touches has to travel together.  radiod's preset
+// reload resets the filter edges and the AGC, and its per-channel command queue
+// holds one entry and silently drops anything that arrives while that entry is
+// still pending -- so a follow-up command is not merely late, it may never be
+// applied at all.  buildUpdateCommand carries the detail; the rule here is that
+// a caller changing the mode must pass the bandwidth and AGC it wants with it
+// rather than sending them afterwards.
+//
+// agc == nil leaves the AGC to the preset.
+func (sm *SessionManager) UpdateSessionChannel(sessionID string, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, agc *AGCParams) error {
 	session, ok := sm.GetSession(sessionID)
 	if !ok {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
 	if session.IsSpectrum {
-		return fmt.Errorf("cannot update spectrum session with UpdateSessionWithEdges, use UpdateSpectrumSession instead")
+		return fmt.Errorf("cannot update spectrum session with UpdateSessionChannel, use UpdateSpectrumSession instead")
 	}
 
 	// Validate frequency if provided - must not be below minimum
@@ -1639,9 +1764,19 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		}
 	}
 
-	// Send update command to radiod with existing SSRC
-	// radiod.UpdateChannel will handle the bandwidth edges
-	if err := sm.radiod.UpdateChannel(session.SSRC, sendFreq, sendMode, bandwidthLow, bandwidthHigh, sendBandwidth); err != nil {
+	// A mode change is the one update that leaves the channel misdescribing
+	// itself for a while, so it opens the settling window before the command
+	// goes out rather than after: audio produced from here on is the old
+	// channel's until radiod says otherwise.  Frequency and bandwidth changes
+	// take effect within a block and need no such treatment.
+	modeChanged := currentMode != oldMode
+	if modeChanged {
+		session.beginRetune(time.Now())
+	}
+
+	// Send update command to radiod with existing SSRC.  Mode, edges and AGC go
+	// as one command -- see UpdateSessionChannel.
+	if err := sm.radiod.UpdateChannelWithAGC(session.SSRC, sendFreq, sendMode, bandwidthLow, bandwidthHigh, sendBandwidth, agc); err != nil {
 		// Rollback on error
 		session.mu.Lock()
 		session.Frequency = oldFreq
@@ -1649,6 +1784,8 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.BandwidthLow = oldBandwidthLow
 		session.BandwidthHigh = oldBandwidthHigh
 		session.SampleRate = oldSampleRate
+		session.retuneAt = time.Time{}
+		session.retuneSettledAt = time.Time{}
 		session.mu.Unlock()
 		return fmt.Errorf("failed to update radiod channel: %w", err)
 	}

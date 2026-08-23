@@ -27,6 +27,17 @@ import { isIQ } from '../radio/constants.js';
 // arrived and been metered — the gate is judged on packets, not on the tune.
 const SCAN_DWELL_MS = 250;
 
+// What a hop costs when it also changes mode, which is a different kind of hop.
+//
+// A mode change makes the server reload radiod's preset, which rebuilds the
+// filter and restarts the demodulator, and the server holds the audio gate shut
+// until radiod confirms the new channel — around a fifth of a second in which
+// there is deliberately nothing to hear. Judging a channel inside that window
+// finds silence whoever is on it, so a busy VFO would be stepped over rather
+// than stopped on. These wait it out and then leave a run of packets to judge.
+const SCAN_MODE_DWELL_MS = 600;
+const SCAN_MODE_SETTLE_MS = 350;
+
 /**
  * What each slot holds, with the active one taken from live tuning.
  *
@@ -104,13 +115,31 @@ function useScan(radio, vfos) {
         // When the VFO we are on was arrived at, so the gate can be judged on
         // what has been heard since.
         let judgeFrom = 0;
+        let handle = null;
+        // Moves the scan on, and returns what this hop is worth dwelling for —
+        // 0 when there was nowhere to go. A hop that changes mode costs the
+        // server a preset reload, so it is timed differently from one that does
+        // not; see SCAN_MODE_DWELL_MS.
         const step = () => {
             const now = live.current;
             const next = nextScanVfo(now.ids, getVfos().active);
-            if (!next) { setScanning(false); return false; }
+            if (!next) { setScanning(false); return 0; }
+            const target = getVfos().slots[next];
+            const changesMode = !!target && target.mode !== now.radio.tuning.mode;
             selectVfo(now.radio, next);
-            judgeFrom = performance.now() + SCAN_SETTLE_MS;
-            return true;
+            judgeFrom = performance.now() + (changesMode ? SCAN_MODE_SETTLE_MS : SCAN_SETTLE_MS);
+            return changesMode ? SCAN_MODE_DWELL_MS : SCAN_DWELL_MS;
+        };
+        const tick = () => {
+            const now = live.current;
+            // Something went out from under the scan — the last-but-one VFO
+            // cleared, the squelch switched off, IQ selected. Stopping is the
+            // honest answer; carrying on would be stepping with nothing able to
+            // halt it.
+            if (now.blocked) { setScanning(false); return; }
+            if (meters.current.lastGateOpenAt > judgeFrom) { setScanning(false); return; }
+            const dwell = step();
+            if (dwell) handle = setTimeout(tick, dwell);
         };
         // The first move is made on the press, not a dwell later.
         //
@@ -120,18 +149,12 @@ function useScan(radio, vfos) {
         // already in the speaker, called it a stop, and never moved at all.
         // The VFO you started on is the one place a scan has no reason to
         // check: you were already there.
-        if (!step()) return undefined;
-        const timer = setInterval(() => {
-            const now = live.current;
-            // Something went out from under the scan — the last-but-one VFO
-            // cleared, the squelch switched off, IQ selected. Stopping is the
-            // honest answer; carrying on would be stepping with nothing able to
-            // halt it.
-            if (now.blocked) { setScanning(false); return; }
-            if (meters.current.lastGateOpenAt > judgeFrom) { setScanning(false); return; }
-            step();
-        }, SCAN_DWELL_MS);
-        return () => clearInterval(timer);
+        const first = step();
+        if (!first) return undefined;
+        // A timeout rescheduled per hop rather than one interval, because the
+        // dwell is no longer the same for every hop.
+        handle = setTimeout(tick, first);
+        return () => clearTimeout(handle);
     }, [scanning, meters]);
 
     return {
@@ -208,7 +231,7 @@ export default function VfosPanel({ minimal }) {
                     disabled={!scan.scanning && !!scan.blocked}
                     title={scan.scanning
                         ? 'Stop scanning'
-                        : scan.blocked || `Step through the VFOs every ${SCAN_DWELL_MS} ms and stop on the first one the squelch opens on`}
+                        : scan.blocked || `Step through the VFOs every ${SCAN_DWELL_MS} ms — longer where the mode changes — and stop on the first one the squelch opens on`}
                     onClick={scan.toggle}
                 >
                     {scan.scanning ? 'Scanning' : 'Scan'}

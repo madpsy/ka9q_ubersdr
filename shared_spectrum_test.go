@@ -44,6 +44,9 @@ func (r *stubRadiod) UpdateSpectrumChannel(ssrc uint32, freq uint64, binBW float
 func (r *stubRadiod) UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error {
 	return nil
 }
+func (r *stubRadiod) UpdateChannelWithAGC(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, agc *AGCParams) error {
+	return nil
+}
 func (r *stubRadiod) UpdateSquelch(ssrc uint32, squelchOpen, squelchClose float32) error {
 	return nil
 }

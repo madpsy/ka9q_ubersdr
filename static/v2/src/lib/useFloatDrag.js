@@ -34,10 +34,23 @@ export function useFloatDrag({ geom, bounds, min, onChange, onRaise }) {
         // the button's click depends on, and setPointerCapture() would redirect
         // the rest of the gesture to the header — between them the menu never
         // opens and the close button never fires.
-        // `.menu` covers the dropdown as well as its trigger: the panel renders
-        // inside this header, so a press on a menu item would otherwise reach
-        // the drag handler and have its click swallowed the same way.
+        // `.menu` covers the trigger and, when a dropdown renders in place,
+        // its panel: a press on a menu item would otherwise reach the drag
+        // handler and have its click swallowed the same way.
         if (mode === 'move' && e.target && e.target.closest && e.target.closest('.floatwin__ctl, .menu')) return;
+        // ...and the same press when the dropdown is *portalled*. React bubbles
+        // events from a portal to the React parent, so a menu panel rendered
+        // into <body> still arrives at this header — while `closest('.menu')`
+        // cannot see it, because in the DOM it is nowhere near here. That is
+        // precisely how the dock items in a floating window's options menu
+        // stopped being clickable when Menu started portalling its panel: the
+        // menu opened, and every item was dead.
+        //
+        // Asking whether the press landed in this header's own subtree is the
+        // question that stays true whatever gets portalled next, rather than a
+        // list of class names that goes stale the moment one of them moves.
+        if (mode === 'move' && e.currentTarget && e.target
+            && e.currentTarget.contains && !e.currentTarget.contains(e.target)) return;
         e.preventDefault();
         e.stopPropagation();
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }

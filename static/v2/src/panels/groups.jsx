@@ -1,4 +1,7 @@
-// How the panels are grouped on a phone.
+// How the panels are grouped: on a phone's tab bar, and in the layout manager's
+// list of every panel. The phone is what the grouping was drawn for and what the
+// reasoning below is about; the layout manager reuses it so that the two agree
+// about what "Tune" means. See allGroupsFor at the foot for where they differ.
 //
 // A dock is a column you scroll and read; a phone's tab bar is a row of thumb
 // targets, and fifty of them is not a row, it is a corridor. The panel you
@@ -170,4 +173,35 @@ export function groupsFor(panels) {
         const all = i === GROUPS.length - 1 ? mine.concat(spare) : mine;
         return { ...g, items: all };
     }).filter((g) => g.items.length > 0);
+}
+
+/**
+ * The same grouping, for a list that must account for every panel rather than
+ * offer the useful ones — the layout manager rather than the phone shell.
+ *
+ * Two things differ from groupsFor, and both follow from that. The solo panel
+ * is in no group and has to be somewhere, and a panel nothing claims must be
+ * visible as unclaimed rather than tucked onto the end of Setup where it reads
+ * as a Setup panel. So both land in a group of their own at the end, which is
+ * also the answer to "why is this panel not on my phone's Tune tab" being
+ * findable at all.
+ *
+ * @param panels  the panels already filtered to what may be shown.
+ */
+export function allGroupsFor(panels) {
+    const by = new Map(panels.map((p) => [p.id, p]));
+    const out = GROUPS.map((g) => ({
+        ...g,
+        items: g.panels.map((id) => by.get(id)).filter(Boolean).concat(claiming(panels, g.id)),
+    }));
+    // By what actually landed, not by NAMED: a panel claiming a group this
+    // build does not have is unclaimed here however its manifest reads.
+    const placed = new Set(out.flatMap((g) => g.items.map((p) => p.id)));
+    const spare = panels.filter((p) => !placed.has(p.id));
+    if (spare.length) {
+        out.push({
+            id: 'ungrouped', title: 'Ungrouped', icon: <Icon.Puzzle />, items: spare,
+        });
+    }
+    return out.filter((g) => g.items.length > 0);
 }

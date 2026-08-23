@@ -4703,6 +4703,42 @@ a.btn { text-decoration: none; }
 .layout-row__icon { display: grid; place-items: center; color: var(--accent); }
 .layout-row__name { flex: 1; font-size: calc(12.5px * var(--ui-scale)); }
 
+/* The same list in groups — the phone's groups, so the two agree about where a
+   panel belongs. Collapsed, a group is one row saying how many of its panels are
+   on, which is the whole reason for grouping fifty rows in the first place. */
+.layout-groupbar { display: flex; gap: 6px; }
+.layout-groups { display: flex; flex-direction: column; gap: 6px; }
+.layout-group {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    overflow: hidden;
+}
+.layout-group__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 8px;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.layout-group__head:hover { background: var(--surface-3); }
+.layout-group.is-open .layout-group__head { border-bottom: 1px solid var(--border); }
+.layout-group__chev { display: grid; place-items: center; color: var(--text-dim); }
+.layout-group__icon { display: grid; place-items: center; color: var(--accent); }
+.layout-group__name { flex: 1; font-size: calc(12.5px * var(--ui-scale)); font-weight: 600; }
+.layout-group__count {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.layout-group__body { padding: 8px; }
+
 /* Backup: one row per group of settings, each saying how much of it there is.
    The count is the point of the row — "0" beside a section is the answer to
    "did my mappings save?" — so it sits next to the switch rather than in the

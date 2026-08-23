@@ -324,6 +324,8 @@ esbuild layout.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/layout.cjs --log-level=warning
 esbuild custompanels.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/custompanels.cjs --log-level=warning
+esbuild layoutpanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/layoutpanel.cjs --log-level=warning
 esbuild panelhost.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/panelhost.cjs --log-level=warning
 esbuild floatdrag.entry.js --bundle --format=cjs --platform=node \
@@ -462,6 +464,7 @@ node bandstats.test.js
 node dispatch.test.js
 node layout.test.js
 node custompanels.test.js
+node layoutpanel.test.js
 node panelhost.test.js
 node floatdrag.test.js
 node panelgate.test.js

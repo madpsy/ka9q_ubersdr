@@ -119,8 +119,8 @@ Local bookmarks · Markers · Media controls · Mini Games · Most used
 Multipad · NAVTEX · News · Noise reduction · Notifications · Packet
 Quick bands · Radio control · Ranking · Receiver · Receiver info
 Recorder · Rotator · SDR control · Shortcuts · Signal · Space weather
-Spectrogram · Spots · SSTV · Voice activity · Voice skimmer · Weather
-Weather fax · World clocks
+Spectrogram · Spots · SSTV · VFOs · Voice activity · Voice skimmer
+Weather · Weather fax · World clocks
 ```
 
 The authoritative list for this receiver is in `/v2/dist/panel-meta.json` under

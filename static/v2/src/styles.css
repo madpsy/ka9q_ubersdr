@@ -10416,3 +10416,60 @@ a.btn { text-decoration: none; }
     border: 0;
     background: transparent;
 }
+
+/* The VFOs panel: four rows, one per VFO, laid out rather than collapsed into
+   the Receiver panel's row of buttons. A row is a button because clicking it
+   switches; it reads as a table because that is what it is for. */
+.vfos { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.vfos__row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 4px 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+}
+.vfos__row:hover { border-color: var(--accent); background: var(--surface-hover); }
+
+/* The one in use, marked by the accent rather than by a word: it is the only
+   accented thing here, so it needs no label to be found. */
+.vfos__row.is-active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+.vfos__row.is-active .vfos__id,
+.vfos__row.is-active .vfos__freq { color: var(--accent); }
+
+.vfos__id {
+    flex-shrink: 0;
+    width: 1.4em;
+    font-weight: 600;
+    color: var(--text-dim);
+}
+
+/* Reserved width, tabular figures: these change as the dial moves and a column
+   that reflows on every turn is unreadable. */
+.vfos__freq {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.vfos__mode { flex-shrink: 0; width: 3.2em; font-size: 0.85em; color: var(--text-dim); }
+.vfos__width { flex-shrink: 0; font-size: 0.8em; color: var(--text-faint); }
+.vfos__band { flex-shrink: 0; font-size: 0.8em; color: var(--text-faint); }
+.vfos__empty { flex: 1; font-size: 0.85em; color: var(--text-faint); }
+
+/* Narrow dock: the qualifiers go before the frequency does. */
+@media (max-width: 260px) {
+    .vfos__band { display: none; }
+}

@@ -46,7 +46,7 @@ export const GROUPS = [
         // which is the same question the dial itself answers and not the "what
         // is out there" that Activity's pictures answer.
         panels: [
-            'receiver', 'ifspectrum', 'markernav', 'quickbands', 'bands',
+            'receiver', 'ifspectrum', 'vfos', 'markernav', 'quickbands', 'bands',
             'bookmarks', 'localbookmarks', 'topfreq',
             'doppler', 'rotator', 'antenna',
         ],

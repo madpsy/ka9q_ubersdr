@@ -57,6 +57,7 @@ import CustomPanel from './custom/CustomPanel.jsx';
 import MultipadPanel from './MultipadPanel.jsx';
 import ReceiverPanel from './ReceiverPanel.jsx';
 import MarkerNavPanel from './MarkerNavPanel.jsx';
+import VfosPanel from './VfosPanel.jsx';
 import BandsPanel from './BandsPanel.jsx';
 import BookmarksPanel from './BookmarksPanel.jsx';
 import LocalBookmarksPanel from './LocalBookmarksPanel.jsx';
@@ -205,6 +206,19 @@ const BUILT_IN = [
         defaultOpen: false,
         minimal: true,
         Component: IFSpectrumPanel,
+    },
+    // The four VFOs, laid out. The Receiver panel's own row of A–D buttons is
+    // the control; this is the view — four frequencies readable at once rather
+    // than one at a time in a tooltip. Ships collapsed: most sessions use one
+    // VFO and never think about the others.
+    {
+        id: 'vfos',
+        title: 'VFOs',
+        icon: <Icon.Layers />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: VfosPanel,
     },
     // Under the two of them, because it is about where the dial is: what
     // is on this frequency, and what is either side of it.

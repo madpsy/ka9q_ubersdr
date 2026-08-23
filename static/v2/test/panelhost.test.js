@@ -12,7 +12,7 @@ globalThis.location = { origin: 'https://rx.example' };
 const {
     attachPanel, detachPanel, setPanelDeps, resetPanelHosts, fetchForPanel,
     publishToPanels, themeToPanels, attachedPanelIds,
-    buildSrcdoc, startPanelRuntime, writeKey, readAll,
+    buildSrcdoc, themeDeclarations, startPanelRuntime, writeKey, readAll,
 } = require('./.build/panelhost.cjs');
 
 let pass = 0;
@@ -443,6 +443,41 @@ function fakeDeps(over = {}) {
         assert.ok(doc.includes('--fg:#fff;'), 'the theme did not reach the frame');
         assert.ok(doc.includes('"minimal":true'), 'the panel is not told about the minimal view');
         assert.ok(doc.startsWith('<!doctype html>'), 'not a document');
+    });
+
+    t('the frame is told the page\'s colour scheme, or it paints itself white', () => {
+        // A frame inherits no CSS, so without a declared scheme it is a `light`
+        // document — and a light document's *canvas* is painted white by the
+        // browser. `background: transparent` on the body cannot help, because
+        // the canvas underneath is what is painted. Every panel then sits on a
+        // white slab in a dark receiver, however well its author used the theme
+        // variables.
+        const saved = globalThis.getComputedStyle;
+        globalThis.getComputedStyle = () => ({
+            getPropertyValue: (name) => ({
+                'color-scheme': 'dark',
+                '--fg': '#e8eaed',
+                '--ui-scale': '1.25',
+            }[name] || ''),
+        });
+        globalThis.document = globalThis.document || {};
+        globalThis.document.documentElement = globalThis.document.documentElement || {};
+        try {
+            const decls = themeDeclarations();
+            assert.ok(/color-scheme:\s*dark/.test(decls),
+                'the scheme is not carried into the frame: ' + decls);
+            assert.ok(decls.includes('--fg:#e8eaed'), 'colours are not carried: ' + decls);
+            assert.ok(decls.includes('--ui-scale:1.25'), 'the zoom is not carried: ' + decls);
+        } finally {
+            globalThis.getComputedStyle = saved;
+        }
+    });
+
+    t('the assembled document paints no background of its own', () => {
+        const doc = buildSrcdoc({ runtime: '', body: '', theme: 'color-scheme:dark;', minimal: false });
+        assert.ok(/html,body\{[^}]*background:transparent/.test(doc),
+            'the root has no explicit transparent background, so the UA paints one');
+        assert.ok(doc.includes('color-scheme:dark;'), 'the scheme did not reach the document');
     });
 
     console.log(`\n${pass} ok`);

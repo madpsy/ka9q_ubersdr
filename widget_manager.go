@@ -770,6 +770,27 @@ func (wm *WidgetManager) HandlePublicWithInstances(w http.ResponseWriter, r *htt
 // Auth errors (401/403) from the collector are translated to an empty list
 // with 200 OK so they never trigger a false session-expiry logout in the
 // admin UI.
+// parseWidgetList decodes a collector widget listing.
+//
+// Both shapes the collector uses are accepted — a JSON array, or an object keyed
+// by string integers — for the same reason proxyWidgetList accepts both: which
+// one arrives is not something a caller here should have to know.
+func parseWidgetList(body []byte) ([]WidgetMeta, bool) {
+	var asArray []WidgetMeta
+	if err := json.Unmarshal(body, &asArray); err == nil {
+		return asArray, true
+	}
+	var asMap map[string]WidgetMeta
+	if err := json.Unmarshal(body, &asMap); err == nil {
+		out := make([]WidgetMeta, 0, len(asMap))
+		for _, v := range asMap {
+			out = append(out, v)
+		}
+		return out, true
+	}
+	return nil, false
+}
+
 func (wm *WidgetManager) proxyWidgetList(w http.ResponseWriter, path string, withSecret bool) {
 	body, statusCode := wm.proxyToCollectorRaw(http.MethodGet, path, withSecret, nil)
 	w.Header().Set("Content-Type", "application/json")
@@ -837,6 +858,55 @@ func collectorAuthError(w http.ResponseWriter, statusCode int) bool {
 	return false
 }
 
+// nameAlreadyTaken reports whether this instance already owns a widget with the
+// name in a create request.
+//
+// Compared case-insensitively and with surrounding space trimmed, because "SNR
+// Meter" and "snr meter " are the same name to everybody except a byte
+// comparison.
+//
+// Only creates are checked. An update carries its own widget_id and must be free
+// to keep the name it already has, and a collector that cannot be reached is not
+// a reason to refuse the create — the check fails open, because its job is to
+// catch an ordinary mistake rather than to enforce a rule.
+func (wm *WidgetManager) nameAlreadyTaken(body []byte) (bool, WidgetMeta) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false, WidgetMeta{}
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return false, WidgetMeta{}
+	}
+
+	raw, status := wm.proxyToCollectorRaw(http.MethodGet, "/api/widgets/mine", true, nil)
+	if status != http.StatusOK {
+		return false, WidgetMeta{}
+	}
+	mine, ok := parseWidgetList(raw)
+	if !ok {
+		return false, WidgetMeta{}
+	}
+	return findWidgetByName(mine, req.Name)
+}
+
+// findWidgetByName looks a name up the way a person would: ignoring case and
+// surrounding space, because "SNR Meter" and "snr meter " are the same name to
+// everybody except a byte comparison.
+func findWidgetByName(list []WidgetMeta, name string) (bool, WidgetMeta) {
+	want := strings.ToLower(strings.TrimSpace(name))
+	if want == "" {
+		return false, WidgetMeta{}
+	}
+	for _, existing := range list {
+		if strings.ToLower(strings.TrimSpace(existing.Name)) == want {
+			return true, existing
+		}
+	}
+	return false, WidgetMeta{}
+}
+
 // HandleCreate proxies POST /admin/widgets/create → collector POST /api/widgets
 func (wm *WidgetManager) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -847,7 +917,33 @@ func (wm *WidgetManager) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		collectorAuthError(w, http.StatusUnauthorized)
 		return
 	}
-	respBody, statusCode := wm.proxyToCollectorRaw(http.MethodPost, "/api/widgets", true, r.Body)
+
+	// Buffered so the name can be looked at before it is forwarded.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	if taken, existing := wm.nameAlreadyTaken(body); taken {
+		// Refused rather than warned. A duplicate name breaks nothing — ids
+		// cannot collide — but it leaves the operator with two rows they cannot
+		// tell apart in the layout manager, and the usual way it happens is an
+		// assistant creating a second panel where the intention was to edit the
+		// first. Advice in a document is advice something can skip; this cannot
+		// be skipped, and the message says what to do instead.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf(
+				"you already have a widget called %q (%s) — choose a different name, "+
+					"or update that one instead of creating a second",
+				existing.Name, existing.WidgetID),
+		})
+		return
+	}
+
+	respBody, statusCode := wm.proxyToCollectorRaw(http.MethodPost, "/api/widgets", true, bytes.NewReader(body))
 	w.Header().Set("Content-Type", "application/json")
 	if collectorAuthError(w, statusCode) {
 		return

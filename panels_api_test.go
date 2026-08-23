@@ -458,3 +458,65 @@ func TestNewPanelSkeletonIsServable(t *testing.T) {
 		t.Fatal(`the prefilled skeleton's code is not <script type="module">`)
 	}
 }
+
+// Creating a second panel with a name the operator already has.
+//
+// Nothing breaks — ids cannot collide — but it leaves two rows the operator
+// cannot tell apart in the layout manager, and the way it actually happens is an
+// assistant creating a second panel where the intention was to edit the first.
+// So it is refused at create time, before anything exists to clean up.
+func TestDuplicateNameIsRefused(t *testing.T) {
+	mine := []WidgetMeta{
+		{WidgetID: "aaaa", Name: "SNR meter"},
+		{WidgetID: "bbbb", Name: "Band Memories"},
+	}
+
+	for _, want := range []string{
+		"SNR meter",    // exactly
+		"snr meter",    // case is not a difference
+		"  SNR METER ", // nor is surrounding space
+		"Band Memories",
+	} {
+		taken, existing := findWidgetByName(mine, want)
+		if !taken {
+			t.Fatalf("%q was treated as free", want)
+		}
+		if existing.WidgetID == "" {
+			t.Fatalf("%q matched but named no existing widget, so the error cannot say which", want)
+		}
+	}
+
+	for _, want := range []string{
+		"SNR meter 2",
+		"Signal",
+		"", // no name at all is the collector's complaint, not ours
+		"   ",
+	} {
+		if taken, _ := findWidgetByName(mine, want); taken {
+			t.Fatalf("%q was refused but nothing owns it", want)
+		}
+	}
+}
+
+// The collector answers with an array or with an object keyed by string
+// integers, and which one arrives is not something the caller should have to
+// know.
+func TestParseWidgetListAcceptsBothShapes(t *testing.T) {
+	asArray := []byte(`[{"widget_id":"a","name":"One"},{"widget_id":"b","name":"Two"}]`)
+	got, ok := parseWidgetList(asArray)
+	if !ok || len(got) != 2 || got[0].Name != "One" {
+		t.Fatalf("array form: %v %+v", ok, got)
+	}
+
+	asMap := []byte(`{"0":{"widget_id":"a","name":"One"},"1":{"widget_id":"b","name":"Two"}}`)
+	got, ok = parseWidgetList(asMap)
+	if !ok || len(got) != 2 {
+		t.Fatalf("map form: %v %+v", ok, got)
+	}
+
+	// Anything else is "cannot tell", which must fail open — refusing a create
+	// because the collector answered oddly would be worse than the duplicate.
+	if _, ok := parseWidgetList([]byte(`"nonsense"`)); ok {
+		t.Fatal("a scalar was accepted as a widget list")
+	}
+}

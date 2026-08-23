@@ -423,6 +423,41 @@ function fakeDeps(over = {}) {
         resetPanelHosts();
     });
 
+    await ta('a panel can see all four VFOs without retuning anything', async () => {
+        // `tuning` carries the active VFO only. Until the `vfos` topic existed,
+        // reading the other three meant switching to each in turn — which really
+        // retunes the receiver, audibly, on a receiver other people are
+        // listening to. So a panel showing four frequencies could not be built.
+        resetPanelHosts();
+        setPanelDeps(fakeDeps({
+            snapshot: (topic) => (topic === 'vfos' ? {
+                active: 'B',
+                slots: [
+                    { id: 'A', active: false, frequency: 7100000, mode: 'lsb' },
+                    { id: 'B', active: true, frequency: 14074000, mode: 'usb' },
+                    { id: 'C', active: false, frequency: null, mode: null },
+                    { id: 'D', active: false, frequency: 3573000, mode: 'usb' },
+                ],
+            } : null),
+        }));
+
+        const scope = fakeFrame();
+        const api = startPanelRuntime(scope);
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+
+        const sdr = await api.ready();
+        const vfos = await sdr.get('vfos');
+
+        assert.strictEqual(vfos.slots.length, 4, 'four slots, always, so four rows can be laid out');
+        assert.strictEqual(vfos.active, 'B');
+        assert.strictEqual(vfos.slots[0].frequency, 7100000, 'an inactive VFO is readable');
+        assert.strictEqual(vfos.slots[1].active, true);
+        assert.strictEqual(vfos.slots[2].frequency, null, 'a never-used slot is null, not absent');
+        resetPanelHosts();
+    });
+
     await ta('a panel hears a topic it subscribed to', async () => {
         resetPanelHosts();
         setPanelDeps(fakeDeps());

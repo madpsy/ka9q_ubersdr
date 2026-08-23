@@ -233,10 +233,15 @@ sdr.minimal                            // is the operator showing you cut down?
 sdr.height(180);                       // usually unnecessary — see §6
 ```
 
-The topics (`tuning`, `audio`, `signal`, `spectrum`, `session`, `page`, `layout`,
-`modes`, `bands`, `functions`), the commands and the `run` catalogue are all
-documented in **`BRIDGE_API.md`**, and behave here exactly as they do there. Two
-notes worth repeating:
+The topics (`tuning`, `vfos`, `audio`, `signal`, `spectrum`, `session`, `page`,
+`layout`, `modes`, `bands`, `functions`), the commands and the `run` catalogue
+are all documented in **`BRIDGE_API.md`**, and behave here exactly as they do
+there. Three notes worth repeating:
+
+- **`vfos` is the only way to see a VFO that is not the active one.** `tuning`
+  reports the active VFO; switching to another to read it really retunes the
+  receiver, which is audible to everyone listening. Subscribe to `vfos` instead.
+
 
 - **`tune` carries mode and passband in one call.** Sending them separately walks
   the receiver through intermediate states, which is audible.

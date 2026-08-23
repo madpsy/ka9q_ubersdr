@@ -10,7 +10,7 @@ client library), `BridgeHost.jsx` (the wiring). Tests: `test/bridge.test.js`,
 specification — if one has to change, the change is a breaking one.
 
 - Protocol (envelope) version: **1**
-- API version: **1.0**
+- API version: **1.5**
 
 ---
 
@@ -120,7 +120,7 @@ neither of them has.
   "session": { … },             // the `session` topic (§6)
   "page": { "url": "…", "title": "…" },
   "capabilities": ["tune","mode",…,"functions","rotator","antenna"],
-  "topics": ["tuning","audio","signal","spectrum","session","page","modes","bands","functions"],
+  "topics": ["tuning","audio","signal","spectrum","session","page","vfos","modes","bands","functions"],
   "commands": ["tune","mode","passband","volume","mute","duck","squelch","vfo","spectrum","power"]
 }
 ```
@@ -187,6 +187,25 @@ the limit is *held, not dropped* — the true final value always arrives.
 ```jsonc
 { "centerFreq": 14100000, "span": 204800, "binBandwidth": 100, "binCount": 2048, "follow": true }
 ```
+
+### `vfos` *(since 1.5)*
+```jsonc
+{ "active": "B",
+  "slots": [{ "id": "A", "active": false, "frequency": 7100000, "mode": "lsb",
+              "bandwidthLow": -2700, "bandwidthHigh": -50 }] }
+```
+All four, always, in order, so a client can lay out four rows without counting.
+A slot never used is present with `null` values rather than absent.
+
+`tuning` carries the *active* VFO, which is what nearly everything wants. This
+carries the other three as well, and exists because there was previously no way
+to see them: switching to a VFO to read it really retunes the receiver, which is
+audible and rude on a receiver other people are listening to.
+
+The active slot is reported from live tuning, not from its stored copy — the
+page deliberately leaves that copy stale while a VFO is selected, writing it only
+when you switch away, so reading it would give wherever the dial was when that
+VFO was last left.
 
 ### `session`
 ```jsonc

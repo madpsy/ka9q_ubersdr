@@ -39,6 +39,59 @@ export function tuningSnapshot(src) {
     };
 }
 
+/**
+ * All four VFOs, not just the one in use.
+ *
+ * `tuning` carries the active VFO — which is what a client wants nearly always —
+ * and until this existed that was the *only* way to see a frequency. Reading the
+ * other three meant switching to each in turn, which really retunes the
+ * receiver: audible, and rude on a receiver other people are listening to. So a
+ * panel that simply wanted to show four frequencies could not be written.
+ *
+ * The one subtlety is which value each slot takes. lib/vfos.js deliberately does
+ * not keep the *active* slot's stored copy up to date — while a VFO is selected
+ * the live receiver is that VFO, and the stored value is written only when you
+ * switch away, which avoids a localStorage write on every turn of the dial. So
+ * the active slot is filled from live tuning here and the rest from their stored
+ * copies, or the active one would report wherever the dial was when it was last
+ * selected.
+ *
+ * A slot that has never been used is `null` rather than absent: four entries,
+ * always, in order, so a client can lay out four rows without counting.
+ */
+export function vfosSnapshot(src) {
+    const state = src.vfos || {};
+    const slots = state.slots || {};
+    const active = state.active || src.vfo || null;
+    const live = src.tuning || {};
+
+    return {
+        active,
+        slots: (state.ids || ['A', 'B', 'C', 'D']).map((id) => {
+            if (id === active) {
+                return {
+                    id,
+                    active: true,
+                    frequency: num(live.frequency),
+                    mode: live.mode || null,
+                    bandwidthLow: num(live.bandwidthLow),
+                    bandwidthHigh: num(live.bandwidthHigh),
+                };
+            }
+            const slot = slots[id];
+            if (!slot) return { id, active: false, frequency: null, mode: null, bandwidthLow: null, bandwidthHigh: null };
+            return {
+                id,
+                active: false,
+                frequency: num(slot.frequency),
+                mode: slot.mode || null,
+                bandwidthLow: num(slot.bandwidthLow),
+                bandwidthHigh: num(slot.bandwidthHigh),
+            };
+        }),
+    };
+}
+
 export function audioSnapshot(src) {
     const a = src.audio || {};
     const sq = src.squelch || {};
@@ -238,6 +291,7 @@ export function sdrControlSnapshot(src) {
 
 export const SNAPSHOTS = {
     tuning: tuningSnapshot,
+    vfos: vfosSnapshot,
     layout: layoutSnapshot,
     radiocontrol: radioControlSnapshot,
     sdrcontrol: sdrControlSnapshot,

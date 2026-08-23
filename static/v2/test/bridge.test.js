@@ -29,18 +29,20 @@ t('the two event names are the published ones', () => {
     assert.strictEqual(PROTOCOL, 1);
     // 1.1 added the `layout` topic and the `panel` command; 1.2 the
     // `radiocontrol` topic and the `radio` command; 1.3 its `configure` action;
-    // 1.4 the `surface` and `audio` commands and the `sdrcontrol` topic.
+    // 1.4 the `surface` and `audio` commands and the `sdrcontrol` topic; 1.5 the
+    // `vfos` topic, which is the only way to see a VFO that is not the active
+    // one without switching to it and really retuning the receiver.
     // The envelope never changed, so PROTOCOL stays 1 and a 1.0 client keeps
     // working — which is what the major number is for, and why only the minor
     // has ever moved.
-    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 4 });
+    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 5 });
 });
 
 t('the topic lists are what a client is promised', () => {
     assert.deepStrictEqual(
         LIVE_TOPICS,
         ['tuning', 'audio', 'signal', 'spectrum', 'session', 'page', 'layout', 'radiocontrol',
-            'sdrcontrol'],
+            'sdrcontrol', 'vfos'],
     );
     assert.deepStrictEqual(STATIC_TOPICS, ['modes', 'bands', 'functions']);
     assert.deepStrictEqual(TOPICS, [...LIVE_TOPICS, ...STATIC_TOPICS]);

@@ -531,4 +531,47 @@ t('a page with no layout snapshots as empty rather than null', () => {
     assert.deepStrictEqual(snapshotFor('layout', {}), { panels: [], docks: [] });
 });
 
+// --- the vfos topic ---------------------------------------------------------
+//
+// Four VFOs, and the one subtlety worth pinning: lib/vfos.js deliberately does
+// not keep the *active* slot's stored copy current — the live receiver is that
+// VFO, and the store is written only when you switch away. So the snapshot has
+// to take the active slot from live tuning, or it reports wherever the dial was
+// when that VFO was last selected.
+
+t('vfos reports all four, with the active one taken from live tuning', () => {
+    const snap = snapshotFor('vfos', {
+        tuning: { frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
+        vfos: {
+            active: 'B',
+            ids: ['A', 'B', 'C', 'D'],
+            slots: {
+                A: { frequency: 7100000, mode: 'lsb', bandwidthLow: -2700, bandwidthHigh: -50 },
+                // Stale on purpose: B is active, so this is where the dial was
+                // when B was last switched away from.
+                B: { frequency: 1810000, mode: 'cwu', bandwidthLow: -250, bandwidthHigh: 250 },
+                C: null,
+                D: { frequency: 3573000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
+            },
+        },
+    });
+
+    assert.strictEqual(snap.active, 'B');
+    assert.strictEqual(snap.slots.length, 4, 'always four, in order, so a client can lay out four rows');
+
+    const byId = Object.fromEntries(snap.slots.map((v) => [v.id, v]));
+    assert.strictEqual(byId.B.frequency, 14074000, 'the active slot must come from live tuning, not the stale store');
+    assert.strictEqual(byId.B.active, true);
+    assert.strictEqual(byId.A.frequency, 7100000, 'an inactive slot comes from the store');
+    assert.strictEqual(byId.A.active, false);
+    assert.strictEqual(byId.C.frequency, null, 'a never-used slot is null, not missing');
+    assert.strictEqual(byId.D.mode, 'usb');
+});
+
+t('vfos survives a page that has no VFO state at all', () => {
+    const snap = snapshotFor('vfos', { tuning: { frequency: 14074000, mode: 'usb' } });
+    assert.strictEqual(snap.slots.length, 4);
+    assert.ok(snap.slots.every((v) => typeof v.id === 'string'));
+});
+
 console.log(`\n${pass} ok`);

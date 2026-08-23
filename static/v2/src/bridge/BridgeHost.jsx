@@ -25,7 +25,7 @@ import { useControlContext, useHardware } from '../controls/panel.jsx';
 import { runFunction } from '../controls/functions.js';
 import { getSessionId } from '../radio/session.js';
 import { bandForFrequency } from '../lib/bands.js';
-import { getVfos, onVfosChanged } from '../lib/vfos.js';
+import { getVfos, onVfosChanged, VFO_IDS } from '../lib/vfos.js';
 import { API_VERSION, EVENT_FROM_PAGE, EVENT_TO_PAGE, LIVE_TOPICS, STATIC_TOPICS, encodeMessage } from './protocol.js';
 import { createHost } from './host.js';
 import { closingPanels, publishToPanels, setPanelDeps, tickPanels } from '../panels/custom/hosts.js';
@@ -221,19 +221,26 @@ export default function BridgeHost() {
     const hw = useHardware();
     const ctx = useControlContext(display.tuneStep || 500);
     const [settings, setSettings] = useState(bridgeSettings);
-    const [vfo, setVfo] = useState(() => getVfos().active);
+    // The whole VFO state, not only which one is active: the `vfos` topic
+    // reports all four, and a client that wanted the other three could
+    // otherwise only reach them by switching to each in turn — which really
+    // retunes the receiver.
+    // Named apart from lib/vfos.js's own `setVfos`, which writes the store:
+    // this only mirrors it into React state for publishing.
+    const [vfos, setVfoState] = useState(getVfos);
+    const vfo = vfos.active;
     // The Radio Control panel's own settings, which a registered transport reads
     // to know whether it is the selected one and what it was configured with.
     const [controls, setControls] = useState(controlState);
 
     useEffect(() => onBridgeSettings(setSettings), []);
-    useEffect(() => onVfosChanged((s) => setVfo(s.active)), []);
+    useEffect(() => onVfosChanged(setVfoState), []);
     useEffect(() => onControlState(setControls), []);
 
     // Read by the host on every message, so it always sees the current
     // receiver without the host being rebuilt (which would drop every client).
     const live = useRef(null);
-    live.current = { radio, ctx, hw, vfo, settings, controls, layout: layoutFacade(layout) };
+    live.current = { radio, ctx, hw, vfo, vfos, settings, controls, layout: layoutFacade(layout) };
 
     const capabilities = useMemo(() => [
         ...COMMAND_NAMES,
@@ -346,6 +353,9 @@ export default function BridgeHost() {
     // --- state that React already tracks ------------------------------------
     const { tuning, audio, squelch, view, followTuning, session } = radio;
 
+    useEffect(() => { publishAll('vfos', snapshotFor('vfos', sources(live.current))); },
+        [host, tuning, vfos]);
+
     useEffect(() => { publishAll('tuning', snapshotFor('tuning', sources(live.current))); },
         [host, tuning, vfo]);
     useEffect(() => { publishAll('audio', snapshotFor('audio', sources(live.current))); },
@@ -399,7 +409,7 @@ export default function BridgeHost() {
 // Everything the snapshots and the descriptor read, in one place, so a topic
 // added later needs a line there and nothing here.
 function sources(l) {
-    const { radio: r, hw, vfo } = l;
+    const { radio: r, hw, vfo, vfos } = l;
     const layout = l.layout ? l.layout.snapshot() : null;
     const m = r.meters ? r.meters.current : null;
     return {
@@ -418,6 +428,7 @@ function sources(l) {
         receiverId: r.serverInfo ? r.serverInfo.public_uuid : null,
         serverInfo: r.serverInfo,
         vfo,
+        vfos: vfos ? { ...vfos, ids: VFO_IDS } : null,
         band: bandForFrequency(r.tuning.frequency),
         url: typeof location !== 'undefined' ? location.href : null,
         title: typeof document !== 'undefined' ? document.title : null,

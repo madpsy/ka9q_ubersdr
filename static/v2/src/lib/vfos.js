@@ -186,6 +186,26 @@ export function selectVfo(radio, to) {
     return true;
 }
 
+/**
+ * Put the receiver as it stands into another VFO, and stay where you are.
+ *
+ * The counterpart to selectVfo: that one *goes* somewhere, this one *sends* the
+ * current settings somewhere. Both live here rather than in a panel because a
+ * VFO must be written exactly one way — the panel, the spectrum's right-click
+ * menu and a MIDI mapping all reach the same slots, and two of them disagreeing
+ * about what "B" holds is the bug this module exists to prevent.
+ *
+ * Copying onto the active VFO is refused by storeInto: that slot *is* the live
+ * receiver, and writing it would imply otherwise.
+ */
+export function copyVfo(radio, to) {
+    const before = getVfos();
+    const state = storeInto(before, to, vfoSnapshot(radio.tuning, radio.view));
+    if (state === before) return false;
+    setVfos(state);
+    return true;
+}
+
 /** Step `dir` places along A B C D, wrapping. */
 export function stepVfo(radio, dir) {
     const i = VFO_IDS.indexOf(getVfos().active);

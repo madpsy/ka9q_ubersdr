@@ -10545,3 +10545,36 @@ a.btn { text-decoration: none; }
 @container (max-width: 210px) {
     .vfos__width { display: none; }
 }
+
+/* "Copy A to  [B] [C] [D]" — sending the live settings into another VFO without
+   going there. Set apart from the rows above it because it does something to
+   them rather than being one of them. */
+.vfos__copy {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+}
+.vfos__copy-label {
+    font-size: 0.8em;
+    color: var(--text-dim);
+    margin-right: auto;
+}
+.vfos__copy-btn {
+    flex-shrink: 0;
+    min-width: 2em;
+    padding: 2px 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    font-weight: 600;
+    cursor: pointer;
+}
+.vfos__copy-btn:hover {
+    border-color: var(--accent);
+    background: var(--surface-hover);
+    color: var(--text);
+}

@@ -6,7 +6,8 @@
 
 const assert = require('assert');
 const {
-    VFO_IDS, cleanSlot, markableVfos, selectVfo, setVfos, storeInto, switchTo, vfoSnapshot,
+    VFO_IDS, cleanSlot, copyVfo, getVfos, markableVfos, selectVfo, setVfos, storeInto, switchTo,
+    vfoSnapshot,
 } = require('./.build/vfos.cjs');
 
 let pass = 0;
@@ -251,6 +252,59 @@ t('no dial frequency yet is not a reason to hide them', () => {
     const state = { active: 'A', slots: { A: parkedAt(7.1e6), B: parkedAt(7.2e6), C: null, D: null } };
     assert.deepStrictEqual(markableVfos(state, null).map((v) => v.id), ['B']);
     assert.deepStrictEqual(markableVfos(state, undefined).map((v) => v.id), ['B']);
+});
+
+// --- copying into a VFO you are not on ---------------------------------------
+//
+// The direction is the whole risk. "Copy A to B" writes the live receiver into
+// B; getting it backwards would overwrite the VFO the operator is sitting on
+// with a stale one, and they would not find out until they switched.
+
+t('copying sends the live settings into the target and stays put', () => {
+    setVfos({ active: 'A', slots: { A: null, B: null, C: null, D: null } });
+    const radio = fakeRadio(
+        { centerFreq: 14100000, span: 204800, binCount: 2048, binBandwidth: 100 },
+        { frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
+    );
+
+    assert.strictEqual(copyVfo(radio, 'C'), true);
+
+    const after = getVfos();
+    assert.strictEqual(after.active, 'A', 'copying must not switch');
+    assert.strictEqual(after.slots.C.frequency, 14074000, 'C did not take the live frequency');
+    assert.strictEqual(after.slots.C.mode, 'usb');
+    // The dial is untouched: this sends settings somewhere, it does not go there.
+    assert.deepStrictEqual(radio.calls, []);
+});
+
+t('copying onto the VFO in use is refused, not written', () => {
+    // That slot *is* the live receiver; writing it would imply otherwise, and a
+    // stored copy of the active VFO is the one value guaranteed to go stale.
+    setVfos({ active: 'B', slots: { A: null, B: null, C: null, D: null } });
+    const radio = fakeRadio(
+        { centerFreq: 14100000, span: 204800, binCount: 2048, binBandwidth: 100 },
+        { frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
+    );
+    assert.strictEqual(copyVfo(radio, 'B'), false);
+    assert.strictEqual(getVfos().slots.B, null, 'the active slot was written');
+});
+
+t('copying overwrites what was there, without touching the rest', () => {
+    setVfos({
+        active: 'A',
+        slots: { A: null, B: slot(7100000, 200), C: slot(3573000, 200), D: null },
+    });
+    const radio = fakeRadio(
+        { centerFreq: 14100000, span: 204800, binCount: 2048, binBandwidth: 100 },
+        { frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
+    );
+
+    copyVfo(radio, 'B');
+
+    const after = getVfos();
+    assert.strictEqual(after.slots.B.frequency, 14074000, 'B was not overwritten');
+    assert.strictEqual(after.slots.C.frequency, 3573000, 'C was disturbed');
+    assert.strictEqual(after.slots.D, null);
 });
 
 console.log(`\n${pass} VFO checks passed`);

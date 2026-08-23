@@ -15,7 +15,7 @@
 
 import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { VFO_IDS, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
+import { VFO_IDS, copyVfo, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import { formatFilterWidth, formatHz } from '../lib/format.js';
 import { bandForFrequency } from '../lib/bands.js';
 
@@ -96,10 +96,25 @@ export default function VfosPanel({ minimal }) {
                     </button>
                 ))}
             </div>
+            {/* Sending the current settings somewhere, as opposed to going
+                there — which is what clicking a row does. The two are easy to
+                confuse and the mistake is expensive, so the direction is spelled
+                out rather than left to an icon: "Copy A to" and then the VFOs
+                that are not A. */}
             {!minimal && (
-                <div className="note note--tight">
-                    Switching stores what is live into the VFO you are leaving, so
-                    you never lose the frequency you were on.
+                <div className="vfos__copy">
+                    <span className="vfos__copy-label">Copy {vfos.active} to</span>
+                    {VFO_IDS.filter((id) => id !== vfos.active).map((id) => (
+                        <button
+                            key={id}
+                            type="button"
+                            className="vfos__copy-btn"
+                            title={`Put the current frequency, mode and filter into VFO ${id}, and stay on ${vfos.active}`}
+                            onClick={() => copyVfo(radio, id)}
+                        >
+                            {id}
+                        </button>
+                    ))}
                 </div>
             )}
         </div>

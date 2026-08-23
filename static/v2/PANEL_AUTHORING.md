@@ -218,6 +218,13 @@ await sdr.store.set('cities', [...]);  // returns null, or why it was refused
 // ── The receiver's API ───────────────────────────────────────────────────────
 const res = await sdr.fetch('/api/cty/countries');   // /api/ only
 if (res.ok) JSON.parse(res.body);
+//
+// **Storage is per receiver.** Each receiver a desktop or mobile client opens gets
+// its own local port and therefore its own origin, so what a panel stores on one
+// receiver is invisible to the same panel on another — the right answer for
+// settings about *that* receiver's bands, antennas or frequencies. The desktop
+// client's shared-settings feature copies some preferences between receivers; it
+// does not copy this.
 
 // ── Presentation ─────────────────────────────────────────────────────────────
 sdr.minimal                            // is the operator showing you cut down?

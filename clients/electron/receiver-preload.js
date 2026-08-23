@@ -32,7 +32,21 @@ const SKIP_PREFIX = 'ubersdr.v2.news.cache.';
 // as a broken receiver rather than as a setting. Volume and the output device
 // live in the same blob and are the price of excluding it whole; they are set
 // once per receiver, where the tuning changes every minute.
-const SKIP_EXACT = new Set(['ubersdr.v2.radio']);
+const SKIP_EXACT = new Set([
+    'ubersdr.v2.radio',
+    // Which custom panels a receiver serves is a fact about *that* receiver, not
+    // a preference to be adopted from another one. Copying it seeds the panel
+    // registry from the wrong instance: the foreign panels are registered but
+    // never shown (the enabled set they are gated on comes from the receiver
+    // actually being talked to), while this receiver's own panels are missing
+    // from the registry until the cache is rewritten — so a panel would not
+    // appear until the second time the operator opened that receiver.
+    //
+    // The layout beside it is deliberately still shared: an arrangement is a
+    // preference, and a placement for a panel this receiver does not have is
+    // parked harmlessly rather than dropped.
+    'ubersdr.v2.panels',
+]);
 
 // Settings change at human speed; this is a copy of a few kilobytes.
 const POLL_MS = 2000;

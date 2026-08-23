@@ -15,11 +15,21 @@
 // budget. Structured clone is a bonus: a panel can keep an ArrayBuffer or an
 // ImageBitmap directly rather than base64 in the pot the layout lives in.
 //
-// Per origin, like every other preference here — which means per receiver in a
-// browser and shared between receivers in the desktop client, whose windows all
-// load from one loopback origin. That inconsistency is the existing one for v2
-// preferences, and inheriting it is better than inventing a second storage model
-// for panels alone.
+// Per origin, which here means per *receiver*, everywhere.
+//
+// That is worth stating because the desktop client looks as though it would
+// break it: every receiver window is a loopback address. But each receiver gets
+// its own persisted local port — "the stored port is the instance's origin (and
+// so its localStorage)", clients/electron/main.js — so the origins differ and so
+// does this store. The mobile client keeps a `localPort` per receiver for the
+// same reason.
+//
+// The desktop client's shared settings copy a subset of `ubersdr.v2.*`
+// *localStorage* keys between those origins, which is how a preference follows
+// an operator from one receiver to the next. IndexedDB is not localStorage and
+// is never copied, so a panel's data stays with the receiver it was entered on —
+// which is the right answer for a panel whose settings are about that receiver's
+// bands, antennas or frequencies.
 
 const DB_NAME = 'ubersdr.v2.panels';
 const DB_VERSION = 1;

@@ -226,6 +226,11 @@ adapting, and it needs no JavaScript:
 pushes the panel wider than its dock and the whole thing gets a scrollbar. Wide
 tables and diagrams go in their own `overflow-x: auto` container.
 
+**Do not set a background on `body`.** The dock has already painted the panel's
+surface and the frame is transparent over it; painting your own puts a slab
+inside the panel. The frame is also told the page's `color-scheme`, so form
+controls and scrollbars match the theme without you doing anything.
+
 **Never use `vh`/`vw`, `height: 100%` on `body`, or `position: fixed`.** The
 viewport they refer to is the frame, whose height is whatever your panel last
 reported — a circular measurement. Give a canvas an explicit pixel height.
@@ -233,13 +238,30 @@ reported — a circular measurement. Give a canvas an explicit pixel height.
 **Colours come from the operator's theme**, as CSS custom properties. Use them
 and your panel follows the interface, including when they switch:
 
-```
---bg  --bg-raised  --bg-sunken  --fg  --fg-dim  --fg-faint
---line  --accent  --accent-fg  --ok  --warn  --bad
---font  --font-mono
-```
+| Variable | What it is |
+|---|---|
+| `--bg` | The page behind everything. Rarely what a panel wants. |
+| `--surface` | A panel's own surface — the dock has already painted it, so use this only for something raised *on* your panel. |
+| `--surface-2` | One step up: buttons, chips, a header row. |
+| `--surface-3` | Sunken: input fields, wells, a code block. |
+| `--surface-hover` | The hover state of something pressable. |
+| `--text` | Body text. **This is the one you want** for ordinary content. |
+| `--text-dim` | Labels, units, secondary text. |
+| `--text-faint` | Timestamps, hints, anything at the edge of attention. |
+| `--border` | Ordinary rules and outlines. |
+| `--border-strong` | A divider that needs to be seen. |
+| `--accent` | The one interactive thing. Links, the active control. |
+| `--accent-ink` | Text *on* an accent-filled surface. |
+| `--accent-soft` | An accent-tinted background. |
+| `--accent-line` | An accent-tinted border. |
+| `--good` `--warn` `--bad` | State. Never the only signal — pair with a word. |
+| `--font` | The interface's UI face. |
+| `--mono` | Its monospace face — frequencies, callsigns, anything columnar. |
+| `--radius` `--radius-sm` `--radius-lg` | Corner radii, so your boxes match the dock's. |
+| `--ui-scale` | The operator's zoom for this panel. The base font size already applies it. |
 
-Always give a fallback: `color: var(--fg-dim, #9aa4b2)`.
+Always give a fallback — `color: var(--text-dim, #9aa4b2)` — because a receiver
+older than a variable will not send it.
 
 `--ui-scale` carries the operator's zoom for this panel, and the frame's base
 font size already applies it — so **size text in `em`/`rem` and the zoom buttons

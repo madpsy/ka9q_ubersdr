@@ -6,6 +6,8 @@
 // receiver through it, because a boundary nothing can cross is not a feature.
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 globalThis.location = { origin: 'https://rx.example' };
 
@@ -456,7 +458,7 @@ function fakeDeps(over = {}) {
         globalThis.getComputedStyle = () => ({
             getPropertyValue: (name) => ({
                 'color-scheme': 'dark',
-                '--fg': '#e8eaed',
+                '--text': '#e8eaed',
                 '--ui-scale': '1.25',
             }[name] || ''),
         });
@@ -466,11 +468,42 @@ function fakeDeps(over = {}) {
             const decls = themeDeclarations();
             assert.ok(/color-scheme:\s*dark/.test(decls),
                 'the scheme is not carried into the frame: ' + decls);
-            assert.ok(decls.includes('--fg:#e8eaed'), 'colours are not carried: ' + decls);
+            assert.ok(decls.includes('--text:#e8eaed'), 'colours are not carried: ' + decls);
             assert.ok(decls.includes('--ui-scale:1.25'), 'the zoom is not carried: ' + decls);
         } finally {
             globalThis.getComputedStyle = saved;
         }
+    });
+
+    t('every theme variable a panel is given actually exists', () => {
+        // The list was invented once — `--fg`, `--bg-raised`, `--line`, none of
+        // which are real names — and because a missing custom property resolves
+        // to the author's fallback rather than to an error, every panel looked
+        // correct on the dark theme and put near-white text on a light surface.
+        // Nothing failed; it was just quietly wrong.
+        const srcdoc = fs.readFileSync(path.join(__dirname, '..', 'src', 'panels', 'custom', 'srcdoc.js'), 'utf8');
+        const listed = [...srcdoc.slice(srcdoc.indexOf('const THEME_VARS'), srcdoc.indexOf('];'))
+            .matchAll(/'(--[a-z0-9-]+)'/g)].map((m) => m[1]);
+        assert.ok(listed.length > 8, 'could not read the theme list');
+
+        const styles = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+        const root = styles.slice(styles.indexOf(':root {'), styles.indexOf('\n}', styles.indexOf(':root {')));
+        const real = new Set([...root.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+
+        const invented = listed.filter((v) => !real.has(v));
+        assert.deepStrictEqual(invented, [],
+            'these are passed to panels but are not defined in :root, so they resolve to nothing');
+    });
+
+    t('the base stylesheet uses only variables panels are given', () => {
+        const srcdoc = fs.readFileSync(path.join(__dirname, '..', 'src', 'panels', 'custom', 'srcdoc.js'), 'utf8');
+        const listed = new Set([...srcdoc.slice(srcdoc.indexOf('const THEME_VARS'), srcdoc.indexOf('];'))
+            .matchAll(/'(--[a-z0-9-]+)'/g)].map((m) => m[1]));
+        const css = srcdoc.slice(srcdoc.indexOf('const BASE_CSS'));
+        const used = [...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]);
+        const orphan = [...new Set(used)].filter((v) => !listed.has(v));
+        assert.deepStrictEqual(orphan, [],
+            'the frame\'s own stylesheet references variables it is never sent');
     });
 
     t('the assembled document paints no background of its own', () => {

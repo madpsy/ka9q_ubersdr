@@ -26,9 +26,25 @@
 // carefully its author had used the theme variables.
 const THEME_VARS = [
     'color-scheme',
-    '--bg', '--bg-raised', '--bg-sunken', '--fg', '--fg-dim', '--fg-faint',
-    '--line', '--accent', '--accent-fg', '--ok', '--warn', '--bad',
-    '--font', '--font-mono',
+
+    // Surfaces and text. These are the interface's own names — taken from the
+    // `:root` block in styles.css, not invented here. An earlier version of this
+    // list guessed at `--fg`, `--bg-raised` and `--line`; none of them exist, so
+    // every one resolved to nothing and panels silently fell back to whatever
+    // their author had hardcoded. That looked right on the dark theme and put
+    // near-white text on a light surface. test/panelhost pins this list against
+    // styles.css so it cannot drift again.
+    '--bg', '--surface', '--surface-2', '--surface-3', '--surface-hover',
+    '--text', '--text-dim', '--text-faint',
+    '--border', '--border-strong',
+
+    // Accent and state.
+    '--accent', '--accent-ink', '--accent-soft', '--accent-line',
+    '--good', '--warn', '--bad',
+
+    // Type and shape, so a panel's corners and fonts match the dock it is in.
+    '--font', '--mono', '--radius', '--radius-sm', '--radius-lg',
+
     // The operator's per-panel zoom. Custom properties do not cross into a
     // frame, so without carrying it explicitly a custom panel would be the one
     // panel in the dock that ignored the zoom buttons in its own header.
@@ -63,7 +79,7 @@ const BASE_CSS = `
    above, transparent here means the dock's own surface shows through. */
 html,body{margin:0;padding:0;background:transparent}
 body{
-  background:transparent;color:var(--fg,#e8eaed);
+  background:transparent;color:var(--text,#e8eaed);
   font-family:var(--font,system-ui,sans-serif);
   /* Scaled by the operator's zoom for this panel, so anything sized in em or
      rem follows it. A panel using px throughout opts itself out. */
@@ -74,18 +90,18 @@ body{
 a{color:var(--accent,#7aa2f7)}
 button,input,select,textarea{font:inherit;color:inherit}
 button{
-  background:var(--bg-raised,#232a35);color:inherit;
-  border:1px solid var(--line,#39414f);border-radius:6px;
+  background:var(--surface-2,#232a35);color:inherit;
+  border:1px solid var(--border,#39414f);border-radius:var(--radius-sm,6px);
   padding:4px 10px;cursor:pointer;
 }
 button:hover{border-color:var(--accent,#7aa2f7)}
 input,select,textarea{
-  background:var(--bg-sunken,#161a21);border:1px solid var(--line,#39414f);
-  border-radius:6px;padding:4px 8px;
+  background:var(--surface-3,#161a21);border:1px solid var(--border,#39414f);
+  border-radius:var(--radius-sm,6px);padding:4px 8px;
 }
 table{border-collapse:collapse;width:100%}
-th,td{text-align:left;padding:2px 6px;border-bottom:1px solid var(--line,#39414f)}
-code,pre{font-family:var(--font-mono,ui-monospace,monospace)}
+th,td{text-align:left;padding:2px 6px;border-bottom:1px solid var(--border,#39414f)}
+code,pre{font-family:var(--mono,ui-monospace,monospace)}
 img,svg,canvas,video{max-width:100%}
 /* Wide content scrolls inside itself. A panel lives in a dock column that may be
    220px across, and a table that widens its own frame widens the panel. */

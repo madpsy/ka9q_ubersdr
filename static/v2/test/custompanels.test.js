@@ -427,6 +427,31 @@ const reply = (status, body, etag) => async () => ({
         assert.ok(/<script type="module">/.test(skeleton), 'the skeleton uses a classic script');
     });
 
+    t('the reference panels use theme variables that exist', () => {
+        // Both are copied by authors — the worked example is what the skill
+        // points at first, and the skeleton is literally prefilled into the
+        // editor. A wrong variable name in either teaches the mistake.
+        const styles = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+        const root = styles.slice(styles.indexOf(':root {'), styles.indexOf('\n}', styles.indexOf(':root {')));
+        const real = new Set([...root.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+
+        const admin = fs.readFileSync(path.join(__dirname, '..', '..', 'admin.html'), 'utf8');
+        const from = admin.indexOf('const NEW_PANEL_SKELETON');
+        // eslint-disable-next-line no-new-func
+        const skeleton = new Function(
+            admin.slice(from, admin.indexOf('function openNewWidgetEditor', from))
+            + '; return NEW_PANEL_SKELETON;')();
+
+        for (const [what, text] of [
+            ['the worked example', fs.readFileSync(path.join(__dirname, '..', 'example-panel.html'), 'utf8')],
+            ['the editor skeleton', skeleton],
+        ]) {
+            const used = [...text.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]);
+            const invented = [...new Set(used)].filter((v) => !real.has(v));
+            assert.deepStrictEqual(invented, [], what + ' uses variables that do not exist');
+        }
+    });
+
     t('the worked example uses a real icon and a real group', () => {
         // /v2/example-panel.html is what an author is pointed at first. If it
         // names something that does not exist, it teaches the fallback as if it

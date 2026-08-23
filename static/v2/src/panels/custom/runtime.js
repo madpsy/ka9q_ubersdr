@@ -110,6 +110,17 @@ export function startPanelRuntime(global) {
             port.postMessage({ p: 'height', height: value });
         };
 
+        // Deferred to an animation frame: measuring scrollHeight while the
+        // document is still parsing forces a layout the browser then warns
+        // about, and the figure would be of a half-built document anyway.
+        const measureSoon = () => {
+            if (typeof requestAnimationFrame !== 'function') {
+                height(document.documentElement.scrollHeight);
+                return;
+            }
+            requestAnimationFrame(() => height(document.documentElement.scrollHeight));
+        };
+
         const watchHeight = () => {
             if (typeof ResizeObserver !== 'function') return;
             const observer = new ResizeObserver(() => {
@@ -185,18 +196,34 @@ export function startPanelRuntime(global) {
             scope.sdr = sdr;
             resolveReady(sdr);
             watchHeight();
-            height(document.documentElement.scrollHeight);
+            measureSoon();
         });
     }
 
-    // The parent hands the port over once, after this document has loaded — by
-    // which time this listener is registered, because the runtime is inlined in
-    // the head and runs while the document is still parsing.
     scope.addEventListener('message', (ev) => {
         if (!ev.ports || !ev.ports.length) return;
         if (!ev.data || ev.data['ubersdr.panel-port'] !== true) return;
         connect(ev.ports[0]);
     });
+
+    // Say we are here, rather than waiting to be found.
+    //
+    // The parent used to hand the port over on the frame's `load` event alone,
+    // and that is a race it can lose: when the document and the runtime are both
+    // already cached — which is exactly what happens when the operator toggles
+    // the minimal view — the frame is created, parsed and loaded before the
+    // parent's effect has attached its listener. The port was then never sent
+    // and the panel sat at its own "Loading…" for ever.
+    //
+    // This runs while the document is still parsing, so it cannot be too early,
+    // and the parent answers whenever it is ready. Between this and `load`,
+    // whichever happens second completes the handover; the parent hands over
+    // only once per document.
+    try {
+        if (scope.parent && scope.parent !== scope) {
+            scope.parent.postMessage({ 'ubersdr.panel-hello': true }, '*');
+        }
+    } catch (e) { /* no parent to tell */ }
 
     scope.ubersdr = {
         ready: () => ready,

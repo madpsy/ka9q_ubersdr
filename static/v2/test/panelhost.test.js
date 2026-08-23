@@ -262,6 +262,9 @@ function fakeDeps(over = {}) {
             deliver(ev) { for (const fn of this._handlers) fn(ev); },
             __ubersdrPanel: { minimal: true },
         };
+        // No `parent` by default: the runtime must not throw when there is
+        // nothing to announce itself to.
+        globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
         globalThis.document = { documentElement: { scrollHeight: 220 }, body: {} };
         globalThis.ResizeObserver = undefined;
         globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
@@ -286,6 +289,36 @@ function fakeDeps(over = {}) {
         const sdr = await api.ready();
         assert.ok(sdr, 'ready never resolved');
         assert.strictEqual(sdr.minimal, true, 'the panel was not told it is in its minimal view');
+        resetPanelHosts();
+    });
+
+    await ta('the frame announces itself, so a cached remount is not a lost race', async () => {
+        // The bug: toggling the minimal view rebuilds the document, and with the
+        // runtime and body both cached the frame is created, parsed and loaded
+        // before the parent's effect attaches its listener. The load event had
+        // been and gone, the port was never sent, and the panel sat at its own
+        // "Loading…" for ever.
+        //
+        // So the frame says hello as it parses. Here the runtime starts with no
+        // parent listening at all — the hello goes into nothing — and the port
+        // still arrives when the parent gets round to it.
+        resetPanelHosts();
+        setPanelDeps(fakeDeps());
+
+        const posted = [];
+        const scope = fakeFrame();
+        scope.parent = { postMessage: (msg) => posted.push(msg) };
+
+        const api = startPanelRuntime(scope);
+        assert.ok(posted.some((m) => m && m['ubersdr.panel-hello'] === true),
+            'the frame never announced itself, so a parent that missed `load` can never recover');
+
+        const { port1, port2 } = makeChannel();
+        attachPanel({ id: 'x:a', port: port1, onHeight: () => {} });
+        scope.deliver({ data: { 'ubersdr.panel-port': true }, ports: [port2] });
+
+        const sdr = await api.ready();
+        assert.ok(sdr, 'the panel never became ready');
         resetPanelHosts();
     });
 

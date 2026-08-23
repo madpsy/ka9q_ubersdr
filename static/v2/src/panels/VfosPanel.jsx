@@ -101,7 +101,26 @@ function useScan(radio, vfos) {
 
     useEffect(() => {
         if (!scanning) return undefined;
-        let judgeFrom = performance.now() + SCAN_SETTLE_MS;
+        // When the VFO we are on was arrived at, so the gate can be judged on
+        // what has been heard since.
+        let judgeFrom = 0;
+        const step = () => {
+            const now = live.current;
+            const next = nextScanVfo(now.ids, getVfos().active);
+            if (!next) { setScanning(false); return false; }
+            selectVfo(now.radio, next);
+            judgeFrom = performance.now() + SCAN_SETTLE_MS;
+            return true;
+        };
+        // The first move is made on the press, not a dwell later.
+        //
+        // Pressing Scan is "leave here and go looking", and the commonest time
+        // to press it is while listening to something — which is exactly the
+        // case where dwelling first and then testing the gate found the signal
+        // already in the speaker, called it a stop, and never moved at all.
+        // The VFO you started on is the one place a scan has no reason to
+        // check: you were already there.
+        if (!step()) return undefined;
         const timer = setInterval(() => {
             const now = live.current;
             // Something went out from under the scan — the last-but-one VFO
@@ -110,10 +129,7 @@ function useScan(radio, vfos) {
             // halt it.
             if (now.blocked) { setScanning(false); return; }
             if (meters.current.lastGateOpenAt > judgeFrom) { setScanning(false); return; }
-            const next = nextScanVfo(now.ids, getVfos().active);
-            if (!next) { setScanning(false); return; }
-            selectVfo(now.radio, next);
-            judgeFrom = performance.now() + SCAN_SETTLE_MS;
+            step();
         }, SCAN_DWELL_MS);
         return () => clearInterval(timer);
     }, [scanning, meters]);

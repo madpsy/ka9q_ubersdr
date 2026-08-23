@@ -121,12 +121,11 @@ t('scanning steps to the next VFO in use, skipping the empty one', () => {
     assert.ok(byClass(running, 'vfos')[0].props.className.includes('is-scanning'));
     assert.strictEqual(timer.ms, 250, 'the dwell is not 250 ms');
 
-    // A quiet channel: the gate has not opened since we landed.
-    clock += 250;
-    timer.fn();
-    assert.strictEqual(getVfos().active, 'B');
+    // The first move is made on the press, not a dwell later.
+    assert.strictEqual(getVfos().active, 'B', 'the scan did not move when it started');
     assert.strictEqual(ctx.tuned.at(-1).frequency, 7100000, 'the receiver did not follow');
 
+    // A quiet channel: the gate has not opened since we landed.
     clock += 250;
     timer.fn();
     assert.strictEqual(getVfos().active, 'C');
@@ -138,6 +137,24 @@ t('scanning steps to the next VFO in use, skipping the empty one', () => {
     assert.strictEqual(getVfos().slots.D, null, 'the unused VFO was filled by the scan');
 });
 
+t('a signal where the scan is started does not hold it there', () => {
+    // The reported case: pressing Scan while listening to something. The gate
+    // is open on the VFO under the dial, and testing it before moving found the
+    // signal that was already in the speaker — so the scan stopped where it
+    // began and never moved at all. The VFO you start from is the one place a
+    // scan has no reason to check: you were already there.
+    reset();
+    threeInUse();
+    const ctx = context();
+    ctx.meters.current.lastGateOpenAt = clock;      // open, right now, on A
+    render(VfosPanel, {}, ctx);
+    scanBtn(render(VfosPanel, {}, ctx).tree).props.onClick();
+    const running = render(VfosPanel, {}, ctx).tree;
+
+    assert.strictEqual(getVfos().active, 'B', 'the scan stopped on the VFO it started from');
+    assert.strictEqual(scanBtn(running).props.children, 'Scanning');
+});
+
 t('the scan stops where the squelch opens', () => {
     reset();
     threeInUse();
@@ -146,9 +163,7 @@ t('the scan stops where the squelch opens', () => {
     scanBtn(render(VfosPanel, {}, ctx).tree).props.onClick();
     render(VfosPanel, {}, ctx);
 
-    clock += 250;
-    timer.fn();
-    assert.strictEqual(getVfos().active, 'B');
+    assert.strictEqual(getVfos().active, 'B', 'the press did not move the scan on');
 
     // A signal on B: the gate opens while we are sitting on it.
     clock += 200;
@@ -173,13 +188,13 @@ t('a gate left open by the VFO before this one does not stop the scan', () => {
     scanBtn(render(VfosPanel, {}, ctx).tree).props.onClick();
     render(VfosPanel, {}, ctx);
 
-    // A signal on A, heard just before the scan steps off it.
-    ctx.meters.current.lastGateOpenAt = clock + 10;
-    clock += 250;
-    timer.fn();
-    assert.strictEqual(getVfos().active, 'B', 'a signal on A should have stopped it there');
+    // The press put us on B. The last gate reading belongs to A, from a moment
+    // before we arrived — packets already in flight when the switch went out.
+    assert.strictEqual(getVfos().active, 'B');
+    ctx.meters.current.lastGateOpenAt = clock;
 
-    // Nothing further arrives: the same stale reading must not stop it on B.
+    // Nothing further arrives, so that stale reading is all there is: it must
+    // not be taken as a signal on B.
     clock += 250;
     timer.fn();
     assert.strictEqual(getVfos().active, 'C', 'the scan stopped on the VFO after the signal');
@@ -193,6 +208,7 @@ t('picking a VFO by hand ends the scan', () => {
     scanBtn(render(VfosPanel, {}, ctx).tree).props.onClick();
     const running = render(VfosPanel, {}, ctx).tree;
 
+    assert.strictEqual(getVfos().active, 'B', 'the press did not move the scan on');
     byClass(running, 'vfos__row')[2].props.onClick();    // C
 
     assert.strictEqual(getVfos().active, 'C');
@@ -238,9 +254,13 @@ t('the squelch going off under a running scan stops it', () => {
     ctx.squelch = { value: -100, enabled: false, threshold: null };
     render(VfosPanel, {}, ctx);     // the panel re-renders with the new context
 
+    // Where the scan has reached is not the point of this one — the stub
+    // re-mounts every effect on every frame, so each render moves it on. What
+    // matters is that the next dwell does not.
+    const parked = getVfos().active;
     clock += 250;
     timer.fn();
-    assert.strictEqual(getVfos().active, 'A', 'the scan kept stepping with nothing to stop it');
+    assert.strictEqual(getVfos().active, parked, 'the scan kept stepping with nothing to stop it');
     assert.strictEqual(scanBtn(render(VfosPanel, {}, ctx).tree).props.children, 'Scan');
 });
 

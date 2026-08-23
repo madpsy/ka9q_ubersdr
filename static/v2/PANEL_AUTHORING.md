@@ -68,7 +68,7 @@ Inline everything.
 | `dock` | no | `left`, `right` or `bottom`. Default `left`. |
 | `defaultOpen` | no | `false` to ship collapsed. Default `true`. |
 | `defaultHidden` | no | `true` to ship hidden but listed. Default `false`. |
-| `minimal` | no | `true` if you honour `sdr.minimal` (§6). Default `false`. |
+| `minimal` | **yes** | Always `true`. Every panel owes the operator a minimal view — see §6. |
 | `fill` | no | `true` to stretch to the dock's height. Bottom dock only. |
 | `weight` | no | Share of the bottom dock's width, 0.1–4. Default `1`. |
 | `height` | no | Starting height in px, 60–2000, before your panel reports its own. |
@@ -419,9 +419,25 @@ accented, none of them is.
 
 ---
 
-**The minimal view** is the operator saying "keep this, but smaller". If you
-declare `"minimal": true`, honour `sdr.minimal` by dropping what is set-and-forget
-and keeping what is watched. You decide what survives; nothing does it for you.
+**The minimal view is not optional.** Every panel declares `"minimal": true` and
+honours `sdr.minimal`. A panel with no minimal view is an unfinished one, and the
+operator finds out by pressing a button that does nothing.
+
+The reason is the screen. An operator runs six panels in a 220 px dock, or on a
+phone where a panel is a sheet over the spectrum. The minimal view is how a panel
+earns a place in that arrangement instead of being the one they close.
+
+What survives answers one question: what is this panel *for*? Keep what is
+watched or acted on — the reading, the list, the control the panel exists for.
+Drop what is set once and then ignored — settings, legends, helper text,
+secondary columns. Two rules keep it honest: nothing appears in the minimal view
+that is absent from the full one, and nothing the panel is for becomes
+unreachable. If the only way to act is a control you were going to drop, keep the
+control and drop its label.
+
+Read `sdr.minimal` once at startup and put the difference in CSS behind a single
+class. Toggling the view rebuilds the frame, so the panel starts again with the
+new answer; there is no event to listen for and none is missing.
 
 ---
 

@@ -12903,19 +12903,27 @@ function resetStationIdColor() {
             '  "title": "My panel",',
             '  "icon": "Custom",',
             '  "group": "shack",',
-            '  "dock": "left"',
+            '  "dock": "left",',
+            '  "minimal": true',
             '}',
             '<\/script>',
             '',
             '<style>',
             '  .out { font-family: var(--mono, monospace); }',
+            '  /* The minimal view: keep what the panel is for, drop the rest. */',
+            '  .min .hint { display: none; }',
             '</style>',
             '',
             '<div class="out" id="out">Starting\u2026</div>',
+            '<div class="hint">Tuned frequency and mode.</div>',
             '',
             '<!-- type="module" is required: await needs it. -->',
             '<script type="module">',
             'const sdr = await ubersdr.ready();',
+            '',
+            '// Read once: toggling the minimal view rebuilds the frame, so the',
+            '// panel starts again with the new answer. There is no event.',
+            'if (sdr.minimal) document.body.classList.add(\'min\');',
             '',
             'sdr.on(\'tuning\', (t) => {',
             '    document.getElementById(\'out\').textContent =',
@@ -13274,6 +13282,15 @@ function resetStationIdColor() {
             }
             if (Number(manifest.ui) !== 2) {
                 problems.push('"ui" is ' + JSON.stringify(manifest.ui) + ', and this receiver serves the v2 interface');
+            }
+            // Not fatal — it publishes and it works — but the operator gets a
+            // minimise button that does nothing, and a panel that can only be
+            // full size is the one they close when the dock gets crowded. Said
+            // here because this is where somebody is still in a position to fix
+            // it. See PANEL_AUTHORING.md §6.
+            if (manifest.minimal !== true) {
+                problems.push('no minimal view — declare "minimal": true and honour sdr.minimal, '
+                    + 'keeping what the panel is for and dropping settings and helper text');
             }
             if (panelMeta) {
                 if (manifest.icon && !panelMeta.icons.includes(manifest.icon)) {

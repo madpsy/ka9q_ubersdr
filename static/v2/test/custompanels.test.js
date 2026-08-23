@@ -458,6 +458,39 @@ const reply = (status, body, etag) => async () => ({
             'the editor did not notice a classic script: ' + flagged.problems.join('; '));
     });
 
+    t('every panel is expected to have a minimal view', () => {
+        // The requirement lives in three places that have to agree: the guide
+        // here, the authoring skill Claude works from, and the editor that a
+        // human publishes through. It drifted once — all three called `minimal`
+        // optional, and panels arrived without one — so this pins it.
+        const table = /\|\s*`minimal`\s*\|\s*\*\*yes\*\*/;
+        assert.ok(table.test(guide), 'the guide no longer requires a minimal view');
+
+        const skillPath = '/home/nathan/repos/ubersdr-claude/skills/create-panel/SKILL.md';
+        if (fs.existsSync(skillPath)) {
+            const skill = fs.readFileSync(skillPath, 'utf8');
+            assert.ok(table.test(skill), 'the skill no longer requires a minimal view');
+        }
+
+        const admin = fs.readFileSync(path.join(__dirname, '..', '..', 'admin.html'), 'utf8');
+        const insFrom = admin.indexOf('const PANEL_TEMPLATE_RE');
+        const insTo = admin.indexOf('function updateWidgetKindNote');
+        // eslint-disable-next-line no-new-func
+        const inspect = new Function(admin.slice(insFrom, insTo) + '; return inspectWidgetContent;')();
+
+        const without = [
+            '<template id="ubersdr-panel">',
+            '<script type="application/ubersdr-panel+json">',
+            '{"ui":2,"schema":1,"title":"No Minimal","icon":"Custom","group":"shack"}',
+            '<\/script>',
+            '<div>hi</div>',
+            '</template>',
+        ].join('\n');
+        const found = inspect(without);
+        assert.ok(found.problems.some((p) => /minimal/.test(p)),
+            'the editor no longer points out a panel with no minimal view');
+    });
+
     t('a new widget starts as a valid panel', () => {
         // The admin editor prefills this, so it is the first thing most authors
         // will ever publish. If it does not itself pass, every new panel starts

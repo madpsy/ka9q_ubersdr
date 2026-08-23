@@ -144,6 +144,9 @@ export function spotsSnapshot(src) {
         spotter: sp.spotter || '',
         comment: sp.comment || '',
         countryCode: sp.countryCode || '',
+        // Only the CW and digital feeds carry one, and only sometimes — the
+        // skimmer needs QRZ lookup on, and a cluster spot never has it.
+        grid: sp.grid || '',
         snr: num(sp.snr),
         at: num(sp.at),
     }));

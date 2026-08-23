@@ -227,10 +227,12 @@ amount of calling the API could reconstruct this.
 ```jsonc
 { "dx": [{ "frequency": 14025000, "mode": "cw", "callsign": "VK9XX",
            "spotter": "G4ABC", "comment": "up 2", "countryCode": "XR",
-           "snr": null, "at": 1750000000000 }],
+           "grid": "", "snr": null, "at": 1750000000000 }],
   "cw": [ … ], "digital": [ … ] }
 ```
-Capped at the most recent 100 per feed.
+Capped at the most recent 100 per feed. `grid` is the spotted station's Maidenhead
+locator, `""` when it is not known — a cluster spot never carries one, a digital
+spot usually does, and a CW spot does only where the skimmer runs with QRZ lookup on.
 
 **Acquired only while something is subscribed.** The receiver sends nothing until
 a stream is asked for, so the page holds these feeds only while a client is

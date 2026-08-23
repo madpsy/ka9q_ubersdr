@@ -43,6 +43,19 @@
 #                           release on GitHub with the gh CLI, replacing what is
 #                           there. Asks first, and only from a terminal.
 #                           Implies --release.
+#   ./build.sh --play       release-build, then upload the .aab to Google Play
+#                           with the Developer API and roll it out on the
+#                           `internal` track. Asks first, like --publish, and
+#                           takes --yes the same way. Implies --release.
+#   ./build.sh --play=beta  ...on another track. `internal`, `alpha`, `beta`,
+#                           `production`, or the name of a closed track. Play
+#                           refuses a track the app does not have, which is the
+#                           check this does not have to make.
+#   ./build.sh --play-draft the same, but left as a draft for somebody to
+#                           release from the console. What to use the first time
+#                           a track is fed this way, and always the first time
+#                           for production — see the note above play_release for
+#                           why a track's first release is the strict one.
 #   ./build.sh --screenshots
 #                           build a debug APK, then capture the Play Store set
 #                           into screenshots/: a 7-inch and a 10-inch tablet,
@@ -112,6 +125,9 @@ INSTALL=0
 DEVICE=""
 CLEAN=0
 PUBLISH=0
+PLAY=0
+PLAY_TRACK=internal
+PLAY_STATUS=completed
 
 for arg in "$@"; do
     case "$arg" in
@@ -122,6 +138,9 @@ for arg in "$@"; do
         --install) APK=1; INSTALL=1 ;;
         --install=*) APK=1; INSTALL=1; DEVICE="${arg#--install=}" ;;
         --publish) APK=1; RELEASE=1; PUBLISH=1 ;;
+        --play) APK=1; RELEASE=1; PLAY=1 ;;
+        --play=*) APK=1; RELEASE=1; PLAY=1; PLAY_TRACK="${arg#--play=}" ;;
+        --play-draft) APK=1; RELEASE=1; PLAY=1; PLAY_STATUS=draft ;;
         --yes) ASSUME_YES=1 ;;
         --clean) CLEAN=1 ;;
         --screenshots) APK=1; SHOTS=1 ;;
@@ -209,6 +228,16 @@ android_signing_report() {
         echo "    This APK will be unsigned, and Android will refuse to install"
         echo "    it. Fine for checking that it builds. See README.md."
     fi
+    # Only when it is about to matter. Reporting "no Play key" on every --apk
+    # would be noise about a thing nobody asked for.
+    if [[ "${PLAY:-0}" -eq 1 ]]; then
+        if [[ -f "$PLAY_JSON" ]]; then
+            echo "    play           $PLAY_JSON"
+            echo "                   track $PLAY_TRACK, as $PLAY_STATUS"
+        else
+            echo "    play           $PLAY_JSON — not there, so --play will refuse"
+        fi
+    fi
     echo
 }
 
@@ -286,6 +315,222 @@ publish_release() {
         echo "  uploaded to https://github.com/$REPO/releases/tag/$TAG"
     else
         echo "not published: the upload failed — $ARTIFACT is intact, try again." >&2
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Google Play
+# ---------------------------------------------------------------------------
+#
+# The .aab, straight to Play, over the Developer API.
+#
+# Nothing is added to the build to do it: openssl signs the assertion, curl
+# carries the requests and python3 reads the JSON, all three of which are here
+# already. The alternative was a Gradle plugin, which would put a dependency and
+# a network call into the Android build's configure step so that a shell script
+# could stay shorter — and this is the same shape as publish_release above,
+# which uploads to GitHub with a tool rather than through Gradle.
+#
+# What the API cannot do, and no flag here will: create the app listing. A brand
+# new app needs its first bundle uploaded through the console by hand. This is
+# for every one after that.
+#
+# ── Before the first run at a track that has never been fed this way ─────────
+#
+# Use --play-draft, and look at the console before releasing it. Not timidity:
+# a track's *first* release is where Play applies the checks it does not apply
+# to later ones, and production is the strict case — content rating, data
+# safety, target audience and country selection all have to be answered before
+# it will take one. An unanswered question fails the **commit**, which is the
+# last step, after the bundle has been accepted. Nothing is published when that
+# happens and the edit is abandoned, so it costs nothing but the confusion of
+# a refusal arriving as raw API JSON at the end of a build that looked fine.
+#
+# A draft turns that around: the upload finishes, the release sits in the
+# console, and whatever Play wants is asked there in a form that explains
+# itself, with the bundle already in place.
+#
+# ── What this deliberately does not do ──────────────────────────────────────
+#
+# A staged rollout. Play spells that as status `inProgress` with a
+# `userFraction`, and only `completed` and `draft` are offered here — so
+# --play=production hands the rollout schedule to Play's own defaults rather
+# than to a percentage named on the command line. Add it the day somebody wants
+# it; guessing at a default fraction for a release nobody has asked to stage
+# would be inventing a policy, not implementing one.
+PLAY_PACKAGE=org.ubersdr.mobile
+PLAY_API=https://androidpublisher.googleapis.com/androidpublisher/v3/applications
+PLAY_UPLOAD=https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications
+
+# Where the service-account key lives when nobody has said otherwise — beside
+# the keystore, and found the same way. See adopt_default_keystore.
+PLAY_JSON="${UBERSDR_PLAY_JSON:-$KEYS_DIR/play-service-account.json}"
+
+play_json_field() {
+    python3 -c "import json,sys;sys.stdout.write(str(json.load(open(sys.argv[1]))[sys.argv[2]]))" \
+        "$PLAY_JSON" "$1"
+}
+
+# An access token, from the service account, with openssl for the RS256.
+#
+# The private key goes to a temp file because openssl wants a file; it is made
+# with mktemp (0600) and removed on the way out, including on failure.
+play_token() {
+    local iss aud now hdr clm pem sig body
+    iss="$(play_json_field client_email)" || return 1
+    aud="$(play_json_field token_uri)" || return 1
+    now="$(date +%s)"
+
+    b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+    hdr="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)"
+    clm="$(printf '{"iss":"%s","scope":"%s","aud":"%s","iat":%s,"exp":%s}' \
+            "$iss" "https://www.googleapis.com/auth/androidpublisher" \
+            "$aud" "$now" "$((now + 3600))" | b64url)"
+
+    pem="$(mktemp)"
+    python3 -c "import json,sys;sys.stdout.write(json.load(open(sys.argv[1]))['private_key'])" \
+        "$PLAY_JSON" > "$pem"
+    sig="$(printf '%s.%s' "$hdr" "$clm" | openssl dgst -sha256 -sign "$pem" -binary | b64url)"
+    rm -f "$pem"
+
+    body="$(curl -sS --max-time 60 -X POST "$aud" \
+        -d grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer \
+        --data-urlencode "assertion=${hdr}.${clm}.${sig}")" || return 1
+    printf '%s' "$body" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if 'access_token' not in d:
+    sys.stderr.write('  Play refused the credentials: ' + json.dumps(d) + chr(10))
+    raise SystemExit(1)
+print(d['access_token'])
+"
+}
+
+# What the operator is told before anything is uploaded, and what the refusals
+# are for. The stakes are Play's, not GitHub's: a bundle cannot be withdrawn
+# once a track has it, and its versionCode can never be used again.
+play_release() {
+    if [[ ! -f "$BUNDLE" ]]; then
+        echo "not uploaded to Play: $BUNDLE was not built." >&2
+        return 1
+    fi
+    if [[ ! -f "$PLAY_JSON" ]]; then
+        echo "not uploaded to Play: no service-account key at $PLAY_JSON." >&2
+        echo "  Play Console → Setup → API access → link a Google Cloud project," >&2
+        echo "  make a service account, download its JSON key, then invite that" >&2
+        echo "  account under Users and permissions with release access." >&2
+        return 1
+    fi
+    # An unsigned bundle is refused for the reason an unsigned APK is: Play
+    # rejects it, and finding that out after the upload is worse than here.
+    if [[ -z "${UBERSDR_KEYSTORE:-}" ]]; then
+        echo "not uploaded to Play: this bundle is unsigned." >&2
+        return 1
+    fi
+
+    local version
+    version="$(node -p "require('./package.json').version")"
+    echo
+    echo "  Upload to Google Play:"
+    echo "      $(basename "$BUNDLE")   $(du -h "$BUNDLE" | cut -f1)   version $version"
+    echo "      track $PLAY_TRACK, as $PLAY_STATUS"
+    if [[ "$PLAY_TRACK" == "production" && "$PLAY_STATUS" == "completed" ]]; then
+        echo
+        echo "      This goes to everybody, on a staged rollout Play decides."
+        echo "      --play-draft uploads it and leaves it for somebody to"
+        echo "      release from the console — which is what to use the first"
+        echo "      time, because a track's first release is where Play asks"
+        echo "      for the content rating, data safety and target audience,"
+        echo "      and an unanswered one fails the commit at the very end."
+    fi
+    echo
+
+    local reply=''
+    # The same rule as publish_release, and deliberately not a weaker one: a
+    # versionCode is spent the moment Play accepts it, and cannot be reused even
+    # if the release is never rolled out.
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+        echo "  --yes given; uploading."
+        reply=yes
+    elif [[ ! -t 0 ]]; then
+        echo "not uploaded to Play: --play asks first and there is no terminal to ask on." >&2
+        echo "  Pass --yes to answer it in advance." >&2
+        return 1
+    fi
+    if [[ -z "$reply" ]]; then
+        read -r -p "  type 'yes' to upload: " reply || true
+    fi
+    if [[ "$reply" != "yes" ]]; then
+        echo "  not uploaded to Play."
+        return 0
+    fi
+
+    local token edit code
+    token="$(play_token)" || return 1
+
+    # An edit is a transaction: everything below happens inside it and none of
+    # it is visible until the commit. Abandoning one changes nothing, which is
+    # what makes every failure here safe to retry.
+    edit="$(curl -sS --max-time 60 -X POST -H "Authorization: Bearer $token" \
+        -H "Content-Length: 0" "$PLAY_API/$PLAY_PACKAGE/edits" \
+        | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if 'id' not in d:
+    sys.stderr.write('  Play refused to open an edit: ' + json.dumps(d) + chr(10))
+    raise SystemExit(1)
+print(d['id'])
+")" || return 1
+
+    play_abandon() {
+        curl -sS --max-time 60 -o /dev/null -X DELETE \
+            -H "Authorization: Bearer $token" "$PLAY_API/$PLAY_PACKAGE/edits/$edit" || true
+    }
+
+    echo "  uploading the bundle"
+    code="$(curl -sS --max-time 900 -X POST \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/octet-stream" \
+        --data-binary "@$BUNDLE" \
+        "$PLAY_UPLOAD/$PLAY_PACKAGE/edits/$edit/bundles?uploadType=media" \
+        | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if 'versionCode' not in d:
+    sys.stderr.write('  Play refused the bundle: ' + json.dumps(d) + chr(10))
+    raise SystemExit(1)
+print(d['versionCode'])
+")" || { play_abandon; return 1; }
+    echo "  accepted as versionCode $code"
+
+    # The release notes are what the tester sees. The version is the honest
+    # minimum: a track fed by a script with no note at all shows an empty
+    # what's-new, which reads as a build somebody forgot about.
+    if ! curl -sS --max-time 120 -o /dev/null -w '' -X PUT \
+        -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
+        -d "$(python3 -c "
+import json, sys
+print(json.dumps({'track': sys.argv[1], 'releases': [{
+    'name': sys.argv[2],
+    'versionCodes': [sys.argv[3]],
+    'status': sys.argv[4],
+}]}))
+" "$PLAY_TRACK" "$version" "$code" "$PLAY_STATUS")" \
+        "$PLAY_API/$PLAY_PACKAGE/edits/$edit/tracks/$PLAY_TRACK"; then
+        echo "not uploaded to Play: the track could not be set — nothing was committed." >&2
+        play_abandon
+        return 1
+    fi
+
+    if curl -sS --max-time 120 -o /dev/null -X POST \
+        -H "Authorization: Bearer $token" -H "Content-Length: 0" \
+        "$PLAY_API/$PLAY_PACKAGE/edits/$edit:commit"; then
+        echo "  committed — $version ($code) is on the $PLAY_TRACK track as $PLAY_STATUS"
+        echo "  https://play.google.com/console — processing takes a few minutes"
+    else
+        echo "not uploaded to Play: the commit failed. Nothing changed; try again." >&2
+        play_abandon
+        return 1
     fi
 }
 
@@ -994,4 +1239,8 @@ fi
 
 if [[ "$PUBLISH" -eq 1 ]]; then
     publish_release
+fi
+
+if [[ "$PLAY" -eq 1 ]]; then
+    play_release
 fi

@@ -10435,10 +10435,10 @@ a.btn { text-decoration: none; }
 .vfos__row {
     display: flex;
     align-items: baseline;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
     min-width: 0;
-    padding: 4px 8px;
+    padding: 4px 6px;
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -10469,8 +10469,17 @@ a.btn { text-decoration: none; }
    `overflow: hidden` is the guard that stops the number drawing *over* the mode
    beside it: a flex item with min-width 0 will happily shrink its box while its
    text keeps its own width, and the two then occupy the same pixels. */
+/* A fixed column, not a growing one.
+   `flex: 1` here was the bug behind "why does it need to be so wide": the cell
+   absorbed every spare pixel in the row, and right-aligning the number parked
+   all of it between the VFO letter and the digits. The row was full by
+   construction — so the band and the filter width were being dropped for want of
+   space that was sitting there, visibly empty, on the left.
+   Sized instead to the widest dial reading it will hold, which is what keeps the
+   digits aligned down the column, and the slack now collects at the end of the
+   row where it reads as margin. */
 .vfos__freq {
-    flex: 1;
+    flex: 0 0 7.2em;
     min-width: 0;
     font-family: var(--mono);
     font-variant-numeric: tabular-nums;
@@ -10486,13 +10495,13 @@ a.btn { text-decoration: none; }
    its place whether or not it has anything in it. */
 .vfos__mode {
     flex-shrink: 0;
-    width: 3.2em;
+    width: 2.6em;
     font-size: 0.85em;
     color: var(--text-dim);
 }
 .vfos__width {
     flex-shrink: 0;
-    width: 3.4em;
+    width: 3.2em;
     text-align: right;
     font-variant-numeric: tabular-nums;
     font-size: 0.8em;
@@ -10500,7 +10509,7 @@ a.btn { text-decoration: none; }
 }
 .vfos__band {
     flex-shrink: 0;
-    width: 3em;
+    width: 2.8em;
     text-align: right;
     font-size: 0.8em;
     color: var(--text-faint);
@@ -10516,9 +10525,13 @@ a.btn { text-decoration: none; }
 /* Narrow dock: the qualifiers go before the frequency does, one at a time.
    The band first — it is derivable from the number beside it — then the filter
    width. The frequency and the mode are the panel, and they stay. */
-@container (max-width: 300px) {
+/* The thresholds are measured, not guessed: with the cells above, a row needs
+   about 262px of column to hold all five, 219px without the band and 172px
+   without the filter width too. Each cut is made just before the row would
+   otherwise have to clip the frequency. */
+@container (max-width: 268px) {
     .vfos__band { display: none; }
 }
-@container (max-width: 240px) {
+@container (max-width: 224px) {
     .vfos__width { display: none; }
 }

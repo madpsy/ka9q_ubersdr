@@ -93,10 +93,16 @@ function VfoBar() {
     );
 }
 
-// `minimal` keeps what you tune with — the dial, the VFOs, its step and the
-// mode — and drops the filter controls, the passband readout and AGC. The
+// `minimal` keeps what you tune with — the dial, its step and the mode — and
+// drops the filter controls, the passband readout, AGC and the VFO buttons. The
 // filter is reachable from the spectrum in any case: drag either edge of the
 // passband, or shift+wheel over it. See the registry's `minimal`.
+//
+// The VFOs go because switching between four of them is not what a cut-down
+// panel is for: a minimal Receiver is somebody who wants the dial and nothing
+// else, and the VFOs have a panel of their own now for anyone who wants to see
+// or switch them. They are also on the keyboard and mappable to a control
+// surface, so nothing becomes unreachable by dropping the row.
 export default function ReceiverPanel({ minimal }) {
     const { tuning, actions, running } = useRadio();
     // Shared with click-to-tune on the spectrum, so both land on the same grid.
@@ -135,7 +141,7 @@ export default function ReceiverPanel({ minimal }) {
         <div className="stack">
             <FrequencyDial frequency={tuning.frequency} onChange={actions.setFrequency} />
 
-            <VfoBar />
+            {!minimal && <VfoBar />}
 
             <div className="tune-row">
                 <Button variant="ghost" icon={<Icon.Minus />} title={`− ${stepLabel(step)}`} onClick={() => actions.stepBy(step, -1)} />

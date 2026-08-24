@@ -7,7 +7,7 @@
 
 import { getPalette } from './palettes.js';
 import { audioBins } from './audioBand.js';
-import { TINT_SILENT, TINT_ZONES, tintColour, tintZones } from './audioTint.js';
+import { TINT_SILENT, TINT_ZONES, stepPeaks, tintColour, tintZones } from './audioTint.js';
 
 // How fast the history scrolls, in rows a second. A setting rather than the
 // fixed 33 ms v1 runs at: what it should be depends on what is being watched —
@@ -262,7 +262,7 @@ export function newBarLevel() {
     // `tint` is the background's own state — the eased shares between frames.
     // Kept here rather than in the panel for the same reason the level is: it
     // belongs to the view, and the view is drawn from one call.
-    return { floor: -100, ceil: -30, tint: {} };
+    return { floor: -100, ceil: -30, tint: {}, peaks: {} };
 }
 
 /**
@@ -311,6 +311,7 @@ function drawBarTint(c, w, h, bins, start, count, state) {
 
 export function drawAudioBars({
     canvas, bins, binCount, sampleRate, tuning, palette, contrast, level, floorDb, fftSize,
+    heat = true, peaks = true,
 }) {
     if (!canvas || !bins || bins.length !== binCount) return;
     const { w, h, dpr } = sizedCanvas(canvas);
@@ -377,7 +378,7 @@ export function drawAudioBars({
     // The cut follows the whole bar pitch rather than the bar itself, so the
     // gap beside a bar is cleared to that bar's height and the skyline is a
     // clean stepped edge instead of a comb.
-    if (level && level.tint) {
+    if (heat && level && level.tint) {
         drawBarTint(c, w, h, bins, start, count, level.tint);
         c.fillStyle = BAR_BG;
         for (let b = 0; b < bars; b++) {
@@ -392,6 +393,25 @@ export function drawAudioBars({
     }
 
     for (let b = 0; b < bars; b++) c.fillRect(b * step, h - heights[b], target, heights[b]);
+
+    // The falling marks, over everything: a peak is a statement about the bar
+    // under it and has to be legible against the bar as well as against the
+    // background. See stepPeaks in lib/audioTint.js for the fall itself.
+    if (peaks && level && level.peaks) {
+        const frac = new Float32Array(bars);
+        for (let b = 0; b < bars; b++) frac[b] = heights[b] / h;
+        const marks = stepPeaks(level.peaks, frac, performance.now());
+        const thick = Math.max(1, Math.round(dpr));
+        c.fillStyle = cssVar('--scope-peak', 'rgba(233,240,255,0.82)');
+        for (let b = 0; b < bars; b++) {
+            const y = h - marks[b].v * h;
+            // Clamped inside the panel: a mark at full scale would be drawn
+            // half off the top edge and read as a thinner line than its
+            // neighbours.
+            const top = Math.min(h - thick, Math.max(0, Math.round(y - thick / 2)));
+            c.fillRect(b * step, top, target, thick);
+        }
+    }
 }
 
 export function drawAudioRuler(canvas, tuning, sampleRate, binCount) {

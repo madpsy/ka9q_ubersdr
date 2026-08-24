@@ -175,6 +175,12 @@
     /* The ruler's minor ticks. Majors take --scale-text, so this only has to be
        legible as a subdivision — but 0.16 was not even that against --scale-bg. */
     --scale-tick: rgba(255, 255, 255, 0.34);
+    /* The bar scope's falling peak marks. Near-white and not quite opaque: it
+       has to read against the top of a bright bar as well as against the dark
+       above it, and a flat white was brighter than anything else on the panel.
+       Not a theme token for the same reason the dial line is not — the panel is
+       dark in both themes. */
+    --scope-peak: rgba(233, 240, 255, 0.82);
 
     --radius: 10px;
     --radius-sm: 7px;
@@ -3350,6 +3356,12 @@ a.btn { text-decoration: none; }
 .readout--good .readout__value { color: var(--good); }
 .readout--ok .readout__value { color: var(--text); }
 .readout--weak .readout__value { color: var(--warn); }
+
+/* The bar scope's two switches, side by side under one label — they are the
+   same kind of choice and each is a word and a switch, so a row is the honest
+   shape for them. Wraps rather than squeezing: this panel is drawn in a 220px
+   dock column as well as full width. */
+.scope__toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 
 .sparkline { position: relative; height: 46px; }
 .sparkline canvas { width: 100%; height: 100%; display: block; }

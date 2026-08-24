@@ -20,7 +20,7 @@
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
-import { Empty, Field, Segmented, Slider } from '../components/ui.jsx';
+import { Empty, Field, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { isIQ } from '../radio/constants.js';
 import { audioBins } from '../lib/audioBand.js';
 import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
@@ -123,6 +123,11 @@ export default function ScopePanel({ minimal }) {
     const showScope = view !== 'waterfall';
     const showWf = view !== 'scope';
     const bars = showScope && shape === 'bars';
+    // The bar view's two extras. Read here rather than inside the draw so the
+    // effect has them as dependencies and a toggle repaints at once, rather
+    // than at whatever rate the audio happens to be arriving.
+    const peaks = display.scopePeaks !== false;
+    const heat = display.scopeHeat !== false;
 
     // Persist the choices with the other display settings.
     useEffect(() => {
@@ -168,6 +173,8 @@ export default function ScopePanel({ minimal }) {
                     level: barLevel.current,
                     floorDb: autoLevel ? null : floorDb,
                     fftSize,
+                    peaks,
+                    heat,
                 });
                 drawAudioRuler(barRulerRef.current, tuning, f.sampleRate, f.binCount);
             } else if (showScope) {
@@ -191,7 +198,7 @@ export default function ScopePanel({ minimal }) {
                 drawAudioRuler(rulerRef.current, tuning, f.sampleRate, f.binCount);
             }
         });
-    }, [player, fftSize, showScope, showWf, bars, timebase, tuning, display.palette, contrast, rate,
+    }, [player, fftSize, showScope, showWf, bars, peaks, heat, timebase, tuning, display.palette, contrast, rate,
         wfRate, autoLevel, floorDb, iq]);
 
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
@@ -359,6 +366,30 @@ export default function ScopePanel({ minimal }) {
             {!minimal && showWf && (
                 <Field label="Contrast" hint={contrast.toFixed(2)}>
                     <Slider value={contrast} min={0.4} max={2.5} step={0.05} onChange={setContrast} />
+                </Field>
+            )}
+
+            {/* The bar view's two extras, side by side because they are the
+                same kind of choice — what is drawn besides the bars — and
+                because each is a word and a switch. Only with the bars
+                showing: neither means anything over a waveform or a
+                waterfall. */}
+            {!minimal && bars && (
+                <Field label="Bars">
+                    <div className="scope__toggles">
+                        <Switch
+                            checked={peaks}
+                            onChange={(v) => display.set({ scopePeaks: v })}
+                            label="Peak"
+                            title="A mark that jumps to each bar's top and falls back, holding the loudest moment for a second after the bar has dropped"
+                        />
+                        <Switch
+                            checked={heat}
+                            onChange={(v) => display.set({ scopeHeat: v })}
+                            label="Heat"
+                            title="Colours the space above the bars by how much of the audio's energy each part of the band is carrying — green for an average share, red for more, blue for less"
+                        />
+                    </div>
                 </Field>
             )}
 

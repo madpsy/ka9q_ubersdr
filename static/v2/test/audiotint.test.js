@@ -7,8 +7,9 @@
 const assert = require('assert');
 const {
     TINT_EVEN, TINT_SPAN_MAX_DB, TINT_SPAN_MIN_DB, TINT_ZONES,
-    TINT_SILENT,
-    centreOf, easeZones, rankTint, smoothZones, spreadOf, tintColour, tintZones, zoneShares,
+    PEAK_FALL_RATE, PEAK_HOLD_MS, TINT_SILENT,
+    centreOf, easeZones, rankTint, smoothZones, spreadOf, stepPeak, stepPeaks, tintColour,
+    tintZones, zoneShares,
 } = require('./.build/audiotint.cjs');
 
 let pass = 0;
@@ -327,6 +328,93 @@ t('a resize of the zone count starts again rather than mixing two grids', () => 
     const st = {};
     tintZones(st, band(-40), 0, BINS, 0, 8);
     assert.strictEqual(tintZones(st, band(-40), 0, BINS, 16, 16).pos.length, 16);
+});
+
+// ── falling peaks ────────────────────────────────────────────────────────────
+
+const mark = () => ({ v: 0, hold: 0, rate: 0 });
+
+t('a peak jumps to the bar at once', () => {
+    const p = mark();
+    stepPeak(p, 0.8, 16);
+    assert.strictEqual(p.v, 0.8);
+});
+
+t('...and holds there before it starts to fall', () => {
+    const p = mark();
+    stepPeak(p, 0.8, 16);
+    stepPeak(p, 0.1, PEAK_HOLD_MS - 50);
+    assert.strictEqual(p.v, 0.8, 'still up');
+    stepPeak(p, 0.1, 100);
+    assert.ok(p.v < 0.8, 'and then it moves');
+});
+
+t('the fall accelerates', () => {
+    const p = mark();
+    stepPeak(p, 1, 16);
+    stepPeak(p, 0, PEAK_HOLD_MS);
+    const before = p.v;
+    stepPeak(p, 0, 100);
+    const firstDrop = before - p.v;
+    const mid = p.v;
+    stepPeak(p, 0, 100);
+    assert.ok(before - mid > 0, 'it is falling');
+    assert.ok(mid - p.v > firstDrop, 'and faster than it was');
+});
+
+t('a mark never falls below its bar', () => {
+    const p = mark();
+    stepPeak(p, 1, 16);
+    for (let i = 0; i < 100; i++) stepPeak(p, 0.4, 50);
+    assert.ok(p.v >= 0.4 - 1e-6, `${p.v}`);
+});
+
+t('a rising bar takes the mark with it and restarts the hold', () => {
+    const p = mark();
+    stepPeak(p, 0.5, 16);
+    stepPeak(p, 0.2, PEAK_HOLD_MS + 200);       // falling
+    assert.ok(p.v < 0.5);
+    stepPeak(p, 0.9, 16);
+    assert.strictEqual(p.v, 0.9);
+    assert.strictEqual(p.hold, PEAK_HOLD_MS);
+    assert.strictEqual(p.rate, 0);
+});
+
+t('the first fall is at the stated rate, not from a standstill', () => {
+    const p = mark();
+    stepPeak(p, 1, 16);
+    stepPeak(p, 0, PEAK_HOLD_MS);
+    const before = p.v;
+    stepPeak(p, 0, 1000);
+    // A second of falling: the initial rate plus a second of gravity, so more
+    // than the rate alone and comfortably less than the whole panel.
+    assert.ok(before - p.v > PEAK_FALL_RATE, `${before - p.v}`);
+    assert.ok(p.v >= 0);
+});
+
+t('one mark per bar, and a resize starts them again', () => {
+    const st = {};
+    assert.strictEqual(stepPeaks(st, new Float32Array([0.2, 0.4, 0.6]), 0).length, 3);
+    assert.strictEqual(stepPeaks(st, new Float32Array(8), 16).length, 8);
+});
+
+t('marks are independent — a loud bar does not lift a quiet one', () => {
+    const st = {};
+    stepPeaks(st, new Float32Array([1, 0.1]), 0);
+    const marks = stepPeaks(st, new Float32Array([0, 0.1]), 16);
+    assert.strictEqual(marks[0].v, 1, 'the loud one holds');
+    // Float32 round-trip, so near rather than exact.
+    assert.ok(Math.abs(marks[1].v - 0.1) < 1e-6, `${marks[1].v}`);
+});
+
+t('a hidden tab does not drop every mark to the floor', () => {
+    // One frame arriving thirty seconds after the last must not fall the whole
+    // panel — the clamp is what keeps a tab coming back looking like a display
+    // rather than an empty one.
+    const st = {};
+    stepPeaks(st, new Float32Array([1]), 0);
+    const marks = stepPeaks(st, new Float32Array([0]), 30000);
+    assert.ok(marks[0].v > 0.5, `${marks[0].v}`);
 });
 
 console.log(`\n${pass} passed`);

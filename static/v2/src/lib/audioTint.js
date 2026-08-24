@@ -393,3 +393,96 @@ export function tintZones(state, bins, start, count, nowMs, zones = TINT_ZONES) 
     rankTint(rel, state.pos, Math.max(0, Math.min(1, raw / TINT_SPAN_MIN_DB)));
     return { pos: state.pos, rel, quiet: state.quiet, span: state.span, centre: mid };
 }
+
+// ── Falling peaks ────────────────────────────────────────────────────────────
+//
+// The mark every graphic equaliser had: a line that jumps to a bar's top and
+// then sinks back, so the loudest moment of the last second stays visible after
+// the bar itself has dropped away. It is a peak-hold, and it earns its place
+// here for the same reason it did there — audio moves faster than the eye, and
+// the height a bar reached is information the bar has already thrown away by
+// the time you look at it.
+//
+// Three numbers make it feel right, and all three are the classic ones:
+//
+//   * A rise that is instantaneous. The mark is a peak, so it goes to the peak
+//     the moment there is one — anything else is a second, slower bar.
+//   * A hold, so the mark sits still at the top for a moment before it moves.
+//     Without it a peak starts falling before the eye has found it, and the
+//     mark reads as a wobble rather than as a record.
+//   * A fall that accelerates. A constant rate looks like a lift descending;
+//     gravity is what the eye expects of something that has been dropped, and
+//     it also means a mark left behind by a signal that has gone gets out of
+//     the way quickly, while one just below a live bar barely moves.
+
+// How long a peak sits before it starts to fall.
+export const PEAK_HOLD_MS = 700;
+// The initial fall, in fractions of the panel's height per second...
+export const PEAK_FALL_RATE = 0.35;
+// ...and how much that rate grows per second of falling. Two and a half means a
+// mark that has been dropping for a second is falling three and a half times as
+// fast as it started — off the bottom in a moment, rather than drifting.
+export const PEAK_GRAVITY = 2.5;
+
+/**
+ * Advance one bar's peak mark.
+ *
+ * Heights are fractions of the panel, 0..1. `p` is the mark's state — an object
+ * with `v` (where it is) and `hold` (milliseconds still to wait) and `rate`
+ * (how fast it is falling) — and is mutated in place, because there is one per
+ * bar and they are stepped every frame.
+ */
+export function stepPeak(p, height, dtMs) {
+    if (!(height < p.v)) {
+        // At or above the mark: it is the new peak, and the hold starts again.
+        p.v = height;
+        p.hold = PEAK_HOLD_MS;
+        p.rate = 0;
+        return p.v;
+    }
+    let left = dtMs;
+    if (p.hold > 0) {
+        // Only the part of the frame the hold actually covers. Subtracting the
+        // whole frame instead cost a mark up to one frame of falling every time
+        // the hold ran out mid-frame — and at a slow frame rate, or with a hold
+        // that expires just after a frame lands, that is a visible extra pause
+        // before anything moves.
+        const used = Math.min(p.hold, left);
+        p.hold -= used;
+        left -= used;
+        if (left <= 0) return p.v;
+    }
+    const dt = left / 1000;
+    p.rate = (p.rate || PEAK_FALL_RATE) + PEAK_GRAVITY * dt;
+    p.v = Math.max(height, p.v - p.rate * dt);
+    return p.v;
+}
+
+/** A row of peak marks, one per bar; resized when the bar count changes. */
+export function peaksFor(state, bars) {
+    if (!state.marks || state.marks.length !== bars) {
+        state.marks = Array.from({ length: bars }, () => ({ v: 0, hold: 0, rate: 0 }));
+        state.started = false;
+    }
+    return state.marks;
+}
+
+/**
+ * Step every mark and return the row.
+ *
+ * The first frame after a resize has no `dt` to work with, and a frame that
+ * arrives after the tab was hidden has far too much — a mark would fall the
+ * whole panel between two paints. Both are clamped here rather than in the
+ * drawing, so the marks behave the same however the frames arrive.
+ */
+export function stepPeaks(state, heights, nowMs) {
+    const marks = peaksFor(state, heights.length);
+    // A flag rather than a zero clock: `nowMs` is a timestamp and zero is a
+    // perfectly good one, so testing the stored value would make the first two
+    // frames of a run starting at zero both count as the first.
+    const dt = state.started ? Math.min(250, nowMs - state.at) : 0;
+    state.started = true;
+    state.at = nowMs;
+    for (let b = 0; b < heights.length; b++) stepPeak(marks[b], heights[b], dt);
+    return marks;
+}

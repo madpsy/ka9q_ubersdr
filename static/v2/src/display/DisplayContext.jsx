@@ -248,6 +248,12 @@ export const DEFAULTS = {
     // which is the same rule statsPlace and the idle delays follow.
     maxFps: null,
     scopeShape: 'bars',
+    // The two things the bar view draws besides the bars: the falling peak
+    // marks, and the background wash showing where the energy sits (see
+    // lib/audioTint.js). Both on — they are what the view is for, and each is
+    // one tap away from off for anyone who wants the bars bare.
+    scopePeaks: true,
+    scopeHeat: true,
     // ── The IF Spectrum panel ───────────────────────────────────────────────
     //
     // Its own settings rather than the main display's, because the two panes are

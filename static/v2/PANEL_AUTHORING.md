@@ -118,9 +118,9 @@ Extensions · HFDL · IF Spectrum · Layout · Lightning · Listeners
 Local bookmarks · Markers · Media controls · Mini Games · Most used
 Multipad · NAVTEX · News · Noise reduction · Notifications · Packet
 Quick bands · Radio control · Ranking · Receiver · Receiver info
-Recorder · Rotator · SDR control · Shortcuts · Signal · Space weather
-Spectrogram · Spots · SSTV · VFOs · Voice activity · Voice skimmer
-Weather · Weather fax · World clocks
+Recorder · Rotator · Scanner · SDR control · Shortcuts · Signal
+Space weather · Spectrogram · Spots · SSTV · VFOs · Voice activity
+Voice skimmer · Weather · Weather fax · World clocks
 ```
 
 The authoritative list for this receiver is in `/v2/dist/panel-meta.json` under
@@ -145,8 +145,8 @@ Chevron ChevronLeft ChevronRight ChevronUp Clock Close Cloud Collapse
 Compass Copy Custom Dice Download Drag Expand External Eye EyeOff Fax Gauge
 Grid Info Keyboard Knob Layers Link List LockScreen Mic Minus Moon Morse
 Mute News Packet Pad Pause Picture Play Plug Plus Podium Pointer Power
-Puzzle Radio Record Reset RotateLeft RotateRight Search Share Sliders Snail
-Span Stop Sun Target Teleprinter Tick Trash Upload Users ViewSpectrum
+Puzzle Radio Record Reset RotateLeft RotateRight Scan Search Share Sliders
+Snail Span Stop Sun Target Teleprinter Tick Trash Upload Users ViewSpectrum
 ViewSplit ViewWaterfall Volume Waves Wf2D Wf3D WfBoth Wheel Wind ZoomIn
 ZoomOut
 ```

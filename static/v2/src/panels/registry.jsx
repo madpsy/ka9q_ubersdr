@@ -57,6 +57,7 @@ import CustomPanel from './custom/CustomPanel.jsx';
 import MultipadPanel from './MultipadPanel.jsx';
 import ReceiverPanel from './ReceiverPanel.jsx';
 import MarkerNavPanel from './MarkerNavPanel.jsx';
+import ScannerPanel from './ScannerPanel.jsx';
 import VfosPanel from './VfosPanel.jsx';
 import BandsPanel from './BandsPanel.jsx';
 import BookmarksPanel from './BookmarksPanel.jsx';
@@ -185,7 +186,28 @@ const BUILT_IN = [
     // with. The filter shift, the passband readout and AGC are settings you
     // reach for occasionally.
     { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', minimal: true, Component: ReceiverPanel },
-    // Directly under the Receiver, and it is the Receiver panel's picture: the
+    // Directly under the Receiver, because it is the Receiver panel working on
+    // its own: the dial stepping through the markers until the squelch opens on
+    // one. What it steps between is the same list the Markers panel's prev/next
+    // buttons use — voice activity, spots, bookmarks — so a scan visits exactly
+    // what that panel would have walked you through by hand.
+    //
+    // Its own selection of kinds, though, and its own band switch: see
+    // lib/scannerSettings.js. Voice only and the current band to start with,
+    // which is the scan somebody who presses this without reading anything is
+    // asking for.
+    //
+    // Minimal: the button, the note and the targets, without the two pickers —
+    // a scan is set up once and then started and stopped.
+    {
+        id: 'scanner',
+        title: 'Scanner',
+        icon: <Icon.Scan />,
+        dock: 'left',
+        minimal: true,
+        Component: ScannerPanel,
+    },
+    // Under the Receiver and its scanner, and it is the Receiver panel's picture: the
     // few kHz around the dial, with the filter shaded on it. Where the main
     // waterfall says which part of the band you are in, this says where in the
     // *signal* you are — and the window is shaped like the mode, so AM straddles

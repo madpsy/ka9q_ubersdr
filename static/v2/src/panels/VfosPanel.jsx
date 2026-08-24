@@ -18,25 +18,12 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import {
     VFO_IDS, copyVfo, getVfos, nextScanVfo, onVfosChanged, scannableVfos, selectVfo,
 } from '../lib/vfos.js';
+import {
+    SCAN_DWELL_MS, SCAN_MODE_DWELL_MS, SCAN_MODE_SETTLE_MS, SCAN_SETTLE_MS,
+} from '../lib/scanner.js';
 import { formatFilterWidth, formatHz } from '../lib/format.js';
 import { bandForFrequency } from '../lib/bands.js';
 import { isIQ } from '../radio/constants.js';
-
-// How long the scan sits on each VFO before moving on. Short enough that four
-// channels come round in a second, long enough that the server's audio has
-// arrived and been metered — the gate is judged on packets, not on the tune.
-const SCAN_DWELL_MS = 250;
-
-// What a hop costs when it also changes mode, which is a different kind of hop.
-//
-// A mode change makes the server reload radiod's preset, which rebuilds the
-// filter and restarts the demodulator, and the server holds the audio gate shut
-// until radiod confirms the new channel — around a fifth of a second in which
-// there is deliberately nothing to hear. Judging a channel inside that window
-// finds silence whoever is on it, so a busy VFO would be stepped over rather
-// than stopped on. These wait it out and then leave a run of packets to judge.
-const SCAN_MODE_DWELL_MS = 600;
-const SCAN_MODE_SETTLE_MS = 350;
 
 /**
  * What each slot holds, with the active one taken from live tuning.
@@ -63,13 +50,6 @@ function rowsFor(vfos, tuning) {
         };
     });
 }
-
-// After a switch, the packets already in flight were produced on the VFO we
-// just left, so the gate they open is the old channel's, not this one's. A
-// signal on B would otherwise stop the scan on C, one hop late and every time.
-// Judged from a moment after the tune instead — well inside a 250 ms dwell, so
-// there is still a run of packets left to hear this channel on.
-const SCAN_SETTLE_MS = 100;
 
 /**
  * The scan: step the VFOs on a timer and stop on the first one carrying a

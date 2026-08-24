@@ -318,6 +318,12 @@ esbuild bandstats.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/bandstats.cjs --log-level=warning
 esbuild vfospanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/vfospanel.cjs --log-level=warning
+esbuild ../src/lib/scanner.js --bundle --format=cjs --platform=node \
+    --outfile=.build/scanner.cjs --log-level=warning
+esbuild ../src/lib/scannerSettings.js --bundle --format=cjs --platform=node \
+    --outfile=.build/scannersettings.cjs --log-level=warning
+esbuild scannerpanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/scannerpanel.cjs --log-level=warning
 esbuild dispatch.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dispatch.cjs --log-level=warning
 esbuild layout.entry.js --bundle --format=cjs --platform=node \
@@ -391,6 +397,8 @@ node dss.test.js
 node samfallback.test.js
 node vfos.test.js
 node vfospanel.test.js
+node scanner.test.js
+node scannerpanel.test.js
 node needle.test.js
 node listeners.test.js
 node idle.test.js

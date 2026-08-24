@@ -56,6 +56,11 @@ export const Icon = {
     // it is a width being stated, not somewhere to go.
     Span: (p) => <Svg {...p}><path d="M3 7v10M21 7v10" /><path d="M6 12h12" /><path d="m8.5 9.5-2.5 2.5 2.5 2.5" /><path d="m15.5 9.5 2.5 2.5-2.5 2.5" /></Svg>,
     Pointer: (p) => <Svg {...p}><path d="M5 3.5 18 11l-5.6 1.5L9.6 17.5z" /></Svg>,
+    // A radar sweep: the dish arc and the line going round it. The Scanner is
+    // the one control that moves the dial by itself, so its icon says "looking"
+    // rather than "pointing at" — which is what Target and Pointer already say
+    // for the panels that mark where you are.
+    Scan: (p) => <Svg {...p}><path d="M12 12 20 8" /><path d="M4.2 15.5a8.5 8.5 0 1 1 15.6 0" /><path d="M3 19.5h18" /><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" /></Svg>,
     ZoomIn: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M11 8v6M8 11h6" /></Svg>,
     ZoomOut: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M8 11h6" /></Svg>,
     Sun: (p) => <Svg {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Svg>,

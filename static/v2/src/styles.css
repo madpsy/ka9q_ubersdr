@@ -10724,3 +10724,131 @@ a.btn { text-decoration: none; }
     background: var(--surface-hover);
     color: var(--text);
 }
+
+/* ── The Scanner panel ───────────────────────────────────────────────────────
+   The same control the VFOs panel's scan has — a toggle and a line saying what
+   it will do or why it cannot — over a list of the markers it will visit. Its
+   own block rather than a second use of .vfos__scan: that one sits under four
+   fixed rows and this one heads a list that grows, and a shared class would tie
+   the two together for no reason beyond their looking alike today. */
+.scan {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.scan__btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 6.2em;
+    padding: 2px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    font-weight: 600;
+    cursor: pointer;
+}
+.scan__btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--surface-hover);
+    color: var(--text);
+}
+.scan__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Running: filled and pulsing, as the VFO scan's button is and for the same
+   reason. A scan moves the dial by itself every quarter second, so it must not
+   be possible to leave one running without noticing. */
+.scan__btn.is-scanning {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+    animation: vfo-scan-pulse 1s ease-in-out infinite;
+}
+.scan__btn.is-scanning:hover { background: var(--accent); color: var(--bg); }
+
+.scan__note {
+    min-width: 0;
+    font-size: 0.8em;
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.scan__list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.scan__row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 2px 6px;
+    background: var(--surface-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    text-align: left;
+    cursor: pointer;
+}
+.scan__row:hover { border-color: var(--accent); background: var(--surface-hover); }
+
+/* Where the dial is sitting — which during a scan is where the scan has got to,
+   and after one is where it stopped. Breathing while it is running, so the row
+   and the button read as one thing in motion rather than as a selection that
+   keeps changing on its own. */
+.scan__row.is-active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
+}
+.scan__list.is-scanning .scan__row.is-active {
+    animation: vfo-scan-pulse 1s ease-in-out infinite;
+}
+
+.scan__freq {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(11.5px * var(--ui-scale));
+    white-space: nowrap;
+    color: var(--text);
+}
+.scan__row.is-active .scan__freq { color: var(--accent); }
+.scan__name {
+    min-width: 0;
+    font-size: calc(11px * var(--ui-scale));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* The same badge the Markers panel puts on the marker under the dial, so a kind
+   is the same colour wherever it is named. */
+.scan__type {
+    flex: none;
+    padding: 0 5px;
+    border-radius: 3px;
+    font-size: calc(9.5px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    background: var(--surface-hover);
+    color: var(--text-dim);
+}
+.scan__type--dx { background: var(--accent-soft); color: var(--accent); }
+.scan__type--cw { background: rgba(69, 214, 154, 0.14); color: var(--good); }
+.scan__type--voice { background: rgba(242, 181, 68, 0.14); color: var(--warn); }
+
+/* In a narrow dock the kind badge is the first thing to go: the name beside it
+   is usually a callsign, which says more. */
+@container (max-width: 230px) {
+    .scan__type { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scan__btn.is-scanning,
+    .scan__list.is-scanning .scan__row.is-active { animation: none; }
+}

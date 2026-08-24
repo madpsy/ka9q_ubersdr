@@ -346,9 +346,13 @@ t('the panel is registered, under the Receiver, and in a group', () => {
     const group = GROUPS.find((g) => g.panels.includes('ifspectrum'));
     assert.ok(group, 'no group claims it');
     assert.strictEqual(group.id, 'tune');
-    assert.strictEqual(
-        group.panels.indexOf('ifspectrum'), group.panels.indexOf('receiver') + 1,
-        'it should sit next to the Receiver, as it does in the dock',
+    // The group mirrors the dock, and in the dock the Scanner now sits between
+    // the two — the panel that works the dial by itself, which is the
+    // Receiver's other half. So this is still the Receiver's own cluster at the
+    // head of the group, with one panel in it rather than none.
+    assert.deepStrictEqual(
+        group.panels.slice(0, 3), ['receiver', 'scanner', 'ifspectrum'],
+        'it should lead the group with the Receiver, as it does in the dock',
     );
 });
 

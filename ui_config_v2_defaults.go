@@ -50,6 +50,21 @@ type UIConfigV2 struct {
 	PeakHold      *bool    `yaml:"peak_hold,omitempty"      json:"peak_hold,omitempty"`
 	Fill          *bool    `yaml:"fill,omitempty"           json:"fill,omitempty"`
 	Grid          *bool    `yaml:"grid,omitempty"           json:"grid,omitempty"`
+
+	// The operator's page-load notices. Here because they are v2's alone, and
+	// the one field of this block that is not a display default: it is exempt
+	// from the rule above — no v2Settings entry, no applyV2Defaults case —
+	// because those describe a control the listener also has in the Display
+	// panel, and this is not a setting anybody chooses. They reach the client as
+	// their own top-level `v2_notices` key rather than inside `v2`, because
+	// everything in `v2` is applied to first-time visitors only and a notice is
+	// for everyone. See ui_config_notice.go.
+	//
+	// json:"-" so they do not also travel inside the `v2` object the public
+	// endpoint sends — that copy would be the raw config rather than the
+	// clamped one, and two versions of the same notice on the wire is one too
+	// many. The admin UI reads them from ui.yaml, which is YAML either way.
+	Notices []UINotice `yaml:"notices,omitempty" json:"-"`
 }
 
 // ─── Option metadata for the admin UI ────────────────────────────────────────
@@ -273,5 +288,6 @@ func validateUIConfigV2(v UIConfigV2) error {
 			return fmt.Errorf("ui.v2.%s: %g is outside %g-%g", n.key, *n.val, r.Min, r.Max)
 		}
 	}
-	return nil
+
+	return validateUINotices(v.Notices)
 }

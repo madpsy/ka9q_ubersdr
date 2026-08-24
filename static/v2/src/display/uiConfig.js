@@ -54,6 +54,11 @@ export const UI_CONFIG_DEFAULTS = {
     // DisplayProvider to a browser that has never stored any of its own; see
     // the note on parseV2Defaults.
     v2Defaults: {},
+    // The operator's page-load notices, in the order they are shown — empty
+    // when there are none. Not defaults and not settings: they are shown to
+    // everybody on every load, which is why they arrive beside `v2` rather than
+    // in it. See parseNotices.
+    notices: [],
 };
 
 // ── The operator's v2 defaults ───────────────────────────────────────────────
@@ -191,6 +196,95 @@ export function markColors(d) {
     };
 }
 
+// ── The operator's page-load notice ──────────────────────────────────────────
+
+/** Severities the interface can draw, and nothing else. */
+const NOTICE_SEVERITIES = ['info', 'warning', 'good'];
+
+/**
+ * Is this a link worth offering? The server checks the same thing on the way
+ * out (see noticeLinkOK in ui_config_notice.go), and it is checked again here
+ * because a scheme test is cheap and this value ends up in an href — the one
+ * field of the notice a listener can be sent somewhere by.
+ */
+export function noticeLinkOk(href) {
+    if (typeof href !== 'string' || !href || href.length > 500) return false;
+    // Protocol-relative: no scheme to test, and a browser would follow it.
+    if (href.startsWith('//')) return false;
+    try {
+        // A base is supplied so a relative path parses rather than throwing;
+        // one that resolves against the page is then rejected by the scheme
+        // test below, which is what should happen to it.
+        const u = new URL(href, 'https://invalid.example/');
+        if (u.protocol === 'mailto:') return true;
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+        // Rejects a relative path, which resolved against the fake base above.
+        return u.hostname !== 'invalid.example' || /^https?:/i.test(href);
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * The `v2_notices` list, in the order the operator wrote it.
+ *
+ * Anything that would draw an empty card is dropped rather than kept as a hole:
+ * the component then has a list it can map over with no further tests, and one
+ * malformed entry does not take the notices after it with it.
+ */
+export function parseNotices(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map(parseNotice).filter(Boolean).slice(0, 3);
+}
+
+/**
+ * One `v2_notices` entry, checked into something the component can render
+ * without asking any further questions of it.
+ *
+ * Everything is re-checked rather than trusted, on the same principle the rest
+ * of this file follows: the interface is the authority on what it can draw, and
+ * a receiver may be running a server newer or older than its client. It also
+ * costs nothing — this runs once per page load.
+ *
+ * Null for anything that would draw an empty box, so the component has one test
+ * to make and no partial state to reason about.
+ */
+export function parseNotice(n) {
+    if (!n || typeof n !== 'object' || Array.isArray(n)) return null;
+
+    const title = typeof n.title === 'string' ? n.title.trim().slice(0, 200) : '';
+    const text = typeof n.text === 'string' ? n.text.trim().slice(0, 700) : '';
+    if (!title && !text) return null;
+
+    const secs = Number(n.timeout_seconds);
+    const seconds = Number.isFinite(secs) ? Math.max(0, Math.min(60, secs)) : 3;
+
+    const href = typeof n.link_url === 'string' ? n.link_url.trim() : '';
+    const link = noticeLinkOk(href)
+        ? {
+            href,
+            label: (typeof n.link_label === 'string' && n.link_label.trim().slice(0, 60)) || 'Open',
+        }
+        : null;
+
+    return {
+        // Which notice this is, by its wording — so "seen once" survives a
+        // reload and stops applying the moment the operator edits it.
+        id: typeof n.id === 'string' && n.id ? n.id : `${title}|${text}`,
+        severity: NOTICE_SEVERITIES.includes(n.severity) ? n.severity : 'info',
+        title,
+        text,
+        link,
+        seconds,
+        // A notice that neither times out nor closes is a permanent obstruction
+        // over somebody's spectrum, whatever the config says. The two answers
+        // are combined here rather than left to the component, so there is one
+        // place this cannot be got wrong.
+        dismissible: n.dismissible !== false || seconds === 0,
+        once: n.repeat === 'once',
+    };
+}
+
 export function parseUiConfig(cfg) {
     if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return { ...UI_CONFIG_DEFAULTS };
     const o = parseFloat(cfg.spectrum_bg_opacity);
@@ -235,5 +329,6 @@ export function parseUiConfig(cfg) {
             ? Math.max(0.05, Math.min(2, bufferMs / 1000))
             : UI_CONFIG_DEFAULTS.bufferSec,
         v2Defaults: parseV2Defaults(cfg.v2),
+        notices: parseNotices(cfg.v2_notices),
     };
 }

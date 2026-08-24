@@ -72,3 +72,41 @@ export function hiddenByHost(id) {
         return false;
     }
 }
+
+/**
+ * May a notice carrying a link be drawn here?
+ *
+ * The rule is fail-closed, and deliberately not the shape of the others in this
+ * file: an ordinary browser allows one, and a *host* allows one only by saying
+ * so.
+ *
+ * The mobile clients are the reason, and only for the link. A notice is the
+ * operator's own words on somebody else's receiver, and one of the things it is
+ * for is a donate button — which inside an iOS or Android app is a payment link
+ * the stores require to go through their own billing. The apps open whichever
+ * receiver the listener picked, so what appears in them is not something this
+ * project chooses: any receiver in the directory could put any link there.
+ *
+ * The words alone are a different matter. "Antenna work this afternoon" breaks
+ * no rule and is exactly what somebody in an app wants to know, so a notice with
+ * no link is shown everywhere. Only the ones carrying a link are held back — and
+ * every link, not the ones that look like payment: a donate button is a URL like
+ * any other and there is no telling them apart from here.
+ *
+ * Expressed as an opt-out it would only take one future client forgetting a
+ * flag. Expressed this way there is nothing for them to remember — the mobile
+ * clients set nothing and no link can appear, and no receiver-side setting can
+ * turn it on. The desktop client, which is ours and goes through no store, opts
+ * in explicitly with `noticeLinks: true`.
+ */
+export function noticeLinksAllowedByHost() {
+    try {
+        if (typeof window === 'undefined') return true;
+        const host = window.ubersdrDesktop;
+        if (!host) return true;
+        return host.noticeLinks === true;
+    } catch (e) {
+        // Whatever this is, it is not a browser a link can be offered in safely.
+        return false;
+    }
+}

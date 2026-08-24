@@ -725,6 +725,16 @@ if (location.pathname.startsWith('/v2')) {
         contextBridge.exposeInMainWorld('ubersdrDesktop', {
             upstreamOrigin: context.upstreamOrigin || null,
             autoStart: true,
+            // A page-load notice carrying a link may be drawn here.
+            //
+            // Stated rather than assumed, because the page's rule is that a host
+            // allows one only by saying so — see lib/hostPanels.js. The mobile
+            // clients say nothing and so show only the link-free ones: one of
+            // the things a notice is for is a donate button, and inside an app
+            // that is a payment link the stores require to go through their own
+            // billing. This client is downloaded rather than published to a
+            // store, so the question does not arise.
+            noticeLinks: true,
         });
     } catch { /* nothing here is worth failing the whole preload for */ }
 

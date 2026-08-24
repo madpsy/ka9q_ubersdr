@@ -146,7 +146,7 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		}
 	}
 
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	payload := map[string]interface{}{
 		"signal_meter_mode":           config.UI.SignalMeterMode.Default,
 		"smeter_mode":                 config.UI.SMeterMode.Default,
 		"smeter_charts_visible":       config.UI.SMeterChartsVisible.Default,
@@ -176,7 +176,17 @@ func handleUIConfig(w http.ResponseWriter, r *http.Request, config *Config, conf
 		// matters: "not chosen" has to reach the client as absent, or every
 		// listener would be held to whatever this file happened to marshal.
 		"v2": config.UI.V2,
-	}); err != nil {
+	}
+	// The operator's page-load notices, beside the v2 block rather than inside
+	// it: everything in `v2` is applied to a first-time visitor only, and a
+	// notice that a returning listener never saw would be no notice at all.
+	// Absent entirely when there are none, so the client has one test to make.
+	// See ui_config_notice.go for why they carry no markup.
+	if notices := noticesForWire(config.UI.V2.Notices); notices != nil {
+		payload["v2_notices"] = notices
+	}
+
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		log.Printf("Error encoding UI config response: %v", err)
 	}
 }

@@ -69,7 +69,14 @@ window.React = {
         }];
     },
 };
-window.ReactDOM = { createRoot: () => ({ render() {} }) };
+window.ReactDOM = {
+    createRoot: () => ({ render() {} }),
+    // A portal is where the tree is *put*, not what it is: the toasts and the
+    // operator's notice both draw into <body> so a dock cannot clip them, and a
+    // test asking what they drew wants the tree, not the destination. Returning
+    // the node keeps walk() and deep() working through one.
+    createPortal: (node) => node,
+};
 
 /**
  * Call a component, then run the effects it registered.

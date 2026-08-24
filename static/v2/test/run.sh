@@ -28,6 +28,8 @@ esbuild ../src/display/uiConfig.js --bundle --format=cjs --platform=node \
     --outfile=.build/uiconfig.cjs --log-level=warning
 esbuild ../src/lib/palettes.js --bundle --format=cjs --platform=node \
     --outfile=.build/palettes.cjs --log-level=warning
+esbuild opnotice.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/opnotice.cjs --log-level=warning
 esbuild ../src/lib/format.js --bundle --format=cjs --platform=node \
     --outfile=.build/format.cjs --log-level=warning
 esbuild ../src/lib/spectrogram.js --bundle --format=cjs --platform=node \
@@ -524,6 +526,7 @@ node svgmarkup.test.js
 node chatname.test.js
 node chatignore.test.js
 node hostpanels.test.js
+node opnotice.test.js
 node maxfps.test.js
 node shell.test.js
 node barrelmarks.test.js

@@ -10856,3 +10856,105 @@ a.btn { text-decoration: none; }
     .scan__btn.is-scanning,
     .scan__list.is-scanning .scan__row.is-active { animation: none; }
 }
+
+/* =========================================================================
+   Operator notice
+   ========================================================================= */
+
+/* Above the start overlay and the modals, which both sit at 200.
+   
+   It has to be: this appears on page load, and on page load the front door is
+   covering the screen. The strip is anchored to the top and is at most a few
+   lines, so the one thing it could cover — a modal, which is centred — it does
+   not reach in practice. */
+.opnotice-layer {
+    position: fixed;
+    z-index: 210;
+    /* A column, because there may be up to three of them — an outage warning
+       and a donate button are different messages with different clocks, and
+       they stack in the order the operator wrote them. */
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    top: calc(12px + env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(420px, calc(100vw - 24px));
+    pointer-events: none;
+}
+.opnotice-layer > * { pointer-events: auto; }
+
+.opnotice {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 10px 11px;
+    border: 1px solid var(--border-strong);
+    /* The severity as a bar down the leading edge, as the toasts do it — a
+       tinted panel is harder to read words off, and this one may hold two
+       sentences rather than half of one. */
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    box-shadow: var(--shadow);
+    animation: opnotice-in 180ms ease-out;
+}
+@keyframes opnotice-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .opnotice { animation: none; }
+}
+
+.opnotice.is-good { border-left-color: var(--good); }
+.opnotice.is-warning { border-left-color: var(--warn); }
+.opnotice__icon { flex: none; margin-top: 1px; color: var(--accent); }
+.opnotice.is-good .opnotice__icon { color: var(--good); }
+.opnotice.is-warning .opnotice__icon { color: var(--warn); }
+
+.opnotice__text { flex: 1; min-width: 0; }
+.opnotice__title {
+    font-size: calc(12.5px * var(--ui-scale));
+    font-weight: 600;
+    color: var(--text);
+}
+.opnotice__body {
+    margin-top: 2px;
+    font-size: calc(11.5px * var(--ui-scale));
+    line-height: 1.45;
+    color: var(--text-dim);
+    /* The operator's own words, wrapped as written: a long URL typed into the
+       text is broken rather than allowed to widen the strip. */
+    overflow-wrap: anywhere;
+}
+.opnotice__link {
+    display: inline-block;
+    margin-top: 7px;
+    padding: 5px 11px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    font-size: calc(11.5px * var(--ui-scale));
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+}
+.opnotice__link:hover { background: var(--accent); color: var(--accent-ink); }
+
+.opnotice__close {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.opnotice__close:hover { background: var(--surface-hover); color: var(--text); }

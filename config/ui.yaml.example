@@ -299,3 +299,51 @@ ui:
   #   fill: true
   #   # dB gridlines across the spectrum pane. v2 default: false.
   #   grid: false
+  #
+  #   # ── Messages to visitors ──
+  #   # Up to three short messages shown to everyone who opens the receiver,
+  #   # stacked at the top of the page and gone again after a few seconds each.
+  #   # Set them in Admin → UI, or here. They take effect on the next page load
+  #   # — no restart.
+  #   #
+  #   # A list rather than one message because the two cases this exists for are
+  #   # not the same kind of thing: an outage warning is temporary, amber and
+  #   # worth repeating every load, while a donate button is permanent, quiet and
+  #   # worth showing once. One card holding both reads as "donate towards the
+  #   # outage".
+  #   #
+  #   # Plain text and at most one link each, deliberately: no HTML. An operator
+  #   # can already put markup on the page through admin.description and
+  #   # server.custom_body_html, but this file is exported and imported as a unit
+  #   # (/admin/ui-config-export), and a notice made of markup would turn
+  #   # importing somebody's colour scheme into importing their script.
+  #   #
+  #   # A message carrying a link_url is never shown in the iOS and Android
+  #   # apps, whatever is set here: a donate button inside an app-store build is
+  #   # a payment link the stores require to go through their own billing, and
+  #   # those apps open whichever receiver the listener picked. A message with no
+  #   # link breaks no such rule and is shown everywhere, apps included.
+  #   notices:
+  #     - enabled: true
+  #       # info (accent), warning (amber) or good (green). Default: info.
+  #       severity: "warning"
+  #       title: "Antenna maintenance"
+  #       text: "Reception may be impacted until 18:00 UTC."
+  #       # Seconds on screen. 0-60, default 3; 0 means it stays until dismissed.
+  #       # The countdown pauses while the pointer is on the notice.
+  #       timeout_seconds: 5
+  #       # every-load (default), or once — once per browser, until the wording
+  #       # changes, at which point it is a new notice and is shown again.
+  #       repeat: "every-load"
+  #       # Whether it has a close button. Default: true. Forced on when
+  #       # timeout_seconds is 0, since it would otherwise never go away.
+  #       dismissible: true
+  #     - enabled: true
+  #       title: "Support this receiver"
+  #       text: "Running costs are met by listeners like you."
+  #       # Optional call to action. http, https or mailto only; opens in a new
+  #       # tab. A PayPal donate button is this and nothing else.
+  #       link_url: "https://www.paypal.com/donate?hosted_button_id=XXXXXXXX"
+  #       link_label: "Donate"
+  #       timeout_seconds: 0
+  #       repeat: "once"

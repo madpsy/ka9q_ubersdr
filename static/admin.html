@@ -2550,6 +2550,53 @@
                              here without this page being edited. See ui_config_v2_defaults.go. -->
                         <div id="ui-v2-settings"></div>
 
+                        <!-- Page-load notices. Not part of renderV2Settings: that list is
+                             select/bool/range display defaults, each of which the listener
+                             also has in the Display panel. These are not settings anybody
+                             chooses — they are shown to every visitor on every load.
+
+                             The cards are built by renderNoticeRows() rather than written
+                             out three times here, so adding and removing one is the same
+                             code path as loading them.
+
+                             The help text is written for somebody setting up their own
+                             receiver, not for somebody who has read the code: what it does,
+                             where it appears and what it costs them. The reasons behind the
+                             design — why there is no HTML box, how the "once" id works —
+                             live in ui_config_notice.go, which is where they are useful. -->
+                        <div style="margin-top: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                            <h3 style="margin: 0 0 12px 0; color: #333; font-size: 16px;">📣 Messages to visitors</h3>
+                            <p style="margin: 0 0 10px 0; color: #666; font-size: 13px;">
+                                Short messages shown to everyone who opens your receiver — on the start screen,
+                                as soon as the page loads — and gone again a few seconds later.
+                            </p>
+                            <p style="margin: 0 0 10px 0; color: #666; font-size: 13px;">
+                                Two things people use them for: telling listeners something they should know
+                                (<em>&ldquo;antenna work this afternoon, reception may be poor&rdquo;</em>),
+                                and asking for support with a Donate button. You can have both at once —
+                                up to three, stacked in the order below, each with its own colour and timing.
+                            </p>
+                            <p style="margin: 0 0 14px 0; color: #666; font-size: 13px;">
+                                Just type your message — no HTML or web-page code, and none is needed.
+                                For a button, put the web address in the <strong>Button link</strong> box.
+                                Saving takes effect straight away: the next person to open the receiver sees it,
+                                with no restart.
+                            </p>
+                            <p style="margin: 0 0 16px 0; padding: 9px 11px; background: #fff8e1; border: 1px solid #ffe082; border-radius: 5px; color: #6d4c00; font-size: 12.5px;">
+                                <strong>A message with a button link is not shown in the iPhone and Android apps</strong> —
+                                Apple and Google do not allow payment or donation links inside apps.
+                                Messages without a link are shown everywhere, apps included.
+                            </p>
+
+                            <div id="ui-notice-list"></div>
+
+                            <button type="button" id="ui-notice-add" class="btn btn-secondary" onclick="addNoticeRow()"
+                                    style="font-size: 13px; padding: 6px 12px; margin-bottom: 18px;">+ Add another message</button>
+
+                            <div style="font-weight: 500; color: #555; font-size: 13px; margin-bottom: 6px;">Preview</div>
+                            <div id="ui-notice-preview"></div>
+                        </div>
+
                             </div>
                         </details>
 
@@ -11314,6 +11361,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 // interface offers — see renderV2Settings.
                 renderV2Settings(data.v2_settings, ui.v2);
 
+                // The page-load notice, which lives in the same block but is not
+                // one of those rows — see the markup.
+                fillNoticesForm(ui.v2 && ui.v2.notices);
+
                 // v2 interface switch — lives above the form and saves on change,
                 // so it is enabled only once we know its real state.
                 setV2InterfaceSwitch(Boolean(ui.v2_interface), true);
@@ -11949,6 +12000,288 @@ function resetStationIdColor() {
             return out;
         }
 
+        // ── The operator's page-load messages ────────────────────────────────
+        //
+        // Up to three, each a card in #ui-notice-list built from the same
+        // template, with the field ids carrying the row number. The cards are
+        // rebuilt from a plain array whenever one is added or removed — reading
+        // the form back first — so there is one shape of the truth (the array)
+        // and the DOM is only ever a rendering of it.
+
+        const NOTICE_MAX = 3;
+
+        /** HTML-escape a value before it goes into a template or the preview. */
+        function noticeEscape(v) {
+            return String(v == null ? '' : v).replace(/[&<>"']/g, c => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+            ));
+        }
+
+        // v2's own tokens for the three colours, so the swatch in the preview is
+        // what the visitor will actually see. From :root in
+        // static/v2/src/styles.css — --accent, --warn and --good.
+        const NOTICE_TONE = { info: '#08a2fb', warning: '#f2b544', good: '#45d69a' };
+
+        const noticeSel = (i, field) => `ui-notice-${i}-${field}`;
+
+        /** One card's HTML. `n` is a stored notice, or {} for a new one. */
+        function noticeRowHtml(n, i) {
+            const sel = (field, value) => (String(n[field] || '') === value ? ' selected' : '');
+            const secs = (n.timeout_seconds === undefined || n.timeout_seconds === null) ? 3 : n.timeout_seconds;
+            const field = 'width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;';
+            const label = 'display: block; margin-bottom: 6px; font-weight: 500; color: #555;';
+            const hint = 'font-size: 11px; color: #999; margin-top: 4px;';
+            return `
+            <div class="ui-notice-row" data-index="${i}" style="margin-bottom: 14px; padding: 14px; background: #fff; border: 1px solid #dee2e6; border-radius: 6px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #444; cursor: pointer;">
+                        <input type="checkbox" id="${noticeSel(i, 'enabled')}" ${n.enabled ? 'checked' : ''} onchange="updateNoticePreview()">
+                        Message ${i + 1} — show it to visitors
+                    </label>
+                    <button type="button" class="btn btn-secondary" onclick="removeNoticeRow(${i})"
+                            style="font-size: 12px; padding: 4px 10px;" title="Delete this message">Remove</button>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label for="${noticeSel(i, 'title')}" style="${label}">Heading <span style="font-weight: 400; color: #999;">— optional, shown in bold</span></label>
+                    <input type="text" id="${noticeSel(i, 'title')}" maxlength="120" value="${noticeEscape(n.title)}"
+                           placeholder="Antenna maintenance" oninput="updateNoticePreview()" style="${field} max-width: 520px;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label for="${noticeSel(i, 'text')}" style="${label}">Message</label>
+                    <textarea id="${noticeSel(i, 'text')}" maxlength="500" rows="3"
+                              placeholder="Reception may be impacted until 18:00 UTC." oninput="updateNoticePreview()"
+                              style="${field} max-width: 520px; font-family: inherit; resize: vertical;">${noticeEscape(n.text)}</textarea>
+                    <div style="${hint}">Keep it to a sentence or two — it is only on screen for a few seconds.</div>
+                </div>
+
+                <div style="display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px;">
+                    <div class="form-group" style="margin-bottom: 0; flex: 1 1 220px;">
+                        <label for="${noticeSel(i, 'severity')}" style="${label}">Colour</label>
+                        <select id="${noticeSel(i, 'severity')}" onchange="updateNoticePreview()" style="${field} background: white;">
+                            <option value="info"${sel('severity', 'info')}>🔵 Blue — just so you know</option>
+                            <option value="warning"${sel('severity', 'warning')}>🟠 Amber — something is wrong or about to be</option>
+                            <option value="good"${sel('severity', 'good')}>🟢 Green — good news</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0; flex: 1 1 220px;">
+                        <label for="${noticeSel(i, 'repeat')}" style="${label}">How often</label>
+                        <select id="${noticeSel(i, 'repeat')}" onchange="updateNoticePreview()" style="${field} background: white;">
+                            <option value="every-load"${sel('repeat', 'every-load')}>Every time someone opens the receiver</option>
+                            <option value="once"${sel('repeat', 'once')}>Once each — until you change the wording</option>
+                        </select>
+                        <div style="${hint}">Edit the message later and everyone sees the new one, even if they closed the old one.</div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px;">
+                    <div class="form-group" style="margin-bottom: 0; flex: 2 1 300px;">
+                        <label for="${noticeSel(i, 'link-url')}" style="${label}">Button link <span style="font-weight: 400; color: #999;">— optional</span></label>
+                        <input type="text" id="${noticeSel(i, 'link-url')}" maxlength="500" value="${noticeEscape(n.link_url)}"
+                               placeholder="https://www.paypal.com/donate?hosted_button_id=..." oninput="updateNoticePreview()" style="${field}">
+                        <div style="${hint}">
+                            A web address starting <code>https://</code>, or an email address as <code>mailto:you@example.com</code>. Opens in a new tab.
+                            For PayPal, use the link from your own <em>Donate</em> button.
+                            <br><strong>Adding a link hides this message in the iPhone and Android apps</strong> — app store rules on payment links. Leave it empty and the message shows there too.
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0; flex: 1 1 160px;">
+                        <label for="${noticeSel(i, 'link-label')}" style="${label}">Button wording</label>
+                        <input type="text" id="${noticeSel(i, 'link-label')}" maxlength="40" value="${noticeEscape(n.link_label)}"
+                               placeholder="Donate" oninput="updateNoticePreview()" style="${field}">
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="${noticeSel(i, 'timeout')}" style="${label}">How long it stays</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="${noticeSel(i, 'timeout')}" min="0" max="60" step="0.5" value="${noticeEscape(secs)}"
+                                   oninput="updateNoticePreview()" style="width: 90px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                            <span style="color: #666; font-size: 13px;">seconds</span>
+                        </div>
+                        <div style="${hint}">Type 0 to leave it up until the visitor closes it.<br>The countdown pauses while they hover over it.</div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label style="display: flex; align-items: center; gap: 8px; font-weight: 500; color: #555; cursor: pointer;">
+                            <input type="checkbox" id="${noticeSel(i, 'dismissible')}" ${n.dismissible === false ? '' : 'checked'} onchange="updateNoticePreview()">
+                            Let visitors close it early
+                        </label>
+                        <div style="${hint} max-width: 260px;">Adds an × in the corner.</div>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        /** Draw the cards for `list`, and hide Add once there are three. */
+        function renderNoticeRows(list) {
+            const host = document.getElementById('ui-notice-list');
+            if (!host) return;
+            const rows = Array.isArray(list) ? list.slice(0, NOTICE_MAX) : [];
+            host.innerHTML = rows.length
+                ? rows.map(noticeRowHtml).join('')
+                : '<div style="margin-bottom: 14px; color: #999; font-size: 13px;">No messages. Visitors see nothing.</div>';
+            const add = document.getElementById('ui-notice-add');
+            if (add) {
+                add.style.display = rows.length >= NOTICE_MAX ? 'none' : '';
+                add.textContent = rows.length ? '+ Add another message' : '+ Add a message';
+            }
+            updateNoticePreview();
+        }
+
+        /** Put the stored messages into the form. Absent means none. */
+        function fillNoticesForm(list) {
+            renderNoticeRows(Array.isArray(list) ? list : []);
+        }
+
+        function addNoticeRow() {
+            const list = collectNotices(true);
+            if (list.length >= NOTICE_MAX) return;
+            // A new card starts switched on: somebody who pressed Add means to
+            // say something, and a card that did nothing until a second tick
+            // would be a card that looked broken.
+            list.push({ enabled: true, severity: 'info', repeat: 'every-load', timeout_seconds: 3, dismissible: true });
+            renderNoticeRows(list);
+        }
+
+        function removeNoticeRow(i) {
+            const list = collectNotices(true);
+            list.splice(i, 1);
+            renderNoticeRows(list);
+        }
+
+        /**
+         * The messages as they will be stored, in the order the cards are in.
+         *
+         * `keepBlank` is for the redraw that add and remove do: there the empty
+         * card somebody has just made has to survive being read back, whereas a
+         * save should not store a card with nothing in it.
+         */
+        function collectNotices(keepBlank) {
+            const out = [];
+            for (let i = 0; i < NOTICE_MAX; i++) {
+                const el = (field) => document.getElementById(noticeSel(i, field));
+                if (!el('enabled')) continue;   // no such card
+
+                const val = (field) => { const e = el(field); return e ? e.value.trim() : ''; };
+                const on = (field) => { const e = el(field); return e ? e.checked : false; };
+
+                const title = val('title');
+                const text = val('text');
+                const linkUrl = val('link-url');
+                const linkLabel = val('link-label');
+                const enabled = on('enabled');
+                // A card with no words is not a message, whether or not it is
+                // switched on: somebody pressed Add and then thought better of
+                // it. Dropped here rather than sent, because the server refuses
+                // an enabled notice with nothing in it and the operator would
+                // get a failed save for a card they had already abandoned.
+                // A card with words but switched off is kept — writing one in
+                // advance is what the switch is for.
+                if (!keepBlank && !title && !text) continue;
+
+                const secs = parseFloat(val('timeout'));
+                const notice = {
+                    enabled,
+                    severity: val('severity') || 'info',
+                    repeat: val('repeat') || 'every-load',
+                    timeout_seconds: Number.isFinite(secs) ? Math.max(0, Math.min(60, secs)) : 3,
+                    dismissible: on('dismissible'),
+                };
+                if (title) notice.title = title;
+                if (text) notice.text = text;
+                if (linkUrl) notice.link_url = linkUrl;
+                if (linkLabel) notice.link_label = linkLabel;
+                out.push(notice);
+            }
+            return out;
+        }
+
+        /** One card, drawn roughly as v2 will draw it. */
+        function noticeCardHtml(n) {
+            const tone = NOTICE_TONE[n.severity] || NOTICE_TONE.info;
+            const parts = [];
+            if (n.title) parts.push(`<div style="color: #dfe5ee; font-weight: 600; font-size: 13px;">${noticeEscape(n.title)}</div>`);
+            if (n.text) parts.push(`<div style="margin-top: 3px; color: #8d99ad; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;">${noticeEscape(n.text)}</div>`);
+            if (n.link_url) parts.push(`<div style="margin-top: 9px;"><span style="display: inline-block; padding: 5px 11px; border: 1px solid ${tone}; border-radius: 6px; color: ${tone}; font-size: 12px; font-weight: 600;">${noticeEscape(n.link_label || 'Open')}</span></div>`);
+            const close = n.dismissible ? '<span style="flex: none; color: #5c6779; font-size: 13px; line-height: 1;">&times;</span>' : '';
+            return `<div style="display: flex; align-items: flex-start; gap: 9px; max-width: 420px; margin: 0 auto 6px auto; padding: 10px 11px; background: #141a25; border: 1px solid #2f3b4e; border-left: 3px solid ${tone}; border-radius: 6px;">
+                    <span style="flex: none; width: 13px; height: 13px; margin-top: 1px; border: 1.5px solid ${tone}; border-radius: 50%;"></span>
+                    <div style="flex: 1; min-width: 0;">${parts.join('')}</div>
+                    ${close}
+                </div>`;
+        }
+
+        /**
+         * What the operator is about to save, shown as a picture and said in words.
+         *
+         * The picture is approximate and says so. It is a second copy of v2's
+         * styling and will drift from it, which is the price of the operator being
+         * able to see what they are writing without opening the interface in
+         * another tab — and a rough likeness answers "is this too long, is that
+         * the right colour, do these two read oddly together" perfectly well. What
+         * it must not do is claim to be exact, so it is labelled as roughly.
+         *
+         * The words underneath each card carry what a picture cannot: how long it
+         * stays, how often it comes back, and whether its link will work.
+         */
+        function updateNoticePreview() {
+            const host = document.getElementById('ui-notice-preview');
+            if (!host) return;
+            const all = collectNotices(true);
+            const live = all.filter(n => n.enabled && (n.title || n.text));
+
+            const frame = (inner) => `<div style="padding: 14px; background: #090c12; border-radius: 6px;">${inner}</div>`;
+
+            // Cards somebody added and left empty. Named rather than silently
+            // skipped: they vanish on save, and a card disappearing without
+            // having been told it would is the kind of thing that reads as the
+            // page having lost your work.
+            const empty = all
+                .map((n, i) => (!n.title && !n.text ? i + 1 : 0))
+                .filter(Boolean);
+            const emptyNote = empty.length
+                ? `<div style="margin-top: 8px; color: #b8860b; font-size: 12.5px;">Message${empty.length > 1 ? 's' : ''} ${empty.join(' and ')} ${empty.length > 1 ? 'are' : 'is'} empty and will not be saved.</div>`
+                : '';
+
+            if (!live.length) {
+                const drafted = all.some(n => (n.title || n.text));
+                host.innerHTML = frame(`<div style="color: #5c6779; font-size: 13px; text-align: center;">${
+                    drafted ? 'Nothing switched on — visitors see nothing.' : 'Visitors see nothing.'
+                }</div>`) + emptyNote;
+                return;
+            }
+
+            const said = live.map((n, i) => {
+                const bits = [];
+                bits.push(n.timeout_seconds
+                    ? `stays <strong>${n.timeout_seconds} second${n.timeout_seconds === 1 ? '' : 's'}</strong>`
+                    : '<strong>stays until closed</strong>');
+                bits.push(n.repeat === 'once' ? 'shown once to each visitor' : 'shown every time the page opens');
+                // Where it will and will not appear, as its own sentence and said
+                // per message rather than once for the section: it depends on
+                // whether this one has a link, which the operator changes as they
+                // type, and the reason has to travel with it.
+                const where = n.link_url
+                    ? ' <span style="color: #b8860b;">Not shown in the iPhone or Android apps, because it has a link.</span>'
+                    : ' Shown everywhere, phone apps included.';
+
+                let warn = '';
+                if (n.link_url && !/^(https?:\/\/[^\/]|mailto:.)/i.test(n.link_url)) {
+                    warn = ' <span style="color: #c0392b;">⚠️ That link will not work — it needs to start with <code>https://</code>, <code>http://</code> or <code>mailto:</code>, so the button will not appear at all.</span>';
+                } else if (n.link_url && n.timeout_seconds && n.timeout_seconds < 5) {
+                    warn = ` <span style="color: #b8860b;">⚠️ ${n.timeout_seconds} seconds is not long to read it <em>and</em> press the button — consider 8, or 0 to leave it up.</span>`;
+                }
+                const heading = noticeEscape(n.title || n.text).slice(0, 40);
+                return `<div style="margin-top: 4px;"><strong>${i + 1}. ${heading}${(n.title || n.text).length > 40 ? '…' : ''}</strong> — ${bits.join(', ')}.${where}${warn}</div>`;
+            }).join('');
+
+            host.innerHTML = frame(live.map(noticeCardHtml).join(''))
+                + `<div style="margin-top: 8px; color: #666; font-size: 12.5px;">Roughly how they look, stacked at the top of the page.${said}</div>`
+                + emptyNote;
+        }
+
         /**
          * Reflect the v2 interface state in the switch and its label.
          * enable=true also makes the switch operable (it starts disabled so it
@@ -12157,7 +12490,15 @@ function resetStationIdColor() {
             // defaults. Left out altogether when there was no group to read —
             // see collectV2Settings, and the matching rule on the server.
             const v2 = collectV2Settings();
-            if (v2) body.ui.v2 = v2;
+            if (v2) {
+                // Only onto a block that was actually rendered. Sending
+                // `v2: {notice: ...}` on its own would rewrite the whole block
+                // and take every display default with it — see collectV2Settings
+                // for why the key is otherwise left out entirely.
+                const notices = collectNotices(false);
+                if (notices.length) v2.notices = notices;
+                body.ui.v2 = v2;
+            }
 
             try {
                 const response = await authenticatedFetch('/admin/ui-config', {

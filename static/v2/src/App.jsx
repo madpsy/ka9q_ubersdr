@@ -23,6 +23,7 @@ import HapticWatch from './components/HapticWatch.jsx';
 import ControlWatch from './components/ControlWatch.jsx';
 import TopFreqWatch from './components/TopFreqWatch.jsx';
 import StartOverlay from './components/StartOverlay.jsx';
+import OperatorNotice from './components/OperatorNotice.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import DXClusterWatch from './components/DXClusterWatch.jsx';
@@ -261,6 +262,13 @@ export default function App() {
                                     only draws what it finds. */}
                                 <TopFreqWatch />
                                 <StartOverlay />
+                                {/* After the overlay, and drawn above it: the
+                                    operator's notices appear the moment the page
+                                    loads, which is while the front door is still
+                                    on screen. The ones carrying a link are not
+                                    drawn in the mobile clients — see
+                                    noticeLinksAllowedByHost. */}
+                                <OperatorNotice />
                                 <LegacyBridge />
                                 <BridgeHost />
                                 <SpotStreams />

@@ -65,11 +65,21 @@ const WIRE = {
  * with something in it. Two calls with the hook state kept between them, which
  * is exactly what a mount followed by the re-render it caused is.
  */
-const mount = (wire) => {
+// `running` is the radio's, and it is what the start overlay hides on: these are
+// drawn once the front door is open and not over it. Every test that is not
+// about that starts from a receiver already running.
+const mount = (wire, running = true) => {
     reset();
-    const context = { server: { notices: parseNotices([].concat(wire || [])) } };
+    const notices = parseNotices([].concat(wire || []));
+    const context = { server: { notices }, running };
     render(OperatorNotice, {}, context);
     return render(OperatorNotice, {}, context);
+};
+
+const withUserAgent = (ua, fn) => {
+    const before = globalThis.navigator.userAgent;
+    globalThis.navigator = { userAgent: ua };
+    try { return fn(); } finally { globalThis.navigator = { userAgent: before }; }
 };
 
 const withHost = (host, fn) => {
@@ -133,6 +143,114 @@ t('an app does not use up the one showing of a notice it never showed', () => {
     store.clear();
     withHost({ autoStart: true }, () => mount(PAIR));
     assert.deepStrictEqual(JSON.parse(store.get('ubersdr.v2.notices-seen')), []);
+});
+
+t('an app whose document-start script never ran is still not asked for money', () => {
+    // The gap this closes. `window.ubersdrDesktop` is set by a document-start
+    // script, and an Android WebView too old for DOCUMENT_START_SCRIPT never
+    // runs one — leaving the page looking exactly like an ordinary browser.
+    // The user agent is set on the WebView itself and is there regardless, so
+    // it is asked as well.
+    store.clear();
+    const ua = 'Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 Chrome/83 Mobile Safari/537.36 UberSDR-Android/0.7.9';
+    const { tree } = withUserAgent(ua, () => withHost(undefined, () => mount(PAIR)));
+    assert.ok(tree, 'the app was shown nothing at all');
+    assert.strictEqual(deep(tree).filter((n) => n.type === 'a').length, 0,
+        'a link reached an app whose host object was missing');
+    assert.ok(words(tree).includes('Antenna maintenance'), words(tree));
+});
+
+t('the desktop client is not caught by the same test', () => {
+    // Its token is UberSDR-Desktop/, which must not read as a phone app: it is
+    // downloaded rather than published to a store, and it says so with the flag.
+    const ua = 'Mozilla/5.0 Chrome/120 Electron/28 UberSDR-Desktop/0.9.5';
+    assert.strictEqual(
+        withUserAgent(ua, () => withHost({ noticeLinks: true }, noticeLinksAllowedByHost)),
+        true,
+    );
+});
+
+// ── The clients themselves ──────────────────────────────────────────────────
+//
+// Everything above tests the page against a host that was described to it. What
+// follows tests the descriptions: that the real clients still are what those
+// tests assume. Both of the ways this promise can break silently live in files
+// no other test in this directory reads —
+//
+//   * a mobile client gaining `noticeLinks: true`, which is one plausible line
+//     in a Swift or Java string builder and would put a donate link in a store
+//     build;
+//   * the user-agent token being renamed, which would leave the fallback above
+//     matching nothing and the whole rule resting on the injection again.
+//
+// Read as source rather than imported: the Swift and Java are not runnable here,
+// and what is being asserted is what a reviewer would look for anyway.
+
+const fs = require('fs');
+const path = require('path');
+const repo = path.join(__dirname, '..', '..', '..');
+const source = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
+
+const IOS_RECEIVER = 'clients/capacitor/ios/UberSdrPlugin/sources/ReceiverViewController.swift';
+const ANDROID_RECEIVER = 'clients/capacitor/android/app/src/main/java/org/ubersdr/mobile/ReceiverActivity.java';
+
+t('neither mobile client claims it may show links', () => {
+    // The flag must be absent, not set to false: the page requires === true, so
+    // absence is what carries the rule, and a client that mentions the name at
+    // all is a client somebody has been editing near this.
+    for (const rel of [IOS_RECEIVER, ANDROID_RECEIVER]) {
+        assert.ok(
+            !/noticeLinks/.test(source(rel)),
+            `${rel} mentions noticeLinks — a mobile client must never claim it may draw a link, `
+            + 'because a donate button inside an app is a payment link the stores require to go '
+            + 'through their own billing. See noticeLinksAllowedByHost.',
+        );
+    }
+});
+
+t('the desktop client still opts in explicitly', () => {
+    // The other half: if this were dropped, the desktop client would silently
+    // stop showing operators' donate buttons and nothing else would say so.
+    assert.ok(
+        /noticeLinks:\s*true/.test(source('clients/electron/receiver-preload.js')),
+        'the desktop preload no longer sets noticeLinks: true',
+    );
+});
+
+t('the user-agent fallback still matches what the apps actually send', () => {
+    // Built from the real source rather than from a copy of the token here,
+    // which is the whole point: a rename in useragent.js has to fail this test
+    // rather than quietly stop matching.
+    const ua = source('clients/capacitor/src/useragent.js');
+    const names = [...ua.matchAll(/(?:android|ios):\s*'([^']+)'/g)].map((m) => m[1]);
+    assert.deepStrictEqual(names.sort(), ['Android', 'iOS'],
+        'the platform names in clients/capacitor/src/useragent.js have changed');
+    assert.ok(/`UberSDR\$\{NAME \? `-\$\{NAME\}`/.test(ua),
+        'the product token is no longer UberSDR-<Platform>/<version>');
+
+    for (const name of names) {
+        const agent = `Mozilla/5.0 (whatever) AppleWebKit/537.36 UberSDR-${name}/9.9.9`;
+        assert.strictEqual(
+            withUserAgent(agent, () => withHost(undefined, noticeLinksAllowedByHost)),
+            false,
+            `a ${name} app user agent no longer withholds links`,
+        );
+    }
+});
+
+t('the desktop token is not one of them', () => {
+    // Read from its own source for the same reason. If the desktop client were
+    // ever renamed to something the mobile pattern matched, it would stop
+    // showing links and the flag it sets would look broken.
+    const desktop = source('clients/electron/useragent.js');
+    const token = (desktop.match(/const PRODUCT = `([^`$]+)/) || [])[1];
+    assert.ok(token && token.startsWith('UberSDR'), `unexpected desktop token: ${token}`);
+    const agent = `Mozilla/5.0 Chrome/120 Electron/28 ${token}9.9.9`;
+    assert.strictEqual(
+        withUserAgent(agent, () => withHost({ noticeLinks: true }, noticeLinksAllowedByHost)),
+        true,
+        'the desktop client is being treated as a phone app',
+    );
 });
 
 t('a text-only notice reaches an app', () => {
@@ -234,6 +352,39 @@ t('the operator cannot inject an element, only text', () => {
         assert.ok(!n.props || n.props.dangerouslySetInnerHTML === undefined,
             'the notice has an innerHTML path — see ui_config_notice.go for why it must not');
     }
+});
+
+// ── Not until the front door is open ────────────────────────────────────────
+
+t('nothing is drawn while the start overlay is up', () => {
+    store.clear();
+    const { tree } = withHost(undefined, () => mount(PAIR, false));
+    assert.strictEqual(tree, null);
+});
+
+t('a "once" notice is not spent behind the overlay', () => {
+    // The failure worth guarding: counted as shown while nobody could see it,
+    // a once-per-visitor notice would be gone for good without ever appearing.
+    store.clear();
+    withHost(undefined, () => mount(PAIR, false));
+    assert.deepStrictEqual(JSON.parse(store.get('ubersdr.v2.notices-seen') || '[]'), []);
+});
+
+t('they appear when the receiver starts', () => {
+    // The same component, the same notices, the overlay gone — which is what
+    // pressing Start does, and what the apps do to themselves on load.
+    store.clear();
+    reset();
+    const notices = parseNotices(PAIR);
+    const waiting = { server: { notices }, running: false };
+    render(OperatorNotice, {}, waiting);
+    assert.strictEqual(render(OperatorNotice, {}, waiting).tree, null);
+
+    const started = { server: { notices }, running: true };
+    render(OperatorNotice, {}, started);
+    const { tree } = render(OperatorNotice, {}, started);
+    assert.ok(tree, 'nothing appeared after the receiver started');
+    assert.ok(words(tree).includes('Antenna maintenance'), words(tree));
 });
 
 // ── More than one ───────────────────────────────────────────────────────────

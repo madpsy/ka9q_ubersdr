@@ -66,6 +66,15 @@ final class Prefs {
      * be loaded" for a panel the receiver never had.
      */
     private static final String SKIP_PANELS = "ubersdr.v2.panels";
+    /**
+     * Which of a receiver's page-load messages this WebView has been shown. The
+     * ids are digests of one receiver's own wording, so they mean nothing
+     * anywhere else — and the list is pruned on each load to the notices the
+     * receiver being opened actually offers, so sharing it would have two
+     * receivers delete each other's record and a "once" message would come back
+     * every time the operator switched. Excluded first by the desktop client.
+     */
+    private static final String SKIP_NOTICES = "ubersdr.v2.notices-seen";
 
     /** Where a receiver's own snapshot lives, when settings are not shared. */
     private static final String PER_RECEIVER = "prefs:";
@@ -227,6 +236,7 @@ final class Prefs {
                 && !key.startsWith(SKIP_PREFIX)
                 && !SKIP_RADIO.equals(key)
                 && !SKIP_PASSWORD.equals(key)
-                && !SKIP_PANELS.equals(key);
+                && !SKIP_PANELS.equals(key)
+                && !SKIP_NOTICES.equals(key);
     }
 }

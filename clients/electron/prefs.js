@@ -26,7 +26,9 @@ const PREFIX = 'ubersdr.v2.';
 // Mirrors receiver-preload.js, which is where the reasoning is. Repeated here
 // because the sender is a renderer showing remote content: what it reports is
 // checked rather than trusted.
-const SKIP_EXACT = new Set(['ubersdr.v2.radio']);
+// `ubersdr.v2.notices-seen` beside it: which of a receiver's own page-load
+// messages have been shown, keyed by digests of that receiver's wording.
+const SKIP_EXACT = new Set(['ubersdr.v2.radio', 'ubersdr.v2.notices-seen']);
 // Keys the chooser's settings page may read and write — see readOne.
 const APP_LEVEL = new Set(['ubersdr.v2.shell']);
 

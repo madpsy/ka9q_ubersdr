@@ -46,6 +46,15 @@ const SKIP_EXACT = new Set([
     // preference, and a placement for a panel this receiver does not have is
     // parked harmlessly rather than dropped.
     'ubersdr.v2.panels',
+    // Which of the operator's page-load messages this browser has already been
+    // shown. The ids are digests of one receiver's own wording (see
+    // ui_config_notice.go), so they mean nothing anywhere else — and sharing
+    // them does active harm rather than none: the list is pruned on each load
+    // to the notices the receiver being opened actually offers, so carrying it
+    // between them would have each receiver delete the other's record. A
+    // "once" notice would come back every time the operator switched receiver,
+    // which is the opposite of what it says.
+    'ubersdr.v2.notices-seen',
 ]);
 
 // Settings change at human speed; this is a copy of a few kilobytes.

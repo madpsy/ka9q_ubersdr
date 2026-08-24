@@ -98,10 +98,42 @@ export function hiddenByHost(id) {
  * clients set nothing and no link can appear, and no receiver-side setting can
  * turn it on. The desktop client, which is ours and goes through no store, opts
  * in explicitly with `noticeLinks: true`.
+ *
+ * ── Why the user agent is asked as well ─────────────────────────────────────
+ *
+ * Because the flag's *absence* is what carries the rule, and absence is also
+ * what a failed injection looks like. `window.ubersdrDesktop` is set by a
+ * document-start script, and on Android that needs WebViewFeature
+ * DOCUMENT_START_SCRIPT: a system WebView old enough to lack it gets no host
+ * object at all, and ReceiverActivity logs the loss and carries on, because
+ * everything else it costs is a convenience (autostart, share links, a saved
+ * password). A payment link appearing in a store build is not a convenience,
+ * so it must not depend on the same mechanism.
+ *
+ * The user agent does not: both clients set it on the WebView itself before
+ * any page is loaded — `settings.setUserAgentString` on Android,
+ * `applicationNameForUserAgent` on iOS — so the token is there whether or not
+ * a script ever ran. Two independent signals, either of which is enough to
+ * withhold the link. The desktop client's token is `UberSDR-Desktop/`, which
+ * is deliberately not matched here: it says so with the flag.
+ *
+ * See clients/capacitor/src/useragent.js, which owns the token.
  */
+const MOBILE_APP_UA = /UberSDR-(Android|iOS)\//i;
+
+function mobileAppUserAgent() {
+    try {
+        return MOBILE_APP_UA.test((navigator && navigator.userAgent) || '');
+    } catch (e) {
+        return false;
+    }
+}
+
 export function noticeLinksAllowedByHost() {
     try {
         if (typeof window === 'undefined') return true;
+        // An app, whatever else did or did not happen at document start.
+        if (mobileAppUserAgent()) return false;
         const host = window.ubersdrDesktop;
         if (!host) return true;
         return host.noticeLinks === true;

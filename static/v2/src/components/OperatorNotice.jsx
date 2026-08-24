@@ -18,8 +18,15 @@
 // ui.yaml is exported and imported as a file, and a notice made of markup would
 // make importing somebody's colour scheme a way to import their script.
 //
-// Drawn above the start overlay, because that is what is on screen at the moment
-// they appear. A notice behind the front door would be a notice nobody ever saw.
+// Drawn once the front door is open, not over it. The start overlay is what is
+// on screen when the page loads, and a notice on top of it would be read — if it
+// were read at all — before the listener had decided to come in, competing with
+// the receiver's own description for the one screen that exists to introduce it.
+// So the clock starts when the overlay goes: `running` from the radio, which is
+// exactly what the overlay itself hides on (see StartOverlay's early return) and
+// is set the moment Start is pressed. In the mobile and desktop clients, which
+// start themselves, that is a moment after load and the notice follows straight
+// on — which is the same behaviour, not a special case.
 //
 // In the mobile clients only the link-free ones are drawn: the app stores do not
 // allow a payment link inside an app, and a donate button is exactly that. The
@@ -37,6 +44,7 @@
 
 import React, { ReactDOM, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useDisplay } from '../display/DisplayContext.jsx';
+import { useRadio } from '../radio/RadioContext.jsx';
 import { noticeLinksAllowedByHost } from '../lib/hostPanels.js';
 import { Icon } from './ui.jsx';
 
@@ -69,6 +77,9 @@ const ICON = {
 
 export default function OperatorNotice() {
     const { server } = useDisplay();
+    // Whether the receiver has been started, which is the same question as
+    // whether the start overlay is still up: it draws nothing once this is true.
+    const { running } = useRadio();
     const all = (server && server.notices) || [];
 
     // Whether a link may be offered here. Asked once and not per render: the
@@ -95,6 +106,11 @@ export default function OperatorNotice() {
     const timers = useRef(new Map());
 
     useEffect(() => {
+        // Nothing is decided while the overlay is up — not even "already seen".
+        // A notice counted as shown behind the front door is one the listener
+        // never saw, and for a "once" notice that would be the only showing it
+        // was ever going to get.
+        if (!running) return;
         const key = notices.map((n) => n.id).join('|');
         if (!notices.length) {
             decided.current = key;
@@ -119,7 +135,7 @@ export default function OperatorNotice() {
         }
         writeSeen(keep);
         setOpen(next);
-    }, [notices]);
+    }, [notices, running]);
 
     // The clocks, one per card that is up and has one. Held while the pointer is
     // on that card — a few seconds is not long to read a sentence and decide

@@ -558,6 +558,12 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
             // shown "This panel could not be loaded" for a panel that receiver
             // never had. Excluded first by the desktop client, then here.
             && key != "ubersdr.v2.panels"
+            // Which of a receiver's page-load messages this WebView has been
+            // shown. The ids are digests of that receiver's own wording, and the
+            // list is pruned on each load to what the receiver being opened
+            // offers — so shared, two receivers would delete each other's record
+            // and a "once" message would return on every switch.
+            && key != "ubersdr.v2.notices-seen"
     }
 
     static func prefsLiteral(scope: String?, instanceId: String) -> String {

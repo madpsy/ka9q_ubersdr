@@ -10861,15 +10861,17 @@ a.btn { text-decoration: none; }
    Operator notice
    ========================================================================= */
 
-/* Above the start overlay and the modals, which both sit at 200.
-   
-   It has to be: this appears on page load, and on page load the front door is
-   covering the screen. The strip is anchored to the top and is at most a few
-   lines, so the one thing it could cover — a modal, which is centred — it does
-   not reach in practice. */
+/* Above the shell and the toasts, below the modals and the start overlay, which
+   both sit at 200.
+
+   It does not need to be any higher: these are drawn only once the overlay has
+   gone (see OperatorNotice), so the thing they used to have to clear is no
+   longer on screen when they appear. Below a modal for the ordinary reason —
+   a notice that outlived its few seconds must not sit over a dialog somebody
+   opened afterwards. */
 .opnotice-layer {
     position: fixed;
-    z-index: 210;
+    z-index: 95;
     /* A column, because there may be up to three of them — an outage warning
        and a donate button are different messages with different clocks, and
        they stack in the order the operator wrote them. */
@@ -10908,11 +10910,26 @@ a.btn { text-decoration: none; }
     .opnotice { animation: none; }
 }
 
-.opnotice.is-good { border-left-color: var(--good); }
-.opnotice.is-warning { border-left-color: var(--warn); }
-.opnotice__icon { flex: none; margin-top: 1px; color: var(--accent); }
-.opnotice.is-good .opnotice__icon { color: var(--good); }
-.opnotice.is-warning .opnotice__icon { color: var(--warn); }
+/* The operator's chosen colour, as one variable the whole card reads.
+   
+   It was three separate rules, and the edge and the icon were the only two that
+   honoured it — the link button underneath kept `--accent` whatever was chosen,
+   which is the largest coloured thing on the card. Picking green then gave a
+   green hairline, a 15px green tick and a blue button, and read as the choice
+   having done nothing.
+   
+   Amber and green are fixed tokens: `--good` and `--warn` are defined once and
+   are not in UI_COLOR_VARS, so a listener's colour scheme leaves them alone and
+   a warning looks like a warning everywhere. The neutral one is deliberately the
+   accent and therefore does move with the scheme — that is what keeps a notice
+   inside a listener's chosen colours rather than forcing a blue into Night,
+   which exists to keep the whole page red for dark adaptation. The admin form
+   says so rather than promising a blue. */
+.opnotice { --tone: var(--accent); }
+.opnotice.is-warning { --tone: var(--warn); }
+.opnotice.is-good { --tone: var(--good); }
+.opnotice { border-left-color: var(--tone); }
+.opnotice__icon { flex: none; margin-top: 1px; color: var(--tone); }
 
 .opnotice__text { flex: 1; min-width: 0; }
 .opnotice__title {
@@ -10933,15 +10950,18 @@ a.btn { text-decoration: none; }
     display: inline-block;
     margin-top: 7px;
     padding: 5px 11px;
-    border: 1px solid var(--accent);
+    border: 1px solid var(--tone);
     border-radius: var(--radius-sm);
     background: transparent;
     font-size: calc(11.5px * var(--ui-scale));
     font-weight: 600;
-    color: var(--accent);
+    color: var(--tone);
     text-decoration: none;
 }
-.opnotice__link:hover { background: var(--accent); color: var(--accent-ink); }
+/* Dark ink on the fill. All three tones are light enough for it — the accent is
+   picked to clear 4.5:1 on the page (see uiColors.js), and amber and green are
+   lighter still. */
+.opnotice__link:hover { background: var(--tone); color: var(--accent-ink); }
 
 .opnotice__close {
     flex: none;

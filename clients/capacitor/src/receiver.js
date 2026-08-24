@@ -80,6 +80,13 @@ const SKIP_EXACT = new Set([
     // preference, and a placement for a panel this receiver does not have is
     // parked harmlessly rather than dropped.
     'ubersdr.v2.panels',
+    // The page-load messages this browser has been shown. Per receiver by
+    // nature — the ids are digests of one receiver's own wording — and
+    // pruned on each load to what that receiver offers, so sharing them
+    // would have two receivers wipe each other's record and a "once"
+    // notice would return on every switch. Excluded first by the desktop
+    // client, which see.
+    'ubersdr.v2.notices-seen',
     ...INSTANCE_SECRETS,
 ]);
 

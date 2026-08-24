@@ -12020,6 +12020,12 @@ function resetStationIdColor() {
         // v2's own tokens for the three colours, so the swatch in the preview is
         // what the visitor will actually see. From :root in
         // static/v2/src/styles.css — --accent, --warn and --good.
+        //
+        // Amber and green are exact: those two tokens are fixed and no colour
+        // scheme touches them. The neutral one is the *default* accent, and a
+        // listener on another scheme sees that scheme's colour instead — which
+        // is why the preview says "in the default colours" underneath rather
+        // than letting this stand as a promise.
         const NOTICE_TONE = { info: '#08a2fb', warning: '#f2b544', good: '#45d69a' };
 
         const noticeSel = (i, field) => `ui-notice-${i}-${field}`;
@@ -12060,10 +12066,11 @@ function resetStationIdColor() {
                     <div class="form-group" style="margin-bottom: 0; flex: 1 1 220px;">
                         <label for="${noticeSel(i, 'severity')}" style="${label}">Colour</label>
                         <select id="${noticeSel(i, 'severity')}" onchange="updateNoticePreview()" style="${field} background: white;">
-                            <option value="info"${sel('severity', 'info')}>🔵 Blue — just so you know</option>
+                            <option value="info"${sel('severity', 'info')}>Neutral — just so you know</option>
                             <option value="warning"${sel('severity', 'warning')}>🟠 Amber — something is wrong or about to be</option>
                             <option value="good"${sel('severity', 'good')}>🟢 Green — good news</option>
                         </select>
+                        <div style="${hint}">Amber and green look the same to everyone. <strong>Neutral</strong> takes the colour of whatever scheme the listener is using — blue by default, but red on a listener who has picked Night to keep their night vision.</div>
                     </div>
                     <div class="form-group" style="margin-bottom: 0; flex: 1 1 220px;">
                         <label for="${noticeSel(i, 'repeat')}" style="${label}">How often</label>
@@ -12278,7 +12285,11 @@ function resetStationIdColor() {
             }).join('');
 
             host.innerHTML = frame(live.map(noticeCardHtml).join(''))
-                + `<div style="margin-top: 8px; color: #666; font-size: 12.5px;">Roughly how they look, stacked at the top of the page.${said}</div>`
+                + `<div style="margin-top: 8px; color: #666; font-size: 12.5px;">Roughly how they look in the default colours, once the visitor has pressed Start.${
+                    live.some(n => n.severity === 'info')
+                        ? ' A <strong>neutral</strong> message takes the colour of the listener\'s own scheme, so it will not always be this blue.'
+                        : ''
+                }${said}</div>`
                 + emptyNote;
         }
 

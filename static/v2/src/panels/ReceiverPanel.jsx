@@ -165,10 +165,17 @@ export default function ReceiverPanel({ minimal }) {
                         actions.setBandwidth. Shown rather than hidden, and
                         reading 10.00 kHz, because the width is worth knowing
                         even when it cannot be changed. */}
-                    {/* The reset is a sibling of the Field, not a child of it:
-                        a Field is a <label>, and a button inside one is a click
-                        two elements want — the same reason the Multipad's row
-                        keeps its action outside. */}
+                    {/* Each reset names what it resets, rather than taking the
+                        default: this is the one view with a slider for both
+                        numbers, so here they are separate and neither touches
+                        the other. Elsewhere — the Multipad, the top bar — the
+                        button restores the whole passband, because a width is
+                        all those views can otherwise change. See FilterReset.
+
+                        A sibling of the Field, not a child of it: a Field is a
+                        <label>, and a button inside one is a click two elements
+                        want — the same reason the Multipad's row keeps its
+                        action outside. */}
                     <div className="filter-row">
                         <Field
                             label="Filter width"
@@ -183,7 +190,7 @@ export default function ReceiverPanel({ minimal }) {
                                 disabled={iq}
                             />
                         </Field>
-                        <FilterReset />
+                        <FilterReset what="width" />
                     </div>
 
                     <div className="filter-row">

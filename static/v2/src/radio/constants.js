@@ -84,17 +84,27 @@ export const FILTER_WIDTH_MIN = 100;
 export const FILTER_WIDTH_STEP = 50;
 
 /**
- * The filter width a mode opens with.
+ * The passband a mode opens with, as edges.
  *
- * Taken from MODES rather than named again here, because that is the passband
+ * Taken from MODES rather than named again here, because that is what
  * `commitMode` applies when the mode is chosen — so "the mode's default" means
- * one thing whether it is arrived at by picking the mode or by resetting the
- * width beside its slider. An unknown mode has no default; the floor is the only
- * honest answer, and every caller clamps to it anyway.
+ * one thing whether it is arrived at by picking the mode or by pressing a reset.
+ * The three functions below are all this one read differently, so a caller
+ * asking for the default width and a caller asking for the default passband
+ * cannot be told different things.
+ *
+ * An unknown mode has no default. The narrowest filter on the dial is the only
+ * honest answer, and every caller clamps into its mode's limits anyway.
  */
-export function defaultFilterWidth(mode) {
+export function defaultEdges(mode) {
     const def = MODE_BY_ID[mode];
-    return def ? Math.abs(def.high - def.low) : FILTER_WIDTH_MIN;
+    return def ? [def.low, def.high] : [-FILTER_WIDTH_MIN / 2, FILTER_WIDTH_MIN / 2];
+}
+
+/** The filter width a mode opens with. */
+export function defaultFilterWidth(mode) {
+    const [low, high] = defaultEdges(mode);
+    return Math.abs(high - low);
 }
 
 const clampEdge = (v, l) => Math.max(l.min, Math.min(l.max, v));
@@ -134,8 +144,7 @@ export function filterShift(mode, low, high) {
 
 /** The shift a mode opens with — 50 Hz for SSB, nothing for the rest. */
 export function defaultFilterShift(mode) {
-    const def = MODE_BY_ID[mode];
-    return def ? filterShift(mode, def.low, def.high) : 0;
+    return filterShift(mode, ...defaultEdges(mode));
 }
 
 /**

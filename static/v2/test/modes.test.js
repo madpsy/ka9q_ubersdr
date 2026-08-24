@@ -10,7 +10,7 @@
 
 const assert = require('assert');
 const {
-    FILTER_WIDTH_MIN, MODES, MODE_BY_ID, bandwidthLimits, defaultFilterShift,
+    FILTER_WIDTH_MIN, MODES, MODE_BY_ID, bandwidthLimits, defaultEdges, defaultFilterShift,
     defaultFilterWidth, edgesForEdgeDrag, edgesForShift, edgesForWidth, filterShift,
     maxFilterWidth,
 } = require('./.build/constants.cjs');
@@ -286,14 +286,29 @@ t('a dragged edge stays inside the mode limits', () => {
 
 t('a mode’s default width and shift are its own passband', () => {
     for (const m of MODES) {
+        assert.deepStrictEqual(defaultEdges(m.id), [m.low, m.high], m.id);
         assert.strictEqual(defaultFilterWidth(m.id), Math.abs(m.high - m.low), m.id);
         assert.strictEqual(defaultFilterShift(m.id), filterShift(m.id, m.low, m.high), m.id);
+    }
+});
+
+t('the default passband is the one the mode buttons apply', () => {
+    // defaultEdges is what a whole-filter reset sends, and commitMode is what
+    // picking the mode sends. They have to be the same passband or "back to the
+    // default" and "pick the mode again" would land in two different places.
+    for (const m of MODES) {
+        const [low, high] = defaultEdges(m.id);
+        assert.deepStrictEqual(clampToMode(m.id, low, high), [m.low, m.high], m.id);
     }
 });
 
 t('an unknown mode has no default rather than a wrong one', () => {
     assert.strictEqual(defaultFilterWidth('nosuchmode'), FILTER_WIDTH_MIN);
     assert.strictEqual(defaultFilterShift('nosuchmode'), 0);
+    // The three answers still agree with each other, which is the point of them
+    // all being one read of defaultEdges.
+    const [low, high] = defaultEdges('nosuchmode');
+    assert.strictEqual(Math.abs(high - low), FILTER_WIDTH_MIN);
 });
 
 t('SSB’s default shift is the 50 Hz its passband starts at', () => {

@@ -73,7 +73,7 @@ function button(tuning, props) {
 
 t('at the mode default there is nothing to reset', () => {
     for (const m of MODES) {
-        for (const what of ['width', 'shift']) {
+        for (const what of ['filter', 'width', 'shift']) {
             const { node } = button(at(m.id), { what });
             assert.strictEqual(node.props.disabled, true, `${m.id} ${what}`);
         }
@@ -89,7 +89,7 @@ t('IQ is disabled even when it is off its default', () => {
 });
 
 t('a moved filter enables it, and the title names the figure', () => {
-    const { node } = button(at('usb', { bandwidthHigh: 1500 }));
+    const { node } = button(at('usb', { bandwidthHigh: 1500 }), { what: 'width' });
     assert.strictEqual(node.props.disabled, false);
     assert.ok(/USB/.test(node.props.title), node.props.title);
     assert.ok(/2\.65 kHz/.test(node.props.title), node.props.title);
@@ -112,7 +112,7 @@ t('clicking the width reset sends the mode default width', () => {
             ? { bandwidthLow: -400, bandwidthHigh: 400 }
             : m.high <= 0 ? { bandwidthLow: -850, bandwidthHigh: -50 }
                 : { bandwidthLow: 50, bandwidthHigh: 850 };
-        const { node, ctx } = button(at(m.id, narrow));
+        const { node, ctx } = button(at(m.id, narrow), { what: 'width' });
         node.props.onClick();
         assert.strictEqual(ctx.sent.length, 1, m.id);
         const [low, high] = ctx.sent[0];
@@ -135,6 +135,45 @@ t('a disabled button sends nothing when clicked anyway', () => {
     assert.strictEqual(ctx.sent.length, 0);
 });
 
+// --- the whole passband, where there is no shift slider ----------------------
+
+t('the default kind restores both edges', () => {
+    // What the Multipad and the top bar draw. Neither has a shift control, so
+    // the low edge is only reachable from here.
+    const { node, ctx } = button(at('usb', { bandwidthLow: 400, bandwidthHigh: 1500 }));
+    assert.strictEqual(node.props['aria-label'], 'Reset filter');
+    node.props.onClick();
+    assert.deepStrictEqual(ctx.sent, [[50, 2700]]);
+});
+
+t('a default *width* sitting off centre still enables it', () => {
+    // The case that made this the default: 400..3050 is the USB default width to
+    // the Hz, so a width-only reset reads as spent and there is no shift slider
+    // in either of these two views to finish the job with.
+    const shifted = at('usb', { bandwidthLow: 400, bandwidthHigh: 3050 });
+    assert.strictEqual(button(shifted, { what: 'width' }).node.props.disabled, true,
+        'the width really is at its default');
+    const { node, ctx } = button(shifted);
+    assert.strictEqual(node.props.disabled, false, 'but the filter is not');
+    node.props.onClick();
+    assert.deepStrictEqual(ctx.sent, [[50, 2700]]);
+});
+
+t('its title names both edges, not a width', () => {
+    // A width reading would not have mentioned the number it is really fixing.
+    const { node } = button(at('lsb', { bandwidthLow: -1000 }));
+    assert.ok(/-2700 to -50 Hz/.test(node.props.title), node.props.title);
+});
+
+t('it restores the default passband for every mode', () => {
+    for (const m of MODES.filter((x) => x.id !== 'iq')) {
+        const { node, ctx } = button(at(m.id, { bandwidthLow: m.low / 2, bandwidthHigh: m.high / 2 }));
+        assert.strictEqual(node.props.disabled, false, m.id);
+        node.props.onClick();
+        assert.deepStrictEqual(ctx.sent, [[m.low, m.high]], m.id);
+    }
+});
+
 // --- in the panel ------------------------------------------------------------
 
 t('the Receiver panel draws a reset for each of its two sliders', () => {
@@ -146,6 +185,19 @@ t('the Receiver panel draws a reset for each of its two sliders', () => {
     assert.deepStrictEqual(labels.sort(), ['Reset filter shift', 'Reset filter width']);
     // Each beside its own field rather than inside it — a Field is a <label>.
     assert.strictEqual(walk(tree).filter((n) => n.props?.className === 'filter-row').length, 2);
+});
+
+t('the Receiver panel’s width reset leaves the shift alone', () => {
+    // The decision this file exists to protect: the panel with a slider for each
+    // number asks for them separately, so neither button moves the other's
+    // control. 400..1500 is shifted *and* narrow; the width reset must fix only
+    // the width and leave the low edge where the operator put it.
+    reset();
+    const ctx = context(at('usb', { bandwidthLow: 400, bandwidthHigh: 1500 }));
+    const { tree } = render(ReceiverPanel, {}, ctx);
+    const w = deep(tree).find((n) => n.props?.['aria-label'] === 'Reset filter width');
+    w.props.onClick();
+    assert.deepStrictEqual(ctx.sent, [[400, 3050]], 'the low edge survived');
 });
 
 t('the minimal Receiver panel has neither, because it has no sliders', () => {

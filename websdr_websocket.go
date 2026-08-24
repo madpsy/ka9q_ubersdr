@@ -1285,6 +1285,13 @@ func applyWaterfallTextOverlay(pixels []byte, textRows [][]byte, wfWidth int) {
 // when it makes its /~~orgstatus callback.
 const websdrServerVersion = "WebSDR/20140718.1506-64"
 
+// websdrFirstRequestTimeout bounds how long a newly accepted WebSDR
+// connection may stay silent before we give up on it.  Sized for the
+// websdr.org directory callback, which idles ~60 s before its first
+// /~~orgstatus request (measured; PhantomSDR+ keeps the socket open for the
+// same reason).  180 s leaves headroom without holding sockets indefinitely.
+const websdrFirstRequestTimeout = 180 * time.Second
+
 // serverHeaderWriter wraps an http.ResponseWriter to inject the WebSDR
 // Server: header before the first Write or WriteHeader call.
 type serverHeaderWriter struct {
@@ -1437,7 +1444,15 @@ func websdrRouteConn(conn net.Conn, cl *channelListener, handler *WebSDRHandler)
 
 	// Read until we see \r\n\r\n (end of HTTP headers).
 	// Set a deadline so we don't block forever on silent connections.
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	//
+	// This must be generous: after registration, the websdr.org directory
+	// opens the /~~orgstatus callback connection and then sits IDLE for
+	// roughly 60 s before sending its first request.  A short deadline here
+	// closes that socket before the directory ever speaks, and the receiver
+	// silently never appears in the listing.  Normal clients (browsers,
+	// curl) send immediately, so the long deadline only ever applies to
+	// genuinely silent connections.
+	conn.SetReadDeadline(time.Now().Add(websdrFirstRequestTimeout))
 	var buf []byte
 	tmp := make([]byte, 4096)
 	for {

@@ -375,6 +375,9 @@ type ServerConfig struct {
 	EnableWebSDR                    bool                 `yaml:"enable_websdr"`                       // Enable WebSDR protocol compatibility server (default: false)
 	WebSDRWaterfallCalibration      float32              `yaml:"websdr_waterfall_calibration"`        // Waterfall dBFS→pixel calibration offset (default: -13.0)
 	WebSDREmail                     string               `yaml:"websdr_email"`                        // Operator contact email shown in WebSDR UI /~~orgstatus (XOR-obfuscated; defaults to admin.email)
+	WebSDRRegisterWebSDROrg         bool                 `yaml:"websdr_register_websdrorg"`           // Register with the websdr.org public directory (default: false)
+	WebSDRHostname                  string               `yaml:"websdr_hostname"`                     // Public hostname advertised to websdr.org (empty = derive from admin.public_url)
+	WebSDRTCPPort                   int                  `yaml:"websdr_tcp_port"`                     // Public TCP port advertised to websdr.org (default: 8901; differs from the listen port behind a tunnel)
 	KiwiSDRRegisterKiwiSDRCom       bool                 `yaml:"kiwisdr_register_kiwisdrcom"`         // Register with rx.kiwisdr.com public directory (default: false)
 	KiwiSDRHost                     string               `yaml:"kiwisdr_host"`                        // Public hostname advertised to rx.kiwisdr.com (required for registration)
 	LogFileEnabled                  bool                 `yaml:"logfile_enabled"`                     // Enable HTTP request logging (default: false)
@@ -1297,6 +1300,9 @@ func LoadConfig(filename string) (*Config, error) {
 	// WebSDR compatibility defaults
 	if config.Server.EnableWebSDR && config.Server.WebSDRWaterfallCalibration == 0 {
 		config.Server.WebSDRWaterfallCalibration = -13.0
+	}
+	if config.Server.WebSDRTCPPort == 0 {
+		config.Server.WebSDRTCPPort = 8901
 	}
 	if config.Audio.BufferSize == 0 {
 		config.Audio.BufferSize = 4096

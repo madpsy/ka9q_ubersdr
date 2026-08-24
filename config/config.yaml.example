@@ -470,6 +470,39 @@ server:
   websdr_waterfall_calibration: 20.0
   websdr_email: "operator@example.com"
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # websdr.org public directory registration
+  # ─────────────────────────────────────────────────────────────────────────
+  #
+  # Listing on websdr.org is a two-phase protocol and BOTH phases must work:
+  #
+  #   1. Outbound: UberSDR sends
+  #        GET /~~websdrorg?host=<websdr_hostname>&port=<websdr_tcp_port>
+  #      to websdr.ewi.utwente.nl:80 every 60 seconds.  A "200 OK / ok" reply
+  #      only means the ping was accepted — NOT that you will be listed.
+  #
+  #   2. Inbound: websdr.org then opens a TCP connection back to the
+  #      advertised hostname:port, waits about 60 seconds, sends
+  #      GET /~~orgstatus, and reuses that same connection for status polls
+  #      roughly every 10 seconds.  UberSDR handles this natively.
+  #
+  # Because of phase 2, the advertised endpoint must be a real TCP endpoint
+  # reachable from the internet.  An HTTP reverse proxy is NOT equivalent —
+  # use a plain TCP forward/tunnel if you are not directly reachable.
+  #
+  # Requires enable_websdr: true.
+  websdr_register_websdrorg: false
+  #
+  # Public hostname advertised to websdr.org.
+  # Leave empty to derive it from admin.public_url.
+  websdr_hostname: ""
+  #
+  # Public TCP port advertised to websdr.org (default: 8901).
+  # This is the port the OUTSIDE WORLD connects to, which is not necessarily
+  # the port UberSDR listens on — behind a NAT mapping or TCP tunnel it will
+  # differ from the local WebSDR listen port.
+  websdr_tcp_port: 8901
+
   # HTTP request logging (Apache combined log format)
   # Enable/disable HTTP request logging to disk (default: false)
   # When enabled, logs all HTTP requests to the specified logfile

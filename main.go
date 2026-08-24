@@ -3597,6 +3597,18 @@ func main() {
 				}
 			}
 		}()
+
+		// Register with the websdr.org public directory.  This is the
+		// outbound half of the protocol; the inbound /~~orgstatus callback
+		// is served by websdrTCPRouter above.  Both must work for the
+		// receiver to appear in the listing.
+		if config.Server.WebSDRRegisterWebSDROrg {
+			websdrRegistrar := NewWebSDROrgRegistrar(config)
+			websdrRegistrar.Start()
+			defer websdrRegistrar.Stop()
+		} else {
+			log.Printf("websdr.org: directory registration disabled")
+		}
 	} else {
 		log.Printf("WebSDR protocol compatibility disabled")
 	}

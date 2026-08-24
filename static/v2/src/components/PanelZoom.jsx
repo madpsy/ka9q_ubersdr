@@ -17,26 +17,15 @@
 // neither costs a pixel, and the panel snapping back to the size of everything
 // around it is its own confirmation that something happened.
 
-import React, { useCallback, useEffect, useRef } from '../react.js';
+import React, { useCallback } from '../react.js';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { useDisplay, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from '../display/DisplayContext.jsx';
 import { Icon } from './ui.jsx';
 import { haptic } from '../lib/haptics.js';
 import { canScale, nudgeScale, panelScale } from '../lib/panelScale.js';
+import useHoldPress from '../lib/useHoldPress.js';
 
 const RANGE = { min: UI_SCALE_MIN, max: UI_SCALE_MAX, step: UI_SCALE_STEP };
-
-// Long enough not to fire on a firm tap, short enough to find by accident, and
-// the same figure Minesweeper's flag press uses — one hold length across the app
-// is one thing to learn.
-const HOLD_MS = 450;
-
-// A click that lands within this of a reset is the tail of the gesture that did
-// it, not a press of its own. A timestamp rather than a flag, as the top bar's
-// menu buttons do it: a flag has to be cleared by an event that may never come —
-// a right-click fires no click at all — and one left set would swallow the next
-// real press instead.
-const AFTER_RESET_MS = 400;
 
 const pct = (v) => `${Math.round(v * 100)}%`;
 
@@ -69,12 +58,7 @@ export default function PanelZoom({ panelId, className, size = 13 }) {
     const { setSectionScale } = useLayout();
     const { base, delta, scale } = usePanelScale(panelId);
 
-    const hold = useRef(null);
-    const resetAt = useRef(0);
-    useEffect(() => () => clearTimeout(hold.current), []);
-
     const reset = useCallback(() => {
-        resetAt.current = performance.now();
         if (!delta) return;
         setSectionScale(panelId, 0);
         // The one press here whose effect is not a step of type size, so it is
@@ -82,36 +66,15 @@ export default function PanelZoom({ panelId, className, size = 13 }) {
         haptic('toggle');
     }, [delta, panelId, setSectionScale]);
 
+    // Right-click with a mouse, hold with a finger — see lib/useHoldPress for
+    // the three details of that shared with the Multipad's squelch Auto, which
+    // is the other place a button here has a second job.
+    const [press, afterHold] = useHoldPress(reset);
+
     const step = (dir) => () => {
-        // The click a hold leaves behind. Ignored rather than prevented: a touch
-        // dispatches its compatibility click well after the timer has fired, and
-        // by then there is nothing left to cancel.
-        if (performance.now() - resetAt.current < AFTER_RESET_MS) return;
+        // The click a hold leaves behind is not a press of its own.
+        if (afterHold()) return;
         setSectionScale(panelId, nudgeScale(base, delta, dir, RANGE));
-    };
-
-    // Touch only. A mouse has the right button for this, and a mouse held still
-    // on a button is somebody reading the tooltip.
-    const onPointerDown = (e) => {
-        if (e.pointerType === 'mouse') return;
-        clearTimeout(hold.current);
-        hold.current = setTimeout(reset, HOLD_MS);
-    };
-    const endHold = () => clearTimeout(hold.current);
-
-    // Right-click, and on Android the long press arrives here as well — which is
-    // harmless, because resetting twice is resetting once.
-    const onContextMenu = (e) => {
-        e.preventDefault();
-        reset();
-    };
-
-    const press = {
-        onPointerDown,
-        onPointerUp: endHold,
-        onPointerCancel: endHold,
-        onPointerLeave: endHold,
-        onContextMenu,
     };
 
     // Says where it is now and, when that is not the global size, what the

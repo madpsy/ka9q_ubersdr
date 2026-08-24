@@ -18,7 +18,7 @@
 // the same reason: hunting for a signal is one activity, and the marker four
 // kilohertz up should be reachable without letting go of the drum.
 
-import React, { useEffect, useMemo, useRef, useState } from '../react.js';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import Barrel from '../components/Barrel.jsx';
@@ -32,6 +32,8 @@ import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js'
 import useMarkerLookup from '../lib/useMarkerLookup.js';
 import { getRmNoise, rmCredentials } from '../lib/rmnoise.js';
 import useTapThrough from '../lib/useTapThrough.js';
+import useHoldPress from '../lib/useHoldPress.js';
+import { haptic } from '../lib/haptics.js';
 import {
     clamp, countryFlag, formatFilterWidth, formatFreqShort, formatHz, snrColour, snrFraction,
 } from '../lib/format.js';
@@ -828,6 +830,52 @@ function WidthRow({ paired }) {
     );
 }
 
+// Auto, and the hold that turns the squelch off.
+//
+// The two halves of one control: Auto puts the threshold just above the noise —
+// which switches the squelch on, the floor being what "off" means — and the
+// secondary press puts it back on the floor. Right-click or hold, the same
+// gesture the panel zoom uses to get back to the global size. See
+// lib/useHoldPress.
+function AutoSquelch({ snr }) {
+    const { squelch, actions } = useRadio();
+    const off = useCallback(() => {
+        if (!squelch.enabled) return;
+        actions.setSquelch(SQUELCH_MIN);
+        // The one press on this pad whose effect is not a number changing under
+        // the finger that changed it, so it is the one that has to say it landed
+        // on a device with no pointer to see.
+        haptic('toggle');
+    }, [squelch.enabled, actions]);
+    const [press, afterHold] = useHoldPress(off);
+
+    // The gesture rides on the wrapper, not the button: Auto goes disabled while
+    // there is no SNR to measure from, and a disabled button dispatches no
+    // pointer events — which would have made "turn it off" unreachable at
+    // exactly the moment it is most wanted, over a band that has gone quiet.
+    return (
+        <span className="pad-row__hold" {...press}>
+            <button
+                type="button"
+                className="chip chip--button pad-row__act"
+                title={[
+                    snr == null
+                        ? 'Waiting for a signal reading to set the threshold from'
+                        : 'Set the threshold just above the recent noise level',
+                    squelch.enabled ? 'right-click or hold to turn the squelch off' : null,
+                ].filter(Boolean).join(' — ')}
+                disabled={snr == null}
+                onClick={() => {
+                    if (afterHold()) return;
+                    actions.autoSquelch();
+                }}
+            >
+                Auto
+            </button>
+        </span>
+    );
+}
+
 // Its own component so the 12 Hz meter sampling behind the live SNR marker
 // re-renders this line alone, and not the barrels above it.
 function SquelchRow({ paired }) {
@@ -852,21 +900,22 @@ function SquelchRow({ paired }) {
                squelch on, because the threshold it picks is above the floor and
                the floor is what "off" means here.
 
-               Disabled until there is an SNR to measure against, and it says so
-               — a threshold set from no measurement would be a guess. */
-            action={(
-                <button
-                    type="button"
-                    className="chip chip--button pad-row__act"
-                    title={snr == null
-                        ? 'Waiting for a signal reading to set the threshold from'
-                        : 'Set the threshold just above the recent noise level'}
-                    disabled={snr == null}
-                    onClick={actions.autoSquelch}
-                >
-                    Auto
-                </button>
-            )}
+               Its secondary press turns the squelch off — the other end of the
+               one thing this button does, and the pad has nowhere to put a
+               second control for it. Off is the slider's own floor, so the
+               gesture is visible in the track sliding to the left rather than
+               needing a confirmation of its own.
+
+               Live even when Auto is not: the button greys out while there is
+               nothing to measure a threshold from, and a squelch left closed
+               over a dead band is exactly when somebody wants it off. So the
+               press is on a span around the button rather than on the button —
+               a disabled button dispatches no pointer events at all.
+
+               Auto itself is disabled until there is an SNR to measure against,
+               and it says so — a threshold set from no measurement would be a
+               guess. */
+            action={<AutoSquelch snr={snr} />}
         >
             <Slider
                 value={squelch.value}

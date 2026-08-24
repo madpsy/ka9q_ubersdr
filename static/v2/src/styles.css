@@ -3099,6 +3099,12 @@ a.btn { text-decoration: none; }
 /* A button on a pad row, after the control it acts on. Never shrinks: the
    slider gives up the width instead, which is what has width to give. */
 .pad-row__act { flex: none; padding: 2px 6px; }
+/* A wrapper that carries a gesture the button inside it cannot: the squelch
+   Auto goes disabled while there is no SNR to measure from, and a disabled
+   button dispatches no pointer events — so the right-click-or-hold that turns
+   the squelch off would be unreachable over exactly the dead band somebody wants
+   it off for. Contributes nothing to the row but its child. */
+.pad-row__hold { flex: none; display: flex; }
 /* An icon button in that slot — the filter reset — pinned to the row's height
    rather than left to its own padding.
  *

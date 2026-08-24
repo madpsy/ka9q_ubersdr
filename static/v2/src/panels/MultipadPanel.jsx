@@ -792,7 +792,7 @@ function PadRow({ label, value, children, action }) {
 // The filter width. Its own component because it is drawn in two places — on a
 // line of its own, or beside the squelch where the pad is wide enough for the
 // pair — and a slider defined inline twice is two sliders to keep in step.
-function WidthRow({ minimal }) {
+function WidthRow({ paired }) {
     const { tuning, actions } = useRadio();
     const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
     const maxWidth = maxFilterWidth(tuning.mode);
@@ -800,12 +800,15 @@ function WidthRow({ minimal }) {
     return (
         <PadRow
             label="Width"
-            /* No number in the minimal view, as the squelch beside it has none:
-               the two share a line there, and a reading on each is a third of
-               that line spent on figures the readout above already carries — the
-               passband is printed beside the frequency. */
-            value={minimal ? null : `${(width / 1000).toFixed(2)}k`}
-            /* Kept in the minimal view, unlike the reading beside it: the
+            /* No number when the two share a line, as the squelch beside it has
+               none: a reading on each is a third of that line spent on figures
+               the readout above already carries — the passband is printed beside
+               the frequency. Stacked or on a row of its own it keeps the number,
+               which is why this asks about the pairing rather than about the
+               minimal view: those were the same question until the minimal view
+               learned to stack. */
+            value={paired ? null : `${(width / 1000).toFixed(2)}k`}
+            /* Kept even in the paired row, where the reading is not: the
                squelch's Auto is on that line for the same reason, and both are
                a way *out* of a setting you have wandered off with rather than a
                figure to read. It is an icon, so it costs the line almost
@@ -827,7 +830,7 @@ function WidthRow({ minimal }) {
 
 // Its own component so the 12 Hz meter sampling behind the live SNR marker
 // re-renders this line alone, and not the barrels above it.
-function SquelchRow({ minimal }) {
+function SquelchRow({ paired }) {
     const { squelch, actions } = useRadio();
     const m = useMeters(12);
     const snr = m.snr;
@@ -835,12 +838,14 @@ function SquelchRow({ minimal }) {
     return (
         <PadRow
             label="Squelch"
-            /* No number in the minimal view. It is the one row that survives the
-               cut, so it is the row with the least width to spare — and the
-               threshold is a figure you set by ear against the noise rather than
-               one you dial to a value. The slider says where it is, the marker on
-               it says where the signal is, and both are the reading. */
-            value={minimal ? null : (squelch.enabled ? `${squelch.value.toFixed(0)} dB` : 'Off')}
+            /* No number when it is sharing a line with the width: there is no
+               room for one beside Auto — and the threshold is a figure you set by
+               ear against the noise rather than one you dial to a value. The
+               slider says where it is, the marker on it says where the signal is,
+               and both are the reading. On a row of its own it prints the figure,
+               which is worth having for the one case the marker cannot cover:
+               reading back a threshold on a band that has gone quiet. */
+            value={paired ? null : (squelch.enabled ? `${squelch.value.toFixed(0)} dB` : 'Off')}
             /* The Signal panel's Auto, on the same line for the same reason it
                is on the same line there: it sets the number the slider sets, so
                it belongs beside it rather than under it. It also turns the
@@ -877,18 +882,19 @@ function SquelchRow({ minimal }) {
     );
 }
 
-// `minimal` keeps the two barrels and the squelch, and drops the rest.
+// `minimal` keeps the two barrels, the squelch and the width, and drops the rest.
 //
 // The barrels are the controls a pad is *for* — the ones with no good small form
-// anywhere else — and the mode, the width and the view are all a tap away in
-// their own panels. The squelch is here on the strength of when it is reached
-// for rather than where else it lives: it is the one setting on this panel you
-// adjust *while listening*, against a signal that is fading in and out, and the
-// pad is what a phone has open while that is happening. Sending somebody to the
-// Signal panel for it means covering the dial they are working to hear.
+// anywhere else — and the mode, the bands and the view are all a tap away in
+// their own panels.
 //
-// It also costs a line rather than a block: one slider and its reading, on the
-// row it already shares with Auto. See the registry's `minimal`.
+// The other two are here on the strength of when they are reached for rather
+// than where else they live. They are the two settings on this panel adjusted
+// *while listening*, against a signal that is fading in and out, and the pad is
+// what a phone has open while that is happening; sending somebody to the Signal
+// or Receiver panel for either means covering the dial they are working to hear.
+// Both cost a line rather than a block, and on a pad with room they share one.
+// See the registry's `minimal`.
 export default function MultipadPanel({ minimal }) {
     const { tuning, actions } = useRadio();
 
@@ -960,8 +966,9 @@ export default function MultipadPanel({ minimal }) {
                 </>
             )}
 
-            {/* The two sliders you work while listening.
-                
+            {/* The two sliders you work while listening. Both of them, in every
+                view — see below for what that cost and why it is worth it.
+
                 Paired on one line only in the minimal view, and only where the
                 pad is wide enough — the same measurement that decides whether
                 the readout carries the passband, because it is the same question
@@ -969,7 +976,17 @@ export default function MultipadPanel({ minimal }) {
                 worth saving: it is two barrels and this, and a pad cut down to
                 fit a phone should not spend half its remaining height on two
                 sliders that fit side by side.
-                
+
+                Below that width they stack instead. They used to *not*: the
+                width was dropped and the squelch kept, on the reasoning that
+                the Receiver panel has a width slider a tap away. That reasoning
+                held for the panel and not for the phone, where this is the panel
+                a session lives in and a narrow handset is the ordinary case
+                rather than the cramped one — so the common way to see this pad
+                was the one way that had no width control at all. A stacked pair
+                costs one line; a missing control costs a trip to another panel
+                and the dial disappearing behind it.
+
                 The full view keeps them on rows of their own. It has the height
                 — it is already showing the mode buttons, the bands and the view
                 row — and at full size the pair is two half-length sliders where
@@ -978,17 +995,26 @@ export default function MultipadPanel({ minimal }) {
                 worked while listening, and the row that gets adjusted belongs
                 nearest the thing being adjusted against.
 
-                Squelch leads the pair, because it is the row the minimal view
-                would keep on its own. */}
-            {minimal && wide ? (
-                <div className="pad__pair">
-                    <SquelchRow minimal />
-                    <WidthRow minimal />
-                </div>
+                Squelch leads in the minimal view, paired or stacked: it is the
+                row that would be kept if only one could be, and the order should
+                not change under somebody when a rotation crosses the threshold
+                between the two shapes. */}
+            {minimal ? (
+                wide ? (
+                    <div className="pad__pair">
+                        <SquelchRow paired />
+                        <WidthRow paired />
+                    </div>
+                ) : (
+                    <>
+                        <SquelchRow />
+                        <WidthRow />
+                    </>
+                )
             ) : (
                 <>
-                    {!minimal && <WidthRow />}
-                    <SquelchRow minimal={minimal} />
+                    <WidthRow />
+                    <SquelchRow />
                 </>
             )}
         </div>

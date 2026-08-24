@@ -3099,6 +3099,16 @@ a.btn { text-decoration: none; }
 /* A button on a pad row, after the control it acts on. Never shrinks: the
    slider gives up the width instead, which is what has width to give. */
 .pad-row__act { flex: none; padding: 2px 6px; }
+/* An icon button in that slot — the filter reset — pinned to the row's height
+   rather than left to its own padding.
+ *
+ * The row is 20px because the slider is, and .btn--sm.btn--icon's 5px around a
+ * 16px icon comes to 28. That would have made the width row taller than the
+ * squelch row it sits beside in the paired layout, and taller than the height
+ * the floating pad is seeded with — which is measured, and checked, per row. See
+ * the Multipad's registry entry. Height rather than padding so it stays 20
+ * whatever icon goes in it. */
+.pad-row .btn.pad-row__act { height: 20px; padding: 0 3px; }
 
 /* Squelch and width side by side, where the pad is wide enough for both — see
    MultipadPanel. Equal halves rather than content-sized: two sliders of

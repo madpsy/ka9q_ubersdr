@@ -37,15 +37,20 @@ export const PLACEMENTS = [...DOCKS, 'float'];
 const FLOAT_DEFAULT = { w: 320, h: 320 };
 
 // Float heights that were a default once and are too small for what the panel
-// shows now — the multipad's was measured without the squelch that its minimal
-// view includes, so the one control there that is adjusted while listening was
-// the one clipped.
+// shows now.
+//
+// The multipad has done this twice, the same way each time: 188 was measured
+// without the squelch its minimal view includes, and 213 was measured when that
+// view still dropped the filter width on a narrow pad instead of stacking it.
+// Both times the control clipped was one of the two adjusted while listening,
+// which is the whole reason either is on this panel.
 //
 // Keyed by panel, and matched exactly: a float still sitting at one of these
 // was never resized by hand, so correcting it cannot undo an arrangement
 // anybody made. A float at any other height was, and is left alone — which is
-// the rule every migration here has to satisfy.
-const OUTGROWN_FLOAT_HEIGHTS = { multipad: [188] };
+// the rule every migration here has to satisfy. The list grows rather than being
+// replaced, so a window skipped at one release is still corrected at the next.
+const OUTGROWN_FLOAT_HEIGHTS = { multipad: [188, 213] };
 
 // Panels whose minimal view arrived after `minimalMobile` did.
 //

@@ -149,11 +149,11 @@ const BUILT_IN = [
     // the spectrum, not occupying a column of the left dock. The size is the two
     // barrels and the frequency readout with nothing to scroll.
     //
-    // Minimal: the two barrels and the squelch — the controls that exist here
-    // because they have no good small form anywhere else, plus the one setting
-    // on this panel that is adjusted while listening rather than beforehand.
-    // Like every panel it opens cut down on a phone; the mode buttons, the width
-    // and the view are one tap on the header away.
+    // Minimal: the two barrels, the squelch and the filter width — the controls
+    // that exist here because they have no good small form anywhere else, plus
+    // the two settings on this panel adjusted while listening rather than
+    // beforehand. Like every panel it opens cut down on a phone; the mode
+    // buttons, the bands and the view are one tap on the header away.
     {
         id: 'multipad',
         title: 'Multipad',
@@ -167,11 +167,17 @@ const BUILT_IN = [
             minimal: true,
             // Wide enough for the head row whole: a ten-digit readout at 27 px
             // plus the step and mode pickers beside it. The height is that row,
-            // the two barrels *and the squelch*, with nothing to scroll — the
-            // squelch is part of the minimal view (see above) and the 188 this
-            // used to be was measured without it, so the one control here that
-            // is adjusted while listening was the one cut off.
-            float: { w: 390, h: 213, anchor: 'bottom-left' },
+            // the two barrels, the squelch *and the width*, with nothing to
+            // scroll.
+            //
+            // Both sliders, and stacked rather than paired: 390 px leaves about
+            // 11 px of slack in the head row and the pair needs 52, so a window
+            // this size takes the minimal view's stacked branch — see the note
+            // above the two rows in MultipadPanel. Each has cost 25 px to add
+            // and each was left out of this figure once: 188 missed the squelch,
+            // 213 missed the width. layout.test.js sums the rows so a third
+            // omission cannot pass.
+            float: { w: 390, h: 238, anchor: 'bottom-left' },
         },
         Component: MultipadPanel,
     },

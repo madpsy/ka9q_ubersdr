@@ -50,20 +50,29 @@ t('a touchscreen desktop gets it floating, minimal, in the bottom left', () => {
     assert.ok(!inAnyDock(l, PAD), 'must not also be listed in a dock');
 });
 
-t('the seeded window is big enough for both barrels and the squelch', () => {
+t('the seeded window is big enough for both barrels and both sliders', () => {
     // The height the registry asks for has to clear the window chrome plus the
     // frequency readout, both barrels and the gaps between them — the whole
     // point of the size being declared rather than left at the default.
     //
-    // And the squelch, which this sum used to leave out. That omission is why
-    // the seeded height was 25 px short of its own minimal view for as long as
-    // it was: the panel showed a control the test never accounted for, so
-    // nothing here objected. Measured in the running panel — a floating
-    // Multipad at 188 reported scrollHeight 180 against clientHeight 155.
+    // And both slider rows, each of which this sum has left out once: 188 missed
+    // the squelch, 213 missed the width. Both times the panel showed a control
+    // the test did not account for, so nothing here objected, and the control
+    // adjusted while listening was the one cut off. Measured in the running
+    // panel — a floating Multipad at 188 reported scrollHeight 180 against
+    // clientHeight 155.
+    //
+    // Both rows, not one: at this width the minimal view stacks the pair rather
+    // than putting them on one line, which is the branch a 390 px window takes
+    // — see MultipadPanel. A row is the slider's own 20 px plus the stack's 5 px
+    // gap, and .pad-row .btn.pad-row__act pins the width row's reset button to
+    // that 20 so the two rows cannot differ.
     const g = defaultLayout(TOUCH).floats[PAD];
     const CHROME = 31 + 10;             // title bar, and the body's bottom padding
+    const ROW = 5 + 20;                 // a slider row, and the gap above it
     const CONTENT = 4 + (38 + 5 + 48) + 8 + 38   // .pad, freq head + wheel, gap, zoom
-        + 25;                           // the squelch row, and the gap above it
+        + ROW                           // the squelch
+        + ROW;                          // the width
     assert.ok(g.h >= CHROME + CONTENT, `${g.h} < ${CHROME + CONTENT}`);
 
     // Width is the head row, which is the widest thing here: a ten-digit
@@ -128,18 +137,30 @@ t('a Multipad somebody had already gone and found is left alone', () => {
     assert.ok(inAnyDock(l, PAD));
 });
 
-// The height it was seeded with never had room for the squelch, which is part
-// of what its minimal view shows. Correcting that is only safe where nobody has
-// sized the thing themselves.
-t('a Multipad still at the height it was given grows enough for the squelch', () => {
+// Neither height it was seeded with had room for everything its minimal view
+// shows: 188 was measured without the squelch, 213 without the filter width.
+// Correcting either is only safe where nobody has sized the thing themselves.
+t('a Multipad still at a height it was given grows to fit both sliders', () => {
+    for (const was of [188, 213]) {
+        const stored = storedOld();
+        stored.rev = 1;
+        stored.floats = { [PAD]: { x: 40, y: 400, w: 390, h: was, min: false } };
+        stored.floatOrder = [PAD];
+        const l = reconcile(stored, TOUCH);
+        assert.strictEqual(l.floats[PAD].h, PANEL_BY_ID[PAD].touch.float.h, `from ${was}`);
+        assert.strictEqual(l.floats[PAD].w, 390, 'and nothing else about it moves');
+        assert.strictEqual(l.floats[PAD].x, 40);
+    }
+});
+
+t('a height between the two old defaults is somebody’s own', () => {
+    // 200 is not a default this project ever shipped, so it is an opinion — and
+    // the list is matched exactly rather than as a range for that reason.
     const stored = storedOld();
     stored.rev = 1;
-    stored.floats = { [PAD]: { x: 40, y: 400, w: 390, h: 188, min: false } };
+    stored.floats = { [PAD]: { x: 40, y: 400, w: 390, h: 200, min: false } };
     stored.floatOrder = [PAD];
-    const l = reconcile(stored, TOUCH);
-    assert.strictEqual(l.floats[PAD].h, PANEL_BY_ID[PAD].touch.float.h);
-    assert.strictEqual(l.floats[PAD].w, 390, 'and nothing else about it moves');
-    assert.strictEqual(l.floats[PAD].x, 40);
+    assert.strictEqual(reconcile(stored, TOUCH).floats[PAD].h, 200);
 });
 
 t('a Multipad somebody has resized keeps the height they chose', () => {

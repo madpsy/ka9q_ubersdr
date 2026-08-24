@@ -19,10 +19,10 @@ package main
 //
 // This registrar deliberately speaks raw sockets rather than net/http, and
 // sends a minimal two-line request with no User-Agent and no Accept-Encoding.
-// That is the exact byte sequence that scripts/websdr-org-register.py has been
-// observed to get listed with.  The directory server is old and idiosyncratic;
-// do not "modernise" this to an http.Client without re-testing an actual
-// listing end to end.
+// That is the exact byte sequence observed to produce a listing (previously
+// via an external Python shim, since removed — see git history).  The
+// directory server is old and idiosyncratic; do not "modernise" this to an
+// http.Client without re-testing an actual listing end to end.
 
 import (
 	"errors"
@@ -38,13 +38,17 @@ const (
 	websdrOrgServer = "websdr.ewi.utwente.nl"
 	websdrOrgPort   = 80
 
-	// Mirrors PING_INTERVAL / RECONNECT_DLY / TIMEOUT in
-	// scripts/websdr-org-register.py.
+	// Timings carried over from the external shim this replaced, which was
+	// observed to hold a listing reliably.
 	websdrOrgPingInterval = 60 * time.Second
 	websdrOrgReconnectDly = 30 * time.Second
 	websdrOrgTimeout      = 15 * time.Second
-	websdrOrgReplyTimeout = 5 * time.Second
 )
+
+// websdrOrgReplyTimeout is how long we listen for a reply after each ping.
+// A var, not a const, only so tests can shorten it; production must keep the
+// shim's proven 5 s.
+var websdrOrgReplyTimeout = 5 * time.Second
 
 // WebSDROrgRegistrar keeps this instance registered with the websdr.org public
 // receiver directory.  It holds one long-lived TCP connection to the directory
@@ -174,9 +178,7 @@ func (w *WebSDROrgRegistrar) loop() {
 			log.Printf("websdr.org: connected to %s:%d", websdrOrgServer, websdrOrgPort)
 		}
 
-		conn.SetWriteDeadline(time.Now().Add(websdrOrgTimeout))
-		if _, err := conn.Write(req); err != nil {
-			log.Printf("websdr.org: ping #%d write error: %v — reconnecting", attempt+1, err)
+		if !w.sendPing(conn, req, attempt+1) {
 			conn.Close()
 			conn = nil
 			if !w.sleep(websdrOrgReconnectDly) {
@@ -186,31 +188,75 @@ func (w *WebSDROrgRegistrar) loop() {
 		}
 		attempt++
 
-		// Read the reply if one arrives promptly.  The directory does not
-		// always answer immediately on a reused connection; a timeout here
-		// is normal and must NOT be treated as a failure.
-		conn.SetReadDeadline(time.Now().Add(websdrOrgReplyTimeout))
-		buf := make([]byte, 256)
-		n, err := conn.Read(buf)
-		switch {
-		case n > 0:
-			line := strings.SplitN(strings.TrimSpace(string(buf[:n])), "\r\n", 2)[0]
-			log.Printf("websdr.org: ping #%d registration OK — %s", attempt, line)
-		case websdrOrgIsTimeout(err):
-			log.Printf("websdr.org: ping #%d sent (no immediate response — normal)", attempt)
-		default:
-			// EOF or a real error: the server closed the connection.
-			log.Printf("websdr.org: ping #%d error: %v — reconnecting", attempt, err)
-			conn.Close()
-			conn = nil
-			if !w.sleep(websdrOrgReconnectDly) {
-				return
-			}
-			continue
-		}
-
 		if !w.sleep(websdrOrgPingInterval) {
 			return
+		}
+	}
+}
+
+// sendPing writes one registration request and consumes whatever reply
+// arrives promptly.  It returns false if the connection is dead and must be
+// replaced.
+//
+// The directory does not always answer on a reused connection, so a read
+// timeout is normal and is NOT a failure.  Whatever does arrive is fully
+// drained: leaving unread bytes in the socket would desynchronise the next
+// ping's reply and, over a long uptime, stall the connection once the receive
+// window filled.
+func (w *WebSDROrgRegistrar) sendPing(conn net.Conn, req []byte, attempt int) bool {
+	conn.SetWriteDeadline(time.Now().Add(websdrOrgTimeout))
+	if _, err := conn.Write(req); err != nil {
+		log.Printf("websdr.org: ping #%d write error: %v — reconnecting", attempt, err)
+		return false
+	}
+
+	conn.SetReadDeadline(time.Now().Add(websdrOrgReplyTimeout))
+	reply, err := drainReply(conn)
+
+	if len(reply) == 0 {
+		if websdrOrgIsTimeout(err) {
+			log.Printf("websdr.org: ping #%d sent (no immediate response — normal)", attempt)
+			return true
+		}
+		// EOF or a hard error with nothing to show for it.
+		log.Printf("websdr.org: ping #%d error: %v — reconnecting", attempt, err)
+		return false
+	}
+
+	status := strings.SplitN(strings.TrimSpace(string(reply)), "\r\n", 2)[0]
+	if strings.Contains(status, "200") {
+		log.Printf("websdr.org: ping #%d registration OK — %s", attempt, status)
+	} else {
+		// Not fatal on its own, but the directory rejecting the ping is the
+		// single most useful thing to see when a listing fails to appear.
+		log.Printf("websdr.org: ping #%d UNEXPECTED reply — %s", attempt, status)
+	}
+
+	// The server sent a reply and then closed: use it, but reconnect.
+	if err != nil && !websdrOrgIsTimeout(err) {
+		log.Printf("websdr.org: connection closed by server after ping #%d — reconnecting", attempt)
+		return false
+	}
+	return true
+}
+
+// drainReply reads until the read deadline expires or the peer closes,
+// returning everything received.  The returned error is the one that ended the
+// read: a timeout means "peer is still connected, just done talking".
+func drainReply(conn net.Conn) ([]byte, error) {
+	var reply []byte
+	buf := make([]byte, 1024)
+	for {
+		n, err := conn.Read(buf)
+		if n > 0 {
+			// Cap what we retain; the status line is all we log, and a
+			// pathological responder must not grow this without bound.
+			if len(reply) < 4096 {
+				reply = append(reply, buf[:n]...)
+			}
+		}
+		if err != nil {
+			return reply, err
 		}
 	}
 }

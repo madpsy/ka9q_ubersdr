@@ -196,3 +196,153 @@ func readFull(br *bufio.Reader, buf []byte) (int, error) {
 	}
 	return total, nil
 }
+
+// ── Registrar reply handling ────────────────────────────────────────────────
+
+// fakeDirectory runs a one-connection stand-in for websdr.ewi.utwente.nl.
+// reply is written in response to each request it reads; if closeAfter is
+// true it closes the connection immediately after replying.
+func fakeDirectory(t *testing.T, reply string, closeAfter bool) (net.Conn, func()) {
+	t.Helper()
+	// Keep these tests quick; the production value is 5s.
+	prev := websdrOrgReplyTimeout
+	websdrOrgReplyTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { websdrOrgReplyTimeout = prev })
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer srv.Close()
+		buf := make([]byte, 4096)
+		for {
+			// Generous: the client spends websdrOrgReplyTimeout draining
+			// after each reply before it sends the next ping.
+			srv.SetReadDeadline(time.Now().Add(30 * time.Second))
+			if _, err := srv.Read(buf); err != nil {
+				return
+			}
+			if reply != "" {
+				srv.Write([]byte(reply))
+			}
+			if closeAfter {
+				return
+			}
+		}
+	}()
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	return conn, func() { conn.Close(); ln.Close(); <-done }
+}
+
+func TestRegistrarPingDrainsLongReply(t *testing.T) {
+	// A realistic reply with headers, comfortably over a 256-byte read.
+	reply := "HTTP/1.1 200 OK\r\nDate: Mon, 24 Aug 2026 12:00:00 GMT\r\n" +
+		"Server: Apache/2.4.62 (Debian) OpenSSL/3.0.15 mod_perl/2.0.13 Perl/v5.36.0\r\n" +
+		"X-Padding: " + strings.Repeat("p", 300) + "\r\n" +
+		"Content-Type: text/plain\r\nContent-Length: 3\r\n\r\nok\n"
+	if len(reply) <= 256 {
+		t.Fatalf("test reply is only %d bytes; must exceed 256 to be meaningful", len(reply))
+	}
+
+	conn, cleanup := fakeDirectory(t, reply, false)
+	defer cleanup()
+
+	reg := NewWebSDROrgRegistrar(&Config{})
+	req := []byte("GET /~~websdrorg?host=h&port=1 HTTP/1.1\r\nHost: x\r\n\r\n")
+
+	if !reg.sendPing(conn, req, 1) {
+		t.Fatal("first ping reported the connection dead")
+	}
+
+	// The real assertion: nothing may be left buffered. Leftover bytes would
+	// be read as the NEXT ping's reply (desynchronising every subsequent log
+	// line) and would accumulate until the receive window stalled.
+	conn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+	leftover := make([]byte, 4096)
+	n, err := conn.Read(leftover)
+	if n > 0 {
+		t.Fatalf("%d bytes left unread after sendPing (reply was %d bytes): %q…",
+			n, len(reply), string(leftover[:min(n, 60)]))
+	}
+	if !websdrOrgIsTimeout(err) {
+		t.Fatalf("connection unusable after sendPing: %v", err)
+	}
+
+	// And the connection is still good for further pings.
+	for i := 2; i <= 3; i++ {
+		if !reg.sendPing(conn, req, i) {
+			t.Fatalf("ping #%d reported the connection dead", i)
+		}
+	}
+}
+
+func TestRegistrarPingReconnectsWhenServerCloses(t *testing.T) {
+	// Server replies and then closes: the reply is usable, but the connection
+	// must not be reused.
+	conn, cleanup := fakeDirectory(t, "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nok\n", true)
+	defer cleanup()
+
+	reg := NewWebSDROrgRegistrar(&Config{})
+	req := []byte("GET /~~websdrorg?host=h&port=1 HTTP/1.1\r\nHost: x\r\n\r\n")
+
+	if reg.sendPing(conn, req, 1) {
+		t.Error("sendPing kept a connection the server had closed")
+	}
+}
+
+func TestRegistrarPingSilentServerIsNotAFailure(t *testing.T) {
+	// The directory often stays silent on a reused connection. That must not
+	// be treated as an error, or we would reconnect every single minute.
+	conn, cleanup := fakeDirectory(t, "", false)
+	defer cleanup()
+
+	reg := NewWebSDROrgRegistrar(&Config{})
+	req := []byte("GET /~~websdrorg?host=h&port=1 HTTP/1.1\r\nHost: x\r\n\r\n")
+
+	if !reg.sendPing(conn, req, 1) {
+		t.Error("a silent (but open) directory connection was treated as dead")
+	}
+}
+
+func TestRegistrarEndpointRejectsPlaceholders(t *testing.T) {
+	cases := []struct {
+		name     string
+		hostname string
+		pubURL   string
+		port     int
+		wantOK   bool
+		wantHost string
+	}{
+		{"explicit hostname", "sdr.example.net", "", 8901, true, "sdr.example.net"},
+		{"derived from public_url", "", "https://sdr.example.net/path", 8901, true, "sdr.example.net"},
+		{"public_url with port", "", "https://sdr.example.net:8443", 8901, true, "sdr.example.net"},
+		{"default placeholder rejected", "", "https://example.com", 8901, false, ""},
+		{"no hostname at all", "", "", 8901, false, ""},
+		{"bad port", "sdr.example.net", "", 0, false, ""},
+		{"port out of range", "sdr.example.net", "", 70000, false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{}
+			cfg.Server.WebSDRHostname = tc.hostname
+			cfg.Admin.PublicURL = tc.pubURL
+			cfg.Server.WebSDRTCPPort = tc.port
+			host, _, ok := NewWebSDROrgRegistrar(cfg).endpoint()
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && host != tc.wantHost {
+				t.Errorf("host = %q, want %q", host, tc.wantHost)
+			}
+		})
+	}
+}

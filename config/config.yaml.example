@@ -395,45 +395,52 @@ server:
   #
   # Default: All false except 48 KHz (require bypass authentication)
   public_iq_modes:
+    # Allow 48 kHz IQ without bypass authentication (default: true)
     iq48: true
+    # Allow 96 kHz IQ without bypass authentication (default: false)
     iq96: false
+    # Allow 192 kHz IQ without bypass authentication (default: false)
     iq192: false
+    # Allow 384 kHz IQ without bypass authentication (default: false)
     iq384: false
 
   # Enable CORS
   enable_cors: true
 
   # KiwiSDR protocol compatibility
-  # Allows KiwiSDR clients (like kiwirecorder.py) to connect to UberSDR
-  # When enabled, starts a separate HTTP server on the configured port
-  # This creates standard UberSDR sessions with full IP tracking and authentication
-  #
-  # enable_kiwisdr: Enable/disable KiwiSDR compatibility (default: false)
-  # The KiwiSDR server always listens on port 8073 (standard KiwiSDR port).
-  #
-  # kiwisdr_port: Port advertised to rx.kiwisdr.com for directory registration (default: 8073)
-  #   This is the port KiwiSDR clients will use to connect from the public directory.
-  #   Change this if your KiwiSDR port is exposed publicly on a different port (e.g. via NAT).
-  #
-  # kiwisdr_public_email: Public email address shown in KiwiSDR status endpoint
-  #   This is the operator contact email displayed to KiwiSDR clients
-  #   If not set, defaults to "admin@example.com"
-  #   Use this to provide a public contact email separate from your admin email
-  #
-  # kiwisdr_smeter_offset: Calibration offset for S-meter readings (dBFS to dBm conversion)
-  #   This value is added to the baseband power (in dBFS) to convert to approximate dBm
-  #   Adjust based on your system's calibration to get accurate S-meter readings
-  #   Typical values: 25-35 (default: 30)
-  #   Higher values = higher S-meter readings (more sensitive)
-  #   Lower values = lower S-meter readings (less sensitive)
-  #   Example: If -43 dBFS signals should show as S9 (-73 dBm), offset = -73 - (-43) = -30, so use 30
+  # Allows KiwiSDR clients (like kiwirecorder.py) to connect to UberSDR.
   #
   # Usage with kiwirecorder.py:
   #   python3 kiwirecorder.py -s your-host -p 8073 -f 14074 -m usb --tlimit 60
-  #
+
+  # Enable/disable KiwiSDR compatibility (default: false)
+  # When enabled, starts a separate HTTP server on the configured port.
+  # This creates standard UberSDR sessions with full IP tracking and
+  # authentication. The KiwiSDR server always listens on port 8073
+  # (the standard KiwiSDR port).
   enable_kiwisdr: true
+
+  # Port advertised to rx.kiwisdr.com for directory registration (default: 8073)
+  # This is the port KiwiSDR clients will use to connect from the public
+  # directory. Change this if your KiwiSDR port is exposed publicly on a
+  # different port (e.g. via NAT).
   kiwisdr_port: 8073
+
+  # Public email address shown in the KiwiSDR status endpoint.
+  # This is the operator contact email displayed to KiwiSDR clients.
+  # If not set, defaults to "admin@example.com".
+  # Use this to provide a public contact email separate from your admin email.
   kiwisdr_public_email: "admin@example.com"
+
+  # Calibration offset for S-meter readings (dBFS to dBm conversion).
+  # This value is added to the baseband power (in dBFS) to convert to
+  # approximate dBm. Adjust based on your system's calibration to get accurate
+  # S-meter readings.
+  # Typical values: 25-35 (default: 30)
+  #   Higher values = higher S-meter readings (more sensitive)
+  #   Lower values = lower S-meter readings (less sensitive)
+  # Example: if -43 dBFS signals should show as S9 (-73 dBm), the offset is
+  # -73 - (-43) = -30, so use 30.
   kiwisdr_smeter_offset: 20.0
 
   # Public hostname advertised to rx.kiwisdr.com (required for registration)
@@ -1215,8 +1222,12 @@ mqtt:
   # MQTT broker connection settings
   broker: "tcp://mqtt.example.com:1883"  # MQTT broker URL (tcp:// or ssl://)
   
-  # MQTT authentication (leave empty if not required)
+  # MQTT broker username. Leave empty if the broker does not require
+  # authentication.
   username: ""
+
+  # MQTT broker password. Leave empty if the broker does not require
+  # authentication.
   password: ""
   
   # Topic prefix for all metrics
@@ -1341,6 +1352,8 @@ mqtt:
 
   # TLS/SSL settings for secure connections
   tls:
+    # Enable TLS/SSL for the MQTT broker connection (default: false).
+    # Use together with an ssl:// broker URL above.
     enabled: false
     ca_cert: ""      # Path to CA certificate file
     client_cert: ""  # Path to client certificate file (optional)
@@ -1396,10 +1409,10 @@ noisefloor:
       end: 479000
       start: 472000
 
-    - name: "160m"
+    - name: "160m"            # Band label shown in the UI and in noise-floor data
       start: 1800000          # 1.8 MHz
       end: 2000000            # 2.0 MHz
-      center_frequency: 1900000
+      center_frequency: 1900000  # Center frequency for this band's spectrum (Hz)
       bin_count: 400          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
       bin_bandwidth: 500      # 500 Hz resolution
       ft8_frequency: 1840000  # 1.840 MHz - FT8 calling frequency
@@ -1605,8 +1618,13 @@ instance_reporting:
   # These fields tell clients how to connect to this UberSDR instance
   # Leave empty if you don't want to report connection details
   instance:
+    # Hostname or IP that clients should use to reach this instance.
+    # Leave empty to omit connection details from the registry.
     host: ""
+    # Port that clients should use to reach this instance (default: 8080).
     port: 8080
+    # Whether clients should connect over HTTPS/WSS rather than HTTP/WS
+    # (default: false).
     tls: false
 
   # Enable/disable tunnel server integration (default: false)

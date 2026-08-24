@@ -1762,170 +1762,26 @@ var orgStatusSerial = int(time.Now().Unix() & 0x7fffffff)
 var orgStatusConfigRe = regexp.MustCompile(`[?&]config=(-?\d+)`)
 
 func (h *WebSDRHandler) handleOrgStatus(w http.ResponseWriter, r *http.Request) {
-	callerIP := getClientIP(r)
-
-	// Build the full orgstatus body.
-	fullBody := h.buildOrgStatusBody()
-	cookieVal := "ID=" + websdrOrgStatusID(h.config) + "; expires=Thu, 31-Dec-2099 00:00:00 GMT"
-
-	// Determine response for the first request.
-	users := h.sessions.GetNonBypassedUserCount()
-	usersLine := fmt.Sprintf("Users: %d\n", users)
-
-	cacheHit := false
-	if reqCfg := r.URL.Query().Get("config"); reqCfg != "" {
-		if reqCfg == strconv.Itoa(orgStatusSerial) {
-			cacheHit = true
-		}
+	// Fallback only.  In practice websdrTCPRouter intercepts every request
+	// whose first line contains "/~~orgstatus" and answers it with raw socket
+	// I/O (websdrHandleOrgStatusRaw), because the websdr.org directory reuses
+	// the connection and expects unframed body text on follow-up polls —
+	// something http.Server cannot produce.  This handler is reachable only
+	// via a request that hides the path from that literal check (e.g. percent
+	// encoding), so it just answers the first request correctly and stops.
+	respBody := h.buildOrgStatusBody()
+	if reqCfg := r.URL.Query().Get("config"); reqCfg == strconv.Itoa(orgStatusSerial) {
+		respBody = fmt.Sprintf("Users: %d\n", h.sessions.GetNonBypassedUserCount())
 	}
 
-	var respBody string
-	if cacheHit {
-		respBody = usersLine
-	} else {
-		respBody = fullBody
-	}
-
-	// ── Hijack FIRST, write everything as raw bytes ─────────────────────
-	// websdr.org reuses the same TCP connection for subsequent /~~orgstatus
-	// requests.  The real WebSDR binary responds to follow-up requests with
-	// JUST the raw body text (no HTTP status line, no headers) — a custom
-	// protocol that Go's http.Server cannot produce.
-	//
-	// We hijack BEFORE any ResponseWriter writes, because Go buffers the
-	// response internally and Hijack() after Write() does not guarantee the
-	// data reaches the wire.  Once hijacked, we write the first HTTP
-	// response as raw bytes ourselves, then loop for keep-alive requests.
-	//
-	// We hijack for ALL callers (not just websdr.org) because Docker NAT
-	// hides the real source IP.  For normal clients (curl, browsers) the
-	// keep-alive loop simply gets an EOF and returns cleanly.
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		log.Printf("WebSDR: /~~orgstatus hijack not supported — falling back to ResponseWriter")
-		// Fallback: use ResponseWriter (won't support keep-alive protocol).
-		respBodyBytes := []byte(respBody)
-		w.Header().Set("Content-Type", "text/plain")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Content-Length", strconv.Itoa(len(respBodyBytes)))
-		w.Header().Set("Set-Cookie", cookieVal)
-		w.Header()["Date"] = nil
-		w.WriteHeader(http.StatusOK)
-		w.Write(respBodyBytes)
-		return
-	}
-	conn, brw, err := hj.Hijack()
-	if err != nil {
-		log.Printf("WebSDR: /~~orgstatus hijack error: %v", err)
-		return
-	}
-	defer conn.Close()
-
-	// ── First response: write raw HTTP bytes on the hijacked conn ────
-	respBodyBytes := []byte(respBody)
-	var hdr bytes.Buffer
-	fmt.Fprintf(&hdr, "HTTP/1.1 200 OK\r\n")
-	fmt.Fprintf(&hdr, "Server: %s\r\n", websdrServerVersion)
-	fmt.Fprintf(&hdr, "Content-Length: %d\r\n", len(respBodyBytes))
-	fmt.Fprintf(&hdr, "Content-Type: text/plain\r\n")
-	fmt.Fprintf(&hdr, "Cache-control: no-cache\r\n")
-	fmt.Fprintf(&hdr, "Set-Cookie: %s\r\n", cookieVal)
-	fmt.Fprintf(&hdr, "\r\n")
-
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	if _, err := brw.Write(hdr.Bytes()); err != nil {
-		log.Printf("WebSDR: /~~orgstatus first write (header) error: %v", err)
-		return
-	}
-	if _, err := brw.Write(respBodyBytes); err != nil {
-		log.Printf("WebSDR: /~~orgstatus first write (body) error: %v", err)
-		return
-	}
-	if err := brw.Flush(); err != nil {
-		log.Printf("WebSDR: /~~orgstatus first flush error: %v", err)
-		return
-	}
-
-	if cacheHit {
-		log.Printf("WebSDR: /~~orgstatus callback from %s (cache hit, users=%d)", callerIP, users)
-	} else {
-		log.Printf("WebSDR: /~~orgstatus callback from %s (full response, users=%d)", callerIP, users)
-	}
-
-	// ── Subsequent requests: raw body text, no HTTP framing ─────────
-	// websdr.org sends follow-up GET requests on the same TCP
-	// connection.  We read each request, then respond with just the
-	// body text — exactly like the real WebSDR binary (confirmed via
-	// pcap).  For normal clients (curl, browsers) this loop gets an
-	// EOF immediately and returns.
-	var leftover []byte
-	for {
-		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
-
-		// Read until we see the end of an HTTP request (\r\n\r\n).
-		// leftover may contain data from a previous read that
-		// arrived after the \r\n\r\n delimiter.
-		data := leftover
-		leftover = nil
-		for {
-			if bytes.Contains(data, []byte("\r\n\r\n")) {
-				break
-			}
-			tmp := make([]byte, 4096)
-			n, err := brw.Read(tmp)
-			if n > 0 {
-				data = append(data, tmp[:n]...)
-			}
-			if err != nil {
-				// EOF or timeout — connection closed.
-				return
-			}
-		}
-
-		// Split at the first \r\n\r\n — anything after is leftover
-		// for the next request.
-		parts := bytes.SplitN(data, []byte("\r\n\r\n"), 2)
-		reqRaw := string(parts[0])
-		if len(parts) > 1 {
-			leftover = parts[1]
-		}
-
-		firstLine := reqRaw
-		if idx := strings.Index(reqRaw, "\r\n"); idx >= 0 {
-			firstLine = reqRaw[:idx]
-		}
-
-		// Parse config= parameter from the request.
-		reqCfg := ""
-		if m := orgStatusConfigRe.FindStringSubmatch(reqRaw); m != nil {
-			reqCfg = m[1]
-		}
-
-		// Build the response body.
-		users = h.sessions.GetNonBypassedUserCount()
-		usersLine = fmt.Sprintf("Users: %d\n", users)
-
-		isCacheHit := reqCfg == strconv.Itoa(orgStatusSerial)
-		var rawResp string
-		if isCacheHit {
-			rawResp = usersLine
-			log.Printf("WebSDR: /~~orgstatus keep-alive from %s (cache hit, users=%d)", callerIP, users)
-		} else {
-			rawResp = h.buildOrgStatusBody()
-			log.Printf("WebSDR: /~~orgstatus keep-alive from %s (full, %s)", callerIP, firstLine)
-		}
-
-		// Write raw body text — NO HTTP status line, NO headers.
-		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		if _, err := brw.Write([]byte(rawResp)); err != nil {
-			log.Printf("WebSDR: /~~orgstatus keep-alive write error: %v", err)
-			return
-		}
-		if err := brw.Flush(); err != nil {
-			log.Printf("WebSDR: /~~orgstatus keep-alive flush error: %v", err)
-			return
-		}
-	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Length", strconv.Itoa(len(respBody)))
+	w.Header().Set("Set-Cookie", "ID="+websdrOrgStatusID(h.config)+
+		"; expires=Thu, 31-Dec-2099 00:00:00 GMT")
+	w.Header()["Date"] = nil
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(respBody))
 }
 
 // buildOrgStatusBody constructs the full /~~orgstatus response body text.

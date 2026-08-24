@@ -27,6 +27,7 @@ import {
     clampSpeed, decayVelocity, flingVelocity, settleOffset, takeDetents,
 } from '../lib/barrel.js';
 import { haptic } from '../lib/haptics.js';
+import { createWheelStep } from '../lib/wheelStep.js';
 
 // Half the strip's width, CSS px. Anything wider than the barrel is clipped, so
 // this only has to cover the widest place a barrel is drawn — a floating panel
@@ -194,19 +195,27 @@ export default function Barrel({
     // registers wheel handlers passively, so preventDefault() there is ignored
     // and the dock scrolls along with the drum being turned — the same trap the
     // Receiver panel's dial fell into.
+    //
+    // A notch is a distance rather than an event, for the other half of that
+    // trap: a mouse sends one event per detent but a trackpad sends a stream of
+    // small ones, and a detent apiece span the drum round under a swipe that
+    // meant to nudge it. See lib/wheelStep.js.
     const rootRef = useRef(null);
     useEffect(() => {
         const el = rootRef.current;
         if (!el || disabled) return undefined;
+        const step = createWheelStep();
         const onWheel = (e) => {
             e.preventDefault();
+            const dir = step(e);
+            if (!dir) return;
             stop();
             const s = state.current;
             s.vel = 0;
             s.rest = 0;
             // Scroll up is a step *up* the scale, as the dial's digits are, so
             // the strip moves the opposite way to the notch.
-            move((e.deltaY < 0 ? -1 : 1) * detentRef.current);
+            move(-dir * detentRef.current);
         };
         el.addEventListener('wheel', onWheel, { passive: false });
         return () => el.removeEventListener('wheel', onWheel);

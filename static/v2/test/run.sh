@@ -204,6 +204,8 @@ esbuild ../src/lib/hostPanels.js --bundle --format=cjs --platform=node \
     --outfile=.build/hostpanels.cjs --log-level=warning
 esbuild ../src/lib/barrelMarks.js --bundle --format=cjs --platform=node \
     --outfile=.build/barrelmarks.cjs --log-level=warning
+esbuild ../src/lib/wheelStep.js --bundle --format=cjs --platform=node \
+    --outfile=.build/wheelstep.cjs --log-level=warning
 esbuild maxfps.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/displaycontext.cjs --log-level=warning
 esbuild ../src/extensions/protocol.js --bundle --format=cjs --platform=node \
@@ -531,3 +533,4 @@ node maxfps.test.js
 node shell.test.js
 node barrelmarks.test.js
 node audioresume.test.js
+node wheelstep.test.js

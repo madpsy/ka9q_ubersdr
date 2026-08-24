@@ -10,6 +10,7 @@ import { formatHz, clamp } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
 import { haptic } from '../lib/haptics.js';
+import { createWheelStep } from '../lib/wheelStep.js';
 
 const DIGITS = 8;   // 30 MHz upper limit needs eight decimal digits
 
@@ -35,15 +36,21 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
     // Wheel-to-tune has to be a native non-passive listener. React registers
     // its wheel handlers passively, so preventDefault() there is ignored and
     // the dock scrolled along with the digit being tuned.
+    //
+    // A step per detent's worth of scroll rather than per event: a mouse sends
+    // one event per detent, but a trackpad sends a stream of small ones and
+    // stepping on each ran the digits away under the lightest swipe.
     useEffect(() => {
         const el = rootRef.current;
         if (!el) return undefined;
+        const step = createWheelStep();
         const onWheel = (e) => {
             if (disabled) return;
             const cell = e.target.closest && e.target.closest('[data-place]');
             if (!cell) return;
             e.preventDefault();
-            bump(Number(cell.dataset.place), e.deltaY < 0 ? 1 : -1);
+            const dir = step(e);
+            if (dir) bump(Number(cell.dataset.place), dir);
         };
         el.addEventListener('wheel', onWheel, { passive: false });
         return () => el.removeEventListener('wheel', onWheel);

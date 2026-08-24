@@ -403,15 +403,24 @@ export default function MobileShell() {
                             closes exactly when it looks open: an extension owns
                             the sheet over whatever `openId` still names, and a
                             tap there should bring the Multipad back rather than
-                            silently clear the panel waiting behind it. */}
+                            silently clear the panel waiting behind it.
+
+                            With a group's list open the tap is spent on the
+                            list: it dismisses it and leaves the Multipad
+                            showing, rather than closing the panel the operator
+                            was looking at on their way out of a menu they had
+                            just decided against. Coming out of a menu is the
+                            one time this button means "back here" rather than
+                            "not this". */}
                         {solo && (
                             <button
                                 type="button"
                                 className={`tabbar__item${panel && panel.id === solo.id ? ' is-open' : ''}`}
                                 aria-current={panel && panel.id === solo.id ? 'true' : undefined}
                                 onClick={() => {
+                                    const shut = !menuId && panel && panel.id === solo.id;
                                     setMenuId(null);
-                                    setOpenId(panel && panel.id === solo.id ? null : solo.id);
+                                    setOpenId(shut ? null : solo.id);
                                 }}
                             >
                                 <span className="tabbar__icon">{solo.icon}</span>

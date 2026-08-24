@@ -90,6 +90,17 @@ const STATS_MS = 250;
 // drawing does.
 const THEME_VARS = ['--spec-bg', '--spec-grid', '--spec-band', '--warn'];
 
+// The Filter card's long wording, keyed by verdict — the card itself is a
+// fixed cell and only has room for a couple of words (see formatFit).
+const FIT_TIPS = {
+    '': 'Whether the filter fits the signal — measured from the averaged spectrum once a signal is present',
+    ok: 'The filter fits the signal',
+    narrow: 'The signal continues past the filter edge — widening would stop it being clipped',
+    wide: 'The filter is much wider than the signal — narrowing would shut out noise',
+    neighbour: 'A second signal is inside the passband — narrowing or shifting would exclude it',
+    offcentre: 'The signal is not where the filter expects it — re-tune by about the amount shown',
+};
+
 // A row with no measurement behind it, as packed ABGR — the waterfall's own
 // background, so a window hanging off the end of the served view reads as
 // nothing rather than as a floor-level noise that was never received.
@@ -775,8 +786,10 @@ export default function IFSpectrumPanel({ minimal }) {
                     {/* Whether the passband fits the signal it is passing —
                         averaged, mode-aware and deliberately slow to change:
                         see lib/ifFit.js. A dash is "nothing to judge", which a
-                        quiet channel is. */}
-                    <Readout label="Filter" value={fit.value} unit={fit.unit} tone={fit.tone} />
+                        quiet channel is — the same moments Peak shows one. */}
+                    <span title={FIT_TIPS[shown && shown.fit ? shown.fit.kind : '']}>
+                        <Readout label="Filter" value={fit.value} unit={fit.unit} tone={fit.tone} />
+                    </span>
                 </div>
             )}
 
@@ -1129,7 +1142,11 @@ function drawAll(st, spec, wf, ov) {
     if (st.measured) {
         st.measured.fit = updateFit(
             st.fit,
-            rawFit(stats.open, st.win, st.band, st.tuning, stats.floorDb),
+            // The served bin width goes along so every threshold knows the
+            // resolution actually behind the grid — at a wide span one bin is
+            // hundreds of hertz, and without this the edge quantisation alone
+            // read as clipping.
+            rawFit(stats.open, st.win, st.band, st.tuning, stats.floorDb, binWidthOf(st.cfg)),
             now,
         );
     }

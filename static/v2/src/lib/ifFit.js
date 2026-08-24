@@ -77,9 +77,10 @@ import { SIGNAL_DB } from './ifShape.js';
 import { MODE_BY_ID, bandwidthLimits, isIQ } from '../radio/constants.js';
 
 // A hole this wide inside a signal is still that signal. Wide enough to bridge
-// the quiet rows between speech formants on a settled average; far narrower
-// than the space between two stations anyone would call separate.
-export const FIT_GAP_HZ = 150;
+// the quiet stretches inside speech on a settled average — the gap between a
+// voiced cluster and its sibilance is hundreds of hertz, and splitting one
+// station into two here is what turns a voice into a phantom "neighbour".
+export const FIT_GAP_HZ = 250;
 
 // ...except on CW, where 150 Hz would weld two stations in a contest pileup
 // into one island and hide exactly the neighbour the verdict exists to point
@@ -92,8 +93,25 @@ export const FIT_MIN_ISLAND_HZ = 30;
 
 // Spill past an edge has to be at least this deep before it is called
 // clipping: the last bin of a signal straddles the edge line on any filter
-// that fits well, and reporting that would mean no filter ever fitted.
+// that fits well, and reporting that would mean no filter ever fitted. Widened
+// to twice the served bin width when that is coarser — at a wide span one bin
+// covers hundreds of hertz, and edge quantisation alone would read as spill.
 export const FIT_SPILL_HZ = 60;
+
+// A strong signal's edges are measured relative to its own peak, not only
+// against the noise: FFT leakage and phase-noise skirts stand well above the
+// floor beside anything loud, and taking them as occupied width called every
+// strong station clipped. Down-thirty is a shade gentler than the ITU's 26 dB
+// occupied-bandwidth convention, so an AM carrier's sidebands — genuinely
+// 20-odd dB under their carrier — still count as the signal they are.
+export const FIT_DROP_DB = 30;
+
+// A second island only counts as a neighbour when it could actually be one:
+// standing well clear of the floor, and within shouting distance of the main
+// signal's own level. Fragments of the main signal that broke past the gap
+// tolerance — sibilance, a weak formant cluster — fail both.
+export const FIT_NEIGHBOUR_MIN_DB = 12;
+export const FIT_NEIGHBOUR_REL_DB = 18;
 
 // Slack thresholds, as a fraction of the filter width and an absolute floor —
 // whichever is larger. Voice first: a 2.7 kHz SSB filter with 500 Hz of
@@ -168,7 +186,7 @@ const midHzOf = (win, perBin, bin) => win.offLo + (bin + 0.5) * perBin;
  *   wide       { slackHz, extentHz }           the filter admits mostly noise
  *   ok         {}                              measured, and it fits
  */
-export function rawFit(mean, win, band, tuning, floorDb) {
+export function rawFit(mean, win, band, tuning, floorDb, resHz = 0) {
     if (!mean || !win || !(win.span > 0) || !band || band.last < band.first) return null;
     if (!tuning || isIQ(tuning.mode)) return null;
     const bins = mean.length;
@@ -178,10 +196,14 @@ export function rawFit(mean, win, band, tuning, floorDb) {
     const limits = bandwidthLimits(tuning.mode);
     const group = (MODE_BY_ID[tuning.mode] || {}).group;
     const gapHz = group === 'cw' ? FIT_GAP_HZ_CW : FIT_GAP_HZ;
+    // `resHz` is the *served* bin width. The grid this runs on is finer, but
+    // nothing on it can be sharper than what the server sent, so every
+    // threshold in hertz is floored by the resolution actually behind it.
+    const minIsland = Math.max(FIT_MIN_ISLAND_HZ, resHz);
     const islands = findIslands(
         mean, floorDb, SIGNAL_DB,
         Math.max(1, Math.round(gapHz / perBin)),
-    ).filter((is) => (is.last - is.first + 1) * perBin >= FIT_MIN_ISLAND_HZ);
+    ).filter((is) => (is.last - is.first + 1) * perBin >= minIsland);
     if (!islands.length) return null;
 
     // The signal is the island that is loudest *inside* the passband — judged
@@ -192,15 +214,33 @@ export function rawFit(mean, win, band, tuning, floorDb) {
     // business. Islands that never enter the passband are skipped outright.
     let main = null;
     let mainDb = -Infinity;
-    for (const is of islands) {
+    const inBandDb = islands.map((is) => {
         const a = Math.max(is.first, band.first);
         const b = Math.min(is.last, band.last);
-        if (a > b) continue;
-        let inBand = -Infinity;
-        for (let i = a; i <= b; i++) if (Number.isFinite(mean[i]) && mean[i] > inBand) inBand = mean[i];
-        if (inBand > mainDb) { mainDb = inBand; main = is; }
+        let peak = -Infinity;
+        for (let i = a; i <= b; i++) if (Number.isFinite(mean[i]) && mean[i] > peak) peak = mean[i];
+        return peak;
+    });
+    for (let k = 0; k < islands.length; k++) {
+        if (inBandDb[k] > mainDb) { mainDb = inBandDb[k]; main = islands[k]; }
     }
     if (!main) return null;
+
+    // The main signal's occupied extent, at the stricter of the two gates —
+    // above the noise, and within FIT_DROP_DB of its own peak. The relative
+    // gate is what keeps a strong station honest: its leakage skirts clear the
+    // floor gate for hundreds of hertz either side, and measured against the
+    // floor alone every loud signal read as wider than any filter.
+    const gate2 = Math.max(floorDb + SIGNAL_DB, main.peakDb - FIT_DROP_DB);
+    let occFirst = -1;
+    let occLast = -1;
+    for (let i = main.first; i <= main.last; i++) {
+        const v = mean[i];
+        if (!Number.isFinite(v) || v < gate2) continue;
+        if (occFirst < 0) occFirst = i;
+        occLast = i;
+    }
+    if (occFirst < 0) { occFirst = main.peakBin; occLast = main.peakBin; }
 
     const bandLoHz = loHzOf(win, perBin, band.first);
     const bandHiHz = hiHzOf(win, perBin, band.last);
@@ -218,10 +258,11 @@ export function rawFit(mean, win, band, tuning, floorDb) {
     // the same mistune, and the off-centre check below reports it with the
     // right advice. Symmetric voice is the only family where both edges are
     // bandwidth's fault.
-    const spillLo = Math.max(0, bandLoHz - loHzOf(win, perBin, main.first));
-    const spillHi = Math.max(0, hiHzOf(win, perBin, main.last) - bandHiHz);
-    const clipLo = spillLo >= FIT_SPILL_HZ;
-    const clipHi = spillHi >= FIT_SPILL_HZ;
+    const spillMin = Math.max(FIT_SPILL_HZ, 2 * resHz);
+    const spillLo = Math.max(0, bandLoHz - loHzOf(win, perBin, occFirst));
+    const spillHi = Math.max(0, hiHzOf(win, perBin, occLast) - bandHiHz);
+    const clipLo = spillLo >= spillMin;
+    const clipHi = spillHi >= spillMin;
     if (limits.sideband === 'upper' || limits.sideband === 'lower') {
         const upper = limits.sideband === 'upper';
         if (upper ? clipHi : clipLo) {
@@ -242,11 +283,15 @@ export function rawFit(mean, win, band, tuning, floorDb) {
 
     // A second island inside the passband. After clipping — a cut signal is
     // the more urgent problem — and reported at the neighbour's peak, which is
-    // where to look for it.
-    for (const is of islands) {
-        if (is === main) continue;
-        const overlaps = is.first <= band.last && is.last >= band.first;
-        if (overlaps) return { kind: 'neighbour', offsetHz: midHzOf(win, perBin, is.peakBin) };
+    // where to look for it. Guarded twice (see FIT_NEIGHBOUR_*): the island
+    // has to be strong enough to be a station and loud enough beside the main
+    // signal, or a stray fragment of speech gets pointed at as an intruder.
+    for (let k = 0; k < islands.length; k++) {
+        const is = islands[k];
+        if (is === main || inBandDb[k] === -Infinity) continue;
+        if (is.peakDb < floorDb + FIT_NEIGHBOUR_MIN_DB) continue;
+        if (inBandDb[k] < mainDb - FIT_NEIGHBOUR_REL_DB) continue;
+        return { kind: 'neighbour', offsetHz: midHzOf(win, perBin, is.peakBin) };
     }
 
     if (group === 'cw') {
@@ -254,7 +299,7 @@ export function rawFit(mean, win, band, tuning, floorDb) {
         // moves where "centred" is, and the operator meant the shift.
         const centre = (bandLoHz + bandHiHz) / 2;
         const off = midHzOf(win, perBin, main.peakBin) - centre;
-        const allow = Math.max(FIT_CENTRE_MIN_HZ, (width / 2) * FIT_CENTRE_FRAC);
+        const allow = Math.max(FIT_CENTRE_MIN_HZ, (width / 2) * FIT_CENTRE_FRAC, 1.5 * resHz);
         if (Math.abs(off) > allow) return { kind: 'offcentre', offsetHz: off };
         // No wide verdict for CW — a carrier in any usable filter would earn
         // it every time, and an indicator that is always on is one that is
@@ -262,8 +307,8 @@ export function rawFit(mean, win, band, tuning, floorDb) {
         return { kind: 'ok' };
     }
 
-    const occLoHz = loHzOf(win, perBin, main.first);
-    const occHiHz = hiHzOf(win, perBin, main.last);
+    const occLoHz = loHzOf(win, perBin, occFirst);
+    const occHiHz = hiHzOf(win, perBin, occLast);
     if (limits.sideband === 'both') {
         // One verdict from the wider side, folded about the filter's middle —
         // the only shape a symmetric width control can produce.
@@ -303,16 +348,21 @@ export function rawFit(mean, win, band, tuning, floorDb) {
  */
 export function updateFit(state, candidate, nowMs) {
     if (candidate === null) {
-        // Silence. The station has not changed its bandwidth by pausing, so
-        // the shown verdict stands — until the pause is long enough to mean
-        // the station is gone, when everything is let go.
+        // Silence. Nothing is measurable, so nothing is *shown* — the Peak
+        // and Occupancy cards read a dash at this moment and a Filter verdict
+        // beside them would be a confident answer about a signal that is not
+        // there. But the verdict is remembered, not forgotten: a pause between
+        // overs says nothing about the station's bandwidth, so when the same
+        // verdict returns with the signal it shows again instantly rather
+        // than re-earning its two seconds. Only a silence long enough to mean
+        // "they have gone" clears the memory.
         state.pending = null;
         if (state.shown && state.quietAt == null) state.quietAt = nowMs;
         if (state.quietAt != null && nowMs - state.quietAt >= FIT_SILENCE_MS) {
             state.shown = null;
             state.quietAt = null;
         }
-        return state.shown || null;
+        return null;
     }
     state.quietAt = null;
 
@@ -337,7 +387,13 @@ export function updateFit(state, candidate, nowMs) {
     return state.shown || null;
 }
 
-/** The readout's wording: `{ value, unit, tone }` for the Filter card. */
+/**
+ * The readout's wording: `{ value, unit, tone }` for the Filter card.
+ *
+ * Terse on purpose — the card is a fixed cell in the readout grid and a unit
+ * longer than about eight characters walks out of it. The tooltip on the card
+ * carries the long version.
+ */
 export function formatFit(verdict) {
     if (!verdict) return { value: '—', unit: '', tone: undefined };
     const hz = (v) => (Math.abs(v) >= 950 ? `${(v / 1000).toFixed(1)} kHz` : `${Math.round(v / 10) * 10} Hz`);
@@ -345,12 +401,12 @@ export function formatFit(verdict) {
     switch (verdict.kind) {
         case 'narrow': return {
             value: 'narrow',
-            unit: `clipping ${verdict.edge === 'both' ? 'both edges' : `${verdict.edge} edge`}`,
+            unit: verdict.edge === 'both' ? 'clips both' : `clips ${verdict.edge}`,
             tone: 'weak',
         };
-        case 'wide': return { value: 'wide', unit: `~${hz(verdict.slackHz)} slack`, tone: 'weak' };
-        case 'neighbour': return { value: 'shared', unit: `signal at ${signed(verdict.offsetHz)}`, tone: 'weak' };
-        case 'offcentre': return { value: 'off-centre', unit: signed(verdict.offsetHz), tone: 'weak' };
+        case 'wide': return { value: 'wide', unit: `~${hz(verdict.slackHz)}`, tone: 'weak' };
+        case 'neighbour': return { value: 'shared', unit: signed(verdict.offsetHz), tone: 'weak' };
+        case 'offcentre': return { value: 'off-tune', unit: signed(verdict.offsetHz), tone: 'weak' };
         default: return { value: 'good', unit: 'fit', tone: 'good' };
     }
 }

@@ -42,11 +42,11 @@ function bandOf(win, perBin, lo, hi) {
     };
 }
 
-const fit = (mode, offLo, offHi, bandLo, bandHi, shapes) => {
+const fit = (mode, offLo, offHi, bandLo, bandHi, shapes, resHz = 0) => {
     const { win, mean, perBin } = scene(offLo, offHi, shapes);
     const band = bandOf(win, perBin, bandLo, bandHi);
     const tuning = { mode, bandwidthLow: bandLo, bandwidthHigh: bandHi };
-    return rawFit(mean, win, band, tuning, FLOOR);
+    return rawFit(mean, win, band, tuning, FLOOR, resHz);
 };
 
 // ── islands ──────────────────────────────────────────────────────────────────
@@ -259,30 +259,67 @@ t('a settled verdict tracks its numbers without re-earning its place', () => {
     assert.strictEqual(v.slackHz, 650);
 });
 
-t('silence holds the verdict — a pause is not a bandwidth change', () => {
+t('silence shows nothing — no signal, no verdict beside a dashed Peak', () => {
     const st = {};
     updateFit(st, { kind: 'narrow' }, 0);
     updateFit(st, { kind: 'narrow' }, FIT_PERSIST_MS);
-    const during = updateFit(st, null, FIT_PERSIST_MS + FIT_SILENCE_MS - 1);
-    assert.strictEqual(during.kind, 'narrow');
+    assert.strictEqual(updateFit(st, null, FIT_PERSIST_MS + 500), null);
 });
 
-t('silence long enough to mean "gone" lets go', () => {
+t('...but a pause is not a bandwidth change: the verdict returns instantly', () => {
+    const st = {};
+    updateFit(st, { kind: 'narrow' }, 0);
+    updateFit(st, { kind: 'narrow' }, FIT_PERSIST_MS);
+    updateFit(st, null, FIT_PERSIST_MS + 500);
+    const back = updateFit(st, { kind: 'narrow' }, FIT_PERSIST_MS + 3000);
+    assert.strictEqual(back.kind, 'narrow');       // no re-earning
+});
+
+t('silence long enough to mean "gone" clears the memory too', () => {
     const st = {};
     updateFit(st, { kind: 'narrow' }, 0);
     updateFit(st, { kind: 'narrow' }, FIT_PERSIST_MS);
     updateFit(st, null, FIT_PERSIST_MS + 10);
-    assert.strictEqual(updateFit(st, null, FIT_PERSIST_MS + 10 + FIT_SILENCE_MS), null);
+    updateFit(st, null, FIT_PERSIST_MS + 10 + FIT_SILENCE_MS);
+    // A new station must earn its verdict from scratch.
+    assert.strictEqual(updateFit(st, { kind: 'narrow' }, FIT_PERSIST_MS + 9000), null);
 });
 
-t('speech resuming cancels the silence clock', () => {
-    const st = {};
-    updateFit(st, { kind: 'narrow' }, 0);
-    updateFit(st, { kind: 'narrow' }, FIT_PERSIST_MS);
-    updateFit(st, null, FIT_PERSIST_MS + 10);
-    updateFit(st, { kind: 'narrow' }, FIT_PERSIST_MS + 3000);          // back
-    const v = updateFit(st, null, FIT_PERSIST_MS + 3000 + FIT_SILENCE_MS - 1);
-    assert.strictEqual(v.kind, 'narrow');
+// ── the false alarms this exists not to raise ────────────────────────────────
+
+t('a strong station\'s leakage skirts are not clipping', () => {
+    // The skirts clear the floor gate for a kilohertz either side, but sit
+    // 35 dB under the peak — the relative gate keeps them out of the width.
+    const v = fit('am', -8000, 8000, -5000, 5000, [
+        { lo: -5600, hi: 5600, db: 10 },        // skirts, past both edges
+        { lo: -4200, hi: 4200, db: 45 },        // the actual signal, inside
+    ]);
+    assert.notStrictEqual(v.kind, 'narrow');
+});
+
+t('coarse served bins cannot read as spill', () => {
+    // 400 Hz of apparent spill under 300 Hz bins is edge quantisation.
+    const shapes = [{ lo: 300, hi: 3100, db: 25 }];
+    assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes).kind, 'narrow');
+    assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes, 300).kind, 'ok');
+});
+
+t('a weak fragment of the same speech is not a neighbour', () => {
+    // Sibilance: detached from the voiced energy, but far below it and barely
+    // out of the noise. Both neighbour guards refuse it.
+    const v = fit('usb', -800, 3400, 50, 2700, [
+        { lo: 300, hi: 1800, db: 25 },
+        { lo: 2300, hi: 2500, db: 8 },
+    ]);
+    assert.notStrictEqual(v.kind, 'neighbour');
+});
+
+t('a real second station still is one', () => {
+    const v = fit('usb', -800, 3400, 50, 2700, [
+        { lo: 300, hi: 1600, db: 25 },
+        { lo: 2100, hi: 2500, db: 15 },
+    ]);
+    assert.strictEqual(v.kind, 'neighbour');
 });
 
 // ── wording ──────────────────────────────────────────────────────────────────
@@ -290,10 +327,18 @@ t('speech resuming cancels the silence clock', () => {
 t('the readout wording covers every verdict', () => {
     assert.strictEqual(formatFit(null).value, '—');
     assert.strictEqual(formatFit({ kind: 'ok' }).value, 'good');
-    assert.strictEqual(formatFit({ kind: 'narrow', edge: 'high' }).unit, 'clipping high edge');
-    assert.strictEqual(formatFit({ kind: 'wide', slackHz: 1240 }).unit, '~1.2 kHz slack');
-    assert.strictEqual(formatFit({ kind: 'offcentre', offsetHz: -82 }).value, 'off-centre');
-    assert.ok(formatFit({ kind: 'neighbour', offsetHz: 340 }).unit.includes('+340 Hz'));
+    assert.strictEqual(formatFit({ kind: 'narrow', edge: 'high' }).unit, 'clips high');
+    assert.strictEqual(formatFit({ kind: 'wide', slackHz: 1240 }).unit, '~1.2 kHz');
+    assert.strictEqual(formatFit({ kind: 'offcentre', offsetHz: -82 }).value, 'off-tune');
+    assert.strictEqual(formatFit({ kind: 'neighbour', offsetHz: 340 }).unit, '+340 Hz');
+    // Nothing the cell cannot hold — the card is a fixed grid column.
+    for (const v of [
+        null, { kind: 'ok' }, { kind: 'narrow', edge: 'both' }, { kind: 'wide', slackHz: 12400 },
+        { kind: 'neighbour', offsetHz: -1340 }, { kind: 'offcentre', offsetHz: 4200 },
+    ]) {
+        const f = formatFit(v);
+        assert.ok(f.value.length <= 8 && f.unit.length <= 10, `${f.value} ${f.unit}`);
+    }
 });
 
 console.log(`\n${pass} passed`);

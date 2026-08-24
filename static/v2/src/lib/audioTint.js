@@ -79,6 +79,16 @@ export const TINT_SPAN_MAX_DB = 40;
 // coloured rather than sitting halfway to neutral.
 export const TINT_GAMMA = 0.8;
 
+// How much spread there has to be before the colours are used at full strength.
+//
+// The rank scale below spends the whole ramp on whatever range is present, so
+// on its own it would paint a rainbow across a band that is flat to within a
+// decibel — the ranks are still an order even when the differences are noise.
+// This is the answer to that: the colours come up in proportion to how much
+// real spread there is, reaching full strength at TINT_SPAN_MIN_DB. Under a
+// decibel or two of variation the whole panel stays near neutral, which is the
+// flat background evenly spread audio is supposed to have.
+
 // Where the spread is measured, as a percentile of the zones' deviations from
 // even. Not the extreme, which one notch or one carrier would own; high enough
 // that the bulk of the picture uses most of the scale.
@@ -150,6 +160,50 @@ export function zoneShares(bins, start, count, out) {
     return { rel: out, quiet };
 }
 
+/**
+ * Each zone's place on the colour scale, -1..+1, by *rank* rather than by
+ * distance from the middle.
+ *
+ * An audio spectrum is bimodal and a linear scale cannot draw it. The busy part
+ * of the band sits thirty or forty decibels above the analyser's floor and the
+ * rest of the band sits on the floor; there is almost nothing in between. Map
+ * that linearly — however the centre and the span are chosen — and every zone
+ * lands far from the middle: one group clamps hot, the other clamps cold, and
+ * the display is two colours with nothing between them.
+ *
+ * Ranking fixes it by construction. The coldest zone is at -1, the hottest at
+ * +1, and everything else is spread evenly between them, so the ramp is always
+ * fully used and a band always reads as a graduation. This is histogram
+ * equalisation, and it is the same trick a waterfall's auto-levelling is doing
+ * for the same reason.
+ *
+ * Ties share a rank — averaged, so a run of equal zones gets one value and
+ * therefore one colour, whatever else is in the band. That is the promise this
+ * whole file rests on and it is exact here rather than approximate: equal
+ * energy in, identical colour out.
+ *
+ * `scale` (0..1) is how strongly to use the ramp — see TINT_SPAN_MIN_DB.
+ */
+export function rankTint(rel, out, scale = 1) {
+    const n = rel.length;
+    if (!n) return out;
+    if (n === 1) { out[0] = 0; return out; }
+    // Ranks by value, ties averaged. n is a couple of dozen, so the simple
+    // quadratic count is cheaper than sorting with an index permutation.
+    for (let i = 0; i < n; i++) {
+        let below = 0;
+        let equal = 0;
+        for (let j = 0; j < n; j++) {
+            if (rel[j] < rel[i]) below++;
+            else if (rel[j] === rel[i]) equal++;
+        }
+        // The middle of this value's block of ranks, as 0..1.
+        const r = (below + (equal - 1) / 2) / (n - 1);
+        out[i] = (r * 2 - 1) * scale;
+    }
+    return out;
+}
+
 /** Three-tap smoothing along the band, in place via `scratch`. */
 export function smoothZones(vals, scratch) {
     const n = vals.length;
@@ -198,14 +252,14 @@ export function centreOf(rel, scratch) {
  * maximum, so one dead notch cannot set the scale for everything else, clamped
  * into the range where the answer stays meaningful.
  */
-export function spreadOf(rel, scratch, centre = 0) {
+export function spreadOf(rel, scratch, centre = 0, floorDb = TINT_SPAN_MIN_DB) {
     const n = rel.length;
     if (!n) return TINT_SPAN_MIN_DB;
     const buf = scratch && scratch.length >= n ? scratch.subarray(0, n) : new Float32Array(n);
     for (let i = 0; i < n; i++) buf[i] = Math.abs(rel[i] - centre);
     buf.sort();
     const at = buf[Math.min(n - 1, Math.round(TINT_SPREAD_PCT * (n - 1)))];
-    return Math.max(TINT_SPAN_MIN_DB, Math.min(TINT_SPAN_MAX_DB, at));
+    return Math.max(floorDb, Math.min(TINT_SPAN_MAX_DB, at));
 }
 
 /** Ease `state.rel` toward `vals` with the TINT_TAU_MS time constant. */
@@ -233,14 +287,14 @@ export const TINT_EVEN = [32, 44, 58];
 export const TINT_HOT = [140, 54, 16];
 
 /**
- * The background colour for a share of `relDb`, as `rgb(...)`.
+ * The background colour for a place on the scale, -1 (coldest) to +1 (hottest),
+ * as `rgb(...)`.
  *
  * `quiet` fades the whole scale toward the balanced colour, so silence is flat
- * rather than colourful. At relDb 0 this is TINT_EVEN whatever else is
- * happening — which is what makes evenly spread audio one colour.
+ * rather than colourful. At 0 this is TINT_EVEN whatever else is happening.
  */
-export function tintColour(relDb, quiet = 1, span = TINT_SPAN_MIN_DB, centre = 0) {
-    const raw = Math.max(-1, Math.min(1, ((relDb || 0) - centre) / span));
+export function tintColour(pos, quiet = 1) {
+    const raw = Math.max(-1, Math.min(1, pos || 0));
     const t = Math.sign(raw) * Math.abs(raw) ** TINT_GAMMA * Math.max(0, Math.min(1, quiet));
     const to = t >= 0 ? TINT_HOT : TINT_COLD;
     const k = Math.abs(t);
@@ -271,12 +325,19 @@ export function tintZones(state, bins, start, count, nowMs, zones = TINT_ZONES) 
     // *eased* shares rather than the raw ones so it cannot chase a transient,
     // and easing it again keeps a change of signal from re-scaling the picture
     // faster than the eye can follow.
-    const wantMid = centreOf(rel, state.scratch);
-    const want = spreadOf(rel, state.scratch, wantMid);
+    // How much of the ramp to use: all of it once the band has a real spread,
+    // proportionally less as it flattens toward one level.
+    const mid = centreOf(rel, state.scratch);
+    const want = spreadOf(rel, state.scratch, mid);
     const ease = dt ? 1 - Math.exp(-dt / TINT_TAU_MS) : 1;
     state.span = state.span == null ? want : state.span + (want - state.span) * ease;
-    state.mid = state.mid == null ? wantMid : state.mid + (wantMid - state.mid) * ease;
     // The fade is eased too, or the gate opening snaps the whole background on.
     state.quiet = state.quiet == null || !dt ? quiet : state.quiet + (quiet - state.quiet) * ease;
-    return { rel, quiet: state.quiet, span: state.span, centre: state.mid };
+
+    if (!state.pos || state.pos.length !== zones) state.pos = new Float32Array(zones);
+    // spreadOf floors at TINT_SPAN_MIN_DB, so a flat band reports the floor and
+    // the raw spread has to be measured again here to know it was flat.
+    const raw = spreadOf(rel, state.scratch, mid, 0);
+    rankTint(rel, state.pos, Math.max(0, Math.min(1, raw / TINT_SPAN_MIN_DB)));
+    return { pos: state.pos, rel, quiet: state.quiet, span: state.span, centre: mid };
 }

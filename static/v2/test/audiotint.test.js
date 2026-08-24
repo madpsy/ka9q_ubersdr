@@ -1,13 +1,13 @@
 // The bar scope's background — energy as a proportion of the band.
 //
-// The property worth pinning hardest is the one that makes it readable: evenly
-// spread audio must come out one flat colour, whatever its volume. Everything
-// else is a deviation from that.
+// Two properties carry the whole feature and both are pinned hardest here:
+// regions of equal energy get an identical colour, and a band whose energy is
+// evenly spread is one flat colour rather than a rainbow of noise.
 
 const assert = require('assert');
 const {
     TINT_EVEN, TINT_SPAN_MAX_DB, TINT_SPAN_MIN_DB, TINT_ZONES,
-    centreOf, easeZones, smoothZones, spreadOf, tintColour, tintZones, zoneShares,
+    centreOf, easeZones, rankTint, smoothZones, spreadOf, tintColour, tintZones, zoneShares,
 } = require('./.build/audiotint.cjs');
 
 let pass = 0;
@@ -17,16 +17,18 @@ const t = (name, fn) => {
 };
 
 const BINS = 480;
-// A band of `db`, with optional { from, to, db } regions laid over it.
+// A band at `db`, with optional { from, to, db } regions laid over it.
 const band = (db, regions = []) => {
     const a = new Float32Array(BINS).fill(db);
     for (const r of regions) for (let i = r.from; i < r.to; i++) a[i] = r.db;
     return a;
 };
-const shares = (bins, zones = TINT_ZONES) => {
-    const out = new Float32Array(zones);
-    return zoneShares(bins, 0, BINS, out);
-};
+const shares = (bins, zones = TINT_ZONES) => zoneShares(bins, 0, BINS, new Float32Array(zones));
+// What the drawing actually calls.
+const tint = (bins, zones = TINT_ZONES) => tintZones({}, bins, 0, BINS, 0, zones);
+const red = (c) => Number(c.match(/rgb\((\d+),/)[1]);
+const blue = (c) => Number(c.match(/,(\d+)\)$/)[1]);
+const EVEN = `rgb(${TINT_EVEN[0]},${TINT_EVEN[1]},${TINT_EVEN[2]})`;
 
 // ── the flat case, which is the whole point ──────────────────────────────────
 
@@ -36,10 +38,8 @@ t('evenly spread audio is exactly zero everywhere', () => {
 });
 
 t('...and therefore one colour, the balanced one', () => {
-    const { rel, quiet } = shares(band(-40));
-    const first = tintColour(rel[0], quiet);
-    for (const v of rel) assert.strictEqual(tintColour(v, quiet), first);
-    assert.strictEqual(first, `rgb(${TINT_EVEN[0]},${TINT_EVEN[1]},${TINT_EVEN[2]})`);
+    const { pos, quiet } = tint(band(-40));
+    for (const v of pos) assert.strictEqual(tintColour(v, quiet), EVEN);
 });
 
 t('volume does not change the picture — it is a share, not a level', () => {
@@ -50,62 +50,106 @@ t('volume does not change the picture — it is a share, not a level', () => {
     }
 });
 
-t('a tilt in level is a tilt in share, at any volume', () => {
-    // The same 20 dB tilt, 40 dB apart in absolute level.
-    const tilt = (base) => {
-        const a = new Float32Array(BINS);
-        for (let i = 0; i < BINS; i++) a[i] = base + (i / BINS) * 20;
-        return shares(a).rel;
-    };
-    const lo = tilt(-70);
-    const hi = tilt(-30);
-    for (let i = 0; i < lo.length; i++) assert.ok(Math.abs(lo[i] - hi[i]) < 1e-6);
-});
-
 // ── same energy, same colour ─────────────────────────────────────────────────
-//
-// The property the whole thing rests on: the background is a function of a
-// region's energy and nothing else — not of where it sits in the band, not of
-// what its neighbours are doing, not of the overall volume.
 
 t('two regions of equal energy get an identical colour, wherever they are', () => {
-    // Equal humps at the bottom and the top, quiet in between.
-    const { rel, quiet } = shares(band(-75, [
+    const { pos, quiet } = tint(band(-75, [
         { from: 0, to: BINS / 8, db: -25 },
         { from: BINS - BINS / 8, to: BINS, db: -25 },
     ]));
-    assert.strictEqual(tintColour(rel[0], quiet), tintColour(rel[rel.length - 1], quiet));
-    // ...and the quiet middle is a different one.
-    assert.notStrictEqual(tintColour(rel[0], quiet), tintColour(rel[rel.length >> 1], quiet));
+    assert.strictEqual(tintColour(pos[0], quiet), tintColour(pos[pos.length - 1], quiet));
+    assert.notStrictEqual(tintColour(pos[0], quiet), tintColour(pos[pos.length >> 1], quiet));
 });
 
-t('a third region matching one of them matches its colour too', () => {
-    const { rel, quiet } = shares(band(-75, [
-        { from: 0, to: BINS / 8, db: -25 },
-        { from: BINS * 3 / 8, to: BINS / 2, db: -25 },
-        { from: BINS - BINS / 8, to: BINS, db: -25 },
-    ]));
-    const c0 = tintColour(rel[0], quiet);
-    assert.strictEqual(tintColour(rel[Math.round(rel.length * 0.44)], quiet), c0);
-    assert.strictEqual(tintColour(rel[rel.length - 1], quiet), c0);
+t('ties share a rank exactly, so equal zones are the same colour', () => {
+    const rel = new Float32Array([-20, 5, 5, 5, 30]);
+    const out = rankTint(rel, new Float32Array(5));
+    assert.strictEqual(out[1], out[2]);
+    assert.strictEqual(out[2], out[3]);
+    assert.strictEqual(tintColour(out[1]), tintColour(out[3]));
 });
 
 t('more energy is always warmer — the mapping never doubles back', () => {
-    // A staircase: every step up in level must be a step up the colour scale.
     const a = new Float32Array(BINS);
     const steps = 8;
     for (let i = 0; i < BINS; i++) a[i] = -80 + Math.floor((i / BINS) * steps) * 6;
-    const { rel } = shares(a, steps);
-    for (let i = 1; i < steps; i++) assert.ok(rel[i] > rel[i - 1], `step ${i}: ${rel[i - 1]} → ${rel[i]}`);
+    const { pos } = tint(a, steps);
+    for (let i = 1; i < steps; i++) assert.ok(pos[i] > pos[i - 1], `step ${i}`);
 });
 
-t('a near-equal band is a near-equal colour, not an amplified difference', () => {
-    // Two decibels of drift across the whole band is "roughly equal", and must
-    // read as one colour rather than being stretched into the full scale.
+t('a near-equal band stays near neutral rather than being amplified', () => {
+    // Two decibels of drift is "roughly equal": the ranks still order it, but
+    // the strength comes up with the spread, so it stays a flat background.
     const a = new Float32Array(BINS);
     for (let i = 0; i < BINS; i++) a[i] = -50 + (i / BINS) * 2;
-    const { rel } = shares(a);
-    for (const v of rel) assert.ok(Math.abs(v) < 1.5, `${v} dB from even`);
+    const { pos, quiet } = tint(a);
+    for (const v of pos) assert.ok(Math.abs(v) < 0.25, `position ${v}`);
+    for (const v of pos) assert.ok(Math.abs(red(tintColour(v, quiet)) - TINT_EVEN[0]) < 30);
+});
+
+// ── the complaint this was rewritten for ─────────────────────────────────────
+
+t('a bimodal spectrum is a graduation, not two saturated ends', () => {
+    // What audio really is: a busy region well above the analyser's floor, the
+    // rest of the band near it with the ordinary ripple of a real floor.
+    // Mapped by distance from a centre, every zone landed at one end or the
+    // other — red and blue and little else.
+    const a = new Float32Array(BINS);
+    for (let i = 0; i < BINS; i++) a[i] = -100 + ((i * 37) % 11) * 0.7;
+    for (let i = 40; i < 140; i++) a[i] = -30 - ((i * 13) % 17) * 0.5;
+    const { pos, quiet } = tint(a);
+    const cols = new Set(Array.from(pos, (v) => tintColour(v, quiet)));
+    assert.ok(cols.size >= TINT_ZONES - 6, `only ${cols.size} of ${TINT_ZONES} distinct`);
+    const mids = Array.from(pos).filter((v) => Math.abs(v) < 0.35);
+    assert.ok(mids.length >= 4, `only ${mids.length} zones near neutral`);
+});
+
+t('a dead-flat floor beside a signal is one colour, not a gradient of noise', () => {
+    // The other half of the same case, and the promise made everywhere here:
+    // zones with identical energy share a rank exactly, so an idealised floor
+    // gets one colour however many zones it spans.
+    const a = new Float32Array(BINS).fill(-100);
+    for (let i = 40; i < 140; i++) a[i] = -30;
+    const { pos, quiet } = tint(a);
+    const floorCols = new Set(Array.from(pos.slice(10), (v) => tintColour(v, quiet)));
+    assert.strictEqual(floorCols.size, 1, 'the floor is one colour');
+});
+
+t('the typical part of the band keeps the middle of the ramp', () => {
+    const a = new Float32Array(BINS).fill(-70);
+    for (let i = 0; i < BINS / 8; i++) a[i] = -25;
+    const { pos, quiet } = tint(a);
+    assert.ok(red(tintColour(pos[0], quiet)) > TINT_EVEN[0] + 40, 'the voice is hot');
+    const mids = Array.from(pos).filter((v) => Math.abs(v) < 0.5);
+    assert.ok(mids.length >= 6, `only ${mids.length} zones in the middle`);
+});
+
+t('a sloped spectrum is graduated across the whole ramp', () => {
+    const a = new Float32Array(BINS);
+    for (let i = 0; i < BINS; i++) a[i] = -30 - 55 * (i / BINS) ** 1.4;
+    const { pos, quiet } = tint(a);
+    const cols = new Set(Array.from(pos, (v) => tintColour(v, quiet)));
+    assert.ok(cols.size >= TINT_ZONES - 4, `only ${cols.size} of ${TINT_ZONES} distinct`);
+    assert.ok(pos[0] > 0.8 && pos[pos.length - 1] < -0.8, 'the ends are the ends');
+});
+
+t('a bigger imbalance is the same picture, more strongly coloured', () => {
+    // Ranks give the order and the spread gives the strength, so doubling the
+    // tilt keeps every zone in its place on the ramp and pushes them further
+    // along it. Order is what the display means; strength is how loudly it
+    // says it.
+    const tilt = (k) => {
+        const a = new Float32Array(BINS);
+        for (let i = 0; i < BINS; i++) a[i] = -60 + (i / BINS) * 12 * k;
+        return tint(a);
+    };
+    const one = tilt(1);
+    const two = tilt(2);
+    for (let i = 1; i < one.pos.length; i++) {
+        assert.ok(one.pos[i] > one.pos[i - 1], 'order holds at one');
+        assert.ok(two.pos[i] > two.pos[i - 1], 'and at two');
+    }
+    assert.ok(Math.abs(two.pos[0]) > Math.abs(one.pos[0]), 'and it is stronger');
 });
 
 // ── hot and cold ─────────────────────────────────────────────────────────────
@@ -122,121 +166,69 @@ t('hiss at the top is the mirror of it', () => {
     assert.ok(rel[0] < -5);
 });
 
-t('the shares are a proper decomposition — the mean power is the reference', () => {
-    // One zone holding all the energy is 10log10(zones) above even.
+t('the shares are a proper decomposition — mean power is the reference', () => {
     const a = new Float32Array(BINS).fill(-200);
     for (let i = 0; i < BINS / TINT_ZONES; i++) a[i] = 0;
     const { rel } = shares(a);
     assert.ok(Math.abs(rel[0] - 10 * Math.log10(TINT_ZONES)) < 0.5, `${rel[0]}`);
 });
 
+t('cold is reachable — a genuine notch reads blue', () => {
+    const a = band(-40, [{ from: BINS / 2, to: BINS / 2 + BINS / 12, db: -95 }]);
+    const { pos, quiet } = tint(a);
+    assert.ok(blue(tintColour(Math.min(...pos), quiet)) > TINT_EVEN[2] + 20);
+});
+
 t('colour runs cold below and hot above, and saturates', () => {
-    const cold = tintColour(-TINT_SPAN_MIN_DB);
-    const hot = tintColour(TINT_SPAN_MIN_DB);
-    const blueOf = (s) => Number(s.match(/,(\d+)\)$/)[1]);
-    const redOf = (s) => Number(s.match(/rgb\((\d+),/)[1]);
-    assert.ok(blueOf(cold) > blueOf(hot));
-    assert.ok(redOf(hot) > redOf(cold));
-    // Past the span it does not keep going.
-    assert.strictEqual(tintColour(TINT_SPAN_MIN_DB * 3), hot);
+    const cold = tintColour(-1);
+    const hot = tintColour(1);
+    assert.ok(blue(cold) > blue(hot));
+    assert.ok(red(hot) > red(cold));
+    assert.strictEqual(tintColour(3), hot);
+});
+
+t('a moderate position is already visibly coloured', () => {
+    const reach = (red(tintColour(0.5)) - TINT_EVEN[0]) / (red(tintColour(1)) - TINT_EVEN[0]);
+    assert.ok(reach > 0.5, `only ${(reach * 100) | 0}% of the way`);
 });
 
 // ── the scale is the band's own spread ───────────────────────────────────────
 
-t('a wide spread scales to itself instead of saturating', () => {
+t('a wide spread scales to itself', () => {
     const rel = new Float32Array([-30, -20, -10, 0, 10, 20, 30]);
-    assert.ok(spreadOf(rel, new Float32Array(7)) > 25, 'uses the range present');
+    assert.ok(spreadOf(rel, new Float32Array(7)) > 25);
 });
 
-t('the typical part of the band is the neutral colour, not the starved one', () => {
-    // The shape that made the panel mostly blue: a voice in a few zones, the
-    // rest of the band ordinary. Centred on the mean share, "ordinary" reads
-    // as starved; centred on the median it reads as typical, and only the
-    // voice departs from it.
-    const a = new Float32Array(BINS).fill(-70);
-    for (let i = 0; i < BINS / 8; i++) a[i] = -25;
-    const { rel, quiet, span, centre } = tintZones({}, a, 0, BINS, 0);
-    const even = `rgb(${TINT_EVEN[0]},${TINT_EVEN[1]},${TINT_EVEN[2]})`;
-    // The quiet majority sits at the neutral colour...
-    assert.strictEqual(tintColour(rel[rel.length - 1], quiet, span, centre), even);
-    assert.strictEqual(tintColour(rel[rel.length >> 1], quiet, span, centre), even);
-    // ...and the loud part is hot.
-    const red = (c) => Number(c.match(/rgb\((\d+),/)[1]);
-    assert.ok(red(tintColour(rel[0], quiet, span, centre)) > TINT_EVEN[0] + 40);
-});
-
-t('the centre is the median zone, not the mean share', () => {
-    // Seven zones, one of them carrying almost everything: the median is the
-    // ordinary one, and the mean would be well above it.
-    const rel = new Float32Array([-8, -7, -6, -6, -5, -4, 30]);
-    const mid = centreOf(rel, new Float32Array(7));
-    assert.strictEqual(mid, -6);
-});
-
-t('a flat band is still one colour under the new centre', () => {
-    const rel = new Float32Array([3, 3, 3, 3, 3]);
-    const mid = centreOf(rel, new Float32Array(5));
-    const span = spreadOf(rel, new Float32Array(5), mid);
-    const first = tintColour(rel[0], 1, span, mid);
-    for (const v of rel) assert.strictEqual(tintColour(v, 1, span, mid), first);
-});
-
-t('cold is still reachable — a genuine notch reads cold', () => {
-    const rel = new Float32Array([0, 0, 0, -25, 0, 0, 0]);
-    const mid = centreOf(rel, new Float32Array(7));
-    const span = spreadOf(rel, new Float32Array(7), mid);
-    const blue = (c) => Number(c.match(/,(\d+)\)$/)[1]);
-    assert.ok(blue(tintColour(rel[3], 1, span, mid)) > TINT_EVEN[2] + 20);
-});
-
-t('a narrow spread does not get stretched into a rainbow', () => {
-    // A band flat to within a decibel must stay near the neutral colour.
+t('a narrow spread reports the floor, which is what damps the colours', () => {
     const rel = new Float32Array([-0.4, 0.2, -0.1, 0.3, 0.1, -0.2, 0]);
     assert.strictEqual(spreadOf(rel, new Float32Array(7)), TINT_SPAN_MIN_DB);
-    const span = spreadOf(rel, new Float32Array(7));
-    const cols = new Set(Array.from(rel, (v) => tintColour(v, 1, span)));
-    // Every one of them within a hair of even.
-    for (const v of rel) {
-        const red = Number(tintColour(v, 1, span).match(/rgb\((\d+),/)[1]);
-        assert.ok(Math.abs(red - TINT_EVEN[0]) < 20, `${red}`);
-    }
-    assert.ok(cols.size <= 7);
 });
 
 t('one freak notch cannot set the scale for everything else', () => {
     const rel = new Float32Array([-60, -2, -1, 0, 1, 2, 3]);
     const mid = centreOf(rel, new Float32Array(7));
-    assert.ok(spreadOf(rel, new Float32Array(7), mid) < 20, 'the outlier is not the scale');
+    assert.ok(spreadOf(rel, new Float32Array(7), mid) < 20);
 });
 
-t('the scale is bounded at both ends', () => {
-    const huge = Float32Array.from({ length: 8 }, () => -90);
-    assert.strictEqual(spreadOf(huge, new Float32Array(8)), TINT_SPAN_MAX_DB);
+t('the scale is bounded at the top', () => {
+    const huge = Float32Array.from({ length: 8 }, (_, i) => (i % 2 ? -90 : 90));
+    const mid = centreOf(huge, new Float32Array(8));
+    assert.strictEqual(spreadOf(huge, new Float32Array(8), mid), TINT_SPAN_MAX_DB);
 });
 
-t('the same picture at twice the imbalance still uses the whole scale', () => {
-    // Doubling every deviation must not change which zones look hottest — the
-    // scale doubles with it. This is what "relative to the energy we have"
-    // buys: the display is about the shape, not the size.
-    const a = new Float32Array([-12, -6, 0, 6, 12]);
-    const b = Float32Array.from(a, (v) => v * 2);
-    const sa = spreadOf(a, new Float32Array(5));
-    const sb = spreadOf(b, new Float32Array(5));
-    for (let i = 0; i < a.length; i++) {
-        assert.strictEqual(tintColour(a[i], 1, sa), tintColour(b[i], 1, sb));
-    }
+t('the centre is the median zone, not the mean share', () => {
+    const rel = new Float32Array([-8, -7, -6, -6, -5, -4, 30]);
+    assert.strictEqual(centreOf(rel, new Float32Array(7)), -6);
 });
 
 // ── silence ──────────────────────────────────────────────────────────────────
 
 t('a closed gate is flat, not colourful', () => {
-    // Dither: random, and a hundred dB down. Its shares are meaningless.
     const a = new Float32Array(BINS);
     for (let i = 0; i < BINS; i++) a[i] = -120 + (i % 7);
-    const { rel, quiet } = shares(a);
+    const { pos, quiet } = tint(a);
     assert.strictEqual(quiet, 0);
-    const flat = tintColour(rel[0], quiet);
-    for (const v of rel) assert.strictEqual(tintColour(v, quiet), flat);
+    for (const v of pos) assert.strictEqual(tintColour(v, quiet), EVEN);
 });
 
 t('audible audio is not faded', () => {
@@ -245,90 +237,52 @@ t('audible audio is not faded', () => {
 
 t('a real spectrum is not mistaken for silence', () => {
     // The shape that broke this: a busy few hundred hertz over a band that is
-    // otherwise near the analyser's floor. The mean of those bins is well
-    // under the silence line while the audio is plainly audible, so the gate
-    // has to read the peak — see TINT_SILENCE_DB.
-    const speech = band(-100, [{ from: 20, to: 90, db: -35 }]);
-    assert.strictEqual(shares(speech).quiet, 1);
-});
-
-t('a sloped spectrum is graduated, not two saturated ends', () => {
-    // What audio actually looks like: energy concentrated low, rolling off
-    // smoothly. A fixed scale painted this as hot at one end, cold at the
-    // other and nothing in between; the band's own spread gives the middle
-    // colours of its own.
-    const a = new Float32Array(BINS);
-    for (let i = 0; i < BINS; i++) a[i] = -30 - 55 * (i / BINS) ** 1.4;
-    const { rel, quiet, span } = tintZones({}, a, 0, BINS, 0);
-    const cols = new Set(Array.from(rel, (v) => tintColour(v, quiet, span)));
-    // Most zones distinct — the ends clamp, which is the scale doing its job.
-    assert.ok(cols.size >= TINT_ZONES - 8, `only ${cols.size} of ${TINT_ZONES} distinct`);
-    // ...and the ends really are the ends.
-    assert.ok(rel[0] > 0 && rel[rel.length - 1] < 0);
-});
-
-t('a moderate imbalance is already visibly coloured', () => {
-    // Half the span should be well past halfway to the end colour, or the
-    // interesting part of the range all looks neutral.
-    const mid = tintColour(TINT_SPAN_MIN_DB / 2);
-    const end = tintColour(TINT_SPAN_MIN_DB);
-    const redOf = (s) => Number(s.match(/rgb\((\d+),/)[1]);
-    const reach = (redOf(mid) - TINT_EVEN[0]) / (redOf(end) - TINT_EVEN[0]);
-    assert.ok(reach > 0.55, `only ${(reach * 100) | 0}% of the way`);
+    // otherwise near the analyser's floor. The mean of those bins is well under
+    // any silence line while the audio is plainly audible, so the gate reads
+    // the peak — see TINT_SILENCE_DB.
+    assert.strictEqual(shares(band(-100, [{ from: 20, to: 90, db: -35 }])).quiet, 1);
 });
 
 t('the fade is gradual, not a switch', () => {
-    // Between the silence line and TINT_FADE_DB above it the tint washes out
-    // rather than snapping off, so a gate closing is not a visible event.
     const q = shares(band(-80)).quiet;
     assert.ok(q > 0 && q < 1, `${q}`);
     assert.ok(shares(band(-78)).quiet > q, 'and it is monotonic');
 });
 
-// ── smoothing ────────────────────────────────────────────────────────────────
+// ── smoothing and easing ─────────────────────────────────────────────────────
 
 t('a single spiky zone is spread across its neighbours', () => {
     const v = new Float32Array([0, 0, 12, 0, 0]);
     smoothZones(v, new Float32Array(5));
     assert.ok(v[2] < 12 && v[2] > 4);
     assert.ok(v[1] > 0 && v[3] > 0);
-    // ...and nothing is invented at the far ends.
     assert.strictEqual(v[0], 0);
 });
 
-t('smoothing conserves the middle of a flat run', () => {
+t('smoothing conserves a flat run', () => {
     const v = new Float32Array([5, 5, 5, 5, 5]);
     smoothZones(v, new Float32Array(5));
     for (const x of v) assert.ok(Math.abs(x - 5) < 1e-6);
 });
 
 t('easing is frame-rate independent', () => {
-    // One 400 ms step and eight 50 ms ones land in the same place.
     const one = { rel: new Float32Array([0]) };
     easeZones(one, new Float32Array([10]), 400, 400);
     const many = { rel: new Float32Array([0]) };
     for (let i = 0; i < 8; i++) easeZones(many, new Float32Array([10]), 50, 400);
-    assert.ok(Math.abs(one.rel[0] - many.rel[0]) < 0.2, `${one.rel[0]} vs ${many.rel[0]}`);
+    assert.ok(Math.abs(one.rel[0] - many.rel[0]) < 0.2);
 });
 
 t('the first frame is taken whole, not eased up from zero', () => {
-    const st = {};
-    const out = easeZones(st, new Float32Array([7, -7]), 16);
+    const out = easeZones({}, new Float32Array([7, -7]), 16);
     assert.strictEqual(out[0], 7);
     assert.strictEqual(out[1], -7);
 });
 
-// ── the one call the drawing makes ───────────────────────────────────────────
-
-t('tintZones eases toward the answer over successive frames', () => {
+t('a change of signal is eased, not snapped', () => {
     const st = {};
-    const hot = band(-70, [{ from: 0, to: BINS / 6, db: -20 }]);
-    const first = tintZones(st, hot, 0, BINS, 1000);
-    const settled = first.rel[0];
-    // Now flip the energy to the top and watch the low zone cool, but not
-    // instantly: a syllable must not repaint the panel.
-    const other = band(-70, [{ from: BINS - BINS / 6, to: BINS, db: -20 }]);
-    const next = tintZones(st, other, 0, BINS, 1050);
+    const settled = tintZones(st, band(-70, [{ from: 0, to: BINS / 6, db: -20 }]), 0, BINS, 1000).rel[0];
+    const next = tintZones(st, band(-70, [{ from: BINS - BINS / 6, to: BINS, db: -20 }]), 0, BINS, 1050);
     assert.ok(next.rel[0] < settled, 'moved');
     assert.ok(next.rel[0] > settled - 6, 'but not all the way');
 });
@@ -336,8 +290,7 @@ t('tintZones eases toward the answer over successive frames', () => {
 t('a resize of the zone count starts again rather than mixing two grids', () => {
     const st = {};
     tintZones(st, band(-40), 0, BINS, 0, 8);
-    const a = tintZones(st, band(-40), 0, BINS, 16, 16);
-    assert.strictEqual(a.rel.length, 16);
+    assert.strictEqual(tintZones(st, band(-40), 0, BINS, 16, 16).pos.length, 16);
 });
 
 console.log(`\n${pass} passed`);

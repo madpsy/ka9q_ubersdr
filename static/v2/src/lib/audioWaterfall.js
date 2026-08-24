@@ -287,10 +287,10 @@ export function newBarLevel() {
 // canvas interpolates between them, which is where the smoothness comes from:
 // two dozen colours become a continuous wash for the cost of two dozen stops.
 function drawBarTint(c, w, h, bins, start, count, state) {
-    const { rel, quiet, span, centre } = tintZones(state, bins, start, count, performance.now());
+    const { pos, quiet } = tintZones(state, bins, start, count, performance.now());
     const grad = c.createLinearGradient(0, 0, w, 0);
-    const n = rel.length || TINT_ZONES;
-    const at = (z) => tintColour(rel[z], quiet, span, centre);
+    const n = pos.length || TINT_ZONES;
+    const at = (z) => tintColour(pos[z], quiet);
     grad.addColorStop(0, at(0));
     for (let z = 0; z < n; z++) grad.addColorStop((z + 0.5) / n, at(z));
     grad.addColorStop(1, at(n - 1));

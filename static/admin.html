@@ -247,6 +247,25 @@
            the control beside it is dimmed, not disabled, so the operator can
            still see what value it would take. */
         .v2-row__set { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #666; white-space: nowrap; }
+
+        /* The button inside a page-load message's preview. A real link, styled
+           as v2 styles it — including the fill on hover, which is why this is a
+           rule rather than another inline style: the tone comes in as --tone,
+           exactly as it does in static/v2/src/styles.css. */
+        .notice-preview-btn {
+            display: inline-block;
+            padding: 5px 11px;
+            border: 1px solid var(--tone);
+            border-radius: 6px;
+            color: var(--tone);
+            font-size: 12px;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        .notice-preview-btn:hover { background: var(--tone); color: #031a2b; }
+        /* One that would not work, so it is drawn but not pressable — the line
+           under the preview says why. */
+        .notice-preview-btn--dead { opacity: 0.55; cursor: not-allowed; }
         .v2-row--unset .v2-row__control select,
         .v2-row--unset .v2-row__control input[type=range] { opacity: 0.45; }
         .v2-row--unset .v2-row__value { opacity: 0.45; }
@@ -12205,13 +12224,39 @@ function resetStationIdColor() {
             return out;
         }
 
+        /**
+         * Would v2 offer this link at all?
+         *
+         * The same scheme allowlist the client and the server apply — see
+         * noticeLinkOK in ui_config_notice.go. Kept in one place here because
+         * two things ask: whether to draw the preview's button as a pressable
+         * link, and whether to warn underneath that it will be dropped.
+         */
+        function noticeLinkUsable(url) {
+            return /^(https?:\/\/[^\/]|mailto:.)/i.test(String(url || ''));
+        }
+
         /** One card, drawn roughly as v2 will draw it. */
         function noticeCardHtml(n) {
             const tone = NOTICE_TONE[n.severity] || NOTICE_TONE.info;
             const parts = [];
             if (n.title) parts.push(`<div style="color: #dfe5ee; font-weight: 600; font-size: 13px;">${noticeEscape(n.title)}</div>`);
             if (n.text) parts.push(`<div style="margin-top: 3px; color: #8d99ad; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;">${noticeEscape(n.text)}</div>`);
-            if (n.link_url) parts.push(`<div style="margin-top: 9px;"><span style="display: inline-block; padding: 5px 11px; border: 1px solid ${tone}; border-radius: 6px; color: ${tone}; font-size: 12px; font-weight: 600;">${noticeEscape(n.link_label || 'Open')}</span></div>`);
+            if (n.link_url) {
+                // A real link, so pressing it here does what pressing it there
+                // will: opens in a new tab, with the same rel as v2 gives it.
+                // Only when it would actually work, though — the href goes into
+                // this page's own markup, and a javascript: URL typed into the
+                // form must not become one this page will run. Same scheme test
+                // the client and the server apply; anything else is drawn dead,
+                // and the line under the preview says why.
+                const label = noticeEscape(n.link_label || 'Open');
+                parts.push(`<div style="margin-top: 9px;">${
+                    noticeLinkUsable(n.link_url)
+                        ? `<a class="notice-preview-btn" style="--tone: ${tone};" href="${noticeEscape(n.link_url)}" target="_blank" rel="noopener noreferrer" title="Opens ${noticeEscape(n.link_url)}">${label}</a>`
+                        : `<span class="notice-preview-btn notice-preview-btn--dead" style="--tone: ${tone};" title="This link will not work">${label}</span>`
+                }</div>`);
+            }
             const close = n.dismissible ? '<span style="flex: none; color: #5c6779; font-size: 13px; line-height: 1;">&times;</span>' : '';
             return `<div style="display: flex; align-items: flex-start; gap: 9px; max-width: 420px; margin: 0 auto 6px auto; padding: 10px 11px; background: #141a25; border: 1px solid #2f3b4e; border-left: 3px solid ${tone}; border-radius: 6px;">
                     <span style="flex: none; width: 13px; height: 13px; margin-top: 1px; border: 1.5px solid ${tone}; border-radius: 50%;"></span>
@@ -12275,7 +12320,7 @@ function resetStationIdColor() {
                     : ' Shown everywhere, phone apps included.';
 
                 let warn = '';
-                if (n.link_url && !/^(https?:\/\/[^\/]|mailto:.)/i.test(n.link_url)) {
+                if (n.link_url && !noticeLinkUsable(n.link_url)) {
                     warn = ' <span style="color: #c0392b;">⚠️ That link will not work — it needs to start with <code>https://</code>, <code>http://</code> or <code>mailto:</code>, so the button will not appear at all.</span>';
                 } else if (n.link_url && n.timeout_seconds && n.timeout_seconds < 5) {
                     warn = ` <span style="color: #b8860b;">⚠️ ${n.timeout_seconds} seconds is not long to read it <em>and</em> press the button — consider 8, or 0 to leave it up.</span>`;

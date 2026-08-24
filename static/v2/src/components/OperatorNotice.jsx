@@ -46,6 +46,7 @@ import React, { ReactDOM, useEffect, useMemo, useRef, useState } from '../react.
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { noticeLinksAllowedByHost } from '../lib/hostPanels.js';
+import { HOVER_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { Icon } from './ui.jsx';
 
 // Where "shown once" is remembered: the ids of the notices this browser has
@@ -100,6 +101,22 @@ export default function OperatorNotice() {
     // The one card the pointer is on, if any: its clock is held while it is
     // being read.
     const [held, setHeld] = useState(null);
+    // Whether holding is a thing this device can do at all.
+    //
+    // It was `onMouseEnter` alone, and on a phone that is a trap. A touch
+    // synthesises `mouseenter` — a tap, or a WebView dispatching one at the
+    // last touch point as new content appears under it — but `mouseleave` does
+    // not follow until the pointer moves to *another* element, which on touch
+    // means the next tap somewhere else. So the clock was cleared and never
+    // restarted, and a five-second notice sat there for half a minute: exactly
+    // as long as it took to touch something else.
+    //
+    // Two guards rather than one, because they fail differently. The media
+    // query answers for the whole device and so covers a WebView that reports
+    // a synthesised event as a mouse; the pointerType check covers the machine
+    // that genuinely has both, where the query says yes and the finger is still
+    // a finger.
+    const hoverable = useMediaQuery(HOVER_QUERY);
     // The list this component has already decided about, as its ids. A
     // re-render is not a new decision; a notice the operator edited is.
     const decided = useRef('');
@@ -159,6 +176,15 @@ export default function OperatorNotice() {
         timers.current.clear();
     }, []);
 
+    // Holding is refused where it cannot be released; releasing never is, so a
+    // hold that somehow got set still comes off.
+    const hold = (id, e) => {
+        if (!hoverable) return;
+        if (e && e.pointerType === 'touch') return;
+        setHeld(id);
+    };
+    const release = (id) => setHeld((h) => (h === id ? null : h));
+
     const showing = notices.filter((n) => open[n.id]);
     if (!showing.length) return null;
 
@@ -168,10 +194,10 @@ export default function OperatorNotice() {
                 <div
                     key={notice.id}
                     className={`opnotice is-${notice.severity}`}
-                    onMouseEnter={() => setHeld(notice.id)}
-                    onMouseLeave={() => setHeld((h) => (h === notice.id ? null : h))}
-                    onFocusCapture={() => setHeld(notice.id)}
-                    onBlurCapture={() => setHeld((h) => (h === notice.id ? null : h))}
+                    onPointerEnter={(e) => hold(notice.id, e)}
+                    onPointerLeave={() => release(notice.id)}
+                    onFocusCapture={(e) => hold(notice.id, e)}
+                    onBlurCapture={() => release(notice.id)}
                 >
                     <span className="opnotice__icon">{ICON[notice.severity] || ICON.info}</span>
                     <div className="opnotice__text">

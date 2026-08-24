@@ -29,6 +29,14 @@ globalThis.document = {
     createElement: () => ({ getContext: () => null }),
 };
 globalThis.navigator = { userAgent: 'node' };
+// useMediaQuery reads this. `hover` decides whether the notice will hold its
+// countdown for a pointer — a phone must answer no, which is what the timing
+// tests below turn on.
+let hoverCapable = true;
+globalThis.matchMedia = (q) => ({
+    matches: /hover/.test(q) ? hoverCapable : false,
+    addEventListener() {}, removeEventListener() {},
+});
 globalThis.fetch = () => Promise.reject(new Error('no network in a test'));
 globalThis.addEventListener = () => {};
 globalThis.removeEventListener = () => {};
@@ -352,6 +360,108 @@ t('the operator cannot inject an element, only text', () => {
         assert.ok(!n.props || n.props.dangerouslySetInnerHTML === undefined,
             'the notice has an innerHTML path — see ui_config_notice.go for why it must not');
     }
+});
+
+// ── The countdown, and what may stop it ─────────────────────────────────────
+//
+// A five-second notice that stayed half a minute on a phone is what these are
+// for. A touch synthesises `mouseenter` and no `mouseleave` follows until the
+// pointer moves to another element — the next tap somewhere else — so the hold
+// went on and never came off. See the note on `hoverable`.
+//
+// The hold is not visible in the rendered tree, so it is observed where it acts:
+// on the timer. A held card is one whose timeout was cleared.
+
+const cardOf = (tree) => deep(tree).find((n) => typeof n.props?.className === 'string'
+    && n.props.className.startsWith('opnotice '));
+
+// A five-second notice, as reported.
+const FIVE = { ...WIRE, id: 'five', timeout_seconds: 5 };
+
+/** Run `fn` with the clock recorded rather than running. */
+function withRecordedTimers(fn) {
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    const set = [];
+    const cleared = [];
+    globalThis.setTimeout = (cb, ms) => { set.push({ id: set.length + 1, cb, ms }); return set.length; };
+    globalThis.clearTimeout = (id) => { cleared.push(id); };
+    try {
+        return fn({ set, cleared });
+    } finally {
+        globalThis.setTimeout = realSet;
+        globalThis.clearTimeout = realClear;
+    }
+}
+
+const showing = (context) => {
+    reset();
+    render(OperatorNotice, {}, context);
+    return render(OperatorNotice, {}, context);
+};
+
+t('the countdown is the one the operator set', () => {
+    store.clear();
+    withRecordedTimers(({ set }) => {
+        withHost(undefined, () => showing({ server: { notices: parseNotices([FIVE]) }, running: true }));
+        assert.strictEqual(set.length, 1, `scheduled ${set.length} timers, want 1`);
+        assert.strictEqual(set[0].ms, 5000);
+    });
+});
+
+t('a touch does not stop the clock', () => {
+    store.clear();
+    hoverCapable = false;                       // a phone: (hover: hover) is no
+    try {
+        withRecordedTimers(({ set, cleared }) => {
+            const context = { server: { notices: parseNotices([FIVE]) }, running: true };
+            const { tree } = showing(context);
+            assert.strictEqual(set.length, 1, 'the notice never got a clock');
+
+            // A WebView synthesising a mouse enter over the card — a tap, or one
+            // dispatched at the last touch point as the card appeared under it.
+            // No leave will ever follow.
+            cardOf(tree).props.onPointerEnter({ pointerType: 'mouse' });
+            render(OperatorNotice, {}, context);
+
+            assert.deepStrictEqual(cleared, [],
+                'the clock was stopped by a touch, and nothing would ever restart it');
+        });
+    } finally {
+        hoverCapable = true;
+    }
+});
+
+t('a finger on a machine that also has a mouse does not stop it either', () => {
+    // The hybrid: the query says the device can hover, and the pointer that
+    // arrived is still a finger.
+    store.clear();
+    withRecordedTimers(({ cleared }) => {
+        const context = { server: { notices: parseNotices([FIVE]) }, running: true };
+        const { tree } = showing(context);
+        cardOf(tree).props.onPointerEnter({ pointerType: 'touch' });
+        render(OperatorNotice, {}, context);
+        assert.deepStrictEqual(cleared, []);
+    });
+});
+
+t('a real pointer still holds it, and letting go starts it again', () => {
+    // The behaviour being protected: a few seconds is not long to read a
+    // sentence and decide whether to press the link in it.
+    store.clear();
+    withRecordedTimers(({ set, cleared }) => {
+        const context = { server: { notices: parseNotices([FIVE]) }, running: true };
+        const { tree } = showing(context);
+
+        cardOf(tree).props.onPointerEnter({ pointerType: 'mouse' });
+        render(OperatorNotice, {}, context);
+        assert.deepStrictEqual(cleared, [1], 'a mouse over the card did not hold it');
+
+        cardOf(tree).props.onPointerLeave();
+        render(OperatorNotice, {}, context);
+        assert.strictEqual(set.length, 2, 'letting go did not start the clock again');
+        assert.strictEqual(set[1].ms, 5000);
+    });
 });
 
 // ── Not until the front door is open ────────────────────────────────────────

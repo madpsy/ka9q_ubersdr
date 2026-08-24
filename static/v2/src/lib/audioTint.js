@@ -1,0 +1,192 @@
+// The bar scope's background: where the audio's energy actually is.
+//
+// The bars say how loud each frequency is *now*, and the eye reads them as a
+// shape — but the thing they cannot show is proportion. A voice with all its
+// energy under 500 Hz and a voice spread evenly to 3 kHz draw much the same
+// picture once the auto-level has magnified each to fill the panel, because
+// that level is relative and every frame is normalised to its own loudest bin.
+//
+// So the background carries the other half: how each part of the band is doing
+// *relative to the rest of the band*, right now. Warm where a region is taking
+// more than its share of the energy, cool where it is taking less, and one flat
+// colour across the whole panel when the audio is evenly spread — which is the
+// property that makes it readable at a glance rather than a second thing to
+// interpret. Bass-heavy audio glows warm at the left, a hissy channel warm at
+// the right, a well-balanced signal not at all.
+//
+// ── Why it is a share, not a level ───────────────────────────────────────────
+//
+// Everything here is normalised to the band's own total power, so the tint says
+// nothing about volume: turning the audio down leaves it unchanged, which is
+// what makes it a second instrument rather than a paler copy of the bars.
+// "Zero" is the share a region would have if the energy were spread perfectly
+// evenly — so the reference is a *fixed* idea of balance, not the frame's own
+// spread. That is deliberate and is the whole of the requirement that evenly
+// spread audio comes out one colour: normalise against the frame's own extremes
+// instead and a dead-flat band would be stretched into a full rainbow of
+// nothing.
+//
+// ── Why it is smoothed twice ─────────────────────────────────────────────────
+//
+// Across frequency, because the question is "is this region hot", not "is this
+// bin hot" — the bars already answer the second one, and a background that
+// tracked individual bins would be a blurry second copy of them. A few dozen
+// zones, three-tap smoothed, then handed to a canvas gradient which interpolates
+// the rest: what is drawn is smooth by construction.
+//
+// And across time, because a spectrum frame is a noisy estimate and speech is
+// not stationary: without it the background strobes on every syllable. A ~400 ms
+// time constant is slow enough to read as a wash and fast enough to follow a
+// change of speaker.
+//
+// ── Silence ──────────────────────────────────────────────────────────────────
+//
+// With the gate shut there is no energy to take shares of, and the ratios become
+// a picture of dither. So the tint fades to flat as the band approaches silence
+// rather than colouring noise — the one case where "all one colour" means
+// nothing rather than everything.
+
+// How many zones the band is divided into for the background. Enough that a
+// formant-sized region is a zone or two; far too few to resolve a bar, which is
+// the point.
+export const TINT_ZONES = 24;
+
+// The share, in dB relative to an even spread, that saturates the colour. Ten
+// decibels is a region carrying ten times its share of the energy, which is a
+// strong imbalance in audio terms — most speech sits well inside it.
+export const TINT_SPAN_DB = 10;
+
+// The time constant of the temporal smoothing.
+export const TINT_TAU_MS = 400;
+
+// Below this the band is treated as silent and the tint goes flat: the mean bin
+// level over the drawn band, in dBFS. Well under any audio that has been
+// through a volume control, and above the dither of a closed gate.
+export const TINT_SILENCE_DB = -85;
+// ...and the range over which it fades out, so the gate closing is a wash
+// rather than a switch.
+export const TINT_FADE_DB = 10;
+
+/**
+ * Each zone's share of the band's power, in dB relative to an even spread.
+ *
+ * 0 dB is exactly its share; +10 is ten times it; -10 a tenth. `bins` is the
+ * analyser's dBFS array, `start`/`count` the part of it being drawn.
+ *
+ * Returns `{ rel, quiet }` — `rel` is `out` filled in, `quiet` a 0..1 fade
+ * where 1 is "loud enough to mean something" and 0 is silence.
+ */
+export function zoneShares(bins, start, count, out) {
+    const zones = out.length;
+    const p = new Float64Array(zones);
+    let total = 0;
+    let sumDb = 0;
+    let n = 0;
+    for (let z = 0; z < zones; z++) {
+        const lo = start + Math.floor((z / zones) * count);
+        const hi = Math.max(lo + 1, start + Math.floor(((z + 1) / zones) * count));
+        let sum = 0;
+        let k = 0;
+        for (let i = lo; i < hi; i++) {
+            const db = bins[i];
+            if (!Number.isFinite(db)) continue;
+            // Power, not decibels: the mean of a column of dB is the geometric
+            // mean of the powers, which is not a share of anything. Same
+            // reasoning as the IF pane's shape average.
+            sum += 10 ** (db / 10);
+            sumDb += db;
+            k++;
+            n++;
+        }
+        p[z] = k ? sum / k : 0;      // mean power, so zones of unequal bin count compare
+        total += p[z];
+    }
+
+    if (!(total > 0) || !n) {
+        out.fill(0);
+        return { rel: out, quiet: 0 };
+    }
+    const even = total / zones;
+    for (let z = 0; z < zones; z++) {
+        out[z] = p[z] > 0 ? 10 * Math.log10(p[z] / even) : -TINT_SPAN_DB;
+    }
+
+    const meanDb = sumDb / n;
+    const quiet = Math.max(0, Math.min(1, (meanDb - TINT_SILENCE_DB) / TINT_FADE_DB));
+    return { rel: out, quiet };
+}
+
+/** Three-tap smoothing along the band, in place via `scratch`. */
+export function smoothZones(vals, scratch) {
+    const n = vals.length;
+    if (n < 3 || scratch.length !== n) return vals;
+    scratch.set(vals);
+    for (let i = 0; i < n; i++) {
+        const a = scratch[i > 0 ? i - 1 : 0];
+        const b = scratch[i];
+        const c = scratch[i < n - 1 ? i + 1 : n - 1];
+        vals[i] = (a + 2 * b + c) / 4;
+    }
+    return vals;
+}
+
+/** Ease `state.rel` toward `vals` with the TINT_TAU_MS time constant. */
+export function easeZones(state, vals, dtMs, tauMs = TINT_TAU_MS) {
+    const n = vals.length;
+    if (!state.rel || state.rel.length !== n) {
+        state.rel = Float32Array.from(vals);
+        return state.rel;
+    }
+    // Frame-rate independent: the same time constant however fast frames come.
+    const a = dtMs > 0 ? 1 - Math.exp(-dtMs / Math.max(1, tauMs)) : 1;
+    for (let i = 0; i < n; i++) state.rel[i] += (vals[i] - state.rel[i]) * a;
+    return state.rel;
+}
+
+// The two ends of the scale and the colour of balance, over the scope's own
+// near-black. Desaturated and dark on purpose: this sits *behind* bars painted
+// in the spectrum palette, and a background that competed with them would cost
+// more legibility than it bought.
+export const TINT_COLD = [26, 58, 104];
+export const TINT_EVEN = [34, 40, 52];
+export const TINT_HOT = [104, 52, 26];
+
+/**
+ * The background colour for a share of `relDb`, as `rgb(...)`.
+ *
+ * `quiet` fades the whole scale toward the balanced colour, so silence is flat
+ * rather than colourful. At relDb 0 this is TINT_EVEN whatever else is
+ * happening — which is what makes evenly spread audio one colour.
+ */
+export function tintColour(relDb, quiet = 1, span = TINT_SPAN_DB) {
+    const t = Math.max(-1, Math.min(1, (relDb || 0) / span)) * Math.max(0, Math.min(1, quiet));
+    const to = t >= 0 ? TINT_HOT : TINT_COLD;
+    const k = Math.abs(t);
+    const mix = (i) => Math.round(TINT_EVEN[i] + (to[i] - TINT_EVEN[i]) * k);
+    return `rgb(${mix(0)},${mix(1)},${mix(2)})`;
+}
+
+/**
+ * Everything the drawing needs, in one call: the eased, smoothed shares and the
+ * colour for each zone.
+ *
+ * `state` is kept by the caller between frames — `{}` the first time.
+ */
+export function tintZones(state, bins, start, count, nowMs, zones = TINT_ZONES) {
+    if (!state.raw || state.raw.length !== zones) {
+        state.raw = new Float32Array(zones);
+        state.scratch = new Float32Array(zones);
+        state.rel = null;
+        state.at = 0;
+    }
+    const { quiet } = zoneShares(bins, start, count, state.raw);
+    smoothZones(state.raw, state.scratch);
+    const dt = state.at ? nowMs - state.at : 0;
+    state.at = nowMs;
+    const rel = easeZones(state, state.raw, dt);
+    // The fade is eased too, or the gate opening snaps the whole background on.
+    state.quiet = state.quiet == null || !dt
+        ? quiet
+        : state.quiet + (quiet - state.quiet) * (1 - Math.exp(-dt / TINT_TAU_MS));
+    return { rel, quiet: state.quiet };
+}

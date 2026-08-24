@@ -7,6 +7,7 @@
 
 import { getPalette } from './palettes.js';
 import { audioBins } from './audioBand.js';
+import { TINT_ZONES, tintColour, tintZones } from './audioTint.js';
 
 // How fast the history scrolls, in rows a second. A setting rather than the
 // fixed 33 ms v1 runs at: what it should be depends on what is being watched —
@@ -252,7 +253,10 @@ export function drawAudioWaterfall({
 
 /** State for the bar view's own auto-level, kept by whoever draws it. */
 export function newBarLevel() {
-    return { floor: -100, ceil: -30 };
+    // `tint` is the background's own state — the eased shares between frames.
+    // Kept here rather than in the panel for the same reason the level is: it
+    // belongs to the view, and the view is drawn from one call.
+    return { floor: -100, ceil: -30, tint: {} };
 }
 
 /**
@@ -276,6 +280,25 @@ export function newBarLevel() {
  *
  * `fftSize` sets how many bars there are, via barWidth below.
  */
+// The graduated background, as one horizontal gradient across the panel.
+//
+// A stop per zone at the zone's centre, plus the two edges held at the end
+// zones' colours so the gradient does not fade out of its own picture. The
+// canvas interpolates between them, which is where the smoothness comes from:
+// two dozen colours become a continuous wash for the cost of two dozen stops.
+function drawBarTint(c, w, h, bins, start, count, state) {
+    const { rel, quiet } = tintZones(state, bins, start, count, performance.now());
+    const grad = c.createLinearGradient(0, 0, w, 0);
+    const n = rel.length || TINT_ZONES;
+    grad.addColorStop(0, tintColour(rel[0], quiet));
+    for (let z = 0; z < n; z++) {
+        grad.addColorStop((z + 0.5) / n, tintColour(rel[z], quiet));
+    }
+    grad.addColorStop(1, tintColour(rel[n - 1], quiet));
+    c.fillStyle = grad;
+    c.fillRect(0, 0, w, h);
+}
+
 export function drawAudioBars({
     canvas, bins, binCount, sampleRate, tuning, palette, contrast, level, floorDb, fftSize,
 }) {
@@ -291,6 +314,11 @@ export function drawAudioBars({
     if (!(count > 0)) return;
 
     const { floor, range } = levelWindow(bins, start, count, level, floorDb);
+
+    // The background: where the energy is, as a proportion of the whole band.
+    // Drawn first, so the bars sit on it — see lib/audioTint.js for what it
+    // means and why it is a share rather than a level.
+    if (level && level.tint) drawBarTint(c, w, h, bins, start, count, level.tint);
 
     // Bar width in device pixels, from a target in CSS pixels. Whole pixels, or
     // neighbouring bars round differently and the row develops a moiré of gaps

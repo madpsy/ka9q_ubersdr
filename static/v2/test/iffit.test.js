@@ -7,7 +7,8 @@
 
 const assert = require('assert');
 const {
-    FIT_PERSIST_MS, FIT_SILENCE_MS, findIslands, formatFit, rawFit, updateFit,
+    FIT_MIN_ROWS, FIT_MIN_SPAN_MS, FIT_PERSIST_MS, FIT_SILENCE_MS,
+    findIslands, formatFit, rawFit, updateFit,
 } = require('./.build/iffit.cjs');
 
 let pass = 0;
@@ -42,11 +43,14 @@ function bandOf(win, perBin, lo, hi) {
     };
 }
 
-const fit = (mode, offLo, offHi, bandLo, bandHi, shapes, resHz = 0) => {
+// Plenty of evidence unless a test says otherwise — the evidence bar has its
+// own tests below.
+const PLENTY = { rows: 40, spanMs: 4000 };
+const fit = (mode, offLo, offHi, bandLo, bandHi, shapes, opts = {}) => {
     const { win, mean, perBin } = scene(offLo, offHi, shapes);
     const band = bandOf(win, perBin, bandLo, bandHi);
     const tuning = { mode, bandwidthLow: bandLo, bandwidthHigh: bandHi };
-    return rawFit(mean, win, band, tuning, FLOOR, resHz);
+    return rawFit(mean, win, band, tuning, FLOOR, { ...PLENTY, ...opts });
 };
 
 // ── islands ──────────────────────────────────────────────────────────────────
@@ -120,14 +124,14 @@ t('empty low end of a USB filter is speech, not slack', () => {
 });
 
 t('a USB filter far wider than the speech is wide, at the far edge', () => {
-    const v = fit('usb', -800, 3400, 50, 2700, [{ lo: 300, hi: 1200, db: 25 }]);
+    const v = fit('usb', -800, 3400, 50, 2700, [{ lo: 300, hi: 1000, db: 25 }]);
     assert.strictEqual(v.kind, 'wide');
     assert.strictEqual(v.edge, 'high');
-    assert.ok(v.slackHz > 1300, `slack ${v.slackHz}`);
+    assert.ok(v.slackHz > 1600, `slack ${v.slackHz}`);
 });
 
 t('LSB is the mirror: slack lives at the low edge', () => {
-    const v = fit('lsb', -3400, 800, -2700, -50, [{ lo: -1200, hi: -300, db: 25 }]);
+    const v = fit('lsb', -3400, 800, -2700, -50, [{ lo: -1000, hi: -300, db: 25 }]);
     assert.strictEqual(v.kind, 'wide');
     assert.strictEqual(v.edge, 'low');
 });
@@ -143,7 +147,7 @@ t('an adjacent station outside the filter, with a cold gap, is nobody\'s problem
 t('a second signal inside the filter is a neighbour, at its peak', () => {
     const v = fit('usb', -800, 3400, 50, 2700, [
         { lo: 300, hi: 1600, db: 25 },
-        { lo: 2100, hi: 2500, db: 15 },
+        { lo: 2100, hi: 2500, db: 18 },
     ]);
     assert.strictEqual(v.kind, 'neighbour');
     assert.ok(v.offsetHz > 2100 && v.offsetHz < 2500, `at ${v.offsetHz}`);
@@ -156,11 +160,17 @@ t('AM sized to its sidebands is a good fit', () => {
     assert.strictEqual(v.kind, 'ok');
 });
 
-t('AM in a filter twice its width is wide, both edges', () => {
-    const v = fit('am', -6500, 6500, -5000, 5000, [{ lo: -2500, hi: 2500, db: 20 }]);
+t('AM in a filter nearly three times its width is wide, both edges', () => {
+    const v = fit('am', -6500, 6500, -5000, 5000, [{ lo: -1800, hi: 1800, db: 20 }]);
     assert.strictEqual(v.kind, 'wide');
     assert.strictEqual(v.edge, 'both');
-    assert.ok(v.extentHz > 4500 && v.extentHz < 5500, `extent ${v.extentHz}`);
+    assert.ok(v.extentHz > 3200 && v.extentHz < 4000, `extent ${v.extentHz}`);
+});
+
+t('...but a filter merely roomier than the signal is left alone', () => {
+    // ±2.5 kHz of audio in a ±5 kHz filter: wider than it needs to be, and
+    // not wrong. The card is advice, and this is not worth giving.
+    assert.strictEqual(fit('am', -6500, 6500, -5000, 5000, [{ lo: -2500, hi: 2500, db: 20 }]).kind, 'ok');
 });
 
 t('a faded sideband does not shrink the verdict onto the healthy one', () => {
@@ -176,9 +186,9 @@ t('AM spilling both edges is narrow at both', () => {
 });
 
 t('the same slack that moves AM leaves FM alone', () => {
-    // ±5 kHz occupied in a ±8 kHz filter: 3 kHz slack. AM's threshold is
-    // 1.6 kHz; FM's tapering sidebands push its own to 3.2 kHz.
-    const shapes = [{ lo: -5000, hi: 5000, db: 20 }];
+    // ±3 kHz occupied in a ±8 kHz filter: 5 kHz of slack, past AM's 3.6 kHz
+    // threshold and inside the 5.2 kHz that FM's tapering sidebands earn it.
+    const shapes = [{ lo: -3000, hi: 3000, db: 20 }];
     assert.strictEqual(fit('fm', -10000, 10000, -8000, 8000, shapes).kind, 'ok');
     assert.strictEqual(fit('am', -10000, 10000, -8000, 8000, shapes).kind, 'wide');
 });
@@ -226,6 +236,23 @@ t('IQ gets no opinion', () => {
 t('a signal only outside the passband is not ours to judge', () => {
     const v = fit('usb', -800, 3400, 50, 2700, [{ lo: 2900, hi: 3300, db: 30 }]);
     assert.strictEqual(v, null);
+});
+
+// ── the evidence bar ─────────────────────────────────────────────────────────
+
+t('a thin average is not asked for an opinion', () => {
+    const shapes = [{ lo: 300, hi: 3100, db: 25 }];     // plainly clipped
+    assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes).kind, 'narrow');
+    assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes, { rows: FIT_MIN_ROWS - 1 }), null);
+    assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes, { spanMs: FIT_MIN_SPAN_MS - 1 }), null);
+});
+
+t('a fast feed still has to cover the time, and a slow one the frames', () => {
+    const shapes = [{ lo: 300, hi: 3100, db: 25 }];
+    // Forty frames inside a second: plenty of samples, not enough signal.
+    assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes, { rows: 40, spanMs: 900 }), null);
+    // Four seconds covered by three frames: plenty of time, too few samples.
+    assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes, { rows: 3, spanMs: 4000 }), null);
 });
 
 // ── patience ─────────────────────────────────────────────────────────────────
@@ -297,7 +324,7 @@ t('coarse served bins cannot read as spill', () => {
     // 400 Hz of apparent spill under 300 Hz bins is edge quantisation.
     const shapes = [{ lo: 300, hi: 3100, db: 25 }];
     assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes).kind, 'narrow');
-    assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes, 300).kind, 'ok');
+    assert.strictEqual(fit('usb', -800, 3400, 50, 2700, shapes, { resHz: 300 }).kind, 'ok');
 });
 
 t('a weak fragment of the same speech is not a neighbour', () => {
@@ -313,7 +340,7 @@ t('a weak fragment of the same speech is not a neighbour', () => {
 t('a real second station still is one', () => {
     const v = fit('usb', -800, 3400, 50, 2700, [
         { lo: 300, hi: 1600, db: 25 },
-        { lo: 2100, hi: 2500, db: 15 },
+        { lo: 2100, hi: 2500, db: 18 },
     ]);
     assert.strictEqual(v.kind, 'neighbour');
 });

@@ -97,7 +97,7 @@ export const FIT_MIN_ISLAND_HZ = 30;
 // that fits well, and reporting that would mean no filter ever fitted. Widened
 // to twice the served bin width when that is coarser — at a wide span one bin
 // covers hundreds of hertz, and edge quantisation alone would read as spill.
-export const FIT_SPILL_HZ = 60;
+export const FIT_SPILL_HZ = 200;
 
 // A strong signal's edges are measured relative to its own peak, not only
 // against the noise: FFT leakage and phase-noise skirts stand well above the
@@ -105,26 +105,54 @@ export const FIT_SPILL_HZ = 60;
 // strong station clipped. Down-thirty is a shade gentler than the ITU's 26 dB
 // occupied-bandwidth convention, so an AM carrier's sidebands — genuinely
 // 20-odd dB under their carrier — still count as the signal they are.
-export const FIT_DROP_DB = 30;
+export const FIT_DROP_DB = 25;
 
 // A second island only counts as a neighbour when it could actually be one:
 // standing well clear of the floor, and within shouting distance of the main
 // signal's own level. Fragments of the main signal that broke past the gap
 // tolerance — sibilance, a weak formant cluster — fail both.
-export const FIT_NEIGHBOUR_MIN_DB = 12;
-export const FIT_NEIGHBOUR_REL_DB = 18;
+export const FIT_NEIGHBOUR_MIN_DB = 15;
+export const FIT_NEIGHBOUR_REL_DB = 10;
 
 // Slack thresholds, as a fraction of the filter width and an absolute floor —
-// whichever is larger. Voice first: a 2.7 kHz SSB filter with 500 Hz of
-// nothing at the top is worth a nudge, with 200 Hz it is fine.
-export const FIT_SLACK_FRAC = 0.2;
-export const FIT_SLACK_MIN_HZ = 300;
+// whichever is larger.
+//
+// Deliberately forgiving. This card is advice, not a specification, and the
+// cost of the two mistakes is not symmetric: a missed "your filter is a bit
+// wide" costs nothing, while an indicator that finds fault with a perfectly
+// ordinary setting is one nobody believes twice. So the band called "good" is
+// wide enough that most sensible filters sit inside it, and only a filter that
+// is *plainly* mismatched — roughly twice the width the signal needs — is
+// remarked on. A 2.7 kHz SSB filter has to be passing under about 1.2 kHz of
+// speech before it is called wide, and an AM filter has to be better than
+// twice its station's occupied width.
+export const FIT_SLACK_FRAC = 0.55;
+export const FIT_SLACK_MIN_HZ = 600;
 // FM's sidebands taper rather than stop — Carson's rule is a convention, not a
 // cliff — so its filter is allowed far more apparent slack before comment.
-export const FIT_SLACK_FRAC_FM = 0.4;
+export const FIT_SLACK_FRAC_FM = 0.65;
+
+// How much measured signal there has to be before any verdict is offered.
+//
+// The average behind this is what makes it trustworthy, and a two-frame
+// average is not one: the occupied width of a signal measured over half a
+// second is mostly the noise's opinion, and it was that thin evidence turning
+// into confident verdicts that made the card look like it was guessing. Both
+// bars have to be cleared — a fast feed can put twelve frames into a moment,
+// and a slow one can cover four seconds with three.
+export const FIT_MIN_ROWS = 12;
+export const FIT_MIN_SPAN_MS = 2500;
+
+// The window the verdict averages over, which is its own rather than the
+// display's: the Shape slider is a look the operator chose and goes as low as
+// half a second, while this wants as much signal as it can get before saying
+// anything. Four seconds covers a full over's worth of speech peaks and
+// several CW characters, and is short enough that a filter change is reflected
+// while the hand is still on the control.
+export const FIT_WINDOW_MS = 4000;
 
 // The patience. A candidate verdict must hold this long before it is shown...
-export const FIT_PERSIST_MS = 2000;
+export const FIT_PERSIST_MS = 3000;
 // ...and a shown verdict survives this much silence before clearing, because a
 // pause between overs says nothing about the station's bandwidth.
 export const FIT_SILENCE_MS = 5000;
@@ -170,9 +198,13 @@ const midHzOf = (win, perBin, bin) => win.offLo + (bin + 0.5) * perBin;
  * updateFit()'s job. Null when there is nothing to judge: no signal in the
  * passband, an IQ mode, or geometry that has not settled.
  *
- * `mean` must be the unmasked shape average (shapeStats' `open`): the mask
- * erases everything outside the filter, which is precisely where clipping
- * shows.
+ * `mean` must be an *unmasked* shape average — the passband mask erases
+ * everything outside the filter, which is precisely where clipping shows. The
+ * panel computes one over its own longer window for exactly this.
+ *
+ * `opts.resHz` is the served bin width, `opts.rows` and `opts.spanMs` how much
+ * signal went into the average: below FIT_MIN_ROWS / FIT_MIN_SPAN_MS there is
+ * not enough evidence to judge and the answer is null.
  *
  * Returns `{ kind, ... }`:
  *   narrow     { spillHz, edge: 'low'|'high'|'both' }   the signal is clipped
@@ -180,9 +212,12 @@ const midHzOf = (win, perBin, bin) => win.offLo + (bin + 0.5) * perBin;
  *   wide       { slackHz, extentHz }           the filter admits mostly noise
  *   ok         {}                              measured, and it fits
  */
-export function rawFit(mean, win, band, tuning, floorDb, resHz = 0) {
+export function rawFit(mean, win, band, tuning, floorDb, opts = {}) {
+    const { resHz = 0, rows = Infinity, spanMs = Infinity } = opts;
     if (!mean || !win || !(win.span > 0) || !band || band.last < band.first) return null;
     if (!tuning || isIQ(tuning.mode)) return null;
+    // Not enough measured signal to have an opinion about — see FIT_MIN_ROWS.
+    if (!(rows >= FIT_MIN_ROWS) || !(spanMs >= FIT_MIN_SPAN_MS)) return null;
     const bins = mean.length;
     const perBin = perBinOf(win, bins);
     if (!(perBin > 0)) return null;

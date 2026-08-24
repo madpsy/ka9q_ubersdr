@@ -51,7 +51,7 @@ import {
     bandBins, clampShapeSec, createShape, formatShape, measureShape, pushShapeRow, resetShape,
     shapeStats, shapeWantsZoom, shapeZoomSpan,
 } from '../lib/ifShape.js';
-import { formatFit, rawFit, updateFit } from '../lib/ifFit.js';
+import { FIT_WINDOW_MS, formatFit, rawFit, updateFit } from '../lib/ifFit.js';
 import {
     IF_RATE_MAX, IF_RATE_MIN, IF_VIEWS, ZOOM_MIN, ZOOM_STEP,
     binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels, formatBinWidth,
@@ -194,8 +194,12 @@ export default function IFSpectrumPanel({ minimal }) {
         measure: {},
         measured: null,
         measuredAt: 0,
-        // The fit verdict's patience — see updateFit in lib/ifFit.js.
+        // The fit verdict's patience — see updateFit in lib/ifFit.js — and its
+        // own averaging pass, which is longer and slower than the display's.
         fit: {},
+        fitOut: {},
+        fitAt: 0,
+        fitVerdict: null,
 
         cmap: null,
         ring: null, ringCtx: null, ringH: 0,
@@ -1139,15 +1143,37 @@ function drawAll(st, spec, wf, ov) {
     // and through the little state machine that keeps it from flapping between
     // words. Carried on `measured` so it publishes at the same cadence.
     if (st.measured) {
-        st.measured.fit = updateFit(
-            st.fit,
-            // The served bin width goes along so every threshold knows the
-            // resolution actually behind the grid — at a wide span one bin is
-            // hundreds of hertz, and without this the edge quantisation alone
-            // read as clipping.
-            rawFit(stats.open, st.win, st.band, st.tuning, stats.floorDb, binWidthOf(st.cfg)),
-            now,
-        );
+        // The verdict gets its own average, and it is not the one on screen.
+        //
+        // Two reasons. The display's window is the operator's setting and can
+        // be half a second, which is far too little signal to judge a filter
+        // by; and this needs the *unmasked* spectrum, since whether a signal
+        // continues past a filter edge is only visible outside the filter. So
+        // it takes its own pass over the same rows — a longer window, and no
+        // passband mask — off the ring the display is already filling.
+        //
+        // At the publish cadence rather than per frame: the card updates four
+        // times a second whatever the frame rate, so a pass per frame would be
+        // fifteen times the work for the same number on screen.
+        if (now - st.fitAt >= STATS_MS) {
+            st.fitAt = now;
+            const fs = shapeStats(st.shape, FIT_WINDOW_MS, now, st.fitOut);
+            st.fitVerdict = updateFit(
+                st.fit,
+                // The served bin width goes along so every threshold knows the
+                // resolution actually behind the grid — at a wide span one bin
+                // is hundreds of hertz, and without this the edge quantisation
+                // alone read as clipping — and the row count so a thin average
+                // is not asked for an opinion.
+                rawFit(fs.mean, st.win, st.band, st.tuning, fs.floorDb, {
+                    resHz: binWidthOf(st.cfg),
+                    rows: fs.rows,
+                    spanMs: fs.spanMs,
+                }),
+                now,
+            );
+        }
+        st.measured.fit = st.fitVerdict;
     }
 
     let levels;
@@ -1185,7 +1211,10 @@ function updateShape(st, now) {
     if (!st.shapeRow || st.shapeRow.length !== SHAPE_BINS) st.shapeRow = new Float32Array(SHAPE_BINS);
     sliceToPixels(st.bins, st.cfg, st.win, st.shapeRow);
     const windowMs = clampShapeSec(st.d && st.d.ifShapeSec) * 1000;
-    pushShapeRow(st.shape, st.shapeRow, now, windowMs);
+    // The ring keeps whichever window is longer. The display is unaffected —
+    // shapeStats applies its own cutoff — but the fit's pass would otherwise
+    // find its four seconds already thrown away by a half-second setting.
+    pushShapeRow(st.shape, st.shapeRow, now, Math.max(windowMs, st.wantStats ? FIT_WINDOW_MS : 0));
     st.band = bandBins(SHAPE_BINS, st.win, st.tuning);
     return shapeStats(st.shape, windowMs, now, st.shapeOut, st.band);
 }

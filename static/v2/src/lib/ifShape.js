@@ -249,14 +249,6 @@ export function shapeStats(st, windowMs, nowMs, out = {}, band) {
     if (!out.scratch || out.scratch.length !== n) out.scratch = new Float32Array(n);
     out.floorDb = noiseFloorOf(mean, out.scratch);
 
-    // A copy of the mean before the mask, for the fit measurement
-    // (lib/ifFit.js). Whether the signal continues past a filter edge is only
-    // visible in the margins — the very bins the mask is about to erase — so
-    // the masked array cannot answer it. Same reasoning as the floor above:
-    // everything that needs the whole window reads it here, before the mask.
-    if (!out.open || out.open.length !== n) out.open = new Float32Array(n);
-    out.open.set(mean);
-
     // ...and only now the mask. Everything outside the filter is dropped rather
     // than drawn: see the note at the top of this file.
     if (band) {

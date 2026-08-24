@@ -18,7 +18,7 @@ globalThis.localStorage = {
 
 const { nextScanMarker, scanTargets } = require('./.build/scanner.cjs');
 const {
-    SCAN_DEFAULT_BAND_ONLY, SCAN_DEFAULT_TYPES,
+    SCAN_DEFAULT_BAND_ONLY, SCAN_DEFAULT_IGNORE_IQ, SCAN_DEFAULT_TYPES,
     _resetScanSettings, onScanSettings, saveScanSettings, savedScanSettings,
 } = require('./.build/scannersettings.cjs');
 
@@ -85,6 +85,35 @@ t('the band limit off scans across the bands', () => {
     assert.strictEqual(list.length, 2);
 });
 
+t('a quadrature marker is not a hop, so it is left out', () => {
+    // Switching into IQ is confirmed rather than selected: the tune is swallowed
+    // and a dialog goes up. Mid-scan that is a modal over a hop that never
+    // happened, and answering it would take away the squelch the scan stops on.
+    const list = scanTargets([
+        marker(14100000, { mode: 'iq', type: 'bookmark-local' }),
+        marker(14200000, { mode: 'usb', type: 'bookmark-local' }),
+    ], { ignoreIQ: true });
+    assert.deepStrictEqual(list.map((m) => m.freq), [14200000]);
+});
+
+t('a marker with no mode is never an IQ hop', () => {
+    // A bookmark that names no mode is tuned in whatever is live, so it cannot
+    // be the thing that switches the receiver into IQ.
+    const list = scanTargets([
+        marker(14100000, { mode: null, type: 'bookmark-local' }),
+        marker(14200000, { mode: 'usb', type: 'bookmark-local' }),
+    ], { ignoreIQ: true });
+    assert.strictEqual(list.length, 2);
+});
+
+t('the IQ toggle off scans them like anything else', () => {
+    const list = scanTargets([
+        marker(14100000, { mode: 'iq', type: 'bookmark-local' }),
+        marker(14200000, { mode: 'usb', type: 'bookmark-local' }),
+    ], { ignoreIQ: false });
+    assert.strictEqual(list.length, 2);
+});
+
 t('two markers on one station are one target', () => {
     // The detector hears a voice at 14247980 and the skimmer confirms a callsign
     // at 14248000. Twenty hertz apart is the same station, and the dial cannot
@@ -140,13 +169,15 @@ t('nothing to scan is nowhere to go, not the first thing again', () => {
 
 // ── The settings ────────────────────────────────────────────────────────────
 
-t('a browser that has never been told scans voice, on this band', () => {
+t('a browser that has never been told scans voice, on this band, skipping IQ', () => {
     fresh();
     const s = savedScanSettings();
     assert.deepStrictEqual(s.types, SCAN_DEFAULT_TYPES);
     assert.deepStrictEqual(s.types, ['voice']);
     assert.strictEqual(s.bandOnly, SCAN_DEFAULT_BAND_ONLY);
     assert.strictEqual(s.bandOnly, true);
+    assert.strictEqual(s.ignoreIQ, SCAN_DEFAULT_IGNORE_IQ);
+    assert.strictEqual(s.ignoreIQ, true);
 });
 
 t('a stored selection comes back', () => {
@@ -175,16 +206,26 @@ t('junk in the key is not a setting', () => {
     store.set(KEY, 'not json at all');
     assert.deepStrictEqual(savedScanSettings().types, SCAN_DEFAULT_TYPES);
     assert.strictEqual(savedScanSettings().bandOnly, true);
+    assert.strictEqual(savedScanSettings().ignoreIQ, true);
 });
 
-t('one control is written without disturbing the other', () => {
-    // The two live in one key, so a whole-object write from the chips would put
-    // back whatever the band switch was when that half rendered.
+t('a stored IQ answer comes back, including the one that is not the default', () => {
+    fresh();
+    store.set(KEY, JSON.stringify({ ignoreIQ: false }));
+    assert.strictEqual(savedScanSettings().ignoreIQ, false);
+});
+
+t('one control is written without disturbing the others', () => {
+    // All three live in one key, so a whole-object write from the chips would
+    // put back whatever the switches were when that part rendered.
     fresh();
     saveScanSettings({ bandOnly: false });
     assert.deepStrictEqual(savedScanSettings().types, ['voice'], 'the kinds were overwritten');
+    saveScanSettings({ ignoreIQ: false });
+    assert.strictEqual(savedScanSettings().bandOnly, false, 'the band switch was overwritten');
     saveScanSettings({ types: ['dx'] });
     assert.strictEqual(savedScanSettings().bandOnly, false, 'the band switch was overwritten');
+    assert.strictEqual(savedScanSettings().ignoreIQ, false, 'the IQ switch was overwritten');
 });
 
 t('a write reaches the other copy of the panel', () => {

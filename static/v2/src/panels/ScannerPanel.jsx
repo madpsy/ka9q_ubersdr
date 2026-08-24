@@ -194,7 +194,7 @@ function useScan(radio, list, types) {
 export default function ScannerPanel({ minimal }) {
     const radio = useRadio();
     const { tuning } = radio;
-    const { types, bandOnly } = useScanSettings();
+    const { types, bandOnly, ignoreIQ } = useScanSettings();
     const markers = useMarkerNav(radio, types);
     const [shown, setShown] = useState(SCAN_ROWS);
 
@@ -203,8 +203,10 @@ export default function ScannerPanel({ minimal }) {
     // scanTargets.
     const band = bandOnly ? bandForFrequency(tuning.frequency) : null;
     const list = useMemo(
-        () => scanTargets(markers.all, { types, bandOnly, dialHz: tuning.frequency }),
-        [markers.all, types, bandOnly, tuning.frequency],
+        () => scanTargets(markers.all, {
+            types, bandOnly, ignoreIQ, dialHz: tuning.frequency,
+        }),
+        [markers.all, types, bandOnly, ignoreIQ, tuning.frequency],
     );
 
     const scan = useScan(radio, list, types);
@@ -329,6 +331,20 @@ export default function ScannerPanel({ minimal }) {
                         ))}
                     </div>
                 </Field>
+            )}
+
+            {/* Quadrature markers, which are a hop the receiver will not make
+                without asking — see scanTargets. Under the band switch because
+                it is the same kind of setting: what the scan will not visit. */}
+            {!minimal && (
+                <Switch
+                    checked={ignoreIQ}
+                    onChange={(v) => saveScanSettings({ ignoreIQ: v })}
+                    label="Ignore IQ"
+                    title={ignoreIQ
+                        ? 'Skipping markers in a quadrature mode: switching into IQ has to be confirmed, and it takes away the squelch the scan stops on'
+                        : 'Scanning IQ markers too — each one puts up a confirmation, and answering it ends the scan'}
+                />
             )}
 
             {!minimal && (

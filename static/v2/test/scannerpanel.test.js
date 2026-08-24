@@ -140,6 +140,7 @@ t('the cut-down view keeps the scan and drops the pickers', () => {
     assert.ok(scanBtn(tree), 'the scan went with the pickers');
     assert.strictEqual(byClass(tree, 'scan__row').length, 3);
     assert.ok(!/Current band only/.test(words(tree)), 'the band switch survived the cut');
+    assert.ok(!/Ignore IQ/.test(words(tree)), 'the IQ switch survived the cut');
 });
 
 t('the shipped settings scan voice, on the current band', () => {
@@ -405,6 +406,41 @@ t('deselecting every kind says so rather than going blank', () => {
     const { tree } = render(ScannerPanel, {}, context());
     assert.strictEqual(scanBtn(tree).props.disabled, true);
     assert.strictEqual(note(tree), 'No marker kinds selected');
+});
+
+t('an IQ marker is left out of the scan, and the toggle says so', () => {
+    // Tuning to one is not a hop: the receiver refuses to enter IQ without
+    // confirming, so the tune is swallowed and a modal goes up mid-scan.
+    reset();
+    _resetScanSettings();
+    store.clear();
+    saveScanSettings({ types: ['bookmark-local'], bandOnly: true });
+    const ctx = context({
+        catalog: {
+            bookmarks: [],
+            local: [mark(14100000, 'Wideband', 'iq'), mark(14200000, 'Two'), mark(14300000, 'Three')],
+        },
+    });
+    const { tree } = render(ScannerPanel, {}, ctx);
+    assert.deepStrictEqual(
+        byClass(tree, 'scan__freq').map((n) => n.props.children),
+        ['14.200 MHz', '14.300 MHz'],
+    );
+    assert.ok(/Ignore IQ/.test(words(tree)), 'the IQ switch is missing');
+});
+
+t('the IQ toggle off puts them back', () => {
+    reset();
+    _resetScanSettings();
+    store.clear();
+    saveScanSettings({ types: ['bookmark-local'], bandOnly: true, ignoreIQ: false });
+    const ctx = context({
+        catalog: {
+            bookmarks: [],
+            local: [mark(14100000, 'Wideband', 'iq'), mark(14200000, 'Two')],
+        },
+    });
+    assert.strictEqual(byClass(render(ScannerPanel, {}, ctx).tree, 'scan__row').length, 2);
 });
 
 t('the band switch widens the scan to every band', () => {

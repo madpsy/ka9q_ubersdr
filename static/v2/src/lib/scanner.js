@@ -11,6 +11,7 @@
 // the markers and it hands back what to step through. Nothing here fetches,
 // subscribes or reads the DOM.
 
+import { isIQ } from '../radio/constants.js';
 import { bandForFrequency, bandRange } from './bands.js';
 import { MARKER_TOLERANCE_HZ } from './markerNav.js';
 
@@ -58,6 +59,15 @@ export const SCAN_SETTLE_MS = 100;
  *     with nothing in it, and a listener parked on a broadcast station asking to
  *     scan should get a scan.
  *
+ *   - `ignoreIQ` drops markers that name a quadrature mode. Tuning to one is not
+ *     a hop at all: switching into IQ is confirmed rather than selected — it
+ *     costs the receiver's owner six times the bandwidth and takes the audio
+ *     chain, the squelch and the S-meter away — so the tune is swallowed and a
+ *     dialog goes up instead. In the middle of a scan that is a modal nobody
+ *     asked for over a hop that never happened, and if it were answered the scan
+ *     would stop dead the next tick for want of a squelch. A KiwiSDR import is
+ *     where these come from; see bookmarkTarget.
+ *
  *   - anything the dial cannot tell apart is folded together. A voice detection
  *     and the skimmer's confirmation of it land within a few tens of hertz of
  *     each other, and stepping to both means two dwells, two mode reloads and
@@ -66,7 +76,7 @@ export const SCAN_SETTLE_MS = 100;
  *     spot over a bookmark — which is the same precedence findMarkers applies to
  *     the marker under the dial.
  */
-export function scanTargets(markers, { types, bandOnly, dialHz } = {}) {
+export function scanTargets(markers, { types, bandOnly, dialHz, ignoreIQ } = {}) {
     const allow = Array.isArray(types) ? new Set(types) : null;
     const range = bandOnly ? bandRange(bandForFrequency(dialHz)) : null;
 
@@ -75,6 +85,9 @@ export function scanTargets(markers, { types, bandOnly, dialHz } = {}) {
         if (!m || !(m.freq > 0)) continue;
         if (allow && !allow.has(m.type)) continue;
         if (range && (m.freq < range.min || m.freq > range.max)) continue;
+        // A marker with no mode of its own is tuned in whatever is live, so it
+        // is never an IQ hop however this is set.
+        if (ignoreIQ && m.mode && isIQ(m.mode)) continue;
         wanted.push(m);
     }
     // Frequency order, and the better marker first where two share one — so the

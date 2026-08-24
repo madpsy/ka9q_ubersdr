@@ -389,13 +389,30 @@ export default function MobileShell() {
                     <nav className={`tabbar${panel || extension ? ' tabbar--over' : ''}`}>
                         {/* Alone and first — see SOLO. It opens its panel rather
                             than a list, because a group in front of the dial is a
-                            tap in the one place that cannot afford one. */}
+                            tap in the one place that cannot afford one.
+
+                            And closes it again: every other button on this row
+                            toggles the thing it names — a group's list shuts on
+                            a second tap of the same icon — so the one button
+                            that did nothing when tapped while lit was the odd
+                            one out. Only reachable with the row kept on under an
+                            open sheet (mobileTabsAlways), which is exactly where
+                            a dead tap on a lit button is most obviously dead.
+
+                            Against `panel` rather than `openId`, so the button
+                            closes exactly when it looks open: an extension owns
+                            the sheet over whatever `openId` still names, and a
+                            tap there should bring the Multipad back rather than
+                            silently clear the panel waiting behind it. */}
                         {solo && (
                             <button
                                 type="button"
                                 className={`tabbar__item${panel && panel.id === solo.id ? ' is-open' : ''}`}
                                 aria-current={panel && panel.id === solo.id ? 'true' : undefined}
-                                onClick={() => { setMenuId(null); setOpenId(solo.id); }}
+                                onClick={() => {
+                                    setMenuId(null);
+                                    setOpenId(panel && panel.id === solo.id ? null : solo.id);
+                                }}
                             >
                                 <span className="tabbar__icon">{solo.icon}</span>
                                 <span className="tabbar__label">{solo.title}</span>

@@ -37,6 +37,9 @@
 #                           (port 5555 unless one is given) and installs there.
 #                           A serial from `adb devices` works in the same place.
 #                           Combine with --release to install that instead.
+#                           Combined with --publish or --play the upload happens
+#                           first, so a phone that refuses the APK cannot cost
+#                           you the release — see the note above those blocks.
 #   ./build.sh --yes        answer the publish prompt in advance, for a run with
 #                           no terminal to ask on. Only meaningful with --publish.
 #   ./build.sh --publish    release-build, then upload it to the `latest`
@@ -1097,6 +1100,30 @@ if [[ "$SHOTS" -eq 1 ]]; then
     exit 0
 fi
 
+# The uploads first, and the install after them.
+#
+# They used to be the other way round, and a failed install took the upload with
+# it: every exit in the block below is a hard one — a device that is not there,
+# an APK whose signature does not match the one already on the phone — and all
+# of them sat in front of the thing the run was actually for. `--play --install`
+# on a phone holding a debug build therefore built the bundle, refused the
+# install and stopped, having uploaded nothing, while saying only that the
+# install had failed.
+#
+# This way round the ordering matches what depends on what. The upload needs the
+# artefact and nothing else; the install is a local convenience with the same
+# artefact, and whether a phone on the desk took it has no bearing on whether
+# the build should reach the store. A failed upload still stops the run before
+# the install, which is the right way for *that* one to fail: nothing was
+# published, so there is nothing to be inconsistent with.
+if [[ "$PUBLISH" -eq 1 ]]; then
+    publish_release
+fi
+
+if [[ "$PLAY" -eq 1 ]]; then
+    play_release
+fi
+
 if [[ "$INSTALL" -eq 1 ]]; then
     ADB="$ANDROID_HOME/platform-tools/adb"
     command -v adb >/dev/null 2>&1 && ADB=adb
@@ -1235,12 +1262,4 @@ if [[ "$INSTALL" -eq 1 ]]; then
         exit 1
     fi
     echo "installed on $("$ADB" "${TARGET[@]}" shell getprop ro.product.model | tr -d '\r')"
-fi
-
-if [[ "$PUBLISH" -eq 1 ]]; then
-    publish_release
-fi
-
-if [[ "$PLAY" -eq 1 ]]; then
-    play_release
 fi

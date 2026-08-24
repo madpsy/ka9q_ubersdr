@@ -1,6 +1,6 @@
 {
   "name": "ubersdr-desktop",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "private": true,
   "description": "UberSDR desktop client — the v2 web UI in an Electron shell with an instance chooser",
   "author": "MadPsy <madpsy@users.noreply.github.com>",

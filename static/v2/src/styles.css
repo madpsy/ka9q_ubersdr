@@ -838,7 +838,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
  * is in front of the receiver rather than part of it. */
 .dock--peek {
     position: absolute;
-    /* Above the minimised-float chips (.floatbar, 70), below the menus (80).
+    /* Above the minimised-float chips (.floatbar, 70), below the menus.
      *
      * The chips are deliberately high — one a window can cover is one you
      * cannot click to get that window back — and they live along the bottom of
@@ -846,8 +846,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
      * they punched straight through it.
      *
      * A peek outranks them because it is transient and the pointer is on it:
-     * it goes when you move away, and the chips are back. It stays under 80 so
-     * a menu opened from a panel inside the peek still comes out on top. */
+     * it goes when you move away, and the chips are back. It stays under the
+     * menus (.menu__panel and .specmenu, 90; .links__panel, 80) so a menu
+     * opened from a panel inside the peek still comes out on top. */
     z-index: 75;
     box-shadow: var(--shadow);
     animation: dock-peek 120ms var(--ease);
@@ -4506,7 +4507,18 @@ a.btn { text-decoration: none; }
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    z-index: 60;
+    /* With .specmenu, because they are the same thing: a transient overlay
+       portalled to <body> and opened from wherever the pointer is. Nothing in
+       the shell establishes a stacking context between them, so these numbers
+       are compared directly.
+     *
+     * It sat at 60 and lost to three things it opens over. A peeked dock
+     * (.dock--peek, 75) was the one that showed: the header's move menu is
+     * aligned to a trigger inside that dock, so it opened wholly behind an
+     * opaque overlay — an invisible menu whose clicks the overlay took, which
+     * reads as a button that does nothing. The minimised-float chips
+     * (.floatbar, 70) and the toasts (75) covered it the same way. */
+    z-index: 90;
     animation: menu-in 120ms var(--ease);
 }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } }

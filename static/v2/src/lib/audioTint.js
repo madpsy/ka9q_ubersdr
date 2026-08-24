@@ -51,17 +51,52 @@
 // the point.
 export const TINT_ZONES = 24;
 
-// The share, in dB relative to an even spread, that saturates the colour. Ten
-// decibels is a region carrying ten times its share of the energy, which is a
-// strong imbalance in audio terms — most speech sits well inside it.
-export const TINT_SPAN_DB = 10;
+// How far from even the colour scale reaches — and it is not a fixed number,
+// because a fixed one is wrong at both ends of the range it has to cover.
+//
+// Set it low and every real signal saturates: a voice puts thirty decibels
+// between its formants and the top of the band, so an eight-decibel scale
+// paints two colours, one at each end, and the shape in between — which is the
+// interesting part — is lost. Set it high and quiet, subtle imbalances never
+// leave the neutral colour at all.
+//
+// So the scale is the band's own spread: whatever range of shares is actually
+// present is what the colours are spent on. That is what makes the display
+// read as "where is this audio's energy" rather than "is this audio louder
+// than some number somebody chose".
+//
+// The floor is what keeps the promise about even audio. Without one, a band
+// that is flat to within a decibel would have that decibel stretched across
+// the whole scale and paint a full rainbow of nothing; with it, a spread
+// smaller than the floor stays bunched near the neutral colour, which is the
+// flat background an evenly spread signal is supposed to have. The ceiling
+// only stops one freak zone — a dead notch reading -60 dB below even — from
+// flattening everything else.
+export const TINT_SPAN_MIN_DB = 10;
+export const TINT_SPAN_MAX_DB = 40;
+
+// Bends the scale toward its ends, so a moderate imbalance is already visibly
+// coloured rather than sitting halfway to neutral.
+export const TINT_GAMMA = 0.8;
+
+// Where the spread is measured, as a percentile of the zones' deviations from
+// even. Not the extreme, which one notch or one carrier would own; high enough
+// that the bulk of the picture uses most of the scale.
+export const TINT_SPREAD_PCT = 0.9;
 
 // The time constant of the temporal smoothing.
 export const TINT_TAU_MS = 400;
 
-// Below this the band is treated as silent and the tint goes flat: the mean bin
-// level over the drawn band, in dBFS. Well under any audio that has been
-// through a volume control, and above the dither of a closed gate.
+// Below this the band is treated as silent and the tint goes flat: the level of
+// the *loudest* bin in it, in dBFS.
+//
+// The loudest and not the average, which is what this was and was wrong. Most
+// of an audio spectrum sits near the analyser's floor at any moment — a voice
+// is a few busy hundred hertz and a lot of quiet — so the mean across the band
+// lands under any sane silence line while the audio is plainly audible. The
+// gate closed on real signals and the whole panel painted one flat neutral,
+// which is exactly what "impossibly faint, just grey" looks like. The peak is
+// the honest test for "is there anything here at all".
 export const TINT_SILENCE_DB = -85;
 // ...and the range over which it fades out, so the gate closing is a wash
 // rather than a switch.
@@ -80,7 +115,7 @@ export function zoneShares(bins, start, count, out) {
     const zones = out.length;
     const p = new Float64Array(zones);
     let total = 0;
-    let sumDb = 0;
+    let peakDb = -Infinity;
     let n = 0;
     for (let z = 0; z < zones; z++) {
         const lo = start + Math.floor((z / zones) * count);
@@ -94,7 +129,7 @@ export function zoneShares(bins, start, count, out) {
             // mean of the powers, which is not a share of anything. Same
             // reasoning as the IF pane's shape average.
             sum += 10 ** (db / 10);
-            sumDb += db;
+            if (db > peakDb) peakDb = db;
             k++;
             n++;
         }
@@ -111,8 +146,7 @@ export function zoneShares(bins, start, count, out) {
         out[z] = p[z] > 0 ? 10 * Math.log10(p[z] / even) : -TINT_SPAN_DB;
     }
 
-    const meanDb = sumDb / n;
-    const quiet = Math.max(0, Math.min(1, (meanDb - TINT_SILENCE_DB) / TINT_FADE_DB));
+    const quiet = Math.max(0, Math.min(1, (peakDb - TINT_SILENCE_DB) / TINT_FADE_DB));
     return { rel: out, quiet };
 }
 
@@ -130,6 +164,22 @@ export function smoothZones(vals, scratch) {
     return vals;
 }
 
+/**
+ * How far from even this band's zones actually are — the scale the colours are
+ * spent on. A high percentile of |rel| rather than the maximum, so one dead
+ * notch cannot set the scale for everything else, clamped into the range where
+ * the answer stays meaningful.
+ */
+export function spreadOf(rel, scratch) {
+    const n = rel.length;
+    if (!n) return TINT_SPAN_MIN_DB;
+    const buf = scratch && scratch.length >= n ? scratch.subarray(0, n) : new Float32Array(n);
+    for (let i = 0; i < n; i++) buf[i] = Math.abs(rel[i]);
+    buf.sort();
+    const at = buf[Math.min(n - 1, Math.round(TINT_SPREAD_PCT * (n - 1)))];
+    return Math.max(TINT_SPAN_MIN_DB, Math.min(TINT_SPAN_MAX_DB, at));
+}
+
 /** Ease `state.rel` toward `vals` with the TINT_TAU_MS time constant. */
 export function easeZones(state, vals, dtMs, tauMs = TINT_TAU_MS) {
     const n = vals.length;
@@ -143,13 +193,18 @@ export function easeZones(state, vals, dtMs, tauMs = TINT_TAU_MS) {
     return state.rel;
 }
 
-// The two ends of the scale and the colour of balance, over the scope's own
-// near-black. Desaturated and dark on purpose: this sits *behind* bars painted
-// in the spectrum palette, and a background that competed with them would cost
-// more legibility than it bought.
-export const TINT_COLD = [26, 58, 104];
-export const TINT_EVEN = [34, 40, 52];
-export const TINT_HOT = [104, 52, 26];
+// The two ends of the scale and the colour of balance.
+//
+// Balance is close to the panel's own near-black on purpose: evenly spread
+// audio should look much as it always did, and the colour should be something
+// that *happens* when the energy is lopsided rather than a wash the display
+// wears at all times. From there it runs to a deep blue where a region is
+// starved and a hot rust where it is taking more than its share — both dark
+// enough to stay behind bars painted in the spectrum palette, both saturated
+// enough to be unmistakable at a glance.
+export const TINT_COLD = [12, 42, 116];
+export const TINT_EVEN = [14, 18, 28];
+export const TINT_HOT = [148, 52, 10];
 
 /**
  * The background colour for a share of `relDb`, as `rgb(...)`.
@@ -158,8 +213,9 @@ export const TINT_HOT = [104, 52, 26];
  * rather than colourful. At relDb 0 this is TINT_EVEN whatever else is
  * happening — which is what makes evenly spread audio one colour.
  */
-export function tintColour(relDb, quiet = 1, span = TINT_SPAN_DB) {
-    const t = Math.max(-1, Math.min(1, (relDb || 0) / span)) * Math.max(0, Math.min(1, quiet));
+export function tintColour(relDb, quiet = 1, span = TINT_SPAN_MIN_DB) {
+    const raw = Math.max(-1, Math.min(1, (relDb || 0) / span));
+    const t = Math.sign(raw) * Math.abs(raw) ** TINT_GAMMA * Math.max(0, Math.min(1, quiet));
     const to = t >= 0 ? TINT_HOT : TINT_COLD;
     const k = Math.abs(t);
     const mix = (i) => Math.round(TINT_EVEN[i] + (to[i] - TINT_EVEN[i]) * k);
@@ -178,15 +234,21 @@ export function tintZones(state, bins, start, count, nowMs, zones = TINT_ZONES) 
         state.scratch = new Float32Array(zones);
         state.rel = null;
         state.at = 0;
+        state.span = null;
     }
     const { quiet } = zoneShares(bins, start, count, state.raw);
     smoothZones(state.raw, state.scratch);
     const dt = state.at ? nowMs - state.at : 0;
     state.at = nowMs;
     const rel = easeZones(state, state.raw, dt);
+    // The scale is eased along with everything else. It is derived from the
+    // *eased* shares rather than the raw ones so it cannot chase a transient,
+    // and easing it again keeps a change of signal from re-scaling the picture
+    // faster than the eye can follow.
+    const want = spreadOf(rel, state.scratch);
+    const ease = dt ? 1 - Math.exp(-dt / TINT_TAU_MS) : 1;
+    state.span = state.span == null ? want : state.span + (want - state.span) * ease;
     // The fade is eased too, or the gate opening snaps the whole background on.
-    state.quiet = state.quiet == null || !dt
-        ? quiet
-        : state.quiet + (quiet - state.quiet) * (1 - Math.exp(-dt / TINT_TAU_MS));
-    return { rel, quiet: state.quiet };
+    state.quiet = state.quiet == null || !dt ? quiet : state.quiet + (quiet - state.quiet) * ease;
+    return { rel, quiet: state.quiet, span: state.span };
 }

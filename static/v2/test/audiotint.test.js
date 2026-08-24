@@ -6,8 +6,8 @@
 
 const assert = require('assert');
 const {
-    TINT_EVEN, TINT_SPAN_DB, TINT_ZONES,
-    easeZones, smoothZones, tintColour, tintZones, zoneShares,
+    TINT_EVEN, TINT_SPAN_MAX_DB, TINT_SPAN_MIN_DB, TINT_ZONES,
+    easeZones, smoothZones, spreadOf, tintColour, tintZones, zoneShares,
 } = require('./.build/audiotint.cjs');
 
 let pass = 0;
@@ -62,6 +62,52 @@ t('a tilt in level is a tilt in share, at any volume', () => {
     for (let i = 0; i < lo.length; i++) assert.ok(Math.abs(lo[i] - hi[i]) < 1e-6);
 });
 
+// ── same energy, same colour ─────────────────────────────────────────────────
+//
+// The property the whole thing rests on: the background is a function of a
+// region's energy and nothing else — not of where it sits in the band, not of
+// what its neighbours are doing, not of the overall volume.
+
+t('two regions of equal energy get an identical colour, wherever they are', () => {
+    // Equal humps at the bottom and the top, quiet in between.
+    const { rel, quiet } = shares(band(-75, [
+        { from: 0, to: BINS / 8, db: -25 },
+        { from: BINS - BINS / 8, to: BINS, db: -25 },
+    ]));
+    assert.strictEqual(tintColour(rel[0], quiet), tintColour(rel[rel.length - 1], quiet));
+    // ...and the quiet middle is a different one.
+    assert.notStrictEqual(tintColour(rel[0], quiet), tintColour(rel[rel.length >> 1], quiet));
+});
+
+t('a third region matching one of them matches its colour too', () => {
+    const { rel, quiet } = shares(band(-75, [
+        { from: 0, to: BINS / 8, db: -25 },
+        { from: BINS * 3 / 8, to: BINS / 2, db: -25 },
+        { from: BINS - BINS / 8, to: BINS, db: -25 },
+    ]));
+    const c0 = tintColour(rel[0], quiet);
+    assert.strictEqual(tintColour(rel[Math.round(rel.length * 0.44)], quiet), c0);
+    assert.strictEqual(tintColour(rel[rel.length - 1], quiet), c0);
+});
+
+t('more energy is always warmer — the mapping never doubles back', () => {
+    // A staircase: every step up in level must be a step up the colour scale.
+    const a = new Float32Array(BINS);
+    const steps = 8;
+    for (let i = 0; i < BINS; i++) a[i] = -80 + Math.floor((i / BINS) * steps) * 6;
+    const { rel } = shares(a, steps);
+    for (let i = 1; i < steps; i++) assert.ok(rel[i] > rel[i - 1], `step ${i}: ${rel[i - 1]} → ${rel[i]}`);
+});
+
+t('a near-equal band is a near-equal colour, not an amplified difference', () => {
+    // Two decibels of drift across the whole band is "roughly equal", and must
+    // read as one colour rather than being stretched into the full scale.
+    const a = new Float32Array(BINS);
+    for (let i = 0; i < BINS; i++) a[i] = -50 + (i / BINS) * 2;
+    const { rel } = shares(a);
+    for (const v of rel) assert.ok(Math.abs(v) < 1.5, `${v} dB from even`);
+});
+
 // ── hot and cold ─────────────────────────────────────────────────────────────
 
 t('energy at the bottom reads hot low and cold high', () => {
@@ -85,14 +131,58 @@ t('the shares are a proper decomposition — the mean power is the reference', (
 });
 
 t('colour runs cold below and hot above, and saturates', () => {
-    const cold = tintColour(-TINT_SPAN_DB);
-    const hot = tintColour(TINT_SPAN_DB);
+    const cold = tintColour(-TINT_SPAN_MIN_DB);
+    const hot = tintColour(TINT_SPAN_MIN_DB);
     const blueOf = (s) => Number(s.match(/,(\d+)\)$/)[1]);
     const redOf = (s) => Number(s.match(/rgb\((\d+),/)[1]);
     assert.ok(blueOf(cold) > blueOf(hot));
     assert.ok(redOf(hot) > redOf(cold));
     // Past the span it does not keep going.
-    assert.strictEqual(tintColour(TINT_SPAN_DB * 3), hot);
+    assert.strictEqual(tintColour(TINT_SPAN_MIN_DB * 3), hot);
+});
+
+// ── the scale is the band's own spread ───────────────────────────────────────
+
+t('a wide spread scales to itself instead of saturating', () => {
+    const rel = new Float32Array([-30, -20, -10, 0, 10, 20, 30]);
+    assert.ok(spreadOf(rel, new Float32Array(7)) > 25, 'uses the range present');
+});
+
+t('a narrow spread does not get stretched into a rainbow', () => {
+    // A band flat to within a decibel must stay near the neutral colour.
+    const rel = new Float32Array([-0.4, 0.2, -0.1, 0.3, 0.1, -0.2, 0]);
+    assert.strictEqual(spreadOf(rel, new Float32Array(7)), TINT_SPAN_MIN_DB);
+    const span = spreadOf(rel, new Float32Array(7));
+    const cols = new Set(Array.from(rel, (v) => tintColour(v, 1, span)));
+    // Every one of them within a hair of even.
+    for (const v of rel) {
+        const red = Number(tintColour(v, 1, span).match(/rgb\((\d+),/)[1]);
+        assert.ok(Math.abs(red - TINT_EVEN[0]) < 20, `${red}`);
+    }
+    assert.ok(cols.size <= 7);
+});
+
+t('one freak notch cannot set the scale for everything else', () => {
+    const rel = new Float32Array([-60, -2, -1, 0, 1, 2, 3]);
+    assert.ok(spreadOf(rel, new Float32Array(7)) < 20, 'the outlier is not the scale');
+});
+
+t('the scale is bounded at both ends', () => {
+    const huge = Float32Array.from({ length: 8 }, () => -90);
+    assert.strictEqual(spreadOf(huge, new Float32Array(8)), TINT_SPAN_MAX_DB);
+});
+
+t('the same picture at twice the imbalance still uses the whole scale', () => {
+    // Doubling every deviation must not change which zones look hottest — the
+    // scale doubles with it. This is what "relative to the energy we have"
+    // buys: the display is about the shape, not the size.
+    const a = new Float32Array([-12, -6, 0, 6, 12]);
+    const b = Float32Array.from(a, (v) => v * 2);
+    const sa = spreadOf(a, new Float32Array(5));
+    const sb = spreadOf(b, new Float32Array(5));
+    for (let i = 0; i < a.length; i++) {
+        assert.strictEqual(tintColour(a[i], 1, sa), tintColour(b[i], 1, sb));
+    }
 });
 
 // ── silence ──────────────────────────────────────────────────────────────────
@@ -109,6 +199,39 @@ t('a closed gate is flat, not colourful', () => {
 
 t('audible audio is not faded', () => {
     assert.strictEqual(shares(band(-40)).quiet, 1);
+});
+
+t('a real spectrum is not mistaken for silence', () => {
+    // The shape that broke this: a busy few hundred hertz over a band that is
+    // otherwise near the analyser's floor. The mean of those bins is well
+    // under the silence line while the audio is plainly audible, so the gate
+    // has to read the peak — see TINT_SILENCE_DB.
+    const speech = band(-100, [{ from: 20, to: 90, db: -35 }]);
+    assert.strictEqual(shares(speech).quiet, 1);
+});
+
+t('a sloped spectrum is graduated, not two saturated ends', () => {
+    // What audio actually looks like: energy concentrated low, rolling off
+    // smoothly. A fixed scale painted this as hot at one end, cold at the
+    // other and nothing in between; the band's own spread gives the middle
+    // colours of its own.
+    const a = new Float32Array(BINS);
+    for (let i = 0; i < BINS; i++) a[i] = -30 - 55 * (i / BINS) ** 1.4;
+    const { rel, quiet, span } = tintZones({}, a, 0, BINS, 0);
+    const cols = new Set(Array.from(rel, (v) => tintColour(v, quiet, span)));
+    assert.ok(cols.size >= TINT_ZONES - 4, `only ${cols.size} of ${TINT_ZONES} distinct`);
+    // ...and the ends really are the ends.
+    assert.ok(rel[0] > 0 && rel[rel.length - 1] < 0);
+});
+
+t('a moderate imbalance is already visibly coloured', () => {
+    // Half the span should be well past halfway to the end colour, or the
+    // interesting part of the range all looks neutral.
+    const mid = tintColour(TINT_SPAN_MIN_DB / 2);
+    const end = tintColour(TINT_SPAN_MIN_DB);
+    const redOf = (s) => Number(s.match(/rgb\((\d+),/)[1]);
+    const reach = (redOf(mid) - TINT_EVEN[0]) / (redOf(end) - TINT_EVEN[0]);
+    assert.ok(reach > 0.55, `only ${(reach * 100) | 0}% of the way`);
 });
 
 t('the fade is gradual, not a switch', () => {

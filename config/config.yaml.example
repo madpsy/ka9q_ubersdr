@@ -455,52 +455,49 @@ server:
   # ─────────────────────────────────────────────────────────────────────────
   # WebSDR Protocol Compatibility
   # ─────────────────────────────────────────────────────────────────────────
-  #
+
+  # Enable/disable the WebSDR compatibility server (default: false).
   # UberSDR can emulate a WebSDR server (websdr.org software) on a separate
-  # TCP port.  This allows the original WebSDR browser frontend and any
-  # WebSDR-compatible tools to connect directly.
-  #
-  # enable_websdr: Enable/disable WebSDR compatibility server (default: false)
-  # websdr_waterfall_calibration: dBFS→pixel calibration offset (default: -13.0)
-  #   Adjust this if the waterfall appears too bright or too dark.
-  # websdr_email: Operator contact email shown in the WebSDR UI /~~orgstatus response.
-  #   XOR-obfuscated before transmission. Defaults to admin.email if not set.
-  #
+  # TCP port, so the original WebSDR browser frontend and any
+  # WebSDR-compatible tools can connect directly.
   enable_websdr: true
+
+  # Waterfall dBFS→pixel calibration offset (default: -13.0).
+  # Adjust this if the WebSDR waterfall appears too bright or too dark.
   websdr_waterfall_calibration: 20.0
+
+  # Operator contact email shown in the WebSDR UI /~~orgstatus response.
+  # XOR-obfuscated before transmission. Defaults to admin.email if not set.
   websdr_email: "operator@example.com"
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # websdr.org public directory registration
-  # ─────────────────────────────────────────────────────────────────────────
+  # Register this receiver with the websdr.org public directory (default: false).
+  # Requires enable_websdr: true.
   #
-  # Listing on websdr.org is a two-phase protocol and BOTH phases must work:
-  #
+  # Listing is a two-phase protocol and BOTH phases must work:
   #   1. Outbound: UberSDR sends
   #        GET /~~websdrorg?host=<websdr_hostname>&port=<websdr_tcp_port>
-  #      to websdr.ewi.utwente.nl:80 every 60 seconds.  A "200 OK / ok" reply
+  #      to websdr.ewi.utwente.nl:80 every 60 seconds. A "200 OK / ok" reply
   #      only means the ping was accepted — NOT that you will be listed.
-  #
   #   2. Inbound: websdr.org then opens a TCP connection back to the
   #      advertised hostname:port, waits about 60 seconds, sends
   #      GET /~~orgstatus, and reuses that same connection for status polls
-  #      roughly every 10 seconds.  UberSDR handles this natively.
+  #      roughly every 10 seconds. UberSDR handles this natively.
   #
-  # Because of phase 2, the advertised endpoint must be a real TCP endpoint
-  # reachable from the internet.  An HTTP reverse proxy is NOT equivalent —
+  # Because of phase 2 the advertised endpoint must be a real TCP endpoint
+  # reachable from the internet. An HTTP reverse proxy is NOT equivalent —
   # use a plain TCP forward/tunnel if you are not directly reachable.
-  #
-  # Requires enable_websdr: true.
   websdr_register_websdrorg: false
-  #
+
   # Public hostname advertised to websdr.org.
   # Leave empty to derive it from admin.public_url.
+  # Only used when websdr_register_websdrorg is true.
   websdr_hostname: ""
-  #
+
   # Public TCP port advertised to websdr.org (default: 8901).
   # This is the port the OUTSIDE WORLD connects to, which is not necessarily
   # the port UberSDR listens on — behind a NAT mapping or TCP tunnel it will
   # differ from the local WebSDR listen port.
+  # Only used when websdr_register_websdrorg is true.
   websdr_tcp_port: 8901
 
   # HTTP request logging (Apache combined log format)

@@ -161,8 +161,9 @@ export function zoneShares(bins, start, count, out) {
 }
 
 /**
- * Each zone's place on the colour scale, -1..+1, by *rank* rather than by
- * distance from the middle.
+ * Each zone's place on the colour scale, -1..+1, with 0 — green — pinned to
+ * the zones carrying exactly the average energy, and rank rather than distance
+ * deciding the rest.
  *
  * An audio spectrum is bimodal and a linear scale cannot draw it. The busy part
  * of the band sits thirty or forty decibels above the analyser's floor and the
@@ -187,19 +188,50 @@ export function zoneShares(bins, start, count, out) {
 export function rankTint(rel, out, scale = 1) {
     const n = rel.length;
     if (!n) return out;
-    if (n === 1) { out[0] = 0; return out; }
-    // Ranks by value, ties averaged. n is a couple of dozen, so the simple
-    // quadratic count is cheaper than sorting with an index permutation.
+
+    // Zero is not an arbitrary middle: `rel` is measured against the even
+    // share, so a zone at exactly 0 dB is one carrying exactly the average
+    // energy. That is the point green is nailed to, and it is why the ranking
+    // is done in two halves rather than over the band as a whole — ranked in
+    // one pass, the middle of the ramp would land on the *median* zone, which
+    // is wherever the middle of the distribution happens to fall and is not the
+    // average of anything.
+    //
+    // So: everything under the average is spread across blue-to-green by its
+    // rank among the zones under the average, everything over it across
+    // green-to-red the same way, and a zone sitting on the average is green
+    // outright. Both halves still use their whole sub-ramp, which is what keeps
+    // a lopsided band — most of it quiet, a little of it loud — from painting
+    // its quiet majority in one flat blue.
+    //
+    // Ties share a rank within their half, so equal energy is still exactly
+    // equal colour. A perfectly even band is every zone at 0: all green, which
+    // is the flat background evenly spread audio is supposed to have.
+    let below = 0;
+    let above = 0;
     for (let i = 0; i < n; i++) {
-        let below = 0;
+        if (rel[i] < 0) below++;
+        else if (rel[i] > 0) above++;
+    }
+    for (let i = 0; i < n; i++) {
+        const v = rel[i];
+        if (v === 0) { out[i] = 0; continue; }
+        const hot = v > 0;
+        const m = hot ? above : below;
+        // Rank within this half, ties averaged, as a 0..1 position. The half
+        // step at each end keeps a lone member off the extreme of the ramp —
+        // one zone a shade under the average is not the coldest thing there
+        // could ever be.
+        let lower = 0;
         let equal = 0;
         for (let j = 0; j < n; j++) {
-            if (rel[j] < rel[i]) below++;
-            else if (rel[j] === rel[i]) equal++;
+            const w = rel[j];
+            if (w === 0 || (w > 0) !== hot) continue;
+            if (hot ? w < v : w > v) lower++;
+            else if (w === v) equal++;
         }
-        // The middle of this value's block of ranks, as 0..1.
-        const r = (below + (equal - 1) / 2) / (n - 1);
-        out[i] = (r * 2 - 1) * scale;
+        const r = (lower + (equal - 1) / 2 + 0.5) / m;
+        out[i] = (hot ? r : -r) * scale;
     }
     return out;
 }
@@ -277,28 +309,48 @@ export function easeZones(state, vals, dtMs, tauMs = TINT_TAU_MS) {
 
 // The two ends of the scale and the colour of balance.
 //
-// The three are kept at much the same brightness on purpose, so the scale
-// reads as a change of hue rather than of light. A near-black middle made the
-// panel look like it had a hole in it where the typical part of the band was —
-// blue, then black, then a touch of red — instead of one continuous wash. All
-// three stay dark enough to sit behind bars painted in the spectrum palette.
+// Blue under the average, green on it, red over it — the reading everyone
+// already has for cold, normal and hot, and the middle of it is a colour in its
+// own right rather than an absence. A near-black middle made the panel look
+// like it had a hole in it where the ordinary part of the band was.
+//
+// The three are kept at much the same brightness on purpose, so the scale reads
+// as a change of hue rather than of light, and all three stay dark enough to
+// sit behind bars painted in the spectrum palette.
 export const TINT_COLD = [16, 46, 112];
-export const TINT_EVEN = [32, 44, 58];
+export const TINT_EVEN = [22, 64, 36];
 export const TINT_HOT = [140, 54, 16];
+
+// ...and the panel's own black, which is where the whole scale goes when there
+// is no audio. The bar view paints its background with this too, so the two
+// cannot drift apart and leave a silent panel a shade off its own edges.
+//
+// Silence has to land here rather than on the middle of the ramp. Fading to the
+// middle would say "every part of this band has an average share of the
+// energy", which is true of an empty band in the arithmetic and absurd on the
+// screen: the gate shuts and the panel turns green. Black is what the waterfall
+// above it does with the same silence, and it is what nothing should look like.
+export const TINT_SILENT = [5, 7, 12];
 
 /**
  * The background colour for a place on the scale, -1 (coldest) to +1 (hottest),
  * as `rgb(...)`.
  *
- * `quiet` fades the whole scale toward the balanced colour, so silence is flat
- * rather than colourful. At 0 this is TINT_EVEN whatever else is happening.
+ * `quiet` fades the whole scale toward the panel's black, so a band with no
+ * audio in it goes dark exactly as the waterfall above it does, rather than
+ * settling on the middle of the ramp and turning the panel green.
  */
 export function tintColour(pos, quiet = 1) {
     const raw = Math.max(-1, Math.min(1, pos || 0));
-    const t = Math.sign(raw) * Math.abs(raw) ** TINT_GAMMA * Math.max(0, Math.min(1, quiet));
+    const t = Math.sign(raw) * Math.abs(raw) ** TINT_GAMMA;
     const to = t >= 0 ? TINT_HOT : TINT_COLD;
     const k = Math.abs(t);
-    const mix = (i) => Math.round(TINT_EVEN[i] + (to[i] - TINT_EVEN[i]) * k);
+    // Where this zone sits on the scale...
+    const ramp = (i) => TINT_EVEN[i] + (to[i] - TINT_EVEN[i]) * k;
+    // ...and how much of the scale is showing at all: none of it in silence,
+    // which fades the lot to black rather than to the middle of the ramp.
+    const q = Math.max(0, Math.min(1, quiet));
+    const mix = (i) => Math.round(TINT_SILENT[i] + (ramp(i) - TINT_SILENT[i]) * q);
     return `rgb(${mix(0)},${mix(1)},${mix(2)})`;
 }
 

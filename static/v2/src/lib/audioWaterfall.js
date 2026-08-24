@@ -7,7 +7,7 @@
 
 import { getPalette } from './palettes.js';
 import { audioBins } from './audioBand.js';
-import { TINT_ZONES, tintColour, tintZones } from './audioTint.js';
+import { TINT_SILENT, TINT_ZONES, tintColour, tintZones } from './audioTint.js';
 
 // How fast the history scrolls, in rows a second. A setting rather than the
 // fixed 33 ms v1 runs at: what it should be depends on what is being watched —
@@ -252,6 +252,12 @@ export function drawAudioWaterfall({
 }
 
 /** State for the bar view's own auto-level, kept by whoever draws it. */
+// The bar view's own background, behind everything: the panel's black, and the
+// colour the headroom tint is cut back to below the bars. Named once in
+// audioTint.js, because that is also where a silent band fades to — the two
+// being the same colour is what makes "no audio" read as one flat panel.
+const BAR_BG = `rgb(${TINT_SILENT[0]},${TINT_SILENT[1]},${TINT_SILENT[2]})`;
+
 export function newBarLevel() {
     // `tint` is the background's own state — the eased shares between frames.
     // Kept here rather than in the panel for the same reason the level is: it
@@ -286,6 +292,11 @@ export function newBarLevel() {
 // zones' colours so the gradient does not fade out of its own picture. The
 // canvas interpolates between them, which is where the smoothness comes from:
 // two dozen colours become a continuous wash for the cost of two dozen stops.
+//
+// Painted across the whole canvas and then cut back to the headroom above the
+// bars — see drawAudioBars. Cutting is the cheap way round: one gradient fill
+// and one rectangle per bar, rather than a clipping path with a step in it for
+// every bar in the row.
 function drawBarTint(c, w, h, bins, start, count, state) {
     const { pos, quiet } = tintZones(state, bins, start, count, performance.now());
     const grad = c.createLinearGradient(0, 0, w, 0);
@@ -304,7 +315,7 @@ export function drawAudioBars({
     if (!canvas || !bins || bins.length !== binCount) return;
     const { w, h, dpr } = sizedCanvas(canvas);
     const c = canvas.getContext('2d', { alpha: false });
-    c.fillStyle = '#05070c';
+    c.fillStyle = BAR_BG;
     c.fillRect(0, 0, w, h);
 
     const { start, count } = audioBins(
@@ -313,11 +324,6 @@ export function drawAudioBars({
     if (!(count > 0)) return;
 
     const { floor, range } = levelWindow(bins, start, count, level, floorDb);
-
-    // The background: where the energy is, as a proportion of the whole band.
-    // Drawn first, so the bars sit on it — see lib/audioTint.js for what it
-    // means and why it is a share rather than a level.
-    if (level && level.tint) drawBarTint(c, w, h, bins, start, count, level.tint);
 
     // Bar width in device pixels, from a target in CSS pixels. Whole pixels, or
     // neighbouring bars round differently and the row develops a moiré of gaps
@@ -342,6 +348,8 @@ export function drawAudioBars({
     for (let i = 0; i <= 8; i++) grad.addColorStop(i / 8, colour(i / 8));
     c.fillStyle = grad;
 
+    // Heights first, because the background is drawn to fit around them.
+    const heights = new Int32Array(bars);
     for (let b = 0; b < bars; b++) {
         const lo = start + Math.floor((b / bars) * count);
         const hi = Math.max(lo + 1, start + Math.floor(((b + 1) / bars) * count));
@@ -352,9 +360,38 @@ export function drawAudioBars({
         if (contrast && contrast !== 1) t = Math.pow(t, 1 / contrast);
         // A floor of one pixel: a bar of no height reads as a gap in the
         // display rather than as silence, and silence is a thing to show.
-        const bh = Math.max(1, Math.round(t * h));
-        c.fillRect(b * step, h - bh, target, bh);
+        heights[b] = Math.max(1, Math.round(t * h));
     }
+
+    // The background: where the energy is, as a proportion of the whole band —
+    // see lib/audioTint.js for what it means and why it is a share rather than
+    // a level.
+    //
+    // Only in the headroom *above* the bars. Filling the whole panel put the
+    // wash behind the row as well, so it showed through every gap between two
+    // bars and the display read as coloured stripes rather than as a skyline
+    // against a coloured sky. Below the top of a bar the panel stays its own
+    // black, gaps included: the colour is the empty space, which is the space
+    // the reading is about.
+    //
+    // The cut follows the whole bar pitch rather than the bar itself, so the
+    // gap beside a bar is cleared to that bar's height and the skyline is a
+    // clean stepped edge instead of a comb.
+    if (level && level.tint) {
+        drawBarTint(c, w, h, bins, start, count, level.tint);
+        c.fillStyle = BAR_BG;
+        for (let b = 0; b < bars; b++) {
+            const x = b * step;
+            // The last one takes the remainder: `bars` is a floor division, so
+            // up to a bar's width of panel is left over on the right and would
+            // otherwise keep its colour all the way down.
+            const span = b === bars - 1 ? w - x : step;
+            c.fillRect(x, h - heights[b], span, heights[b]);
+        }
+        c.fillStyle = grad;
+    }
+
+    for (let b = 0; b < bars; b++) c.fillRect(b * step, h - heights[b], target, heights[b]);
 }
 
 export function drawAudioRuler(canvas, tuning, sampleRate, binCount) {

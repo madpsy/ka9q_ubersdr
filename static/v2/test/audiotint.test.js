@@ -7,6 +7,7 @@
 const assert = require('assert');
 const {
     TINT_EVEN, TINT_SPAN_MAX_DB, TINT_SPAN_MIN_DB, TINT_ZONES,
+    TINT_SILENT,
     centreOf, easeZones, rankTint, smoothZones, spreadOf, tintColour, tintZones, zoneShares,
 } = require('./.build/audiotint.cjs');
 
@@ -29,6 +30,7 @@ const tint = (bins, zones = TINT_ZONES) => tintZones({}, bins, 0, BINS, 0, zones
 const red = (c) => Number(c.match(/rgb\((\d+),/)[1]);
 const blue = (c) => Number(c.match(/,(\d+)\)$/)[1]);
 const EVEN = `rgb(${TINT_EVEN[0]},${TINT_EVEN[1]},${TINT_EVEN[2]})`;
+const BLACK = `rgb(${TINT_SILENT[0]},${TINT_SILENT[1]},${TINT_SILENT[2]})`;
 
 // ── the flat case, which is the whole point ──────────────────────────────────
 
@@ -115,13 +117,32 @@ t('a dead-flat floor beside a signal is one colour, not a gradient of noise', ()
     assert.strictEqual(floorCols.size, 1, 'the floor is one colour');
 });
 
-t('the typical part of the band keeps the middle of the ramp', () => {
+t('a quiet majority is not painted at the cold extreme', () => {
+    // A voice in an eighth of the band, the rest of it identical: those zones
+    // tie, so they share one colour — and because their half of the ramp is
+    // ranked among themselves, that colour is the middle of blue-to-green
+    // rather than saturated blue. This is the case that used to paint most of
+    // the panel one flat colour at the end of the scale.
     const a = new Float32Array(BINS).fill(-70);
     for (let i = 0; i < BINS / 8; i++) a[i] = -25;
     const { pos, quiet } = tint(a);
     assert.ok(red(tintColour(pos[0], quiet)) > TINT_EVEN[0] + 40, 'the voice is hot');
-    const mids = Array.from(pos).filter((v) => Math.abs(v) < 0.5);
-    assert.ok(mids.length >= 6, `only ${mids.length} zones in the middle`);
+    const rest = Array.from(pos.slice(5));
+    assert.ok(rest.every((v) => v === rest[0]), 'the identical zones agree');
+    assert.ok(Math.abs(rest[0]) < 0.75, `at ${rest[0]}, too near the extreme`);
+});
+
+t('green is pinned to the average, not to the median zone', () => {
+    // Two thirds of the band below the average and a third above: a zone
+    // sitting exactly on the average must still be green, wherever the middle
+    // of the distribution is.
+    const rel = new Float32Array([-9, -6, -3, 0, 4, 8]);
+    const out = rankTint(rel, new Float32Array(6));
+    assert.strictEqual(out[3], 0);
+    assert.strictEqual(tintColour(out[3]), EVEN);
+    // ...and the two halves each use their own range.
+    assert.ok(out[0] < out[1] && out[1] < out[2] && out[2] < 0);
+    assert.ok(out[4] > 0 && out[5] > out[4]);
 });
 
 t('a sloped spectrum is graduated across the whole ramp', () => {
@@ -223,12 +244,27 @@ t('the centre is the median zone, not the mean share', () => {
 
 // ── silence ──────────────────────────────────────────────────────────────────
 
-t('a closed gate is flat, not colourful', () => {
+t('no audio is black, the same as the waterfall above it', () => {
+    // Not the middle of the ramp: a silent band has every zone at an average
+    // share of nothing, which is arithmetically true and would turn the panel
+    // green. The gate shutting has to look like nothing being there.
     const a = new Float32Array(BINS);
     for (let i = 0; i < BINS; i++) a[i] = -120 + (i % 7);
     const { pos, quiet } = tint(a);
     assert.strictEqual(quiet, 0);
-    for (const v of pos) assert.strictEqual(tintColour(v, quiet), EVEN);
+    for (const v of pos) assert.strictEqual(tintColour(v, quiet), BLACK);
+    // Every point on the scale, not just the ones this frame happened to hit.
+    for (const v of [-1, -0.5, 0, 0.5, 1]) assert.strictEqual(tintColour(v, 0), BLACK);
+});
+
+t('the fade to black is gradual across the whole ramp', () => {
+    // Half faded, a hot zone is halfway between black and its colour — so a
+    // signal dying away dims rather than switching off.
+    const half = tintColour(1, 0.5);
+    const full = tintColour(1, 1);
+    assert.notStrictEqual(half, full);
+    assert.notStrictEqual(half, BLACK);
+    assert.ok(red(half) < red(full) && red(half) > TINT_SILENT[0]);
 });
 
 t('audible audio is not faded', () => {

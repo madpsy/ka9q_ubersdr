@@ -148,7 +148,15 @@ function firstRun(p, phone, touch) {
         // indistinguishable later from one the operator chose, and a panel that
         // gains a minimal view in a later build would then be held at "full" by
         // an answer nobody gave — see MINIMAL_LATECOMERS.
-        minimal: p.minimal ? !!m.minimal : undefined,
+        //
+        // `defaultMinimal` is the panel's own answer for a machine with no block
+        // of its own — a mouse-only desktop, where until now every panel opened
+        // whole whatever it thought about that. Read the same way `hidden` reads
+        // `defaultHidden`: the machine's block wins where it says anything, and
+        // this is what is left.
+        minimal: p.minimal
+            ? (m.minimal != null ? !!m.minimal : !!p.defaultMinimal)
+            : undefined,
         // On a phone every panel starts cut down, this one included. A sheet
         // over the spectrum has a fraction of a dock's room, and the minimal
         // view is the part of a panel worth having in that space — see

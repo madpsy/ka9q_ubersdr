@@ -16,6 +16,11 @@
 //                the starting point: dragging a splitter stores a weight of the
 //                operator's own, which then wins.
 //   Badge        optional component rendered in the header, for unread counts
+//   defaultMinimal true to ship in the cut-down view. Only consulted where the
+//                machine has no block of its own — `mobile` and `touch` say it
+//                for themselves, and a phone starts every panel cut down
+//                regardless. A default and never a preference: once someone has
+//                toggled the header control their layout says so.
 //   minimal      true when the panel has a minimal view. The header then shows
 //                a toggle, and Component is called with `minimal` — the panel
 //                itself decides what survives. That is all it takes to give any
@@ -198,13 +203,18 @@ const BUILT_IN = [
     // asking for.
     //
     // Minimal: the button, the note and the targets, without the two pickers —
-    // a scan is set up once and then started and stopped.
+    // a scan is set up once and then started and stopped. Which is also how it
+    // ships, because the shipped settings are the ones most sessions want: voice,
+    // on this band. The pickers are one click on the header away for the sessions
+    // that want something else, and until then they are two rows spent on
+    // answers nobody is going to change.
     {
         id: 'scanner',
         title: 'Scanner',
         icon: <Icon.Scan />,
         dock: 'left',
         minimal: true,
+        defaultMinimal: true,
         Component: ScannerPanel,
     },
     // Under the Receiver and its scanner, and it is the Receiver panel's picture: the

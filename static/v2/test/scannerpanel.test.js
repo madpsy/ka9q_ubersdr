@@ -49,6 +49,7 @@ globalThis.clearInterval = () => {};
 
 const {
     deep, render, reset, walk, words, ScannerPanel, _resetScanSettings, saveScanSettings,
+    PANEL_BY_ID, GROUPS, defaultLayout,
 } = require('./.build/scannerpanel.cjs');
 
 let pass = 0;
@@ -455,6 +456,43 @@ t('closing the panel takes the timer with it', () => {
     assert.ok(timer, 'the scan never started');
     for (const off of cleanups) off();
     assert.strictEqual(timer, null, 'the scan timer outlived the panel');
+});
+
+// ── Where it lands ──────────────────────────────────────────────────────────
+
+t('the panel is registered, under the Receiver, and in a group', () => {
+    const p = PANEL_BY_ID.scanner;
+    assert.ok(p, 'not in the registry');
+    assert.strictEqual(p.dock, 'left');
+    assert.strictEqual(p.title, 'Scanner');
+    assert.strictEqual(p.Component, ScannerPanel);
+    // No `requires`: the marker kinds it can scan include bookmarks, which every
+    // receiver has, so there is none it does not apply to.
+    assert.strictEqual(p.requires, undefined);
+
+    // A panel no group claims vanishes from every phone — see groups.jsx.
+    const group = GROUPS.find((g) => g.panels.includes('scanner'));
+    assert.ok(group, 'no group claims it');
+    assert.strictEqual(group.id, 'tune');
+    assert.strictEqual(
+        group.panels.indexOf('scanner'), group.panels.indexOf('receiver') + 1,
+        'it should sit directly under the Receiver, as it does in the dock',
+    );
+});
+
+t('it opens cut down, on a mouse as well as everywhere else', () => {
+    // The shipped settings are the ones most sessions want, so the two pickers
+    // are rows spent on answers nobody is going to change. Every other panel
+    // opens whole on a desktop, so this needs the registry to say so — see
+    // defaultMinimal.
+    for (const env of [{ phone: false, touch: false }, { phone: false, touch: true }]) {
+        const s = defaultLayout(env).sections.scanner;
+        assert.strictEqual(s.minimal, true, JSON.stringify(env));
+        assert.strictEqual(s.open, true, 'it ships collapsed');
+        assert.strictEqual(s.hidden, false, 'it ships hidden');
+    }
+    // A phone starts every panel cut down anyway, by its own rule.
+    assert.strictEqual(defaultLayout({ phone: true, touch: true }).sections.scanner.minimalMobile, true);
 });
 
 console.log(`\n${pass} Scanner panel checks passed`);

@@ -40,6 +40,8 @@ esbuild ../src/lib/ifSpectrum.js --bundle --format=cjs --platform=node \
     --outfile=.build/ifspectrum.cjs --log-level=warning
 esbuild ../src/lib/ifShape.js --bundle --format=cjs --platform=node \
     --outfile=.build/ifshape.cjs --log-level=warning
+esbuild ../src/lib/ifFit.js --bundle --format=cjs --platform=node \
+    --outfile=.build/iffit.cjs --log-level=warning
 esbuild ifpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/ifpanel.cjs --log-level=warning
 esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
@@ -534,3 +536,4 @@ node shell.test.js
 node barrelmarks.test.js
 node audioresume.test.js
 node wheelstep.test.js
+node iffit.test.js

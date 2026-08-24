@@ -51,6 +51,7 @@ import {
     bandBins, clampShapeSec, createShape, formatShape, measureShape, pushShapeRow, resetShape,
     shapeStats, shapeWantsZoom, shapeZoomSpan,
 } from '../lib/ifShape.js';
+import { formatFit, rawFit, updateFit } from '../lib/ifFit.js';
 import {
     IF_RATE_MAX, IF_RATE_MIN, IF_VIEWS, ZOOM_MIN, ZOOM_STEP,
     binWidthOf, binsInWindow, clampRate, clampZoom, coverageOf, createLevels, formatBinWidth,
@@ -87,7 +88,7 @@ const STATS_MS = 250;
 // Theme values this pane reads, through the same cached lookup the main
 // spectrum uses — getComputedStyle inside a draw loop costs more than the
 // drawing does.
-const THEME_VARS = ['--spec-bg', '--spec-grid', '--spec-band'];
+const THEME_VARS = ['--spec-bg', '--spec-grid', '--spec-band', '--warn'];
 
 // A row with no measurement behind it, as packed ABGR — the waterfall's own
 // background, so a window hanging off the end of the served view reads as
@@ -183,6 +184,8 @@ export default function IFSpectrumPanel({ minimal }) {
         measure: {},
         measured: null,
         measuredAt: 0,
+        // The fit verdict's patience — see updateFit in lib/ifFit.js.
+        fit: {},
 
         cmap: null,
         ring: null, ringCtx: null, ringH: 0,
@@ -580,6 +583,7 @@ export default function IFSpectrumPanel({ minimal }) {
     const peak = shown ? shown.peak : null;
     const busy = shown ? shown.occupancy : null;
     const floor = shown ? shown.floorDb : NaN;
+    const fit = formatFit(shown ? shown.fit : null);
     const floorDb = Number.isFinite(display.ifFloor) ? display.ifFloor : -110;
     const ceilDb = Number.isFinite(display.ifCeil) ? display.ifCeil : -20;
 
@@ -768,6 +772,11 @@ export default function IFSpectrumPanel({ minimal }) {
                         value={Number.isFinite(floor) ? floor.toFixed(1) : '—'}
                         unit={Number.isFinite(floor) ? 'dBFS' : ''}
                     />
+                    {/* Whether the passband fits the signal it is passing —
+                        averaged, mode-aware and deliberately slow to change:
+                        see lib/ifFit.js. A dash is "nothing to judge", which a
+                        quiet channel is. */}
+                    <Readout label="Filter" value={fit.value} unit={fit.unit} tone={fit.tone} />
                 </div>
             )}
 
@@ -1113,6 +1122,17 @@ function drawAll(st, spec, wf, ov) {
     st.measured = st.wantStats && stats
         ? measureShape(stats, st.win, st.band, st.measure)
         : null;
+    // Whether the filter fits what it is passing. From the *unmasked* average
+    // (`stats.open`) — clipping only shows in the margins the mask erases —
+    // and through the little state machine that keeps it from flapping between
+    // words. Carried on `measured` so it publishes at the same cadence.
+    if (st.measured) {
+        st.measured.fit = updateFit(
+            st.fit,
+            rawFit(stats.open, st.win, st.band, st.tuning, stats.floorDb),
+            now,
+        );
+    }
 
     let levels;
     if (st.d && st.d.ifAuto === false) {
@@ -1533,7 +1553,66 @@ function drawOverlay(st, canvas, trace, levels) {
     c.clearRect(0, 0, w, h);
     const col = themeColors(THEME_VARS);
     drawMarks(st, c, w, h, col, true);
+    drawFitMarks(st, c, w, h, col);
     if (st.has && st.has.merged) drawTrace(st, canvas, trace, levels, { mirror: false, over: true });
+}
+
+// The fit verdict on the picture itself: chevrons at the filter edges, in the
+// warn colour, saying which way to move them — outward where the signal is
+// being clipped, inward where the filter is mostly passing noise — and a
+// pointer at a neighbour sharing the passband. Nothing for "good" or for
+// off-centre: a chart wearing a tick would be clutter, and off-centre is a
+// tuning nudge the readout words better than an arrow could.
+//
+// Drawn from the settled verdict (lib/ifFit.js), never the instantaneous one,
+// so the chevrons hold as steady as the readout does.
+function drawFitMarks(st, c, w, h, col) {
+    const v = st.measured && st.measured.fit;
+    if (!v || v.kind === 'ok' || v.kind === 'offcentre') return;
+    const t = st.tuning;
+    const win = st.win;
+    if (!t || !win || !(win.span > 0)) return;
+    const dpr = st.dpr || 1;
+    const xOf = (hz) => ((hz - win.lo) / win.span) * w;
+    const s = 5 * dpr;
+    const y = 9 * dpr;
+
+    // A dark halo first, as the mark lines have: these sit over the waterfall
+    // views too, where a flat warn-coloured mark disappears into a bright row.
+    const shape = (path) => {
+        c.beginPath();
+        path();
+        c.closePath();
+        c.lineWidth = 2 * dpr;
+        c.strokeStyle = 'rgba(0,0,0,0.45)';
+        c.stroke();
+        c.fillStyle = col['--warn'] || '#f2b544';
+        c.fill();
+    };
+    // Sideways chevron at an edge, pointing the way the edge should move.
+    const tri = (x, dir) => shape(() => {
+        c.moveTo(x + dir * s, y);
+        c.lineTo(x, y - s);
+        c.lineTo(x, y + s);
+    });
+
+    const lo = xOf(t.frequency + Math.min(t.bandwidthLow, t.bandwidthHigh));
+    const hi = xOf(t.frequency + Math.max(t.bandwidthLow, t.bandwidthHigh));
+    if (v.kind === 'narrow') {
+        if (v.edge !== 'high') tri(lo, -1);
+        if (v.edge !== 'low') tri(hi, 1);
+    } else if (v.kind === 'wide') {
+        if (v.edge !== 'high') tri(lo, 1);
+        if (v.edge !== 'low') tri(hi, -1);
+    } else if (v.kind === 'neighbour') {
+        // Pointing down at the intruder, where the eye should go.
+        const x = xOf(t.frequency + v.offsetHz);
+        shape(() => {
+            c.moveTo(x, y + s);
+            c.lineTo(x - s, y - s);
+            c.lineTo(x + s, y - s);
+        });
+    }
 }
 
 // The filter and the dial, the same three marks and the same colours the main

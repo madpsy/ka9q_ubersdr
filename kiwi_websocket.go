@@ -849,8 +849,8 @@ func (kc *kiwiConn) enforceIdentityBan(identity string) bool {
 		return false
 	}
 
-	log.Printf("KiwiSDR: dropping %s connection from %s: identity %q matches banned User-Agent pattern %q",
-		kc.connType, kc.clientIP, identity, ban.Pattern)
+	log.Printf("KiwiSDR: dropping %s connection from %s: identity matches banned User-Agent pattern %q",
+		kc.connType, kc.clientIP, ban.Pattern)
 	if err := kc.conn.conn.SetReadDeadline(time.Now()); err != nil {
 		log.Printf("KiwiSDR: error expiring read deadline for banned client: %v", err)
 	}

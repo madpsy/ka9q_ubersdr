@@ -685,8 +685,8 @@ func (c *websdrConn) applyParamCommand(text string) {
 			// (as the KiwiSDR path does) would not stick, and the deferred
 			// cleanup in handleAudioStream closes silently.
 			if ban := clientIdentityBan(c.handler.config, c.handler.ipBanManager, c.clientIP, "", newName); ban != nil {
-				log.Printf("WebSDR: dropping connection from %s: identity %q matches banned User-Agent pattern %q",
-					c.clientIP, newName, ban.Pattern)
+				log.Printf("WebSDR: dropping connection from %s: identity matches banned User-Agent pattern %q",
+					c.clientIP, ban.Pattern)
 				c.conn.Close()
 				return
 			}
@@ -1432,8 +1432,6 @@ func websdrTCPRouter(ln net.Listener, cl *channelListener, handler *WebSDRHandle
 			log.Printf("WebSDR: TCP accept error: %v", err)
 			continue
 		}
-		remoteAddr := conn.RemoteAddr().String()
-		log.Printf("WebSDR: new TCP connection from %s", remoteAddr)
 		go websdrRouteConn(conn, cl, handler)
 	}
 }
@@ -1459,20 +1457,24 @@ func websdrRouteConn(conn net.Conn, cl *channelListener, handler *WebSDRHandler)
 		n, err := conn.Read(tmp)
 		if n > 0 {
 			buf = append(buf, tmp[:n]...)
-			log.Printf("WebSDR: TCP route read %d bytes from %s: %q", n, remoteAddr, sanitiseLogString(tmp[:n], 200))
 		}
 		if bytes.Contains(buf, []byte("\r\n\r\n")) {
 			break
 		}
 		if err != nil || len(buf) > 65536 {
-			log.Printf("WebSDR: TCP route read failed for %s: read %d bytes, err=%v",
-				remoteAddr, len(buf), err)
-			if len(buf) > 0 {
-				snippet := string(buf)
-				if len(snippet) > 200 {
-					snippet = snippet[:200]
-				}
-				log.Printf("WebSDR: TCP route partial data from %s: %q", remoteAddr, snippet)
+			// A connection that sends nothing and hangs up is a port scanner or a
+			// bare TCP health check, not a fault -- on a public port that is most
+			// of the traffic, so it is not logged. Two cases still are: a client
+			// that sent something but never a complete request, and a deadline
+			// expiry, which is how a too-short websdrFirstRequestTimeout shows up
+			// when the websdr.org directory idles before speaking.
+			timedOut := false
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				timedOut = true
+			}
+			if len(buf) > 0 || timedOut {
+				log.Printf("WebSDR: TCP route read failed for %s: read %d bytes, err=%v",
+					remoteAddr, len(buf), err)
 			}
 			conn.Close()
 			return
@@ -1488,11 +1490,8 @@ func websdrRouteConn(conn net.Conn, cl *channelListener, handler *WebSDRHandler)
 		firstLine = string(buf)
 	}
 
-	log.Printf("WebSDR: TCP route %s → %q", remoteAddr, firstLine)
-
 	// Route based on the request path.
 	if strings.Contains(firstLine, "/~~orgstatus") {
-		log.Printf("WebSDR: routing %s to raw /~~orgstatus handler", remoteAddr)
 		// Handle directly with raw socket I/O.
 		websdrHandleOrgStatusRaw(conn, buf, handler)
 	} else {
@@ -1647,11 +1646,6 @@ func websdrHandleOrgStatusRaw(conn net.Conn, firstReqRaw []byte, handler *WebSDR
 			leftover = parts[1]
 		}
 
-		firstLine := reqRaw
-		if idx := strings.Index(reqRaw, "\r\n"); idx >= 0 {
-			firstLine = reqRaw[:idx]
-		}
-
 		// Parse config= parameter.
 		reqCfg = ""
 		if m := orgStatusConfigRe.FindStringSubmatch(reqRaw); m != nil {
@@ -1665,11 +1659,11 @@ func websdrHandleOrgStatusRaw(conn net.Conn, firstReqRaw []byte, handler *WebSDR
 		isCacheHit := reqCfg != "" && reqCfg == strconv.Itoa(orgStatusSerial)
 		var rawResp string
 		if isCacheHit {
+			// Heartbeat: user count only, several times a minute. Not logged.
 			rawResp = usersLine
-			log.Printf("WebSDR: /~~orgstatus keep-alive from %s (raw, cache hit, %d bytes)", remoteAddr, len(rawResp))
 		} else {
 			rawResp = handler.buildOrgStatusBody()
-			log.Printf("WebSDR: /~~orgstatus keep-alive from %s (raw, full, %s)", remoteAddr, firstLine)
+			log.Printf("WebSDR: /~~orgstatus keep-alive from %s (raw, full, %d bytes)", remoteAddr, len(rawResp))
 		}
 
 		// Write raw body text — NO HTTP status line, NO headers.
@@ -1679,34 +1673,6 @@ func websdrHandleOrgStatusRaw(conn net.Conn, firstReqRaw []byte, handler *WebSDR
 			return
 		}
 	}
-}
-
-// sanitiseLogString converts raw bytes to a printable string safe for logging.
-// Non-printable characters (< 0x20, except tab) and DEL (0x7f) are replaced
-// with '?'. The result is trimmed of leading/trailing whitespace and capped at
-// maxLen runes.
-func sanitiseLogString(b []byte, maxLen int) string {
-	var sb strings.Builder
-	for _, c := range b {
-		if c == 0 {
-			break // stop at first NUL (end of unread buffer)
-		}
-		if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') || c == 0x7f {
-			sb.WriteByte('?')
-		} else {
-			sb.WriteByte(c)
-		}
-	}
-	s := strings.TrimSpace(sb.String())
-	// Collapse embedded newlines to spaces for single-line log output
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	runes := []rune(s)
-	if len(runes) > maxLen {
-		runes = runes[:maxLen]
-	}
-	return string(runes)
 }
 
 func noCacheHeaders(w http.ResponseWriter) {

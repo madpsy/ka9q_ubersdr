@@ -87,18 +87,16 @@ t('USB speech past the high edge is narrow, at that edge', () => {
     assert.ok(v.spillHz > 300 && v.spillHz < 500, `spill ${v.spillHz}`);
 });
 
-t('USB energy past the near edge is a mistune, not a narrow filter', () => {
-    // The signal runs below the dial: widening would only let the mistake in
-    // louder, so the advice is the tuning knob — negative means tune down.
+t('USB energy past the near edge is not the filter\'s fault — silence', () => {
+    // The signal runs below the dial: a mistune, which is the tuning knob's
+    // business and not this card's. No verdict at all beats a nagging one.
     const v = fit('usb', -800, 3400, 50, 2700, [{ lo: -300, hi: 2400, db: 25 }]);
-    assert.strictEqual(v.kind, 'offcentre');
-    assert.ok(v.offsetHz < -250 && v.offsetHz > -450, `off ${v.offsetHz}`);
+    assert.strictEqual(v.kind, 'ok');
 });
 
-t('LSB is the mirror: near-edge spill says tune up', () => {
+t('LSB is the mirror: near-edge spill is ignored there too', () => {
     const v = fit('lsb', -3400, 800, -2700, -50, [{ lo: -2400, hi: 300, db: 25 }]);
-    assert.strictEqual(v.kind, 'offcentre');
-    assert.ok(v.offsetHz > 250 && v.offsetHz < 450, `off ${v.offsetHz}`);
+    assert.strictEqual(v.kind, 'ok');
 });
 
 t('spill at both SSB edges is narrow at the far edge, the filter\'s own fault', () => {
@@ -107,12 +105,11 @@ t('spill at both SSB edges is narrow at the far edge, the filter\'s own fault', 
     assert.strictEqual(v.edge, 'high');
 });
 
-t('a CW carrier pressing through the filter edge is a mistune, never "narrow"', () => {
-    // Straddling the edge — still audible, badly tuned. Wholly outside the
-    // passband there is nothing being heard and rawFit rightly says nothing.
+t('a CW carrier pressing through the filter edge is never "narrow"', () => {
+    // Straddling the edge — badly tuned, which is not this card's business.
     const v = fit('cwu', -650, 650, -500, 500, [{ lo: 460, hi: 560, db: 30 }]);
-    assert.strictEqual(v.kind, 'offcentre');
-    assert.ok(v.offsetHz > 400, `off ${v.offsetHz}`);
+    assert.strictEqual(v.kind, 'ok');
+    // Wholly outside the passband nothing is being heard: no verdict at all.
     assert.strictEqual(fit('cwu', -650, 650, -500, 500, [{ lo: 540, hi: 590, db: 30 }]), null);
 });
 
@@ -193,10 +190,9 @@ t('a centred carrier never earns "wide"', () => {
     assert.strictEqual(v.kind, 'ok');
 });
 
-t('a carrier far off the middle is off-centre, signed', () => {
+t('a carrier off the middle is still just a carrier — no nagging', () => {
     const v = fit('cwu', -650, 650, -500, 500, [{ lo: 280, hi: 320, db: 30 }]);
-    assert.strictEqual(v.kind, 'offcentre');
-    assert.ok(v.offsetHz > 250 && v.offsetHz < 350, `off ${v.offsetHz}`);
+    assert.strictEqual(v.kind, 'ok');
 });
 
 t('a second carrier in the passband is the neighbour verdict, not off-centre', () => {
@@ -329,12 +325,11 @@ t('the readout wording covers every verdict', () => {
     assert.strictEqual(formatFit({ kind: 'ok' }).value, 'good');
     assert.strictEqual(formatFit({ kind: 'narrow', edge: 'high' }).unit, 'clips high');
     assert.strictEqual(formatFit({ kind: 'wide', slackHz: 1240 }).unit, '~1.2 kHz');
-    assert.strictEqual(formatFit({ kind: 'offcentre', offsetHz: -82 }).value, 'off-tune');
     assert.strictEqual(formatFit({ kind: 'neighbour', offsetHz: 340 }).unit, '+340 Hz');
     // Nothing the cell cannot hold — the card is a fixed grid column.
     for (const v of [
         null, { kind: 'ok' }, { kind: 'narrow', edge: 'both' }, { kind: 'wide', slackHz: 12400 },
-        { kind: 'neighbour', offsetHz: -1340 }, { kind: 'offcentre', offsetHz: 4200 },
+        { kind: 'neighbour', offsetHz: -1340 },
     ]) {
         const f = formatFit(v);
         assert.ok(f.value.length <= 8 && f.unit.length <= 10, `${f.value} ${f.unit}`);

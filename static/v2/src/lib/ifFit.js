@@ -39,16 +39,17 @@
 //   * SSB is one-sided, and only the far edge — the one the width slider moves
 //     — is judged at all. Slack at the near edge is what speech looks like (an
 //     empty first 250 Hz is normal), and *spill* past the near edge is not a
-//     bandwidth problem either: energy on the wrong side of the dial means the
-//     station is mistuned, and the honest advice is re-tune, not widen. Only
-//     the far edge can make the filter guilty.
+//     bandwidth problem either — energy on the wrong side of the dial means
+//     the station is mistuned, which is the tuning knob's business and not
+//     this card's. It is silently ignored: only the far edge can make the
+//     filter guilty.
 //
 //   * CW is symmetric too, but a keyed carrier is a few tens of hertz wide and
 //     every CW filter is "too wide" by the voice test, permanently — so that
 //     verdict is suppressed outright, and so is "narrow": a carrier pressing
-//     an edge of a symmetric filter is mistuned, not under-filtered. What CW
-//     actually wants to know is whether the carrier is centred and whether a
-//     *second* signal is inside the passband, which is the real reason CW
+//     an edge of a symmetric filter is mistuned, not under-filtered, and
+//     mistuning is not this card's business. The one thing CW is told about
+//     is a *second* signal inside the passband, which is the real reason CW
 //     filters get narrowed.
 //
 //   * IQ is not demodulated and gets no opinion at all.
@@ -122,12 +123,6 @@ export const FIT_SLACK_MIN_HZ = 300;
 // cliff — so its filter is allowed far more apparent slack before comment.
 export const FIT_SLACK_FRAC_FM = 0.4;
 
-// CW: how far off the middle of the passband the carrier may sit, as a
-// fraction of the half-width, before it is worth saying. And in hertz, so a
-// very narrow filter does not nag about single-bin wobble.
-export const FIT_CENTRE_FRAC = 0.35;
-export const FIT_CENTRE_MIN_HZ = 40;
-
 // The patience. A candidate verdict must hold this long before it is shown...
 export const FIT_PERSIST_MS = 2000;
 // ...and a shown verdict survives this much silence before clearing, because a
@@ -182,7 +177,6 @@ const midHzOf = (win, perBin, bin) => win.offLo + (bin + 0.5) * perBin;
  * Returns `{ kind, ... }`:
  *   narrow     { spillHz, edge: 'low'|'high'|'both' }   the signal is clipped
  *   neighbour  { offsetHz }                    another signal shares the filter
- *   offcentre  { offsetHz }                    CW carrier off the middle
  *   wide       { slackHz, extentHz }           the filter admits mostly noise
  *   ok         {}                              measured, and it fits
  */
@@ -253,11 +247,10 @@ export function rawFit(mean, win, band, tuning, floorDb, resHz = 0) {
     // Which edge can convict the filter depends on the family. On SSB only the
     // far edge can: energy past the *near* edge is on the wrong side of the
     // dial, which is a mistune — the fix is the tuning knob, and widening the
-    // filter toward it would only let the mistake in louder. CW never earns
-    // "narrow" at all: a carrier pressing the edge of a symmetric filter is
-    // the same mistune, and the off-centre check below reports it with the
-    // right advice. Symmetric voice is the only family where both edges are
-    // bandwidth's fault.
+    // filter toward it would only let the mistake in louder, so it is ignored
+    // rather than reported. CW never earns "narrow" at all: a carrier pressing
+    // the edge of a symmetric filter is the same mistune. Symmetric voice is
+    // the only family where both edges are bandwidth's fault.
     const spillMin = Math.max(FIT_SPILL_HZ, 2 * resHz);
     const spillLo = Math.max(0, bandLoHz - loHzOf(win, perBin, occFirst));
     const spillHi = Math.max(0, hiHzOf(win, perBin, occLast) - bandHiHz);
@@ -267,11 +260,6 @@ export function rawFit(mean, win, band, tuning, floorDb, resHz = 0) {
         const upper = limits.sideband === 'upper';
         if (upper ? clipHi : clipLo) {
             return { kind: 'narrow', spillHz: upper ? spillHi : spillLo, edge: upper ? 'high' : 'low' };
-        }
-        if (upper ? clipLo : clipHi) {
-            // Signed the way the dial should move to bring the signal back
-            // onto its own side: negative is tune down, as the CW one is.
-            return { kind: 'offcentre', offsetHz: upper ? -spillLo : spillHi };
         }
     } else if (group !== 'cw' && (clipLo || clipHi)) {
         return {
@@ -295,15 +283,10 @@ export function rawFit(mean, win, band, tuning, floorDb, resHz = 0) {
     }
 
     if (group === 'cw') {
-        // Off the middle of the passband, not off the dial: a shifted filter
-        // moves where "centred" is, and the operator meant the shift.
-        const centre = (bandLoHz + bandHiHz) / 2;
-        const off = midHzOf(win, perBin, main.peakBin) - centre;
-        const allow = Math.max(FIT_CENTRE_MIN_HZ, (width / 2) * FIT_CENTRE_FRAC, 1.5 * resHz);
-        if (Math.abs(off) > allow) return { kind: 'offcentre', offsetHz: off };
         // No wide verdict for CW — a carrier in any usable filter would earn
         // it every time, and an indicator that is always on is one that is
-        // never read.
+        // never read. With narrow refused above too, a lone CW signal simply
+        // fits; only a neighbour has anything to say.
         return { kind: 'ok' };
     }
 
@@ -406,7 +389,6 @@ export function formatFit(verdict) {
         };
         case 'wide': return { value: 'wide', unit: `~${hz(verdict.slackHz)}`, tone: 'weak' };
         case 'neighbour': return { value: 'shared', unit: signed(verdict.offsetHz), tone: 'weak' };
-        case 'offcentre': return { value: 'off-tune', unit: signed(verdict.offsetHz), tone: 'weak' };
         default: return { value: 'good', unit: 'fit', tone: 'good' };
     }
 }

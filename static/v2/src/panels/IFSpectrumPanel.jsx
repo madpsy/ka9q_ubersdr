@@ -98,7 +98,6 @@ const FIT_TIPS = {
     narrow: 'The signal continues past the filter edge — widening would stop it being clipped',
     wide: 'The filter is much wider than the signal — narrowing would shut out noise',
     neighbour: 'A second signal is inside the passband — narrowing or shifting would exclude it',
-    offcentre: 'The signal is not where the filter expects it — re-tune by about the amount shown',
 };
 
 // A row with no measurement behind it, as packed ABGR — the waterfall's own
@@ -787,7 +786,7 @@ export default function IFSpectrumPanel({ minimal }) {
                         averaged, mode-aware and deliberately slow to change:
                         see lib/ifFit.js. A dash is "nothing to judge", which a
                         quiet channel is — the same moments Peak shows one. */}
-                    <span title={FIT_TIPS[shown && shown.fit ? shown.fit.kind : '']}>
+                    <span className="ifs__fit" title={FIT_TIPS[shown && shown.fit ? shown.fit.kind : '']}>
                         <Readout label="Filter" value={fit.value} unit={fit.unit} tone={fit.tone} />
                     </span>
                 </div>
@@ -1577,15 +1576,14 @@ function drawOverlay(st, canvas, trace, levels) {
 // The fit verdict on the picture itself: chevrons at the filter edges, in the
 // warn colour, saying which way to move them — outward where the signal is
 // being clipped, inward where the filter is mostly passing noise — and a
-// pointer at a neighbour sharing the passband. Nothing for "good" or for
-// off-centre: a chart wearing a tick would be clutter, and off-centre is a
-// tuning nudge the readout words better than an arrow could.
+// pointer at a neighbour sharing the passband. Nothing for "good": a chart
+// wearing a tick would be clutter.
 //
 // Drawn from the settled verdict (lib/ifFit.js), never the instantaneous one,
 // so the chevrons hold as steady as the readout does.
 function drawFitMarks(st, c, w, h, col) {
     const v = st.measured && st.measured.fit;
-    if (!v || v.kind === 'ok' || v.kind === 'offcentre') return;
+    if (!v || v.kind === 'ok') return;
     const t = st.tuning;
     const win = st.win;
     if (!t || !win || !(win.span > 0)) return;

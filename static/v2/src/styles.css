@@ -5365,6 +5365,11 @@ a.btn { text-decoration: none; }
    it. */
 .ifs__stats > .readout:first-child { grid-column: 1 / -1; }
 .ifs__stats .readout__unit { white-space: nowrap; }
+/* The Filter verdict spans the row as Peak does: its unit is words rather than
+   a number, and half a column was where they escaped the card. The wrapper is
+   a span (it carries the tooltip), so the card inside must fill it. */
+.ifs__fit { grid-column: 1 / -1; display: block; min-width: 0; }
+.ifs__fit .readout { width: 100%; }
 
 /* The three pointer and readout switches on one row. Wraps rather than
    squeezing: in a narrow dock the labels side by side would otherwise ellipse

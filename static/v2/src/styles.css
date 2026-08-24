@@ -2002,6 +2002,14 @@ a.btn { text-decoration: none; }
 
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field--inline { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* A field with a button of its own to the right of its control — the Receiver
+   panel's filter width and shift, each with a reset. `flex-end` rather than
+   centring: the button lines up with the slider, not with the middle of the
+   label-and-slider stack, so a column of these has its buttons on the same line
+   as the tracks they belong to. */
+.filter-row { display: flex; align-items: flex-end; gap: 4px; }
+.filter-row > .field { flex: 1; min-width: 0; }
 .field__label {
     display: flex;
     align-items: baseline;

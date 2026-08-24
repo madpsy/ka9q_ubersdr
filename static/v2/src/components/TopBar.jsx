@@ -17,6 +17,7 @@ import {
 } from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
 import Popover from './Popover.jsx';
+import FilterReset from './FilterReset.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import { getSessionId } from '../radio/session.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
@@ -641,6 +642,11 @@ export default function TopBar({ compact }) {
                                         filterWidth + FILTER_WIDTH_STEP),
                                 )}
                             />
+                            {/* Past the wider step rather than between it and
+                                the slider: − slider + is one control read left
+                                to right, and putting an unrelated button inside
+                                that run would break the pair apart. */}
+                            <FilterReset />
                         </div>
                         <div className="bwpop__edges">
                             <span>{tuning.bandwidthLow} Hz</span>

@@ -24,6 +24,7 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import Barrel from '../components/Barrel.jsx';
 import FreqEntry from '../components/FreqEntry.jsx';
 import NavTypes from '../components/NavTypes.jsx';
+import FilterReset from '../components/FilterReset.jsx';
 import { Icon, Segmented, Slider } from '../components/ui.jsx';
 import { countryOf, shortMarkerName } from '../lib/markerNav.js';
 import { placeBarrelMarks } from '../lib/barrelMarks.js';
@@ -804,6 +805,12 @@ function WidthRow({ minimal }) {
                that line spent on figures the readout above already carries — the
                passband is printed beside the frequency. */
             value={minimal ? null : `${(width / 1000).toFixed(2)}k`}
+            /* Kept in the minimal view, unlike the reading beside it: the
+               squelch's Auto is on that line for the same reason, and both are
+               a way *out* of a setting you have wandered off with rather than a
+               figure to read. It is an icon, so it costs the line almost
+               nothing. */
+            action={<FilterReset className="pad-row__act" />}
         >
             <Slider
                 value={Math.min(width, maxWidth)}

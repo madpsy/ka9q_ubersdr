@@ -2,11 +2,13 @@ import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import FrequencyDial from '../components/FrequencyDial.jsx';
+import FilterReset from '../components/FilterReset.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import { VFO_IDS, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import {
     AGC_CONTROLS, FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MODES, MODE_BY_ID, TUNING_STEPS,
-    bandwidthLimits, edgesForWidth, hasAGCSettings, isIQ, maxFilterWidth, stepLabel,
+    edgesForShift, edgesForWidth, filterShift, hasAGCSettings, isIQ,
+    maxFilterWidth, stepLabel,
 } from '../radio/constants.js';
 
 // AGC, shown only for USB and LSB — the only modes v1 exposes it for.
@@ -111,7 +113,6 @@ export default function ReceiverPanel({ minimal }) {
     const setStep = (hz) => display.set({ tuneStep: hz });
 
     const mode = MODE_BY_ID[tuning.mode] || MODES[0];
-    const limits = bandwidthLimits(tuning.mode);
     const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
     const iq = isIQ(tuning.mode);
 
@@ -121,21 +122,11 @@ export default function ReceiverPanel({ minimal }) {
     // of setting a filter width cannot disagree about what a width means.
     const setWidth = (w) => actions.setBandwidth(...edgesForWidth(tuning.mode, w, tuning));
 
-    const setShift = (shift) => {
-        if (limits.sideband === 'lower') {
-            actions.setBandwidth(-width - shift, -shift);
-        } else if (limits.sideband === 'upper') {
-            actions.setBandwidth(shift, shift + width);
-        } else {
-            actions.setBandwidth(shift - width / 2, shift + width / 2);
-        }
-    };
-
-    const shift = limits.sideband === 'lower'
-        ? -tuning.bandwidthHigh
-        : limits.sideband === 'upper'
-            ? tuning.bandwidthLow
-            : (tuning.bandwidthLow + tuning.bandwidthHigh) / 2;
+    // Both halves of the shift live in constants.js beside the width's, so the
+    // slider and the reset button next to it cannot read the same passband
+    // differently — see filterShift.
+    const setShift = (s) => actions.setBandwidth(...edgesForShift(tuning.mode, s, tuning));
+    const shift = filterShift(tuning.mode, tuning.bandwidthLow, tuning.bandwidthHigh);
 
     return (
         <div className="stack">
@@ -174,30 +165,40 @@ export default function ReceiverPanel({ minimal }) {
                         actions.setBandwidth. Shown rather than hidden, and
                         reading 10.00 kHz, because the width is worth knowing
                         even when it cannot be changed. */}
-                    <Field
-                        label="Filter width"
-                        hint={iq ? `${(width / 1000).toFixed(2)} kHz — fixed in IQ` : `${(width / 1000).toFixed(2)} kHz`}
-                    >
-                        <Slider
-                            value={Math.min(width, maxFilterWidth(tuning.mode))}
-                            min={FILTER_WIDTH_MIN}
-                            max={maxFilterWidth(tuning.mode)}
-                            step={FILTER_WIDTH_STEP}
-                            onChange={setWidth}
-                            disabled={iq}
-                        />
-                    </Field>
+                    {/* The reset is a sibling of the Field, not a child of it:
+                        a Field is a <label>, and a button inside one is a click
+                        two elements want — the same reason the Multipad's row
+                        keeps its action outside. */}
+                    <div className="filter-row">
+                        <Field
+                            label="Filter width"
+                            hint={iq ? `${(width / 1000).toFixed(2)} kHz — fixed in IQ` : `${(width / 1000).toFixed(2)} kHz`}
+                        >
+                            <Slider
+                                value={Math.min(width, maxFilterWidth(tuning.mode))}
+                                min={FILTER_WIDTH_MIN}
+                                max={maxFilterWidth(tuning.mode)}
+                                step={FILTER_WIDTH_STEP}
+                                onChange={setWidth}
+                                disabled={iq}
+                            />
+                        </Field>
+                        <FilterReset />
+                    </div>
 
-                    <Field label="Filter shift" hint={iq ? '0 Hz — fixed in IQ' : `${Math.round(shift)} Hz`}>
-                        <Slider
-                            value={Math.round(shift)}
-                            min={-1500}
-                            max={1500}
-                            step={10}
-                            onChange={setShift}
-                            disabled={iq}
-                        />
-                    </Field>
+                    <div className="filter-row">
+                        <Field label="Filter shift" hint={iq ? '0 Hz — fixed in IQ' : `${Math.round(shift)} Hz`}>
+                            <Slider
+                                value={Math.round(shift)}
+                                min={-1500}
+                                max={1500}
+                                step={10}
+                                onChange={setShift}
+                                disabled={iq}
+                            />
+                        </Field>
+                        <FilterReset what="shift" />
+                    </div>
 
                     <div className="passband">
                         <span>{tuning.bandwidthLow} Hz</span>

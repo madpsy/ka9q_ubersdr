@@ -83,6 +83,20 @@ export function maxFilterWidth(mode) {
 export const FILTER_WIDTH_MIN = 100;
 export const FILTER_WIDTH_STEP = 50;
 
+/**
+ * The filter width a mode opens with.
+ *
+ * Taken from MODES rather than named again here, because that is the passband
+ * `commitMode` applies when the mode is chosen — so "the mode's default" means
+ * one thing whether it is arrived at by picking the mode or by resetting the
+ * width beside its slider. An unknown mode has no default; the floor is the only
+ * honest answer, and every caller clamps to it anyway.
+ */
+export function defaultFilterWidth(mode) {
+    const def = MODE_BY_ID[mode];
+    return def ? Math.abs(def.high - def.low) : FILTER_WIDTH_MIN;
+}
+
 const clampEdge = (v, l) => Math.max(l.min, Math.min(l.max, v));
 
 /**
@@ -99,6 +113,44 @@ export function edgesForWidth(mode, width, tuning) {
     if (l.sideband === 'upper') return [tuning.bandwidthLow, clampEdge(tuning.bandwidthLow + w, l)];
     const mid = (tuning.bandwidthLow + tuning.bandwidthHigh) / 2;
     return [clampEdge(mid - w / 2, l), clampEdge(mid + w / 2, l)];
+}
+
+/**
+ * Where a passband sits relative to the dial, in the terms the shift slider
+ * uses: a lower-sideband filter's shift is measured down from the carrier, an
+ * upper one's up from it, and a symmetric one's is simply its centre.
+ *
+ * Named here rather than derived in the Receiver panel, which is the only place
+ * that edits a shift, because the reset beside that slider has to ask the same
+ * question of the mode's *default* passband — and two spellings of "where is
+ * this filter sitting" would be two answers waiting to differ.
+ */
+export function filterShift(mode, low, high) {
+    const l = bandwidthLimits(mode);
+    if (l.sideband === 'lower') return -high;
+    if (l.sideband === 'upper') return low;
+    return (low + high) / 2;
+}
+
+/** The shift a mode opens with — 50 Hz for SSB, nothing for the rest. */
+export function defaultFilterShift(mode) {
+    const def = MODE_BY_ID[mode];
+    return def ? filterShift(mode, def.low, def.high) : 0;
+}
+
+/**
+ * Passband edges for a shift, keeping whatever width is in force.
+ *
+ * The mirror of edgesForWidth, and paired with it deliberately: the two sliders
+ * in the Receiver panel each move one of these two numbers and leave the other
+ * alone, which is only true if both are worked out from the same convention.
+ */
+export function edgesForShift(mode, shift, tuning) {
+    const l = bandwidthLimits(mode);
+    const w = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
+    if (l.sideband === 'lower') return [clampEdge(-w - shift, l), clampEdge(-shift, l)];
+    if (l.sideband === 'upper') return [clampEdge(shift, l), clampEdge(shift + w, l)];
+    return [clampEdge(shift - w / 2, l), clampEdge(shift + w / 2, l)];
 }
 
 /**

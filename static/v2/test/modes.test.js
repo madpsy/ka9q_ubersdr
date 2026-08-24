@@ -10,8 +10,9 @@
 
 const assert = require('assert');
 const {
-    FILTER_WIDTH_MIN, MODES, MODE_BY_ID, bandwidthLimits, edgesForEdgeDrag,
-    edgesForWidth, maxFilterWidth,
+    FILTER_WIDTH_MIN, MODES, MODE_BY_ID, bandwidthLimits, defaultFilterShift,
+    defaultFilterWidth, edgesForEdgeDrag, edgesForShift, edgesForWidth, filterShift,
+    maxFilterWidth,
 } = require('./.build/constants.cjs');
 
 let pass = 0;
@@ -272,6 +273,96 @@ t('a dragged edge stays inside the mode limits', () => {
                 assert.ok(low >= l.min && high <= l.max,
                     `${m.id} ${which} ${offset}: ${low}..${high} outside ${l.min}..${l.max}`);
                 assert.ok(high > low, `${m.id} ${which} ${offset}: inside out`);
+            }
+        }
+    }
+});
+
+// --- the reset beside each slider -------------------------------------------
+//
+// A reset is only worth having if "the default" is the same thing the mode
+// itself applies. These pin that, and the one property the two resets have to
+// keep: each puts back its own number and leaves the other alone.
+
+t('a mode’s default width and shift are its own passband', () => {
+    for (const m of MODES) {
+        assert.strictEqual(defaultFilterWidth(m.id), Math.abs(m.high - m.low), m.id);
+        assert.strictEqual(defaultFilterShift(m.id), filterShift(m.id, m.low, m.high), m.id);
+    }
+});
+
+t('an unknown mode has no default rather than a wrong one', () => {
+    assert.strictEqual(defaultFilterWidth('nosuchmode'), FILTER_WIDTH_MIN);
+    assert.strictEqual(defaultFilterShift('nosuchmode'), 0);
+});
+
+t('SSB’s default shift is the 50 Hz its passband starts at', () => {
+    // Not zero, which is what a reset written as "back to nothing" would have
+    // set — and it would have moved the passband onto the carrier.
+    assert.strictEqual(defaultFilterShift('usb'), 50);
+    assert.strictEqual(defaultFilterShift('lsb'), 50);
+    assert.strictEqual(defaultFilterShift('am'), 0);
+    assert.strictEqual(defaultFilterShift('cwu'), 0);
+});
+
+t('resetting the width from anywhere lands on the mode default', () => {
+    for (const m of MODES) {
+        // Somewhere else entirely: narrow, and shifted off the default.
+        const moved = at(m.id);
+        const [lo, hi] = edgesForWidth(m.id, 800, moved);
+        const from = { mode: m.id, bandwidthLow: lo, bandwidthHigh: hi };
+        const [low, high] = edgesForWidth(m.id, defaultFilterWidth(m.id), from);
+        assert.strictEqual(Math.round(Math.abs(high - low)), defaultFilterWidth(m.id), m.id);
+    }
+});
+
+t('a width reset keeps the shift, and a shift reset keeps the width', () => {
+    // The whole reason there are two buttons rather than one. Shifted 300 Hz off
+    // its default and narrowed, each reset must move exactly one of the two.
+    //
+    // Except where a mode's default width *is* its whole limit range — FM and IQ
+    // — because a filter at full width has nowhere left to sit off centre and the
+    // clamp takes the shift with it. That is edgesForWidth's own behaviour, which
+    // the width slider has always had: dragged to maximum, those two recentre.
+    // Nothing the reset can or should do differently.
+    for (const m of MODES.filter((x) => defaultFilterWidth(x.id) < maxFilterWidth(x.id))) {
+        const narrowed = edgesForWidth(m.id, 900, at(m.id));
+        const base = { mode: m.id, bandwidthLow: narrowed[0], bandwidthHigh: narrowed[1] };
+        const off = edgesForShift(m.id, filterShift(m.id, ...narrowed) + 300, base);
+        const from = { mode: m.id, bandwidthLow: off[0], bandwidthHigh: off[1] };
+
+        const w = edgesForWidth(m.id, defaultFilterWidth(m.id), from);
+        assert.strictEqual(Math.round(filterShift(m.id, ...w)),
+            Math.round(filterShift(m.id, ...off)), `${m.id}: width reset moved the shift`);
+
+        const sh = edgesForShift(m.id, defaultFilterShift(m.id), from);
+        assert.strictEqual(Math.round(Math.abs(sh[1] - sh[0])),
+            Math.round(Math.abs(off[1] - off[0])), `${m.id}: shift reset moved the width`);
+    }
+});
+
+t('a shift stays inside the mode limits', () => {
+    for (const m of MODES) {
+        const l = bandwidthLimits(m.id);
+        for (const s of [-99999, 99999]) {
+            const [low, high] = edgesForShift(m.id, s, at(m.id));
+            assert.ok(low >= l.min && high <= l.max,
+                `${m.id} shift ${s}: ${low}..${high} outside ${l.min}..${l.max}`);
+        }
+    }
+});
+
+t('the shift the panel reads back is the shift it set', () => {
+    // The slider shows filterShift() of whatever edgesForShift() produced. If
+    // those two disagree the control jumps under the thumb.
+    for (const m of MODES) {
+        for (const want of [-200, 0, 120, 400]) {
+            const [low, high] = edgesForShift(m.id, want, at(m.id));
+            const l = bandwidthLimits(m.id);
+            // Only where the request fits inside the limits: past them the
+            // clamp is the answer, and it is meant to differ.
+            if (low > l.min && high < l.max) {
+                assert.strictEqual(Math.round(filterShift(m.id, low, high)), want, `${m.id} ${want}`);
             }
         }
     }

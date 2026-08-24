@@ -10768,6 +10768,10 @@ a.btn { text-decoration: none; }
 }
 .scan__btn.is-scanning:hover { background: var(--accent); color: var(--bg); }
 
+/* The way out of "Squelch off", next to the button it unblocks. Flex-none, so
+   the sentence beside it gives up its width first. */
+.scan__auto { flex: none; }
+
 .scan__note {
     min-width: 0;
     font-size: 0.8em;

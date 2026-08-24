@@ -17,7 +17,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from '../react.js';
 import { Empty, Field, Icon, ShowMore, Switch } from '../components/ui.jsx';
-import { useRadio } from '../radio/RadioContext.jsx';
+import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import useMarkerNav, { stepToMarker } from '../lib/useMarkerNav.js';
 import { MARKER_TOLERANCE_HZ } from '../lib/markerNav.js';
 import { NAV_LABELS } from '../lib/markerNavSettings.js';
@@ -30,6 +30,17 @@ import { bandForFrequency } from '../lib/bands.js';
 import { formatFreqShort } from '../lib/format.js';
 import { isIQ } from '../radio/constants.js';
 
+// Why a scan cannot start, in the order the reasons are worth saying. Codes
+// rather than bare sentences because one of them — the squelch — is a state the
+// panel can offer to fix, and picking that one out by matching its wording would
+// make the wording something a test has to guard.
+const SCAN_BLOCKED = {
+    types: 'No marker kinds selected',
+    iq: 'No squelch in IQ mode',
+    squelch: 'Squelch off, so nothing would stop it',
+    empty: 'Needs two markers to scan between',
+};
+
 // How many targets the list shows before Show more. A page rather than the lot:
 // the dock scrolls, the panel does not, and a voice-heavy 40m evening can put a
 // hundred markers in here.
@@ -40,6 +51,42 @@ function useScanSettings() {
     const [settings, setSettings] = useState(savedScanSettings);
     useEffect(() => onScanSettings(setSettings), []);
     return settings;
+}
+
+/**
+ * The way out of the one blocked state that has one.
+ *
+ * A scan with the squelch off would step for ever, so the panel refuses it — but
+ * "Squelch off" is a dead end when the answer is one press of the same Auto the
+ * Signal panel carries, which sets the threshold just above the noise the
+ * receiver is currently hearing. Same action, same wording, so it is recognisably
+ * the control from over there rather than a second way of doing it.
+ *
+ * Its own component so the meter sampling comes and goes with it: this is the
+ * only part of the panel that wants a live SNR, and it is on screen only while
+ * the squelch is off. Two samples a second is all a button's enabled state
+ * needs — the Signal panel's twelve are for a slider marker that has to track.
+ */
+function AutoSquelch() {
+    const { actions } = useRadio();
+    const { snr } = useMeters(2);
+    return (
+        <button
+            type="button"
+            className="chip chip--button scan__auto"
+            // Disabled rather than silently doing nothing: autoSquelch sets the
+            // threshold from the recent SNR history, and with no reading yet —
+            // the receiver stopped, or just started — it returns without
+            // changing anything.
+            disabled={snr == null}
+            title={snr == null
+                ? 'No SNR reading yet — start the receiver and give it a moment'
+                : 'Set the squelch just above the recent noise level, so the scan has something to stop on'}
+            onClick={actions.autoSquelch}
+        >
+            Auto
+        </button>
+    );
 }
 
 /**
@@ -64,15 +111,19 @@ function useScan(radio, list, types) {
     const { meters, squelch, tuning } = radio;
     const [scanning, setScanning] = useState(false);
 
-    const blocked = !types.length
-        ? 'No marker kinds selected'
+    // The reason as a code as well as a sentence. Only one of them has anything
+    // the panel can offer to do about it, and testing for that by comparing the
+    // sentence would make the wording load-bearing.
+    const why = !types.length
+        ? 'types'
         : isIQ(tuning.mode)
-            ? 'No squelch in IQ mode'
+            ? 'iq'
             : !squelch.enabled
-                ? 'Squelch off, so nothing would stop it'
+                ? 'squelch'
                 : list.length < 2
-                    ? 'Needs two markers to scan between'
+                    ? 'empty'
                     : null;
+    const blocked = why ? SCAN_BLOCKED[why] : null;
 
     // What the timer must read live. The effect is started once per scan and
     // must not be torn down and rebuilt as spots arrive — and a `radio` or a
@@ -127,6 +178,7 @@ function useScan(radio, list, types) {
     return {
         scanning,
         blocked,
+        why,
         stop: () => setScanning(false),
         toggle: () => {
             if (scanning) { setScanning(false); return; }
@@ -156,7 +208,26 @@ export default function ScannerPanel({ minimal }) {
     );
 
     const scan = useScan(radio, list, types);
-    const rows = list.slice(0, shown);
+
+    // Where the dial is among the targets — the one the scan locked on to, or
+    // whichever was clicked.
+    const onIdx = list.findIndex((m) => Math.abs(m.freq - tuning.frequency) <= MARKER_TOLERANCE_HZ);
+
+    // The locked-on target leads the list, so the answer to "what did it stop
+    // on" is the first row rather than something several pages down: a scan of a
+    // busy band walks through far more markers than the eight this shows, and
+    // the one it stopped on was usually not among them.
+    //
+    // Only once it has stopped, though. While a scan is running the dial lands
+    // on a different target every dwell, and pinning each in turn would reshuffle
+    // the whole list four times a second — a list nobody could read, to show a
+    // row that is already marked where it stands. The scan order itself is
+    // untouched either way: `list` stays in frequency order, and this is what is
+    // drawn from it.
+    const ordered = !scan.scanning && onIdx > 0
+        ? [list[onIdx], ...list.slice(0, onIdx), ...list.slice(onIdx + 1)]
+        : list;
+    const rows = ordered.slice(0, shown);
 
     // Picking a target by hand is taking the dial back, so it ends the scan
     // rather than being stepped off a dwell later.
@@ -183,6 +254,10 @@ export default function ScannerPanel({ minimal }) {
                     <Icon.Scan size={13} />
                     {scan.scanning ? 'Scanning' : 'Scan'}
                 </button>
+                {/* Beside the Scan button rather than after the note, so it
+                    is not the thing that gets pushed out of a narrow dock —
+                    the sentence can ellipsise, the way out of it should not. */}
+                {scan.why === 'squelch' && <AutoSquelch />}
                 <span className="scan__note">{note}</span>
             </div>
 

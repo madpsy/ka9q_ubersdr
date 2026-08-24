@@ -41,9 +41,14 @@ globalThis.removeEventListener = () => {};
 let timer = null;
 globalThis.setTimeout = (fn, ms) => { timer = { fn, ms }; return timer; };
 globalThis.clearTimeout = (h) => { if (h === timer) timer = null; };
+// The Auto button samples the meters on an interval. Nothing here winds it — the
+// stub never mounts an expanded child's effects — but a real one would keep node
+// running after the last check.
+globalThis.setInterval = () => 0;
+globalThis.clearInterval = () => {};
 
 const {
-    render, reset, walk, words, ScannerPanel, _resetScanSettings, saveScanSettings,
+    deep, render, reset, walk, words, ScannerPanel, _resetScanSettings, saveScanSettings,
 } = require('./.build/scannerpanel.cjs');
 
 let pass = 0;
@@ -88,6 +93,10 @@ const fire = () => { const h = timer; timer = null; h.fn(); };
 const byClass = (tree, cls) => walk(tree).filter((n) => (
     typeof n.props?.className === 'string' && n.props.className.split(' ').includes(cls)
 ));
+// The Auto button is its own component, so walk() stops at it — deep() calls it.
+const autoBtn = (tree) => deep(tree).filter((n) => (
+    typeof n.props?.className === 'string' && n.props.className.split(' ').includes('scan__auto')
+))[0];
 const scanBtn = (tree) => byClass(tree, 'scan__btn')[0];
 const label = (tree) => scanBtn(tree).props.children.filter((c) => typeof c === 'string').join('');
 const note = (tree) => byClass(tree, 'scan__note')[0].props.children;
@@ -257,6 +266,55 @@ t('a hop that changes mode dwells long enough to hear it', () => {
     assert.strictEqual(timer.ms, 250, 'a same-mode hop took the mode-change dwell');
 });
 
+t('what the scan locked on to leads the list', () => {
+    // A scan of a busy band walks through far more markers than the eight rows
+    // this shows, so the one it stopped on is usually somewhere below the fold.
+    // "What did it stop on" has to be the first row.
+    reset();
+    scanBookmarks();
+    const ctx = context();
+    start(ctx);
+
+    // Two dwells with nothing heard, then a signal on the third target.
+    clock += 250;
+    fire();
+    clock += 250;
+    fire();
+    assert.strictEqual(ctx.tuned.at(-1).frequency, 14300000);
+    // The dial follows, which the static context does not do by itself.
+    ctx.tuning = { ...ctx.tuning, frequency: 14300000 };
+    clock += 200;
+    ctx.meters.current.lastGateOpenAt = clock;
+    clock += 50;
+    fire();
+
+    const stopped = render(ScannerPanel, {}, ctx).tree;
+    assert.strictEqual(label(stopped), 'Scan', 'it did not stop');
+    const freqs = byClass(stopped, 'scan__freq').map((n) => n.props.children);
+    assert.strictEqual(freqs[0], '14.300 MHz', `locked on to 14.300, list reads ${freqs}`);
+    assert.ok(byClass(stopped, 'scan__row')[0].props.className.includes('is-active'));
+    // The rest keep their order, and nothing is lost out of the middle.
+    assert.deepStrictEqual(freqs.slice(1), ['14.100 MHz', '14.200 MHz']);
+});
+
+t('a running scan does not reshuffle the list under itself', () => {
+    // The dial lands on a different target every dwell. Pinning each in turn
+    // would reorder the whole list four times a second, to show a row that is
+    // already marked where it stands.
+    reset();
+    scanBookmarks();
+    const ctx = context();
+    start(ctx);
+    ctx.tuning = { ...ctx.tuning, frequency: 14300000 };
+
+    const running = render(ScannerPanel, {}, ctx).tree;
+    assert.strictEqual(label(running), 'Scanning');
+    assert.deepStrictEqual(
+        byClass(running, 'scan__freq').map((n) => n.props.children),
+        ['14.100 MHz', '14.200 MHz', '14.300 MHz'],
+    );
+});
+
 t('picking a target by hand ends the scan', () => {
     reset();
     scanBookmarks();
@@ -284,6 +342,48 @@ t('a scan with the squelch off would never stop, so it is refused', () => {
     const { tree } = render(ScannerPanel, {}, ctx);
     assert.strictEqual(scanBtn(tree).props.disabled, true);
     assert.ok(/Squelch off/.test(note(tree)), note(tree));
+});
+
+t('the squelch being off comes with the way to set it', () => {
+    // A refusal with nothing to do about it is a dead end. The same Auto the
+    // Signal panel carries, calling the same action, so pressing it here means
+    // what it means over there.
+    reset();
+    scanBookmarks();
+    const set = [];
+    const ctx = context({
+        squelch: { value: -100, enabled: false, threshold: null },
+        actions: { tuneTo: () => {}, ensureVisible: () => {}, autoSquelch: () => set.push(true) },
+    });
+    const { tree } = render(ScannerPanel, {}, ctx);
+    const btn = autoBtn(tree);
+    assert.ok(btn, 'no way out of the squelch being off');
+    assert.strictEqual(btn.props.disabled, false);
+    btn.props.onClick();
+    assert.strictEqual(set.length, 1, 'Auto did not set the squelch');
+});
+
+t('Auto is dead until there is a reading to set it from', () => {
+    // autoSquelch takes the threshold from the recent SNR history and returns
+    // without changing anything when there is none — a button that silently did
+    // nothing would read as broken.
+    reset();
+    scanBookmarks();
+    const ctx = context({ squelch: { value: -100, enabled: false, threshold: null } });
+    ctx.meters.current.snr = null;
+    assert.strictEqual(autoBtn(render(ScannerPanel, {}, ctx).tree).props.disabled, true);
+});
+
+t('the way to set the squelch is only offered when that is what is wrong', () => {
+    reset();
+    scanBookmarks();
+    // Squelch on and markers to scan: nothing is blocked, so nothing to fix.
+    assert.strictEqual(autoBtn(render(ScannerPanel, {}, context()).tree), undefined);
+    // IQ has no gate at all, so setting one is not the answer either.
+    reset();
+    const iq = context();
+    iq.tuning = { ...iq.tuning, mode: 'iq' };
+    assert.strictEqual(autoBtn(render(ScannerPanel, {}, iq).tree), undefined);
 });
 
 t('IQ has no gate, so it has no scan either', () => {

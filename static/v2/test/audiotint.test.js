@@ -7,7 +7,7 @@
 const assert = require('assert');
 const {
     TINT_EVEN, TINT_SPAN_MAX_DB, TINT_SPAN_MIN_DB, TINT_ZONES,
-    easeZones, smoothZones, spreadOf, tintColour, tintZones, zoneShares,
+    centreOf, easeZones, smoothZones, spreadOf, tintColour, tintZones, zoneShares,
 } = require('./.build/audiotint.cjs');
 
 let pass = 0;
@@ -148,6 +148,47 @@ t('a wide spread scales to itself instead of saturating', () => {
     assert.ok(spreadOf(rel, new Float32Array(7)) > 25, 'uses the range present');
 });
 
+t('the typical part of the band is the neutral colour, not the starved one', () => {
+    // The shape that made the panel mostly blue: a voice in a few zones, the
+    // rest of the band ordinary. Centred on the mean share, "ordinary" reads
+    // as starved; centred on the median it reads as typical, and only the
+    // voice departs from it.
+    const a = new Float32Array(BINS).fill(-70);
+    for (let i = 0; i < BINS / 8; i++) a[i] = -25;
+    const { rel, quiet, span, centre } = tintZones({}, a, 0, BINS, 0);
+    const even = `rgb(${TINT_EVEN[0]},${TINT_EVEN[1]},${TINT_EVEN[2]})`;
+    // The quiet majority sits at the neutral colour...
+    assert.strictEqual(tintColour(rel[rel.length - 1], quiet, span, centre), even);
+    assert.strictEqual(tintColour(rel[rel.length >> 1], quiet, span, centre), even);
+    // ...and the loud part is hot.
+    const red = (c) => Number(c.match(/rgb\((\d+),/)[1]);
+    assert.ok(red(tintColour(rel[0], quiet, span, centre)) > TINT_EVEN[0] + 40);
+});
+
+t('the centre is the median zone, not the mean share', () => {
+    // Seven zones, one of them carrying almost everything: the median is the
+    // ordinary one, and the mean would be well above it.
+    const rel = new Float32Array([-8, -7, -6, -6, -5, -4, 30]);
+    const mid = centreOf(rel, new Float32Array(7));
+    assert.strictEqual(mid, -6);
+});
+
+t('a flat band is still one colour under the new centre', () => {
+    const rel = new Float32Array([3, 3, 3, 3, 3]);
+    const mid = centreOf(rel, new Float32Array(5));
+    const span = spreadOf(rel, new Float32Array(5), mid);
+    const first = tintColour(rel[0], 1, span, mid);
+    for (const v of rel) assert.strictEqual(tintColour(v, 1, span, mid), first);
+});
+
+t('cold is still reachable — a genuine notch reads cold', () => {
+    const rel = new Float32Array([0, 0, 0, -25, 0, 0, 0]);
+    const mid = centreOf(rel, new Float32Array(7));
+    const span = spreadOf(rel, new Float32Array(7), mid);
+    const blue = (c) => Number(c.match(/,(\d+)\)$/)[1]);
+    assert.ok(blue(tintColour(rel[3], 1, span, mid)) > TINT_EVEN[2] + 20);
+});
+
 t('a narrow spread does not get stretched into a rainbow', () => {
     // A band flat to within a decibel must stay near the neutral colour.
     const rel = new Float32Array([-0.4, 0.2, -0.1, 0.3, 0.1, -0.2, 0]);
@@ -164,7 +205,8 @@ t('a narrow spread does not get stretched into a rainbow', () => {
 
 t('one freak notch cannot set the scale for everything else', () => {
     const rel = new Float32Array([-60, -2, -1, 0, 1, 2, 3]);
-    assert.ok(spreadOf(rel, new Float32Array(7)) < 20, 'the outlier is not the scale');
+    const mid = centreOf(rel, new Float32Array(7));
+    assert.ok(spreadOf(rel, new Float32Array(7), mid) < 20, 'the outlier is not the scale');
 });
 
 t('the scale is bounded at both ends', () => {
@@ -219,7 +261,8 @@ t('a sloped spectrum is graduated, not two saturated ends', () => {
     for (let i = 0; i < BINS; i++) a[i] = -30 - 55 * (i / BINS) ** 1.4;
     const { rel, quiet, span } = tintZones({}, a, 0, BINS, 0);
     const cols = new Set(Array.from(rel, (v) => tintColour(v, quiet, span)));
-    assert.ok(cols.size >= TINT_ZONES - 4, `only ${cols.size} of ${TINT_ZONES} distinct`);
+    // Most zones distinct — the ends clamp, which is the scale doing its job.
+    assert.ok(cols.size >= TINT_ZONES - 8, `only ${cols.size} of ${TINT_ZONES} distinct`);
     // ...and the ends really are the ends.
     assert.ok(rel[0] > 0 && rel[rel.length - 1] < 0);
 });

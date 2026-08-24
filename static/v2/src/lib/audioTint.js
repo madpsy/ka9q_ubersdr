@@ -165,16 +165,44 @@ export function smoothZones(vals, scratch) {
 }
 
 /**
- * How far from even this band's zones actually are — the scale the colours are
- * spent on. A high percentile of |rel| rather than the maximum, so one dead
- * notch cannot set the scale for everything else, clamped into the range where
- * the answer stays meaningful.
+ * The middle of this band — the share a typical zone has, in dB relative to an
+ * even spread. The point the colour scale is centred on.
+ *
+ * The median rather than the even share itself, and the difference is the whole
+ * look of the display. "Even" is the *mean* power, and a mean is dragged up by
+ * whatever is loudest: put a voice's energy in three zones out of twenty-four
+ * and the even share sits above nearly all of them, so nearly every zone reads
+ * as starved and the panel paints blue almost everywhere with a spot of red
+ * where the voice is. That is a true statement about mean power and a useless
+ * picture — it says "most of the band is not the loudest part of the band",
+ * which was never in doubt.
+ *
+ * The median says something worth drawing instead: most of the band is
+ * *typical*, and the colours are spent on what departs from typical in either
+ * direction. A flat band still has every zone at its median, so evenly spread
+ * audio is still one flat colour — the promise survives the change of centre.
  */
-export function spreadOf(rel, scratch) {
+export function centreOf(rel, scratch) {
+    const n = rel.length;
+    if (!n) return 0;
+    const buf = scratch && scratch.length >= n ? scratch.subarray(0, n) : new Float32Array(n);
+    buf.set(rel.subarray ? rel.subarray(0, n) : rel);
+    buf.sort();
+    const mid = n >> 1;
+    return n % 2 ? buf[mid] : (buf[mid - 1] + buf[mid]) / 2;
+}
+
+/**
+ * How far from the centre this band's zones actually are — the scale the
+ * colours are spent on. A high percentile of |rel - centre| rather than the
+ * maximum, so one dead notch cannot set the scale for everything else, clamped
+ * into the range where the answer stays meaningful.
+ */
+export function spreadOf(rel, scratch, centre = 0) {
     const n = rel.length;
     if (!n) return TINT_SPAN_MIN_DB;
     const buf = scratch && scratch.length >= n ? scratch.subarray(0, n) : new Float32Array(n);
-    for (let i = 0; i < n; i++) buf[i] = Math.abs(rel[i]);
+    for (let i = 0; i < n; i++) buf[i] = Math.abs(rel[i] - centre);
     buf.sort();
     const at = buf[Math.min(n - 1, Math.round(TINT_SPREAD_PCT * (n - 1)))];
     return Math.max(TINT_SPAN_MIN_DB, Math.min(TINT_SPAN_MAX_DB, at));
@@ -195,16 +223,14 @@ export function easeZones(state, vals, dtMs, tauMs = TINT_TAU_MS) {
 
 // The two ends of the scale and the colour of balance.
 //
-// Balance is close to the panel's own near-black on purpose: evenly spread
-// audio should look much as it always did, and the colour should be something
-// that *happens* when the energy is lopsided rather than a wash the display
-// wears at all times. From there it runs to a deep blue where a region is
-// starved and a hot rust where it is taking more than its share — both dark
-// enough to stay behind bars painted in the spectrum palette, both saturated
-// enough to be unmistakable at a glance.
-export const TINT_COLD = [12, 42, 116];
-export const TINT_EVEN = [14, 18, 28];
-export const TINT_HOT = [148, 52, 10];
+// The three are kept at much the same brightness on purpose, so the scale
+// reads as a change of hue rather than of light. A near-black middle made the
+// panel look like it had a hole in it where the typical part of the band was —
+// blue, then black, then a touch of red — instead of one continuous wash. All
+// three stay dark enough to sit behind bars painted in the spectrum palette.
+export const TINT_COLD = [16, 46, 112];
+export const TINT_EVEN = [32, 44, 58];
+export const TINT_HOT = [140, 54, 16];
 
 /**
  * The background colour for a share of `relDb`, as `rgb(...)`.
@@ -213,8 +239,8 @@ export const TINT_HOT = [148, 52, 10];
  * rather than colourful. At relDb 0 this is TINT_EVEN whatever else is
  * happening — which is what makes evenly spread audio one colour.
  */
-export function tintColour(relDb, quiet = 1, span = TINT_SPAN_MIN_DB) {
-    const raw = Math.max(-1, Math.min(1, (relDb || 0) / span));
+export function tintColour(relDb, quiet = 1, span = TINT_SPAN_MIN_DB, centre = 0) {
+    const raw = Math.max(-1, Math.min(1, ((relDb || 0) - centre) / span));
     const t = Math.sign(raw) * Math.abs(raw) ** TINT_GAMMA * Math.max(0, Math.min(1, quiet));
     const to = t >= 0 ? TINT_HOT : TINT_COLD;
     const k = Math.abs(t);
@@ -245,10 +271,12 @@ export function tintZones(state, bins, start, count, nowMs, zones = TINT_ZONES) 
     // *eased* shares rather than the raw ones so it cannot chase a transient,
     // and easing it again keeps a change of signal from re-scaling the picture
     // faster than the eye can follow.
-    const want = spreadOf(rel, state.scratch);
+    const wantMid = centreOf(rel, state.scratch);
+    const want = spreadOf(rel, state.scratch, wantMid);
     const ease = dt ? 1 - Math.exp(-dt / TINT_TAU_MS) : 1;
     state.span = state.span == null ? want : state.span + (want - state.span) * ease;
+    state.mid = state.mid == null ? wantMid : state.mid + (wantMid - state.mid) * ease;
     // The fade is eased too, or the gate opening snaps the whole background on.
     state.quiet = state.quiet == null || !dt ? quiet : state.quiet + (quiet - state.quiet) * ease;
-    return { rel, quiet: state.quiet, span: state.span };
+    return { rel, quiet: state.quiet, span: state.span, centre: state.mid };
 }

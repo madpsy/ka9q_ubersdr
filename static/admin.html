@@ -29407,8 +29407,9 @@ const tooltipLine2 = timeStr;
                 }
 
                 // Calculate PPM calibration value
-                // Empirically determined: calibrate must be OPPOSITE sign of offset
-                // If offset is -3 Hz (slow), calibrate = +1.2e-7 (positive) to speed it up
+                // Empirically determined: the correction is OPPOSITE in sign to the offset.
+                // If offset is -3 Hz (slow), the correction is +1.2e-7 -- a reference
+                // frequency above nominal -- to speed the oscillator up.
                 const expectedFreq = data.expected_frequency;
                 const ppmError = avgOffset / expectedFreq;
                 const calibrateValue = -ppmError; // Invert sign - opposite of offset
@@ -29447,6 +29448,12 @@ const tooltipLine2 = timeStr;
                 const existingPPM = (existingCalibrate * 1e6).toFixed(3);
                 const incrementalPPM = (calibrateValue * 1e6).toFixed(3);
                 const newPPM = (newCalibrateValue * 1e6).toFixed(3);
+
+                // The config stores a reference frequency, not the fraction, so the
+                // preview below has to show what will really be written -- see
+                // calibrateToReference / the apply path in applyCalibration().
+                const existingReferenceStr = calibrateToReference(existingCalibrate).toFixed(3);
+                const newReferenceStr = calibrateToReference(newCalibrateValue).toFixed(3);
 
                 // Check if calibration values are the same (no change needed)
                 const noChangeNeeded = Math.abs(newCalibrateValue - existingCalibrate) < 1e-10;
@@ -29515,13 +29522,14 @@ const tooltipLine2 = timeStr;
                             <div style="padding: 15px; background: #fff3cd; border-radius: 5px; border: 2px solid #ffc107;">
                                 <strong style="color: #856404;">Proposed Radiod Configuration Change:</strong>
                                 <div style="margin-top: 10px; padding: 10px; background: #fff; border-radius: 3px; font-family: monospace; font-size: 14px; border: 1px solid #dee2e6;">
-                                    <span style="color: #999;">calibrate = ${existingCalibrate.toExponential(6)}</span> → <strong style="color: #28a745;">calibrate = ${newCalibrateValue.toExponential(6)}</strong>
+                                    <span style="color: #999;">reference = ${existingReferenceStr}</span> → <strong style="color: #28a745;">reference = ${newReferenceStr}</strong>
+                                    <div style="margin-top: 6px; font-size: 12px; color: #999;">(${existingPPM} ppm → ${newPPM} ppm, relative to the nominal 27 MHz reference)</div>
                                 </div>
                                 <div style="margin-top: 10px; font-size: 12px; color: #856404;">
-                                    <em>(Calibrate correction is opposite sign of offset. Negative offset requires positive calibrate to speed up oscillator.)</em>
+                                    <em>(The correction is opposite in sign to the offset. A negative offset raises the reference frequency to speed the oscillator up.)</em>
                                 </div>
                                 <div style="margin-top: 15px; padding: 12px; background: #e3f2fd; border-radius: 5px; border: 1px solid #2196f3; font-size: 13px; color: #0d47a1;">
-                                    💡 <strong>Tip:</strong> If applying calibration makes your offset worse instead of better, set <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">calibrate = 0</code> in your radiod config and restart. Your oscillator may already be well-calibrated.
+                                    💡 <strong>Tip:</strong> If applying calibration makes your offset worse instead of better, set <code style="background: #fff; padding: 2px 6px; border-radius: 3px;">reference = 27000000</code> in your radiod config and restart. Your oscillator may already be well-calibrated.
                                 </div>
                             </div>
                         </div>
@@ -30095,10 +30103,10 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
             if (willMakeWorse) {
                 if (!confirm(
                     `⚠️ WARNING: This calibration will increase the magnitude of your existing calibration.\n\n` +
-                    `Existing: ${calibrationData.existingCalibrate.toExponential(6)}\n` +
-                    `New: ${(calibrationData.existingCalibrate + calculatedCalibrationValue).toExponential(6)}\n\n` +
+                    `Existing: ${calibrateToReference(calibrationData.existingCalibrate).toFixed(3)} Hz (${(calibrationData.existingCalibrate * 1e6).toFixed(3)} ppm)\n` +
+                    `New: ${calibrateToReference(calibrationData.existingCalibrate + calculatedCalibrationValue).toFixed(3)} Hz (${((calibrationData.existingCalibrate + calculatedCalibrationValue) * 1e6).toFixed(3)} ppm)\n\n` +
                     `If your previous calibration made things worse, this will make it even worse.\n\n` +
-                    `Consider setting calibrate = 0 instead.\n\n` +
+                    `Consider setting reference = 27000000 instead.\n\n` +
                     `Continue anyway?`
                 )) {
                     return;
@@ -30246,10 +30254,12 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
         //     calibrate = reference / 27e6 - 1
         //     reference = 27e6 * (1 + calibrate)
         //
-        // Old configs are converted to "reference" by the radiod container's
-        // entrypoint, which leaves the original "calibrate" line behind as a
-        // comment. The regexes below are anchored at start-of-line so they match
-        // only an active setting, never that comment.
+        // Nothing converts an old "calibrate" line for us -- a config predating the
+        // driver change simply has no "reference" key, so it reads back as a zero
+        // correction and the apply path adds a "reference" line to the hardware
+        // section. Any leftover "calibrate" line is inert and is left alone. The
+        // regexes below are anchored at start-of-line so they match only an active
+        // setting, never a commented-out one.
         const NOMINAL_REFERENCE_HZ = 27e6;
         // The old driver clamped |calibrate| >= 1e-4 (100 ppm) to zero as a typo
         // guard. Current radiod applies "reference" with no range check at all, so

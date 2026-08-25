@@ -42,6 +42,10 @@ type spectrumUpdate struct {
 	binBandwidth float64
 	binCount     int
 	sendBinCount bool
+	// fftAverages accompanies a bin bandwidth change: the averaging window
+	// scales with 1/bin_bw, so the two have to move together. Zero means "not
+	// carried", as for every other field here.
+	fftAverages int
 }
 
 // merge folds a newer request into a pending one.
@@ -64,6 +68,9 @@ func (u *spectrumUpdate) merge(next spectrumUpdate) {
 	}
 	if next.binCount == 0 {
 		u.binCount = prev.binCount
+	}
+	if next.fftAverages == 0 {
+		u.fftAverages = prev.fftAverages
 	}
 }
 

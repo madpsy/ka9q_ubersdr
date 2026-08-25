@@ -100,5 +100,115 @@ t('nothing measured, nothing said', () => {
     assert.strictEqual(fr.offsetLabel(null), '');
 });
 
+// --- the marks on the spectrum -------------------------------------------------
+
+const REF = {
+    enabled: true,
+    expected_frequency: 10_000_000,
+    detected_frequency: 10_000_004,
+    frequency_offset: 4,
+    snr: 22.5,
+};
+
+t('the marks are absent for every reason the badge is', () => {
+    assert.strictEqual(fr.refMarks(null), null);
+    assert.strictEqual(fr.refMarks(desc(null)), null);
+    assert.strictEqual(fr.refMarks(desc({ enabled: false })), null);
+    // Running, but nothing measured yet: the server sends `enabled` alone.
+    assert.strictEqual(fr.refMarks(desc({ enabled: true })), null);
+});
+
+t('a reference with no expected frequency cannot be drawn', () => {
+    // The badge can still show an offset here; the marks cannot, because there
+    // is nowhere to put them.
+    assert.strictEqual(fr.refMarks(desc({ enabled: true, frequency_offset: 4 })), null);
+    assert.strictEqual(fr.refMarks(desc({ ...REF, expected_frequency: 0 })), null);
+});
+
+t('the two frequencies are where the station is and where it is heard', () => {
+    const m = fr.refMarks(desc(REF));
+    assert.strictEqual(m.expectedHz, 10_000_000);
+    assert.strictEqual(m.actualHz, 10_000_004);
+    assert.strictEqual(m.offsetHz, 4);
+});
+
+t('the offset drawn is the gap between the lines, whatever the server called it', () => {
+    // The two must agree or the picture contradicts the badge beside it.
+    const m = fr.refMarks(desc({ ...REF, detected_frequency: 9_999_990, frequency_offset: 4 }));
+    assert.strictEqual(m.offsetHz, -10, 'the offset should follow the frequencies actually drawn');
+});
+
+t('a missing detected frequency falls back to the reported offset', () => {
+    const m = fr.refMarks(desc({ enabled: true, expected_frequency: 10e6, frequency_offset: -7 }));
+    assert.strictEqual(m.actualHz, 9_999_993);
+    assert.strictEqual(m.offsetHz, -7);
+});
+
+t('the second line waits until the zoom can separate it', () => {
+    const m = fr.refMarks(desc(REF));   // 4 Hz out
+    // A full-span view: 4 Hz is a ten-thousandth of a pixel.
+    assert.strictEqual(fr.refMarksSeparate(m, 30e6, 1000), false);
+    // 100 kHz across 1000 px is 100 Hz/px — still one line.
+    assert.strictEqual(fr.refMarksSeparate(m, 100e3, 1000), false);
+    // 500 Hz across 1000 px is 0.5 Hz/px, so 4 Hz is 8 px — clear of the gap,
+    // and the zoom at which a few hertz of error is worth looking at.
+    assert.strictEqual(fr.refMarksSeparate(m, 500, 1000), true);
+});
+
+t('the boundary is where the halos stop touching', () => {
+    const m = fr.refMarks(desc(REF));   // 4 Hz
+    // Separation in px is |offset| / span * width. Solve for exactly the gap.
+    const span = (4 / fr.REF_MIN_GAP_PX) * 1000;
+    assert.strictEqual(fr.refMarksSeparate(m, span, 1000), true, 'exactly the gap should draw');
+    assert.strictEqual(fr.refMarksSeparate(m, span * 1.02, 1000), false, 'just under it should not');
+});
+
+t('a receiver exactly on frequency draws one line, not two on the same pixel', () => {
+    const m = fr.refMarks(desc({ ...REF, detected_frequency: 10e6, frequency_offset: 0 }));
+    assert.strictEqual(m.offsetHz, 0);
+    // However far in you zoom, there is only one frequency to point at.
+    assert.strictEqual(fr.refMarksSeparate(m, 1000, 1000), false);
+});
+
+t('nothing to draw is never separate', () => {
+    assert.strictEqual(fr.refMarksSeparate(null, 1000, 1000), false);
+    const m = fr.refMarks(desc(REF));
+    assert.strictEqual(fr.refMarksSeparate(m, 0, 1000), false);
+    assert.strictEqual(fr.refMarksSeparate(m, 1000, 0), false);
+});
+
+t('each line says what it is', () => {
+    const expected = fr.refMarkTitle(desc(REF), 'expected');
+    assert.ok(/10\.000000 MHz/.test(expected), expected);
+    assert.ok(/\+4 Hz/.test(expected), expected);
+    assert.ok(/22\.5 dB/.test(expected), expected);
+
+    const actual = fr.refMarkTitle(desc(REF), 'actual');
+    assert.ok(/10\.000004 MHz/.test(actual), actual);
+    assert.ok(/high/.test(actual), 'a positive offset reads high');
+
+    const low = fr.refMarkTitle(desc({ ...REF, detected_frequency: 9_999_996, frequency_offset: -4 }), 'actual');
+    assert.ok(/low/.test(low), 'a negative offset reads low');
+});
+
+t('a receiver on frequency says so rather than reporting a zero error', () => {
+    const on = fr.refMarkTitle(desc({ ...REF, detected_frequency: 10e6, frequency_offset: 0 }), 'expected');
+    assert.ok(/exactly/.test(on), on);
+});
+
+t('there is no title when there are no marks', () => {
+    assert.strictEqual(fr.refMarkTitle(desc({ enabled: false }), 'expected'), '');
+    assert.strictEqual(fr.refTipText(desc({ enabled: false }), 'ref-expected'), '');
+});
+
+t('the hover line is short enough for the readout box', () => {
+    const tip = fr.refTipText(desc(REF), 'ref-expected');
+    assert.ok(tip.length < 60, `too long for the tip box: ${tip}`);
+    assert.ok(/Reference/.test(tip), tip);
+
+    const actual = fr.refTipText(desc(REF), 'ref-actual');
+    assert.ok(/10\.000004 MHz/.test(actual), actual);
+});
+
 if (process.exitCode) console.log('\nfrequency reference tests FAILED');
 else console.log(`\nall ${pass} frequency reference tests passed`);

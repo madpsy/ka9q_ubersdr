@@ -254,6 +254,11 @@ export const DEFAULTS = {
     // one tap away from off for anyone who wants the bars bare.
     scopePeaks: true,
     scopeHeat: true,
+    // The readings under the pictures: peak frequency, how far it stands above
+    // the noise, where the energy is centred, and the floor itself. On, and
+    // shown in the minimal view as well — they are read at a glance like the
+    // pictures are, rather than set like the controls beside them.
+    scopeStats: true,
     // ── The IF Spectrum panel ───────────────────────────────────────────────
     //
     // Its own settings rather than the main display's, because the two panes are

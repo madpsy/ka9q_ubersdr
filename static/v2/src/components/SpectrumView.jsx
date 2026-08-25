@@ -38,7 +38,10 @@ import {
 } from '../lib/spectrumTrace.js';
 import { approachFor, retentionFor } from '../lib/timeConstant.js';
 import { newPanPace, panFlush, panStep } from '../lib/panPacing.js';
-import { freqOffset, offsetBand, offsetLabel, offsetTitle } from '../lib/freqRef.js';
+import {
+    freqOffset, offsetBand, offsetLabel, offsetTitle,
+    refMarks, refMarkTitle, refMarksSeparate, refTipText,
+} from '../lib/freqRef.js';
 import {
     PEAK_GAP_PX, PEAK_REFRESH_MS, PEAK_TAU_MS, averageTrace, findPeaks, layoutPeakLabels,
     peakCount, peakPlace, peakSnr,
@@ -1668,6 +1671,11 @@ export default function SpectrumView() {
     const statsAt = statsPlace(display.spectrumStats, mobile);
     // Peak markers. Resolved here and left on the gfx ref, as bgOpacity and the station
     // colour are, rather than being dug out of the settings inside the draw.
+    // The frequency reference's two lines, resolved here and left on the gfx ref
+    // as the peak markers are. Null whenever the monitor is off or has not
+    // measured yet, which is what makes the marks absent rather than drawn at
+    // some default.
+    gfx.current.freqRef = refMarks(radio.serverInfo);
     gfx.current.peaksWanted = peakCount(display.peakMarks);
     gfx.current.peaksSnr = peakSnr(display.peakMinSnr);
     gfx.current.peaksPlace = peakPlace(display.peakMarksAt);
@@ -1713,7 +1721,22 @@ export default function SpectrumView() {
         const b = xAt(t.frequency + t.bandwidthHigh);
         const lo = Math.min(a, b) - EDGE_GRAB_PX;
         const hi = Math.max(a, b) + EDGE_GRAB_PX;
-        return x >= lo && x <= hi ? 'filter' : null;
+        if (x >= lo && x <= hi) return 'filter';
+
+        // The frequency reference last, so it never takes a hit from the dial or
+        // the filter: those are what the pointer is usually asking about, and
+        // this is a standing fact that happens to be drawn in the same place.
+        //
+        // The 'actual' line is offered only when it is actually drawn, on the
+        // same test the drawing uses — pointing at a line that is not there
+        // would name a frequency with nothing under it.
+        const ref = gfx.current.freqRef;
+        if (ref) {
+            if (refMarksSeparate(ref, cfg.span, r.width)
+                && Math.abs(x - xAt(ref.actualHz)) <= EDGE_GRAB_PX) return 'ref-actual';
+            if (Math.abs(x - xAt(ref.expectedHz)) <= EDGE_GRAB_PX) return 'ref-expected';
+        }
+        return null;
     }, []);
 
     // Which passband edge is under the pointer, if either. The geometry and the
@@ -2754,7 +2777,13 @@ export default function SpectrumView() {
                             transform: hoverInfo.x > sizes.w - 150 ? 'translateX(-100%)' : undefined,
                         }}
                     >
-                        {hoverInfo.mark && (
+                        {hoverInfo.mark && hoverInfo.mark.startsWith('ref-') && (
+                            <div className="spec-tip__mark" title={refMarkTitle(radio.serverInfo,
+                                hoverInfo.mark === 'ref-actual' ? 'actual' : 'expected')}>
+                                {refTipText(radio.serverInfo, hoverInfo.mark)}
+                            </div>
+                        )}
+                        {hoverInfo.mark && !hoverInfo.mark.startsWith('ref-') && (
                             <div className="spec-tip__mark">
                                 {hoverInfo.mark === 'dial' ? 'Tuned' : 'Filter'}
                                 {': '}
@@ -3255,6 +3284,21 @@ const MARK_MIN_GAP_PX = 5;
 const DIAL_DASH = [6, 3];
 const EDGE_DASH = [4, 8];
 
+// The frequency reference's own rhythm: a long dash with a short gap, so it
+// reads as a ruled line rather than as one of the tuning marks. It is not
+// something you tune by and not part of your passband — it is a fixed fact
+// about the receiver, and it should look like one.
+const REF_DASH = [2, 4];
+
+// Fixed rather than from the palette, and deliberately not the dial's or the
+// edges' colours: these are a different kind of fact and should not be mistaken
+// for either. Both carry the same halo as every other mark, which is what makes
+// a fixed colour legible across a palette that runs from near-black to
+// near-white. Cool for where the station should be, warm for where this
+// receiver actually hears it — so the gap between them reads as the error it is.
+const REF_EXPECTED_COLOR = 'rgba(120, 200, 255, 0.9)';
+const REF_ACTUAL_COLOR = 'rgba(255, 185, 90, 0.95)';
+
 // `width` and the dash are in CSS px; everything below works in device px.
 function markLine(c, x, H, dpr, colour, dash, width) {
     const xr = Math.round(x) + 0.5;
@@ -3546,6 +3590,35 @@ function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
     // on top — it is the line you tune by.
     const x = hzToX(tuning.frequency);
     if (x >= 0 && x <= pxW) markLine(c, x, H, dpr, dialColor, DIAL_DASH, 1.6);
+}
+
+// The frequency reference: where the standard station is, and where this
+// receiver hears it.
+//
+// Drawn under the tuning marks, deliberately. These are context — a standing
+// fact about the receiver's calibration — and the dial is the thing being
+// aimed with; where the two land on the same pixel the dial must be what is
+// left on top.
+//
+// The second line appears only once the view is deep enough to separate it from
+// the first. A four hertz error is a ten-thousandth of a pixel on a full-span
+// view, and drawing it there would put a second mark on top of the first: not a
+// smaller error, just a thicker line, and one that makes the expected frequency
+// look like it is somewhere it is not. See refMarksSeparate.
+function drawFreqRefMarks(c, pxW, H, cfg, dpr, ref, expectedColor, actualColor) {
+    if (!ref || !cfg.span) return;
+    const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
+
+    // pxW is device pixels and the gap is in CSS px, as every other spacing
+    // rule here is.
+    const separate = refMarksSeparate(ref, cfg.span, pxW / dpr);
+
+    if (separate) {
+        const x = hzToX(ref.actualHz);
+        if (x >= 0 && x <= pxW) markLine(c, x, H, dpr, actualColor, REF_DASH, 1.2);
+    }
+    const x = hzToX(ref.expectedHz);
+    if (x >= 0 && x <= pxW) markLine(c, x, H, dpr, expectedColor, REF_DASH, 1.2);
 }
 
 /**
@@ -3883,6 +3956,7 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
         c.lineTo(hx, H);
         c.stroke();
     }
+    drawFreqRefMarks(c, pxW, H, cfg, g.dpr, g.freqRef, REF_EXPECTED_COLOR, REF_ACTUAL_COLOR);
     drawTuningMarks(c, pxW, H, cfg, tuning, g.dpr, colVfo, colEdge);
 }
 
@@ -4098,6 +4172,7 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         c.stroke();
     }
 
+    drawFreqRefMarks(c, pxW, H, cfg, dpr, g.freqRef, REF_EXPECTED_COLOR, REF_ACTUAL_COLOR);
     drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colVfo, colEdge);
 
     // Peak markers, over the trace they point at. Spectrum only: in waterfall-only

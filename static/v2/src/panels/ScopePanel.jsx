@@ -24,6 +24,7 @@ import { Empty, Field, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { isIQ } from '../radio/constants.js';
 import { audioBins } from '../lib/audioBand.js';
 import { subscribeAudioSpectrum } from '../lib/audioSpectrum.js';
+import { accumulateAudioStats, newAudioStats, readAudioStats } from '../lib/audioStats.js';
 import {
     AUDIO_WF_RATE_MAX, AUDIO_WF_RATE_MIN,
     SCOPE_FLOOR_DEFAULT, SCOPE_FLOOR_MAX, SCOPE_FLOOR_MIN,
@@ -92,6 +93,11 @@ export default function ScopePanel({ minimal }) {
         Number.isFinite(display.scopeFloor) ? display.scopeFloor : SCOPE_FLOOR_DEFAULT,
     );
 
+    // The numbers under the pictures. On by default, and shown in the minimal
+    // view too: they are the same kind of thing as the pictures — something
+    // read at a glance — so a side dock showing the traces should show them.
+    const stats = display.scopeStats !== false;
+
     const scopeRef = useRef(null);
     const wfRef = useRef(null);
     const rulerRef = useRef(null);
@@ -103,6 +109,13 @@ export default function ScopePanel({ minimal }) {
     const hover = useRef(null);      // pointer position while over the waterfall
     const tipAt = useRef(0);
     const [tip, setTip] = useState(null);
+    // The averaged spectrum the Stats row is read from, and the last reading
+    // taken off it. The average is a ref because it is written on every frame
+    // and rendering it would be pointless; the reading is state because it is
+    // what gets drawn, and is refreshed on a timer rather than per frame.
+    const statsAcc = useRef(newAudioStats());
+    const statsAt = useRef(0);
+    const [statsRead, setStatsRead] = useState(null);
     // Smoothed vertical gain for the scope, so the trace does not jump as the
     // gate opens and closes.
     const scope = useRef({ gain: 1 });
@@ -154,9 +167,19 @@ export default function ScopePanel({ minimal }) {
         // analyser follows the shape, and a scope showing bars costs no
         // time-domain read at all.
         return subscribeAudioSpectrum(player, {
-            fftSize, bins: showWf || bars, wave: showScope && !bars,
+            // Stats are read from the spectrum, so they need the bins even in
+            // the waveform view where nothing else does.
+            fftSize, bins: showWf || bars || stats, wave: showScope && !bars,
         }, (f) => {
             if (f.sampleRate !== rate) setRate(f.sampleRate);
+            if (stats) {
+                accumulateAudioStats(statsAcc.current, f, tuning);
+                const now = performance.now();
+                if (now - statsAt.current >= STATS_MS) {
+                    statsAt.current = now;
+                    setStatsRead(readAudioStats(statsAcc.current, f.sampleRate, f.binCount, tuning));
+                }
+            }
             if (bars) {
                 // The frame the tooltip is answered from, kept whichever view
                 // drew it: the readings are the frame's, not the picture's.
@@ -199,7 +222,14 @@ export default function ScopePanel({ minimal }) {
             }
         });
     }, [player, fftSize, showScope, showWf, bars, peaks, heat, timebase, tuning, display.palette, contrast, rate,
-        wfRate, autoLevel, floorDb, iq]);
+        wfRate, autoLevel, floorDb, iq, stats]);
+
+    // A new passband, a new resolution or a stopped stream all make the
+    // accumulated average describe something that is no longer on screen.
+    useEffect(() => {
+        statsAcc.current = newAudioStats();
+        setStatsRead(null);
+    }, [tuning.mode, tuning.bandwidthLow, tuning.bandwidthHigh, fftSize, rate, running, stats]);
 
     const bins = audioBins(tuning.bandwidthLow, tuning.bandwidthHigh, rate || 48000, 1024);
 
@@ -312,6 +342,8 @@ export default function ScopePanel({ minimal }) {
                 </div>
             )}
 
+            {stats && <StatsRow read={statsRead} />}
+
             {!minimal && showScope && (
                 <Field label="Timebase" hint={`${timebase} ms`}>
                     <Slider value={timebase} min={2} max={200} step={1} onChange={setTimebase} />
@@ -393,6 +425,23 @@ export default function ScopePanel({ minimal }) {
                 </Field>
             )}
 
+            {/* Not with the bar switches above: those describe what is drawn on
+                the bars, while this is read from the spectrum whichever view is
+                showing it — including the waveform, which has no spectrum on
+                screen at all. */}
+            {!minimal && (
+                <Field label="Readout">
+                    <div className="scope__toggles">
+                        <Switch
+                            checked={stats}
+                            onChange={(v) => display.set({ scopeStats: v })}
+                            label="Stats"
+                            title="Numbers under the pictures: where the loudest audio is, how far above the noise it sits, and where the energy is centred — averaged over about a third of a second so they can be read"
+                        />
+                    </div>
+                </Field>
+            )}
+
             {/* Offered for the bars as well as the waterfall: it sets how many
                 bars there are (lib/audioWaterfall.js barWidth), so gating it on
                 the waterfall would leave a scope-only bar view with a control
@@ -430,6 +479,12 @@ export default function ScopePanel({ minimal }) {
 // the pointer is still, but a two-line label does not need 60 Hz of React.
 const TIP_MS = 150;
 
+// The Stats row's own refresh. Slower than the tooltip: the tooltip follows a
+// pointer that is being held somewhere on purpose, while these are read at a
+// glance, and numbers that change four times a second are already at the limit
+// of what can be read rather than watched.
+const STATS_MS = 250;
+
 function refreshTip(at, l, tipAt, setTip) {
     if (!at || !l) return;
     const now = performance.now();
@@ -459,6 +514,44 @@ function refreshTip(at, l, tipAt, setTip) {
 }
 
 
+
+// The Stats row: what the spectrum says, in words, under the picture that says
+// it in colour.
+//
+// Four readings, in the order they get used. Peak first because it is the one
+// people come for — zero-beating a carrier, checking a tone, watching a drift.
+// SNR beside it because a peak frequency means nothing until you know whether
+// the peak is a signal; a dash of a few dB is the noise floor's own wobble.
+// Centre and floor last, as context.
+//
+// A dash rather than a zero before there is anything to say: an empty reading
+// and a reading of nothing are different, and only one of them is true when the
+// stream has not started.
+function StatsRow({ read }) {
+    const hz = (v) => (Number.isFinite(v) ? `${fmtHz(v)} Hz` : '—');
+    const db = (v) => (Number.isFinite(v) ? `${v.toFixed(1)} dB` : '—');
+
+    return (
+        <div className="scope-stats">
+            <div className="scope-stats__item" title="Loudest frequency in the passband, interpolated between bins">
+                <span className="scope-stats__label">Peak</span>
+                <span className="scope-stats__value">{read ? hz(read.peakHz) : '—'}</span>
+            </div>
+            <div className="scope-stats__item" title="How far the peak stands above the median bin — the noise floor of the passband, not the receiver's SNR">
+                <span className="scope-stats__label">SNR</span>
+                <span className="scope-stats__value">{read ? db(read.snrDb) : '—'}</span>
+            </div>
+            <div className="scope-stats__item" title="Where the audio's energy is centred. On the peak for a tone; away from it when the energy is spread, as in speech or noise">
+                <span className="scope-stats__label">Centre</span>
+                <span className="scope-stats__value">{read ? hz(read.centroidHz) : '—'}</span>
+            </div>
+            <div className="scope-stats__item" title="The median bin level, as the passband's noise floor">
+                <span className="scope-stats__label">Floor</span>
+                <span className="scope-stats__value">{read ? db(read.floorDb) : '—'}</span>
+            </div>
+        </div>
+    );
+}
 
 function drawScope(canvas, wave, sampleRate, timebaseMs, state) {
     if (!canvas || !wave || !wave.length) return;

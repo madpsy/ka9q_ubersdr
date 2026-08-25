@@ -83,3 +83,113 @@ export function offsetTitle(serverInfo) {
     if (Number.isFinite(snr)) parts.push(`Reference SNR ${snr.toFixed(1)} dB.`);
     return parts.join(' ');
 }
+
+// ── The marks on the spectrum ───────────────────────────────────────────────
+//
+// The badge says the receiver is a few hertz out; these say where. Two lines on
+// the frequency the reference station transmits on: where it should be, and
+// where this receiver is actually hearing it. The gap between them *is* the
+// error, drawn at the scale of whatever the view is showing, which is the one
+// place the number becomes something you can see rather than read.
+
+/**
+ * Where to draw, or null when there is nothing to draw.
+ *
+ * `expectedHz` is the station's true frequency, `actualHz` where this receiver
+ * puts it. The offset is taken as the difference rather than trusted from the
+ * server's own field: the two must agree or the picture would contradict the
+ * badge beside it, and the subtraction is the definition.
+ *
+ * Null whenever the monitor is off, has not measured yet, or reports a
+ * frequency that cannot be drawn — the same three cases the badge is absent
+ * for, plus a missing expected frequency, which is the one the marks need and
+ * the badge does not.
+ */
+export function refMarks(serverInfo) {
+    const ref = serverInfo && serverInfo.frequency_reference;
+    if (!ref || typeof ref !== 'object' || !ref.enabled) return null;
+
+    const expectedHz = Number(ref.expected_frequency);
+    if (!Number.isFinite(expectedHz) || expectedHz <= 0) return null;
+
+    const offset = freqOffset(serverInfo);
+    if (offset == null) return null;
+
+    const detected = Number(ref.detected_frequency);
+    const actualHz = Number.isFinite(detected) && detected > 0 ? detected : expectedHz + offset;
+
+    return { expectedHz, actualHz, offsetHz: actualHz - expectedHz };
+}
+
+// How much clear space the two lines need before both are worth drawing, in CSS
+// px between them.
+//
+// The same reasoning as the passband edges' own gap, and the same number: below
+// it the two halos touch and what you see is one fat line rather than two, so
+// the second is not telling you anything — worse, it makes the first look like
+// it is somewhere it is not. A four hertz error on a 30 MHz view is a
+// ten-thousandth of a pixel; the marks only separate once the span is down to a
+// few kilohertz, which is exactly when the error is worth looking at.
+export const REF_MIN_GAP_PX = 5;
+
+/**
+ * Whether the 'actual' line is far enough from the expected one to draw.
+ *
+ * A zero offset is not a near miss, it is the two being the same frequency, and
+ * one line is the honest picture of that.
+ */
+export function refMarksSeparate(marks, spanHz, widthPx) {
+    if (!marks || !(spanHz > 0) || !(widthPx > 0)) return false;
+    if (!marks.offsetHz) return false;
+    return Math.abs(marks.offsetHz / spanHz) * widthPx >= REF_MIN_GAP_PX;
+}
+
+/**
+ * The tooltip for a reference line.
+ *
+ * `which` is 'expected' or 'actual'. Both name the station and the error; they
+ * differ in which of the two frequencies they lead with, because the question
+ * being asked of a line is "what is this one".
+ */
+export function refMarkTitle(serverInfo, which) {
+    const marks = refMarks(serverInfo);
+    if (!marks) return '';
+    const ref = serverInfo.frequency_reference || {};
+    const mhz = (hz) => `${(hz / 1e6).toFixed(6)} MHz`;
+
+    const parts = [];
+    if (which === 'actual') {
+        parts.push(`Reference station as this receiver hears it: ${mhz(marks.actualHz)}.`);
+        parts.push(`It transmits on ${mhz(marks.expectedHz)}, so the receiver reads`
+            + ` ${offsetLabel(marks.offsetHz)} ${marks.offsetHz > 0 ? 'high' : 'low'}.`);
+    } else if (!marks.offsetHz) {
+        parts.push(`Reference station: ${mhz(marks.expectedHz)}.`);
+        parts.push('This receiver is hearing it exactly there.');
+    } else {
+        parts.push(`Reference station transmits on ${mhz(marks.expectedHz)}.`);
+        parts.push(`This receiver hears it ${offsetLabel(marks.offsetHz)} away,`
+            + ` at ${mhz(marks.actualHz)}.`);
+    }
+
+    const snr = Number(ref.snr);
+    if (Number.isFinite(snr)) parts.push(`Reference SNR ${snr.toFixed(1)} dB.`);
+    return parts.join(' ');
+}
+
+/**
+ * The one line the spectrum's hover readout shows for a reference mark.
+ *
+ * Short, because it sits in a box beside the cursor and peak readings and has to
+ * be read at a glance; the sentence with the detail is refMarkTitle, on the
+ * element's own tooltip for anyone who stops on it.
+ *
+ * `mark` is 'ref-expected' or 'ref-actual', as the hit test names them.
+ */
+export function refTipText(serverInfo, mark) {
+    const marks = refMarks(serverInfo);
+    if (!marks) return '';
+    const mhz = (hz) => `${(hz / 1e6).toFixed(6)} MHz`;
+    if (mark === 'ref-actual') return `Reference here: ${mhz(marks.actualHz)} (${offsetLabel(marks.offsetHz)})`;
+    if (!marks.offsetHz) return `Reference: ${mhz(marks.expectedHz)} — on frequency`;
+    return `Reference: ${mhz(marks.expectedHz)} (reads ${offsetLabel(marks.offsetHz)} off)`;
+}

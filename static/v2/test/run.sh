@@ -44,6 +44,10 @@ esbuild ../src/lib/ifFit.js --bundle --format=cjs --platform=node \
     --outfile=.build/iffit.cjs --log-level=warning
 esbuild ../src/lib/audioTint.js --bundle --format=cjs --platform=node \
     --outfile=.build/audiotint.cjs --log-level=warning
+esbuild ../src/lib/audioStats.js --bundle --format=cjs --platform=node \
+    --outfile=.build/audiostats.cjs --log-level=warning
+esbuild scopepanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/scopepanel.cjs --log-level=warning
 esbuild ifpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/ifpanel.cjs --log-level=warning
 esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
@@ -506,6 +510,8 @@ node bandspectrum.test.js
 node ifspectrum.test.js
 node ifshape.test.js
 node ifpanel.test.js
+node audiostats.test.js
+node scopepanel.test.js
 node lightning.test.js
 node lightningstream.test.js
 node packet.test.js

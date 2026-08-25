@@ -514,6 +514,48 @@ const (
 	maxSpectrumFFTAverages     = 10
 )
 
+// maxSpectrumAveragingWindow bounds how much signal history one spectrum frame
+// may be an average of.
+//
+// The averaging count alone does not say that. radiod builds each response from
+// fft_avg FFTs of fft_n samples, and it chooses fft_n so that the channel's
+// sample rate is fft_n * bin_bw -- so one FFT always spans 1/bin_bw seconds and
+// the whole response spans fft_avg/bin_bw. That is the resolution bandwidth's
+// own reciprocal, which no amount of engineering removes: 2 Hz bins need half a
+// second of signal. What is removable is the *averaging* on top of it, which at
+// 2 Hz/bin and the default four FFTs stretches one frame to two seconds of
+// history.
+//
+// Two seconds is long enough that panning appears to do nothing: radiod retunes
+// on the next block, but the ring it is averaging still holds the old
+// frequency's samples, and dragging keeps refilling it faster than it drains.
+// So the count is reduced at deep zoom to hold the window near this, trading
+// a noisier trace for one that answers the mouse. At the shallow end nothing
+// changes -- 10 Hz/bin with four averages is already only 0.4 s.
+const maxSpectrumAveragingWindow = 0.5 // seconds
+
+// spectrumAveragesFor returns the SPECTRUM_AVG to use at a given bin bandwidth:
+// the configured value, reduced where it would otherwise average over more than
+// maxSpectrumAveragingWindow of signal.
+//
+// The window is computed as fft_avg/bin_bw, which assumes radiod's spectrum
+// overlap is zero. Any overlap makes the real window shorter, so this errs
+// toward responsiveness rather than toward the lag it exists to prevent.
+func (rc *RadiodController) spectrumAveragesFor(binBandwidth float64) int {
+	configured := rc.fftAverages()
+	if binBandwidth <= 0 {
+		return configured
+	}
+	allowed := int(maxSpectrumAveragingWindow * binBandwidth)
+	if allowed >= configured {
+		return configured
+	}
+	if allowed < minSpectrumFFTAverages {
+		return minSpectrumFFTAverages
+	}
+	return allowed
+}
+
 // buildCreateSpectrumCommand builds the packet that creates a spectrum channel.
 func buildCreateSpectrumCommand(frequency uint64, binCount int, binBandwidth float64, ssrc uint32, fftAverages int) []byte {
 	buf := make([]byte, 0, 1500)
@@ -567,7 +609,7 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 	rc.clearTerminated(ssrc)
 
 	// Send command
-	if err := rc.sendCommand(buildCreateSpectrumCommand(frequency, binCount, binBandwidth, ssrc, rc.fftAverages())); err != nil {
+	if err := rc.sendCommand(buildCreateSpectrumCommand(frequency, binCount, binBandwidth, ssrc, rc.spectrumAveragesFor(binBandwidth))); err != nil {
 		return fmt.Errorf("failed to send create spectrum command: %w", err)
 	}
 
@@ -644,6 +686,7 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 		binBandwidth: binBandwidth,
 		binCount:     binCount,
 		sendBinCount: sendBinCount,
+		fftAverages:  rc.spectrumAveragesFor(binBandwidth),
 	})
 }
 
@@ -673,6 +716,12 @@ func buildUpdateSpectrumCommand(ssrc uint32, u spectrumUpdate) []byte {
 	// bin count and bin bandwidth on its own.  See CreateSpectrumChannel.
 	if u.binBandwidth > 0 {
 		buf = encodeFloat(&buf, tagNoncoherentBinBw, float32(u.binBandwidth))
+		// The averaging window scales with 1/bin_bw, so a zoom that changes the
+		// bandwidth changes how much history each frame covers. Re-send the
+		// count with it. See spectrumAveragesFor.
+		if u.fftAverages > 0 {
+			buf = encodeInt32(&buf, tagSpectrumAvg, uint32(u.fftAverages))
+		}
 	}
 
 	// LIFETIME, so that an update racing a teardown cannot leave an immortal

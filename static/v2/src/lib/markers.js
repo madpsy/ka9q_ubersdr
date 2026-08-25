@@ -208,3 +208,44 @@ export function bandLabelPositions({ x0, x1, labelWidth, baseSpacing = 220, minG
     for (let i = 0; i < n; i++) xs.push(first + i * step);
     return xs;
 }
+
+// ── Off-screen indicators ───────────────────────────────────────────────────
+//
+// The dial and the two passband edges are drawn on the spectrum, and panning or
+// zooming can take them off it. Nothing then says where they went: the view is
+// full of signal either way, and "the dial is off to the left" and "the dial is
+// off to the right" look identical. These are the answer to that — an arrow at
+// the end of the bar in the mark's own colour, pointing the way you would pan to
+// bring it back.
+
+/**
+ * Which indicators each end of the bar owes, as arrays of 'dial' and 'edge'.
+ *
+ * `edgeHz` is the passband's two edges; one arrow covers both, because the
+ * question an indicator answers is "where has my filter gone" and two arrows of
+ * the same colour on the same side answer it twice. A filter wider than the view
+ * puts one edge off each side and gets an arrow at each end, which is right —
+ * that is a passband the view sits inside, and both ends of it are elsewhere.
+ *
+ * Dial first in each list, so the drawing puts it at the very end of the bar with
+ * the filter's inboard of it: they can be off the same side at once, and a fixed
+ * order is what stops the pair swapping places as you pan.
+ *
+ * A mark exactly on the boundary counts as in view — it is drawn, so there is
+ * nothing to point at.
+ */
+export function offscreenArrows({ dialHz, edgeHz = [], startFreq, endFreq }) {
+    const left = [];
+    const right = [];
+    if (!(endFreq > startFreq)) return { left, right };
+
+    const below = (hz) => Number.isFinite(hz) && hz < startFreq;
+    const above = (hz) => Number.isFinite(hz) && hz > endFreq;
+
+    if (below(dialHz)) left.push('dial');
+    if (above(dialHz)) right.push('dial');
+    if (edgeHz.some(below)) left.push('edge');
+    if (edgeHz.some(above)) right.push('edge');
+
+    return { left, right };
+}

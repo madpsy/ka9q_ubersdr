@@ -509,6 +509,69 @@ t('with nothing seeded the layout is unchanged', () => {
     );
 });
 
+// Off-screen indicators. The dial and the passband edges live on the spectrum;
+// pan far enough and they leave it, and these say which way they went.
+t('nothing is flagged while everything is on screen', () => {
+    const w = { startFreq: 7.0e6, endFreq: 7.2e6 };
+    assert.deepStrictEqual(
+        mk.offscreenArrows({ dialHz: 7.1e6, edgeHz: [7.0999e6, 7.1003e6], ...w }),
+        { left: [], right: [] },
+    );
+});
+
+t('a mark on the boundary is in view — it is drawn, so there is nothing to point at', () => {
+    const w = { startFreq: 7.0e6, endFreq: 7.2e6 };
+    assert.deepStrictEqual(mk.offscreenArrows({ dialHz: 7.0e6, ...w }), { left: [], right: [] });
+    assert.deepStrictEqual(mk.offscreenArrows({ dialHz: 7.2e6, ...w }), { left: [], right: [] });
+});
+
+t('the arrow is on the side the mark went', () => {
+    const w = { startFreq: 7.0e6, endFreq: 7.2e6 };
+    assert.deepStrictEqual(mk.offscreenArrows({ dialHz: 6.9e6, ...w }).left, ['dial']);
+    assert.deepStrictEqual(mk.offscreenArrows({ dialHz: 6.9e6, ...w }).right, []);
+    assert.deepStrictEqual(mk.offscreenArrows({ dialHz: 7.3e6, ...w }).right, ['dial']);
+    assert.deepStrictEqual(mk.offscreenArrows({ dialHz: 7.3e6, ...w }).left, []);
+});
+
+t('the dial comes first, so the pair never swaps places as you pan', () => {
+    // Both gone the same way: the dial's arrow is the one at the end of the bar.
+    const both = mk.offscreenArrows({
+        dialHz: 6.9e6, edgeHz: [6.8997e6, 6.9003e6], startFreq: 7.0e6, endFreq: 7.2e6,
+    });
+    assert.deepStrictEqual(both, { left: ['dial', 'edge'], right: [] });
+});
+
+t('two edges off one side are one arrow, not two of the same colour', () => {
+    const one = mk.offscreenArrows({
+        dialHz: 7.1e6, edgeHz: [6.8e6, 6.9e6], startFreq: 7.0e6, endFreq: 7.2e6,
+    });
+    assert.deepStrictEqual(one, { left: ['edge'], right: [] });
+});
+
+t('a passband wider than the view points both ways', () => {
+    // The view is inside the filter: both ends of it really are elsewhere.
+    const wide = mk.offscreenArrows({
+        dialHz: 7.1e6, edgeHz: [6.5e6, 7.7e6], startFreq: 7.0e6, endFreq: 7.2e6,
+    });
+    assert.deepStrictEqual(wide, { left: ['edge'], right: ['edge'] });
+});
+
+t('a mark that is not a number is not an arrow', () => {
+    const w = { startFreq: 7.0e6, endFreq: 7.2e6 };
+    assert.deepStrictEqual(
+        mk.offscreenArrows({ dialHz: NaN, edgeHz: [undefined, null], ...w }),
+        { left: [], right: [] },
+    );
+    assert.deepStrictEqual(mk.offscreenArrows(w), { left: [], right: [] });
+});
+
+t('a collapsed view flags nothing rather than everything', () => {
+    assert.deepStrictEqual(
+        mk.offscreenArrows({ dialHz: 7.1e6, startFreq: 7.2e6, endFreq: 7.0e6 }),
+        { left: [], right: [] },
+    );
+});
+
 t('lowerBound finds the first index at or after the target', () => {
     const arr = [10, 20, 30, 40].map((f) => ({ frequency: f }));
     assert.strictEqual(mk.lowerBound(arr, 5), 0);

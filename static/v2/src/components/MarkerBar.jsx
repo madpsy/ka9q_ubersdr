@@ -9,7 +9,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
-import { assignRows, bandColors, bandLabelPositions, layoutBands, layoutBookmarks } from '../lib/markers.js';
+import {
+    assignRows, bandColors, bandLabelPositions, layoutBands, layoutBookmarks, offscreenArrows,
+} from '../lib/markers.js';
+import { markColors } from '../display/uiConfig.js';
 import { bookmarkTarget } from '../lib/bookmarkTune.js';
 import { countryFlag, formatFreqShort, sinceLabel } from '../lib/format.js';
 import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
@@ -113,6 +116,22 @@ const SPOT_STYLE = {
     cw: { pill: 'rgba(23, 162, 184, 0.95)', stem: 'rgba(23, 162, 184, 0.55)', ink: '#ffffff' },
 };
 
+// Off-screen indicators for the dial and the passband edges. Their colours are
+// not fixed here: they are the operator's own marks, from the palette or from
+// the pickers in the Display panel, and an arrow that did not match the line it
+// stands for would be a third colour to learn rather than the same one moved.
+//
+// Small, and level with the near row rather than in a strip of their own — the
+// bar has no spare height, and an arrow on the row it overlaps reads as part of
+// the same picture. The halo is the spectrum's trick for the same problem: these
+// land on band tints, on pills and on nothing, and a single colour cannot be
+// legible against all three on its own.
+const ARROW_W = 7;                          // base to tip, CSS px
+const ARROW_H = 11;
+const ARROW_PAD = 2;                        // clear of the end of the bar
+const ARROW_GAP = 3;                        // between the dial's arrow and the filter's
+const ARROW_HALO = 'rgba(0, 0, 0, 0.72)';
+
 export default function MarkerBar({ width }) {
     const radio = useRadio();
     const { view, actions, catalog, tuning, serverInfo } = radio;
@@ -167,6 +186,15 @@ export default function MarkerBar({ width }) {
     const showRef = display.markerReference !== false && freqRefAvailable(serverInfo);
     const refFreq = showRef ? refMarkerFreq(serverInfo) : null;
     const lookups = !!(serverInfo && serverInfo.lookup_service);
+
+    // The dial and passband colours the spectrum is drawing with — palette
+    // defaults or the operator's own overrides, whichever is in force. Plain
+    // strings, so they can go straight into the draw effect's dependencies.
+    const { dial: dialColor, edge: edgeColor } = markColors(display);
+    // The passband in absolute hertz. The tuning state holds it as offsets from
+    // the dial, which are signed — an LSB filter's edges are both below it.
+    const edgeLowHz = tuning.frequency + tuning.bandwidthLow;
+    const edgeHighHz = tuning.frequency + tuning.bandwidthHigh;
 
     // One shared poll for the page: subscribing starts it, and the last unsubscribe
     // stops it, so with the toggle off the addon is never asked anything.
@@ -704,10 +732,31 @@ export default function MarkerBar({ width }) {
             hitsRef.current.vfos.push({ x, y, w: PILL_H, h: PILL_H, vfo: p.vfo });
         }
 
+        // ---- off-screen dial and passband ------------------------------------
+        // Last of everything, so a marker at the end of the view cannot cover an
+        // arrow. An indicator that can be hidden is not one.
+        const arrows = offscreenArrows({
+            dialHz: tuning.frequency,
+            edgeHz: [edgeLowHz, edgeHighHz],
+            startFreq,
+            endFreq,
+        });
+        // Level with the near row: the bottom of the marker section.
+        const arrowCy = BAND_H + 2 + (ROWS - 1) * ROW_H + PILL_H / 2;
+        arrows.left.forEach((kind, i) => {
+            drawArrow(c, ARROW_PAD + i * (ARROW_W + ARROW_GAP), arrowCy, -1,
+                kind === 'dial' ? dialColor : edgeColor);
+        });
+        arrows.right.forEach((kind, i) => {
+            drawArrow(c, width - ARROW_PAD - i * (ARROW_W + ARROW_GAP), arrowCy, 1,
+                kind === 'dial' ? dialColor : edgeColor);
+        });
+
     }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency,
         showVoice, voice, showConfirmed, confirmed,
         showDx, showCw, dxSpots, cwSpots, ageTick, showPacket, packet,
-        showVfos, vfos, tuning.frequency, showRef, refFreq]);
+        showVfos, vfos, tuning.frequency, showRef, refFreq,
+        dialColor, edgeColor, edgeLowHz, edgeHighHz]);
 
     const locate = useCallback((e) => {
         const canvas = canvasRef.current;
@@ -965,6 +1014,27 @@ function spotTip(s) {
     const note = s.comment || s.message;
     if (note) parts.push(note);
     return parts.join(' · ');
+}
+
+// One off-screen indicator. `x` is the tip and `dir` which way it points: -1 for
+// the left end of the bar, +1 for the right.
+//
+// Stroked before it is filled, so the dark outline sits under the colour rather
+// than eating into it — the same order the spectrum's marks use for their halo.
+function drawArrow(c, x, cy, dir, fill) {
+    c.beginPath();
+    c.moveTo(x, cy);
+    c.lineTo(x - dir * ARROW_W, cy - ARROW_H / 2);
+    c.lineTo(x - dir * ARROW_W, cy + ARROW_H / 2);
+    c.closePath();
+
+    c.lineJoin = 'round';
+    c.lineWidth = 2;
+    c.strokeStyle = ARROW_HALO;
+    c.stroke();
+
+    c.fillStyle = fill;
+    c.fill();
 }
 
 function roundRect(c, x, y, w, h, r) {

@@ -19,6 +19,9 @@ import { lookupCallsign } from '../compat/legacyBridge.js';
 import { subscribeSpots } from '../lib/spotStore.js';
 import { ageLabel, markerSpots, modeForSpot } from '../lib/spots.js';
 import { packetAvailable } from '../lib/packet.js';
+import {
+    REF_MARKER_LABEL, freqRefAvailable, refMarkerFreq, refMarkerLayout, refMarkerTip,
+} from '../lib/freqRef.js';
 import { subscribePacketMarkers } from '../lib/packetMarkers.js';
 import { subscribeConfirmedVoice } from '../lib/voiceConfirmed.js';
 import { tuneTarget, voiceSkimmerAvailable } from '../lib/voiceSkimmer.js';
@@ -87,6 +90,20 @@ const PACKET_PILL = 'rgba(230, 126, 34, 0.95)';
 const PACKET_STEM = 'rgba(230, 126, 34, 0.55)';
 const PACKET_INK = '#1b1004';
 
+// The frequency reference: silver, and the one marker in the bar that is not a
+// colour.
+//
+// It cannot be gold or near it, which is also why it does not match the amber
+// the spectrum draws its own reference line in. A receiver measures itself
+// against a standard station — WWV, MSF, a GPSDO's output — and that is exactly
+// the sort of frequency the published bookmark list has an entry for, so the
+// pill this one sits beside most often is a gold one. Neutral says what it is,
+// too: everything else here is something that was heard, and this is the ruler
+// the rest are measured with.
+const REF_PILL = 'rgba(214, 222, 234, 0.95)';
+const REF_STEM = 'rgba(214, 222, 234, 0.55)';
+const REF_INK = '#131a24';
+
 // Spot colours are v1's, so a green pill means the same thing in both
 // frontends: green for DX cluster spots (dx-cluster drawDXSpotsOnSpectrum),
 // cyan for the CW skimmer's (cw-spots drawCWSpotsOnSpectrum). Both take white
@@ -143,6 +160,12 @@ export default function MarkerBar({ width }) {
     // Packet channels, gated on the addon being installed — the toggle would otherwise
     // promise markers that can never appear.
     const showPacket = display.markerPacket !== false && packetAvailable(serverInfo);
+    // The frequency reference, gated on the operator running the monitor at all.
+    // refMarkerFreq stays null until it has averaged a measurement, so the pill
+    // arrives with the first lock rather than at load — the same "enabled, but
+    // nothing to say yet" the badge and the spectrum marks already handle.
+    const showRef = display.markerReference !== false && freqRefAvailable(serverInfo);
+    const refFreq = showRef ? refMarkerFreq(serverInfo) : null;
     const lookups = !!(serverInfo && serverInfo.lookup_service);
 
     // One shared poll for the page: subscribing starts it, and the last unsubscribe
@@ -243,6 +266,7 @@ export default function MarkerBar({ width }) {
 
         hitsRef.current = {
             bookmarks: [], bands: [], voice: [], confirmed: [], spots: [], vfos: [], packet: [],
+            ref: [],
         };
         if (!span) return;
 
@@ -299,11 +323,38 @@ export default function MarkerBar({ width }) {
         // Kept so the voice layer below can avoid the space they took.
         let placedMarks = [];
 
-        // ---- VFOs: laid out first, drawn last -------------------------------
-        // First because they outrank everything else in the bar: a bookmark or
-        // a spot can move up a row or be dropped, and a VFO is somewhere you
-        // put down yourself and expect to find again. Everything below is
-        // seeded with these, so they fit around the VFOs rather than over them.
+        // ---- the frequency reference: laid out before anything else ---------
+        // First claim on a row, ahead of even the VFOs. The reference is not a
+        // place a signal might be, it is where this receiver's own accuracy is
+        // measured — and it sits on a standard station, which is exactly the sort
+        // of frequency somebody has already published a bookmark for. So the
+        // collision is the normal case rather than an edge one, and when the two
+        // land together the reference keeps the near row while the bookmark is
+        // pushed up to the top one: both stay readable, and the mark that is about
+        // this pixel is the one against the spectrum.
+        //
+        // Drawn at the foot of the function for the same reason the VFOs are.
+        let placedRef = [];
+        if (showRef && refFreq != null) {
+            c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
+            c.textBaseline = 'middle';
+            c.textAlign = 'center';
+            placedRef = refMarkerLayout({
+                freq: refFreq,
+                startFreq,
+                endFreq,
+                width,
+                labelWidth: c.measureText(REF_MARKER_LABEL).width + 10,
+            });
+            placedMarks = placedRef.slice();
+        }
+
+        // ---- VFOs: laid out next, drawn last --------------------------------
+        // Ahead of everything but the reference, because they outrank the rest of
+        // the bar: a bookmark or a spot can move up a row or be dropped, and a VFO
+        // is somewhere you put down yourself and expect to find again. Everything
+        // below is seeded with these, so it fits around the VFOs rather than over
+        // them.
         //
         // The drawing waits until the end so the circles sit on top of any
         // stem that crosses them — see the block at the foot of this function.
@@ -322,8 +373,8 @@ export default function MarkerBar({ width }) {
                 });
             }
             items.sort((a, b) => a.x - b.x);
-            placedVfos = assignRows(items);
-            placedMarks = placedVfos.slice();
+            placedVfos = assignRows(items, placedMarks);
+            placedMarks = placedMarks.concat(placedVfos);
         }
         if (marks.length) {
             c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
@@ -589,6 +640,36 @@ export default function MarkerBar({ width }) {
         c.globalAlpha = 0.35;
         c.fillRect(0, MARKER_BAR_H - 1, width, 1);
         c.globalAlpha = 1;
+        // ---- the frequency reference, drawn ----------------------------------
+        // Placed at the top of this function, drawn here for the same reason the
+        // VFOs are: whatever this pill displaced is now on the row above with a
+        // stem running down past it.
+        for (const p of placedRef) {
+            const y = BAND_H + 2 + (ROWS - 1 - p.row) * ROW_H;
+            const { x, width: w } = p;
+
+            c.strokeStyle = REF_STEM;
+            c.lineWidth = 1;
+            c.beginPath();
+            c.moveTo(Math.round(x) + 0.5, y + PILL_H);
+            c.lineTo(Math.round(x) + 0.5, MARKER_BAR_H);
+            c.stroke();
+
+            c.fillStyle = REF_PILL;
+            roundRect(c, x - w / 2, y, w, PILL_H, 3);
+            c.fill();
+            c.strokeStyle = 'rgba(255,255,255,0.55)';
+            c.stroke();
+
+            c.font = '600 10px ui-sans-serif, system-ui, sans-serif';
+            c.textBaseline = 'middle';
+            c.textAlign = 'center';
+            c.fillStyle = REF_INK;
+            clipText(c, REF_MARKER_LABEL, x, y + PILL_H / 2, w - 6);
+
+            hitsRef.current.ref.push({ x, y, w, h: PILL_H });
+        }
+
         // ---- VFOs, drawn -----------------------------------------------------
         // Placed at the top of this function so the other layers fit around
         // them; drawn here so the circles sit over any stem that crosses one.
@@ -626,7 +707,7 @@ export default function MarkerBar({ width }) {
     }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency,
         showVoice, voice, showConfirmed, confirmed,
         showDx, showCw, dxSpots, cwSpots, ageTick, showPacket, packet,
-        showVfos, vfos, tuning.frequency]);
+        showVfos, vfos, tuning.frequency, showRef, refFreq]);
 
     const locate = useCallback((e) => {
         const canvas = canvasRef.current;
@@ -634,6 +715,10 @@ export default function MarkerBar({ width }) {
         const r = canvas.getBoundingClientRect();
         const x = e.clientX - r.left;
         const y = e.clientY - r.top;
+        const rf = hitsRef.current.ref.find(
+            (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
+        );
+        if (rf) return { kind: 'ref' };
         const vfo = hitsRef.current.vfos.find(
             (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
         );
@@ -674,7 +759,9 @@ export default function MarkerBar({ width }) {
         const r = canvasRef.current.getBoundingClientRect();
         setTip({
             x: e.clientX - r.left,
-            text: hit.kind === 'vfo'
+            text: hit.kind === 'ref'
+                ? refMarkerTip(serverInfo)
+                : hit.kind === 'vfo'
                 ? `VFO ${hit.vfo.id} · ${formatFreqShort(hit.vfo.frequency)}${hit.vfo.mode ? ' · ' + hit.vfo.mode.toUpperCase() : ''}`
                 : hit.kind === 'bookmark'
                 ? `${hit.item.name} · ${formatFreqShort(hit.item.frequency)}${hit.item.mode ? ' · ' + hit.item.mode.toUpperCase() : ''}${hit.item.comment ? ' — ' + hit.item.comment : ''}`
@@ -688,7 +775,7 @@ export default function MarkerBar({ width }) {
                             ? packetTip(hit.marker)
                             : `${bandName(hit.band)} · ${formatFreqShort(hit.band.start)}–${formatFreqShort(hit.band.end)}`,
         });
-    }, [locate]);
+    }, [locate, serverInfo]);
 
     const onClick = useCallback((e) => {
         const hit = locate(e);
@@ -697,7 +784,18 @@ export default function MarkerBar({ width }) {
         // the tap found something, and no pulse says it did not.
         if (!hit) return;
         haptic('tune', 'spectrum');
-        if (hit.kind === 'vfo') {
+        if (hit.kind === 'ref') {
+            // Where this receiver hears the reference, which is where the dial has
+            // to be to hear it — not the frequency the station transmits on, which
+            // is the same number only for a receiver that is exactly right. No
+            // mode: a carrier is not one, and whatever is set already is a better
+            // answer than a guess.
+            if (refFreq != null) {
+                const freq = Math.round(refFreq);
+                actions.setFrequency(freq);
+                actions.ensureVisible(freq);
+            }
+        } else if (hit.kind === 'vfo') {
             // Go to that VFO rather than merely tuning its frequency: the mark
             // says "B is parked here", and arriving on A at B's frequency would
             // be a different thing than the one that was clicked. selectVfo
@@ -754,10 +852,12 @@ export default function MarkerBar({ width }) {
             actions.setFrequency(centre);
             actions.setSpectrumCenter(centre);
         }
-    }, [locate, actions, lookups, radio]);
+    }, [locate, actions, lookups, radio, refFreq]);
 
+    // Packet was missing from this list, which hid the whole bar for anyone who
+    // had turned everything else off and kept the packet channels.
     if (!showBands && !showServer && !showLocal && !showVoice && !showConfirmed
-        && !showDx && !showCw && !showVfos) {
+        && !showDx && !showCw && !showVfos && !showPacket && !showRef) {
         return null;
     }
 

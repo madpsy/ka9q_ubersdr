@@ -93,6 +93,11 @@ export const DEFAULTS = {
     // marker this one is a *shared* frequency rather than one station, which is why its
     // tooltip is a list — see packetTip in MarkerBar.
     markerPacket: true,
+    // The frequency reference: one pill on the frequency the receiver measures its own
+    // accuracy against, next to the two lines the spectrum draws there. Only where the
+    // operator runs the monitor, and only once it has measured something. It outranks
+    // every other marker for a row — see MarkerBar.
+    markerReference: true,
     // Spot markers, per feed and only where the instance has it. Digital spots
     // are deliberately absent: a decoder band puts every station on one
     // frequency, so they would stack into a single illegible pile rather than

@@ -193,3 +193,71 @@ export function refTipText(serverInfo, mark) {
     if (!marks.offsetHz) return `Reference: ${mhz(marks.expectedHz)} — on frequency`;
     return `Reference: ${mhz(marks.expectedHz)} (reads ${offsetLabel(marks.offsetHz)} off)`;
 }
+
+// ── The pill on the marker bar ──────────────────────────────────────────────
+//
+// The lines above are on the spectrum, where the error is a distance. This is
+// the same station on the marker bar, where it is a label among the others —
+// so that the frequency the receiver measures itself against is findable at a
+// glance rather than only visible once you are zoomed in far enough to see two
+// lines apart.
+
+/**
+ * Whether this receiver has a frequency reference at all.
+ *
+ * The capability, not the measurement: `refMarks` additionally needs the monitor
+ * to have averaged something, and a settings toggle that appeared and vanished
+ * with the first lock would be a control nobody could find twice. Same shape and
+ * same job as packetAvailable and voiceSkimmerAvailable, which gate their own
+ * switches this way.
+ */
+export function freqRefAvailable(serverInfo) {
+    const ref = serverInfo && serverInfo.frequency_reference;
+    return !!(ref && typeof ref === 'object' && ref.enabled);
+}
+
+/**
+ * Where the pill goes, in hertz — or null when there is nothing to mark.
+ *
+ * The receiver's own frequency, not the station's: the marker bar shares the
+ * spectrum's scale, so the pill has to sit over the peak in the trace beneath
+ * it. Those are the same pixel until the span is down to a few kilohertz, and
+ * from there on the difference is the point.
+ */
+export function refMarkerFreq(serverInfo) {
+    const marks = refMarks(serverInfo);
+    return marks ? marks.actualHz : null;
+}
+
+/** What the pill says. Short, because the bar gives a label about forty pixels. */
+export const REF_MARKER_LABEL = 'Ref';
+
+/**
+ * The pill's hover line — the spectrum marks' own wording, because the bar's tip
+ * and the spectrum's readout are the same box doing the same job, and the
+ * reference should not describe itself two ways on one screen.
+ */
+export function refMarkerTip(serverInfo) {
+    const marks = refMarks(serverInfo);
+    if (!marks) return '';
+    return refTipText(serverInfo, marks.offsetHz ? 'ref-actual' : 'ref-expected');
+}
+
+/**
+ * The pill's place, as the one-element array `assignRows` takes for space that is
+ * already claimed. Empty when there is nothing to draw or it is off screen.
+ *
+ * Row 0 — the near row, against the spectrum — and laid out before every other
+ * layer, which is what "the reference outranks the rest" amounts to: seeded into
+ * the layers below, a bookmark or a spot on the same frequency is pushed up to
+ * the top row instead of sharing the space or covering it. That collision is the
+ * normal case rather than an edge one, because a receiver measures itself against
+ * a standard station and a standard station is exactly the kind of frequency
+ * somebody has published a bookmark for.
+ */
+export function refMarkerLayout({ freq, startFreq, endFreq, width, labelWidth }) {
+    if (freq == null || !(width > 0) || !(labelWidth > 0)) return [];
+    const span = endFreq - startFreq;
+    if (!(span > 0) || freq < startFreq || freq > endFreq) return [];
+    return [{ x: ((freq - startFreq) / span) * width, width: labelWidth, row: 0 }];
+}

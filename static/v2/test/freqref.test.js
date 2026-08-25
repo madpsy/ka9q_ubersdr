@@ -210,5 +210,75 @@ t('the hover line is short enough for the readout box', () => {
     assert.ok(/10\.000004 MHz/.test(actual), actual);
 });
 
+// --- the marker bar's pill -----------------------------------------------------
+
+const mk = require('./.build/markers.cjs');
+
+t('the toggle appears for a receiver that runs the monitor, measured or not', () => {
+    // Capability, not measurement: a switch that came and went with the first lock
+    // would be one nobody could find twice.
+    assert.strictEqual(fr.freqRefAvailable(desc({ enabled: true })), true);
+    assert.strictEqual(fr.freqRefAvailable(desc({ ...REF })), true);
+    assert.strictEqual(fr.freqRefAvailable(desc({ enabled: false })), false);
+    assert.strictEqual(fr.freqRefAvailable({}), false);
+    assert.strictEqual(fr.freqRefAvailable(null), false);
+});
+
+t('the pill sits where the receiver hears it, not where the station transmits', () => {
+    // The bar shares the spectrum's scale, so the pill has to be over the peak.
+    assert.strictEqual(fr.refMarkerFreq(desc(REF)), fr.refMarks(desc(REF)).actualHz);
+    assert.notStrictEqual(fr.refMarkerFreq(desc(REF)), 10e6);
+});
+
+t('there is no pill until there is something to mark', () => {
+    assert.strictEqual(fr.refMarkerFreq(desc({ enabled: false })), null);
+    assert.strictEqual(fr.refMarkerFreq(desc({ enabled: true })), null);
+    assert.strictEqual(fr.refMarkerTip(desc({ enabled: true })), '');
+});
+
+t('the pill says the same thing the spectrum mark under it says', () => {
+    assert.strictEqual(fr.refMarkerTip(desc(REF)), fr.refTipText(desc(REF), 'ref-actual'));
+    const exact = desc({ ...REF, detected_frequency: 10e6, frequency_offset: 0 });
+    assert.strictEqual(fr.refMarkerTip(exact), fr.refTipText(exact, 'ref-expected'));
+});
+
+t('the pill takes the near row', () => {
+    const [p] = fr.refMarkerLayout({
+        freq: 10e6, startFreq: 9e6, endFreq: 11e6, width: 1000, labelWidth: 30,
+    });
+    assert.strictEqual(p.row, 0, 'row 0 is the row against the spectrum');
+    assert.strictEqual(p.x, 500, 'halfway across a window it is centred in');
+});
+
+t('nothing is laid out off screen, or with nothing to lay out', () => {
+    const win = { startFreq: 9e6, endFreq: 11e6, width: 1000, labelWidth: 30 };
+    assert.deepStrictEqual(fr.refMarkerLayout({ ...win, freq: 12e6 }), []);
+    assert.deepStrictEqual(fr.refMarkerLayout({ ...win, freq: 8e6 }), []);
+    assert.deepStrictEqual(fr.refMarkerLayout({ ...win, freq: null }), []);
+    assert.deepStrictEqual(fr.refMarkerLayout({ ...win, freq: 10e6, width: 0 }), []);
+    // A collapsed window would divide by zero and place the pill at NaN.
+    assert.deepStrictEqual(fr.refMarkerLayout({ ...win, freq: 10e6, endFreq: 9e6 }), []);
+});
+
+// The point of laying the reference out before every other layer: a standard
+// station is exactly the sort of frequency somebody has published a bookmark for,
+// so the two land together as a matter of course.
+t('a marker on the same frequency is bumped to the top row, not dropped', () => {
+    const ref = fr.refMarkerLayout({
+        freq: 10e6, startFreq: 9e6, endFreq: 11e6, width: 1000, labelWidth: 30,
+    });
+    const placed = mk.assignRows([{ x: 500, width: 60, item: { name: 'WWV' } }], ref);
+    assert.strictEqual(placed.length, 1, 'the bookmark is still drawn');
+    assert.strictEqual(placed[0].row, 1, 'and it is the one that moved');
+});
+
+t('the reference does not cost a row anywhere else on the bar', () => {
+    const ref = fr.refMarkerLayout({
+        freq: 10e6, startFreq: 9e6, endFreq: 11e6, width: 1000, labelWidth: 30,
+    });
+    const placed = mk.assignRows([{ x: 100, width: 60 }, { x: 900, width: 60 }], ref);
+    assert.deepStrictEqual(placed.map((p) => p.row), [0, 0]);
+});
+
 if (process.exitCode) console.log('\nfrequency reference tests FAILED');
 else console.log(`\nall ${pass} frequency reference tests passed`);

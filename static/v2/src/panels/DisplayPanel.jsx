@@ -17,6 +17,7 @@ import {
     PEAK_COUNTS, PEAK_SNR_CHOICES, peakCount, peakPlace, peakSnr,
 } from '../lib/spectrumPeaks.js';
 import { packetAvailable } from '../lib/packet.js';
+import { freqRefAvailable } from '../lib/freqRef.js';
 import { voiceSkimmerAvailable } from '../lib/voiceSkimmer.js';
 import {
     UI_THEMES, canvasContrast, contrastMin, effectiveColors, matchUiTheme, pageContrast,
@@ -238,6 +239,19 @@ export default function DisplayPanel() {
             {packetAvailable(serverInfo) && (
                 <Field label="Packet channels" inline>
                     <Switch checked={d.markerPacket !== false} onChange={(v) => d.set({ markerPacket: v })} />
+                </Field>
+            )}
+            {/* Only where the operator runs the frequency reference monitor. One pill
+                on the frequency the receiver checks itself against, and it takes the row
+                against the spectrum ahead of anything else there — a standard station is
+                usually a published bookmark too, and this is the mark that is about the
+                pixel rather than the station. */}
+            {freqRefAvailable(serverInfo) && (
+                <Field label="Frequency reference" inline>
+                    <Switch
+                        checked={d.markerReference !== false}
+                        onChange={(v) => d.set({ markerReference: v })}
+                    />
                 </Field>
             )}
             {/* Spot markers, each present only where that feed is. Digital

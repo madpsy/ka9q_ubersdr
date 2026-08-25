@@ -4464,46 +4464,53 @@ function drawScale(g, d, scale, pxW, cfg, tuning, cssW, colVfo, colEdge) {
         c.fillRect(bx, by, bw, bh);
         c.fillStyle = colVfo;
         c.fillText(label, bx + bw / 2, labelY);
+    }
 
-        // The passband, along the badge's top edge: from the low edge to the
-        // high one, in the edge marks' own colour so it reads as the same thing
-        // they are. This replaced a plain rule that was there to cap the badge
-        // and said nothing — a line across a frequency ruler ought to mean a
-        // span of frequency, and this is the span that matters.
+    // The passband, across the ruler: from the low edge to the high one, in the
+    // edge marks' own colour so it reads as the same thing they are. This
+    // replaced a plain rule that was there to cap the badge and said nothing — a
+    // line across a frequency ruler ought to mean a span of frequency, and this
+    // is the span that matters.
+    //
+    // Drawn after the badge so it is not painted over, and it runs past the badge
+    // on both sides whenever the passband is wider than the number is, which is
+    // most of the time at a narrow span. Lopsided about the dial for SSB, as it
+    // should be.
+    //
+    // Sits on the pip's point rather than on the badge's top edge, which is where
+    // it ended up when the number moved down to join the tick labels. The pip
+    // marks the dial and the bar is the passband about that dial, so the two
+    // belong together — with the number under them both rather than between them.
+    //
+    // Outside the pip's block, though, and the clamping below is why it can be.
+    // A span can be on screen when the mark at its centre is not: the dial sits
+    // at the *end* of an SSB passband rather than inside it, so zooming into a
+    // signal takes the dial off the view while the filter still covers every
+    // pixel of it. That is the moment this bar has the most to say — you are
+    // inside the passband, and with both edges off screen nothing else says so —
+    // and it was the one moment it was being skipped.
+    const lox = ((tuning.frequency + tuning.bandwidthLow - lo) / cfg.span) * pxW;
+    const hix = ((tuning.frequency + tuning.bandwidthHigh - lo) / cfg.span) * pxW;
+    const x0 = clamp(Math.min(lox, hix), 0, pxW);
+    const x1 = clamp(Math.max(lox, hix), 0, pxW);
+    if (x1 - x0 >= 1) {
+        // Dashed on EDGE_DASH, the same pattern the vertical passband edges
+        // are drawn with. Solid, it read as its own kind of mark; sharing
+        // the dash says it is the same thing seen end-on — the span those
+        // two lines bound.
         //
-        // Drawn after the badge so it is not painted over, and it runs past the
-        // badge on both sides whenever the passband is wider than the number is,
-        // which is most of the time at a narrow span. Lopsided about the dial for
-        // SSB, as it should be.
-        //
-        // Sits on the pip's point rather than on the badge's top edge, which is
-        // where it ended up when the number moved down to join the tick labels.
-        // The pip marks the dial and the bar is the passband about that dial, so
-        // the two belong together — with the number under them both rather than
-        // between them.
-        const lox = ((tuning.frequency + tuning.bandwidthLow - lo) / cfg.span) * pxW;
-        const hix = ((tuning.frequency + tuning.bandwidthHigh - lo) / cfg.span) * pxW;
-        const x0 = clamp(Math.min(lox, hix), 0, pxW);
-        const x1 = clamp(Math.max(lox, hix), 0, pxW);
-        if (x1 - x0 >= 1) {
-            // Dashed on EDGE_DASH, the same pattern the vertical passband edges
-            // are drawn with. Solid, it read as its own kind of mark; sharing
-            // the dash says it is the same thing seen end-on — the span those
-            // two lines bound.
-            //
-            // One CSS pixel, which is thinner than the 1.4 the edge marks
-            // themselves take: this is a short bar read as a span rather than a
-            // line read as a position, and it does not need the weight.
-            const y = Math.round(PIP_H * dpr) + 0.5;
-            c.beginPath();
-            c.moveTo(Math.round(x0), y);
-            c.lineTo(Math.round(x1), y);
-            c.setLineDash([EDGE_DASH[0] * dpr, EDGE_DASH[1] * dpr]);
-            c.lineCap = 'butt';
-            c.lineWidth = Math.max(1, Math.round(dpr));
-            c.strokeStyle = colEdge;
-            c.stroke();
-            c.setLineDash([]);
-        }
+        // One CSS pixel, which is thinner than the 1.4 the edge marks
+        // themselves take: this is a short bar read as a span rather than a
+        // line read as a position, and it does not need the weight.
+        const y = Math.round(PIP_H * dpr) + 0.5;
+        c.beginPath();
+        c.moveTo(Math.round(x0), y);
+        c.lineTo(Math.round(x1), y);
+        c.setLineDash([EDGE_DASH[0] * dpr, EDGE_DASH[1] * dpr]);
+        c.lineCap = 'butt';
+        c.lineWidth = Math.max(1, Math.round(dpr));
+        c.strokeStyle = colEdge;
+        c.stroke();
+        c.setLineDash([]);
     }
 }

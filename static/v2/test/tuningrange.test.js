@@ -154,4 +154,50 @@ t('ifSpectrum keeps 30 MHz as its own default, and takes an override', () => {
     assert.strictEqual(fullBinWidthOf({ defaultBinCount: 2048 }, 60e6), 29296.875);
 });
 
+
+// ── Bookmark reachability ────────────────────────────────────────────────────
+//
+// Bookmarks outlive the receiver's range. Save a 6 m bookmark at 129.6 Msps, drop back
+// to 64.8, and the record is still there — served by the server, listed by both panels —
+// but unreachable. Clicking it must refuse rather than let tuneTo clamp to the band edge,
+// because a silent landing on 30 MHz looks like the click worked.
+const { bookmarkReachable, markerReachable } = require('./.build/bookmarktune.cjs');
+
+t('a bookmark inside the range is reachable', () => {
+    assert.ok(bookmarkReachable({ frequency: 14074000 }, 10000, 30000000));
+});
+
+t('a 6 m bookmark is unreachable on a 30 MHz receiver, reachable on a 60 MHz one', () => {
+    const sixM = { frequency: 50313000 };
+    assert.ok(!bookmarkReachable(sixM, 10000, 30000000), 'must refuse at 30 MHz');
+    assert.ok(bookmarkReachable(sixM, 10000, 60000000), 'must allow at 60 MHz');
+});
+
+t('the defaults are the old 10 kHz - 30 MHz, for a caller that passes none', () => {
+    assert.ok(bookmarkReachable({ frequency: 14074000 }));
+    assert.ok(!bookmarkReachable({ frequency: 50313000 }));
+});
+
+t('junk is unreachable rather than throwing', () => {
+    for (const b of [null, undefined, {}, { frequency: null }, { frequency: NaN },
+        { frequency: '14074000' }, { frequency: -1 }, { frequency: Infinity }]) {
+        assert.strictEqual(bookmarkReachable(b, 10000, 30000000), false,
+            `${JSON.stringify(b)} should be unreachable`);
+    }
+});
+
+t('markers answer the same question about their own field', () => {
+    assert.ok(markerReachable({ freq: 14074000 }, 10000, 30000000));
+    assert.ok(!markerReachable({ freq: 50313000 }, 10000, 30000000));
+    assert.strictEqual(markerReachable({ frequency: 14074000 }, 10000, 30000000), false,
+        'a marker carries freq, not frequency');
+});
+
+t('the band edges themselves are reachable', () => {
+    assert.ok(bookmarkReachable({ frequency: 10000 }, 10000, 30000000));
+    assert.ok(bookmarkReachable({ frequency: 30000000 }, 10000, 30000000));
+    assert.ok(!bookmarkReachable({ frequency: 9999 }, 10000, 30000000));
+    assert.ok(!bookmarkReachable({ frequency: 30000001 }, 10000, 30000000));
+});
+
 console.log(`\n${pass} passed`);

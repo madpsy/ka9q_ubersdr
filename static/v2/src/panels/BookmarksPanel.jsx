@@ -13,7 +13,8 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { Empty } from '../components/ui.jsx';
 import { MINIMAL_ROWS, PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
 import { formatFreqShort } from '../lib/format.js';
-import { bookmarkTarget } from '../lib/bookmarkTune.js';
+import { bookmarkReachable, bookmarkTarget } from '../lib/bookmarkTune.js';
+import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 
 export default function BookmarksPanel({ minimal }) {
     const { actions, catalog } = useRadio();
@@ -79,12 +80,22 @@ export default function BookmarksPanel({ minimal }) {
             {listed && (
                 <div className="list">
                     {listed.length === 0 && <Empty>No match</Empty>}
-                    {listed.slice(start, end).map((b, i) => (
+                    {listed.slice(start, end).map((b, i) => {
+                        // A bookmark outside this receiver's range is shown, not hidden —
+                        // it is the operator's record and may become reachable again — but
+                        // it cannot be clicked. tuneTo would clamp to the band edge and
+                        // land on 30 MHz looking like it worked. See bookmarkReachable.
+                        const reachable = bookmarkReachable(b, MIN_FREQ, MAX_FREQ);
+                        return (
                         <button
                             key={`${b.frequency}-${start + i}`}
                             type="button"
-                            className="list__row"
-                            title={b.comment || ''}
+                            className={`list__row${reachable ? '' : ' list__row--disabled'}`}
+                            disabled={!reachable}
+                            title={reachable
+                                ? (b.comment || '')
+                                : `${formatFreqShort(b.frequency)} is outside this receiver's range `
+                                  + `(${MIN_FREQ / 1000} kHz–${MAX_FREQ / 1e6} MHz)`}
                             // Frequency, mode and the bookmark's passband if it has one, in
                             // one tune — see lib/bookmarkTune.js. A receiver's config.yaml
                             // can set bandwidth_low/high on a bookmark, and it used to be
@@ -100,7 +111,8 @@ export default function BookmarksPanel({ minimal }) {
                                 {b.mode && <span className="chip">{b.mode.toUpperCase()}</span>}
                             </span>
                         </button>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
             {listed && <Pager pager={pager} unit="bookmarks" />}

@@ -376,3 +376,60 @@ func verifyReceiverAgainstFrontend(rc ReceiverConfig, status *FrontendStatus) []
 
 	return issues
 }
+
+// pruneOutOfRangeChannels disables the configured things that would otherwise ask radiod
+// for a channel outside the receiver.
+//
+// Noise-floor bands, decoder bands and the frequency reference each create a real radiod
+// channel at an operator-chosen frequency. None of them is validated against the front
+// end, because until the span was derived there was nothing to validate against — the
+// answer was always 0-30 MHz. Now an operator who adds a 6 m FT8 decoder while running at
+// 129.6 Msps and later drops back to 64.8 is left with a channel radiod cannot serve: no
+// error, just a decoder that never decodes and a spectrum band that stays empty.
+//
+// Warn and skip rather than fail: a receiver that boots with one band disabled is far
+// better than one that refuses to start because a config entry went out of reach. The
+// entries stay in the file, so widening the front end again brings them back — the same
+// contract bookmarks and VFOs have.
+func pruneOutOfRangeChannels(config *Config) {
+	rx := config.Receiver
+	inRange := func(hz uint64) bool { return hz >= rx.MinFreq() && hz <= rx.MaxFreq() }
+
+	if n := len(config.NoiseFloor.Bands); n > 0 {
+		kept := config.NoiseFloor.Bands[:0]
+		for _, b := range config.NoiseFloor.Bands {
+			// The centre is what the channel is created at; the edges decide whether any
+			// of the band is visible at all.
+			if !inRange(b.CenterFrequency) || b.Start > rx.MaxFreq() || b.End < rx.MinFreq() {
+				fmt.Printf("Warning: noise floor band '%s' (%.3f-%.3f MHz) is outside the receiver's range (%.3f-%.3f MHz) — disabled\n",
+					b.Name, float64(b.Start)/1e6, float64(b.End)/1e6,
+					float64(rx.MinFreq())/1e6, float64(rx.MaxFreq())/1e6)
+				continue
+			}
+			kept = append(kept, b)
+		}
+		config.NoiseFloor.Bands = kept
+	}
+
+	if n := len(config.Decoder.Bands); n > 0 {
+		kept := config.Decoder.Bands[:0]
+		for _, b := range config.Decoder.Bands {
+			if !inRange(b.Frequency) {
+				fmt.Printf("Warning: decoder band '%s' at %.3f MHz is outside the receiver's range (%.3f-%.3f MHz) — disabled\n",
+					b.Name, float64(b.Frequency)/1e6,
+					float64(rx.MinFreq())/1e6, float64(rx.MaxFreq())/1e6)
+				continue
+			}
+			kept = append(kept, b)
+		}
+		config.Decoder.Bands = kept
+	}
+
+	if config.FrequencyReference.Enabled && config.FrequencyReference.Frequency > 0 &&
+		!inRange(config.FrequencyReference.Frequency) {
+		fmt.Printf("Warning: frequency reference at %.3f MHz is outside the receiver's range (%.3f-%.3f MHz) — disabled\n",
+			float64(config.FrequencyReference.Frequency)/1e6,
+			float64(rx.MinFreq())/1e6, float64(rx.MaxFreq())/1e6)
+		config.FrequencyReference.Enabled = false
+	}
+}

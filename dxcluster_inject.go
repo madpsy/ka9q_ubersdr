@@ -36,6 +36,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -104,6 +105,16 @@ func HandleDXSpotInject(client *DXClusterClient, dxConfig *DXClusterConfig, serv
 
 		if req.Spotter == "" || req.DXCall == "" || req.Frequency <= 0 {
 			http.Error(w, "spotter, dx_call and frequency (Hz) are required", http.StatusBadRequest)
+			return
+		}
+
+		// Refused rather than accepted-and-hidden: a spot this receiver cannot tune is
+		// one nobody here can act on, and the upstream cluster feed drops the same ones
+		// at ingest (see processLine). Injecting past that would put a spot on the
+		// marker bar whose only possible outcome is a click that does nothing.
+		if client != nil && client.maxFrequency > 0 && req.Frequency > float64(client.maxFrequency) {
+			http.Error(w, fmt.Sprintf("frequency %.0f Hz is outside the receiver's range (max %d Hz)",
+				req.Frequency, client.maxFrequency), http.StatusBadRequest)
 			return
 		}
 

@@ -865,3 +865,66 @@ func TestKiwiGeometryIsIndependentOfReceiverSpan(t *testing.T) {
 		}
 	}
 }
+
+// Anything that creates a radiod channel at an operator-chosen frequency must be
+// disabled when that frequency falls outside the receiver — and left in the config, so
+// widening the front end again brings it back.
+func TestPruneOutOfRangeChannels(t *testing.T) {
+	build := func(span uint64) *Config {
+		c := &Config{}
+		c.Receiver = testReceiver(span)
+		c.NoiseFloor.Bands = []NoiseFloorBand{
+			{Name: "20m", Start: 14_000_000, End: 14_350_000, CenterFrequency: 14_175_000},
+			{Name: "6m", Start: 50_000_000, End: 52_000_000, CenterFrequency: 51_000_000},
+		}
+		c.Decoder.Bands = []DecoderBandConfig{
+			{Name: "20m", Frequency: 14_074_000},
+			{Name: "6m", Frequency: 50_313_000},
+		}
+		c.FrequencyReference.Enabled = true
+		c.FrequencyReference.Frequency = 25_000_000
+		return c
+	}
+
+	// 30 MHz: the 6 m entries go, the HF ones stay, the 25 MHz reference stays.
+	narrow := build(30_000_000)
+	pruneOutOfRangeChannels(narrow)
+	if len(narrow.NoiseFloor.Bands) != 1 || narrow.NoiseFloor.Bands[0].Name != "20m" {
+		t.Errorf("noise floor bands: got %+v, want just 20m", narrow.NoiseFloor.Bands)
+	}
+	if len(narrow.Decoder.Bands) != 1 || narrow.Decoder.Bands[0].Name != "20m" {
+		t.Errorf("decoder bands: got %+v, want just 20m", narrow.Decoder.Bands)
+	}
+	if !narrow.FrequencyReference.Enabled {
+		t.Error("a 25 MHz reference is reachable on a 30 MHz receiver")
+	}
+
+	// 60 MHz: everything is in range and nothing is touched.
+	wide := build(60_000_000)
+	pruneOutOfRangeChannels(wide)
+	if len(wide.NoiseFloor.Bands) != 2 {
+		t.Errorf("noise floor bands: got %d, want both", len(wide.NoiseFloor.Bands))
+	}
+	if len(wide.Decoder.Bands) != 2 {
+		t.Errorf("decoder bands: got %d, want both", len(wide.Decoder.Bands))
+	}
+
+	// A reference above the receiver is switched off rather than left to ask radiod for
+	// a channel it cannot serve.
+	ref := build(30_000_000)
+	ref.FrequencyReference.Frequency = 50_000_000
+	pruneOutOfRangeChannels(ref)
+	if ref.FrequencyReference.Enabled {
+		t.Error("a 50 MHz reference must be disabled on a 30 MHz receiver")
+	}
+
+	// A zero ReceiverConfig means today's range, so HF survives and 6 m does not.
+	zero := &Config{}
+	zero.NoiseFloor.Bands = build(30_000_000).NoiseFloor.Bands
+	zero.Decoder.Bands = build(30_000_000).Decoder.Bands
+	pruneOutOfRangeChannels(zero)
+	if len(zero.NoiseFloor.Bands) != 1 || len(zero.Decoder.Bands) != 1 {
+		t.Errorf("zero config should behave as 10 kHz-30 MHz, got %d/%d bands",
+			len(zero.NoiseFloor.Bands), len(zero.Decoder.Bands))
+	}
+}

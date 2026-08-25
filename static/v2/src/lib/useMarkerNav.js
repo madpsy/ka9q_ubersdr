@@ -12,12 +12,13 @@
 // clear of the contexts — the same arrangement lib/vfos.js uses.
 
 import { useEffect, useMemo, useState } from '../react.js';
+import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import { subscribeSpots } from './spotStore.js';
 import { subscribeVoiceActivity } from './voiceActivity.js';
 import { subscribeConfirmedVoice } from './voiceConfirmed.js';
 import { voiceSkimmerAvailable } from './voiceSkimmer.js';
 import { collectMarkers, findMarkers } from './markerNav.js';
-import { markerTarget } from './bookmarkTune.js';
+import { markerReachable, markerTarget } from './bookmarkTune.js';
 import { onNavTypes, saveNavTypes, savedNavTypes } from './markerNavSettings.js';
 
 // The shared selection of kinds to step between, as state that tracks it.
@@ -37,6 +38,11 @@ export function useNavTypes() {
 // no needle in it, and the fix must be the same wherever the step came from.
 export function stepToMarker(actions, marker) {
     if (!marker) return;
+    // Refused rather than clamped, exactly as clicking the same marker on the bar or in
+    // a panel is: a marker for something outside this receiver — a bookmark saved when
+    // the front end ran wider, a spot replayed from the database — would otherwise walk
+    // the dial to the band edge and look like the step worked.
+    if (!markerReachable(marker, MIN_FREQ, MAX_FREQ)) return;
     // A bookmark marker carries its passband, and stepping onto one should land on the
     // filter it was saved with — see lib/bookmarkTune.js.
     actions.tuneTo(markerTarget(marker));

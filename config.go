@@ -1515,6 +1515,12 @@ func LoadConfig(filename string) (*Config, error) {
 	// Validate and clean up frequency gain ranges
 	config.Spectrum.validateFrequencyGainRanges(config.Receiver.MaxFreq())
 
+	// Anything that would ask radiod for a channel outside the receiver is disabled here,
+	// after the noise-floor band defaults above have been filled in. main.go calls this
+	// again once decoder.yaml has been merged, because that replaces config.Decoder
+	// wholesale and the bands it brings have not been through this.
+	pruneOutOfRangeChannels(&config)
+
 	// Set DX cluster defaults if not specified
 	if config.DXCluster.Port == 0 {
 		config.DXCluster.Port = 7300 // Default DX cluster port

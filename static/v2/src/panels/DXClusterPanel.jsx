@@ -43,6 +43,7 @@
 // bottom of the screen has led with the wrong thing.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
+import { freqInRange } from '../lib/format.js';
 import { Button, Empty, Modal } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import DockTooNarrow, { useDockRoom } from '../components/DockTooNarrow.jsx';
@@ -172,6 +173,10 @@ export default function DXClusterPanel({ minimal }) {
     const tune = (spot) => {
         // Frequency and mode together: separately the receiver passes through
         // the old mode's passband on the new frequency on the way.
+        // Refused, not clamped: a spot outside this receiver would otherwise pull the
+        // dial to the band edge and look like it worked. Live cluster spots are filtered
+        // server-side, but injected and replayed ones reach here too.
+        if (!freqInRange(spot.hz)) return;
         actions.tuneTo({ frequency: spot.hz, mode: spot.mode });
         actions.ensureVisible(spot.hz);
         say(`Tuned ${spot.khz} ${spot.mode.toUpperCase()}`);

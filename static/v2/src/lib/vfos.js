@@ -11,6 +11,8 @@
 // turn of the dial and there is nothing it can get wrong — nothing reads the
 // active slot.
 
+import { freqInRange } from './format.js';
+
 export const VFO_IDS = ['A', 'B', 'C', 'D'];
 
 const STORAGE_KEY = 'ubersdr.v2.vfos';
@@ -174,8 +176,26 @@ export function selectVfo(radio, to) {
     const before = getVfos();
     const { state, recall } = switchTo(before, to, vfoSnapshot(radio.tuning, radio.view));
     if (state === before) return false;
+    // An unused VFO has nothing to recall and is always switchable — it simply becomes a
+    // copy of where the receiver already is. The range test below must come after this,
+    // not before: applied to a null recall it refused every first switch to a fresh slot.
+    if (!recall) {
+        setVfos(state);
+        return true;
+    }
+
+    // A VFO whose stored frequency is outside the receiver's range is left alone
+    // entirely — the switch is refused rather than made.
+    //
+    // VFOs are persisted per browser, so one parked on 6 m while the front end ran at
+    // 129.6 Msps is still there after a drop back to 64.8. Switching to it and letting
+    // tuneTo clamp would not just land on the wrong frequency: switchTo writes the live
+    // tuning into the slot being left, so the next switch away would save the clamped
+    // 30 MHz over the stored 50 MHz and the VFO would be gone for good. Refusing keeps
+    // it intact, and usable again if the operator goes back.
+    if (!freqInRange(recall.frequency)) return false;
+
     setVfos(state);
-    if (!recall) return true;   // an unused VFO starts as a copy of this one
     radio.actions.tuneTo({
         frequency: recall.frequency,
         mode: recall.mode,

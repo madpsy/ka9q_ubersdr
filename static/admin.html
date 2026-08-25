@@ -6571,7 +6571,14 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 row.innerHTML = `
                     <td style="padding: 12px;">${bookmark.name}</td>
-                    <td style="padding: 12px;">${bookmark.frequency.toLocaleString()}</td>
+                    <td style="padding: 12px;">${bookmark.frequency.toLocaleString()}${
+                        // Kept, not removed: the receiver's range can widen again, and
+                        // deleting an operator's bookmark because the sample rate moved
+                        // would be the wrong kind of tidy. Flagged so it is obvious why
+                        // the frontends will not tune to it.
+                        inReceiverRange(bookmark.frequency) ? '' :
+                        ` <span title="Outside this receiver's range (${receiverRangeLabel()}) \u2014 kept, but not tunable" style="color:#856404;background:#fff3cd;border-radius:3px;padding:1px 6px;font-size:11px;white-space:nowrap;">out of range</span>`
+                    }</td>
                     <td style="padding: 12px;">${bookmark.mode.toUpperCase()}</td>
                     <td style="padding: 12px;">${groupDisplay}</td>
                     <td style="padding: 12px; max-width: 300px;">${commentDisplay}</td>
@@ -6708,6 +6715,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 if (isDuplicate) {
                     freqError.textContent = `A bookmark '${name}' at ${frequency.toLocaleString()} Hz already exists`;
+                    freqError.style.display = 'block';
+                    isValid = false;
+                } else if (!inReceiverRange(frequency)) {
+                    // The server refuses these too; saying so here avoids a round trip
+                    // that comes back as an opaque 400.
+                    freqError.textContent = `${frequency.toLocaleString()} Hz is outside this receiver's range (${receiverRangeLabel()})`;
                     freqError.style.display = 'block';
                     isValid = false;
                 } else {
@@ -7539,6 +7552,31 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             document.getElementById('bandEndError').style.display = 'none';
         }
 
+        // ── Receiver frequency range ──────────────────────────────────────────
+        // Bookmarks and bands are rejected outside it, and existing entries outside it
+        // are flagged rather than removed: an operator who runs at 129.6 Msps, saves a
+        // 6 m entry and drops back to 64.8 keeps the record, and it becomes usable again
+        // if they go back. Fetched once; a server without tuning_range is 10 kHz-30 MHz,
+        // which is what this file assumed before the span became configurable.
+        let receiverRange = { min: 10000, max: 30000000 };
+        (async function loadReceiverRange() {
+            try {
+                const r = await fetch('/api/description');
+                const d = await r.json();
+                const t = d && d.tuning_range;
+                if (t && t.min_frequency > 0 && t.max_frequency > 0) {
+                    receiverRange = { min: t.min_frequency, max: t.max_frequency };
+                }
+            } catch (e) { /* keep the defaults */ }
+        })();
+
+        function receiverRangeLabel() {
+            return `${(receiverRange.min / 1000).toFixed(0)} kHz \u2013 ${(receiverRange.max / 1e6).toFixed(3)} MHz`;
+        }
+        function inReceiverRange(hz) {
+            return Number.isFinite(hz) && hz >= receiverRange.min && hz <= receiverRange.max;
+        }
+
         function validateBandForm() {
             const label = document.getElementById('newBandLabel').value.trim();
             const startValue = document.getElementById('newBandStart').value.trim();
@@ -7595,8 +7633,21 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 endError.textContent = 'End frequency must be greater than start frequency';
                 endError.style.display = 'block';
                 isValid = false;
+            } else if (end < receiverRange.min || start > receiverRange.max) {
+                // Wholly outside — the server rejects this outright.
+                endError.textContent = `This band lies outside the receiver's range (${receiverRangeLabel()})`;
+                endError.style.display = 'block';
+                isValid = false;
+            } else if (start < receiverRange.min || end > receiverRange.max) {
+                // Overlapping — the server clamps it to the receiver rather than
+                // refusing, so this is a warning, not an error. Saying so beats having
+                // the saved values come back different from the typed ones.
+                endError.textContent = `Note: this band extends past the receiver's range (${receiverRangeLabel()}) and will be trimmed to fit`;
+                endError.style.display = 'block';
+                endError.style.color = '#856404';
             } else {
                 endError.style.display = 'none';
+                endError.style.color = '#dc3545';
             }
 
             // Enable/disable save button based on validation

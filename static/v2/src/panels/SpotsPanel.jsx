@@ -22,7 +22,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Empty, Icon, Segmented, ShowMore, Switch } from '../components/ui.jsx';
 import SpotMap from '../components/SpotMap.jsx';
-import { countryFlag } from '../lib/format.js';
+import { countryFlag, freqInRange } from '../lib/format.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
 import { getSessionId } from '../radio/session.js';
@@ -365,7 +365,7 @@ export default function SpotsPanel({ minimal }) {
         frequency: () => tuning.frequency,
         lookups: () => !!(serverInfo && serverInfo.lookup_service),
         uuid: () => getSessionId(),
-        tune: (t) => actions.tuneTo(t),
+        tune: (t) => { if (t && freqInRange(t.frequency)) actions.tuneTo(t); },
         lookup: (call) => { if (!requestLookup(call)) lookupCallsign(call); },
         clear: () => clearSpots('cw'),
     });
@@ -443,6 +443,8 @@ export default function SpotsPanel({ minimal }) {
         // One tune rather than a mode change that resets the passband followed
         // by a frequency change — the v1 extensions pass preserveBandwidth=false
         // for the same reason, so the row lands on the mode's own filter.
+        // Same rule as the marker bar: out of range is refused rather than clamped.
+        if (!freqInRange(Math.round(spot.frequency))) return;
         actions.tuneTo({ frequency: Math.round(spot.frequency), mode: modeForSpot(spot) });
         // And look the callsign up, as the v1 rows do.
         lookup(spot.callsign);

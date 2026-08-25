@@ -717,11 +717,23 @@ t('nothing to run, and nothing to run it with, are both survivable', () => {
     assert.strictEqual(n.runNoticeAction({ kind: 'tune', frequency: 1 }, null), false);
     assert.strictEqual(n.runNoticeAction({ kind: 'teleport' }, { tuneTo() {} }), false);
     // ensureVisible is optional, because not every caller's action bag has one.
+    // A real frequency, not a placeholder: the action is refused outside the receiver's
+    // range, so 1 Hz no longer exercises the running path.
     let tuned = 0;
     assert.strictEqual(
-        n.runNoticeAction({ kind: 'tune', frequency: 1 }, { tuneTo: () => { tuned++; } }), true,
+        n.runNoticeAction({ kind: 'tune', frequency: 14205000 }, { tuneTo: () => { tuned++; } }), true,
     );
     assert.strictEqual(tuned, 1);
+});
+
+t('a notice naming a frequency this receiver cannot reach is refused, not clamped', () => {
+    // An operator writes the notice, so it can name anything. Clamping would tune to the
+    // band edge and make the button look like it worked.
+    let tuned = 0;
+    const bag = { tuneTo: () => { tuned++; } };
+    assert.strictEqual(n.runNoticeAction({ kind: 'tune', frequency: 50313000 }, bag), false);
+    assert.strictEqual(n.runNoticeAction({ kind: 'tune', frequency: 1 }, bag), false);
+    assert.strictEqual(tuned, 0, 'nothing should have been tuned');
 });
 
 t('the press says what it will do, because a button with no words is a guess', () => {

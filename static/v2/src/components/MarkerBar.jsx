@@ -13,8 +13,9 @@ import {
     assignRows, bandColors, bandLabelPositions, layoutBands, layoutBookmarks, offscreenArrows,
 } from '../lib/markers.js';
 import { markColors } from '../display/uiConfig.js';
-import { bookmarkTarget } from '../lib/bookmarkTune.js';
-import { countryFlag, formatFreqShort, sinceLabel } from '../lib/format.js';
+import { bookmarkReachable, bookmarkTarget } from '../lib/bookmarkTune.js';
+import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
+import { countryFlag, formatFreqShort, freqInRange, sinceLabel } from '../lib/format.js';
 import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
 import { getVfos, markableVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import { requestLookup } from '../lib/callsign.js';
@@ -853,7 +854,13 @@ export default function MarkerBar({ width }) {
             selectVfo(radio, hit.vfo.id);
             actions.ensureVisible(hit.vfo.frequency);
         } else if (hit.kind === 'voice') {
+            // Every kind below refuses a frequency outside the receiver rather than
+            // letting tuneTo clamp it to the band edge — a spot or marker that cannot be
+            // reached must not look like it tuned. Live cluster and skimmer feeds are
+            // already filtered server-side; this covers injected spots, anything replayed
+            // from the database, and a receiver whose range has since narrowed.
             const freq = dialFreq(hit.activity);
+            if (!freqInRange(freq)) return;
             actions.tuneTo({ frequency: freq, mode: (hit.activity.mode || 'lsb').toLowerCase() });
             actions.ensureVisible(freq);
             // Pair the tune with a lookup, as the voice activity panel's rows
@@ -867,7 +874,7 @@ export default function MarkerBar({ width }) {
             // wherever you click it. A mode it did not report is left alone rather than
             // guessed, which is why this is a spread and not two fixed fields.
             const t = tuneTarget(hit.spot);
-            if (t) {
+            if (t && freqInRange(t.frequency)) {
                 actions.tuneTo(t);
                 actions.ensureVisible(t.frequency);
                 if (lookups && !requestLookup(hit.spot.callsign)) lookupCallsign(hit.spot.callsign);
@@ -877,12 +884,14 @@ export default function MarkerBar({ width }) {
             // with their own demodulation, and guessing one here would fight whatever
             // the operator has the receiver set to for a frequency they have just
             // asked to hear.
+            if (!freqInRange(hit.marker.frequency)) return;
             actions.setFrequency(hit.marker.frequency);
             actions.ensureVisible(hit.marker.frequency);
         } else if (hit.kind === 'spot') {
             // One tune with the mode the feed implies, as the Spots panel's
             // rows do — see modeForSpot for where those rules come from.
             const freq = Math.round(hit.spot.frequency);
+            if (!freqInRange(freq)) return;
             actions.tuneTo({ frequency: freq, mode: modeForSpot(hit.spot) });
             actions.ensureVisible(freq);
             const call = hit.spot.callsign;
@@ -890,6 +899,9 @@ export default function MarkerBar({ width }) {
         } else if (hit.kind === 'bookmark') {
             // Server or local — the pill draws both, and both can carry a passband. One
             // tune, so a mode change does not send the old filter on the way through.
+            // Same refusal as the panels: a marker for a bookmark this receiver cannot
+            // reach must not silently retune to the band edge.
+            if (!bookmarkReachable(hit.item, MIN_FREQ, MAX_FREQ)) return;
             actions.tuneTo(bookmarkTarget(hit.item));
             // A pill sits at the edge of the bar as often as the middle, and
             // with follow-tuning off nothing else would move the view — so the

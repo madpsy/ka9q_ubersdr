@@ -15,8 +15,8 @@ import { UNGROUPED, groupsOf, hiddenGroups, onGroupsChanged } from '../lib/bookm
 import { Button, Empty, Icon, Menu, MenuItem, Modal } from '../components/ui.jsx';
 import { MINIMAL_ROWS, PAGE_ROWS, Pager, usePager } from '../components/Pager.jsx';
 import { formatFilterWidth, formatFreqShort } from '../lib/format.js';
-import { bookmarkTarget } from '../lib/bookmarkTune.js';
-import { MODES, MODE_BY_ID } from '../radio/constants.js';
+import { bookmarkReachable, bookmarkTarget } from '../lib/bookmarkTune.js';
+import { MAX_FREQ, MIN_FREQ, MODES, MODE_BY_ID } from '../radio/constants.js';
 import {
     EXPORT_FORMATS, downloadFile, exportText, importText,
     localBookmarks, mutate, onLocalBookmarksChanged, passbandFields,
@@ -165,6 +165,11 @@ export default function LocalBookmarksPanel({ minimal }) {
     // filter on the way. Shared with the other three places a bookmark is clicked — see
     // lib/bookmarkTune.js.
     const tune = (b) => {
+        // Refused rather than clamped: tuneTo would pull an out-of-range bookmark to the
+        // band edge, so the dial would land on 30 MHz looking like the click worked. A
+        // local bookmark can outlive the receiver's range — saved at 129.6 Msps, opened
+        // again at 64.8. See bookmarkReachable.
+        if (!bookmarkReachable(b, MIN_FREQ, MAX_FREQ)) return;
         actions.tuneTo(bookmarkTarget(b));
         actions.ensureVisible(b.frequency);
     };

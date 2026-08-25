@@ -582,6 +582,10 @@ func main() {
 	decoderConfig, err := LoadConfig(decoderPath)
 	if err == nil {
 		config.Decoder = decoderConfig.Decoder
+		// decoder.yaml is loaded as its own Config, so its bands have not been checked
+		// against this receiver's range — LoadConfig only saw the (empty) decoder section
+		// of config.yaml. Re-run the prune now that they are in place.
+		pruneOutOfRangeChannels(config)
 		log.Printf("Loaded decoder configuration from decoder.yaml (enabled: %v, bands: %d)",
 			config.Decoder.Enabled, len(config.Decoder.GetEnabledBands()))
 	} else {

@@ -23,7 +23,7 @@
 // that one is the store, and a store that could tune the receiver is a store that does
 // more than keep a list.
 
-import { formatFreqShort } from './format.js';
+import { formatFreqShort, freqInRange } from './format.js';
 
 /** The modes a notification is allowed to ask for. The same set tuneTarget accepts. */
 const MODES = /^(usb|lsb|am|sam|fm|nfm|cwu|cwl)$/;
@@ -83,6 +83,11 @@ export function runNoticeAction(action, actions) {
     if (!action || !actions) return false;
     if (action.kind === 'tune') {
         const { kind, ...target } = action;
+        // A notice is written by the operator and can name any frequency, including one
+        // this receiver cannot reach. Refuse rather than clamp — landing on the band edge
+        // would look like the notice's button worked. False, like every other "did
+        // nothing" path here, so the caller can tell.
+        if (!freqInRange(target.frequency)) return false;
         actions.tuneTo(target);
         // The same pair the Voice skimmer panel and the marker bar use when a callsign is
         // clicked: tuning to somewhere off the edge of the spectrum and leaving the view

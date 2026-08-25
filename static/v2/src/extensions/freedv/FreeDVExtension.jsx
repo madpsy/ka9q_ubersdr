@@ -31,6 +31,7 @@ import { getOpusDecoderClass } from '../../radio/audio-player.js';
 import { dxcluster } from '../../radio/dxcluster-connection.js';
 import { bandForFrequency, HAM_BANDS } from '../../lib/bands.js';
 import { formatHz } from '../../lib/format.js';
+import { MAX_FREQ, MIN_FREQ } from '../../radio/constants.js';
 import { useAudioExtension } from '../useAudioExtension.js';
 import {
     SIGNAL_TIMEOUT_MS, applyUpdate, decodeFrame, isOnFrequency, isTunable,
@@ -219,7 +220,9 @@ export default function FreeDVExtension({ minimal }) {
     const rows = useMemo(() => visibleUsers(users, band), [users, band]);
 
     const tuneToStation = (user) => {
-        if (!isTunable(user)) return;
+        // The receiver's real range, not isTunable's 30 MHz default: on a wider
+        // receiver a 6 m spot is tunable and must not read as out of reach.
+        if (!isTunable(user, MIN_FREQ, MAX_FREQ)) return;
         actions.tuneTo({
             frequency: user.freqHz,
             // FreeDV is USB above 10 MHz and LSB below, as SSB voice is.
@@ -322,7 +325,7 @@ export default function FreeDVExtension({ minimal }) {
                     </Empty>
                 )}
                 {rows.map((u) => {
-                    const tunable = isTunable(u);
+                    const tunable = isTunable(u, MIN_FREQ, MAX_FREQ);
                     return (
                         <button
                             key={u.sid}

@@ -251,3 +251,33 @@ func truncateWords(s string, max int) string {
 	}
 	return strings.TrimRight(cut, " ,;:.-") + "…"
 }
+
+// v2TuningRangeJSON renders the receiver's frequency limits for the v2 shell to read
+// synchronously, before the bundle runs.
+//
+// /api/description carries the same numbers and is the right place for anything that can
+// wait for a fetch. v2 cannot: radio/constants.js evaluates MAX_FREQ at module scope, and
+// four things downstream read it before any fetch could land —
+//
+//   - initialTuning() clamps the ?freq= share link and the restored localStorage
+//     frequency in a useMemo on first render, and the clamp is lossy: a 50 MHz link
+//     would become 30 MHz with the real value gone before the reply arrived
+//   - FreqEntry's RANGE_HINT is a module-scope template literal, evaluated at import
+//   - bridge/commands.js validates commands that can arrive before the fetch resolves
+//   - RadioContext's own default_frequency guard lives inside the /api/description
+//     handler, so it would be validating against a limit carried by the reply it reads
+//
+// Inlining keeps MAX_FREQ a plain constant whose value changes but whose shape does not,
+// so none of its ~15 consumers need to become context reads.
+//
+// Marshalling cannot fail — every field is a number or a short ASCII string — but a
+// belt-and-braces empty object is returned if it somehow does, because the frontend
+// treats "absent" as 10 kHz–30 MHz and that is the safe answer.
+func v2TuningRangeJSON(config *Config) template.JS {
+	encoded, err := json.Marshal(config.Receiver.TuningRange())
+	if err != nil {
+		log.Printf("v2 shell: could not encode tuning range (%v); the frontend will use its 10 kHz-30 MHz defaults", err)
+		return template.JS("{}")
+	}
+	return template.JS(encoded)
+}

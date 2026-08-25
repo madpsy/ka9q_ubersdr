@@ -7,10 +7,10 @@ package main
 // set to e.scaleimgs[zoom][tileIndex].  Each tile is a 1024×14 PNG showing
 // frequency tick marks and labels for the portion of the band it covers.
 //
-// Tile geometry (band = 10 kHz … 30 MHz, i.e. 29 990 kHz wide):
+// Tile geometry, for a band of width W kHz starting at S kHz (see websdrBandFor):
 //
-//	tileWidthKHz[zoom] = 29990 / (1 << zoom)
-//	tileStartKHz       = 10 + tile * tileWidthKHz
+//	tileWidthKHz[zoom] = W / (1 << zoom)
+//	tileStartKHz       = S + tile * tileWidthKHz
 //	pixelsPerKHz       = 1024 / tileWidthKHz
 //
 // Label step is chosen so that labels are at least ~60 px apart.
@@ -129,11 +129,159 @@ func chooseLabelStep(pixelsPerKHz, minPxApart float64) float64 {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const (
-	scaleBandStartKHz = 10.0
-	scaleBandBWKHz    = 29990.0 // 30000 - 10
-	scaleImgW         = 1024
-	scaleImgH         = 14
+	scaleImgW = 1024
+	scaleImgH = 14
 )
+
+// websdrBand is the single band the emulation advertises, and the one description of it
+// that bandinfo.js, the scale tiles, the waterfall geometry and the tune clamp all share.
+//
+// Unlike the KiwiSDR emulation, this one is not pinned to 30 MHz. A WebSDR client builds
+// its entire frequency axis from bandinfo[] — `khzperpixel = samplerate/1024` and
+// `centerfreq` in websdr-base.js — and takes maxzoom from the same place, so telling it a
+// wider band is all that is needed. (The Kiwi client computes 30 MHz / 2^zoom itself, with
+// no field to override; that is why the two are treated differently. See RECEIVER_SPAN.md.)
+//
+// These used to be four sets of constants in three files kept in step by a comment saying
+// they "MUST match". They are one struct now because that comment was the only thing
+// enforcing it.
+type websdrBand struct {
+	StartHz float64
+	EndHz   float64
+	MaxZoom int
+}
+
+// websdrBaseMaxZoom is the deepest zoom on a 30 MHz receiver: 1024x, showing ~29 kHz.
+//
+// It was 8 (~117 kHz) while the waterfall path believed radiod could not serve better
+// than 500 Hz per bin. It can — 0.5 Hz, via radiodBinBandwidthLadder — so resolution is
+// no longer what bounds this. What bounds it now is bandinfo.js, which carries
+// 2^(MaxZoom+1)-1 scale-tile URLs and is served no-cache, so every level doubles what is
+// re-fetched on each page load:
+//
+//	 8  ~117 kHz    511 tiles   ~18 KB
+//	10   ~29 kHz   2047 tiles   ~72 KB   <- here
+//	12    ~7 kHz   8191 tiles  ~288 KB
+//
+// 10 buys four times the depth of the old limit for a page-weight cost that is still
+// small. Going deeper is a page-weight decision, not a signal-processing one.
+const websdrBaseMaxZoom = 10
+
+// websdrMaxZoomCap bounds the growth below, at ~288 KB of tile URLs.
+const websdrMaxZoomCap = 12
+
+// websdrBandFor describes the band for a receiver.
+//
+// MaxZoom grows with the span so the deepest zoom always shows about the same width of
+// spectrum: websdrBaseMaxZoom on a 30 MHz receiver, one more on a 60 MHz one. Without
+// that a wider receiver would silently lose half its zoom depth.
+func websdrBandFor(rx ReceiverConfig) websdrBand {
+	b := websdrBand{
+		// From 0 Hz, not from the tuning minimum.
+		//
+		// This is the band the *waterfall* draws, and it has to be exactly the span the
+		// shared spectrum channel covers or zoom 0 cannot use it. It used to start at
+		// 10 kHz, which put the centre at 15.005 MHz against the shared channel's
+		// 15.000 and the bin width at 29287.11 Hz against 29296.875 — near enough to
+		// look right on screen, different enough that isAtDefaultSpectrumParams refused
+		// the match, so every WebSDR viewer opened a private radiod channel to be shown
+		// the same 0-30 MHz everyone else was already receiving.
+		//
+		// Tuning is bounded separately, by Receiver.MinFreq()/MaxFreq(), which is where
+		// the 10 kHz floor belongs: a waterfall showing down to DC is ordinary, and the
+		// client still cannot tune there.
+		StartHz: 0,
+		EndHz:   float64(rx.Span()),
+		MaxZoom: websdrBaseMaxZoom,
+	}
+	for span := b.WidthHz(); span > receiverTodaySpanHz && b.MaxZoom < websdrMaxZoomCap; span /= 2 {
+		b.MaxZoom++
+	}
+	return b
+}
+
+// WidthHz is the band's width — `samplerate` in bandinfo, once converted to kHz.
+func (b websdrBand) WidthHz() float64 {
+	w := b.EndHz - b.StartHz
+	if w <= 0 {
+		return 192000 // a degenerate band would divide by zero downstream
+	}
+	return w
+}
+
+// CentreHz is the midpoint the client hangs its axis on.
+func (b websdrBand) CentreHz() float64 { return b.StartHz + b.WidthHz()/2 }
+
+// MaxZoomPixels is the width of the maxzoom pixel grid the client sends `start` offsets in.
+func (b websdrBand) MaxZoomPixels() int { return scaleImgW << uint(b.MaxZoom) }
+
+// websdrMaxWidebandFFT bounds the FFT length radiod is asked for on its wideband path.
+//
+// radiod has two spectrum algorithms and the requested bin bandwidth picks between them:
+//
+//	rbw >  crossover (200 Hz)  ->  wideband, fft_n = samprate / rbw
+//	rbw <= crossover           ->  narrowband downconverter, fft_n ~ bin_count + 400/rbw
+//
+// The narrowband path is cheap at any depth. The wideband one is not: setup_wideband
+// takes fft_n = lrint(samprate/rbw) with no ceiling -- its own comment says "should limit
+// to a sane value" and then does not -- so halving the bandwidth doubles the transform.
+//
+// That is why the old code reduced bin_count at deep zoom, and it was right to, even
+// though the 500 Hz figure it used to decide when was not radiod's floor. Asking for the
+// full display width at zoom 6-7 would put fft_n at 142k and 283k points against today's
+// 71k: two and four times the work, on the one path that will not push back.
+//
+// 2^17 permits exactly what a full-width zoom 5 already costs, so the zooms that were
+// affordable before stay affordable, and the arithmetic follows the sample rate rather
+// than a constant tuned for 64.8 Msps.
+const websdrMaxWidebandFFT = 1 << 17
+
+// websdrSpectrumRequest is what to ask radiod for at a zoom level, paired with the grid
+// the client is going to draw. They differ whenever the cheap request is not the exact
+// one; streamWaterfall resamples between them.
+type websdrSpectrumRequest struct {
+	BinBandwidth float64 // Hz per bin to request from radiod
+	BinCount     int     // bins to request
+	DisplayBinBW float64 // Hz per bin the client's axis assumes
+	DisplayBins  int     // the client's pixel width
+}
+
+// websdrSpectrumParams chooses radiod parameters for a view.
+//
+// Below radiod's crossover the narrowband path serves the full display width cheaply, so
+// it is used at full width with the bandwidth rounded up onto radiodBinBandwidthLadder.
+// This is what the old code could not reach: it believed 500 Hz was a floor and halved
+// the bin count instead, drawing 128 bins across 1024 pixels at full zoom.
+//
+// Above the crossover the only lever is the bin count, because the bandwidth is pinned to
+// the span the client draws. Halve it until the wideband FFT fits websdrMaxWidebandFFT --
+// the same trade the old code made, now made against radiod's actual cost rather than an
+// invented limit.
+func websdrSpectrumParams(visibleBWHz float64, wfWidth int, samprate int) websdrSpectrumRequest {
+	if wfWidth < 1 {
+		wfWidth = 1
+	}
+	req := websdrSpectrumRequest{
+		DisplayBins:  wfWidth,
+		DisplayBinBW: visibleBWHz / float64(wfWidth),
+	}
+
+	if req.DisplayBinBW <= radiodSpectrumCrossoverHz {
+		req.BinCount = wfWidth
+		req.BinBandwidth = radiodRoundUpBinBW(req.DisplayBinBW)
+		return req
+	}
+
+	// Wideband. bin_count x bin_bw must stay equal to the visible span, so trading bins
+	// for bandwidth is the only way to shorten the transform.
+	bins := wfWidth
+	for bins > 1 && samprate > 0 && float64(samprate)/(visibleBWHz/float64(bins)) > websdrMaxWidebandFFT {
+		bins /= 2
+	}
+	req.BinCount = bins
+	req.BinBandwidth = visibleBWHz / float64(bins)
+	return req
+}
 
 // handleScalePNG serves GET /~~scale?band=B&zoom=Z&tile=N
 // It generates a 1024×14 PNG with frequency tick marks and labels.
@@ -142,13 +290,14 @@ func (h *WebSDRHandler) handleScalePNG(w http.ResponseWriter, r *http.Request) {
 	zoom, _ := strconv.Atoi(q.Get("zoom"))
 	tile, _ := strconv.Atoi(q.Get("tile"))
 
+	band := websdrBandFor(h.config.Receiver)
+
 	// Clamp zoom to valid range.
-	const maxZoom = 8
 	if zoom < 0 {
 		zoom = 0
 	}
-	if zoom > maxZoom {
-		zoom = maxZoom
+	if zoom > band.MaxZoom {
+		zoom = band.MaxZoom
 	}
 
 	numTiles := 1 << uint(zoom)
@@ -160,8 +309,8 @@ func (h *WebSDRHandler) handleScalePNG(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tile frequency range.
-	tileWidthKHz := scaleBandBWKHz / float64(numTiles)
-	tileStartKHz := scaleBandStartKHz + float64(tile)*tileWidthKHz
+	tileWidthKHz := band.WidthHz() / 1000.0 / float64(numTiles)
+	tileStartKHz := band.StartHz/1000.0 + float64(tile)*tileWidthKHz
 	tileEndKHz := tileStartKHz + tileWidthKHz
 	pixelsPerKHz := float64(scaleImgW) / tileWidthKHz
 

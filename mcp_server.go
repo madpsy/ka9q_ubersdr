@@ -775,14 +775,15 @@ func (m *MCPServer) handleGetBandConditions(ctx context.Context, request mcp.Cal
 
 func (m *MCPServer) handleGetWidebandSpectrum(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Note: center_freq and span parameters are accepted but not used by GetWideBandFFT()
-	// The method returns the full 0-30 MHz spectrum
+	// The method returns the receiver's full spectrum, whatever it covers; the reply's
+	// start_freq/end_freq/bin_width say what that is.
 	// These parameters are kept for future enhancement possibilities
 
 	if m.noiseFloorMonitor == nil {
 		return mcp.NewToolResultError("Noise floor monitoring is not enabled"), nil
 	}
 
-	// Get wideband FFT data (full 0-30 MHz spectrum)
+	// Get wideband FFT data (the receiver's full spectrum; self-describing, see above)
 	fft := m.noiseFloorMonitor.GetWideBandFFT()
 	if fft == nil {
 		return mcp.NewToolResultError("No wideband FFT data available"), nil

@@ -243,14 +243,27 @@ export const MIN_COVERAGE = 0.99;
 
 // The band the full-span view covers, for working out what a step is when the
 // server has not yet said what its own default bin width is.
+//
+// Deliberately a literal rather than a read of the receiver's real span: this module is
+// pure arithmetic and is tested on its own, which is the whole reason it does not import
+// from radio/constants.js. fullBinWidthOf takes the span as an argument for a caller that
+// knows the receiver's real one; 30 MHz is what a receiver was before the span became
+// configurable, and is the right answer when nobody says otherwise.
 export const FULL_SPAN_HZ = 30e6;
 
-/** Hz per bin of the whole-band view — the zero point the steps are counted from. */
-export function fullBinWidthOf(cfg) {
+/**
+ * Hz per bin of the whole-band view — the zero point the steps are counted from.
+ *
+ * `spanHz` only matters on the fallback path. The server sends defaultBinBandwidth in
+ * every spectrum config, and that is preferred whenever it is present, so this is used
+ * for the first frames before one has arrived.
+ */
+export function fullBinWidthOf(cfg, spanHz = FULL_SPAN_HZ) {
     if (!cfg) return 0;
     if (cfg.defaultBinBandwidth > 0) return cfg.defaultBinBandwidth;
     const bins = cfg.defaultBinCount || cfg.binCount || 0;
-    return bins > 0 ? FULL_SPAN_HZ / bins : 0;
+    const span = spanHz > 0 ? spanHz : FULL_SPAN_HZ;
+    return bins > 0 ? span / bins : 0;
 }
 
 /**

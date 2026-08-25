@@ -82,7 +82,11 @@ func TestWebSDROrgStatusKeepAlive(t *testing.T) {
 		t.Errorf("Server header = %q, want %q", got, websdrServerVersion)
 	}
 	text := string(body)
-	for _, want := range []string{"Config: ", "Bands: 1", "Band: 0 15005.000000 29990.000000", "Users: 0"} {
+	// The band line is derived from the receiver now (websdrBandFor), so it is the full
+	// 0-30 MHz span rather than the old 10 kHz-30 MHz one. It starts at DC because that
+	// is what the waterfall draws and what the shared spectrum channel covers; tuning is
+	// bounded separately.
+	for _, want := range []string{"Config: ", "Bands: 1", "Band: 0 15000.000000 30000.000000", "Users: 0"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("first body missing %q; got:\n%s", want, text)
 		}

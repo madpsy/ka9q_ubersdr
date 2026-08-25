@@ -62,7 +62,10 @@ type CWSkimmerSpot struct {
 
 // CWSkimmerClient manages connection to a CW Skimmer server
 type CWSkimmerClient struct {
-	config            *CWSkimmerConfig
+	config *CWSkimmerConfig
+	// maxFrequency is the top of the receiver's range; spots above it cannot be
+	// tuned so they are discarded rather than shown (see receiver_span.go).
+	maxFrequency      uint64
 	conn              atomic.Value // stores net.Conn
 	mu                sync.RWMutex // Only for handlers, lastActivityTime, lastSpotTime
 	connected         atomic.Bool  // Atomic for lock-free access
@@ -82,9 +85,10 @@ type CWSkimmerClient struct {
 }
 
 // NewCWSkimmerClient creates a new CW Skimmer client
-func NewCWSkimmerClient(config *CWSkimmerConfig, ctyDatabase *CTYDatabase, receiverLat, receiverLon float64) *CWSkimmerClient {
+func NewCWSkimmerClient(config *CWSkimmerConfig, ctyDatabase *CTYDatabase, receiverLat, receiverLon float64, maxFrequency uint64) *CWSkimmerClient {
 	return &CWSkimmerClient{
 		config:          config,
+		maxFrequency:    maxFrequency,
 		stopChan:        make(chan struct{}),
 		restartChan:     make(chan struct{}, 1), // Buffered to prevent blocking
 		spotHandlers:    make([]func(CWSkimmerSpot), 0),
@@ -500,9 +504,9 @@ func (c *CWSkimmerClient) processLine(line string, spotHandlers []func(CWSkimmer
 
 	// Try to parse as CW spot
 	if spot, ok := c.parseCWSpot(line); ok {
-		// Filter spots: only process spots between 0 and 30 MHz
-		if spot.Frequency <= 0 || spot.Frequency > 30000000 {
-			// Silently discard spots outside the 0-30 MHz range
+		// Filter spots to what this receiver can actually tune
+		if spot.Frequency <= 0 || (c.maxFrequency > 0 && spot.Frequency > float64(c.maxFrequency)) {
+			// Silently discard spots the receiver cannot reach
 			return
 		}
 

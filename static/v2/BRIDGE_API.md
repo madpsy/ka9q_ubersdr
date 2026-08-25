@@ -308,9 +308,15 @@ need a follow-up `get`.
 One rule governs bad input:
 
 - **Absolute values are refused** (`bad_args`) when they are impossible — a
-  frequency outside 10 kHz–30 MHz, a volume above 1, a passband wider than the
-  mode allows. The caller asked for somewhere that does not exist, and clamping
+  frequency outside the receiver's range, a volume above 1, a passband wider than
+  the mode allows. The caller asked for somewhere that does not exist, and clamping
   would report success for a state the receiver is not in.
+
+  The range is the receiver's own, not a fixed 10 kHz–30 MHz: it is derived from
+  the front end sample rate, so a receiver running its RX888 at full speed reaches
+  past 30 MHz. Read the real figures from `tuning_range` in `/api/description`
+  (`min_frequency` / `max_frequency`) rather than assuming; a server that predates
+  that field is 10 kHz–30 MHz. See `RECEIVER_SPAN.md`.
 - **Relative movements stop at the edge** — `tune {delta}`, `volume {delta}` —
   because that is what turning the dial or the volume knob does, and what the
   receiver does with them anyway.
@@ -558,7 +564,7 @@ how long they stay, and whether they are switched off at all are theirs, under
 
 ```jsonc
 { "type": "result", "id": 7, "client": "abc", "ok": false,
-  "error": { "code": "bad_args", "message": "frequency 40000000 is outside 10000–30000000" } }
+  "error": { "code": "bad_args", "message": "frequency 70000000 is outside 10000–60000000" } }
 ```
 
 | Code | Meaning |

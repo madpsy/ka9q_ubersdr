@@ -139,7 +139,7 @@ func (l *TelegramBotListener) handleMonitor(chatID int64, args string) (string, 
 		if widebandSSRC != 0 {
 			frontendStatus := ah.sessions.radiod.GetFrontendStatus(widebandSSRC)
 			if frontendStatus != nil {
-				payload := buildFrontendStatusPayload(frontendStatus)
+				payload := buildFrontendStatusPayload(frontendStatus, ah.config.Receiver)
 				healthy, _ := payload["healthy"].(bool)
 				feStatus, _ := payload["status"].(string)
 				var issues []string

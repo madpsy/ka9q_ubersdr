@@ -382,13 +382,20 @@ type websdrConn struct {
 	username  string
 	band      int
 
-	wfBand   int
-	wfZoom   int
-	wfStart  int
-	wfWidth  int
-	wfSlow   int
-	wfScale  int
-	wfFormat int
+	wfBand  int
+	wfZoom  int
+	wfStart int
+	wfWidth int
+	// Waterfall grid geometry, set by applyWaterparamCommand and read by
+	// streamWaterfall to resample what radiod delivers onto what the client draws.
+	// Equal whenever the exact bandwidth was cheap enough to request; see
+	// radiodRoundUpBinBW.
+	wfDisplayBinBW float64
+	wfServedBinBW  float64
+	wfDisplayBins  int
+	wfSlow         int
+	wfScale        int
+	wfFormat       int
 
 	opusEncoder       *OpusEncoderWrapper
 	wfState           *WebSDRWaterfallState
@@ -599,11 +606,13 @@ func (c *websdrConn) applyParamCommand(text string) {
 
 	if v := vals.Get("f"); v != "" {
 		newFreq, _ := strconv.ParseFloat(v, 64)
-		// Clamp to valid HF range: 10 kHz – 30 MHz
-		if newFreq < 10.0 {
-			newFreq = 10.0
-		} else if newFreq > 30000.0 {
-			newFreq = 30000.0
+		// Clamp to what the receiver covers, in kHz
+		loKHz := float64(c.handler.config.Receiver.MinFreq()) / 1000.0
+		hiKHz := float64(c.handler.config.Receiver.MaxFreq()) / 1000.0
+		if newFreq < loKHz {
+			newFreq = loKHz
+		} else if newFreq > hiKHz {
+			newFreq = hiKHz
 		}
 		if newFreq != c.tuneKHz {
 			c.tuneKHz = newFreq
@@ -818,19 +827,17 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	// needs c.mu to drain SpectrumChan, and radiod blocks waiting for that
 	// drain before it can respond to the update).
 	//
-	// The hardcoded HF band is 10 kHz–30 MHz (bandwidth = 29990 kHz).
-	// maxZoom is 8 (matching handleBandInfoJS), giving a maxzoom grid of
-	// 1024 × 2^8 = 262144 pixels spanning the full band.
+	// The band and maxZoom both come from websdrBandFor, which is also what
+	// handleBandInfoJS hands the client, giving a maxzoom grid of
+	// 1024 × 2^maxZoom pixels spanning the full band.
 	//
-	// Radiod requires binBW ≥ ~500 Hz for 1024 bins (empirically: 114 Hz fails).
-	// To allow deep zoom without violating this constraint, we halve binCount for
-	// each zoom level beyond 5, keeping binBW ≈ 915 Hz constant:
-	//   zoom 0–5: binCount=1024, binBW = bandBW/2^z/1024
-	//   zoom 6:   binCount=512,  binBW = bandBW/64/512  ≈ 915 Hz
-	//   zoom 7:   binCount=256,  binBW = bandBW/128/256 ≈ 915 Hz
-	//   zoom 8:   binCount=128,  binBW = bandBW/256/128 ≈ 915 Hz
-	// spectrumToPixels() upsamples binCount→wfWidth pixels (nearest-neighbour),
-	// so the client always receives wfWidth=1024 pixels per row.
+	// What to ask radiod for is websdrSpectrumParams; see there for the two regimes and
+	// why the deep zooms now keep the full display width where they used to be halved to
+	// 128 bins stretched across 1024 pixels.
+	//
+	// The bin count only ever decreases from wfWidth, which starts at 1024 and is the
+	// value the channel was created with, so radiod's bin_count-change heap bug (see
+	// kiwiSpectrumBins) cannot be triggered.
 	//
 	// The `start` value sent by the client is a pixel offset in the
 	// maxzoom grid (NOT in the current-zoom pixel grid).  To convert:
@@ -839,12 +846,12 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	// At zoom level z, the visible bandwidth is bandBW / 2^z.
 	// Center = visibleStart + visibleBW/2
 	// binBandwidth = visibleBW / binCount
-	const bandStartHz = 10000.0  // 10 kHz
-	const bandEndHz = 30000000.0 // 30 MHz
-	const bandBWHz = bandEndHz - bandStartHz
-	const maxZoom = 8
-	const maxZoomPixels = 1024 * (1 << maxZoom) // 262144
-	const minBinBWHz = 500.0                    // radiod minimum bin bandwidth (Hz)
+	geom := websdrBandFor(c.handler.config.Receiver)
+	bandStartHz := geom.StartHz
+	bandEndHz := geom.EndHz
+	bandBWHz := geom.WidthHz()
+	maxZoom := geom.MaxZoom
+	maxZoomPixels := geom.MaxZoomPixels()
 
 	zoom := c.wfZoom
 	if zoom < 0 {
@@ -861,22 +868,15 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 		wfWidth = 1024
 	}
 
-	// Compute adaptive binCount: halve for each zoom level beyond 5 to keep
-	// binBW ≥ minBinBWHz.  spectrumToPixels() upsamples binCount→wfWidth pixels.
-	binCount := wfWidth
-	for binCount > 1 && visibleBWHz/float64(binCount) < minBinBWHz {
-		binCount /= 2
-	}
-	if binCount < 1 {
-		binCount = 1
-	}
+	req := websdrSpectrumParams(visibleBWHz, wfWidth, c.handler.config.Receiver.Samprate())
+	binCount := req.BinCount
 
 	// start is in maxzoom-grid pixels from the band left edge
 	startOffsetHz := float64(c.wfStart) * bandBWHz / float64(maxZoomPixels)
 	visibleStartHz := bandStartHz + startOffsetHz
 	centerHz := visibleStartHz + visibleBWHz/2.0
 
-	// Clamp center frequency to valid HF range (10 kHz – 30 MHz).
+	// Clamp centre to the band this receiver covers.
 	// A malformed or out-of-range start value from the client can produce
 	// a calculated center outside the band.  Clamp rather than reject so
 	// the waterfall stays usable at the boundary.
@@ -887,7 +887,15 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 		centerHz = bandEndHz
 	}
 
-	binBandwidthHz := visibleBWHz / float64(binCount)
+	// What the client's axis assumes, and what we actually ask radiod for. streamWaterfall
+	// resamples between them: below the crossover the request is rounded up to a round
+	// bandwidth and the extra span is cropped off; above it the bin count is reduced and
+	// the row is stretched back to the display width.
+	binBandwidthHz := req.BinBandwidth
+
+	c.wfDisplayBinBW = req.DisplayBinBW
+	c.wfServedBinBW = req.BinBandwidth
+	c.wfDisplayBins = req.DisplayBins
 
 	sessionID := ""
 	if c.session != nil {
@@ -1094,12 +1102,17 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 	// (zoom=0, start=0) so the waterfall shows data before the first
 	// /~~waterparam command arrives.
 	{
-		const bandStartHz = 10000.0
-		const bandEndHz = 30000000.0
-		const bandBWHz = bandEndHz - bandStartHz
-		centerHz := bandStartHz + bandBWHz/2.0
-		binBandwidthHz := bandBWHz / float64(c.wfWidth)
-		_ = h.sessions.UpdateSpectrumSession(session.ID, uint64(centerHz), binBandwidthHz, c.wfWidth)
+		geom := websdrBandFor(h.config.Receiver)
+		centerHz := geom.CentreHz()
+		req := websdrSpectrumParams(geom.WidthHz(), c.wfWidth, h.config.Receiver.Samprate())
+		// Recorded so the rows that arrive before the client's first waterparam
+		// command are put on the same grid as every row after it.
+		c.mu.Lock()
+		c.wfDisplayBinBW = req.DisplayBinBW
+		c.wfServedBinBW = req.BinBandwidth
+		c.wfDisplayBins = req.DisplayBins
+		c.mu.Unlock()
+		_ = h.sessions.UpdateSpectrumSession(session.ID, uint64(centerHz), req.BinBandwidth, req.BinCount)
 	}
 
 	defer func() {
@@ -1147,6 +1160,9 @@ func (c *websdrConn) streamWaterfall(done <-chan struct{}) {
 			pf2 := c.pendingInitFrame2
 			c.pendingInitFrame1 = nil
 			c.pendingInitFrame2 = nil
+			// Read with wfWidth, not separately: a zoom arriving between the two
+			// would pair one row's width with the next row's grid.
+			srcBinBW, dstBinBW, dstBins := c.wfServedBinBW, c.wfDisplayBinBW, c.wfDisplayBins
 			c.mu.Unlock()
 
 			// Flush any pending init frames (queued by applyWaterparamCommand
@@ -1175,6 +1191,15 @@ func (c *websdrConn) streamWaterfall(done <-chan struct{}) {
 				half := n / 2
 				copy(unwrapped[0:half], pkt[half:n])
 				copy(unwrapped[half:n], pkt[0:half])
+			}
+
+			// Crop and rescale onto the grid the client's axis assumes. A no-op
+			// whenever the exact bandwidth was cheap enough to request outright,
+			// which is every zoom above radiod's crossover; below it radiod is
+			// serving a round bandwidth slightly wider than the view, and this is
+			// what puts the signals back at the right frequencies.
+			if dstBins > 0 && srcBinBW > 0 && dstBinBW > 0 && srcBinBW != dstBinBW {
+				unwrapped = resampleSpectrumOntoGrid(unwrapped, srcBinBW, dstBinBW, dstBins)
 			}
 
 			// BUG-H: The browser's `slow` parameter is an animation-frame
@@ -1713,7 +1738,7 @@ func sanitizeChatField(s string, maxLen int) string {
 //   <org_info block verbatim, with email XOR-obfuscated>\n
 //   Mobile: m.html\n
 //   Bands: 1\n
-//   Band: 0 15005.000000 29990.000000 HF\n
+//   Band: 0 <centreKHz> <widthKHz> HF\n
 //   Users: <n>\n
 //
 // If the request includes ?config=<serial> matching the current serial, only
@@ -1761,8 +1786,9 @@ func (h *WebSDRHandler) buildOrgStatusBody() string {
 	qth := latLonToGridSquare(h.config.Admin.GPS.Lat, h.config.Admin.GPS.Lon)
 	fmt.Fprintln(&buf, "Qth: "+qth)
 
-	// Description: "0-30 MHz SDR[, <Callsign>][, <Location>]"
-	descParts := []string{"0-30 MHz SDR"}
+	// Description: "0-<top> MHz SDR[, <Callsign>][, <Location>]" — the text websdr.org
+	// shows in its listing, so it states the receiver's real coverage.
+	descParts := []string{fmt.Sprintf("0-%.0f MHz SDR", float64(h.config.Receiver.Span())/1e6)}
 	if h.config.Admin.Callsign != "" {
 		descParts = append(descParts, h.config.Admin.Callsign)
 	}
@@ -1800,13 +1826,15 @@ func (h *WebSDRHandler) buildOrgStatusBody() string {
 		}
 	}
 
-	// Fixed hardware band: 10 kHz – 30 MHz (UberSDR limitation)
 	antenna := h.config.Admin.Antenna
 	if antenna == "" {
 		antenna = "HF"
 	}
+	// Band: <index> <centreKHz> <widthKHz> <name> — the coverage websdr.org lists us
+	// under, so it follows the receiver rather than claiming a fixed 10 kHz-30 MHz.
+	geom := websdrBandFor(h.config.Receiver)
 	fmt.Fprintf(&buf, "Bands: 1\n")
-	fmt.Fprintf(&buf, "Band: 0 15005.000000 29990.000000 %s\n", antenna)
+	fmt.Fprintf(&buf, "Band: 0 %f %f %s\n", geom.CentreHz()/1000.0, geom.WidthHz()/1000.0, antenna)
 
 	fmt.Fprintf(&buf, "Users: %d\n", users)
 
@@ -1832,7 +1860,7 @@ func (h *WebSDRHandler) handleOthersJ(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "uu_bands=[];\n")
 	fmt.Fprintf(w, "uu_freqs=[];\n")
 	for i, u := range users {
-		normFreq := websdrNormalizeFreq(float64(u.FrequencyHz) / 1000.0)
+		normFreq := websdrNormalizeFreq(float64(u.FrequencyHz)/1000.0, websdrBandFor(h.config.Receiver))
 		fmt.Fprintf(w, "uu(%d,%q,%d,%.6f);\n",
 			i,
 			u.DisplayName,
@@ -1869,7 +1897,7 @@ func (h *WebSDRHandler) handleOthersJJ(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "uu_bands=[];\n")
 	fmt.Fprintf(w, "uu_freqs=[];\n")
 	for i, u := range users {
-		normFreq := websdrNormalizeFreq(float64(u.FrequencyHz) / 1000.0)
+		normFreq := websdrNormalizeFreq(float64(u.FrequencyHz)/1000.0, websdrBandFor(h.config.Receiver))
 		fmt.Fprintf(w, "uu(%d,%q,%d,%.6f);\n",
 			i,
 			u.DisplayName,
@@ -1906,12 +1934,12 @@ func (h *WebSDRHandler) websdrThroughputStats() (audioKBps, wfKBps, httpKBps flo
 }
 
 // websdrNormalizeFreq converts a tuning frequency in kHz to a normalized 0–1
-// fraction of the HF band (10 kHz – 30 MHz).  The WebSDR frontend's douu()
-// function multiplies this by 1024 to get a pixel offset on the band display.
-func websdrNormalizeFreq(tuneKHz float64) float64 {
-	const bandStartKHz = 10.0
-	const bandBWKHz = 29990.0 // 30000 - 10
-	norm := (tuneKHz - bandStartKHz) / bandBWKHz
+// fraction of the band.  The WebSDR frontend's douu() function multiplies this by 1024 to
+// get a pixel offset on the band display, so it has to be the same band bandinfo.js
+// describes — otherwise every user's marker sits at the wrong place on a receiver wider
+// than 30 MHz.
+func websdrNormalizeFreq(tuneKHz float64, geom websdrBand) float64 {
+	norm := (tuneKHz - geom.StartHz/1000.0) / (geom.WidthHz() / 1000.0)
 	if norm < 0 {
 		norm = 0
 	}
@@ -2139,8 +2167,8 @@ func (h *WebSDRHandler) handleLogbook(w http.ResponseWriter, r *http.Request) {
 //
 // websdr-base.js reads this file on every page load to discover the available
 // bands (nbands, bandinfo[]), the current chseq, and the idle timeout.
-// The real WebSDR server generates this from its config at startup; we generate
-// it on-the-fly with a single hardcoded HF band (10 kHz–30 MHz).
+// The real WebSDR server generates this from its config at startup; we generate it
+// on-the-fly with a single band covering the whole receiver (see websdrBandFor).
 //
 // Fields per band entry (all required by websdr-base.js):
 //   centerfreq   — centre of the band in kHz
@@ -2159,8 +2187,15 @@ func (h *WebSDRHandler) handleBandInfoJS(w http.ResponseWriter, r *http.Request)
 	noCacheHeaders(w)
 	w.Header().Set("Content-Type", "application/javascript")
 
-	// Single hardcoded HF band: 10 kHz–30 MHz.
-	bands := []Band{{Label: "HF", Start: 10000, End: 30000000}}
+	// A single band covering the whole receiver.
+	//
+	// Derived, not pinned: the WebSDR client builds its axis from what this hands it
+	// (khzperpixel = samplerate/1024, plus centerfreq and maxzoom), so a wider receiver
+	// simply gets a wider band. That is the opposite of the KiwiSDR emulation, whose
+	// client computes the span itself from the zoom level with no field to override.
+	// See websdrBandFor and RECEIVER_SPAN.md.
+	geom := websdrBandFor(h.config.Receiver)
+	bands := []Band{{Label: "HF", Start: uint64(geom.StartHz), End: uint64(geom.EndHz)}}
 
 	idleMS := 0
 	if h.config.Server.SessionTimeout > 0 {
@@ -2176,15 +2211,15 @@ func (h *WebSDRHandler) handleBandInfoJS(w http.ResponseWriter, r *http.Request)
 	fmt.Fprintf(w, "var bandinfo= [\n")
 
 	for i, b := range bands {
-		// Derive kHz values from Hz config
-		startKHz := float64(b.Start) / 1000.0
-		endKHz := float64(b.End) / 1000.0
-		bwKHz := endKHz - startKHz
-		if bwKHz <= 0 {
-			bwKHz = 192.0
-		}
-		centerKHz := 15005.0       // true centre of 10 kHz–30 MHz HF band (midpoint of 10–30000 kHz)
-		vfoKHz := centerKHz + 10.0 // default VFO 10 kHz above centre
+		// Every field below comes from geom, and they must all come from the same
+		// place. centerfreq and samplerate are the two numbers the client builds its
+		// whole axis from (khzperpixel = samplerate/1024), and the scale tiles and the
+		// spectrum window are generated from geom too — so a centre taken from one band
+		// and a width taken from another silently shifts every label and every bin
+		// relative to the dial, which still reads correctly.
+		bwKHz := geom.WidthHz() / 1000.0
+		centerKHz := geom.CentreHz() / 1000.0 // midpoint of the band
+		vfoKHz := centerKHz + 10.0            // default VFO 10 kHz above centre
 
 		// tuningstep: 1/32 kHz (31.25 Hz), matching real WebSDR default
 		tuningStep := 1.0 / 32.0
@@ -2194,12 +2229,14 @@ func (h *WebSDRHandler) handleBandInfoJS(w http.ResponseWriter, r *http.Request)
 		// We allow 6 kHz (matching the 12 kHz SSB/AM sample rate Nyquist limit).
 		maxLinBW := 6.0
 
-		// maxzoom: 8 gives 256× zoom (2^8).
-		// The maxzoom grid is 1024×2^8 = 262144 pixels spanning the full HF band.
-		// At zoom=8 the visible bandwidth is ~117 kHz; binBW is kept ≥ 500 Hz by
-		// halving binCount at deep zoom levels (see applyWaterparamCommand).
-		// This constant MUST match the maxZoom constant in applyWaterparamCommand.
-		maxZoom := 8
+		// maxzoom comes from websdrBandFor, which scales it with the span so the deepest
+		// zoom is always about 117 kHz wide: 8 (256×) on a 30 MHz receiver, 9 on a 60 MHz
+		// one. The maxzoom grid is 1024×2^maxzoom pixels spanning the whole band, and
+		// binBW is kept ≥ 500 Hz by halving binCount at deep zoom (applyWaterparamCommand).
+		//
+		// Both read it from the same place now; it used to be two constants kept in step
+		// by a comment.
+		maxZoom := geom.MaxZoom
 
 		name := b.Label
 		if name == "" {

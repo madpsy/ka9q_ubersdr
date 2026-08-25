@@ -546,3 +546,4 @@ node audioresume.test.js
 node wheelstep.test.js
 node iffit.test.js
 node audiotint.test.js
+node tuningrange.test.js

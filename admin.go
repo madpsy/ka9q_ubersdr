@@ -1645,11 +1645,11 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Reject bookmarks outside the valid HF range (10 kHz – 30 MHz)
-	const bookmarkMinFreq uint64 = 10000
-	const bookmarkMaxFreq uint64 = 30000000
-	if newBookmark.Frequency < bookmarkMinFreq || newBookmark.Frequency > bookmarkMaxFreq {
-		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (10 kHz – 30 MHz)", newBookmark.Frequency), http.StatusBadRequest)
+	// Reject bookmarks outside what this receiver covers (see receiver_span.go)
+	rx := ah.config.Receiver
+	if newBookmark.Frequency < rx.MinFreq() || newBookmark.Frequency > rx.MaxFreq() {
+		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (%.0f kHz – %.3f MHz)",
+			newBookmark.Frequency, float64(rx.MinFreq())/1e3, float64(rx.MaxFreq())/1e6), http.StatusBadRequest)
 		return
 	}
 
@@ -1760,17 +1760,16 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 			return
 		}
 
-		// Filter out bookmarks outside the valid HF range (10 kHz – 30 MHz).
-		const bulkMinFreq uint64 = 10000
-		const bulkMaxFreq uint64 = 30000000
+		// Filter out bookmarks outside what this receiver covers.
+		rx := ah.config.Receiver
 		accepted := incoming.Bookmarks[:0]
 		skippedCount := 0
 		for _, b := range incoming.Bookmarks {
-			if b.Frequency >= bulkMinFreq && b.Frequency <= bulkMaxFreq {
+			if b.Frequency >= rx.MinFreq() && b.Frequency <= rx.MaxFreq() {
 				accepted = append(accepted, b)
 			} else {
 				skippedCount++
-				log.Printf("Skipping bookmark '%s' at %d Hz: outside valid HF range (10 kHz – 30 MHz)", b.Name, b.Frequency)
+				log.Printf("Skipping bookmark '%s' at %d Hz: outside the receiver range (%d–%d Hz)", b.Name, b.Frequency, rx.MinFreq(), rx.MaxFreq())
 			}
 		}
 		incoming.Bookmarks = accepted
@@ -1839,11 +1838,11 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Reject updated frequency outside the valid HF range (10 kHz – 30 MHz)
-	const singleMinFreq uint64 = 10000
-	const singleMaxFreq uint64 = 30000000
-	if updatedBookmark.Frequency < singleMinFreq || updatedBookmark.Frequency > singleMaxFreq {
-		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (10 kHz – 30 MHz)", updatedBookmark.Frequency), http.StatusBadRequest)
+	// Reject updated frequency outside what this receiver covers
+	rx := ah.config.Receiver
+	if updatedBookmark.Frequency < rx.MinFreq() || updatedBookmark.Frequency > rx.MaxFreq() {
+		http.Error(w, fmt.Sprintf("Frequency %d Hz is outside the valid range (%.0f kHz – %.3f MHz)",
+			updatedBookmark.Frequency, float64(rx.MinFreq())/1e3, float64(rx.MaxFreq())/1e6), http.StatusBadRequest)
 		return
 	}
 
@@ -2114,29 +2113,30 @@ func (ah *AdminHandler) handleGetBands(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(bandsConfig)
 }
 
-// validateAndClampBandFrequencies validates and clamps band frequencies to the valid range (10 kHz - 30 MHz)
+// validateAndClampBandFrequencies validates and clamps band frequencies to what this
+// receiver covers.
 // Returns error if band is completely outside the valid range, otherwise clamps and returns nil
-func validateAndClampBandFrequencies(band *Band) error {
-	const minFreq uint64 = 10000    // 10 kHz in Hz
-	const maxFreq uint64 = 30000000 // 30 MHz in Hz
+func validateAndClampBandFrequencies(band *Band, rx ReceiverConfig) error {
+	minFreq := rx.MinFreq()
+	maxFreq := rx.MaxFreq()
 
-	// Reject bands that end below 10 kHz or start above 30 MHz
+	// Reject bands that fall entirely outside the receiver
 	if band.End < minFreq {
-		return fmt.Errorf("band ends below minimum frequency (10 kHz)")
+		return fmt.Errorf("band ends below minimum frequency (%.0f kHz)", float64(minFreq)/1e3)
 	}
 	if band.Start > maxFreq {
-		return fmt.Errorf("band starts above maximum frequency (30 MHz)")
+		return fmt.Errorf("band starts above maximum frequency (%.3f MHz)", float64(maxFreq)/1e6)
 	}
 
-	// Clamp start frequency to 10 kHz minimum
+	// Clamp to the receiver's bottom
 	if band.Start < minFreq {
-		log.Printf("Clamping band '%s' start frequency from %d Hz to %d Hz (10 kHz)", band.Label, band.Start, minFreq)
+		log.Printf("Clamping band '%s' start frequency from %d Hz to %d Hz", band.Label, band.Start, minFreq)
 		band.Start = minFreq
 	}
 
-	// Clamp end frequency to 30 MHz maximum
+	// Clamp to the receiver's top
 	if band.End > maxFreq {
-		log.Printf("Clamping band '%s' end frequency from %d Hz to %d Hz (30 MHz)", band.Label, band.End, maxFreq)
+		log.Printf("Clamping band '%s' end frequency from %d Hz to %d Hz", band.Label, band.End, maxFreq)
 		band.End = maxFreq
 	}
 
@@ -2169,7 +2169,7 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate and clamp frequencies to valid range (10 kHz - 30 MHz)
-	if err := validateAndClampBandFrequencies(&newBand); err != nil {
+	if err := validateAndClampBandFrequencies(&newBand, ah.config.Receiver); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -2313,7 +2313,7 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 				}
 
 				// Validate and clamp frequencies
-				if err := validateAndClampBandFrequencies(&band); err != nil {
+				if err := validateAndClampBandFrequencies(&band, ah.config.Receiver); err != nil {
 					log.Printf("Skipping band '%s': %v", band.Label, err)
 					skippedCount++
 					continue
@@ -2395,7 +2395,7 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 	}
 
 	// Validate and clamp frequencies to valid range (10 kHz - 30 MHz)
-	if err := validateAndClampBandFrequencies(&updatedBand); err != nil {
+	if err := validateAndClampBandFrequencies(&updatedBand, ah.config.Receiver); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -2871,7 +2871,7 @@ func evaluateIFPowerHealth(ifPower float32) (healthy bool, status string, issues
 
 // buildFrontendStatusPayload converts a FrontendStatus into the JSON-serialisable
 // map that is returned by HandleFrontendStatus and published to MQTT.
-func buildFrontendStatusPayload(frontendStatus *FrontendStatus) map[string]interface{} {
+func buildFrontendStatusPayload(frontendStatus *FrontendStatus, rx ReceiverConfig) map[string]interface{} {
 	// Helper function to sanitize float values for JSON (replace Inf/NaN with nil)
 	sanitizeFloat := func(f float32) interface{} {
 		if math.IsInf(float64(f), 0) || math.IsNaN(float64(f)) {
@@ -2919,6 +2919,18 @@ func buildFrontendStatusPayload(frontendStatus *FrontendStatus) map[string]inter
 	// is the convention the monitor-health and Telegram reporters expect.
 	healthy, status, issues := evaluateIFPowerHealth(frontendStatus.IFPower)
 
+	// Fold the receiver-span cross-check in here rather than reporting it separately.
+	// It is a statement about the front end, and a reader looking at "is the SDR
+	// frontend right?" should not have to know to look somewhere else for "...and does
+	// the server agree with it about how much spectrum there is?".
+	if spanIssues := verifyReceiverAgainstFrontend(rx, frontendStatus); len(spanIssues) > 0 {
+		issues = append(issues, spanIssues...)
+		healthy = false
+		if status == "ok" {
+			status = "warning"
+		}
+	}
+
 	// Calculate FFT parameters if we have the necessary data
 	var fftSize int
 	var fftType string
@@ -2965,19 +2977,29 @@ func buildFrontendStatusPayload(frontendStatus *FrontendStatus) map[string]inter
 		"samples_since_over":   frontendStatus.SamplesSinceOver,
 		"time_since_overrange": timeSinceOverrange,
 		"input_samprate":       frontendStatus.InputSamprate,
-		"filter_blocksize":     frontendStatus.FilterBlocksize,
-		"filter_fir_length":    frontendStatus.FilterFirLength,
-		"fe_is_real":           frontendStatus.FeIsReal,
-		"fft_size":             fftSize,
-		"fft_type":             fftType,
-		"block_time_ms":        blockTimeMs,
-		"block_rate_hz":        blockRateHz,
-		"overlap_percent":      overlapPercent,
-		"bin_width_hz":         binWidthHz,
-		"last_update":          frontendStatus.LastUpdate.Format(time.RFC3339),
-		"healthy":              healthy,
-		"status":               status,
-		"issues":               issues,
+		// What the server derived from that sample rate. Shown beside it because the
+		// two disagreeing is the failure this whole path exists to make visible: the
+		// span is resolved once at startup and frozen, so a radiod restarted alone
+		// leaves these describing different receivers. See receiver_span.go.
+		"tuning_min_hz":      rx.MinFreq(),
+		"tuning_max_hz":      rx.MaxFreq(),
+		"spectrum_span_hz":   rx.Span(),
+		"spectrum_center_hz": rx.Centre(),
+		"resolved_samprate":  rx.Samprate(),
+		"samprate_source":    rx.Source(),
+		"filter_blocksize":   frontendStatus.FilterBlocksize,
+		"filter_fir_length":  frontendStatus.FilterFirLength,
+		"fe_is_real":         frontendStatus.FeIsReal,
+		"fft_size":           fftSize,
+		"fft_type":           fftType,
+		"block_time_ms":      blockTimeMs,
+		"block_rate_hz":      blockRateHz,
+		"overlap_percent":    overlapPercent,
+		"bin_width_hz":       binWidthHz,
+		"last_update":        frontendStatus.LastUpdate.Format(time.RFC3339),
+		"healthy":            healthy,
+		"status":             status,
+		"issues":             issues,
 	}
 }
 
@@ -3015,7 +3037,7 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	response := buildFrontendStatusPayload(frontendStatus)
+	response := buildFrontendStatusPayload(frontendStatus, ah.config.Receiver)
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -3966,12 +3988,13 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	// Convert SDR# bands to our format
 	var bands []interface{}
 	skippedCount := 0
-	const minFreq = 10000     // 10 kHz in Hz
-	const maxFreq = 30000000  // 30 MHz in Hz
+	// SDR# entries carry plain ints, so the receiver bounds are narrowed to match.
+	minFreq := int(ah.config.Receiver.MinFreq())
+	maxFreq := int(ah.config.Receiver.MaxFreq())
 	const cwCutoff = 10000000 // 10 MHz cutoff for CW mode conversion
 
 	for _, entry := range sdrBands.Entries {
-		// Skip bands that end below 10 kHz or start above 30 MHz
+		// Skip bands that fall entirely outside the receiver
 		if entry.MaxFrequency < minFreq || entry.MinFrequency > maxFreq {
 			skippedCount++
 			continue
@@ -4885,7 +4908,7 @@ func (ah *AdminHandler) HandleRadiodConfig(w http.ResponseWriter, r *http.Reques
 // handleGetRadiodConfig returns the radiod configuration file content
 func (ah *AdminHandler) handleGetRadiodConfig(w http.ResponseWriter, r *http.Request) {
 	// Read the radiod config file from /etc/ka9q-radio/radiod@ubersdr.conf
-	radiodConfigPath := "/etc/ka9q-radio/radiod@ubersdr.conf"
+	radiodConfigPath := RadiodConfPath
 	data, err := os.ReadFile(radiodConfigPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read radiod config file: %v", err), http.StatusInternalServerError)
@@ -4958,7 +4981,7 @@ func (ah *AdminHandler) HandleRadiodValues(w http.ResponseWriter, r *http.Reques
 	}
 	w.Header().Set("Content-Type", "application/json")
 
-	radiodConfigPath := "/etc/ka9q-radio/radiod@ubersdr.conf"
+	radiodConfigPath := RadiodConfPath
 	data, err := os.ReadFile(radiodConfigPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read radiod config file: %v", err), http.StatusInternalServerError)
@@ -4984,7 +5007,7 @@ func (ah *AdminHandler) handleUpdateRadiodConfig(w http.ResponseWriter, r *http.
 	}
 
 	// Backup existing file with timestamp before replacing
-	radiodConfigPath := "/etc/ka9q-radio/radiod@ubersdr.conf"
+	radiodConfigPath := RadiodConfPath
 	if _, err := os.Stat(radiodConfigPath); err == nil {
 		timestamp := time.Now().Format("20060102-150405")
 		backupPath := fmt.Sprintf("%s.%s", radiodConfigPath, timestamp)
@@ -5003,6 +5026,20 @@ func (ah *AdminHandler) handleUpdateRadiodConfig(w http.ResponseWriter, r *http.
 
 	log.Printf("Radiod configuration updated by admin")
 
+	// samprate is the one key that changes more than radiod's own behaviour: it decides
+	// this server's whole frequency range, which was resolved at startup and is frozen
+	// (see receiver_span.go). Restarting radiod alone would leave the spectrum geometry,
+	// the tuning limits and every connected client describing the old receiver, so say so
+	// rather than leaving it to the "Receiver span" health warning to be noticed later.
+	samprateChanged := false
+	if newRate, err := samprateFromRadiodConfBytes(configContent); err == nil {
+		samprateChanged = newRate != ah.config.Receiver.Samprate()
+		if samprateChanged {
+			log.Printf("Radiod sample rate changed %d -> %d Hz; the receiver span stays at 0-%.0f MHz until this server restarts",
+				ah.config.Receiver.Samprate(), newRate, float64(ah.config.Receiver.Span())/1e6)
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 
 	if restart {
@@ -5017,9 +5054,14 @@ func (ah *AdminHandler) handleUpdateRadiodConfig(w http.ResponseWriter, r *http.
 			log.Printf("Error encoding response: %v", err)
 		}
 	} else {
+		message := "Radiod configuration updated. Restart server to apply changes."
+		if samprateChanged {
+			message = "Radiod configuration updated, including the sample rate. " +
+				"Restart the server — not just radiod — or the frequency range will stay as it is."
+		}
 		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status":  "success",
-			"message": "Radiod configuration updated. Restart server to apply changes.",
+			"message": message,
 		}); err != nil {
 			log.Printf("Error encoding response: %v", err)
 		}

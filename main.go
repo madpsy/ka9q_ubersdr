@@ -1240,7 +1240,7 @@ func main() {
 	}
 
 	// Initialize DX cluster client
-	dxCluster := NewDXClusterClient(&config.DXCluster)
+	dxCluster := NewDXClusterClient(&config.DXCluster, config.Receiver.MaxFreq())
 
 	// Set Prometheus metrics if enabled
 	if prometheusMetrics != nil {
@@ -1302,7 +1302,7 @@ func main() {
 		receiverLat := config.Admin.GPS.Lat
 		receiverLon := config.Admin.GPS.Lon
 
-		cwSkimmer = NewCWSkimmerClient(cwskimmerConfig, globalCTY, receiverLat, receiverLon)
+		cwSkimmer = NewCWSkimmerClient(cwskimmerConfig, globalCTY, receiverLat, receiverLon, config.Receiver.MaxFreq())
 
 		// Initialize metrics tracker if enabled
 		if cwskimmerConfig.MetricsLogEnabled {
@@ -1862,9 +1862,10 @@ func main() {
 		freedvMaxUsers = 10 // default: 10 concurrent users
 	}
 	freedv.GlobalConfig = &freedv.GlobalConfigProvider{
-		Callsign: config.Admin.Callsign,
-		Locator:  latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon),
-		MaxUsers: freedvMaxUsers,
+		Callsign:       config.Admin.Callsign,
+		Locator:        latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon),
+		MaxUsers:       freedvMaxUsers,
+		MaxFrequencyHz: int(config.Receiver.MaxFreq()),
 	}
 	freedvInfo := freedv.GetInfo()
 
@@ -4095,10 +4096,12 @@ func handleV2IndexPage(w http.ResponseWriter, r *http.Request, config *Config) {
 		Meta           V2PageMeta
 		CustomHeadHTML template.HTML
 		CustomBodyHTML template.HTML
+		TuningRange    template.JS
 	}{
 		Meta:           buildV2PageMeta(config, r),
 		CustomHeadHTML: template.HTML(config.Server.CustomHeadHTML),
 		CustomBodyHTML: template.HTML(config.Server.CustomBodyHTML),
+		TuningRange:    v2TuningRangeJSON(config),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -4402,7 +4405,7 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 	// Augment with currently-active EiBi broadcasts (0–30 MHz) if available.
 	if includeEiBi && eibi != nil && eibi.IsLoaded() {
 		now := time.Now().UTC()
-		activeEntries := eibi.GetActiveEntries(now)
+		activeEntries := eibi.GetActiveEntries(now, config.Receiver.MaxFreq())
 
 		// Build a set of existing static bookmark frequencies to avoid duplicates.
 		existingFreqs := make(map[uint64]bool, len(filteredBookmarks))
@@ -4428,8 +4431,8 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 
 	// Optional frequency-span filter: ?center=<Hz>&width=<Hz>
 	// Both parameters must be present and valid for the filter to apply.
-	// Valid range for this system is 0–30 MHz (0–30,000,000 Hz).
-	const maxFreqHz = 30_000_000.0
+	// The valid range is whatever this receiver covers (see receiver_span.go).
+	maxFreqHz := float64(config.Receiver.MaxFreq())
 	q := r.URL.Query()
 	centerStr := q.Get("center")
 	widthStr := q.Get("width")
@@ -4808,9 +4811,9 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	// Calculate Maidenhead grid locator from GPS coordinates
 	maidenhead := latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon)
 
-	// Resolve and sanitise default frequency (must be in valid HF range 10 kHz–30 MHz)
+	// Resolve and sanitise default frequency (must be inside the receiver's range)
 	effectiveDefaultFreq := config.Admin.DefaultFrequency
-	if effectiveDefaultFreq < 10000 || effectiveDefaultFreq > 30000000 {
+	if effectiveDefaultFreq < config.Receiver.MinFreq() || effectiveDefaultFreq > config.Receiver.MaxFreq() {
 		effectiveDefaultFreq = 14175000 // built-in default: 14.175 MHz (20m USB calling)
 	}
 
@@ -4863,6 +4866,16 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"description":       config.Admin.Description,
 		"default_frequency": effectiveDefaultFreq,
 		"default_mode":      effectiveDefaultMode,
+		// How much spectrum this receiver covers. Derived from the front end sample
+		// rate, not hardcoded — see receiver_span.go and RECEIVER_SPAN.md.
+		//
+		// Named tuning_range rather than "receiver" because that key is already the
+		// station's identity (name, callsign, GPS) further down this same map.
+		//
+		// Consumers must treat a missing tuning_range object, or any field of it that
+		// is absent or zero, as 10 kHz – 30 MHz. That is the compatibility contract
+		// with clients built against a server that predates this field.
+		"tuning_range": config.Receiver.TuningRange(),
 		"receiver": map[string]interface{}{
 			"name":       config.Admin.Name,
 			"callsign":   config.Admin.Callsign,
@@ -5054,9 +5067,9 @@ func handleStatus(w http.ResponseWriter, r *http.Request, config *Config) {
 				"type": "SDR",
 				"profiles": []map[string]interface{}{
 					{
-						"name":        "0-30 MHz",
-						"center_freq": 15000000, // 15 MHz in Hz
-						"sample_rate": 64000000, // 64 MHz in Hz
+						"name":        fmt.Sprintf("0-%.0f MHz", float64(config.Receiver.Span())/1e6),
+						"center_freq": config.Receiver.Centre(),
+						"sample_rate": config.Receiver.Samprate(),
 					},
 				},
 			},
@@ -5793,23 +5806,24 @@ func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Conf
 		}
 	}
 
-	// Synthetic "wideband" pseudo-band (0-30 MHz, the same channel used by the
-	// spectrogram) — always available whenever noise floor monitoring is
-	// enabled, independent of individual band configuration. Selectable on
+	// Synthetic "wideband" pseudo-band (the full receiver span, the same channel
+	// used by the spectrogram) — always available whenever noise floor monitoring
+	// is enabled, independent of individual band configuration. Selectable on
 	// the spectrum SSE stream via ?band=wideband.
 	//
 	// Kept out of the "bands" array on purpose: noisefloor.js indexes every
 	// entry there into its per-band UI state (band-selector dropdown, FFT
 	// canvases, historical/aggregate lookups), none of which support a
 	// "wideband" band. It is exposed as a separate top-level field instead.
+	wbBins, wbBinBW := widebandGeometry(config.Receiver.Span())
 	wideband := map[string]interface{}{
 		"name":             wideBandSSEName,
 		"start":            uint64(0),
-		"end":              uint64(30_000_000),
-		"center_frequency": uint64(wideBandSSECenterHz),
-		"bin_count":        4096,
-		"bin_bandwidth":    7324.21875,
-		"total_bandwidth":  float64(4096) * 7324.21875,
+		"end":              config.Receiver.Span(),
+		"center_frequency": config.Receiver.Centre(),
+		"bin_count":        wbBins,
+		"bin_bandwidth":    wbBinBW,
+		"total_bandwidth":  float64(wbBins) * wbBinBW,
 		"ft8_frequency":    uint64(0),
 		"ft8_markers":      ft8Markers,
 	}

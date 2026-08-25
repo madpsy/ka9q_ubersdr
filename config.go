@@ -15,8 +15,12 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Admin              AdminConfig               `yaml:"admin"`
-	Radiod             RadiodConfig              `yaml:"radiod"`
+	Admin  AdminConfig  `yaml:"admin"`
+	Radiod RadiodConfig `yaml:"radiod"`
+	// Receiver is derived in LoadConfig from the front end sample rate, never read
+	// from YAML. It is the single source of truth for how much spectrum this
+	// receiver covers — see receiver_span.go and RECEIVER_SPAN.md.
+	Receiver           ReceiverConfig            `yaml:"-"`
 	Server             ServerConfig              `yaml:"server"`
 	Audio              AudioConfig               `yaml:"audio"`
 	Spectrum           SpectrumConfig            `yaml:"spectrum"`
@@ -347,63 +351,63 @@ type SSBAgcConfig struct {
 
 // ServerConfig contains web server settings
 type ServerConfig struct {
-	Listen                          string               `yaml:"listen"`
-	MaxSessions                     int                  `yaml:"max_sessions"`
-	MaxSessionsIP                   int                  `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
-	SessionTimeout                  int                  `yaml:"session_timeout"`
-	MaxSessionTime                  int                  `yaml:"max_session_time"`          // Maximum time a session can exist in seconds (0 = unlimited)
-	MaxDailyTimePerIP               int                  `yaml:"max_daily_time_per_ip"`     // Maximum total connected time per IP per rolling 24-hour window in seconds (0 = unlimited)
-	MaxIdleTime                     int                  `yaml:"max_idle_time"`             // Maximum time a user can be idle in seconds (0 = unlimited)
-	SpectrumOnlyTimeout             int                  `yaml:"spectrum_only_timeout"`     // Seconds before a spectrum-only session (no audio) is kicked (0 = disabled, default: 60)
-	CmdRateLimit                    int                  `yaml:"cmd_rate_limit"`            // Commands per second per UUID per channel (0 = unlimited)
-	ConnRateLimit                   int                  `yaml:"conn_rate_limit"`           // WebSocket connections per second per IP (0 = default 4, minimum 4, negative = unlimited)
-	SessionsPerMinute               int                  `yaml:"sessions_per_minute"`       // /connection endpoint requests per minute per IP (0 = unlimited)
-	SessionCreateRateLimit          int                  `yaml:"session_create_rate_limit"` // New sessions per minute per user (UUID), separately for audio and spectrum (0 = default 6, negative = unlimited)
-	SessionCreateBurst              int                  `yaml:"session_create_burst"`      // New sessions allowed back-to-back before the per-minute rate bites (0 = default 3)
-	EnforceSessionIPMatch           bool                 `yaml:"enforce_session_ip_match"`  // Enforce that WebSocket connections must come from same IP as /connection (default: false)
-	TimeoutBypassIPs                []string             `yaml:"timeout_bypass_ips"`        // List of IPs/CIDRs that bypass idle and max session time limits
-	TrustedProxyIPs                 []string             `yaml:"trusted_proxy_ips"`         // List of IPs/CIDRs to trust X-Real-IP header from
-	TrustedContainers               []string             `yaml:"trusted_containers"`        // Docker container names to resolve and trust as proxies
-	BypassPassword                  string               `yaml:"bypass_password"`           // Password that grants bypass privileges (empty = disabled)
-	BypassedUsersOnly               bool                 `yaml:"bypassed_users_only"`       // Only allow bypassed users (IP or password) to connect (default: false)
-	PublicIQModes                   map[string]bool      `yaml:"public_iq_modes"`           // IQ modes accessible without bypass authentication
-	EnableCORS                      bool                 `yaml:"enable_cors"`
-	EnableKiwiSDR                   bool                 `yaml:"enable_kiwisdr"`                      // Enable KiwiSDR protocol compatibility server (default: false)
-	KiwiSDRPort                     int                  `yaml:"kiwisdr_port"`                        // Port advertised to rx.kiwisdr.com for directory registration (default: 8073)
-	KiwiSDRPublicEmail              string               `yaml:"kiwisdr_public_email"`                // Public email for KiwiSDR status endpoint (default: "admin@example.com")
-	KiwiSDRSmeterOffset             float32              `yaml:"kiwisdr_smeter_offset"`               // S-meter calibration offset (dBFS to dBm, default: 30.0)
-	EnableWebSDR                    bool                 `yaml:"enable_websdr"`                       // Enable WebSDR protocol compatibility server (default: false)
-	WebSDRWaterfallCalibration      float32              `yaml:"websdr_waterfall_calibration"`        // Waterfall dBFS→pixel calibration offset (default: -13.0)
-	WebSDREmail                     string               `yaml:"websdr_email"`                        // Operator contact email shown in WebSDR UI /~~orgstatus (XOR-obfuscated; defaults to admin.email)
-	WebSDRRegisterWebSDROrg         bool                 `yaml:"websdr_register_websdrorg"`           // Register with the websdr.org public directory (default: false)
-	WebSDRHostname                  string               `yaml:"websdr_hostname"`                     // Public hostname advertised to websdr.org (empty = derive from admin.public_url)
-	WebSDRTCPPort                   int                  `yaml:"websdr_tcp_port"`                     // Public TCP port advertised to websdr.org (default: 8901; differs from the listen port behind a tunnel)
-	KiwiSDRRegisterKiwiSDRCom       bool                 `yaml:"kiwisdr_register_kiwisdrcom"`         // Register with rx.kiwisdr.com public directory (default: false)
-	KiwiSDRHost                     string               `yaml:"kiwisdr_host"`                        // Public hostname advertised to rx.kiwisdr.com (required for registration)
-	LogFileEnabled                  bool                 `yaml:"logfile_enabled"`                     // Enable HTTP request logging (default: false)
-	LogFile                         string               `yaml:"logfile"`                             // HTTP request log file path
-	SessionActivityLogEnabled       bool                 `yaml:"session_activity_log_enabled"`        // Enable session activity logging to disk
-	SessionActivityLogDir           string               `yaml:"session_activity_log_dir"`            // Directory for session activity logs (default: data/session_activity)
-	SessionActivityLogIntervalSec   int                  `yaml:"session_activity_log_interval_sec"`   // Interval for periodic snapshots in seconds (default: 300)
-	SessionActivityLogRetentionDays int                  `yaml:"session_activity_log_retention_days"` // Number of days to retain session activity logs (default: 30, 0 = keep forever)
-	SessionsGeoJSONEnabled          bool                 `yaml:"sessions_geojson_enabled"`            // Expose a public /api/sessions.geojson feed of active listeners (approx GeoIP location) for e.g. Home Assistant maps (default: false)
-	CustomHeadHTML                  string               `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of both index.html and v2's shell (for analytics, ads, meta tags, etc.)
-	CustomBodyHTML                  string               `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in both index.html and v2's shell (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
-	CustomAdsTxt                    string               `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
-	EnabledWidgets                  []string             `yaml:"enabled_widgets"`                     // Widget UUIDs from the collector to inject (sandboxed iframes) after custom_body_html (max 10)
-	CPUTempThresholdC               float64              `yaml:"cpu_temp_threshold_c"`                // CPU temperature (°C) above which the cpu_temperature health probe fires (default: 80)
-	SSBAgcDefaults                  SSBAgcConfig         `yaml:"ssb_agc"`                             // Default AGC parameters for USB/LSB sessions (applied on session create and mode change)
-	timeoutBypassNets               []*net.IPNet         // Parsed CIDR networks (internal use)
-	trustedProxyNets                []*net.IPNet         // Parsed CIDR networks for trusted proxies (internal use)
-	containerProxyIPs               []string             // Dynamically resolved container IPs (internal use)
-	containerNameByIP               map[string]string    // Reverse map: IP -> container name (internal use)
-	containerProxyMu                sync.RWMutex         // Protects containerProxyIPs and containerNameByIP
-	lookupResolveNames              []string             // Lookup-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from lookup_services.trusted_containers)
-	injectResolveNames              []string             // DX inject-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from dxcluster.inject_trusted_hosts)
-	widgetResolveNames              []string             // Widget-admin-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from admin.widget_trusted_hosts)
-	whisperResolveNames             []string             // Whisper-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from whisper.trusted_containers)
-	addonResolveFn                  func() []string      // Returns the CURRENT addon container hostnames (internal use, set from the live addons.yaml); nil when addon ingest is off
-	addonResolveMu                  sync.RWMutex         // Protects addonResolveFn
+	Listen                          string            `yaml:"listen"`
+	MaxSessions                     int               `yaml:"max_sessions"`
+	MaxSessionsIP                   int               `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
+	SessionTimeout                  int               `yaml:"session_timeout"`
+	MaxSessionTime                  int               `yaml:"max_session_time"`          // Maximum time a session can exist in seconds (0 = unlimited)
+	MaxDailyTimePerIP               int               `yaml:"max_daily_time_per_ip"`     // Maximum total connected time per IP per rolling 24-hour window in seconds (0 = unlimited)
+	MaxIdleTime                     int               `yaml:"max_idle_time"`             // Maximum time a user can be idle in seconds (0 = unlimited)
+	SpectrumOnlyTimeout             int               `yaml:"spectrum_only_timeout"`     // Seconds before a spectrum-only session (no audio) is kicked (0 = disabled, default: 60)
+	CmdRateLimit                    int               `yaml:"cmd_rate_limit"`            // Commands per second per UUID per channel (0 = unlimited)
+	ConnRateLimit                   int               `yaml:"conn_rate_limit"`           // WebSocket connections per second per IP (0 = default 4, minimum 4, negative = unlimited)
+	SessionsPerMinute               int               `yaml:"sessions_per_minute"`       // /connection endpoint requests per minute per IP (0 = unlimited)
+	SessionCreateRateLimit          int               `yaml:"session_create_rate_limit"` // New sessions per minute per user (UUID), separately for audio and spectrum (0 = default 6, negative = unlimited)
+	SessionCreateBurst              int               `yaml:"session_create_burst"`      // New sessions allowed back-to-back before the per-minute rate bites (0 = default 3)
+	EnforceSessionIPMatch           bool              `yaml:"enforce_session_ip_match"`  // Enforce that WebSocket connections must come from same IP as /connection (default: false)
+	TimeoutBypassIPs                []string          `yaml:"timeout_bypass_ips"`        // List of IPs/CIDRs that bypass idle and max session time limits
+	TrustedProxyIPs                 []string          `yaml:"trusted_proxy_ips"`         // List of IPs/CIDRs to trust X-Real-IP header from
+	TrustedContainers               []string          `yaml:"trusted_containers"`        // Docker container names to resolve and trust as proxies
+	BypassPassword                  string            `yaml:"bypass_password"`           // Password that grants bypass privileges (empty = disabled)
+	BypassedUsersOnly               bool              `yaml:"bypassed_users_only"`       // Only allow bypassed users (IP or password) to connect (default: false)
+	PublicIQModes                   map[string]bool   `yaml:"public_iq_modes"`           // IQ modes accessible without bypass authentication
+	EnableCORS                      bool              `yaml:"enable_cors"`
+	EnableKiwiSDR                   bool              `yaml:"enable_kiwisdr"`                      // Enable KiwiSDR protocol compatibility server (default: false)
+	KiwiSDRPort                     int               `yaml:"kiwisdr_port"`                        // Port advertised to rx.kiwisdr.com for directory registration (default: 8073)
+	KiwiSDRPublicEmail              string            `yaml:"kiwisdr_public_email"`                // Public email for KiwiSDR status endpoint (default: "admin@example.com")
+	KiwiSDRSmeterOffset             float32           `yaml:"kiwisdr_smeter_offset"`               // S-meter calibration offset (dBFS to dBm, default: 30.0)
+	EnableWebSDR                    bool              `yaml:"enable_websdr"`                       // Enable WebSDR protocol compatibility server (default: false)
+	WebSDRWaterfallCalibration      float32           `yaml:"websdr_waterfall_calibration"`        // Waterfall dBFS→pixel calibration offset (default: -13.0)
+	WebSDREmail                     string            `yaml:"websdr_email"`                        // Operator contact email shown in WebSDR UI /~~orgstatus (XOR-obfuscated; defaults to admin.email)
+	WebSDRRegisterWebSDROrg         bool              `yaml:"websdr_register_websdrorg"`           // Register with the websdr.org public directory (default: false)
+	WebSDRHostname                  string            `yaml:"websdr_hostname"`                     // Public hostname advertised to websdr.org (empty = derive from admin.public_url)
+	WebSDRTCPPort                   int               `yaml:"websdr_tcp_port"`                     // Public TCP port advertised to websdr.org (default: 8901; differs from the listen port behind a tunnel)
+	KiwiSDRRegisterKiwiSDRCom       bool              `yaml:"kiwisdr_register_kiwisdrcom"`         // Register with rx.kiwisdr.com public directory (default: false)
+	KiwiSDRHost                     string            `yaml:"kiwisdr_host"`                        // Public hostname advertised to rx.kiwisdr.com (required for registration)
+	LogFileEnabled                  bool              `yaml:"logfile_enabled"`                     // Enable HTTP request logging (default: false)
+	LogFile                         string            `yaml:"logfile"`                             // HTTP request log file path
+	SessionActivityLogEnabled       bool              `yaml:"session_activity_log_enabled"`        // Enable session activity logging to disk
+	SessionActivityLogDir           string            `yaml:"session_activity_log_dir"`            // Directory for session activity logs (default: data/session_activity)
+	SessionActivityLogIntervalSec   int               `yaml:"session_activity_log_interval_sec"`   // Interval for periodic snapshots in seconds (default: 300)
+	SessionActivityLogRetentionDays int               `yaml:"session_activity_log_retention_days"` // Number of days to retain session activity logs (default: 30, 0 = keep forever)
+	SessionsGeoJSONEnabled          bool              `yaml:"sessions_geojson_enabled"`            // Expose a public /api/sessions.geojson feed of active listeners (approx GeoIP location) for e.g. Home Assistant maps (default: false)
+	CustomHeadHTML                  string            `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of both index.html and v2's shell (for analytics, ads, meta tags, etc.)
+	CustomBodyHTML                  string            `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in both index.html and v2's shell (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
+	CustomAdsTxt                    string            `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
+	EnabledWidgets                  []string          `yaml:"enabled_widgets"`                     // Widget UUIDs from the collector to inject (sandboxed iframes) after custom_body_html (max 10)
+	CPUTempThresholdC               float64           `yaml:"cpu_temp_threshold_c"`                // CPU temperature (°C) above which the cpu_temperature health probe fires (default: 80)
+	SSBAgcDefaults                  SSBAgcConfig      `yaml:"ssb_agc"`                             // Default AGC parameters for USB/LSB sessions (applied on session create and mode change)
+	timeoutBypassNets               []*net.IPNet      // Parsed CIDR networks (internal use)
+	trustedProxyNets                []*net.IPNet      // Parsed CIDR networks for trusted proxies (internal use)
+	containerProxyIPs               []string          // Dynamically resolved container IPs (internal use)
+	containerNameByIP               map[string]string // Reverse map: IP -> container name (internal use)
+	containerProxyMu                sync.RWMutex      // Protects containerProxyIPs and containerNameByIP
+	lookupResolveNames              []string          // Lookup-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from lookup_services.trusted_containers)
+	injectResolveNames              []string          // DX inject-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from dxcluster.inject_trusted_hosts)
+	widgetResolveNames              []string          // Widget-admin-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from admin.widget_trusted_hosts)
+	whisperResolveNames             []string          // Whisper-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from whisper.trusted_containers)
+	addonResolveFn                  func() []string   // Returns the CURRENT addon container hostnames (internal use, set from the live addons.yaml); nil when addon ingest is off
+	addonResolveMu                  sync.RWMutex      // Protects addonResolveFn
 }
 
 // SetAddonContainerResolver installs a callback returning the container
@@ -1379,23 +1383,34 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Admin.AllowedIPs = []string{"0.0.0.0/0"} // Default: allow all IPv4
 	}
 
+	// Resolve how much spectrum this receiver covers, before anything that depends
+	// on it. See receiver_span.go: the front end sample rate decides the span, and
+	// everything below is derived from that rather than from a literal 30 MHz.
+	config.Receiver = resolveReceiver()
+
 	// Set spectrum defaults if not specified.
 	// Only bin_count is operator-facing; center frequency and bin bandwidth are
-	// derived, because changing them independently breaks the 0-30 MHz display
-	// (totalBandwidth = binCount × binBandwidth must equal 30 MHz).
+	// derived, because changing them independently breaks the full-span display
+	// (totalBandwidth = binCount × binBandwidth must equal Receiver.Span()).
 	if config.Spectrum.Default.CenterFrequency == 0 {
-		config.Spectrum.Default.CenterFrequency = 15000000 // 15 MHz center for 0-30 MHz coverage
+		// Half the span: the full-span view starts at 0 Hz, so its centre is the
+		// only value that puts both edges where they belong. 15 MHz for a 30 MHz
+		// receiver, 30 MHz for a 60 MHz one.
+		config.Spectrum.Default.CenterFrequency = config.Receiver.Centre()
 	}
 
-	// Number of FFT bins across the 0-30 MHz view. Only 512 (low), 1024 (normal)
+	// Number of FFT bins across the full-span view. Only 512 (low), 1024 (normal)
 	// and 2048 (high) are accepted; anything else snaps to the nearest of those so
 	// a typo in config.yaml can never produce a channel radiod will reject.
 	// The thresholds are geometric midpoints (√(512·1024) ≈ 724, √(1024·2048) ≈ 1448)
 	// so a value snaps to whichever option it is nearest on a log scale.
+	//
+	// The default scales with the span so Hz-per-bin at full zoom-out does not move
+	// as the receiver widens: 30 MHz → 1024 bins, 60 MHz → 2048, both 29296.875 Hz.
 	rawBinCount := config.Spectrum.BinCount
 	switch {
 	case config.Spectrum.BinCount == 0:
-		config.Spectrum.BinCount = 1024
+		config.Spectrum.BinCount = defaultSpectrumBinCount(config.Receiver.Span())
 	case config.Spectrum.BinCount <= 724:
 		config.Spectrum.BinCount = 512
 	case config.Spectrum.BinCount <= 1448:
@@ -1409,9 +1424,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	// Derived — never set directly. binCount × binBandwidth must equal exactly
-	// 30,000,000 Hz or the display stops covering 0-30 MHz.
+	// Receiver.SpanHz or the display stops covering the receiver.
 	config.Spectrum.Default.BinCount = config.Spectrum.BinCount
-	config.Spectrum.Default.BinBandwidth = 30000000.0 / float64(config.Spectrum.BinCount)
+	config.Spectrum.Default.BinBandwidth = float64(config.Receiver.Span()) / float64(config.Spectrum.BinCount)
 
 	if config.Spectrum.PollPeriodMs == 0 {
 		config.Spectrum.PollPeriodMs = 100 // 100ms default (10 Hz update rate)
@@ -1498,7 +1513,7 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	// Validate and clean up frequency gain ranges
-	config.Spectrum.validateFrequencyGainRanges()
+	config.Spectrum.validateFrequencyGainRanges(config.Receiver.MaxFreq())
 
 	// Set DX cluster defaults if not specified
 	if config.DXCluster.Port == 0 {
@@ -2611,7 +2626,7 @@ func (irc *InstanceReportingConfig) IsInstanceReporter(ipStr string) bool {
 
 // validateFrequencyGainRanges validates and cleans up frequency gain ranges
 // Removes invalid ranges and logs warnings for user errors
-func (sc *SpectrumConfig) validateFrequencyGainRanges() {
+func (sc *SpectrumConfig) validateFrequencyGainRanges(maxFreq uint64) {
 	if len(sc.GainDBFrequencyRanges) == 0 {
 		return
 	}
@@ -2627,11 +2642,10 @@ func (sc *SpectrumConfig) validateFrequencyGainRanges() {
 			continue
 		}
 
-		// Check if frequency range is reasonable (within HF range: 0-30 MHz)
-		const maxHFFreq = 30000000 // 30 MHz
-		if r.StartFreq > maxHFFreq {
-			fmt.Printf("Warning: Ignoring frequency gain range '%s': start_freq (%d Hz) exceeds maximum HF frequency (30 MHz)\n",
-				name, r.StartFreq)
+		// Check the range is inside what this receiver covers
+		if maxFreq > 0 && uint64(r.StartFreq) > maxFreq {
+			fmt.Printf("Warning: Ignoring frequency gain range '%s': start_freq (%d Hz) exceeds the receiver maximum (%.3f MHz)\n",
+				name, r.StartFreq, float64(maxFreq)/1e6)
 			continue
 		}
 

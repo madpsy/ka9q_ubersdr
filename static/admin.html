@@ -19884,8 +19884,37 @@ const tooltipLine2 = timeStr;
 
                 // Format sample rate for display (MSPS = Mega Samples Per Second)
                 const sampleRateMSPS = data.input_samprate ? (data.input_samprate / 1e6).toFixed(2) + ' MSPS' : 'N/A';
-                // Calculate Nyquist frequency (max usable frequency = sample rate / 2)
-                const nyquistFreqMHz = data.input_samprate ? (data.input_samprate / 2 / 1e6).toFixed(1) : 'N/A';
+                // The top of the tuning range, as the server derived it — NOT samprate/2.
+                // Half the sample rate is the theoretical Nyquist; radiod caps the front
+                // end at 0.47 x samprate and the span is rounded down from there, so a
+                // 64.8 MSPS receiver tunes to 30 MHz, not the 32.4 that figure implied.
+                // Falls back to the old arithmetic for a server that predates the field.
+                const tuningMaxMHz = data.tuning_max_hz
+                    ? (data.tuning_max_hz / 1e6).toFixed(1)
+                    : (data.input_samprate ? (data.input_samprate / 2 / 1e6).toFixed(1) : 'N/A');
+
+                // This used to read "⚠️ Using unsupported sample rate" for anything that
+                // was not 64.8 MSPS, which would have fired the moment the RX888 was run
+                // at its full 129.6. The rate is no longer special-cased anywhere — the
+                // frequency range is derived from it — so the only thing worth warning
+                // about is the server and radiod disagreeing, which the server itself
+                // reports in `issues`.
+                // The frequency range this server derived from the sample rate beside it,
+                // so the two can be read together — a disagreement between them is what
+                // the warning line below is for.
+                const spanRange = (data.tuning_min_hz && data.tuning_max_hz)
+                    ? (data.tuning_min_hz / 1e3).toFixed(0) + ' kHz – ' + (data.tuning_max_hz / 1e6).toFixed(3) + ' MHz'
+                    : 'N/A';
+                const spanSource = data.samprate_source === 'radiod-conf'
+                    ? 'from radiod config'
+                    : (data.samprate_source === 'fallback'
+                        ? 'assumed — radiod config unreadable'
+                        : (data.samprate_source || ''));
+
+                const spanWarning = (data.issues || [])
+                    .filter(i => /sample rate|front end usable/i.test(i))
+                    .map(i => '⚠️ ' + i)
+                    .join(' ');
 
                 // Format FFT values
                 const fftSize = data.fft_size || 0;
@@ -19908,7 +19937,7 @@ const tooltipLine2 = timeStr;
                         <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Sample Rate</div>
                             <div style="font-size: 16px; font-weight: bold; color: #667eea;">${sampleRateMSPS}</div>
-                            <div style="font-size: 10px; color: #999; margin-top: 3px;">(max ${nyquistFreqMHz} MHz)</div>
+                            <div style="font-size: 10px; color: #999; margin-top: 3px;">(tunes to ${tuningMaxMHz} MHz)</div>
                         </div>
                         <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 11px; color: #666; margin-bottom: 5px;">RF AGC</div>
@@ -19938,7 +19967,12 @@ const tooltipLine2 = timeStr;
                             <div style="font-size: 10px; color: #999; margin-top: 3px;">(since last overrange)</div>
                         </div>
                     </div>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+                        <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">Receiver Span</div>
+                            <div style="font-size: 16px; font-weight: bold; color: ${spanWarning ? '#dc3545' : '#667eea'};">${spanRange}</div>
+                            <div style="font-size: 10px; color: #999; margin-top: 3px;">${spanSource}</div>
+                        </div>
                         <div style="padding: 12px; background: #fff; border-radius: 5px; border: 1px solid #dee2e6;">
                             <div style="font-size: 11px; color: #666; margin-bottom: 5px;">FFT Size</div>
                             <div style="font-size: 16px; font-weight: bold; color: #667eea;">${fftSize.toLocaleString()} <span style="font-size: 10px; color: #999;">${fftType} (${fftwBlock})</span></div>
@@ -19954,7 +19988,7 @@ const tooltipLine2 = timeStr;
                     </div>
                     <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
                         <div style="color: #dc3545; font-weight: bold;">
-                            ${data.input_samprate && Math.abs(data.input_samprate - 64800000) > 1000 ? '⚠️ Using unsupported sample rate. Behaviour and performance may be impacted.' : ''}
+                            ${spanWarning}
                         </div>
                         <div style="color: #999;">
                             Last Update: ${data.last_update ? new Date(data.last_update).toLocaleString() : 'N/A'}

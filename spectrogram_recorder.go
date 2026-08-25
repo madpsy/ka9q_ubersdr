@@ -24,10 +24,20 @@ import (
 )
 
 const (
-	spectrogramBins           = 4096 // Wideband FFT bin count (used as default for wideband recorder)
-	spectrogramMaxRows        = 1440 // One row per minute, 24 hours
-	spectrogramMagic          = "SGRM"
-	spectrogramVersion        = uint32(1)
+	spectrogramMaxRows = 1440 // One row per minute, 24 hours
+	spectrogramMagic   = "SGRM"
+	// spectrogramVersion 2 added the frequency axis to the header.
+	//
+	// Version 1 stored only rowCount/lastRow/binCount, so the axis was implied by
+	// whatever span the recorder happened to be configured with when the file was read
+	// back. Once the span became derived from the front end sample rate that stopped
+	// being safe: widening the receiver would have silently re-labelled every archived
+	// row against the new axis, and a same-bin-count change would not even have tripped
+	// the mismatch check. v1 files are discarded on load rather than reinterpreted.
+	spectrogramVersion = uint32(2)
+	// spectrogramHeaderSize is magic(4) + version(4) + rowCount(4) + lastRowUnix(8) +
+	// binCount(4) + startFreqHz(8) + endFreqHz(8).
+	spectrogramHeaderSize     = 40
 	spectrogramDefaultDBMin   = float32(-130) // fallback noise floor when insufficient data
 	spectrogramDefaultDBMax   = float32(-60)  // fallback signal peak when insufficient data
 	spectrogramDefaultPalette = "jet"         // default colour palette
@@ -105,13 +115,18 @@ type SpectrogramRecorder struct {
 	wg       sync.WaitGroup
 }
 
-// NewSpectrogramRecorder creates a new wideband (0-30 MHz) recorder.
+// NewSpectrogramRecorder creates a new wideband recorder covering the whole receiver.
 // Returns nil if disabled or nfm is nil.
+//
+// The span and bin count come from the noise-floor monitor's own wideband geometry, so
+// the recorder always matches the channel it is reading (see widebandGeometry).
 func NewSpectrogramRecorder(nfm *NoiseFloorMonitor, config SpectrogramConfig) *SpectrogramRecorder {
 	if !config.IsEnabled() || nfm == nil {
 		return nil
 	}
-	return newSpectrogramRecorderForBand(nfm, config, "wideband", 0, 30_000_000, spectrogramBins,
+	spanHz := nfm.config.Receiver.Span()
+	bins, _ := widebandGeometry(spanHz)
+	return newSpectrogramRecorderForBand(nfm, config, "wideband", 0, spanHz, bins,
 		func() *BandFFT { return nfm.GetWideBandFFT() })
 }
 
@@ -517,8 +532,7 @@ func (sr *SpectrogramRecorder) persistToDisk(today string) {
 
 	binPath := filepath.Join(sr.config.DataDir, "spectrogram_"+today+".bin")
 
-	// Header: magic(4) + version(4) + rowCount(4) + lastRowUnix(8) + binCount(4) = 24 bytes
-	headerSize := 24
+	headerSize := spectrogramHeaderSize
 	dataSize := rowCount * binCount * 4
 	buf := make([]byte, headerSize+dataSize)
 
@@ -527,6 +541,9 @@ func (sr *SpectrogramRecorder) persistToDisk(today string) {
 	binary.LittleEndian.PutUint32(buf[8:12], uint32(rowCount))
 	binary.LittleEndian.PutUint64(buf[12:20], uint64(lastRow.Unix()))
 	binary.LittleEndian.PutUint32(buf[20:24], uint32(binCount))
+	// The frequency axis, so the rows can never be redrawn against a different one.
+	binary.LittleEndian.PutUint64(buf[24:32], sr.startFreqHz)
+	binary.LittleEndian.PutUint64(buf[32:40], sr.endFreqHz)
 
 	offset := headerSize
 	for _, v := range rowData {
@@ -620,13 +637,15 @@ func (sr *SpectrogramRecorder) loadTodayFromDisk() {
 		return // No file — fresh start
 	}
 
-	if len(data) < 24 || string(data[0:4]) != spectrogramMagic {
+	if len(data) < spectrogramHeaderSize || string(data[0:4]) != spectrogramMagic {
 		log.Printf("Spectrogram: corrupt or missing magic in %s, starting fresh", binPath)
 		return
 	}
 
 	version := binary.LittleEndian.Uint32(data[4:8])
 	if version != spectrogramVersion {
+		// Includes every v1 file: they carry no frequency axis, so there is no way to
+		// know whether they describe the span this recorder is now covering.
 		log.Printf("Spectrogram: unknown .bin version %d, starting fresh", version)
 		return
 	}
@@ -634,6 +653,8 @@ func (sr *SpectrogramRecorder) loadTodayFromDisk() {
 	rowCount := int(binary.LittleEndian.Uint32(data[8:12]))
 	lastRowUnix := int64(binary.LittleEndian.Uint64(data[12:20]))
 	binCount := int(binary.LittleEndian.Uint32(data[20:24]))
+	startFreqHz := binary.LittleEndian.Uint64(data[24:32])
+	endFreqHz := binary.LittleEndian.Uint64(data[32:40])
 	lastRowTime := time.Unix(lastRowUnix, 0).UTC()
 
 	if rowCount < 0 || rowCount > spectrogramMaxRows {
@@ -644,16 +665,23 @@ func (sr *SpectrogramRecorder) loadTodayFromDisk() {
 		log.Printf("Spectrogram: bin count mismatch (%d vs %d), starting fresh", binCount, sr.binCount)
 		return
 	}
+	if startFreqHz != sr.startFreqHz || endFreqHz != sr.endFreqHz {
+		// The receiver's span moved. Plotting these rows against the new axis would put
+		// every signal at the wrong frequency, convincingly.
+		log.Printf("Spectrogram: frequency range mismatch (%d-%d vs %d-%d Hz), starting fresh",
+			startFreqHz, endFreqHz, sr.startFreqHz, sr.endFreqHz)
+		return
+	}
 
-	expectedSize := 24 + rowCount*sr.binCount*4
+	expectedSize := spectrogramHeaderSize + rowCount*sr.binCount*4
 	if len(data) < expectedSize {
-		rowCount = (len(data) - 24) / (sr.binCount * 4)
+		rowCount = (len(data) - spectrogramHeaderSize) / (sr.binCount * 4)
 		log.Printf("Spectrogram: truncated .bin, loading %d rows", rowCount)
 	}
 
 	sr.mu.Lock()
 	for i := 0; i < rowCount; i++ {
-		offset := 24 + i*sr.binCount*4
+		offset := spectrogramHeaderSize + i*sr.binCount*4
 		for j := 0; j < sr.binCount; j++ {
 			bits := binary.LittleEndian.Uint32(data[offset : offset+4])
 			sr.rows[i][j] = math.Float32frombits(bits)

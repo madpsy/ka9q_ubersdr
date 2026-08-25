@@ -472,12 +472,22 @@ func EiBiBookmarkComment(e EiBiEntry) string {
 	return timeStr + " " + days
 }
 
-// GetActiveEntries returns all EiBi entries that are currently active at time t
-// and whose frequency falls within the shortwave range (0–30 MHz / 0–30,000 kHz).
+// GetActiveEntries returns all EiBi entries that are currently active at time t and
+// whose frequency this receiver can tune. maxFreqHz is config.Receiver.MaxFreq(); pass 0
+// to fall back to the shortwave range (0–30 MHz), which is what this filter used to be
+// fixed at.
+//
+// Entries the receiver cannot reach are dropped rather than listed: the caller turns
+// these into bookmarks, and a bookmark that refuses to tune is worse than an absent one.
 // Returns nil when the schedule is not loaded or no entries are active.
-func (s *EiBiSchedule) GetActiveEntries(t time.Time) []EiBiEntry {
+func (s *EiBiSchedule) GetActiveEntries(t time.Time, maxFreqHz uint64) []EiBiEntry {
 	if s == nil {
 		return nil
+	}
+
+	maxKHz := float64(maxFreqHz) / 1000.0
+	if maxKHz <= 0 {
+		maxKHz = 30000 // 30 MHz, the shortwave range this used to assume
 	}
 
 	s.mu.RLock()
@@ -493,8 +503,8 @@ func (s *EiBiSchedule) GetActiveEntries(t time.Time) []EiBiEntry {
 
 	var matches []EiBiEntry
 	for _, e := range entries {
-		// Shortwave range: 0–30 MHz (0–30,000 kHz).
-		if e.FreqKHz <= 0 || e.FreqKHz > 30000 {
+		// Within what the receiver covers.
+		if e.FreqKHz <= 0 || e.FreqKHz > maxKHz {
 			continue
 		}
 

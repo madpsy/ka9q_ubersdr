@@ -27,8 +27,18 @@ const enableReporting = false
 // Set to 0 to disable the cooldown entirely.
 const restartCooldown = 2 * time.Second
 
-// maxFreqHz is the upper bound for a valid HF frequency (30 MHz)
-const maxFreqHz = 30_000_000
+// defaultMaxFreqHz is the fallback upper bound when the main package has not
+// supplied the receiver's real range — the value this extension used to hardcode.
+const defaultMaxFreqHz = 30_000_000
+
+// maxFreqHz is the top of the receiver's tuning range, from GlobalConfig when it is
+// set and defaultMaxFreqHz otherwise.
+func maxFreqHz() int {
+	if GlobalConfig != nil && GlobalConfig.MaxFrequencyHz > 0 {
+		return GlobalConfig.MaxFrequencyHz
+	}
+	return defaultMaxFreqHz
+}
 
 // outputSampleRate is the fixed output sample rate for decoded audio.
 // 16 kHz is the standard Opus wideband rate — better voice quality than 12 kHz
@@ -44,6 +54,9 @@ type GlobalConfigProvider struct {
 	Callsign string // Station callsign (config.Admin.Callsign)
 	Locator  string // Maidenhead grid square (derived from config.Admin.GPS lat/lon)
 	MaxUsers int    // Maximum concurrent users (0 = unlimited, default: 10)
+	// MaxFrequencyHz is the top of the receiver's tuning range (config.Receiver.MaxFrequency).
+	// Zero means "not supplied": maxFreqHz falls back to defaultMaxFreqHz.
+	MaxFrequencyHz int
 }
 
 // GlobalConfig is set by main package before the extension is registered
@@ -163,8 +176,8 @@ func NewFreeDVExtension(audioParams AudioExtensionParams, extensionParams map[st
 	// but arrives here as uint64 via extensionParams.
 	// 0 means no session frequency is known → FreeDV Reporter disabled.
 	if freq, ok := extensionParams["tuned_frequency_hz"].(uint64); ok {
-		if freq > maxFreqHz {
-			log.Printf("[FreeDV Extension] tuned_frequency_hz %d Hz exceeds HF range (%d Hz) — FreeDV Reporter disabled", freq, maxFreqHz)
+		if freq > uint64(maxFreqHz()) {
+			log.Printf("[FreeDV Extension] tuned_frequency_hz %d Hz exceeds the receiver range (%d Hz) — FreeDV Reporter disabled", freq, maxFreqHz())
 		} else {
 			config.FreqHz = int64(freq)
 		}

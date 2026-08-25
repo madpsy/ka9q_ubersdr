@@ -159,7 +159,7 @@ func TestResampleKiwiWaterfallIdentity(t *testing.T) {
 	for i := range src {
 		src[i] = float32(-120 + i%40)
 	}
-	out := resampleKiwiWaterfall(src, 114.44, 114.44, kiwiWaterfallBins)
+	out := resampleSpectrumOntoGrid(src, 114.44, 114.44, kiwiWaterfallBins)
 	if len(out) != kiwiWaterfallBins {
 		t.Fatalf("length %d, want %d", len(out), kiwiWaterfallBins)
 	}
@@ -175,7 +175,7 @@ func TestResampleKiwiWaterfallIdentity(t *testing.T) {
 func TestResampleKiwiWaterfallAlwaysDisplayBins(t *testing.T) {
 	for _, srcLen := range []int{1, 100, 512, 1023, 1024, 1176, 1465, 2232, 4096} {
 		src := make([]float32, srcLen)
-		out := resampleKiwiWaterfall(src, 100, 114.44, kiwiWaterfallBins)
+		out := resampleSpectrumOntoGrid(src, 100, 114.44, kiwiWaterfallBins)
 		if len(out) != kiwiWaterfallBins {
 			t.Errorf("src %d bins -> %d out, want %d", srcLen, len(out), kiwiWaterfallBins)
 		}
@@ -201,7 +201,7 @@ func TestResampleKiwiWaterfallKeepsNarrowCarriers(t *testing.T) {
 		}
 		src[pos] = carrier
 
-		out := resampleKiwiWaterfall(src, req.BinBandwidth, req.DisplayBinBW, req.DisplayBins)
+		out := resampleSpectrumOntoGrid(src, req.BinBandwidth, req.DisplayBinBW, req.DisplayBins)
 		peak := float32(floor)
 		for _, v := range out {
 			if v > peak {
@@ -235,7 +235,7 @@ func TestResampleKiwiWaterfallPreservesFrequency(t *testing.T) {
 		srcIdx := int(srcCentre + offsetHz/req.BinBandwidth)
 		src[srcIdx] = carrier
 
-		out := resampleKiwiWaterfall(src, req.BinBandwidth, req.DisplayBinBW, req.DisplayBins)
+		out := resampleSpectrumOntoGrid(src, req.BinBandwidth, req.DisplayBinBW, req.DisplayBins)
 
 		peakIdx, peak := -1, float32(floor)
 		for i, v := range out {
@@ -264,7 +264,7 @@ func TestResampleKiwiWaterfallUnknownGeometry(t *testing.T) {
 	for i := range src {
 		src[i] = float32(i)
 	}
-	out := resampleKiwiWaterfall(src, 0, 114.44, kiwiWaterfallBins)
+	out := resampleSpectrumOntoGrid(src, 0, 114.44, kiwiWaterfallBins)
 	if len(out) != kiwiWaterfallBins {
 		t.Fatalf("length %d, want %d", len(out), kiwiWaterfallBins)
 	}
@@ -278,10 +278,10 @@ func TestResampleKiwiWaterfallUnknownGeometry(t *testing.T) {
 }
 
 func TestResampleKiwiWaterfallDegenerateInput(t *testing.T) {
-	if got := resampleKiwiWaterfall(nil, 100, 114.44, kiwiWaterfallBins); len(got) != kiwiWaterfallBins {
+	if got := resampleSpectrumOntoGrid(nil, 100, 114.44, kiwiWaterfallBins); len(got) != kiwiWaterfallBins {
 		t.Errorf("nil input gave %d bins, want %d of silence", len(got), kiwiWaterfallBins)
 	}
-	if got := resampleKiwiWaterfall([]float32{1, 2, 3}, 100, 114.44, 0); got != nil {
+	if got := resampleSpectrumOntoGrid([]float32{1, 2, 3}, 100, 114.44, 0); got != nil {
 		t.Errorf("zero output bins gave %v, want nil", got)
 	}
 }

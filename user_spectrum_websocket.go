@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"net"
@@ -419,19 +420,20 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			newBinCount := curBinCount
 
 			if msg.Frequency > 0 {
-				// Enforce center frequency within HF range (10 kHz – 30 MHz)
-				const minCenterFreq = 10000    // 10 kHz
-				const maxCenterFreq = 30000000 // 30 MHz
-				if msg.Frequency < minCenterFreq {
-					log.Printf("Rejecting spectrum update: center frequency %d Hz < minimum %d Hz (10 kHz)",
-						msg.Frequency, minCenterFreq)
-					swsh.sendError(conn, "Center frequency must be at least 10 kHz")
+				// Enforce centre frequency within what this receiver covers
+				rx := swsh.sessions.config.Receiver
+				if msg.Frequency < rx.MinFreq() {
+					log.Printf("Rejecting spectrum update: center frequency %d Hz < minimum %d Hz",
+						msg.Frequency, rx.MinFreq())
+					swsh.sendError(conn, fmt.Sprintf("Center frequency must be at least %.0f kHz",
+						float64(rx.MinFreq())/1e3))
 					continue
 				}
-				if msg.Frequency > maxCenterFreq {
-					log.Printf("Rejecting spectrum update: center frequency %d Hz > maximum %d Hz (30 MHz)",
-						msg.Frequency, maxCenterFreq)
-					swsh.sendError(conn, "Center frequency must be at most 30 MHz")
+				if msg.Frequency > rx.MaxFreq() {
+					log.Printf("Rejecting spectrum update: center frequency %d Hz > maximum %d Hz",
+						msg.Frequency, rx.MaxFreq())
+					swsh.sendError(conn, fmt.Sprintf("Center frequency must be at most %.3f MHz",
+						float64(rx.MaxFreq())/1e6))
 					continue
 				}
 				newFreq = msg.Frequency
@@ -453,8 +455,13 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			//   samprate_base = lcm(blockrate, L*blockrate/N)
 			//   fft_size      = bin_count + 400/bin_bw, then searched upward until
 			//                   goodchoice(fft_size) && (fft_size*bin_bw) % samprate_base == 0
-			// For the RX888 config here (samprate 64.8 MHz, blocktime 20 ms, overlap 5):
-			// blockrate = 50 Hz, input bin spacing = 40 Hz, so samprate_base = lcm(50,40) = 200.
+			// For the RX888 config here (blocktime 20 ms, overlap 5): blockrate = 50 Hz and
+			// the input bin spacing is 40 Hz, so samprate_base = lcm(50,40) = 200.
+			//
+			// Both hold at either sample rate, which is why this ladder does not move when
+			// the receiver widens. L = samprate x blocktime and N = L x overlap/(overlap-1),
+			// so the bin spacing samprate/N = 40 Hz at 64.8 Msps (L=1296000, N=1620000) and
+			// at 129.6 Msps (L=2592000, N=3240000) alike. See RECEIVER_SPAN.md.
 			//
 			// Note radiod SEARCHES for a valid fft_size (up to 65536) rather than rejecting,
 			// so most bin_bw values work. This ladder is deliberately more conservative than
@@ -502,8 +509,9 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			} else if newBinBW < 7500 {
 				safeBinBW = 5000
 			} else {
-				// For very large bin bandwidths (e.g., default 29296.875 for full 0-30 MHz),
-				// don't round - pass through as-is for full bandwidth view
+				// For very large bin bandwidths (the full-span default — 29296.875 for
+				// a 30 MHz receiver, and the same figure for a 60 MHz one at twice the
+				// bin count) don't round: pass through as-is for the full-bandwidth view
 				safeBinBW = newBinBW
 			}
 

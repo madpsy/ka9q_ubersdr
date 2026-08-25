@@ -18,6 +18,7 @@
 // on the way out, into a separate buffer.
 
 import { Emitter } from './emitter.js';
+import { RECEIVER_SPAN_HZ } from './constants.js';
 import { connectionCheck, frameSize, getBypassPassword, getSessionId, wsBase } from './session.js';
 import { clampCenter } from '../lib/zoom.js';
 import { failureKind } from '../lib/connectFailure.js';
@@ -135,11 +136,15 @@ export class SpectrumConnection extends Emitter {
         return Math.max(0.5, MIN_ZOOM_SPAN_HZ / bins);
     }
 
-    // Hz/bin at full zoom-out (the whole 0–30 MHz view).
+    // Hz/bin at full zoom-out (the whole receiver).
+    //
+    // The server's own defaultBinBandwidth is preferred wherever it has arrived; the last
+    // line only covers the frames before the first spectrum config, and uses the span the
+    // shell inlined rather than assuming 30 MHz.
     fullSpanBinBandwidth() {
         if (this.defaultBinBandwidth > 0) return this.defaultBinBandwidth;
         if (this.initialBinBandwidth > 0) return this.initialBinBandwidth;
-        return 30000000 / (this.defaultBinCount || this.binCount || 1024);
+        return RECEIVER_SPAN_HZ / (this.defaultBinCount || this.binCount || 1024);
     }
 
     async connect(initial) {

@@ -133,19 +133,19 @@ const nfSpectrumSSEHeartbeatInterval = 30 * time.Second
 // with no error and no context cancellation to end it.
 const nfSpectrumSSEWriteTimeout = 30 * time.Second
 
-// wideBandSSEName and wideBandSSECenterHz describe the synthetic "wideband"
-// pseudo-band exposed on this endpoint. It mirrors the 0-30 MHz channel used
-// by the spectrogram (see NewSpectrogramRecorder / nfm.GetWideBandFFT) and is
-// fetched separately from the per-band fftBuffers map.
+// wideBandSSEName is the synthetic "wideband" pseudo-band exposed on this endpoint.
+// It mirrors the full-span channel used by the spectrogram (see
+// NewSpectrogramRecorder / nfm.GetWideBandFFT) and is fetched separately from the
+// per-band fftBuffers map.
+//
+// Its centre is not a constant: it is half the receiver's span (config.Receiver.Centre()),
+// so it follows the front end rather than assuming 30 MHz of coverage.
 //
 // Emitted on the same pollTicker as every named band — GetWideBandFFT() is
 // memoized against background_poll_period_ms itself (see that function in
 // noise_floor.go), so there's no separate cost-bounding cadence to manage
 // here; asking for it every tick, same as any other band, is already cheap.
-const (
-	wideBandSSEName     = "wideband"
-	wideBandSSECenterHz = 15_000_000
-)
+const wideBandSSEName = "wideband"
 
 // encodeBinary8PacketForSSE encodes []float32 spectrum data into the SPEC binary8
 // wire format used by both the WebSocket spectrum path and this SSE endpoint.
@@ -339,7 +339,7 @@ func HandleNoiseFloorSpectrumStream(
 		for _, b := range config.NoiseFloor.Bands {
 			configuredBands[b.Name] = b.CenterFrequency
 		}
-		configuredBands[wideBandSSEName] = wideBandSSECenterHz
+		configuredBands[wideBandSSEName] = config.Receiver.Centre()
 
 		// ── parse ?band= query parameters ────────────────────────────────────
 		// Repeatable: ?band=20m&band=40m

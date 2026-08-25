@@ -985,14 +985,15 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	binCount := sm.config.Spectrum.Default.BinCount
 	binBandwidth := sm.config.Spectrum.Default.BinBandwidth
 
-	// Validate frequency - must be within HF range (10 kHz – 30 MHz)
-	// If config has invalid frequency, use 15 MHz as fallback (covers 0-30 MHz HF range)
-	const minFrequency = 10000    // 10 kHz minimum
-	const maxFrequency = 30000000 // 30 MHz maximum
-	if frequency < minFrequency || frequency > maxFrequency {
-		log.Printf("WARNING: Invalid spectrum center frequency %d Hz in config (must be %d–%d Hz), using fallback 15 MHz",
-			frequency, minFrequency, maxFrequency)
-		frequency = 15000000 // 15 MHz fallback
+	// Validate the shared spectrum centre against what this receiver covers. The
+	// fallback is the middle of the span — the only centre that puts both edges of a
+	// full-span view where they belong (15 MHz on a 30 MHz receiver, 30 MHz on a
+	// 60 MHz one), not a fixed 15 MHz.
+	rx := sm.config.Receiver
+	if frequency < rx.MinFreq() || frequency > rx.MaxFreq() {
+		log.Printf("WARNING: Invalid spectrum center frequency %d Hz in config (must be %d–%d Hz), using fallback %d Hz",
+			frequency, rx.MinFreq(), rx.MaxFreq(), rx.Centre())
+		frequency = rx.Centre()
 	}
 
 	// Create spectrum session
@@ -1170,11 +1171,10 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		return fmt.Errorf("session %s is not a spectrum session", sessionID)
 	}
 
-	// Validate frequency if provided - must be within HF range (10 kHz – 30 MHz)
-	const minFrequency = 10000    // 10 kHz minimum
-	const maxFrequency = 30000000 // 30 MHz maximum
-	if frequency > 0 && (frequency < minFrequency || frequency > maxFrequency) {
-		return fmt.Errorf("invalid spectrum frequency %d Hz (must be %d–%d Hz)", frequency, minFrequency, maxFrequency)
+	// Validate frequency if provided - must be inside what this receiver covers
+	rx := sm.config.Receiver
+	if frequency > 0 && (frequency < rx.MinFreq() || frequency > rx.MaxFreq()) {
+		return fmt.Errorf("invalid spectrum frequency %d Hz (must be %d–%d Hz)", frequency, rx.MinFreq(), rx.MaxFreq())
 	}
 
 	// Compute the effective new parameters (fall back to current values for zeros).
@@ -1211,13 +1211,13 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	// one will push it back and forth between them.
 	if span := newBinBW * float64(newBinCount); span > 0 {
 		half := uint64(math.Round(span / 2))
-		lo := uint64(minFrequency)
+		lo := rx.MinFreq()
 		if half > lo {
 			lo = half
 		}
 		hi := lo
-		if maxFrequency > half && maxFrequency-half > lo {
-			hi = maxFrequency - half
+		if rx.MaxFreq() > half && rx.MaxFreq()-half > lo {
+			hi = rx.MaxFreq() - half
 		}
 		if clamped := newFreq; clamped < lo || clamped > hi {
 			if clamped < lo {
@@ -1226,7 +1226,7 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 				clamped = hi
 			}
 			log.Printf("Spectrum: centre %d Hz with a %.0f Hz span runs outside 0–%d Hz; using %d Hz",
-				newFreq, span, maxFrequency, clamped)
+				newFreq, span, rx.MaxFreq(), clamped)
 			newFreq = clamped
 		}
 	}
@@ -1455,8 +1455,10 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 		return fmt.Errorf("cannot update spectrum session with UpdateSession, use UpdateSpectrumSession instead")
 	}
 
-	// Validate frequency if provided - must not be below minimum
-	const minFrequency = 10000 // 10 kHz minimum
+	// Validate frequency if provided - must not be below the receiver's floor.
+	// Only a floor here: the ceiling is enforced at the WebSocket layer, which is the
+	// only place a frequency enters from outside.
+	minFrequency := sm.config.Receiver.MinFreq()
 	if frequency > 0 && frequency < minFrequency {
 		return fmt.Errorf("invalid audio frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
 	}
@@ -1677,8 +1679,10 @@ func (sm *SessionManager) UpdateSessionChannel(sessionID string, frequency uint6
 		return fmt.Errorf("cannot update spectrum session with UpdateSessionChannel, use UpdateSpectrumSession instead")
 	}
 
-	// Validate frequency if provided - must not be below minimum
-	const minFrequency = 10000 // 10 kHz minimum
+	// Validate frequency if provided - must not be below the receiver's floor.
+	// Only a floor here: the ceiling is enforced at the WebSocket layer, which is the
+	// only place a frequency enters from outside.
+	minFrequency := sm.config.Receiver.MinFreq()
 	if frequency > 0 && frequency < minFrequency {
 		return fmt.Errorf("invalid audio frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
 	}

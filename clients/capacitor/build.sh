@@ -509,7 +509,19 @@ print(d['versionCode'])
     # The release notes are what the tester sees. The version is the honest
     # minimum: a track fed by a script with no note at all shows an empty
     # what's-new, which reads as a build somebody forgot about.
-    if ! curl -sS --max-time 120 -o /dev/null -w '' -X PUT \
+    #
+    # Judged on Play's answer rather than on curl's exit status, and that is not
+    # a nicety. `curl -sS` exits 0 on an HTTP 400 — only -f changes that, and -f
+    # discards the body, which is the half that says why. Play refuses a track
+    # whose console declarations are unfinished (content rating, data safety,
+    # target audience) with a bare "Precondition check failed", and read the old
+    # way that refusal was invisible. What followed was worse than a crash: the
+    # commit below then succeeded on an edit carrying no release, Play accepted
+    # that empty commit, and this printed "committed" over a bundle that had
+    # been left on no track at all. Four releases went that way before anybody
+    # noticed, because the only symptom is somewhere else — the track still
+    # showing the version before last.
+    if ! curl -sS --max-time 120 -X PUT \
         -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
         -d "$(python3 -c "
 import json, sys
@@ -519,15 +531,30 @@ print(json.dumps({'track': sys.argv[1], 'releases': [{
     'status': sys.argv[4],
 }]}))
 " "$PLAY_TRACK" "$version" "$code" "$PLAY_STATUS")" \
-        "$PLAY_API/$PLAY_PACKAGE/edits/$edit/tracks/$PLAY_TRACK"; then
+        "$PLAY_API/$PLAY_PACKAGE/edits/$edit/tracks/$PLAY_TRACK" \
+        | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if 'error' in d:
+    sys.stderr.write('  Play refused the track: ' + json.dumps(d['error']) + chr(10))
+    raise SystemExit(1)
+"; then
         echo "not uploaded to Play: the track could not be set — nothing was committed." >&2
         play_abandon
         return 1
     fi
 
-    if curl -sS --max-time 120 -o /dev/null -X POST \
+    # The commit, read the same way and for the same reason.
+    if curl -sS --max-time 120 -X POST \
         -H "Authorization: Bearer $token" -H "Content-Length: 0" \
-        "$PLAY_API/$PLAY_PACKAGE/edits/$edit:commit"; then
+        "$PLAY_API/$PLAY_PACKAGE/edits/$edit:commit" \
+        | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if 'error' in d:
+    sys.stderr.write('  Play refused the commit: ' + json.dumps(d['error']) + chr(10))
+    raise SystemExit(1)
+"; then
         echo "  committed — $version ($code) is on the $PLAY_TRACK track as $PLAY_STATUS"
         echo "  https://play.google.com/console — processing takes a few minutes"
     else

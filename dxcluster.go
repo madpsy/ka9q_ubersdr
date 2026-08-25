@@ -80,7 +80,10 @@ func (c *DXClusterClient) SetPrometheusMetrics(pm *PrometheusMetrics) {
 
 // DXClusterClient manages connection to a DX cluster
 type DXClusterClient struct {
-	config            *DXClusterConfig
+	config *DXClusterConfig
+	// maxFrequency is the top of the receiver's range; spots above it cannot be
+	// tuned so they are discarded rather than shown (see receiver_span.go).
+	maxFrequency      uint64
 	conn              net.Conn
 	reader            *bufio.Reader
 	mu                sync.RWMutex
@@ -105,9 +108,10 @@ type DXClusterClient struct {
 }
 
 // NewDXClusterClient creates a new DX cluster client
-func NewDXClusterClient(config *DXClusterConfig) *DXClusterClient {
+func NewDXClusterClient(config *DXClusterConfig, maxFrequency uint64) *DXClusterClient {
 	return &DXClusterClient{
 		config:          config,
+		maxFrequency:    maxFrequency,
 		stopChan:        make(chan struct{}),
 		spotHandlers:    make([]func(DXSpot), 0),
 		messageHandlers: make([]func(string), 0),
@@ -498,8 +502,8 @@ func (c *DXClusterClient) processLine(line string) {
 
 	// Try to parse as DX spot
 	if spot, ok := c.parseDXSpot(line); ok {
-		// Filter spots: only process spots between 0 and 30 MHz
-		if spot.Frequency <= 0 || spot.Frequency > 30000000 {
+		// Filter spots to what this receiver can actually tune
+		if spot.Frequency <= 0 || (c.maxFrequency > 0 && spot.Frequency > float64(c.maxFrequency)) {
 			return
 		}
 

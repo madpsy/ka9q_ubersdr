@@ -170,13 +170,17 @@ func (ah *AdminHandler) buildMonitorHealthItems() []MonitorHealthItem {
 		if widebandSSRC != 0 {
 			frontendStatus := ah.sessions.radiod.GetFrontendStatus(widebandSSRC)
 			if frontendStatus != nil {
-				payload := buildFrontendStatusPayload(frontendStatus)
+				payload := buildFrontendStatusPayload(frontendStatus, ah.config.Receiver)
 				healthy, _ := payload["healthy"].(bool)
 				feStatus, _ := payload["status"].(string)
 				var issues []string
 				if raw, ok := payload["issues"].([]string); ok {
 					issues = raw
 				}
+				// Includes the receiver-span cross-check: buildFrontendStatusPayload
+				// folds it into these issues, because "does the server agree with
+				// radiod about how much spectrum there is?" is a fact about the front
+				// end, not a separate component. See receiver_span.go.
 				add("Frontend (SDR)", healthy, feStatus == "warning", issues)
 			}
 		}

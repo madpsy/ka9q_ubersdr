@@ -88,6 +88,7 @@ type InstanceReport struct {
 	AntSwitch                  map[string]interface{}   `json:"ant_switch,omitempty"`         // Antenna switch information (omitted when disabled)
 	FrequencyReference         map[string]interface{}   `json:"frequency_reference"`          // Frequency reference tracking information
 	Frontend                   map[string]interface{}   `json:"frontend,omitempty"`           // SDR frontend status: if_power (dBFS) and input_power_dbm (omitted when unavailable)
+	TuningRange                map[string]interface{}   `json:"tuning_range"`                 // Receiver frequency range, the same fields /api/description publishes; absent or zero means 10 kHz-30 MHz
 	SpeechToText               bool                     `json:"speech_to_text"`               // Whether Whisper speech-to-text is enabled
 	Spectrogram                bool                     `json:"spectrogram"`                  // Whether wideband spectrogram recording is enabled
 	DSP                        map[string]interface{}   `json:"dsp"`                          // DSP noise reduction insert info (enabled + allowed filter names)
@@ -765,6 +766,7 @@ func (ir *InstanceReporter) sendReport() error {
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Spectrogram:                ir.config.Spectrogram.IsEnabled(),
+		TuningRange:                ir.config.Receiver.TuningRange(),
 		DSP:                        buildDSPInfo(&ir.config.DSP),
 		Addons:                     ir.getEnabledAddonNames(),
 		EnabledWidgets:             ir.config.Server.EnabledWidgets,
@@ -1160,6 +1162,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		FrequencyReference:         freqRefInfo,
 		SpeechToText:               ir.config.Whisper.Enabled,
 		Spectrogram:                ir.config.Spectrogram.IsEnabled(),
+		TuningRange:                ir.config.Receiver.TuningRange(),
 		DSP:                        buildDSPInfo(&ir.config.DSP),
 		Addons:                     ir.getEnabledAddonNames(),
 		EnabledWidgets:             ir.config.Server.EnabledWidgets,
@@ -1576,6 +1579,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			AntSwitch:                  antSwitchInfo,
 			FrequencyReference:         freqRefInfo,
 			Spectrogram:                config.Spectrogram.IsEnabled(),
+			TuningRange:                config.Receiver.TuningRange(),
 			StartupReport:              true,
 			Addons:                     enabledAddons,
 			NotifyInstanceDisconnected: config.InstanceReporting.NotifyInstanceDisconnected != nil && *config.InstanceReporting.NotifyInstanceDisconnected,

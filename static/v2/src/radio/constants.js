@@ -1,8 +1,36 @@
 // Radio-side constants. Values mirror the server (websocket.go) so the UI and
 // the backend agree on defaults without a round-trip.
 
-export const MIN_FREQ = 10000;      // 10 kHz
-export const MAX_FREQ = 30000000;   // 30 MHz
+// How much spectrum this receiver covers.
+//
+// The server derives this from the front end sample rate and inlines it into the shell
+// (see v2TuningRangeJSON and static/v2/index.html), so it is here before this module is
+// evaluated. That matters: MAX_FREQ is read at module scope — FreqEntry's RANGE_HINT is
+// a template literal evaluated at import, and initialTuning clamps the ?freq= share link
+// on first render — so a value that arrived with /api/description would be too late, and
+// the clamp is lossy.
+//
+// Inlining keeps these plain constants: the value changes with the receiver, the shape
+// does not, and none of their ~15 consumers has to become a context read.
+//
+// ── The fallback is a contract, not padding ──────────────────────────────────
+// A bundle cached in a visitor's browser will outlive the server it was built against,
+// in both directions. With no inlined value — an older server, a stale shell, a test
+// harness, a bundle loaded outside the shell entirely — this must behave exactly as it
+// did before the receiver span became configurable: 10 kHz to 30 MHz.
+//
+// `> 0` rather than `??` or `||` on purpose, so 0, null, "" and undefined all fall
+// through to the literal rather than 0 becoming a legitimate limit.
+const RANGE = (typeof window !== 'undefined' && window.__UBERSDR__) || {};
+
+export const MIN_FREQ = RANGE.min_frequency > 0 ? RANGE.min_frequency : 10000;      // 10 kHz
+export const MAX_FREQ = RANGE.max_frequency > 0 ? RANGE.max_frequency : 30000000;   // 30 MHz
+
+// The full-span spectrum view, for the modules that need a span rather than a limit.
+// Named RECEIVER_SPAN_HZ, not FULL_SPAN_HZ, because lib/ifSpectrum.js already exports
+// that name as its own pure-module default.
+// Same fallback rule, same reason.
+export const RECEIVER_SPAN_HZ = RANGE.spectrum_span_hz > 0 ? RANGE.spectrum_span_hz : 30000000;
 
 // Mode table. `low`/`high` are the passband edges in Hz relative to the tuned
 // frequency and match the server-side defaults in websocket.go.

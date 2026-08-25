@@ -34,6 +34,13 @@ const (
 
 	// kiwiFullSpanHz is the 0-30 MHz coverage the emulation advertises, which
 	// zoom 0 shows in full.
+	//
+	// Deliberately fixed, and deliberately NOT config.Receiver.Span(): a real KiwiSDR is
+	// a 30 MHz device, and the client derives its whole frequency axis from the zoom
+	// level with no protocol field to say otherwise (see the note above). On a receiver
+	// that reaches further, this emulation shows the bottom 30 MHz of it and the v2
+	// frontend is where the rest lives. Widening it would put every signal at the wrong
+	// frequency in every Kiwi client, silently. See RECEIVER_SPAN.md.
 	kiwiFullSpanHz = 30e6
 
 	// kiwiMaxZoom is the deepest zoom level offered. At zoom 14 the span is
@@ -55,12 +62,40 @@ const (
 	radiodFilterMarginHz = 400.0
 )
 
-// kiwiBinBandwidthLadder holds the round bin bandwidths radiod resolves to a
+// radiodBinBandwidthLadder holds the round bin bandwidths radiod resolves to a
 // small FFT. Each is a value for which the samprate condition above is met
 // within a few tens of steps of the search's starting point, so fft_n stays
 // near bin_count instead of running into the tens of thousands. It matches the
 // ladder the v2 spectrum path uses for the same reason.
-var kiwiBinBandwidthLadder = []float64{0.5, 1, 2, 5, 10, 20, 50, 100, 200}
+//
+// This is a property of radiod, not of either emulation: the WebSDR waterfall uses it
+// too. 0.5 Hz is radiod's real floor — the figure to reach for instead of inventing a
+// conservative one.
+var radiodBinBandwidthLadder = []float64{0.5, 1, 2, 5, 10, 20, 50, 100, 200}
+
+// radiodRoundUpBinBW returns the bin bandwidth to ask radiod for when a display wants
+// `want` Hz per bin.
+//
+// Above the crossover the exact value is already cheap — the wideband FFT length is just
+// samprate/rbw, no search and no downconverter — so it is passed through and the caller's
+// resample is a no-op.
+//
+// At or below it, the smallest ladder value that still *covers* the view. Rounding down
+// would deliver a narrower span than the client is going to draw and put signals at the
+// wrong frequencies, which is the one failure this must not have; rounding up costs
+// sharpness instead, which is recoverable.
+func radiodRoundUpBinBW(want float64) float64 {
+	if want > radiodSpectrumCrossoverHz {
+		return want
+	}
+	binBW := radiodBinBandwidthLadder[len(radiodBinBandwidthLadder)-1]
+	for i := len(radiodBinBandwidthLadder) - 1; i >= 0; i-- {
+		if radiodBinBandwidthLadder[i] >= want {
+			binBW = radiodBinBandwidthLadder[i]
+		}
+	}
+	return binBW
+}
 
 // kiwiSpectrumBins is the bin count every request uses, at every zoom, for the
 // life of the channel.
@@ -128,30 +163,14 @@ func kiwiSpectrumParams(zoom int) kiwiSpectrumRequest {
 	// Never varies; see kiwiSpectrumBins.
 	req.BinCount = kiwiSpectrumBins
 
-	if displayBinBW > radiodSpectrumCrossoverHz {
-		// Wideband: the exact bandwidth is already cheap, and asking for it
-		// gives the client's grid exactly, so the resample is a no-op.
-		req.BinBandwidth = displayBinBW
-		return req
-	}
-
-	// Smallest ladder value that still covers the view. With the bin count
-	// pinned, bin_count x bin_bw is the delivered span, so rounding the
-	// bandwidth down would deliver less than the client is going to draw and
-	// put signals at the wrong frequencies -- the one failure this must not
-	// have. Rounding up costs sharpness instead, which is recoverable.
-	binBW := kiwiBinBandwidthLadder[len(kiwiBinBandwidthLadder)-1]
-	for i := len(kiwiBinBandwidthLadder) - 1; i >= 0; i-- {
-		if kiwiBinBandwidthLadder[i] >= displayBinBW {
-			binBW = kiwiBinBandwidthLadder[i]
-		}
-	}
-	req.BinBandwidth = binBW
+	// With the bin count pinned, bin_count x bin_bw is the delivered span, which is why
+	// this rounds up rather than down. See radiodRoundUpBinBW.
+	req.BinBandwidth = radiodRoundUpBinBW(displayBinBW)
 	return req
 }
 
-// resampleKiwiWaterfall maps a spectrum radiod delivered onto the grid the Kiwi
-// client assumes, given both bin bandwidths. Both are centred on the same
+// resampleSpectrumOntoGrid maps a spectrum radiod delivered onto the grid a client
+// assumes, given both bin bandwidths. Used by both emulations' waterfalls. Both are centred on the same
 // frequency; src is expected to be at least as wide as the display span, and is
 // cropped symmetrically to it.
 //
@@ -166,7 +185,7 @@ func kiwiSpectrumParams(zoom int) kiwiSpectrumRequest {
 //
 // src must already be in ascending frequency order; unwrap radiod's raw FFT
 // halves before calling.
-func resampleKiwiWaterfall(src []float32, srcBinBW, dstBinBW float64, dstBins int) []float32 {
+func resampleSpectrumOntoGrid(src []float32, srcBinBW, dstBinBW float64, dstBins int) []float32 {
 	if dstBins <= 0 {
 		return nil
 	}

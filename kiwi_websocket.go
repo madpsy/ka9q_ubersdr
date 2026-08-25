@@ -2112,20 +2112,16 @@ func (kc *kiwiConn) sendStatsCallback() {
 	if kc.handler != nil && kc.handler.noiseFloorMonitor != nil {
 		widebandFFT := kc.handler.noiseFloorMonitor.GetWideBandFFT()
 		if widebandFFT != nil && len(widebandFFT.Data) > 0 {
-			// Calculate 0-30 MHz SNR (dynamic range = P95 - P5)
-			_, _, fullDynamicRange := calculateDynamicRangeFromFFT(widebandFFT.Data)
-			sa = int(fullDynamicRange)
-
-			// Calculate 1.8-30 MHz HF SNR
-			// Wideband FFT covers 0-30 MHz with bin width of 7324.21875 Hz
-			// 1.8 MHz starts at bin: 1800000 / 7324.21875 ≈ 246
-			startBin := int(1800000.0 / widebandFFT.BinWidth)
-			if startBin < len(widebandFFT.Data) {
-				hfBins := widebandFFT.Data[startBin:]
-				_, _, hfDynamicRange := calculateDynamicRangeFromFFT(hfBins)
-				sh = int(hfDynamicRange)
+			// Pinned to 0-30 MHz and 1.8-30 MHz, like everywhere else these two are
+			// reported — and doubly so here, where a real KiwiSDR is a 30 MHz device
+			// and its client reads sa/sh as figures for that band.
+			snr030, snr1830 := widebandSNRBands(widebandFFT)
+			if snr030 >= 0 {
+				sa = int(snr030)
 			}
-
+			if snr1830 >= 0 {
+				sh = int(snr1830)
+			}
 		}
 	}
 
@@ -3139,7 +3135,7 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				displayBinBW = kiwiFullSpanHz / math.Pow(2, float64(currentZoom)) / kiwiWaterfallBins
 			}
 
-			unwrapped = resampleKiwiWaterfall(unwrapped, srcBinBW, displayBinBW, kiwiWaterfallBins)
+			unwrapped = resampleSpectrumOntoGrid(unwrapped, srcBinBW, displayBinBW, kiwiWaterfallBins)
 			N = len(unwrapped)
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format

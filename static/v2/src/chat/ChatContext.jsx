@@ -12,6 +12,7 @@ import {
     followSignature, followTarget, followView, loadFollowZoom, saveFollowZoom,
 } from '../lib/chatFollow.js';
 import { pushNotification } from '../lib/notifications.js';
+import { MAX_FREQ } from '../radio/constants.js';
 
 const ChatContext = createContext(null);
 
@@ -415,7 +416,9 @@ export function ChatProvider({ children }) {
         // Their view too, when asked for — and then nothing else touches it. Matching a view
         // already puts their frequency inside it, so ensureVisible would either do nothing or,
         // at the edges of the band, argue with the centre we just chose.
-        const v = followZoom ? followView(them, view.binCount) : null;
+        // MAX_FREQ, not chatFollow's own 30 MHz default: on a wider receiver the centre
+        // has to be pulled back from the real top, not from where 30 MHz used to be.
+        const v = followZoom ? followView(them, view.binCount, MAX_FREQ) : null;
         if (v) radio.setSpectrumView(v.frequency, v.span);
         // Otherwise the dial has moved and the window has not: v1 forces "edge tune" on for two
         // seconds to drag the spectrum along, which is this said directly.

@@ -85,7 +85,7 @@ func (l *TelegramBotListener) handleSDR(chatID int64, args string) (string, stri
 		return msg, apiResp, apiOK
 	}
 
-	p := buildFrontendStatusPayload(frontendStatus)
+	p := buildFrontendStatusPayload(frontendStatus, l.sessions.config.Receiver)
 
 	// Health header: ✅ OK, ⚠️ Warning, 🔴 Critical — same severities as /monitor.
 	healthy, _ := p["healthy"].(bool)
@@ -101,10 +101,15 @@ func (l *TelegramBotListener) handleSDR(chatID int64, args string) (string, stri
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "📻 <b>SDR Frontend</b> %s\n\n", headerIcon)
 
-	// Sample rate, with the maximum usable (Nyquist) frequency beneath it.
+	// Sample rate, with the top of the tuning range beneath it.
+	//
+	// Not samprate/2: half the sample rate is the theoretical Nyquist, but radiod caps the
+	// front end at 0.47 x samprate and the display span is rounded down from there, so a
+	// 64.8 Msps receiver tunes to 30 MHz rather than the 32.4 that figure implied. Report
+	// what can actually be tuned — see receiver_span.go.
 	if samprate, _ := p["input_samprate"].(int); samprate > 0 {
-		fmt.Fprintf(&sb, "⏱ <b>Sample Rate:</b> %.2f MSPS (max %.1f MHz)\n",
-			float64(samprate)/1e6, float64(samprate)/2/1e6)
+		fmt.Fprintf(&sb, "⏱ <b>Sample Rate:</b> %.2f MSPS (tunes to %.0f MHz)\n",
+			float64(samprate)/1e6, float64(receiverSpanFor(samprate))/1e6)
 	} else {
 		sb.WriteString("⏱ <b>Sample Rate:</b> N/A\n")
 	}

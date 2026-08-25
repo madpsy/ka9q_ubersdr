@@ -143,6 +143,11 @@ export function visibleUsers(map, band) {
  * The reporter carries VHF and above, which this receiver cannot reach, and a
  * row that looks clickable and then tunes to the band edge is worse than one
  * that plainly is not.
+ *
+ * The bounds are arguments rather than reads of radio/constants.js because this
+ * module is pure and is tested on its own; callers pass MIN_FREQ/MAX_FREQ. The
+ * defaults are what a receiver was before the span became configurable, so a
+ * caller that passes nothing behaves as it always did — see RECEIVER_SPAN.md.
  */
 export function isTunable(user, minHz = 10000, maxHz = 30000000) {
     return !!user.freqHz && user.freqHz >= minHz && user.freqHz <= maxHz;

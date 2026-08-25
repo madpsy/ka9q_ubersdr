@@ -735,7 +735,8 @@ func (mp *MQTTPublisher) publishSpectrumData(config *Config) {
 
 	timestamp := time.Now().Unix()
 
-	// Publish wideband spectrum data (0-30 MHz)
+	// Publish wideband spectrum data. The payload carries start_freq/end_freq/bin_width,
+	// so it describes whatever the receiver actually covers.
 	widebandFFT := mp.noiseFloorMonitor.GetWideBandFFT()
 	if widebandFFT != nil && len(widebandFFT.Data) > 0 {
 		// Create wideband spectrum payload
@@ -1565,7 +1566,7 @@ func (mp *MQTTPublisher) publishFrontendStatusOnce() {
 		return
 	}
 
-	payload := buildFrontendStatusPayload(frontendStatus)
+	payload := buildFrontendStatusPayload(frontendStatus, sm.config.Receiver)
 
 	topic := fmt.Sprintf("%s/frontend_status", mp.config.TopicPrefix)
 

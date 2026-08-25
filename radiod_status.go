@@ -55,6 +55,7 @@ const (
 
 	// Tuning/Frequency tags
 	tagRadioFrequency       = 33 // RADIO_FREQUENCY
+	tagFirstLoFrequency     = 34 // FIRST_LO_FREQUENCY - frontend->frequency
 	tagSecondLoFrequency    = 35 // SECOND_LO_FREQUENCY
 	tagShiftFrequency       = 36 // SHIFT_FREQUENCY
 	tagDopplerFrequency     = 37 // DOPPLER_FREQUENCY
@@ -71,6 +72,8 @@ const (
 	tagFilter2Blocksize  = 73  // FILTER2_BLOCKSIZE
 	tagFilter2FirLength  = 74  // FILTER2_FIR_LENGTH
 	tagFilter2KaiserBeta = 75  // FILTER2_KAISER_BETA
+	tagFeLowEdge         = 100 // FE_LOW_EDGE - frontend->min_IF, Hz
+	tagFeHighEdge        = 101 // FE_HIGH_EDGE - frontend->max_IF, Hz
 	tagFeIsReal          = 102 // FE_ISREAL - real vs complex sampling
 
 	// Signal quality tags
@@ -158,21 +161,28 @@ const (
 
 // FrontendStatus holds frontend gain and overload information from radiod
 type FrontendStatus struct {
-	SSRC             uint32    // Channel SSRC this status belongs to
-	InputSamprate    int       // Input sample rate in Hz
-	LNAGain          int32     // LNA gain in dB
-	MixerGain        int32     // Mixer gain in dB
-	IFGain           int32     // IF gain in dB
-	RFGain           float32   // RF gain (float)
-	RFAtten          float32   // RF attenuation (float)
-	RFAGC            int32     // RF AGC on/off
-	IFPower          float32   // IF power in dBFS
-	ADOverranges     int64     // A/D overrange count
-	SamplesSinceOver int64     // Samples since last overrange
-	FilterBlocksize  int       `json:"filter_blocksize"`  // L - input buffer length for FFT
-	FilterFirLength  int       `json:"filter_fir_length"` // M - FIR impulse length for FFT
-	FeIsReal         bool      `json:"fe_is_real"`        // Real vs complex sampling (true = real-to-complex FFT)
-	RFLevelCal       float32   `json:"rf_level_cal"`      // RF level calibration (dBm to dBFS adjustment)
+	SSRC             uint32  // Channel SSRC this status belongs to
+	InputSamprate    int     // Input sample rate in Hz
+	LNAGain          int32   // LNA gain in dB
+	MixerGain        int32   // Mixer gain in dB
+	IFGain           int32   // IF gain in dB
+	RFGain           float32 // RF gain (float)
+	RFAtten          float32 // RF attenuation (float)
+	RFAGC            int32   // RF AGC on/off
+	IFPower          float32 // IF power in dBFS
+	ADOverranges     int64   // A/D overrange count
+	SamplesSinceOver int64   // Samples since last overrange
+	FilterBlocksize  int     `json:"filter_blocksize"`  // L - input buffer length for FFT
+	FilterFirLength  int     `json:"filter_fir_length"` // M - FIR impulse length for FFT
+	FeIsReal         bool    `json:"fe_is_real"`        // Real vs complex sampling (true = real-to-complex FFT)
+	// FeLowEdge/FeHighEdge are the front end's usable IF limits (ka9q-radio
+	// frontend->min_IF / max_IF), and FirstLOFrequency the base they are measured
+	// from. Together they give radiod's own view of the usable RF range, which
+	// verifyReceiverAgainstFrontend checks the resolved span against.
+	FeLowEdge        float32   `json:"fe_low_edge"`
+	FeHighEdge       float32   `json:"fe_high_edge"`
+	FirstLOFrequency float64   `json:"first_lo_frequency"`
+	RFLevelCal       float32   `json:"rf_level_cal"` // RF level calibration (dBm to dBFS adjustment)
 	LastUpdate       time.Time // When this status was last updated
 }
 
@@ -552,12 +562,20 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 			frontendStatus.FilterFirLength = int(decodeInt32(value))
 		case tagFeIsReal:
 			frontendStatus.FeIsReal = decodeBool(value)
+		case tagFeLowEdge:
+			frontendStatus.FeLowEdge = decodeFloat(value)
+		case tagFeHighEdge:
+			frontendStatus.FeHighEdge = decodeFloat(value)
 		case tagRFLevelCal:
 			frontendStatus.RFLevelCal = decodeFloat(value)
 
 		// Tuning/Frequency tags
 		case tagRadioFrequency:
 			channelStatus.RadioFrequency = decodeDouble(value)
+		case tagFirstLoFrequency:
+			// A frontend value despite living in the tuning block: radio_status.c
+			// encodes frontend->frequency here, not anything per-channel.
+			frontendStatus.FirstLOFrequency = decodeDouble(value)
 		case tagSecondLoFrequency:
 			channelStatus.SecondLoFrequency = decodeDouble(value)
 		case tagShiftFrequency:

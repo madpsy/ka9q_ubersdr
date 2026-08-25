@@ -126,6 +126,36 @@ radiod:
   # Network interface to use (empty = auto-detect)
   interface: "lo"
 
+  # ── How much spectrum this receiver covers ──────────────────────────────────
+  #
+  # Nothing to set here. The frequency range is derived from the front end
+  # sample rate, and the only place that is configured is `samprate` in the
+  # [rx888] section of the radiod config itself:
+  #
+  #     /etc/ka9q-radio/radiod@ubersdr.conf
+  #
+  # ka9q-radio's rx888 driver sets the usable top to 0.47 x samprate, so:
+  #
+  #   samprate = 64800000   ->  30.456 MHz usable  ->  0-30 MHz  (the default)
+  #   samprate = 129600000  ->  60.912 MHz usable  ->  0-60 MHz
+  #
+  # The span is rounded down to a whole megahertz, which keeps the display edge
+  # clear of the anti-alias rolloff. Everything else follows from it: the
+  # spectrum centre, the default bin count (so Hz-per-bin at full zoom-out does
+  # not move when the receiver widens), the noise-floor wideband channel, the
+  # tuning limits, and the range the v2 frontend enforces.
+  #
+  # Deliberately not settable here: the span is a property of the hardware, not
+  # an operator preference, and a second place to say it is a second place for
+  # it to be wrong. If the radiod config cannot be read the server assumes
+  # 64.8 Msps and behaves exactly as it always has (0-30 MHz).
+  #
+  # Whatever is resolved is cross-checked against what radiod actually reports
+  # once a channel is up; a mismatch appears in the admin health panel as
+  # "Receiver span" rather than silently changing the geometry.
+  #
+  # See RECEIVER_SPAN.md.
+
 # Multicast Relay settings
 # Controls the multicast-relay Docker container that bridges multicast traffic
 # between the Docker network and the host network interface

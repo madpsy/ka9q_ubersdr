@@ -35,6 +35,10 @@
 
 // The spectrum's limits, as RadioContext has them. Repeated rather than imported because this
 // module is pure arithmetic and is tested on its own.
+//
+// MAX_HZ is the default for callers that do not know the receiver's real top; followView
+// takes it as an argument so RadioContext can pass MAX_FREQ. 30 MHz is what a receiver
+// was before the span became configurable — see RECEIVER_SPAN.md.
 const MIN_HZ = 0;
 const MAX_HZ = 30e6;
 
@@ -74,21 +78,22 @@ export function followTarget(user) {
  * numbers of bins, and copying the span rather than the resolution would show a different
  * slice of the band at the same zoom setting.
  *
- * The centre is pulled back so the whole window stays inside 0–30 MHz, as v1 does. Without it,
+ * The centre is pulled back so the whole window stays inside the receiver, as v1 does. Without it,
  * following somebody parked on 200 kHz at a wide zoom asks for a view starting below zero, and
  * what comes back is not the view either of you is looking at.
  */
-export function followView(user, binCount) {
+export function followView(user, binCount, maxHz = MAX_HZ) {
     const binBW = Number(user && user.zoom_bw);
     const freq = Math.round(Number(user && user.frequency) || 0);
     if (!(binBW > 0) || !(binCount > 0) || !(freq > MIN_HZ)) return null;
+    const top = maxHz > 0 ? maxHz : MAX_HZ;
     const span = binBW * binCount;
     const half = span / 2;
     // A span wider than the whole spectrum has no centre that satisfies both edges; the middle
     // is the only sensible answer, and the server will clamp the span itself.
-    const centre = span >= MAX_HZ - MIN_HZ
-        ? Math.round((MIN_HZ + MAX_HZ) / 2)
-        : Math.round(Math.min(Math.max(freq, MIN_HZ + half), MAX_HZ - half));
+    const centre = span >= top - MIN_HZ
+        ? Math.round((MIN_HZ + top) / 2)
+        : Math.round(Math.min(Math.max(freq, MIN_HZ + half), top - half));
     return { frequency: centre, span };
 }
 

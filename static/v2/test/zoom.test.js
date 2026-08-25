@@ -215,16 +215,17 @@ t('a saved zoom with no span is trusted for the zoom but not the centre', () => 
 // --- the ladder, as the Multipad's zoom barrel reads it ---------------------
 
 // A stock receiver: 1024 bins over 0-30 MHz, so 29296.875 Hz/bin at full span,
-// and the 10.24 kHz floor both frontends stop at — 10 Hz/bin over those bins.
+// and v2's 2.048 kHz floor — 2 Hz/bin over those bins.
 const LADDER_BINS = 1024;
 const FULL_BW = 30e6 / LADDER_BINS;
-const FLOOR_BW = 10;
+const FLOOR_BW = 2;
 const L = zoomLadder(FULL_BW, LADDER_BINS, FLOOR_BW);
 
 // What repeated zoomIn actually produces, worked through the server's snapping
 // (user_spectrum_websocket.go). This is the list the drum has to draw: get it
 // wrong and a detent either does nothing or is missing.
-const REACHABLE = [30e6, 15e6, 5.12e6, 2.048e6, 1.024e6, 512e3, 307.2e3, 204.8e3, 102.4e3, 51.2e3, 20.48e3, 10.24e3];
+const REACHABLE = [30e6, 15e6, 5.12e6, 2.048e6, 1.024e6, 512e3, 307.2e3, 204.8e3, 102.4e3, 51.2e3,
+    20.48e3, 10.24e3, 5.12e3, 2.048e3];
 
 t('the ladder is the spans the server actually serves', () => {
     assert.deepStrictEqual(L.map((s) => Math.round(s)), REACHABLE.map((s) => Math.round(s)));
@@ -235,7 +236,7 @@ t('the ladder reaches the floor, not half a rung above it', () => {
     // span, so a powers-of-two ladder floored to 11 stopped at 14.6 kHz — one
     // detent short of where the zoom buttons and a pinch both stop.
     assert.strictEqual(L[L.length - 1], FLOOR_BW * LADDER_BINS);
-    assert.strictEqual(L.length, 12);
+    assert.strictEqual(L.length, 14);
 });
 
 t('every rung round-trips', () => {
@@ -283,11 +284,12 @@ t('the wide end halves and the narrow end is the server\'s list', () => {
 });
 
 t('a coarser receiver gets a shallower ladder, still reaching its own floor', () => {
-    // 512 bins: the floor is 20 Hz/bin, so the last two rungs of the 1024-bin
-    // ladder simply do not exist here.
-    const l512 = zoomLadder(30e6 / 512, 512, Math.max(0.5, 10240 / 512));
+    // 512 bins: the floor works out at 4 Hz/bin, and the nearest rung at or
+    // above it on the server's ladder is 5 — so this receiver stops at 2.56 kHz
+    // and the 1024-bin ladder's last rungs simply do not exist here.
+    const l512 = zoomLadder(30e6 / 512, 512, Math.max(0.5, 2048 / 512));
     assert.strictEqual(l512[0], 30e6);
-    assert.strictEqual(l512[l512.length - 1], 10240);
+    assert.strictEqual(l512[l512.length - 1], 2560);
     assert.ok(l512.every((s, i) => i === 0 || s < l512[i - 1]), 'must descend');
 });
 

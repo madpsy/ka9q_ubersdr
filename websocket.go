@@ -1643,14 +1643,25 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 // driven from here because this runs on every packet and already holds the
 // status the decision needs.
 func (wsh *WebSocketHandler) signalQualityFor(session *Session, version int) (basebandPower, noise float32) {
+	var radiod radiodController
+	if wsh.sessions != nil {
+		radiod = wsh.sessions.radiod
+	}
+	return channelSignalQuality(radiod, wsh.config, session, version)
+}
+
+// channelSignalQuality is the body of the above, without the WebSocketHandler.
+// The KiwiSDR emulation needs the same two figures on the same scale to drive
+// the same audio gate, and it has its own handler type; see kiwiConn.squelch.
+func channelSignalQuality(radiod radiodController, cfg *Config, session *Session, version int) (basebandPower, noise float32) {
 	basebandPower, noise = SignalUnavailable, SignalUnavailable
-	if version < 2 || wsh.sessions == nil || wsh.sessions.radiod == nil {
+	if version < 2 || radiod == nil {
 		// No way to observe radiod answering, so a settling window here would
 		// only ever expire on its timeout.  Abandon it instead.
 		session.settleRetune(nil, false, time.Now())
 		return
 	}
-	cs := wsh.sessions.radiod.GetChannelStatus(session.SSRC)
+	cs := radiod.GetChannelStatus(session.SSRC)
 	if !session.settleRetune(cs, true, time.Now()) {
 		return
 	}
@@ -1665,12 +1676,12 @@ func (wsh *WebSocketHandler) signalQualityFor(session *Session, version int) (ba
 		noise = cs.NoiseDensity
 	}
 
-	gainAdjustment := float32(wsh.config.Spectrum.GainDB)
-	if len(wsh.config.Spectrum.GainDBFrequencyRanges) > 0 {
+	gainAdjustment := float32(cfg.Spectrum.GainDB)
+	if len(cfg.Spectrum.GainDBFrequencyRanges) > 0 {
 		session.mu.RLock()
 		tunedFreq := session.Frequency
 		session.mu.RUnlock()
-		for _, freqRange := range wsh.config.Spectrum.GainDBFrequencyRanges {
+		for _, freqRange := range cfg.Spectrum.GainDBFrequencyRanges {
 			if tunedFreq >= freqRange.StartFreq && tunedFreq <= freqRange.EndFreq {
 				gainAdjustment += float32(freqRange.GainDB)
 				break
@@ -1691,6 +1702,11 @@ func (wsh *WebSocketHandler) signalQualityFor(session *Session, version int) (ba
 
 // Audio gate constants.
 const (
+	// audioGateDisabled is the sentinel that turns a gate threshold off. The
+	// checks treat anything at or below -998 as disabled, so a real reading can
+	// never be mistaken for it.
+	audioGateDisabled = float32(-999)
+
 	// audioGateHysteresis is the dB gap between the open and close thresholds.
 	// Gate opens at min_snr; gate closes (after hang) at min_snr − audioGateHysteresis.
 	audioGateHysteresis = float32(3.0)
@@ -2371,6 +2387,30 @@ func coalesceF32(userVal *float32, configDefault float32) *float32 {
 	return &v
 }
 
+// ssbAGCDefaults resolves the operator's configured AGC parameters, falling
+// back to the presets.conf values when the config is absent or a field is unset
+// (LoadConfig always fills them in; the nil checks are for tests).
+//
+// Shared with the KiwiSDR emulation, which has no threshold control of its own
+// but needs the hang time to turn the client's on/off hang toggle into a
+// duration.
+func ssbAGCDefaults(cfg *Config) (hangTimeS, recoveryRateDbS, thresholdDb float32) {
+	hangTimeS, recoveryRateDbS, thresholdDb = 1.1, 20.0, -15.0
+	if cfg == nil {
+		return
+	}
+	if cfg.Server.SSBAgcDefaults.HangTimeS != nil {
+		hangTimeS = *cfg.Server.SSBAgcDefaults.HangTimeS
+	}
+	if cfg.Server.SSBAgcDefaults.RecoveryRateDbS != nil {
+		recoveryRateDbS = *cfg.Server.SSBAgcDefaults.RecoveryRateDbS
+	}
+	if cfg.Server.SSBAgcDefaults.ThresholdDb != nil {
+		thresholdDb = *cfg.Server.SSBAgcDefaults.ThresholdDb
+	}
+	return
+}
+
 // agcStateInfo returns the current AGC parameter values for a session.
 // Priority: user override > operator config default.
 // The config pointer may be nil (e.g. in tests); hardcoded presets.conf values are used as fallback.
@@ -2384,20 +2424,7 @@ func agcStateInfo(session *Session, cfg *Config) map[string]interface{} {
 	session.mu.RUnlock()
 
 	// Operator config defaults (or hardcoded presets.conf values if config/field unavailable).
-	hangDefault := float32(1.1)
-	recovDefault := float32(20.0)
-	threshDefault := float32(-15.0)
-	if cfg != nil {
-		if cfg.Server.SSBAgcDefaults.HangTimeS != nil {
-			hangDefault = *cfg.Server.SSBAgcDefaults.HangTimeS
-		}
-		if cfg.Server.SSBAgcDefaults.RecoveryRateDbS != nil {
-			recovDefault = *cfg.Server.SSBAgcDefaults.RecoveryRateDbS
-		}
-		if cfg.Server.SSBAgcDefaults.ThresholdDb != nil {
-			threshDefault = *cfg.Server.SSBAgcDefaults.ThresholdDb
-		}
-	}
+	hangDefault, recovDefault, threshDefault := ssbAGCDefaults(cfg)
 
 	hangTime := hangDefault
 	recoveryRate := recovDefault

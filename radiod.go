@@ -39,6 +39,11 @@ type RadiodController struct {
 	terminatedMu sync.Mutex
 	terminated   map[uint32]time.Time
 
+	// Bin count each live spectrum channel was created with, so an update can
+	// never ask for more than its buffer holds. See spectrumBinCeiling.
+	spectrumBinsMu sync.Mutex
+	spectrumBins   map[uint32]int
+
 	// Spacing between commands to one audio channel, so two of ours never land
 	// in the same radiod block and get one of them dropped. See
 	// radiod_audio_pacing.go.
@@ -331,11 +336,21 @@ type AGCParams struct {
 	HangTime     *float32 // Hang time in seconds (nil = use preset default)
 	RecoveryRate *float32 // Recovery rate in dB/s (nil = use preset default)
 	Threshold    *float32 // Threshold in dB relative to headroom (nil = use preset default)
+
+	// Gain is a manual output gain in dB, for linear and AM demods.
+	//
+	// radiod treats this as a mode switch, not just a level: decode_radio_commands
+	// clears linear.agc on any GAIN command ("Doesn't make sense to change gain
+	// and then have the AGC change it again", radio_status.c). Setting Gain
+	// therefore turns the AGC off as a side effect, so pair it with Enable only
+	// when that is what you mean -- see the encode order in SetAGC.
+	Gain *float32
 }
 
-// SetAGC sends AGC parameter overrides to an existing channel identified by ssrc.
-// Only non-nil fields in params are sent; nil fields leave the current value unchanged.
-func (rc *RadiodController) SetAGC(ssrc uint32, params AGCParams) error {
+// buildAGCCommand assembles the AGC control packet. Split out from SetAGC so
+// the tag order -- which radiod is sensitive to -- can be tested without a
+// radiod to send it to.
+func buildAGCCommand(ssrc uint32, params AGCParams) []byte {
 	buf := make([]byte, 0, 64)
 
 	// CMD packet type
@@ -344,13 +359,6 @@ func (rc *RadiodController) SetAGC(ssrc uint32, params AGCParams) error {
 	// Identify the channel
 	buf = encodeInt32(&buf, tagOutputSSRC, ssrc)
 
-	if params.Enable != nil {
-		val := byte(0)
-		if *params.Enable {
-			val = 1
-		}
-		buf = encodeByte(&buf, tagAgcEnable, val)
-	}
 	if params.HangTime != nil {
 		buf = encodeFloat(&buf, tagAgcHangtime, *params.HangTime)
 	}
@@ -359,6 +367,19 @@ func (rc *RadiodController) SetAGC(ssrc uint32, params AGCParams) error {
 	}
 	if params.Threshold != nil {
 		buf = encodeFloat(&buf, tagAgcThreshold, *params.Threshold)
+	}
+	// Gain goes before Enable deliberately. radiod decodes tags in packet order
+	// and GAIN clears the AGC flag, so a caller that sets both gets the enable
+	// it asked for rather than having it silently undone.
+	if params.Gain != nil {
+		buf = encodeFloat(&buf, tagGain, *params.Gain)
+	}
+	if params.Enable != nil {
+		val := byte(0)
+		if *params.Enable {
+			val = 1
+		}
+		buf = encodeByte(&buf, tagAgcEnable, val)
 	}
 
 	// LIFETIME, so that an update racing a teardown cannot leave an immortal
@@ -369,6 +390,14 @@ func (rc *RadiodController) SetAGC(ssrc uint32, params AGCParams) error {
 
 	buf = encodeInt32(&buf, tagCommandTag, uint32(time.Now().Unix()))
 	buf = append(buf, tagEOL)
+
+	return buf
+}
+
+// SetAGC sends AGC parameter overrides to an existing channel identified by ssrc.
+// Only non-nil fields in params are sent; nil fields leave the current value unchanged.
+func (rc *RadiodController) SetAGC(ssrc uint32, params AGCParams) error {
+	buf := buildAGCCommand(ssrc, params)
 
 	if err := rc.sendAudioCommand(ssrc, buf); err != nil {
 		return fmt.Errorf("failed to send AGC params for SSRC 0x%08x: %w", ssrc, err)
@@ -542,15 +571,71 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 		return fmt.Errorf("failed to send create spectrum command: %w", err)
 	}
 
+	rc.noteSpectrumBins(ssrc, binCount)
+
 	log.Printf("Spectrum channel created: SSRC 0x%08x, freq=%d Hz, bins=%d, bw=%.1f Hz (span %.1f Hz)",
 		ssrc, frequency, binCount, binBandwidth, float64(binCount)*binBandwidth)
 	return nil
+}
+
+// A radiod spectrum channel's bin_data buffer is sized once and never resized.
+//
+// ka9q-radio src/spectrum.c means to reallocate it whenever bin_count changes,
+// but the guard compares chan->spectrum.bin_count against a local that the
+// reinitialisation block a few lines earlier has already set to the same value,
+// so only its "buffer is NULL" arm can ever fire. Every later change leaves the
+// buffer at its original size while narrowband_poll and wideband_poll memset
+// and fill bin_count entries into it.
+//
+// Asking a live channel for more bins than it was created with therefore writes
+// past the end of a heap block, and radiod aborts with glibc's "corrupted size
+// vs. prev_size in fastbins" -- taking every user's audio and waterfall with it,
+// not just the one that asked. Fewer bins is harmless: the buffer is merely
+// larger than needed.
+//
+// This is enforced here rather than in each caller because the consequence is
+// a dead receiver, and a future protocol has no way to know the rule exists.
+// Drop it if upstream fixes the guard and UPSTREAM_REF moves past the fix.
+func (rc *RadiodController) noteSpectrumBins(ssrc uint32, binCount int) {
+	if binCount <= 0 {
+		return
+	}
+	rc.spectrumBinsMu.Lock()
+	if rc.spectrumBins == nil {
+		rc.spectrumBins = make(map[uint32]int)
+	}
+	rc.spectrumBins[ssrc] = binCount
+	rc.spectrumBinsMu.Unlock()
+}
+
+// spectrumBinCeiling returns the largest bin count this SSRC's channel can
+// safely be asked for, or 0 when we did not create it and so cannot know.
+func (rc *RadiodController) spectrumBinCeiling(ssrc uint32) int {
+	rc.spectrumBinsMu.Lock()
+	defer rc.spectrumBinsMu.Unlock()
+	return rc.spectrumBins[ssrc]
+}
+
+// forgetSpectrumBins drops the record for a torn-down SSRC, so a later channel
+// on the same SSRC is measured against its own creation count.
+func (rc *RadiodController) forgetSpectrumBins(ssrc uint32) {
+	rc.spectrumBinsMu.Lock()
+	delete(rc.spectrumBins, ssrc)
+	rc.spectrumBinsMu.Unlock()
 }
 
 // UpdateSpectrumChannel updates spectrum channel parameters (for zoom/pan)
 // binCount is needed to calculate filter edges when binBandwidth changes
 // If binCount changes, it will also be sent to radiod
 func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool) error {
+	// Never above what the channel was created with; see noteSpectrumBins.
+	if ceiling := rc.spectrumBinCeiling(ssrc); ceiling > 0 && binCount > ceiling {
+		log.Printf("radiod: refusing to raise SSRC 0x%08x from %d to %d spectrum bins -- "+
+			"radiod would overrun its bin_data buffer and abort; capping at %d",
+			ssrc, ceiling, binCount, ceiling)
+		binCount = ceiling
+	}
+
 	// Paced rather than sent outright: radiod drops commands that arrive faster
 	// than it drains them, and where a channel ends up then depends on which of
 	// a burst happened to survive. See radiod_spectrum_pacing.go.
@@ -1032,6 +1117,10 @@ func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
 	// send already queued behind cmdMu cannot slip past it and resurrect the
 	// channel. The terminate itself bypasses the check by going out raw.
 	rc.markTerminated(ssrc)
+
+	// The bin ceiling belonged to the channel being torn down; the next one on
+	// this SSRC gets its own. See noteSpectrumBins.
+	rc.forgetSpectrumBins(ssrc)
 
 	if err := rc.sendCommandRaw(buildTerminateCommand(ssrc)); err != nil {
 		log.Printf("Terminate for SSRC 0x%08x was NOT sent: %v", ssrc, err)

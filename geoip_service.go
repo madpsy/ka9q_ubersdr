@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -13,12 +14,24 @@ import (
 
 // GeoIPService provides IP geolocation functionality using MaxMind GeoIP2 database
 // This service is for internal use only and admin API access
+//
+// The geoip2 readers are memory-mapped files.  Closing one unmaps its pages,
+// so a lookup racing with Close does not get an error, it faults (SIGSEGV) —
+// the decoder holds raw pointers into the mapping.  Every method that touches
+// db/asnDB therefore does so under mu (read side), and Close takes mu for
+// writing, which blocks until the in-flight lookups have finished.  The check
+// for usability happens *inside* the lock, never before taking it.
 type GeoIPService struct {
 	db      *geoip2.Reader
 	asnDB   *geoip2.Reader
 	mu      sync.RWMutex
 	enabled bool
 }
+
+// ErrGeoIPUnavailable is returned by every lookup when the service is disabled
+// or has been closed.  Callers should treat it as "no geolocation data", not
+// as something to retry: after Close the databases are gone for good.
+var ErrGeoIPUnavailable = errors.New("GeoIP service not enabled")
 
 // GeoIPResult contains geolocation information for an IP address
 type GeoIPResult struct {
@@ -100,22 +113,34 @@ func NewGeoIPService(dbPath string, asnDBPath string) (*GeoIPService, error) {
 
 // IsASNEnabled returns whether the ASN database is loaded
 func (g *GeoIPService) IsASNEnabled() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	return g.asnDB != nil
 }
 
-// IsEnabled returns whether the GeoIP service is enabled
+// IsEnabled returns whether the GeoIP service is enabled.  Returns false once
+// Close has been called, so callers that gate on it stop issuing lookups
+// during shutdown.
 func (g *GeoIPService) IsEnabled() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	return g.enabled
+}
+
+// available reports whether the city/country database can be read.
+// Must be called with g.mu held (either side).
+func (g *GeoIPService) available() bool {
+	return g.enabled && g.db != nil
 }
 
 // GetCountry returns the country name for an IP address
 func (g *GeoIPService) GetCountry(ipStr string) (string, error) {
-	if !g.enabled {
-		return "", fmt.Errorf("GeoIP service not enabled")
-	}
-
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
+	if !g.available() {
+		return "", ErrGeoIPUnavailable
+	}
 
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
@@ -137,12 +162,12 @@ func (g *GeoIPService) GetCountry(ipStr string) (string, error) {
 
 // GetCountryCode returns the ISO country code for an IP address
 func (g *GeoIPService) GetCountryCode(ipStr string) (string, error) {
-	if !g.enabled {
-		return "", fmt.Errorf("GeoIP service not enabled")
-	}
-
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
+	if !g.available() {
+		return "", ErrGeoIPUnavailable
+	}
 
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
@@ -160,26 +185,13 @@ func (g *GeoIPService) GetCountryCode(ipStr string) (string, error) {
 // Lookup performs a full geolocation lookup for an IP address.
 // If reverseDNS is true, a reverse DNS lookup is attempted with a 2 second timeout.
 func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, error) {
-	if !g.enabled {
-		return nil, fmt.Errorf("GeoIP service not enabled")
+	result, err := g.lookupDatabases(ipStr)
+	if err != nil {
+		return nil, err
 	}
 
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return nil, fmt.Errorf("invalid IP address: %s", ipStr)
-	}
-
-	// Try City database first (has all fields), fall back to Country database
-	cityRecord, cityErr := g.db.City(ip)
-
-	result := &GeoIPResult{
-		IP: ipStr,
-	}
-
-	// Perform reverse DNS lookup if requested
+	// Deliberately outside the database lock: a PTR resolve can take the full
+	// 2 second timeout, and Close (i.e. shutdown) blocks on that lock.
 	if reverseDNS {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -192,6 +204,32 @@ func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, erro
 			}
 			result.Hostname = hostname
 		}
+	}
+
+	return result, nil
+}
+
+// lookupDatabases performs the memory-mapped part of a lookup: the city or
+// country record plus ASN enrichment.  Everything that dereferences the mapped
+// databases happens here, under the read lock.
+func (g *GeoIPService) lookupDatabases(ipStr string) (*GeoIPResult, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if !g.available() {
+		return nil, ErrGeoIPUnavailable
+	}
+
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return nil, fmt.Errorf("invalid IP address: %s", ipStr)
+	}
+
+	// Try City database first (has all fields), fall back to Country database
+	cityRecord, cityErr := g.db.City(ip)
+
+	result := &GeoIPResult{
+		IP: ipStr,
 	}
 
 	// Enrich with ASN/ISP data if available
@@ -335,12 +373,12 @@ func (g *GeoIPService) Lookup(ipStr string, reverseDNS bool) (*GeoIPResult, erro
 // GetASN returns the ASN number and organisation name for an IP address.
 // Returns (0, "", error) if the ASN database is not loaded or lookup fails.
 func (g *GeoIPService) GetASN(ipStr string) (uint, string, error) {
-	if !g.enabled {
-		return 0, "", fmt.Errorf("GeoIP service not enabled")
-	}
-
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
+	if !g.enabled {
+		return 0, "", ErrGeoIPUnavailable
+	}
 
 	if g.asnDB == nil {
 		return 0, "", fmt.Errorf("ASN database not loaded")
@@ -381,7 +419,7 @@ func (g *GeoIPService) lookupASN(ip net.IP, result *GeoIPResult) {
 // LookupSafe performs a lookup and returns empty strings on error
 // Useful for non-critical enrichment where failures should be silent
 func (g *GeoIPService) LookupSafe(ipStr string) (country, countryCode string) {
-	if !g.enabled || ipStr == "" {
+	if ipStr == "" {
 		return "", ""
 	}
 
@@ -393,16 +431,37 @@ func (g *GeoIPService) LookupSafe(ipStr string) (country, countryCode string) {
 	return result.Country, result.CountryCode
 }
 
-// Close closes the GeoIP database(s)
+// Close closes the GeoIP database(s).
+//
+// Closing a geoip2 reader munmaps the database file, so this must never run
+// while another goroutine is inside a lookup: the decoder would read unmapped
+// pages and the process would take a SIGSEGV rather than an error.  Taking the
+// write lock waits for every in-flight lookup to return, and clearing the
+// fields before unmapping means no lookup started afterwards can reach the
+// mapping — it sees an unavailable service and gets ErrGeoIPUnavailable.
+//
+// Close is idempotent; calling it on an already-closed or disabled service is
+// a no-op that returns nil.
 func (g *GeoIPService) Close() error {
-	if g.asnDB != nil {
-		if err := g.asnDB.Close(); err != nil {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	db, asnDB := g.db, g.asnDB
+	g.db, g.asnDB = nil, nil
+	g.enabled = false
+
+	var firstErr error
+	if asnDB != nil {
+		if err := asnDB.Close(); err != nil {
 			log.Printf("GeoIP: Error closing ASN database: %v", err)
+			firstErr = err
 		}
 	}
-	if g.db != nil {
+	if db != nil {
 		log.Println("GeoIP: Closing database")
-		return g.db.Close()
+		if err := db.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	return firstErr
 }

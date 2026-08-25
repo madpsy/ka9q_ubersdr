@@ -247,7 +247,9 @@ t('the readout reports the time measured, not the time asked for', () => {
 
 // ── Driving the main display ─────────────────────────────────────────────────
 
-// The interface's zoom floor: 1024 bins at its narrowest bin width.
+// A representative zoom floor. Deliberately not v2's own, which is lower: what
+// is under test is the clamp, and it has to hold for whatever floor the
+// interface reports — v1 and v2 no longer stop in the same place.
 const FLOOR = 10240;
 
 t('the zoom it asks for is one the interface can actually give', () => {

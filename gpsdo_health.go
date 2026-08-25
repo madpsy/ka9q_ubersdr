@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -114,6 +115,7 @@ type GPSDOMonitor struct {
 	mu          sync.RWMutex
 	snapshot    *GPSDOSnapshot // nil if last fetch failed
 	lastPollErr bool           // true if the previous poll returned an error
+	fixCount    uint64         // polls that reported a usable GPS fix, since start
 }
 
 // NewGPSDOMonitor creates a new monitor.  Call Start() to begin polling.
@@ -157,8 +159,39 @@ func (m *GPSDOMonitor) poll() {
 		}
 		m.lastPollErr = false
 		m.snapshot = snapshot
+		if gpsFixUsable(snapshot) {
+			m.fixCount++
+		}
 	}
 	m.mu.Unlock()
+}
+
+// gpsFixUsable reports whether a snapshot carries a GPS fix good enough to
+// stand behind. The receiver reports a fix type of "no fix" until it has one,
+// and a fix with no satellites behind it is not a position.
+func gpsFixUsable(snapshot *GPSDOSnapshot) bool {
+	if snapshot == nil || snapshot.GPS == nil {
+		return false
+	}
+	gps := snapshot.GPS
+	if gps.SatsUsed <= 0 {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(gps.Fix)) {
+	case "", "no fix", "none", "invalid", "0":
+		return false
+	}
+	return true
+}
+
+// FixCount returns how many polls have reported a usable fix since start. The
+// monitor polls at 1 Hz, so this is also roughly the number of seconds the
+// receiver has held a position -- which is the sense in which a KiwiSDR
+// reports its own fix count.
+func (m *GPSDOMonitor) FixCount() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.fixCount
 }
 
 // GetSnapshot returns the most recently cached snapshot (may be nil if the

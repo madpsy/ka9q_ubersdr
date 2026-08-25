@@ -27,15 +27,31 @@ import {
 
 const HEADER_BYTES = 22;
 
-// Narrowest span (Hz) the normal zoom controls will reach. Matches v1's
-// MIN_ZOOM_SPAN_HZ so both frontends stop at the same place. It is a *span*,
-// not a Hz/bin value, so zoom depth does not change with spectrum.bin_count.
-// The server allows down to 0.5 Hz/bin for explicit requests.
+// Narrowest span (Hz) the normal zoom controls will reach. It is a *span*, not
+// a Hz/bin value, so zoom depth does not change with spectrum.bin_count.
+//
+// Two rungs below where this used to sit, and below where v1's own copy still
+// does (static/spectrum-display.js) — so the two frontends no longer stop
+// together. Nothing technical was stopping either of them: the server snaps to
+// BIN_BW_LADDER down to 0.5 Hz/bin, which on a 1024-bin receiver is a 512 Hz
+// span, and 10240 was only ever a UI choice the two shared.
+//
+// What sets the real limit is integration time rather than radiod, because
+// resolution bandwidth is roughly the reciprocal of how long you look:
+//
+//	10 Hz/bin  10240 Hz span  0.1 s per line
+//	 5 Hz/bin   5120 Hz span  0.2 s
+//	 2 Hz/bin   2048 Hz span  0.5 s   <- here
+//	 1 Hz/bin   1024 Hz span  1.0 s
+//	0.5 Hz/bin   512 Hz span  2.0 s
+//
+// 2 Hz/bin is the last rung that still feels live. Below it each waterfall line
+// covers a second or more of signal, so keying and fading smear into it and the
+// display reads as laggy rather than detailed.
 //
 // Exported because a control that draws the zoom ladder rather than stepping
-// along it — the Multipad's zoom barrel — has to know where the ladder ends,
-// and a second copy of the number is a second place for it to drift from v1's.
-export const MIN_ZOOM_SPAN_HZ = 10240;
+// along it — the Multipad's zoom barrel — has to know where the ladder ends.
+export const MIN_ZOOM_SPAN_HZ = 2048;
 
 export class SpectrumConnection extends Emitter {
     constructor() {

@@ -243,9 +243,9 @@ export default function ScopePanel({ minimal }) {
     // anyway, differing only in phase.
     //
     // The view that *would* be right is a complex FFT of I+jQ, and the RF
-    // waterfall already is one: MIN_ZOOM_SPAN_HZ is 10240, so at full zoom it
-    // shows a 10.24 kHz span — the whole of what a 10 kHz IQ stream carries, at
-    // the server's own resolution with the sidebands the correct way round.
+    // waterfall already is one: it reaches a 10.24 kHz span — the whole of what
+    // a 10 kHz IQ stream carries — at the server's own resolution and with the
+    // sidebands the correct way round, and now zooms past it besides.
     // Rebuilding that here in JS would duplicate it, worse.
     //
     // Left in the dock rather than removed, so the reason is where the picture

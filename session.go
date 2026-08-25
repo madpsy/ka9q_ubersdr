@@ -663,26 +663,37 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 
 	// Create session with default bandwidth edges (50 Hz to bandwidth Hz for SSB)
 	session := &Session{
-		ID:             sessionID,
-		ChannelName:    channelName,
-		SSRC:           ssrc,
-		Frequency:      frequency,
-		Mode:           mode,
-		Bandwidth:      bandwidth,
-		BandwidthLow:   50,        // Default low edge
-		BandwidthHigh:  bandwidth, // Default high edge
-		SampleRate:     sampleRate,
-		Channels:       channels,
-		CreatedAt:      time.Now(),
-		LastActive:     time.Now(),
-		AudioChan:      make(chan AudioPacket, 100), // Buffer 100 audio packets
-		Done:           make(chan struct{}),
-		SourceIP:       sourceIP,
-		ClientIP:       clientIP,
-		UserSessionID:  userSessionID,
-		BypassPassword: password, // Store the password in the session
-		VisitedBands:   make(map[string]bool),
-		VisitedModes:   make(map[string]bool),
+		ID:            sessionID,
+		ChannelName:   channelName,
+		SSRC:          ssrc,
+		Frequency:     frequency,
+		Mode:          mode,
+		Bandwidth:     bandwidth,
+		BandwidthLow:  50,        // Default low edge
+		BandwidthHigh: bandwidth, // Default high edge
+		SampleRate:    sampleRate,
+		Channels:      channels,
+		CreatedAt:     time.Now(),
+		LastActive:    time.Now(),
+		// The audio gate starts disabled, as the field comment promises.
+		//
+		// Without this the zero value is an active 0 dB threshold, and an
+		// active gate closes whenever the SNR reading is unavailable -- which
+		// audioGateAllows does deliberately, since an absent reading must not
+		// be treated as a loud one. A session that never asked for a squelch
+		// would fall silent as soon as radiod had not supplied a channel status
+		// or filter bandwidth. The native path assigns these from its connect
+		// parameters and so never saw it; any other caller would.
+		AudioGateMinSNR:   audioGateDisabled,
+		AudioGateMinPower: audioGateDisabled,
+		AudioChan:         make(chan AudioPacket, 100), // Buffer 100 audio packets
+		Done:              make(chan struct{}),
+		SourceIP:          sourceIP,
+		ClientIP:          clientIP,
+		UserSessionID:     userSessionID,
+		BypassPassword:    password, // Store the password in the session
+		VisitedBands:      make(map[string]bool),
+		VisitedModes:      make(map[string]bool),
 	}
 
 	// Track initial band and mode in per-session maps

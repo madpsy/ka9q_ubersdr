@@ -2557,6 +2557,9 @@ func main() {
 	// Wire GPSDO monitor into admin handler so /admin/monitor-health can include
 	// GPSDO health using the same cached snapshot as the /monitor bot command.
 	adminHandler.SetGPSDOMonitor(gpsdoMonitor)
+	if kiwiHandler != nil {
+		kiwiHandler.SetGPSDOMonitor(gpsdoMonitor)
+	}
 	// Wire config and instance reporter so the /info bot command can report
 	// receiver details (name, callsign, public URL, GPS coordinates, version).
 	notifManager.SetConfig(config)
@@ -3389,11 +3392,25 @@ func main() {
 		Handler: handler,
 	}
 
+	// Every listener the signal handler has to stop.  The KiwiSDR and WebSDR
+	// servers are created further down, after the handler goroutine is already
+	// running, so they are registered with the group rather than captured.
+	httpServers := newHTTPServerGroup(httpShutdownGrace)
+	httpServers.Add("main", server)
+
+	// Closed once the shutdown sequence has finished draining.  main waits on
+	// it before running its deferred teardown, because that teardown closes
+	// resources (the memory-mapped GeoIP databases, radiod, the SQLite handle)
+	// that in-flight handlers are still using.
+	shutdownComplete := make(chan struct{})
+
 	// Handle graceful shutdown
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
+
+		defer close(shutdownComplete)
 
 		log.Println("Shutting down server...")
 
@@ -3407,13 +3424,12 @@ func main() {
 			Reason:    "signal",
 		})
 
-		// Clean up all active sessions first
+		// Clean up all active sessions first: this closes the WebSockets, which
+		// is what lets their handlers return so the servers can drain.
 		sessions.Shutdown()
 
-		// Then close the HTTP server
-		if err := server.Close(); err != nil {
-			log.Printf("Error closing server: %v", err)
-		}
+		// Then stop every HTTP listener and wait for the handlers to finish.
+		httpServers.ShutdownAll()
 	}()
 
 	// Start KiwiSDR compatibility server on separate port if enabled
@@ -3531,6 +3547,8 @@ func main() {
 			Handler: banMiddleware(config, ipBanManager, countryBanManager, asnBanManager, kiwiMux),
 		}
 
+		httpServers.Add("KiwiSDR", kiwiServer)
+
 		go func() {
 			log.Printf("KiwiSDR protocol server listening on %s", kiwiSDRListenAddr)
 			log.Printf("KiwiSDR clients can connect to this port (e.g., kiwirecorder.py -s host -p %s)", strings.TrimPrefix(kiwiSDRListenAddr, ":"))
@@ -3575,6 +3593,8 @@ func main() {
 			// User-Agent and must keep working regardless.
 			Handler: WebSDRServerHeaderMiddleware(banMiddleware(config, ipBanManager, countryBanManager, asnBanManager, websdrHandler)),
 		}
+
+		httpServers.Add("WebSDR", websdrServer)
 
 		// Start the http.Server on the channel listener (non-orgstatus traffic).
 		go func() {
@@ -3646,6 +3666,18 @@ func main() {
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server error: %v", err)
+	}
+
+	// ListenAndServe returns the moment Shutdown closes the listener, well
+	// before the handlers it is draining have returned.  Wait for the shutdown
+	// sequence to finish before falling into the deferred teardown, otherwise a
+	// request still in flight can read a closed database — and because the
+	// GeoIP readers are memory-mapped, "read a closed database" means SIGSEGV,
+	// not an error.  Bounded so a wedged handler cannot hang the exit.
+	select {
+	case <-shutdownComplete:
+	case <-time.After(httpShutdownGrace + 5*time.Second):
+		log.Println("Shutdown sequence did not complete in time, continuing with teardown")
 	}
 
 	log.Println("Server stopped")

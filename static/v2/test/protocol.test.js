@@ -241,10 +241,10 @@ t('a gentle 1.25x step stalls — this is why the step is 2x', () => {
 t('UI zoom floor is a span, independent of bin count', () => {
     const c = new SpectrumConnection();
     c._onControl({ type: 'config', centerFreq: 15e6, binCount: 1024, binBandwidth: 29296.875, defaultBinCount: 1024, defaultBinBandwidth: 29296.875 });
-    assert.strictEqual(c.minBinBandwidthForUI() * 1024, 10240);
+    assert.strictEqual(c.minBinBandwidthForUI() * 1024, 2048);
     const d = new SpectrumConnection();
     d._onControl({ type: 'config', centerFreq: 15e6, binCount: 2048, binBandwidth: 14648.4375, defaultBinCount: 2048, defaultBinBandwidth: 14648.4375 });
-    assert.strictEqual(d.minBinBandwidthForUI() * 2048, 10240);
+    assert.strictEqual(d.minBinBandwidthForUI() * 2048, 2048);
 });
 
 t('full-span bin bandwidth survives a missing server default', () => {

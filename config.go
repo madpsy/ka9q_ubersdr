@@ -1851,7 +1851,12 @@ func (c *AudioConfig) GetSampleRateForMode(mode string) int {
 	case "am", "sam", "fm", "nfm":
 		return 24000
 	case "iq":
-		return 10000
+		// presets.conf has [iq] samprate = 12k. This said 10000 until
+		// 2026-08-25, which is exactly the drift the comment above warns
+		// about: nothing sends OUTPUT_SAMPRATE to radiod, so the preset is the
+		// real rate and this constant only labels it. The wrong label reached
+		// the WebSDR Opus encoder and the session info, playing IQ 20% slow.
+		return 12000
 	case "iq48":
 		return 48000
 	case "iq96":

@@ -62,6 +62,7 @@ type KiwiWebSocketHandler struct {
 	prometheusMetrics  *PrometheusMetrics
 	radiod             radiodController
 	noiseFloorMonitor  *NoiseFloorMonitor
+	gpsdoMonitor       *GPSDOMonitor        // nil when the receiver has no Leo Bodnar GPSDO
 	kiwiRegistrar      *KiwiSDRComRegistrar // may be nil if registration is disabled
 	kiwiRXSlots        map[string]int       // Map userSessionID to RX channel number
 	kiwiVacatedSlots   map[string]int       // Slots that need a clearing user_cb entry on next sendUserList
@@ -186,6 +187,14 @@ func (kwsh *KiwiWebSocketHandler) RecordSNRMeasurement() {
 
 // SetKiwiRegistrar attaches the directory registrar so the /status handler can
 // notify it when kiwisdr.com performs its reverse reachability probe.
+// SetGPSDOMonitor supplies the Leo Bodnar GPSDO monitor, whose telemetry backs
+// the GPS row of the client's status tab. Optional: without it, and on a
+// receiver whose GPSDO is absent or unreachable, that row falls back to
+// reporting only what the configured coordinates can support.
+func (kwsh *KiwiWebSocketHandler) SetGPSDOMonitor(monitor *GPSDOMonitor) {
+	kwsh.gpsdoMonitor = monitor
+}
+
 func (kwsh *KiwiWebSocketHandler) SetKiwiRegistrar(r *KiwiSDRComRegistrar) {
 	kwsh.kiwiRegistrar = r
 }
@@ -624,10 +633,12 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 	uptime := int(time.Since(StartTime).Seconds())
 	status.WriteString(fmt.Sprintf("uptime=%d\n", uptime))
 
-	// Current date/time
-	now := time.Now()
-	status.WriteString(fmt.Sprintf("gps_date=0,0\n"))
-	status.WriteString(fmt.Sprintf("date=%s\n", now.Format("Mon Jan _2 15:04:05 2006")))
+	// Current date/time. UTC, not the configured local zone: a real KiwiSDR
+	// reports UTC here regardless of where it is (confirmed against a receiver
+	// in UTC-6 reporting the UTC wall clock), and this endpoint feeds
+	// directory listings that compare receivers against each other.
+	status.WriteString("gps_date=0,0\n")
+	status.WriteString(fmt.Sprintf("date=%s\n", time.Now().UTC().Format("Mon Jan _2 15:04:05 2006")))
 
 	// IP blacklist hash — empty string until the blacklist has been loaded.
 	// The real KiwiSDR sends "" on first boot and a CRC32 hex string once loaded.
@@ -811,7 +822,504 @@ type kiwiConn struct {
 	xBin               uint32           // Current x_bin (start position in bins)
 	lastLoggedZoom     int              // Last logged zoom for debug
 	lastLoggedXBin     uint32           // Last logged xBin for debug
-	mu                 sync.RWMutex
+	// decimator converts radiod's per-mode rate down to the single rate this
+	// connection announced; decimatorInRate records the input rate it was
+	// built for so a mode change rebuilds it. Touched only by streamAudio.
+	decimator         *kiwiDecimator
+	decimatorInRate   int
+	decimatorChannels int
+	// wfRequest is the spectrum geometry the zoom handler last asked radiod
+	// for, paired with the grid the client assumes. Guarded by mu.
+	wfRequest kiwiSpectrumRequest
+	// adpcmStale marks that the client has zeroed its ADPCM decoder state
+	// because an uncompressed packet went out, so the encoder must be reset
+	// before compressed audio resumes. Touched only by streamAudio.
+	adpcmStale bool
+	mu         sync.RWMutex
+}
+
+// SND packet flags, as read by audio_recv in kiwi/audio.js.
+const (
+	kiwiSndFlagStereo     = 0x08 // payload is interleaved stereo (IQ modes)
+	kiwiSndFlagCompressed = 0x10 // payload is IMA ADPCM
+	kiwiSndFlagSquelchUI  = 0x40 // squelch is closed for this packet
+)
+
+// kiwiStereoTimestampLen is the size of the GPS timestamp a stereo SND packet
+// carries between the S-meter and the payload. The browser client skips it
+// (audio_recv takes its payload from offset 20 rather than 10), but kiwirecorder
+// parses it for TDoA, so the field has to be present and well formed for the
+// payload to land where every client expects it.
+const kiwiStereoTimestampLen = 10
+
+// kiwiStereoTimestamp writes that field: last_gps_solution:u8, a pad byte, then
+// GPS time-of-week seconds and nanoseconds, both little-endian. Confirmed
+// against a live KiwiSDR v1.902, whose nanosecond field advances by exactly one
+// packet duration between IQ packets.
+//
+// ubersdr has no GPS receiver of its own -- the packet timestamp is the host
+// clock at arrival -- so last_gps_solution is 255, the same "no solution" value
+// a real KiwiSDR without a fix reports. The seconds field is still a genuine
+// time-of-week so the numbers stay in range and advance monotonically, which is
+// what a consumer needs for relative packet timing; it carries no leap-second
+// correction, and the 255 says not to trust it as a GPS fix.
+func kiwiStereoTimestamp(dst []byte, unixNanos int64) {
+	if len(dst) < kiwiStereoTimestampLen {
+		return
+	}
+	const (
+		gpsEpochUnix   = 315964800 // 1980-01-06 00:00:00 UTC
+		secondsPerWeek = 604800
+	)
+	sec := unixNanos / int64(time.Second)
+	nsec := unixNanos % int64(time.Second)
+	tow := sec - gpsEpochUnix
+	if tow < 0 {
+		tow = 0
+	}
+	tow %= secondsPerWeek
+
+	dst[0] = 255 // last_gps_solution: no GPS solution
+	dst[1] = 0   // pad
+	binary.LittleEndian.PutUint32(dst[2:6], uint32(tow))
+	binary.LittleEndian.PutUint32(dst[6:10], uint32(nsec))
+}
+
+// encodeSndPayload prepares one SND payload and the flags that describe it.
+//
+// Compression is suppressed for stereo: ADPCM is mono-only in this protocol,
+// the client forces compression off for the duration of a stereo stream (see
+// the isStereo branch of audio_recv in kiwi/audio.js), and a real KiwiSDR sends
+// IQ uncompressed.
+//
+// Because that same client code zeroes its ADPCM decoder state whenever the
+// compression flag changes, the encoder has to be rebuilt when compressed audio
+// resumes. Without it the decoder runs against a different predictor and step
+// index than the encoder, which sounds like distortion that slowly settles
+// rather than an outright failure.
+//
+// Called only from streamAudio, which owns adpcmEncoder and adpcmStale.
+func (kc *kiwiConn) encodeSndPayload(pcm []byte, stereo bool) ([]byte, byte) {
+	kc.mu.RLock()
+	useCompression := kc.compression
+	kc.mu.RUnlock()
+
+	useCompression = useCompression && !stereo
+
+	var data []byte
+	var flags byte
+	if useCompression {
+		if kc.adpcmStale {
+			kc.adpcmEncoder = NewIMAAdpcmEncoder()
+			kc.adpcmStale = false
+		}
+		data = kc.adpcmEncoder.Encode(pcm)
+		flags = kiwiSndFlagCompressed
+	} else {
+		data = pcm
+		kc.adpcmStale = true
+	}
+	if stereo {
+		flags |= kiwiSndFlagStereo
+	}
+	return data, flags
+}
+
+// buildKiwiSndPacket assembles one SND packet, tag included:
+//
+//	"SND" | flags:1 | seq:4 LE | smeter:2 BE | [gps:10 if stereo] | payload
+//
+// The layout is what audio_recv in kiwi/audio.js reads: it takes the sequence
+// little-endian from bytes 4-7, the S-meter big-endian from bytes 8-9, and the
+// payload from byte 20 when the stereo flag is set or byte 10 when it is not.
+// Getting that offset wrong does not fail loudly -- the client decodes the
+// timestamp as audio -- so the offset is pinned by test.
+func buildKiwiSndPacket(flags byte, seq uint32, smeter uint16, gpsTimeNs int64, payload []byte) []byte {
+	header := 3 + 1 + 4 + 2
+	if flags&kiwiSndFlagStereo != 0 {
+		header += kiwiStereoTimestampLen
+	}
+
+	packet := make([]byte, header+len(payload))
+	copy(packet, "SND")
+	packet[3] = flags
+	binary.LittleEndian.PutUint32(packet[4:8], seq)
+	binary.BigEndian.PutUint16(packet[8:10], smeter)
+	if flags&kiwiSndFlagStereo != 0 {
+		kiwiStereoTimestamp(packet[10:header], gpsTimeNs)
+	}
+	copy(packet[header:], payload)
+	return packet
+}
+
+// kiwiModeToRadiod translates KiwiSDR mode names to radiod preset names.
+// Modes not present here are unsupported (e.g. drm, qam, nsb, wide-IQ variants)
+// and are silently dropped — the client stays on its current mode, matching
+// real KiwiSDR behaviour for missing extensions.
+//
+// Every preset named here must produce audio convertible to the announced rate;
+// TestKiwiMappedModesReachTheAnnouncedRate enforces that.
+var kiwiModeToRadiod = map[string]string{
+	"usb":  "usb",
+	"lsb":  "lsb",
+	"am":   "am",
+	"amn":  "am", // narrow AM — edges supplied by low_cut/high_cut
+	"amw":  "am", // wide AM — same
+	"sam":  "sam",
+	"sal":  "sam", // SAM lower sideband
+	"sau":  "sam", // SAM upper sideband
+	"sas":  "sam", // SAM stereo
+	"cw":   "cwu", // KiwiSDR generic CW → cwu
+	"cwn":  "cwu", // narrow CW — edges from client
+	"usn":  "usb", // USB narrow — edges from client
+	"lsn":  "lsb", // LSB narrow — edges from client
+	"nbfm": "nfm", // KiwiSDR name for narrow FM
+	"nnfm": "nfm", // even narrower FM
+	"iq":   "iq",
+}
+
+// addTimeStats fills in the clock and timezone fields of the status payload.
+func (kc *kiwiConn) addTimeStats(stats map[string]interface{}) {
+	// ===== TIME FIELDS =====
+	//
+	// "Local" is the receiver's configured timezone (admin.timezone), not the
+	// server process's. Under Docker the container clock is UTC, so reading the
+	// process timezone made the client's local clock a copy of its UTC one and
+	// the zone read "UTC" on every receiver.
+	//
+	// The client renders these as: tu and tl as clocks, and
+	// server_tz = <tn> (<tz>) beneath them, with underscores in tn turned into
+	// spaces (time_display_cb).
+	location := kc.config.Admin.TimezoneLocation()
+	utc := time.Now().UTC()
+	now := utc.In(location)
+
+	// tu: UTC time string (format: "HH:MM" - no seconds, matching real KiwiSDR)
+	stats["tu"] = utc.Format("15:04")
+
+	// tl: Local time string in the configured timezone
+	stats["tl"] = now.Format("15:04")
+
+	// ti: Timezone abbreviation for that zone at this moment, so it follows
+	// daylight saving ("GMT" or "BST", not one of them all year).
+	// The client puts this through decodeURIComponent.
+	zoneName, offset := now.Zone()
+	stats["ti"] = url.PathEscape(zoneName)
+
+	// tn: IANA timezone name (e.g. "Europe/London"), falling back to a numeric
+	// offset for a location that has no name to give.
+	if name := location.String(); name != "" && name != "Local" {
+		stats["tn"] = url.PathEscape(name)
+	} else {
+		hours := offset / 3600
+		minutes := offset % 3600 / 60
+		if minutes < 0 {
+			minutes = -minutes
+		}
+		stats["tn"] = url.PathEscape(fmt.Sprintf("UTC%+03d:%02d", hours, minutes))
+	}
+}
+
+// addGPSStats fills in the GPS fields of the status-tab payload.
+//
+// A receiver with a Leo Bodnar GPSDO reports real satellite telemetry; one
+// without keeps the previous behaviour, which is to say only what the
+// configured coordinates support. Nothing here invents a number: a field with
+// no measurement behind it is left at zero, and the client renders zeroes
+// honestly -- "acquire pause", and no ADC clock line at all.
+func (kc *kiwiConn) addGPSStats(stats map[string]interface{}) {
+	// Defaults: no GPS hardware. ga is the acquiring flag the client prints as
+	// yes/pause; configured coordinates are a position, not an acquisition, but
+	// reporting 0 here would claim the receiver has no idea where it is.
+	acquiring := 0
+	if kc.config.Admin.GPS.Lat != 0 || kc.config.Admin.GPS.Lon != 0 {
+		acquiring = 1
+	}
+	stats["ga"] = acquiring
+	stats["gt"] = 0 // satellites tracked
+	stats["gg"] = 0 // satellites used in the fix
+	stats["gf"] = 0 // fixes since start
+	stats["go"] = 0 // ADC clock corrections averaged; 0 hides the clock line
+
+	// gc: ADC clock in MHz. Real whenever radiod has told us the front end's
+	// sample rate, GPSDO or not -- for a direct-sampling front end that rate is
+	// the ADC clock. The client keeps it as extint.adc_clock_Hz even when the
+	// display line is hidden, so calibration extensions see a true figure.
+	stats["gc"] = kc.adcClockMHz()
+
+	monitor := kc.gpsdoMonitor()
+	if monitor == nil {
+		return
+	}
+	snapshot := monitor.GetSnapshot()
+	if snapshot == nil || snapshot.Device == "" || snapshot.GPS == nil {
+		// No GPSDO on this receiver, or the container is unreachable.
+		return
+	}
+	gps := snapshot.GPS
+
+	// The GPS engine is present and talking, which is what the client's
+	// "acquire yes" means -- it says nothing about having a fix, which is
+	// what the counts below report.
+	stats["ga"] = 1
+	stats["gt"] = gps.GPSInView + gps.GLOInView
+	stats["gg"] = gps.SatsUsed
+	stats["gf"] = monitor.FixCount()
+
+	// gr and gl -- the client's GPS_auto_grid and GPS_auto_latlon -- are
+	// deliberately not sent, even though the GPSDO reports a position.
+	//
+	// That position is the antenna's actual location to six decimal places,
+	// which is not the operator's to publish by default: they set the receiver's
+	// coordinates in the admin config precisely so they can advertise a
+	// deliberately approximate location. Omitting these leaves
+	// isNonEmptyString(kiwi.GPS_auto_latlon) false in update_web_map and
+	// update_web_grid, so the client keeps using rx_gps and rx_grid from the cfg
+	// -- the configured values, which is what every other part of the emulation
+	// already advertises.
+}
+
+// gpsdoMonitor returns the handler's GPSDO monitor, or nil when this connection
+// has no handler (as in tests).
+func (kc *kiwiConn) gpsdoMonitor() *GPSDOMonitor {
+	if kc.handler == nil {
+		return nil
+	}
+	return kc.handler.gpsdoMonitor
+}
+
+// adcClockMHz reports the front end's sample rate in MHz, which for a
+// direct-sampling receiver is its ADC clock. Returns 0 when radiod has not
+// reported one, which keeps the client from displaying a made-up figure.
+//
+// The status is looked up by this connection's own SSRC; there is one physical
+// front end, so every channel reports the same rate for it.
+func (kc *kiwiConn) adcClockMHz() float64 {
+	kc.mu.RLock()
+	session := kc.session
+	kc.mu.RUnlock()
+	if kc.radiod == nil || session == nil {
+		return 0
+	}
+	fe := kc.radiod.GetFrontendStatus(session.SSRC)
+	if fe == nil || fe.InputSamprate <= 0 {
+		return 0
+	}
+	return float64(fe.InputSamprate) / 1e6
+}
+
+// AGC. The Kiwi client sends every control in one command whenever any of them
+// moves, and unprompted at connect (set_agc in kiwi/openwebrx.js, called from
+// the connect sequence with whatever the browser restored from its cookies).
+//
+// Only the controls radiod can reproduce faithfully are honoured:
+//
+//	agc      -> AGC_ENABLE          exact
+//	manGain  -> GAIN, when agc=0    exact in dB, though not calibrated to the
+//	                                same reference as a real KiwiSDR's
+//	hang     -> AGC_HANGTIME        the client's toggle becomes the operator's
+//	                                configured hang time, or zero
+//	decay    -> AGC_RECOVERY_RATE   see kiwiDecayToRecoveryRate
+//
+// thresh, threshCW and slope are deliberately ignored. radiod's AGC threshold
+// caps the *noise* at threshold x headroom (linear.c) on a -30..0 dB scale
+// relative to headroom, whereas the client's is an absolute signal level in
+// -130..0 dBm; and radiod's linear AGC has no slope term at all. Squashing one
+// range onto the other would give a slider that moves and means nothing.
+//
+// None of this is persisted as a session AGC override. The client pushes its
+// cookie values before the user has touched a control, and an override cannot
+// be cleared once set -- it would pin a stale setting from some other receiver
+// for the life of the session. Applying to the live channel only means the
+// operator's configured defaults reassert on the next mode change, when radiod
+// reloads the preset.
+const (
+	// kiwiDecayDefaultMs is the client's own default decay, which the mapping
+	// below is anchored to.
+	kiwiDecayDefaultMs = 1000.0
+
+	// kiwiAGCRecoveryMinDbS and kiwiAGCRecoveryMaxDbS are the bounds the native
+	// set_agc handler enforces; the same ones apply here.
+	kiwiAGCRecoveryMinDbS = 1.0
+	kiwiAGCRecoveryMaxDbS = 100.0
+)
+
+// kiwiDecayToRecoveryRate converts the client's AGC decay, in milliseconds,
+// into radiod's recovery rate in dB/s.
+//
+// The two are inverse quantities -- a longer decay is a slower recovery -- and
+// the constant is chosen so the two products' defaults coincide: the client's
+// decay slider starts at 1000 ms and ubersdr's configured recovery rate
+// defaults to 20 dB/s, so an untouched slider asks for exactly what the
+// receiver would have done anyway, and moving it goes the right way from there.
+func kiwiDecayToRecoveryRate(decayMs float64, defaultRateDbS float32) float32 {
+	if decayMs <= 0 {
+		return defaultRateDbS
+	}
+	rate := float64(defaultRateDbS) * kiwiDecayDefaultMs / decayMs
+	if rate < kiwiAGCRecoveryMinDbS {
+		rate = kiwiAGCRecoveryMinDbS
+	}
+	if rate > kiwiAGCRecoveryMaxDbS {
+		rate = kiwiAGCRecoveryMaxDbS
+	}
+	return float32(rate)
+}
+
+// kiwiAGCParams turns one "SET agc=..." command into radiod parameters.
+// Returns false when there is nothing worth sending.
+func kiwiAGCParams(params map[string]string, cfg *Config) (AGCParams, bool) {
+	hangDefault, recoveryDefault, _ := ssbAGCDefaults(cfg)
+
+	enabled := params["agc"] == "1"
+	out := AGCParams{Enable: &enabled}
+
+	if !enabled {
+		// Manual gain, which is the only thing that means anything with the
+		// AGC off. GAIN clears radiod's AGC flag by itself; Enable is still
+		// sent, after it, so the two agree.
+		if manGain, err := strconv.ParseFloat(strings.TrimSpace(params["manGain"]), 64); err == nil {
+			gain := float32(manGain)
+			out.Gain = &gain
+		}
+		return out, true
+	}
+
+	// The client's hang is a toggle, radiod's a duration.
+	hang := float32(0)
+	if params["hang"] == "1" {
+		hang = hangDefault
+	}
+	out.HangTime = &hang
+
+	if decayMs, err := strconv.ParseFloat(strings.TrimSpace(params["decay"]), 64); err == nil {
+		rate := kiwiDecayToRecoveryRate(decayMs, recoveryDefault)
+		out.RecoveryRate = &rate
+	}
+	return out, true
+}
+
+// applyAGC handles "SET agc=...".
+func (kc *kiwiConn) applyAGC(params map[string]string) {
+	kc.mu.RLock()
+	session := kc.session
+	kc.mu.RUnlock()
+	if session == nil {
+		return
+	}
+
+	session.mu.RLock()
+	mode := session.Mode
+	session.mu.RUnlock()
+
+	// IQ delivers raw quadrature for recording and TDoA; scaling it or riding
+	// its level would corrupt exactly what those uses depend on. FM does not
+	// use radiod's linear AGC at all.
+	if strings.HasPrefix(mode, "iq") || mode == "fm" || mode == "nfm" {
+		return
+	}
+
+	agcParams, ok := kiwiAGCParams(params, kc.config)
+	if !ok {
+		return
+	}
+
+	// UpdateAGC only forwards to radiod. Deliberately not the native handler's
+	// path, which also records session.UserAGC* overrides; see the note above.
+	if err := kc.sessions.UpdateAGC(session.ID, agcParams); err != nil {
+		log.Printf("KiwiSDR: AGC update failed for %s: %v", kc.clientIP, err)
+	}
+}
+
+// kiwiSquelchMaxDB is the top of the Kiwi squelch slider for every mode except
+// NBFM, in dB. squelch_setup in kiwi/openwebrx.js sets the slider maximum to 40
+// there and renders the value with a " dB" suffix, so the number the client
+// sends is already an SNR threshold.
+const kiwiSquelchMaxDB = 40.0
+
+// kiwiSquelchNBFMMax is the top of the same slider in NBFM, where it runs 0-99
+// on a scale of its own with no unit shown.
+const kiwiSquelchNBFMMax = 99.0
+
+// kiwiSquelchToMinSNR converts a slider position into the audio gate's min_snr.
+//
+// Zero is off in the Kiwi UI -- the readout reads "off" rather than "0 dB" --
+// so it maps to the gate's disabled sentinel rather than to a 0 dB threshold,
+// which would gate out every signal at or below the noise floor.
+func kiwiSquelchToMinSNR(position float64, nbfm bool) float32 {
+	if position <= 0 {
+		return audioGateDisabled
+	}
+	if nbfm {
+		// No dB scale to preserve; spread 1-99 across the same useful range so
+		// the control still spans "barely gates" to "only strong signals".
+		if position > kiwiSquelchNBFMMax {
+			position = kiwiSquelchNBFMMax
+		}
+		return float32(position * kiwiSquelchMaxDB / kiwiSquelchNBFMMax)
+	}
+	if position > kiwiSquelchMaxDB {
+		position = kiwiSquelchMaxDB
+	}
+	return float32(position)
+}
+
+// applySquelch handles "SET squelch=<n>". The threshold lands on the session's
+// audio gate, the same one the native protocol's set_audio_gate drives, so both
+// front ends gate on identical logic -- hysteresis, hang timer and the
+// retune-settling window included.
+func (kc *kiwiConn) applySquelch(value string) {
+	position, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil {
+		log.Printf("KiwiSDR: bad squelch value %q from %s", value, kc.clientIP)
+		return
+	}
+
+	kc.mu.RLock()
+	session := kc.session
+	kc.mu.RUnlock()
+	if session == nil {
+		// No audio channel yet. The client re-sends the squelch on every mode
+		// change (squelch_setup calls set_squelch_cb, which calls
+		// send_squelch), so the setting is not lost.
+		return
+	}
+
+	session.mu.RLock()
+	nbfm := session.Mode == "nfm" || session.Mode == "fm"
+	session.mu.RUnlock()
+
+	minSNR := kiwiSquelchToMinSNR(position, nbfm)
+
+	session.mu.Lock()
+	session.AudioGateMinSNR = minSNR
+	session.mu.Unlock()
+}
+
+// announcedSampleRate is the audio rate this connection tells the client about,
+
+// and therefore the rate every SND packet must actually be in.
+//
+// The KiwiSDR protocol states the rate once, in the "audio_init" message at
+// connect, and has no way to revise it: a real KiwiSDR runs every mode at
+// 12 kHz, so nothing upstream ever needed to. radiod does not — am/sam/fm/nfm
+// are 24 kHz presets — so streamAudio decimates to this rate rather than the
+// announcement chasing the mode. See kiwi_decimate.go.
+func (kc *kiwiConn) announcedSampleRate() int {
+	return kc.config.Audio.DefaultSampleRate
+}
+
+// maxPassbandEdgeHz is the widest filter edge that can survive the trip to the
+// client, namely the Nyquist limit of the announced rate.
+//
+// The Kiwi web UI already clamps its own edges to audio_input_rate/2 (see
+// low_cut_limit/high_cut_limit in kiwi/openwebrx.js), so this never binds for
+// browser users. Non-browser clients such as kiwirecorder build the "SET mod"
+// string themselves with no such limit, and radiod would honour edges out to
+// +/-12 kHz on a 24 kHz channel -- which would then fold into the audio band on
+// the way down to 12 kHz.
+func (kc *kiwiConn) maxPassbandEdgeHz() int {
+	return kc.announcedSampleRate() / 2
 }
 
 // identityForSession returns the identity a User-Agent ban is matched against for
@@ -1040,28 +1548,6 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 
 	// Handle mod command (frequency/mode/bandwidth)
 	if kiwiMode, hasMod := params["mod"]; hasMod {
-		// Translate KiwiSDR mode names to radiod preset names.
-		// Modes not present in this map are unsupported (e.g. drm, qam, nsb,
-		// wide-IQ variants) and are silently dropped — the client stays on its
-		// current mode, matching real KiwiSDR behaviour for missing extensions.
-		kiwiModeToRadiod := map[string]string{
-			"usb":  "usb",
-			"lsb":  "lsb",
-			"am":   "am",
-			"amn":  "am", // narrow AM — edges supplied by low_cut/high_cut
-			"amw":  "am", // wide AM — same
-			"sam":  "sam",
-			"sal":  "sam", // SAM lower sideband
-			"sau":  "sam", // SAM upper sideband
-			"sas":  "sam", // SAM stereo
-			"cw":   "cwu", // KiwiSDR generic CW → cwu
-			"cwn":  "cwu", // narrow CW — edges from client
-			"usn":  "usb", // USB narrow — edges from client
-			"lsn":  "lsb", // LSB narrow — edges from client
-			"nbfm": "nfm", // KiwiSDR name for narrow FM
-			"nnfm": "nfm", // even narrower FM
-			"iq":   "iq",
-		}
 		mode, ok := kiwiModeToRadiod[strings.ToLower(kiwiMode)]
 		if !ok {
 			log.Printf("KiwiSDR: unsupported mode '%s' from %s — ignoring", kiwiMode, kc.clientIP)
@@ -1081,6 +1567,19 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		}
 		if hcStr, ok := params["high_cut"]; ok {
 			highCut, _ = strconv.Atoi(hcStr)
+		}
+
+		// Keep the passband inside what the announced rate can carry. radiod
+		// would accept edges out to +/-12 kHz on a 24 kHz am/fm channel, and
+		// everything past the announced Nyquist folds back into the audio band
+		// when streamAudio decimates. See maxPassbandEdgeHz.
+		if edge := kc.maxPassbandEdgeHz(); edge > 0 {
+			if lowCut < -edge {
+				lowCut = -edge
+			}
+			if highCut > edge {
+				highCut = edge
+			}
 		}
 
 		// Create or update session
@@ -1134,23 +1633,31 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 
 		zoom, _ := strconv.Atoi(zoomStr)
 
+		// Clamp before anything uses it. zoom_max is advertised at connect but
+		// nothing obliges a client to honour it, and the x_bin arithmetic below
+		// shifts by (maxZoom - zoom): past the maximum that count converts to a
+		// huge unsigned value, Go yields 0 rather than panicking, and the
+		// frequency mapping silently collapses.
+		if zoom < 0 {
+			zoom = 0
+		}
+		if zoom > kiwiMaxZoom {
+			zoom = kiwiMaxZoom
+		}
+
 		// Store zoom level
 		kc.mu.Lock()
 		kc.zoom = zoom
 		kc.mu.Unlock()
 
-		// Calculate bin_bandwidth from zoom level
-		// Full span = 30 MHz, zoom divides by 2^zoom, 1024 bins displayed
-		fullSpanKHz := 30000.0
-		spanKHz := fullSpanKHz / math.Pow(2, float64(zoom))
-		requestedBinBandwidth := (spanKHz * 1000) / 1024 // Hz per bin at this zoom level
+		fullSpanKHz := kiwiFullSpanHz / 1000.0
 
-		// Important: x_bin is always relative to MAX zoom level (zoom 7)
-		// max_bins = 1024 << 7 = 131072 bins across 30 MHz
+		// Important: x_bin is always relative to MAX zoom level (kiwiMaxZoom)
+		// max_bins = 1024 << kiwiMaxZoom bins across 30 MHz
 		// bin_to_freq: freq = (bin / max_bins) * bandwidth
 		// freq_to_bin: bin = (freq / bandwidth) * max_bins
-		const maxZoom = 7
-		maxBins := 1024 << maxZoom // 131072
+		const maxZoom = kiwiMaxZoom
+		maxBins := 1024 << maxZoom
 
 		// Parse x_bin and calculate center frequency FIRST (before bin count determination)
 		var freq uint64
@@ -1165,8 +1672,15 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			centerBin := (cfKHz / fullSpanKHz) * float64(maxBins)
 			// Calculate bins at current zoom: bins_at_zoom(zoom) = wf_fft_size << (zoom_levels_max - zoom)
 			binsAtCurrentZoom := 1024 << uint(maxZoom-zoom)
-			// xBin is the start position, so it's center minus half the window
-			xBin = uint32(centerBin - float64(binsAtCurrentZoom)/2)
+			// xBin is the start position, so it's center minus half the window.
+			// Floor at zero: a converted negative float is undefined in Go, and
+			// a window wider than the centre frequency's offset from 0 Hz --
+			// any shallow zoom below mid band -- produces one.
+			startBin := centerBin - float64(binsAtCurrentZoom)/2
+			if startBin < 0 {
+				startBin = 0
+			}
+			xBin = uint32(startBin)
 		} else if startStr, ok := params["start"]; ok {
 			// Handle start parameter (x_bin position at max zoom resolution)
 			xBin64, _ := strconv.ParseUint(startStr, 10, 32)
@@ -1206,27 +1720,24 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			freq = maxSpectrumFreq
 		}
 
-		// Always use 1024 bins (matching real KiwiSDR FPGA hardware behaviour).
-		//
-		// The KiwiSDR client uses the echoed x_bin and zoom from the W/F packet
-		// header to draw the frequency axis, assuming the server always returns
-		// exactly wf_fft_size (1024) bins covering the full 30MHz/2^zoom span.
-		// Reducing binCount silently narrows the actual radiod window while the
-		// client still labels the axis for the full span, causing signals to
-		// appear at the wrong frequency position when zoomed in.
-		//
-		// If the requested binBW falls below radiod's minimum (~60 Hz/bin for
-		// 1024 bins), clamp it.  The waterfall resolution stops improving beyond
-		// that zoom level but the frequency axis remains accurate.
-		const minBinBW = 60.0 // radiod minimum Hz/bin for 1024 bins
-		binCount := 1024
-		binBandwidth := requestedBinBandwidth
-		if binBandwidth < minBinBW {
-			binBandwidth = minBinBW
-		}
+		// Choose what to ask radiod for. The client's axis always assumes 1024
+		// bins across the full 30MHz/2^zoom span, so whatever comes back is
+		// resampled onto that grid in streamWaterfall -- which is what lets the
+		// request use a bin bandwidth radiod can serve cheaply instead of the
+		// exact fractional one. See kiwi_waterfall.go.
+		req := kiwiSpectrumParams(zoom)
+		binCount := req.BinCount
+		binBandwidth := req.BinBandwidth
 
-		// Store xBin
+		// Hand the geometry and the new window position to the waterfall
+		// goroutine together. It cannot read the session's own bin bandwidth:
+		// that is written by the update path and would be a race, and a packet
+		// already queued when the zoom changed still has the previous geometry.
+		// Recording the bin count we asked for lets streamWaterfall recognise
+		// such a packet and fall back rather than stretch it across the wrong
+		// span.
 		kc.mu.Lock()
+		kc.wfRequest = req
 		kc.xBin = xBin
 		kc.mu.Unlock()
 
@@ -1237,6 +1748,37 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		// during connection setup), so no error is logged on failure.
 		if kc.userSessionID != "" {
 			kc.sessions.UpdateSpectrumSessionByUserIDWithBinCount(kc.userSessionID, freq, binBandwidth, binCount)
+		}
+		return
+	}
+
+	// Handle AGC. See applyAGC for what is honoured and what is not.
+	if _, hasAGC := params["agc"]; hasAGC {
+		if kc.connType == "SND" {
+			kc.applyAGC(params)
+		}
+		return
+	}
+
+	// Handle squelch.
+	//
+	// The Kiwi client sends "SET squelch=<n> param=<p>" whenever the slider
+	// moves (send_squelch in kiwi/openwebrx.js). For every mode except NBFM the
+	// slider is 0-40 and the UI labels it in dB -- squelch_setup sets
+	// id-squelch-value.max to 40 and the readout appends " dB" -- which is an
+	// SNR threshold and maps straight onto ubersdr's audio gate. For NBFM the
+	// same slider runs 0-99 on an arbitrary scale, so it is taken as a
+	// proportion of the same dB range.
+	//
+	// param carries the squelch tail in seconds (non-NBFM) or the NBFM
+	// threshold; neither is applied. The gate has its own 500 ms hang time,
+	// which is within the range of the tail selector's options.
+	if sqStr, hasSquelch := params["squelch"]; hasSquelch {
+		// Only on the audio connection: handleSetCommand serves both, and on a
+		// W/F connection kc.session is the spectrum session, which has no audio
+		// to gate.
+		if kc.connType == "SND" {
+			kc.applySquelch(sqStr)
 		}
 		return
 	}
@@ -1396,7 +1938,8 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
-	// Ignore other commands (agc, etc.)
+	// Anything else is ignored, as a real KiwiSDR does for commands whose
+	// extension is not loaded.
 }
 
 // calculateDynamicRangeFromFFT calculates P5, P95, and dynamic range from FFT data
@@ -1425,37 +1968,11 @@ func (kc *kiwiConn) sendStatsCallback() {
 	// Build stats JSON object with all expected fields
 	stats := make(map[string]interface{})
 
-	// ===== TIME FIELDS (fully implemented) =====
-	now := time.Now()
-	utc := now.UTC()
-
-	// tu: UTC time string (format: "HH:MM" - no seconds, matching real KiwiSDR)
-	stats["tu"] = utc.Format("15:04")
-
-	// tl: Local time string (format: "HH:MM" - no seconds, matching real KiwiSDR)
-	stats["tl"] = now.Format("15:04")
-
-	// ti: Timezone ID (e.g., "GMT", "EST", "PST")
-	// Get timezone abbreviation from the zone name
-	zoneName, _ := now.Zone()
-	stats["ti"] = zoneName
-
-	// tn: Timezone name (e.g., "Europe/London", "America/New_York")
-	// Use IANA timezone name if available, otherwise use offset
-	location := now.Location()
-	if location != nil && location.String() != "" && location.String() != "Local" {
-		stats["tn"] = location.String()
-	} else {
-		// Fallback to offset format
-		_, offset := now.Zone()
-		hours := offset / 3600
-		minutes := (offset % 3600) / 60
-		stats["tn"] = fmt.Sprintf("UTC%+03d:%02d", hours, minutes)
-	}
+	kc.addTimeStats(stats)
 
 	// ===== SAMPLE RATE FIELDS (fully implemented) =====
 	// sr: Sample rate (Hz) - audio sample rate
-	sampleRate := kc.config.Audio.DefaultSampleRate
+	sampleRate := kc.announcedSampleRate()
 	stats["sr"] = sampleRate
 
 	// wsr: Waterfall sample rate (Hz) - spectrum update rate
@@ -1565,35 +2082,23 @@ func (kc *kiwiConn) sendStatsCallback() {
 	// as: Sum of all kilobytes per second (sum_kbps in frontend)
 	stats["as"] = int(totalKBytesPerSec)
 
-	// ===== GPS STATS (placeholder - to be implemented with GPS integration) =====
-	// ga: GPS acquisition state (0 = no GPS, 1 = acquiring, 2 = acquired)
-	// Check if GPS coordinates are configured
-	if kc.config.Admin.GPS.Lat != 0 || kc.config.Admin.GPS.Lon != 0 {
-		stats["ga"] = 2 // Show as acquired if coordinates are configured
-	} else {
-		stats["ga"] = 0 // No GPS
-	}
-
-	// gt: GPS tracking state (0 = not tracking, 1 = tracking)
-	stats["gt"] = 0
-
-	// gg: GPS good satellites count
-	stats["gg"] = 0
-
-	// gf: GPS fixes count
-	stats["gf"] = 0
-
-	// gc: GPS corrections count
-	stats["gc"] = 0
-
-	// go: GPS offset in ns (nanoseconds)
-	stats["go"] = 0
-
-	// gr: GPS reference clock frequency in Hz
-	stats["gr"] = 0
-
-	// gl: GPS lock status (0 = unlocked, 1 = locked)
-	stats["gl"] = 0
+	// ===== GPS STATS =====
+	//
+	// The client feeds these to gps_stats_cb(o.ga, o.gt, o.gg, o.gf, o.gc, o.go)
+	// and renders the status tab's GPS row as:
+	//
+	//	GPS: acquire <yes|pause>, ch N, track <gt>, good <gg>, fixes <gf>
+	//
+	// followed by ", ADC clock <gc> (<go> avgs)" -- but only when go is
+	// non-zero. Two of these do not mean what their names suggest: gc is the
+	// ADC clock in MHz (the client also stores it as extint.adc_clock_Hz for
+	// the calibration extensions), and go is the number of corrections averaged
+	// into it, not an offset in nanoseconds.
+	//
+	// gr and gl are not part of that row at all: the client URI-decodes them
+	// into kiwi.GPS_auto_grid and kiwi.GPS_auto_latlon, which feed the
+	// receiver's displayed grid and map position.
+	kc.addGPSStats(stats)
 
 	// ===== SNR STATS (fully implemented using wideband spectrum) =====
 	// sa: SNR for 0-30 MHz in dB (or -1 if not available)
@@ -1790,7 +2295,7 @@ func (kc *kiwiConn) sendInitMessages() {
 
 	if kc.connType == "SND" {
 		// Audio connection - send audio-specific messages
-		sampleRate := kc.config.Audio.DefaultSampleRate
+		sampleRate := kc.announcedSampleRate()
 		kc.sendMsg("sample_rate", fmt.Sprintf("%.6f", float64(sampleRate)))
 		kc.sendMsg("client_public_ip", kc.clientIP)
 
@@ -1822,7 +2327,7 @@ func (kc *kiwiConn) sendInitMessages() {
 		kc.sendMsg("wf_fft_size", "1024")
 		kc.sendMsg("wf_fps", "23")
 		kc.sendMsg("wf_fps_max", "23")
-		kc.sendMsg("zoom_max", "7")
+		kc.sendMsg("zoom_max", fmt.Sprintf("%d", kiwiMaxZoom))
 		kc.sendMsg("wf_chans", fmt.Sprintf("%d", maxSessions))
 		kc.sendMsg("wf_chans_real", fmt.Sprintf("%d", maxSessions))
 		kc.sendMsg("wf_cal", "-3")
@@ -1857,11 +2362,17 @@ func (kc *kiwiConn) sendInitMessages() {
 			}
 			kc.session = session
 
-			// Configure initial spectrum parameters (zoom 0 = full 30 MHz span)
-			// Full span = 30 MHz, zoom 0 = 30000 kHz / 1024 bins = 29.296875 kHz/bin
-			initialBinBandwidth := 30000000.0 / 1024.0 // Hz per bin at zoom 0
-			initialFreq := uint64(15000000)            // Center frequency: 15 MHz
-			updated := kc.sessions.UpdateSpectrumSessionByUserID(kc.userSessionID, initialFreq, initialBinBandwidth)
+			// Configure initial spectrum parameters (zoom 0 = full 30 MHz span).
+			// Same chooser the zoom handler uses, so streamWaterfall's geometry
+			// is correct from the first packet rather than only after the
+			// client's first SET zoom.
+			initialReq := kiwiSpectrumParams(0)
+			initialFreq := uint64(15000000) // Center frequency: 15 MHz
+			kc.mu.Lock()
+			kc.wfRequest = initialReq
+			kc.mu.Unlock()
+			updated := kc.sessions.UpdateSpectrumSessionByUserIDWithBinCount(
+				kc.userSessionID, initialFreq, initialReq.BinBandwidth, initialReq.BinCount)
 			if !updated {
 				log.Printf("Warning: Failed to configure initial spectrum session")
 			}
@@ -2435,26 +2946,78 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 			// This is what KiwiSDR expects for uncompressed audio
 			pcmData := audioPacket.PCMData
 
-			var encodedData []byte
-			var flags byte
+			// IQ modes deliver interleaved I/Q, which the Kiwi protocol carries
+			// as stereo. The channel count is stamped on the packet (see
+			// routeAudio) so a mode change cannot mislabel audio already queued.
+			stereo := audioPacket.Channels == 2
 
-			kc.mu.RLock()
-			useCompression := kc.compression
-			kc.mu.RUnlock()
+			// Bring the packet to the rate this connection announced. The
+			// packet carries the rate it was captured at (stamped in
+			// routeAudio), so a mode change is picked up here without this
+			// path needing its own copy of the per-mode rate table.
+			announced := kc.announcedSampleRate()
+			if audioPacket.SampleRate != kc.decimatorInRate || audioPacket.Channels != kc.decimatorChannels {
+				kc.decimatorInRate = audioPacket.SampleRate
+				kc.decimatorChannels = audioPacket.Channels
+				kc.decimator = nil
+				// The filter runs over one continuous stream, so interleaved
+				// stereo would smear I into Q. Only "iq" is mapped and it is
+				// already at the announced rate, so this never needs to
+				// convert; refuse rather than corrupt if that ever changes.
+				if !stereo {
+					kc.decimator = newKiwiDecimator(audioPacket.SampleRate, announced)
+				}
+				if kc.decimator == nil && audioPacket.SampleRate != announced {
+					// Nothing in presets.conf produces this for a mode the
+					// Kiwi emulation maps, so it means a preset changed under
+					// us. Passing the packet through would play at the wrong
+					// speed silently; say so once per rate change instead.
+					log.Printf("KiwiSDR: cannot convert %d Hz %d-channel audio to the announced %d Hz "+
+						"(SSRC %d) -- audio will play at the wrong speed",
+						audioPacket.SampleRate, audioPacket.Channels, announced, kc.session.SSRC)
+				}
+			}
+			pcmData = kc.decimator.Process(pcmData)
 
-			if useCompression {
-				// Encode with IMA ADPCM
-				encodedData = kc.adpcmEncoder.Encode(pcmData)
-				flags = 0x10 // Compressed flag
-			} else {
-				encodedData = pcmData
-				flags = 0x00
+			// Squelch. The gate is the session's own -- the same one
+			// set_audio_gate drives for native clients -- so both front ends
+			// share its thresholds, 3 dB hysteresis, hang timer and
+			// retune-settling window. Version 3 semantics: min_snr is an SNR in
+			// dB, the scale the Kiwi slider is labelled in.
+			//
+			// IQ carries raw quadrature rather than demodulated audio, so there
+			// is nothing to squelch; the native path skips the gate likewise.
+			var squelchFlag byte
+			if !stereo {
+				// channelSignalQuality also closes the retune settling window,
+				// so it is called even while that window is open.
+				bbPower, noiseFigure := channelSignalQuality(kc.radiod, kc.config, kc.session, 3)
+				if !audioGateAllows(kc.session, bbPower, noiseFigure) {
+					if kc.session.retuning() {
+						// Not a squelch decision: the gate closes outright
+						// during a retune, squelch off or not, because what is
+						// coming out is the old channel's audio followed by the
+						// new channel's filter and AGC transient. Substitute
+						// silence the way the native path does, rather than
+						// raising the squelch flag and blinking the client's
+						// squelch indicator on every mode change. Blanking here
+						// rather than after encoding matters: zeroed ADPCM
+						// nibbles decode as drift, not as silence.
+						pcmData = make([]byte, len(pcmData))
+					} else {
+						// A real squelch decision. The payload is left intact:
+						// the client mutes for itself when it sees this flag
+						// (audio_recv in kiwi/audio.js substitutes 1 for every
+						// sample) and keeps the unsquelched audio for its
+						// pre-record buffer, so sending the real audio is both
+						// what a KiwiSDR does and what makes that feature work.
+						squelchFlag = kiwiSndFlagSquelchUI
+					}
+				}
 			}
 
-			// Build SND packet: [flags:1][seq:4][smeter:2][data]
-			packet := make([]byte, 7+len(encodedData))
-			packet[0] = flags
-			binary.LittleEndian.PutUint32(packet[1:5], kc.sequence)
+			encodedData, flags := kc.encodeSndPayload(pcmData, stereo)
+			flags |= squelchFlag
 
 			// S-meter: Get actual baseband power from radiod channel status
 			// KiwiSDR S-meter encoding: smeter_value = (dBm + 127) * 10
@@ -2477,11 +3040,19 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 					smeterValue = uint16((dbm + 127) * 10)
 				}
 			}
-			binary.BigEndian.PutUint16(packet[5:7], smeterValue)
-			copy(packet[7:], encodedData)
-
-			// Send with "SND" tag
-			fullPacket := append([]byte("SND"), packet...)
+			// Squelch. The gate is the session's own -- the same one
+			// set_audio_gate drives for native clients -- so both front ends
+			// share its hysteresis, hang timer and retune-settling window.
+			//
+			// Version 3 semantics: min_snr is an SNR in dB, which is the scale
+			// the Kiwi slider is labelled in.
+			//
+			// Unlike the native path, a closed gate does not blank the payload.
+			// The client mutes for itself when it sees this flag (audio_recv in
+			// kiwi/audio.js substitutes 1 for every sample) and keeps the
+			// unsquelched audio for its pre-record buffer, so sending real audio
+			// is both what a KiwiSDR does and what makes that feature work.
+			fullPacket := buildKiwiSndPacket(flags, kc.sequence, smeterValue, audioPacket.GPSTimeNs, encodedData)
 
 			kc.conn.writeMu.Lock()
 			if err := kc.conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
@@ -2543,35 +3114,33 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			// Copy first half (positive frequencies) to end
 			copy(unwrapped[halfBins:N], spectrumData[0:halfBins])
 
-			// Get current zoom, xBin, and compression flag for packet building
+			// Get current zoom, xBin, geometry and compression flag for packet building
 			kc.mu.RLock()
 			currentZoom := kc.zoom
 			currentXBin := kc.xBin
 			useCompression := kc.wfCompression
+			req := kc.wfRequest
 			kc.mu.RUnlock()
 
-			// KiwiSDR protocol always expects exactly 1024 bins
-			// If radiod sent fewer bins (due to narrow bandwidth optimization), interpolate up
-			const targetBins = 1024
-			if N < targetBins {
-				interpolated := make([]float32, targetBins)
-				for i := 0; i < targetBins; i++ {
-					// Map output bin i to input position in unwrapped
-					srcPos := float64(i) * float64(N-1) / float64(targetBins-1)
-					srcIdx := int(srcPos)
-					frac := float32(srcPos - float64(srcIdx))
-
-					// Linear interpolation
-					if srcIdx+1 < N {
-						interpolated[i] = unwrapped[srcIdx]*(1-frac) + unwrapped[srcIdx+1]*frac
-					} else {
-						interpolated[i] = unwrapped[srcIdx]
-					}
-				}
-
-				unwrapped = interpolated
-				N = targetBins
+			// Put the spectrum on the grid the client's frequency axis assumes:
+			// always exactly 1024 bins spanning 30MHz/2^zoom. radiod is asked
+			// for whatever bin bandwidth it can serve cheaply, so this is where
+			// the two are reconciled. See kiwi_waterfall.go.
+			srcBinBW := req.BinBandwidth
+			if req.BinCount != N || req.DisplayBinBW <= 0 {
+				// Either a packet still in flight from the previous zoom, or a
+				// zoom command we never saw. Neither can be mapped with this
+				// geometry; treat the data as covering the display span, which
+				// is what this path did before the ladder existed.
+				srcBinBW = 0
 			}
+			displayBinBW := req.DisplayBinBW
+			if displayBinBW <= 0 {
+				displayBinBW = kiwiFullSpanHz / math.Pow(2, float64(currentZoom)) / kiwiWaterfallBins
+			}
+
+			unwrapped = resampleKiwiWaterfall(unwrapped, srcBinBW, displayBinBW, kiwiWaterfallBins)
+			N = len(unwrapped)
 
 			// Convert unwrapped spectrum data (float32 dBFS) to KiwiSDR waterfall format
 			// KiwiSDR wire protocol (from openwebrx.js dB_wire_to_dBm):

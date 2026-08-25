@@ -12009,6 +12009,7 @@ function resetStationIdColor() {
             const GROUPS = [
                 { id: 'interface', title: '🎨 Interface', note: 'Colours and text size, as the Colours menu and the A- / A+ buttons set them.' },
                 { id: 'spectrum',  title: '📉 Spectrum and waterfall', note: 'The display a visitor opens on. Every one of these is in v2\'s own Display panel too.' },
+                { id: 'tuning',    title: '🎚️ Tuning', note: 'How far a step moves the dial, and what the scroll wheel does over the spectrum. Both are the visitor\'s to change afterwards — in the Receiver and Display panels.' },
             ];
             host.innerHTML = GROUPS.map(g => {
                 const rows = v2SettingsList.filter(s => s.group === g.id).map(v2RowHtml).join('');

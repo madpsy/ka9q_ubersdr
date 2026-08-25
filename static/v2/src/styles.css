@@ -7731,6 +7731,24 @@ a.btn { text-decoration: none; }
    instead of above, where a two-line field would make the bar taller. */
 .tp__field--inline { flex-direction: row; align-items: center; gap: 6px; }
 
+/* ── Olivia ───────────────────────────────────────────────────────────────── */
+
+/* Two of Olivia's three settings need room the teleprinter fields do not: the
+   mode menu carries the rate alongside the name, and the squelch is a slider
+   that has to be draggable rather than merely present. They grow into whatever
+   the row has spare, which on a narrow window drops them onto their own lines
+   rather than shrinking them to unusable. */
+.olivia .tp__field--wide { flex: 1 1 200px; min-width: 180px; }
+
+/* What the server actually built, sat in the footer beside the audio level.
+   Secondary information about a thing you are already reading, so it takes the
+   faint colour and the tabular figures rather than competing with the text. */
+.olivia .tp__hint {
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+}
+
 /* ── NAVTEX ───────────────────────────────────────────────────────────────── */
 
 /* The message list is the same scroller as the raw console, so switching

@@ -36,6 +36,7 @@ import (
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/ft8"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/morse"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/olivia"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/soundmodem"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/sstv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/wefax"
@@ -1625,6 +1626,35 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: navtex v%s", navtexInfo["version"].(string))
+
+	// Register Olivia extension
+	oliviaInfo := olivia.GetInfo()
+
+	oliviaFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		oliviaParams := olivia.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		oliviaExt, err := olivia.Factory(oliviaParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &oliviaExtensionWrapper{ext: oliviaExt}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"olivia",
+		oliviaFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        oliviaInfo["name"].(string),
+			Description: oliviaInfo["description"].(string),
+			Version:     oliviaInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: olivia v%s", oliviaInfo["version"].(string))
 
 	// Register FSK extension
 	fskInfo := fsk.GetInfo()
@@ -7043,6 +7073,47 @@ func (w *navtexExtensionWrapper) Stop() error {
 
 func (w *navtexExtensionWrapper) GetName() string {
 	return w.ext.GetName()
+}
+
+// oliviaExtensionWrapper wraps an olivia.AudioExtension to implement main.AudioExtension
+type oliviaExtensionWrapper struct {
+	ext olivia.AudioExtension
+}
+
+func (w *oliviaExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to olivia.AudioSample
+	oliviaChan := make(chan olivia.AudioSample, cap(audioChan))
+	go func() {
+		defer close(oliviaChan)
+		for sample := range audioChan {
+			oliviaChan <- olivia.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(oliviaChan, resultChan)
+}
+
+func (w *oliviaExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *oliviaExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// SetSyncThreshold moves the squelch on a running decoder, and reports back the
+// value that was actually applied after clamping. Olivia takes several seconds
+// to acquire, so this deliberately does not go through a re-attach the way its
+// other settings do.
+func (w *oliviaExtensionWrapper) SetSyncThreshold(v float64) (float64, error) {
+	ext, ok := w.ext.(*olivia.Extension)
+	if !ok {
+		return 0, fmt.Errorf("olivia extension has an unexpected type %T", w.ext)
+	}
+	return ext.SetSyncThreshold(v), nil
 }
 
 // fskExtensionWrapper wraps a fsk.AudioExtension to implement main.AudioExtension

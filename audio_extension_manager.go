@@ -348,6 +348,43 @@ func (aem *AudioExtensionManager) handleControl(sessionID string, conn *websocke
 			"output_mode":  modeStr,
 		})
 
+	case "set_squelch":
+		// Move the Olivia squelch without rebuilding the decoder.
+		// Expected message: { "type": "audio_extension_control", "control_type": "set_squelch", "sync_threshold": 4.5 }
+		//
+		// Every other Olivia setting resizes the receiver's arrays, so the
+		// frontend changes those by re-attaching. The squelch is the exception
+		// on purpose: Olivia has no preamble and takes several seconds to
+		// acquire, so a slider that tore the decoder down on every drag would
+		// be unusable.
+		threshold, ok := msg["sync_threshold"].(float64)
+		if !ok {
+			log.Printf("AudioExtension: set_squelch missing sync_threshold")
+			return aem.sendErrorSafe(activeExtension, conn, "sync_threshold is required for set_squelch")
+		}
+
+		oliviaWrapper, ok := activeExtension.Extension.(*oliviaExtensionWrapper)
+		if !ok {
+			log.Printf("AudioExtension: set_squelch called on non-olivia extension")
+			return aem.sendErrorSafe(activeExtension, conn, "set_squelch is only supported for the olivia extension")
+		}
+
+		applied, err := oliviaWrapper.SetSyncThreshold(threshold)
+		if err != nil {
+			log.Printf("AudioExtension: set_squelch failed: %v", err)
+			return aem.sendErrorSafe(activeExtension, conn, fmt.Sprintf("set_squelch failed: %v", err))
+		}
+
+		log.Printf("AudioExtension: [%s] olivia squelch set to %.2f", sessionID, applied)
+		// The applied value is echoed rather than the requested one: it is
+		// clamped, and a slider that silently disagreed with the decoder would
+		// be worse than one that snaps.
+		return aem.sendTextMessageSafe(activeExtension, map[string]interface{}{
+			"type":           "audio_extension_control_ack",
+			"control_type":   "set_squelch",
+			"sync_threshold": applied,
+		})
+
 	default:
 		log.Printf("AudioExtension: Unknown control type: %s", controlType)
 		return aem.sendErrorSafe(activeExtension, conn, fmt.Sprintf("unknown control_type: %s", controlType))

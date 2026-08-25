@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -154,7 +156,7 @@ func TestV2EnumsAndBoolsMatchTheClient(t *testing.T) {
 	for _, s := range v2Settings {
 		switch s.Kind {
 		case "select":
-			if s.Key == "color_scheme" || s.Key == "palette" {
+			if s.Key == "color_scheme" || s.Key == "palette" || s.Key == "tune_step" {
 				continue // handled by their own tests above
 			}
 			block := src[strings.Index(src, "export const V2_ENUMS = {"):]
@@ -176,6 +178,62 @@ func TestV2EnumsAndBoolsMatchTheClient(t *testing.T) {
 				t.Errorf("the admin UI offers %q but V2_BOOLS does not list it", s.Key)
 			}
 		}
+	}
+}
+
+// TestV2TuneStepsMatchTheInterface checks the step list against both sides of
+// the interface: TUNING_STEPS in radio/constants.js, which is what its own step
+// menus offer, and V2_STEPS in display/uiConfig.js, which is what it accepts
+// from the operator. A step in the admin UI that is in neither is one an
+// operator can save and nothing will act on.
+func TestV2TuneStepsMatchTheInterface(t *testing.T) {
+	steps := func(src, decl string) []string {
+		t.Helper()
+		i := strings.Index(src, decl)
+		if i < 0 {
+			t.Fatalf("%q not found — has it been restructured?", decl)
+		}
+		list := src[i+len(decl):]
+		list = list[:strings.Index(list, "]")]
+		out := []string{}
+		for _, f := range strings.Split(list, ",") {
+			if f = strings.TrimSpace(f); f != "" {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+
+	want := steps(readV2Source(t, "radio/constants.js"), "export const TUNING_STEPS = [")
+	client := steps(readV2Source(t, "display/uiConfig.js"), "tune_step: { key: 'tuneStep', values: [")
+	if len(want) == 0 {
+		t.Fatal("no tuning steps found in radio/constants.js")
+	}
+	if strings.Join(want, ",") != strings.Join(client, ",") {
+		t.Errorf("the client accepts steps %v but the interface offers %v", client, want)
+	}
+
+	got := []string{}
+	for _, o := range v2TuneSteps {
+		got = append(got, o.Value)
+		// Labelled the way the interface's own step menus label it, so the two
+		// lists read identically as well as holding the same values — see
+		// stepLabel() in radio/constants.js, which is this rule.
+		hz, err := strconv.Atoi(o.Value)
+		if err != nil {
+			t.Errorf("step %q is not a number of hertz", o.Value)
+			continue
+		}
+		want := fmt.Sprintf("%d Hz", hz)
+		if hz >= 1000 {
+			want = strconv.FormatFloat(float64(hz)/1000, 'f', -1, 64) + " kHz"
+		}
+		if o.Label != want {
+			t.Errorf("step %s is labelled %q here and %q in the interface", o.Value, o.Label, want)
+		}
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("the admin UI offers steps %v, in this order; the interface has %v", got, want)
 	}
 }
 
@@ -299,6 +357,12 @@ func TestAdminUIConfigV2RoundTrip(t *testing.T) {
 				"palette":  "ice",
 				"grid":     false,
 				"ui_scale": 1.15,
+				// A step is a select like the rest, so the admin page sends the
+				// string its <select> holds — the round trip has to keep it one
+				// rather than turning it into a number the client then cannot
+				// tell from a hand-edited ui.yaml.
+				"tune_step":    "9000",
+				"wheel_action": "tune",
 			},
 		},
 	}
@@ -317,6 +381,12 @@ func TestAdminUIConfigV2RoundTrip(t *testing.T) {
 	if config.UI.V2.Grid == nil || *config.UI.V2.Grid != false {
 		t.Errorf("grid = %v, want a pointer to false — not nil, which would mean unset", config.UI.V2.Grid)
 	}
+	if config.UI.V2.TuneStep == nil || *config.UI.V2.TuneStep != "9000" {
+		t.Errorf("tune_step = %v, want the string 9000", config.UI.V2.TuneStep)
+	}
+	if config.UI.V2.WheelAction == nil || *config.UI.V2.WheelAction != "tune" {
+		t.Errorf("wheel_action = %v, want tune", config.UI.V2.WheelAction)
+	}
 	if config.UI.V2.Contrast != nil {
 		t.Errorf("contrast = %v, want nil: the operator did not set it", *config.UI.V2.Contrast)
 	}
@@ -326,7 +396,7 @@ func TestAdminUIConfigV2RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading back ui.yaml: %v", err)
 	}
-	for _, want := range []string{"palette: ice", "grid: false", "ui_scale: 1.15"} {
+	for _, want := range []string{"palette: ice", "grid: false", "ui_scale: 1.15", `tune_step: "9000"`, "wheel_action: tune"} {
 		if !strings.Contains(string(onDisk), want) {
 			t.Errorf("ui.yaml is missing %q:\n%s", want, onDisk)
 		}
@@ -417,6 +487,23 @@ func TestAdminUIConfigV2RoundTrip(t *testing.T) {
 // TestV2SettingsTableIsWellFormed guards the contract the admin page's renderer
 // relies on: every row has a control it knows how to draw, in a group it draws.
 func TestV2SettingsTableIsWellFormed(t *testing.T) {
+	// Read from the page rather than listed here: a setting in a group the
+	// renderer has no section for is dropped without a word, which looks
+	// exactly like the server not sending it.
+	admin, err := os.ReadFile(filepath.Join("static", "admin.html"))
+	if err != nil {
+		t.Fatalf("reading static/admin.html: %v", err)
+	}
+	groups := string(admin)[strings.Index(string(admin), "const GROUPS = ["):]
+	groups = groups[:strings.Index(groups, "\n            ];")]
+	adminGroups := map[string]bool{}
+	for _, m := range regexp.MustCompile(`id: '([a-z]+)'`).FindAllStringSubmatch(groups, -1) {
+		adminGroups[m[1]] = true
+	}
+	if len(adminGroups) == 0 {
+		t.Fatal("no groups found in admin.html — has renderV2Settings been restructured?")
+	}
+
 	seen := map[string]bool{}
 	for _, s := range v2Settings {
 		if seen[s.Key] {
@@ -424,7 +511,7 @@ func TestV2SettingsTableIsWellFormed(t *testing.T) {
 		}
 		seen[s.Key] = true
 
-		if s.Group != "interface" && s.Group != "spectrum" {
+		if !adminGroups[s.Group] {
 			t.Errorf("%s: group %q is not one the admin UI renders", s.Key, s.Group)
 		}
 		switch s.Kind {

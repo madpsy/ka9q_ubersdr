@@ -63,7 +63,7 @@ export const UI_CONFIG_DEFAULTS = {
 
 // ── The operator's v2 defaults ───────────────────────────────────────────────
 //
-// Three tables rather than one switch, because each kind needs a different
+// Four tables rather than one switch, because each kind needs a different
 // check, and because being tables is what lets the Go side test itself against
 // them: ui_config_v2_defaults_test.go reads this file and the two colour modules
 // and fails if the admin UI would offer a value this interface cannot act on, or
@@ -90,6 +90,25 @@ export const V2_ENUMS = {
     view_mode: { key: 'viewMode', values: ['split', 'spectrum', 'waterfall'] },
     waterfall_mode: { key: 'waterfallMode', values: ['2d', '3d', 'both'] },
     waterfall_pan: { key: 'waterfallPan', values: ['follow', 'hold'] },
+    wheel_action: { key: 'wheelAction', values: ['zoom', 'tune'] },
+};
+
+/**
+ * Settings chosen from a list of numbers rather than a list of words.
+ *
+ * A separate table because the check is different in both directions: the value
+ * arrives as the string a <select> holds ("500"), and the setting it lands in is
+ * a number, so it is parsed rather than compared and it is matched against the
+ * list rather than clamped to a range — a step between two of the offered ones
+ * would land the +/- buttons on a grid the step menu cannot show.
+ *
+ * Kept as a literal copy of TUNING_STEPS in radio/constants.js rather than an
+ * import, for the reason given above the tables: the Go side reads this file to
+ * check the admin UI against it. ui_config_v2_defaults_test.go checks it against
+ * constants.js too, so the copy cannot drift unnoticed.
+ */
+export const V2_STEPS = {
+    tune_step: { key: 'tuneStep', values: [1, 10, 100, 500, 1000, 5000, 9000, 10000, 100000] },
 };
 
 /** Plain switches. */
@@ -153,6 +172,14 @@ export function parseV2Defaults(v2) {
     for (const [wire, spec] of Object.entries(V2_RANGES)) {
         const n = parseFloat(v2[wire]);
         if (Number.isFinite(n)) out[spec.key] = clamp01(n, spec.min, spec.max);
+    }
+
+    // Not clamped, unlike the ranges above: a step is one of a list and the
+    // nearest legal value to a number off it is a guess about which of two
+    // grids was meant. Ignored instead, which leaves the interface's own.
+    for (const [wire, spec] of Object.entries(V2_STEPS)) {
+        const n = parseFloat(v2[wire]);
+        if (spec.values.includes(n)) out[spec.key] = n;
     }
 
     return out;

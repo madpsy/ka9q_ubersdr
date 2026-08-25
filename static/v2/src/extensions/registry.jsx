@@ -32,6 +32,7 @@ import Icon from '../components/icons.jsx';
 import FT8Extension from './ft8/FT8Extension.jsx';
 import FSKExtension from './fsk/FSKExtension.jsx';
 import NavtexExtension from './navtex/NavtexExtension.jsx';
+import OliviaExtension from './olivia/OliviaExtension.jsx';
 import MorseExtension from './morse/MorseExtension.jsx';
 import WefaxExtension from './wefax/WefaxExtension.jsx';
 import QrssExtension from './qrss/QrssExtension.jsx';
@@ -70,6 +71,18 @@ export const EXTENSIONS = [
         float: { w: 760, h: 580 },
         minimal: true,
         Component: NavtexExtension,
+    },
+    {
+        id: 'olivia',
+        title: 'Olivia Decoder',
+        icon: <Icon.Keyboard />,
+        summary: 'Weak-signal MFSK keyboard-to-keyboard, readable under the noise.',
+        requiresAudio: true,
+        // Narrower than FSK's: the settings are three controls rather than a
+        // six-field grid, and the output is one column of text.
+        float: { w: 720, h: 560 },
+        minimal: true,
+        Component: OliviaExtension,
     },
     {
         // v1 calls the slug `morse` and the extension "CW Decoder". Both are

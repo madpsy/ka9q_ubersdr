@@ -232,6 +232,8 @@ esbuild ../src/extensions/fsk/presets.js --bundle --format=cjs --platform=node \
     --outfile=.build/fskpresets.cjs --log-level=warning
 esbuild ../src/extensions/navtex/messages.js --bundle --format=cjs --platform=node \
     --outfile=.build/navtex.cjs --log-level=warning
+esbuild olivia.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/olivia.cjs --log-level=warning
 esbuild ../src/extensions/morse/frames.js --bundle --format=cjs --platform=node \
     --outfile=.build/morse.cjs --log-level=warning
 esbuild ../src/extensions/wefax/image.js --bundle --format=cjs --platform=node \
@@ -424,6 +426,7 @@ node controls.test.js
 node spots.test.js
 node extensions.test.js
 node fsk.test.js
+node olivia.test.js
 node navtex.test.js
 node morse.test.js
 node callannounce.test.js

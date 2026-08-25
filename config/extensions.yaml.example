@@ -23,6 +23,9 @@ extensions:
   # NAVTEX Decoder - NAVTEX FSK decoder for maritime communications
   - navtex
 
+  # Olivia Decoder - Olivia MFSK, the weak-signal keyboard-to-keyboard HF mode
+  - olivia
+
   # Radio Sync - syncs the SDR <-> Radio via serial CAT
   - radio-sync
 

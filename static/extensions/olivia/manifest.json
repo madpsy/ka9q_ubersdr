@@ -1,0 +1,72 @@
+{
+  "name": "olivia",
+  "displayName": "Olivia Decoder",
+  "version": "1.0.0",
+  "description": "Olivia MFSK decoder — the weak-signal keyboard-to-keyboard HF mode. Offers fldigi's eighteen tone/bandwidth combinations including the standard 8/250, 16/500 and 32/1000, with a live squelch, tune margin, integration depth and a lock/SNR readout. Decoding runs on the server; the panel is part of the V2 interface.",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "⌨️",
+  "category": "decoder",
+  "requiresAudio": true,
+  "requiresMode": "usb",
+  "files": {},
+  "settings": {
+    "tones": {
+      "type": "number",
+      "default": 8,
+      "min": 2,
+      "max": 256,
+      "description": "Number of tones. Rounded down to a power of two. Eighteen tone/bandwidth combinations are offered, matching fldigi's quick-change list"
+    },
+    "bandwidth": {
+      "type": "number",
+      "default": 250,
+      "min": 125,
+      "max": 2000,
+      "description": "Width of the tone block in Hz. Rounded down to a power-of-two multiple of 125"
+    },
+    "center_frequency": {
+      "type": "number",
+      "default": 1000,
+      "min": 300,
+      "max": 2700,
+      "description": "Audio frequency the tone block is centred on"
+    },
+    "sync_threshold": {
+      "type": "number",
+      "default": 4.0,
+      "min": 3.0,
+      "max": 15.0,
+      "description": "Squelch: the FEC signal-to-noise a block must reach before it is printed. Adjustable while decoding, without restarting the decoder"
+    },
+    "reverse": {
+      "type": "boolean",
+      "default": false,
+      "description": "Decode an inverted tone block, for a signal received on the opposite sideband to the one it was sent on"
+    },
+    "contestia": {
+      "type": "boolean",
+      "default": false,
+      "description": "Decode Contestia instead of Olivia (six-bit characters). No UI exposes this yet"
+    },
+    "sync_margin": {
+      "type": "number",
+      "default": 8,
+      "min": 1,
+      "max": 32,
+      "description": "fldigi's tune margin: how far either side of the centre the decoder searches, in FFT bins. Clamps automatically when the tone block sits too close to DC"
+    },
+    "sync_integ_len": {
+      "type": "number",
+      "default": 4,
+      "min": 1,
+      "max": 8,
+      "description": "fldigi's integration period, in FEC blocks. Deeper copies further into the noise but makes the wait before anything prints proportionally longer"
+    },
+    "eight_bit": {
+      "type": "boolean",
+      "default": true,
+      "description": "Honour Olivia's escape for characters above 126 — a 127 means the next character plus 128. On by default, as fldigi has it"
+    }
+  }
+}

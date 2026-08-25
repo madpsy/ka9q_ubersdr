@@ -51,6 +51,19 @@ type UIConfigV2 struct {
 	Fill          *bool    `yaml:"fill,omitempty"           json:"fill,omitempty"`
 	Grid          *bool    `yaml:"grid,omitempty"           json:"grid,omitempty"`
 
+	// ── Tuning ──────────────────────────────────────────────────────────────
+	// The step the +/- buttons, click-to-tune and the keyboard all move by.
+	//
+	// A string rather than a number, because it is a select like the ones above
+	// and travels as its option's value: the admin page sends what the <select>
+	// holds, and keeping the wire form the same as every other select is what
+	// lets it be validated against the option list rather than needing a rule of
+	// its own. The client parses it back to a number.
+	TuneStep *string `yaml:"tune_step,omitempty" json:"tune_step,omitempty"`
+	// What the scroll wheel does over the spectrum: zoom the view, or step the
+	// frequency by TuneStep.
+	WheelAction *string `yaml:"wheel_action,omitempty" json:"wheel_action,omitempty"`
+
 	// The operator's page-load notices. Here because they are v2's alone, and
 	// the one field of this block that is not a display default: it is exempt
 	// from the rule above — no v2Settings entry, no applyV2Defaults case —
@@ -138,6 +151,22 @@ var v2Palettes = []V2Option{
 	{Value: "radar", Label: "Radar", Swatch: "linear-gradient(90deg,rgb(2,10,5) 0%,rgb(6,54,24) 30%,rgb(12,122,46) 55%,rgb(46,200,78) 78%,rgb(130,240,132) 92%,rgb(226,255,226) 100%)", Note: "A radar scope: one green hue up to a hot trace"},
 }
 
+// The tuning steps the interface offers, in the order its own step menus list
+// them. Values are TUNING_STEPS from static/v2/src/radio/constants.js, written
+// as the strings a <select> holds — see TuneStep — and labelled the way
+// stepLabel() there labels them.
+var v2TuneSteps = []V2Option{
+	{Value: "1", Label: "1 Hz"},
+	{Value: "10", Label: "10 Hz"},
+	{Value: "100", Label: "100 Hz"},
+	{Value: "500", Label: "500 Hz", Note: "Suits SSB, which is most of what these bands carry"},
+	{Value: "1000", Label: "1 kHz"},
+	{Value: "5000", Label: "5 kHz", Note: "Shortwave broadcast spacing"},
+	{Value: "9000", Label: "9 kHz", Note: "Medium wave channel spacing outside the Americas"},
+	{Value: "10000", Label: "10 kHz", Note: "Medium wave channel spacing in the Americas"},
+	{Value: "100000", Label: "100 kHz"},
+}
+
 // Every v2 setting the admin UI offers, in display order. Ranges mirror the
 // Display panel's own sliders (static/v2/src/panels/DisplayPanel.jsx) and the
 // defaults mirror DEFAULTS in static/v2/src/display/DisplayContext.jsx.
@@ -216,6 +245,19 @@ var v2Settings = []V2Setting{
 	{Key: "peak_hold", Label: "Peak hold", Group: "spectrum", Kind: "bool", Hint: "Hold the highest trace seen, decaying slowly.", Default: "off"},
 	{Key: "fill", Label: "Fill under trace", Group: "spectrum", Kind: "bool", Hint: "Solid area beneath the spectrum line.", Default: "on"},
 	{Key: "grid", Label: "Grid", Group: "spectrum", Kind: "bool", Hint: "dB gridlines across the spectrum pane.", Default: "off"},
+	{
+		Key: "tune_step", Label: "Step size", Group: "tuning", Kind: "select",
+		Hint:    "How far the +/- buttons, click-to-tune and the arrow keys move the dial. The Receiver panel's step menu sets the same thing.",
+		Default: "500 Hz", Options: v2TuneSteps,
+	},
+	{
+		Key: "wheel_action", Label: "Scroll wheel", Group: "tuning", Kind: "select",
+		Hint:    "What the wheel does over the spectrum. Shift+wheel sets the filter width either way.",
+		Default: "Zoom", Options: []V2Option{
+			{Value: "zoom", Label: "Zoom", Note: "A notch in or out of the view"},
+			{Value: "tune", Label: "Tune", Note: "A notch moves the dial by the step size"},
+		},
+	},
 }
 
 // v2SettingByKey indexes the table above for validation.
@@ -261,6 +303,8 @@ func validateUIConfigV2(v UIConfigV2) error {
 		{"view_mode", v.ViewMode},
 		{"waterfall_mode", v.WaterfallMode},
 		{"waterfall_pan", v.WaterfallPan},
+		{"tune_step", v.TuneStep},
+		{"wheel_action", v.WheelAction},
 	}
 	for _, s := range sel {
 		if s.val != nil && !v2OptionValid(s.key, *s.val) {

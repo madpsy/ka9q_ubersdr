@@ -1067,12 +1067,14 @@ t('words are checked against the choices, switches against being booleans', () =
     const d = parseUiConfig({
         v2: {
             view_mode: 'waterfall', waterfall_mode: 'both', waterfall_pan: 'hold',
+            wheel_action: 'tune',
             peak_hold: true, grid: false, fill: true, smooth_scroll: false,
         },
     }).v2Defaults;
     assert.strictEqual(d.viewMode, 'waterfall');
     assert.strictEqual(d.waterfallMode, 'both');
     assert.strictEqual(d.waterfallPan, 'hold');
+    assert.strictEqual(d.wheelAction, 'tune');
     // false is a choice like any other and must survive.
     assert.strictEqual(d.grid, false);
     assert.strictEqual(d.smoothScroll, false);
@@ -1109,6 +1111,21 @@ t('numbers are clamped to the sliders that set them', () => {
 
     // Not a number at all is dropped, rather than clamped to a bound.
     assert.deepStrictEqual(parseUiConfig({ v2: { contrast: 'high' } }).v2Defaults, {});
+});
+
+t('a tuning step is taken only if it is one the step menus offer', () => {
+    // Sent as the string the admin page's <select> holds, and stored as the
+    // number the +/- buttons and click-to-tune step by — a string there would
+    // not match any option in the Receiver panel's own menu.
+    assert.deepStrictEqual(parseUiConfig({ v2: { tune_step: '9000' } }).v2Defaults, { tuneStep: 9000 });
+    assert.deepStrictEqual(parseUiConfig({ v2: { tune_step: 1 } }).v2Defaults, { tuneStep: 1 });
+
+    // Not clamped like the sliders are: a step between two of the offered ones
+    // is not a near-miss to round, so it is left alone and the interface keeps
+    // its own 500 Hz.
+    assert.deepStrictEqual(parseUiConfig({ v2: { tune_step: 250 } }).v2Defaults, {});
+    assert.deepStrictEqual(parseUiConfig({ v2: { tune_step: 1e9 } }).v2Defaults, {});
+    assert.deepStrictEqual(parseUiConfig({ v2: { tune_step: 'fine' } }).v2Defaults, {});
 });
 
 t('a key this build does not know is ignored', () => {

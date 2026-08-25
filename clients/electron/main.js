@@ -1124,10 +1124,20 @@ function setupIpc() {
     // running app, and a directory refresh every minute should not be a GeoIP
     // request every minute. `undefined` is "not asked yet", `null` is "asked,
     // and it could not say" — which is why this is not initialised to null.
+    //
+    // `refresh` is the chooser's own Refresh button, and the one thing that
+    // clears it: a machine does move between connections — a phone off Wi-Fi and
+    // onto mobile data is somewhere else by GeoIP — and a lookup that failed at
+    // launch, which is what a laptop opened before its network came up gives,
+    // would otherwise stay failed for the run. Pressing Refresh is a person
+    // asking, so it is not the per-minute request this cache exists to prevent.
     let geoip;
-    ipcMain.handle('geo:home', async () => {
+    ipcMain.handle('geo:home', async (_e, opts) => {
         const manual = store.chooser.home;
+        // A typed-in position wins and asks nothing: nothing about the network
+        // can improve on somebody having said where they are.
         if (manual) return { ...manual, source: 'manual' };
+        if (opts && opts.refresh) geoip = undefined;
         if (geoip === undefined) {
             try { geoip = await discovery.fetchGeoIP(); } catch { geoip = null; }
         }

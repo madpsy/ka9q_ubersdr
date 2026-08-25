@@ -3123,19 +3123,41 @@ a.btn { text-decoration: none; }
  * whatever icon goes in it. */
 .pad-row .btn.pad-row__act { height: 20px; padding: 0 3px; }
 
-/* Squelch and width side by side, where the pad is wide enough for both — see
-   MultipadPanel. Equal halves rather than content-sized: two sliders of
-   different lengths on one line read as one control that has gone wrong. The
-   `minmax(0, 1fr)` is what lets each half actually reach zero, so the sliders
-   give up width instead of the row overflowing the panel. */
-.pad__pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-/* Tighter inside a half-width row: the label is the only part that can give,
-   and 50px of "SQUELCH" against a slider with 90px to work in is the wrong
-   split. The reading on the right keeps its width — it is what the slider is
-   being set to. */
-.pad__pair .pad-row { gap: 6px; }
-.pad__pair .pad-row__field { gap: 6px; }
-.pad__pair .pad-row__label { width: auto; }
+/* The minimal view's two sliders: stacked, and side by side once the pad is
+   wide enough — see MultipadPanel.
+ *
+ * Stacked is the default rather than the exception because it is the shape that
+ * needs nothing: one column, the pad's own 8px between the rows, and each row
+ * exactly as it is drawn everywhere else, figure and all.
+ *
+ * A container query and not a measurement in JS. `.pad` is the container (it
+ * declares `container-type: inline-size` for the readout's `cqi` sizing), and
+ * the width of the pad is precisely what the question is about. It used to ride
+ * on the readout's spare room, which moved with the length of the frequency and
+ * with --ui-scale — so tuning across 10 MHz could restack the sliders. */
+.pad__pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+
+/* 300px, which is where two halves stop being a joke rather than where they
+   stop overlapping. Each half carries a label, a slider and the row's button:
+   "SQUELCH" is about 50px, the Auto and reset buttons about 25, the gaps 12, so
+   145px a side leaves the slider some 60px to work in — short, but a slider you
+   can still put somewhere, and the pad is a thumb control where a line saved is
+   worth more than the last 20px of track.
+ *
+ * The two readings go here, and they are what pays for the fit: a figure on each
+ * is a third of the line spent on numbers the readout above already carries.
+ * Written by the rows either way — see PadRow — so that the stacked shape keeps
+ * them without anything having to be told which shape it is in. */
+@container (min-width: 300px) {
+    .pad__pair { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    /* Tighter inside a half-width row: the label is the only part that can give,
+       and 50px of "SQUELCH" against a slider with 90px to work in is the wrong
+       split. */
+    .pad__pair .pad-row { gap: 6px; }
+    .pad__pair .pad-row__field { gap: 6px; }
+    .pad__pair .pad-row__label { width: auto; }
+    .pad__pair .pad-row__value { display: none; }
+}
 
 .pad__zoomrow { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
 .pad__zoomrow > .barrel { flex: 1; min-width: 0; }

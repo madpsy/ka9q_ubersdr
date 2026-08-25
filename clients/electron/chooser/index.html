@@ -121,6 +121,14 @@
                             <button id="dir-refresh" class="ghost icon-btn" title="Refresh the directory">⟳</button>
                         </div>
                     </div>
+                    <!-- Fills as the list is pulled down past its top — see
+                         pullToRefresh. Outside #dir-list rather than in it
+                         because renderDirectory replaces that element's whole
+                         contents on every draw, and aria-hidden because it is
+                         feedback on a gesture: whoever cannot see it cannot have
+                         made it, and "Refreshing…" is already on the status line
+                         under the list. -->
+                    <div id="dir-pull" class="pull" aria-hidden="true"></div>
                     <div id="dir-list" class="list dir-list"></div>
                     <div id="dir-status" class="section-status dir-status"></div>
                 </div>

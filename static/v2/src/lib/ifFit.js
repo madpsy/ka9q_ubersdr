@@ -114,19 +114,43 @@ export const FIT_DROP_DB = 25;
 export const FIT_NEIGHBOUR_MIN_DB = 15;
 export const FIT_NEIGHBOUR_REL_DB = 10;
 
-// Slack thresholds, as a fraction of the filter width and an absolute floor —
-// whichever is larger.
+// Slack thresholds, as a fraction of the span the width control governs on the
+// side being judged — the whole filter for SSB, half of it for a symmetric
+// mode — and an absolute floor, whichever is larger.
 //
 // Deliberately forgiving. This card is advice, not a specification, and the
 // cost of the two mistakes is not symmetric: a missed "your filter is a bit
 // wide" costs nothing, while an indicator that finds fault with a perfectly
 // ordinary setting is one nobody believes twice. So the band called "good" is
-// wide enough that most sensible filters sit inside it, and only a filter that
-// is *plainly* mismatched — roughly twice the width the signal needs — is
-// remarked on. A 2.7 kHz SSB filter has to be passing under about 1.2 kHz of
-// speech before it is called wide, and an AM filter has to be better than
-// twice its station's occupied width.
+// wide enough that most sensible filters sit inside it.
+//
+// Forgiving is not the same as unreachable, though, and the fraction is per
+// family because the two families need different amounts of it:
+//
+//   * SSB is judged mostly by the floor. Slack above the speech is an audio
+//     bandwidth, and a kilohertz of empty passband means the same thing in a
+//     2.4 kHz filter as in a 4 kHz one — so the filter's own width is the
+//     wrong yardstick to scale it by, and a large fraction of it put the
+//     verdict out of reach: at 0.55, a 4.1 kHz filter had to be passing under
+//     1.9 kHz of speech before it said anything, so a filter a kilohertz too
+//     wide over ordinary speech read as a good fit. The fraction is kept, but
+//     small, and only bites on the deliberately wide — an eSSB filter carrying
+//     genuinely wide audio has its slack in proportion and is left alone.
+//
+//   * Symmetric voice keeps the generous fraction, because a roomy AM filter
+//     is a preference rather than a mistake: selective fading takes a sideband
+//     away for minutes at a time and gives it back, and sizing to what is
+//     arriving right now would clip what returns. Only a filter better than
+//     about twice the station's occupied width is remarked on.
 export const FIT_SLACK_FRAC = 0.55;
+export const FIT_SLACK_FRAC_SSB = 0.2;
+// Below this much, tightening the filter is not worth suggesting: any real
+// filter's skirts are a couple of hundred hertz wide, and where a speaker's
+// last formant lands moves further than that between overs. Kept low, because
+// the measured top of speech already sits short of the transmitted one — a
+// voice falls away with frequency and its last octave is close to the
+// FIT_DROP_DB gate — so this is the slack of a filter that is *plainly* roomy
+// rather than the first sign of one.
 export const FIT_SLACK_MIN_HZ = 600;
 // FM's sidebands taper rather than stop — Carson's rule is a convention, not a
 // cliff — so its filter is allowed far more apparent slack before comment.
@@ -344,7 +368,7 @@ export function rawFit(mean, win, band, tuning, floorDb, opts = {}) {
     // SSB: slack judged at the far edge only. For USB that is the high edge,
     // for LSB the low one — the edge the width slider moves.
     const far = limits.sideband === 'upper' ? bandHiHz - occHiHz : occLoHz - bandLoHz;
-    if (far > Math.max(FIT_SLACK_MIN_HZ, width * FIT_SLACK_FRAC)) {
+    if (far > Math.max(FIT_SLACK_MIN_HZ, width * FIT_SLACK_FRAC_SSB)) {
         return {
             kind: 'wide',
             slackHz: far,

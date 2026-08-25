@@ -130,6 +130,33 @@ t('a USB filter far wider than the speech is wide, at the far edge', () => {
     assert.ok(v.slackHz > 1600, `slack ${v.slackHz}`);
 });
 
+t('a 4 kHz USB filter over 3 kHz of speech is wide', () => {
+    // The case from the field: a 100-4200 Hz filter with speech reaching about
+    // 3.1 kHz, so more than a kilohertz of the passband is carrying nothing but
+    // noise. Scaling the threshold by the filter width wanted 2.3 kHz of slack
+    // here and called this a good fit — see FIT_SLACK_FRAC_SSB.
+    const v = fit('usb', -1000, 5300, 100, 4200, [{ lo: 200, hi: 3100, db: 25 }]);
+    assert.strictEqual(v.kind, 'wide');
+    assert.strictEqual(v.edge, 'high');
+    assert.ok(v.slackHz > 1000, `slack ${v.slackHz}`);
+});
+
+t('...but a few hundred hertz of empty top is not worth a verdict', () => {
+    // 450 Hz of slack on a 2.7 kHz filter: inside the floor, and nothing an
+    // operator would thank the card for pointing out. A voice measures short
+    // of what was transmitted anyway — see FIT_SLACK_MIN_HZ.
+    const v = fit('usb', -800, 3400, 50, 2700, [{ lo: 300, hi: 2250, db: 25 }]);
+    assert.strictEqual(v.kind, 'ok');
+});
+
+t('...and wide audio in a wide filter is what that filter is for', () => {
+    // 6 kHz of eSSB carrying 5.1 kHz of audio. The slack is a kilohertz again,
+    // but in proportion to the filter, which is what the fraction is left in
+    // to protect: this one was chosen wide on purpose.
+    const v = fit('usb', -1500, 7500, 50, 6000, [{ lo: 100, hi: 5100, db: 25 }]);
+    assert.strictEqual(v.kind, 'ok');
+});
+
 t('LSB is the mirror: slack lives at the low edge', () => {
     const v = fit('lsb', -3400, 800, -2700, -50, [{ lo: -1000, hi: -300, db: 25 }]);
     assert.strictEqual(v.kind, 'wide');

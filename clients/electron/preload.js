@@ -34,7 +34,8 @@ contextBridge.exposeInMainWorld('ubersdr', {
     setChooser: (patch) => ipcRenderer.invoke('chooser:set-state', patch),
     // Where to draw "you", and what the distance column measures from: the
     // typed-in position if there is one, else GeoIP. Null when neither answers.
-    home: () => ipcRenderer.invoke('geo:home'),
+    // `{ refresh: true }` forgets the GeoIP answer first — see geo:home.
+    home: (opts) => ipcRenderer.invoke('geo:home', opts || null),
     onChanged: (cb) => {
         ipcRenderer.on('instances:changed', () => cb());
     },

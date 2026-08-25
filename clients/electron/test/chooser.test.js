@@ -43,6 +43,13 @@ class Node {
         this.hidden = false;
         this.disabled = false;
         this.value = '';
+        // Enough for the one thing that writes inline styles: the pull-to-refresh
+        // gutter sets its own height. A bag of properties, not a CSSStyleDeclaration
+        // — nothing here reads a computed anything.
+        this.style = {};
+        // What a list that has not been scrolled reports. The pull gesture arms
+        // on it, so a test that means "scrolled down" has to say so.
+        this.scrollTop = 0;
         this.classList = {
             add: (c) => { if (!this.has(c)) this._class = (this._class + ' ' + c).trim(); },
             remove: (c) => { this._class = this._class.split(/\s+/).filter((x) => x && x !== c).join(' '); },
@@ -722,6 +729,176 @@ ta('a stored sort from before the chips had directions runs its own way', async 
     const ctx = load(dirApi({ chooser: async () => ({ dirSort: 'listeners' }) }));
     await settled();
     assert.strictEqual(ctx.document.getElementById('dir-sort-listeners').getAttribute('data-dir'), 'desc');
+});
+
+// --- refresh, and where you are ----------------------------------------------
+//
+// GeoIP is looked up once per run and remembered, which is right for a desktop
+// on a fixed connection and wrong for a handset that has walked out of the
+// house. Refresh is the way back.
+
+// A home that answers differently the second time it is asked, and counts.
+const movingHome = (first, second) => {
+    const calls = [];
+    return {
+        calls,
+        home: async (opts) => {
+            calls.push(opts || null);
+            return calls.length > 1 ? second : first;
+        },
+    };
+};
+
+ta('refresh asks where you are again, and says so', async () => {
+    const moving = movingHome(null, HERE);
+    const ctx = load(dirApi({ home: moving.home }));
+    await settled();
+    // Nowhere to measure from, so the distance sort is not offered.
+    assert.strictEqual(ctx.document.getElementById('dir-sort-distance').disabled, true);
+
+    ctx.document.getElementById('dir-refresh').click();
+    await settled();
+    assert.deepStrictEqual(moving.calls[0], null, 'the load asks plainly');
+    assert.strictEqual(moving.calls[1].refresh, true, 'refresh asks for a fresh lookup');
+    assert.strictEqual(ctx.document.getElementById('dir-sort-distance').disabled, false,
+        'and the sort it enables comes with it');
+    assert.match(ctx.document.getElementById('home-status').textContent, /London/);
+});
+
+ta('a position that has not moved does not disturb the sort', async () => {
+    // The ordinary refresh: same answer, so nothing about the list's order or
+    // the map's fit is invalidated and neither is touched.
+    const moving = movingHome(HERE, HERE);
+    const ctx = load(dirApi({ home: moving.home }));
+    await settled();
+    ctx.document.getElementById('dir-sort-name').click();
+    ctx.document.getElementById('dir-sort-name').click();     // Z to A
+    const before = callsigns(ctx);
+
+    ctx.document.getElementById('dir-refresh').click();
+    await settled();
+    assert.strictEqual(ctx.document.getElementById('dir-sort-name').getAttribute('data-dir'), 'desc');
+    assert.deepStrictEqual(callsigns(ctx), before);
+});
+
+ta('losing the position takes the distance sort with it', async () => {
+    const moving = movingHome(HERE, null);
+    const ctx = load(dirApi({ home: moving.home }));
+    await settled();
+    assert.ok(ctx.document.getElementById('dir-sort-distance').has('active'), 'opens on distance');
+
+    ctx.document.getElementById('dir-refresh').click();
+    await settled();
+    const distance = ctx.document.getElementById('dir-sort-distance');
+    assert.strictEqual(distance.disabled, true);
+    assert.ok(!distance.has('active'), 'and the sort has moved off it');
+    // Conditions is where setDirSort falls back to, at its own way round rather
+    // than at whichever way distance happened to be pointing.
+    assert.strictEqual(ctx.document.getElementById('dir-sort-snr').getAttribute('data-dir'), 'desc');
+});
+
+ta('the directory is still refreshed when the lookup throws', async () => {
+    // The position is a garnish on this button; the list is the point of it.
+    let asked = 0;
+    const ctx = load(dirApi({
+        home: async () => { asked += 1; if (asked > 1) throw new Error('offline'); return HERE; },
+    }));
+    await settled();
+    ctx.document.getElementById('dir-refresh').click();
+    await settled();
+    assert.match(ctx.document.getElementById('dir-status').textContent, /3 receivers/);
+    assert.match(ctx.document.getElementById('home-status').textContent, /London/,
+        'and the position it already had is kept');
+});
+
+// --- pull to refresh ---------------------------------------------------------
+
+// One finger, at a height. `touches` is what the handlers read.
+const at = (y) => ({ touches: [{ clientY: y }] });
+
+/** Drag the directory list from 0 down to `to`, and let go. */
+const pull = async (ctx, to, { release = true } = {}) => {
+    const list = ctx.document.getElementById('dir-list');
+    list.dispatch('touchstart', at(0));
+    list.dispatch('touchmove', at(to));
+    if (release) list.dispatch('touchend', {});
+    await settled();
+    return ctx.document.getElementById('dir-pull');
+};
+
+ta('pulling the list open past its trip point refreshes it', async () => {
+    const moving = movingHome(null, HERE);
+    const ctx = load(dirApi({ home: moving.home }));
+    await settled();
+
+    // Twice the trip point of finger travel, the gutter following at half speed.
+    await pull(ctx, 140);
+    assert.strictEqual(moving.calls.length, 2, 'the same refresh the button runs');
+    assert.strictEqual(moving.calls[1].refresh, true);
+    // ...and unwound afterwards, whatever it showed while it was open.
+    assert.strictEqual(ctx.document.getElementById('dir-pull').style.height, '0px');
+    assert.strictEqual(ctx.document.getElementById('dir-pull').textContent, '');
+});
+
+ta('a short pull springs back and refreshes nothing', async () => {
+    const moving = movingHome(HERE, HERE);
+    const ctx = load(dirApi({ home: moving.home }));
+    await settled();
+
+    const gutter = await pull(ctx, 40);      // 20px of gutter, under the 48 trip
+    assert.strictEqual(moving.calls.length, 1, 'the load, and nothing since');
+    assert.strictEqual(gutter.style.height, '0px');
+});
+
+ta('the gutter says which of the two a release would be', async () => {
+    const ctx = load(dirApi());
+    await settled();
+    const gutter = await pull(ctx, 40, { release: false });
+    assert.strictEqual(gutter.textContent, 'Pull to refresh');
+    ctx.document.getElementById('dir-list').dispatch('touchmove', at(140));
+    assert.strictEqual(gutter.textContent, 'Release to refresh');
+    assert.strictEqual(gutter.style.height, '64px', 'and stops following at its maximum');
+});
+
+ta('a list that is not at its top scrolls, and does not pull', async () => {
+    const moving = movingHome(HERE, HERE);
+    const ctx = load(dirApi({ home: moving.home }));
+    await settled();
+    ctx.document.getElementById('dir-list').scrollTop = 40;
+
+    const gutter = await pull(ctx, 140);
+    assert.strictEqual(gutter.style.height, undefined, 'never touched');
+    assert.strictEqual(moving.calls.length, 1);
+});
+
+ta('a drag that goes up first is a scroll for the rest of its life', async () => {
+    // The flick that ends where it started: without disarming on the upward
+    // move, its return leg would pull the gutter open mid-scroll.
+    const moving = movingHome(HERE, HERE);
+    const ctx = load(dirApi({ home: moving.home }));
+    await settled();
+    const list = ctx.document.getElementById('dir-list');
+
+    list.dispatch('touchstart', at(0));
+    list.dispatch('touchmove', at(-30));
+    list.dispatch('touchmove', at(140));
+    list.dispatch('touchend', {});
+    await settled();
+    assert.strictEqual(ctx.document.getElementById('dir-pull').style.height, '0px');
+    assert.strictEqual(moving.calls.length, 1);
+});
+
+ta('two fingers are not a pull', async () => {
+    const moving = movingHome(HERE, HERE);
+    const ctx = load(dirApi({ home: moving.home }));
+    await settled();
+    const list = ctx.document.getElementById('dir-list');
+
+    list.dispatch('touchstart', { touches: [{ clientY: 0 }, { clientY: 30 }] });
+    list.dispatch('touchmove', at(140));
+    list.dispatch('touchend', {});
+    await settled();
+    assert.strictEqual(moving.calls.length, 1);
 });
 
 ta('the filter reads places and countries, not just callsigns', async () => {

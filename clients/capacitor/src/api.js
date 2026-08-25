@@ -285,15 +285,25 @@ export const api = {
      * Where the operator is: what the map centres on and the distance column is
      * measured from. A position typed in always wins; otherwise GeoIP.
      *
-     * Looked up once per run and then remembered, including the failure: it is
-     * a property of this connection, it does not change under a running app,
-     * and a directory refresh every minute should not be a GeoIP request every
-     * minute. `undefined` is "not asked yet", `null` is "asked, and it could not
-     * say" — which is why geoip is not initialised to null.
+     * Looked up once per run and then remembered, including the failure: an
+     * automatic refresh every minute should not be a GeoIP request every minute.
+     * `undefined` is "not asked yet", `null` is "asked, and it could not say" —
+     * which is why geoip is not initialised to null.
+     *
+     * `{ refresh: true }` clears it, and only the chooser's Refresh button sends
+     * that. A handset is exactly the machine this cache's original reasoning did
+     * not hold for: walking out of Wi-Fi and onto mobile data puts it somewhere
+     * else entirely by GeoIP, and an app resumed in another town would otherwise
+     * measure every distance from where it was opened. A lookup that failed for
+     * want of a network at launch is the same story. Refresh is a person asking,
+     * so it costs one request when one is wanted.
      */
-    home: async () => {
+    home: async (opts) => {
         const { home: manual } = await store.chooser();
+        // A typed-in position wins and asks nothing: nothing about the network
+        // can improve on somebody having said where they are.
         if (manual) return { ...manual, source: 'manual' };
+        if (opts && opts.refresh) geoip = undefined;
         if (geoip === undefined) {
             try { geoip = await discovery.fetchGeoIP(); } catch { geoip = null; }
         }

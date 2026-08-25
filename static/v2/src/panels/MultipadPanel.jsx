@@ -794,7 +794,7 @@ function PadRow({ label, value, children, action }) {
 // The filter width. Its own component because it is drawn in two places — on a
 // line of its own, or beside the squelch where the pad is wide enough for the
 // pair — and a slider defined inline twice is two sliders to keep in step.
-function WidthRow({ paired }) {
+function WidthRow() {
     const { tuning, actions } = useRadio();
     const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
     const maxWidth = maxFilterWidth(tuning.mode);
@@ -802,14 +802,12 @@ function WidthRow({ paired }) {
     return (
         <PadRow
             label="Width"
-            /* No number when the two share a line, as the squelch beside it has
-               none: a reading on each is a third of that line spent on figures
-               the readout above already carries — the passband is printed beside
-               the frequency. Stacked or on a row of its own it keeps the number,
-               which is why this asks about the pairing rather than about the
-               minimal view: those were the same question until the minimal view
-               learned to stack. */
-            value={paired ? null : `${(width / 1000).toFixed(2)}k`}
+            /* Hidden by .pad__pair where the two share a line, as the squelch
+               beside it is: a reading on each is a third of that line spent on
+               figures the readout above already carries — the passband is
+               printed beside the frequency. Stacked or on a row of its own it
+               keeps the number. */
+            value={`${(width / 1000).toFixed(2)}k`}
             /* Kept even in the paired row, where the reading is not: the
                squelch's Auto is on that line for the same reason, and both are
                a way *out* of a setting you have wandered off with rather than a
@@ -878,7 +876,7 @@ function AutoSquelch({ snr }) {
 
 // Its own component so the 12 Hz meter sampling behind the live SNR marker
 // re-renders this line alone, and not the barrels above it.
-function SquelchRow({ paired }) {
+function SquelchRow() {
     const { squelch, actions } = useRadio();
     const m = useMeters(12);
     const snr = m.snr;
@@ -886,14 +884,18 @@ function SquelchRow({ paired }) {
     return (
         <PadRow
             label="Squelch"
-            /* No number when it is sharing a line with the width: there is no
-               room for one beside Auto — and the threshold is a figure you set by
-               ear against the noise rather than one you dial to a value. The
-               slider says where it is, the marker on it says where the signal is,
-               and both are the reading. On a row of its own it prints the figure,
-               which is worth having for the one case the marker cannot cover:
-               reading back a threshold on a band that has gone quiet. */
-            value={paired ? null : (squelch.enabled ? `${squelch.value.toFixed(0)} dB` : 'Off')}
+            /* Always written, and hidden by .pad__pair where the two sliders
+               share a line: there is no room for a figure beside Auto in half a
+               row, and the threshold is one you set by ear against the noise
+               rather than dial to a value. The slider says where it is and the
+               marker on it says where the signal is, which is the reading. On a
+               row of its own it prints the figure too, which is worth having for
+               the one case the marker cannot cover: reading back a threshold on
+               a band that has gone quiet.
+
+               Dropped in CSS rather than here because the layout it depends on
+               is now decided in CSS — see .pad__pair. */
+            value={squelch.enabled ? `${squelch.value.toFixed(0)} dB` : 'Off'}
             /* The Signal panel's Auto, on the same line for the same reason it
                is on the same line there: it sets the number the slider sets, so
                it belongs beside it rather than under it. It also turns the
@@ -947,13 +949,13 @@ function SquelchRow({ paired }) {
 export default function MultipadPanel({ minimal }) {
     const { tuning, actions } = useRadio();
 
-    // How wide the pad is, asked once and answered in two places: whether the
-    // readout carries the passband, and — in the minimal view — whether the
-    // squelch and the width fit on one line. It is the same question, is there a
-    // spare chip's worth of room, and a second measurement with a threshold of
-    // its own would give a pad that showed the passband but stacked the sliders,
-    // or the other way about, at whatever widths the two happened to disagree
-    // on.
+    // Whether the readout has room for the passband beside the frequency.
+    //
+    // This once answered a second question too — whether the squelch and the
+    // width share a line in the minimal view — on the reasoning that both were
+    // asking whether there was a spare chip's worth of room. That coupling is
+    // gone: the slack inside this button is the wrong quantity for the sliders,
+    // and .pad__pair asks about the pad's width instead. See the sliders below.
     //
     // Measured on the readout rather than the row it sits in: the readout is the
     // row's only flexible child, so the row's spare width is *inside* it and a
@@ -1018,23 +1020,32 @@ export default function MultipadPanel({ minimal }) {
             {/* The two sliders you work while listening. Both of them, in every
                 view — see below for what that cost and why it is worth it.
 
-                Paired on one line only in the minimal view, and only where the
-                pad is wide enough — the same measurement that decides whether
-                the readout carries the passband, because it is the same question
-                about the same spare width. The minimal view is where a line is
-                worth saving: it is two barrels and this, and a pad cut down to
-                fit a phone should not spend half its remaining height on two
-                sliders that fit side by side.
+                The minimal view puts them in one wrapper and lets CSS lay it
+                out: side by side where the pad has the room, stacked where it
+                has not, and no prop here saying which. See .pad__pair, which
+                also drops the two readings in the side-by-side case — that is
+                what buys the room, and it is why the pair fits at widths a row
+                carrying its figures could not.
 
-                Below that width they stack instead. They used to *not*: the
-                width was dropped and the squelch kept, on the reasoning that
-                the Receiver panel has a width slider a tap away. That reasoning
-                held for the panel and not for the phone, where this is the panel
-                a session lives in and a narrow handset is the ordinary case
-                rather than the cramped one — so the common way to see this pad
-                was the one way that had no width control at all. A stacked pair
-                costs one line; a missing control costs a trip to another panel
-                and the dial disappearing behind it.
+                It used to be decided here, on `wide` — the measurement that
+                decides whether the readout carries the passband — on the
+                reasoning that both were the same question about the same spare
+                width. They are not. That measurement is the slack left inside
+                the frequency button, which moves with the length of the
+                frequency (`14.074.000` is a character wider than `7.074.000`,
+                which is more than the hysteresis) and with --ui-scale, since the
+                step and mode pickers beside it scale with the text while the
+                readout is sized in cqi. Tuning from 40m to 20m could restack the
+                sliders. What the pair actually depends on is the width of the
+                pad, which is the one thing that measurement was not asking
+                about, and a container query asks it directly.
+
+                The stacked shape is not a fallback anybody should mind: it was
+                once a *dropped* control instead, the width going and the squelch
+                staying on the reasoning that the Receiver panel has a width
+                slider a tap away. That held for the panel and not for the phone,
+                where this is the panel a session lives in — so the common way to
+                see this pad was the one way with no width control at all.
 
                 The full view keeps them on rows of their own. It has the height
                 — it is already showing the mode buttons, the bands and the view
@@ -1049,17 +1060,10 @@ export default function MultipadPanel({ minimal }) {
                 not change under somebody when a rotation crosses the threshold
                 between the two shapes. */}
             {minimal ? (
-                wide ? (
-                    <div className="pad__pair">
-                        <SquelchRow paired />
-                        <WidthRow paired />
-                    </div>
-                ) : (
-                    <>
-                        <SquelchRow />
-                        <WidthRow />
-                    </>
-                )
+                <div className="pad__pair">
+                    <SquelchRow />
+                    <WidthRow />
+                </div>
             ) : (
                 <>
                     <WidthRow />

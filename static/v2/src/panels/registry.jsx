@@ -176,13 +176,18 @@ const BUILT_IN = [
             // the two barrels, the squelch *and the width*, with nothing to
             // scroll.
             //
-            // Both sliders, and stacked rather than paired: 390 px leaves about
-            // 11 px of slack in the head row and the pair needs 52, so a window
-            // this size takes the minimal view's stacked branch — see the note
-            // above the two rows in MultipadPanel. Each has cost 25 px to add
-            // and each was left out of this figure once: 188 missed the squelch,
-            // 213 missed the width. layout.test.js sums the rows so a third
-            // omission cannot pass.
+            // Both sliders, and the height for them *stacked* even though a
+            // window this wide draws them side by side: .pad__pair pairs them
+            // from a 300 px pad, and 390 less the body's padding is 368, so the
+            // seed opens paired and one row shorter than this. The extra row is
+            // deliberate — a float can be dragged narrower, and crossing 300 px
+            // restacks them. Seeding the paired height would make that drag scroll
+            // the pad instead of resizing it, and 25 px of slack at the opening
+            // size costs nothing.
+            //
+            // Each row has cost 25 px to add and each was left out of this figure
+            // once: 188 missed the squelch, 213 missed the width. layout.test.js
+            // sums the rows so a third omission cannot pass.
             float: { w: 390, h: 238, anchor: 'bottom-left' },
         },
         Component: MultipadPanel,

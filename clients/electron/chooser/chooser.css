@@ -471,6 +471,33 @@ select {
 .set-links a:hover { text-decoration: underline; }
 
 .dir-list { flex: 1; min-height: 0; overflow-y: auto; gap: 5px; padding-right: 4px; }
+
+/* The pull-to-refresh gutter above that list.
+ *
+ * Height rather than a transform on the list. The list is the flexible child of
+ * this column, so every pixel this takes is a pixel the list gives back: nothing
+ * slides over the toolbar above, nothing spills past the map below, and there is
+ * no state to unwind afterwards beyond setting the height to zero. A transform
+ * would be cheaper per frame and would have needed a positioned wrapper and a
+ * clip to stop it doing both of those things.
+ *
+ * Zero-height and empty when idle, so it costs the layout nothing at all on a
+ * desktop, where nothing can pull it open. */
+.pull {
+    flex: none;
+    height: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--dim);
+    font-size: 12px;
+    transition: height 160ms ease;
+}
+/* No transition while a finger is on it: the height *is* the finger, and easing
+   towards it would lag the gesture by a frame or two of rubber. The spring back
+   at the end is the transition, which is what it is for. */
+.pull.is-pulling { transition: none; }
 .dir-status { padding-top: 8px; }
 
 /* Denser than a saved row, because there are two hundred of them and each says
@@ -589,9 +616,17 @@ select {
     filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
 }
 
-.map-foot { display: flex; align-items: center; gap: 10px; }
-.map-foot .section-status { margin-right: auto; }
-.map-foot button { padding: 4px 10px; font-size: 12px; }
+/* Where you are, and the button that corrects it.
+ *
+ * The status is a sentence rather than a label — at its longest, "Your IP
+ * address could not be placed — set your location to see distances" — so it is
+ * given a small basis and the room to grow into: it takes what the button does
+ * not want and wraps inside it, rather than pushing the button off the end. The
+ * wrap on the row is the floor under that, for a window narrower than the two of
+ * them can share; the button keeps its size either way. */
+.map-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.map-foot .section-status { flex: 1 1 12em; min-width: 0; }
+.map-foot button { flex: none; padding: 4px 10px; font-size: 12px; }
 
 /* Leaflet's own chrome, in this page's colours rather than its default white.
    These match leaflet.css selector for selector at equal specificity, so they
@@ -721,7 +756,18 @@ select {
    too thin to be a map. */
 @media (max-width: 900px) {
     .dir-layout { flex-direction: column; }
-    .dir-column { width: auto; }
+    /* `flex-shrink` as well as the width, because turning the layout on its side
+       turns that property over with it. `flex-shrink: 0` was written to stop the
+       370px list column being squeezed *sideways* by the map beside it; stacked,
+       the same declaration reads "never give up any height" — and the map column
+       below it holds a 260px floor. On a phone the two together came to more
+       than there was, and a panel that does not scroll (see #panel-saved for the
+       two that do) overflowed into `main`'s `overflow: hidden`. What that cut
+       off was the last thing in the column: the line under the map saying where
+       you are, which is also the one that runs to two lines when the lookup has
+       something to apologise for. The list gives up the height instead, and it
+       has its own scrollbar to give it up into. */
+    .dir-column { width: auto; flex-shrink: 1; }
     .dir-list { max-height: 45vh; }
     .dir-map-column { min-height: 260px; }
 }

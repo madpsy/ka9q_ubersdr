@@ -1460,6 +1460,141 @@ async function loadDirectory() {
     }
 }
 
+/**
+ * The Refresh button: the directory, and where you are with it.
+ *
+ * GeoIP is otherwise looked up once for the run and remembered — see api.home,
+ * where the reasoning is that a machine's connection does not change under it.
+ * On a handset it does: leaving the house takes it off Wi-Fi and onto a mobile
+ * network somewhere else entirely, and a lookup that failed at launch for want
+ * of a network stays failed. Both leave every distance in the list measured from
+ * the wrong place, or from nowhere, with no way back short of restarting.
+ *
+ * So the button asks again. It is the only thing that does — a person pressing
+ * Refresh is asking to be brought up to date, which is exactly the moment the
+ * extra request is worth making, and nothing here is on a timer.
+ *
+ * Nothing to ask when the position was typed in: api.home answers from the store
+ * and never reaches the network, so this is one call either way.
+ */
+async function refreshDirectory() {
+    const before = home;
+    home = await api.home({ refresh: true }).catch(() => home);
+    if (!sameHome(before, home)) {
+        showHome();
+        // A new reference point invalidates both things measured from it: every
+        // distance in the list, and the fit, which had the old position as one
+        // of its corners. The same pair askHome resets, for the same reason.
+        fittedTo = '';
+        // Distance may have just become available — or, if the lookup came back
+        // empty this time, unavailable. setDirSort is where that button's state
+        // lives, and it drops the sort itself when there is nowhere to measure
+        // from. Not persisted: a sort the operator did not choose should not be
+        // written down as one they did.
+        //
+        // The direction rides along only where the sort survives. Distance
+        // falling back to conditions is a different question being asked, and
+        // "nearest last" does not mean "worst conditions first".
+        const dropped = dirSort === 'distance' && !home;
+        setDirSort(dirSort, { persist: false, dir: dropped ? null : dirDir });
+    }
+    return loadDirectory();
+}
+
+/**
+ * Pull down at the top of a list to refresh it.
+ *
+ * The gesture a phone already teaches: the refresh button is a 34 px target in
+ * a corner of a toolbar, and the thumb is on the list. Touch only, and not by
+ * checking for one — `touchstart` is the arming event, so a mouse never gets
+ * near this and the desktop keeps the behaviour it has.
+ *
+ * ── Not fighting the scroller ────────────────────────────────────────────────
+ *
+ * Armed only where the list is already at its top, and disarmed the moment the
+ * finger goes up rather than down: past that point the drag is an ordinary
+ * scroll and must be left alone for the rest of its life, which is why `from`
+ * is cleared rather than merely ignored. Without that, a flick that started
+ * upwards and drifted back down would pull the gutter open mid-scroll.
+ *
+ * `touchmove` is registered non-passively because it calls preventDefault, and
+ * it must: otherwise the engine takes the same drag as an overscroll and paints
+ * its own glow behind a gesture that already has feedback of its own.
+ *
+ * The finger moves twice as far as the gutter opens. Damping is what makes a
+ * pull feel like a pull rather than a drawer, and it is also the margin of
+ * safety: at half speed the trip point is a deliberate 96 px of travel, which is
+ * not somewhere a scroll flick ends up by accident.
+ */
+function pullToRefresh(list, gutter, run) {
+    const MAX = 64;     // as far as the gutter will open
+    const TRIP = 48;    // and how far down is a refresh
+    let from = null;    // where the finger started, or null for "not ours"
+    let open = 0;
+    let busy = false;
+
+    const draw = (px, text) => {
+        open = px;
+        gutter.style.height = `${px}px`;
+        gutter.textContent = text;
+    };
+    const reset = () => {
+        from = null;
+        gutter.classList.remove('is-pulling');
+        draw(0, '');
+    };
+
+    list.addEventListener('touchstart', (event) => {
+        // One finger: a pinch is not a pull. And nothing while the last one is
+        // still being served — the gutter is showing that, and a second refresh
+        // on top of it would replace the list under the finger.
+        if (busy || event.touches.length !== 1 || list.scrollTop > 0) return;
+        from = event.touches[0].clientY;
+    }, { passive: true });
+
+    list.addEventListener('touchmove', (event) => {
+        if (from === null) return;
+        const dy = event.touches[0].clientY - from;
+        if (dy <= 0) { reset(); return; }
+        event.preventDefault();
+        gutter.classList.add('is-pulling');
+        const px = Math.min(MAX, dy / 2);
+        draw(px, px >= TRIP ? 'Release to refresh' : 'Pull to refresh');
+    }, { passive: false });
+
+    list.addEventListener('touchend', async () => {
+        if (from === null) return;
+        const tripped = open >= TRIP;
+        from = null;
+        gutter.classList.remove('is-pulling');
+        if (!tripped) { draw(0, ''); return; }
+        // Held open while the request is out, so that a refresh which answers
+        // instantly is still visible as having happened — the list redrawing
+        // with the same rows in the same order otherwise looks like a gesture
+        // that did nothing.
+        busy = true;
+        draw(TRIP, 'Refreshing…');
+        try {
+            await run();
+        } finally {
+            busy = false;
+            reset();
+        }
+    });
+
+    // A gesture taken away — a call arriving, a system edge swipe — is not a
+    // refusal to refresh, but it is not a request either. Left alone while one
+    // is in flight: cancel says nothing about the request, and clearing the
+    // gutter would strand `busy`.
+    list.addEventListener('touchcancel', () => { if (!busy) reset(); });
+}
+
+/** Whether two answers from api.home mean the same place. */
+function sameHome(a, b) {
+    if (!a || !b) return !a && !b;
+    return a.lat === b.lat && a.lon === b.lon && a.source === b.source;
+}
+
 const DIR_SORTS = ['distance', 'listeners', 'snr', 'name'];
 const DIR_DIRS = ['asc', 'desc'];
 
@@ -1710,7 +1845,10 @@ byId('saved-sort').addEventListener('change', async (event) => {
     event.target.value = sortBy;
     refreshSaved();
 });
-byId('dir-refresh').addEventListener('click', loadDirectory);
+byId('dir-refresh').addEventListener('click', refreshDirectory);
+// The same refresh the button runs, including the second look at where you are:
+// a pull is the phone's way of asking the question the button asks.
+pullToRefresh(byId('dir-list'), byId('dir-pull'), refreshDirectory);
 byId('dir-filter').addEventListener('input', renderDirectory);
 byId('home-set').addEventListener('click', askHome);
 for (const tab of TABS) byId(`tab-${tab}`).addEventListener('click', () => showTab(tab));

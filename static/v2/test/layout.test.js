@@ -62,9 +62,12 @@ t('the seeded window is big enough for both barrels and both sliders', () => {
     // panel — a floating Multipad at 188 reported scrollHeight 180 against
     // clientHeight 155.
     //
-    // Both rows, not one: at this width the minimal view stacks the pair rather
-    // than putting them on one line, which is the branch a 390 px window takes
-    // — see MultipadPanel. A row is the slider's own 20 px plus the stack's 5 px
+    // Both rows, not one — and not because this width stacks them. It does not:
+    // .pad__pair puts the pair on one line from a 300 px pad and a 390 px window
+    // gives it 368. The seed is measured against the stacked shape because a
+    // float is resizable and dragging it under that threshold brings the second
+    // row back; a height that only fitted the paired shape would turn that drag
+    // into a scrollbar. A row is the slider's own 20 px plus the stack's 5 px
     // gap, and .pad-row .btn.pad-row__act pins the width row's reset button to
     // that 20 so the two rows cannot differ.
     const g = defaultLayout(TOUCH).floats[PAD];

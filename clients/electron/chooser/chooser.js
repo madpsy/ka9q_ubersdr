@@ -1248,28 +1248,88 @@ function conditionsFresh(row) {
 
 let directoryRows = [];
 let dirSort = 'snr';
+let dirDir = 'desc';
 let home = null;
 let selected = null;
 const rowNodes = new Map();
 
+/**
+ * How many people are on a receiver now.
+ *
+ * The directory reports the cap and what is left of it, never the count itself,
+ * so this is the difference. `available_clients` is -1 where an instance does
+ * not report it and the cap is 0 where it has none, and neither of those is a
+ * quiet receiver — they are receivers with no answer, which sink like every
+ * other missing value here.
+ */
+function users(row) {
+    return row.availableClients >= 0 && row.maxClients > 0
+        ? row.maxClients - row.availableClients
+        : null;
+}
+
+/**
+ * The four orders, each as the one value it reads off a row.
+ *
+ * A comparator per sort would have been four comparators to turn round when the
+ * chips became toggles, and turning a comparator round is where the missing
+ * values go wrong: negating `a - b` floats every row with no answer to the top,
+ * so "furthest away" would open on the receivers nobody knows the position of.
+ * A value each, compared and sunk in one place below, cannot drift that way.
+ *
+ * `dir` is which way round the order runs when the chip is first pressed — the
+ * answer people want without asking. Nearest and A-to-Z read up; busiest and
+ * best-conditions read down. The two labels are the chip's tooltip, one per
+ * direction, because "Users" alone does not say which end it starts from.
+ */
+const ORDERS = {
+    distance: {
+        of: (row) => row.distance,
+        dir: 'asc',
+        asc: 'Nearest first',
+        desc: 'Furthest first',
+    },
+    listeners: {
+        of: users,
+        dir: 'desc',
+        asc: 'Quietest first',
+        desc: 'Busiest first',
+    },
+    snr: {
+        of: (row) => row.conditionSnr,
+        dir: 'desc',
+        asc: 'Poorest conditions first',
+        desc: 'Best conditions first',
+    },
+    name: {
+        of: (row) => row.callsign || row.name,
+        dir: 'asc',
+        asc: 'A to Z',
+        desc: 'Z to A',
+    },
+};
+
 // Offline receivers sink to the bottom of every order. They are still listed —
 // an instance that is down for the evening is one somebody may still be looking
 // for — but no sort of "where do I listen tonight" puts them first.
-function bySort(key) {
-    // MAX_VALUE rather than Infinity for the missing ones, because two rows that
-    // are both missing must compare equal and `Infinity - Infinity` is NaN — a
-    // comparator that returns NaN sorts arbitrarily. Both cases are ordinary:
-    // receivers the directory has no position for, and receivers whose band
-    // conditions have gone stale.
-    const asc = (v) => (v == null ? Number.MAX_VALUE : v);
-    const desc = (v) => (v == null ? -Number.MAX_VALUE : v);
-    const orders = {
-        distance: (a, b) => asc(a.distance) - asc(b.distance),
-        listeners: (a, b) => b.availableClients - a.availableClients || b.snr - a.snr,
-        snr: (a, b) => desc(b.conditionSnr) - desc(a.conditionSnr) || b.snr - a.snr,
-        name: (a, b) => (a.callsign || a.name).localeCompare(b.callsign || b.name),
+function bySort(key, dir) {
+    const order = ORDERS[key] || ORDERS.snr;
+    const flip = dir === 'desc' ? -1 : 1;
+    const inner = (a, b) => {
+        const av = order.of(a);
+        const bv = order.of(b);
+        // Rows with no value sink whichever way the arrow points: a receiver the
+        // directory has no position for is not the furthest away, and one whose
+        // band conditions have gone stale is not the worst-sounding — both are
+        // receivers there is no answer for, and reversing the order does not
+        // turn a blank into an extreme. Two of them compare equal, which is also
+        // what keeps `null - null` out of the arithmetic below.
+        if (av == null || bv == null) return av == null ? (bv == null ? 0 : 1) : -1;
+        const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+        // The raw wideband SNR breaks ties, as it always has, and is not turned
+        // round with the rest: it is the tiebreak rather than the question.
+        return cmp * flip || b.snr - a.snr;
     };
-    const inner = orders[key] || orders.snr;
     return (a, b) => (a.online === b.online ? inner(a, b) : (a.online ? -1 : 1));
 }
 
@@ -1373,7 +1433,7 @@ function renderDirectory() {
         return [row.name, row.callsign, row.location, row.countryName, row.grid, row.host]
             .some((field) => field && field.toLowerCase().includes(filter));
     });
-    rows.sort(bySort(dirSort));
+    rows.sort(bySort(dirSort, dirDir));
 
     list.replaceChildren();
     rowNodes.clear();
@@ -1401,21 +1461,48 @@ async function loadDirectory() {
 }
 
 const DIR_SORTS = ['distance', 'listeners', 'snr', 'name'];
+const DIR_DIRS = ['asc', 'desc'];
 
-function setDirSort(key, { persist = true } = {}) {
+/** The other way round. */
+const flipped = (dir) => (dir === 'desc' ? 'asc' : 'desc');
+
+/**
+ * Pick the order, and which way round it runs.
+ *
+ * `dir` absent means the sort's own default — what pressing a chip that is not
+ * already lit should give you. The lit chip passes the opposite of what it has,
+ * which is the toggle.
+ */
+function setDirSort(key, { persist = true, dir = null } = {}) {
     // Distance is meaningless without a position to measure from, and a sort
     // that silently does nothing is worse than one that is visibly unavailable.
     if (key === 'distance' && !home) key = 'snr';
     dirSort = DIR_SORTS.includes(key) ? key : 'snr';
+    dirDir = DIR_DIRS.includes(dir) ? dir : ORDERS[dirSort].dir;
     for (const name of DIR_SORTS) {
         const btn = byId(`dir-sort-${name}`);
-        btn.classList.toggle('active', name === dirSort);
-        if (name === 'distance') {
-            btn.disabled = !home;
-            btn.title = home ? '' : 'Set your location to sort by distance';
+        const on = name === dirSort;
+        btn.classList.toggle('active', on);
+        // The arrow is drawn from this attribute rather than from a glyph in the
+        // markup, so the chip's label stays one text node — the page reads and
+        // measures those — and an unlit chip carries no direction at all: it is
+        // not sorting anything, and an arrow on it would say it was.
+        if (on) btn.setAttribute('data-dir', dirDir);
+        else btn.removeAttribute('data-dir');
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (name === 'distance' && !home) {
+            btn.disabled = true;
+            btn.title = 'Set your location to sort by distance';
+        } else {
+            if (name === 'distance') btn.disabled = false;
+            // The lit one says what pressing it again does; the rest say what
+            // pressing them once would give.
+            btn.title = on
+                ? `${ORDERS[name][dirDir]} — press again to reverse`
+                : ORDERS[name][ORDERS[name].dir];
         }
     }
-    if (persist) api.setChooser({ dirSort });
+    if (persist) api.setChooser({ dirSort, dirDir });
 }
 
 // ---- where the operator is -------------------------------------------------
@@ -1482,9 +1569,10 @@ function askHome() {
         // is the fit, which had the old position as one of its corners.
         fittedTo = '';
         // Typing in a location is an act with one purpose, so it lands on the
-        // sort it was for. Clearing it leaves the sort alone — beyond distance
+        // sort it was for — nearest first, which is what it was typed in to get.
+        // Clearing it leaves the sort alone, direction and all, beyond distance
         // itself, which setDirSort drops for want of anywhere to measure from.
-        setDirSort(place ? 'distance' : dirSort);
+        setDirSort(place ? 'distance' : dirSort, place ? {} : { dir: dirDir });
         renderDirectory();
     };
 
@@ -1628,7 +1716,9 @@ byId('home-set').addEventListener('click', askHome);
 for (const tab of TABS) byId(`tab-${tab}`).addEventListener('click', () => showTab(tab));
 for (const name of DIR_SORTS) {
     byId(`dir-sort-${name}`).addEventListener('click', () => {
-        setDirSort(name);
+        // The lit chip is the direction control: pressing it again turns the
+        // order round rather than re-applying the order it already has.
+        setDirSort(name, name === dirSort ? { dir: flipped(dirDir) } : {});
         renderDirectory();
     });
 }
@@ -1688,6 +1778,11 @@ api.onChanged(refreshSaved);
     // later. Never throws — the whole tab works without it.
     home = await api.home().catch(() => null);
     showHome();
-    setDirSort(state.dirSort || (home ? 'distance' : 'snr'), { persist: false });
+    setDirSort(state.dirSort || (home ? 'distance' : 'snr'), {
+        persist: false,
+        // Absent for a file written before the chips had directions, and for
+        // one whose sort has always run its own way — both mean the default.
+        dir: state.dirDir || null,
+    });
     loadDirectory();
 })();

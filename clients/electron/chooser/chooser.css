@@ -333,6 +333,29 @@ select {
 }
 .chip:disabled:hover { background: transparent; color: var(--dim); }
 
+/* Which way the lit chip is running, and the one control that turns it round.
+ *
+ * Only the lit chip has a direction — the others are not sorting anything, and
+ * an arrow on them would say they were — so this hangs off the attribute
+ * setDirSort writes rather than off .active. Drawn as a pseudo-element so the
+ * chip's label stays a single text node.
+ *
+ * The row wraps on a phone (mobile.css), so the width the arrow adds costs a
+ * reflow of the chips after it and never a clipped one. */
+.chip[data-dir]::after {
+    display: inline-block;
+    width: 0.75em;
+    margin-left: 4px;
+    /* Boxed and centred at a fixed width so the chip is the same size either way
+       up — ↑ and ↓ are not the same width in every family, and a chip that
+       changed width as it was pressed would nudge the three beside it. */
+    font-size: 0.85em;
+    text-align: center;
+    opacity: 0.75;
+}
+.chip[data-dir="asc"]::after { content: '\2191'; }    /* ↑ */
+.chip[data-dir="desc"]::after { content: '\2193'; }   /* ↓ */
+
 .icon-btn { margin-left: auto; padding: 3px 9px; font-size: 14px; line-height: 1.2; }
 /* The cog: pushed to the far end of the header by the auto margin above, and
    given a touch-sized box on the two clients where the header is reached with a

@@ -4764,17 +4764,15 @@ a.btn { text-decoration: none; }
 /* Rounded to the group's inner edge by hand, where an `overflow: hidden` on the
    group would have clipped the head's hover fill to the corners for free.
  *
- * That clip is what stopped this panel scrolling on a phone. `overflow: hidden`
- * makes a box a scroll container; .shell--mobile gives every box
- * `overscroll-behavior: contain` so that a list which runs out does not hand the
- * rest of the swipe to the browser — and the two together make a box that cannot
- * scroll and will not pass the gesture on. Grouped is this panel's default view,
- * so every group box was one of those and they covered the whole sheet: nothing
- * moved wherever a finger landed. The flat "All" list has no such box and
- * scrolled the whole time, which is what the two views differ by.
- *
- * Any full-width wrapper inside a panel is the same trap. Clip with a radius on
- * the child, as here, rather than with an overflow on the parent. */
+ * That clip was this panel's share of the phone-scrolling bug: while
+ * .shell--mobile contained the overscroll of every box in its subtree, a clip
+ * was a scroll container that could not scroll and would not pass a swipe on,
+ * and the group boxes covered the whole sheet. Grouped being the default view,
+ * nothing moved wherever a finger landed, while the flat "All" list — which has
+ * no such box — scrolled the whole time. The blanket rule is gone, so the clip
+ * would be harmless now; the hand-rolled radius stays because it is no worse and
+ * rewriting working CSS to prove a point is not a reason. See the Mobile section
+ * for what the trap was and why nothing should reintroduce it. */
 .layout-group__head {
     display: flex;
     align-items: center;
@@ -6002,23 +6000,39 @@ a.btn { text-decoration: none; }
    ========================================================================= */
 
 /* A scroller that reaches its end must not hand the rest of the gesture back to
-   the browser. That chaining is what fires pull-to-refresh from a sheet scrolled
+   the browser: that chaining is what fires pull-to-refresh from a sheet scrolled
    to its top, and what turns a swipe along the tab bar past its last item into a
-   page back. The property only means anything on a scroll container, so covering
-   the subtree costs nothing and does not rot as panels are added.
+   page back.
+ *
+ * These two named scrollers, and not the subtree.
+ *
+ * `.shell--mobile *` was the rule here, on the reasoning that the property means
+ * nothing on a box that is not a scroll container — so covering everything cost
+ * nothing and could not rot as panels were added. The premise is false, and it
+ * cost this frontend most of its scrolling on a phone. `overflow: hidden` *is* a
+ * scroll container. A box that clips — a wrapper rounding its corners, a cell
+ * ellipsising a callsign — picked the containment up, and then swallowed every
+ * swipe that began inside it: nothing of its own to scroll, and no leave to hand
+ * the gesture up. There are 107 such boxes in this file and 59 of them are text
+ * cells that tile a panel's rows end to end, so on the panels built out of rows
+ * — spots, listeners, voice activity, the layout manager, most of the rest — the
+ * finger was almost always on one. The symptom is a list that ignores the swipe
+ * wherever you touch it and moves only from the gaps between its rows.
+ *
+ * What actually stops the browser gestures is `overscroll-behavior: none` at the
+ * top of this file, on html/body/#root — the viewport is where pull-to-refresh
+ * and overscroll-navigation are decided, and the document has no scrollport to
+ * rubber-band in the first place. Naming the sheet and the tab bar here keeps
+ * the two cases above contained at the scroller itself as well, which is where
+ * the intent is legible; both are real scrollers, so neither can eat a gesture.
+ *
+ * The lesson for anything added later: do not reach for a blanket
+ * `overscroll-behavior`. Contain the scroller you mean.
  *
  * Mobile only: on a desktop, a wheel that runs a list out and carries on into
- * the dock behind it is the behaviour people expect.
- *
- * The subtree is covered because the property means nothing on a box that is not
- * a scroll container — with one trap in it, which cost the layout manager its
- * scrolling: `overflow: hidden` *is* a scroll container, so a plain clipping
- * wrapper picks this up and then swallows every swipe that starts inside it,
- * having nowhere of its own to scroll and no leave to pass the gesture on. Clip
- * with a radius on the child rather than an overflow on the parent — see
- * .layout-group. */
-.shell--mobile,
-.shell--mobile * { overscroll-behavior: contain; }
+ * the dock behind it is the behaviour people expect. */
+.shell--mobile .sheet__body,
+.shell--mobile .tabbar { overscroll-behavior: contain; }
 
 .shell--mobile .shell__center { padding: 6px; }
 
@@ -10907,7 +10921,20 @@ a.btn { text-decoration: none; }
     display: flex;
     flex-direction: column;
     gap: 6px;
-    top: calc(12px + env(safe-area-inset-top));
+    /* Below the top bar, not over it.
+     *
+     * These open a moment after Start and the first card landed square on the
+     * strip — frequency, mode, S-meter — which is the row somebody wants to read
+     * while being told the antenna is down.
+     *
+     * `max()` and not a sum. Both edges are measured from the top of the
+     * viewport: the notch ends at the inset, the bar ends at its own height, and
+     * the notices have to start below whichever of the two is lower. Adding them
+     * would push the cards a bar's height down the screen on any phone with a
+     * notch, for no reason. --topbar-h is published by TopBar itself and is
+     * absent whenever there is no bar to clear — a handset held sideways drops
+     * it, and the fallback takes this straight back to the notch. */
+    top: calc(12px + max(var(--topbar-h, 0px), env(safe-area-inset-top)));
     left: 50%;
     transform: translateX(-50%);
     width: min(420px, calc(100vw - 24px));

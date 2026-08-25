@@ -106,10 +106,16 @@
                                placeholder="Filter by callsign, name or place…">
                         <!-- No "Sort" label: four chips in a row, one of them
                              always lit, is already a sort control, and the word
-                             cost a chip's worth of width on a phone. -->
+                             cost a chip's worth of width on a phone.
+
+                             The lit one carries an arrow saying which way it
+                             runs, and pressing it again turns it round. Neither
+                             the arrow nor the tooltip is written here: both come
+                             from setDirSort, which is the one place that knows
+                             which chip is lit and which way it is pointing. -->
                         <div class="sort-row">
                             <button id="dir-sort-distance" class="chip" data-sort="distance">Distance</button>
-                            <button id="dir-sort-listeners" class="chip" data-sort="listeners">Free slots</button>
+                            <button id="dir-sort-listeners" class="chip" data-sort="listeners">Users</button>
                             <button id="dir-sort-snr" class="chip" data-sort="snr">Conditions</button>
                             <button id="dir-sort-name" class="chip" data-sort="name">Name</button>
                             <button id="dir-refresh" class="ghost icon-btn" title="Refresh the directory">⟳</button>

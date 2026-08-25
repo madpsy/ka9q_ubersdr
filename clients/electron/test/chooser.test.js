@@ -97,6 +97,8 @@ class Node {
 
     getAttribute(name) { return this.attributes[name]; }
 
+    removeAttribute(name) { delete this.attributes[name]; }
+
     addEventListener(type, fn) {
         if (!this.listeners.has(type)) this.listeners.set(type, []);
         this.listeners.get(type).push(fn);
@@ -630,13 +632,96 @@ ta('and by conditions when it does not', async () => {
     assert.ok(ctx.document.getElementById('dir-sort-snr').has('active'));
 });
 
-ta('free slots is a different question from a good signal', async () => {
-    const ctx = load(dirApi());
+ta('users puts the busiest first, whatever it is hearing', async () => {
+    // Busy is a different question from loud, and this order asks the first: the
+    // one with nineteen of its twenty slots taken leads a receiver hearing forty
+    // times better with nobody on it. The count is the cap less what is left, so
+    // an instance that reports neither has no answer and sinks past both.
+    const rows = [
+        { ...DIR[1], uuid: 'quiet', callsign: 'QUIET', availableClients: 8, maxClients: 8, snr: 40, avgBandSnr: 40 },
+        { ...DIR[1], uuid: 'mute', callsign: 'MUTE', availableClients: -1, maxClients: 0, snr: 30, avgBandSnr: 30 },
+        { ...DIR[1], uuid: 'busy', callsign: 'BUSY', availableClients: 1, maxClients: 20, snr: 1, avgBandSnr: 1 },
+    ];
+    const ctx = load(dirApi({ directory: async () => rows.map((r) => ({ ...r })) }));
     await settled();
     ctx.document.getElementById('dir-sort-listeners').click();
-    // The full one sinks even though it is nearer and hearing well enough.
+    assert.deepStrictEqual(callsigns(ctx), ['BUSY', 'QUIET', 'MUTE']);
+});
+
+ta('the lit chip is the direction control, and says which way it points', async () => {
+    const ctx = load(dirApi());
+    await settled();
+    const snr = ctx.document.getElementById('dir-sort-snr');
+    const name = ctx.document.getElementById('dir-sort-name');
+    // Conditions is where a chooser with no position opens, best first.
+    assert.strictEqual(snr.getAttribute('data-dir'), 'desc');
     assert.deepStrictEqual(callsigns(ctx), ['VK2ABC', 'G4XYZ', 'W1DED']);
-    assert.strictEqual(callsigns(ctx).indexOf('G4XYZ'), 1);
+
+    snr.click();
+    assert.strictEqual(snr.getAttribute('data-dir'), 'asc');
+    // Turned round, and the offline one still last: reversing the order is not
+    // licence to promote a receiver that is not there.
+    assert.deepStrictEqual(callsigns(ctx), ['G4XYZ', 'VK2ABC', 'W1DED']);
+
+    // Only the chip doing the sorting carries a direction.
+    assert.strictEqual(name.getAttribute('data-dir'), undefined);
+    name.click();
+    assert.strictEqual(snr.getAttribute('data-dir'), undefined);
+    assert.strictEqual(name.getAttribute('data-dir'), 'asc');
+});
+
+ta('a chip that was not lit opens on its own way round, not the last one used', async () => {
+    // Reversing one order must not reverse the next: "Z to A" is not what
+    // pressing Name after turning Conditions upside down should mean.
+    const ctx = load(dirApi());
+    await settled();
+    ctx.document.getElementById('dir-sort-snr').click();          // desc -> asc
+    ctx.document.getElementById('dir-sort-name').click();
+    assert.strictEqual(ctx.document.getElementById('dir-sort-name').getAttribute('data-dir'), 'asc');
+    assert.deepStrictEqual(callsigns(ctx), ['G4XYZ', 'VK2ABC', 'W1DED']);
+    ctx.document.getElementById('dir-sort-name').click();         // asc -> desc
+    assert.deepStrictEqual(callsigns(ctx), ['VK2ABC', 'G4XYZ', 'W1DED']);
+});
+
+ta('reversed, the receivers with no answer still sink', async () => {
+    // The trap in turning a comparator round: negating `a - b` floats the rows
+    // with no value to the top, so "quietest first" would open on the instances
+    // that report no slots at all. They are not quiet, they are unknown.
+    const rows = [
+        { ...DIR[1], uuid: 'busy', callsign: 'BUSY', availableClients: 1, maxClients: 20 },
+        { ...DIR[1], uuid: 'mute', callsign: 'MUTE', availableClients: -1, maxClients: 0 },
+        { ...DIR[1], uuid: 'quiet', callsign: 'QUIET', availableClients: 8, maxClients: 8 },
+    ];
+    const ctx = load(dirApi({ directory: async () => rows.map((r) => ({ ...r })) }));
+    await settled();
+    const chip = ctx.document.getElementById('dir-sort-listeners');
+    chip.click();
+    assert.deepStrictEqual(callsigns(ctx), ['BUSY', 'QUIET', 'MUTE']);
+    chip.click();
+    assert.deepStrictEqual(callsigns(ctx), ['QUIET', 'BUSY', 'MUTE']);
+});
+
+ta('the direction is saved with the sort, and comes back with it', async () => {
+    const api = dirApi();
+    const ctx = load(api);
+    await settled();
+    ctx.document.getElementById('dir-sort-listeners').click();
+    ctx.document.getElementById('dir-sort-listeners').click();
+    // Field by field: the patch is built inside the page's context, so it does
+    // not share a prototype with an object literal written out here.
+    const [, patch] = api.calls.filter((c) => c[0] === 'setChooser').pop();
+    assert.strictEqual(patch.dirSort, 'listeners');
+    assert.strictEqual(patch.dirDir, 'asc');
+
+    const back = load(dirApi({ chooser: async () => ({ dirSort: 'listeners', dirDir: 'asc' }) }));
+    await settled();
+    assert.strictEqual(back.document.getElementById('dir-sort-listeners').getAttribute('data-dir'), 'asc');
+});
+
+ta('a stored sort from before the chips had directions runs its own way', async () => {
+    const ctx = load(dirApi({ chooser: async () => ({ dirSort: 'listeners' }) }));
+    await settled();
+    assert.strictEqual(ctx.document.getElementById('dir-sort-listeners').getAttribute('data-dir'), 'desc');
 });
 
 ta('the filter reads places and countries, not just callsigns', async () => {

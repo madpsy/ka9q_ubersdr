@@ -32,6 +32,10 @@ const MUTABLE = new Set(['label', 'ui', 'insecureTLS']);
 
 const TABS = new Set(['saved', 'lan', 'dir', 'custom']);
 const DIR_SORTS = new Set(['distance', 'listeners', 'snr', 'name']);
+// Which way round that sort runs — the arrow on the lit chip. Absent in a file
+// written before the chips could be turned round, which the chooser reads as
+// "whichever way this sort runs by default".
+const DIR_DIRS = new Set(['asc', 'desc']);
 
 /**
  * A home position, or null. Read back out of storage the operator's other apps
@@ -53,6 +57,7 @@ function sanitiseChooser(chooser) {
     const out = {};
     if (TABS.has(raw.tab)) out.tab = raw.tab;
     if (DIR_SORTS.has(raw.dirSort)) out.dirSort = raw.dirSort;
+    if (DIR_DIRS.has(raw.dirDir)) out.dirDir = raw.dirDir;
     const home = sanitiseHome(raw.home);
     if (home) out.home = home;
     // Settings, which live here rather than in a store of their own: they are

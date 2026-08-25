@@ -406,6 +406,38 @@ export default function TopBar({ compact }) {
     const freqRef = useRef(null);
     const fit = useFitScale(barRef, freqRef, !!compact);
 
+    // This bar's height, published for the fixed layers that must not land on it.
+    //
+    // The operator's notices are the ones that did: they open at the top of the
+    // window a moment after Start, and the first card sat over the frequency,
+    // the mode and the S-meter — the one row somebody wants to read while being
+    // told the antenna is down. They clear it by reading this rather than by an
+    // offset written out a second time in the stylesheet, because there is no
+    // constant to write: the bar is 9px of padding around whatever its controls
+    // measure at the current --ui-scale, it has a shorter compact form on a
+    // phone, and it is not rendered at all on a handset held sideways.
+    //
+    // Cleared when this unmounts, so that rotation into landscape takes the
+    // notices back to the top of the window, where with no bar they belong. See
+    // .opnotice-layer, which clears the notch and this bar with a max() of the
+    // two rather than a sum — the bar starts at the top of the viewport, so the
+    // lower of the two edges is the one to clear, not both stacked.
+    useEffect(() => {
+        const el = barRef.current;
+        if (!el) return undefined;
+        const root = document.documentElement;
+        const publish = () => root.style.setProperty('--topbar-h', `${el.offsetHeight}px`);
+        publish();
+        // Observed rather than measured once: the bar changes height when the
+        // text size does, and the readout wraps at some widths.
+        const ro = new ResizeObserver(publish);
+        ro.observe(el);
+        return () => {
+            ro.disconnect();
+            root.style.removeProperty('--topbar-h');
+        };
+    }, []);
+
     // Whether anything in this bar may talk about hovering — see the dock
     // buttons at the foot of it.
     const canHover = useMediaQuery(HOVER_QUERY);

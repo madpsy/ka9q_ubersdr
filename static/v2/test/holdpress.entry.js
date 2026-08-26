@@ -7,10 +7,11 @@
 import { deep, render, reset, walk, words } from './hookStub.js';
 import useHoldPress, { HOLD_MS } from '../src/lib/useHoldPress.js';
 import MultipadPanel from '../src/panels/MultipadPanel.jsx';
+import SignalPanel from '../src/panels/SignalPanel.jsx';
 import { DEFAULTS } from '../src/display/DisplayContext.jsx';
 import { SQUELCH_MIN } from '../src/radio/constants.js';
 
 module.exports = {
     deep, render, reset, walk, words, useHoldPress, HOLD_MS,
-    MultipadPanel, DEFAULTS, SQUELCH_MIN,
+    MultipadPanel, SignalPanel, DEFAULTS, SQUELCH_MIN,
 };

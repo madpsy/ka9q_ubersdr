@@ -40,7 +40,7 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 
 const {
     deep, render, reset, walk, useHoldPress, HOLD_MS,
-    MultipadPanel, DEFAULTS, SQUELCH_MIN,
+    MultipadPanel, SignalPanel, DEFAULTS, SQUELCH_MIN,
 } = require('./.build/holdpress.cjs');
 
 let pass = 0;
@@ -260,6 +260,88 @@ t('the tooltip says how, but only while there is something to turn off', () => {
     const off = pad(OFF, 12).auto.props.title;
     assert.ok(/right-click or hold/.test(on), on);
     assert.ok(!/right-click or hold/.test(off), off);
+});
+
+
+// --- and on the Signal panel -------------------------------------------------
+//
+// The same gesture on the other Auto. It matters most in the minimal view,
+// where the Off button below the slider is dropped and this is the only way off
+// the squelch that is not dragging the slider to the stop.
+
+function signal(squelch, snr, props = { minimal: true }) {
+    reset();
+    const sent = [];
+    const ctx = {
+        running: true,
+        squelch,
+        tuning: { mode: 'usb', frequency: 14_200_000, bandwidthLow: 50, bandwidthHigh: 2700 },
+        audio: { bufferSec: 0.5 },
+        meters: { current: { snr, snrHistory: snr == null ? [] : [snr, snr, snr] } },
+        actions: {
+            setSquelch: (v) => sent.push(v),
+            autoSquelch: () => sent.push('auto'),
+        },
+        ...DEFAULTS,
+        set() {},
+    };
+    const { tree, cleanups } = render(SignalPanel, props, ctx);
+    const nodes = deep(tree);
+    // Unmounted straight away, and it has to be: the panel samples the meters
+    // at 15 Hz through a real setInterval — not the stub above, which only
+    // stands in for setTimeout — and a test that renders it four times and
+    // never tears it down leaves four live timers and node never exits.
+    for (const off of cleanups) off();
+    const hold = nodes.find((n) => n.props?.className === 'squelch-row__hold');
+    return { sent, hold, auto: hold && deep(hold).find((n) => n.type === 'button') };
+}
+
+t('right-clicking Auto on the Signal panel turns the squelch off', () => {
+    const { hold, sent } = signal(ON, 12);
+    assert.ok(hold, 'the gesture wrapper is drawn');
+    hold.props.onContextMenu(menu().event);
+    assert.deepStrictEqual(sent, [SQUELCH_MIN]);
+});
+
+t('holding it there does the same', () => {
+    const { hold, sent } = signal(ON, 12);
+    hold.props.onPointerDown({ pointerType: 'touch' });
+    elapse(HOLD_MS);
+    assert.deepStrictEqual(sent, [SQUELCH_MIN]);
+});
+
+t('it still works with no SNR there too', () => {
+    const { hold, sent, auto } = signal(ON, null);
+    assert.strictEqual(auto.props.disabled, true, 'Auto is disabled');
+    hold.props.onContextMenu(menu().event);
+    assert.deepStrictEqual(sent, [SQUELCH_MIN], 'and the squelch still went off');
+});
+
+t('an already-off squelch is left alone there too', () => {
+    const { hold, sent } = signal(OFF, 12);
+    hold.props.onContextMenu(menu().event);
+    assert.deepStrictEqual(sent, []);
+});
+
+t('Auto still autos, and the click after a hold does not', () => {
+    // The wrapper carries the gesture and the button carries the press; the one
+    // mistake left is the compatibility click a hold leaves behind arriving as
+    // an Auto on top of the off.
+    const { hold, auto, sent } = signal(ON, 12);
+    auto.props.onClick();
+    assert.deepStrictEqual(sent, ['auto'], 'a plain press sets the threshold');
+    hold.props.onPointerDown({ pointerType: 'touch' });
+    elapse(HOLD_MS);
+    auto.props.onClick();
+    assert.deepStrictEqual(sent, ['auto', SQUELCH_MIN], 'the hold went off, the click behind it was ignored');
+});
+
+t('the full view keeps its Off button as well', () => {
+    // The gesture is the minimal view's way off the squelch, not a replacement
+    // for the labelled one.
+    const { hold, sent } = signal(ON, 12, { minimal: false });
+    assert.ok(hold, 'the gesture is on both views');
+    assert.deepStrictEqual(sent, []);
 });
 
 console.log(`\n${pass} passed`);

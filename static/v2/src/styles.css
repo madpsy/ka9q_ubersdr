@@ -2231,6 +2231,12 @@ a.btn { text-decoration: none; }
 .squelch-row .slider-wrap,
 .squelch-row .slider { flex: 1; min-width: 0; }
 .squelch-row .chip { flex: none; margin-left: 0; }
+/* The wrapper carrying Auto's hold gesture. It becomes the flex child in the
+   chip's place, so it takes the sizing the chip had — and stays a flex box
+   itself so the button inside it keeps the row's height rather than sitting on
+   the wrapper's baseline. Same shape as the Multipad's .pad-row__hold, and for
+   the same reason: the gesture has to stay live while the button is disabled. */
+.squelch-row__hold { flex: none; display: flex; }
 
 /* A segmented option that has been chosen and cannot yet do its job — today
    the RM Noise engine selected with no account entered. The top bar's Stop

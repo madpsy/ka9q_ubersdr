@@ -1,7 +1,7 @@
 // Live meters. Reads the mutable meters object via useMeters so the sampling
 // rate is decoupled from the audio packet rate.
 
-import React, { useEffect, useRef } from '../react.js';
+import React, { useCallback, useEffect, useRef } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { resolveMaxFps, useDisplay } from '../display/DisplayContext.jsx';
 import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
@@ -22,6 +22,8 @@ import {
 import {
     drawLag, medianGap, strokeCurve, trimBefore, xAt, SPAN_MS,
 } from '../lib/rollingChart.js';
+import useHoldPress from '../lib/useHoldPress.js';
+import { haptic } from '../lib/haptics.js';
 
 // A little more than the span is kept, because the chart is drawn slightly
 // behind live and the segment crossing the left edge starts at a point that has
@@ -216,6 +218,24 @@ function SquelchControl({ minimal }) {
     const snr = m.snr;
     const open = m.squelchOpen;
 
+    // Auto's secondary press, the same one the Multipad's Auto carries: it puts
+    // the threshold back on the floor, which is what "off" means here. The Off
+    // button below does it too, but that row is dropped in the minimal view —
+    // where Auto is the only squelch control left besides the slider, and the
+    // gesture is the only way back off it. See lib/useHoldPress.
+    //
+    // Declared above the IQ return because it is a hook, and idempotent because
+    // Android sends the long press through `contextmenu` as well as the timer.
+    const off = useCallback(() => {
+        if (!squelch.enabled) return;
+        actions.setSquelch(SQUELCH_MIN);
+        // The one press here whose effect is not a number moving under the
+        // finger that moved it, so it is the one that has to say it landed on a
+        // device with no pointer to see.
+        haptic('toggle');
+    }, [squelch.enabled, actions]);
+    const [press, afterHold] = useHoldPress(off);
+
     // The server does not gate IQ at all — audioGateAllows is skipped outright
     // for it, because a threshold on the SNR of raw RF samples gates nothing
     // meaningful. Leaving the control live would be the worse failure of the
@@ -255,15 +275,29 @@ function SquelchControl({ minimal }) {
                         markerTone={squelch.enabled && !open ? 'closed' : 'open'}
                         markerTitle={snr == null ? undefined : `Current SNR: ${snr.toFixed(1)} dB`}
                     />
-                    <button
-                        type="button"
-                        className="chip chip--button"
-                        title="Set the threshold just above the recent noise level"
-                        disabled={snr == null}
-                        onClick={actions.autoSquelch}
-                    >
-                        Auto
-                    </button>
+                    {/* The gesture rides on the wrapper, not the button: Auto
+                        goes disabled while there is no SNR to measure from, and
+                        a disabled button dispatches no pointer events — which
+                        would put "turn it off" out of reach at exactly the
+                        moment it is most wanted, over a band that has gone
+                        quiet. */}
+                    <span className="squelch-row__hold" {...press}>
+                        <button
+                            type="button"
+                            className="chip chip--button"
+                            title={[
+                                'Set the threshold just above the recent noise level',
+                                squelch.enabled ? 'right-click or hold to turn the squelch off' : null,
+                            ].filter(Boolean).join(' — ')}
+                            disabled={snr == null}
+                            onClick={() => {
+                                if (afterHold()) return;
+                                actions.autoSquelch();
+                            }}
+                        >
+                            Auto
+                        </button>
+                    </span>
                 </div>
             </Field>
             {/* The state and the off switch, full view only. Minimal carries

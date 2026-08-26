@@ -21,7 +21,12 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { freqInRange, freqToKHz, parseFreqInput } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 
-const RANGE_HINT = `Frequency in kHz, ${MIN_FREQ / 1000} to ${MAX_FREQ / 1000}`;
+// Built where it is used rather than once at import. MIN_FREQ/MAX_FREQ are live bindings
+// that take this receiver's real limits when /api/description answers (see
+// radio/constants.js), and a template literal evaluated at module scope would have baked
+// the 10 kHz-30 MHz default into the string before the answer arrived — leaving a 60 MHz
+// receiver telling everybody it stops at 30,000.
+const rangeHint = () => `Frequency in kHz, ${MIN_FREQ / 1000} to ${MAX_FREQ / 1000}`;
 
 // `onDone` is called with the frequency in Hz, or null where nothing usable was
 // typed — either way the caller closes the editor.
@@ -61,7 +66,7 @@ export default function FreqEntry({ frequency, className, fitKey, onDone }) {
             inputMode="decimal"
             aria-label="Frequency in kHz"
             aria-invalid={valid ? undefined : true}
-            title={valid ? RANGE_HINT : `${RANGE_HINT} — ${draft.trim() ? 'out of range' : 'enter a frequency'}`}
+            title={valid ? rangeHint() : `${rangeHint()} — ${draft.trim() ? 'out of range' : 'enter a frequency'}`}
             onChange={(e) => setDraft(e.target.value)}
             // Clicking away from a box that cannot be committed abandons the
             // edit: leaving it open would trap focus in a control the operator

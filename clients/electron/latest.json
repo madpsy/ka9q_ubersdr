@@ -1,4 +1,4 @@
 {
   "//": "The desktop client version that is on the releases page now. Bump this when a release is published, to the same value as package.json's version — the running app compares its own version against it and offers the download when this one is newer. Fetched raw from main; see updates.js.",
-  "version": "0.9.12"
+  "version": "0.9.13"
 }

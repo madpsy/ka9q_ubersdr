@@ -3,34 +3,74 @@
 
 // How much spectrum this receiver covers.
 //
-// The server derives this from the front end sample rate and inlines it into the shell
-// (see v2TuningRangeJSON and static/v2/index.html), so it is here before this module is
-// evaluated. That matters: MAX_FREQ is read at module scope — FreqEntry's RANGE_HINT is
-// a template literal evaluated at import, and initialTuning clamps the ?freq= share link
-// on first render — so a value that arrived with /api/description would be too late, and
-// the clamp is lossy.
+// One publisher: /api/description, whose `tuning_range` object is built by
+// ReceiverConfig.TuningRange() in receiver_span.go. The same map reaches the instance
+// reporter, so every consumer of these numbers is reading one fact from one place.
 //
-// Inlining keeps these plain constants: the value changes with the receiver, the shape
-// does not, and none of their ~15 consumers has to become a context read.
+// It used to be inlined into the shell as well, as `window.__UBERSDR__`, so that these
+// could be plain `const`s evaluated before anything read them. That is gone, and the
+// reason is the bundled clients: the desktop and mobile apps serve their own copy of
+// index.html and strip its Go template actions — an operator's injected HTML is the
+// instance's business — which took the inlined range with it. Every app therefore fell
+// back to 30 MHz on every receiver, so a 60 MHz instance drew 0-60 MHz of spectrum (that
+// arrives over the websocket) while offering no 6 m button and refusing to centre above
+// 30 MHz. Two delivery mechanisms for one fact, and the apps only ever had the one that
+// was silently dropped.
+//
+// So these are live bindings rather than constants, set once by applyTuningRange when the
+// description lands. ES module exports are live: `import { MAX_FREQ }` re-reads this
+// variable on every access, and esbuild preserves that through the bundle — so the ~40
+// consumers keep importing exactly what they imported before, and none of them became a
+// context read. What that does *not* do is re-render anybody, so the caller applies the
+// range immediately before the setState that publishes the description (see
+// RadioContext) and the render that follows sees these values.
+//
+// Two consumers read too early for any of that and are fixed rather than papered over:
+// FreqEntry's range hint is computed at render instead of at import, and initialTuning
+// defers its clamp of the ?freq= share link until the range is known, because clamping
+// a 6 m link to 30 MHz destroys the frequency it was sent to convey.
 //
 // ── The fallback is a contract, not padding ──────────────────────────────────
 // A bundle cached in a visitor's browser will outlive the server it was built against,
-// in both directions. With no inlined value — an older server, a stale shell, a test
-// harness, a bundle loaded outside the shell entirely — this must behave exactly as it
-// did before the receiver span became configurable: 10 kHz to 30 MHz.
+// in both directions. Until the description answers — and for an older server that does
+// not publish the object, a test harness, or a bundle loaded outside a page entirely —
+// this must behave exactly as it did before the receiver span became configurable:
+// 10 kHz to 30 MHz.
 //
 // `> 0` rather than `??` or `||` on purpose, so 0, null, "" and undefined all fall
-// through to the literal rather than 0 becoming a legitimate limit.
-const RANGE = (typeof window !== 'undefined' && window.__UBERSDR__) || {};
-
-export const MIN_FREQ = RANGE.min_frequency > 0 ? RANGE.min_frequency : 10000;      // 10 kHz
-export const MAX_FREQ = RANGE.max_frequency > 0 ? RANGE.max_frequency : 30000000;   // 30 MHz
+// through to the default rather than 0 becoming a legitimate limit.
+export let MIN_FREQ = 10000;              // 10 kHz
+export let MAX_FREQ = 30000000;           // 30 MHz
 
 // The full-span spectrum view, for the modules that need a span rather than a limit.
 // Named RECEIVER_SPAN_HZ, not FULL_SPAN_HZ, because lib/ifSpectrum.js already exports
 // that name as its own pure-module default.
 // Same fallback rule, same reason.
-export const RECEIVER_SPAN_HZ = RANGE.spectrum_span_hz > 0 ? RANGE.spectrum_span_hz : 30000000;
+export let RECEIVER_SPAN_HZ = 30000000;
+
+/**
+ * Adopt this receiver's tuning range, from /api/description's `tuning_range`.
+ *
+ * Every field is optional and each falls back on its own, because the three are
+ * independent facts and a server that publishes one of them must not reset the others.
+ * Returns true when anything actually moved, so the caller can tell a real change from
+ * the common case of a receiver that is the 30 MHz default anyway.
+ */
+export function applyTuningRange(range) {
+    const r = range || {};
+    const pick = (v, was) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : was);
+    const min = pick(r.min_frequency, MIN_FREQ);
+    const max = pick(r.max_frequency, MAX_FREQ);
+    const span = pick(r.spectrum_span_hz, RECEIVER_SPAN_HZ);
+    // A max below the min is not a range, it is a misconfigured receiver, and taking it
+    // would leave every clamp in the app inverted. Left as it was instead.
+    if (max <= min) return false;
+    const changed = min !== MIN_FREQ || max !== MAX_FREQ || span !== RECEIVER_SPAN_HZ;
+    MIN_FREQ = min;
+    MAX_FREQ = max;
+    RECEIVER_SPAN_HZ = span;
+    return changed;
+}
 
 // Mode table. `low`/`high` are the passband edges in Hz relative to the tuned
 // frequency and match the server-side defaults in websocket.go.

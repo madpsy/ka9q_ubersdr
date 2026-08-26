@@ -57,13 +57,6 @@
     <!-- Opus decoder shared with the v1 frontend; exposes window["opus-decoder"] -->
     <script src="/opus-decoder.min.js"></script>
 
-    <!-- The receiver's frequency limits, inlined so radio/constants.js can read them
-         synchronously at module scope. /api/description carries the same values for
-         anything that can wait for a fetch; this cannot, because the ?freq= share link
-         and the restored tuning are clamped against MAX_FREQ on first render. Absent or
-         zero fields fall back to 10 kHz-30 MHz. -->
-    <script>window.__UBERSDR__ = {{.TuningRange}};</script>
-
     <script src="dist/v2.js"></script>
 
     <!-- The service worker exists to satisfy the install criteria, not to serve

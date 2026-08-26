@@ -20,6 +20,8 @@ esbuild ../src/radio/socket-health.js --bundle --format=cjs --platform=node \
     --outfile=.build/sockethealth.cjs --log-level=warning
 esbuild ../src/radio/constants.js --bundle --format=cjs --platform=node \
     --outfile=.build/constants.cjs --log-level=warning
+esbuild tuningrange.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/tuningrange.cjs --log-level=warning
 esbuild ../src/radio/pcm-stream.js --bundle --format=cjs --platform=node \
     --outfile=.build/pcmstream.cjs --log-level=warning
 esbuild ../src/lib/dsp.js --bundle --format=cjs --platform=node \

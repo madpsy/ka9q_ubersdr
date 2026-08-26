@@ -4143,12 +4143,10 @@ func handleV2IndexPage(w http.ResponseWriter, r *http.Request, config *Config) {
 		Meta           V2PageMeta
 		CustomHeadHTML template.HTML
 		CustomBodyHTML template.HTML
-		TuningRange    template.JS
 	}{
 		Meta:           buildV2PageMeta(config, r),
 		CustomHeadHTML: template.HTML(config.Server.CustomHeadHTML),
 		CustomBodyHTML: template.HTML(config.Server.CustomBodyHTML),
-		TuningRange:    v2TuningRangeJSON(config),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

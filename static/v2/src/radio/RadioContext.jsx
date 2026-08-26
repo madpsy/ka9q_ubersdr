@@ -24,7 +24,8 @@ import { NB_DEFAULTS } from '../lib/noiseBlanker.js';
 import { NR_DEFAULTS } from '../lib/nr.js';
 import { getRmNoise, rmCredentials, rmModeSupported } from '../lib/rmnoise.js';
 import {
-    AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, bandwidthLimits, defaultAGC, hasAGCSettings,
+    AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, applyTuningRange, bandwidthLimits, defaultAGC,
+    hasAGCSettings,
     isIQ, SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
     autoSquelchValue, squelchEnabled, squelchThreshold,
 } from './constants.js';
@@ -73,7 +74,13 @@ function initialTuning() {
     const high = link.bandwidthHigh != null ? link.bandwidthHigh
         : (restore && saved.bandwidthHigh != null ? saved.bandwidthHigh : def.high);
     return {
-        frequency: clamp(link.frequency > 0 ? link.frequency : (saved.frequency || 7100000), MIN_FREQ, MAX_FREQ),
+        // Deliberately unclamped. The receiver's range is not known yet — it arrives with
+        // /api/description, below — and clamping is lossy: a 6 m share link squeezed to
+        // 30 MHz here can never be recovered, because the number it was sent to convey is
+        // gone. Nothing tunes to this on its own; it is the dial's starting position until
+        // Start is pressed, and the description handler clamps it once the real limits are
+        // in. Every path that actually tunes clamps for itself.
+        frequency: link.frequency > 0 ? link.frequency : (saved.frequency || 7100000),
         mode,
         bandwidthLow: clamp(low, l.min, l.max),
         bandwidthHigh: clamp(high, l.min, l.max),
@@ -691,8 +698,21 @@ export function RadioProvider({ children }) {
         fetch('/api/description')
             .then((r) => r.json())
             .then((d) => {
+                // Before setServerInfo, and that order is the whole mechanism. The range
+                // lives in live module bindings (see applyTuningRange), which re-render
+                // nobody on their own; this setState does, and by then it is already the
+                // new value that the render reads. Reversed, every panel would draw its
+                // bands and limits once more against the 30 MHz default.
+                if (d) applyTuningRange(d.tuning_range);
                 setServerInfo(d);
                 if (!d) return;
+                // The starting frequency, now that there is something to measure it
+                // against — initialTuning left it alone on purpose. A share link for a
+                // band this receiver cannot reach lands on the nearest edge, which is the
+                // same thing every tune does, just deferred until the limits are known.
+                const held = tuningRef.current.frequency;
+                const fitted = clamp(held, MIN_FREQ, MAX_FREQ);
+                if (fitted !== held) tuningRef.current = { ...tuningRef.current, frequency: fitted };
                 const freq = Number(d.default_frequency);
                 const mode = String(d.default_mode || '').toLowerCase();
                 const patch = {};

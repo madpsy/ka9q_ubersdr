@@ -161,6 +161,104 @@ fi
 CPU_HASH=$("${SCRIPT_DIR}/get-cpu.sh" --hash-only 2>/dev/null || true)
 CPU_NAME=$("${SCRIPT_DIR}/get-cpu.sh" 2>/dev/null | grep -i 'CPU Name' | sed 's/.*:[[:space:]]*//' | xargs || true)
 
+# ── Which FFT sizes this receiver needs ───────────────────────────────────────
+#
+# Worked out here, before any prompt, rather than down in the generation section where
+# it used to live. The operator is about to be asked whether to download precomputed
+# wisdom or generate their own — a choice between minutes and several hours — and on a
+# 129.6 MSPS receiver "generate my own" means two transforms, the larger of which is
+# hours by itself. That is not something to disclose after the decision.
+
+FFT_LOW="rof1620000"    # 64.8 MSPS
+FFT_HIGH="rof3240000"   # 129.6 MSPS
+
+# `|| true` because set -e is on: without it a missing helper — or a receiver that
+# cannot be reached — takes the whole script down instead of falling through to the
+# warning below. Same guard the get-cpu.sh calls above use.
+_SR_INFO=$("${SCRIPT_DIR}/get-samprate.sh" 2>/dev/null || true)
+if [ -n "$_SR_INFO" ]; then
+    eval "$_SR_INFO"
+    echo
+    echo "Front end is running at $(awk -v s="$samprate" 'BEGIN{printf "%.4g", s/1e6}') MSPS"
+    echo "  (read from $([ "${source:-}" = "api" ] && echo "the running server" || echo "the radiod config"))"
+    echo "  blocktime ${blocktime}s, overlap ${overlap} -> radiod plans ${fft_name}"
+
+    if [ "$fft_name" = "$FFT_HIGH" ]; then
+        # At the high rate, generate for both — deliberately, and not symmetrically with
+        # the low rate.
+        #
+        # 129.6 MSPS is the rate an operator drops *back* from: it runs the RX888 MkII
+        # hot enough to damage it without thermal work, and a receiver that cannot
+        # sustain the USB throughput loses samples. Both of those end with someone
+        # setting 64800000 and restarting — and finding radiod planning rof1620000 with
+        # no wisdom for it, hours after the wisdom run they thought had finished the job.
+        #
+        # The extra size is also the cheap one here: whoever is at 129.6 has already
+        # accepted the several-hour rof3240000 generation, and rof1620000 beside it is a
+        # small fraction of that.
+        FFT_SIZES="$FFT_HIGH $FFT_LOW"
+        echo
+        echo "Generating for BOTH sample rates (${FFT_SIZES})."
+        echo "  At 129.6 MSPS the 64.8 wisdom is generated too, so dropping back to the"
+        echo "  safe rate does not leave radiod planning a transform with no wisdom."
+    else
+        FFT_SIZES="$fft_name"
+    fi
+else
+    FFT_SIZES="$FFT_LOW"
+    echo
+    # Name the actual cause. A missing helper is a packaging fault and is fixed by
+    # re-running the installer; a helper that ran and found nothing means the receiver
+    # could not be reached. Saying "is UberSDR running?" for both sends people to look
+    # in the wrong place.
+    if [ ! -x "${SCRIPT_DIR}/get-samprate.sh" ]; then
+        echo "WARNING: ${SCRIPT_DIR}/get-samprate.sh is missing, so the front end sample"
+        echo "         rate could not be read. Re-run the installer to fetch it:"
+        echo "           curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash -s --"
+    else
+        echo "WARNING: could not read the front end sample rate — is UberSDR running?"
+        echo "         Start it, or check ${UBERSDR_URL:-http://localhost:8080}/api/description."
+    fi
+    echo
+    echo "         Assuming 64.8 MSPS (${FFT_SIZES}). If this receiver runs at 129.6 MSPS"
+    echo "         this generates wisdom for a transform radiod never plans, and the one"
+    echo "         it does plan gets none — hours of work for nothing."
+    echo "         Re-run with --max-rate to cover both rates regardless."
+fi
+
+# --max-rate forces both even at the low rate: for a receiver about to be raised to
+# 129.6, so the wisdom is ready before the change rather than hours after it. At the high
+# rate both are already included and this changes nothing.
+if [ $MAX_RATE -eq 1 ]; then
+    _added=0
+    for _both in "$FFT_HIGH" "$FFT_LOW"; do
+        case " $FFT_SIZES " in
+            *" $_both "*) ;;
+            *) FFT_SIZES="$_both $FFT_SIZES"; _added=1 ;;
+        esac
+    done
+    # Only say so if it actually changed something — at the high rate both are already
+    # in, and repeating the same sentence reads as two different decisions.
+    if [ $_added -eq 1 ]; then
+        echo
+        echo "--max-rate: generating for both sample rates (${FFT_SIZES})."
+    fi
+fi
+
+# One sentence about what it costs, used by the prompts below and stated again just
+# before generation actually starts.
+case " $FFT_SIZES " in
+    *" $FFT_HIGH "*) FFT_COST_NOTE="${FFT_HIGH} alone may take SEVERAL HOURS." ;;
+    *)               FFT_COST_NOTE="Expect this to take a while, but not hours." ;;
+esac
+case " $FFT_SIZES " in
+    *" $FFT_HIGH "*)
+        echo
+        echo "WARNING: ${FFT_COST_NOTE}" ;;
+esac
+
+echo
+
 # ── ARM big.LITTLE: determine which CPUs to pin wisdom generation to ──────────
 #
 # FFTW wisdom is CPU-microarchitecture-specific.  On big.LITTLE systems,
@@ -488,6 +586,9 @@ if [[ -n "$CPU_HASH" ]]; then
                 echo "  Using precomputed wisdom saves several hours of generation time."
                 echo "  The wisdom was generated on an identical CPU microarchitecture."
                 echo
+                echo "  Generating your own would build: ${FFT_SIZES}"
+                echo "  ${FFT_COST_NOTE}"
+                echo
                 read -p "  [1] Use precomputed wisdom (recommended)  [2] Generate my own: " -r _choice
                 echo
                 if [[ "$_choice" == "2" ]]; then
@@ -508,6 +609,9 @@ if [[ -n "$CPU_HASH" ]]; then
             echo
             echo "  Using precomputed wisdom saves several hours of generation time."
             echo "  The wisdom was generated on an identical CPU microarchitecture."
+            echo
+            echo "  Generating your own would build: ${FFT_SIZES}"
+            echo "  ${FFT_COST_NOTE}"
             echo
             read -p "  [1] Use precomputed wisdom (recommended)  [2] Generate my own: " -r _choice
             echo
@@ -570,89 +674,6 @@ sudo rm -f "$WISDOM_TMP" 2>/dev/null || true
 #
 # get-samprate.sh reads it from the running server's /api/description and falls back to
 # the radiod .conf when the server is not up. See there for why the API is preferred.
-FFT_LOW="rof1620000"    # 64.8 MSPS
-FFT_HIGH="rof3240000"   # 129.6 MSPS
-
-# `|| true` because set -e is on: without it a missing helper — or a receiver that
-# cannot be reached — takes the whole script down instead of falling through to the
-# warning below. Same guard the get-cpu.sh calls above use.
-_SR_INFO=$("${SCRIPT_DIR}/get-samprate.sh" 2>/dev/null || true)
-if [ -n "$_SR_INFO" ]; then
-    eval "$_SR_INFO"
-    echo
-    echo "Front end is running at $(awk -v s="$samprate" 'BEGIN{printf "%.4g", s/1e6}') MSPS"
-    echo "  (read from $([ "${source:-}" = "api" ] && echo "the running server" || echo "the radiod config"))"
-    echo "  blocktime ${blocktime}s, overlap ${overlap} -> radiod plans ${fft_name}"
-
-    if [ "$fft_name" = "$FFT_HIGH" ]; then
-        # At the high rate, generate for both — deliberately, and not symmetrically with
-        # the low rate.
-        #
-        # 129.6 MSPS is the rate an operator drops *back* from: it runs the RX888 MkII
-        # hot enough to damage it without thermal work, and a receiver that cannot
-        # sustain the USB throughput loses samples. Both of those end with someone
-        # setting 64800000 and restarting — and finding radiod planning rof1620000 with
-        # no wisdom for it, hours after the wisdom run they thought had finished the job.
-        #
-        # The extra size is also the cheap one here: whoever is at 129.6 has already
-        # accepted the several-hour rof3240000 generation, and rof1620000 beside it is a
-        # small fraction of that.
-        FFT_SIZES="$FFT_HIGH $FFT_LOW"
-        echo
-        echo "Generating for BOTH sample rates (${FFT_SIZES})."
-        echo "  At 129.6 MSPS the 64.8 wisdom is generated too, so dropping back to the"
-        echo "  safe rate does not leave radiod planning a transform with no wisdom."
-    else
-        FFT_SIZES="$fft_name"
-    fi
-else
-    FFT_SIZES="$FFT_LOW"
-    echo
-    # Name the actual cause. A missing helper is a packaging fault and is fixed by
-    # re-running the installer; a helper that ran and found nothing means the receiver
-    # could not be reached. Saying "is UberSDR running?" for both sends people to look
-    # in the wrong place.
-    if [ ! -x "${SCRIPT_DIR}/get-samprate.sh" ]; then
-        echo "WARNING: ${SCRIPT_DIR}/get-samprate.sh is missing, so the front end sample"
-        echo "         rate could not be read. Re-run the installer to fetch it:"
-        echo "           curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash -s --"
-    else
-        echo "WARNING: could not read the front end sample rate — is UberSDR running?"
-        echo "         Start it, or check ${UBERSDR_URL:-http://localhost:8080}/api/description."
-    fi
-    echo
-    echo "         Assuming 64.8 MSPS (${FFT_SIZES}). If this receiver runs at 129.6 MSPS"
-    echo "         this generates wisdom for a transform radiod never plans, and the one"
-    echo "         it does plan gets none — hours of work for nothing."
-    echo "         Re-run with --max-rate to cover both rates regardless."
-fi
-
-# --max-rate forces both even at the low rate: for a receiver about to be raised to
-# 129.6, so the wisdom is ready before the change rather than hours after it. At the high
-# rate both are already included and this changes nothing.
-if [ $MAX_RATE -eq 1 ]; then
-    _added=0
-    for _both in "$FFT_HIGH" "$FFT_LOW"; do
-        case " $FFT_SIZES " in
-            *" $_both "*) ;;
-            *) FFT_SIZES="$_both $FFT_SIZES"; _added=1 ;;
-        esac
-    done
-    # Only say so if it actually changed something — at the high rate both are already
-    # in, and repeating the same sentence reads as two different decisions.
-    if [ $_added -eq 1 ]; then
-        echo
-        echo "--max-rate: generating for both sample rates (${FFT_SIZES})."
-    fi
-fi
-
-case " $FFT_SIZES " in
-    *" $FFT_HIGH "*)
-        echo
-        echo "WARNING: ${FFT_HIGH} may take SEVERAL HOURS on its own." ;;
-esac
-
-echo
 echo "Creating tmux session '$SESSION_NAME' and starting FFTW Wisdom generation..."
 if [[ -n "$WISDOM_CPU_DESC" ]]; then
     echo "CPU pinning${WISDOM_CPU_DESC}"

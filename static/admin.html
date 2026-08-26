@@ -1436,11 +1436,30 @@
                             <button class="btn" id="generateWisdomBtn" onclick="openGenerateWisdom()" style="background: #805ad5; color: white; font-weight: bold; margin-left: 10px;">✨ Generate Wisdom</button>
                         </div>
                     </div>
+                    <!-- Shown whenever the saved config is at 129.6 MSPS. Separate from
+                         the "advanced users only" notice above, which is dismissed by the
+                         "I Have No Fear" button: this one stays put, because it is about
+                         the state the hardware is in rather than about what you are
+                         allowed to edit. -->
+                    <div id="radiodSamprateWarning" class="alert" style="display: none; margin-bottom: 20px; background: #f8d7da; border: 2px solid #dc3545; color: #721c24;">
+                        🔥 <strong>This receiver is running at 129.6 MSPS (0&ndash;60 MHz).</strong>
+                        <div style="margin-top: 8px;">
+                            At this rate the RX888 MkII runs very hot. It will overheat and be
+                            <strong>permanently damaged</strong> unless the thermal modifications have been
+                            made &mdash; heatsinking the ADC and adding forced airflow. ka9q-radio ships
+                            64.8&nbsp;MSPS as the default for this reason.
+                        </div>
+                        <div style="margin-top: 8px;">
+                            Check the ADC temperature and airflow before leaving this running. To go back,
+                            set <code>samprate = 64800000</code> in the <code>[rx888]</code> section below
+                            and restart the server.
+                        </div>
+                    </div>
                     <div id="radiodConfig" class="loading">
                         <div class="spinner"></div>
                         <p>Loading radiod configuration...</p>
                     </div>
-                    <textarea id="radiodConfigEditor" style="width: 100%; min-height: 500px; font-family: monospace; font-size: 13px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f5f5f5; display: none;" readonly></textarea>
+                    <textarea id="radiodConfigEditor" style="width: 100%; min-height: 500px; font-family: monospace; font-size: 13px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f5f5f5; display: none;" readonly oninput="updateRadiodSamprateWarning(this.value)"></textarea>
                 </div>
 
                 <!-- Radiod Channels Tab -->
@@ -14416,7 +14435,13 @@ function resetStationIdColor() {
                     row.innerHTML = `
                         <td style="padding: 8px;"><strong>${band.name}</strong></td>
                         <td style="padding: 8px;"><span style="color: #667eea;">${band.mode}</span></td>
-                        <td style="padding: 8px;">${(band.frequency || 0).toLocaleString()}</td>
+                        <td style="padding: 8px;">${(band.frequency || 0).toLocaleString()}${
+                            // Kept and listed, not hidden: these are meant to be switched
+                            // on once the front end reaches them. Flagged so it is clear
+                            // why enabling one is refused today.
+                            inReceiverRange(band.frequency || 0) ? '' :
+                            ` <span title="Outside this receiver's range (${receiverRangeLabel()}) — cannot be enabled until the RX888 sample rate is raised" style="color:#856404;background:#fff3cd;border-radius:3px;padding:1px 6px;font-size:11px;white-space:nowrap;">out of range</span>`
+                        }</td>
                         <td style="padding: 8px; text-align: center;">${displayDepth}</td>
                         <td style="padding: 8px; text-align: center;">${band.enabled ? '✓' : '—'}</td>
                         <td style="padding: 8px; text-align: center;">
@@ -14792,6 +14817,17 @@ function resetStationIdColor() {
             const namePattern = /^[a-zA-Z0-9_-]+$/;
             if (!namePattern.test(name)) {
                 showAlert('Name must contain only alphanumeric characters, dashes (-), and underscores (_)', 'error');
+                return;
+            }
+
+            // A band can be *saved* outside the receiver's range — the shipped list ships
+            // 6m entries for exactly that reason — but not switched on, because an enabled
+            // decoder there would sit burning CPU on a frequency it can never hear. The
+            // server refuses this too; saying so here avoids an opaque 400.
+            if (enabled && !inReceiverRange(frequency)) {
+                showAlert(`Cannot enable this band: ${(frequency / 1e6).toFixed(3)} MHz is outside `
+                    + `this receiver's range (${receiverRangeLabel()}). Save it disabled, or raise `
+                    + `the RX888 sample rate.`, 'error');
                 return;
             }
 
@@ -19429,6 +19465,67 @@ const tooltipLine2 = timeStr;
         let currentRadiodConfig = '';
         let radiodEditingEnabled = false;
 
+        // The only two front end sample rates this receiver accepts. Anything else gives
+        // worse phase noise, an FFT length radiod struggles with, or a frequency scale
+        // that is quietly wrong — only these divide cleanly from the RX888's 27 MHz
+        // reference. Enforced on the server too; see validateRadiodSamprate.
+        const RATE_HALF = 64800000;   // 0-30 MHz
+        const RATE_FULL = 129600000;  // 0-60 MHz
+
+        // What the file said when it was loaded, so a *change* to the full rate can be
+        // told apart from an edit that leaves it where it already was.
+        let currentRadiodSamprate = null;
+
+        // Pull [rx888] samprate out of a radiod .conf. Section-aware on purpose: [global]
+        // has a samprate too — the audio output rate — and mistaking one for the other
+        // would be the whole bug this is here to prevent. Returns null when absent.
+        function readRx888Samprate(text) {
+            let section = '';
+            let found = null;
+            for (const raw of String(text || '').split('\n')) {
+                const line = raw.trim();
+                if (!line || line.startsWith('#')) continue;
+                if (line.startsWith('[') && line.endsWith(']')) {
+                    section = line.slice(1, -1).trim().toLowerCase();
+                    continue;
+                }
+                if (section !== 'rx888') continue;
+                const eq = line.indexOf('=');
+                if (eq < 1 || line.slice(0, eq).trim().toLowerCase() !== 'samprate') continue;
+                let v = line.slice(eq + 1).split('#')[0].trim().toLowerCase();
+                let mult = 1;
+                if (v.endsWith('k')) { mult = 1e3; v = v.slice(0, -1); }
+                else if (v.endsWith('m')) { mult = 1e6; v = v.slice(0, -1); }
+                else if (v.endsWith('g')) { mult = 1e9; v = v.slice(0, -1); }
+                const n = parseFloat(v);
+                if (!isFinite(n) || n <= 0) return null;
+                // Keep going rather than returning: a repeated key is won by the last
+                // one, which is how parseRadiodConf and radiod itself read the file.
+                // Someone uncommenting the "for full speed use" hint line while leaving
+                // the original in place lands exactly here, and the two sides have to
+                // agree about which value they are judging.
+                found = Math.round(n * mult);
+            }
+            return found;
+        }
+
+        // The agreement for 129.6 MSPS. Typed rather than clicked: this is the one action
+        // in the admin interface that can physically destroy the receiver, and a button
+        // that only needs a click gets clicked.
+        function confirmThermalRisk() {
+            const warning =
+                'STOP — READ THIS\n\n'
+                + 'Running the RX888 MkII at 129.6 MSPS makes it run very hot.\n\n'
+                + 'Without thermal modifications — heatsinking the ADC and adding forced '
+                + 'airflow — it WILL overheat and be PERMANENTLY DAMAGED.\n\n'
+                + 'This is not a warning about performance. The hardware physically breaks. '
+                + 'ka9q-radio ships 64.8 MSPS as the default for this reason.\n\n'
+                + 'Only continue if this receiver\'s RX888 has been modified for it.\n\n'
+                + 'Type  MODIFIED  to confirm:';
+            const answer = window.prompt(warning, '');
+            return answer !== null && answer.trim().toUpperCase() === 'MODIFIED';
+        }
+
         async function loadRadiodConfig() {
             try {
                 const response = await authenticatedFetch('/admin/radiod-config');
@@ -19437,6 +19534,7 @@ const tooltipLine2 = timeStr;
 
                 const data = await response.json();
                 currentRadiodConfig = data.config || '';
+                currentRadiodSamprate = readRx888Samprate(currentRadiodConfig);
                 renderRadiodConfig();
                 showAlert('Radiod configuration loaded successfully', 'success');
             } catch (error) {
@@ -19444,9 +19542,19 @@ const tooltipLine2 = timeStr;
             }
         }
 
+        // Show or hide the high-rate banner from whatever the editor currently holds, so
+        // it follows an edit as well as a load — typing the change and looking at the
+        // warning before pressing save is the point.
+        function updateRadiodSamprateWarning(text) {
+            const banner = document.getElementById('radiodSamprateWarning');
+            if (!banner) return;
+            banner.style.display = readRx888Samprate(text) === RATE_FULL ? 'block' : 'none';
+        }
+
         function renderRadiodConfig() {
             const container = document.getElementById('radiodConfig');
             const editor = document.getElementById('radiodConfigEditor');
+            updateRadiodSamprateWarning(currentRadiodConfig);
 
             container.style.display = 'none';
             editor.style.display = 'block';
@@ -19507,7 +19615,40 @@ const tooltipLine2 = timeStr;
                 const editor = document.getElementById('radiodConfigEditor');
                 const configContent = editor.value;
 
-                const url = restart ? '/admin/radiod-config?restart=true' : '/admin/radiod-config';
+                // The sample rate is checked here and again on the server, which is the
+                // one that counts — this pass exists so the operator is told before the
+                // request goes out, and so the thermal agreement is taken deliberately
+                // rather than by clicking through a 400.
+                const rate = readRx888Samprate(configContent);
+                if (rate === null) {
+                    showAlert('This config has no [rx888] samprate line. It is required, and must be '
+                        + '64800000 (0-30 MHz) or 129600000 (0-60 MHz).', 'error');
+                    return;
+                }
+                if (rate !== RATE_HALF && rate !== RATE_FULL) {
+                    showAlert(`samprate ${rate.toLocaleString()} is not supported. It must be exactly `
+                        + `${RATE_HALF.toLocaleString()} (64.8 MSPS, 0-30 MHz) or `
+                        + `${RATE_FULL.toLocaleString()} (129.6 MSPS, 0-60 MHz) — only these two divide `
+                        + `cleanly from the RX888's 27 MHz reference.`, 'error');
+                    return;
+                }
+
+                // Raising to the full rate: shown once, and only when it is actually a
+                // change. Re-asking on every unrelated edit would train people to click
+                // through the one warning here that describes physical damage.
+                let thermalAck = false;
+                if (rate === RATE_FULL && currentRadiodSamprate !== RATE_FULL) {
+                    if (!confirmThermalRisk()) {
+                        showAlert('Sample rate change cancelled — nothing was saved.', 'info');
+                        return;
+                    }
+                    thermalAck = true;
+                }
+
+                const params = [];
+                if (restart) params.push('restart=true');
+                if (thermalAck) params.push('thermal_ack=true');
+                const url = '/admin/radiod-config' + (params.length ? '?' + params.join('&') : '');
                 const response = await authenticatedFetch(url, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'text/plain' },
@@ -19526,6 +19667,8 @@ const tooltipLine2 = timeStr;
 
                 // Update current config
                 currentRadiodConfig = configContent;
+                currentRadiodSamprate = rate;
+                updateRadiodSamprateWarning(configContent);
 
                 // If restarting, show countdown overlay (same as Config tab)
                 if (restart && result.restart) {
@@ -19604,6 +19747,7 @@ const tooltipLine2 = timeStr;
                     editor.style.display = 'block';
                 }
                 currentRadiodConfig = text;
+                updateRadiodSamprateWarning(text);
                 document.getElementById('radiodConfig').style.display = 'none';
 
                 // Run the config analyser warnings on the imported content
@@ -30278,6 +30422,7 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 // Update the editor
                 editor.value = configText;
                 currentRadiodConfig = configText;
+                updateRadiodSamprateWarning(configText);
 
                 // Scroll to the reference line in the editor
                 const lines = configText.split('\n');

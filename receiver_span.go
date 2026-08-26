@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"os"
+	"sync"
 )
 
 // Receiver span: the one place that decides how much spectrum this receiver covers.
@@ -56,6 +56,29 @@ const (
 	// the span changes so historical comparisons stay meaningful. 30 MHz / 4096.
 	nfWidebandBinBandwidth = 7324.21875
 )
+
+// logOnce prints a line the first time it is seen and never again.
+//
+// LoadConfig is called for every YAML the server reads — config.yaml, bookmarks.yaml,
+// bands.yaml, extensions.yaml, decoder.yaml, ui.yaml — and each call resolves the
+// receiver and prunes its own Config. They all reach the same answer, so without this
+// the startup log carries six identical copies of the sample-rate line and six of every
+// skipped band, which buries the one thing an operator is looking for.
+var (
+	loggedOnceMu sync.Mutex
+	loggedOnce   = map[string]bool{}
+)
+
+func logOnce(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	loggedOnceMu.Lock()
+	seen := loggedOnce[msg]
+	loggedOnce[msg] = true
+	loggedOnceMu.Unlock()
+	if !seen {
+		fmt.Print(msg)
+	}
+}
 
 // ReceiverConfig is the resolved geometry. Populated by resolveReceiver during
 // LoadConfig and then treated as immutable: it sizes the noise-floor FFT buffers, the
@@ -312,7 +335,7 @@ func resolveReceiverFrom(path string) ReceiverConfig {
 	if rate, err := samprateFromRadiodConf(path); err == nil {
 		samprate, source = rate, "radiod-conf"
 	} else {
-		log.Printf("Receiver: could not read sample rate from %s (%v), assuming %d Hz",
+		logOnce("Receiver: could not read sample rate from %s (%v), assuming %d Hz\n",
 			path, err, receiverFallbackSamprate)
 	}
 
@@ -330,7 +353,7 @@ func resolveReceiverFrom(path string) ReceiverConfig {
 		MaxFrequency:   span,
 	}
 
-	log.Printf("Receiver: %.4f Msps (%s) -> %.3f-%.3f MHz, spectrum span %.0f MHz centred on %.1f MHz",
+	logOnce("Receiver: %.4f Msps (%s) -> %.3f-%.3f MHz, spectrum span %.0f MHz centred on %.1f MHz\n",
 		float64(samprate)/1e6, source,
 		float64(rc.MinFrequency)/1e6, float64(rc.MaxFrequency)/1e6,
 		float64(rc.SpanHz)/1e6, float64(rc.CenterHz)/1e6)
@@ -381,7 +404,8 @@ func verifyReceiverAgainstFrontend(rc ReceiverConfig, status *FrontendStatus) []
 // for a channel outside the receiver.
 //
 // Noise-floor bands, decoder bands and the frequency reference each create a real radiod
-// channel at an operator-chosen frequency. None of them is validated against the front
+// channel at an operator-chosen frequency; band-plan entries do not, but a band button
+// that cannot be tuned to is the same problem wearing a different hat. None of them is validated against the front
 // end, because until the span was derived there was nothing to validate against — the
 // answer was always 0-30 MHz. Now an operator who adds a 6 m FT8 decoder while running at
 // 129.6 Msps and later drops back to 64.8 is left with a channel radiod cannot serve: no
@@ -401,7 +425,13 @@ func pruneOutOfRangeChannels(config *Config) {
 			// The centre is what the channel is created at; the edges decide whether any
 			// of the band is visible at all.
 			if !inRange(b.CenterFrequency) || b.Start > rx.MaxFreq() || b.End < rx.MinFreq() {
-				fmt.Printf("Warning: noise floor band '%s' (%.3f-%.3f MHz) is outside the receiver's range (%.3f-%.3f MHz) — disabled\n",
+				// A note, not a warning. The shipped band list covers more than any one
+				// front end reaches — 6m is there for a receiver running at 129.6 Msps
+				// and is expected to be skipped at 64.8 — so an alarming line here would
+				// make the default config look broken on every boot. The decoder and
+				// reference cases below are warnings because those are single, deliberate
+				// choices rather than a list to pick from.
+				logOnce("Noise floor: skipping band '%s' (%.3f-%.3f MHz) — outside this receiver's %.3f-%.3f MHz range\n",
 					b.Name, float64(b.Start)/1e6, float64(b.End)/1e6,
 					float64(rx.MinFreq())/1e6, float64(rx.MaxFreq())/1e6)
 				continue
@@ -411,25 +441,113 @@ func pruneOutOfRangeChannels(config *Config) {
 		config.NoiseFloor.Bands = kept
 	}
 
-	if n := len(config.Decoder.Bands); n > 0 {
-		kept := config.Decoder.Bands[:0]
-		for _, b := range config.Decoder.Bands {
-			if !inRange(b.Frequency) {
-				fmt.Printf("Warning: decoder band '%s' at %.3f MHz is outside the receiver's range (%.3f-%.3f MHz) — disabled\n",
-					b.Name, float64(b.Frequency)/1e6,
+	// Decoder bands are switched off in place rather than removed, and only when they
+	// are switched *on*.
+	//
+	// Both halves matter. The shipped list carries every band this software knows about
+	// with enabled: false, including 6m entries meant for a receiver at 129.6 Msps — a
+	// disabled band spawns no decoder, so there is nothing to warn about and six warnings
+	// per boot would be pure noise. An *enabled* band that has gone out of reach is a
+	// different thing: it would spawn a decoder that can never hear anything, and the
+	// operator chose it, so they are told.
+	//
+	// Disabling rather than deleting keeps the entry in the list, so it is still there to
+	// be switched on again if the sample rate goes back up. The admin decoder tab reads
+	// decoder.yaml from disk anyway, so it shows every band either way.
+	// Recorded on the decoder config itself so GetEnabledBands can refuse an unreachable
+	// band whatever route it took to being enabled — see there.
+	config.Decoder.SetReceiverRange(rx.MinFreq(), rx.MaxFreq())
+
+	for i := range config.Decoder.Bands {
+		b := &config.Decoder.Bands[i]
+		if b.Enabled && !inRange(b.Frequency) {
+			logOnce("Warning: decoder band '%s' at %.3f MHz is outside the receiver's range (%.3f-%.3f MHz) — disabled\n",
+				b.Name, float64(b.Frequency)/1e6,
+				float64(rx.MinFreq())/1e6, float64(rx.MaxFreq())/1e6)
+			b.Enabled = false
+		}
+	}
+
+	// Band-plan entries (bands.yaml) are display only — they never create a channel —
+	// but a band nobody can tune to is a button that silently retunes to the edge of the
+	// receiver. Handled exactly as the admin API's validateAndClampBandFrequencies
+	// handles an edit: dropped when wholly out of reach, trimmed when it overlaps.
+	if len(config.Bands) > 0 {
+		kept := config.Bands[:0]
+		for _, b := range config.Bands {
+			if b.End < rx.MinFreq() || b.Start > rx.MaxFreq() {
+				logOnce("Bands: skipping '%s' (%.3f-%.3f MHz) — outside this receiver's %.3f-%.3f MHz range\n",
+					b.Label, float64(b.Start)/1e6, float64(b.End)/1e6,
 					float64(rx.MinFreq())/1e6, float64(rx.MaxFreq())/1e6)
+				continue
+			}
+			if b.Start < rx.MinFreq() || b.End > rx.MaxFreq() {
+				trimmed := b
+				if trimmed.Start < rx.MinFreq() {
+					trimmed.Start = rx.MinFreq()
+				}
+				if trimmed.End > rx.MaxFreq() {
+					trimmed.End = rx.MaxFreq()
+				}
+				logOnce("Bands: trimming '%s' from %.3f-%.3f to %.3f-%.3f MHz to fit this receiver\n",
+					b.Label, float64(b.Start)/1e6, float64(b.End)/1e6,
+					float64(trimmed.Start)/1e6, float64(trimmed.End)/1e6)
+				kept = append(kept, trimmed)
 				continue
 			}
 			kept = append(kept, b)
 		}
-		config.Decoder.Bands = kept
+		config.Bands = kept
 	}
 
 	if config.FrequencyReference.Enabled && config.FrequencyReference.Frequency > 0 &&
 		!inRange(config.FrequencyReference.Frequency) {
-		fmt.Printf("Warning: frequency reference at %.3f MHz is outside the receiver's range (%.3f-%.3f MHz) — disabled\n",
+		logOnce("Warning: frequency reference at %.3f MHz is outside the receiver's range (%.3f-%.3f MHz) — disabled\n",
 			float64(config.FrequencyReference.Frequency)/1e6,
 			float64(rx.MinFreq())/1e6, float64(rx.MaxFreq())/1e6)
 		config.FrequencyReference.Enabled = false
 	}
+}
+
+// The only two front end sample rates this receiver accepts.
+//
+// ka9q-radio's rx888 driver will take anything between MIN_SAMPRATE and 130 MHz, but only
+// these two divide cleanly from the 27 MHz reference with no fractional-N and good FFT
+// factors — upstream's own comment on the samprate key names exactly this pair. A rate
+// off this list gives worse phase noise, an FFT length radiod struggles with, or a
+// frequency scale that is quietly wrong.
+const (
+	SamprateHalf = 64_800_000  // 64.8 MHz — 0-30 MHz, the safe default
+	SamprateFull = 129_600_000 // 129.6 MHz — 0-60 MHz, needs thermal work first
+)
+
+// SamprateThermalWarning is what an operator has to agree to before the full rate is
+// accepted. Deliberately blunt: the failure it describes is physical and permanent, and
+// upstream ka9q-radio defaults to half speed *because* of it.
+const SamprateThermalWarning = "Running the RX888 MkII at 129.6 MSPS makes it run very hot. " +
+	"Without thermal modifications — heatsinking the ADC and adding forced airflow — it will " +
+	"overheat and be permanently damaged. This is not a warning about performance: the hardware " +
+	"physically breaks. Only continue if this receiver's RX888 has been modified for it."
+
+// validateRadiodSamprate checks the [rx888] samprate in a radiod config about to be saved.
+//
+// currentRate is what the server resolved at startup, and thermalAck is the operator's
+// explicit agreement to the warning above. Raising the rate without that agreement is
+// refused; leaving it already-raised is not, because the agreement was given when it was
+// set and asking again on every unrelated edit would train people to click through it.
+func validateRadiodSamprate(content []byte, currentRate int, thermalAck bool) error {
+	rate, err := samprateFromRadiodConfBytes(content)
+	if err != nil {
+		return fmt.Errorf("no [rx888] samprate found in this config — it is required, and must be %d (0-30 MHz) or %d (0-60 MHz)",
+			SamprateHalf, SamprateFull)
+	}
+	if rate != SamprateHalf && rate != SamprateFull {
+		return fmt.Errorf("samprate %d is not supported — it must be exactly %d (64.8 MSPS, 0-30 MHz) or %d (129.6 MSPS, 0-60 MHz). "+
+			"Only these two divide cleanly from the RX888's 27 MHz reference",
+			rate, SamprateHalf, SamprateFull)
+	}
+	if rate == SamprateFull && currentRate != SamprateFull && !thermalAck {
+		return fmt.Errorf("%s", SamprateThermalWarning)
+	}
+	return nil
 }

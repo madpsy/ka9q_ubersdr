@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
     <link rel="stylesheet" href="fonts/fonts.css">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wideband Spectrogram 0-30 MHz</title>
+<title>Wideband Spectrogram</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -227,7 +227,9 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <button id="next-btn" onclick="navDate(+1)" title="Next day (newer)" disabled>&#x25BA;</button>
   <div>
     <select id="bsel" onchange="onBandChange()">
-      <option value="wideband" selected>Wideband (0&ndash;30 MHz)</option>
+      <!-- Replaced from band_ranges as soon as /api/spectrogram/list answers; neutral
+           until then so a 60 MHz receiver never flashes "0-30 MHz". -->
+      <option value="wideband" selected>Wideband</option>
     </select>
   </div>
   <div>
@@ -1040,15 +1042,41 @@ function buildBandsBar() {
 })();
 
 /* Amateur radio bands */
+/* Fallback band table, used only until /api/bands answers — see bandName below.
+   6m is here for the same reason it is in the server's list: a receiver running its
+   RX888 at 129.6 MSPS reaches it, and a hover that names every band except the one
+   above 30 MHz is worse than one that names none. */
 var BANDS=[
   [135700,137800,'2200m'],[472000,479000,'630m'],
   [1800000,2000000,'160m'],[3500000,4000000,'80m'],
   [5250000,5450000,'60m'],[7000000,7200000,'40m'],
   [10100000,10150000,'30m'],[14000000,14350000,'20m'],
   [18068000,18168000,'17m'],[21000000,21450000,'15m'],
-  [24890000,24990000,'12m'],[28000000,29700000,'10m']
+  [24890000,24990000,'12m'],[28000000,29700000,'10m'],
+  [50000000,52000000,'6m']
 ];
-function bandName(hz){for(var i=0;i<BANDS.length;i++)if(hz>=BANDS[i][0]&&hz<=BANDS[i][1])return BANDS[i][2];return null;}
+
+/* Which band a frequency is in, for the hover readouts.
+   Prefers the server's own band plan (sgBands, from /api/bands): it is the operator's
+   list rather than a copy of it, it follows the receiver — so 6m and anything else above
+   30 MHz appears by itself once the front end reaches it — and it carries whatever bands
+   this station has chosen to define. Falls back to the table above before that fetch has
+   landed, or if it failed.
+   Narrowest match wins, so a sub-band names itself rather than being swallowed by the
+   whole-band entry it sits inside: hovering 50.05 MHz says "6m CW", not "6m". */
+function bandName(hz){
+  var best=null;
+  for(var i=0;i<sgBands.length;i++){
+    var b=sgBands[i];
+    if(!b||!b.label)continue;
+    var lo=b.start||0,hi=b.end||0;
+    if(hi<=lo||hz<lo||hz>hi)continue;
+    if(!best||(hi-lo)<best.width)best={label:b.label,width:hi-lo};
+  }
+  if(best)return best.label;
+  for(var j=0;j<BANDS.length;j++)if(hz>=BANDS[j][0]&&hz<=BANDS[j][1])return BANDS[j][2];
+  return null;
+}
 
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
@@ -1456,6 +1484,30 @@ function clampZoom(rect){
 
   /* Update page title for non-wideband bands */
 
+  /* What a band option should read.
+     Taken from band_ranges in the same reply the option list comes from, rather than
+     spelled out here: the wideband recorder covers whatever the receiver covers, so an
+     RX888 at 129.6 MSPS makes "0-30 MHz" a lie while the picture underneath runs to 60.
+     The hardcoded pair is kept only as the fallback for a server that predates the
+     field. */
+  function fmtRangeMHz(startHz,endHz){
+    /* Both ends at the same precision, and at whatever the ends themselves need rather
+       than one chosen from how wide the span is. This is v2's formatRange (lib/spectrogram.js)
+       verbatim, so the two pages name the same picture the same way: 1.8-30 must not
+       print as 2-30, and 0-60 must not print as 0.000-60.000. */
+    var needs=function(hz){return hz%1e6===0?0:(hz%100e3===0?1:3);};
+    var dp=Math.max(needs(startHz),needs(endHz));
+    return (startHz/1e6).toFixed(dp)+'\u2013'+(endHz/1e6).toFixed(dp)+' MHz';
+  }
+  function bandOptionLabel(name,ranges){
+    /* Only the two wideband entries carry a range in their label, as before — a named
+       band's option is its name. */
+    if(name!=='wideband'&&name!=='wideband-hf')return name;
+    var r=ranges&&ranges[name];
+    if(r&&r.end_freq_hz>r.start_freq_hz)return 'Wideband ('+fmtRangeMHz(r.start_freq_hz,r.end_freq_hz)+')';
+    return name==='wideband'?'Wideband (0\u201330 MHz)':'Wideband (1.8\u201330 MHz)';
+  }
+
   fetch('/api/spectrogram/list')
     .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
     .then(function(data){
@@ -1468,9 +1520,7 @@ function clampZoom(rect){
           var bn=data.bands[bi];
           var bo=document.createElement('option');
           bo.value=bn;
-          if(bn==='wideband')bo.textContent='Wideband (0\u201330 MHz)';
-          else if(bn==='wideband-hf')bo.textContent='Wideband (1.8\u201330 MHz)';
-          else bo.textContent=bn;
+          bo.textContent=bandOptionLabel(bn,data.band_ranges);
           if(bn===urlBand)bo.selected=true;
           bsel.appendChild(bo);
         }
@@ -1725,14 +1775,19 @@ function updateInfoBanner(){
   var infoEl=document.getElementById('sg-info-text');
   if(!infoEl)return;
   if(urlBand==='wideband-hf'){
-    infoEl.innerHTML='<b>How to read this spectrogram (1.8\u201330 MHz view):</b> Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image covers <b>1.8\u201330 MHz</b>, excluding the AM broadcast band below 1.8 MHz which would otherwise skew the colour scale. The auto-range is computed from the 1.8\u201330 MHz data only. Hover over the image for exact frequency, time, and signal level.';
+    /* The range is the recorder's, not a fixed 1.8-30: the wideband-hf crop starts at
+       1.8 MHz to keep the AM broadcast band out of the colour scale, but its top is
+       wherever the receiver stops. */
+    var hfRange=fmtRangeMHz((meta&&meta.start_freq_hz)||1.8e6,(meta&&meta.end_freq_hz)||30e6);
+    infoEl.innerHTML='<b>How to read this spectrogram ('+hfRange+' view):</b> Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image covers <b>'+hfRange+'</b>, excluding the AM broadcast band below 1.8 MHz which would otherwise skew the colour scale. The auto-range is computed from the '+hfRange+' data only. Hover over the image for exact frequency, time, and signal level.';
   } else {
     infoEl.innerHTML='<b>How to read this spectrogram:</b> Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image builds top-to-bottom throughout the day and will be fully populated after <b>24 hours</b> (1&nbsp;440 rows). The <b>X-axis</b> shows frequency; the <b>Y-axis</b> shows UTC time, with the most recent data at the bottom. Colour indicates signal strength &mdash; from noise floor (cool/dark) to signal peak (warm/bright) &mdash; as shown in the legend below. Hover over the image for exact frequency, time, and signal level.';
   }
 }
 
 /* Frequency axis — zoom-aware, rebuilds on every zoom/pan change.
-   All ticks are rendered across the full 0–30 MHz range at the appropriate
+   All ticks are rendered across the recorder's full range — 0-30 MHz on a 64.8 MSPS
+   receiver, 0-60 on a 129.6 one — at the appropriate
    density for the current zoom level. Positions are left:X% of the full width.
    The CSS transform on zoom-wrap handles scaling; overflow:hidden on sg-right
    The freq-axis is now OUTSIDE zoom-wrap, so positions must be in screen-space.
@@ -2522,7 +2577,14 @@ function tsAddSlice(){
   var freqMHz=parseFloat(document.getElementById('ts-freq').value);
   var bwKHz=parseFloat(document.getElementById('ts-bw').value);
   var label=(document.getElementById('ts-label').value||'').trim();
-  if(isNaN(freqMHz)||freqMHz<0||freqMHz>30){tsShowErr('Enter a valid frequency (0\u201330 MHz).');return;}
+  /* Bounded by the picture actually on screen, not by a fixed 30 MHz: on an RX888 at
+     129.6 MSPS the spectrogram runs to 60, and this box was refusing every frequency
+     above half of it. meta carries the recorder's own range. */
+  var tsMaxMHz=((meta&&meta.end_freq_hz)||30e6)/1e6;
+  var tsMinMHz=((meta&&meta.start_freq_hz)||0)/1e6;
+  if(isNaN(freqMHz)||freqMHz<tsMinMHz||freqMHz>tsMaxMHz){
+    tsShowErr('Enter a valid frequency ('+fmtRangeMHz(tsMinMHz*1e6,tsMaxMHz*1e6)+').');return;
+  }
   if(isNaN(bwKHz)||bwKHz<=0){tsShowErr('Enter a valid bandwidth (kHz).');return;}
   tsShowErr('');
   tsAddSliceData(freqMHz,bwKHz,label);

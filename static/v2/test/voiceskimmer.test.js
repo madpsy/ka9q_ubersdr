@@ -143,9 +143,15 @@ t('auto never reaches the query, because it is not a band', () => {
 t('a band name this build does not know is dropped, not passed on', () => {
     // A stored preference from another version, or a typo: better a full list than a query
     // that quietly matches nothing.
-    assert.strictEqual(vs.bandParam('6m'), '');
+    //
+    // The stand-in used to be '6m', which stopped being unknown the day the band table
+    // gained it. A name no band plan will ever produce keeps this test about the thing it
+    // is testing.
+    assert.strictEqual(vs.bandParam('not-a-band'), '');
     assert.strictEqual(vs.bandParam('20 m'), '');
     assert.strictEqual(vs.bandParam('20m'), '&band=20m');
+    // 6m is a real band now, so it must pass through like any other.
+    assert.strictEqual(vs.bandParam('6m'), '&band=6m');
 });
 
 t('auto means the band the dial is in, and all bands between them', () => {
@@ -175,8 +181,11 @@ t('the chosen band survives the panel being unmounted', () => {
     vs.saveBand('all');
     assert.strictEqual(vs.savedBand(), 'all');
     // Nonsense in storage is auto again rather than a filter nobody can explain.
-    store.set('ubersdr.v2.voiceskimmer', '{"band":"6m"}');
+    store.set('ubersdr.v2.voiceskimmer', '{"band":"not-a-band"}');
     assert.strictEqual(vs.savedBand(), vs.AUTO_BAND);
+    // ...but a band the table does know is kept, 6m included.
+    store.set('ubersdr.v2.voiceskimmer', '{"band":"6m"}');
+    assert.strictEqual(vs.savedBand(), '6m');
     store.set('ubersdr.v2.voiceskimmer', 'not json');
     assert.strictEqual(vs.savedBand(), vs.AUTO_BAND);
     delete global.localStorage;

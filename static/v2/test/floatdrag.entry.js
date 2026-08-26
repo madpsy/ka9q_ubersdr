@@ -5,6 +5,6 @@
 // like any other — useCallback and useRef have to be real for `start` to exist
 // at all.
 import { render, reset } from './hookStub.js';
-import { useFloatDrag } from '../src/lib/useFloatDrag.js';
+import { useFloatDrag, keepOnScreen } from '../src/lib/useFloatDrag.js';
 
-module.exports = { render, reset, useFloatDrag };
+module.exports = { render, reset, useFloatDrag, keepOnScreen };

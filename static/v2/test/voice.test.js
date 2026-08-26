@@ -4,7 +4,7 @@
 // lib/voiceActivity.js, and those are what this covers.
 
 const assert = require('assert');
-const { HAM_BANDS, BAND_NAMES, bandForFrequency, bandOrder } = require('./.build/bands.cjs');
+const { HAM_BANDS, BAND_NAMES, bandForFrequency, bandOrder, bandsInRange } = require('./.build/bands.cjs');
 const va = require('./.build/voice.cjs');
 
 let pass = 0;
@@ -15,13 +15,35 @@ const t = (name, fn) => {
 
 // --- bands ------------------------------------------------------------------
 
-t('the band table is v1\'s, in ascending frequency order', () => {
-    assert.strictEqual(HAM_BANDS.length, 10);
+t('the band table is v1\'s ten, plus 6m, in ascending frequency order', () => {
+    // v1 had ten because its receiver stopped at 30 MHz. 6m is here unconditionally so
+    // bandForFrequency can name a 6m frequency whatever the front end is; whether it is
+    // *offered* is bandsInRange's job, tested below.
+    assert.strictEqual(HAM_BANDS.length, 11);
     for (let i = 1; i < HAM_BANDS.length; i++) {
         assert.ok(HAM_BANDS[i][1] > HAM_BANDS[i - 1][2], `${HAM_BANDS[i][0]} overlaps its predecessor`);
     }
     assert.deepStrictEqual(BAND_NAMES[0], '160m');
     assert.deepStrictEqual(BAND_NAMES[9], '10m');
+    assert.deepStrictEqual(BAND_NAMES[10], '6m');
+});
+
+t('band buttons are offered only for bands the receiver can reach', () => {
+    // A 6m key on a 30 MHz receiver would clamp to the band edge and look like it worked,
+    // which is worse than not being there.
+    const hf = bandsInRange(10000, 30000000).map(([n]) => n);
+    assert.strictEqual(hf.length, 10, 'a 30 MHz receiver gets v1\'s ten');
+    assert.ok(!hf.includes('6m'));
+
+    const vhf = bandsInRange(10000, 60000000).map(([n]) => n);
+    assert.strictEqual(vhf.length, 11);
+    assert.strictEqual(vhf[10], '6m');
+
+    // The default is what a receiver was before the span became configurable.
+    assert.deepStrictEqual(bandsInRange().map(([n]) => n), hf);
+
+    // A band only counts when it fits entirely — half a band has no centre to tune to.
+    assert.ok(!bandsInRange(10000, 51000000).map(([n]) => n).includes('6m'));
 });
 
 t('a frequency inside a band resolves to it', () => {

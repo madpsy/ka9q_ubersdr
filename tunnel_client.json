@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "version": "0.1.61",
+  "secret_uuid": "",
+  "callsign": "",
+  "email": "",
+  "tunnel_url": "",
+  "backend_host": "",
+  "backend_port": 0,
+  "beta_frontend": false
+}

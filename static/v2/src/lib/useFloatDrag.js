@@ -10,8 +10,27 @@ import { useCallback, useRef } from '../react.js';
 
 // How much of a window must stay on screen, so one can never be dragged fully
 // out of reach, and the strip of title bar that must stay below the top edge.
-const EDGE_KEEP = 60;
-const HEAD_KEEP = 28;
+export const EDGE_KEEP = 60;
+export const HEAD_KEEP = 28;
+
+/**
+ * Where a window of width `w` may sit in a layer `b` ({width, height}) wide,
+ * given where it is being asked to go.
+ *
+ * Exported because this is the *only* rule about where a floating window is
+ * allowed to be, and anything else that moves one has to agree with it. A
+ * second, stricter rule elsewhere does not read as a stricter rule: it reads as
+ * a window that will not stay where it is put, and if the two disagree while a
+ * drag is running, as one that shakes. See the fit in ExtensionWindow.
+ */
+export function keepOnScreen(x, y, w, b) {
+    const width = b ? b.width : Infinity;
+    const height = b ? b.height : Infinity;
+    return {
+        x: Math.max(EDGE_KEEP - w, Math.min(width - EDGE_KEEP, x)),
+        y: Math.max(0, Math.min(height - HEAD_KEEP, y)),
+    };
+}
 
 /**
  * geom     { x, y, w, h } — current geometry
@@ -65,10 +84,7 @@ export function useFloatDrag({ geom, bounds, min, onChange, onRaise }) {
         const dy = e.clientY - d.py;
         const max = bounds && bounds.current;
         if (d.mode === 'move') {
-            onChange({
-                x: Math.max(EDGE_KEEP - d.w, Math.min((max ? max.width : Infinity) - EDGE_KEEP, d.x + dx)),
-                y: Math.max(0, Math.min((max ? max.height : Infinity) - HEAD_KEEP, d.y + dy)),
-            });
+            onChange(keepOnScreen(d.x + dx, d.y + dy, d.w, max));
         } else {
             onChange({
                 w: Math.max(min ? min.w : 0, d.w + dx),

@@ -38,8 +38,8 @@ import { dxcluster } from '../../radio/dxcluster-connection.js';
 import { useAudioExtension } from '../useAudioExtension.js';
 import { controlMessage } from '../protocol.js';
 import { tunedOption } from '../frequencies.js';
-import { AudioLevel, Console, NumberField } from '../TeleprinterUI.jsx';
-import { appendText, toText } from '../teleprinter.js';
+import { AudioLevel, Console, NumberField, SpectrumStrip } from '../TeleprinterUI.jsx';
+import { appendText, sidebandSign, toText } from '../teleprinter.js';
 import { saveFile } from '../../lib/saveFile.js';
 import {
     DEFAULT_MODE, DEFAULT_SYNC_INTEG, DEFAULT_SYNC_MARGIN, LIMITS, MODES, MODE_ID,
@@ -81,7 +81,9 @@ export default function OliviaExtension({ minimal }) {
     const [lines, setLines] = useState([]);
     const [status, setStatus] = useState(null);
     const [srvConfig, setSrvConfig] = useState(null);
-    const [opts, setOpts] = useState({ timestamps: true, autoScroll: true });
+    // The spectrum starts off, as the FSK and FT8 panels' do: it is a tuning aid you
+    // reach for while lining a signal up, not something to leave running.
+    const [opts, setOpts] = useState({ timestamps: true, autoScroll: true, spectrum: false });
     const [copied, setCopied] = useState(false);
 
     // The squelch reaches the server two ways: baked into the attach params for
@@ -152,6 +154,27 @@ export default function OliviaExtension({ minimal }) {
     const text = useMemo(() => toText(lines, opts.timestamps), [lines, opts.timestamps]);
     const tuned = tunedOption(OLIVIA_FREQUENCIES, tuning.frequency);
     const rates = useMemo(() => modeRates(config), [config.tones, config.bandwidth]);
+
+    // Where the decoder is listening, as a band rather than a pair of tones: Olivia's
+    // tone block is continuous, so the useful marks are its edges and the region between.
+    // Taken from the server's own config when it has answered, because it may have
+    // narrowed the search — showing what we asked for while it decodes something else
+    // would be the panel disagreeing with the receiver.
+    const listening = useMemo(() => {
+        const centre = (srvConfig && srvConfig.center_hz) || config.center_frequency;
+        const width = (srvConfig && srvConfig.bandwidth) || config.bandwidth;
+        return { lo: centre - width / 2, hi: centre + width / 2, centre };
+    }, [srvConfig, config.center_frequency, config.bandwidth]);
+
+    // Click-to-tune: move the dial so the audio frequency clicked lands on the centre of
+    // the tone block, which is where the decoder is listening. Same rule as the FSK
+    // panel's, including the sideband sign — clicking left of the block on USB has to
+    // move the dial the other way on LSB.
+    const tuneAudio = (audioHz) => {
+        const offset = Math.round(audioHz - listening.centre);
+        if (!offset) return;
+        actions.nudge(sidebandSign(tuning.mode) * offset);
+    };
 
     const copy = () => {
         navigator.clipboard.writeText(text).then(() => {
@@ -322,6 +345,7 @@ export default function OliviaExtension({ minimal }) {
             {!minimal && live && !decoding && (
                 <div className="note note--tight">
                     Tune to an Olivia signal in USB, pick the mode that matches its width, then press Start.
+                    {' '}Switch on Spectrum below to see the signal and the block the decoder listens to.
                 </div>
             )}
             {/* The decoder takes whatever audio the session produces, so a wrong
@@ -356,6 +380,12 @@ export default function OliviaExtension({ minimal }) {
                         checked={opts.autoScroll}
                         onChange={(v) => set({ autoScroll: v })}
                     />
+                    <Switch
+                        label="Spectrum"
+                        title="Show the 0–3 kHz audio spectrum, with the tone block the decoder is listening to shaded on it. Click a signal to move the dial so it lands there"
+                        checked={opts.spectrum}
+                        onChange={(v) => set({ spectrum: v })}
+                    />
                     <span className="tp__bar-gap" />
                     <Readout
                         label="Lock"
@@ -369,6 +399,21 @@ export default function OliviaExtension({ minimal }) {
                         unit="Hz"
                     />
                 </div>
+            )}
+
+            {/* Only while the receiver is running: the strip reads the session's audio, and
+                with nothing playing it would draw an empty box under a panel that already
+                says why. Hidden in the minimal view for the same reason the hints are. */}
+            {opts.spectrum && running && !minimal && (
+                <SpectrumStrip
+                    mark={listening.lo}
+                    space={listening.hi}
+                    markLabel="Low"
+                    spaceLabel="High"
+                    band={listening}
+                    onTune={tuneAudio}
+                    title="Audio spectrum, 0–3 kHz. The shaded region is the tone block the decoder is listening to — line the signal up inside it. Click to move the dial so what you clicked lands on the centre"
+                />
             )}
 
             <Console

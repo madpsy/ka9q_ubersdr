@@ -1515,12 +1515,6 @@ func LoadConfig(filename string) (*Config, error) {
 	// Validate and clean up frequency gain ranges
 	config.Spectrum.validateFrequencyGainRanges(config.Receiver.MaxFreq())
 
-	// Anything that would ask radiod for a channel outside the receiver is disabled here,
-	// after the noise-floor band defaults above have been filled in. main.go calls this
-	// again once decoder.yaml has been merged, because that replaces config.Decoder
-	// wholesale and the bands it brings have not been through this.
-	pruneOutOfRangeChannels(&config)
-
 	// Set DX cluster defaults if not specified
 	if config.DXCluster.Port == 0 {
 		config.DXCluster.Port = 7300 // Default DX cluster port
@@ -1682,6 +1676,10 @@ func LoadConfig(filename string) (*Config, error) {
 			{Name: "15m", Start: 21000000, End: 21450000, CenterFrequency: 21225000, BinCount: 1000, BinBandwidth: 450},
 			{Name: "12m", Start: 24890000, End: 24990000, CenterFrequency: 24940000, BinCount: 500, BinBandwidth: 200},
 			{Name: "10m", Start: 28000000, End: 28300000, CenterFrequency: 28150000, BinCount: 1000, BinBandwidth: 300, FT8Frequency: 28074000},
+			// Only reachable at 129.6 Msps; pruneOutOfRangeChannels skips it on a
+			// narrower front end. The lower 500 kHz, where the narrowband activity is —
+			// see the 6m entry in config.yaml.example for why not the whole 50-52 MHz.
+			{Name: "6m", Start: 50000000, End: 50500000, CenterFrequency: 50250000, BinCount: 1000, BinBandwidth: 500, FT8Frequency: 50313000},
 		}
 	}
 
@@ -1701,6 +1699,15 @@ func LoadConfig(filename string) (*Config, error) {
 			band.BinBandwidth = bandwidth / float64(band.BinCount)
 		}
 	}
+
+	// Anything that would ask radiod for a channel outside the receiver is disabled here.
+	//
+	// It has to come after the two blocks above, not before: the band list may be the
+	// built-in default, and a band that omits center_frequency has it derived from
+	// start/end just above — pruning earlier would test a zero centre and drop bands that
+	// are perfectly reachable. main.go calls this again once decoder.yaml has been merged,
+	// because that replaces config.Decoder wholesale.
+	pruneOutOfRangeChannels(&config)
 
 	// Set GPSDO proxy defaults if not specified
 	if config.GPSDO.Host == "" {

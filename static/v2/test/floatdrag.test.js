@@ -16,7 +16,7 @@ const assert = require('assert');
 
 globalThis.window = globalThis.window || globalThis;
 
-const { render, reset, useFloatDrag } = require('./.build/floatdrag.cjs');
+const { render, reset, useFloatDrag, keepOnScreen } = require('./.build/floatdrag.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -142,6 +142,47 @@ t('a resize is judged on its own handle, not on this', () => {
     h.onMove({ clientX: 160, clientY: 100 });
     assert.strictEqual(moves.length, 1);
     assert.strictEqual(moves[0].w, 360);
+});
+
+// The bottom edge, and why the extension window used to shake against it.
+//
+// A drag stops when a strip of title bar is all that is left on screen. Anything
+// else that repositions a window — ExtensionWindow fits one to the layer — has
+// to call that position settled, or the two take turns: the drag puts the window
+// where the pointer asks, the other rule pulls it back, the next pointer event
+// pushes it down again from the unchanged grab point, and it flickers between
+// the two for the length of the gesture. So the test is that the drag's own
+// result is a fixed point of the shared rule.
+t('a drag stops at the bottom instead of leaving the layer', () => {
+    const moves = [];
+    reset();
+    const bounds = { current: { width: 1000, height: 600 } };
+    const h = render(() => useFloatDrag({
+        geom: { x: 100, y: 100, w: 300, h: 200 },
+        bounds,
+        min: { w: 100, h: 80 },
+        onChange: (p) => moves.push(p),
+        onRaise: () => {},
+    })).tree;
+    press(h, makeDom().header, makeDom().bare);
+    h.onMove({ clientX: 100, clientY: 5000 });
+    const at = moves[moves.length - 1];
+    assert.strictEqual(at.y, 600 - 28, 'the window did not stop at the bottom edge');
+});
+
+t('and where it stops is where the fit would leave it', () => {
+    const b = { width: 1000, height: 600 };
+    // Every corner a drag can reach, run back through the same rule the fit
+    // applies. A second application that moves the window is the judder.
+    for (const g of [
+        { x: -240, y: 572, w: 300 },   // hard against the left and the bottom
+        { x: 940, y: 0, w: 300 },      // and the right and the top
+        { x: 500, y: 572, w: 300 },
+    ]) {
+        const once = keepOnScreen(g.x, g.y, g.w, b);
+        const twice = keepOnScreen(once.x, once.y, g.w, b);
+        assert.deepStrictEqual(twice, once, `the fit moved a window the drag had already placed at ${g.x},${g.y}`);
+    }
 });
 
 console.log(`\n${pass} ok`);

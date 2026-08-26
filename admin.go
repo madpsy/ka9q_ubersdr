@@ -4395,6 +4395,52 @@ func (ah *AdminHandler) HandleDecoderBands(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// validateDecoderBandRange refuses a decoder band that is switched on at a frequency this
+// receiver cannot tune.
+//
+// Saving one disabled is fine and deliberate: the shipped decoder.yaml carries every band
+// this software knows about, 6m included, so an operator who later raises the sample rate
+// can simply switch them on. Enabling one now would spawn a decoder that can never hear
+// anything — a process burning CPU on silence, with no error anywhere to explain it.
+func validateDecoderBandRange(band map[string]interface{}, rx ReceiverConfig) error {
+	enabled, _ := band["enabled"].(bool)
+	if !enabled {
+		return nil
+	}
+	hz, ok := decoderBandFrequency(band)
+	if !ok {
+		return nil // the caller's own frequency validation reports this
+	}
+	if hz < rx.MinFreq() || hz > rx.MaxFreq() {
+		return fmt.Errorf("cannot enable this band: %.3f MHz is outside the receiver's range (%.3f-%.3f MHz). Save it disabled, or raise the RX888 sample rate",
+			float64(hz)/1e6, float64(rx.MinFreq())/1e6, float64(rx.MaxFreq())/1e6)
+	}
+	return nil
+}
+
+// decoderBandFrequency pulls the frequency out of the decoded JSON, which may have it as
+// a float64 (the usual case) or a json.Number depending on how it was parsed.
+func decoderBandFrequency(band map[string]interface{}) (uint64, bool) {
+	switch v := band["frequency"].(type) {
+	case float64:
+		if v <= 0 {
+			return 0, false
+		}
+		return uint64(v), true
+	case int:
+		if v <= 0 {
+			return 0, false
+		}
+		return uint64(v), true
+	case int64:
+		if v <= 0 {
+			return 0, false
+		}
+		return uint64(v), true
+	}
+	return 0, false
+}
+
 // handleGetDecoderBands returns all decoder bands
 func (ah *AdminHandler) handleGetDecoderBands(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(ah.getConfigPath("decoder.yaml"))
@@ -4534,6 +4580,11 @@ func (ah *AdminHandler) handleAddDecoderBand(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if err := validateDecoderBandRange(newBand, ah.config.Receiver); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Read existing config
 	data, err := os.ReadFile(ah.getConfigPath("decoder.yaml"))
 	var decoderConfig map[string]interface{}
@@ -4618,6 +4669,11 @@ func (ah *AdminHandler) handleUpdateDecoderBand(w http.ResponseWriter, r *http.R
 	}
 
 	if err := validateDecoderBandName(name); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := validateDecoderBandRange(updatedBand, ah.config.Receiver); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -4999,10 +5055,24 @@ func (ah *AdminHandler) handleUpdateRadiodConfig(w http.ResponseWriter, r *http.
 	// Check for restart flag
 	restart := r.URL.Query().Get("restart") == "true"
 
+	// The operator's explicit agreement to the thermal warning, sent only when they have
+	// actually been shown it and typed the confirmation. A query parameter rather than
+	// anything implicit, so it cannot be set by accident.
+	thermalAck := r.URL.Query().Get("thermal_ack") == "true"
+
 	// Read the raw config content from request body
 	configContent, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// The sample rate decides this server's whole frequency range and, at the full rate,
+	// whether the hardware survives. Checked before anything is written — a bad value
+	// reaching the file would be applied by radiod on its next restart, whether or not
+	// this server ever agreed to it.
+	if err := validateRadiodSamprate(configContent, ah.config.Receiver.Samprate(), thermalAck); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

@@ -75,6 +75,52 @@ bookmarks:
     mode: "usb"
     group: "Digital Modes"
 
+  # 6m digital modes — only reachable when the RX888 runs at its full 129.6 MSPS.
+  #
+  # A receiver whose front end does not reach 50 MHz simply does not publish these: they
+  # are dropped from /api/bookmarks at startup, so nobody is offered a bookmark that
+  # cannot tune. They stay in this file and in the admin bookmarks tab (flagged there as
+  # out of range), and start working by themselves if the sample rate is raised. Nothing
+  # needs commenting out either way.
+  - name: "WSPR 6m"
+    frequency: 50293000
+    mode: "usb"
+    group: "Digital Modes"
+    comment: "6m WSPR"
+
+  - name: "FT8 6m"
+    frequency: 50313000
+    mode: "usb"
+    group: "Digital Modes"
+    comment: "6m FT8 calling frequency"
+
+  - name: "FT4 6m"
+    frequency: 50318000
+    mode: "usb"
+    group: "Digital Modes"
+    comment: "6m FT4"
+
+  - name: "FT2 6m"
+    frequency: 50320000
+    mode: "usb"
+    group: "Digital Modes"
+    comment: "6m FT2"
+
+  - name: "FT8 6m (2)"
+    frequency: 50323000
+    mode: "usb"
+    group: "Digital Modes"
+    comment: "6m secondary FT8, used for DX and during openings"
+
+  # 50.318 is also the FT4 frequency — on 6m the two conventions share it, unlike on HF
+  # where they are separate. Both bookmarks are kept because they are different modes to
+  # listen for, and the receiver does not care that they point at the same dial setting.
+  - name: "JS8 6m"
+    frequency: 50318000
+    mode: "usb"
+    group: "Digital Modes"
+    comment: "6m JS8Call — shares 50.318 with FT4"
+
   # CW (Morse Code) Frequencies
   - name: "CW 40m"
     frequency: 7030000
@@ -148,3 +194,127 @@ bookmarks:
     frequency: 15200000
     mode: "am"
     group: "Broadcast"
+
+  # ── 6m band plan (IARU Region 1) ─────────────────────────────────────────────
+  # Only reachable when the RX888 runs at its full 129.6 MSPS; /api/bookmarks drops
+  # them on a narrower front end, so nobody is offered a bookmark that cannot tune.
+  # They stay in this file and in the admin bookmarks tab, and start working by
+  # themselves if the sample rate is raised.
+  #
+  # The digital-mode entries for 6m (FT8, FT4, FT2, WSPR, JS8) are in the Digital
+  # Modes group above; 50.313, 50.318 and 50.320 are not repeated here.
+  # Where the plan gives a range, the bookmark sits at its lower edge.
+  - name: "6m CW Centre"
+    frequency: 50050000
+    mode: "cwu"
+    group: "6m"
+    comment: "International CW centre of activity"
+
+  - name: "6m DX CW"
+    frequency: 50090000
+    mode: "cwu"
+    group: "6m"
+    comment: "Intercontinental DX CW"
+
+  - name: "6m DX Calling"
+    frequency: 50110000
+    mode: "usb"
+    group: "6m"
+    comment: "Intercontinental DX calling"
+
+  - name: "6m SSB Centre"
+    frequency: 50150000
+    mode: "usb"
+    group: "6m"
+    comment: "SSB centre of activity"
+
+  - name: "6m Crossband"
+    frequency: 50185000
+    mode: "usb"
+    group: "6m"
+    comment: "Crossband centre of activity"
+
+  - name: "6m Meteor"
+    frequency: 50200000
+    mode: "usb"
+    group: "6m"
+    comment: "Meteor scatter"
+
+  - name: "6m Crossband MGM"
+    frequency: 50285000
+    mode: "usb"
+    group: "6m"
+    comment: "Crossband / MGM activity"
+
+  - name: "6m PSK"
+    frequency: 50305000
+    mode: "usb"
+    group: "6m"
+    comment: "PSK"
+
+  - name: "6m Beacons"
+    frequency: 50400000
+    mode: "cwu"
+    group: "6m"
+    comment: "Propagation beacons, 50.400-50.500 MHz"
+
+  - name: "6m SSTV"
+    frequency: 50510000
+    mode: "usb"
+    group: "6m"
+    comment: "SSTV"
+
+  - name: "6m Gateway 1"
+    frequency: 50520000
+    mode: "nfm"
+    group: "6m"
+    comment: "FM/DV internet voice gateway"
+
+  - name: "6m Gateway 2"
+    frequency: 50530000
+    mode: "nfm"
+    group: "6m"
+    comment: "FM/DV internet voice gateway"
+
+  - name: "6m Gateway 3"
+    frequency: 50540000
+    mode: "nfm"
+    group: "6m"
+    comment: "FM/DV internet voice gateway"
+
+  - name: "6m RTTY"
+    frequency: 50600000
+    mode: "usb"
+    group: "6m"
+    comment: "RTTY"
+
+  - name: "6m DV Calling"
+    frequency: 50630000
+    mode: "nfm"
+    group: "6m"
+    comment: "Digital voice calling"
+
+  - name: "6m Repeater Out"
+    frequency: 50720000
+    mode: "nfm"
+    group: "6m"
+    comment: "FM/DV repeater outputs, 50.720-50.870 MHz"
+
+  - name: "6m Repeater In"
+    frequency: 51220000
+    mode: "nfm"
+    group: "6m"
+    comment: "FM/DV repeater inputs, 51.220-51.370 MHz"
+
+  - name: "6m FM Calling"
+    frequency: 51510000
+    mode: "nfm"
+    group: "6m"
+    comment: "FM calling"
+
+  - name: "6m GB2RS"
+    frequency: 51530000
+    mode: "nfm"
+    group: "6m"
+    comment: "GB2RS news and slow Morse"
+

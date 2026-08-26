@@ -38,7 +38,7 @@ import {
     clamp, countryFlag, formatFilterWidth, formatFreqShort, formatHz, snrColour, snrFraction,
 } from '../lib/format.js';
 import { useHeaderFits } from '../lib/useHeaderFits.js';
-import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
+import { bandForFrequency, bandsInRange, tuneToBand } from '../lib/bands.js';
 import { bandTip, bandTone } from '../lib/bandConditions.js';
 import { getBandConditions, subscribeBandConditions } from '../lib/bandNoise.js';
 import { rungOfSpan, spanAtRung, zoomLadder } from '../lib/zoom.js';
@@ -744,7 +744,11 @@ function BandRow() {
         [conditions],
     );
 
-    const options = HAM_BANDS.map(([name]) => ({
+    // Same rule as the Quick Bands panel — these two rows are deliberately the same
+    // control, so they must offer the same bands.
+    const bands = bandsInRange(MIN_FREQ, MAX_FREQ);
+
+    const options = bands.map(([name]) => ({
         value: name,
         label: name,
         title: bandTip(name, states[name], conditions),
@@ -752,7 +756,7 @@ function BandRow() {
     }));
 
     const go = (name) => {
-        const b = HAM_BANDS.find(([n]) => n === name);
+        const b = bands.find(([n]) => n === name);
         if (b) tuneToBand(actions, b[1], b[2]);
     };
 

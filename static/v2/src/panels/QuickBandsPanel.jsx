@@ -40,7 +40,8 @@ import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { Segmented, Switch } from '../components/ui.jsx';
-import { HAM_BANDS, bandForFrequency, tuneToBand } from '../lib/bands.js';
+import { bandForFrequency, bandsInRange, tuneToBand } from '../lib/bands.js';
+import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import { bandTip, bandTone } from '../lib/bandConditions.js';
 import { getBandConditions, subscribeBandConditions } from '../lib/bandNoise.js';
 
@@ -96,6 +97,11 @@ export default function QuickBandsPanel({ minimal }) {
         (b) => tuning.frequency >= b.start && tuning.frequency <= b.end,
     );
 
+    // Only the bands this receiver can reach. 6m appears by itself once the RX888 is
+    // running at 129.6 MSPS — a key that clamped to the band edge would look like it
+    // worked, which is worse than not offering it.
+    const bands = bandsInRange(MIN_FREQ, MAX_FREQ);
+
     return (
         <div className="stack">
             <Segmented
@@ -104,10 +110,10 @@ export default function QuickBandsPanel({ minimal }) {
                 size="sm"
                 value={bandForFrequency(tuning.frequency) || ''}
                 onChange={(name) => {
-                    const b = HAM_BANDS.find(([n]) => n === name);
+                    const b = bands.find(([n]) => n === name);
                     if (b) go(b[1], b[2]);
                 }}
-                options={HAM_BANDS.map(([name]) => ({
+                options={bands.map(([name]) => ({
                     value: name,
                     label: name,
                     title: bandTip(name, states[name], conditions),

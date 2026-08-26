@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -877,9 +878,11 @@ func TestPruneOutOfRangeChannels(t *testing.T) {
 			{Name: "20m", Start: 14_000_000, End: 14_350_000, CenterFrequency: 14_175_000},
 			{Name: "6m", Start: 50_000_000, End: 52_000_000, CenterFrequency: 51_000_000},
 		}
+		// Enabled, so the prune has something to act on — a disabled band is inert and
+		// deliberately left alone. See TestDecoderBandsDisabledInPlaceOnlyWhenEnabled.
 		c.Decoder.Bands = []DecoderBandConfig{
-			{Name: "20m", Frequency: 14_074_000},
-			{Name: "6m", Frequency: 50_313_000},
+			{Name: "20m", Frequency: 14_074_000, Enabled: true},
+			{Name: "6m", Frequency: 50_313_000, Enabled: true},
 		}
 		c.FrequencyReference.Enabled = true
 		c.FrequencyReference.Frequency = 25_000_000
@@ -892,8 +895,13 @@ func TestPruneOutOfRangeChannels(t *testing.T) {
 	if len(narrow.NoiseFloor.Bands) != 1 || narrow.NoiseFloor.Bands[0].Name != "20m" {
 		t.Errorf("noise floor bands: got %+v, want just 20m", narrow.NoiseFloor.Bands)
 	}
-	if len(narrow.Decoder.Bands) != 1 || narrow.Decoder.Bands[0].Name != "20m" {
-		t.Errorf("decoder bands: got %+v, want just 20m", narrow.Decoder.Bands)
+	// Switched off, not deleted — the entry has to survive to be switched on again if the
+	// front end widens.
+	if len(narrow.Decoder.Bands) != 2 {
+		t.Errorf("decoder bands were deleted: got %+v", narrow.Decoder.Bands)
+	}
+	if enabled := narrow.Decoder.GetEnabledBands(); len(enabled) != 1 || enabled[0].Name != "20m" {
+		t.Errorf("enabled decoder bands: got %+v, want just 20m", enabled)
 	}
 	if !narrow.FrequencyReference.Enabled {
 		t.Error("a 25 MHz reference is reachable on a 30 MHz receiver")
@@ -905,8 +913,8 @@ func TestPruneOutOfRangeChannels(t *testing.T) {
 	if len(wide.NoiseFloor.Bands) != 2 {
 		t.Errorf("noise floor bands: got %d, want both", len(wide.NoiseFloor.Bands))
 	}
-	if len(wide.Decoder.Bands) != 2 {
-		t.Errorf("decoder bands: got %d, want both", len(wide.Decoder.Bands))
+	if enabled := wide.Decoder.GetEnabledBands(); len(enabled) != 2 {
+		t.Errorf("enabled decoder bands: got %d, want both", len(enabled))
 	}
 
 	// A reference above the receiver is switched off rather than left to ask radiod for
@@ -923,8 +931,359 @@ func TestPruneOutOfRangeChannels(t *testing.T) {
 	zero.NoiseFloor.Bands = build(30_000_000).NoiseFloor.Bands
 	zero.Decoder.Bands = build(30_000_000).Decoder.Bands
 	pruneOutOfRangeChannels(zero)
-	if len(zero.NoiseFloor.Bands) != 1 || len(zero.Decoder.Bands) != 1 {
-		t.Errorf("zero config should behave as 10 kHz-30 MHz, got %d/%d bands",
-			len(zero.NoiseFloor.Bands), len(zero.Decoder.Bands))
+	if len(zero.NoiseFloor.Bands) != 1 {
+		t.Errorf("zero config should behave as 10 kHz-30 MHz, got %d noise floor bands",
+			len(zero.NoiseFloor.Bands))
+	}
+	if enabled := zero.Decoder.GetEnabledBands(); len(enabled) != 1 {
+		t.Errorf("zero config should behave as 10 kHz-30 MHz, got %d enabled decoder bands",
+			len(enabled))
+	}
+}
+
+// The shipped band list carries 6m, which only a receiver at 129.6 Msps can reach. It has
+// to disappear quietly on a narrower front end and come back by itself on a wider one,
+// with no edit to config.yaml either way — that is the whole point of shipping it.
+func TestSixMetreBandAppearsOnlyWhenReachable(t *testing.T) {
+	sixM := NoiseFloorBand{
+		Name: "6m", Start: 50_000_000, End: 50_500_000,
+		CenterFrequency: 50_250_000, BinCount: 1000, BinBandwidth: 500,
+		FT8Frequency: 50_313_000,
+	}
+	// The invariants the rest of the list keeps.
+	if got := uint64(sixM.BinCount) * uint64(sixM.BinBandwidth); got != sixM.End-sixM.Start {
+		t.Errorf("bin_count x bin_bandwidth = %d, want %d", got, sixM.End-sixM.Start)
+	}
+	if sixM.CenterFrequency != (sixM.Start+sixM.End)/2 {
+		t.Errorf("centre %d is not the midpoint of %d-%d", sixM.CenterFrequency, sixM.Start, sixM.End)
+	}
+	if sixM.FT8Frequency < sixM.Start || sixM.FT8Frequency > sixM.End {
+		t.Errorf("FT8 at %d is outside the band", sixM.FT8Frequency)
+	}
+
+	has := func(bands []NoiseFloorBand, name string) bool {
+		for _, b := range bands {
+			if b.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Same config, two receivers. Nothing about the config changes between them.
+	for _, tt := range []struct {
+		span uint64
+		want bool
+	}{
+		{30_000_000, false},
+		{60_000_000, true},
+	} {
+		c := &Config{}
+		c.Receiver = testReceiver(tt.span)
+		c.NoiseFloor.Bands = []NoiseFloorBand{
+			{Name: "20m", Start: 14_000_000, End: 14_350_000, CenterFrequency: 14_175_000},
+			sixM,
+		}
+		pruneOutOfRangeChannels(c)
+
+		if got := has(c.NoiseFloor.Bands, "6m"); got != tt.want {
+			t.Errorf("span %d: 6m present = %v, want %v", tt.span, got, tt.want)
+		}
+		if !has(c.NoiseFloor.Bands, "20m") {
+			t.Errorf("span %d: 20m must survive either way", tt.span)
+		}
+	}
+}
+
+// The built-in defaults — used when config.yaml has no bands: section — must carry it too,
+// and must still be self-consistent.
+func TestBuiltInBandDefaultsIncludeSixMetres(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("admin:\n  name: test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	// LoadConfig prunes, and the test environment has no radiod config, so the receiver
+	// falls back to 30 MHz — 6m must have been dropped.
+	for _, b := range cfg.NoiseFloor.Bands {
+		if b.Name == "6m" {
+			t.Errorf("6m survived on a %.0f MHz receiver", float64(cfg.Receiver.Span())/1e6)
+		}
+		if b.CenterFrequency > cfg.Receiver.MaxFreq() {
+			t.Errorf("band %s centre %d is past the receiver", b.Name, b.CenterFrequency)
+		}
+	}
+	if len(cfg.NoiseFloor.Bands) == 0 {
+		t.Error("every HF band was pruned; the defaults should survive a 30 MHz receiver")
+	}
+}
+
+// The shipped bookmark list carries 6m digital entries that only a receiver at 129.6 Msps
+// can reach. /api/bookmarks must not publish them on a narrower front end — a visitor
+// offered a bookmark whose only outcome is a refused click is worse served than one who
+// never sees it — while the admin tab, which reads bookmarks.yaml separately, still shows
+// them flagged.
+func TestBookmarksAPIDropsUnreachableEntries(t *testing.T) {
+	bookmarks := []Bookmark{
+		{Name: "FT8 20m", Frequency: 14_074_000, Mode: "usb"},
+		{Name: "WSPR 6m", Frequency: 50_293_000, Mode: "usb"},
+		{Name: "FT8 6m", Frequency: 50_313_000, Mode: "usb"},
+		{Name: "VLF", Frequency: 5_000, Mode: "usb"},
+	}
+
+	for _, tt := range []struct {
+		span uint64
+		want []string
+	}{
+		{30_000_000, []string{"FT8 20m"}},
+		{60_000_000, []string{"FT8 20m", "WSPR 6m", "FT8 6m"}},
+	} {
+		cfg := &Config{}
+		cfg.Receiver = testReceiver(tt.span)
+		cfg.Bookmarks = bookmarks
+
+		rec := httptest.NewRecorder()
+		handleBookmarks(rec, httptest.NewRequest(http.MethodGet, "/api/bookmarks?eibi=0", nil), cfg, nil)
+
+		var got []Bookmark
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("span %d: %v (body %s)", tt.span, err, rec.Body.String())
+		}
+		// Compared as a set: the handler sorts by name, which is its business, not this
+		// test's.
+		names := make([]string, 0, len(got))
+		for _, b := range got {
+			names = append(names, b.Name)
+		}
+		sort.Strings(names)
+		want := append([]string(nil), tt.want...)
+		sort.Strings(want)
+		if strings.Join(names, ",") != strings.Join(want, ",") {
+			t.Errorf("span %d: got %v, want %v", tt.span, names, want)
+		}
+	}
+
+	// The list itself is untouched — dropping happens on the way out, so the operator's
+	// file and the admin tab still have everything.
+	if len(bookmarks) != 4 {
+		t.Errorf("the source list was mutated: %d entries left", len(bookmarks))
+	}
+}
+
+// Decoder bands are switched off in place, and only when they were switched on.
+//
+// The shipped decoder.yaml carries every band this software knows about with
+// enabled: false — 6m included, for a receiver at 129.6 Msps. A disabled band spawns no
+// decoder, so pruning it would be both pointless and six warnings of noise per boot. An
+// enabled one that has gone out of reach would spawn a decoder that can never hear
+// anything, so that is disabled and reported.
+func TestDecoderBandsDisabledInPlaceOnlyWhenEnabled(t *testing.T) {
+	build := func() []DecoderBandConfig {
+		return []DecoderBandConfig{
+			{Name: "20m-ft8", Frequency: 14_074_000, Enabled: true},
+			{Name: "6m-ft8", Frequency: 50_313_000, Enabled: false}, // shipped, off
+			{Name: "6m-wspr", Frequency: 50_293_000, Enabled: true}, // operator switched on
+		}
+	}
+
+	narrow := &Config{}
+	narrow.Receiver = testReceiver(30_000_000)
+	narrow.Decoder.Bands = build()
+	pruneOutOfRangeChannels(narrow)
+
+	// Nothing is removed — the entries have to survive to be switched on again later.
+	if len(narrow.Decoder.Bands) != 3 {
+		t.Fatalf("bands were deleted: %d left, want 3", len(narrow.Decoder.Bands))
+	}
+	byName := map[string]DecoderBandConfig{}
+	for _, b := range narrow.Decoder.Bands {
+		byName[b.Name] = b
+	}
+	if !byName["20m-ft8"].Enabled {
+		t.Error("a reachable enabled band must stay enabled")
+	}
+	if byName["6m-ft8"].Enabled {
+		t.Error("a shipped disabled band must stay disabled")
+	}
+	if byName["6m-wspr"].Enabled {
+		t.Error("an enabled band out of reach must be switched off")
+	}
+
+	// On a receiver that reaches them, nothing is touched at all.
+	wide := &Config{}
+	wide.Receiver = testReceiver(60_000_000)
+	wide.Decoder.Bands = build()
+	pruneOutOfRangeChannels(wide)
+	for _, b := range wide.Decoder.Bands {
+		want := b.Name != "6m-ft8" // the only one that started disabled
+		if b.Enabled != want {
+			t.Errorf("%s: enabled=%v, want %v on a 60 MHz receiver", b.Name, b.Enabled, want)
+		}
+	}
+}
+
+// The admin API refuses to switch a band on outside the receiver, but saving one disabled
+// is fine — that is how the shipped 6m entries get to sit there waiting.
+func TestValidateDecoderBandRange(t *testing.T) {
+	rx := testReceiver(30_000_000)
+
+	if err := validateDecoderBandRange(map[string]interface{}{
+		"frequency": float64(50_313_000), "enabled": false,
+	}, rx); err != nil {
+		t.Errorf("saving a 6m band disabled must be allowed: %v", err)
+	}
+	if err := validateDecoderBandRange(map[string]interface{}{
+		"frequency": float64(50_313_000), "enabled": true,
+	}, rx); err == nil {
+		t.Error("enabling a 6m band on a 30 MHz receiver must be refused")
+	}
+	if err := validateDecoderBandRange(map[string]interface{}{
+		"frequency": float64(14_074_000), "enabled": true,
+	}, rx); err != nil {
+		t.Errorf("enabling a reachable band must be allowed: %v", err)
+	}
+	// A 60 MHz receiver allows it.
+	if err := validateDecoderBandRange(map[string]interface{}{
+		"frequency": float64(50_313_000), "enabled": true,
+	}, testReceiver(60_000_000)); err != nil {
+		t.Errorf("enabling 6m on a 60 MHz receiver must be allowed: %v", err)
+	}
+	// A missing or unusable frequency is the caller's own validation to report.
+	if err := validateDecoderBandRange(map[string]interface{}{"enabled": true}, rx); err != nil {
+		t.Errorf("a missing frequency is not this check's business: %v", err)
+	}
+}
+
+// The question this answers: can a 6m decoder start if 50 MHz is not available?
+//
+// pruneOutOfRangeChannels switches such bands off at startup, but that is one call in one
+// startup sequence. GetEnabledBands is the single question every consumer asks — the
+// decoder that spawns processes, the metrics API, the instance reporter — so the refusal
+// lives there too and holds however the band came to be enabled.
+func TestEnabledBandsNeverIncludeUnreachableOnes(t *testing.T) {
+	dc := &DecoderConfig{
+		Bands: []DecoderBandConfig{
+			{Name: "20m-ft8", Frequency: 14_074_000, Enabled: true},
+			{Name: "6m-ft8", Frequency: 50_313_000, Enabled: true}, // hand-edited into the file
+			{Name: "6m-wspr", Frequency: 50_293_000, Enabled: false},
+		},
+	}
+
+	// Before the receiver is known, nothing is filtered — a config loaded in isolation
+	// behaves exactly as it always did.
+	if got := len(dc.GetEnabledBands()); got != 2 {
+		t.Errorf("with no range set: got %d enabled, want 2", got)
+	}
+
+	// A 30 MHz receiver: the 6m band is refused even though the file says enabled.
+	dc.SetReceiverRange(10_000, 30_000_000)
+	got := dc.GetEnabledBands()
+	if len(got) != 1 || got[0].Name != "20m-ft8" {
+		t.Errorf("on 30 MHz: got %+v, want just 20m-ft8", got)
+	}
+	// And the underlying record is untouched — this is a refusal to run it, not an edit.
+	if !dc.Bands[1].Enabled {
+		t.Error("GetEnabledBands must not mutate the config")
+	}
+
+	// A 60 MHz receiver runs it.
+	dc.SetReceiverRange(10_000, 60_000_000)
+	if got := len(dc.GetEnabledBands()); got != 2 {
+		t.Errorf("on 60 MHz: got %d enabled, want 2", got)
+	}
+}
+
+// The radiod config editor is a free-text box, so the sample rate it writes has to be
+// checked before anything reaches disk. Two things are being defended: a value the RX888
+// cannot cleanly synthesise, and the full rate on hardware that has not been modified for
+// it — which destroys the receiver rather than merely performing badly.
+func TestValidateRadiodSamprate(t *testing.T) {
+	conf := func(rate string) []byte {
+		return []byte("[global]\nhardware = rx888\nsamprate = 12000\n\n[rx888]\nsamprate = " + rate + "\n")
+	}
+
+	// The two supported rates, staying where they are.
+	if err := validateRadiodSamprate(conf("64800000"), SamprateHalf, false); err != nil {
+		t.Errorf("half rate must be accepted: %v", err)
+	}
+	if err := validateRadiodSamprate(conf("129600000"), SamprateFull, false); err != nil {
+		t.Errorf("staying at the full rate must not re-ask for agreement: %v", err)
+	}
+
+	// Anything else is refused, however plausible.
+	for _, bad := range []string{"130000000", "64000000", "12960000", "100000000", "0", "-1"} {
+		if err := validateRadiodSamprate(conf(bad), SamprateHalf, false); err == nil {
+			t.Errorf("samprate %s should have been refused", bad)
+		}
+	}
+
+	// A config with no [rx888] samprate at all.
+	if err := validateRadiodSamprate([]byte("[global]\nhardware = rx888\n"), SamprateHalf, false); err == nil {
+		t.Error("a config with no front end samprate must be refused")
+	}
+
+	// Raising to the full rate needs the operator's agreement...
+	err := validateRadiodSamprate(conf("129600000"), SamprateHalf, false)
+	if err == nil {
+		t.Fatal("raising to 129.6 MSPS without agreement must be refused")
+	}
+	if !strings.Contains(err.Error(), "overheat") || !strings.Contains(err.Error(), "permanently damaged") {
+		t.Errorf("the refusal must say what actually happens, got: %v", err)
+	}
+
+	// ...and is allowed with it.
+	if err := validateRadiodSamprate(conf("129600000"), SamprateHalf, true); err != nil {
+		t.Errorf("with agreement the full rate must be accepted: %v", err)
+	}
+
+	// Dropping back down never needs agreement.
+	if err := validateRadiodSamprate(conf("64800000"), SamprateFull, false); err != nil {
+		t.Errorf("dropping to the half rate must always be allowed: %v", err)
+	}
+
+	// Inline comments and suffixes are the operator's normal habit, not an error.
+	if err := validateRadiodSamprate(
+		[]byte("[rx888]\nsamprate = 129600000  # full speed\n"), SamprateFull, false); err != nil {
+		t.Errorf("an inline comment must not break parsing: %v", err)
+	}
+	if err := validateRadiodSamprate(
+		[]byte("[rx888]\nsamprate = 129.6m\n"), SamprateFull, false); err != nil {
+		t.Errorf("a suffixed frequency must parse: %v", err)
+	}
+}
+
+// The admin editor validates the sample rate in the browser and the server validates it
+// again. They must read the same file the same way, or an operator is refused for a value
+// the server would have accepted, or worse, waved through one it would not.
+func TestSamprateParserParity(t *testing.T) {
+	for _, c := range []struct {
+		conf string
+		want int
+	}{
+		{"[rx888]\nsamprate = 64800000\n", 64800000},
+		{"[rx888]\nsamprate = 129600000  # full speed\n", 129600000},
+		{"[rx888]\nsamprate = 129.6m\n", 129600000},
+		{"[global]\nsamprate = 12000\n[rx888]\nsamprate = 64800000\n", 64800000},
+		{"[global]\nsamprate = 12000\n", 0},
+		{"[rx888]\n#samprate = 129600000\n", 0},
+		{"[rx888]\nsamprate = 64800000\nsamprate = 129600000\n", 129600000},
+		{"[rx888]\ndevice = rx888\n", 0},
+		{"[rx888]\nsamprate = 64800000\n[global]\nsamprate = 12000\n", 64800000},
+	} {
+		got, err := samprateFromRadiodConfBytes([]byte(c.conf))
+		if c.want == 0 {
+			if err == nil {
+				t.Errorf("%q: got %d, want an error", c.conf, got)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("%q: got %d (%v), want %d", c.conf, got, err, c.want)
+		}
 	}
 }

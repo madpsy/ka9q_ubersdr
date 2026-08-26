@@ -213,6 +213,12 @@ type DecoderConfig struct {
 
 	// Band configurations
 	Bands []DecoderBandConfig `yaml:"bands"`
+
+	// The receiver's tuning range, set by pruneOutOfRangeChannels rather than read from
+	// YAML — it is a property of the front end, not an operator preference. Zero means
+	// not yet known, which allows everything. See GetEnabledBands.
+	minFrequency uint64 `yaml:"-"`
+	maxFrequency uint64 `yaml:"-"`
 }
 
 // Validate checks if the decoder configuration is valid
@@ -312,9 +318,36 @@ func (dc *DecoderConfig) Validate() error {
 func (dc *DecoderConfig) GetEnabledBands() []DecoderBandConfig {
 	enabled := make([]DecoderBandConfig, 0)
 	for _, band := range dc.Bands {
-		if band.Enabled {
-			enabled = append(enabled, band)
+		if !band.Enabled {
+			continue
 		}
+		// Second line of defence behind pruneOutOfRangeChannels, which switches these off
+		// at startup. Every consumer — the decoder itself, the metrics API, the instance
+		// reporter, /api/description — asks this one question, so a band that cannot be
+		// heard is refused here no matter how it came to be enabled: a hand-edited
+		// decoder.yaml, a future reload path that forgets to prune, a config assembled in
+		// code. A decoder spawned on a frequency the front end cannot reach is a process
+		// burning CPU on silence with nothing to show for it.
+		if !dc.bandReachable(band.Frequency) {
+			continue
+		}
+		enabled = append(enabled, band)
 	}
 	return enabled
+}
+
+// SetReceiverRange records what the front end can tune, for GetEnabledBands to filter on.
+// Called by pruneOutOfRangeChannels once the receiver has been resolved.
+func (dc *DecoderConfig) SetReceiverRange(minHz, maxHz uint64) {
+	dc.minFrequency, dc.maxFrequency = minHz, maxHz
+}
+
+// bandReachable answers whether a frequency is inside the recorded range. An unset range
+// means "not known yet" and allows everything, so a DecoderConfig built in a test or
+// loaded before the receiver is resolved behaves exactly as it always did.
+func (dc *DecoderConfig) bandReachable(hz uint64) bool {
+	if dc.maxFrequency == 0 {
+		return true
+	}
+	return hz >= dc.minFrequency && hz <= dc.maxFrequency
 }

@@ -48,6 +48,8 @@ esbuild ../src/lib/audioStats.js --bundle --format=cjs --platform=node \
     --outfile=.build/audiostats.cjs --log-level=warning
 esbuild scopepanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/scopepanel.cjs --log-level=warning
+esbuild oliviapanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/oliviapanel.cjs --log-level=warning
 esbuild ifpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/ifpanel.cjs --log-level=warning
 esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
@@ -549,4 +551,5 @@ node audioresume.test.js
 node wheelstep.test.js
 node iffit.test.js
 node audiotint.test.js
+node oliviapanel.test.js
 node tuningrange.test.js

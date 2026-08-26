@@ -84,6 +84,13 @@ function drawTone(ctx, { x, width, height, colour, label, hz }) {
 export function drawSpectrum(canvas, {
     bins, binCount, sampleRate, mark, space, cssHeight,
     markLabel = 'Mark', spaceLabel = 'Space',
+    // Optional occupied band, {lo, hi} in Hz, shaded behind the bars.
+    //
+    // Two tones want two lines; a continuous block wants a region. Olivia's 8/250 is a
+    // solid 250 Hz of tones, and two lines that close together on a 3 kHz scale read as a
+    // narrow gap rather than as the thing the decoder is listening to. Drawn under the
+    // bars so it never hides a signal.
+    band = null,
 }) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -96,6 +103,21 @@ export function drawSpectrum(canvas, {
 
     ctx.fillStyle = cssVar('--spec-bg', '#0a0e15');
     ctx.fillRect(0, 0, width, height);
+
+    if (band && band.hi > band.lo) {
+        const x0 = (Math.max(0, band.lo) / MAX_AUDIO_HZ) * width;
+        const x1 = (Math.min(MAX_AUDIO_HZ, band.hi) / MAX_AUDIO_HZ) * width;
+        if (x1 > x0) {
+            // The accent at low alpha rather than a fixed rgba(): the panel is drawn in
+            // whichever theme the viewer has, and a hardcoded blue would be wrong in one
+            // of them. There is no --accent-dim to borrow, so the alpha is applied here.
+            ctx.save();
+            ctx.globalAlpha = 0.16;
+            ctx.fillStyle = cssVar('--accent', '#08a2fb');
+            ctx.fillRect(x0, 0, x1 - x0, height);
+            ctx.restore();
+        }
+    }
 
     if (bins && binCount) {
         const nyquist = (sampleRate || 48000) / 2;

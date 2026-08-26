@@ -10,8 +10,8 @@
 // Closing is the only chrome besides the drag and resize handles: no dock menu,
 // no hide, because there is nowhere else for it to go.
 
-import React, { useEffect } from '../react.js';
-import { useFloatDrag } from '../lib/useFloatDrag.js';
+import React, { useEffect, useState } from '../react.js';
+import { useFloatDrag, keepOnScreen } from '../lib/useFloatDrag.js';
 import { Icon } from '../components/ui.jsx';
 import { useExtensions } from './ExtensionsContext.jsx';
 import useWakeProps from '../radio/useWake.js';
@@ -37,20 +37,46 @@ export default function ExtensionWindow({ bounds }) {
 
     // A window sized for a desktop, or left where a wider viewport put it, must
     // still be reachable here: fit it to the layer and pull it back into view.
-    // The layer re-renders this on resize, which is what makes the check run.
+    //
+    // When that runs is the whole of it. This used to run after *every* render,
+    // and a drag re-renders this window on every pointer move — so the fit was
+    // running inside the gesture, against it. Dragging towards the bottom, the
+    // drag put the window where the pointer asked (its rule keeps a strip of
+    // title bar on screen, no more), the fit immediately hauled it back up by
+    // the rest of its height, the next pointer event pushed it down again from
+    // the unchanged grab point, and the window shook between the two positions
+    // for as long as the drag went on. A docked panel that has been floated
+    // never did this, because nothing writes its geometry mid-drag — the layer
+    // stopped doing exactly this, for its own reasons, and this was the copy
+    // left behind (see components/FloatingLayer.jsx).
+    //
+    // So it runs on the occasions it is actually for: the layer changed size,
+    // another extension opened, or a gesture just finished. `bounds` is a ref,
+    // so it is the layer forcing a re-render that makes these change — the same
+    // arrangement the layer's own fit relies on.
+    const b = bounds && bounds.current;
+    const bw = b ? b.width : 0;
+    const bh = b ? b.height : 0;
+    const [settled, setSettled] = useState(0);
+    const endAndFit = (e) => { onEnd(e); setSettled((n) => n + 1); };
     useEffect(() => {
-        const b = bounds && bounds.current;
         // Not before the layer has a real size — clamping against an unmeasured
         // one would rewrite the stored position to the corner, and persist it.
-        if (!active || !b || b.width < 120 || b.height < 120) return;
-        const w = Math.max(MIN.w, Math.min(geom.w, b.width));
-        const h = Math.max(MIN.h, Math.min(geom.h, b.height));
-        const x = Math.max(0, Math.min(b.width - w, geom.x));
-        const y = Math.max(0, Math.min(Math.max(0, b.height - h), geom.y));
+        if (!active || bw < 120 || bh < 120) return;
+        const w = Math.max(MIN.w, Math.min(geom.w, bw));
+        const h = Math.max(MIN.h, Math.min(geom.h, bh));
+        // The drag's own rule, not a stricter one of our own: a window dropped
+        // against an edge is then already where this would put it, so a later
+        // resize of the layer cannot quietly undo somebody's placement.
+        const { x, y } = keepOnScreen(geom.x, geom.y, w, { width: bw, height: bh });
         if (w !== geom.w || h !== geom.h || x !== geom.x || y !== geom.y) {
             setFloat(active.id, { x, y, w, h });
         }
-    });
+        // geom is read as it is at that moment and deliberately not a
+        // dependency: geom changing *is* the drag, and that is what must not
+        // retrigger this.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [active && active.id, bw, bh, settled]);
 
     if (!active) return null;
 
@@ -68,8 +94,8 @@ export default function ExtensionWindow({ bounds }) {
                 className="floatwin__head"
                 onPointerDown={onMoveDown}
                 onPointerMove={onMove}
-                onPointerUp={onEnd}
-                onPointerCancel={onEnd}
+                onPointerUp={endAndFit}
+                onPointerCancel={endAndFit}
             >
                 <span className="floatwin__icon">{active.icon}</span>
                 <span className="floatwin__title">{active.title}</span>
@@ -116,8 +142,8 @@ export default function ExtensionWindow({ bounds }) {
                 title="Resize"
                 onPointerDown={onSizeDown}
                 onPointerMove={onMove}
-                onPointerUp={onEnd}
-                onPointerCancel={onEnd}
+                onPointerUp={endAndFit}
+                onPointerCancel={endAndFit}
             />
         </section>
     );

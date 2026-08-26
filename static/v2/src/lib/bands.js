@@ -16,9 +16,32 @@ export const HAM_BANDS = [
     ['15m', 21000000, 21450000],
     ['12m', 24890000, 24990000],
     ['10m', 28000000, 29700000],
+    // 6m is only reachable when the RX888 runs at its full 129.6 MSPS. It stays in this
+    // list unconditionally so bandForFrequency can name a 6m frequency correctly whatever
+    // the receiver is; the band *buttons* ask bandsInRange instead, so a receiver that
+    // cannot get there is not offered a key that would refuse to work.
+    ['6m', 50000000, 52000000],
 ];
 
 export const BAND_NAMES = HAM_BANDS.map(([name]) => name);
+
+/**
+ * The bands this receiver can actually tune, for anything that offers them as a choice.
+ *
+ * A band button for 6m on a 30 MHz receiver is worse than a missing one: tuneToBand goes
+ * through setFrequency, which clamps, so pressing it would walk the dial to the band edge
+ * and look like it worked.
+ *
+ * Bounds are arguments rather than an import of radio/constants.js, keeping this module
+ * testable on its own like the other pure ones. Callers pass MIN_FREQ/MAX_FREQ; the
+ * defaults are what a receiver was before the span became configurable.
+ *
+ * A band counts as available when it lies entirely inside the range. Half a band is not a
+ * band button — the centre it tunes to could be outside what the receiver can reach.
+ */
+export function bandsInRange(minHz = 10000, maxHz = 30000000) {
+    return HAM_BANDS.filter(([, min, max]) => min >= minHz && max <= maxHz);
+}
 
 // Which band a frequency sits in, or null between bands. Inclusive at both
 // edges, as v1's active-badge test is.

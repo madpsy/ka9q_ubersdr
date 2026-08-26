@@ -128,11 +128,11 @@ export function AudioLevel() {
 
 // The 0-3 kHz audio spectrum with the two tones marked. Subscribes to the
 // analyser directly and paints the canvas, so no frame of it reaches React.
-export function SpectrumStrip({ mark, space, onTune, markLabel, spaceLabel, title }) {
+export function SpectrumStrip({ mark, space, onTune, markLabel, spaceLabel, title, band }) {
     const { player } = useRadio();
     const canvas = useRef(null);
     const tones = useRef(null);
-    tones.current = { mark, space, markLabel, spaceLabel };
+    tones.current = { mark, space, markLabel, spaceLabel, band };
 
     useEffect(() => subscribeAudioSpectrum(player, { fftSize: 2048, bins: true }, (f) => {
         drawSpectrum(canvas.current, {
@@ -143,6 +143,7 @@ export function SpectrumStrip({ mark, space, onTune, markLabel, spaceLabel, titl
             space: tones.current.space,
             markLabel: tones.current.markLabel,
             spaceLabel: tones.current.spaceLabel,
+            band: tones.current.band,
             cssHeight: SPECTRUM_H,
         });
     }), [player]);

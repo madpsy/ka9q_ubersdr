@@ -1519,11 +1519,38 @@ noisefloor:
       bin_bandwidth: 500      # 500 Hz resolution
       ft8_frequency: 28074000 # 28.074 MHz - FT8 calling frequency
 
+    # 6m — only reachable when the RX888 runs at its full 129.6 MSPS.
+    #
+    # Left in the list unconditionally: a receiver whose front end does not reach this
+    # far skips the band at startup with a one-line note and carries on, so this entry
+    # is harmless at 64.8 MSPS and starts working by itself if the sample rate is raised.
+    # Nothing needs commenting out either way.
+    #
+    # The allocation is 50–52 MHz, four times wider than any HF band here, but the
+    # narrowband activity is all in the bottom 500 kHz — CW and beacons to 50.100, then
+    # SSB and digital including FT8 at 50.313 and FT4 at 50.323. Above 50.5 is repeaters
+    # and wide-band modes, which a 500 Hz bin says nothing useful about. So this follows
+    # the same choice 10m makes above: cover the active lower portion properly rather
+    # than the whole allocation coarsely, and keep the 500 Hz resolution that makes an
+    # FT8 signal visible.
+    #
+    # To watch the entire band instead, use start/end of 50000000/52000000 with
+    # bin_count 2000 and bin_bandwidth 1000. That is a 2 MHz view at 1 kHz per bin —
+    # cheaper for radiod than this one, but too coarse to resolve FT8.
+    - name: "6m"
+      start: 50000000         # 50.0 MHz
+      end: 50500000           # 50.5 MHz (lower portion — see above)
+      center_frequency: 50250000
+      bin_count: 1000         # 1000 bins × 500 Hz = 500 kHz coverage
+      bin_bandwidth: 500      # 500 Hz resolution
+      ft8_frequency: 50313000 # 50.313 MHz - FT8 calling frequency
+
 # ==============================================================================
 # Wideband Spectrogram Recording
 # ==============================================================================
-# Records the 0-30 MHz wideband spectrum as a PNG image, one file per UTC day.
-# Each image is 4096 pixels wide (one pixel per FFT bin, ~7.3 kHz resolution)
+# Records the full wideband spectrum as a PNG image, one file per UTC day.
+# The image is one pixel per FFT bin at ~7.3 kHz resolution — 4096 pixels across a
+# 30 MHz receiver, 8192 across a 60 MHz one, since the bin count follows the span
 # and grows by one row per minute throughout the day (up to 1440 rows at midnight).
 # The image is always valid and can be served at any time during the day.
 # At UTC midnight, the completed day's image is archived and a new one begins.

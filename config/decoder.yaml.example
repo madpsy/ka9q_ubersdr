@@ -150,6 +150,21 @@ decoder:
       frequency: 28074000  # 28.074 MHz
       enabled: false
 
+    # 6m — only reachable when the RX888 runs at its full 129.6 MSPS. Disabled like every
+    # other band here; enabling one on a narrower front end is refused by the admin
+    # decoder tab, and an enabled one that goes out of reach (dropping the sample rate
+    # back to 64.8) is switched off at startup with a warning rather than left spawning a
+    # decoder that can never hear anything.
+    - name: "6m-ft8"
+      mode: "FT8"
+      frequency: 50313000  # 50.313 MHz
+      enabled: false
+
+    - name: "6m-ft8-2"
+      mode: "FT8"
+      frequency: 50323000  # 50.323 MHz - secondary, used for DX and during openings
+      enabled: false
+
     # ========================================
     # FT4 bands (160m - 10m)
     # ========================================
@@ -192,6 +207,11 @@ decoder:
     - name: "10m-ft4"
       mode: "FT4"
       frequency: 28180000  # 28.180 MHz
+      enabled: false
+
+    - name: "6m-ft4"
+      mode: "FT4"
+      frequency: 50318000  # 50.318 MHz
       enabled: false
 
     # ========================================
@@ -252,6 +272,11 @@ decoder:
       frequency: 28124600  # 28.1246 MHz
       enabled: false
 
+    - name: "6m-wspr"
+      mode: "WSPR"
+      frequency: 50293000  # 50.293 MHz
+      enabled: false
+
     - name: "60m-alt-wspr"
       mode: "WSPR"
       frequency: 5364700
@@ -291,6 +316,12 @@ decoder:
     - name: "80m-js8"
       mode: "JS8"
       frequency: 3578000   # 3.578 MHz
+      enabled: false
+      depth: 2
+
+    - name: "6m-js8"
+      mode: "JS8"
+      frequency: 50318000  # 50.318 MHz — shared with FT4 on 6m
       enabled: false
       depth: 2
 
@@ -346,6 +377,12 @@ decoder:
     - name: "10m-ft2"
       mode: "FT2"
       frequency: 28184000
+      enabled: false
+      depth: 3
+
+    - name: "6m-ft2"
+      mode: "FT2"
+      frequency: 50320000  # 50.320 MHz
       enabled: false
       depth: 3
 

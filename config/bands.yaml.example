@@ -54,3 +54,66 @@ bands:
     start: 28000000
     end: 29700000
     group: "HF"
+
+  # 6m — only reachable when the RX888 runs at its full 129.6 MSPS. A receiver whose
+  # front end does not reach this far drops the band at startup and carries on, so this
+  # entry is harmless at 64.8 MSPS and starts working by itself if the sample rate is
+  # raised. Nothing needs commenting out either way.
+  #
+  # Grouped VHF rather than HF because that is what it is; the group is a free-text
+  # label used only to organise the admin list.
+  - label: "6m"
+    start: 50000000
+    end: 52000000
+    group: "VHF"
+
+  # 6m sub-bands, from the IARU Region 1 plan. They overlap the whole-band entry above on
+  # purpose: that one is for moving to the band, these are for landing on the part of it
+  # you actually want.
+  - label: "6m CW"
+    start: 50000000
+    end: 50100000
+    group: "VHF"
+
+  - label: "6m SSB"
+    start: 50100000
+    end: 50300000
+    group: "VHF"
+
+  - label: "6m Digital"
+    start: 50300000
+    end: 50400000
+    group: "VHF"
+
+  - label: "6m Beacons"
+    start: 50400000
+    end: 50500000
+    group: "VHF"
+
+  - label: "6m FM"
+    start: 50500000
+    end: 52000000
+    group: "VHF"
+
+  # Non-amateur VHF allocations, listed because a receiver that reaches this far can hear
+  # them and they are what most of the activity between 30 and 50 MHz actually is. Like
+  # 6m above, they need the RX888 at its full 129.6 MSPS and are dropped at startup on a
+  # narrower front end.
+
+  # UK aeromodelling — RC aircraft
+  - label: "35 MHz RC"
+    start: 34945000
+    end: 35305000
+    group: "Model Control"
+
+  # UK surface model control — cars and boats
+  - label: "40 MHz RC"
+    start: 40660000
+    end: 41000000
+    group: "Model Control"
+
+  # Licence-exempt short-range devices and model control
+  - label: "49 MHz SRD"
+    start: 49820000
+    end: 49980000
+    group: "Model Control"

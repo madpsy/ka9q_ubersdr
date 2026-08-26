@@ -14,8 +14,8 @@
 //     by value: unrounded floats would put a "change" on the wire ten times a
 //     second forever, and the rate limit would be spending its budget on noise.
 
-import { MODES, bandwidthLimits } from '../radio/constants.js';
-import { HAM_BANDS } from '../lib/bands.js';
+import { MAX_FREQ, MIN_FREQ, MODES, bandwidthLimits } from '../radio/constants.js';
+import { bandsInRange } from '../lib/bands.js';
 import { dbfsToSUnits } from '../lib/format.js';
 import { catalogue } from '../controls/functions.js';
 
@@ -251,7 +251,11 @@ export function modesSnapshot() {
 }
 
 export function bandsSnapshot() {
-    return HAM_BANDS.map(([name, min, max]) => ({ name, min, max }));
+    // Only what this receiver can reach. A bridge client reads this to decide where it
+    // can go, and 6m is in the band list whether or not the front end gets there — the
+    // tune command would refuse it, but offering a band and then rejecting the tune is
+    // the worse half of that exchange.
+    return bandsInRange(MIN_FREQ, MAX_FREQ).map(([name, min, max]) => ({ name, min, max }));
 }
 
 /**

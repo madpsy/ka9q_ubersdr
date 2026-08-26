@@ -583,15 +583,21 @@ func main() {
 	decoderConfig, err := LoadConfig(decoderPath)
 	if err == nil {
 		config.Decoder = decoderConfig.Decoder
-		// decoder.yaml is loaded as its own Config, so its bands have not been checked
-		// against this receiver's range — LoadConfig only saw the (empty) decoder section
-		// of config.yaml. Re-run the prune now that they are in place.
-		pruneOutOfRangeChannels(config)
 		log.Printf("Loaded decoder configuration from decoder.yaml (enabled: %v, bands: %d)",
 			config.Decoder.Enabled, len(config.Decoder.GetEnabledBands()))
 	} else {
 		log.Printf("No decoder.yaml found or error loading: %v", err)
 	}
+
+	// bands.yaml and decoder.yaml are each loaded as their own Config and assigned over
+	// config.Bands / config.Decoder above, so neither has been checked against this
+	// receiver's range — LoadConfig only ever saw the (empty) sections of config.yaml.
+	// Re-run the prune now that both are in place.
+	//
+	// Deliberately outside the branch above: a receiver with no decoder.yaml still has a
+	// band plan to check, and having this inside the `if` meant a missing decoder file
+	// silently skipped that.
+	pruneOutOfRangeChannels(config)
 
 	// Start DB retention pruning loop — runs once at startup then daily at midnight UTC.
 	// Uses each subsystem's configured retention period; 0 = keep forever.
@@ -4423,14 +4429,30 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 		enabledExtensions[ext] = true
 	}
 
-	// Filter bookmarks to only include enabled extensions
-	filteredBookmarks := make([]Bookmark, len(config.Bookmarks))
-	for i, bookmark := range config.Bookmarks {
-		filteredBookmarks[i] = bookmark
+	// Filter bookmarks to only include enabled extensions, and to drop any this receiver
+	// cannot tune.
+	//
+	// The range test is here, on the way out, rather than at config load: the shipped list
+	// covers more than any one front end reaches — the 6m digital entries are there for a
+	// receiver running at 129.6 Msps — and an operator must still see them in the admin
+	// bookmarks tab, which reads bookmarks.yaml through /admin/bookmarks and flags them as
+	// out of range rather than hiding them. Publishing one here would offer every visitor
+	// a bookmark whose only possible outcome is a refused click.
+	//
+	// This is deliberately not the same answer as a *local* bookmark, which v2 keeps and
+	// greys out: that one is the visitor's own record and losing it silently would be
+	// worse than showing it unreachable.
+	rx := config.Receiver
+	filteredBookmarks := make([]Bookmark, 0, len(config.Bookmarks))
+	for _, bookmark := range config.Bookmarks {
+		if bookmark.Frequency < rx.MinFreq() || bookmark.Frequency > rx.MaxFreq() {
+			continue
+		}
 		// If bookmark has an extension reference but it's not enabled, clear it
 		if bookmark.Extension != "" && !enabledExtensions[bookmark.Extension] {
-			filteredBookmarks[i].Extension = ""
+			bookmark.Extension = ""
 		}
+		filteredBookmarks = append(filteredBookmarks, bookmark)
 	}
 
 	// ?eibi=0 lets callers opt out of EiBi augmentation.

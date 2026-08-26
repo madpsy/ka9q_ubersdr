@@ -59,6 +59,54 @@ type TuneRequest struct {
 	BandwidthHigh *int   `json:"bandwidthHigh,omitempty"`
 }
 
+// TuningRange is how much spectrum the connected receiver covers, from
+// /api/description's `tuning_range` object.
+//
+// The receiver is not always the 0-30 MHz box this client assumed for its first
+// year: the span follows the front end sample rate, so a 129.6 Msps RX888
+// reaches 60 MHz and has 6 m in it. The server publishes these numbers from one
+// place (ReceiverConfig.TuningRange in receiver_span.go) and the web UI reads
+// the same object — see static/v2/src/radio/constants.js, whose fallback rules
+// these deliberately match.
+//
+// Every field is optional, including the whole object: an older receiver does
+// not publish it at all. See Limits for what that means.
+//
+// SpectrumSpanHz is decoded but unused here — this client shows no spectrum. It
+// is kept so the shape matches what the receiver sends and the other clients
+// read, rather than reappearing as a surprise the day a waterfall is added.
+type TuningRange struct {
+	MinFrequency   int `json:"min_frequency"`
+	MaxFrequency   int `json:"max_frequency"`
+	SpectrumSpanHz int `json:"spectrum_span_hz"`
+}
+
+// Limits resolves the tuning range, filling in anything the receiver did not
+// say.
+//
+// The fallback is a contract rather than padding: a receiver that publishes
+// nothing — an older server, or one whose description could not be fetched —
+// must behave exactly as this client did before the span became configurable,
+// which is 10 kHz to 30 MHz. Each edge falls back on its own, because they are
+// independent facts and a server that states one must not reset the other.
+//
+// A max at or below the min is not a receiver, it is a misconfiguration, and
+// adopting it would make clampFreq return a frequency outside its own range. It
+// is refused outright.
+func (t TuningRange) Limits() (min, max int) {
+	min, max = t.MinFrequency, t.MaxFrequency
+	if min <= 0 {
+		min = defaultFreqMinHz
+	}
+	if max <= 0 {
+		max = defaultFreqMaxHz
+	}
+	if max <= min {
+		return defaultFreqMinHz, defaultFreqMaxHz
+	}
+	return min, max
+}
+
 // InstanceDescription holds the fields we care about from GET /api/description.
 type InstanceDescription struct {
 	DefaultFrequency int    `json:"default_frequency"`
@@ -77,6 +125,9 @@ type InstanceDescription struct {
 		Enabled bool     `json:"enabled"`
 		Filters []string `json:"filters"`
 	} `json:"dsp"`
+	// How far this receiver tunes. Read through TuningRange.Limits, never off
+	// the fields.
+	TuningRange TuningRange `json:"tuning_range"`
 }
 
 // DSPFilterInfo describes a single filter parameter returned by get_dsp_filters.

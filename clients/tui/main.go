@@ -13,12 +13,50 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+// minSpan is the zoom floor, and is a property of this client rather than of
+// the receiver: 10 kHz, matching the web UI's.
+const minSpan = 10000.0 // 10 kHz — matches the web UI's zoom floor
+
+// The receiver's own defaults, which are also the fallback when it will not say.
+//
+// Deliberately the exact numbers this client hardcoded before the span became
+// configurable, so a receiver that publishes no tuning_range — an older server,
+// or one whose description could not be fetched — behaves as it always has.
 const (
-	minSpan = 10000.0    // 10 kHz — matches the web UI's zoom floor
-	maxSpan = 30000000.0 // full HF coverage
-	minFreq = 10000.0    // server rejects centers below 10 kHz
-	maxFreq = 30000000.0 // …and above 30 MHz
+	defaultMaxSpan = 30000000.0 // full HF coverage
+	defaultMinFreq = 10000.0    // server rejects centers below 10 kHz
+	defaultMaxFreq = 30000000.0 // …and above 30 MHz
 )
+
+// How much spectrum the receiver in front of us covers.
+//
+// Variables rather than constants because it is a property of the receiver, not
+// of this program: the span follows the front end sample rate, so a 129.6 Msps
+// RX888 tunes to 60 MHz and has 6 m in it. They are set from /api/description's
+// tuning_range by applyTuningRange, and until it answers they read as the
+// 10 kHz-30 MHz receiver this client used to assume.
+//
+// Owned by the event-loop goroutine: applyTuningRange is called from connectTo
+// and from applyDescription, both of which run there, and every reader below —
+// clampCenter, clampFreq, changeZoom, commitPrompt — runs there too. The one
+// place that needs the range off that goroutine is Description.Defaults, and it
+// reads the description's own copy instead. Headless mode has no event loop and
+// applies the range before it starts anything.
+var (
+	maxSpan = defaultMaxSpan
+	minFreq = defaultMinFreq
+	maxFreq = defaultMaxFreq
+)
+
+// applyTuningRange adopts what a receiver says about its own coverage.
+//
+// Unlike the web UI's equivalent, an absent field falls back to the built-in
+// default rather than to whatever is in force. This client outlives a
+// connection: switching receivers with the picker must not leave a 60 MHz box's
+// range applied to the 30 MHz one that replaced it.
+func applyTuningRange(tr TuningRange) {
+	minFreq, maxFreq, maxSpan = tr.Limits()
+}
 
 func main() {
 	server := flag.String("server", "", "receiver: a public callsign or name, host:port, or a full http(s):// URL (empty opens the receiver picker)")
@@ -385,6 +423,10 @@ func (e *eventLoop) connectTo(inst Instance) {
 	}
 	e.ui.serverName = name
 	e.ui.Reset()
+	// Back to the built-in 10 kHz-30 MHz until this receiver says otherwise.
+	// The description may not arrive at all — it is fetched below and failure is
+	// survivable — and a previous receiver's range must not outlive it.
+	applyTuningRange(TuningRange{})
 	// A chat panel belongs to the receiver it was opened on.
 	e.chatPanel = nil
 	e.ui.status = "connecting to " + inst.Host + "…"
@@ -987,6 +1029,11 @@ func (e *eventLoop) applyDescription(desc Description) {
 	if desc.DSP.Enabled {
 		e.ui.dspFilters = desc.DSP.Filters
 	}
+
+	// Before anything below clamps a frequency: the receiver's own coverage
+	// decides what "outside the band" means, and on a 60 MHz box the starting
+	// frequency itself may be above 30 MHz.
+	applyTuningRange(desc.TuningRange)
 
 	freq, mode := desc.Defaults()
 	if e.opts.initialMode != "" {
@@ -1663,7 +1710,7 @@ func (e *eventLoop) zoomStep(direction int, anchor float64) {
 //
 // Zooming in keeps `anchor` at the same screen position, so pointing the mouse
 // at a signal and zooming dives into it. Zooming out instead holds the centre,
-// so the view widens symmetrically and converges on the full 0-30 MHz span —
+// so the view widens symmetrically and converges on the receiver's full span —
 // anchoring a zoom-out to an off-centre cursor would slide the view sideways
 // instead of revealing more spectrum.
 //
@@ -1722,7 +1769,9 @@ func (e *eventLoop) commitPrompt() {
 		return
 	}
 	if hz < minFreq || hz > maxFreq {
-		ui.status = fmt.Sprintf("%.3f MHz is outside 0.01–30 MHz", hz/1e6)
+		// The edges are the receiver's, so the refusal names them rather than
+		// the 30 MHz that used to be the only possible answer.
+		ui.status = fmt.Sprintf("%.3f MHz is outside %g–%g MHz", hz/1e6, minFreq/1e6, maxFreq/1e6)
 		return
 	}
 
@@ -1762,13 +1811,14 @@ func parseFrequency(text string) (float64, error) {
 	return value * multiplier, nil
 }
 
-// clampCenter keeps the whole view inside the receiver's 10 kHz–30 MHz range.
+// clampCenter keeps the whole view inside the receiver's tuning range.
 //
 // When the span is too wide to fit inside that range at all — which is exactly
 // the fully-zoomed-out case — there is no centre that satisfies both edges, so
 // the view is centred on the middle of the receiver's range. Clamping the
 // centre instead would leave the full-span view lopsided, showing negative
-// frequencies on the left and stopping short of 30 MHz on the right.
+// frequencies on the left and stopping short of the top of the band on the
+// right.
 func clampCenter(center, span float64) float64 {
 	half := span / 2
 	lo, hi := minFreq+half, maxFreq-half

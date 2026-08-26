@@ -533,8 +533,8 @@ override: `7.1M`, `7100k`, `7100000Hz`.
 uses it, tuning there and opening the view centred on it. The order is the same
 as the Python client's: **what you asked for on the command line, then what the
 receiver prefers, then the built-in fallback** of 14.175 MHz USB. Both values
-are re-checked on arrival, since a receiver can name a frequency outside
-0.01–30 MHz or a mode this client has no demodulator for.
+are re-checked on arrival, since a receiver can name a frequency outside its own
+tuning range or a mode this client has no demodulator for.
 
 A mode that was asked for — by `-mode` or by the receiver naming its own —
 holds against the 10 MHz sideband convention until you tune somewhere yourself:
@@ -729,7 +729,7 @@ rule returns 2000.
 
 Zooming *in* holds the frequency under the cursor at the same screen position,
 so you can point at a signal and dive into it. Zooming *out* holds the centre
-instead, so the view widens symmetrically and converges on the full 0–30 MHz
+instead, so the view widens symmetrically and converges on the receiver's full
 span; anchoring zoom-out to an off-centre cursor would slide the view sideways
 rather than reveal more spectrum.
 
@@ -760,9 +760,20 @@ server records the User-Agent a session presented to `/connection` and refuses
 to open a socket for a UUID it has never seen one from.
 
 Everything else it reads is a plain JSON GET: `/api/description` for the DSP
-inserts a receiver offers and whether it runs a chat, and `/api/bands` and
-`/api/bookmarks` for the marker strip. None of them is required — a receiver
-serving none of them simply gets a display without those parts.
+inserts a receiver offers, whether it runs a chat, and how far it tunes, and
+`/api/bands` and `/api/bookmarks` for the marker strip. None of them is
+required — a receiver serving none of them simply gets a display without those
+parts.
+
+**How far the receiver tunes** comes from `/api/description`'s `tuning_range`,
+and is not always 0–30 MHz. The span follows the front end sample rate, so a
+64.8 Msps RX888 covers 30 MHz while a 129.6 Msps one covers 60 MHz and has 6 m
+in it. The client adopts the range on connect: it decides what `f` will accept,
+where panning stops, and how far `-` zooms out. Switching receivers in the
+picker re-reads it, and a receiver that publishes no range at all — an older
+server, or one whose description could not be fetched — is treated as
+10 kHz–30 MHz, which is exactly what this client assumed before the span became
+configurable.
 
 Chat, when there is one, is a third WebSocket: `/ws/dxcluster`, subscribed to
 the chat stream only and sharing the same session UUID.
@@ -777,10 +788,11 @@ The suite covers the binary protocol decoders, layout arithmetic across a wide
 range of terminal sizes, the picker's key handling, and renders every view mode
 to a simulated screen to catch panics.
 
-Three tests reach the network and are skipped unless enabled:
+These reach the network and are skipped unless enabled:
 
 ```bash
 UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveServer -v
+UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveTuningRange -v
 UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveModeSwitchSpeed -v
 UBERSDR_TEST_DIRECTORY=1 go test -run TestLivePublicDirectory -v
 UBERSDR_TEST_MDNS=1 go test -run TestLiveLocalDiscovery -v

@@ -116,6 +116,10 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	// Recording.
 	recStatus := s.recordingMgr.Status()
 
+	// How far the connected receiver tunes. Carried in every tune payload —
+	// see the note in api_handlers_tune.go.
+	tuneMin, tuneMax := freqLimits()
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"connection": map[string]any{
 			"state":               connStateStr,
@@ -132,6 +136,8 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		},
 		"tune": map[string]any{
 			"frequency_hz":     freq,
+			"frequency_min_hz": tuneMin,
+			"frequency_max_hz": tuneMax,
 			"mode":             mode,
 			"bandwidth_low":    bwLow,
 			"bandwidth_high":   bwHigh,

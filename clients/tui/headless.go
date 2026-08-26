@@ -35,9 +35,19 @@ func runHeadless(opts options) error {
 	if err != nil {
 		return fmt.Errorf("cannot reach %s: %w", host, err)
 	}
+	// No event loop here, so this is the only place the range is set — and it
+	// runs before anything reads it.
+	applyTuningRange(desc.TuningRange)
 	freq, mode := desc.Defaults()
 	if opts.initialFreq > 0 {
 		freq = opts.initialFreq
+		// Worth refusing rather than clamping: a -freq this receiver cannot
+		// reach is a typo or the wrong receiver, and silently streaming the
+		// band edge instead would look like it worked.
+		if freq < minFreq || freq > maxFreq {
+			return fmt.Errorf("%.6f MHz is outside this receiver's %g-%g MHz range",
+				freq/1e6, minFreq/1e6, maxFreq/1e6)
+		}
 	}
 	if opts.initialMode != "" {
 		mode = opts.initialMode

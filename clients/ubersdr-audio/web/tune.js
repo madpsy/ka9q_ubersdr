@@ -17,8 +17,18 @@ const Tune = (() => {
   const bwValueLabel = () => document.getElementById('bw-value-label');
 
   // ── Constants ─────────────────────────────────────────────────────────────
-  const FREQ_MIN_HZ = 10_000;
-  const FREQ_MAX_HZ = 30_000_000;
+  // How far the connected receiver tunes. Not constants, because it is a
+  // property of the receiver rather than of this UI: the span follows the front
+  // end sample rate, so a 129.6 Msps RX888 reaches 60 MHz and has 6 m in it.
+  //
+  // These are the fallback until GET /api/v1/tune reports otherwise, and they
+  // are the exact numbers this file hardcoded before the receiver span became
+  // configurable — an older client, or one connected to nothing, must behave as
+  // it always has.
+  const FREQ_MIN_DEFAULT_HZ = 10_000;
+  const FREQ_MAX_DEFAULT_HZ = 30_000_000;
+  let FREQ_MIN_HZ = FREQ_MIN_DEFAULT_HZ;
+  let FREQ_MAX_HZ = FREQ_MAX_DEFAULT_HZ;
 
   const BASE_MODES = ['usb','lsb','am','sam','fm','cwu','cwl','iq'];
   const WIDE_IQ    = ['iq48','iq96','iq192','iq384'];
@@ -57,6 +67,38 @@ const Tune = (() => {
 
   function clampFreq(hz) {
     return Math.max(FREQ_MIN_HZ, Math.min(FREQ_MAX_HZ, Math.round(hz)));
+  }
+
+  /**
+   * Adopt the receiver's tuning range from a /api/v1/tune snapshot.
+   *
+   * Each edge falls back on its own to the built-in default, and a max at or
+   * below the min is refused outright rather than leaving the clamp inverted —
+   * the same rules the Go side applies in TuningRange.Limits.
+   *
+   * The number input carries the range too, so the browser's own validation and
+   * its spinner agree with what the API will accept.
+   */
+  function applyTuningRange(tune) {
+    const pick = (v, fallback) =>
+      (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback);
+    // An absent field means the backend never said, not that the range is the
+    // default: an older build of this client serves none of them, and treating
+    // that as a reset would leave the range flapping on every poll. Every
+    // current tune payload carries both, including on disconnect, so the reset
+    // arrives as numbers rather than as silence.
+    let min = pick(tune?.frequency_min_hz, FREQ_MIN_HZ);
+    let max = pick(tune?.frequency_max_hz, FREQ_MAX_HZ);
+    if (max <= min) { min = FREQ_MIN_DEFAULT_HZ; max = FREQ_MAX_DEFAULT_HZ; }
+    if (min === FREQ_MIN_HZ && max === FREQ_MAX_HZ) return;
+
+    FREQ_MIN_HZ = min;
+    FREQ_MAX_HZ = max;
+    const fe = freqEntry();
+    if (fe) {
+      fe.min = (min / 1000).toFixed(3);
+      fe.max = (max / 1000).toFixed(3);
+    }
   }
 
   function formatFreqKHz(hz) {
@@ -99,6 +141,10 @@ const Tune = (() => {
     // If a bookmark (or other direct tune) recently fired, ignore poll-driven
     // snapshots for a short window so the UI doesn't revert.
     if (!fromServer && Date.now() < _suppressUntil) return;
+
+    // Before the frequency is read, so a 60 MHz receiver's dial is not treated
+    // as out of range on the way in.
+    applyTuningRange(tune);
 
     const newMode = tune.mode || _mode;
     const newFreq = tune.frequency_hz ?? _freqHz;

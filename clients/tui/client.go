@@ -236,6 +236,51 @@ func (c *Client) getJSON(path string, out interface{}) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// TuningRange is how much spectrum a receiver covers, from /api/description's
+// `tuning_range` object.
+//
+// The receiver is not always the 0-30 MHz box this client assumed for its first
+// year: the span follows the front end sample rate, so a 129.6 Msps RX888
+// reaches 60 MHz and has 6 m in it. The server publishes the numbers from one
+// place (ReceiverConfig.TuningRange in receiver_span.go) and the web UI reads
+// them from here too — see static/v2/src/radio/constants.js, whose fallback
+// rules these deliberately match.
+//
+// Every field is optional, including the whole object: an older receiver does
+// not publish it at all. See Limits for what that means.
+type TuningRange struct {
+	MinFrequency   float64 `json:"min_frequency"`
+	MaxFrequency   float64 `json:"max_frequency"`
+	SpectrumSpanHz float64 `json:"spectrum_span_hz"`
+}
+
+// Limits resolves the range, filling in anything the receiver did not say.
+//
+// The fallback is a contract rather than padding: a receiver that publishes
+// nothing — an older server, or one this client could not reach — must behave
+// exactly as this client did before the span became configurable, which is
+// 10 kHz to 30 MHz. Each field falls back on its own, because the three are
+// independent facts and a server that states one must not reset the others.
+//
+// A max at or below the min is not a receiver, it is a misconfiguration, and
+// adopting it would leave every clamp in the client inverted and fail a long
+// way from here. It is refused outright.
+func (t TuningRange) Limits() (min, max, span float64) {
+	pick := func(v, fallback float64) float64 {
+		if v > 0 && !math.IsInf(v, 1) {
+			return v
+		}
+		return fallback
+	}
+	min = pick(t.MinFrequency, defaultMinFreq)
+	max = pick(t.MaxFrequency, defaultMaxFreq)
+	span = pick(t.SpectrumSpanHz, defaultMaxSpan)
+	if max <= min {
+		return defaultMinFreq, defaultMaxFreq, defaultMaxSpan
+	}
+	return min, max, span
+}
+
 // Description is what a receiver says about itself, from /api/description.
 // Only the parts this client acts on are decoded: which optional features are
 // worth offering the user.
@@ -250,6 +295,10 @@ type Description struct {
 	// both are already sanitised server-side, but see Defaults.
 	DefaultFrequency float64 `json:"default_frequency"`
 	DefaultMode      string  `json:"default_mode"`
+
+	// How far this receiver tunes. Read through TuningRange.Limits, never off
+	// the fields.
+	TuningRange TuningRange `json:"tuning_range"`
 }
 
 // defaultStartFrequency is the fallback when a receiver names none: 14.175 MHz,
@@ -264,8 +313,13 @@ const defaultStartFrequency = 14_175_000
 // the band or a mode this client cannot demodulate — the Python client
 // re-checks them for the same reason.
 func (d Description) Defaults() (freq float64, mode string) {
+	// This receiver's own range rather than the package-level one, because the
+	// answer is wanted on the goroutine that fetched the description — before
+	// the event loop has adopted it, and without reading a variable the event
+	// loop owns.
+	min, max, _ := d.TuningRange.Limits()
 	freq = d.DefaultFrequency
-	if freq < minFreq || freq > maxFreq {
+	if freq < min || freq > max {
 		freq = defaultStartFrequency
 	}
 	mode = strings.ToLower(strings.TrimSpace(d.DefaultMode))

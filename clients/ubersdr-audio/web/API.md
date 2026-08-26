@@ -77,6 +77,8 @@ authoritative source of truth for any polling client.
   },
   "tune": {
     "frequency_hz": 14200000,
+    "frequency_min_hz": 10000,
+    "frequency_max_hz": 30000000,
     "mode": "usb",
     "bandwidth_low": 0,
     "bandwidth_high": 2700,
@@ -275,6 +277,8 @@ from the server's `/api/description` endpoint.
   "default_mode": "usb",
   "max_session_time": 3600,
   "max_clients": 10,
+  "frequency_min_hz": 10000,
+  "frequency_max_hz": 30000000,
   "dsp": {
     "available": true,
     "filters": ["nr4", "rn2"]
@@ -286,6 +290,10 @@ from the server's `/api/description` endpoint.
 **Field notes:**
 - `max_session_time`: session length limit in seconds; `0` means unlimited
 - `max_clients`: `0` when not reported by the server
+- `frequency_min_hz` / `frequency_max_hz`: how far this receiver tunes, in Hz.
+  Derived from its front end sample rate, so it is not always 10 kHz - 30 MHz —
+  a 129.6 Msps RX888 reports 60 MHz and can be tuned to 6 m.  A receiver that
+  reports no range at all reads as 10 kHz - 30 MHz.
 - `dsp.available`: `true` when the server has DSP configured and available
 - `dsp.filters`: list of filter names the server permits; empty array when DSP is unavailable
 - `allowed_iq_modes`: wide IQ modes the server permits; empty array when none are available
@@ -337,6 +345,8 @@ server; this endpoint passes the response through without modification.
 ```json
 {
   "frequency_hz": 14200000,
+  "frequency_min_hz": 10000,
+  "frequency_max_hz": 30000000,
   "mode": "usb",
   "bandwidth_low": 0,
   "bandwidth_high": 2700,
@@ -348,6 +358,14 @@ server; this endpoint passes the response through without modification.
 
 `allowed_iq_modes` lists the IQ modes the connected server permits.  Empty
 when not connected.
+
+`frequency_min_hz` / `frequency_max_hz` are how far the connected receiver
+tunes, and are what `PUT /api/v1/tune` clamps `frequency_hz` to.  They are not
+fixed: the receiver's span follows its front end sample rate, so a 64.8 Msps
+RX888 reports 10 kHz - 30 MHz while a 129.6 Msps one reports 10 kHz - 60 MHz
+and can be tuned to 6 m.  A receiver that does not report a range at all — an
+older server, or none connected — reads as 10 kHz - 30 MHz.  Read the range
+rather than assuming it.
 
 ---
 
@@ -369,16 +387,19 @@ immediately (same as the GUI).
 
 | Field | Type | Constraints | Notes |
 |---|---|---|---|
-| `frequency_hz` | integer | [10 000, 30 000 000] — **clamped** | 10 kHz – 30 MHz |
+| `frequency_hz` | integer | `[frequency_min_hz, frequency_max_hz]` — **clamped** | The connected receiver's range; see `GET /api/v1/tune` |
 | `mode` | string | see Mode table below | |
 | `bandwidth_hz` | float | see Bandwidth table below; step 50 Hz | Slider value |
 | `bandwidth_low` | integer | — | Direct lo/hi override; ignored if `bandwidth_hz` also provided |
 | `bandwidth_high` | integer | — | Direct lo/hi override; ignored if `bandwidth_hz` also provided |
 | `step_hz` | integer | one of: 1, 10, 100, 500, 1000, 10000, 100000, 1000000 | |
 
-> **Frequency clamping:** values outside [10 000, 30 000 000] are silently
-> clamped (not rejected), matching GUI behaviour.  The response always
-> reflects the actual applied value.
+> **Frequency clamping:** values outside the connected receiver's range are
+> silently clamped (not rejected), matching GUI behaviour.  The range is
+> reported as `frequency_min_hz` / `frequency_max_hz` by every tune payload —
+> `GET`/`PUT /api/v1/tune`, the `tune` block of `GET /api/v1/status`, and
+> `GET /api/v1/instance` — and defaults to 10 kHz - 30 MHz when the receiver
+> does not report one.  The response always reflects the actual applied value.
 
 **Mode table:**
 

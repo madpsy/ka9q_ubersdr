@@ -116,18 +116,66 @@ func modeKey(label string) string { return strings.ToLower(label) }
 // freqSteps are in Hz; displayed labels are in kHz.
 var freqSteps = []int{1, 10, 100, 500, 1_000, 9_000, 10_000, 100_000, 1_000_000}
 
+// The receiver's tuning range, and the fallback for when it will not say.
+//
+// Deliberately the exact numbers this client hardcoded before the receiver span
+// became configurable, so a receiver that publishes no tuning_range — an older
+// server, or one whose description could not be fetched — behaves as it always
+// has.
 const (
-	freqMinHz = 10_000     // 10 kHz
-	freqMaxHz = 30_000_000 // 30 MHz
+	defaultFreqMinHz = 10_000     // 10 kHz
+	defaultFreqMaxHz = 30_000_000 // 30 MHz
 )
 
-// clampFreq clamps hz to the valid tuning range [freqMinHz, freqMaxHz].
-func clampFreq(hz int) int {
-	if hz < freqMinHz {
-		return freqMinHz
+// How far the connected receiver tunes, in Hz.
+//
+// Not constants, because it is a property of the receiver rather than of this
+// program: the span follows the front end sample rate, so a 129.6 Msps RX888
+// reaches 60 MHz and has 6 m in it. Set from /api/description's tuning_range by
+// applyTuningRange on every connect, and until one answers they read as the
+// 10 kHz-30 MHz receiver this client used to assume.
+//
+// Atomic because clampFreq has two callers on different goroutines: the Fyne
+// widgets, and the local REST API's handlers.
+var (
+	tuneMinHz atomic.Int64
+	tuneMaxHz atomic.Int64
+)
+
+func init() {
+	tuneMinHz.Store(defaultFreqMinHz)
+	tuneMaxHz.Store(defaultFreqMaxHz)
+}
+
+// freqLimits is the tuning range in force.
+func freqLimits() (min, max int) {
+	return int(tuneMinHz.Load()), int(tuneMaxHz.Load())
+}
+
+// applyTuningRange adopts what a receiver says about its own coverage, or —
+// given nil — puts the built-in 10 kHz-30 MHz back.
+//
+// The reset matters as much as the adoption: this client outlives a connection,
+// so moving from a 60 MHz receiver to a 30 MHz one, or to one that will not
+// describe itself, must not leave the wider range in force.
+func applyTuningRange(tr *TuningRange) {
+	var r TuningRange
+	if tr != nil {
+		r = *tr
 	}
-	if hz > freqMaxHz {
-		return freqMaxHz
+	min, max := r.Limits()
+	tuneMinHz.Store(int64(min))
+	tuneMaxHz.Store(int64(max))
+}
+
+// clampFreq clamps hz to the connected receiver's tuning range.
+func clampFreq(hz int) int {
+	min, max := freqLimits()
+	if hz < min {
+		return min
+	}
+	if hz > max {
+		return max
 	}
 	return hz
 }
@@ -1089,10 +1137,18 @@ func main() {
 		// keep the user's own saved frequency/mode instead of overwriting them.
 		sessionMaxSecs = 0 // reset before each connection
 		connMaxClients = 0 // reset before each connection
+		// Back to 10 kHz-30 MHz until this receiver says otherwise, so a
+		// previous receiver's wider range never outlives it.
+		applyTuningRange(nil)
 		applyServerDefaults := rawURL != prefs.StringWithFallback(prefKeyURL, "")
 		if desc, err := client.FetchDescription(); err == nil {
 			sessionMaxSecs = desc.MaxSessionTime
 			connMaxClients = desc.MaxClients
+			// Before the default frequency below and the clampFreq further
+			// down: on a 60 MHz receiver either may legitimately be above
+			// 30 MHz, and clamping it there would tune somewhere else without
+			// saying so.
+			applyTuningRange(&desc.TuningRange)
 			// Apply default frequency only when switching to a new instance.
 			if applyServerDefaults && desc.DefaultFrequency > 0 {
 				currentFreq = desc.DefaultFrequency
@@ -1322,7 +1378,11 @@ func main() {
 		if err != nil {
 			hz = currentFreq
 		}
-		hz = clampFreq(hz)
+		// Not clamped here: the receiver this profile names may reach further
+		// than the one currently connected, and clamping against the outgoing
+		// range would pull a 50 MHz profile down to 30 MHz before the new
+		// receiver ever got to say it could tune there. Clamped below instead,
+		// once its description has answered.
 		lo, hi := bwToLoHi(currentMode, bwSlider.Value)
 		vol := volumeSlider.Value / 100.0
 		var devID string
@@ -1363,10 +1423,10 @@ func main() {
 				return
 			}
 
-			// Set client fields directly — no widget reads needed.
+			// Set client fields directly — no widget reads needed. The
+			// frequency waits for the description below.
 			client.BaseURL = rawURL
 			client.Password = password
-			client.Frequency = hz
 			client.Mode = currentMode
 			client.BandwidthLow = lo
 			client.BandwidthHigh = hi
@@ -1376,9 +1436,11 @@ func main() {
 			// Fetch description for station label / session info (best-effort).
 			sessionMaxSecs = 0
 			connMaxClients = 0
+			applyTuningRange(nil)
 			if desc, err := client.FetchDescription(); err == nil {
 				sessionMaxSecs = desc.MaxSessionTime
 				connMaxClients = desc.MaxClients
+				applyTuningRange(&desc.TuningRange)
 				activeCallsign = desc.Receiver.Callsign
 				parts := []string{}
 				if desc.Receiver.Callsign != "" {
@@ -1399,6 +1461,9 @@ func main() {
 			} else {
 				refreshDSPFromDescription(nil)
 			}
+
+			// Now that the range is known, and only now.
+			client.Frequency = clampFreq(hz)
 
 			client.ConnectForce()
 		}()

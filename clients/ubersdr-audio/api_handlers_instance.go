@@ -31,6 +31,11 @@ func (s *APIServer) handleInstance(w http.ResponseWriter, r *http.Request) {
 		dspFilters = []string{}
 	}
 
+	// The receiver's own coverage, resolved rather than passed through: a
+	// receiver that publishes no tuning_range means 10 kHz-30 MHz, and an API
+	// client should not have to know that.
+	tuneMin, tuneMax := desc.TuningRange.Limits()
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":               s.client.BaseURL,
 		"name":              desc.Receiver.Name,
@@ -40,6 +45,8 @@ func (s *APIServer) handleInstance(w http.ResponseWriter, r *http.Request) {
 		"default_mode":      desc.DefaultMode,
 		"max_session_time":  desc.MaxSessionTime,
 		"max_clients":       desc.MaxClients,
+		"frequency_min_hz":  tuneMin,
+		"frequency_max_hz":  tuneMax,
 		"dsp": map[string]any{
 			"available": desc.DSP.Enabled,
 			"filters":   dspFilters,

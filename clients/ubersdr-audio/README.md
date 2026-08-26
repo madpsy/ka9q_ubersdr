@@ -9,6 +9,10 @@ waterfall or spectrum display.
 
 - **Modes**: USB, LSB, AM, FM, CWU, CWL
 - **Live retune** without reconnecting (sends a `tune` JSON message over the existing WebSocket)
+- **Follows the receiver's tuning range**, read from `/api/description` on connect —
+  not always 0–30 MHz, since the span follows the front end sample rate (a
+  129.6 Msps RX888 reaches 60 MHz and has 6 m in it). A receiver that reports no
+  range, or none connected, falls back to 10 kHz – 30 MHz
 - **Frequency step buttons**: 1 Hz, 100 Hz, 1 kHz, 10 kHz, 100 kHz, 1 MHz
 - **Per-mode bandwidth defaults** (editable low/high cut fields)
 - **Audio format**: Uncompressed (PCM-zstd) or Compressed (Opus)
@@ -114,6 +118,25 @@ The client uses the standard UberSDR WebSocket protocol:
 3. Binary frames: zstd-compressed → 13-byte (PM) or 29-byte (PC) header → big-endian int16 PCM
 4. Live retune: `{"type":"tune","frequency":N,"mode":"usb","bandwidthLow":-2400,"bandwidthHigh":2400}`
 5. Keepalive: `{"type":"ping"}` every 30 seconds
+
+On connect it also reads `GET /api/description` for the station label, the
+session limit, the DSP inserts on offer, and the receiver's tuning range — see
+the `tuning_range` note under Features. The range is reported on to the local
+REST API and the bundled web UI as `frequency_min_hz` / `frequency_max_hz`; see
+`web/API.md`.
+
+## Tests
+
+```bash
+go test ./...
+```
+
+One test reaches the network and is skipped unless enabled. It checks that the
+range a real receiver publishes is the one this client then clamps to:
+
+```bash
+UBERSDR_TEST_SERVER=http://example.org:8080 go test -run TestLiveTuningRange -v
+```
 
 ## Directory structure
 

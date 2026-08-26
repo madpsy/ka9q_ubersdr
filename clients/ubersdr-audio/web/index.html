@@ -71,6 +71,8 @@
             <!-- Frequency row -->
             <div class="freq-row">
               <label class="freq-label">kHz</label>
+              <!-- min/max are the 10 kHz-30 MHz fallback; Tune.applySnapshot
+                   rewrites them from the connected receiver's own range. -->
               <input type="number" id="freq-entry" class="freq-input" step="0.001" min="10" max="30000">
               <button id="freq-apply-btn" class="btn btn-icon" title="Apply">✓</button>
               <button id="freq-down-btn" class="btn btn-icon step-btn">◀</button>

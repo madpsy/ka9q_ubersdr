@@ -40,8 +40,15 @@ func (s *APIServer) getTune(w http.ResponseWriter, _ *http.Request) {
 		allowedIQ = []string{}
 	}
 
+	// What frequency_hz will be clamped to on the way in. Reported here because
+	// this is the payload the bundled web UI already polls, and it is the only
+	// way it can tell a 30 MHz receiver from a 60 MHz one.
+	tuneMin, tuneMax := freqLimits()
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"frequency_hz":     freq,
+		"frequency_min_hz": tuneMin,
+		"frequency_max_hz": tuneMax,
 		"mode":             mode,
 		"bandwidth_low":    bwLow,
 		"bandwidth_high":   bwHigh,
@@ -230,8 +237,16 @@ func (s *APIServer) putTune(w http.ResponseWriter, r *http.Request) {
 	if allowedIQ == nil {
 		allowedIQ = []string{}
 	}
+	// The range travels with every tune payload — this one, the GET above, and
+	// the "tune" block of GET /api/v1/status — because the bundled web UI takes
+	// all three through the same Tune.applySnapshot, and a payload that omitted
+	// it would have the UI snap back to 30 MHz on the next poll.
+	tuneMin, tuneMax := freqLimits()
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"frequency_hz":     currentFreq,
+		"frequency_min_hz": tuneMin,
+		"frequency_max_hz": tuneMax,
 		"mode":             currentMode,
 		"bandwidth_low":    bwLow,
 		"bandwidth_high":   bwHigh,

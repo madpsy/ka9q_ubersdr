@@ -296,7 +296,25 @@ async function resolveTarget(input, { insecureTLS = false } = {}) {
     if (certFailure) {
         throw Object.assign(new Error(`certificate not trusted (${certFailure.code})`), { certError: certFailure });
     }
-    throw new Error(`no UberSDR instance answered at "${text}" (${lastErr ? lastErr.code || lastErr.message : 'unknown'})`);
+    // The code and the message, rather than the code alone.
+    //
+    // The code is a name from a fixed vocabulary and the message is the
+    // system's own account of what happened, and only one of them survived
+    // here — the wrong one, whenever the vocabulary has no entry for the
+    // failure. iOS is where that shows: Http.swift maps six URLSession errors
+    // onto names the chooser already speaks and calls everything else
+    // `EFAILED`, so a receiver that will not answer reports "EFAILED" and
+    // nothing more. That is a restatement of the question, and it was the only
+    // thing on the screen.
+    //
+    // Both, when they differ, so the code stays greppable and shared with the
+    // other clients while the sentence beside it says something.
+    const why = [];
+    if (lastErr) {
+        if (lastErr.code) why.push(lastErr.code);
+        if (lastErr.message && lastErr.message !== lastErr.code) why.push(lastErr.message);
+    }
+    throw new Error(`no UberSDR instance answered at "${text}" (${why.length ? why.join(': ') : 'unknown'})`);
 }
 
 // getJson is exported for main.js's Links menu, which reads /api/pages-menu

@@ -114,12 +114,26 @@
 	     Certificate trust is not abandoned with it: Http.swift evaluates every
 	     chain and only accepts a bad one where the operator has said so for
 	     that one receiver (see insecureTLS), and the receiver's own page is
-	     reached over loopback rather than over any of this. -->
+	     reached over loopback rather than over any of this.
+
+	     NSAllowsLocalNetworking is deliberately absent, and adding it back
+	     breaks exactly what this key exists to allow. From iOS 10 onwards
+	     NSAllowsArbitraryLoads is *ignored* whenever NSAllowsLocalNetworking
+	     (or either NSAllowsArbitraryLoadsInWebContent/ForMedia) is present in
+	     this dictionary — the old blanket key is kept only so that older
+	     systems still read it, and the newer, narrower key governs everywhere
+	     else. Both together therefore do not mean "arbitrary loads, and local
+	     ones too". They mean local ones only.
+
+	     The symptom is a receiver list that splits in half for no visible
+	     reason: a box on 192.168.x over plain HTTP connects, because that is
+	     local networking, while any public address over plain HTTP is refused
+	     before a packet leaves — URLSession error -1022, which Http.swift has
+	     no name for and reports as EFAILED. Arbitrary loads already permits
+	     the local case, so nothing is lost by leaving the narrower key out. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 

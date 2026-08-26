@@ -69,6 +69,17 @@ export default function Barrel({
     onStep,
     onSettle,
     disabled,
+    /**
+     * Mirror the scale: higher values to the left, and a drag that used to raise
+     * them lowers them instead.
+     *
+     * Both halves, and that is the point of doing it here rather than by negating
+     * what the owner does with `onStep`. The drum's whole illusion is that the strip
+     * is a physical thing under the thumb, so the labels have to run the other way
+     * too — flip only the steps and the scale slides one way while the numbers count
+     * the other, which reads as a bug rather than as a preference.
+     */
+    reverse = false,
     ariaLabel,
     className = '',
     children,
@@ -85,6 +96,9 @@ export default function Barrel({
     settleRef.current = onSettle;
     const detentRef = useRef(detent);
     detentRef.current = detent;
+    // Read inside move(), which is memoised and must not be rebuilt mid-drag.
+    const reverseRef = useRef(reverse);
+    reverseRef.current = reverse;
 
     const draw = useCallback(() => {
         const el = stripRef.current;
@@ -114,7 +128,7 @@ export default function Barrel({
             // The strip follows the thumb, so dragging right brings the values
             // on the *left* of the scale to the index line — the same direction
             // the spectrum pans in.
-            const want = -steps;
+            const want = reverseRef.current ? steps : -steps;
             const got = stepRef.current ? stepRef.current(want) : want;
             const applied = got == null ? want : got;
             if (applied !== want) {
@@ -266,7 +280,7 @@ export default function Barrel({
     const reach = Math.max(1, Math.ceil(HALF_STRIP_PX / detent));
     const cells = [];
     for (let i = -reach; i <= reach; i++) {
-        const text = label ? label(i) : null;
+        const text = label ? label(reverse ? -i : i) : null;
         if (text === undefined) continue;   // past the end of the scale
         cells.push(
             <span

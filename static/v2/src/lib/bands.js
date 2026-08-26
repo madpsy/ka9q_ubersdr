@@ -109,6 +109,18 @@ export function tuneToBand(actions, min, max, mode) {
     const centre = Math.round((min + max) / 2);
     actions.setMode(mode || (centre < 10000000 ? 'lsb' : 'usb'));
     actions.setFrequency(centre);
-    actions.setSpectrumCenter(centre);
-    actions.setSpan(Math.max(max - min, MIN_BAND_SPAN));
+    // Centre and span in one message, not setSpectrumCenter followed by setSpan.
+    //
+    // The two-call form is what this did, and it failed at exactly the moment a band
+    // button is most useful — zoomed out. setView clamps the centre so the whole window
+    // stays inside the band, and with no span of its own to go on it uses the span you
+    // already have: at full zoom-out on a 60 MHz receiver that is 60 MHz wide, so
+    // clampCenter's lo and hi both collapse to 30 MHz and *every* band lands on 30 MHz.
+    // The setSpan that followed then closed around that, leaving the dial correct and the
+    // spectrum showing the middle of the receiver. Zoomed in far enough for the new span
+    // to fit, the same code worked — which is what made it look intermittent.
+    //
+    // One message clamps the centre against the span being asked for rather than the one
+    // being left behind. See setSpectrumView in RadioContext, which exists for this.
+    actions.setSpectrumView(centre, Math.max(max - min, MIN_BAND_SPAN));
 }

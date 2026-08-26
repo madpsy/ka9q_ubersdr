@@ -1361,7 +1361,17 @@ export function RadioProvider({ children }) {
             // to move the view.
             setSpectrumView(centerHz, spanHz) {
                 const bins = spectrumConn.binCount;
-                if (!bins) return;
+                // No bin count yet — the first spectrum config has not arrived, so there
+                // is nothing to turn a span into a binBandwidth with. The centre is still
+                // worth sending: setView queues it and the socket replays it on open, so
+                // a band pressed before the receiver is started arrives pointing at the
+                // right place instead of being dropped. Returning here would silently
+                // discard the whole request, which is what this did when the only callers
+                // were recalling a stored view.
+                if (!bins) {
+                    spectrumConn.setView(clamp(centerHz, MIN_FREQ, MAX_FREQ), null);
+                    return;
+                }
                 const binBW = clamp(
                     spanHz / bins,
                     spectrumConn.minBinBandwidthForUI(),

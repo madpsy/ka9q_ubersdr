@@ -139,6 +139,13 @@ export const DEFAULTS = {
     // lands on the same grid as the +/- buttons. 500 Hz suits SSB, which is
     // what most of this band is.
     tuneStep: 500,
+    // Which way the Multipad's frequency drum turns. Off is the direction the
+    // spectrum pans in — drag right and the values to the left of the index line
+    // come to it — which is what every other surface here does. Some people read a
+    // drum the other way round and want the thumb pushing the numbers rather than
+    // the scale; this is for them, and it is per-listener rather than an operator
+    // setting because it is a preference about hands, not about the receiver.
+    tuneReverse: false,
     // What the wheel does over the spectrum: 'zoom' or 'tune' by tuneStep.
     wheelAction: 'zoom',
     // What a zoom holds still: 'cursor' keeps the frequency under the pointer

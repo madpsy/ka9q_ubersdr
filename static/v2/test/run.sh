@@ -314,6 +314,8 @@ esbuild ../src/lib/appHeight.js --bundle --format=cjs --platform=node \
     --outfile=.build/appheight.cjs --log-level=warning
 esbuild ../src/lib/barrel.js --bundle --format=cjs --platform=node \
     --outfile=.build/barrel.cjs --log-level=warning
+esbuild barrelflip.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/barrelflip.cjs --log-level=warning
 esbuild ../src/lib/paging.js --bundle --format=cjs --platform=node \
     --outfile=.build/paging.cjs --log-level=warning
 esbuild ../src/lib/localBookmarks.js --bundle --format=cjs --platform=node \
@@ -484,6 +486,7 @@ node edgehit.test.js
 node haptics.test.js
 node appheight.test.js
 node barrel.test.js
+node barrelflip.test.js
 node paging.test.js
 node localbookmarks.test.js
 node bookmarktune.test.js
@@ -558,3 +561,4 @@ node audiotint.test.js
 node oliviapanel.test.js
 node drmpanel.test.js
 node tuningrange.test.js
+node bandtune.test.js

@@ -142,7 +142,7 @@ function SnrWash() {
 // they are on screen — and it is a *tap*, not a press: the gesture is left to
 // reach the drum so a drag that starts on a name still spins the scale. See
 // useTapThrough, which is the same mechanism the step buttons at the ends use.
-function BarrelMarks({ markers, current, centreHz, stepHz, width, edges }) {
+function BarrelMarks({ markers, current, centreHz, stepHz, width, edges, reverse }) {
     const radio = useRadio();
     const press = useTapThrough();
     // What was on screen last time, so a mark that is already being looked at
@@ -173,7 +173,11 @@ function BarrelMarks({ markers, current, centreHz, stepHz, width, edges }) {
                     <span
                         key={id}
                         className={`barrel__mark${current && freq === current.freq ? ' is-current' : ''}`}
-                        style={{ transform: `translateX(${Math.round(x)}px)` }}
+                        // Mirrored with the scale. placeBarrelMarks works in one
+                        // coordinate space and its crowding rules are symmetric, so
+                        // the flip belongs here, after placement, rather than as a
+                        // second set of rules inside it.
+                        style={{ transform: `translateX(${Math.round(reverse ? -x : x)}px)` }}
                         data-type={marker.type}
                     >
                         {/* The name is the target; the tick below it is not.
@@ -292,7 +296,7 @@ function MarkerEdges({ markers, types }) {
 // gap in front of it.
 const BW_W = 52;
 
-function FreqWheel({ headRef, showBw }) {
+function FreqWheel({ headRef, showBw, minimal }) {
     const radio = useRadio();
     const { tuning, actions } = radio;
     const display = useDisplay();
@@ -326,6 +330,10 @@ function FreqWheel({ headRef, showBw }) {
     // Shared with click-to-tune on the spectrum and with the Receiver panel's
     // ± buttons, so the pad tunes on the same grid as everything else.
     const step = display.tuneStep || 500;
+    // How far a detent goes is `step`; which way it goes is this. Kept together
+    // because they are the same question asked twice, and the drum is the only
+    // thing that reads either.
+    const reverse = display.tuneReverse === true;
     const [editing, setEditing] = useState(false);
 
     // A spin outruns React: the drum asks for a step per frame and the prop it
@@ -442,6 +450,7 @@ function FreqWheel({ headRef, showBw }) {
                 centre={tuning.frequency}
                 label={label}
                 onStep={tune}
+                reverse={reverse}
                 ariaLabel="Frequency wheel"
                 className="barrel--freq"
                 strip={((
@@ -452,11 +461,38 @@ function FreqWheel({ headRef, showBw }) {
                         stepHz={step}
                         width={width}
                         edges={navTypes.length > 0}
+                        reverse={reverse}
                     />
                 ))}
             >
                 <SnrWash />
                 <MarkerEdges markers={markers} types={navTypes} />
+                {/* Which way the drum turns, on the drum itself.
+                    In the box rather than the head row because that row already
+                    holds a 27 px readout and two selects, and the panel is tall
+                    enough without a line of its own for one switch. It sits over
+                    the corner the scale is already clipped and faded through, so
+                    it costs no room the scale was using.
+                    The full view only: at the size a pad gets cut down to, the
+                    barrels are the whole panel and this would be in the way of
+                    the thumb using them.
+                    Nothing here has to explain itself — the scale mirrors as you
+                    press, which is the answer to "which way is it now?".
+                    stopPropagation on pointerdown, or the press that toggles it
+                    also starts a spin on the drum underneath. */}
+                {!minimal && (
+                    <button
+                        type="button"
+                        className="barrel__flip"
+                        aria-label="Reverse tuning direction"
+                        aria-pressed={reverse}
+                        title="Reverse which way the wheel tunes"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => display.set({ tuneReverse: !reverse })}
+                    >
+                        {reverse ? <Icon.RotateLeft size={13} /> : <Icon.RotateRight size={13} />}
+                    </button>
+                )}
             </Barrel>
         </div>
     );
@@ -970,7 +1006,7 @@ export default function MultipadPanel({ minimal }) {
 
     return (
         <div className="stack stack--tight pad">
-            <FreqWheel headRef={headRef} showBw={wide} />
+            <FreqWheel headRef={headRef} showBw={wide} minimal={minimal} />
 
             {/* Which markers the drum's ends step to. Directly under the drum it
                 controls, rather than down with the other settings: five chips

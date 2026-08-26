@@ -2613,6 +2613,46 @@ a.btn { text-decoration: none; }
         rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, 0.34));
 }
 
+/* Which way the drum turns — see FreqWheel in MultipadPanel.
+ *
+ * In the barrel rather than in the panel's head row, which already carries a
+ * 27 px readout and two selects and has no room for another chip. The corner it
+ * sits in is one the scale is already clipped through and the SNR wash has
+ * faded out of by two thirds, so it takes no space anything else was using and
+ * covers nothing readable.
+ *
+ * z-index 4 puts it over the belly shading and the needle, both of which are
+ * pointer-events: none, so this is the only thing in the box that takes a
+ * press. It has to, and that is also why the button stops pointerdown: the drum
+ * listens for one on the whole surface, and a tap here would otherwise flip the
+ * direction and start a spin with the same finger.
+ *
+ * Quiet until wanted. It is a preference somebody sets once, so it sits at a
+ * third opacity — visible if you look at the drum, not competing with the scale
+ * that is the reason to look. Full strength once it is on, because then it is
+ * saying something rather than offering something. */
+.barrel__flip {
+    position: absolute;
+    right: 3px;
+    bottom: 2px;
+    z-index: 4;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-2);
+    opacity: 0.34;
+    cursor: pointer;
+    transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+.barrel__flip:hover { opacity: 0.85; background: var(--surface-2); }
+.barrel__flip:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+.barrel__flip[aria-pressed='true'] { opacity: 1; color: var(--accent); }
+
 /* The SNR behind the frequency scale — see SnrWash in MultipadPanel.
  *
  * Barely there on purpose: enough colour to catch the eye of somebody whose

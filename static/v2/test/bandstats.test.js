@@ -78,6 +78,10 @@ function context(over) {
         actions: {
             setFrequency: (hz) => tuned.push(['frequency', hz]),
             setMode: (m) => tuned.push(['mode', m]),
+            setSpectrumView: (hz, span) => tuned.push(['view', hz, span]),
+            // Kept, though tuneToBand no longer calls either: a slip back to centre-then-
+            // span would otherwise throw here rather than being recorded, and the
+            // assertion below is what says which form is correct.
             setSpectrumCenter: (hz) => tuned.push(['centre', hz]),
             setSpan: (hz) => tuned.push(['span', hz]),
         },
@@ -245,12 +249,14 @@ t('clicking a row tunes to that band the way the band keys do', async () => {
     const rows = deep(tree).filter((n) => String(n.props.className || '').startsWith('bst-table__row'));
     const fortyM = rows.find((r) => words(r).startsWith('40m'));
     fortyM.props.onClick();
-    // The middle of 40m, in the band's sideband, with the spectrum on it.
+    // The middle of 40m, in the band's sideband, with the spectrum on it — centre and
+    // span in one call, because sending them separately clamps the centre against the
+    // span still on screen and lands every band in the middle of the receiver when
+    // zoomed out. See bandtune.test.js.
     assert.deepStrictEqual(ctx.tuned, [
         ['mode', 'lsb'],
         ['frequency', 7_150_000],
-        ['centre', 7_150_000],
-        ['span', 300_000],
+        ['view', 7_150_000, 300_000],
     ]);
     unmount();
 });

@@ -649,6 +649,13 @@ echo "Fetching get-uuid.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/get-uuid.sh -o "$ACTUAL_HOME/ubersdr/get-uuid.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/get-uuid.sh"
 
+# Needed by generate_wisdom.sh, which asks it which FFT the front end sample rate makes
+# radiod plan. Without it the wisdom run falls back to assuming 64.8 MSPS and would
+# generate for a transform a 129.6 MSPS receiver never uses.
+echo "Fetching get-samprate.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/get-samprate.sh -o "$ACTUAL_HOME/ubersdr/get-samprate.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/get-samprate.sh"
+
 echo "Fetching set-password.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/set-password.sh -o "$ACTUAL_HOME/ubersdr/set-password.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/set-password.sh"

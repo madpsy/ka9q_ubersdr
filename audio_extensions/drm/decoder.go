@@ -1,12 +1,14 @@
 package drm
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -49,9 +51,19 @@ const (
 	// readBufSamples is the number of int16 samples to read per iteration from stdout.
 	readBufSamples = 1024
 
-	// maxPCMBufSamples caps the shared PCM accumulation buffer at 500 ms of audio
-	// (6000 samples at 12 kHz). Oldest samples are dropped on overflow.
-	maxPCMBufSamples = 6000
+	// maxPCMBufSamples caps the shared PCM accumulation buffer at 1 s of audio
+	// (12000 samples at 12 kHz). Oldest samples are dropped on overflow. The
+	// binary emits a whole 400 ms audio super frame at a time, so the cap has
+	// to clear that burst plus scheduling jitter comfortably.
+	maxPCMBufSamples = 12000
+
+	// maxFramesPerTick bounds how fast the emitter may drain a backlog, so a
+	// stalled-then-flushed subprocess doesn't dump a burst at the browser.
+	maxFramesPerTick = 2
+
+	// catchUpThresholdSamples is the backlog (60 ms) above which the emitter
+	// sends a second frame in the same tick to claw back the ticker's drift.
+	catchUpThresholdSamples = 3 * opusFrameSamples
 )
 
 // DRMDecoder manages the ubersdr-drm subprocess.
@@ -102,7 +114,13 @@ func (d *DRMDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []byt
 	}
 
 	cmd := exec.Command(binaryPath, args...)
-	cmd.Stderr = io.Discard // suppress noisy binary stderr output
+	// The binary only reports acquisition/decode state changes on stderr, so
+	// forward it to the log — it is the only visibility into whether a DRM
+	// signal actually locked.
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -132,6 +150,17 @@ func (d *DRMDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []byt
 	d.running = true
 
 	log.Printf("[DRM] Subprocess started (pid=%d): %s %v", cmd.Process.Pid, binaryPath, args)
+
+	// stderrLoop: relay the binary's status lines to the log. Not tracked by
+	// wg — it ends at EOF when the subprocess exits.
+	go func() {
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			if line := strings.TrimSpace(sc.Text()); line != "" {
+				log.Printf("[DRM] %s", line)
+			}
+		}
+	}()
 
 	// writeLoop: forward IQ PCM from audioChan → subprocess stdin
 	d.wg.Add(1)
@@ -296,31 +325,43 @@ func (d *DRMDecoder) readLoop(resultChan chan<- []byte) {
 			return
 
 		case <-ticker.C:
-			pcmMu.Lock()
-			if len(pcmBuf) < opusFrameSamples {
-				// Not enough samples yet — binary hasn't decoded a frame this tick.
+			// One frame per tick, plus a catch-up frame whenever a backlog has
+			// built up. A 20 ms ticker fires marginally slower than 50 Hz, so
+			// draining strictly one frame per tick consumes slightly under
+			// 12 kHz and the buffer creeps upwards until it overflows and
+			// discards audio — roughly one dropped frame per second.
+			for emitted := 0; emitted < maxFramesPerTick; emitted++ {
+				pcmMu.Lock()
+				if len(pcmBuf) < opusFrameSamples {
+					// Binary hasn't decoded a frame this tick.
+					pcmMu.Unlock()
+					break
+				}
+				// Take exactly one frame from the front of the buffer.
+				frame := make([]int16, opusFrameSamples)
+				copy(frame, pcmBuf[:opusFrameSamples])
+				pcmBuf = pcmBuf[opusFrameSamples:]
+				backlog := len(pcmBuf)
 				pcmMu.Unlock()
-				continue
-			}
-			// Take exactly one frame from the front of the buffer.
-			frame := make([]int16, opusFrameSamples)
-			copy(frame, pcmBuf[:opusFrameSamples])
-			pcmBuf = pcmBuf[opusFrameSamples:]
-			pcmMu.Unlock()
 
-			nEncoded, encErr := d.opusEncoder.Encode(frame, opusBuf)
-			if encErr != nil {
-				log.Printf("[DRM] Opus encode error: %v", encErr)
-				continue
-			}
+				nEncoded, encErr := d.opusEncoder.Encode(frame, opusBuf)
+				if encErr != nil {
+					log.Printf("[DRM] Opus encode error: %v", encErr)
+					break
+				}
 
-			timestamp := time.Now().UnixNano()
-			pkt := encodeOpusFrame(opusBuf[:nEncoded], d.config.OutputSampleRate, timestamp)
+				timestamp := time.Now().UnixNano()
+				pkt := encodeOpusFrame(opusBuf[:nEncoded], d.config.OutputSampleRate, timestamp)
 
-			select {
-			case resultChan <- pkt:
-			default:
-				log.Printf("[DRM] Result channel full, dropping Opus frame")
+				select {
+				case resultChan <- pkt:
+				default:
+					log.Printf("[DRM] Result channel full, dropping Opus frame")
+				}
+
+				if backlog < catchUpThresholdSamples {
+					break
+				}
 			}
 		}
 	}

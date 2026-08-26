@@ -20,7 +20,7 @@ func GetInfo() map[string]interface{} {
 		"description": "DRM (Digital Radio Mondiale) decoder via ubersdr-drm",
 		"version":     "1.0.0",
 		"parameters":  map[string]interface{}{},
-		"notes":       "Requires a stereo IQ session (Channels==2) with SampleRate>=12000. Supports iq (12 kHz), iq48, iq96, iq192. Dream scales all OFDM parameters proportionally via ADJ_FOR_SRATE so any rate works. The binary at /opt/ubersdr-drm/ubersdr-drm is spawned automatically. No frontend parameters are required.",
+		"notes":       "Requires a stereo IQ session (Channels==2) with SampleRate>=12000. Supports iq (12 kHz), iq48, iq96, iq192. Dream scales all OFDM parameters proportionally via ADJ_FOR_SRATE; rates below 24 kHz are interpolated up inside the binary first, since Dream mixes baseband IQ to a 6 kHz virtual IF that would otherwise sit at Nyquist. The binary at /opt/ubersdr-drm/ubersdr-drm is spawned automatically. No frontend parameters are required.",
 		"output_format": map[string]interface{}{
 			"type":        "binary",
 			"description": "Binary protocol carrying Opus-encoded decoded DRM audio frames. Frames are only sent when a DRM signal is actively being decoded.",

@@ -573,7 +573,10 @@ sudo rm -f "$WISDOM_TMP" 2>/dev/null || true
 FFT_LOW="rof1620000"    # 64.8 MSPS
 FFT_HIGH="rof3240000"   # 129.6 MSPS
 
-_SR_INFO=$("${SCRIPT_DIR}/get-samprate.sh" 2>/dev/null)
+# `|| true` because set -e is on: without it a missing helper — or a receiver that
+# cannot be reached — takes the whole script down instead of falling through to the
+# warning below. Same guard the get-cpu.sh calls above use.
+_SR_INFO=$("${SCRIPT_DIR}/get-samprate.sh" 2>/dev/null || true)
 if [ -n "$_SR_INFO" ]; then
     eval "$_SR_INFO"
     echo
@@ -605,10 +608,23 @@ if [ -n "$_SR_INFO" ]; then
 else
     FFT_SIZES="$FFT_LOW"
     echo
-    echo "WARNING: could not determine the front end sample rate — is UberSDR running?"
-    echo "         Assuming 64.8 MSPS (${FFT_SIZES}). If this receiver runs at 129.6 MSPS,"
-    echo "         the generated wisdom will be for a transform radiod never plans."
-    echo "         Re-run with --max-rate to cover both."
+    # Name the actual cause. A missing helper is a packaging fault and is fixed by
+    # re-running the installer; a helper that ran and found nothing means the receiver
+    # could not be reached. Saying "is UberSDR running?" for both sends people to look
+    # in the wrong place.
+    if [ ! -x "${SCRIPT_DIR}/get-samprate.sh" ]; then
+        echo "WARNING: ${SCRIPT_DIR}/get-samprate.sh is missing, so the front end sample"
+        echo "         rate could not be read. Re-run the installer to fetch it:"
+        echo "           curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash -s --"
+    else
+        echo "WARNING: could not read the front end sample rate — is UberSDR running?"
+        echo "         Start it, or check ${UBERSDR_URL:-http://localhost:8080}/api/description."
+    fi
+    echo
+    echo "         Assuming 64.8 MSPS (${FFT_SIZES}). If this receiver runs at 129.6 MSPS"
+    echo "         this generates wisdom for a transform radiod never plans, and the one"
+    echo "         it does plan gets none — hours of work for nothing."
+    echo "         Re-run with --max-rate to cover both rates regardless."
 fi
 
 # --max-rate forces both even at the low rate: for a receiver about to be raised to

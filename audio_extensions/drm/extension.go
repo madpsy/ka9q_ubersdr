@@ -15,10 +15,12 @@ import (
  *
  * Accepted IQ modes: any session where Channels==2 and SampleRate>=12000.
  * This includes iq (12 kHz), iq48 (48 kHz), iq96, iq192, etc.
- * Dream scales all OFDM parameters via ADJ_FOR_SRATE(v, sr) = v*sr/48000,
- * so it works correctly at any sample rate including 12 kHz.
- * The binary bypasses Dream's internal sample rate clamping via
- * SetSoundCardSigSampleRate() so all rates are passed through correctly.
+ * Dream scales all OFDM parameters via ADJ_FOR_SRATE(v, sr) = v*sr/48000, and
+ * the binary bypasses Dream's internal sample rate clamping via
+ * SetSoundCardSigSampleRate(), so all rates are passed through. Below 24 kHz
+ * the binary interpolates the IQ up to at least that rate first: Dream mixes
+ * baseband IQ to a 6 kHz virtual IF before Hilbert filtering, which would
+ * otherwise land the carrier at Nyquist and never acquire.
  */
 
 const binaryPath = "/opt/ubersdr-drm/ubersdr-drm"

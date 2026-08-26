@@ -114,6 +114,39 @@ WIN_IMAGE=electronuserland/builder:wine
 # --linux skips the Windows half — so publishing uploads what is there and says
 # what is not. The dmgs come from build-mac.sh, which puts them here.
 #
+# Which is the trap in this list, and it is worth stating plainly because the
+# script cannot see it happening:
+#
+#   **A --publish from Linux uploads whatever dmgs are sitting in dist/, and
+#   they are as old as the last time build-mac.sh ran.**
+#
+# Nothing in a Linux run rebuilds them or can. So bumping the version, running
+# --publish here, and walking away puts the new version's Linux and Windows
+# artefacts on the release beside the *previous* version's macOS ones, all under
+# one rolling tag, with no warning louder than the sizes printed before the
+# upload. The .gatekeeper-ok check below does not catch it either: that file
+# says a dmg was notarised, not that it is this build's.
+#
+# So the order for a full release is the Mac first, or the publish split in two:
+#
+#     bump package.json
+#     ./build-mac.sh            # dmgs into dist/, signed and notarised
+#     ./build.sh --publish      # everything, now all of one version
+#
+# or, equivalently, ./build.sh --publish followed by ./build-mac.sh --publish,
+# which rebuilds the dmgs and replaces only those two assets.
+#
+# build-mac.sh already refuses this mistake at its own end: it uploads from
+# BUILT_DMGS — what that run actually produced — rather than from the directory,
+# precisely so an --arch=arm64 --publish cannot re-upload a leftover x64 dmg.
+# This script has no equivalent, because from Linux there is nothing to compare
+# a dmg against; the ordering above is the whole defence.
+#
+# What keeps this from reaching anybody is latest.json, and this is the case it
+# exists for: the release is not announced until that file moves, so a mismatched
+# tag is invisible to running clients until somebody says otherwise. Do not
+# announce until every artefact on the release is the version being announced.
+#
 # Linux is published for two architectures and the names are asymmetric on
 # purpose: the bare pair is x64's for good, because every client already
 # installed fetches exactly those two URLs when it updates (see updates.js), and
@@ -239,6 +272,11 @@ publish_release() {
         if [[ -f "$asset" ]]; then found+=("$asset"); else missing+=("$asset"); fi
     done
     # A dmg nobody else can open is worse than no dmg.
+    #
+    # Note what this checks and what it does not: that a dmg was notarised, not
+    # that it was built from the tree in front of you. A stale dmg from an older
+    # version keeps its .gatekeeper-ok and sails through here — see the note on
+    # RELEASE_ASSETS for why that matters and what order avoids it.
     #
     # Gatekeeper refuses a downloaded app that is not signed *and* notarised,
     # and reports it as damaged rather than as unsigned — so the person who

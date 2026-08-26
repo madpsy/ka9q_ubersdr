@@ -345,6 +345,28 @@ function FreqWheel({ headRef, showBw, minimal }) {
     // Snapped, not added: a spin from an odd frequency lands on round numbers,
     // which is what the ± buttons do and what the grid is for.
     const tune = (n) => {
+        // The tuning lock, answered here rather than left to the action.
+        //
+        // The drum is the one control in the app that moves *itself*: the strip
+        // is translated by the pointer and only then asks to be tuned, so a
+        // refusal upstream would leave the wheel spinning under the thumb with
+        // the receiver standing still — a lock you can watch not working.
+        //
+        // Zero is the same answer the band edge gives below, and Barrel already
+        // knows what to do with it: re-base the strip, kill the momentum, and
+        // bump. Which is the right feel for both — the drum has hit something.
+        //
+        // Asked rather than read off `locked`, because tuneRefused also raises
+        // the toast. Barrel's own `disabled` prop would stop the drum harder —
+        // but it is `pointer-events: none`, so the gesture never arrives, and a
+        // drum that silently swallows a drag explains itself less than one that
+        // stops dead and says why.
+        //
+        // Before freqRef, deliberately. That ref is the drum's own idea of where
+        // it is, advanced per detent because pointer moves outrun rendering;
+        // moving it for a step that never reached the receiver would leave the
+        // wheel a detent out for the rest of the gesture.
+        if (actions.tuneRefused()) return 0;
         const from = freqRef.current;
         const dir = n > 0 ? 1 : -1;
         const first = snapStep(from, step, dir);

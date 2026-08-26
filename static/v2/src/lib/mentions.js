@@ -1,6 +1,8 @@
 // @mention parsing, matching v1's chat-ui.js so both frontends agree on what
 // counts as a mention and how tab completion behaves.
 
+import { MAX_FREQ, MIN_FREQ, MODE_BY_ID } from '../radio/constants.js';
+
 // The partial username being typed, or null. Only fires directly before the
 // cursor, so "@bob hello @" completes the trailing one and text pasted earlier
 // in the line is left alone.
@@ -68,19 +70,38 @@ export function splitMentions(message, usernames) {
 //   { text, url }                  http(s) link
 //   { text, freq: { hz, mode } }   "14175.000 KHz (USB)", click to tune
 //
-// The frequency pattern and its validation are v1's: 10 kHz–30 MHz, and only
-// modes the receiver actually has.
+// The pattern is v1's. The *validation* is this receiver's, and that is the
+// difference that matters: v1 hardcoded 10 kHz–30 MHz and a list of eight modes,
+// both of which have since become properties of the receiver rather than of the
+// software. MIN_FREQ and MAX_FREQ are live bindings — see radio/constants.js —
+// so a 129.6 Msps front end links a 6 m frequency and a 64.8 Msps one still
+// does not, without either being told about the other.
+//
+// splitMessage runs during render and is not memoised, so a message that arrives
+// before /api/description lands is re-parsed against the real range as soon as
+// the range is known. Nothing has to be re-fetched or invalidated for that.
 const URL_RE = /https?:\/\/[^\s]+/gi;
 const FREQ_RE = /(\d+\.?\d*)\s*KHz\s*\(([A-Za-z]+)\)/gi;
-const FREQ_MODES = ['usb', 'lsb', 'am', 'sam', 'fm', 'nfm', 'cwu', 'cwl'];
 
 function freqPart(match, khz, mode) {
     const f = parseFloat(khz);
     const m = String(mode).toLowerCase();
-    // Out of band, or a mode this receiver does not have: leave it as text
-    // rather than offering a link that would tune somewhere wrong.
-    if (!(f >= 10 && f <= 30000) || !FREQ_MODES.includes(m)) return null;
-    return { text: match, freq: { hz: Math.round(f * 1000), mode: m } };
+    if (!Number.isFinite(f)) return null;
+    const hz = Math.round(f * 1000);
+    // Out of range, or a mode this receiver does not have: leave it as plain
+    // text rather than offering a link that would tune somewhere wrong.
+    //
+    // Checked in Hz, after rounding, so the answer is the same one the tune
+    // itself would give — a kHz comparison can accept a value that rounds to a
+    // hertz outside the range.
+    //
+    // The mode list comes from MODE_BY_ID rather than being written out here,
+    // so it cannot drift from what the receiver offers. IQ is included: tuning
+    // into it costs the operator's bandwidth, which is exactly why RadioContext
+    // puts a confirmation in front of it, and a link that is confirmed before it
+    // acts is safe to offer.
+    if (hz < MIN_FREQ || hz > MAX_FREQ || !MODE_BY_ID[m]) return null;
+    return { text: match, freq: { hz, mode: m } };
 }
 
 export function splitMessage(message, usernames) {

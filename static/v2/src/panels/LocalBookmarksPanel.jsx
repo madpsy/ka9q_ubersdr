@@ -349,9 +349,34 @@ export default function LocalBookmarksPanel({ minimal }) {
             {listed && (
             <div className="list">
                 {items.length > 0 && listed.length === 0 && <Empty>No match</Empty>}
-                {listed.slice(start, end).map((b) => (
+                {listed.slice(start, end).map((b) => {
+                // Shown, kept, editable — and not clickable. A local bookmark is
+                // the one kind that routinely outlives the receiver's range: it
+                // is stored in this browser, so dropping the sample rate from
+                // 129.6 to 64.8 Msps strands every 6 m entry until it goes back
+                // up. Deleting them would be destroying the operator's own
+                // records over a setting they can undo.
+                //
+                // `tune` refuses these anyway, and did before this — but it
+                // refused *silently*, so the row looked live, took the click and
+                // did nothing. The state has to be on the row, not only in the
+                // handler. The chip carries it rather than a title alone,
+                // because a disabled button does not reliably show a tooltip in
+                // every browser and "nothing happens, and nothing says why" is
+                // the fault being fixed.
+                const reachable = bookmarkReachable(b, MIN_FREQ, MAX_FREQ);
+                return (
                     <div className="lb-row" key={b.name}>
-                        <button type="button" className="list__row lb-row__main" onClick={() => tune(b)}>
+                        <button
+                            type="button"
+                            className={`list__row lb-row__main${reachable ? '' : ' list__row--disabled'}`}
+                            disabled={!reachable}
+                            title={reachable
+                                ? (b.comment || '')
+                                : `${formatFreqShort(b.frequency)} is outside this receiver's range `
+                                  + `(${MIN_FREQ / 1000} kHz–${MAX_FREQ / 1e6} MHz)`}
+                            onClick={() => tune(b)}
+                        >
                             <span className="list__title">
                                 {b.name}
                                 {b.group && <span className="chip">{b.group}</span>}
@@ -359,6 +384,9 @@ export default function LocalBookmarksPanel({ minimal }) {
                             <span className="list__meta">
                                 {formatFreqShort(b.frequency)}
                                 <span className="chip">{b.mode.toUpperCase()}</span>
+                                {!reachable && (
+                                    <span className="chip chip--warn">out of range</span>
+                                )}
                                 {/* Only when one is stored: the row would otherwise repeat
                                     the mode's own figure on every bookmark and say nothing.
                                     Here because a passband is part of what tuning to this
@@ -416,7 +444,8 @@ export default function LocalBookmarksPanel({ minimal }) {
                         </div>
                         )}
                     </div>
-                ))}
+                );
+                })}
             </div>
             )}
 

@@ -1015,7 +1015,7 @@ function SpectrumStats({ place, bottom, gfx, onClose }) {
 export default function SpectrumView() {
     const radio = useRadio();
     const display = useDisplay();
-    const { spectrumConn, tuning, actions, view, meters } = radio;
+    const { spectrumConn, tuning, actions, view, meters, locked } = radio;
 
     // The spectrum socket has been closed after a long spell of nothing (see
     // IdleWatch, and PAUSE_CHOICES for why that is a setting and not a rule).
@@ -2685,6 +2685,41 @@ export default function SpectrumView() {
                             reaches for costs one somebody does. Getting back is
                             unaffected either way: the paused overlay carries its
                             own Resume. */}
+                        {/* The tuning lock.
+                            
+                            Second from the right on a desktop, beside Pause —
+                            the two switches in a row that is otherwise made of
+                            things you press and are done with. On a handset it
+                            is last, because Reset and Pause are not there at
+                            all; it stays on a handset either way, unlike those
+                            two, since a phone is where the spectrum *is* the
+                            tuning control and a stray thumb on it retunes the
+                            radio.
+                            
+                            Open padlock when off, closed when on, in the manner
+                            of the play/pause pair below: a toggle whose two
+                            states look the same and differ only by a highlight
+                            is a toggle you have to already know the state of.
+                            
+                            And gold when it is on — a fixed gold, not the theme
+                            accent every other active button in the app wears.
+                            The accent is what "this control is engaged" looks
+                            like here, and it is a different colour on every
+                            theme; a lock that stops the receiver responding is
+                            worth one thing the eye can find without knowing
+                            which theme it is looking at. See .btn--lock. */}
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            className="btn--lock"
+                            active={locked}
+                            icon={locked ? <Icon.Lock /> : <Icon.Unlock />}
+                            title={locked
+                                ? 'Tuning is locked — press to unlock. Frequency, mode and filter are held; volume, squelch, DSP and the spectrum view are not affected'
+                                : 'Lock the tuning — frequency, mode and filter stop responding until this is pressed again'}
+                            aria-pressed={locked}
+                            onClick={actions.toggleTuneLock}
+                        />
                         {!mobile && (
                             <Button
                                 size="sm"

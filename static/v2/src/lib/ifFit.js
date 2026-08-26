@@ -63,6 +63,11 @@
 // strongest in-band peak is *the* signal; its extent is the occupied width.
 // Any other island inside the passband is a neighbour.
 //
+// Its extent is measured at a gate that is partly relative to the signal's own
+// level, and *which* level is the whole difficulty on a mode that transmits a
+// carrier: the carrier is the loudest thing in the picture by tens of decibels
+// and is not the signal. FIT_CARRIER_DROP_DB has that argument in full.
+//
 // The islands are found on the window's full width, not just the passband —
 // that is the only way "the signal continues past the edge" is even visible —
 // which is why the caller hands this the *unmasked* mean (shapeStats keeps one
@@ -75,7 +80,7 @@
 // filter is its own verdict, and the far more useful one.
 
 import { SIGNAL_DB } from './ifShape.js';
-import { MODE_BY_ID, bandwidthLimits, isIQ } from '../radio/constants.js';
+import { MODE_BY_ID, bandwidthLimits, hasCarrier, isIQ } from '../radio/constants.js';
 
 // A hole this wide inside a signal is still that signal. Wide enough to bridge
 // the quiet stretches inside speech on a settled average — the gap between a
@@ -102,10 +107,41 @@ export const FIT_SPILL_HZ = 200;
 // A strong signal's edges are measured relative to its own peak, not only
 // against the noise: FFT leakage and phase-noise skirts stand well above the
 // floor beside anything loud, and taking them as occupied width called every
-// strong station clipped. Down-thirty is a shade gentler than the ITU's 26 dB
-// occupied-bandwidth convention, so an AM carrier's sidebands — genuinely
-// 20-odd dB under their carrier — still count as the signal they are.
+// strong station clipped. Down-twenty-five is a shade gentler than the ITU's
+// 26 dB occupied-bandwidth convention.
 export const FIT_DROP_DB = 25;
+
+// ...but on a mode with a carrier, "its own peak" is the carrier, and the
+// carrier is not the signal — see hasCarrier() for why it stands 30-45 dB above
+// any single bin of the modulation. Measured from there, a 25 dB gate finds
+// nothing but the carrier itself: an AM broadcast filling a 10 kHz filter, with
+// occupancy reading 100 %, was measured as 1.2 kHz wide and told the operator
+// its filter was 5.4 kHz too roomy. The two cards disagreed because they hung
+// their gates from different places, and this one was hanging its from the
+// wrong one.
+//
+// So on those modes the relative gate hangs from the strongest bin that is
+// *not* the carrier — the loudest sideband — and the carrier keeps its role as
+// the thing being excluded rather than the reference. Two guards on that:
+//
+//   * Bins within FIT_CARRIER_GUARD_HZ of the peak are the carrier, not
+//     modulation. Widened to twice the served bin width when that is coarser,
+//     for the same reason FIT_SPILL_HZ is: a carrier cannot be sharper on this
+//     grid than the resolution behind it.
+//
+//   * The gate never falls further than FIT_CARRIER_DROP_DB below the carrier
+//     whatever the sidebands say, because the deeper the gate the more of a
+//     strong signal's leakage skirt is admitted, and a skirt read as occupied
+//     width is the false "narrow" that FIT_DROP_DB exists to prevent. Fifty
+//     decibels reaches under the lightest ordinary modulation and stops well
+//     short of where the skirts of a loud carrier live.
+//
+// A carrier with nothing either side of it — a het, an idling repeater, an
+// unmodulated broadcast — has no sideband to hang the gate from, and falls back
+// to the peak: the old behaviour, which is the right one when the carrier
+// really is all there is.
+export const FIT_CARRIER_GUARD_HZ = 200;
+export const FIT_CARRIER_DROP_DB = 50;
 
 // A second island only counts as a neighbour when it could actually be one:
 // standing well clear of the floor, and within shouting distance of the main
@@ -137,12 +173,23 @@ export const FIT_NEIGHBOUR_REL_DB = 10;
 //     small, and only bites on the deliberately wide — an eSSB filter carrying
 //     genuinely wide audio has its slack in proportion and is left alone.
 //
-//   * Symmetric voice keeps the generous fraction, because a roomy AM filter
-//     is a preference rather than a mistake: selective fading takes a sideband
-//     away for minutes at a time and gives it back, and sizing to what is
-//     arriving right now would clip what returns. Only a filter better than
-//     about twice the station's occupied width is remarked on.
-export const FIT_SLACK_FRAC = 0.55;
+//   * Symmetric voice is judged the same way, and for the same reason. It used
+//     to carry a far larger fraction — 0.55, so a filter had to be better than
+//     twice the station's occupied width before anything was said — on the
+//     argument that a roomy AM filter is a preference rather than a mistake,
+//     since selective fading takes a sideband away for minutes at a time and
+//     gives it back. Two things are wrong with that. The fading is already
+//     answered further down, by folding the verdict onto the *wider* side, so
+//     the fraction was paying for it twice; and at that size the verdict was
+//     effectively unreachable — a 12 kHz filter over a 9.7 kHz signal, which is
+//     a kilohertz of noise a side and plainly worth tightening, read as a good
+//     fit. So symmetric modes now lean on the absolute floor like SSB does, and
+//     the fraction only takes over on the widest filters.
+//
+//     (That fraction had never really been tested, because until the carrier
+//     stopped being taken for the signal every carriered mode measured a couple
+//     of hundred hertz wide and reported "wide" whatever the threshold was.)
+export const FIT_SLACK_FRAC = 0.15;
 export const FIT_SLACK_FRAC_SSB = 0.2;
 // Below this much, tightening the filter is not worth suggesting: any real
 // filter's skirts are a couple of hundred hertz wide, and where a speaker's
@@ -152,8 +199,18 @@ export const FIT_SLACK_FRAC_SSB = 0.2;
 // FIT_DROP_DB gate — so this is the slack of a filter that is *plainly* roomy
 // rather than the first sign of one.
 export const FIT_SLACK_MIN_HZ = 600;
+// A symmetric filter's slack is per side and both sides move together, so the
+// figure that matters to the operator is twice this: two kilohertz of passband
+// carrying nothing but noise, which is worth a kilohertz of it either side of
+// what is being listened to. Above SSB's floor because a symmetric filter has
+// two edges to be wrong about and both of them breathe — an AM signal's
+// measured width moves with the modulation, and a fade takes a whole sideband.
+export const FIT_SLACK_MIN_SYM_HZ = 1000;
 // FM's sidebands taper rather than stop — Carson's rule is a convention, not a
 // cliff — so its filter is allowed far more apparent slack before comment.
+// NFM is FM: it takes the same allowance, which is also what keeps a lightly
+// modulated channel, whose deviation and therefore whose occupied width fall
+// with the audio, from being told to narrow a filter that fits the loud parts.
 export const FIT_SLACK_FRAC_FM = 0.65;
 
 // How much measured signal there has to be before any verdict is offered.
@@ -218,6 +275,23 @@ const hiHzOf = (win, perBin, bin) => win.offLo + (bin + 1) * perBin;
 const midHzOf = (win, perBin, bin) => win.offLo + (bin + 0.5) * perBin;
 
 /**
+ * The loudest bin of `island` that is more than `guardHz` from its peak — the
+ * strongest sideband of a carrier, in dB, or -Infinity if the island is nothing
+ * but its own peak. See FIT_CARRIER_GUARD_HZ.
+ */
+function sidebandDb(mean, island, win, perBin, guardHz) {
+    const peakHz = midHzOf(win, perBin, island.peakBin);
+    let best = -Infinity;
+    for (let i = island.first; i <= island.last; i++) {
+        const v = mean[i];
+        if (!Number.isFinite(v) || v <= best) continue;
+        if (Math.abs(midHzOf(win, perBin, i) - peakHz) <= guardHz) continue;
+        best = v;
+    }
+    return best;
+}
+
+/**
  * The raw judgement for this instant — no memory, no patience; that is
  * updateFit()'s job. Null when there is nothing to judge: no signal in the
  * passband, an IQ mode, or geometry that has not settled.
@@ -279,12 +353,29 @@ export function rawFit(mean, win, band, tuning, floorDb, opts = {}) {
     }
     if (!main) return null;
 
-    // The main signal's occupied extent, at the stricter of the two gates —
-    // above the noise, and within FIT_DROP_DB of its own peak. The relative
+    // The main signal's occupied extent, at the stricter of the gates — above
+    // the noise, and within FIT_DROP_DB of its reference level. The relative
     // gate is what keeps a strong station honest: its leakage skirts clear the
     // floor gate for hundreds of hertz either side, and measured against the
     // floor alone every loud signal read as wider than any filter.
-    const gate2 = Math.max(floorDb + SIGNAL_DB, main.peakDb - FIT_DROP_DB);
+    //
+    // The reference is the island's peak, except on a mode with a carrier,
+    // where the peak *is* the carrier and the modulation lives far below it —
+    // there it is the loudest sideband, floored so the gate never reaches down
+    // into the carrier's own skirts. See FIT_CARRIER_DROP_DB for both halves.
+    let refDb = main.peakDb;
+    let deepest = -Infinity;
+    if (hasCarrier(tuning.mode)) {
+        const side = sidebandDb(
+            mean, main, win, perBin,
+            Math.max(FIT_CARRIER_GUARD_HZ, 2 * resHz),
+        );
+        if (side > -Infinity) {
+            refDb = side;
+            deepest = main.peakDb - FIT_CARRIER_DROP_DB;
+        }
+    }
+    const gate2 = Math.max(floorDb + SIGNAL_DB, refDb - FIT_DROP_DB, deepest);
     let occFirst = -1;
     let occLast = -1;
     for (let i = main.first; i <= main.last; i++) {
@@ -357,8 +448,9 @@ export function rawFit(mean, win, band, tuning, floorDb, opts = {}) {
         const centre = (bandLoHz + bandHiHz) / 2;
         const ext = Math.max(centre - occLoHz, occHiHz - centre, 0);
         const slack = width / 2 - ext;
-        const frac = tuning.mode === 'fm' ? FIT_SLACK_FRAC_FM : FIT_SLACK_FRAC;
-        if (slack > Math.max(FIT_SLACK_MIN_HZ, (width / 2) * frac)) {
+        const fm = tuning.mode === 'fm' || tuning.mode === 'nfm';
+        const frac = fm ? FIT_SLACK_FRAC_FM : FIT_SLACK_FRAC;
+        if (slack > Math.max(FIT_SLACK_MIN_SYM_HZ, (width / 2) * frac)) {
             // Both edges: a symmetric width control cannot tighten one side.
             return { kind: 'wide', slackHz: slack, extentHz: ext * 2, edge: 'both' };
         }

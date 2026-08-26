@@ -108,6 +108,15 @@ export default function BookmarksPanel({ minimal }) {
                             <span className="list__title">{b.name}</span>
                             <span className="list__meta">
                                 {formatFreqShort(b.frequency)}
+                                {/* Said in the row, not only in the title. The row
+                                    was already disabled and already carried
+                                    .list__row--disabled — but that class had no
+                                    rule until now, so an unreachable bookmark
+                                    looked identical to a reachable one and just
+                                    swallowed the click. A disabled button also
+                                    does not reliably show its tooltip, which
+                                    left nothing at all to go on. */}
+                                {!reachable && <span className="chip chip--warn">out of range</span>}
                                 {b.mode && <span className="chip">{b.mode.toUpperCase()}</span>}
                             </span>
                         </button>

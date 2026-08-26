@@ -194,10 +194,22 @@ t('AM in a filter nearly three times its width is wide, both edges', () => {
     assert.ok(v.extentHz > 3200 && v.extentHz < 4000, `extent ${v.extentHz}`);
 });
 
-t('...but a filter merely roomier than the signal is left alone', () => {
-    // ±2.5 kHz of audio in a ±5 kHz filter: wider than it needs to be, and
-    // not wrong. The card is advice, and this is not worth giving.
-    assert.strictEqual(fit('am', -6500, 6500, -5000, 5000, [{ lo: -2500, hi: 2500, db: 20 }]).kind, 'ok');
+t('a kilohertz of empty passband either side is worth saying', () => {
+    // The case from the field: a 12 kHz filter over a 9.7 kHz signal. Not a
+    // wild mis-setting — which is the point, because the old symmetric
+    // threshold wanted 3.3 kHz of slack a side and called this a good fit.
+    const v = fit('am', -8000, 8000, -6000, 6000, [{ lo: -4850, hi: 4850, db: 20 }]);
+    assert.strictEqual(v.kind, 'wide');
+    assert.ok(v.slackHz > 1000 && v.slackHz < 1300, `slack ${v.slackHz}`);
+});
+
+t('...and a few hundred hertz either side is not', () => {
+    // The same 12 kHz filter over 10.2 kHz. The measured width already reads
+    // short of the transmitted one and an AM signal breathes with the
+    // modulation, so this is inside the tolerance rather than a filter worth
+    // touching. The two tests together are where the line is.
+    const v = fit('am', -8000, 8000, -6000, 6000, [{ lo: -5100, hi: 5100, db: 20 }]);
+    assert.strictEqual(v.kind, 'ok');
 });
 
 t('a faded sideband does not shrink the verdict onto the healthy one', () => {
@@ -213,11 +225,117 @@ t('AM spilling both edges is narrow at both', () => {
 });
 
 t('the same slack that moves AM leaves FM alone', () => {
-    // ±3 kHz occupied in a ±8 kHz filter: 5 kHz of slack, past AM's 3.6 kHz
-    // threshold and inside the 5.2 kHz that FM's tapering sidebands earn it.
+    // ±3 kHz occupied in a ±8 kHz filter: 5 kHz of slack, and inside the
+    // 5.2 kHz that FM's tapering sidebands earn it.
     const shapes = [{ lo: -3000, hi: 3000, db: 20 }];
     assert.strictEqual(fit('fm', -10000, 10000, -8000, 8000, shapes).kind, 'ok');
     assert.strictEqual(fit('am', -10000, 10000, -8000, 8000, shapes).kind, 'wide');
+});
+
+t('NFM is FM, and gets FM\'s allowance rather than AM\'s', () => {
+    // A lightly modulated channel: the deviation, and so the occupied width,
+    // falls with the audio, and telling the operator to narrow a filter that
+    // fits the loud parts is bad advice. ±2 kHz in a ±5 kHz filter.
+    const shapes = [{ lo: -2000, hi: 2000, db: 20 }];
+    assert.strictEqual(fit('nfm', -6500, 6500, -5000, 5000, shapes).kind, 'ok');
+    assert.strictEqual(fit('am', -6500, 6500, -5000, 5000, shapes).kind, 'wide');
+});
+
+// ── the carrier is not the signal ────────────────────────────────────────────
+//
+// Every scene here is a carrier line plus sidebands well below it, which is what
+// a multi-second power average of AM actually looks like. Judged against the
+// carrier, the sidebands fall under the relative gate and the station measures a
+// couple of hundred hertz wide — see FIT_CARRIER_DROP_DB.
+
+// A carrier at the dial: two bins of the 512-bin grid at these spans.
+const CARRIER = { lo: -30, hi: 30, db: 79 };
+
+t('an AM broadcast filling its filter is not "wide" because of its carrier', () => {
+    // The case from the field: peak −39 dBFS over a −118 floor, sidebands out
+    // to ±4.5 kHz in a ±5 kHz filter, occupancy reading 100 %. It reported
+    // "wide ~5.4 kHz", which is the carrier's width subtracted from the
+    // filter's half — advice to throw away everything being listened to.
+    const v = fit('am', -6500, 6500, -5000, 5000, [
+        CARRIER,
+        { lo: -4500, hi: 4500, db: 34 },
+    ]);
+    assert.strictEqual(v.kind, 'ok');
+});
+
+t('...and the sidebands are what "wide" is measured from when it is true', () => {
+    const v = fit('am', -6500, 6500, -5000, 5000, [
+        CARRIER,
+        { lo: -1200, hi: 1200, db: 34 },
+    ]);
+    assert.strictEqual(v.kind, 'wide');
+    assert.strictEqual(v.edge, 'both');
+    // The occupied width is the modulation's, not the carrier's — which is the
+    // whole of the fix: this figure used to come back under 200 Hz.
+    assert.ok(v.extentHz > 2000 && v.extentHz < 2900, `extent ${v.extentHz}`);
+});
+
+t('...and a carriered signal past the edges is still clipped', () => {
+    const v = fit('am', -8000, 8000, -5000, 5000, [
+        CARRIER,
+        { lo: -5700, hi: 5700, db: 34 },
+    ]);
+    assert.strictEqual(v.kind, 'narrow');
+    assert.strictEqual(v.edge, 'both');
+});
+
+t('SAM is AM: its carrier is excluded the same way', () => {
+    const shapes = [CARRIER, { lo: -4500, hi: 4500, db: 34 }];
+    assert.strictEqual(fit('sam', -6500, 6500, -5000, 5000, shapes).kind, 'ok');
+});
+
+t('NFM and FM carry a line at the dial too', () => {
+    assert.strictEqual(fit('nfm', -6500, 6500, -5000, 5000, [
+        CARRIER, { lo: -4000, hi: 4000, db: 34 },
+    ]).kind, 'ok');
+    assert.strictEqual(fit('fm', -10000, 10000, -8000, 8000, [
+        CARRIER, { lo: -6500, hi: 6500, db: 34 },
+    ]).kind, 'ok');
+});
+
+t('a bare carrier has no sideband to measure, and reads wide as it always did', () => {
+    // A het, or an unmodulated broadcast. Nothing to hang the gate from, so the
+    // reference falls back to the peak and the verdict is the old one — which
+    // is the honest answer when the carrier really is all there is.
+    const v = fit('am', -6500, 6500, -5000, 5000, [CARRIER]);
+    assert.strictEqual(v.kind, 'wide');
+});
+
+t('the gate does not reach down into a loud carrier\'s skirts', () => {
+    // 79 dB of carrier with a phase-noise skirt 20 dB over the floor running
+    // past both filter edges, and 3 kHz of real modulation between them. The
+    // skirt is 59 dB under the carrier: FIT_CARRIER_DROP_DB refuses to look
+    // that far down, so this is not clipping.
+    const v = fit('am', -8000, 8000, -5000, 5000, [
+        { lo: -7000, hi: 7000, db: 20 },
+        { lo: -3000, hi: 3000, db: 34 },
+        CARRIER,
+    ]);
+    assert.notStrictEqual(v.kind, 'narrow');
+});
+
+t('coarse served bins widen the carrier guard', () => {
+    // At 300 Hz bins the carrier is 300 Hz wide on any grid, so a 200 Hz guard
+    // would take a bin of carrier as the loudest "sideband" and put the gate
+    // back where it was. 2 × resHz is what stops that.
+    const shapes = [CARRIER, { lo: -4500, hi: 4500, db: 34 }];
+    assert.strictEqual(fit('am', -6500, 6500, -5000, 5000, shapes, { resHz: 300 }).kind, 'ok');
+});
+
+t('SSB is untouched: no carrier, so the peak stays the reference', () => {
+    // A strong low formant with the rest of the voice 25 dB under it. On a
+    // carrier mode this would now measure the quiet part as signal; on USB the
+    // peak is part of the modulation and the old reading is the right one.
+    const v = fit('usb', -800, 3400, 50, 2700, [
+        { lo: 300, hi: 600, db: 45 },
+        { lo: 600, hi: 2400, db: 19 },
+    ]);
+    assert.strictEqual(v.kind, 'wide');
 });
 
 // ── CW ───────────────────────────────────────────────────────────────────────

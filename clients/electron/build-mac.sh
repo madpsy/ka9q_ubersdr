@@ -37,6 +37,14 @@
 #                            opinion, and a build that got that far is a build
 #                            worth publishing. Only the dmgs — the Linux and
 #                            Windows artefacts are build.sh's to upload.
+#
+#                            This is also the repair for a release whose dmgs
+#                            are stale. build.sh --publish run from Linux cannot
+#                            build a dmg and uploads whichever one is in dist/,
+#                            however old — see its note on RELEASE_ASSETS — so
+#                            running this afterwards replaces exactly those two
+#                            assets with the current build. Publish nothing to
+#                            latest.json until it has.
 #   ./build-mac.sh --keep    leave the remote build tree behind afterwards
 #
 # Environment:

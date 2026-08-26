@@ -292,11 +292,17 @@ export default function ChatPanel({ minimal }) {
         }
     };
 
-    // Clicking a frequency someone shared tunes there, as v1 does. setMode
-    // applies that mode's default passband, which is what v1 does by hand.
+    // Clicking a frequency someone shared tunes there, as v1 does.
+    //
+    // One tuneTo rather than setMode then setFrequency. The two-call version
+    // walked the receiver through an intermediate state — setMode resets the
+    // passband, so the *old* frequency was briefly commanded in the new mode —
+    // and it is two commands where the server rate-limits by command. tuneTo
+    // sends the pair as one, applies the new mode's default passband exactly as
+    // setMode would, and gates IQ once rather than twice. See the note on
+    // RadioContext's tuneTo, which exists for this.
     const tuneTo = ({ hz, mode }) => {
-        radio.setMode(mode);
-        radio.setFrequency(hz);
+        radio.tuneTo({ frequency: hz, mode });
         radio.ensureVisible(hz);
     };
 
@@ -576,8 +582,13 @@ export default function ChatPanel({ minimal }) {
                                 disabled={!u.frequency}
                                 onClick={() => {
                                     if (!u.frequency) return;
-                                    if (u.mode) radio.setMode(u.mode);
-                                    radio.setFrequency(u.frequency);
+                                    // As one tune, for the reason given on tuneTo
+                                    // above. The mode is optional here — a client
+                                    // that has published a frequency and no mode
+                                    // is tuned in whatever we are already in,
+                                    // which is what tuneTo does with a mode it
+                                    // does not recognise.
+                                    radio.tuneTo({ frequency: u.frequency, mode: u.mode });
                                     radio.setSpectrumCenter(u.frequency);
                                 }}
                             >

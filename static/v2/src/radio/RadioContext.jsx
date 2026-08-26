@@ -38,6 +38,7 @@ import { hiddenGroups, onGroupsChanged, visibleBookmarks } from '../lib/bookmark
 import { readShareUrl, takeUrlView } from '../lib/share.js';
 import { shouldWake } from '../lib/wake.js';
 import { setFeedsAllowed } from '../lib/serverFeeds.js';
+import { refusedByLock, resetLockToast } from '../lib/tuneLock.js';
 import { failureMessage } from '../lib/connectFailure.js';
 import { clearEventLog, logEvent } from '../lib/eventLog.js';
 import {
@@ -185,6 +186,14 @@ export function RadioProvider({ children }) {
         params: saved.dspParams || {},
     });
     const [followTuning, setFollowTuning] = useState(saved.followTuning !== false);
+    // The tuning lock: frequency, mode and passband held where they are.
+    //
+    // Restored, and that is the point of storing it — a lock that came off with
+    // a reload is not a lock, and the receiver left running in a corner is the
+    // case it exists for. Nothing else is affected: volume, squelch, AGC, the
+    // DSP chain and the whole spectrum view stay live, because none of them
+    // change what the receiver is listening to.
+    const [locked, setLocked] = useState(() => !!saved.tuneLocked);
     // Client-side EQ / notch / bandpass. Merged per section so a spec saved
     // before a field existed still loads.
     const [filters, setFilterState] = useState(() => {
@@ -255,6 +264,10 @@ export function RadioProvider({ children }) {
     tuningRef.current = tuning;
     const followRef = useRef(followTuning);
     followRef.current = followTuning;
+    // Read by applyTuning, which runs from pointer moves that can outrun a
+    // render — the same reason tuningRef exists.
+    const lockedRef = useRef(locked);
+    lockedRef.current = locked;
     // When the last local tune happened, so a lagging server echo cannot snap
     // the dial back while the user is still turning it.
     const lastLocalTune = useRef(0);
@@ -853,6 +866,7 @@ export function RadioProvider({ children }) {
             dspFilter: dsp.filter,
             dspParams: dsp.params,
             followTuning,
+            tuneLocked: locked,
             // Where the spectrum was looking, so a reload comes back to it
             // rather than to full span. The zoom is stored as the bin
             // bandwidth rather than a span because that is what the server
@@ -872,7 +886,7 @@ export function RadioProvider({ children }) {
                 }
                 : {}),
         });
-    }, [tuning, audio, squelchValue, dsp, followTuning, filters, noise, view]);
+    }, [tuning, audio, squelchValue, dsp, followTuning, filters, noise, view, locked]);
 
     // ---- actions --------------------------------------------------------
 
@@ -894,9 +908,33 @@ export function RadioProvider({ children }) {
             }
         };
 
+        // The tuning lock, answered in one place.
+        //
+        // Returns true when the caller must stop. Every refusal says so, and
+        // the throttle that keeps that from becoming a strobe lives in
+        // lib/tuneLock.js rather than here — a waterfall drag refuses dozens of
+        // times a second and each one calls this.
+        const refuseTuning = () => {
+            if (!lockedRef.current) return false;
+            refusedByLock();
+            return true;
+        };
+
         // Applied against the ref rather than inside a state updater: pointer
         // moves can outrun rendering, and a state updater must stay pure.
         const applyTuning = (patch) => {
+            // The lock, at the one point every frequency, mode and passband
+            // change in the app passes through — the six actions below all end
+            // here, and so does everything that reaches them: the panels, the
+            // spectrum's own gestures, the keyboard, a control surface, the
+            // scanner, a recalled VFO, CAT sync from a real radio, the bridge
+            // and the v1 window shims. A gate in any of those would be a gate
+            // the other dozen walked past.
+            //
+            // Not the server echo, the startup defaults or the reconnect replay:
+            // none of those are somebody changing the tuning, and blocking them
+            // would leave the dial reading something the receiver is not on.
+            if (refuseTuning()) return;
             const next = { ...tuningRef.current, ...patch };
             // A mode change makes every reading so far irrelevant: they were
             // taken in another mode. Arriving in SAM has to earn its own packet
@@ -1086,6 +1124,11 @@ export function RadioProvider({ children }) {
             setMode(mode) {
                 const def = MODE_BY_ID[mode];
                 if (!def) return;
+                // Ahead of gateIQ, not behind it. applyTuning would refuse this
+                // anyway, but by then the IQ confirmation would already be on
+                // screen — a dialog asking whether to commit to a change that
+                // is going to be dropped whatever the answer is.
+                if (refuseTuning()) return;
                 if (gateIQ({ kind: 'mode', mode })) return;
                 commitMode(mode);
             },
@@ -1113,6 +1156,8 @@ export function RadioProvider({ children }) {
             // the new mode before the real one arrived.
             tuneTo(req) {
                 const next = MODE_BY_ID[req.mode] ? req.mode : tuningRef.current.mode;
+                // Before gateIQ, for the reason given in setMode.
+                if (refuseTuning()) return;
                 if (gateIQ({ kind: 'tune', mode: next, req })) return;
                 commitTune(req);
             },
@@ -1325,6 +1370,38 @@ export function RadioProvider({ children }) {
 
             setFollowTuning,
 
+            // -- tuning lock --
+            //
+            // Whether a tuning change would be refused, said *before* making
+            // one — and it raises the toast on the way out, so a caller that
+            // asks first is no quieter than one that simply tried.
+            //
+            // For controls that move themselves. The Multipad's drum is turned
+            // by the pointer and only then asks to be tuned, so a refusal from
+            // applyTuning arrives a frame too late: the wheel has already spun
+            // against a lock that is supposed to be holding it still. Anything
+            // that draws from `tuning` — which is nearly everything — needs none
+            // of this and should just call the action.
+            tuneRefused() { return refuseTuning(); },
+            //
+            // Both halves clear the toast's throttle: turning the lock on means
+            // the next refusal is the first of a new lock and has to say so,
+            // and turning it off means anything still on screen is now untrue.
+            setTuneLock(on) {
+                const next = !!on;
+                if (next === lockedRef.current) return;
+                lockedRef.current = next;
+                resetLockToast();
+                setLocked(next);
+            },
+
+            toggleTuneLock() {
+                const next = !lockedRef.current;
+                lockedRef.current = next;
+                resetLockToast();
+                setLocked(next);
+            },
+
             // -- spectrum view --
             setSpectrumCenter(hz) {
                 spectrumConn.setView(clamp(hz, MIN_FREQ, MAX_FREQ), null);
@@ -1500,7 +1577,7 @@ export function RadioProvider({ children }) {
 
     const value = useMemo(() => ({
         tuning, audioState, spectrumState, view, running, serverInfo, session, lost,
-        audio, squelch, agc, dsp, followTuning, filters, noise,
+        audio, squelch, agc, dsp, followTuning, filters, noise, locked,
         // `bookmarks` and `local` are what *propagates* — the marker bar, the
         // ⏮/⏭ neighbours, the lock screen, the Markers panel — so a hidden
         // group disappears from all of them without any of them knowing the
@@ -1517,7 +1594,7 @@ export function RadioProvider({ children }) {
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
         iqPrompt,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, catalog, localMarks, hidden, actions, iqPrompt]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, locked, catalog, localMarks, hidden, actions, iqPrompt]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

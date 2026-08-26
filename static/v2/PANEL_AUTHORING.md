@@ -142,13 +142,13 @@ beside it. The names, as of this version:
 ```
 Anchor Announce Antenna Archive Bars Bell Bolt Bookmark Captions Chat
 Chevron ChevronLeft ChevronRight ChevronUp Clock Close Cloud Collapse
-Compass Copy Custom Dice Download Drag Expand External Eye EyeOff Fax Gauge
-Grid Info Keyboard Knob Layers Link List LockScreen Mic Minus Moon Morse
-Mute News Packet Pad Pause Picture Play Plug Plus Podium Pointer Power
-Puzzle Radio Record Reset RotateLeft RotateRight Scan Search Share Sliders
-Snail Span Stop Sun Target Teleprinter Tick Trash Upload Users ViewSpectrum
-ViewSplit ViewWaterfall Volume Waves Wf2D Wf3D WfBoth Wheel Wind ZoomIn
-ZoomOut
+Compass Copy Custom Dice Download Drag Expand External Eye EyeOff Fax
+Gauge Grid Info Keyboard Knob Layers Link List Lock LockScreen Mic Minus
+Moon Morse Mute News Packet Pad Pause Picture Play Plug Plus Podium
+Pointer Power Puzzle Radio Record Reset RotateLeft RotateRight Scan
+Search Share Sliders Snail Span Stop Sun Target Teleprinter Tick Trash
+Unlock Upload Users ViewSpectrum ViewSplit ViewWaterfall Volume Waves
+Wf2D Wf3D WfBoth Wheel Wind ZoomIn ZoomOut
 ```
 
 An unknown name gets `Custom`. These names never change — once published, a

@@ -98,6 +98,10 @@ esbuild ../src/lib/sessionClock.js --bundle --format=cjs --platform=node \
     --outfile=.build/sessionclock.cjs --log-level=warning
 esbuild notifications.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/notifications.cjs --log-level=warning
+esbuild ../src/lib/tuneLock.js --bundle --format=cjs --platform=node \
+    --outfile=.build/tunelock.cjs --log-level=warning
+esbuild mentions.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/mentions.cjs --log-level=warning
 esbuild notices.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/hardwarenotices.cjs --log-level=warning
 esbuild ../src/lib/hoverTip.js --bundle --format=cjs --platform=node \
@@ -152,8 +156,6 @@ esbuild ../src/radio/audio-filters.js --bundle --format=cjs --platform=node \
     --outfile=.build/audiofilters.cjs --log-level=warning
 esbuild ../src/lib/eqLevels.js --bundle --format=cjs --platform=node \
     --outfile=.build/eqlevels.cjs --log-level=warning
-esbuild ../src/lib/mentions.js --bundle --format=cjs --platform=node \
-    --outfile=.build/mentions.cjs --log-level=warning
 esbuild ../src/lib/recorder.js --bundle --format=cjs --platform=node \
     --outfile=.build/recorder.cjs --log-level=warning
 esbuild ../src/lib/zoom.js --bundle --format=cjs --platform=node \
@@ -539,6 +541,8 @@ node freqentry.test.js
 node topclock.test.js
 node sessionclock.test.js
 node notifications.test.js
+node tunelock.test.js
+node mentions.test.js
 node hardwarenotices.test.js
 node spectrumtrace.test.js
 node hookorder.test.js

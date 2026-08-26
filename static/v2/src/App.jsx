@@ -15,6 +15,7 @@ import VisibilityWatch from './components/VisibilityWatch.jsx';
 import AnnounceWatch from './components/AnnounceWatch.jsx';
 import CallsignAnnounceWatch from './components/CallsignAnnounceWatch.jsx';
 import Toasts from './components/Toasts.jsx';
+import LockToast from './components/LockToast.jsx';
 import NativeNotices from './components/NativeNotices.jsx';
 import HardwareNoticeWatch from './components/HardwareNoticeWatch.jsx';
 import AddonNoticeWatch from './components/AddonNoticeWatch.jsx';
@@ -227,6 +228,14 @@ export default function App() {
                                     panel was open would be no notifications at
                                     all. */}
                                 <Toasts />
+                                {/* And the tuning lock's own one-line toast,
+                                    which is not a notification and deliberately
+                                    does not go through that store — see
+                                    lib/tuneLock.js. Here for the same reason
+                                    everything else on this list is: the press it
+                                    answers can come from a panel that is
+                                    unmounted a moment later. */}
+                                <LockToast />
                                 {/* The same notifications, handed to the browser instead when
                                     the operator has asked for desktop ones — which is how a
                                     notification reaches somebody whose tab is hidden, the case

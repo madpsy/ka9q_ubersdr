@@ -7076,8 +7076,14 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 // Convert frequency from kHz to Hz
                 const frequency = Math.round(freqKHz * 1000);
 
-                // Skip entries outside the valid HF range (10 kHz – 30 MHz)
-                if (frequency < 10000 || frequency > 30000000) {
+                // Skip entries this receiver cannot tune.
+                //
+                // Against the receiver's real range, not a hardcoded 30 MHz. A
+                // 129.6 Msps front end reaches 60 MHz, and a fixed ceiling here
+                // threw away every 6 m and 4 m entry in the file before the
+                // server — which checks the same range and would have taken
+                // them — ever saw one. See receiverRange.
+                if (!inReceiverRange(frequency)) {
                     skipped++;
                     continue;
                 }
@@ -7278,12 +7284,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     return;
                 }
 
-                // Convert KiwiSDR bookmarks to UberSDR format (entries > 30 MHz are filtered out)
+                // Convert KiwiSDR bookmarks to UberSDR format (entries this receiver cannot tune are filtered out)
                 const { bookmarks: importedBookmarks, skipped: skippedFreq } = convertKiwiSDRBookmarks(data.dx);
 
                 if (importedBookmarks.length === 0) {
                     const msg = skippedFreq > 0
-                        ? `No valid bookmarks found in KiwiSDR file (${skippedFreq} skipped: outside 10 kHz – 30 MHz range)`
+                        ? `No valid bookmarks found in KiwiSDR file (${skippedFreq} skipped: outside ${receiverRangeLabel()})`
                         : 'No valid bookmarks found in KiwiSDR file';
                     showAlert(msg, 'error');
                     return;
@@ -7311,6 +7317,20 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 if (!response.ok) throw new Error('Failed to save imported bookmarks');
 
                 // Check if the backend also skipped any (safety net)
+                // What the server dropped, which is NOT the same question as
+                // skippedFreq and must not be added to it.
+                //
+                // The PUT carries the whole merged collection, so `skipped` counts
+                // every bookmark in the file on disk that is outside the range —
+                // including ones that were already there and have nothing to do
+                // with this import. Summing the two produced the report that
+                // started this: "imported 25 — 25 skipped", two unrelated counts
+                // added together and blamed on the import.
+                //
+                // They are also different *kinds* of event. skippedFreq is "your
+                // file had entries this receiver cannot tune"; this one is "the
+                // save removed entries that were already stored", which is a
+                // deletion and deserves saying so plainly.
                 let serverSkipped = 0;
                 try {
                     const result = await response.clone().json().catch(() => ({}));
@@ -7319,9 +7339,13 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 await loadBookmarks();
                 let successMsg = `Successfully imported ${importedBookmarks.length} KiwiSDR bookmark(s) (${importMode})`;
-                const totalSkipped = skippedFreq + serverSkipped;
-                if (totalSkipped > 0) successMsg += ` — ${totalSkipped} skipped (outside 10 kHz – 30 MHz)`;
-                showAlert(successMsg, 'success');
+                if (skippedFreq > 0) {
+                    successMsg += ` — ${skippedFreq} skipped (outside ${receiverRangeLabel()})`;
+                }
+                if (serverSkipped > 0) {
+                    successMsg += ` — the save also removed ${serverSkipped} stored bookmark(s) outside ${receiverRangeLabel()}`;
+                }
+                showAlert(successMsg, serverSkipped > 0 ? 'warning' : 'success');
             } catch (error) {
                 showAlert('Error importing KiwiSDR bookmarks: ' + error.message, 'error');
             }
@@ -7346,8 +7370,9 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     // wrapped object { bookmarks: [...] } (from Export Bookmarks)
                     const raw = Array.isArray(data) ? data : (data.bookmarks || []);
                     importedBookmarks = raw.filter(b => {
-                        const f = Number(b.frequency);
-                        if (f >= 10000 && f <= 30000000) return true;
+                        // The receiver's range, not a fixed 30 MHz — see the note
+                        // on receiverRange and convertKiwiSDRBookmarks.
+                        if (inReceiverRange(Number(b.frequency))) return true;
                         skippedFreq++;
                         return false;
                     });
@@ -7395,8 +7420,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 // Also filter YAML-parsed bookmarks by frequency range
                 if (!file.name.endsWith('.json')) {
                     importedBookmarks = importedBookmarks.filter(b => {
-                        const f = Number(b.frequency);
-                        if (f >= 10000 && f <= 30000000) return true;
+                        if (inReceiverRange(Number(b.frequency))) return true;
                         skippedFreq++;
                         return false;
                     });
@@ -7404,7 +7428,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 if (importedBookmarks.length === 0) {
                     const msg = skippedFreq > 0
-                        ? `No valid bookmarks found in file (${skippedFreq} skipped: outside 10 kHz – 30 MHz range)`
+                        ? `No valid bookmarks found in file (${skippedFreq} skipped: outside ${receiverRangeLabel()})`
                         : 'No valid bookmarks found in file';
                     showAlert(msg, 'error');
                     return;
@@ -7432,6 +7456,20 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 if (!response.ok) throw new Error('Failed to save imported bookmarks');
 
                 // Check if the backend also skipped any (safety net)
+                // What the server dropped, which is NOT the same question as
+                // skippedFreq and must not be added to it.
+                //
+                // The PUT carries the whole merged collection, so `skipped` counts
+                // every bookmark in the file on disk that is outside the range —
+                // including ones that were already there and have nothing to do
+                // with this import. Summing the two produced the report that
+                // started this: "imported 25 — 25 skipped", two unrelated counts
+                // added together and blamed on the import.
+                //
+                // They are also different *kinds* of event. skippedFreq is "your
+                // file had entries this receiver cannot tune"; this one is "the
+                // save removed entries that were already stored", which is a
+                // deletion and deserves saying so plainly.
                 let serverSkipped = 0;
                 try {
                     const result = await response.clone().json().catch(() => ({}));
@@ -7440,9 +7478,13 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 await loadBookmarks();
                 let successMsg = `Successfully imported ${importedBookmarks.length} bookmark(s) (${importMode})`;
-                const totalSkipped = skippedFreq + serverSkipped;
-                if (totalSkipped > 0) successMsg += ` — ${totalSkipped} skipped (outside 10 kHz – 30 MHz)`;
-                showAlert(successMsg, 'success');
+                if (skippedFreq > 0) {
+                    successMsg += ` — ${skippedFreq} skipped (outside ${receiverRangeLabel()})`;
+                }
+                if (serverSkipped > 0) {
+                    successMsg += ` — the save also removed ${serverSkipped} stored bookmark(s) outside ${receiverRangeLabel()}`;
+                }
+                showAlert(successMsg, serverSkipped > 0 ? 'warning' : 'success');
             } catch (error) {
                 showAlert('Error importing bookmarks: ' + error.message, 'error');
             }

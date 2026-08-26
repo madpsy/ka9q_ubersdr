@@ -4005,13 +4005,13 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 
-		// Clamp start frequency to 10 kHz if it's below the limit
+		// Clamp to the receiver's bottom if the entry starts below it
 		startFreq := entry.MinFrequency
 		if startFreq < minFreq {
 			startFreq = minFreq
 		}
 
-		// Clamp end frequency to 30 MHz if it exceeds the limit
+		// Clamp to the receiver's top if the entry runs past it
 		endFreq := entry.MaxFrequency
 		if endFreq > maxFreq {
 			endFreq = maxFreq
@@ -4084,9 +4084,14 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Build response message
+	// The range is named from the receiver, not written into the sentence. The
+	// filter above has always used rx.MinFreq()/MaxFreq(); only this message was
+	// fixed at 10 kHz - 30 MHz, so a 60 MHz front end reported bands it had
+	// actually accepted as being outside a limit it does not have.
 	message := fmt.Sprintf("Successfully imported %d band(s) from SDR# XML", len(bands))
 	if skippedCount > 0 {
-		message += fmt.Sprintf(" (skipped %d band(s) outside 10 kHz - 30 MHz range)", skippedCount)
+		message += fmt.Sprintf(" (skipped %d band(s) outside %.0f kHz - %.3f MHz range)",
+			skippedCount, float64(minFreq)/1e3, float64(maxFreq)/1e6)
 	}
 
 	w.WriteHeader(http.StatusOK)

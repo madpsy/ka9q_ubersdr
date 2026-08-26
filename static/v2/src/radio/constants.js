@@ -113,6 +113,31 @@ export function isIQ(mode) {
     return String(mode || '').toLowerCase().startsWith('iq');
 }
 
+// Whether the transmitter puts a carrier at the dial. True for everything the
+// receiver demodulates except the suppressed-carrier modes; IQ is not
+// demodulated at all and answers false.
+//
+// It matters to anything that measures a signal against its own peak. On these
+// modes that peak is the carrier, and a carrier is not part of the modulation
+// it carries: on a power average of several seconds an AM carrier stands 30 to
+// 45 dB above any single bin of its own sidebands, because the carrier is a
+// line landing in one bin while the sidebands are speech spread over kilohertz
+// at whatever the average modulation depth happens to be. Take the peak as the
+// reference and everything the station is actually saying falls below the gate.
+export function hasCarrier(mode) {
+    switch (String(mode || '').toLowerCase()) {
+        // A keyed carrier *is* the signal, and SAM's is the one it locks to.
+        case 'am': case 'sam': case 'cwu': case 'cwl':
+        // FM's carrier moves rather than staying put, and at some modulation
+        // indices it disappears entirely — but a quiet channel or a lightly
+        // modulated one leaves a line at the dial just as plainly.
+        case 'nfm': case 'fm':
+            return true;
+        default:
+            return false;
+    }
+}
+
 // Widest passband the bandwidth sliders will offer, per mode family.
 //
 // These are passband *edges* relative to the tuned frequency, so a symmetric

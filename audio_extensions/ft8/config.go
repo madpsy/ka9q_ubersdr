@@ -16,11 +16,21 @@ const (
 type FT8Config struct {
 	Protocol       Protocol // FT8
 	MinScore       int      // Minimum sync score threshold for candidates (0 = accept all)
-	MaxCandidates  int      // Maximum number of candidates to decode per slot
+	MaxCandidates  int      // Maximum number of candidates to decode per slot (see MinMaxCandidates/MaxMaxCandidates)
 	LDPCIterations int      // Number of LDPC decoder iterations
 }
 
 // DefaultFT8Config returns default configuration
+// Bounds on MaxCandidates. It is settable from the browser's attach message,
+// it sizes the candidate slice, and it is the loop bound the insert path
+// compares against — so it has to be a range rather than a hint. The reference
+// uses 140; the ceiling is well above anything useful and exists to stop a
+// hostile value turning every insert into a full sort of a huge list.
+const (
+	MinMaxCandidates = 1
+	MaxMaxCandidates = 1000
+)
+
 func DefaultFT8Config() FT8Config {
 	return FT8Config{
 		Protocol:       ProtocolFT8,

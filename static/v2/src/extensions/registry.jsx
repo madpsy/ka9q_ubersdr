@@ -19,6 +19,12 @@
 //   summary       one line, shown under the title in the list
 //   requiresAudio true when it needs the receiver running (a server-side
 //                 decoder does; a browser-only one such as QRSS would not)
+//   needsIQ       true when the extension decodes the raw quadrature stream
+//                 rather than demodulated audio. Every other extension is the
+//                 opposite way round and is unusable in IQ, which is why IQ
+//                 closes and disables them — see ExtensionsContext. One of
+//                 these stays available in IQ, and switches the receiver into
+//                 it when it starts.
 //   float         initial window size
 //   minimal       true when the extension has a minimal view. The window and
 //                 the mobile sheet then show a toggle, and Component is called
@@ -37,6 +43,7 @@ import MorseExtension from './morse/MorseExtension.jsx';
 import WefaxExtension from './wefax/WefaxExtension.jsx';
 import QrssExtension from './qrss/QrssExtension.jsx';
 import FreeDVExtension from './freedv/FreeDVExtension.jsx';
+import DRMExtension from './drm/DRMExtension.jsx';
 import SstvExtension from './sstv/SstvExtension.jsx';
 import SoundModemExtension from './soundmodem/SoundModemExtension.jsx';
 import WhisperExtension from './whisper/WhisperExtension.jsx';
@@ -132,6 +139,22 @@ export const EXTENSIONS = [
         float: { w: 820, h: 520 },
         minimal: true,
         Component: FreeDVExtension,
+    },
+    {
+        id: 'drm',
+        title: 'DRM Decoder',
+        icon: <Icon.Radio />,
+        summary: 'Digital Radio Mondiale — shortwave broadcast audio, with the station name.',
+        requiresAudio: true,
+        // The one extension that wants IQ. A DRM channel is 10 kHz of OFDM and
+        // no demodulated mode preserves it, so this must stay usable in a mode
+        // that closes every other extension.
+        needsIQ: true,
+        // Shorter than FreeDV's: there is no activity list to hold, just the
+        // station identity, a text message line and two rows of meters.
+        float: { w: 760, h: 420 },
+        minimal: true,
+        Component: DRMExtension,
     },
     {
         id: 'sstv',

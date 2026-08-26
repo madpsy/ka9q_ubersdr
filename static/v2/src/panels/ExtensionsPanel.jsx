@@ -25,24 +25,30 @@ import { isIQ } from '../radio/constants.js';
 export default function ExtensionsPanel() {
     const { list, activeId, minimised, toggle } = useExtensions();
     const { running, tuning } = useRadio();
-    // Every extension decodes demodulated audio, and IQ is not that. The rows
-    // stay listed and go dead, for the same reason an extension the operator
-    // has not enabled does: a missing row cannot say why it is missing.
-    // Anything open has already been closed by ExtensionsContext.
+    // Almost every extension decodes demodulated audio, and IQ is not that. The
+    // rows stay listed and go dead, for the same reason an extension the
+    // operator has not enabled does: a missing row cannot say why it is
+    // missing. Anything open has already been closed by ExtensionsContext.
+    //
+    // An extension flagged needsIQ is the other way round — it decodes the
+    // quadrature stream — so IQ is exactly where it belongs and it stays live.
     const iq = isIQ(tuning.mode);
+    const blockedByIQ = (e) => iq && !e.needsIQ;
+    const anyBlocked = list.some(blockedByIQ);
 
     return (
         <div className="stack exts">
-            {iq && (
+            {anyBlocked && (
                 <div className="note note--tight">
-                    Not available in IQ mode — these decode demodulated audio,
-                    and IQ carries raw quadrature samples instead.
+                    Most of these are unavailable in IQ mode — they decode
+                    demodulated audio, and IQ carries raw quadrature samples
+                    instead. Anything that reads IQ itself stays available.
                 </div>
             )}
             <div className="list">
                 {list.map((e) => {
                     const open = activeId === e.id;
-                    const reason = iq
+                    const reason = blockedByIQ(e)
                         ? 'Not available in IQ mode'
                         : !e.enabled
                             ? 'Not enabled on this receiver'
@@ -52,7 +58,7 @@ export default function ExtensionsPanel() {
                             key={e.id}
                             type="button"
                             className={`list__row ext-row${open ? ' is-active' : ''}`}
-                            disabled={iq || !e.enabled}
+                            disabled={blockedByIQ(e) || !e.enabled}
                             title={reason || e.summary}
                             onClick={() => toggle(e.id)}
                         >

@@ -66,13 +66,13 @@ t('a mono SSB packet reads as 12 kHz, one plane', () => {
     assert.strictEqual(f.planes[0].length, 2);
 });
 
-t('an IQ packet reads as 10 kHz, two planes, I and Q not transposed', () => {
+t('an IQ packet reads as 12 kHz, two planes, I and Q not transposed', () => {
     const d = new PCMStreamDecoder();
     // Interleaved I,Q,I,Q — asymmetric so a transposition cannot pass.
     const f = d.decode(ab(fullFrame({
-        sampleRate: 10000, channels: 2, samples: [32767, 0, -32768, 0],
+        sampleRate: 12000, channels: 2, samples: [32767, 0, -32768, 0],
     })));
-    assert.strictEqual(f.sampleRate, 10000);
+    assert.strictEqual(f.sampleRate, 12000);
     assert.strictEqual(f.channels, 2);
     assert.strictEqual(f.planes.length, 2);
     assert.ok(Math.abs(f.planes[0][0] - 1) < 0.001, 'I of frame 0');

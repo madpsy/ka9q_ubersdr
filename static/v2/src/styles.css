@@ -7942,6 +7942,96 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 
+/* ── DRM ──────────────────────────────────────────────────────────────────── */
+
+/* The station identity block. Reserves its height whether or not a station has
+   been found, so a lock does not shove the meters down the panel. */
+.drm__id {
+    padding: 8px 10px 6px;
+    border-bottom: 1px solid var(--border);
+}
+.drm__service {
+    font-size: calc(15px * var(--ui-scale));
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--text);
+    min-height: calc(19px * var(--ui-scale));
+}
+.drm__waiting { font-size: calc(12px * var(--ui-scale)); font-weight: 400; color: var(--text-faint); }
+.drm__origin {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+/* The flag is a glyph, not a label: it should not be stretched by the
+   uppercase tracking around it. */
+.drm__flag { font-family: 'Twemoji Flags', var(--sans); letter-spacing: 0; font-size: calc(12px * var(--ui-scale)); }
+
+/* Nothing here is current any more. Dimmed rather than hidden — the last
+   station heard is still worth reading, it just is not live. */
+.drm__id.is-stale { opacity: 0.45; }
+/* The text message is the one field that changes while listening, so it gets
+   room to wrap rather than being clipped to a line. */
+.drm__text {
+    margin-top: 5px;
+    font-size: calc(11.5px * var(--ui-scale));
+    line-height: 1.4;
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
+}
+
+.drm__meters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 10px;
+}
+.drm__meter { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; }
+.drm__meter-bar {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    overflow: hidden;
+}
+/* The decode threshold. A hairline rather than a label: the bar is 5px tall
+   and anything wordier would own the row. */
+.drm__meter-mark {
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    width: 1px;
+    background: var(--border-strong);
+}
+.drm__meter-fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--warn);
+    transition: width 0.35s ease, background-color 0.35s ease;
+}
+.drm__meter-fill.is-good { background: var(--good); }
+
+.drm__blocks { display: flex; gap: 4px; }
+.drm__block {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: var(--surface-3);
+    color: var(--text-faint);
+}
+.drm__block.is-ok  { background: rgba(69, 214, 154, 0.16); color: var(--good); }
+.drm__block.is-bad { background: rgba(242, 181, 68, 0.16); color: var(--warn); }
+
 /* ── FreeDV ───────────────────────────────────────────────────────────────── */
 
 .fdv__signal {

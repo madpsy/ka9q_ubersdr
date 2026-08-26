@@ -3006,7 +3006,12 @@ il2p:        0=off  1=IL2P  2=IL2P+CRC  3=Both
             'cwl': (-200, 200),
             'fm': (-12000, 12000), # 24 kHz samprate → Nyquist = ±12 kHz
             'nfm': (-6000, 6000),  # 24 kHz samprate → Nyquist = ±12 kHz
-            'iq': (-5000, 5000),
+            'iq': (-6000, 6000),   # 12 kHz samprate, and the [iq] preset's own edges
+            # The wide variants keep their preset bandwidth whatever is asked
+            # for -- the server never sends a filter command for them -- so
+            # these are inert.  They stay inside the +/-12 kHz the connect
+            # parameters are validated against rather than naming the real
+            # +/-24 kHz upwards, which would be rejected before it was ignored.
             'iq48': (-5000, 5000),
             'iq96': (-5000, 5000),
             'iq192': (-5000, 5000),

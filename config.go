@@ -45,6 +45,7 @@ type Config struct {
 	MCP                MCPConfig                 `yaml:"mcp"`
 	Whisper            WhisperConfig             `yaml:"whisper"`
 	FreeDVExtension    FreeDVExtensionConfig     `yaml:"freedv_extension"`
+	DRMExtension       DRMExtensionConfig        `yaml:"drm_extension"`
 	SoundModem         SoundModemExtensionConfig `yaml:"soundmodem_extension"`
 	EiBi               EiBiConfig                `yaml:"eibi"`
 	NTP                NTPConfig                 `yaml:"ntp"`
@@ -959,6 +960,14 @@ type WhisperConfig struct {
 // FreeDVExtensionConfig contains settings for the FreeDV audio extension
 type FreeDVExtensionConfig struct {
 	MaxUsers int `yaml:"max_users"` // Maximum concurrent users of the FreeDV extension (0 = unlimited, default: 10)
+}
+
+// DRMExtensionConfig contains DRM decoder extension settings.
+type DRMExtensionConfig struct {
+	// MaxUsers is the maximum number of concurrent DRM decoders (0 = unlimited).
+	// Each one is a Dream OFDM demodulator plus an AAC decode and an Opus
+	// encode, so this is markedly heavier per user than most extensions.
+	MaxUsers int `yaml:"max_users"`
 }
 
 // SoundModemExtensionConfig contains settings for the Sound Modem audio extension

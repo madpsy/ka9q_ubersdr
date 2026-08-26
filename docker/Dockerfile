@@ -36,7 +36,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Build argument for target architecture (set automatically by docker buildx)
 ARG TARGETARCH
 
-# Install runtime dependencies including yq for YAML merging, WSJT-X, libopus, and js8 dependencies
+# Install runtime dependencies including yq for YAML merging, WSJT-X, libopus, and js8 dependencies.
+#
+# The DRM decoder (/opt/ubersdr-drm/ubersdr-drm) needs three of these:
+#   libfftw3-double3 - it links libfftw3.so.3; libfftw3-single3 above is the
+#                      float build (libfftw3f.so.3) and does NOT satisfy it
+#   libfdk-aac2      - linked, so the binary will not start without it
+#   libfaad2         - provides libfaad_drm.so.2, dlopen'd at startup and the
+#                      codec that actually decodes DRM AAC. Without it the
+#                      decoder runs and locks but emits pure silence.
+# libopus0 (already listed) is dlopen'd for DRM Opus services.
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     wget \
@@ -58,6 +67,9 @@ RUN apt-get update && apt-get install -y \
     libfftw3-single3 \
     libfftw3-bin \
     libgfortran5 \
+    libfftw3-double3 \
+    libfdk-aac2 \
+    libfaad2 \
     && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${TARGETARCH} -O /usr/bin/yq \
     && chmod +x /usr/bin/yq \
     && wget https://github.com/madpsy/ubersdr-js8call/releases/download/latest/js8_${TARGETARCH} -O /usr/bin/js8 \
@@ -87,6 +99,9 @@ RUN apt-get update && apt-get install -y \
     && unzip /tmp/freedv.zip -d /opt/freedv \
     && chmod +x /opt/freedv/freedv-ka9q \
     && rm /tmp/freedv.zip \
+    && mkdir -p /opt/ubersdr-drm \
+    && wget https://github.com/madpsy/ubersdr-drm/releases/download/1.0.0/ubersdr-drm_${TARGETARCH} -O /opt/ubersdr-drm/ubersdr-drm \
+    && chmod +x /opt/ubersdr-drm/ubersdr-drm \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

@@ -44,13 +44,21 @@ export const MODES = [
     { id: 'cwl', label: 'CW-L', group: 'cw', low: -200, high: 200 },
     { id: 'cwu', label: 'CW-U', group: 'cw', low: -200, high: 200 },
     // Raw quadrature baseband, last because it is not a listening mode: the
-    // server sends 10 kHz stereo where left is I and right is Q, and what comes
-    // out of the speakers is 10 kHz of RF rather than anything demodulated.
+    // server sends 12 kHz stereo where left is I and right is Q, and what comes
+    // out of the speakers is 12 kHz of RF rather than anything demodulated.
+    //
+    // ±6 kHz rather than the ±5 kHz this said until 2026-08-26, which was
+    // right when the stream was 10 kHz and quietly wrong after radiod's [iq]
+    // preset settled at samprate = 12k, low = -6k, high = +6k: asking for ±5
+    // put a filter *inside* the preset's own passband, so the top and bottom
+    // kilohertz of every capture came back empty with nothing in the WAV to
+    // say why. Matching the preset exactly means the mode change moves no
+    // filter at all.
     //
     // The wide variants (iq48 upwards) are still absent. They need operator
     // authorisation, they refuse passband edges in favour of the radiod preset,
     // and at 48-384 kHz they are for feeding external tools, not a browser.
-    { id: 'iq', label: 'IQ', group: 'iq', low: -5000, high: 5000 },
+    { id: 'iq', label: 'IQ', group: 'iq', low: -6000, high: 6000 },
 ];
 
 export const MODE_BY_ID = Object.fromEntries(MODES.map((m) => [m.id, m]));
@@ -90,10 +98,13 @@ export function bandwidthLimits(mode) {
         // v1: minLow -8000, maxHigh 8000. The shared default below is ±6000,
         // which would clamp FM's own ±8000 default the same way CW's was.
         case 'fm': return { min: -8000, max: 8000, sideband: 'both' };
-        // IQ streams at 10 kHz, so ±5 kHz *is* Nyquist — the server would take
+        // IQ streams at 12 kHz, so ±6 kHz *is* Nyquist — the server would take
         // a wider request (it clamps at ±12 kHz like every non-wide mode) and
-        // the stream simply could not carry the result.
-        case 'iq': return { min: -5000, max: 5000, sideband: 'both' };
+        // the stream simply could not carry the result. Same figure as the
+        // default branch below, kept as its own case because the two agree by
+        // coincidence: one is the AM family's 12 kHz filter, this one is the
+        // whole of the quadrature baseband.
+        case 'iq': return { min: -6000, max: 6000, sideband: 'both' };
         // am, sam, nfm — 12 kHz maximum width.
         default: return { min: -6000, max: 6000, sideband: 'both' };
     }

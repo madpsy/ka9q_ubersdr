@@ -94,6 +94,9 @@ type AudioExtension interface {
 
 // FreeDVExtension wraps the freedv-ka9q subprocess as an AudioExtension
 type FreeDVExtension struct {
+	// Guards the max_users release; see Stop.
+	stopOnce sync.Once
+
 	decoder   *FreeDVDecoder
 	config    FreeDVConfig
 	sessionID string // used to key the per-session restart cooldown
@@ -127,20 +130,13 @@ func NewFreeDVExtension(audioParams AudioExtensionParams, extensionParams map[st
 		}
 	}
 
-	// Check max users limit
-	if GlobalConfig != nil && GlobalConfig.MaxUsers > 0 {
-		activeUserMutex.Lock()
-		if activeUserCount >= GlobalConfig.MaxUsers {
-			activeUserMutex.Unlock()
-			return nil, fmt.Errorf("maximum FreeDV users reached (%d/%d)", activeUserCount, GlobalConfig.MaxUsers)
-		}
-		activeUserCount++
-		currentCount := activeUserCount
-		activeUserMutex.Unlock()
-		log.Printf("[FreeDV Extension] User connected (%d/%d)", currentCount, GlobalConfig.MaxUsers)
-	}
-
 	// Validate audio parameters
+	//
+	// Deliberately before the max_users accounting below: a refused attach must
+	// not consume a slot. It used to, and because a failed constructor never
+	// reaches Stop() the slot was gone for the life of the process — ten
+	// attaches from an IQ session were enough to lock every user out of FreeDV
+	// until a restart.
 	if audioParams.Channels != 1 {
 		return nil, fmt.Errorf("FreeDV requires mono audio (got %d channels)", audioParams.Channels)
 	}
@@ -158,6 +154,34 @@ func NewFreeDVExtension(audioParams AudioExtensionParams, extensionParams map[st
 	default:
 		rawMode, _ := extensionParams["tuned_mode"].(string)
 		return nil, fmt.Errorf("FreeDV requires USB or LSB mode (current mode: %q)", rawMode)
+	}
+
+	// Everything is valid; now take a slot. Released again if the decoder
+	// cannot be built, so a run of failures cannot exhaust the limit either.
+	countedUser := false
+	if GlobalConfig != nil && GlobalConfig.MaxUsers > 0 {
+		activeUserMutex.Lock()
+		if activeUserCount >= GlobalConfig.MaxUsers {
+			currentCount := activeUserCount
+			activeUserMutex.Unlock()
+			return nil, fmt.Errorf("maximum FreeDV users reached (%d/%d)", currentCount, GlobalConfig.MaxUsers)
+		}
+		activeUserCount++
+		currentCount := activeUserCount
+		countedUser = true
+		activeUserMutex.Unlock()
+		log.Printf("[FreeDV Extension] User connected (%d/%d)", currentCount, GlobalConfig.MaxUsers)
+	}
+	releaseSlot := func() {
+		if !countedUser {
+			return
+		}
+		activeUserMutex.Lock()
+		if activeUserCount > 0 {
+			activeUserCount--
+		}
+		activeUserMutex.Unlock()
+		countedUser = false
 	}
 
 	config := FreeDVConfig{
@@ -188,6 +212,7 @@ func NewFreeDVExtension(audioParams AudioExtensionParams, extensionParams map[st
 
 	decoder, err := NewFreeDVDecoder(config)
 	if err != nil {
+		releaseSlot()
 		return nil, fmt.Errorf("failed to create FreeDV decoder: %w", err)
 	}
 
@@ -216,8 +241,14 @@ func (e *FreeDVExtension) Start(audioChan <-chan AudioSample, resultChan chan<- 
 
 // Stop stops the extension and kills the subprocess
 func (e *FreeDVExtension) Stop() error {
-	// Decrement active user count
-	if GlobalConfig != nil && GlobalConfig.MaxUsers > 0 {
+	// Release the slot once however many times Stop is called. The manager
+	// stops an extension whose Start failed as well as on ordinary teardown,
+	// and a double decrement would drift the count downwards until the limit
+	// meant nothing.
+	e.stopOnce.Do(func() {
+		if GlobalConfig == nil || GlobalConfig.MaxUsers <= 0 {
+			return
+		}
 		activeUserMutex.Lock()
 		if activeUserCount > 0 {
 			activeUserCount--
@@ -225,7 +256,7 @@ func (e *FreeDVExtension) Stop() error {
 		currentCount := activeUserCount
 		activeUserMutex.Unlock()
 		log.Printf("[FreeDV Extension] User disconnected (%d/%d)", currentCount, GlobalConfig.MaxUsers)
-	}
+	})
 
 	err := e.decoder.Stop()
 

@@ -316,7 +316,7 @@ function OutputDevicePicker() {
 // agreed to play at. _createContext asks for the former and silently falls back
 // to the device default if it is refused — at which point everything is being
 // resampled, which matters most in exactly the mode where it is most likely
-// (IQ asks for 10 kHz, an unusual rate to be granted). So the second is shown
+// (IQ asks for 12 kHz, an unusual rate to be granted). So the second is shown
 // only when it differs, where it is the answer to a real question.
 export function StreamFormat() {
     const m = useMeters(4);

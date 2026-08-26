@@ -98,7 +98,7 @@ t('it renders in every view, with the stats on', () => {
 t('it renders in IQ, where there is no audio spectrum to read', () => {
     reset();
     render(ScopePanel, {}, context({
-        tuning: { frequency: 14_200_000, mode: 'iq', bandwidthLow: -5000, bandwidthHigh: 5000 },
+        tuning: { frequency: 14_200_000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 },
         scopeStats: true,
     }));
     assert.ok(true);

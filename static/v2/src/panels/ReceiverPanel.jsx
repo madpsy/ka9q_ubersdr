@@ -161,9 +161,9 @@ export default function ReceiverPanel({ minimal }) {
 
             {!minimal && (
                 <>
-                    {/* Fixed in IQ at the full ±5 kHz baseband — see the note on
+                    {/* Fixed in IQ at the full ±6 kHz baseband — see the note on
                         actions.setBandwidth. Shown rather than hidden, and
-                        reading 10.00 kHz, because the width is worth knowing
+                        reading 12.00 kHz, because the width is worth knowing
                         even when it cannot be changed. */}
                     {/* Each reset names what it resets, rather than taking the
                         default: this is the one view with a slider for both

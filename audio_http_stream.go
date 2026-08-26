@@ -264,7 +264,7 @@ func HandleAudioStream(sessions *SessionManager, config *Config) http.HandlerFun
 		channels := session.Channels
 		session.mu.RUnlock()
 
-		// IQ modes carry raw stereo RF samples at 10 kHz to 384 kHz.  Opus
+		// IQ modes carry raw stereo RF samples at 12 kHz to 384 kHz.  Opus
 		// cannot represent that at all — the encoder below is mono, and every
 		// rate above 48 kHz is not even a valid Opus rate.  The WebSocket path
 		// deals with this by forcing lossless pcm-zstd; there is no equivalent

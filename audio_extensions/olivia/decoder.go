@@ -70,6 +70,13 @@ const (
 	SyncThresholdMin     = 3.0
 	SyncThresholdMax     = 15.0
 	SyncThresholdDefault = 4.0
+
+	// Upper bounds on the two search parameters. Both size arrays in preset(),
+	// so these are resource limits rather than questions of taste; the
+	// interface offers 1..32 and 1..8 respectively, and these leave headroom
+	// for that to widen without either becoming a way to exhaust memory.
+	SyncMarginMax   = 64
+	SyncIntegLenMax = 32
 )
 
 // Reference span for the reported FEC quality percentage. Fixed rather than
@@ -317,6 +324,23 @@ func ilog2(v int) int {
 }
 
 // New builds a decoder for the given configuration and input sample rate.
+// clampSyncThreshold folds any value into the usable squelch range. A wild
+// number is clamped rather than refused, as the reference does — but NaN has to
+// be caught first, because every comparison against it is false and it would
+// otherwise pass straight through and poison the block decisions.
+func clampSyncThreshold(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return SyncThresholdDefault
+	}
+	if v < SyncThresholdMin {
+		return SyncThresholdMin
+	}
+	if v > SyncThresholdMax {
+		return SyncThresholdMax
+	}
+	return v
+}
+
 func New(cfg Config, inputRate int) (*Decoder, error) {
 	if inputRate <= 0 {
 		return nil, fmt.Errorf("invalid sample rate %d", inputRate)
@@ -334,9 +358,23 @@ func New(cfg Config, inputRate int) (*Decoder, error) {
 	if cfg.SyncMargin <= 0 {
 		cfg.SyncMargin = syncMarginDeflt
 	}
+	if cfg.SyncMargin > SyncMarginMax {
+		return nil, fmt.Errorf("sync margin must be 1..%d bins, got %d", SyncMarginMax, cfg.SyncMargin)
+	}
 	if cfg.SyncIntegLen <= 0 {
 		cfg.SyncIntegLen = syncIntegDefault
 	}
+	// Bounded above because preset() allocates blockPhases * SyncIntegLen
+	// slots. Unbounded, an attach asking for a few million blocks is a
+	// multi-gigabyte allocation and a denial of service — the interface offers
+	// 1..8, and nothing legitimate wants more than a handful.
+	if cfg.SyncIntegLen > SyncIntegLenMax {
+		return nil, fmt.Errorf("sync integration length must be 1..%d blocks, got %d",
+			SyncIntegLenMax, cfg.SyncIntegLen)
+	}
+	// The reference clamps rather than refuses, and the live setter does too,
+	// so construction must not be the one path that lets a wild value through.
+	cfg.SyncThreshold = clampSyncThreshold(cfg.SyncThreshold)
 	d := &Decoder{cfg: cfg, inputRate: inputRate}
 	if err := d.preset(); err != nil {
 		return nil, err
@@ -533,15 +571,7 @@ func (d *Decoder) Geometry() Geometry {
 // effect without a rebuild, so it can be dragged while decoding without losing
 // a lock that took seconds to acquire.
 func (d *Decoder) SetSyncThreshold(v float64) float64 {
-	if math.IsNaN(v) || math.IsInf(v, 0) {
-		v = SyncThresholdDefault
-	}
-	if v < SyncThresholdMin {
-		v = SyncThresholdMin
-	}
-	if v > SyncThresholdMax {
-		v = SyncThresholdMax
-	}
+	v = clampSyncThreshold(v)
 	d.mu.Lock()
 	d.cfg.SyncThreshold = v
 	d.mu.Unlock()

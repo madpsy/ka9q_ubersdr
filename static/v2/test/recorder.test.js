@@ -315,13 +315,13 @@ function expectedSignalCsv(v1Csv) {
         r.state = 'ready';
         r.startedAt = T0;
         r.endedAt = T0 + DURATION_MS;
-        r._rate = 10000;
+        r._rate = 12000;
         r._channels = 2;
-        r.meta = { frequency: 14175000, mode: 'iq', bandwidthLow: -5000, bandwidthHigh: 5000 };
+        r.meta = { frequency: 14175000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 };
 
         const txt = r._metadataText();
         assert.ok(txt.includes('Channels: 2 (interleaved I/Q — left I, right Q)'), txt);
-        assert.ok(txt.includes('Sample Rate: 10000 Hz'), txt);
+        assert.ok(txt.includes('Sample Rate: 12000 Hz'), txt);
         assert.ok(txt.includes('Mode: IQ'), txt);
         // The empty signal log is explained rather than left to be wondered at.
         assert.ok(txt.includes('Signal Log: not recorded'), txt);

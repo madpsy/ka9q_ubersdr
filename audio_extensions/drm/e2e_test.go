@@ -2,6 +2,7 @@ package drm
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -61,12 +62,28 @@ func TestDRMEndToEnd(t *testing.T) {
 		}
 	}()
 
-	var frames, bytesOut int
+	var frames, bytesOut, statuses int
+	var lastStatus map[string]any
 	deadline := time.After(45 * time.Second)
 collect:
 	for {
 		select {
 		case pkt := <-resultChan:
+			if len(pkt) == 0 {
+				t.Fatal("empty packet")
+			}
+			if pkt[0] == MessageTypeStatus {
+				var st map[string]any
+				if err := json.Unmarshal(pkt[1:], &st); err != nil {
+					t.Fatalf("status frame is not valid JSON: %v (%q)", err, pkt[1:])
+				}
+				if st["t"] != "status" {
+					t.Fatalf("status frame has t=%v, want \"status\"", st["t"])
+				}
+				lastStatus = st
+				statuses++
+				continue
+			}
 			if len(pkt) < 14 {
 				t.Fatalf("short packet: %d bytes", len(pkt))
 			}
@@ -89,8 +106,21 @@ collect:
 		}
 	}
 
-	t.Logf("received %d Opus frames, %d payload bytes (avg %d B/frame)",
-		frames, bytesOut, safeDiv(bytesOut, frames))
+	t.Logf("received %d Opus frames, %d payload bytes (avg %d B/frame); %d status frames",
+		frames, bytesOut, safeDiv(bytesOut, frames), statuses)
+	if lastStatus != nil {
+		t.Logf("last status: service=%v audio=%v wmer=%v codec=%v sbr=%v",
+			lastStatus["service"], lastStatus["audio"],
+			lastStatus["wmer"], lastStatus["codec"], lastStatus["sbr"])
+	}
+
+	// The status channel is the whole point of the fd 3 plumbing: if the pipe
+	// or ExtraFiles wiring breaks, audio still flows and nothing else notices.
+	if statuses == 0 {
+		t.Error("no status frames arrived — the fd 3 channel is not reaching the frontend")
+	} else if lastStatus["service"] != "DeutschlandRadio" {
+		t.Errorf("status service = %v, want DeutschlandRadio", lastStatus["service"])
+	}
 	if frames < 200 {
 		t.Fatalf("only %d Opus frames in 45s — expected a continuous stream", frames)
 	}

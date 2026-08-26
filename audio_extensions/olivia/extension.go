@@ -97,6 +97,10 @@ type Extension struct {
 	done     chan struct{}
 }
 
+// Anything beyond this is not a setting anyone meant, and every parameter here
+// is well inside it — the widest is a centre frequency in hertz.
+const maxParamMagnitude = 1e9
+
 // NewExtension builds an Olivia extension from the attach parameters.
 func NewExtension(sampleRate int, params map[string]interface{}) (*Extension, error) {
 	cfg := DefaultConfig()
@@ -152,14 +156,35 @@ func NewExtension(sampleRate int, params map[string]interface{}) (*Extension, er
 	return e, nil
 }
 
+// numberParam reads one numeric attach parameter.
+//
+// Non-finite and absurdly large values are reported as absent rather than
+// passed on, so the caller's defaults apply. That matters because several of
+// these are converted with int(): in Go a float64 outside the integer range
+// converts to an implementation-defined value, so 1e300 would silently become
+// some arbitrary number rather than being caught by the range checks in New().
 func numberParam(params map[string]interface{}, key string) (float64, bool) {
+	var f float64
 	switch v := params[key].(type) {
 	case float64: // what JSON decoding produces
-		return v, true
+		f = v
 	case int:
-		return float64(v), true
+		f = float64(v)
+	case int64:
+		f = float64(v)
+	case json.Number:
+		n, err := v.Float64()
+		if err != nil {
+			return 0, false
+		}
+		f = n
+	default:
+		return 0, false
 	}
-	return 0, false
+	if math.IsNaN(f) || math.IsInf(f, 0) || math.Abs(f) > maxParamMagnitude {
+		return 0, false
+	}
+	return f, true
 }
 
 func (e *Extension) onChar(r rune) {

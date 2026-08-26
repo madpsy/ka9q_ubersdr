@@ -211,7 +211,7 @@ export class Recorder extends Emitter {
     //   so it would capture I and throw Q away — half of the only thing an IQ
     //   recording is for.
     //
-    //   A 10 kHz AudioContext is not guaranteed; the player falls back to the
+    //   A 12 kHz AudioContext is not guaranteed; the player falls back to the
     //   browser's own rate if the constructor refuses, and the graph would then
     //   resample the samples we are trying to capture exactly.
     //

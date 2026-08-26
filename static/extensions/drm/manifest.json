@@ -1,0 +1,14 @@
+{
+  "name": "drm",
+  "displayName": "DRM Decoder",
+  "version": "1.0.0",
+  "description": "Digital Radio Mondiale decoder \u2014 decodes DRM shortwave broadcasts from an IQ session and plays the audio, with the station name, text message and signal quality",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "\ud83d\udcfb",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": true,
+  "files": {},
+  "settings": {}
+}

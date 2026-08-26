@@ -29,7 +29,7 @@ export default function IQConfirm() {
                     — which reads a capitalised Switch as the ui.jsx component. */}
                 <h2 className="vibe__title">Use IQ mode?</h2>
                 <p className="vibe__text">
-                    IQ sends the raw quadrature baseband &mdash; 10 kHz of RF as a
+                    IQ sends the raw quadrature baseband &mdash; 12 kHz of RF as a
                     stereo pair, left I and right Q &mdash; rather than demodulated
                     audio. It is meant for recording and for feeding external
                     software, and what comes out of the speakers is not a signal

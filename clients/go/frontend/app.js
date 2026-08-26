@@ -1527,8 +1527,14 @@ class UberSDRClient {
             } else if (this.currentMode === 'iq384') {
                 iqBandwidth = 192000; // ±192 kHz
             } else {
-                // Basic 'iq' mode - use default from mode config
-                iqBandwidth = 5000;   // ±5 kHz default
+                // Basic 'iq' mode: ±6 kHz, the whole of the 12 kHz quadrature
+                // baseband and what radiod's [iq] preset opens with. This read
+                // ±5 kHz from when the stream was 10 kHz. Display only — IQ
+                // never sends edges (see applySettings), so what the channel
+                // actually gets is defaultBandwidthForMode in websocket.go;
+                // the figure here drives the sliders, the spectrum overlay and
+                // the auto-zoom, all of which were a kilohertz short each side.
+                iqBandwidth = 6000;   // ±6 kHz
             }
 
             // Set bandwidth values (negative low, positive high for symmetric display)
@@ -1694,7 +1700,7 @@ class UberSDRClient {
             'cwl': { defaults: [-200, 200], range: [-1000, 1000], lowRange: [-1000, 0], highRange: [-1000, 0] },    // CWL: only negative
             'fm': { defaults: [-8000, 8000], range: [-10000, 10000], lowRange: [-10000, 0], highRange: [0, 10000] },  // FM: low negative, high positive
             'nfm': { defaults: [-8000, 8000], range: [-10000, 10000], lowRange: [-10000, 0], highRange: [0, 10000] }, // NFM: low negative, high positive
-            'iq': { defaults: [0, 0], range: [-10000, 10000], lowRange: [-10000, 10000], highRange: [-10000, 10000] },
+            'iq': { defaults: [0, 0], range: [-6000, 6000], lowRange: [-6000, 6000], highRange: [-6000, 6000] },   // fixed ±6 kHz, set in applyIQModeRestrictions
             'iq48': { defaults: [0, 0], range: [-24000, 24000], lowRange: [-24000, 24000], highRange: [-24000, 24000] },
             'iq96': { defaults: [0, 0], range: [-48000, 48000], lowRange: [-48000, 48000], highRange: [-48000, 48000] },
             'iq192': { defaults: [0, 0], range: [-96000, 96000], lowRange: [-96000, 96000], highRange: [-96000, 96000] },

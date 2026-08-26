@@ -6,6 +6,11 @@ extensions:
   # FlexControl - control the SDR with a FlexControl USB controller (Web Serial API)
   - flexcontrol
 
+  # DRM Decoder - Digital Radio Mondiale shortwave broadcast decoder
+  # Requires the ubersdr-drm binary at /opt/ubersdr-drm/ubersdr-drm.
+  # Uses an IQ session; the v2 interface switches the receiver to IQ for you.
+  - drm
+
   # FSK/RTTY Decoder - FSK/RTTY decoder supporting ITA2 (Baudot), ASCII, and CCIR476 (SITOR-B) modes
   - fsk
 

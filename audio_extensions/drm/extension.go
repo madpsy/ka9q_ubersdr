@@ -3,6 +3,10 @@ package drm
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
 )
 
 /*
@@ -23,7 +27,22 @@ import (
  * otherwise land the carrier at Nyquist and never acquire.
  */
 
-const binaryPath = "/opt/ubersdr-drm/ubersdr-drm"
+const binaryDir = "/opt/ubersdr-drm"
+
+// binaryPath is the decoder binary this build should spawn. The C++ build
+// names its output after the target architecture using Go's own GOARCH
+// spellings (ubersdr-drm_amd64, ubersdr-drm_arm64, ...) so several
+// architectures can share /opt/ubersdr-drm/. Fall back to the unsuffixed name
+// so an install predating that change keeps working.
+var binaryPath = resolveBinaryPath()
+
+func resolveBinaryPath() string {
+	arch := filepath.Join(binaryDir, "ubersdr-drm_"+runtime.GOARCH)
+	if _, err := os.Stat(arch); err == nil {
+		return arch
+	}
+	return filepath.Join(binaryDir, "ubersdr-drm")
+}
 
 // outputSampleRate is the fixed output sample rate for decoded DRM audio.
 // DRM standard audio is 12 kHz mono.
@@ -58,10 +77,33 @@ type AudioExtension interface {
 	GetName() string
 }
 
+// GlobalConfigProvider carries the instance settings the extension needs.
+// Set by the main package before the extension is registered.
+type GlobalConfigProvider struct {
+	MaxUsers int // Maximum concurrent users (0 = unlimited)
+}
+
+// GlobalConfig is set by the main package before registration; nil means no
+// limit is enforced.
+var GlobalConfig *GlobalConfigProvider
+
+// activeUserCount tracks concurrent DRM users. Each one holds a Dream OFDM
+// decoder doing a full demodulation plus an AAC decode and an Opus encode, so
+// this is a good deal more expensive per user than most extensions.
+var (
+	activeUserCount int
+	activeUserMutex sync.Mutex
+)
+
 // DRMExtension wraps the ubersdr-drm subprocess as an AudioExtension.
 type DRMExtension struct {
 	decoder *DRMDecoder
 	config  DRMConfig
+
+	// held is true when this instance is counted in activeUserCount, so Stop
+	// releases the slot exactly once however many times it is called.
+	held     bool
+	stopOnce sync.Once
 }
 
 // DRMConfig holds configuration for the DRM extension.
@@ -87,6 +129,35 @@ func NewDRMExtension(audioParams AudioExtensionParams, extensionParams map[strin
 		return nil, fmt.Errorf("DRM requires 16-bit audio (got %d bits)", audioParams.BitsPerSample)
 	}
 
+	// Take a slot before anything expensive is created, and give it back if
+	// the decoder cannot be built — otherwise a run of failures would exhaust
+	// the limit with nothing actually running.
+	held := false
+	if GlobalConfig != nil && GlobalConfig.MaxUsers > 0 {
+		activeUserMutex.Lock()
+		if activeUserCount >= GlobalConfig.MaxUsers {
+			count := activeUserCount
+			activeUserMutex.Unlock()
+			return nil, fmt.Errorf("maximum DRM users reached (%d/%d)", count, GlobalConfig.MaxUsers)
+		}
+		activeUserCount++
+		count := activeUserCount
+		held = true
+		activeUserMutex.Unlock()
+		log.Printf("[DRM Extension] User connected (%d/%d)", count, GlobalConfig.MaxUsers)
+	}
+
+	release := func() {
+		if !held {
+			return
+		}
+		activeUserMutex.Lock()
+		if activeUserCount > 0 {
+			activeUserCount--
+		}
+		activeUserMutex.Unlock()
+	}
+
 	config := DRMConfig{
 		InputSampleRate:  audioParams.SampleRate,
 		OutputSampleRate: outputSampleRate,
@@ -94,6 +165,7 @@ func NewDRMExtension(audioParams AudioExtensionParams, extensionParams map[strin
 
 	decoder, err := NewDRMDecoder(config)
 	if err != nil {
+		release()
 		return nil, fmt.Errorf("failed to create DRM decoder: %w", err)
 	}
 
@@ -103,6 +175,7 @@ func NewDRMExtension(audioParams AudioExtensionParams, extensionParams map[strin
 	return &DRMExtension{
 		decoder: decoder,
 		config:  config,
+		held:    held,
 	}, nil
 }
 
@@ -113,6 +186,22 @@ func (e *DRMExtension) Start(audioChan <-chan AudioSample, resultChan chan<- []b
 
 // Stop stops the extension and kills the subprocess.
 func (e *DRMExtension) Stop() error {
+	// Once only: the manager may call Stop on teardown and again on a crash,
+	// and double-releasing would let the limit drift upwards over a long run.
+	e.stopOnce.Do(func() {
+		if !e.held {
+			return
+		}
+		activeUserMutex.Lock()
+		if activeUserCount > 0 {
+			activeUserCount--
+		}
+		count := activeUserCount
+		activeUserMutex.Unlock()
+		if GlobalConfig != nil {
+			log.Printf("[DRM Extension] User disconnected (%d/%d)", count, GlobalConfig.MaxUsers)
+		}
+	})
 	return e.decoder.Stop()
 }
 

@@ -1936,6 +1936,13 @@ func main() {
 	log.Printf("Registered audio extension: freedv v%s", freedvInfo["version"].(string))
 
 	// Register DRM extension
+	// Each user spawns a Dream OFDM decoder, so the same concurrency cap the
+	// other subprocess extensions use applies here too.
+	drmMaxUsers := config.DRMExtension.MaxUsers
+	if drmMaxUsers == 0 {
+		drmMaxUsers = 5 // default: 5 concurrent users — heavier than FreeDV
+	}
+	drm.GlobalConfig = &drm.GlobalConfigProvider{MaxUsers: drmMaxUsers}
 	drmInfo := drm.GetInfo()
 
 	drmFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {

@@ -3,6 +3,7 @@ package ft8
 import (
 	"fmt"
 	"log"
+	"math"
 )
 
 /*
@@ -61,8 +62,21 @@ func NewFT8Extension(audioParams AudioExtensionParams, extensionParams map[strin
 	// min_score is always 0 (matches reference implementation)
 	// Frontend cannot override this parameter
 
-	if maxCandidates, ok := extensionParams["max_candidates"].(float64); ok {
-		config.MaxCandidates = int(maxCandidates)
+	// max_candidates sizes the candidate slice and bounds the insert loop, so
+	// it is range-checked rather than taken on trust. Rejected outright rather
+	// than clamped, so a client sending nonsense is told about it instead of
+	// silently getting different behaviour.
+	//
+	// The NaN test has to come first: NaN fails every comparison, so a bare
+	// range check would pass it straight through to int(), whose result is
+	// implementation-defined. Same for values beyond the integer range.
+	if raw, ok := extensionParams["max_candidates"].(float64); ok {
+		if math.IsNaN(raw) || math.IsInf(raw, 0) ||
+			raw < MinMaxCandidates || raw > MaxMaxCandidates {
+			return nil, fmt.Errorf("max_candidates must be %d..%d, got %v",
+				MinMaxCandidates, MaxMaxCandidates, raw)
+		}
+		config.MaxCandidates = int(raw)
 	}
 
 	// Extract receiver locator (optional)

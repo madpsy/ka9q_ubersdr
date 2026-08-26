@@ -130,7 +130,7 @@ t('clicking the shift reset sends the mode default shift', () => {
 t('a disabled button sends nothing when clicked anyway', () => {
     // Belt and braces: the DOM would not fire it, but the handler is the only
     // thing standing between a control surface replaying this and IQ moving.
-    const { node, ctx } = button({ mode: 'iq', bandwidthLow: -5000, bandwidthHigh: 5000 });
+    const { node, ctx } = button({ mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 });
     assert.strictEqual(node.props.disabled, true);
     assert.strictEqual(ctx.sent.length, 0);
 });

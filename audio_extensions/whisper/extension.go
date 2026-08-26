@@ -190,7 +190,18 @@ func NewWhisperExtension(audioParams AudioExtensionParams, extensionParams map[s
 	// NOTE: "language" is the LibreTranslate *output* language and always has
 	// been; the recognition language is "asr_language" below.  Keeping them
 	// separate preserves the existing frontend contract.
+	// Validated with the same rule as asr_language below, and for the same
+	// reason the comment there gives: it is forwarded verbatim to a
+	// possibly-shared upstream — here as the "target" field of every
+	// LibreTranslate request, one per transcription segment. It was previously
+	// taken unchecked and unbounded, which made a multi-megabyte attach string
+	// into a multi-megabyte POST body repeated for the life of the session.
+	// Every code the interface offers is a plain ISO-639 code, so nothing
+	// legitimate is refused by this.
 	if language, ok := extensionParams["language"].(string); ok && language != "" {
+		if !reASRLanguage.MatchString(language) {
+			return nil, fmt.Errorf("invalid language %q (expected a language code such as \"en\" or \"pt-BR\")", language)
+		}
 		config.TargetLanguage = language
 		log.Printf("[Whisper Extension] Target language from frontend: %s", language)
 	}
@@ -278,7 +289,11 @@ func (e *WhisperExtension) Start(audioChan <-chan AudioSample, resultChan chan<-
 func (e *WhisperExtension) Stop() error {
 	// Decrement active user count — only if this instance actually took a slot
 	// (trusted containers and attaches created while max_users was 0 did not).
+	// Cleared as it is released, so a second Stop — the manager stops an
+	// extension whose Start failed as well as on ordinary teardown — cannot
+	// give the same slot back twice.
 	if e.countedUser {
+		e.countedUser = false
 		activeUserMutex.Lock()
 		if activeUserCount > 0 {
 			activeUserCount--

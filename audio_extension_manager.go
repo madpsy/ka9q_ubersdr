@@ -181,6 +181,17 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	// Start extension
 	if err := extension.Start(audioChan, resultChan); err != nil {
 		session.DetachAudioExtensionTap()
+		// The constructor succeeded, so this extension may be holding a
+		// max_users slot, a port from a pool, or a subprocess — none of which
+		// the record below will ever be around to release, since it is not
+		// stored and stopExtension can therefore never reach it. Without this
+		// a binary that will not start turns every attempt into a permanent
+		// leak, and enough attempts lock every user out of the extension.
+		// Stop is idempotent in each extension, so one that already cleaned up
+		// after its own failed Start is unharmed by being told again.
+		if stopErr := extension.Stop(); stopErr != nil {
+			log.Printf("AudioExtension: cleanup after failed start of '%s' returned: %v", extensionName, stopErr)
+		}
 		return aem.sendErrorSafe(activeExtension, conn, fmt.Sprintf("failed to start extension: %v", err))
 	}
 

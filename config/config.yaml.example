@@ -2338,6 +2338,19 @@ freedv_extension:
   max_users: 10
 
 # ==============================================================================
+# DRM Extension Configuration
+# ==============================================================================
+# Controls the DRM (Digital Radio Mondiale) shortwave broadcast decoder.
+# Each user who activates the DRM extension spawns a dedicated ubersdr-drm
+# subprocess, which runs a full OFDM demodulation plus an AAC decode — a good
+# deal heavier per user than the other decoders, hence the lower default.
+# Requires the binary at /opt/ubersdr-drm/ubersdr-drm.
+drm_extension:
+  # Maximum concurrent users of the DRM extension (default: 5)
+  # Set to 0 for unlimited users (not recommended for public instances).
+  max_users: 5
+
+# ==============================================================================
 # Sound Modem Extension Configuration
 # ==============================================================================
 # Controls the Sound Modem AX.25 packet decoder extension.

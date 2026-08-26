@@ -1098,13 +1098,13 @@ export function RadioProvider({ children }) {
             },
 
             setBandwidth(low, high) {
-                // IQ's passband is fixed at the full ±5 kHz baseband.
+                // IQ's passband is fixed at the full ±6 kHz baseband.
                 //
                 // The server would accept a narrower one — plain iq takes edges,
                 // unlike the wide variants — but the *stream* would not change:
-                // GetSampleRateForMode returns 10 kHz for iq whatever the filter
+                // GetSampleRateForMode returns 12 kHz for iq whatever the filter
                 // says. So narrowing only band-limits the samples, and the
-                // recording still claims 10 kHz of spectrum while most of it is
+                // recording still claims 12 kHz of spectrum while most of it is
                 // empty, with nothing in the WAV to say so. That is a quiet way
                 // to ruin a capture, and the whole point of the mode is the
                 // capture. clients/go/frontend does the same.

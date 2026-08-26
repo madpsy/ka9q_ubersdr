@@ -2,10 +2,13 @@ package drm
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -38,11 +41,28 @@ import (
  *   - PCM from stdout is accumulated in a shared ring buffer.
  *     A time.Ticker emits exactly one Opus frame every 20 ms, re-pacing
  *     the bursty output of the binary.
+ *
+ * Status protocol (backend → frontend):
+ *   [type:1=0x03][json: N bytes]
+ *   The binary writes JSON Lines on fd 3 — station label, text message,
+ *   country, language and signal quality — which statusLoop forwards
+ *   verbatim. Keeping it off stdout leaves the audio stream headerless.
  */
 
 const (
 	// MessageTypeOpusFrame is the binary protocol message type for Opus-encoded audio.
 	MessageTypeOpusFrame = 0x02
+
+	// MessageTypeStatus carries one JSON status object from the decoder: the
+	// station label, text message, country and language, and the signal
+	// quality figures. The binary writes these on a descriptor of its own so
+	// stdout stays raw PCM; see statusLoop.
+	MessageTypeStatus = 0x03
+
+	// maxStatusLine bounds a single status line. The binary caps its own at
+	// 2 KB; this is the guard against a wedged pipe growing the scanner buffer
+	// without limit.
+	maxStatusLine = 64 * 1024
 
 	// opusFrameSamples is the number of int16 samples per Opus frame.
 	// 20 ms at 12 kHz = 240 samples.
@@ -70,9 +90,10 @@ const (
 type DRMDecoder struct {
 	config DRMConfig
 
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  io.ReadCloser
+	statusR *os.File // read end of the binary's fd 3 status channel
 
 	opusEncoder *opus.Encoder // Opus encoder for decoded audio output
 
@@ -133,6 +154,17 @@ func (d *DRMDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []byt
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
+	// The status channel. ExtraFiles[0] becomes fd 3 in the child, which is
+	// where the binary writes its JSON Lines by default. A failure here is not
+	// fatal: the decoder runs perfectly well with no status channel, and audio
+	// matters more than metadata.
+	statusR, statusW, err := os.Pipe()
+	if err != nil {
+		log.Printf("[DRM] Warning: no status channel (pipe failed: %v)", err)
+	} else {
+		cmd.ExtraFiles = []*os.File{statusW}
+	}
+
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
@@ -150,6 +182,17 @@ func (d *DRMDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []byt
 	d.running = true
 
 	log.Printf("[DRM] Subprocess started (pid=%d): %s %v", cmd.Process.Pid, binaryPath, args)
+
+	// The child holds its own copy of the write end; this one has to go or the
+	// reader below never sees EOF when the subprocess exits.
+	if statusW != nil {
+		_ = statusW.Close()
+	}
+	if statusR != nil {
+		d.statusR = statusR
+		d.wg.Add(1)
+		go d.statusLoop(statusR, resultChan)
+	}
 
 	// stderrLoop: relay the binary's status lines to the log. Not tracked by
 	// wg — it ends at EOF when the subprocess exits.
@@ -363,6 +406,63 @@ func (d *DRMDecoder) readLoop(resultChan chan<- []byte) {
 					break
 				}
 			}
+		}
+	}
+}
+
+// statusLoop forwards the binary's JSON Lines status channel to the frontend.
+//
+// Each line is sent on as a 0x03 frame with the JSON untouched, so adding a
+// field to the binary needs no change here. Lines are only parsed far enough
+// to log the first lock — the frontend does the rest.
+func (d *DRMDecoder) statusLoop(r *os.File, resultChan chan<- []byte) {
+	defer d.wg.Done()
+	defer r.Close()
+
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 8*1024), maxStatusLine)
+
+	logged := false
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+
+		// Say once when a station is identified. Repeating it every second
+		// would bury the log, and the frontend shows the live value anyway.
+		if !logged {
+			var st struct {
+				Service string  `json:"service"`
+				Audio   int     `json:"audio"`
+				WMER    float64 `json:"wmer"`
+			}
+			if json.Unmarshal(line, &st) == nil && st.Service != "" {
+				log.Printf("[DRM] Decoding %q (audio=%d, wmer=%.1f dB)", st.Service, st.Audio, st.WMER)
+				logged = true
+			}
+		}
+
+		pkt := make([]byte, 1+len(line))
+		pkt[0] = MessageTypeStatus
+		copy(pkt[1:], line)
+
+		select {
+		case resultChan <- pkt:
+		case <-d.stopChan:
+			return
+		default:
+			// Status is not worth blocking audio for; the next line supersedes
+			// this one a second later.
+		}
+	}
+
+	if err := sc.Err(); err != nil {
+		d.mu.Lock()
+		running := d.running
+		d.mu.Unlock()
+		if running {
+			log.Printf("[DRM] status channel read error: %v", err)
 		}
 	}
 }

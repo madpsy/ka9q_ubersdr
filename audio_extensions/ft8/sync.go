@@ -20,6 +20,16 @@ type Candidate struct {
 
 // FindCandidates locates top N candidates by sync strength
 func FindCandidates(wf *Waterfall, maxCandidates int, minScore int) []Candidate {
+	// Defensive, not merely tidy: a non-positive value makes the allocation
+	// below panic with "cap out of range", and zero makes insertCandidate index
+	// candidates[-1]. This runs on the decode goroutine, which has no recover,
+	// so either would take the whole process down rather than the session.
+	if maxCandidates < MinMaxCandidates {
+		maxCandidates = MinMaxCandidates
+	}
+	if maxCandidates > MaxMaxCandidates {
+		maxCandidates = MaxMaxCandidates
+	}
 	candidates := make([]Candidate, 0, maxCandidates)
 
 	// FT8 uses 8 tones
@@ -141,6 +151,11 @@ func getWaterfallMag(wf *Waterfall, block, bin, timeSub, freqSub int) uint8 {
 // insertCandidate inserts a candidate into the sorted list (min-heap behavior)
 func insertCandidate(candidates []Candidate, newCand Candidate, maxCandidates int) []Candidate {
 	// If list is not full, just append
+	// Same guard as FindCandidates: this is exported-adjacent and the indexing
+	// below is only safe for a positive bound.
+	if maxCandidates < MinMaxCandidates {
+		maxCandidates = MinMaxCandidates
+	}
 	if len(candidates) < maxCandidates {
 		candidates = append(candidates, newCand)
 		sort.Slice(candidates, func(i, j int) bool {

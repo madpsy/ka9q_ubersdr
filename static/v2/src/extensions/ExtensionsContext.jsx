@@ -97,18 +97,23 @@ export function ExtensionsProvider({ children }) {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ floats, minimal })); } catch (e) { /* ignore */ }
     }, [floats, minimal]);
 
-    // Every extension here is a decoder over demodulated audio, and IQ carries
-    // none — the server hands an audio extension the session's own channel count
-    // and sample rate, so on a 10 kHz quadrature pair a decoder is being fed RF
-    // and told it is speech. Closed rather than left running behind the mode
-    // change: a window still on screen producing nothing reads as the decoder
-    // being broken.
+    // Almost every extension here is a decoder over demodulated audio, and IQ
+    // carries none — the server hands an audio extension the session's own
+    // channel count and sample rate, so on a 12 kHz quadrature pair a decoder
+    // is being fed RF and told it is speech. Closed rather than left running
+    // behind the mode change: a window still on screen producing nothing reads
+    // as the decoder being broken.
+    //
+    // The exception is an extension that wants the quadrature stream — DRM —
+    // which must survive the very mode change that closes the others, and
+    // indeed makes that change itself when it starts.
     //
     // Here rather than in the panel because the panel is unmounted whenever its
     // dock is collapsed, and an extension outlives the launcher that opened it.
     const iq = isIQ(tuning.mode);
     useEffect(() => {
-        if (iq) setActiveId(null);
+        if (!iq) return;
+        setActiveId((id) => (id && EXTENSION_BY_ID[id] && EXTENSION_BY_ID[id].needsIQ ? id : null));
     }, [iq]);
 
     // The registry, annotated. `enabled` is null while the fetch is in flight,

@@ -150,6 +150,9 @@ type AudioExtension interface {
 
 // SoundModemExtension wraps the QtSoundModem subprocess as an AudioExtension.
 type SoundModemExtension struct {
+	// Guards the port slot and max_users release; see Stop.
+	stopOnce sync.Once
+
 	decoder   *SoundModemDecoder
 	sessionID string
 	portSlot  int
@@ -462,26 +465,30 @@ func (e *SoundModemExtension) Start(audioChan <-chan AudioSample, resultChan cha
 func (e *SoundModemExtension) Stop() error {
 	err := e.decoder.Stop()
 
-	// Release port slot
-	releasePortSlot(e.portSlot)
+	// Released once however many times Stop is called. Start() stops itself on
+	// failure and the manager stops it too, so without this the port slot would
+	// be handed back twice — freeing one another session had since taken — and
+	// the user count would drift below zero's worth of real users.
+	e.stopOnce.Do(func() {
+		releasePortSlot(e.portSlot)
 
-	// Decrement active user count
-	if GlobalCfg != nil && GlobalCfg.MaxUsers > 0 {
-		activeUserMu.Lock()
-		if activeUserCount > 0 {
-			activeUserCount--
+		if GlobalCfg != nil && GlobalCfg.MaxUsers > 0 {
+			activeUserMu.Lock()
+			if activeUserCount > 0 {
+				activeUserCount--
+			}
+			cur := activeUserCount
+			activeUserMu.Unlock()
+			log.Printf("[SoundModem] User disconnected (%d/%d)", cur, GlobalCfg.MaxUsers)
 		}
-		cur := activeUserCount
-		activeUserMu.Unlock()
-		log.Printf("[SoundModem] User disconnected (%d/%d)", cur, GlobalCfg.MaxUsers)
-	}
 
-	// Record stop time for cooldown enforcement
-	if e.sessionID != "" {
-		lastStopMu.Lock()
-		lastStopTimes[e.sessionID] = time.Now()
-		lastStopMu.Unlock()
-	}
+		// Record stop time for cooldown enforcement
+		if e.sessionID != "" {
+			lastStopMu.Lock()
+			lastStopTimes[e.sessionID] = time.Now()
+			lastStopMu.Unlock()
+		}
+	})
 
 	return err
 }

@@ -177,6 +177,10 @@ func DefaultWEFAXConfig() WEFAXConfig {
 }
 
 // NewWEFAXDecoder creates a new WEFAX decoder
+// maxImageHeight caps the accumulated image. A WEFAX chart runs a few thousand
+// lines; beyond this the session is not receiving a fax, it is just attached.
+const maxImageHeight = 8192
+
 func NewWEFAXDecoder(sampleRate int, config WEFAXConfig) *WEFAXDecoder {
 	d := &WEFAXDecoder{
 		lpm:                      config.LPM,
@@ -426,12 +430,26 @@ func (d *WEFAXDecoder) decodeFaxLine(resultChan chan<- []byte) {
 
 	// Decode image line
 	if d.includeHeadersInImages || !d.usePhasing || (lineType == HeaderImage && d.phasingLinesLeft < -phasingSkipLines) {
-		// Grow image buffer if needed
+		// Grow image buffer if needed.
+		//
+		// Capped: a fax that never stops would otherwise double for ever, and
+		// the width is chosen by the client, so an idle session left attached
+		// is a slow unbounded allocation. At the ceiling the image stops
+		// growing and further lines are dropped rather than the buffer being
+		// reallocated — a real chart is a few thousand lines at most.
 		if d.imageLine >= d.height {
-			d.height *= 2
-			newData := make([]uint8, d.imageWidth*d.height*d.imageColors)
-			copy(newData, d.imgData)
-			d.imgData = newData
+			if d.height >= maxImageHeight {
+				d.imageLine = d.height - 1
+			} else {
+				newHeight := d.height * 2
+				if newHeight > maxImageHeight {
+					newHeight = maxImageHeight
+				}
+				d.height = newHeight
+				newData := make([]uint8, d.imageWidth*d.height*d.imageColors)
+				copy(newData, d.imgData)
+				d.imgData = newData
+			}
 		}
 
 		// Decode the line only if:
@@ -540,6 +558,12 @@ func (d *WEFAXDecoder) faxPhasingLinePosition(image []uint8) int {
 
 	pixelResolution := 4
 	sampsIncr := (d.samplesPerLine / d.imageWidth) * pixelResolution
+	// Zero whenever the line holds fewer samples than the image is wide, which
+	// would leave the loop below advancing by nothing and spinning a core for
+	// ever. One sample at a time is the slowest meaningful step.
+	if sampsIncr < 1 {
+		sampsIncr = 1
+	}
 
 	for i := 0; i < d.samplesPerLine; i += sampsIncr {
 		total := 0
@@ -568,9 +592,21 @@ func (d *WEFAXDecoder) decodeImageLine(buffer []uint8, resultChan chan<- []byte)
 		pixel := 0
 		pixelSamples := 0
 
-		for sample := firstSample; sample <= lastSample; sample++ {
+		for sample := firstSample; sample <= lastSample && sample < len(buffer); sample++ {
 			pixel += int(buffer[sample])
 			pixelSamples++
+		}
+
+		// A pixel can span no samples at all when the image is wider than the
+		// line: samplesPerLine/imageWidth is then below one and the range comes
+		// out empty. Take the nearest sample instead of averaging none of them
+		// — dividing by zero here is an integer divide-by-zero panic, and this
+		// runs on a goroutine with no recover, so it would end the process.
+		if pixelSamples == 0 {
+			if firstSample >= 0 && firstSample < len(buffer) {
+				d.imgData[d.imgPos+i] = buffer[firstSample]
+			}
+			continue
 		}
 
 		pixel /= pixelSamples

@@ -180,7 +180,7 @@ export default function StatusPanel({ minimal }) {
                 />
                 <Row label="Audio link" value={<Link state={audioState} rate={audioRate} />} />
                 {/* What the stream actually is, rather than what the mode
-                    implies: 12 kHz mono on SSB, 24 on the AM family, and 10 kHz
+                    implies: 12 kHz mono on SSB, 24 on the AM family, and 12 kHz
                     stereo in IQ where the two channels are I and Q rather than
                     left and right. Out of the minimal view, which is the link
                     block on its own. */}

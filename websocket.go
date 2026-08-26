@@ -800,7 +800,15 @@ func defaultBandwidthForMode(mode string) (low, high int) {
 	case "nfm":
 		return -5000, 5000
 	case "iq":
-		return -5000, 5000
+		// The whole 12 kHz quadrature baseband, which is also exactly what
+		// radiod's [iq] preset opens with (samprate = 12k, low = -6k,
+		// high = +6k).  This said +/-5000 while the stream was 10 kHz and
+		// stayed behind when presets.conf moved: asking for +/-5000 put a
+		// filter inside the preset's own passband, so the top and bottom
+		// kilohertz of every capture came back empty with nothing in the WAV
+		// to say why.  Matching the preset means the mode change moves no
+		// filter at all.
+		return -6000, 6000
 	default:
 		return 50, 3000
 	}

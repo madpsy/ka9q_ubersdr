@@ -1287,3 +1287,28 @@ func TestSamprateParserParity(t *testing.T) {
 		}
 	}
 }
+
+// The shared default spectrum channel runs at full rate.
+//
+// It is what every client sees before touching the zoom, and one radiod spectrum_poll()
+// serves all of them, so throttling it made the most-looked-at view visibly less smooth
+// than the private channel a zoom moves you onto. Pinned because the constant is the only
+// thing saying so and it has drifted from its own documentation before — the comments
+// claimed a third while the code did a half.
+func TestSharedSpectrumPollsAtFullRate(t *testing.T) {
+	if sharedPollDivisor != 1 {
+		t.Errorf("sharedPollDivisor is %d; the shared channel should poll every tick",
+			sharedPollDivisor)
+	}
+
+	// The poll loop's own test: tick % divisor == 0. At 1 that is every tick.
+	polled := 0
+	for tick := 1; tick <= 10; tick++ {
+		if tick%sharedPollDivisor == 0 {
+			polled++
+		}
+	}
+	if polled != 10 {
+		t.Errorf("polled on %d of 10 ticks, want 10", polled)
+	}
+}

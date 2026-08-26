@@ -328,10 +328,22 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	swsh.sessions.DestroySession(session.ID)
 }
 
-// sharedPollDivisor is the hardcoded poll-rate divisor for the shared default spectrum channel.
-// The shared SSRC is polled at PollPeriodMs × sharedPollDivisor (i.e. every 2nd tick).
-// This constant is also used in user_spectrum.go (same package) for the poll-loop throttle.
-const sharedPollDivisor = 2
+// sharedPollDivisor is the poll-rate divisor for the shared default spectrum channel: the
+// shared SSRC is polled on every sharedPollDivisor-th tick, i.e. at
+// PollPeriodMs × sharedPollDivisor.
+//
+// 1 means full rate — the same cadence a private channel gets, which is what the default
+// view is worth: it is what every client sees before they touch the zoom, and one radiod
+// spectrum_poll() serves all of them at once. Halving it to save that single call made
+// the view most people look at visibly less smooth than the one they get after zooming in.
+//
+// Raise it if the shared poll ever turns out to cost more than it is worth — 2 is half
+// rate, 3 a third, and so on. Nothing else needs changing: the poll loop reads this
+// constant directly and no client is told the rate, so a change takes effect on restart
+// with no protocol or frontend work.
+//
+// Also used in user_spectrum.go (same package) for the poll-loop throttle.
+const sharedPollDivisor = 1
 
 // handleMessages processes incoming WebSocket messages
 func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *Session, done chan struct{}, state *spectrumState) {
@@ -574,8 +586,11 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			// at 1/N the normal rate, so frames arrive on SpectrumChan at 1/N rate.
 			// Maximum divisor is 8 (1 in every 8 ticks polled).
 			//
-			// Shared-channel subscribers: the shared SSRC poll rate is hardcoded to
-			// sharedPollDivisor (÷3) server-side; set_rate has no effect on delivery rate.
+			// Shared-channel subscribers: the shared SSRC is polled at the rate
+			// sharedPollDivisor sets, server-side, and set_rate has no effect on it —
+			// one channel serves every default-view client, so no one of them can be
+			// allowed to set the pace. It applies as soon as a zoom or pan moves the
+			// session onto a private channel.
 			//
 			// Frame-skip in streamSpectrum() has been removed — rate control is handled
 			// entirely at the poll level, so every frame that arrives is forwarded.

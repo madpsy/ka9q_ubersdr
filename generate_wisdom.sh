@@ -559,27 +559,82 @@ sudo rm -f "$WISDOM_TMP" 2>/dev/null || true
 #    cob16200 cob9600 cob8100 cob6930 cob4860 cob4800 cob3240 cob3200 cob1920 cob1620 cob1600 \
 #    cob1200 cob960 cob810 cob800 cob600 cob480 cob405 cob400 cob320 cob300 cob205 cob200 cob160 cob85 cob45 cob15"
 
-FFT_SIZES="rof1620000"
+# Which transform to generate for.
+#
+# Asked of the receiver rather than assumed: the forward FFT length follows from the
+# front end sample rate (N = samprate x blocktime x overlap/(overlap-1)), so a box
+# running at 129.6 MSPS plans rof3240000 and one at 64.8 plans rof1620000. This used to
+# hardcode the 64.8 size and offer the other behind a flag and a prompt, which meant the
+# usual invocation on a 129.6 receiver spent hours generating wisdom for a transform
+# radiod would never plan, while the one it does plan got none.
+#
+# get-samprate.sh reads it from the running server's /api/description and falls back to
+# the radiod .conf when the server is not up. See there for why the API is preferred.
+FFT_LOW="rof1620000"    # 64.8 MSPS
+FFT_HIGH="rof3240000"   # 129.6 MSPS
 
-# Ask user about RX888 MKII @ 129.6 MSPS support only if --max-rate is specified
-if [ $MAX_RATE -eq 1 ]; then
+_SR_INFO=$("${SCRIPT_DIR}/get-samprate.sh" 2>/dev/null)
+if [ -n "$_SR_INFO" ]; then
+    eval "$_SR_INFO"
     echo
-    echo "Do you want to generate wisdom for RX888 MKII @ 129.6 MSPS?"
-    echo
-    echo "WARNING: This adds rof3240000 to the generation and may take SEVERAL HOURS."
-    echo "         129.6 MSPS is NOT required for most users."
-    echo
-    read -p "Generate for 129.6 MSPS? (y/N): " -n 1 -r
-    echo
-    echo
+    echo "Front end is running at $(awk -v s="$samprate" 'BEGIN{printf "%.4g", s/1e6}') MSPS"
+    echo "  (read from $([ "${source:-}" = "api" ] && echo "the running server" || echo "the radiod config"))"
+    echo "  blocktime ${blocktime}s, overlap ${overlap} -> radiod plans ${fft_name}"
 
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Including 129.6 MSPS support (rof3240000)..."
-        FFT_SIZES="rof3240000 $FFT_SIZES"
+    if [ "$fft_name" = "$FFT_HIGH" ]; then
+        # At the high rate, generate for both — deliberately, and not symmetrically with
+        # the low rate.
+        #
+        # 129.6 MSPS is the rate an operator drops *back* from: it runs the RX888 MkII
+        # hot enough to damage it without thermal work, and a receiver that cannot
+        # sustain the USB throughput loses samples. Both of those end with someone
+        # setting 64800000 and restarting — and finding radiod planning rof1620000 with
+        # no wisdom for it, hours after the wisdom run they thought had finished the job.
+        #
+        # The extra size is also the cheap one here: whoever is at 129.6 has already
+        # accepted the several-hour rof3240000 generation, and rof1620000 beside it is a
+        # small fraction of that.
+        FFT_SIZES="$FFT_HIGH $FFT_LOW"
+        echo
+        echo "Generating for BOTH sample rates (${FFT_SIZES})."
+        echo "  At 129.6 MSPS the 64.8 wisdom is generated too, so dropping back to the"
+        echo "  safe rate does not leave radiod planning a transform with no wisdom."
     else
-        echo "Skipping 129.6 MSPS support..."
+        FFT_SIZES="$fft_name"
+    fi
+else
+    FFT_SIZES="$FFT_LOW"
+    echo
+    echo "WARNING: could not determine the front end sample rate — is UberSDR running?"
+    echo "         Assuming 64.8 MSPS (${FFT_SIZES}). If this receiver runs at 129.6 MSPS,"
+    echo "         the generated wisdom will be for a transform radiod never plans."
+    echo "         Re-run with --max-rate to cover both."
+fi
+
+# --max-rate forces both even at the low rate: for a receiver about to be raised to
+# 129.6, so the wisdom is ready before the change rather than hours after it. At the high
+# rate both are already included and this changes nothing.
+if [ $MAX_RATE -eq 1 ]; then
+    _added=0
+    for _both in "$FFT_HIGH" "$FFT_LOW"; do
+        case " $FFT_SIZES " in
+            *" $_both "*) ;;
+            *) FFT_SIZES="$_both $FFT_SIZES"; _added=1 ;;
+        esac
+    done
+    # Only say so if it actually changed something — at the high rate both are already
+    # in, and repeating the same sentence reads as two different decisions.
+    if [ $_added -eq 1 ]; then
+        echo
+        echo "--max-rate: generating for both sample rates (${FFT_SIZES})."
     fi
 fi
+
+case " $FFT_SIZES " in
+    *" $FFT_HIGH "*)
+        echo
+        echo "WARNING: ${FFT_HIGH} may take SEVERAL HOURS on its own." ;;
+esac
 
 echo
 echo "Creating tmux session '$SESSION_NAME' and starting FFTW Wisdom generation..."

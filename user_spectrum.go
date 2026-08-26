@@ -219,8 +219,10 @@ func (usm *UserSpectrumManager) pollLoop() {
 // Rate control:
 //   - Private sessions: polled at PollPeriodMs ÷ session.PollDivisor.  A divisor of 0 or 1
 //     means full rate (zero value = full rate, no init needed).
-//   - Shared default channel: polled at PollPeriodMs × 3 (hardcoded ÷3) because many
-//     clients share one SSRC and no single client controls the rate.
+//   - Shared default channel: polled at PollPeriodMs × sharedPollDivisor, which is 1 —
+//     full rate. Many clients share one SSRC and no single one of them controls the
+//     rate, so it is fixed here rather than negotiated; see sharedPollDivisor for why
+//     full rate, and for how to slow it down again if it ever needs to be.
 func (usm *UserSpectrumManager) pollUserSpectrumSessions() {
 	// pollTickCount is incremented on every tick for the shared channel throttle.
 	// It is only ever touched by this goroutine so no mutex is needed.

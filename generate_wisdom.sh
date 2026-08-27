@@ -751,42 +751,56 @@ if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     exit 0
 fi
 
-# Check if wisdom file already exists and ask user if they want to continue
+# ── Existing wisdom: noted here, decided later ────────────────────────────────
+#
+# This used to ask "a wisdom file already exists, regenerate it? (y/N)" right here,
+# defaulting to no and exiting — before the catalog had been consulted. That made
+# the answer to "should I take the better wisdom that now exists for my CPU?"
+# unreachable behind a question about spending hours regenerating, and the default
+# answer was the one that skipped it. A receiver holding 64.8 MSPS wisdom could
+# never discover that a file covering both rates had appeared for its CPU.
+#
+# So the file's presence is only recorded here. The catalog runs first, and
+# whichever choice the operator is then offered is one they can actually make
+# knowing what is on the table.
+HAVE_LOCAL_WISDOM=0
 if sudo test -f "$WISDOM_FILE"; then
-    echo "WARNING: A wisdom file already exists at:"
-    echo "  $WISDOM_FILE"
+    HAVE_LOCAL_WISDOM=1
+    echo "Note: a wisdom file already exists at ${WISDOM_FILE}"
+    echo "      (it will be backed up before anything replaces it)"
     echo
-    read -p "Do you want to continue and regenerate it? (y/N): " -n 1 -r
-    echo
-    echo
+fi
 
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Wisdom generation cancelled."
-        # Attempt to upload the existing wisdom to the community catalog.
-        # Errors are ignored — this is best-effort. The helper declares whatever
-        # the sidecar records; with no sidecar the catalog records the file as
-        # 64.8 MSPS only, which is all a pre-sidecar release could produce.
-        _helper=$(mktemp)
-        write_upload_helper "$_helper"
-        bash "$_helper" existing || true
-        rm -f "$_helper"
-        exit 0
-    fi
+# Set once the operator has knowingly chosen local generation, so the fallback
+# prompt further down does not ask a second time.
+GENERATION_CONFIRMED=0
 
-    # Backup existing wisdom file (copy, not move — keep original in place
-    # so it remains usable if generation subsequently fails)
+# Copy the current wisdom aside before anything overwrites it. The sidecar travels
+# with the file it describes: restoring a backup without it would leave a wisdom
+# file nobody can say anything about, which is the situation the sidecar exists to
+# avoid.
+backup_existing_wisdom() {
+    [ $HAVE_LOCAL_WISDOM -eq 1 ] || return 0
     BACKUP_FILE="${WISDOM_FILE}.backup"
     echo "Copying existing wisdom file to ${BACKUP_FILE}..."
     sudo cp "$WISDOM_FILE" "$BACKUP_FILE"
-    # The sidecar travels with the file it describes: restoring the backup without
-    # it would leave a wisdom file nobody can say anything about, which is the
-    # situation this whole mechanism exists to avoid.
     if sudo test -f "$WISDOM_META_FILE"; then
         sudo cp "$WISDOM_META_FILE" "${WISDOM_META_FILE}.backup"
     fi
     echo "Backup created at ${BACKUP_FILE}"
     echo
-fi
+}
+
+# Offer the wisdom already on this machine to the catalog, then leave. Used by the
+# paths where the operator decides to keep what they have.
+keep_existing_and_exit() {
+    echo "  Keeping the existing wisdom file."
+    _helper=$(mktemp)
+    write_upload_helper "$_helper"
+    bash "$_helper" existing || true
+    rm -f "$_helper"
+    exit 0
+}
 
 # ── Try to download precomputed wisdom from the catalog ───────────────────────
 #
@@ -843,10 +857,14 @@ if [[ -n "$CPU_HASH" && $CATALOG_ELIGIBLE -eq 1 ]]; then
         echo
         echo
         if [[ $REPLY =~ ^[Nn]$ ]]; then
-            echo "  Wisdom generation cancelled."
             rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"
+            if [ $HAVE_LOCAL_WISDOM -eq 1 ]; then
+                keep_existing_and_exit
+            fi
+            echo "  Wisdom generation cancelled."
             exit 0
         fi
+        GENERATION_CONFIRMED=1
     }
 
     # Shown once the file has been accepted, whether or not it could be checksummed.
@@ -906,14 +924,32 @@ if [[ -n "$CPU_HASH" && $CATALOG_ELIGIBLE -eq 1 ]]; then
         echo "  Generating your own would build: ${FFT_SIZES}"
         echo "  ${FFT_COST_NOTE}"
         echo
-        read -p "  [1] Use precomputed wisdom (recommended)  [2] Generate my own: " -r _choice
-        echo
-        if [[ "$_choice" == "2" ]]; then
-            echo "  Proceeding with local generation..."
+        if [ $HAVE_LOCAL_WISDOM -eq 1 ]; then
+            echo "  This machine already has a wisdom file. Installing the catalog one"
+            echo "  backs the current file up to ${WISDOM_FILE}.backup first."
             echo
+            read -p "  [1] Use precomputed (recommended)  [2] Generate my own  [3] Keep what I have: " -r _choice
         else
-            USE_PRECOMPUTED=true
+            read -p "  [1] Use precomputed wisdom (recommended)  [2] Generate my own: " -r _choice
         fi
+        echo
+        case "$_choice" in
+            2)
+                echo "  Proceeding with local generation..."
+                echo
+                GENERATION_CONFIRMED=1
+                ;;
+            3)
+                if [ $HAVE_LOCAL_WISDOM -eq 1 ]; then
+                    rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"
+                    keep_existing_and_exit
+                fi
+                USE_PRECOMPUTED=true
+                ;;
+            *)
+                USE_PRECOMPUTED=true
+                ;;
+        esac
     }
 
     if [[ $CURL_EXIT -ne 0 ]]; then
@@ -956,14 +992,7 @@ if [[ -n "$CPU_HASH" && $CATALOG_ELIGIBLE -eq 1 ]]; then
     fi
 
     if $USE_PRECOMPUTED; then
-        # Back up any existing wisdom before overwriting
-        if sudo test -f "$WISDOM_FILE"; then
-            echo "  Backing up existing wisdom to ${WISDOM_FILE}.backup..."
-            sudo cp "$WISDOM_FILE" "${WISDOM_FILE}.backup"
-            if sudo test -f "$WISDOM_META_FILE"; then
-                sudo cp "$WISDOM_META_FILE" "${WISDOM_META_FILE}.backup"
-            fi
-        fi
+        backup_existing_wisdom
         # Install atomically: cp to a temp file on the same filesystem, then mv
         _precomp_tmp="${WISDOM_FILE}.tmp"
         echo "  Installing precomputed wisdom to ${WISDOM_FILE}..."
@@ -1002,6 +1031,25 @@ if [[ -n "$CPU_HASH" && $CATALOG_ELIGIBLE -eq 1 ]]; then
 
     rm -f "$_wisdom_body" "$_wisdom_headers" "$_wisdom_err"
 fi
+
+# ── Confirm, if nobody has been asked yet ─────────────────────────────────────
+#
+# Every route through the catalog block above ends with the operator having chosen
+# local generation explicitly. The block is skipped entirely, though, when there is
+# no CPU hash or the receiver plans a transform the catalog does not carry — and in
+# that case nothing has yet stood between an existing wisdom file and being
+# replaced. Only asked when there is something to lose; with no wisdom on the
+# machine, running this script is itself the request to generate some.
+if [ $GENERATION_CONFIRMED -eq 0 ] && [ $HAVE_LOCAL_WISDOM -eq 1 ]; then
+    read -p "Regenerate the existing wisdom file? (y/N): " -n 1 -r
+    echo
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        keep_existing_and_exit
+    fi
+fi
+
+backup_existing_wisdom
 
 # ── Local generation ──────────────────────────────────────────────────────────
 

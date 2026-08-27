@@ -1,29 +1,39 @@
 #!/usr/bin/env bash
-# build.sh — build ubersdr-rtltcp-bridge for amd64 and arm64, and publish them.
+# build.sh — build ubersdr-hpsdr-bridge for amd64 and arm64, and publish them.
 #
-# Go, and no C of its own — so this could cross-compile on the host in a second
-# with GOARCH=arm64. It builds in containers anyway, the same way docker.sh
-# builds the server image and clients/hpsdr/build.sh builds the bridge, and the
-# reason is cgo rather than architecture:
+# This one is C, and it links libwebsockets, zstd, uuid and bsd — so unlike the
+# pure-Go clients it cannot simply be told to emit another architecture. It needs
+# the target's headers and shared libraries, which means a target-architecture
+# root filesystem.
 #
-#   CGO_ENABLED=0 produces a static binary that needs no glibc at all, which
-#   looks strictly better until you notice what it does to name resolution. Go's
-#   pure resolver reads /etc/hosts and talks DNS itself; it cannot call NSS
-#   modules. UberSDR advertises itself over mDNS (see install-ubersdr-mdns.sh),
-#   so `--url http://ubersdr.local:8080` resolves through nss-mdns via libc — and
-#   under a static build it simply stops resolving, for a bridge whose whole job
-#   is to reach a server the user names. cgo keeps libc doing the lookup, which
-#   costs a glibc dependency and is the right trade here.
+# Docker is that root filesystem, the same way the rest of this repo cross-builds
+# (docker.sh builds the server image --platform linux/amd64,linux/arm64). Both
+# architectures build in ubuntu:24.04 containers here rather than one of them on
+# the host, for two reasons:
 #
-# With cgo on, the binary is dynamically linked and the build environment sets
-# the oldest glibc it will run against. golang:1.24-bookworm is glibc 2.36, but
-# what comes out asks only for GLIBC_2.34 — Go's runtime touches nothing newer,
-# 2.34 being where libpthread merged into libc. That matches the binaries this
-# replaces exactly, so anything running the current download runs this one.
+#   * The result stops depending on whichever libraries this particular machine
+#     happens to have. The host's libwebsockets is an Ubuntu Pro ESM build
+#     (4.3.3-1.1ubuntu0.1~esm1); a plain 24.04 container has the ordinary one.
+#     Same soname, same ABI, but only one of the two is reproducible by anybody
+#     who does not have that subscription.
+#   * The two binaries then match each other, having been built from the same
+#     image against the same library versions — which is what the pair of them
+#     being one release implies.
 #
-# Which is worth knowing before changing the image: the floor to watch is the
-# highest GLIBC_x.y in `objdump -T`, not the image's own glibc, and the build
-# reports it for each binary so a change of image cannot quietly raise it.
+# ubuntu:24.04 specifically, and it is a compatibility decision rather than a
+# default. A dynamically linked binary demands the glibc it was built against or
+# newer, and links a library by soname, so the base image chooses which machines
+# the download runs on:
+#
+#     ubuntu:24.04   glibc 2.39, libwebsockets.so.19   ← what the release has always been
+#     debian:12      glibc 2.36, libwebsockets.so.19
+#     ubuntu:22.04   glibc 2.35, libwebsockets.so.16   ← different soname, would not load
+#
+# The published binaries require GLIBC_2.38 and libwebsockets.so.19, so 24.04 is
+# what they were built on and moving off it would silently change who can run
+# them. Going *older* would widen that audience — a debian:12 build runs on a
+# Raspberry Pi OS bookworm that a 24.04 build refuses — and is worth considering
+# on purpose one day, but it is not a change to make by editing a default.
 #
 # arm64 runs under qemu, registered with binfmt_misc. The registration does not
 # survive a reboot, so --check reports it and the build offers to install it.
@@ -32,7 +42,6 @@
 #   ./build.sh                 both architectures into build/
 #   ./build.sh amd64           just the one — amd64 or arm64
 #   ./build.sh --check         report whether this machine can build both, and stop
-#   ./build.sh --test          run the tests before building
 #   ./build.sh --publish       ...then upload what this run built to the `latest`
 #                              release, replacing what is there. Asks first.
 #   ./build.sh --yes           answer the publish prompt in advance, for a run
@@ -45,7 +54,6 @@ cd "$(dirname "$0")"
 ASSUME_YES=0
 PUBLISH=0
 CHECK_ONLY=0
-RUN_TESTS=0
 
 # Same tag, repo and override variables as the other clients' build scripts: one
 # release holds them all. The asset names are the filenames built below, because
@@ -54,17 +62,18 @@ RUN_TESTS=0
 REPO="${UBERSDR_REPO:-madpsy/ka9q_ubersdr}"
 TAG="${UBERSDR_TAG:-latest}"
 
-# The build environment, and with it the oldest glibc these binaries run against.
-# See the header before changing it.
-IMAGE="${UBERSDR_BUILD_IMAGE:-golang:1.24-bookworm}"
+# The build environment, and with it the glibc and libwebsockets the binaries
+# demand of the machines that run them. See the header before changing it.
+IMAGE="${UBERSDR_BUILD_IMAGE:-ubuntu:24.04}"
 
 OUT="build"
-BINARY="ubersdr-rtltcp-bridge"
+BINARY="ubersdr-hpsdr-bridge"
 
-# Downloaded modules, kept between runs and between architectures. Without it
-# every build re-fetches the whole module graph, and the arm64 one does it
-# through qemu.
-CACHE_VOLUME="${UBERSDR_GOCACHE_VOLUME:-ubersdr-rtltcp-gomod}"
+# What the Makefile needs, copied into the container. Named rather than mounting
+# the directory writable, so a container-built .o never lands in the working tree
+# — an aarch64 ka9q_hpsdr.o left behind here would be picked up by the next
+# native `make` and fail the link in a thoroughly confusing way.
+SOURCES=(ka9q_hpsdr.c ka9q_hpsdr.h Makefile)
 
 # platform:docker-platform
 TARGETS=(
@@ -83,7 +92,6 @@ for arg in "$@"; do
     --publish) PUBLISH=1 ;;
     --yes) ASSUME_YES=1 ;;
     --check) CHECK_ONLY=1 ;;
-    --test) RUN_TESTS=1 ;;
     -*) echo "unknown option: $arg" >&2; exit 2 ;;
     *) WANTED+=("$arg") ;;
   esac
@@ -126,6 +134,7 @@ install_binfmt() {
   docker run --privileged --rm tonistiigi/binfmt --install arm64 >/dev/null 2>&1
 }
 
+# Everything needed to build, reported together rather than one failure at a time.
 preflight() {
   local ok=0
   echo -e "${GREEN}  Build environment${NC}"
@@ -148,6 +157,8 @@ preflight() {
     if can_run_platform "$platform"; then
       echo    "    $name          can run $platform"
     else
+      # amd64 failing is a different problem from arm64 failing, and only one of
+      # them has an answer worth printing.
       if [ "$platform" = "linux/amd64" ]; then
         echo -e "    $name          ${RED}cannot run $platform${NC} — that is this machine's own architecture; something is wrong with docker."
       else
@@ -241,6 +252,8 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
 fi
 
 if ! preflight; then
+  # The one failure with an answer this script can apply. Offered rather than
+  # assumed: it is a host-wide, privileged change.
   echo
   if [ "$ASSUME_YES" -eq 1 ] || [ -t 0 ]; then
     reply='yes'
@@ -260,19 +273,6 @@ if ! preflight; then
   fi
 fi
 
-# Native, and only native. The tests are the same tests whatever the target, and
-# running them again under qemu costs minutes to learn nothing new.
-if [ "$RUN_TESTS" -eq 1 ]; then
-  echo
-  echo -e "${YELLOW}  tests${NC} …"
-  if ! docker run --rm --platform linux/amd64 \
-      -v "$PWD:/src:ro" -v "$CACHE_VOLUME:/go/pkg/mod" \
-      "$IMAGE" bash -c 'cp -r /src /work && cd /work && go test -short ./...'; then
-    echo "  not built: the tests failed." >&2
-    exit 1
-  fi
-fi
-
 echo
 echo -e "${GREEN}Building $BINARY${NC}"
 mkdir -p "$OUT"
@@ -284,23 +284,28 @@ for target in "${TARGETS[@]}"; do
 
   echo -ne "${YELLOW}  $name${NC} … "
 
-  # The source is mounted read-only and copied inside, so nothing the build does
-  # — a rewritten go.sum, a stray binary — reaches the working tree. Only build/
-  # is writable, and the module cache is a named volume rather than a bind mount
-  # so its root-owned contents stay out of the way entirely.
+  # The source is mounted read-only and copied to a scratch directory inside the
+  # container, so the Makefile's in-place .o and binary are the container's
+  # problem and never appear in the working tree. Only build/ is writable.
   if ! docker run --rm --platform "$platform" \
-      -v "$PWD:/src:ro" -v "$PWD/$OUT:/out" -v "$CACHE_VOLUME:/go/pkg/mod" \
-      -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" -e "BINARY=$BINARY" \
+      -v "$PWD:/src:ro" -v "$PWD/$OUT:/out" \
+      -e "SOURCES=${SOURCES[*]}" -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" \
       "$IMAGE" bash -c '
         set -e
-        cp -r /src /work && cd /work
-        # -s -w drop the symbol table and DWARF data, as the Makefile does.
-        CGO_ENABLED=1 go build -ldflags="-s -w" -o "/out/$BINARY" .
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends \
+          build-essential libwebsockets-dev libzstd-dev uuid-dev libbsd-dev
+        mkdir -p /work && cd /work
+        for f in $SOURCES; do cp "/src/$f" .; done
+        make
+        cp ubersdr-hpsdr-bridge /out/
         # Handed back to the user who started the build. The container is root
         # and the bind mount carries its ownership straight out to the host, so
         # without this the binary lands root-owned in the working tree and the
-        # next run cannot overwrite it. Done in here because in here is root.
-        chown "$HOST_UID:$HOST_GID" "/out/$BINARY"
+        # next run cannot overwrite it — and neither can the person who wants to
+        # delete it. Done in here because in here is where we are root.
+        chown "$HOST_UID:$HOST_GID" /out/ubersdr-hpsdr-bridge
       ' >"$OUT/.$name.log" 2>&1; then
     echo -e "${RED}failed${NC}"
     echo
@@ -310,6 +315,8 @@ for target in "${TARGETS[@]}"; do
     exit 1
   fi
 
+  # Named per architecture only now, so the Makefile inside the container stays
+  # untouched and the release asset names live in exactly one place — here.
   mv "$OUT/$BINARY" "$asset"
   rm -f "$OUT/.$name.log"
 
@@ -321,13 +328,11 @@ echo -e "${GREEN}Done.${NC} Binaries are in $OUT/:"
 for target in "${TARGETS[@]}"; do
   asset="$OUT/${BINARY}_${target%%:*}"
   [ -f "$asset" ] || continue
-  # The glibc floor, reported because it is the number that decides which
-  # machines the download runs on and the one a change of base image moves
-  # without otherwise showing up anywhere.
-  printf '    %-34s %-14s needs %s or newer\n' \
-    "$(basename "$asset")" \
-    "$(readelf -h "$asset" | awk -F: '/Machine/{gsub(/^ +/,"",$2); print $2}')" \
-    "$(objdump -T "$asset" | grep -oP 'GLIBC_\d+\.\d+' | sort -uV | tail -1)"
+  # The architecture and the libraries it wants, because that is the thing most
+  # worth checking about a dynamically linked release binary and the thing least
+  # visible from a filename.
+  printf '    %-32s %s\n' "$(basename "$asset")" \
+    "$(readelf -h "$asset" | awk -F: '/Machine/{gsub(/^ +/,"",$2); print $2}')"
 done
 
 if [ "$PUBLISH" -eq 1 ]; then

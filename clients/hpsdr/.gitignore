@@ -27,3 +27,6 @@ vendor/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Release binaries from build.sh
+build/

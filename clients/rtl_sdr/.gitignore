@@ -1,1 +1,4 @@
 ubersdr-rtltcp-bridge
+
+# Release binaries from build.sh
+build/

@@ -1,6 +1,6 @@
 {
   "name": "ubersdr-bridge",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Firefox extension for the UberSDR v2 page API — read and control the receiver, and sync with flrig",
   "private": true,
   "type": "module",

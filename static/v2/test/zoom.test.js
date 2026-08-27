@@ -5,8 +5,8 @@
 
 const assert = require('assert');
 const {
-    BIN_BW_LADDER, BIN_BW_PASSTHROUGH, clampCenter, needsRecenter, resumeView, rungOfSpan,
-    spanAtRung, zoomCenter, zoomLadder,
+    BIN_BW_LADDER, BIN_BW_PASSTHROUGH, clampCenter, followCenter, needsRecenter, resumeView,
+    rungOfSpan, spanAtRung, zoomCenter, zoomLadder,
 } = require('./.build/zoom.cjs');
 const { MAX_FREQ, MIN_FREQ } = require('./.build/constants.cjs');
 
@@ -304,6 +304,60 @@ t('an unconnected spectrum has no ladder rather than a NaN one', () => {
     assert.strictEqual(rungOfSpan(1e6, []), 0);
     assert.strictEqual(spanAtRung(0, []), 0);
     assert.strictEqual(rungOfSpan(0, L), 0);
+});
+
+// --- the two ways of following the dial -------------------------------------
+//
+// followCenter is what the auto-recentre actually calls: the edge rule above
+// when the view is left to itself, and "always the dial" when the toolbar's
+// centre toggle is on. The second is the one worth pinning, because what makes
+// it usable is the case where it does *nothing* — see the caller's note on
+// command slots.
+
+t('left to itself, the view follows the edge rule and nothing else', () => {
+    // Well inside: no move, even though the dial is not in the middle.
+    assert.strictEqual(followCenter(at(LO + 20e3, USB), FOLLOW.center, FOLLOW.span, false), null);
+    // Past the point where the passband would run off: move, to the dial.
+    assert.strictEqual(
+        followCenter(at(HI - 2699, USB), FOLLOW.center, FOLLOW.span, false),
+        HI - 2699,
+    );
+});
+
+t('centred, every tune moves the view to the dial', () => {
+    assert.strictEqual(
+        followCenter(at(LO + 20e3, USB), FOLLOW.center, FOLLOW.span, true),
+        LO + 20e3,
+    );
+    // A hertz is a move: the span can be a few hundred hertz wide at full zoom.
+    assert.strictEqual(
+        followCenter(at(FOLLOW.center + 1, USB), FOLLOW.center, FOLLOW.span, true),
+        FOLLOW.center + 1,
+    );
+});
+
+t('centred, a tune that did not move the dial sends nothing', () => {
+    // What a mode change and a filter change look like from here: the same
+    // frequency, a different passband. Both would otherwise spend a command
+    // slot per keystroke.
+    for (const mode of [USB, LSB, AM]) {
+        assert.strictEqual(followCenter(at(FOLLOW.center, mode), FOLLOW.center, FOLLOW.span, true), null);
+    }
+    // The centre the server reports is a rounded integer; a dial a fraction of
+    // a hertz from it is the same place.
+    assert.strictEqual(followCenter(at(FOLLOW.center + 0.4, USB), FOLLOW.center, FOLLOW.span, true), null);
+});
+
+t('centred, the band edges still bound the dial', () => {
+    assert.strictEqual(followCenter(at(-5e3, USB), FOLLOW.center, FOLLOW.span, true), MIN_FREQ);
+    assert.strictEqual(followCenter(at(MAX_FREQ + 5e3, USB), FOLLOW.center, FOLLOW.span, true), MAX_FREQ);
+});
+
+t('centred needs no span, so it works before the first frame', () => {
+    // span 0 makes needsRecenter answer false for everything; the centred
+    // branch must not go through it.
+    assert.strictEqual(followCenter(at(7.1e6, USB), 0, 0, true), 7.1e6);
+    assert.strictEqual(followCenter(at(7.1e6, USB), 0, 0, false), null);
 });
 
 if (process.exitCode) console.log('\nzoom tests FAILED');

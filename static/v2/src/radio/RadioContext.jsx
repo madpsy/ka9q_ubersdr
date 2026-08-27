@@ -32,7 +32,9 @@ import {
 import { clamp } from '../lib/format.js';
 import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
-import { needsRecenter, resumeView, zoomCenter } from '../lib/zoom.js';
+import { followCenter, resumeView, zoomCenter } from '../lib/zoom.js';
+import { PAN_MS } from '../lib/panPacing.js';
+import { dialIsCentered } from '../lib/viewFollow.js';
 import { loadRadioSettings, saveRadioSettings } from '../lib/radioSettings.js';
 import { hiddenGroups, onGroupsChanged, visibleBookmarks } from '../lib/bookmarkGroups.js';
 import { readShareUrl, takeUrlView } from '../lib/share.js';
@@ -898,14 +900,43 @@ export function RadioProvider({ children }) {
     // Dragging a DSP slider must not emit a command per pixel.
     const sendDspParams = useMemo(() => throttle((params) => audioConn.setDSPParams(params), 120), []);
 
+    // Following the dial can mean a view command per tune, which on a spun wheel
+    // or a held +/- is far more often than radiod will take one: it accepts
+    // one per channel per 20 ms block and drops the rest silently, taking the
+    // frame polls with it. So the same 40 ms gap the pan gesture uses, and for
+    // the same reasons — lib/panPacing.js has them written out.
+    //
+    // A trailing throttle rather than that pacer: a drag ends and flushes, and
+    // tuning does not, so "the last one goes out when the timer next fires" is
+    // exactly what is wanted here and is what makes the view land where the
+    // tuning stopped.
+    const sendCenter = useMemo(() => throttle((hz) => spectrumConn.setView(hz, null), PAN_MS), []);
+
     const actions = useMemo(() => {
         // Move the view only when the passband would leave the screen — the
         // rule itself is in lib/zoom.js, with the rest of the view geometry.
+        //
+        // Unless the dial is being held in the middle, which is the other way
+        // of watching a band: the marker stays on the centre line and the
+        // spectrum comes past it. See DEFAULTS.dialCentered.
         const recenterIfNeeded = (t) => {
             if (!followRef.current || !spectrumConn.connected) return;
-            if (needsRecenter(t, spectrumConn.centerFreq, spectrumConn.span)) {
-                spectrumConn.setView(clamp(t.frequency, MIN_FREQ, MAX_FREQ), null);
-            }
+            const want = followCenter(
+                t, spectrumConn.centerFreq, spectrumConn.span, dialIsCentered(),
+            );
+            if (want == null) return;
+            // Both branches paced, and the edge one is why this changed: it used
+            // to go straight out on the grounds that it fires rarely — once per
+            // half-span of tuning — which stopped being true when the wheel
+            // learned to spin. At the top of that ladder a notch can be a third
+            // of a narrow span, so the edge case fires nearly every notch and
+            // was sending an unpaced view command for each.
+            //
+            // Nothing is lost by pacing it. The throttle is leading-edge, so the
+            // first move of any gesture goes out at once — the case the old note
+            // was protecting — and only a burst is coalesced, which is exactly
+            // the case that needed it.
+            sendCenter(want);
         };
 
         // The tuning lock, answered in one place.
@@ -1117,8 +1148,24 @@ export function RadioProvider({ children }) {
 
             // Steps to the next multiple of `step`, rather than adding to
             // whatever odd frequency happens to be tuned.
-            stepBy(step, dir) {
-                applyTuning({ frequency: snapStep(tuningRef.current.frequency, step, dir) });
+            // `times` is how many steps this one notch is worth — one, until
+            // the wheel is being spun, when the acceleration in lib/wheelStep.js
+            // makes it several. Taken as one move rather than by calling this in
+            // a loop: each call is a tune command, an auto-recentre and a
+            // render, and a spun wheel would spend all three sixteen times to
+            // land somewhere it could have gone directly.
+            //
+            // The snap is still to the step grid, not to a grid of `times`
+            // steps, and that is what keeps acceleration from being a step-size
+            // change by another route: a spin lands on the same round
+            // frequencies a slow turn would have passed through, rather than on
+            // a coarser set of its own. Same arithmetic the Multipad's tuning
+            // drum already uses for a flick worth several detents — snap once,
+            // then whole steps from there.
+            stepBy(step, dir, times = 1) {
+                const n = Math.max(1, Math.round(times));
+                const first = snapStep(tuningRef.current.frequency, step, dir);
+                applyTuning({ frequency: first + (n - 1) * step * (dir > 0 ? 1 : -1) });
             },
 
             setMode(mode) {

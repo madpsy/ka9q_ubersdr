@@ -570,7 +570,37 @@ button, input, select, textarea { font: inherit; color: inherit; }
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
 }
-.topbar__hz:hover { color: var(--accent); }
+/* One span per digit, each a scroll target of its own — the Receiver panel's
+   dial gesture on the bar's own readout. See lib/useDigitWheel.js.
+
+   And no hover on .topbar__hz itself, which is what it used to have: the whole
+   readout turned accent under the pointer, which was right when the whole
+   readout did one thing (click to type) and is wrong now that each digit does
+   something different. A highlight covering eight digits cannot say which one
+   the wheel is about, and it drowned the one below that can — the digit and its
+   neighbours ended up the same colour, so the mark that mattered read as no
+   mark at all. The dial has never had a whole-readout hover for exactly this
+   reason; this now matches it.
+
+   No horizontal padding, unlike .dial__digit, and that is not a style choice:
+   lib/fitScale.js measures this readout to decide what type size keeps the
+   filter width on a narrow phone, and eight digits with a pixel either side is
+   sixteen pixels of readout that was not there before. The mono face already
+   leaves enough room around a glyph for the hover mark to read as a mark.
+
+   ns-resize for the same reason the dial's digits carry it: the pointer says
+   which way the thing under it moves before you try it. */
+.topbar__hz-digit {
+    border-radius: 3px;
+    cursor: ns-resize;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.topbar__hz-digit:hover { background: var(--accent-soft); color: var(--accent); }
+/* .topbar__hz-sep, the two group dots, deliberately has no rule: it carries no
+   data-place and so no gesture, and the hover mark above is enough to say which
+   parts are targets. The dial dims its own separators, and copying that here
+   would be restyling the most-looked-at number in the interface to add a
+   gesture to it. */
 .topbar__mode {
     font-size: calc(10.5px * var(--ui-scale) * var(--fit, 1));
     font-weight: 650;
@@ -594,26 +624,32 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .topbar__bw:hover { color: var(--accent); }
 
 /* The filter width slider, under the readout that opens it. Wider than a menu
-   because a slider you cannot aim at is worse than no slider. */
+   because a slider you cannot aim at is worse than no slider.
+
+   The rows below are shared with .spinpop — the spectrum toolbar's wheel button
+   opens the same shape for the scroll rate — as grouped selectors rather than a
+   rename, because the shape is all the two share and a rename would have touched
+   every line of both for the sake of a word. The box itself is not grouped: see
+   the note on .specmenu.spinpop. */
 .bwpop {
     min-width: 200px;
     padding: 9px 11px 10px;
     gap: 7px;
 }
-.bwpop__head {
+.bwpop__head, .spinpop__head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 10px;
 }
-.bwpop__label {
+.bwpop__label, .spinpop__label {
     font-size: calc(10.5px * var(--ui-scale));
     font-weight: 650;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-dim);
 }
-.bwpop__value {
+.bwpop__value, .spinpop__value {
     font-family: var(--mono);
     font-size: calc(12px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
@@ -622,16 +658,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* The slider with a step button either side. The slider takes the room the
    buttons leave, so the track is as long as the popover allows rather than as
    long as whatever the flex default worked out to. */
-.bwpop__row {
+.bwpop__row, .spinpop__row {
     display: flex;
     align-items: center;
     gap: 4px;
 }
-.bwpop__row .slider { flex: 1; min-width: 0; }
+.bwpop__row .slider, .spinpop__row .slider { flex: 1; min-width: 0; }
 
 /* The edges the width works out to, the pair the Receiver panel prints under
    its own slider. Which one moves depends on the sideband. */
-.bwpop__edges {
+.bwpop__edges, .spinpop__edges {
     display: flex;
     justify-content: space-between;
     gap: 10px;
@@ -640,6 +676,27 @@ button, input, select, textarea { font: inherit; color: inherit; }
     font-variant-numeric: tabular-nums;
     color: var(--text-dim);
 }
+
+/* The scroll rate's own box. Three legends under the track rather than two — the
+   ends of the range, and between them what the setting works out to in hertz or
+   in rungs of the zoom ladder — so it wants more width than a menu, and the
+   middle legend is full-strength text because it is the reading rather than a
+   label.
+
+   Written as `.specmenu.spinpop` rather than `.spinpop`, which is the one thing
+   here that is not cosmetic: Popover puts both classes on the element, .specmenu
+   sets min-width, padding and gap of its own, and it is declared *below* this
+   point in the file. At equal specificity that makes source order the decider
+   and the menu's box win, which is why .bwpop above does not group its own box
+   rules with these — those three properties have been losing to .specmenu since
+   before this existed, and quietly changing the filter popover's shape is not
+   this feature's business. Two classes beat one wherever they land. */
+.specmenu.spinpop {
+    min-width: 250px;
+    padding: 9px 11px 10px;
+    gap: 7px;
+}
+.spinpop__edges > :nth-child(2) { color: var(--text); }
 
 /* Sized in ch so the box is the width of the number it replaces, and the bar
    does not jump as the readout turns into an input. */
@@ -2045,12 +2102,15 @@ a.btn { text-decoration: none; }
 .field--inline { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
 
 /* A field with a button of its own to the right of its control — the Receiver
-   panel's filter width and shift, each with a reset. `flex-end` rather than
-   centring: the button lines up with the slider, not with the middle of the
-   label-and-slider stack, so a column of these has its buttons on the same line
-   as the tracks they belong to. */
-.filter-row { display: flex; align-items: flex-end; gap: 4px; }
-.filter-row > .field { flex: 1; min-width: 0; }
+   panel's filter width and shift, each with a reset, and the Display panel's
+   scroll rate with the same. `flex-end` rather than centring: the button lines
+   up with the slider, not with the middle of the label-and-slider stack, so a
+   column of these has its buttons on the same line as the tracks they belong to.
+
+   Named for the shape rather than for the filter, which is what it was called
+   when the filter was the only thing shaped like this. */
+.field-row { display: flex; align-items: flex-end; gap: 4px; }
+.field-row > .field { flex: 1; min-width: 0; }
 .field__label {
     display: flex;
     align-items: baseline;
@@ -2185,10 +2245,15 @@ a.btn { text-decoration: none; }
 
        And wider, since precision here is pixels per hertz: the same range over
        280 px rather than 200 is a third finer for the same gesture. */
+    /* .specmenu.spinpop for the same reason its base rule is written that way
+       — two classes there, so two classes here or the narrower one wins. */
     .bwpop { min-width: 280px; }
-    .bwpop .slider { height: 44px; touch-action: none; }
-    .bwpop .slider::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -10px; }
-    .bwpop .slider::-moz-range-thumb { width: 24px; height: 24px; }
+    .specmenu.spinpop { min-width: 280px; }
+    .bwpop .slider, .spinpop .slider { height: 44px; touch-action: none; }
+    .bwpop .slider::-webkit-slider-thumb,
+    .spinpop .slider::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -10px; }
+    .bwpop .slider::-moz-range-thumb,
+    .spinpop .slider::-moz-range-thumb { width: 24px; height: 24px; }
 }
 
 .slider-wrap { position: relative; }

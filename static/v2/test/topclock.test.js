@@ -54,5 +54,33 @@ t('every mode has a hint, including one that should not exist', () => {
     }
 });
 
+t('the receiver zone is a second line, not tacked onto the first', () => {
+    // Two questions, two lines: what a click does, and whose clock this is.
+    const hint = tc.clockHint('utc', 'Europe/London');
+    const lines = hint.split('\n');
+    assert.strictEqual(lines.length, 2);
+    assert.strictEqual(lines[0], tc.clockHint('utc'));
+    assert.ok(/Europe\/London/.test(lines[1]), lines[1]);
+    // Named as the receiver's, because the local clock here is its wall clock
+    // and not the browser's — which is the whole reason for printing it.
+    assert.ok(/receiver/i.test(lines[1]), lines[1]);
+});
+
+t('every mode carries the zone', () => {
+    for (const m of [...tc.CLOCK_MODES, 'rubbish']) {
+        assert.ok(tc.clockHint(m, 'Pacific/Auckland').endsWith('Pacific/Auckland'), m);
+    }
+});
+
+t('no zone means no second line, rather than an empty one', () => {
+    // A server from before the name was published, or an operator who left it
+    // unset. Guessing the browser's zone here would be a wrong answer that looks
+    // right, since that is exactly when the clock falls back to browser time.
+    for (const z of [undefined, null, '', '   ', 42, {}]) {
+        assert.strictEqual(tc.clockHint('both', z), tc.clockHint('both'), String(z));
+        assert.ok(!tc.clockHint('both', z).includes('\n'), String(z));
+    }
+});
+
 if (process.exitCode) console.log('\ntop clock tests FAILED');
 else console.log(`\nall ${pass} top clock tests passed`);

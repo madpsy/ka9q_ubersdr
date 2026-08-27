@@ -5,12 +5,12 @@
 // step size first. Typing is still available — click the readout to edit, which
 // swaps in the shared kHz box (FreqEntry); the readout itself stays in Hz.
 
-import React, { useCallback, useEffect, useRef, useState } from '../react.js';
+import React, { useCallback, useRef, useState } from '../react.js';
 import { formatHz, clamp } from '../lib/format.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
 import { haptic } from '../lib/haptics.js';
-import { createWheelStep } from '../lib/wheelStep.js';
+import useDigitWheel from '../lib/useDigitWheel.js';
 
 const DIGITS = 8;   // 30 MHz upper limit needs eight decimal digits
 
@@ -33,28 +33,11 @@ export default function FrequencyDial({ frequency, onChange, disabled }) {
         onChange(next);
     }, [onChange]);
 
-    // Wheel-to-tune has to be a native non-passive listener. React registers
-    // its wheel handlers passively, so preventDefault() there is ignored and
-    // the dock scrolled along with the digit being tuned.
-    //
-    // A step per detent's worth of scroll rather than per event: a mouse sends
-    // one event per detent, but a trackpad sends a stream of small ones and
-    // stepping on each ran the digits away under the lightest swipe.
-    useEffect(() => {
-        const el = rootRef.current;
-        if (!el) return undefined;
-        const step = createWheelStep();
-        const onWheel = (e) => {
-            if (disabled) return;
-            const cell = e.target.closest && e.target.closest('[data-place]');
-            if (!cell) return;
-            e.preventDefault();
-            const dir = step(e);
-            if (dir) bump(Number(cell.dataset.place), dir);
-        };
-        el.addEventListener('wheel', onWheel, { passive: false });
-        return () => el.removeEventListener('wheel', onWheel);
-    }, [disabled, bump, editing]);
+    // Scroll over a digit to step by its place value — lib/useDigitWheel.js,
+    // shared with the top bar's readout, which offers the same gesture on the
+    // same markup. The listener has to be native and non-passive, and a step is
+    // a detent's worth of travel rather than an event; both are in there.
+    useDigitWheel(rootRef, bump, { disabled, rebind: editing });
 
     if (editing) {
         return (

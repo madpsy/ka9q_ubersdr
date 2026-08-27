@@ -6,7 +6,7 @@
 
 const assert = require('assert');
 const {
-    formatFilterWidth, formatFreqExact, formatFreqShort, formatHz, padReading,
+    formatFilterWidth, formatFreqExact, formatFreqShort, formatHz, hzPlaces, padReading,
 } = require('./.build/format.cjs');
 
 let pass = 0;
@@ -124,6 +124,50 @@ t('nothing to show is an em dash, not a padded zero', () => {
 t('a reading wider than the reservation is printed in full', () => {
     // Never truncated: a meter that lies is worse than one that reflows.
     assert.strictEqual(padReading(-1234.5), '-1234.5');
+});
+
+// --- the readout as scroll targets ------------------------------------------
+//
+// What the top bar hangs scroll-to-tune off. A place value off by ten is a
+// readout that tunes ten times too far, and nothing on screen would say so.
+
+// The digits only, with what each steps by.
+const places = (hz) => hzPlaces(hz).filter((c) => c.place).map((c) => c.place);
+const chars = (hz) => hzPlaces(hz).map((c) => c.ch).join('');
+
+t('every digit of the readout is a place, descending by ten', () => {
+    assert.deepStrictEqual(
+        places(14175000),
+        [1e7, 1e6, 1e5, 1e4, 1e3, 100, 10, 1],
+    );
+});
+
+t('the cells spell the readout back, separators and all', () => {
+    for (const hz of [14175000, 7100000, 198000, 0, 29999999]) {
+        assert.strictEqual(chars(hz), formatHz(hz));
+    }
+});
+
+t('the separators are not scroll targets', () => {
+    const seps = hzPlaces(14175000).filter((c) => c.ch === '.');
+    assert.strictEqual(seps.length, 2);
+    assert.ok(seps.every((c) => c.place === 0));
+});
+
+t('below 10 MHz the readout is a digit shorter, and the places follow', () => {
+    // The case a fixed table would get wrong: formatHz prints no leading zeros,
+    // so 7.100.000 has seven digits and its first one is megahertz, not tens.
+    assert.strictEqual(chars(7100000), '7.100.000');
+    assert.deepStrictEqual(places(7100000), [1e6, 1e5, 1e4, 1e3, 100, 10, 1]);
+    // And one hertz over ten megahertz it grows back.
+    assert.deepStrictEqual(places(10000001)[0], 1e7);
+});
+
+t('a frequency below a megahertz still has its megahertz zero', () => {
+    // "0.198.000" — the zero is a real digit and steps by a megahertz, which is
+    // how you get from long wave to anywhere else with the wheel.
+    assert.strictEqual(chars(198000), '0.198.000');
+    assert.deepStrictEqual(places(198000), [1e6, 1e5, 1e4, 1e3, 100, 10, 1]);
 });
 
 console.log(`\n${pass} ok`);

@@ -35,7 +35,10 @@ const AFTER_HOLD_MS = 400;
 /**
  * @param action  what the secondary press does. Called at most once per gesture
  *                by the timer, and again by `contextmenu` where the platform
- *                sends both — so it has to be idempotent.
+ *                sends both — so it has to be idempotent. Given the element the
+ *                press landed on, for the callers that open something *at* the
+ *                button: the timer fires long after the event that started it,
+ *                so the element is kept rather than the event.
  * @returns [press, afterHold]
  *          `press`      spread onto the element
  *          `afterHold`  true while the click a hold left behind is still
@@ -44,11 +47,12 @@ const AFTER_HOLD_MS = 400;
 export default function useHoldPress(action) {
     const timer = useRef(null);
     const firedAt = useRef(0);
+    const on = useRef(null);
     useEffect(() => () => clearTimeout(timer.current), []);
 
     const fire = useCallback(() => {
         firedAt.current = performance.now();
-        action();
+        action(on.current);
     }, [action]);
 
     const end = useCallback(() => clearTimeout(timer.current), []);
@@ -56,6 +60,7 @@ export default function useHoldPress(action) {
     const press = {
         onPointerDown: (e) => {
             if (e.pointerType === 'mouse') return;
+            on.current = e.currentTarget;
             clearTimeout(timer.current);
             timer.current = setTimeout(fire, HOLD_MS);
         },
@@ -64,6 +69,7 @@ export default function useHoldPress(action) {
         onPointerLeave: end,
         onContextMenu: (e) => {
             e.preventDefault();
+            on.current = e.currentTarget;
             fire();
         },
     };

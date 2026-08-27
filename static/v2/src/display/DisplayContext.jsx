@@ -7,6 +7,7 @@ import { UI_CONFIG_DEFAULTS, parseUiConfig } from './uiConfig.js';
 import { UI_COLOR_VARS, uiColorVars } from '../lib/uiColors.js';
 import { invalidateThemeColors } from '../lib/spectrumTrace.js';
 import { IF_VIEW_DEFAULT } from '../lib/ifSpectrum.js';
+import { setDialCentered } from '../lib/viewFollow.js';
 import { SHAPE_SEC_DEFAULT } from '../lib/ifShape.js';
 
 const STORAGE_KEY = 'ubersdr.v2.display';
@@ -148,6 +149,20 @@ export const DEFAULTS = {
     tuneReverse: false,
     // What the wheel does over the spectrum: 'zoom' or 'tune' by tuneStep.
     wheelAction: 'zoom',
+    // How far a *spin* of that wheel is allowed to run ahead of a click.
+    //
+    // Not a step size. One notch is one tuning step at any setting; keep notches
+    // coming quickly and the wheel spins up to this many steps a notch, and a
+    // pause puts it straight back to one. lib/wheelStep.js has the ramp and the
+    // reasons — chiefly that a static multiplier here would be the tuning step
+    // wearing a second hat, and would leave the wheel on a coarser grid than
+    // every other way of tuning.
+    //
+    // Only the wheel over the spectrum, which is what the setting beside it
+    // governs too. The frequency dial's digits and the Multipad's drum stay at
+    // one step a notch: there a notch means one digit, and a digit is the unit
+    // the control is drawn in.
+    wheelAccel: 4,
     // What a zoom holds still: 'cursor' keeps the frequency under the pointer
     // or the fingers where it is, 'tuned' re-centres on the dial each step
     // (which is what the toolbar's +/- buttons do). Read by the wheel and by
@@ -161,6 +176,18 @@ export const DEFAULTS = {
     // the only thing you are actually interested in — anchoring on the fingers
     // there walks the view off the signal you were listening to.
     zoomAnchor: 'auto',
+    // Hold the dial in the middle of the spectrum: the view moves with every
+    // tune, so the marker stays on the centre line and the band slides beneath
+    // it. Read by RadioContext's auto-recentre, through lib/viewFollow.js.
+    //
+    // Off, which is the behaviour this display has always had: the view is left
+    // alone until the passband would fall off the edge, and only then does it
+    // jump. That is right when you are watching a piece of band and tuning
+    // around inside it — the picture holds still and the marker moves — and
+    // wrong when you are hunting, where what you want is the marker still and
+    // the band coming past. Tuning with the wheel is the second case almost by
+    // definition, which is where the toolbar offers this.
+    dialCentered: false,
     // Halve the spectrum poll rate after a few minutes with no input, and put
     // it back on the first sign of life (IdleWatch). On by default, as it is in
     // v1, because the data it saves is data nobody was looking at — but it is a
@@ -465,7 +492,7 @@ export const UI_SCALE_STEP = 0.05;
 // to. Everything in this file is persisted, defaults included — the save effect
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
-const SETTINGS_VERSION = 8;
+const SETTINGS_VERSION = 9;
 
 
 
@@ -533,6 +560,20 @@ function migrate(saved) {
     // what this leaves alone. Anyone who turned it off under the old default
     // was turning off something already off, so there is nothing to preserve.
     if (!(saved.v >= 8) && saved.ifStats === false) delete saved.ifStats;
+
+    // v9: `wheelRate` is gone, and nothing reads it.
+    //
+    // It was a static multiplier on the tuning step, which is what wheelAccel
+    // replaced it with and deliberately is not — see lib/wheelStep.js. Settings
+    // are persisted whole, so a key nothing consults would otherwise be written
+    // back out for ever, and the next person to grep for it would find a live
+    // value and go looking for what reads it.
+    //
+    // Not migrated to the new setting, though both are "how fast": a stored 4
+    // meant four times the step and now means four steps of the same size, and
+    // those are different enough that carrying the number across would be
+    // guessing at what somebody meant. The new default is a good one.
+    delete saved.wheelRate;
 
     return saved;
 }
@@ -617,6 +658,14 @@ export function DisplayProvider({ children }) {
     useEffect(() => {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
     }, [state]);
+
+    // Pushed into the module rather than read from context by the code that
+    // acts on it, which runs from the tuning path and not from a render — see
+    // lib/viewFollow.js. An effect rather than the render body, so a discarded
+    // render cannot leave the mirror describing a state nothing is in; the tune
+    // that would read it in between has not happened yet, because the press
+    // that changed this is the thing that has just rendered.
+    useEffect(() => { setDialCentered(state.dialCentered === true); }, [state.dialCentered]);
 
     useEffect(() => {
         document.documentElement.dataset.theme = state.theme;

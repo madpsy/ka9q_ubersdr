@@ -12,6 +12,33 @@ export function formatHz(hz) {
 }
 
 /**
+ * formatHz's output split into cells, each digit carrying what it steps by.
+ *
+ * `place` is the digit's value in hertz — 10 000 000 down to 1 — and 0 for the
+ * two group separators, which are not scroll targets. The top bar's readout
+ * hangs its scroll-to-tune off this (lib/useDigitWheel.js), and it has to be
+ * worked out rather than fixed because formatHz prints no leading zeros: one
+ * megahertz digit below 10 MHz, two above it, and everything to the right of it
+ * shifts along as that changes.
+ *
+ * Kept here beside the formatter rather than in the component, because it is a
+ * fact about what formatHz produces and it goes wrong silently — a place value
+ * off by ten is a readout that tunes ten times too far, which reads as the radio
+ * being broken rather than as an arithmetic slip.
+ */
+export function hzPlaces(hz) {
+    const text = formatHz(hz);
+    const digits = text.replace(/\D/g, '').length;
+    let seen = 0;
+    return text.split('').map((ch) => {
+        if (ch < '0' || ch > '9') return { ch, place: 0 };
+        const place = 10 ** (digits - 1 - seen);
+        seen += 1;
+        return { ch, place };
+    });
+}
+
+/**
  * Every hertz of it, at a width that does not move.
  *
  * For the cursor readouts, where the point is to read a frequency off the

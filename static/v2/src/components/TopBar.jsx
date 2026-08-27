@@ -8,11 +8,11 @@ import ShareMenu from './ShareMenu.jsx';
 import { clockHint, nextClockMode, saveClockMode, savedClockMode } from '../lib/topClock.js';
 import ColoursMenu from './ColoursMenu.jsx';
 import {
-    audioLevelColour, audioLevelPercent, formatFilterWidth, formatHz, sMeterColour,
+    audioLevelColour, audioLevelPercent, clamp, formatFilterWidth, hzPlaces, sMeterColour,
     snrColour, snrFraction, sUnitFraction, sUnitLabel,
 } from '../lib/format.js';
 import {
-    FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MODES, MODE_BY_ID,
+    FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MAX_FREQ, MIN_FREQ, MODES, MODE_BY_ID,
     edgesForWidth, isIQ, maxFilterWidth,
 } from '../radio/constants.js';
 import FreqEntry from './FreqEntry.jsx';
@@ -24,6 +24,8 @@ import { openCallsignLookup } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
 import { insideApp } from '../lib/hostPanels.js';
 import { onFreqEntry } from '../lib/freqEntry.js';
+import useDigitWheel from '../lib/useDigitWheel.js';
+import { haptic } from '../lib/haptics.js';
 import { HOVER_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { useFitScale } from '../lib/useFitScale.js';
@@ -46,12 +48,30 @@ const FILTER_W = 52;
 // of its own rather than a stump — see VolumeSlider.
 const VOLUME_W = 124;
 
+// The frequency as one span per digit, each carrying what it is worth.
+//
+// The arithmetic is hzPlaces in lib/format.js, beside the formatter it describes
+// — see the note there. This is only the markup: a separator has no place and so
+// no data-place, which is what makes the gap between two groups dead to the
+// wheel rather than tuning whichever digit happens to be nearer.
+function hzCells(hz) {
+    return hzPlaces(hz).map(({ ch, place }, i) => {
+        if (!place) return <span key={i} className="topbar__hz-sep">{ch}</span>;
+        const label = place >= 1000 ? `${place / 1000} kHz` : `${place} Hz`;
+        return (
+            <span key={i} className="topbar__hz-digit" data-place={place} title={`${label} step — scroll to tune`}>
+                {ch}
+            </span>
+        );
+    });
+}
+
 // UTC over receiver-local time, the pair v1 shows bottom-left. "Local" is the
 // receiver's wall clock, not the browser's: timezone_offset is the server's
 // DST-adjusted offset in minutes, so shifting the UTC epoch by it and reading
 // the UTC fields back gives the operator's time wherever you are listening
 // from. Until /api/description answers we fall back to the browser clock.
-function Clock({ tzOffset }) {
+function Clock({ tzOffset, tzName }) {
     const [now, setNow] = useState(() => Date.now());
     // Both, UTC alone, or local alone — see lib/topClock.js for why three. Remembered,
     // because which clock somebody wants is about how they operate rather than what they
@@ -83,7 +103,7 @@ function Clock({ tzOffset }) {
             type="button"
             className={`topbar__clock${both ? '' : ' is-single'}`}
             data-optional="clock"
-            title={clockHint(mode)}
+            title={clockHint(mode, tzName)}
             onClick={() => setMode((m) => saveClockMode(nextClockMode(m)))}
         >
             {lines.map(([time, tag]) => (
@@ -449,6 +469,30 @@ export default function TopBar({ compact }) {
     // opening the same box a click on the readout does. The bar registers rather
     // than the box, because the box does not exist until this is asked for.
     useEffect(() => onFreqEntry(() => setEditingFreq(true)), []);
+
+    // And the other way to tune from here: a wheel over one of the digits steps
+    // by that digit's place, exactly as the Receiver panel's dial does — same
+    // hook, same markup, same one-step-per-detent. It is the gesture people
+    // reach for first once they know it is there, and with every panel shut this
+    // readout was the one place it was missing.
+    //
+    // Against the frequency the receiver last reported rather than one captured
+    // at render: a wheel can outrun React, and two notches read from the same
+    // render would both ask for the same frequency. The lock, the band edges and
+    // the IQ guard are all applied by setFrequency, so nothing here has to know
+    // about them — but the clamp is kept because clamping to the band is what
+    // decides *where* it lands, not whether it is allowed.
+    const hzRef = useRef(null);
+    const tuneRef = useRef(tuning.frequency);
+    tuneRef.current = tuning.frequency;
+    const bumpDigit = useCallback((place, dir) => {
+        const next = clamp(Math.round(tuneRef.current + place * dir), MIN_FREQ, MAX_FREQ);
+        tuneRef.current = next;
+        haptic('step');
+        actions.setFrequency(next);
+    }, [actions]);
+    useDigitWheel(hzRef, bumpDigit, { rebind: editingFreq });
+
     const [modeAt, setModeAt] = useState(null);
     const modeClosedAt = useRef(0);
     const [widthAt, setWidthAt] = useState(null);
@@ -535,7 +579,17 @@ export default function TopBar({ compact }) {
                 </div>
             </div>
 
-            {!compact && room.clock && <Clock tzOffset={serverInfo?.receiver?.timezone_offset} />}
+            {!compact && room.clock && (
+                <Clock
+                    tzOffset={serverInfo?.receiver?.timezone_offset}
+                    /* The IANA name behind that offset, for the tooltip. Both
+                       come from the operator's one `admin.timezone` setting, so
+                       a receiver that has the offset has the name as well —
+                       unless it is running a server from before the name was
+                       published, which clockHint handles by saying nothing. */
+                    tzName={serverInfo?.receiver?.timezone}
+                />
+            )}
 
             {/* The readout is also the shortest way to tune: the frequency
                 opens the same type-in box as the Receiver panel's dial, the
@@ -559,15 +613,29 @@ export default function TopBar({ compact }) {
                     <button
                         type="button"
                         className="topbar__hz"
+                        ref={hzRef}
                         /* The parts that scale, named so their widths survive
                            one of them being dropped — see lib/fitScale.js. The
                            type-in box above carries the same key, because while
                            it is open it *is* this part of the readout. */
                         data-fit="hz"
-                        title="Type a frequency in kHz"
+                        title="Scroll over a digit to tune, click to type a frequency in kHz"
                         onClick={() => setEditingFreq(true)}
                     >
-                        {formatHz(tuning.frequency)}
+                        {/* Per digit rather than one string, so each is its own
+                            scroll target — the Receiver panel's dial gesture, on
+                            the readout that is on screen with every panel shut.
+                            See lib/useDigitWheel.js, which both share.
+
+                            The place values are worked out from the position of
+                            each digit in the formatted number rather than fixed,
+                            because this readout is not fixed width: formatHz
+                            prints no leading zeros, so below 10 MHz there is no
+                            tens-of-megahertz digit here at all. That is the one
+                            thing it cannot do that the dial can, and the price
+                            of not padding a bar that is already short of room on
+                            a phone. */}
+                        {hzCells(tuning.frequency)}
                     </button>
                 )}
                 <button

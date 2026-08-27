@@ -176,7 +176,7 @@ export default function ReceiverPanel({ minimal }) {
                         <label>, and a button inside one is a click two elements
                         want — the same reason the Multipad's row keeps its
                         action outside. */}
-                    <div className="filter-row">
+                    <div className="field-row">
                         <Field
                             label="Filter width"
                             hint={iq ? `${(width / 1000).toFixed(2)} kHz — fixed in IQ` : `${(width / 1000).toFixed(2)} kHz`}
@@ -193,7 +193,7 @@ export default function ReceiverPanel({ minimal }) {
                         <FilterReset what="width" />
                     </div>
 
-                    <div className="filter-row">
+                    <div className="field-row">
                         <Field label="Filter shift" hint={iq ? '0 Hz — fixed in IQ' : `${Math.round(shift)} Hz`}>
                             <Slider
                                 value={Math.round(shift)}

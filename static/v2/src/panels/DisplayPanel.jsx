@@ -18,6 +18,8 @@ import {
 } from '../lib/spectrumPeaks.js';
 import { packetAvailable } from '../lib/packet.js';
 import { freqRefAvailable } from '../lib/freqRef.js';
+import { WHEEL_ACCELS, nearestWheelAccel, wheelAccelLabel } from '../lib/wheelStep.js';
+import WheelAccelReset from '../components/WheelAccelReset.jsx';
 import { voiceSkimmerAvailable } from '../lib/voiceSkimmer.js';
 import {
     UI_THEMES, canvasContrast, contrastMin, effectiveColors, matchUiTheme, pageContrast,
@@ -33,7 +35,7 @@ const FPS_CHOICES = [0, 60, 30, 20, 15, 10];
 
 export default function DisplayPanel() {
     const d = useDisplay();
-    const { serverInfo } = useRadio();
+    const { serverInfo, actions } = useRadio();
     // Two settings resolve per device — the zoom anchor and the idle throttle —
     // and both have to show what is actually in force, not what is stored. The
     // same query IdleWatch and the spectrum use to decide, so the control and
@@ -158,6 +160,45 @@ export default function DisplayPanel() {
                 />
             </Field>
 
+            {/* How far a spin of that wheel may run ahead of a click. One notch
+                is one tuning step whatever this says; keep them coming quickly
+                and the wheel spins up to this many, and a pause puts it back.
+                Mirrored by the popover the spectrum toolbar's wheel button opens
+                on a right-click or a hold, which writes the same setting.
+
+                Deliberately not a step multiplier, which is what this was first
+                built as and what it must not be: that is the tuning step above,
+                and two settings multiplying into one number left the wheel on a
+                coarser grid than the +/- buttons beside it. See lib/wheelStep.js.
+
+                A slider over the rungs, not over the ceilings: they double, and a
+                linear track through 1 to 16 would spend most of its length in
+                the top half.
+
+                Offered whether or not there is a wheel to set. A tablet picks up
+                a trackpad, a phone gets plugged into a dock, and the toolbar
+                button that also sets this is the one that hides itself when it
+                cannot find a wheel; if this hid too there would be devices where
+                the setting existed and was unreachable.
+
+                The reset is a sibling of the Field, not a child of it: a Field
+                is a <label>, and a button inside one is a click two elements
+                want — the same reason the Receiver panel's filter rows keep
+                theirs outside, and they are the rows this shares its layout
+                with. */}
+            <div className="field-row">
+                <Field label="Wheel spin" hint={wheelAccelLabel(d.wheelAccel)}>
+                    <Slider
+                        value={WHEEL_ACCELS.indexOf(nearestWheelAccel(d.wheelAccel))}
+                        min={0}
+                        max={WHEEL_ACCELS.length - 1}
+                        step={1}
+                        onChange={(i) => d.set({ wheelAccel: WHEEL_ACCELS[i] })}
+                    />
+                </Field>
+                <WheelAccelReset />
+            </div>
+
             {/* Read by wheel zoom and by the spectrum's pinch. Mirrored by the
                 toggle in the spectrum toolbar, which writes the same setting —
                 that one only ever writes an explicit choice, so pressing it is
@@ -181,6 +222,31 @@ export default function DisplayPanel() {
                     />
                 </Field>
             )}
+
+            {/* Unconditional, where the zoom anchor above is not: this decides
+                what the view does when the *dial* moves, and the dial moves from
+                everywhere — the wheel, a click on the spectrum, the +/- buttons,
+                the keyboard, a control surface, the scanner, a rig on CAT. The
+                spectrum toolbar shows a button for it only while the wheel is
+                tuning, which is where the question comes up; this is where it
+                lives. */}
+            <Field
+                label="Keep dial centred"
+                hint={d.dialCentered ? 'the band moves past the dial' : 'the view moves at the edge'}
+                inline
+            >
+                <Switch
+                    checked={d.dialCentered === true}
+                    onChange={(v) => {
+                        // Centre now rather than at the next tune, as the
+                        // toolbar's button does — the effect of switching this
+                        // on should be visible from switching it on.
+                        if (v) actions.centerOnTuned();
+                        d.set({ dialCentered: v });
+                    }}
+                    title="Move the spectrum with every tune so the dial stays on the centre line and the band slides past it. Off, the view is left where it is until the passband would reach the edge of the screen, and only then does it jump"
+                />
+            </Field>
 
             {/* Phone only, and only worth offering there: on a desktop the panels are
                 docks and there is no row of names to keep. */}

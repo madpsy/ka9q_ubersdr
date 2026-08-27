@@ -44,6 +44,34 @@ export function needsRecenter(tuning, centerFreq, span) {
         : tuning.frequency < lo || tuning.frequency > hi;
 }
 
+/**
+ * Where the view should move to now that the dial has moved — or null for
+ * "leave it where it is".
+ *
+ * The two ways of watching a band, in one place because the choice between them
+ * is the whole of what the toolbar's centre toggle does:
+ *
+ *   centred off   the view is left alone until the passband would fall off the
+ *                 edge, and only then does it jump. Right when you are working
+ *                 a piece of band: the picture holds still and the marker moves
+ *                 across it, so what you saw a moment ago is still where it was.
+ *
+ *   centred on    the view moves with every tune, so the marker stays on the
+ *                 centre line and the band slides past it. Right when you are
+ *                 hunting — which is what tuning with the wheel is — because
+ *                 there is then no edge to be thrown by and no jump.
+ *
+ * Returning null rather than the centre it already has is not an optimisation:
+ * a mode change and a filter change both come through here with the dial where
+ * it was, and each centre sent costs one of the few commands per block radiod
+ * will take. See the caller in RadioContext.
+ */
+export function followCenter(tuning, centerFreq, span, centered) {
+    const want = clamp(tuning.frequency, MIN_FREQ, MAX_FREQ);
+    if (centered) return Math.round(want) === Math.round(centerFreq) ? null : want;
+    return needsRecenter(tuning, centerFreq, span) ? want : null;
+}
+
 // Keeps a whole span inside the band, so neither edge hangs off the end.
 export function clampCenter(center, spanHz) {
     const half = spanHz / 2;

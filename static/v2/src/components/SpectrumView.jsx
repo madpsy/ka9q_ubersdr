@@ -23,7 +23,13 @@ import {
 } from '../radio/constants.js';
 import { DEFAULTS as DISPLAY_DEFAULTS, resolveMaxFps, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
-import { Button, Icon, RangeSlider } from './ui.jsx';
+import { Button, Icon, RangeSlider, Slider } from './ui.jsx';
+import Popover from './Popover.jsx';
+import WheelAccelReset from './WheelAccelReset.jsx';
+import useHoldPress from '../lib/useHoldPress.js';
+import {
+    WHEEL_ACCELS, createAcceleratedWheelStep, nearestWheelAccel, wheelAccelLabel,
+} from '../lib/wheelStep.js';
 import MarkerBar from './MarkerBar.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
@@ -2320,16 +2326,32 @@ export default function SpectrumView() {
         setHoverInfo(null);
     }, []);
 
-    // Trackpads emit many small deltas per physical gesture, so accumulate to a
-    // threshold — otherwise one flick would fire a dozen factor-of-two zooms.
-    const wheelAcc = useRef(0);
+    // Trackpads emit many small deltas per physical gesture, so the scroll is
+    // measured in pixels of travel and a detent's worth of it is one notch —
+    // otherwise one flick would fire a dozen factor-of-two zooms.
+    //
+    // lib/wheelStep.js rather than the count this kept for itself, which was the
+    // same idea with two gaps in it: its threshold of 50 px sat *above* the 48
+    // a Firefox mouse notch reports, so a Firefox mouse needed two notches for
+    // every step here, and page-mode deltas were not converted at all. The
+    // shared one is what the frequency dial and the Multipad's drum already use,
+    // and it is pinned by test/wheelstep.test.js.
+    //
+    // What comes back is a signed step count, not a direction. One notch is one
+    // step until the wheel is being *spun*, at which point it is worth several —
+    // see the acceleration note in lib/wheelStep.js. Whatever it comes to, the
+    // move is taken in one go rather than in a loop: see `times` in RadioContext's
+    // stepBy for why.
+    const wheelSteps = useMemo(
+        () => createAcceleratedWheelStep(() => dispRef.current.wheelAccel),
+        [],
+    );
     const onWheel = useCallback((e) => {
         e.preventDefault();
-        const step = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
-        wheelAcc.current += step;
-        if (Math.abs(wheelAcc.current) < 50) return;
-        const dir = wheelAcc.current < 0 ? -1 : 1;
-        wheelAcc.current = 0;
+        const n = wheelSteps(e);
+        if (!n) return;
+        const up = n > 0;
+        const times = Math.abs(n);
 
         // Shift: the filter width, which works at any zoom — including the
         // wide views where the passband is too narrow on screen to grab an edge
@@ -2338,7 +2360,7 @@ export default function SpectrumView() {
         if (e.shiftKey) {
             const t = tuneRef.current;
             const width = Math.abs(t.bandwidthHigh - t.bandwidthLow);
-            const next = width + (dir < 0 ? FILTER_WIDTH_STEP : -FILTER_WIDTH_STEP);
+            const next = width + (up ? 1 : -1) * FILTER_WIDTH_STEP * times;
             actions.setBandwidth(...edgesForWidth(t.mode, next, t));
             return;
         }
@@ -2348,15 +2370,27 @@ export default function SpectrumView() {
         // buttons and with click-to-tune; scrolling up goes up in frequency,
         // matching the frequency dial's digits.
         if (dispRef.current.wheelAction === 'tune') {
-            actions.stepBy(dispRef.current.tuneStep || 500, dir < 0 ? 1 : -1);
+            actions.stepBy(dispRef.current.tuneStep || 500, up ? 1 : -1, times);
             return;
         }
         // Anchor per the Display panel: 'cursor' holds the frequency under the
         // pointer still, 'tuned' re-centres on the dial the way the toolbar's
         // +/- buttons do — which zoomCenter() takes as a null point.
+        //
+        // One rung a notch, and deliberately not `times`: the ladder is already
+        // geometric, so an accelerated zoom would be a factor of two *per
+        // multiplied step* — four rungs is a sixteenfold change of span from one
+        // notch of a spin. The whole ladder is about eleven rungs deep, so that
+        // is the difference between arriving and shooting past the band. What
+        // acceleration is for is covering distance along a scale that is linear,
+        // and the zoom's is not.
+        //
+        // zoomSteps rather than zoomIn/zoomOut all the same: same arithmetic,
+        // same handing-back of the private channel at full span, and one path
+        // rather than two.
         const f = anchorNow() === 'tuned' ? null : freqAtX(e.clientX, e.clientY);
-        if (dir < 0) actions.zoomIn(f); else actions.zoomOut(f);
-    }, [actions, freqAtX]);
+        actions.zoomSteps(up ? 1 : -1, f);
+    }, [actions, freqAtX, wheelSteps]);
 
     // React's onWheel is passive, so preventDefault there is a no-op — the
     // listener has to be registered explicitly as non-passive.
@@ -2370,6 +2404,40 @@ export default function SpectrumView() {
     const span = view.span || 0;
     const anchorTuned = resolveZoomAnchor(display.zoomAnchor, mobile) === 'tuned';
     const wheelTunes = (display.wheelAction || 'zoom') === 'tune';
+    const dialCentred = display.dialCentered === true;
+    const wheelAccel = nearestWheelAccel(display.wheelAccel);
+    // What a notch is worth, in the units of whatever the wheel is set to do.
+    // The setting says how far a spin may run ahead; this says what the thing
+    // being multiplied *is*, which is the half somebody deciding where to put
+    // the slider actually wants — and it is what makes visible that the step
+    // itself never changes.
+    const accelEffect = wheelTunes
+        ? `${stepLabel(display.tuneStep || 500)} a notch`
+        : 'one zoom rung a notch, never accelerated';
+
+    // How much a notch is worth, on the button that says what a notch does.
+    //
+    // A secondary press rather than a button of its own: the rate is a thing
+    // set once and then left, and the tools row has no slot to spend on one of
+    // those. Right-click with a mouse, hold with a finger — lib/useHoldPress,
+    // the same gesture the panel zoom's reset and the Multipad's squelch Auto
+    // use, so it is one thing to learn rather than three.
+    //
+    // The element comes from the press rather than from a ref of our own: the
+    // hold fires half a second after the pointer landed, by which time the
+    // event is long gone. See useHoldPress.
+    const [spinAt, setSpinAt] = useState(null);
+    const spinClosedAt = useRef(0);
+    const [spinPress, afterSpinHold] = useHoldPress(useCallback((el) => {
+        if (!el) return;
+        // A right-click while it is open has already dismissed it on the way
+        // down — Popover listens in the capture phase — so without this the
+        // second one blinks it shut and straight back open. Same guard the top
+        // bar's filter popover uses, for the same reason.
+        if (performance.now() - spinClosedAt.current < 250) return;
+        const r = el.getBoundingClientRect();
+        setSpinAt({ x: r.left, y: r.bottom + 4 });
+    }, []));
 
     return (
         <div className="spectrum">
@@ -2486,11 +2554,21 @@ export default function SpectrumView() {
                                 variant="ghost"
                                 active={wheelTunes}
                                 icon={<Icon.Wheel />}
-                                title={wheelTunes
-                                    ? `Wheel tunes in ${stepLabel(display.tuneStep || 500)} steps — click to zoom instead`
-                                    : 'Wheel zooms — click to tune with it instead'}
+                                title={`${wheelTunes
+                                    ? `Wheel tunes in ${stepLabel(display.tuneStep || 500)} steps`
+                                    : 'Wheel zooms'}${wheelAccel > 1 && wheelTunes
+                                    ? `, up to ${wheelAccel} of them a notch when spun`
+                                    : ''}`
+                                    + ` — click to ${wheelTunes ? 'zoom' : 'tune'} with it instead,`
+                                    + ' right-click or hold to set the spin'}
                                 aria-label="What the scroll wheel does"
-                                onClick={() => display.set({ wheelAction: wheelTunes ? 'zoom' : 'tune' })}
+                                {...spinPress}
+                                onClick={() => {
+                                    // The click a hold leaves behind is not a
+                                    // press of its own — see useHoldPress.
+                                    if (afterSpinHold()) return;
+                                    display.set({ wheelAction: wheelTunes ? 'zoom' : 'tune' });
+                                }}
                             />
                         )}
                         {/* Only while there is a zoom for it to apply to. With a
@@ -2515,6 +2593,54 @@ export default function SpectrumView() {
                                     : 'Zoom holds the frequency under the pointer still — click to zoom about the tuned frequency'}
                                 aria-label="Zoom anchor"
                                 onClick={() => display.set({ zoomAnchor: anchorTuned ? 'cursor' : 'tuned' })}
+                            />
+                        )}
+                        {/* The slot the anchor button leaves empty, and the
+                            setting that belongs in it: with the wheel tuning,
+                            what you are doing is walking the band, and the
+                            question that replaces "what does a zoom hold still"
+                            is "does the view come with me". Off, the dial drifts
+                            to the edge of the screen and the view then jumps a
+                            long way in one step; on, the marker sits on the
+                            centre line and the band slides past it.
+
+                            Exactly the complement of the anchor button's
+                            condition, so the row never loses a slot and the
+                            buttons after it do not shuffle sideways when the
+                            wheel is switched over.
+
+                            The setting is not wheel-only — it applies to
+                            click-to-tune, the +/- buttons, the keyboard, the
+                            scanner and CAT alike — so the Display panel carries
+                            it permanently and so does the right-click menu. This
+                            is the shortcut, in the place the question comes up.
+
+                            The crosshair is the one the centre-on-tuned button
+                            at the end of the row already uses, which is the
+                            relation between them: that one does it once, this
+                            one latches it. Highlighted while it is on, so the
+                            toolbar reads as state, as the wheel button beside it
+                            does — both states are the same view tracking the
+                            same dial, which is the case for one glyph and a
+                            highlight rather than two glyphs. */}
+                        {wheelTunes && hasWheel && (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                active={dialCentred}
+                                icon={<Icon.Target />}
+                                title={dialCentred
+                                    ? 'The view keeps the dial centred and the band moves past it — click to leave the view still until the passband reaches the edge'
+                                    : 'The view moves only when the passband would leave the screen — click to keep the dial centred instead'}
+                                aria-label="Keep the dial centred"
+                                onClick={() => {
+                                    // Turning it on centres at once rather than
+                                    // waiting for the next tune: a toggle that
+                                    // does nothing until you touch something
+                                    // else reads as a toggle that did nothing.
+                                    if (!dialCentred) actions.centerOnTuned();
+                                    display.set({ dialCentered: !dialCentred });
+                                }}
                             />
                         )}
                         {/* What the centre area shows, and — where there is a
@@ -3031,8 +3157,74 @@ export default function SpectrumView() {
                                 onSelect: () => display.set({ zoomAnchor: 'cursor' }),
                             },
                         ] : []),
+                        // How the view tracks the dial. Unconditional, unlike
+                        // the anchor above: this one applies to every way of
+                        // tuning there is, so it is a question on every device
+                        // and in both wheel modes — and the toolbar's own button
+                        // for it only appears in one of them.
+                        { key: 'sep-follow', separator: true },
+                        {
+                            key: 'follow-centred',
+                            label: 'Keep the dial centred',
+                            disabled: dialCentred,
+                            title: dialCentred ? 'What the view does now' : undefined,
+                            onSelect: () => {
+                                actions.centerOnTuned();
+                                display.set({ dialCentered: true });
+                            },
+                        },
+                        {
+                            key: 'follow-edge',
+                            label: 'Move the view only at the edge',
+                            disabled: !dialCentred,
+                            title: !dialCentred ? 'What the view does now' : undefined,
+                            onSelect: () => display.set({ dialCentered: false }),
+                        },
                     ]}
                 />
+            )}
+
+            {/* The wheel's rate, under the button that says what the wheel does.
+                A slider over the rungs rather than over the ceilings themselves:
+                they double, and a linear track through 1 to 16 would spend most
+                of its length in the top half. See lib/wheelStep.js.
+
+                The middle legend is the step itself rather than anything about
+                the setting, and that is the point of it being there: whatever
+                this slider says, one notch is still one of those. */}
+            {spinAt && (
+                <Popover
+                    at={spinAt}
+                    className="spinpop"
+                    aria-label="Wheel spin"
+                    onClose={() => {
+                        spinClosedAt.current = performance.now();
+                        setSpinAt(null);
+                    }}
+                >
+                    <div className="spinpop__head">
+                        <span className="spinpop__label">Spin</span>
+                        <span className="spinpop__value">{wheelAccelLabel(wheelAccel)}</span>
+                    </div>
+                    {/* The reset to the right of the track, where the filter
+                        width popover keeps its own and the Multipad keeps the
+                        one on its Width row. */}
+                    <div className="spinpop__row">
+                        <Slider
+                            value={WHEEL_ACCELS.indexOf(wheelAccel)}
+                            min={0}
+                            max={WHEEL_ACCELS.length - 1}
+                            step={1}
+                            onChange={(i) => display.set({ wheelAccel: WHEEL_ACCELS[i] })}
+                        />
+                        <WheelAccelReset />
+                    </div>
+                    <div className="spinpop__edges">
+                        <span>off</span>
+                        <span>{accelEffect}</span>
+                        <span>faster</span>
+                    </div>
+                </Popover>
             )}
 
             {spotting != null && (

@@ -530,6 +530,8 @@ FFT_SIZES_OVERRIDE='${FFT_SIZES_OVERRIDE}'
 FFTW_VERSION='${FFTW_VERSION}'
 PLANNER_FLAGS='-v -T 1'
 NTHREADS=1
+PROBE_SIZES='${CATALOG_FFT_SIZES}'
+PROBE_TIMEOUT=\${UBERSDR_WISDOM_PROBE_TIMEOUT:-5}
 CATALOG_ELIGIBLE=${CATALOG_ELIGIBLE}
 CATALOG_URL='https://instances.ubersdr.org/api/fftw-wisdom'
 HELPER_VARS
@@ -550,13 +552,13 @@ _sha256=$(sha256sum "$_wisdom_tmp" | awk '{print $1}')
 # write_sidecar <space-separated sizes> — one line, so it can be read back with a
 # single sed rather than a JSON parser.
 write_sidecar() {
-    local _sizes="$1" _json_sizes="" _sz
+    local _sizes="$1" _src="${2:-declared}" _json_sizes="" _sz
     for _sz in $_sizes; do
         [ -n "$_json_sizes" ] && _json_sizes="${_json_sizes},"
         _json_sizes="${_json_sizes}\"${_sz}\""
     done
-    printf '{"schema":1,"fft_sizes":[%s],"fft_sizes_source":"declared","wisdom_sha256":"%s","fftw_version":"%s","nthreads":%s,"planner_flags":"%s","generated_at":"%s","generator":"generate_wisdom.sh"}\n' \
-        "$_json_sizes" "$_sha256" "$FFTW_VERSION" "$NTHREADS" "$PLANNER_FLAGS" \
+    printf '{"schema":1,"fft_sizes":[%s],"fft_sizes_source":"%s","wisdom_sha256":"%s","fftw_version":"%s","nthreads":%s,"planner_flags":"%s","generated_at":"%s","generator":"generate_wisdom.sh"}\n' \
+        "$_json_sizes" "$_src" "$_sha256" "$FFTW_VERSION" "$NTHREADS" "$PLANNER_FLAGS" \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | sudo tee "$WISDOM_META_FILE" >/dev/null
     sudo chmod 644 "$WISDOM_META_FILE" 2>/dev/null
 }
@@ -572,11 +574,58 @@ read_sidecar_sizes() {
     printf '%s' "$_meta" | sed -n 's/.*"fft_sizes"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' | tr -d '" ' | tr ',' ' '
 }
 
+# probe_wisdom_sizes — work out what a wisdom file contains without a sidecar.
+#
+# Nothing in a wisdom file names its transforms and no parser will recover them.
+# But membership can be *tested*: ask fftwf-wisdom to plan the transform with only
+# this file imported, and see whether planning returns immediately. A plan already
+# in the file comes back in well under a second; one that is not there is planned
+# from scratch, which for these sizes runs for hours and is cut off by the timeout.
+#
+# -n is essential — without it a plan sitting in /etc/fftw/wisdomf would be found
+# and the file would be credited with a transform it does not have. The planner
+# flags must also match the ones the file was generated with (PLANNER_FLAGS above,
+# i.e. -T 1 and the default PATIENT mode).
+#
+# The failure is one-sided by construction. With no other wisdom source a fast
+# result must have come from this file, so a false positive is not possible; a
+# false negative — a file written by a different FFTW version, whose entries this
+# binary ignores — simply lands back on the conservative declaration that applies
+# when nothing is known. So this can add information but never wrong information.
+#
+# Runs on the readable copy rather than the original, and niced, since this is
+# CPU-bound work on a machine that is probably receiving.
+#
+# On the timeout: a hit is startup plus a hash lookup, measured at 42-60 ms for
+# rof1620000 on an RK3588 with a load average of 9.5, niced, pinned to a LITTLE
+# core — i.e. the slowest placement on the slowest machine in the fleet, busy. The
+# floor (startup and wisdom import alone) is 12 ms. Five seconds is therefore
+# roughly eighty times the worst measured hit, while costing a machine that lacks
+# the larger transform five seconds rather than the half-minute an arbitrarily
+# large timeout would. Raise it with UBERSDR_WISDOM_PROBE_TIMEOUT if a machine
+# ever turns out to be slower than that by two orders of magnitude.
+probe_wisdom_sizes() {
+    local _found="" _sz _rc
+    echo "  Checking which transforms this wisdom contains (up to ${PROBE_TIMEOUT}s per transform)..." >&2
+    for _sz in $PROBE_SIZES; do
+        nice -n 19 timeout "$PROBE_TIMEOUT" \
+            fftwf-wisdom -n -T "$NTHREADS" -w "$_wisdom_tmp" -o /dev/null "$_sz" >/dev/null 2>&1
+        _rc=$?
+        if [ $_rc -eq 0 ]; then
+            _found="${_found}${_found:+ }${_sz}"
+            echo "    ${_sz}: present" >&2
+        else
+            echo "    ${_sz}: not present" >&2
+        fi
+    done
+    printf '%s' "$_found"
+}
+
 _build_file=""
 case "$MODE" in
     declared)
         # Straight after a generation run: we know exactly what was planned.
-        write_sidecar "$FFT_SIZES"
+        write_sidecar "$FFT_SIZES" "declared"
         _build_file="$WISDOM_META_FILE"
         ;;
     *)
@@ -585,17 +634,37 @@ case "$MODE" in
         # field at all rather than a guess — the catalog then records the file as
         # 64.8 MSPS only, which is all a release predating the sidecar could build.
         _sizes=$(read_sidecar_sizes) || _sizes=""
+        _source="declared"
         if [ -z "$_sizes" ] && [ -n "$FFT_SIZES_OVERRIDE" ]; then
+            # An explicit declaration outranks measurement: the operator may know
+            # the file came from a machine whose FFTW this one cannot read.
             _sizes=$(echo "$FFT_SIZES_OVERRIDE" | tr ',' ' ')
-            write_sidecar "$_sizes"
+            write_sidecar "$_sizes" "declared"
+        fi
+        if [ -z "$_sizes" ]; then
+            # No sidecar and no declaration — the case every wisdom file generated
+            # before sidecars existed falls into. Measure it.
+            _sizes=$(probe_wisdom_sizes)
+            [ -n "$_sizes" ] && write_sidecar "$_sizes" "probed"
         fi
         if [ -n "$_sizes" ]; then
             _build_file="$WISDOM_META_FILE"
         else
-            echo "  ℹ No usable record of which transforms this wisdom contains (no sidecar,"
-            echo "    or one describing a different file), so it will be uploaded as 64.8 MSPS"
-            echo "    only. If it was built for 129.6 MSPS, stop and re-run with:"
+            # Probing found none of them. That is a measurement, not a gap in the
+            # records, and it contradicts the assumption a sidecar-less file would
+            # otherwise get. Most likely this wisdom was written by a different FFTW
+            # version, whose entries this binary ignores — in which case the file may
+            # be perfectly good for someone else, but nothing here can say what is in
+            # it. Uploading it under a transform it may not hold is the exact failure
+            # this catalog exists to prevent, so skip it and say why.
+            echo "  ℹ Skipping upload: could not establish what this wisdom contains."
+            echo "    There is no sidecar, and probing found none of ${PROBE_SIZES} in it."
+            echo "    That usually means it was built by a different FFTW version than"
+            echo "    the ${FFTW_VERSION:-local} one, so its entries cannot be read here."
+            echo "    If you know what it holds, declare it explicitly:"
             echo "      generate_wisdom.sh --upload-only --fft-sizes=rof1620000,rof3240000"
+            rm -f "$_wisdom_tmp"
+            exit 0
         fi
         ;;
 esac

@@ -828,6 +828,12 @@ func (h *DXClusterWebSocketHandler) frequencyToBand(freqHz float64) string {
 		return "12m"
 	case freq >= 28.0 && freq < 29.7:
 		return "10m"
+	// Only reachable on a receiver wide enough for 6m; on a narrower one
+	// pruneOutOfRangeChannels has already dropped the band, so no decode ever
+	// lands here. Without this case a 6m decode broadcasts as "unknown", which
+	// the live map draws in the unknown-band red and the band filter can't match.
+	case freq >= 50.0 && freq < 54.0:
+		return "6m"
 	default:
 		return "unknown"
 	}

@@ -102,6 +102,7 @@ class DigitalSpotsMap {
             '12m': '#9C755F',   // Brown
             '11m': '#FFD700',   // Gold
             '10m': '#00D9FF',   // Bright Cyan/Turquoise
+            '6m': '#8A2BE2',    // Violet - matches decoder_spots_history_map.js
             'unknown': '#FF0000' // Red for unknown bands
         };
 
@@ -520,7 +521,7 @@ class DigitalSpotsMap {
         if (!sectionDiv || !badgesDiv) return;
 
         // Sort bands in order
-        const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
         const bands = Object.keys(data).sort((a, b) => {
             return bandOrder.indexOf(a) - bandOrder.indexOf(b);
         });
@@ -2226,8 +2227,10 @@ class DigitalSpotsMap {
     updateTopBands(spots, containerEl) {
         if (!containerEl) return;
         
-        // Define all bands in order (2200m through 10m)
-        const allBands = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m'];
+        // Define all bands in order (2200m through 6m). 6m only ever carries spots on a
+        // receiver wide enough for 50 MHz, but it must be listed either way: this array
+        // also filters the spots below, so leaving it out discards them silently.
+        const allBands = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m', '6m'];
         
         // Count spots by band
         const bandCounts = {};
@@ -2921,8 +2924,9 @@ class DigitalSpotsMap {
             }
         });
 
-        // Sort bands in standard order
-        const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        // Sort bands in standard order. Mirrors allBands in updateTopBands, 11m included:
+        // frequencyToBandUint64 emits it, and an omitted band sorts to the front on -1.
+        const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m', '6m'];
         const sortedBands = Array.from(activeBands).sort((a, b) => {
             return bandOrder.indexOf(a) - bandOrder.indexOf(b);
         });
@@ -3346,7 +3350,7 @@ class DigitalSpotsMap {
                     return a[1].mode.localeCompare(b[1].mode);
                 }
                 // Sort bands in standard order
-                const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+                const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m', '6m'];
                 const aIndex = bandOrder.indexOf(a[1].band);
                 const bIndex = bandOrder.indexOf(b[1].band);
                 if (aIndex !== -1 && bIndex !== -1) {

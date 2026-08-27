@@ -86,9 +86,11 @@
         select.value = current;
     }
 
-    // Common HF band names (excluding VHF/UHF)
+    // Band names offered by the Band filter. 6 m is reachable only on a receiver wide
+    // enough for 50 MHz; listing it unconditionally is harmless on a 30 MHz one, where
+    // no spot ever carries the band.
     const commonBands = [
-        '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'
+        '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'
     ];
 
     // Continent name mapping

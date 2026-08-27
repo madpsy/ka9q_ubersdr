@@ -11,6 +11,26 @@
 # This script detects ARM big.LITTLE topology, reads the Docker cpuset for the
 # ka9q-radio service, and runs fftwf-wisdom pinned to the same CPU(s) that
 # radiod will use via taskset.  On x86 or homogeneous ARM the pinning is skipped.
+#
+# ── The sidecar ───────────────────────────────────────────────────────────────
+#
+# A wisdom file records no trace of which FFT transforms it was generated for, and
+# there is no way to recover that afterwards.  So a JSON sidecar is written beside
+# it — <wisdom>.json — naming the transforms, the FFTW version and thread count
+# used, and the SHA-256 of the wisdom file itself so a sidecar left behind by a
+# replaced or restored wisdom can be told apart from a current one.
+#
+# That declaration is what the community catalog stores alongside the upload, and
+# what lets it serve a 129.6 MSPS receiver a file that actually covers rof3240000
+# instead of one that installs cleanly and leaves radiod planning from scratch.
+#
+# Usage:
+#   generate_wisdom.sh                    generate wisdom for this receiver's rate
+#   generate_wisdom.sh --max-rate         generate for both supported rates
+#   generate_wisdom.sh --upload-only      upload the existing wisdom file
+#   generate_wisdom.sh --upload-only --fft-sizes=rof1620000,rof3240000
+#                                         ...declaring what it contains, for a file
+#                                         generated before sidecars existed
 
 # Exit on error
 set -e
@@ -120,6 +140,7 @@ cpu_name_for() {
 
 MAX_RATE=0
 UPLOAD_ONLY=0
+FFT_SIZES_OVERRIDE=""
 for arg in "$@"; do
     case $arg in
         --max-rate)
@@ -128,6 +149,14 @@ for arg in "$@"; do
             ;;
         --upload-only)
             UPLOAD_ONLY=1
+            shift
+            ;;
+        --fft-sizes=*)
+            # Declare what an existing wisdom file contains, for --upload-only on a
+            # file generated before the sidecar existed (see WISDOM_META_FILE below).
+            # Nothing in a wisdom file records which transforms it holds, so if the
+            # sidecar is missing this is the only way to say so truthfully.
+            FFT_SIZES_OVERRIDE="${arg#*=}"
             shift
             ;;
     esac
@@ -256,6 +285,52 @@ case " $FFT_SIZES " in
         echo
         echo "WARNING: ${FFT_COST_NOTE}" ;;
 esac
+
+# ── Is this a transform set the community catalog carries? ────────────────────
+#
+# The catalog stores wisdom for the two transforms the supported front end sample
+# rates produce, and nothing else. A receiver with a non-default blocktime or
+# overlap lands on a third name — the forward FFT length is
+# N = samprate x blocktime x overlap/(overlap-1) — and for those, local generation
+# works exactly as before but there is nothing to download and nothing to upload.
+#
+# Checked here, before any network call, so such a receiver is told once at the
+# start rather than getting an HTTP 400 after several hours of generation.
+CATALOG_FFT_SIZES="${FFT_LOW} ${FFT_HIGH}"
+CATALOG_ELIGIBLE=1
+for _sz in $FFT_SIZES; do
+    case " $CATALOG_FFT_SIZES " in
+        *" $_sz "*) ;;
+        *) CATALOG_ELIGIBLE=0 ;;
+    esac
+done
+if [ $CATALOG_ELIGIBLE -eq 0 ]; then
+    echo
+    echo "NOTE: ${FFT_SIZES} is not a transform the community catalog carries"
+    echo "      (it holds ${FFT_LOW} and ${FFT_HIGH} only)."
+    echo "      Wisdom will be generated locally as normal, but nothing will be"
+    echo "      downloaded or uploaded."
+fi
+
+# Validate --fft-sizes now, for the same reason: an unusable value should stop the
+# script here, not after the upload has been prepared.
+if [ -n "$FFT_SIZES_OVERRIDE" ]; then
+    for _sz in $(echo "$FFT_SIZES_OVERRIDE" | tr ',' ' '); do
+        case " $CATALOG_FFT_SIZES " in
+            *" $_sz "*) ;;
+            *)
+                echo "Error: --fft-sizes value '${_sz}' is not one the catalog accepts." >&2
+                echo "       Accepted: ${CATALOG_FFT_SIZES}" >&2
+                exit 1 ;;
+        esac
+    done
+fi
+
+# The FFTW version the local tools are built against. Wisdom from a different
+# version is silently ignored on import rather than rejected, which shows up as
+# "wisdom installed, radiod still slow" — so it is recorded with every upload and
+# compared against on every download.
+FFTW_VERSION=$(fftwf-wisdom --version 2>&1 | sed -n 's/.*FFTW version \([0-9][0-9.]*[0-9]\).*/\1/p' | head -1)
 
 echo
 
@@ -418,7 +493,163 @@ fi
 # ── Wisdom file and session setup ─────────────────────────────────────────────
 
 WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
+WISDOM_META_FILE="${WISDOM_FILE}.json"
 SESSION_NAME="generate-wisdom"
+
+# ── The sidecar, and why it exists ────────────────────────────────────────────
+#
+# An FFTW wisdom file is a list of codelet-level solutions keyed by internal
+# problem hashes. Nothing in it names the transforms it was generated for, and
+# there is no way to work that out afterwards. So the file is useless to anyone
+# else unless it is accompanied by a record of how it was built — which is what
+# ${WISDOM_META_FILE} is.
+#
+# It carries the wisdom file's SHA-256 so it can be told apart from a stale
+# sidecar left behind when the wisdom is replaced by hand or restored from
+# ${WISDOM_FILE}.backup. A sidecar that names a different file is ignored rather
+# than believed: a wrong declaration sends someone else's receiver wisdom that
+# does not cover the transform it plans.
+#
+# The upload logic is emitted as a standalone script rather than written inline
+# three times. Post-generation it has to run inside the tmux session, where a
+# shell function from this script is not available and an inline command string
+# would need several layers of quote escaping to survive.
+write_upload_helper() {
+    local _path="$1"
+    # Values fixed at emit time. Single-quoted so nothing in them is re-expanded
+    # when the helper runs, possibly hours later inside tmux.
+    cat > "$_path" <<HELPER_VARS
+#!/bin/bash
+# Emitted by generate_wisdom.sh — writes the wisdom sidecar and uploads to the
+# community catalog. Usage: $(basename "$_path") declared|existing
+WISDOM_FILE='${WISDOM_FILE}'
+WISDOM_META_FILE='${WISDOM_META_FILE}'
+SCRIPT_DIR='${SCRIPT_DIR}'
+FFT_SIZES='${FFT_SIZES}'
+FFT_SIZES_OVERRIDE='${FFT_SIZES_OVERRIDE}'
+FFTW_VERSION='${FFTW_VERSION}'
+PLANNER_FLAGS='-v -T 1'
+NTHREADS=1
+CATALOG_ELIGIBLE=${CATALOG_ELIGIBLE}
+CATALOG_URL='https://instances.ubersdr.org/api/fftw-wisdom'
+HELPER_VARS
+
+    cat >> "$_path" <<'HELPER_BODY'
+
+MODE="${1:-existing}"
+
+sudo test -f "$WISDOM_FILE" || { echo "  No wisdom file at ${WISDOM_FILE}." >&2; exit 1; }
+
+# The wisdom lives in a root-owned Docker volume, so everything below works on a
+# user-readable copy that curl and sha256sum can actually open.
+_wisdom_tmp=$(mktemp)
+sudo cp "$WISDOM_FILE" "$_wisdom_tmp" 2>/dev/null || { echo "  Could not read the wisdom file." >&2; rm -f "$_wisdom_tmp"; exit 1; }
+sudo chmod 644 "$_wisdom_tmp" 2>/dev/null
+_sha256=$(sha256sum "$_wisdom_tmp" | awk '{print $1}')
+
+# write_sidecar <space-separated sizes> — one line, so it can be read back with a
+# single sed rather than a JSON parser.
+write_sidecar() {
+    local _sizes="$1" _json_sizes="" _sz
+    for _sz in $_sizes; do
+        [ -n "$_json_sizes" ] && _json_sizes="${_json_sizes},"
+        _json_sizes="${_json_sizes}\"${_sz}\""
+    done
+    printf '{"schema":1,"fft_sizes":[%s],"fft_sizes_source":"declared","wisdom_sha256":"%s","fftw_version":"%s","nthreads":%s,"planner_flags":"%s","generated_at":"%s","generator":"generate_wisdom.sh"}\n' \
+        "$_json_sizes" "$_sha256" "$FFTW_VERSION" "$NTHREADS" "$PLANNER_FLAGS" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | sudo tee "$WISDOM_META_FILE" >/dev/null
+    sudo chmod 644 "$WISDOM_META_FILE" 2>/dev/null
+}
+
+# read_sidecar_sizes — echoes the declared sizes, but only if the sidecar
+# describes the file we are actually holding.
+read_sidecar_sizes() {
+    sudo test -f "$WISDOM_META_FILE" || return 1
+    local _meta _meta_sha
+    _meta=$(sudo cat "$WISDOM_META_FILE" 2>/dev/null) || return 1
+    _meta_sha=$(printf '%s' "$_meta" | sed -n 's/.*"wisdom_sha256"[[:space:]]*:[[:space:]]*"\([0-9a-f]*\)".*/\1/p')
+    [ "$_meta_sha" = "$_sha256" ] || return 1
+    printf '%s' "$_meta" | sed -n 's/.*"fft_sizes"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' | tr -d '" ' | tr ',' ' '
+}
+
+_build_file=""
+case "$MODE" in
+    declared)
+        # Straight after a generation run: we know exactly what was planned.
+        write_sidecar "$FFT_SIZES"
+        _build_file="$WISDOM_META_FILE"
+        ;;
+    *)
+        # An existing file. Trust the sidecar if it matches, otherwise fall back to
+        # what the operator declared with --fft-sizes. With neither, send no build
+        # field at all rather than a guess — the catalog then records the file as
+        # 64.8 MSPS only, which is all a release predating the sidecar could build.
+        _sizes=$(read_sidecar_sizes) || _sizes=""
+        if [ -z "$_sizes" ] && [ -n "$FFT_SIZES_OVERRIDE" ]; then
+            _sizes=$(echo "$FFT_SIZES_OVERRIDE" | tr ',' ' ')
+            write_sidecar "$_sizes"
+        fi
+        if [ -n "$_sizes" ]; then
+            _build_file="$WISDOM_META_FILE"
+        else
+            echo "  ℹ No usable record of which transforms this wisdom contains (no sidecar,"
+            echo "    or one describing a different file), so it will be uploaded as 64.8 MSPS"
+            echo "    only. If it was built for 129.6 MSPS, stop and re-run with:"
+            echo "      generate_wisdom.sh --upload-only --fft-sizes=rof1620000,rof3240000"
+        fi
+        ;;
+esac
+
+if [ "$CATALOG_ELIGIBLE" != "1" ]; then
+    rm -f "$_wisdom_tmp"
+    exit 0
+fi
+
+_uuid=$(bash "${SCRIPT_DIR}/get-uuid.sh" 2>/dev/null) || { rm -f "$_wisdom_tmp"; exit 0; }
+_meta_tmp=$(mktemp)
+if ! bash "${SCRIPT_DIR}/get-cpu.sh" --json 2>/dev/null > "$_meta_tmp"; then
+    echo "  Could not identify the CPU — skipping upload." >&2
+    rm -f "$_wisdom_tmp" "$_meta_tmp"
+    exit 1
+fi
+
+# The build field is optional; -F is only added when there is something truthful
+# to put in it.
+_build_tmp=""
+_build_args=()
+if [ -n "$_build_file" ]; then
+    _build_tmp=$(mktemp)
+    sudo cat "$_build_file" > "$_build_tmp" 2>/dev/null && _build_args=(-F "build=<${_build_tmp};type=application/json")
+fi
+
+# Keep the response body: a 400 can mean an unsupported transform, a stale
+# sidecar, or malformed CPU metadata, and guessing which wastes the operator's
+# time. The catalog puts the reason in an "error" field.
+_resp=$(mktemp)
+_up=$(curl -sS -o "$_resp" -w '%{http_code}' -X POST \
+    -F "meta=<${_meta_tmp};type=application/json" \
+    -F "wisdom=@${_wisdom_tmp};type=application/octet-stream" \
+    -F "sha256=${_sha256}" \
+    "${_build_args[@]}" \
+    "${CATALOG_URL}/${_uuid}" 2>/dev/null)
+
+_reason=$(sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_resp" 2>/dev/null)
+_stored=$(sed -n 's/.*"fft_sizes"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_resp" 2>/dev/null)
+
+rm -f "$_wisdom_tmp" "$_meta_tmp" "$_resp"
+[ -n "$_build_tmp" ] && rm -f "$_build_tmp"
+
+case "$_up" in
+    201) echo "  ✓ Wisdom uploaded to the community catalog${_stored:+ (${_stored//,/ })}" ;;
+    409) echo "  ℹ The catalog already covers these transforms for this CPU" ;;
+    401) echo "  ℹ Could not upload wisdom (instance not yet registered)" ;;
+    400) echo "  ℹ The catalog rejected the upload${_reason:+: ${_reason}}" ;;
+    *)   echo "  ℹ Wisdom upload skipped (HTTP ${_up})${_reason:+: ${_reason}}" ;;
+esac
+exit 0
+HELPER_BODY
+    chmod 755 "$_path"
+}
 
 # ── --upload-only: upload existing wisdom and exit, no interactivity ──────────
 
@@ -427,31 +658,18 @@ if [ $UPLOAD_ONLY -eq 1 ]; then
         echo "No wisdom file found at ${WISDOM_FILE} — nothing to upload." >&2
         exit 1
     fi
-    _uuid=$("${SCRIPT_DIR}/get-uuid.sh" 2>/dev/null) || { echo "Could not get instance UUID." >&2; exit 1; }
-    _meta_file=$(mktemp)
-    _wisdom_tmp=$(mktemp)
-    if "${SCRIPT_DIR}/get-cpu.sh" --json 2>/dev/null > "$_meta_file" && \
-       sudo cp "${WISDOM_FILE}" "$_wisdom_tmp" 2>/dev/null && \
-       sudo chmod 644 "$_wisdom_tmp" 2>/dev/null; then
-        _sha256=$(sha256sum "$_wisdom_tmp" | awk '{print $1}')
-        _up=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
-            -F "meta=<${_meta_file};type=application/json" \
-            -F "wisdom=@${_wisdom_tmp};type=application/octet-stream" \
-            -F "sha256=${_sha256}" \
-            "https://instances.ubersdr.org/api/fftw-wisdom/${_uuid}" 2>/dev/null)
-        case "$_up" in
-            201) echo "✓ Wisdom uploaded to the community catalog" ;;
-            409) echo "ℹ Wisdom already exists for this CPU in the catalog" ;;
-            401) echo "ℹ Could not upload wisdom (instance not yet registered)" ;;
-            *)   echo "Upload failed (HTTP ${_up})" >&2; rm -f "$_meta_file" "$_wisdom_tmp"; exit 1 ;;
-        esac
-    else
-        echo "Failed to prepare wisdom for upload." >&2
-        rm -f "$_meta_file" "$_wisdom_tmp"
+    if [ $CATALOG_ELIGIBLE -eq 0 ]; then
+        echo "This receiver plans ${FFT_SIZES}, which the catalog does not carry — nothing to upload." >&2
         exit 1
     fi
-    rm -f "$_meta_file" "$_wisdom_tmp"
-    exit 0
+    _helper=$(mktemp)
+    write_upload_helper "$_helper"
+    # set -e is on, so the failure has to be caught here for the temp file to be
+    # cleaned up and the helper's exit status passed through.
+    _rc=0
+    bash "$_helper" existing || _rc=$?
+    rm -f "$_helper"
+    exit $_rc
 fi
 
 # If session already exists, re-attach to it (wisdom generation still running)
@@ -476,26 +694,13 @@ if sudo test -f "$WISDOM_FILE"; then
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "Wisdom generation cancelled."
         # Attempt to upload the existing wisdom to the community catalog.
-        # Errors are ignored — this is best-effort.
-        _uuid=$("${SCRIPT_DIR}/get-uuid.sh" 2>/dev/null) || { exit 0; }
-        _meta_file=$(mktemp)
-        _wisdom_tmp=$(mktemp)
-        if "${SCRIPT_DIR}/get-cpu.sh" --json 2>/dev/null > "$_meta_file" && \
-           sudo cp "${WISDOM_FILE}" "$_wisdom_tmp" 2>/dev/null && \
-           sudo chmod 644 "$_wisdom_tmp" 2>/dev/null; then
-            _sha256=$(sha256sum "$_wisdom_tmp" | awk '{print $1}')
-            _up=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
-                -F "meta=<${_meta_file};type=application/json" \
-                -F "wisdom=@${_wisdom_tmp};type=application/octet-stream" \
-                -F "sha256=${_sha256}" \
-                "https://instances.ubersdr.org/api/fftw-wisdom/${_uuid}" 2>/dev/null)
-            case "$_up" in
-                201) echo "  ✓ Wisdom uploaded to the community catalog" ;;
-                409) echo "  ℹ Wisdom already exists for this CPU in the catalog" ;;
-                401) echo "  ℹ Could not upload wisdom (instance not yet registered)" ;;
-            esac
-        fi
-        rm -f "$_meta_file" "$_wisdom_tmp"
+        # Errors are ignored — this is best-effort. The helper declares whatever
+        # the sidecar records; with no sidecar the catalog records the file as
+        # 64.8 MSPS only, which is all a pre-sidecar release could produce.
+        _helper=$(mktemp)
+        write_upload_helper "$_helper"
+        bash "$_helper" existing || true
+        rm -f "$_helper"
         exit 0
     fi
 
@@ -504,6 +709,12 @@ if sudo test -f "$WISDOM_FILE"; then
     BACKUP_FILE="${WISDOM_FILE}.backup"
     echo "Copying existing wisdom file to ${BACKUP_FILE}..."
     sudo cp "$WISDOM_FILE" "$BACKUP_FILE"
+    # The sidecar travels with the file it describes: restoring the backup without
+    # it would leave a wisdom file nobody can say anything about, which is the
+    # situation this whole mechanism exists to avoid.
+    if sudo test -f "$WISDOM_META_FILE"; then
+        sudo cp "$WISDOM_META_FILE" "${WISDOM_META_FILE}.backup"
+    fi
     echo "Backup created at ${BACKUP_FILE}"
     echo
 fi
@@ -522,8 +733,14 @@ fi
 
 USE_PRECOMPUTED=false
 
-if [[ -n "$CPU_HASH" ]]; then
-    WISDOM_URL="https://instances.ubersdr.org/api/fftw-wisdom/${CPU_HASH}"
+# The catalog is asked for the transforms this receiver actually plans. A file
+# only has to *contain* them — extra transforms are harmless — but one missing the
+# transform radiod plans is worse than nothing, because it installs cleanly and
+# then leaves radiod measuring at startup as if no wisdom existed at all.
+WISDOM_WANT=$(echo "$FFT_SIZES" | tr ' ' ',')
+
+if [[ -n "$CPU_HASH" && $CATALOG_ELIGIBLE -eq 1 ]]; then
+    WISDOM_URL="https://instances.ubersdr.org/api/fftw-wisdom/${CPU_HASH}?fft=${WISDOM_WANT}"
 
     _wisdom_body=$(mktemp)
     _wisdom_headers=$(mktemp)
@@ -534,6 +751,7 @@ if [[ -n "$CPU_HASH" ]]; then
         echo "    CPU:  ${CPU_NAME}"
     fi
     echo "    Hash: ${CPU_HASH}"
+    echo "    Needs: ${FFT_SIZES}"
     echo
 
     HTTP_STATUS=$(curl -sS --max-time 15 \
@@ -541,6 +759,11 @@ if [[ -n "$CPU_HASH" ]]; then
         --dump-header "$_wisdom_headers" \
         --output "$_wisdom_body" \
         "$WISDOM_URL" 2>"$_wisdom_err"); CURL_EXIT=$?; true
+
+    # _header <name> → the value of a response header, or empty
+    _header() {
+        grep -i "^${1}:" "$_wisdom_headers" | tail -1 | tr -d '\r' | sed "s/^[^:]*:[[:space:]]*//"
+    }
 
     _ask_generate_own() {
         # $1 = informational message to show before the prompt
@@ -557,11 +780,89 @@ if [[ -n "$CPU_HASH" ]]; then
         fi
     }
 
+    # Shown once the file has been accepted, whether or not it could be checksummed.
+    _offer_precomputed() {
+        local _covers _source _remote_fftw _remote_threads
+        _covers=$(_header 'x-wisdom-fft-sizes')
+        _source=$(_header 'x-wisdom-fft-source')
+        _remote_fftw=$(_header 'x-wisdom-fftw-version')
+        _remote_threads=$(_header 'x-wisdom-nthreads')
+
+        echo "  ✓  Precomputed FFTW wisdom found for your CPU!"
+        if [[ -n "$CPU_NAME" ]]; then
+            echo "       CPU:    ${CPU_NAME}"
+        fi
+        echo "       Hash:   ${CPU_HASH}"
+        if [[ -n "$_covers" ]]; then
+            case "$_source" in
+                declared|"") echo "       Covers: ${_covers//,/ }" ;;
+                # 'inferred'/'backfilled' mean nobody declared this file's contents;
+                # the catalog recorded it as 64.8 MSPS because that is all the release
+                # which uploaded it could build. Accurate, but worth saying out loud.
+                *)           echo "       Covers: ${_covers//,/ }  (${_source}, not declared by the generator)" ;;
+            esac
+        fi
+        if [[ -n "$_remote_fftw" ]]; then
+            echo "       Built:  FFTW ${_remote_fftw}${_remote_threads:+, ${_remote_threads} thread(s)}"
+        fi
+        echo "       Source: https://instances.ubersdr.org/api/fftw-wisdom/${CPU_HASH}"
+        echo
+        echo "  Using precomputed wisdom saves several hours of generation time."
+        echo "  The wisdom was generated on an identical CPU microarchitecture."
+
+        # FFTW ignores wisdom entries written by a different version instead of
+        # rejecting them, so a mismatch installs cleanly and simply does nothing.
+        # That is worth a warning, not a refusal — the operator may well have a
+        # different FFTW build than the uploader and still benefit from trying.
+        if [[ -n "$_remote_fftw" && -n "$FFTW_VERSION" && "$_remote_fftw" != "$FFTW_VERSION" ]]; then
+            echo
+            echo "  ⚠  It was built with FFTW ${_remote_fftw}, but this machine has ${FFTW_VERSION}."
+            echo "     FFTW silently ignores wisdom from another version, so this may install"
+            echo "     but leave radiod planning from scratch anyway."
+        fi
+
+        # A file covering only the current rate is still worth having, but the
+        # operator should know a rate change means doing this again.
+        if [[ -n "$_covers" && "$_covers" != *"${FFT_LOW}"* ]]; then
+            echo
+            echo "  ⚠  It does not cover ${FFT_LOW} (64.8 MSPS). If you later drop back to"
+            echo "     the lower sample rate you will need to generate wisdom again."
+        elif [[ -n "$_covers" && "$_covers" != *"${FFT_HIGH}"* ]]; then
+            echo
+            echo "  Note: it covers 64.8 MSPS only. Raising this receiver to 129.6 MSPS"
+            echo "        later would mean generating wisdom again."
+        fi
+
+        echo
+        echo "  Generating your own would build: ${FFT_SIZES}"
+        echo "  ${FFT_COST_NOTE}"
+        echo
+        read -p "  [1] Use precomputed wisdom (recommended)  [2] Generate my own: " -r _choice
+        echo
+        if [[ "$_choice" == "2" ]]; then
+            echo "  Proceeding with local generation..."
+            echo
+        else
+            USE_PRECOMPUTED=true
+        fi
+    }
+
     if [[ $CURL_EXIT -ne 0 ]]; then
         _ask_generate_own "  ℹ  Could not reach the wisdom server (network error or timeout).
      You could try again later if you have connectivity issues."
     elif [[ "$HTTP_STATUS" == "404" ]]; then
-        _ask_generate_own "  ℹ  No precomputed wisdom is available for your CPU (hash: ${CPU_HASH})."
+        # "nothing at all for this CPU" and "nothing covering the rate you run at"
+        # are different situations and send the operator to different places, so
+        # they get different messages. X-Wisdom-Available lists what is held.
+        _available=$(_header 'x-wisdom-available')
+        if [[ -n "$_available" ]]; then
+            _ask_generate_own "  ℹ  The catalog has wisdom for your CPU, but none of it covers ${FFT_SIZES}.
+     Available for this CPU: ${_available}
+     (that is wisdom for a different front end sample rate — it would install
+      cleanly and leave radiod planning from scratch, so it is not offered)."
+        else
+            _ask_generate_own "  ℹ  No precomputed wisdom is available for your CPU (hash: ${CPU_HASH})."
+        fi
     elif [[ "$HTTP_STATUS" == "200" ]]; then
         # Verify integrity using X-Wisdom-SHA256 header, falling back to ETag
         EXPECTED_SHA=$(grep -i '^x-wisdom-sha256:' "$_wisdom_headers" | tr -d '\r' | awk '{print $2}')
@@ -575,52 +876,11 @@ if [[ -n "$CPU_HASH" ]]; then
                 _ask_generate_own "  ⚠  Downloaded wisdom failed integrity check (checksum mismatch).
      The file may be corrupt or tampered with."
             else
-                # Checksum OK — offer precomputed wisdom to user
-                echo "  ✓  Precomputed FFTW wisdom found for your CPU!"
-                if [[ -n "$CPU_NAME" ]]; then
-                    echo "       CPU:    ${CPU_NAME}"
-                fi
-                echo "       Hash:   ${CPU_HASH}"
-                echo "       Source: ${WISDOM_URL}"
-                echo
-                echo "  Using precomputed wisdom saves several hours of generation time."
-                echo "  The wisdom was generated on an identical CPU microarchitecture."
-                echo
-                echo "  Generating your own would build: ${FFT_SIZES}"
-                echo "  ${FFT_COST_NOTE}"
-                echo
-                read -p "  [1] Use precomputed wisdom (recommended)  [2] Generate my own: " -r _choice
-                echo
-                if [[ "$_choice" == "2" ]]; then
-                    echo "  Proceeding with local generation..."
-                    echo
-                else
-                    USE_PRECOMPUTED=true
-                fi
+                _offer_precomputed
             fi
         else
             # No checksum header — accept without verification
-            echo "  ✓  Precomputed FFTW wisdom found for your CPU!"
-            if [[ -n "$CPU_NAME" ]]; then
-                echo "       CPU:    ${CPU_NAME}"
-            fi
-            echo "       Hash:   ${CPU_HASH}"
-            echo "       Source: ${WISDOM_URL}"
-            echo
-            echo "  Using precomputed wisdom saves several hours of generation time."
-            echo "  The wisdom was generated on an identical CPU microarchitecture."
-            echo
-            echo "  Generating your own would build: ${FFT_SIZES}"
-            echo "  ${FFT_COST_NOTE}"
-            echo
-            read -p "  [1] Use precomputed wisdom (recommended)  [2] Generate my own: " -r _choice
-            echo
-            if [[ "$_choice" == "2" ]]; then
-                echo "  Proceeding with local generation..."
-                echo
-            else
-                USE_PRECOMPUTED=true
-            fi
+            _offer_precomputed
         fi
     else
         _ask_generate_own "  ℹ  Wisdom server returned an unexpected response (HTTP ${HTTP_STATUS})."
@@ -631,12 +891,33 @@ if [[ -n "$CPU_HASH" ]]; then
         if sudo test -f "$WISDOM_FILE"; then
             echo "  Backing up existing wisdom to ${WISDOM_FILE}.backup..."
             sudo cp "$WISDOM_FILE" "${WISDOM_FILE}.backup"
+            if sudo test -f "$WISDOM_META_FILE"; then
+                sudo cp "$WISDOM_META_FILE" "${WISDOM_META_FILE}.backup"
+            fi
         fi
         # Install atomically: cp to a temp file on the same filesystem, then mv
         _precomp_tmp="${WISDOM_FILE}.tmp"
         echo "  Installing precomputed wisdom to ${WISDOM_FILE}..."
         if sudo cp "$_wisdom_body" "$_precomp_tmp" && sudo mv -f "$_precomp_tmp" "$WISDOM_FILE"; then
-            echo "  Done!"
+            # Record what was installed, so this machine is as self-describing as one
+            # that generated its own — and so a later --upload-only does not have to
+            # fall back to assuming 64.8 MSPS.
+            _dl_covers=$(_header 'x-wisdom-fft-sizes')
+            # Both of these are interpolated into the JSON below, so keep them to
+            # the shapes they are supposed to have rather than trusting the wire.
+            _dl_fftw=$(_header 'x-wisdom-fftw-version' | tr -cd '0-9A-Za-z._+-')
+            _dl_threads=$(_header 'x-wisdom-nthreads' | tr -cd '0-9')
+            [[ -z "$_dl_covers" ]] && _dl_covers="$WISDOM_WANT"
+            _dl_json_sizes=$(echo "$_dl_covers" | tr ',' '\n' | sed 's/.*/"&"/' | paste -sd, -)
+            printf '{"schema":1,"fft_sizes":[%s],"fft_sizes_source":"catalog","wisdom_sha256":"%s","fftw_version":"%s","nthreads":%s,"planner_flags":"","generated_at":"%s","generator":"catalog:%s"}\n' \
+                "$_dl_json_sizes" \
+                "$(sha256sum "$_wisdom_body" | awk '{print $1}')" \
+                "${_dl_fftw}" "${_dl_threads:-1}" \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${CPU_HASH}" \
+                | sudo tee "$WISDOM_META_FILE" >/dev/null
+            sudo chmod 644 "$WISDOM_META_FILE" 2>/dev/null
+
+            echo "  Done!  Installed wisdom covers: ${_dl_covers//,/ }"
             echo
             echo "  Please restart the application using the red \"Save & Restart Radiod\" button"
             echo "  at the bottom of the \"Radiod\" tab in the admin interface."
@@ -695,34 +976,14 @@ FFTWF_CMD="sudo ${TASKSET_PREFIX:+${TASKSET_PREFIX} }fftwf-wisdom -v -T 1 -o '${
     && sudo mv -f '${WISDOM_TMP}' '${WISDOM_FILE}' \
     || { sudo rm -f '${WISDOM_TMP}'; echo 'ERROR: Wisdom generation failed — temp file removed, original wisdom untouched.'; exit 1; }"
 
-# Build the post-generation upload snippet.
-# SCRIPT_DIR and WISDOM_FILE are expanded now (before tmux starts) so they
-# resolve correctly inside the tmux session shell.
-# Errors are fully ignored — the upload is best-effort / fire-and-forget.
+# Build the post-generation step: record what was built, then upload.
 #
-# Notes:
-#   • The wisdom file is in a root-owned Docker volume, so it must be copied
-#     to a user-readable temp file via sudo before curl can read it.
-#   • meta uses curl's '<file' syntax (reads file content as field value,
-#     no filename in Content-Disposition) so the server sees a plain JSON field.
-UPLOAD_CMD="_uuid=\$(bash '${SCRIPT_DIR}/get-uuid.sh' 2>/dev/null) && \
-    _meta_file=\$(mktemp) && \
-    _wisdom_tmp=\$(mktemp) && \
-    bash '${SCRIPT_DIR}/get-cpu.sh' --json 2>/dev/null > \"\${_meta_file}\" && \
-    sudo cp '${WISDOM_FILE}' \"\${_wisdom_tmp}\" 2>/dev/null && \
-    sudo chmod 644 \"\${_wisdom_tmp}\" 2>/dev/null && \
-    _sha256=\$(sha256sum \"\${_wisdom_tmp}\" | awk '{print \$1}') && \
-    _up=\$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
-        -F \"meta=<\${_meta_file};type=application/json\" \
-        -F \"wisdom=@\${_wisdom_tmp};type=application/octet-stream\" \
-        -F \"sha256=\${_sha256}\" \
-        \"https://instances.ubersdr.org/api/fftw-wisdom/\${_uuid}\" 2>/dev/null); \
-    rm -f \"\${_meta_file}\" \"\${_wisdom_tmp}\"; \
-    case \"\${_up}\" in \
-        201) echo '  ✓ Wisdom uploaded to the community catalog' ;; \
-        409) echo '  ℹ Wisdom already exists for this CPU in the catalog' ;; \
-        401) echo '  ℹ Could not upload wisdom (instance not yet registered)' ;; \
-    esac"
+# This runs inside the tmux session, possibly hours later, so it is emitted as a
+# standalone script rather than an inline command string — the alternative is
+# several layers of quote escaping around the same logic that --upload-only uses.
+POST_SCRIPT=$(mktemp /tmp/ubersdr-wisdom-post.XXXXXX)
+write_upload_helper "$POST_SCRIPT"
+UPLOAD_CMD="bash '${POST_SCRIPT}' declared"
 
 # Create tmux session and run the wisdom generation command
 tmux new-session -d -s "$SESSION_NAME" -n 'Generate Wisdom' "${FFTWF_CMD} && \
@@ -732,6 +993,7 @@ tmux new-session -d -s "$SESSION_NAME" -n 'Generate Wisdom' "${FFTWF_CMD} && \
     echo '=== FFTW Wisdom generation completed successfully! ===' && \
     echo && \
     ${UPLOAD_CMD} ; \
+    rm -f '${POST_SCRIPT}' ; \
     echo && \
     echo 'Please restart the application using the red \"Save & Restart Radiod\" button' && \
     echo 'at the bottom of the \"Radiod\" tab in the admin interface.' && \

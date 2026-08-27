@@ -56,6 +56,10 @@ export default function DRMExtension({ minimal }) {
     // presented as current — a confident "17.5 dB" from a dead decoder is
     // worse than an honest gap.
     const [statusStale, setStatusStale] = useState(false);
+    // Why the decoder stopped, when it was not the operator who stopped it.
+    // Detaching clears the hook's own error, so without keeping it here the
+    // panel would drop straight back to "Stopped" with nothing to say why.
+    const [failure, setFailure] = useState(null);
 
     // Playback chain and Opus decoder. None of it may live in state: frames
     // arrive fifty times a second and a re-render per frame would be absurd.
@@ -72,6 +76,7 @@ export default function DRMExtension({ minimal }) {
     // ── mode ────────────────────────────────────────────────────────────────
 
     const start = useCallback(() => {
+        setFailure(null);
         // Remember where the operator was so stopping does not strand them in a
         // mode that plays broadband noise.
         restoreMode.current = isIQ(tuning.mode) ? null : tuning.mode;
@@ -192,6 +197,18 @@ export default function DRMExtension({ minimal }) {
         onResult,
     });
 
+    // A crash is a stop. When the decoder's subprocess dies the server tears
+    // the extension down, so a panel still offering Stop is offering to stop
+    // something that is already gone — and, worse, is still ducking the
+    // receiver and holding it in IQ, so the operator is left with silence they
+    // cannot explain. Retries do not come through here: the hook reports
+    // 'error' only once it has given up.
+    useEffect(() => {
+        if (attachState !== 'error') return;
+        setFailure(error || 'The decoder stopped unexpectedly.');
+        stop();
+    }, [attachState, error, stop]);
+
     // Silence the receiver. In IQ mode its own output is the raw I/Q pair,
     // which is broadband noise, so this is required rather than polite.
     useEffect(() => {
@@ -239,6 +256,11 @@ export default function DRMExtension({ minimal }) {
     const statusTone = !decoding
         ? 'off'
         : (attachState === 'running' ? 'on' : (attachState === 'error' ? 'bad' : 'wait'));
+
+    // The hook's error for the render it is raised on, the kept one from then
+    // on — the same text either way, so the note does not flicker as the
+    // decoder detaches.
+    const problem = attachState === 'error' ? error : failure;
 
     const audioDesc = status && status.codec
         ? `${status.codec}${status.sbr ? '+SBR' : ''}${status.audioMode ? ` ${status.audioMode}` : ''}`
@@ -290,7 +312,7 @@ export default function DRMExtension({ minimal }) {
                     what DRM needs and is silent on its own — and put back when you stop.
                 </div>
             )}
-            {attachState === 'error' && <div className="note note--warn">{error}</div>}
+            {problem && <div className="note note--warn">{problem}</div>}
             {decoding && statusStale && attachState === 'running' && (
                 <div className="note note--warn">
                     The decoder has stopped reporting — the figures below are from

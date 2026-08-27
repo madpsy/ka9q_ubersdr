@@ -109,6 +109,33 @@ var ttStarLastTs = 0;
 var ttStarRafId = null;
 
 /* ── Speed helpers ──────────────────────────────────────────────────────── */
+/* Frequency grid lines for a receiver of any width.
+   This used to be a fixed [0, 5, 10, 15, 20, 25, 30] MHz, which is the one thing on this
+   page that did not follow ttMeta: everything else already reads start_freq_hz/end_freq_hz.
+   On a 60 MHz receiver that put every line in the bottom half and none above it, so the
+   half of the display showing 6 m had no reference marks at all.
+   Roughly six intervals, landing on round numbers a reader can name. */
+function ttGridFreqs(startHz, endHz) {
+  var span = endHz - startHz;
+  if (!(span > 0) || !isFinite(span)) return [];
+  var target = span / 6;
+  var pow = Math.pow(10, Math.floor(Math.log10(target)));
+  var mults = [1, 2, 2.5, 5, 10];
+  var step = pow * 10;
+  for (var i = 0; i < mults.length; i++) {
+    if (pow * mults[i] >= target) { step = pow * mults[i]; break; }
+  }
+  var out = [];
+  /* Guard the loop rather than trusting the arithmetic: a degenerate step would
+     otherwise spin forever inside a requestAnimationFrame draw. */
+  if (!(step > 0)) return [];
+  for (var f = Math.ceil(startHz / step) * step; f <= endHz + 1; f += step) {
+    out.push(f);
+    if (out.length > 64) break;
+  }
+  return out;
+}
+
 function ttRowsPerSec() { return ttBaseRowsPerSec * ttSpeedMult; }
 
 function ttSetSpeed(mult) {
@@ -904,7 +931,7 @@ function ttRedraw() {
     /* Vertical grid lines: front edge at groundY, back edge at vanishY row width */
     var backHalfW = frontHalfW * TT_MIN_WFRAC;
     var backY2 = groundY - (groundY - vanishY) * 1.0; /* = vanishY */
-    var gridFreqs = [0, 5e6, 10e6, 15e6, 20e6, 25e6, 30e6];
+    var gridFreqs = ttGridFreqs(_fullStartHz, _fullStartHz + _fullSpanHz);
     for (var gi = 0; gi < gridFreqs.length; gi++) {
       var gf = gridFreqs[gi];
       if (gf < startHz || gf > startHz + spanHz) continue;

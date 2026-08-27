@@ -10,7 +10,7 @@ client library), `BridgeHost.jsx` (the wiring). Tests: `test/bridge.test.js`,
 specification — if one has to change, the change is a breaking one.
 
 - Protocol (envelope) version: **1**
-- API version: **1.6**
+- API version: **1.7**
 
 ---
 
@@ -121,7 +121,7 @@ neither of them has.
   "page": { "url": "…", "title": "…" },
   "capabilities": ["tune","mode",…,"functions","rotator","antenna"],
   "topics": ["tuning","audio","signal","spectrum","session","page","vfos","modes","bands","functions"],
-  "commands": ["tune","mode","passband","volume","mute","duck","squelch","vfo","spectrum","power"]
+  "commands": ["tune","mode","passband","volume","mute","duck","squelch","vfo","spectrum","power","lock"]
 }
 ```
 
@@ -144,8 +144,15 @@ missing value, never an absent key. That is what makes patch merging safe.
 ### `tuning`
 ```jsonc
 { "frequency": 14074000, "mode": "usb", "bandwidthLow": 50, "bandwidthHigh": 2700,
-  "vfo": "A", "band": "20m" }
+  "vfo": "A", "band": "20m", "locked": false,
+  "minFrequency": 10000, "maxFrequency": 30000000 }
 ```
+
+`locked` *(since 1.7)* is the tuning lock — the padlock above the waterfall. With
+it on, the first four fields stop responding, to this bridge as much as to the
+page: `tune`, `mode` and `passband` still succeed as messages and move nothing.
+Watch it, or a client whose commands are being quietly ignored has no way to say
+why. Everything else — volume, squelch, DSP, the spectrum view — is unaffected.
 
 ### `audio`
 ```jsonc
@@ -337,6 +344,7 @@ One rule governs bad input:
 | `vfo` | `{id:"A"…"D"}` \| `{step:±1}` | `{vfo, …tuning}` |
 | `spectrum` | `{center}`, `{span}`, `{center,span}`, `{zoom:±n, about?}`, `{centerOnTuned:true}`, `{reset:true}` | spectrum |
 | `power` | `{on:false}` | `{running:false}` |
+| `lock` *(1.7)* | `{locked}` (absolute) \| `{toggle:true}` | `{locked}` |
 
 Notes that matter:
 
@@ -356,6 +364,12 @@ Notes that matter:
   reason: separately, the span closes around wherever the view had got to.
 - **`power {on:true}` is refused** with `unsupported`: browsers require a user
   gesture to start audio. Watch `session.running` instead.
+- **`lock` is absolute**, for the reason `mute` is: a controller with a lock
+  switch on it is reporting a position, and a toggle desynchronises permanently
+  the first time a message is missed. `toggle` exists for a button that means
+  "the other one". Either way the operator is told on screen — a receiver that
+  stopped tuning because something out of sight locked it is indistinguishable
+  from a broken one. Read the current state from `tuning.locked`.
 
 ### `run` — the rest of the receiver
 

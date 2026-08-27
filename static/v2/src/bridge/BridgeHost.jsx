@@ -515,7 +515,7 @@ export default function BridgeHost() {
     }, [host, settings.enabled, serverInfo, running, capabilities]);
 
     // --- state that React already tracks ------------------------------------
-    const { tuning, audio, squelch, view, followTuning, session } = radio;
+    const { tuning, audio, squelch, view, followTuning, session, locked } = radio;
 
     useEffect(() => { publishAll('markers', snapshotFor('markers', sources(live.current))); },
         [host, tuning]);
@@ -524,7 +524,7 @@ export default function BridgeHost() {
         [host, tuning, vfos]);
 
     useEffect(() => { publishAll('tuning', snapshotFor('tuning', sources(live.current))); },
-        [host, tuning, vfo]);
+        [host, tuning, vfo, locked]);
     useEffect(() => { publishAll('audio', snapshotFor('audio', sources(live.current))); },
         [host, audio, squelch]);
     useEffect(() => { publishAll('spectrum', snapshotFor('spectrum', sources(live.current))); },
@@ -589,6 +589,7 @@ function sources(l) {
         meters: m,
         squelchOpen: m ? m.squelchOpen : undefined,
         follow: r.followTuning,
+        locked: r.locked,
         running: r.running,
         session: r.session,
         sessionId: getSessionId(),

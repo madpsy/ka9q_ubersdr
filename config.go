@@ -463,7 +463,7 @@ type FrequencyGainRange struct {
 type SpectrumConfig struct {
 	Enabled bool                  `yaml:"enabled"`
 	Default SpectrumDefaultConfig `yaml:"default"`
-	// BinCount is the number of FFT bins across the full 0-30 MHz view — the
+	// BinCount is the number of FFT bins across the receiver's full-span view — the
 	// horizontal resolution of the spectrum and waterfall. Only 512 (low),
 	// 1024 (normal) and 2048 (high) are accepted; LoadConfig snaps anything
 	// else to the nearest of those and copies the result into Default.BinCount,
@@ -491,10 +491,11 @@ type SmoothingConfig struct {
 
 // SpectrumDefaultConfig contains default parameters for new spectrum channels.
 // These values are intentionally not settable directly via config.yaml — they are
-// derived in LoadConfig to ensure the display always covers exactly 0-30 MHz
-// (totalBandwidth = BinCount × BinBandwidth must equal 30,000,000 Hz).
-// BinCount is derived from the operator-facing spectrum.bin_count setting and
-// BinBandwidth is then computed as 30 MHz / BinCount.
+// derived in LoadConfig to ensure the display always covers exactly the receiver's span
+// (totalBandwidth = BinCount × BinBandwidth must equal Receiver.Span(), which is
+// 30,000,000 Hz on a 64.8 Msps RX888 and 60,000,000 Hz at 129.6 Msps — see
+// RECEIVER_SPAN.md). BinCount is derived from the operator-facing spectrum.bin_count
+// setting and BinBandwidth is then computed as Span() / BinCount.
 type SpectrumDefaultConfig struct {
 	CenterFrequency uint64  `yaml:"-"`
 	BinCount        int     `yaml:"-"`
@@ -502,7 +503,7 @@ type SpectrumDefaultConfig struct {
 }
 
 // SpectrogramConfig contains settings for the daily wideband spectrogram recorder.
-// One PNG image is generated per UTC day covering 0-30 MHz.
+// One PNG image is generated per UTC day covering the receiver's full span.
 type SpectrogramConfig struct {
 	// Enabled controls whether the spectrogram recorder runs.
 	// Default: true. Set to false to disable.
@@ -1082,9 +1083,37 @@ func LoadConfig(filename string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	config := &Config{}
+	if err := yaml.Unmarshal(data, config); err != nil {
+		// A value with the wrong YAML type — `kiwisdr_port: "8036"`, `enabled: yes`
+		// — used to be fatal, leaving the operator with a server that would not
+		// start and an error naming only a line number. Retype the offending
+		// scalars against the declared Go types and try once more before giving up.
+		//
+		// The retry decodes into a fresh struct, because the attempt above may
+		// have populated some fields before it gave up and those must not
+		// survive into the repaired config.
+		repairedConfig := &Config{}
+		repaired, repairs, rerr := repairConfigYAML(data, mainConfigSchema(), repairedConfig)
+		if rerr != nil {
+			return nil, fmt.Errorf("failed to parse config file: %w", err)
+		}
+		config = repairedConfig
+
+		for _, r := range repairs {
+			log.Printf("Config repair: %s had the wrong type (%s), corrected to %s", r.Path, r.From, r.To)
+		}
+
+		// Persist the repair so the admin UI and the next boot both see clean
+		// values. Only the mistyped values themselves are rewritten, so comments,
+		// blank lines, key order and layout are byte-for-byte preserved. A config
+		// that cannot be written (read-only bind mount, root-owned file) is not an
+		// error — the in-memory config is already correct.
+		if werr := writeConfigAtomic(filename, repaired); werr != nil {
+			log.Printf("Warning: config repaired in memory but %s could not be rewritten: %v", filename, werr)
+		} else {
+			log.Printf("Config repaired: %d value(s) retyped in %s (previous contents saved as %s.bak)", len(repairs), filename, filename)
+		}
 	}
 
 	// Apply DSP filter defaults (nr2/rn2/nr4/dfnr enabled, bnr disabled)
@@ -1716,7 +1745,7 @@ func LoadConfig(filename string) (*Config, error) {
 	// start/end just above — pruning earlier would test a zero centre and drop bands that
 	// are perfectly reachable. main.go calls this again once decoder.yaml has been merged,
 	// because that replaces config.Decoder wholesale.
-	pruneOutOfRangeChannels(&config)
+	pruneOutOfRangeChannels(config)
 
 	// Set GPSDO proxy defaults if not specified
 	if config.GPSDO.Host == "" {
@@ -1873,7 +1902,7 @@ func LoadConfig(filename string) (*Config, error) {
 		}
 	}
 
-	return &config, nil
+	return config, nil
 }
 
 // GetSampleRateForMode returns the hardcoded sample rate for a given mode.

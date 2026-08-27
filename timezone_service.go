@@ -133,4 +133,3 @@ func TimezoneForLatLon(lat, lon float64) string {
 	}
 	return globalTimezones.lookup(lat, lon)
 }
-

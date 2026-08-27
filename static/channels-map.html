@@ -511,9 +511,21 @@
         // Map zoom state
         let manuallyZoomed = false; // Track if user has manually zoomed/panned the map
 
+        // How far the connected receiver tunes, in Hz.
+        //
+        // Not always the 0-30 MHz this page assumed: the span follows the front end
+        // sample rate, so a 129.6 Msps RX888 reaches 60 MHz. From /api/description's
+        // `tuning_range`, built server-side by ReceiverConfig.TuningRange in
+        // receiver_span.go — the same object v2 reads.
+        //
+        // The fallback is a contract rather than padding: until the description answers,
+        // and on a server too old to publish it, this page must behave exactly as it did
+        // before the span became configurable — a 0-30 MHz bar.
+        let receiverMaxHz = 30000000;
+
         // Frequency bar zoom state
-        let freqBarZoom = 1; // 1 = full 0-30MHz, higher = zoomed in
-        let freqBarCenter = 15000000; // Center frequency in Hz (default 15 MHz)
+        let freqBarZoom = 1; // 1 = the receiver's full span, higher = zoomed in
+        let freqBarCenter = receiverMaxHz / 2; // Center frequency in Hz
         const MIN_ZOOM = 1;
         const MAX_ZOOM = 100;
 
@@ -569,7 +581,11 @@
             { name: '17m',  min: 18068000, max: 18168000, color: 'rgba(138, 43, 226, 0.25)',  labelColor: '#8a2be2' },
             { name: '15m',  min: 21000000, max: 21450000, color: 'rgba(255, 20, 147, 0.25)',  labelColor: '#ff1493' },
             { name: '12m',  min: 24890000, max: 24990000, color: 'rgba(255, 105, 180, 0.25)', labelColor: '#ff69b4' },
-            { name: '10m',  min: 28000000, max: 29700000, color: 'rgba(220, 20, 60, 0.25)',   labelColor: '#dc143c' }
+            { name: '10m',  min: 28000000, max: 29700000, color: 'rgba(220, 20, 60, 0.25)',   labelColor: '#dc143c' },
+            // Reachable only on a receiver wide enough for it. Both band tables are
+            // already clipped to the visible window, so on a 30 MHz receiver this entry
+            // simply never falls inside one — no extra guard needed.
+            { name: '6m',   min: 50000000, max: 54000000, color: 'rgba(138, 43, 226, 0.25)',  labelColor: '#8a2be2' }
         ];
 
         // Return the band colour for a given frequency, or a default grey if out-of-band
@@ -1101,10 +1117,10 @@
             const OVERLAP_THRESHOLD = 100000; // 100 kHz - frequencies within this are considered overlapping
 
             // Calculate visible frequency range based on zoom
-            const fullRange = 30000000; // 30 MHz
+            const fullRange = receiverMaxHz;
             const visibleRange = fullRange / freqBarZoom;
             const MIN_FREQ = Math.max(0, freqBarCenter - visibleRange / 2);
-            const MAX_FREQ = Math.min(30000000, freqBarCenter + visibleRange / 2);
+            const MAX_FREQ = Math.min(receiverMaxHz, freqBarCenter + visibleRange / 2);
 
             // Amateur radio band ranges (from app.js)
             const bandRanges = {
@@ -1117,7 +1133,8 @@
                 '17m': { min: 18068000, max: 18168000, color: 'rgba(138, 43, 226, 0.2)' },
                 '15m': { min: 21000000, max: 21450000, color: 'rgba(255, 20, 147, 0.2)' },
                 '12m': { min: 24890000, max: 24990000, color: 'rgba(255, 105, 180, 0.2)' },
-                '10m': { min: 28000000, max: 29700000, color: 'rgba(220, 20, 60, 0.2)' }
+                '10m': { min: 28000000, max: 29700000, color: 'rgba(220, 20, 60, 0.2)' },
+                '6m': { min: 50000000, max: 54000000, color: 'rgba(138, 43, 226, 0.2)' }
             };
 
             // Draw band blocks
@@ -1171,7 +1188,7 @@
             if (freqBarZoom > 20) step = 100000; // 100 kHz when very zoomed
 
             for (let freq = Math.floor(MIN_FREQ / step) * step; freq <= MAX_FREQ; freq += step) {
-                if (freq < 0 || freq > 30000000) continue;
+                if (freq < 0 || freq > receiverMaxHz) continue;
                 const percent = ((freq - MIN_FREQ) / (MAX_FREQ - MIN_FREQ)) * 100;
 
                 // Vertical marker line
@@ -1579,9 +1596,33 @@
             updateMap();
         };
 
+        /**
+         * Adopt the receiver's tuning range and redraw the bar around it.
+         *
+         * A max at or below zero is not a receiver but a misconfiguration, and taking it
+         * would leave every clamp on the bar inverted, so it is refused and the fallback
+         * stands. `> 0` rather than `??`, so 0, null and undefined all fall through.
+         */
+        function applyTuningRange(range) {
+            const max = (range || {}).max_frequency;
+            if (!(typeof max === 'number' && Number.isFinite(max) && max > 0)) return;
+            if (max === receiverMaxHz) return;
+            receiverMaxHz = max;
+            // Recentre only if the view was never moved off the default; a user who has
+            // already panned somewhere should not be yanked elsewhere when this lands.
+            if (freqBarZoom === 1) freqBarCenter = receiverMaxHz / 2;
+            updateMap();
+        }
+
         // Initialize on load
         window.addEventListener('load', () => {
             initMap();
+            // Failure is not an error: the fallback is exactly the 0-30 MHz bar this
+            // page has always drawn.
+            fetch('/api/description')
+                .then((r) => (r.ok ? r.json() : null))
+                .then((d) => { if (d) applyTuningRange(d.tuning_range); })
+                .catch(() => {});
             addReceiverMarker(); // Add receiver marker first
             updateMap(); // Then add channel markers
 
@@ -1597,9 +1638,9 @@
                     const mousePercent = mouseX / rect.width;
 
                     // Calculate frequency at mouse position (before zoom)
-                    const fullRange = 30000000 / freqBarZoom;
+                    const fullRange = receiverMaxHz / freqBarZoom;
                     const currentMin = Math.max(0, freqBarCenter - fullRange / 2);
-                    const currentMax = Math.min(30000000, freqBarCenter + fullRange / 2);
+                    const currentMax = Math.min(receiverMaxHz, freqBarCenter + fullRange / 2);
                     const freqAtMouse = currentMin + (currentMax - currentMin) * mousePercent;
 
                     // Update zoom level
@@ -1607,11 +1648,11 @@
                     freqBarZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, freqBarZoom * zoomDelta));
 
                     // Adjust center to keep frequency at mouse position
-                    const newRange = 30000000 / freqBarZoom;
+                    const newRange = receiverMaxHz / freqBarZoom;
                     freqBarCenter = freqAtMouse;
 
                     // Clamp center to keep view within 0-30 MHz
-                    freqBarCenter = Math.max(newRange / 2, Math.min(30000000 - newRange / 2, freqBarCenter));
+                    freqBarCenter = Math.max(newRange / 2, Math.min(receiverMaxHz - newRange / 2, freqBarCenter));
 
                     // Re-render frequency bar
                     const channels = window.opener && window.opener.activeChannels ? window.opener.activeChannels : [];
@@ -1636,7 +1677,7 @@
                     const deltaPercent = deltaX / rect.width;
 
                     // Calculate frequency shift
-                    const visibleRange = 30000000 / freqBarZoom;
+                    const visibleRange = receiverMaxHz / freqBarZoom;
                     const freqShift = deltaPercent * visibleRange;
 
                     // Update center (inverted - drag right = pan left)
@@ -1644,7 +1685,7 @@
 
                     // Clamp center to keep view within 0-30 MHz
                     const halfRange = visibleRange / 2;
-                    freqBarCenter = Math.max(halfRange, Math.min(30000000 - halfRange, freqBarCenter));
+                    freqBarCenter = Math.max(halfRange, Math.min(receiverMaxHz - halfRange, freqBarCenter));
 
                     // Re-render frequency bar
                     const channels = window.opener && window.opener.activeChannels ? window.opener.activeChannels : [];

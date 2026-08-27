@@ -326,6 +326,10 @@ async function connectInstance(desc) {
     const rec = {
         id: entry.id, proxy, win, links: null, layout: null, menu: null, radio: null,
         surface: null, audioPort: null,
+        // How far this receiver tunes, once asked. Null until then, which every reader
+        // treats as "not said" and falls back to 10 kHz - 30 MHz for. Kept per window
+        // because two windows can be on two receivers with different spans.
+        tuningRange: null,
     };
     running.set(entry.id, rec);
     // Loaded only once the record is in place: the preload asks the main process
@@ -338,6 +342,7 @@ async function connectInstance(desc) {
     // Not awaited: the receiver is usable the moment its window is up, and the
     // menu is two HTTP round trips behind it.
     attachLinksMenu(running.get(entry.id), entry);
+    loadTuningRange(running.get(entry.id), entry);
     return entry.id;
 }
 
@@ -887,6 +892,26 @@ async function attachLinksMenu(rec, entry) {
     refreshWindowMenu(rec);
 }
 
+/**
+ * Ask this receiver how far it tunes, and remember it on the window's record.
+ *
+ * Separate from attachLinksMenu even though that already reads /api/description: the menu
+ * fetch gives up early when the receiver publishes no page menu, and the range is wanted
+ * whether or not there is a menu. It is also the only thing the TCI surface has to tell a
+ * third-party app what the dial may reach.
+ *
+ * Failure leaves rec.tuningRange null, which every reader treats as "not said".
+ */
+async function loadTuningRange(rec, entry) {
+    if (!rec) return;
+    try {
+        const desc = await discovery.getJson(entry, '/api/description');
+        if (desc && desc.tuning_range) rec.tuningRange = desc.tuning_range;
+    } catch {
+        // An older receiver, or one that went away between opening and asking.
+    }
+}
+
 // macOS shares one menu bar between every window, so it has to follow the
 // focus. Registered once per window rather than per menu rebuild, or the
 // listeners would pile up every time a panel moved.
@@ -1034,6 +1059,9 @@ function setupIpc() {
             },
             onStatus: (status) => surfaceStatus(rec, status),
         });
+        // Before start(), not after: TCI has no message for revising vfo_limits, so a
+        // client is stuck with whatever it was greeted with.
+        if (rec.surface.setTuningRange) rec.surface.setTuningRange(rec.tuningRange);
         rec.surface.start();
     });
 

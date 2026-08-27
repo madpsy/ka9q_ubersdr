@@ -39,7 +39,23 @@ const (
 	// R820T gain table has 29 entries
 	R820TGainCount = 29
 
-	// UberSDR frequency limits
+	// The tuning range to assume when the receiver has not said.
+	//
+	// This is the compatibility contract shared by every UberSDR client — see
+	// ReceiverConfig.MinFreq/MaxFreq in receiver_span.go and TuningRange.Limits in
+	// clients/tui/client.go. A server too old to publish the range, or one this bridge
+	// could not reach, leaves it behaving exactly as it did before the receiver span
+	// became configurable: 10 kHz to 30 MHz.
+	//
+	// Read through minFrequencyHz()/maxFrequencyHz(), not these, everywhere else: the
+	// receiver is not always the 0-30 MHz box this bridge assumed, and a 129.6 Msps
+	// RX888 reaches 60 MHz.
+	//
+	// Note this range is *not* what the connecting SDR client is told. The rtl_tcp
+	// protocol has no frequency-range field at all — the dongle header carries only a
+	// tuner type, and this bridge reports R820T, which makes clients believe 24-1766 MHz
+	// is tunable. There is nowhere to put the truth, so it is used to warn and nothing
+	// more.
 	MinFrequencyHz = 10000    // 10 kHz
 	MaxFrequencyHz = 30000000 // 30 MHz
 
@@ -695,9 +711,9 @@ func (s *clientSession) handleCommand(cmd uint8, param uint32) {
 		freq := int64(param)
 		log.Printf("[%s] CMD set_freq %d Hz (%.3f MHz)", s.userSessionID[:8], freq, float64(freq)/1e6)
 
-		if freq < MinFrequencyHz || freq > MaxFrequencyHz {
+		if lo, hi := tuningLimits(); freq < lo || freq > hi {
 			log.Printf("[%s] WARNING: Frequency %d Hz is outside UberSDR range (%d–%d Hz)",
-				s.userSessionID[:8], freq, MinFrequencyHz, MaxFrequencyHz)
+				s.userSessionID[:8], freq, lo, hi)
 		}
 
 		s.mu.Lock()
@@ -929,6 +945,108 @@ func (b *RTLTCPBridge) Stop() {
 	log.Println("Bridge: Stopped")
 }
 
+// bridgeURL is the instance to ask about the receiver, whether or not a routing table
+// was loaded. Mirrors getURLForFrequency's nil check, which every other consumer of
+// routingConfig already does.
+func bridgeURL(rc *RoutingConfig, flagURL string) string {
+	if rc != nil && rc.DefaultURL != "" {
+		return rc.DefaultURL
+	}
+	return flagURL
+}
+
+// The receiver's tuning range, as read from /api/description at startup.
+//
+// Guarded because the fetch runs on the main goroutine before any client is accepted,
+// while the warning that reads it runs per-connection — go test -race objects otherwise.
+var (
+	rangeMu       sync.RWMutex
+	liveMinFreqHz int64 = MinFrequencyHz
+	liveMaxFreqHz int64 = MaxFrequencyHz
+)
+
+func tuningLimits() (int64, int64) {
+	rangeMu.RLock()
+	defer rangeMu.RUnlock()
+	return liveMinFreqHz, liveMaxFreqHz
+}
+
+// applyTuningRange adopts what a receiver published, and reports whether it moved.
+//
+// Each edge falls back on its own — they are independent facts, and a receiver that
+// states one must not reset the other. Anything at or below zero is "not said" rather
+// than a limit, so a zero, a missing field or a null all leave the default in place. A
+// max at or below the min is a misconfigured receiver, not a range, and is refused
+// outright rather than adopted inverted.
+func applyTuningRange(tr *TuningRange) bool {
+	min, max := int64(MinFrequencyHz), int64(MaxFrequencyHz)
+	if tr != nil {
+		if tr.MinFrequency > 0 {
+			min = tr.MinFrequency
+		}
+		if tr.MaxFrequency > 0 {
+			max = tr.MaxFrequency
+		}
+	}
+	if max <= min {
+		return false
+	}
+	rangeMu.Lock()
+	defer rangeMu.Unlock()
+	changed := min != liveMinFreqHz || max != liveMaxFreqHz
+	liveMinFreqHz, liveMaxFreqHz = min, max
+	return changed
+}
+
+// TuningRange is how much spectrum a receiver covers, from /api/description's
+// `tuning_range` object. Every field is optional, including the whole object.
+type TuningRange struct {
+	MinFrequency int64 `json:"min_frequency"`
+	MaxFrequency int64 `json:"max_frequency"`
+}
+
+type descriptionResponse struct {
+	TuningRange *TuningRange `json:"tuning_range"`
+}
+
+// fetchTuningRange asks the receiver how far it tunes.
+//
+// Failure is not an error: every path out leaves the 10 kHz - 30 MHz default in force,
+// which is what this bridge always assumed. A bridge that starts and warns wrongly beats
+// one that refuses to start.
+func fetchTuningRange(serverURL string) {
+	parsed, err := url.Parse(serverURL)
+	if err != nil {
+		return
+	}
+	scheme := "http"
+	if parsed.Scheme == "https" || parsed.Scheme == "wss" {
+		scheme = "https"
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("%s://%s/api/description", scheme, parsed.Host))
+	if err != nil {
+		log.Printf("Could not read the receiver's tuning range (%v); assuming %d Hz - %d Hz",
+			err, MinFrequencyHz, MaxFrequencyHz)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Receiver returned %s for /api/description; assuming %d Hz - %d Hz",
+			resp.Status, MinFrequencyHz, MaxFrequencyHz)
+		return
+	}
+
+	var desc descriptionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&desc); err != nil {
+		log.Printf("Could not parse /api/description (%v); assuming %d Hz - %d Hz",
+			err, MinFrequencyHz, MaxFrequencyHz)
+		return
+	}
+	applyTuningRange(desc.TuningRange)
+}
+
 func main() {
 	ubersdrURL := flag.String("url", "http://127.0.0.1:8080", "UberSDR server URL (http://, https://, ws://, or wss://)")
 	password := flag.String("password", "", "UberSDR server password (optional)")
@@ -976,8 +1094,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  centre are filled with zeros (no signal, no images).\n")
 		fmt.Fprintf(os.Stderr, "  Recommended: set your SDR client's bandwidth to 250 kHz.\n\n")
 		fmt.Fprintf(os.Stderr, "Frequency Range:\n")
-		fmt.Fprintf(os.Stderr, "  UberSDR is HF-only: %d Hz (%.0f kHz) to %d Hz (%.0f MHz)\n",
-			MinFrequencyHz, float64(MinFrequencyHz)/1000.0,
+		fmt.Fprintf(os.Stderr, "  Read from the receiver at startup. Assumed %d Hz (%.0f kHz) to\n",
+			MinFrequencyHz, float64(MinFrequencyHz)/1000.0)
+		fmt.Fprintf(os.Stderr, "  %d Hz (%.0f MHz) when the receiver does not publish one.\n",
 			MaxFrequencyHz, float64(MaxFrequencyHz)/1e6)
 	}
 
@@ -1027,6 +1146,18 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Start bridge
+	// Ask the receiver how far it tunes, before any client can connect and be warned
+	// against the wrong range. Blocking on purpose: it is one 5-second-capped request at
+	// startup, and every path through it leaves a usable range behind.
+	//
+	// From the flag, not routingConfig: routingConfig is nil unless -config was given,
+	// which is the common case. It also mirrors what the range is used for — a single
+	// global warning threshold. With a routing table the bridge can fan out across
+	// several instances with different spans (see getURLForFrequency), and one global
+	// range cannot describe all of them; the default instance is the closest honest
+	// answer, and being wrong only produces a spurious log line, never a refused tune.
+	fetchTuningRange(bridgeURL(routingConfig, *ubersdrURL))
+
 	if err := bridge.Start(); err != nil {
 		log.Fatalf("Failed to start bridge: %v", err)
 	}
@@ -1036,6 +1167,9 @@ func main() {
 	log.Printf("  Listening on:   %s (rtl_tcp protocol)", *listenAddr)
 	log.Printf("  Initial freq:   %d Hz (%.3f MHz)", *initialFreq, float64(*initialFreq)/1e6)
 	log.Printf("  IQ mode:        %s (%d Hz, windowed-sinc resampling)", IQMode, IQModeRate)
+	rangeLo, rangeHi := tuningLimits()
+	log.Printf("  Tuning range:   %d Hz - %d Hz (%.3f kHz - %.3f MHz)",
+		rangeLo, rangeHi, float64(rangeLo)/1e3, float64(rangeHi)/1e6)
 	log.Printf("  Max clients:    %s", maxClientsStr(*maxClients))
 	log.Printf("Press Ctrl+C to stop")
 

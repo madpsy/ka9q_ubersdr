@@ -7,8 +7,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // ScheduledPosition represents a single scheduled rotator position
@@ -206,7 +204,7 @@ func (rs *RotatorScheduler) LoadConfig() error {
 
 	// Parse YAML
 	var config RotatorScheduleConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if _, err := loadYAMLWithRepair(rs.configPath, data, &config); err != nil {
 		return fmt.Errorf("failed to parse config YAML: %w", err)
 	}
 

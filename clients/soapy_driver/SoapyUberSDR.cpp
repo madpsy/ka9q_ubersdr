@@ -23,6 +23,9 @@
 #include <queue>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <string>
+#include <stdexcept>
 #include <cstring>
 #include <sstream>
 #include <iomanip>
@@ -112,6 +115,48 @@ typedef websocketpp::client<websocketpp::config::asio_client> plain_client;
 typedef websocketpp::config::asio_tls_client::message_type::ptr tls_message_ptr;
 typedef websocketpp::config::asio_client::message_type::ptr plain_message_ptr;
 typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
+
+// The tuning range to advertise when the receiver does not say.
+//
+// This is the compatibility contract shared by every UberSDR client — see
+// ReceiverConfig.MinFreq/MaxFreq in receiver_span.go, applyTuningRange in
+// static/v2/src/radio/constants.js, and TuningRange.Limits in clients/tui/client.go.
+// An older server, or one this driver could not reach, must leave the driver behaving
+// exactly as it did before the receiver span became configurable: 10 kHz to 30 MHz.
+//
+// Note the bottom moved: this driver used to advertise 100 kHz, which was its own number
+// and matched nothing else. The server has always published 10 kHz.
+static const double UBERSDR_FALLBACK_MIN_FREQ = 10e3;
+static const double UBERSDR_FALLBACK_MAX_FREQ = 30e6;
+
+// Pull one number out of a flat JSON object by key.
+//
+// The rest of this driver parses JSON by hand with find()/substr() rather than taking a
+// dependency, and this follows suit. Scoped to the object the caller has already sliced
+// out, so a `min_frequency` appearing elsewhere in the payload cannot be picked up.
+//
+// Returns `fallback` unless the key is present and parses to a finite number greater than
+// zero. `> 0` rather than merely "present" on purpose, so a 0, a null or an empty string
+// all fall through to the default rather than 0 becoming a legitimate limit — the same
+// rule as the pick() helpers in constants.js and client.go.
+static double ubersdrParseNumber(const std::string &obj, const std::string &key, double fallback)
+{
+    size_t keyPos = obj.find("\"" + key + "\"");
+    if (keyPos == std::string::npos) return fallback;
+    size_t colonPos = obj.find(":", keyPos);
+    if (colonPos == std::string::npos) return fallback;
+
+    try {
+        size_t consumed = 0;
+        double value = std::stod(obj.substr(colonPos + 1), &consumed);
+        if (consumed == 0 || !std::isfinite(value) || value <= 0) return fallback;
+        return value;
+    } catch (const std::exception &) {
+        // Not a number at all (null, a string, a nested object): the receiver did not
+        // say, which is exactly what the fallback is for.
+        return fallback;
+    }
+}
 
 /***********************************************************************
  * Device implementation
@@ -208,7 +253,21 @@ private:
     double _sampleRate;
     std::vector<std::string> _allowedIQModes;
     bool _useTLS;
-    
+
+    // How far this receiver tunes, from /api/description's `tuning_range`.
+    //
+    // The receiver is not always the 0-30 MHz box this driver assumed: the span follows
+    // the front end sample rate, so a 129.6 Msps RX888 reaches 60 MHz and has 6 m in it.
+    // getFrequencyRange() is the only place any UberSDR client advertises a limit to its
+    // host, and GQRX / CubicSDR / GNU Radio clamp their own UI to whatever it returns —
+    // so a stale 30 MHz here is the one thing that makes 6 m unreachable from SoapySDR.
+    //
+    // The fallback is a contract rather than padding: a receiver that publishes nothing —
+    // an older server, or one this driver could not reach — must behave exactly as this
+    // driver did before the span became configurable. See fetchTuningRange().
+    double _minFrequency;
+    double _maxFrequency;
+
     // WebSocket clients (only one will be used based on protocol)
     // Using unique_ptr to allow reconstruction after stop()
     std::unique_ptr<tls_client> _tlsClient;
@@ -241,6 +300,8 @@ private:
     void startPingThread();
     void stopPingThread();
     bool checkConnectionAllowed();
+    std::string httpBaseURL() const;
+    void fetchTuningRange();
     void connectWebSocket();
     void disconnectWebSocket();
 };
@@ -265,7 +326,14 @@ SoapyUberSDR::SoapyUberSDR(const SoapySDR::Kwargs &args)
     
     // Detect if we should use TLS based on URL protocol
     _useTLS = (_serverURL.find("wss://") == 0);
-    
+
+    // Ask the receiver how far it tunes, before anything can call getFrequencyRange().
+    // A host enumerates the device and reads the range immediately, so this cannot be
+    // deferred to connect time the way the permission check is.
+    _minFrequency = UBERSDR_FALLBACK_MIN_FREQ;
+    _maxFrequency = UBERSDR_FALLBACK_MAX_FREQ;
+    fetchTuningRange();
+
     if (!_password.empty()) {
         SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Created device for %s mode=%s (with password) [%s]",
                        _serverURL.c_str(), _currentMode.c_str(), _useTLS ? "TLS" : "Plain");
@@ -550,8 +618,11 @@ std::vector<std::string> SoapyUberSDR::listFrequencies(const int /*direction*/, 
 
 SoapySDR::RangeList SoapyUberSDR::getFrequencyRange(const int /*direction*/, const size_t /*channel*/) const
 {
+    // Whatever this receiver said it covers — see fetchTuningRange(). Hosts clamp their
+    // own tuning UI to this, so it is the one number that decides whether 6 m on a
+    // 129.6 Msps receiver is reachable from GQRX, CubicSDR or GNU Radio at all.
     SoapySDR::RangeList ranges;
-    ranges.push_back(SoapySDR::Range(100e3, 30e6));
+    ranges.push_back(SoapySDR::Range(_minFrequency, _maxFrequency));
     return ranges;
 }
 
@@ -940,26 +1011,110 @@ static size_t soapy_curl_write_callback(void *contents, size_t size, size_t nmem
     return size * nmemb;
 }
 
-bool SoapyUberSDR::checkConnectionAllowed()
+// httpBaseURL turns the WebSocket server URL into the HTTP origin its REST API is served
+// from, so /connection and /api/description derive it the same way rather than keeping
+// two copies that can drift apart.
+std::string SoapyUberSDR::httpBaseURL() const
 {
-    // Extract base URL from WebSocket URL
     std::string baseURL = _serverURL;
-    
+
     // Convert ws:// to http:// or wss:// to https://
     if (baseURL.find("ws://") == 0) {
         baseURL = "http://" + baseURL.substr(5);
     } else if (baseURL.find("wss://") == 0) {
         baseURL = "https://" + baseURL.substr(6);
     }
-    
+
     // Remove /ws path if present
     size_t wsPos = baseURL.find("/ws");
     if (wsPos != std::string::npos) {
         baseURL = baseURL.substr(0, wsPos);
     }
-    
+
+    return baseURL;
+}
+
+// fetchTuningRange asks the receiver how much spectrum it covers.
+//
+// Failure is not an error: every path out of here leaves _minFrequency/_maxFrequency at
+// whatever they already were, which the constructor set to the 10 kHz - 30 MHz fallback.
+// A driver that advertises the old range beats one that refuses to load, and an operator
+// running a 30 MHz receiver sees no change whether this call succeeds or not.
+void SoapyUberSDR::fetchTuningRange()
+{
+    std::string url = httpBaseURL() + "/api/description";
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        SoapySDR::log(SOAPY_SDR_WARNING,
+                      "SoapyUberSDR: Failed to initialize CURL, assuming 10 kHz - 30 MHz");
+        return;
+    }
+
+    std::string response;
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "User-Agent: UberSDR_Soapy/1.0");
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, soapy_curl_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+                       "SoapyUberSDR: Could not read %s (%s), assuming 10 kHz - 30 MHz",
+                       url.c_str(), curl_easy_strerror(res));
+        return;
+    }
+
+    // Slice out the tuning_range object before reading any field, so the min_frequency
+    // of some other object in the payload cannot be mistaken for ours.
+    size_t rangePos = response.find("\"tuning_range\"");
+    if (rangePos == std::string::npos) {
+        SoapySDR::log(SOAPY_SDR_INFO,
+                      "SoapyUberSDR: Receiver publishes no tuning_range, assuming 10 kHz - 30 MHz");
+        return;
+    }
+    size_t objStart = response.find("{", rangePos);
+    size_t objEnd = (objStart == std::string::npos) ? std::string::npos : response.find("}", objStart);
+    if (objStart == std::string::npos || objEnd == std::string::npos) {
+        SoapySDR::log(SOAPY_SDR_WARNING,
+                      "SoapyUberSDR: Malformed tuning_range, assuming 10 kHz - 30 MHz");
+        return;
+    }
+    std::string obj = response.substr(objStart, objEnd - objStart + 1);
+
+    // Each field falls back on its own: the two are independent facts, and a receiver
+    // that states one must not reset the other.
+    double min = ubersdrParseNumber(obj, "min_frequency", UBERSDR_FALLBACK_MIN_FREQ);
+    double max = ubersdrParseNumber(obj, "max_frequency", UBERSDR_FALLBACK_MAX_FREQ);
+
+    // A max at or below the min is not a receiver, it is a misconfiguration. Adopting it
+    // would hand the host an inverted Range and fail a long way from here, so it is
+    // refused outright and the fallback stands.
+    if (max <= min) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+                       "SoapyUberSDR: Receiver reports an inverted range (%.0f - %.0f Hz), "
+                       "assuming 10 kHz - 30 MHz", min, max);
+        return;
+    }
+
+    _minFrequency = min;
+    _maxFrequency = max;
+    SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Receiver tunes %.3f kHz - %.3f MHz",
+                   _minFrequency / 1e3, _maxFrequency / 1e6);
+}
+
+bool SoapyUberSDR::checkConnectionAllowed()
+{
     // Build connection check URL
-    std::string checkURL = baseURL + "/connection";
+    std::string checkURL = httpBaseURL() + "/connection";
     
     // Build JSON request body
     std::stringstream jsonBody;

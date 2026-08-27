@@ -13,3 +13,4 @@ node monitorserver.test.js
 node tci.test.js
 node tciserver.test.js
 node wsserver.test.js
+node tuningrange.test.js

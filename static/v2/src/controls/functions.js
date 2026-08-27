@@ -126,6 +126,30 @@ const FREQUENCY = group('Frequency', [
         accepts: [TRIG],
         run: () => requestFreqEntry(),
     },
+    {
+        // The padlock above the waterfall, on a button.
+        //
+        // Worth mapping precisely because it guards the thing a control surface
+        // is most likely to knock: a dial that lives under somebody's hand is
+        // one elbow away from retuning a receiver that was left on a frequency
+        // on purpose. Throwing it says so on screen — see lib/tuneLock.js —
+        // which matters more here than it does for the padlock itself, since
+        // nobody watching the page pressed anything.
+        //
+        // It holds frequency, mode and filter and nothing else: volume, squelch,
+        // DSP and the spectrum view stay live, so the rest of a mapped surface
+        // goes on working with the lock on.
+        //
+        // A press and not a position. A latching switch wired as a CC arrives
+        // here as an absolute value, which runFunction turns into a press on the
+        // way down and drops on the way up — so a switch throws the lock once
+        // per flick, which is what a toggle should do.
+        id: 'tune_lock_toggle',
+        label: 'Tuning lock on/off',
+        hint: 'holds frequency, mode and filter',
+        accepts: PRESS,
+        run: (ev, ctx) => ctx.actions.toggleTuneLock(),
+    },
 ]);
 
 const MODE = group('Mode', [

@@ -437,4 +437,84 @@ t('a later change to the panel is forwarded too', () => {
     assert.strictEqual(after[after.length - 1].rc.direction, 'sdr-to-radio');
 });
 
+// --- the receiver's tuning range ---------------------------------------------
+//
+// The extensions used to gate the popup's frequency box on a hardcoded 10 kHz - 30 MHz.
+// That refused 6 m *in the popup*, before the command was ever sent, so the page's own
+// validation never saw it and could not answer. The range now rides in on `tuning`.
+
+t('the tuning range reaches the popup with the rest of the state', () => {
+    const { applyTuningRange } = require('./.build/bridgesnapshots.cjs');
+    applyTuningRange({});  // the 30 MHz default is in force
+    const p = makePage();
+    const snap = p.sent('ubersdr:state_snapshot');
+    assert.strictEqual(snap[0].state.minFreq, 10000);
+    assert.strictEqual(snap[0].state.maxFreq, 30000000);
+});
+
+t('a wider receiver is what the popup is told about', () => {
+    const { applyTuningRange } = require('./.build/bridgesnapshots.cjs');
+    try {
+        applyTuningRange({
+            min_frequency: 10000, max_frequency: 60000000, spectrum_span_hz: 60000000,
+        });
+        const p = makePage();
+        const snap = p.sent('ubersdr:state_snapshot');
+        // The whole point: 6 m is inside this, and the popup can no longer refuse it.
+        assert.strictEqual(snap[0].state.maxFreq, 60000000);
+        assert.ok(50313000 <= snap[0].state.maxFreq, 'the FT8 6 m frequency is reachable');
+    } finally {
+        // Live module bindings: leaving 60 MHz set would silently change every test
+        // that ran after this one.
+        applyTuningRange({ min_frequency: 10000, max_frequency: 30000000,
+                           spectrum_span_hz: 30000000 });
+    }
+});
+
+t('the range is forwarded on a later tuning change too', () => {
+    const p = attached();
+    p.advance(1000);
+    p.publish('tuning', {
+        frequency: 7100000, mode: 'lsb', bandwidthLow: -2700, bandwidthHigh: -50,
+        vfo: 'A', band: '40m', minFrequency: 10000, maxFrequency: 60000000,
+    });
+    const msgs = p.sent('ubersdr:state');
+    // Only what changed: the range is diffed like every other field, so the bottom
+    // edge — already 10 kHz in the registration snapshot — is not resent. Widening the
+    // top is the whole event here.
+    assert.deepStrictEqual(msgs[msgs.length - 1].state, {
+        freq: 7100000, mode: 'lsb', bwLow: -2700, bwHigh: -50, band: '40m',
+        maxFreq: 60000000,
+    });
+});
+
+t('both edges are forwarded when both move', () => {
+    const p = attached();
+    p.advance(1000);
+    p.publish('tuning', {
+        frequency: 7100000, mode: 'lsb', bandwidthLow: -2700, bandwidthHigh: -50,
+        vfo: 'A', band: '40m', minFrequency: 5000, maxFrequency: 60000000,
+    });
+    const msgs = p.sent('ubersdr:state');
+    const state = msgs[msgs.length - 1].state;
+    assert.strictEqual(state.minFreq, 5000);
+    assert.strictEqual(state.maxFreq, 60000000);
+});
+
+t('a page too old to publish a range says nothing rather than zero', () => {
+    // An extension updated ahead of the page it is attached to. The fields must be
+    // absent, not 0 — the popup reads absent as "10 kHz - 30 MHz, as always" and would
+    // read 0 as a receiver that tunes nowhere.
+    const p = attached();
+    p.advance(1000);
+    p.publish('tuning', {
+        frequency: 7100000, mode: 'lsb', bandwidthLow: -2700, bandwidthHigh: -50,
+        vfo: 'A', band: '40m',
+    });
+    const msgs = p.sent('ubersdr:state');
+    const state = msgs[msgs.length - 1].state;
+    assert.ok(!('minFreq' in state), 'minFreq is absent');
+    assert.ok(!('maxFreq' in state), 'maxFreq is absent');
+});
+
 console.log(`\n${pass} ok`);

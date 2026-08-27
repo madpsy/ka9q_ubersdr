@@ -96,8 +96,141 @@ let rightChannelId = null;      // instance assigned to right ear
 // distinguish 'left' (pan=-1) from 'both' (pan=0) without activeRadios.
 const followerPanMap = new Map();
 
+// How far the connected receiver tunes, in Hz.
+//
+// Not always the 0-30 MHz box this page assumed: the span follows the front end sample
+// rate, so a 129.6 Msps RX888 reaches 60 MHz and has 6 m in it. The numbers come from
+// /api/description's `tuning_range`, built server-side by ReceiverConfig.TuningRange in
+// receiver_span.go — the same object v2 reads.
+//
+// The fallback is a contract rather than padding: until the description answers, and on
+// a server too old to publish the object, this must behave exactly as this page did
+// before the span became configurable. The old bottom here was 0.1 MHz, which was this
+// page's own number and matched nothing else — the server has always said 10 kHz.
+const FALLBACK_MIN_FREQ_HZ = 10000;
+const FALLBACK_MAX_FREQ_HZ = 30000000;
+let minFreqHz = FALLBACK_MIN_FREQ_HZ;
+let maxFreqHz = FALLBACK_MAX_FREQ_HZ;
+
+/**
+ * Adopt the receiver's tuning range and resize the frequency controls to match.
+ *
+ * Each field falls back on its own — they are independent facts, and a receiver that
+ * states one must not reset the other. A max at or below the min is not a range but a
+ * misconfiguration, and taking it would leave every clamp on this page inverted, so it
+ * is refused outright. Mirrors applyTuningRange in static/v2/src/radio/constants.js.
+ */
+function applyTuningRange(range) {
+    const r = range || {};
+    // `> 0` rather than `??` or `||`, so 0, null, '' and undefined all fall through to
+    // the default rather than 0 becoming a legitimate limit.
+    const pick = (v, was) =>
+        (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : was);
+    const min = pick(r.min_frequency, FALLBACK_MIN_FREQ_HZ);
+    const max = pick(r.max_frequency, FALLBACK_MAX_FREQ_HZ);
+    if (max <= min) return false;
+
+    const changed = min !== minFreqHz || max !== maxFreqHz;
+    minFreqHz = min;
+    maxFreqHz = max;
+
+    // The three frequency inputs are in MHz, and their min/max are what stops the
+    // browser's own number validation rejecting 6 m before any of this code runs.
+    const minMhz = minFreqHz / 1e6;
+    const maxMhz = maxFreqHz / 1e6;
+    ['freqSlider', 'freqInput', 'snrModalFreqInput'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.min = String(minMhz);
+        el.max = String(maxMhz);
+    });
+
+    // The tick labels under the slider are positioned by percentage, so they have to be
+    // regenerated rather than restyled — a fixed 0/5/10/15/20/25/30 would sit at the
+    // right pixels and name the wrong frequencies.
+    renderFreqMarkers();
+    return changed;
+}
+
+/** Is this frequency, in MHz, one the connected receiver can actually tune? */
+function freqInRangeMhz(mhz) {
+    const hz = mhz * 1e6;
+    return hz >= minFreqHz && hz <= maxFreqHz;
+}
+
+/** Redraw the slider's tick labels for the range now in force. */
+function renderFreqMarkers() {
+    const markers = document.querySelector('.freq-markers');
+    if (!markers) return;
+    const maxMhz = maxFreqHz / 1e6;
+    // Six intervals, as the original markup had, so the spacing stays familiar. Whole
+    // MHz where the span allows it; the span is a whole number of MHz for any real
+    // receiver, and a fraction is rounded rather than printed to six places.
+    const steps = 6;
+    const html = [];
+    for (let i = 0; i <= steps; i++) {
+        const mhz = (maxMhz * i) / steps;
+        const label = Number.isInteger(mhz) ? String(mhz) : mhz.toFixed(1);
+        html.push(`<span style="left:${((i / steps) * 100).toFixed(2)}%">${label}</span>`);
+    }
+    markers.innerHTML = html.join('');
+}
+
+/**
+ * Ask the receiver how far it tunes.
+ *
+ * Failure is not an error: every path out leaves the fallback in force, and an operator
+ * on a 30 MHz receiver sees no difference whether this succeeds or not.
+ */
+async function loadTuningRange() {
+    try {
+        const resp = await fetch('/api/description');
+        if (!resp.ok) return;
+        const desc = await resp.json();
+        applyTuningRange(desc && desc.tuning_range);
+    } catch (e) { /* keep the fallback */ } finally {
+        // Whether or not the fetch worked, the range in force is now final — so this is
+        // where the frequency restoreFreqFromURL deliberately left unchecked gets its
+        // one and only check.
+        revalidateFrequency();
+    }
+}
+
+/**
+ * Check the restored frequency against the range that is actually in force.
+ *
+ * restoreFreqFromURL runs before the receiver has been asked anything, so a share link
+ * or saved preference is accepted unvalidated and settled here instead. A frequency the
+ * receiver genuinely cannot reach falls back to the page default rather than being
+ * clamped to the band edge: clamping would look like success and leave the user on a
+ * frequency they never asked for.
+ */
+function revalidateFrequency() {
+    if (currentFreqHz >= minFreqHz && currentFreqHz <= maxFreqHz) return;
+
+    const mhz = DEFAULT_FREQ_HZ / 1e6;
+    currentFreqHz = DEFAULT_FREQ_HZ;
+    currentMode = resolveMode(mhz);
+    isFreqValid = true;
+
+    const slider  = document.getElementById('freqSlider');
+    const input   = document.getElementById('freqInput');
+    const display = document.getElementById('freqDisplay');
+    const modeEl  = document.getElementById('modeIndicator');
+    if (slider) slider.value = mhz;
+    if (input) {
+        input.value = mhz.toFixed(6);
+        input.classList.remove('invalid');
+    }
+    if (display) display.textContent = `${mhz.toFixed(6)} MHz`;
+    if (modeEl) modeEl.textContent = currentMode.toUpperCase();
+}
+
 // Frequency state
-let currentFreqHz   = 14100000;
+// Where this page starts when nothing else says otherwise — also where
+// revalidateFrequency() sends a frequency the receiver turns out not to cover.
+const DEFAULT_FREQ_HZ = 14100000;
+let currentFreqHz   = DEFAULT_FREQ_HZ;
 let currentMode     = 'usb';
 let modality        = 'phone';   // 'phone' | 'cw'
 let modeOverride    = null;      // null | 'usb' | 'lsb' | 'cwu' | 'cwl' — user-forced sideband
@@ -202,6 +335,11 @@ window.toggleNR = toggleNR;
 // ─── Initialisation ──────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Ask the receiver how far it tunes. Not awaited: the controls must be usable
+    // immediately, and every one of them reads minFreqHz/maxFreqHz live rather than
+    // caching a copy, so widening them when the answer lands needs no re-setup. The
+    // frequency restoreFreqFromURL leaves unchecked is settled inside this call.
+    loadTuningRange();
     restoreFreqFromURL();   // set slider/input BEFORE setupFrequencyControls reads slider.value
     syncModalityUI();       // sync Phone/CW button states after URL restore
     setupFrequencyControls();
@@ -222,7 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modalFreqInput) {
         modalFreqInput.addEventListener('input', e => {
             const mhz = parseFloat(e.target.value);
-            if (!isNaN(mhz) && mhz >= 0.1 && mhz <= 30) {
+            if (!isNaN(mhz) && freqInRangeMhz(mhz)) {
                 e.target.classList.remove('invalid');
                 // Mirror value into the main slider + input, then apply
                 const slider  = document.getElementById('freqSlider');
@@ -240,7 +378,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modalFreqInput.addEventListener('keydown', e => {
             if (e.key === 'Enter') {
                 const mhz = parseFloat(e.target.value);
-                if (!isNaN(mhz) && mhz >= 0.1 && mhz <= 30) {
+                if (!isNaN(mhz) && freqInRangeMhz(mhz)) {
                     const deltaHz = Math.round(mhz * 1e6) - currentFreqHz;
                     if (deltaHz !== 0) nudgeFreq(deltaHz);
                     e.target.blur();
@@ -442,8 +580,19 @@ function restoreFreqFromURL() {
         modeOverride = modeIn;
     }
 
+    // Deliberately not bounded against the receiver's range here.
+    //
+    // This runs from DOMContentLoaded, before /api/description has answered, so the only
+    // range available at this point is the fallback. It used to test `freq <= 30` and
+    // drop anything above outright — which meant a 6 m share link, or a saved preference
+    // from a wider receiver, was thrown away and replaced with 14.1 MHz before the real
+    // range was ever known. That is lossy: the frequency the link existed to convey is
+    // gone by the time anything could have validated it properly.
+    //
+    // So an out-of-range value is left in place and checked once, in
+    // revalidateFrequency(), after the range lands.
     const freq = parseFloat(freqStr);
-    if (!isNaN(freq) && freq >= 0.1 && freq <= 30) {
+    if (!isNaN(freq) && freq > 0) {
         const slider  = document.getElementById('freqSlider');
         const input   = document.getElementById('freqInput');
         if (slider) slider.value = freq;
@@ -2587,7 +2736,7 @@ function setupFrequencyControls() {
     let applyFreqTimer = null;
 
     function applyFreq(mhz, immediate = false) {
-        const valid = mhz >= 0.1 && mhz <= 30;
+        const valid = freqInRangeMhz(mhz);
         isFreqValid = valid;
 
         if (!valid) {
@@ -2654,7 +2803,7 @@ function setupFrequencyControls() {
     input.addEventListener('input', e => {
         const mhz = parseFloat(e.target.value);
         if (!isNaN(mhz)) {
-            slider.value = Math.max(0.1, Math.min(30, mhz));
+            slider.value = Math.max(minFreqHz / 1e6, Math.min(maxFreqHz / 1e6, mhz));
             applyFreq(mhz);
         } else if (e.target.value === '') {
             input.classList.add('invalid');
@@ -2836,7 +2985,9 @@ function updateSdrLinks() {
 
 /**
  * Nudge the current frequency by deltaHz (e.g. -100, +500, +1000).
- * Clamps to 0.1–30 MHz, updates the slider and input, then retunes all radios.
+ * Clamps to the receiver's own range, updates the slider and input, then retunes all
+ * radios. Stopping at the edge is right for a relative step — the user asked to move,
+ * not to go somewhere specific — which is the same call bridge/commands.js makes.
  */
 function nudgeFreq(deltaHz) {
     const slider  = document.getElementById('freqSlider');
@@ -2845,7 +2996,7 @@ function nudgeFreq(deltaHz) {
     const modeEl  = document.getElementById('modeIndicator');
 
     // Apply delta in Hz, clamp to valid range
-    const newHz  = Math.max(100000, Math.min(30000000, currentFreqHz + deltaHz));
+    const newHz  = Math.max(minFreqHz, Math.min(maxFreqHz, currentFreqHz + deltaHz));
     const newMhz = newHz / 1e6;
 
     // Update controls
@@ -4517,7 +4668,7 @@ function _applySession(sess) {
 
     // Apply frequency
     const freq = parseFloat(sess.freq);
-    if (!isNaN(freq) && freq >= 0.1 && freq <= 30) {
+    if (!isNaN(freq) && freqInRangeMhz(freq)) {
         const slider  = document.getElementById('freqSlider');
         const input   = document.getElementById('freqInput');
         const display = document.getElementById('freqDisplay');

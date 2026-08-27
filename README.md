@@ -10,7 +10,7 @@ The UberSDR website provides comprehensive installation instructions, setup guid
 
 ---
 
-> **Note:** This is currently designed for RX888 MKII SDR hardware to provide 0-30 MHz (full HF) coverage.
+> **Note:** This is currently designed for RX888 MKII SDR hardware. Coverage follows the radiod front end sample rate: 0-30 MHz (full HF) at the default 64.8 Msps, or 0-60 MHz — 6 m included — at 129.6 Msps. See `RECEIVER_SPAN.md`.
 
 ## Quick Start
 

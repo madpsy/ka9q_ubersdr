@@ -7,7 +7,7 @@ This is a SoapySDR driver that provides access to KA9Q UberSDR's wide IQ modes v
 - **Wide IQ Mode Support**: Access to iq48, iq96, iq192, and iq384 modes (48-384 kHz bandwidth)
 - **Network Transparent**: Connect to remote UberSDR servers via WebSocket
 - **Full I/Q Streaming**: Native complex sample format for spectrum analysis and signal processing
-- **Frequency Range**: 100 kHz to 30 MHz (HF bands)
+- **Frequency Range**: read from the receiver at load time; 10 kHz to 30 MHz when it does not say
 - **Sample Rates**: 48, 96, 192, or 384 kHz
 
 ## Requirements
@@ -175,10 +175,18 @@ rx_sdr -d driver=ubersdr,server=ws://localhost:8080/ws,mode=iq192 \
 
 ## Frequency Tuning
 
-The driver supports the full HF range:
+The driver advertises whatever the receiver covers, which it reads from
+`/api/description` when the device is created. The range is not fixed: it follows the
+radiod front end sample rate, so a 64.8 Msps RX888 reaches 30 MHz and a 129.6 Msps one
+reaches 60 MHz, with 6 m inside it.
 
-- **Minimum**: 100 kHz (LF)
-- **Maximum**: 30 MHz (10m band)
+- **Minimum**: 10 kHz, or whatever `tuning_range.min_frequency` says
+- **Maximum**: `tuning_range.max_frequency`; 30 MHz on a stock receiver
+
+When the receiver cannot be reached, or is running a server too old to publish the
+object, the driver advertises 10 kHz - 30 MHz — exactly what it always did. Hosts such as
+GQRX, CubicSDR and GNU Radio clamp their own tuning UI to what `getFrequencyRange()`
+returns, so this is the number that decides what you can tune to.
 
 Tuning is performed by sending WebSocket commands to the server, allowing fast frequency changes within the wide bandwidth.
 
@@ -204,7 +212,7 @@ SoapySDRUtil --info
 ### No Audio/Samples
 
 - Check server logs for connection
-- Verify frequency is within 100 kHz - 30 MHz range
+- Verify the frequency is within the range the driver logged at startup ("Receiver tunes ...")
 - Ensure selected mode is supported by server
 - Check network connectivity
 

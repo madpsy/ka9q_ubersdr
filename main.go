@@ -4527,7 +4527,7 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config, eib
 		}
 		// Reject if the span doesn't overlap the system range at all.
 		if loHz > maxFreqHz || hiHz < 0 {
-			http.Error(w, "center/width span is outside the 0–30 MHz system range", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("center/width span is outside the receiver's 0-%.0f Hz range", maxFreqHz), http.StatusBadRequest)
 			return
 		}
 		spanFiltered := filteredBookmarks[:0]

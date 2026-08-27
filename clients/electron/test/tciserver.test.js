@@ -47,6 +47,16 @@ function server(opts = {}) {
     return { s, conn, control, sent: conn.sent, frames: conn.frames };
 }
 
+/** A server greeted after adopting `range`, as main.js does before start(). */
+function serverWithRange(range) {
+    const s = new TciServer({});
+    s.setTuningRange(range);
+    const conn = fake();
+    s.server = { fake: true };
+    s.accept(conn);
+    return { s, sent: conn.sent };
+}
+
 // --- the handshake -----------------------------------------------------------
 
 t('the greeting ends with ready and start, in that order', () => {
@@ -65,7 +75,7 @@ t('the greeting describes the device before its state', () => {
         'receive_only:true;',
         'trx_count:2;',
         'channel_count:2;',
-        'vfo_limits:0,60000000;',
+        'vfo_limits:10000,30000000;',
         'if_limits:-48000,48000;',
         'modulations_list:am,sam,dsb,lsb,usb,cw,nfm,wfm,digl,digu,spec,drm;',
         `audio_samplerate:${AUDIO_RATE};`,
@@ -299,6 +309,54 @@ t('parseFrame splits a frame into commands', () => {
         { name: 'trx', args: ['0', 'true'] },
         { name: 'ready', args: [] },
     ]);
+});
+
+// --- the tuning range a client is told ---------------------------------------
+//
+// vfo_limits is the only thing this server tells a third-party app about how far the
+// dial may go, and clients bound their own dial by it. It used to be a flat 0-60000000,
+// which was wrong in both directions: on a stock 64.8 Msps receiver it invited a client
+// to dial 50 MHz and hear silence, and the 0 low edge contradicted the 10 kHz every
+// other client honours.
+
+t('the greeting advertises the receiver\'s range, not a fixed one', () => {
+    const { sent } = serverWithRange({ min_frequency: 10000, max_frequency: 60000000 });
+    assert.ok(sent.includes('vfo_limits:10000,60000000;'), sent.join('|'));
+});
+
+t('a receiver that says nothing is advertised as 10 kHz - 30 MHz', () => {
+    for (const range of [undefined, null, {}, { max_frequency: 0 },
+                         { max_frequency: null }, { max_frequency: '60000000' }]) {
+        const { sent } = serverWithRange(range);
+        assert.ok(sent.includes('vfo_limits:10000,30000000;'), JSON.stringify(range));
+    }
+});
+
+t('each edge of the range falls back on its own', () => {
+    const { sent } = serverWithRange({ max_frequency: 60000000 });
+    assert.ok(sent.includes('vfo_limits:10000,60000000;'), sent.join('|'));
+    const b = serverWithRange({ min_frequency: 50000 });
+    assert.ok(b.sent.includes('vfo_limits:50000,30000000;'), b.sent.join('|'));
+});
+
+t('an inverted range is refused rather than advertised backwards', () => {
+    // A client handed vfo_limits:60000000,10000 has no sane way to read it.
+    const { sent } = serverWithRange({ min_frequency: 60000000, max_frequency: 10000 });
+    assert.ok(sent.includes('vfo_limits:10000,30000000;'), sent.join('|'));
+    const d = serverWithRange({ min_frequency: 30000000, max_frequency: 30000000 });
+    assert.ok(d.sent.includes('vfo_limits:10000,30000000;'), d.sent.join('|'));
+});
+
+t('setTuningRange reports whether anything moved', () => {
+    const s = new TciServer({});
+    assert.strictEqual(s.setTuningRange({ min_frequency: 10000, max_frequency: 30000000 }), false);
+    assert.strictEqual(s.setTuningRange({ min_frequency: 10000, max_frequency: 60000000 }), true);
+});
+
+t('6 m is inside what a 60 MHz receiver advertises', () => {
+    const { s } = serverWithRange({ min_frequency: 10000, max_frequency: 60000000 });
+    const sixMetreFT8 = 50313000;
+    assert.ok(sixMetreFT8 >= s.minFrequency && sixMetreFT8 <= s.maxFrequency);
 });
 
 process.on('exit', () => console.log(`\n${pass} passed`));

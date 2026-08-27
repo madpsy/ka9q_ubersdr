@@ -10554,6 +10554,12 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 .lock-toast__head svg { flex: none; color: var(--lock-gold); }
+/* The open padlock, when the lock has just come off, wears the colour the
+   padlock button wears when it is off — the ghost button's dim grey. Gold is
+   what "the receiver is held" looks like here and it is the one colour in the
+   app that means only that; an unlock announced in gold would be the badge of
+   the state it is announcing the end of. */
+.lock-toast--open .lock-toast__head svg { color: var(--text-dim); }
 /* Where the switch is. Dimmer and smaller — it is an instruction, not news, and
    it must not compete with the line above for the half-second the toast has. */
 .lock-toast__hint {

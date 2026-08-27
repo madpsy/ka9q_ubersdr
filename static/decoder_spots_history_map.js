@@ -32,6 +32,7 @@ class DecoderSpotsHistoryMap {
             '15m': '#FF9DA7',   // Pink
             '12m': '#9C755F',   // Brown
             '10m': '#00D9FF',   // Bright Cyan/Turquoise
+            '6m': '#8A2BE2',    // Violet — matches the 6 m block on channels-map
             'unknown': '#FF0000' // Red for unknown bands
         };
     }
@@ -497,7 +498,9 @@ class DecoderSpotsHistoryMap {
         // Only show legend if we have active bands
         if (activeBands.size > 0) {
             // Sort bands in standard order
-            const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+            // 6 m last: a receiver wide enough to hear it reports it, and without an
+            // entry here it would sort after every named band rather than above 10 m.
+            const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
             const sortedBands = Array.from(activeBands).sort((a, b) => {
                 return bandOrder.indexOf(a) - bandOrder.indexOf(b);
             });

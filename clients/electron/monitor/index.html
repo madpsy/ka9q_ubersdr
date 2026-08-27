@@ -129,7 +129,10 @@
                         </div>
                     </div>
                 </div>
-                <input type="range" id="freqSlider" class="freq-slider" min="0.1" max="30" step="0.000001" value="14.100000">
+                <!-- min/max and the tick labels below are the 10 kHz - 30 MHz fallback;
+                     applyTuningRange() in multi_monitor.js rewrites both once the receiver
+                     says how far it actually tunes. -->
+                <input type="range" id="freqSlider" class="freq-slider" min="0.01" max="30" step="0.000001" value="14.100000">
                 <div class="freq-markers">
                     <span style="left:0%">0</span>
                     <span style="left:16.67%">5</span>
@@ -140,7 +143,7 @@
                     <span style="left:100%">30</span>
                 </div>
                 <div class="freq-input-group">
-                    <input type="number" id="freqInput" class="freq-input" placeholder="14.100000" step="0.000001" min="0.1" max="30" value="14.100000">
+                    <input type="number" id="freqInput" class="freq-input" placeholder="14.100000" step="0.000001" min="0.01" max="30" value="14.100000">
                     <span class="freq-unit">MHz</span>
                 </div>
                 <div class="freq-step-row">
@@ -291,7 +294,7 @@
                 <span class="snr-modal-freq-label">Freq:</span>
                 <span class="snr-modal-freq-display" id="snrModalFreqDisplay">14.100000 MHz</span>
                 <input type="number" id="snrModalFreqInput" class="snr-modal-freq-input"
-                       placeholder="14.100000" step="0.000001" min="0.1" max="30" value="14.100000"
+                       placeholder="14.100000" step="0.000001" min="0.01" max="30" value="14.100000"
                        title="Enter frequency in MHz">
                 <span style="font-size:0.82em; opacity:0.7; flex-shrink:0;">MHz</span>
                 <button class="snr-modal-mode-btn" id="snrModalModeBtn"

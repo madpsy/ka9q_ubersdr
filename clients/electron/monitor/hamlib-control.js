@@ -738,12 +738,23 @@
 
         const mhz = freqHz / 1e6;
         let freqChanged = freqHz > 0 && freqHz !== currentFreqHz;
-        if (freqChanged && (mhz < 0.1 || mhz > 30)) {
+        // Against the receiver's real range, not a hardcoded 0.1-30 MHz. On a 129.6 Msps
+        // receiver 6 m is in range, and refusing to follow the rig onto it — while the
+        // spectrum plainly shows it — is the confusing half of the old behaviour.
+        // freqInRangeMhz reads the live limits; before /api/description answers those are
+        // the 10 kHz - 30 MHz fallback, which is what this test used to hardcode.
+        const inRange = (typeof freqInRangeMhz === 'function')
+            ? freqInRangeMhz(mhz)
+            : (mhz >= 0.01 && mhz <= 30);
+        if (freqChanged && !inRange) {
             // 2 m / 70 cm and the rig's transverter ranges are simply not
             // tunable here — warn once per frequency instead of every 150 ms.
             if (freqHz !== lastOutOfRangeHz) {
                 lastOutOfRangeHz = freqHz;
-                addMessage(`Radio on ${mhz.toFixed(6)} MHz — outside the SDR range (0.1–30 MHz), not following`, 'warning');
+                const lo = (typeof minFreqHz !== 'undefined' ? minFreqHz : 10000) / 1e6;
+                const hi = (typeof maxFreqHz !== 'undefined' ? maxFreqHz : 30000000) / 1e6;
+                addMessage(`Radio on ${mhz.toFixed(6)} MHz — outside the SDR range `
+                    + `(${lo}–${hi} MHz), not following`, 'warning');
             }
             freqChanged = false;
         }

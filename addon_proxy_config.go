@@ -5,8 +5,6 @@ import (
 	"net"
 	"os"
 	"regexp"
-
-	"gopkg.in/yaml.v3"
 )
 
 // validAddonNameRe matches URL-safe addon names:
@@ -53,7 +51,7 @@ func LoadAddonProxiesConfig(filename string) (*AddonProxiesConfig, error) {
 	}
 
 	var config AddonProxiesConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if _, err := loadYAMLWithRepair(filename, data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse addons config file: %w", err)
 	}
 

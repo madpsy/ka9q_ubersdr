@@ -9,16 +9,16 @@ func TestSessionsToGeoJSON(t *testing.T) {
 	raw := []map[string]interface{}{
 		// A normal external listener with a location -> should become a Feature.
 		{
-			"user_session_id": "sess-abc",
-			"ssrc":            "0x0000000a",
-			"latitude":        52.5,
-			"longitude":       13.4,
-			"country":         "Germany",
-			"country_code":    "DE",
-			"city":            "Berlin",
-			"mode":            "usb",
-			"frequency":       float64(14175000),
-			"chat_username":   "G0ABC",
+			"user_session_id":    "sess-abc",
+			"ssrc":               "0x0000000a",
+			"latitude":           52.5,
+			"longitude":          13.4,
+			"country":            "Germany",
+			"country_code":       "DE",
+			"city":               "Berlin",
+			"mode":               "usb",
+			"frequency":          float64(14175000),
+			"chat_username":      "G0ABC",
 			"accuracy_radius_km": 50,
 		},
 		// Internal pseudo-session -> excluded.

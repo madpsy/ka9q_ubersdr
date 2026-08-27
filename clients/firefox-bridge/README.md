@@ -34,7 +34,7 @@ A Firefox extension that connects to any open UberSDR tab and lets you read and 
 - **Auto-detects** all open UberSDR tabs — no configuration needed for basic use
 - **Multi-instance support** — if you have multiple UberSDR tabs open, pick which one to control
 - **Live state display** — frequency, mode, and bandwidth update in real time as you tune
-- **Frequency control** — type a frequency in Hz or use ±step buttons (100 Hz → 10 kHz)
+- **Frequency control** — type a frequency in kHz or use ±step buttons (100 Hz → 10 kHz)
 - **Mode control** — USB, LSB, CWU, CWL, AM, SAM, FM, NFM
 - **Bandwidth control** — set low and high edges independently
 - **Bridge server relay** — optional: POST state to a local HTTP server and poll it for commands
@@ -254,6 +254,6 @@ clients/firefox-bridge/
 ## Limitations
 
 - **Audio in background tabs** — `window.audioContext` may be suspended by Firefox when a tab is not visible. The extension does not attempt to resume it; audio decoders (FT8, WEFAX, etc.) may pause. Frequency and mode control still work.
-- **Frequency range** — clamped to 10 kHz – 30 MHz, matching UberSDR's `setFrequency()` validation.
+- **Frequency range** — the receiver's own, which the popup learns from the page's `tuning` state. It is not fixed at 30 MHz: the span follows the radiod front end sample rate, so a 129.6 Msps receiver reaches 60 MHz and has 6 m in it. Until the page says otherwise the popup assumes 10 kHz – 30 MHz. An absolute frequency outside the range is refused with a reason rather than clamped silently; a relative step stops at the band edge, as the dial does.
 - **Manifest V2** — uses MV2 for maximum Firefox compatibility. Firefox supports MV3 but MV2 event pages are simpler and more reliable for background polling.
 - **CORS** — the bridge server must include `Access-Control-Allow-Origin: *` (or the extension origin) in its responses, otherwise `fetch()` from the background script will be blocked.

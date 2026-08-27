@@ -55,7 +55,7 @@ func LoadCWSkimmerConfig(filename string) (*CWSkimmerConfig, error) {
 	}
 
 	var config CWSkimmerConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if _, err := loadYAMLWithRepair(filename, data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse cwskimmer config file: %w", err)
 	}
 

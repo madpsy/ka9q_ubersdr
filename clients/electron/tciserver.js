@@ -222,6 +222,19 @@ class TciServer {
         this.clients = new Set();
         this.error = null;
 
+        // How far the receiver tunes, in Hz, as advertised to clients in greet().
+        //
+        // This is the one place the desktop client tells a third-party app (Expert SDR,
+        // SDC, logging software) what the dial may reach, and they bound their own dial
+        // by it. It used to be a flat 0-60000000, which was wrong in both directions: on
+        // a stock 64.8 Msps receiver it invited clients to dial 50 MHz and hear silence,
+        // and the 0 low edge contradicted the 10 kHz every other client honours.
+        //
+        // The fallback is the same contract the rest of the tree uses: until the range is
+        // known, 10 kHz - 30 MHz. setTuningRange() adopts the receiver's own.
+        this.minFrequency = 10000;
+        this.maxFrequency = 30000000;
+
         // The receiver's state, as clients have been told it.
         this.frequency = 14074000;
         this.mode = 'usb';               // TCI's name for it
@@ -323,6 +336,30 @@ class TciServer {
         this.report();
     }
 
+    /**
+     * Adopt the receiver's tuning range, from /api/description's `tuning_range`.
+     *
+     * Each edge falls back on its own, `> 0` so a 0 or a null cannot become a limit, and
+     * an inverted range is refused wholesale rather than advertised backwards. Returns
+     * whether anything moved.
+     *
+     * Only affects clients that connect afterwards: TCI has no message for revising
+     * vfo_limits mid-session, so an already-connected client keeps what it was greeted
+     * with. That is why main.js sets this before the server is started.
+     */
+    setTuningRange(range) {
+        const r = range || {};
+        const pick = (v, was) =>
+            (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : was);
+        const min = pick(r.min_frequency, this.minFrequency);
+        const max = pick(r.max_frequency, this.maxFrequency);
+        if (max <= min) return false;
+        const changed = min !== this.minFrequency || max !== this.maxFrequency;
+        this.minFrequency = min;
+        this.maxFrequency = max;
+        return changed;
+    }
+
     greet(conn) {
         const lines = [
             `device:${this.deviceName};`,
@@ -332,7 +369,7 @@ class TciServer {
             'receive_only:true;',
             'trx_count:2;',
             'channel_count:2;',
-            'vfo_limits:0,60000000;',
+            `vfo_limits:${this.minFrequency},${this.maxFrequency};`,
             // The IF passband a client may place itself within, either side of
             // the tuned frequency.
             'if_limits:-48000,48000;',

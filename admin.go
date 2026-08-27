@@ -18,7 +18,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -29,41 +28,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// marshalYAMLWithIntegerFrequencies marshals a config map to YAML, ensuring frequency fields are integers
-func marshalYAMLWithIntegerFrequencies(config map[string]interface{}) ([]byte, error) {
-	// Walk through the config and convert float64 frequency values to uint64
-	convertFrequencies(config)
-	return yaml.Marshal(config)
-}
-
-// convertFrequencies recursively converts frequency fields from float64 to uint64
-// Handles any field named "frequency" or ending in "_frequency" or "_freq"
-func convertFrequencies(v interface{}) {
-	switch val := v.(type) {
-	case map[string]interface{}:
-		// Convert any field ending in "frequency", "_frequency", or "_freq"
-		for key, value := range val {
-			if key == "frequency" || strings.HasSuffix(key, "_frequency") || strings.HasSuffix(key, "_freq") {
-				switch f := value.(type) {
-				case float64:
-					val[key] = uint64(f)
-				case int:
-					val[key] = uint64(f)
-				case int64:
-					val[key] = uint64(f)
-				}
-			}
-		}
-		// Recursively process all map values
-		for _, v2 := range val {
-			convertFrequencies(v2)
-		}
-	case []interface{}:
-		// Recursively process all slice elements
-		for _, v2 := range val {
-			convertFrequencies(v2)
-		}
-	}
+// marshalMainConfigYAML is the write gate for config.yaml itself: coerce the
+// admin-supplied map to the types Config declares, then prove the result loads
+// before it goes anywhere near the file.
+func marshalMainConfigYAML(config map[string]interface{}) ([]byte, []ConfigRepair, error) {
+	return marshalCheckedYAML(config, configRootType)
 }
 
 // AdminSession represents an authenticated admin session
@@ -1187,14 +1156,18 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Convert to YAML and write to file, ensuring frequencies are integers
-	yamlData, err := marshalYAMLWithIntegerFrequencies(newConfig)
+	// Coerce every value to its declared Go type and prove the result loads
+	// before writing. A bad value is a 400 here rather than a dead server later.
+	yamlData, repairs, err := marshalMainConfigYAML(newConfig)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
+	for _, r := range repairs {
+		log.Printf("Config save: corrected type of %s", r)
+	}
 
-	if err := os.WriteFile(ah.configFile, yamlData, 0644); err != nil {
+	if err := writeConfigAtomic(ah.configFile, yamlData); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -1356,14 +1329,17 @@ func (ah *AdminHandler) handlePatchConfig(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Convert to YAML and write to file, ensuring frequencies are integers
-	yamlData, err := marshalYAMLWithIntegerFrequencies(configMap)
+	// Same coerce-and-validate gate as the full PUT.
+	yamlData, repairs, err := marshalMainConfigYAML(configMap)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
+	for _, r := range repairs {
+		log.Printf("Config patch: corrected type of %s", r)
+	}
 
-	if err := os.WriteFile(ah.configFile, yamlData, 0644); err != nil {
+	if err := writeConfigAtomic(ah.configFile, yamlData); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -1408,116 +1384,13 @@ func (ah *AdminHandler) setNestedValue(m map[string]interface{}, path string, va
 		}
 	}
 
-	// Set the final value, converting types as needed
+	// Set the final value as supplied. Typing is not this function's job any
+	// more: marshalMainConfigYAML coerces the whole map against the schema
+	// afterwards, which knows the field's declared Go type rather than having
+	// to guess it from whatever value the file happened to hold.
 	finalKey := keys[len(keys)-1]
-	current[finalKey] = ah.convertValue(current[finalKey], value)
+	current[finalKey] = value
 	return nil
-}
-
-// convertValue attempts to convert the new value to match the type of the old value
-func (ah *AdminHandler) convertValue(oldValue, newValue interface{}) interface{} {
-	if oldValue == nil {
-		return newValue
-	}
-
-	oldType := reflect.TypeOf(oldValue)
-	newType := reflect.TypeOf(newValue)
-
-	// If types already match, return as-is
-	if oldType == newType {
-		return newValue
-	}
-
-	// Handle common conversions
-	switch oldType.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		switch v := newValue.(type) {
-		case float64:
-			return int(v)
-		case string:
-			if i, err := strconv.ParseInt(v, 10, 64); err == nil {
-				// Convert to the specific int type
-				switch oldType.Kind() {
-				case reflect.Int:
-					return int(i)
-				case reflect.Int8:
-					return int8(i)
-				case reflect.Int16:
-					return int16(i)
-				case reflect.Int32:
-					return int32(i)
-				case reflect.Int64:
-					return int64(i)
-				}
-			}
-		}
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		switch v := newValue.(type) {
-		case float64:
-			// Convert to the specific uint type
-			switch oldType.Kind() {
-			case reflect.Uint:
-				return uint(v)
-			case reflect.Uint8:
-				return uint8(v)
-			case reflect.Uint16:
-				return uint16(v)
-			case reflect.Uint32:
-				return uint32(v)
-			case reflect.Uint64:
-				return uint64(v)
-			}
-		case string:
-			if u, err := strconv.ParseUint(v, 10, 64); err == nil {
-				// Convert to the specific uint type
-				switch oldType.Kind() {
-				case reflect.Uint:
-					return uint(u)
-				case reflect.Uint8:
-					return uint8(u)
-				case reflect.Uint16:
-					return uint16(u)
-				case reflect.Uint32:
-					return uint32(u)
-				case reflect.Uint64:
-					return uint64(u)
-				}
-			}
-		}
-	case reflect.Float32:
-		switch v := newValue.(type) {
-		case float64:
-			return float32(v)
-		case int:
-			return float32(v)
-		case string:
-			if f, err := strconv.ParseFloat(v, 32); err == nil {
-				return float32(f)
-			}
-		}
-	case reflect.Float64:
-		switch v := newValue.(type) {
-		case int:
-			return float64(v)
-		case float32:
-			return float64(v)
-		case string:
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
-				return f
-			}
-		}
-	case reflect.Bool:
-		switch v := newValue.(type) {
-		case string:
-			if b, err := strconv.ParseBool(v); err == nil {
-				return b
-			}
-		}
-	case reflect.String:
-		return fmt.Sprintf("%v", newValue)
-	}
-
-	return newValue
 }
 
 // HandleConfigSchema returns the configuration schema for the frontend
@@ -1694,9 +1567,9 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 	bookmarksConfig["bookmarks"] = bookmarks
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(bookmarksConfig)
+	yamlData, _, err := marshalCheckedYAML(bookmarksConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal bookmarks: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1793,9 +1666,9 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		}
 
 		// Convert to YAML and write to file
-		yamlData, err := yaml.Marshal(bookmarksConfig)
+		yamlData, _, err := marshalCheckedYAML(bookmarksConfig, configRootType)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to marshal bookmarks: %v", err), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 			return
 		}
 
@@ -1911,9 +1784,9 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	bookmarksConfig["bookmarks"] = bookmarks
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(bookmarksConfig)
+	yamlData, _, err := marshalCheckedYAML(bookmarksConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal bookmarks: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1994,9 +1867,9 @@ func (ah *AdminHandler) handleDeleteBookmark(w http.ResponseWriter, r *http.Requ
 	bookmarksConfig["bookmarks"] = bookmarks
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(bookmarksConfig)
+	yamlData, _, err := marshalCheckedYAML(bookmarksConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal bookmarks: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -2218,9 +2091,9 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 	bandsConfig["bands"] = bands
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(bandsConfig)
+	yamlData, _, err := marshalCheckedYAML(bandsConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -2346,9 +2219,9 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 		}
 
 		// Convert to YAML and write to file
-		yamlData, err := yaml.Marshal(bandsConfig)
+		yamlData, _, err := marshalCheckedYAML(bandsConfig, configRootType)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 			return
 		}
 
@@ -2470,9 +2343,9 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 	bandsConfig["bands"] = bands
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(bandsConfig)
+	yamlData, _, err := marshalCheckedYAML(bandsConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -2542,9 +2415,9 @@ func (ah *AdminHandler) handleDeleteBand(w http.ResponseWriter, r *http.Request)
 	bandsConfig["bands"] = bands
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(bandsConfig)
+	yamlData, _, err := marshalCheckedYAML(bandsConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -3822,9 +3695,9 @@ func (ah *AdminHandler) handleUpdateExtensions(w http.ResponseWriter, r *http.Re
 	}
 
 	// Convert to YAML and write to file
-	yamlData, err := yaml.Marshal(extensionsConfig)
+	yamlData, _, err := marshalCheckedYAML(extensionsConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal extensions: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -4044,7 +3917,8 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	}
 
 	if len(bands) == 0 {
-		http.Error(w, "No valid bands found in XML file (all bands may be > 30 MHz)", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("No valid bands found in XML file (all bands may be outside the receiver's %.3f-%.3f MHz range)",
+			float64(minFreq)/1e6, float64(maxFreq)/1e6), http.StatusBadRequest)
 		return
 	}
 
@@ -4067,9 +3941,9 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Convert to YAML and write to file
-	yamlData, err := yaml.Marshal(bandsConfig)
+	yamlData, _, err := marshalCheckedYAML(bandsConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -4353,9 +4227,9 @@ func (ah *AdminHandler) handleUpdateDecoderConfig(w http.ResponseWriter, r *http
 	}
 
 	// Convert to YAML and write to file
-	yamlData, err := yaml.Marshal(decoderConfig)
+	yamlData, _, err := marshalCheckedYAML(decoderConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -4622,9 +4496,9 @@ func (ah *AdminHandler) handleAddDecoderBand(w http.ResponseWriter, r *http.Requ
 	decoder["bands"] = bands
 
 	// Write back to file with proper number formatting
-	yamlData, err := marshalYAMLWithIntegerFrequencies(decoderConfig)
+	yamlData, _, err := marshalCheckedYAML(decoderConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -4727,9 +4601,9 @@ func (ah *AdminHandler) handleUpdateDecoderBand(w http.ResponseWriter, r *http.R
 	decoder["bands"] = bands
 
 	// Write back to file with proper number formatting
-	yamlData, err := marshalYAMLWithIntegerFrequencies(decoderConfig)
+	yamlData, _, err := marshalCheckedYAML(decoderConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -4789,9 +4663,9 @@ func (ah *AdminHandler) handleDeleteDecoderBand(w http.ResponseWriter, r *http.R
 	decoder["bands"] = bands
 
 	// Write back to file with proper number formatting
-	yamlData, err := marshalYAMLWithIntegerFrequencies(decoderConfig)
+	yamlData, _, err := marshalCheckedYAML(decoderConfig, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -4907,9 +4781,9 @@ func (ah *AdminHandler) handleUpdateCWSkimmerConfig(w http.ResponseWriter, r *ht
 	}
 
 	// Convert to YAML and write to file
-	yamlData, err := yaml.Marshal(cwskimmerConfig)
+	yamlData, _, err := marshalCheckedYAML(cwskimmerConfig, cwSkimmerRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal CW Skimmer config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -5838,9 +5712,9 @@ func (ah *AdminHandler) HandleWizardComplete(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(configMap)
+	yamlData, _, err := marshalCheckedYAML(configMap, configRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -7114,9 +6988,9 @@ func (ah *AdminHandler) handleUpdateRotatorSchedulerConfig(w http.ResponseWriter
 	}
 
 	// Convert to YAML and write to file (using filtered config)
-	yamlData, err := yaml.Marshal(filteredConfig)
+	yamlData, _, err := marshalCheckedYAML(filteredConfig, rotatorScheduleRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal scheduler config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -7197,9 +7071,9 @@ func (ah *AdminHandler) handleAddRotatorPosition(w http.ResponseWriter, r *http.
 	config["positions"] = positions
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(config)
+	yamlData, _, err := marshalCheckedYAML(config, rotatorScheduleRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -7317,9 +7191,9 @@ func (ah *AdminHandler) handleUpdateRotatorPosition(w http.ResponseWriter, r *ht
 	config["positions"] = positions
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(config)
+	yamlData, _, err := marshalCheckedYAML(config, rotatorScheduleRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -7425,9 +7299,9 @@ func (ah *AdminHandler) handleDeleteRotatorPosition(w http.ResponseWriter, r *ht
 	config["positions"] = positions
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(config)
+	yamlData, _, err := marshalCheckedYAML(config, rotatorScheduleRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -7588,9 +7462,9 @@ func (ah *AdminHandler) handleUpdateAntSwitchSchedulerConfig(w http.ResponseWrit
 	}
 
 	// Convert to YAML and write to file (using filtered config)
-	yamlData, err := yaml.Marshal(filteredConfig)
+	yamlData, _, err := marshalCheckedYAML(filteredConfig, antSwitchScheduleRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal scheduler config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -7671,9 +7545,9 @@ func (ah *AdminHandler) handleAddAntSwitchEntry(w http.ResponseWriter, r *http.R
 	config["entries"] = entries
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(config)
+	yamlData, _, err := marshalCheckedYAML(config, antSwitchScheduleRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -7783,9 +7657,9 @@ func (ah *AdminHandler) handleUpdateAntSwitchEntry(w http.ResponseWriter, r *htt
 	config["entries"] = entries
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(config)
+	yamlData, _, err := marshalCheckedYAML(config, antSwitchScheduleRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -7889,9 +7763,9 @@ func (ah *AdminHandler) handleDeleteAntSwitchEntry(w http.ResponseWriter, r *htt
 	config["entries"] = entries
 
 	// Write back to file
-	yamlData, err := yaml.Marshal(config)
+	yamlData, _, err := marshalCheckedYAML(config, antSwitchScheduleRootType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Invalid configuration value: %v", err), http.StatusBadRequest)
 		return
 	}
 

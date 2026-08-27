@@ -1649,6 +1649,7 @@ function load(){
     .then(function(r){if(!r.ok)throw new Error('meta '+r.status);return r.json();})
     .then(function(m){
       meta=m;
+      tsSyncInputBounds();
       /* Always use the selector's current value as the palette.
          The HTML default is 'jet' (selected attribute). We do NOT sync from
          meta.palette — the user's selector choice is the source of truth. */
@@ -2573,6 +2574,22 @@ function tsDateParams(){
 }
 
 /* ── Add / remove slices ─────────────────────────────────────────────────── */
+/* Widen the Time-Slices inputs to the recorder's own range.
+   tsAddSlice() below was already fixed to bound against meta.end_freq_hz, but the
+   markup's max="30" / max="30000" were left behind — and a number input's own
+   constraint is enforced by the browser before any of that code runs, so on a 60 MHz
+   receiver the spinner stopped at 30 and the field went :invalid above it while the
+   validator sitting under it would have accepted the value. The two must agree. */
+function tsSyncInputBounds(){
+  var f=document.getElementById('ts-freq'),b=document.getElementById('ts-bw');
+  var startHz=(meta&&meta.start_freq_hz)||0;
+  var endHz=(meta&&meta.end_freq_hz)||30e6;
+  if(!(endHz>startHz))return;
+  if(f){f.min=String(startHz/1e6);f.max=String(endHz/1e6);}
+  /* A slice may be as wide as the picture it is cut from. */
+  if(b)b.max=String((endHz-startHz)/1e3);
+}
+
 function tsAddSlice(){
   var freqMHz=parseFloat(document.getElementById('ts-freq').value);
   var bwKHz=parseFloat(document.getElementById('ts-bw').value);

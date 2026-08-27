@@ -38,7 +38,7 @@ import { hiddenGroups, onGroupsChanged, visibleBookmarks } from '../lib/bookmark
 import { readShareUrl, takeUrlView } from '../lib/share.js';
 import { shouldWake } from '../lib/wake.js';
 import { setFeedsAllowed } from '../lib/serverFeeds.js';
-import { refusedByLock, resetLockToast } from '../lib/tuneLock.js';
+import { announceLock, refusedByLock } from '../lib/tuneLock.js';
 import { failureMessage } from '../lib/connectFailure.js';
 import { clearEventLog, logEvent } from '../lib/eventLog.js';
 import {
@@ -1384,21 +1384,23 @@ export function RadioProvider({ children }) {
             // of this and should just call the action.
             tuneRefused() { return refuseTuning(); },
             //
-            // Both halves clear the toast's throttle: turning the lock on means
-            // the next refusal is the first of a new lock and has to say so,
-            // and turning it off means anything still on screen is now untrue.
+            // Both halves say so on screen. The padlock above the waterfall
+            // shows the state to anybody looking at it, but the lock can also be
+            // thrown from a MIDI button, a FlexControl or a bridge client — and
+            // a receiver that stops tuning, or quietly starts again, with
+            // nothing said is the failure lib/tuneLock.js exists to prevent.
             setTuneLock(on) {
                 const next = !!on;
                 if (next === lockedRef.current) return;
                 lockedRef.current = next;
-                resetLockToast();
+                announceLock(next);
                 setLocked(next);
             },
 
             toggleTuneLock() {
                 const next = !lockedRef.current;
                 lockedRef.current = next;
-                resetLockToast();
+                announceLock(next);
                 setLocked(next);
             },
 

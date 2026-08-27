@@ -38,9 +38,10 @@
 
 export const PROTOCOL = 1;
 // 1.1 adds the `layout` topic and the `panel` command; 1.2 the `radiocontrol`
-// topic and the `radio` command. All additive, so a 1.0 client is unaffected.
-// Capabilities remain the way to test for them.
-export const API_VERSION = { major: 1, minor: 6 };
+// topic and the `radio` command; 1.7 the `lock` command and `tuning.locked`.
+// All additive, so a 1.0 client is unaffected. Capabilities remain the way to
+// test for them.
+export const API_VERSION = { major: 1, minor: 7 };
 
 export const EVENT_TO_PAGE = 'ubersdr.to-page';
 export const EVENT_FROM_PAGE = 'ubersdr.from-page';

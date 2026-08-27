@@ -676,11 +676,50 @@ function sendCommand(command) {
 
 // ── Frequency ─────────────────────────────────────────────────────────────────
 
+// How far the connected receiver tunes, in kHz, for the box below.
+//
+// The numbers ride in on the `tuning` topic (see content_script.js). The receiver is
+// not always the 0-30 MHz box this popup used to assume: the span follows the front
+// end sample rate, so a 129.6 Msps RX888 reaches 60 MHz and has 6 m in it. This gate
+// used to be a hardcoded 10-30000, which refused such a frequency here in the popup —
+// before the command was ever sent, so the page's own validation never saw it and the
+// user got a flat "must be between 10 kHz and 30 MHz" for a frequency the receiver
+// covers perfectly well.
+//
+// The fallback is a contract rather than padding: a page older than this field, or a
+// popup that has not had a state update yet, must behave exactly as this popup did
+// before the span became configurable — 10 kHz to 30 MHz. Each edge falls back on its
+// own, and a max at or below the min is refused outright rather than adopted, matching
+// applyTuningRange in static/v2/src/radio/constants.js.
+function tuningLimitsKHz() {
+    const FALLBACK_MIN_KHZ = 10;
+    const FALLBACK_MAX_KHZ = 30000;
+    const s = currentState || {};
+    // `> 0` rather than a plain presence check, so a 0, a null or an undefined all
+    // fall through to the default instead of 0 becoming a legitimate limit.
+    const pick = (hz, fallbackKHz) =>
+        (typeof hz === 'number' && Number.isFinite(hz) && hz > 0 ? hz / 1000 : fallbackKHz);
+    const min = pick(s.minFreq, FALLBACK_MIN_KHZ);
+    const max = pick(s.maxFreq, FALLBACK_MAX_KHZ);
+    if (max <= min) return { min: FALLBACK_MIN_KHZ, max: FALLBACK_MAX_KHZ };
+    return { min, max };
+}
+
+/** One edge of that range, as the error message should read it. */
+function describeKHz(khz) {
+    return khz >= 1000
+        ? `${+(khz / 1000).toFixed(6)} MHz`
+        : `${+khz.toFixed(6)} kHz`;
+}
+
 btnSetFreq.addEventListener('click', () => {
     const khz = parseFloat(inputFreq.value);
-    if (isNaN(khz) || khz < 10 || khz > 30000) {
+    const limits = tuningLimitsKHz();
+    if (isNaN(khz) || khz < limits.min || khz > limits.max) {
         inputFreq.classList.add('error');
-        setStatus('Frequency must be between 10 kHz and 30 MHz', 'error');
+        setStatus(
+            `Frequency must be between ${describeKHz(limits.min)} and ${describeKHz(limits.max)}`,
+            'error');
         return;
     }
     const hz = Math.round(khz * 1000);

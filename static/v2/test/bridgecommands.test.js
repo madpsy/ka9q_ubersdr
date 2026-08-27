@@ -9,8 +9,8 @@ const assert = require('assert');
 const { COMMANDS, COMMAND_NAMES, runCommand } = require('./.build/bridgecommands.cjs');
 const { ERR } = require('./.build/bridgeprotocol.cjs');
 const {
-    SNAPSHOTS, audioSnapshot, describePage, layoutSnapshot, sessionSnapshot, signalSnapshot,
-    snapshotFor, spectrumSnapshot, tuningSnapshot,
+    SNAPSHOTS, applyTuningRange, audioSnapshot, describePage, layoutSnapshot,
+    sessionSnapshot, signalSnapshot, snapshotFor, spectrumSnapshot, tuningSnapshot,
 } = require('./.build/bridgesnapshots.cjs');
 const { LIVE_TOPICS, STATIC_TOPICS } = require('./.build/bridgeprotocol.cjs');
 
@@ -40,6 +40,7 @@ function ctxFor(over = {}) {
         tuning: { frequency: 7100000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
         audio: { volume: 0.7, muted: false, channel: 'both', bufferSec: 0.2 },
         squelch: { value: 24, enabled: false, threshold: null },
+        locked: false,
         view: { centerFreq: 15000000, span: 30000000, binBandwidth: 14648, binCount: 2048 },
         dsp: { schemas: null },
         ...over,
@@ -70,6 +71,8 @@ function ctxFor(over = {}) {
                 resetSpectrum: record('resetSpectrum'),
                 centerOnTuned: record('centerOnTuned'),
                 powerOff: record('powerOff'),
+                setTuneLock: record('setTuneLock'),
+                toggleTuneLock: record('toggleTuneLock'),
             },
         },
     };
@@ -96,7 +99,8 @@ t('the command set is the published one', () => {
             'audio',         // 1.4 — the receiver's sound, handed over as a port
             'spectrumdata',  // 1.6 — its frames, the same way; the `spectrum`
                              //       command is the view, this is the data
-            'notice']);      // 1.6 — say something where the operator will see it
+            'notice',        // 1.6 — say something where the operator will see it
+            'lock']);        // 1.7 — the padlock above the waterfall
 });
 
 // Commands are only ever added, and only at the end. A client tests for one by
@@ -246,6 +250,25 @@ t('mute can still be told to flip, when that is what is meant', () => {
     refuses(ERR.BAD_ARGS, () => runCommand('mute', { muted: 'yes' }, h.ctx));
 });
 
+t('lock is absolute, like mute and for the same reason', () => {
+    // A controller with a lock switch reports a position. Emulating that with a
+    // toggle desynchronises permanently the first time a message is missed.
+    const h = ctxFor();
+    assert.deepStrictEqual(runCommand('lock', { locked: true }, h.ctx), { locked: true });
+    assert.deepStrictEqual(h.calls, [['setTuneLock', true]]);
+    runCommand('lock', { locked: false }, h.ctx);
+    assert.deepStrictEqual(h.calls[1], ['setTuneLock', false]);
+    assert.ok(!h.calls.some((c) => c[0] === 'toggleTuneLock'), 'absolute went through the toggle');
+});
+
+t('lock can still be told to flip, and reports where that left it', () => {
+    const h = ctxFor({ locked: false });
+    assert.deepStrictEqual(runCommand('lock', { toggle: true }, h.ctx), { locked: true });
+    assert.deepStrictEqual(h.calls, [['toggleTuneLock']]);
+    refuses(ERR.BAD_ARGS, () => runCommand('lock', {}, h.ctx));
+    refuses(ERR.BAD_ARGS, () => runCommand('lock', { locked: 'yes' }, h.ctx));
+});
+
 t('duck silences without touching the mute the operator chose', () => {
     // A transmission must not end with the receiver permanently muted, and a
     // client showing a mute button must not be made to lie about it.
@@ -352,11 +375,37 @@ t('every topic has a snapshot, and every snapshot belongs to a topic', () => {
     assert.deepStrictEqual(Object.keys(SNAPSHOTS).sort(), [...LIVE_TOPICS, ...STATIC_TOPICS].sort());
 });
 
-t('tuning carries what a client tunes with', () => {
+t('tuning carries what a client tunes with, and how far it can', () => {
+    // minFrequency/maxFrequency ride along on this topic rather than a static one
+    // because they are not static: they are the live MIN_FREQ/MAX_FREQ bindings, which
+    // change when /api/description lands. A client that subscribed before that would
+    // otherwise cache the 30 MHz fallback for the life of the page — which is exactly
+    // what the browser extensions used to do, refusing 6 m on a 60 MHz receiver.
     assert.deepStrictEqual(tuningSnapshot(SOURCE), {
         frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700,
-        vfo: 'B', band: '20m',
+        vfo: 'B', band: '20m', locked: false,
+        minFrequency: 10000, maxFrequency: 30000000,
     });
+});
+
+t('the tuning carries the lock, because the lock is what holds it', () => {
+    // Without this a client whose tune commands are being ignored has no way to
+    // find out: they succeed, and nothing moves.
+    assert.strictEqual(tuningSnapshot({ ...SOURCE, locked: true }).locked, true);
+});
+
+t('the tuning snapshot follows the receiver, not a fixed 30 MHz', () => {
+    applyTuningRange({ min_frequency: 10000, max_frequency: 60000000,
+                       spectrum_span_hz: 60000000 });
+    try {
+        const t2 = tuningSnapshot(SOURCE);
+        assert.strictEqual(t2.maxFrequency, 60000000);
+        assert.strictEqual(t2.minFrequency, 10000);
+    } finally {
+        // Live module bindings: leaving 60 MHz set would change every test after this.
+        applyTuningRange({ min_frequency: 10000, max_frequency: 30000000,
+                           spectrum_span_hz: 30000000 });
+    }
 });
 
 t('audio carries the squelch setting and whether it is open now', () => {

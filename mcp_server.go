@@ -215,16 +215,29 @@ func (m *MCPServer) registerTools() {
 	)
 
 	// Tool: get_wideband_spectrum
+	//
+	// The span is this receiver's, not a fixed 0-30 MHz: an LLM client picks its
+	// center_freq out of these strings, so a stale ceiling here is a model politely
+	// refusing to look at 6 m on a receiver that covers it.
+	//
+	// Note the SNR bands named in get_receiver_info below are deliberately NOT derived —
+	// see noise_floor.go, where they are pinned so history stays comparable.
+	spectrumTopMHz := float64(m.config.Receiver.Span()) / 1e6
+	spectrumCentreMHz := float64(m.config.Receiver.Centre()) / 1e6
+	spectrumSpanKHz := float64(m.config.Receiver.Span()) / 1e3
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_wideband_spectrum",
-			mcp.WithDescription("Get full HF spectrum FFT data (0-30 MHz) showing the entire radio spectrum with noise floor and signal levels across all frequencies. Returns raw FFT bins with frequency and power data. Use this for detailed spectrum analysis or to identify signals across the entire HF spectrum."),
+			mcp.WithDescription(fmt.Sprintf("Get full HF spectrum FFT data (0-%.0f MHz) showing the entire radio spectrum with noise floor and signal levels across all frequencies. Returns raw FFT bins with frequency and power data. Use this for detailed spectrum analysis or to identify signals across the entire HF spectrum.", spectrumTopMHz)),
 			mcp.WithNumber("center_freq",
-				mcp.Description("Center frequency in MHz (default: 15.0, range: 0-30)"),
-				mcp.DefaultNumber(15.0),
+				mcp.Description(fmt.Sprintf("Center frequency in MHz (default: %.1f, range: 0-%.0f)", spectrumCentreMHz, spectrumTopMHz)),
+				// The schema default has to be derived too, not just the sentence beside
+				// it: an LLM client reads the description but *fills in* this number, so
+				// a literal 15 here would quietly contradict a description saying 30.
+				mcp.DefaultNumber(spectrumCentreMHz),
 			),
 			mcp.WithNumber("span",
-				mcp.Description("Frequency span in kHz (default: 30000 = full spectrum, min: 3)"),
-				mcp.DefaultNumber(30000.0),
+				mcp.Description(fmt.Sprintf("Frequency span in kHz (default: %.0f = full spectrum, min: 3)", spectrumSpanKHz)),
+				mcp.DefaultNumber(spectrumSpanKHz),
 			),
 		),
 		m.handleGetWidebandSpectrum,

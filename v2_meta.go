@@ -251,4 +251,3 @@ func truncateWords(s string, max int) string {
 	}
 	return strings.TrimRight(cut, " ,;:.-") + "…"
 }
-

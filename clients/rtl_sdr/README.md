@@ -167,7 +167,11 @@ This maps the top 8 bits of the int16 to the uint8 range, with 127 representing 
 
 ## Frequency Range
 
-UberSDR is HF-only: **10 kHz to 30 MHz**. Frequencies outside this range will be forwarded to UberSDR but may not produce valid data. The bridge logs a warning for out-of-range frequencies.
+The bridge reads the receiver's range from `/api/description` at startup and logs it. It is not fixed at 30 MHz: the span follows the radiod front end sample rate, so a 64.8 Msps RX888 covers 10 kHz–30 MHz and a 129.6 Msps one reaches 60 MHz. A receiver that does not publish a range is assumed to be 10 kHz–30 MHz.
+
+Frequencies outside the range are still forwarded to UberSDR but may not produce valid data; the bridge logs a warning for them.
+
+Note that the range is **not** advertised to your SDR client. The rtl_tcp protocol has no field for it — the dongle header carries only a tuner type, and this bridge reports an R820T, which makes clients believe 24–1766 MHz is tunable. Your client's tuning limits therefore come from its own idea of an R820T, not from the receiver.
 
 ## Frequency Routing Configuration
 
@@ -224,7 +228,7 @@ sudo make install-service
 ## Limitations
 
 - **Client limit**: Up to `-max-clients` (default 4) simultaneous `rtl_tcp` clients. Set to 0 for unlimited. Each client consumes one UberSDR WebSocket session.
-- **HF only**: UberSDR covers 10 kHz–30 MHz. VHF/UHF frequencies are not supported.
+- **Coverage**: whatever the receiver covers — 10 kHz–30 MHz on a stock RX888, up to 60 MHz at 129.6 Msps. Anything above that is not supported.
 - **Sample rate**: Always 192 kHz from UberSDR. Clients requesting any other rate receive Kaiser-windowed sinc resampled data — the inner ±96 kHz contains real signal, the outer bands are clean zeros. Set client bandwidth to 250 kHz for best results.
 - **Gain control**: UberSDR manages gain automatically. Gain commands from the client are acknowledged but have no effect.
 - **No wideband spectrum**: Spectrum/waterfall data is not provided (IQ stream only).
@@ -240,7 +244,7 @@ sudo make install-service
 ### No audio / silent output
 
 - Check bridge logs for UberSDR connection errors
-- Verify the frequency is within UberSDR's coverage (10 kHz–30 MHz)
+- Verify the frequency is within the range the bridge logged at startup ("Tuning range: ...")
 - Try connecting to UberSDR web UI directly to confirm it's working
 
 ### SDR# shows wrong sample rate

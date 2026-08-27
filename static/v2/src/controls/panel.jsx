@@ -41,6 +41,10 @@ export function useControlContext(stepHz) {
             // it back needs the spectrum's current bin count to turn it into a
             // span. See lib/vfos.js.
             view: radio.view,
+            // Whether the tuning lock is on. Read by the lock functions and by
+            // the bridge's `lock` command, both of which have to be able to
+            // report where they left it.
+            locked: radio.locked,
         }),
     };
     return useMemo(() => ({

@@ -596,11 +596,14 @@
         <div id="liveData">
             <h2 style="margin-bottom: 20px; font-size: 1.8em;">📊 Current Conditions</h2>
             
-            <!-- Wide-band spectrum (0-30 MHz) -->
+            <!-- Wide-band spectrum: 0 to whatever the receiver covers. The 30 MHz
+                 written into the markup below is the fallback; applyTuningRange() in
+                 noisefloor.js rewrites the bounds and these labels once the receiver
+                 says how far it actually tunes. -->
             <div class="chart-container" id="widebandContainer" style="margin-bottom: 20px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <h2 style="margin: 0;">📡 Full HF Spectrum (0-30 MHz)</h2>
+                        <h2 style="margin: 0;">📡 Full HF Spectrum (<span id="wideband-span-label">0-30 MHz</span>)</h2>
                         <a href="/spectrogram.html" target="_blank"
                            style="font-size:0.8em; opacity:0.7; text-decoration:none; color:inherit;"
                            title="View wideband spectrogram">&#x1F4CA; Spectrogram</a>
@@ -671,7 +674,7 @@
                                style="width: 100%; cursor: pointer;">
                         <div style="display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 2px;">
                             <span>0 MHz</span>
-                            <span>30 MHz</span>
+                            <span id="wideband-freq-scale-max">30 MHz</span>
                         </div>
                         <input type="number" id="wideband-frequency-input" min="0" max="30" step="0.001" value="15"
                                placeholder="Enter MHz"
@@ -685,7 +688,7 @@
                                style="width: 100%; cursor: pointer;">
                         <div style="display: flex; justify-content: space-between; font-size: 0.8em; opacity: 0.7; margin-top: 2px;">
                             <span>3 kHz</span>
-                            <span>30000 kHz</span>
+                            <span id="wideband-width-scale-max">30000 kHz</span>
                         </div>
                         <input type="number" id="wideband-width-input" min="3" max="30000" step="1" value="30000"
                                placeholder="Enter kHz"

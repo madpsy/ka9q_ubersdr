@@ -11,7 +11,7 @@ const assert = require('assert');
 
 const {
     FFT, COLORMAPS, PALETTES, SPANS, SPEEDS, WINDOWS, RESOLUTIONS, AUTO_LEVELS,
-    QRSS_CONFIG, QRSS_BANDS, FULL_VIEW,
+    QRSS_CONFIG, QRSS_BANDS, qrssBandsInRange, FULL_VIEW,
     buildColorLUT, hannWindow, designLowpass, derive, buildBinMap, powerColumn,
     colorColumn, median, trackFloor, autoSpanOf, niceStep, fmtDuration, fmtShort,
     zoomView, panView, pointToFreqTime,
@@ -300,16 +300,56 @@ t('the band menu says which one the dial is on', () => {
     assert.strictEqual(tunedOption(QRSS_BANDS, 14074000), null);
 });
 
-t('every band entry is one the receiver can reach', () => {
-    // v1 listed 6 m, which is above this receiver's 30 MHz ceiling: choosing it
-    // would have tuned to the clamp and then never matched itself.
+t('every band entry is well formed and unique', () => {
     const all = QRSS_BANDS.flatMap((g) => g.options);
-    assert.strictEqual(all.length, 12);
+    assert.strictEqual(all.length, 13);
     for (const o of all) {
-        assert.ok(o.hz >= 10000 && o.hz <= 30000000, o.label);
+        assert.ok(o.hz > 0, o.label);
         assert.ok(o.label, `${o.hz} has no label`);
     }
     assert.strictEqual(new Set(all.map((o) => o.hz)).size, all.length);
+});
+
+// The list holds every QRSS window that exists; which of them are *offered* is the
+// receiver's business, because the receiver no longer tops out at a fixed 30 MHz.
+// Hiding rather than clamping: an entry that silently tuned to the band edge would look
+// like it worked, and QRSS is a mode where you stare at a waterfall for ten minutes
+// before noticing you are in the wrong place.
+
+t('a 30 MHz receiver is offered exactly what it used to be', () => {
+    const groups = qrssBandsInRange(10000, 30000000);
+    const all = groups.flatMap((g) => g.options);
+    assert.strictEqual(all.length, 12);
+    assert.ok(!all.some((o) => o.hz > 30000000), '6 m is not offered');
+    // And the group it was the only member of is gone, not left empty.
+    assert.ok(!groups.some((g) => g.options.length === 0), 'no empty groups');
+    assert.ok(!groups.some((g) => g.group === 'VHF'), 'the VHF group is dropped whole');
+});
+
+t('a 60 MHz receiver is offered 6 m as well', () => {
+    const groups = qrssBandsInRange(10000, 60000000);
+    const all = groups.flatMap((g) => g.options);
+    assert.strictEqual(all.length, 13);
+    const six = all.find((o) => o.hz > 30000000);
+    assert.ok(six, '6 m is offered');
+    assert.ok(six.label.includes('6 m'), six.label);
+    assert.ok(groups.some((g) => g.group === 'VHF'));
+});
+
+t('the bottom edge is honoured too', () => {
+    // 630 m at 476 kHz is the only entry below 1.8 MHz; a receiver that starts
+    // higher should not be offered it.
+    const all = qrssBandsInRange(1000000, 30000000).flatMap((g) => g.options);
+    assert.ok(!all.some((o) => o.hz < 1000000), '630 m is not offered');
+});
+
+t('a range nobody stated offers everything rather than nothing', () => {
+    // The filter is handed MIN_FREQ/MAX_FREQ, which are live bindings; if they were
+    // ever undefined the picker must not silently empty itself.
+    for (const args of [[undefined, undefined], [null, null], [0, 0], [NaN, NaN]]) {
+        const all = qrssBandsInRange(...args).flatMap((g) => g.options);
+        assert.strictEqual(all.length, 13, JSON.stringify(args));
+    }
 });
 
 t('the menus offer only values the rest of the code handles', () => {

@@ -318,10 +318,17 @@ func TestWidebandSNRHandlesShortAndEmptyFFTs(t *testing.T) {
 	}
 }
 
-// The shell must emit valid JSON, and a Config that never went through LoadConfig must
-// still produce today's limits — that is the exact case an older deployment or a test
-// harness presents.
-func TestV2TuningRangeJSONEndToEnd(t *testing.T) {
+// The published object must survive a JSON round trip, and a Config that never went
+// through LoadConfig must still produce today's limits — that is the exact case an older
+// deployment or a test harness presents.
+//
+// This used to go through v2TuningRangeJSON, which inlined the same object into the v2
+// shell as window.__UBERSDR__. That second publisher is gone (see constants.js: the
+// bundled desktop and mobile apps strip the shell's Go template actions, so they never
+// received it and silently fell back to 30 MHz). /api/description is now the only way
+// these numbers leave the process, so the round trip is asserted against the builder the
+// handler marshals.
+func TestTuningRangeJSONEndToEnd(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 		cfg  *Config
@@ -339,10 +346,11 @@ func TestV2TuningRangeJSONEndToEnd(t *testing.T) {
 			"min_frequency": 10000, "max_frequency": 60000000,
 			"spectrum_span_hz": 60000000, "spectrum_center_hz": 30000000}},
 	} {
-		raw := string(v2TuningRangeJSON(tt.cfg))
-		if strings.Contains(raw, "<") || strings.Contains(raw, "&") {
-			t.Errorf("%s: output would need escaping in a <script>: %s", tt.name, raw)
+		encoded, err := json.Marshal(tt.cfg.Receiver.TuningRange())
+		if err != nil {
+			t.Fatalf("%s: marshalling the tuning range failed: %v", tt.name, err)
 		}
+		raw := string(encoded)
 		var got map[string]interface{}
 		if err := json.Unmarshal([]byte(raw), &got); err != nil {
 			t.Fatalf("%s: not valid JSON (%v): %s", tt.name, err, raw)
@@ -412,8 +420,10 @@ func TestLoadConfigDerivesTodaysSpectrumGeometry(t *testing.T) {
 
 // Every publisher of the receiver's range must send the same fields.
 //
-// There are five: /api/description, the v2 shell's inlined window.__UBERSDR__, and the
-// instance reporter's periodic, test and startup payloads. They all go through
+// There are four: /api/description and the instance reporter's periodic, test and
+// startup payloads. (A fifth, the v2 shell's inlined window.__UBERSDR__, was removed —
+// the bundled apps strip the shell's template actions and so never saw it.) They all go
+// through
 // ReceiverConfig.TuningRange() precisely so a field cannot end up present in one, stale in
 // another and missing from the third — this test is what stops someone hand-rolling a
 // sixth.
@@ -437,22 +447,6 @@ func TestTuningRangeIsOneShape(t *testing.T) {
 		if _, ok := tr[k]; !ok {
 			t.Errorf("missing field %q", k)
 		}
-	}
-
-	// The v2 shell must serialise exactly the same object.
-	cfg := &Config{}
-	cfg.Receiver = rc
-	var shell map[string]interface{}
-	if err := json.Unmarshal([]byte(v2TuningRangeJSON(cfg)), &shell); err != nil {
-		t.Fatalf("shell JSON: %v", err)
-	}
-	for _, k := range want {
-		if _, ok := shell[k]; !ok {
-			t.Errorf("shell is missing %q", k)
-		}
-	}
-	if len(shell) != len(want) {
-		t.Errorf("shell field count: got %d (%v), want %d", len(shell), shell, len(want))
 	}
 
 	// And the instance reporter carries the identical map on all three payload paths.

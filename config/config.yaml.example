@@ -36,7 +36,10 @@ admin:
   # Default tuning frequency for new visitors (Hz)
   # This is the frequency shown when a user first opens the web UI
   # Can be overridden per-link with the URL parameter: ?freq=7074000
-  # Valid range: 10000 (10 kHz) to 30000000 (30 MHz)
+  # Valid range: the receiver's own, from 10000 (10 kHz) up to whatever its front end
+  # covers. That follows the radiod sample rate, so it is 30000000 (30 MHz) on a
+  # 64.8 Msps RX888 and 60000000 (60 MHz) at 129.6 Msps -- see RECEIVER_SPAN.md.
+  # A frequency outside it is ignored and the built-in default used instead.
   # Set to 0 (or omit) to use the built-in default of 14175000 (14.175 MHz - 20m USB calling frequency)
   default_frequency: 14175000
 
@@ -709,10 +712,12 @@ spectrum:
   # Enable per-user spectrum channels
   enabled: true
 
-  # Number of FFT bins across the full 0-30 MHz view — the horizontal resolution
-  # of the spectrum display and waterfall. Server-wide: this applies to every
-  # user, it is not a per-session setting. Bin bandwidth is derived automatically
-  # (30 MHz / bin_count) so the display always covers exactly 0-30 MHz.
+  # Number of FFT bins across the receiver's full-span view — the horizontal
+  # resolution of the spectrum display and waterfall. Server-wide: this applies to
+  # every user, it is not a per-session setting. Bin bandwidth is derived
+  # automatically (span / bin_count) so the display always covers exactly the
+  # receiver's span, which follows the radiod sample rate: 0-30 MHz on a 64.8 Msps
+  # RX888, 0-60 MHz at 129.6 Msps. See RECEIVER_SPAN.md.
   #
   # Only three values are accepted; anything else snaps to the nearest:
   #    512 = low     (58593.75 Hz/bin at full zoom-out, ~5 KB/s per client)

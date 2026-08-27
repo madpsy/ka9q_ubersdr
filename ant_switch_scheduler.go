@@ -7,8 +7,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // AntSwitchScheduleEntry represents a single scheduled antenna switch action
@@ -91,7 +89,7 @@ func (as *AntSwitchScheduler) LoadConfig() error {
 
 	// Parse YAML
 	var config AntSwitchScheduleConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if _, err := loadYAMLWithRepair(as.configPath, data, &config); err != nil {
 		return fmt.Errorf("failed to parse config YAML: %w", err)
 	}
 

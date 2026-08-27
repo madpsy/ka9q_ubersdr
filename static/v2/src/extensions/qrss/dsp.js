@@ -423,10 +423,12 @@ export function pointToFreqTime(view, px, py, { fc, decSR, secPerCol, innerW }) 
 // "which dial do I set" and "where is the activity" are different questions and
 // QRSS operators quote the second.
 //
-// v1's 6 m entry is gone. The receiver tops out at 30 MHz (MAX_FREQ in
-// radio/constants.js, mirroring the server), so choosing it would have tuned to
-// the clamp and sat there never matching itself — an entry that cannot work is
-// worse than one that is not offered.
+// 6 m is in the list but not always offered. The receiver does not top out at a fixed
+// 30 MHz any more — the span follows the front end sample rate, so a 129.6 Msps RX888
+// reaches 60 MHz and 50.294 MHz is a real choice on it. Filtering the options at render
+// against MAX_FREQ is what lib/bands.js already does with bandsInRange, and it keeps the
+// old behaviour exactly on a 30 MHz receiver: an entry that cannot work is still not
+// offered, but now that is decided by the receiver rather than assumed.
 export const QRSS_BANDS = [
     {
         group: 'Most active',
@@ -450,9 +452,31 @@ export const QRSS_BANDS = [
         ],
     },
     {
+        group: 'VHF',
+        options: [
+            { hz: 50293900, label: '6 m · dial 50.29390 · QRSS 50.294000 MHz' },
+        ],
+    },
+    {
         group: 'MF / LF',
         options: [
             { hz: 476000, label: '630 m · dial 476.000 · QRSS 476.100 kHz' },
         ],
     },
 ];
+
+/**
+ * The groups a receiver can actually reach, with unreachable options dropped and any
+ * group left empty removed entirely.
+ *
+ * Hiding rather than clamping on purpose: a picker entry that silently tunes to the band
+ * edge instead of where it says looks like it worked, and QRSS is a mode where you stare
+ * at a waterfall for ten minutes before noticing you are in the wrong place.
+ */
+export function qrssBandsInRange(minHz, maxHz) {
+    const lo = Number.isFinite(minHz) && minHz > 0 ? minHz : 0;
+    const hi = Number.isFinite(maxHz) && maxHz > 0 ? maxHz : Infinity;
+    return QRSS_BANDS
+        .map((grp) => ({ ...grp, options: grp.options.filter((o) => o.hz >= lo && o.hz <= hi) }))
+        .filter((grp) => grp.options.length > 0);
+}

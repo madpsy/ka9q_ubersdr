@@ -36,6 +36,24 @@ export function tuningSnapshot(src) {
         bandwidthHigh: num(t.bandwidthHigh),
         vfo: src.vfo || null,
         band: src.band || null,
+        // The tuning lock. On this topic and not one of its own because it is a
+        // property of the tuning: it is exactly the three fields above that stop
+        // responding, and a client that shows a frequency is the one that has to
+        // explain why its tune command did nothing.
+        locked: !!src.locked,
+        // How far this receiver tunes, so a bridge client can bound its own input
+        // instead of guessing. Without these the browser extensions each carried a
+        // hardcoded 10 kHz - 30 MHz gate, which refused to send anything above 30 MHz
+        // on a receiver that reaches 60 — and refused it *locally*, so commands.js
+        // never saw the command and could not answer bad_args for it.
+        //
+        // On `tuning` rather than a static topic because it is not static: MIN_FREQ and
+        // MAX_FREQ are live bindings that change when /api/description lands, and a
+        // client that subscribed before that would have cached the fallback forever.
+        // Every tuning update recarries them, so a late subscriber and an early one end
+        // up with the same numbers.
+        minFrequency: num(MIN_FREQ),
+        maxFrequency: num(MAX_FREQ),
     };
 }
 

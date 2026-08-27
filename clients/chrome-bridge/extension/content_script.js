@@ -136,6 +136,12 @@
             if (has('bandwidthLow')) out.bwLow = data.bandwidthLow;
             if (has('bandwidthHigh')) out.bwHigh = data.bandwidthHigh;
             if (has('band')) out.band = data.band;
+            // How far this receiver tunes. Forwarded so the popup can bound its
+            // frequency box against the real receiver rather than the 30 MHz it
+            // used to assume — see popup.js. Absent on an older page, which the
+            // popup reads as the same 10 kHz - 30 MHz it always did.
+            if (has('minFrequency')) out.minFreq = data.minFrequency;
+            if (has('maxFrequency')) out.maxFreq = data.maxFrequency;
         } else if (topic === 'audio') {
             if (has('muted')) out.muted = data.muted;
             if (has('volume')) out.volume = data.volume;

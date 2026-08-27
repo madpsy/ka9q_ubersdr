@@ -467,6 +467,9 @@ You are on somebody else's receiver, in a panel they can switch off in one click
 
 - **Do not retune without being asked.** The dial is shared with whatever else
   the user is doing.
+- **Honour `tuning.locked`.** The operator has held the receiver where it is. A
+  `tune` sent while it is on succeeds as a message and moves nothing, so a panel
+  that does not watch the field will sit there believing it retuned.
 - **Use `duck`, never `mute`**, for anything transient. `mute` is the operator's
   own setting and yours to leave alone.
 - **Poll gently.** A receiver serves many listeners, and every one of them is

@@ -282,7 +282,16 @@ esbuild ../src/bridge/client.js --bundle --format=cjs --platform=node \
     --outfile=.build/bridgeclient.cjs --log-level=warning
 esbuild ../src/bridge/commands.js --bundle --format=cjs --platform=node \
     --outfile=.build/bridgecommands.cjs --log-level=warning
-esbuild ../src/bridge/snapshots.js --bundle --format=cjs --platform=node \
+# Snapshots, bundled with the constants they read the receiver's tuning range out of.
+# constants.js holds MIN_FREQ/MAX_FREQ as *live* bindings that applyTuningRange rewrites
+# when /api/description lands; bundling it separately would give the tests a second copy
+# that the snapshots never read, so a test adopting a 60 MHz range would pass while
+# proving nothing.
+cat > .build/snapshots-entry.js <<'SNAPENTRY'
+export * from '../../src/bridge/snapshots.js';
+export * from '../../src/radio/constants.js';
+SNAPENTRY
+esbuild .build/snapshots-entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/bridgesnapshots.cjs --log-level=warning
 esbuild ../src/radio/media/metadata.js --bundle --format=cjs --platform=node \
     --outfile=.build/mediametadata.cjs --log-level=warning

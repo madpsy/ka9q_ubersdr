@@ -55,6 +55,7 @@ function fakeRadio(over = {}) {
             resetSpectrum: record('resetSpectrum'),
             tuneTo: record('tuneTo'),
             setSpan: record('setSpan'),
+            toggleTuneLock: record('toggleTuneLock'),
         },
     };
 }
@@ -285,6 +286,23 @@ t('the NR toggle does nothing at all on a receiver with no DSP', () => {
     const r = fakeRadio();
     runFunction('dsp_toggle', TRIG, r);
     assert.strictEqual(r.calls.length, 0);
+});
+
+t('the tuning lock is mappable, as a press and not a position', () => {
+    // The padlock above the waterfall, on a button — worth mapping because a
+    // dial living under somebody's hand is one elbow away from retuning a
+    // receiver that was parked on purpose.
+    //
+    // A latching switch wired as a CC arrives as a position; runFunction turns
+    // that into a press on the way down and drops the release, so a flick throws
+    // the lock once rather than twice.
+    const r = fakeRadio();
+    assert.ok(catalogue([]).some((f) => f.id === 'tune_lock_toggle'));
+    assert.strictEqual(runFunction('tune_lock_toggle', TRIG, r), true);
+    assert.deepStrictEqual(r.calls, [['toggleTuneLock']]);
+    assert.strictEqual(runFunction('tune_lock_toggle', ABS(1), r), true);
+    assert.strictEqual(runFunction('tune_lock_toggle', ABS(0), r), true);
+    assert.strictEqual(r.calls.length, 2, 'the release threw the lock a second time');
 });
 
 t('squelch off restores a usable threshold rather than the floor', () => {

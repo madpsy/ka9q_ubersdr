@@ -280,6 +280,6 @@ clients/chrome-bridge/
 ## Limitations
 
 - **Audio in background tabs** — Chrome may throttle or suspend audio in non-visible tabs. Frequency and mode control still work; audio decoders (FT8, WEFAX, etc.) may pause.
-- **Frequency range** — 10 kHz – 30 MHz. The page refuses anything outside it with a reason rather than clamping silently; a relative step stops at the band edge, as the dial does.
+- **Frequency range** — the receiver's own, which the popup learns from the page's `tuning` state. It is not fixed at 30 MHz: the span follows the radiod front end sample rate, so a 129.6 Msps receiver reaches 60 MHz and has 6 m in it. Until the page says otherwise the popup assumes 10 kHz – 30 MHz. The page refuses anything outside the range with a reason rather than clamping silently; a relative step stops at the band edge, as the dial does.
 - **Service worker lifetime** — Chrome can kill the service worker after ~30 seconds of inactivity. The `chrome.alarms` keepalive re-wakes it every minute; the poll chain restarts automatically. There may be a brief gap in flrig polling while the SW is asleep.
 - **CORS** — the bridge server must include `Access-Control-Allow-Origin: *` in its responses.

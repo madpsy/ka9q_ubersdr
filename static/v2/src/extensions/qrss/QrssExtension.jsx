@@ -37,8 +37,12 @@ import { tunedOption } from '../frequencies.js';
 import {
     AUTO_LEVELS, FFT, FULL_VIEW, PALETTES, QRSS_BANDS, QRSS_CONFIG, RESOLUTIONS, SPANS, SPEEDS,
     WINDOWS, trackFloor, autoSpanOf, buildBinMap, buildColorLUT, colorColumn, derive, designLowpass,
-    fmtDuration, fmtShort, hannWindow, panView, pointToFreqTime, powerColumn, zoomView,
+    fmtDuration, fmtShort, hannWindow, panView, pointToFreqTime, powerColumn, qrssBandsInRange,
+    zoomView,
 } from './dsp.js';
+// The receiver's own limits, so the band picker offers 6 m on a receiver that reaches it
+// and hides it on one that does not. Live bindings — see radio/constants.js.
+import { MAX_FREQ, MIN_FREQ } from '../../radio/constants.js';
 import { MARGINS, dbAt, drawFrame, plotSize } from './render.js';
 import { saveFile } from '../../lib/saveFile.js';
 
@@ -528,7 +532,7 @@ export default function QrssExtension({ minimal }) {
                     title="Set the dial for a band's QRSS window, in USB, and show which one the receiver is on"
                 >
                     <option value="">Tune to…</option>
-                    {QRSS_BANDS.map((grp) => (
+                    {qrssBandsInRange(MIN_FREQ, MAX_FREQ).map((grp) => (
                         <optgroup key={grp.group} label={grp.group}>
                             {grp.options.map((o) => <option key={o.hz} value={o.hz}>{o.label}</option>)}
                         </optgroup>

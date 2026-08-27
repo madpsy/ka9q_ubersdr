@@ -569,6 +569,38 @@ export const COMMANDS = {
         });
         return { shown: !!id, id: id || null };
     },
+
+    /**
+     * lock — hold the tuning where it is.
+     *
+     *   { locked }        absolute
+     *   { toggle: true }  the other one
+     *
+     * The padlock above the waterfall. With it on, frequency, mode and filter
+     * stop responding — to this bridge as much as to the page: a `tune` sent
+     * while locked succeeds as a message and moves nothing, exactly as a drag
+     * across the waterfall does. Volume, squelch, DSP and the spectrum view are
+     * not affected, so a client can go on doing everything else.
+     *
+     * Absolute by default, and for the same reason `mute` is: a controller with
+     * a lock switch on it is reporting a position, and a toggle desynchronises
+     * permanently the first time a message is missed. `toggle` is there for a
+     * button that genuinely means "the other one".
+     *
+     * The operator is told either way, on screen, wherever they are looking —
+     * a receiver that stopped tuning because something out of sight locked it is
+     * indistinguishable from a broken one.
+     */
+    lock(args, ctx) {
+        const wanted = bool(args, 'locked');
+        if (wanted === null) {
+            if (!bool(args, 'toggle')) throw new BridgeError(ERR.BAD_ARGS, 'locked or toggle is required');
+            ctx.actions.toggleTuneLock();
+            return { locked: !ctx.state().locked };
+        }
+        ctx.actions.setTuneLock(wanted);
+        return { locked: wanted };
+    },
 };
 
 function viewOf(ctx) {

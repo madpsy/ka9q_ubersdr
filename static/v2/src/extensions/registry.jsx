@@ -150,9 +150,10 @@ export const EXTENSIONS = [
         // no demodulated mode preserves it, so this must stay usable in a mode
         // that closes every other extension.
         needsIQ: true,
-        // Shorter than FreeDV's: there is no activity list to hold, just the
-        // station identity, a text message line and two rows of meters.
-        float: { w: 760, h: 420 },
+        // Taller than the identity block and meters need, because the schedule
+        // opens inside the panel rather than over it. Closed it is one row, so
+        // the extra height costs a panel that never opens it nothing.
+        float: { w: 760, h: 560 },
         minimal: true,
         Component: DRMExtension,
     },

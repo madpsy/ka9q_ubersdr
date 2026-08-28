@@ -8125,8 +8125,13 @@ a.btn { text-decoration: none; }
 
 /* The station identity block. Reserves its height whether or not a station has
    been found, so a lock does not shove the meters down the panel. */
+/* The DRM panel is the tallest of the decoders — an identity block, two rows of
+   meters, and a schedule that wants every pixel left over — so its rows are
+   tighter than the shared `.tp` spacing. */
+.tp.drm { gap: 5px; }
+
 .drm__id {
-    padding: 8px 10px 6px;
+    padding: 5px 10px 5px;
     border-bottom: 1px solid var(--border);
 }
 .drm__service {
@@ -8168,7 +8173,7 @@ a.btn { text-decoration: none; }
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 7px 10px;
+    padding: 4px 10px;
 }
 .drm__meter { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; }
 .drm__meter-bar {
@@ -8210,6 +8215,188 @@ a.btn { text-decoration: none; }
 }
 .drm__block.is-ok  { background: rgba(69, 214, 154, 0.16); color: var(--good); }
 .drm__block.is-bad { background: rgba(242, 181, 68, 0.16); color: var(--warn); }
+
+/* ── DRM schedule ─────────────────────────────────────────────────────────── */
+
+/* Closed it is one row and costs nothing. Open it takes every pixel the panel
+   has left — `flex: 1` against `min-height: 0`, so the list scrolls inside
+   itself rather than pushing the footer off the bottom of a floating panel. */
+.drm__sched {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-top: 1px solid var(--border);
+}
+.drm__sched.is-open { flex: 1; }
+
+.drm__sched-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    flex: none;
+}
+.drm__sched-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 4px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: calc(11px * var(--ui-scale));
+    cursor: pointer;
+}
+.drm__sched-toggle:hover { color: var(--text); background: var(--surface-3); }
+/* The chevron points down when closed and up when open, which is the only
+   thing saying whether the list is collapsed or simply empty. */
+.drm__sched-toggle svg { transition: transform 0.15s ease; }
+.drm__sched-toggle.is-open svg { transform: rotate(180deg); }
+.drm__sched-count {
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(69, 214, 154, 0.16);
+    color: var(--good);
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+
+.drm__sched-seg { display: flex; gap: 2px; margin-left: auto; }
+.drm__sched-seg button {
+    padding: 2px 7px;
+    border: 0;
+    border-radius: 4px;
+    background: var(--surface-3);
+    color: var(--text-faint);
+    font: inherit;
+    font-size: calc(10px * var(--ui-scale));
+    cursor: pointer;
+}
+.drm__sched-seg button:hover { color: var(--text); }
+.drm__sched-seg button.is-on { background: var(--accent-soft); color: var(--accent); }
+
+/* The zone toggle carries its own state as its label — "UTC" or "UTC+5:45" —
+   so it needs no separate indicator, and the times beside it are the proof. */
+.drm__sched-zone {
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text-faint);
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    cursor: pointer;
+    white-space: nowrap;
+}
+.drm__sched-zone:hover { color: var(--text); border-color: var(--border-strong); }
+
+/* Sits inside a note, after the sentence explaining what went wrong. */
+.drm__sched-retry {
+    margin-left: 8px;
+    padding: 1px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    font-size: calc(10px * var(--ui-scale));
+    cursor: pointer;
+}
+.drm__sched-retry:hover { background: var(--surface-3); }
+
+.drm__sched-find {
+    width: 96px;
+    min-width: 0;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    font-size: calc(10.5px * var(--ui-scale));
+}
+.drm__sched-find:focus { outline: none; border-color: var(--border-strong); }
+
+/* The scrolling region. `min-height: 0` is what actually lets it scroll: without
+   it the flex item sizes to its content and the panel grows instead. */
+.drm__sched-list {
+    flex: 1;
+    min-height: 0;
+    max-height: 46vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 6px 6px;
+}
+
+/* One transmission. A button, not a row of text: clicking it tunes, and that
+   has to be discoverable without a hint telling people to try. */
+.drm__row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-dim);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.drm__row:hover { background: var(--surface-3); color: var(--text); }
+/* Off-air entries are still listed under "All" — a schedule is worth reading
+   ahead of time — but they must not compete with what is on now. */
+.drm__row { opacity: 0.55; }
+.drm__row.is-on { opacity: 1; }
+/* Where the receiver is sitting. A left edge rather than a fill, so it survives
+   hover and does not fight the on-air distinction. */
+.drm__row.is-tuned {
+    box-shadow: inset 2px 0 0 var(--accent);
+    background: var(--surface-2);
+}
+
+.drm__row-freq {
+    flex: none;
+    width: 74px;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text);
+    text-align: right;
+}
+.drm__row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.drm__row-station {
+    font-size: calc(11.5px * var(--ui-scale));
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* The second line is context, not identity: it may be clipped. */
+.drm__row-detail {
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.drm__row-when {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+.drm__row-slot { color: var(--text-dim); }
+.drm__row-days { font-family: var(--sans); font-size: calc(9px * var(--ui-scale)); }
 
 /* ── FreeDV ───────────────────────────────────────────────────────────────── */
 

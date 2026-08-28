@@ -21,6 +21,13 @@
 //     language, the text message and the signal quality all arrive on a status
 //     frame about once a second, and showing them is most of what makes the
 //     panel worth looking at while it hunts for a lock.
+//   * There are only about eleven DRM broadcasters left, on a schedule that
+//     changes twice a year. So the panel carries that schedule, fetched from
+//     the server's /api/drm/schedule, and a row is a tune — hunting for the one
+//     station that is on air right now is otherwise the whole difficulty of
+//     using this mode. It lives here and nowhere else in the interface: these
+//     are not bookmarks, they are ten kHz of OFDM that only this panel can do
+//     anything with.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../../react.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
@@ -33,6 +40,10 @@ import {
     RX_OK, SIGNAL_TIMEOUT_MS, STATUS_STALE_MS, WMER_THRESHOLD_FRACTION,
     decodeFrame, hasAudioLock, languageName, progressLabel, qualityFraction,
 } from './frame.js';
+import {
+    describeSlot, fetchSchedule, formatOffsetLabel, formatScheduleFreq, formatSlot,
+    isTunedTo, localOffsetMinutes, onAirCount, scheduleDetail, scheduleRows,
+} from './schedule.js';
 
 // One Opus frame is 20 ms. Far enough ahead for the Web Audio scheduler, short
 // enough not to clip the first syllable — the value FreeDV arrived at.
@@ -245,6 +256,73 @@ export default function DRMExtension({ minimal }) {
         if (s.gain) { try { s.gain.disconnect(); } catch (e) { /* ignore */ } }
     }, []);
 
+    // ── schedule ────────────────────────────────────────────────────────────
+
+    // Off until asked for. It is a fetch and a list of a hundred-odd rows, and
+    // an operator who already knows where their station is does not need either
+    // — but the toggle is the first thing in the panel for the one who does.
+    const [schedOpen, setSchedOpen] = useState(false);
+    const [schedule, setSchedule] = useState(null);
+    const [schedLoading, setSchedLoading] = useState(false);
+    // "What can I hear right now" is the question the schedule is opened to
+    // answer, so that is the view it opens in.
+    const [onAirOnly, setOnAirOnly] = useState(true);
+    const [query, setQuery] = useState('');
+    // Broadcast schedules are published in UTC and read in UTC, so that is the
+    // default; the offset is offered because "is that tonight or 4am for me" is
+    // the next question and nobody should have to do the arithmetic.
+    const [useLocal, setUseLocal] = useState(false);
+
+    // Read once per open rather than per row: it cannot change while the panel
+    // is up, short of the operator moving their clock.
+    const offsetMinutes = useMemo(() => localOffsetMinutes(), [schedOpen]);
+    const slotOffset = useLocal ? offsetMinutes : 0;
+
+    // Fetched on first open rather than on mount, and re-fetched when the cache
+    // in schedule.js has gone stale — which is also what re-computes `on_air`,
+    // since the server decides that and a panel left open overnight would
+    // otherwise still be showing yesterday evening's broadcasts as live.
+    // Bumped to ask again. A failure is not cached, so this is the whole of the
+    // retry: without it a schedule that failed while the panel was open could
+    // only be retried by closing and reopening it, which is a thing nobody
+    // should have to guess at.
+    const [schedAttempt, setSchedAttempt] = useState(0);
+
+    useEffect(() => {
+        if (!schedOpen) return undefined;
+        let alive = true;
+        setSchedLoading(true);
+        fetchSchedule({ force: schedAttempt > 0 }).then((data) => {
+            if (!alive) return;
+            setSchedule(data);
+            setSchedLoading(false);
+        });
+        return () => { alive = false; };
+    }, [schedOpen, schedAttempt]);
+
+    const rows = useMemo(
+        () => scheduleRows(schedule && schedule.entries, { onAirOnly, query }),
+        [schedule, onAirOnly, query],
+    );
+    const onAirNow = useMemo(() => onAirCount(schedule && schedule.entries), [schedule]);
+
+    const retrySchedule = useCallback(() => {
+        setSchedule(null);
+        setSchedAttempt((n) => n + 1);
+    }, []);
+
+    // A row is a tune. The mode is only forced to IQ when the decoder is
+    // already running: doing it otherwise would leave the receiver playing raw
+    // I/Q noise at the new frequency with nothing ducking it, which is a nasty
+    // surprise for someone who only meant to look up where a station is.
+    const tuneToEntry = useCallback((entry) => {
+        if (!entry || !entry.freq_hz) return;
+        actions.tuneTo({
+            frequency: entry.freq_hz,
+            mode: decoding ? REQUIRED_MODE : tuning.mode,
+        });
+    }, [actions, decoding, tuning.mode]);
+
     // ── presentation ────────────────────────────────────────────────────────
 
     const locked = hasAudioLock(status);
@@ -308,8 +386,7 @@ export default function DRMExtension({ minimal }) {
             {!minimal && running && !live && <div className="note note--tight">Waiting for the audio connection…</div>}
             {!minimal && live && !decoding && (
                 <div className="note note--tight">
-                    Tune to a DRM broadcast and press Start. The receiver is switched to IQ — which is
-                    what DRM needs and is silent on its own — and put back when you stop.
+                    Tune to a DRM broadcast and press Start — the receiver is switched to IQ, and put back after.
                 </div>
             )}
             {problem && <div className="note note--warn">{problem}</div>}
@@ -374,6 +451,148 @@ export default function DRMExtension({ minimal }) {
                             </span>
                         ))}
                     </div>
+                </div>
+            )}
+
+            {!minimal && (
+                <div className={`drm__sched${schedOpen ? ' is-open' : ''}`}>
+                    <div className="drm__sched-bar">
+                        <button
+                            type="button"
+                            className={`drm__sched-toggle${schedOpen ? ' is-open' : ''}`}
+                            onClick={() => setSchedOpen((v) => !v)}
+                            title="The DRM broadcast schedule, from drmrx.org — click a row to tune to it"
+                        >
+                            <Icon.Chevron size={12} />
+                            Schedule
+                            {onAirNow > 0 && <span className="drm__sched-count">{onAirNow} on air</span>}
+                        </button>
+
+                        {schedOpen && (
+                            <>
+                                {/* On now against everything. Two buttons rather
+                                    than a checkbox: which one is active has to be
+                                    readable at a glance, because it decides whether
+                                    an empty list means "nothing on" or "nothing
+                                    known". */}
+                                <div className="drm__sched-seg">
+                                    <button
+                                        type="button"
+                                        className={onAirOnly ? 'is-on' : ''}
+                                        onClick={() => setOnAirOnly(true)}
+                                        title="Only the broadcasts transmitting right now"
+                                    >
+                                        On now
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={!onAirOnly ? 'is-on' : ''}
+                                        onClick={() => setOnAirOnly(false)}
+                                        title="Every scheduled broadcast, whatever the time"
+                                    >
+                                        All
+                                    </button>
+                                </div>
+                                {/* Only offered where it means something. On a
+                                    machine already keeping UTC the two readings
+                                    are the same and the button would be a lie
+                                    about having a choice. */}
+                                {offsetMinutes !== 0 && (
+                                    <button
+                                        type="button"
+                                        className="drm__sched-zone"
+                                        onClick={() => setUseLocal((v) => !v)}
+                                        title={useLocal
+                                            ? `Times are shown in your local zone (${formatOffsetLabel(offsetMinutes)}) — click for UTC`
+                                            : 'Times are shown in UTC, as the schedule is published — click for your local zone'}
+                                    >
+                                        {useLocal ? formatOffsetLabel(offsetMinutes) : 'UTC'}
+                                    </button>
+                                )}
+                                <input
+                                    className="drm__sched-find"
+                                    type="search"
+                                    value={query}
+                                    placeholder="Find…"
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    title="Filter by station, language, country, site or target"
+                                />
+                            </>
+                        )}
+                    </div>
+
+                    {schedOpen && (
+                        <div className="drm__sched-list">
+                            {schedLoading && !schedule && <div className="note note--tight">Loading the schedule…</div>}
+
+                            {/* Three different failures, and they are worth
+                                telling apart: the browser could not reach the
+                                receiver, the receiver could not reach
+                                drmrx.org, or nobody has tried yet. Only the
+                                first is the operator's to do anything about,
+                                and only the first two are worth a Retry. */}
+                            {schedule && schedule.error && (
+                                <div className="note note--warn">
+                                    The schedule could not be loaded from this receiver ({schedule.error}).
+                                    <button type="button" className="drm__sched-retry" onClick={retrySchedule}>Retry</button>
+                                </div>
+                            )}
+                            {schedule && !schedule.error && !schedule.enabled && (
+                                <div className="note note--tight">The schedule is switched off on this receiver.</div>
+                            )}
+                            {schedule && !schedule.error && schedule.enabled && !schedule.loaded && (
+                                <div className="note note--warn">
+                                    {schedule.serverError
+                                        ? 'This receiver could not fetch the schedule from drmrx.org. It will try again within the hour.'
+                                        : 'The schedule has not been fetched yet — it is collected shortly after the server starts.'}
+                                    <button type="button" className="drm__sched-retry" onClick={retrySchedule}>Retry</button>
+                                </div>
+                            )}
+                            {/* Loaded, but old: the daily refresh has been
+                                failing. Shown rather than hidden — a DRM
+                                schedule changes twice a year, so a copy from
+                                last week is very probably still right, and
+                                dropping the list would help nobody. */}
+                            {schedule && schedule.loaded && schedule.stale && (
+                                <div className="note note--tight">
+                                    This schedule is more than two days old — the receiver has not managed to refresh it.
+                                </div>
+                            )}
+                            {schedule && schedule.loaded && rows.length === 0 && (
+                                <div className="note note--tight">
+                                    {onAirOnly
+                                        ? 'Nothing is on air on a frequency this receiver covers. Try “All”.'
+                                        : 'Nothing matches that.'}
+                                </div>
+                            )}
+
+                            {rows.map((e, i) => {
+                                const tuned = isTunedTo(e, tuning.frequency);
+                                const detail = scheduleDetail(e);
+                                return (
+                                    <button
+                                        type="button"
+                                        key={`${e.freq_khz}-${e.start_utc}-${e.station}-${i}`}
+                                        className={`drm__row${e.on_air ? ' is-on' : ''}${tuned ? ' is-tuned' : ''}`}
+                                        onClick={() => tuneToEntry(e)}
+                                        title={`${e.station} · ${describeSlot(e, offsetMinutes)}\n${decoding
+                                            ? 'Click to tune'
+                                            : 'Click to tune — then press Start to decode it'}`}
+                                    >
+                                        <span className="drm__row-freq">{formatScheduleFreq(e)}</span>
+                                        <span className="drm__row-main">
+                                            <span className="drm__row-station">{e.station}</span>
+                                            {detail && <span className="drm__row-detail">{detail}</span>}
+                                        </span>
+                                        <span className="drm__row-when">
+                                            <span className="drm__row-slot">{formatSlot(e, slotOffset)}</span>
+                                            {e.days && e.days !== 'Daily' && <span className="drm__row-days">{e.days}</span>}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             )}
 

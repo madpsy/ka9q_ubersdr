@@ -969,6 +969,13 @@ type DRMExtensionConfig struct {
 	// Each one is a Dream OFDM demodulator plus an AAC decode and an Opus
 	// encode, so this is markedly heavier per user than most extensions.
 	MaxUsers int `yaml:"max_users"`
+
+	// ScheduleEnabled controls the daily fetch of the DRM broadcast schedule
+	// from drmrx.org (see drm_schedule.go). Default true; nil = not set =
+	// enabled. Unlike EiBi this defaults on: it is one ~20 KB request a day and
+	// the DRM panel is much less use without it, since knowing which of the
+	// eleven DRM stations is on air right now is most of the job of finding one.
+	ScheduleEnabled *bool `yaml:"schedule_enabled"`
 }
 
 // SoundModemExtensionConfig contains settings for the Sound Modem audio extension

@@ -35,6 +35,9 @@ const {
     render, reset, walk, words, DRMExtension, ExtensionsPanel,
     EXTENSIONS, EXTENSION_BY_ID,
     decodeFrame, hasAudioLock, progressLabel, qualityFraction,
+    formatScheduleFreq, formatSlot, formatSlotTime, isTunedTo, onAirCount,
+    resetSchedule, scheduleDetail, scheduleRows,
+    describeSlot, formatOffsetLabel, localOffsetMinutes, shiftHHMM,
 } = require('./.build/drmpanel.cjs');
 
 let pass = 0;
@@ -239,4 +242,306 @@ t('outside IQ every enabled extension is offered, DRM included', () => {
     }
 });
 
-console.log(`\n${pass} passed`);
+// ── schedule ────────────────────────────────────────────────────────────────
+//
+// The panel carries the DRM broadcast schedule, and a row is a tune. Two things
+// worth holding: what the list decides to show, and that a row renders at all —
+// the rows only exist once a fetch has resolved, so nothing else in this file
+// would ever execute that markup.
+
+const SCHEDULE = [
+    {
+        freq_khz: 5875, freq_hz: 5875000, station: 'BBC World Service', start_utc: 500, end_utc: 600,
+        days: 'Daily', days_mask: '1111111', language: 'English', target: 'Europe',
+        site: 'Woofferton', country: 'United Kingdom', power_kw: '100', band: 'SW', on_air: true,
+    },
+    {
+        freq_khz: 549, freq_hz: 549000, station: 'Akashvani', start_utc: 0, end_utc: 2400,
+        days: 'Daily', days_mask: '1111111', language: 'Hindi', target: 'India',
+        site: 'Ranchi', country: 'India', power_kw: '100', band: 'MW', on_air: true,
+    },
+    {
+        freq_khz: 15785, freq_hz: 15785000, station: 'funklust', start_utc: 1030, end_utc: 1100,
+        days: 'Tue, Thu', days_mask: '0010100', language: 'German', target: 'Various',
+        site: 'Bayreuth', country: 'Germany', power_kw: '1', band: 'SW', on_air: false,
+    },
+];
+
+t('the list puts what is on air first, then orders by frequency', () => {
+    const rows = scheduleRows(SCHEDULE, {});
+    assert.deepStrictEqual(rows.map((r) => r.freq_khz), [549, 5875, 15785]);
+    // Not merely sorted by frequency: the off-air entry is last despite sitting
+    // between the two on-air ones by nothing but chance.
+    assert.strictEqual(rows[rows.length - 1].on_air, false);
+});
+
+t('“on now” drops everything that is not', () => {
+    const rows = scheduleRows(SCHEDULE, { onAirOnly: true });
+    assert.strictEqual(rows.length, 2);
+    assert.ok(rows.every((r) => r.on_air));
+    // Still by frequency, and with nothing to promote the order does not change
+    // under the operator as slots start and end.
+    assert.deepStrictEqual(rows.map((r) => r.freq_khz), [549, 5875]);
+});
+
+t('the search reaches past the station name', () => {
+    for (const [q, want] of [['bbc', 5875], ['german', 15785], ['ranchi', 549], ['INDIA', 549]]) {
+        const rows = scheduleRows(SCHEDULE, { query: q });
+        assert.ok(rows.length >= 1, `no match for ${q}`);
+        assert.strictEqual(rows[0].freq_khz, want, `${q} matched the wrong entry`);
+    }
+    assert.strictEqual(scheduleRows(SCHEDULE, { query: 'nothing here' }).length, 0);
+});
+
+t('a band filter keeps only that band', () => {
+    assert.deepStrictEqual(scheduleRows(SCHEDULE, { band: 'MW' }).map((r) => r.station), ['Akashvani']);
+    assert.strictEqual(scheduleRows(SCHEDULE, { band: 'SW' }).length, 2);
+});
+
+t('slots, frequencies and details are formatted for a narrow row', () => {
+    assert.strictEqual(formatSlotTime(1830), '18:30');
+    assert.strictEqual(formatSlotTime(5), '00:05');
+    assert.strictEqual(formatSlot(SCHEDULE[0]), '05:00–06:00');
+    // An all-day entry says so rather than pretending to a window.
+    assert.strictEqual(formatSlot(SCHEDULE[1]), '24h');
+
+    assert.strictEqual(formatScheduleFreq(SCHEDULE[0]), '5875 kHz');
+    assert.strictEqual(formatScheduleFreq(SCHEDULE[1]), '549 kHz');
+    assert.strictEqual(formatScheduleFreq(SCHEDULE[2]), '15.785 MHz');
+
+    assert.strictEqual(scheduleDetail(SCHEDULE[0]), 'English · Woofferton, United Kingdom · 100 kW · to Europe');
+    // The KiwiSDR fallback source carries none of these, and a row of bare
+    // separators would be worse than a blank line.
+    assert.strictEqual(scheduleDetail({ station: 'x' }), '');
+    assert.strictEqual(scheduleDetail({ language: 'French', power_kw: '?' }), 'French');
+
+    assert.strictEqual(onAirCount(SCHEDULE), 2);
+    assert.strictEqual(onAirCount(null), 0);
+});
+
+t('slot times can be read in the operator’s own zone', () => {
+    // Half-hour and three-quarter-hour zones are not a curiosity here: India is
+    // most of the mediumwave schedule and Nepal listens to it.
+    assert.strictEqual(shiftHHMM(500, 330), 1030);   // 05:00 UTC in India
+    assert.strictEqual(shiftHHMM(500, 345), 1045);   // and in Nepal
+    assert.strictEqual(shiftHHMM(2330, 60), 30);      // wraps forward past midnight
+    assert.strictEqual(shiftHHMM(30, -60), 2330);     // and backward
+    assert.strictEqual(shiftHHMM(500, 0), 500);
+
+    // A window that straddles local midnight reads as crossing it, because it
+    // does — no special case needed.
+    assert.strictEqual(formatSlot({ start_utc: 1700, end_utc: 1800 }, 390), '23:30–00:30');
+    // An all-day entry is on air at every moment, so it stays "24h" rather than
+    // becoming an arithmetically correct and useless "05:45–05:45".
+    assert.strictEqual(formatSlot({ start_utc: 0, end_utc: 2400 }, 345), '24h');
+
+    assert.strictEqual(formatOffsetLabel(0), 'UTC');
+    assert.strictEqual(formatOffsetLabel(345), 'UTC+5:45');
+    assert.strictEqual(formatOffsetLabel(-240), 'UTC−4');
+    assert.strictEqual(formatOffsetLabel(60), 'UTC+1');
+
+    // Whichever the row shows, the other is in the tooltip — and the days are
+    // UTC days whatever zone the times are read in.
+    const both = describeSlot({ start_utc: 500, end_utc: 600, days: 'Tue, Thu' }, 345);
+    assert.ok(both.includes('05:00–06:00 UTC'), both);
+    assert.ok(both.includes('10:45–11:45 UTC+5:45'), both);
+    assert.ok(both.includes('UTC days'), both);
+    // On a machine already keeping UTC there is only one reading to give.
+    const one = describeSlot({ start_utc: 500, end_utc: 600, days: 'Daily' }, 0);
+    assert.strictEqual(one, '05:00–06:00 UTC');
+
+    assert.strictEqual(typeof localOffsetMinutes(), 'number');
+});
+
+t('the tuned row is matched with the tolerance a hunt needs', () => {
+    assert.ok(isTunedTo(SCHEDULE[0], 5_875_000));
+    // Off centre while hunting for the lock still counts — losing the highlight
+    // exactly when it is most wanted would be the wrong answer.
+    assert.ok(isTunedTo(SCHEDULE[0], 5_877_000));
+    assert.ok(!isTunedTo(SCHEDULE[0], 5_890_000));
+    assert.ok(!isTunedTo(SCHEDULE[0], NaN));
+});
+
+// Everything below needs the fetch to have resolved, so it is one chain and the
+// summary prints at the end of it.
+const scheduleChain = (async () => {
+    const ta = async (name, fn) => {
+        try { await fn(); console.log('ok    ' + name); pass++; }
+        catch (e) { console.log('FAIL  ' + name + '\n      ' + (e.stack || e.message)); process.exitCode = 1; }
+    };
+
+    // Two renders: the panel fetches on the first render after the toggle is
+    // clicked, and the rows appear on the one after the fetch resolves.
+    const openSchedule = async (over) => {
+        resetSchedule();
+        globalThis.fetch = () => Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+                enabled: true, loaded: true, now_utc: '2026-08-26T05:30:00Z',
+                source: 'https://www.drmrx.org/schedules/drmschedules.php',
+                entries: SCHEDULE,
+            }),
+        });
+
+        reset();
+        const ctx = context(over);
+        let out = render(DRMExtension, { minimal: false }, ctx);
+
+        const toggle = walk(out.tree).find((n) => {
+            const w = words(n);
+            const text = Array.isArray(w) ? w.join(' ') : String(w);
+            return n.props && n.props.onClick && text.includes('Schedule');
+        });
+        assert.ok(toggle, 'no Schedule toggle in the panel');
+        toggle.props.onClick();
+
+        out = render(DRMExtension, { minimal: false }, ctx);   // fetch starts here
+        await new Promise((r) => setTimeout(r, 0));
+        out = render(DRMExtension, { minimal: false }, ctx);   // rows are in this one
+        return { out, ctx };
+    };
+
+    await ta('the schedule opens and draws its rows', async () => {
+        const { out } = await openSchedule();
+        const text = walk(out.tree).map((n) => {
+            const w = words(n);
+            return Array.isArray(w) ? w.join(' ') : String(w);
+        }).join(' | ');
+
+        for (const want of ['BBC World Service', 'Akashvani', '5875 kHz', '05:00–06:00', 'Woofferton']) {
+            assert.ok(text.includes(want), `schedule row missing ${want}: ${text.slice(0, 400)}`);
+        }
+        // "On now" is the view it opens in, so the off-air entry is not drawn.
+        assert.ok(!text.includes('funklust'), 'an off-air entry was listed under "on now"');
+    });
+
+    await ta('a row tunes, and does not force IQ while stopped', async () => {
+        // In AM, with the decoder stopped — the state someone is in when they
+        // open the schedule to go looking for a broadcast.
+        const { out, ctx } = await openSchedule({
+            tuning: { frequency: 6_055_000, mode: 'am', bandwidthLow: -3000, bandwidthHigh: 3000 },
+        });
+        const tunes = [];
+        ctx.actions.tuneTo = (req) => tunes.push(req);
+
+        const row = walk(out.tree).find((n) => {
+            const w = words(n);
+            const text = Array.isArray(w) ? w.join(' ') : String(w);
+            return n.props && n.props.onClick && text.includes('BBC World Service');
+        });
+        assert.ok(row, 'no BBC row to click');
+        row.props.onClick();
+
+        assert.strictEqual(tunes.length, 1);
+        assert.strictEqual(tunes[0].frequency, 5875000);
+        // The receiver is in AM here and the decoder is stopped: switching to IQ
+        // would leave it playing broadband noise with nothing ducking it.
+        assert.strictEqual(tunes[0].mode, 'am');
+    });
+
+    // A helper for the cases where the request succeeds but the server has no
+    // schedule to give.
+    const openWithBody = async (body) => {
+        resetSchedule();
+        globalThis.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+        reset();
+        const ctx = context();
+        let out = render(DRMExtension, { minimal: false }, ctx);
+        const toggle = walk(out.tree).find((n) => {
+            const w = words(n);
+            const text = Array.isArray(w) ? w.join(' ') : String(w);
+            return n.props && n.props.onClick && text.includes('Schedule');
+        });
+        toggle.props.onClick();
+        render(DRMExtension, { minimal: false }, ctx);
+        await new Promise((r) => setTimeout(r, 0));
+        out = render(DRMExtension, { minimal: false }, ctx);
+        return walk(out.tree).map((n) => {
+            const w = words(n);
+            return Array.isArray(w) ? w.join(' ') : String(w);
+        }).join(' ');
+    };
+
+    await ta('a receiver that could not reach drmrx.org says which end failed', async () => {
+        const text = await openWithBody({
+            enabled: true, loaded: false, entries: [],
+            last_error: 'both sources failed: HTTP 500',
+        });
+        assert.ok(text.includes('could not fetch the schedule from drmrx.org'), text.slice(0, 400));
+        assert.ok(text.includes('Retry'), 'no way to ask again');
+    });
+
+    await ta('a schedule too old to trust is flagged but still listed', async () => {
+        const text = await openWithBody({
+            enabled: true, loaded: true, stale: true, entries: SCHEDULE,
+        });
+        assert.ok(text.includes('more than two days old'), text.slice(0, 400));
+        // Still shown: a DRM schedule changes twice a year, so an old copy is
+        // very probably still right and dropping it would help nobody.
+        assert.ok(text.includes('BBC World Service'), 'the stale list was dropped');
+    });
+
+    await ta('a disabled schedule says so, without offering a retry', async () => {
+        const text = await openWithBody({ enabled: false, loaded: false, entries: [] });
+        assert.ok(text.includes('switched off on this receiver'), text.slice(0, 300));
+        assert.ok(!text.includes('Retry'), 'offered to retry something that is turned off');
+    });
+
+    await ta('a failed fetch says so instead of blanking the list', async () => {
+        resetSchedule();
+        globalThis.fetch = () => Promise.reject(new Error('offline'));
+
+        reset();
+        const ctx = context();
+        let out = render(DRMExtension, { minimal: false }, ctx);
+        const toggle = walk(out.tree).find((n) => {
+            const w = words(n);
+            const text = Array.isArray(w) ? w.join(' ') : String(w);
+            return n.props && n.props.onClick && text.includes('Schedule');
+        });
+        toggle.props.onClick();
+        render(DRMExtension, { minimal: false }, ctx);
+        await new Promise((r) => setTimeout(r, 0));
+        out = render(DRMExtension, { minimal: false }, ctx);
+
+        const text = walk(out.tree).map((n) => {
+            const w = words(n);
+            return Array.isArray(w) ? w.join(' ') : String(w);
+        }).join(' ');
+        assert.ok(text.includes('could not be loaded'), `expected a failure note, got: ${text.slice(0, 300)}`);
+
+        // Retry asks again rather than sitting on the failure. The failure is
+        // not cached, so this is the whole of the recovery path.
+        let calls = 0;
+        globalThis.fetch = () => {
+            calls++;
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ enabled: true, loaded: true, entries: SCHEDULE }),
+            });
+        };
+        const retry = walk(out.tree).find((n) => {
+            const w = words(n);
+            const label = Array.isArray(w) ? w.join(' ') : String(w);
+            return n.props && n.props.onClick && label === 'Retry';
+        });
+        assert.ok(retry, 'no Retry button on a failed fetch');
+        retry.props.onClick();
+        render(DRMExtension, { minimal: false }, ctx);
+        await new Promise((r) => setTimeout(r, 0));
+        out = render(DRMExtension, { minimal: false }, ctx);
+
+        // At least once: hookStub re-runs every effect on every render, so the
+        // exact count is the harness's, not the component's.
+        assert.ok(calls >= 1, 'Retry did not re-request');
+        const after = walk(out.tree).map((n) => {
+            const w = words(n);
+            return Array.isArray(w) ? w.join(' ') : String(w);
+        }).join(' ');
+        assert.ok(after.includes('BBC World Service'), `retry did not load the list: ${after.slice(0, 300)}`);
+    });
+})();
+
+scheduleChain.then(() => {
+    console.log(`\n${pass} passed`);
+});

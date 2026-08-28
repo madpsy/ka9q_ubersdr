@@ -345,6 +345,9 @@ func (h *WebSDRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Dynamically generated frequency-scale PNG tiles (replaces scaleblack.png placeholder)
 	case strings.HasPrefix(path, "/~~scale"):
 		h.handleScalePNG(w, r)
+	// The vendored waterfall client, with its pan clamp switched on; see websdr_client_patch.go
+	case path == "/websdr-waterfall.js":
+		h.serveWaterfallJS(w, r)
 	default:
 		h.serveStaticFile(w, r)
 	}
@@ -382,10 +385,16 @@ type websdrConn struct {
 	username  string
 	band      int
 
-	wfBand  int
-	wfZoom  int
-	wfStart int
-	wfWidth int
+	// wfBand/wfZoom/wfStart/wfWidth are what the client last asked for, verbatim.
+	// wfView is what that resolved to once clamped into the band, and is the window
+	// actually being streamed; keeping both is what lets a pan that the clamp swallows
+	// be recognised as a no-op instead of retuning radiod for an unchanged view.
+	wfBand      int
+	wfZoom      int
+	wfStart     int
+	wfWidth     int
+	wfView      websdrView
+	wfViewValid bool
 	// Waterfall grid geometry, set by applyWaterparamCommand and read by
 	// streamWaterfall to resample what radiod delivers onto what the client draws.
 	// Equal whenever the exact bandwidth was cheap enough to request; see
@@ -757,11 +766,13 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	c.mu.Lock()
 
 	reset := false
+	bandChanged := false
 	if v := vals.Get("band"); v != "" {
 		n, _ := strconv.Atoi(v)
 		if n != c.wfBand {
 			c.wfBand = n
 			reset = true
+			bandChanged = true
 		}
 	}
 	if v := vals.Get("zoom"); v != "" {
@@ -778,7 +789,11 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 		f, err := strconv.ParseFloat(v, 64)
 		if err == nil {
 			n := int(math.Round(f))
-			if n != 0x80000001 && n != c.wfStart {
+			// 0x80000001 is the protocol's "leave the offset alone" sentinel. It is a
+			// 32-bit value, and a client is as likely to write it signed (-2147483647)
+			// as unsigned, so compare it as one — on a 64-bit build the unsigned
+			// constant matches neither by itself.
+			if int32(n) != int32(-2147483647) && n != c.wfStart {
 				c.wfStart = n
 				reset = true
 			}
@@ -816,6 +831,31 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 		return
 	}
 
+	// The window the client is asking for, clamped into the band.
+	//
+	// Everything downstream is derived from the clamped triple, so the centre is in
+	// band by construction; there is no separate centre clamp any more. There used to
+	// be, and it was the second half of the bug: it moved the centre without telling
+	// the client, so once `start` went out of band the rows being streamed covered a
+	// different piece of spectrum than the axis they were being drawn on, and real
+	// signals landed at made-up frequencies instead of the view simply running out.
+	// See websdrBand.ClampStart for what puts `start` out of band in the first place.
+	view := websdrViewFor(c.handler.config.Receiver, c.wfZoom, c.wfStart, c.wfWidth)
+
+	// A pan or zoom the clamp swallowed whole — dragging further past an edge that is
+	// already against the stop — leaves the window exactly where it was. Retuning radiod
+	// for that would be a channel reconfigure per mousemove and resetting the encoder
+	// would blank the waterfall, both for no change on screen. The client's own offset
+	// has still moved; it reconciles that against the last init frame it was sent and
+	// shifts each row into place itself.
+	if !bandChanged && c.wfViewValid && view.Zoom == c.wfView.Zoom &&
+		view.Start == c.wfView.Start && view.Width == c.wfView.Width {
+		c.mu.Unlock()
+		return
+	}
+	c.wfView = view
+	c.wfViewValid = true
+
 	if c.wfState != nil {
 		c.wfState.Reset()
 	}
@@ -827,10 +867,6 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	// needs c.mu to drain SpectrumChan, and radiod blocks waiting for that
 	// drain before it can respond to the update).
 	//
-	// The band and maxZoom both come from websdrBandFor, which is also what
-	// handleBandInfoJS hands the client, giving a maxzoom grid of
-	// 1024 × 2^maxZoom pixels spanning the full band.
-	//
 	// What to ask radiod for is websdrSpectrumParams; see there for the two regimes and
 	// why the deep zooms now keep the full display width where they used to be halved to
 	// 128 bins stretched across 1024 pixels.
@@ -839,63 +875,13 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	// value the channel was created with, so radiod's bin_count-change heap bug (see
 	// kiwiSpectrumBins) cannot be triggered.
 	//
-	// The `start` value sent by the client is a pixel offset in the
-	// maxzoom grid (NOT in the current-zoom pixel grid).  To convert:
-	//   startOffsetHz = start * bandBWHz / (1024 * 2^maxZoom)
-	//
-	// At zoom level z, the visible bandwidth is bandBW / 2^z.
-	// Center = visibleStart + visibleBW/2
-	// binBandwidth = visibleBW / binCount
-	geom := websdrBandFor(c.handler.config.Receiver)
-	bandStartHz := geom.StartHz
-	bandEndHz := geom.EndHz
-	bandBWHz := geom.WidthHz()
-	maxZoom := geom.MaxZoom
-	maxZoomPixels := geom.MaxZoomPixels()
-
-	zoom := c.wfZoom
-	if zoom < 0 {
-		zoom = 0
-	}
-	if zoom > maxZoom {
-		zoom = maxZoom
-	}
-	zoomFactor := float64(int(1) << uint(zoom)) // 2^zoom
-	visibleBWHz := bandBWHz / zoomFactor
-
-	wfWidth := c.wfWidth
-	if wfWidth < 1 {
-		wfWidth = 1024
-	}
-
-	req := websdrSpectrumParams(visibleBWHz, wfWidth, c.handler.config.Receiver.Samprate())
-	binCount := req.BinCount
-
-	// start is in maxzoom-grid pixels from the band left edge
-	startOffsetHz := float64(c.wfStart) * bandBWHz / float64(maxZoomPixels)
-	visibleStartHz := bandStartHz + startOffsetHz
-	centerHz := visibleStartHz + visibleBWHz/2.0
-
-	// Clamp centre to the band this receiver covers.
-	// A malformed or out-of-range start value from the client can produce
-	// a calculated center outside the band.  Clamp rather than reject so
-	// the waterfall stays usable at the boundary.
-	if centerHz < bandStartHz {
-		centerHz = bandStartHz
-	}
-	if centerHz > bandEndHz {
-		centerHz = bandEndHz
-	}
-
-	// What the client's axis assumes, and what we actually ask radiod for. streamWaterfall
-	// resamples between them: below the crossover the request is rounded up to a round
-	// bandwidth and the extra span is cropped off; above it the bin count is reduced and
-	// the row is stretched back to the display width.
-	binBandwidthHz := req.BinBandwidth
-
-	c.wfDisplayBinBW = req.DisplayBinBW
-	c.wfServedBinBW = req.BinBandwidth
-	c.wfDisplayBins = req.DisplayBins
+	// What the client's axis assumes and what we actually ask radiod for differ:
+	// streamWaterfall resamples between them. Below the crossover the request is rounded
+	// up to a round bandwidth and the extra span is cropped off; above it the bin count
+	// is reduced and the row is stretched back to the display width.
+	c.wfDisplayBinBW = view.Req.DisplayBinBW
+	c.wfServedBinBW = view.Req.BinBandwidth
+	c.wfDisplayBins = view.Req.DisplayBins
 
 	sessionID := ""
 	if c.session != nil {
@@ -903,7 +889,14 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	}
 
 	// Queue init frames for streamWaterfall to send before the next data row.
-	frame1, frame2 := WebSDRWaterfallInitFrames(zoom, c.wfStart, wfWidth)
+	//
+	// These carry the *clamped* offset, which is what makes the clamp safe: the client
+	// keeps the server's zoom and offset as a.g/a.f and, whenever they differ from its
+	// own a.b/a.c, shifts each incoming row by the difference and blacks out the part of
+	// the screen the band does not reach (function A in websdr-waterfall.js). So a client
+	// that insists on a window half off the edge is shown the spectrum that exists, at
+	// the right frequencies, with black where there is none.
+	frame1, frame2 := WebSDRWaterfallInitFrames(view.Zoom, view.Start, view.Width)
 	c.pendingInitFrame1 = frame1
 	c.pendingInitFrame2 = frame2
 
@@ -914,9 +907,9 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 	if sessionID != "" {
 		if err := c.handler.sessions.UpdateSpectrumSession(
 			sessionID,
-			uint64(centerHz),
-			binBandwidthHz,
-			binCount,
+			uint64(view.CentreHz),
+			view.Req.BinBandwidth,
+			view.Req.BinCount,
 		); err != nil {
 			log.Printf("WebSDR waterparam: UpdateSpectrumSession error: %v", err)
 		}
@@ -1071,14 +1064,36 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 	c := newWebSDRConn(conn, h, clientIP)
 	c.statCounter = &h.statWFBytes
 	c.wfBand = bandIdx
-	c.wfWidth = 1024
 	c.wfFormat = 9
+
+	// The opening view comes from the handshake query, not from a fixed zoom 0.
+	//
+	// On the very first connect the client does not send a /~~waterparam at all — it
+	// puts width, zoom and start in the WebSocket URL and only starts sending waterparam
+	// on later reconnects (b.u in websdr-waterfall.js). Ignoring them meant a page that
+	// opened already zoomed, or a phone whose waterfall is narrower than 1024, was shown
+	// the full band on an axis drawn for something else until the next pan.
+	q := r.URL.Query()
+	reqZoom, _ := strconv.Atoi(q.Get("zoom"))
+	reqStart := 0
+	if f, err := strconv.ParseFloat(q.Get("start"), 64); err == nil {
+		reqStart = int(math.Round(f))
+	}
+	reqWidth := 1024
+	if n, err := strconv.Atoi(q.Get("width")); err == nil {
+		reqWidth = n
+	}
+
+	view := websdrViewFor(h.config.Receiver, reqZoom, reqStart, reqWidth)
+	c.wfZoom, c.wfStart, c.wfWidth = reqZoom, reqStart, view.Width
+	c.wfView = view
+	c.wfViewValid = true
 
 	// Send init frames (§4.2) as two separate WebSocket binary messages.
 	// Frame 1 (0xFF 0x01 ...): sets zoom and scroll offset (a.g, a.f).
 	// Frame 2 (0xFF 0x02 ...): sets pixel width (a.m).
 	{
-		frame1, frame2 := WebSDRWaterfallInitFrames(0, 0, c.wfWidth)
+		frame1, frame2 := WebSDRWaterfallInitFrames(view.Zoom, view.Start, view.Width)
 		if err := c.sendBinary(frame1); err != nil {
 			conn.Close()
 			return
@@ -1098,21 +1113,18 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 	c.session = session
 	c.sessionID = userSessionID
 
-	// BUG-D: tune the spectrum session immediately to the full HF band view
-	// (zoom=0, start=0) so the waterfall shows data before the first
-	// /~~waterparam command arrives.
+	// BUG-D: tune the spectrum session immediately to the view from the handshake so
+	// the waterfall shows data before the first /~~waterparam command arrives — which
+	// on a first connect never comes.
 	{
-		geom := websdrBandFor(h.config.Receiver)
-		centerHz := geom.CentreHz()
-		req := websdrSpectrumParams(geom.WidthHz(), c.wfWidth, h.config.Receiver.Samprate())
 		// Recorded so the rows that arrive before the client's first waterparam
 		// command are put on the same grid as every row after it.
 		c.mu.Lock()
-		c.wfDisplayBinBW = req.DisplayBinBW
-		c.wfServedBinBW = req.BinBandwidth
-		c.wfDisplayBins = req.DisplayBins
+		c.wfDisplayBinBW = view.Req.DisplayBinBW
+		c.wfServedBinBW = view.Req.BinBandwidth
+		c.wfDisplayBins = view.Req.DisplayBins
 		c.mu.Unlock()
-		_ = h.sessions.UpdateSpectrumSession(session.ID, uint64(centerHz), req.BinBandwidth, req.BinCount)
+		_ = h.sessions.UpdateSpectrumSession(session.ID, uint64(view.CentreHz), view.Req.BinBandwidth, view.Req.BinCount)
 	}
 
 	defer func() {

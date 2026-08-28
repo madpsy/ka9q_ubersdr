@@ -12,9 +12,16 @@ import {
     decodeFrame, hasAudioLock, languageName, progressLabel, qualityFraction,
     WMER_THRESHOLD_FRACTION,
 } from '../src/extensions/drm/frame.js';
+import {
+    describeSlot, formatOffsetLabel, formatScheduleFreq, formatSlot, formatSlotTime,
+    isTunedTo, localOffsetMinutes, onAirCount, resetSchedule, scheduleDetail,
+    scheduleRows, shiftHHMM,
+} from '../src/extensions/drm/schedule.js';
 
 module.exports = {
     deep, render, reset, walk, words,
     DRMExtension, ExtensionsPanel, EXTENSIONS, EXTENSION_BY_ID, decodeFrame, hasAudioLock, languageName, progressLabel, qualityFraction,
     WMER_THRESHOLD_FRACTION,
+    formatScheduleFreq, formatSlot, formatSlotTime, isTunedTo, onAirCount, resetSchedule, scheduleDetail, scheduleRows,
+    describeSlot, formatOffsetLabel, localOffsetMinutes, shiftHHMM,
 };

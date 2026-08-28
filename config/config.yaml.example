@@ -2355,6 +2355,27 @@ drm_extension:
   # Set to 0 for unlimited users (not recommended for public instances).
   max_users: 5
 
+  # Fetch the DRM broadcast schedule (default: true)
+  #
+  # Downloads the schedule from drmrx.org once on startup (after a 2 minute
+  # delay) and every 24 hours after that, holding it in memory only — it is
+  # never written to disk. Each fetch is retried up to 5 times with an
+  # exponential backoff, and if drmrx.org cannot be reached at all, KiwiSDR's
+  # digest of the same schedule is used instead.
+  #
+  # A refresh that fails entirely keeps the previous data rather than emptying
+  # the list, and the next attempt is an hour away rather than a day. Data more
+  # than two days old is flagged as stale to the panel, which still shows it —
+  # the DRM schedule changes twice a year, so an old copy is very probably
+  # still correct.
+  #
+  # The schedule is served at /api/drm/schedule and is shown only in the DRM
+  # decoder extension, where clicking an entry tunes to it. Entries outside
+  # this receiver's frequency range are not served.
+  #
+  # Sources: https://www.drmrx.org  ·  https://drm.kiwisdr.com
+  schedule_enabled: true
+
 # ==============================================================================
 # Sound Modem Extension Configuration
 # ==============================================================================

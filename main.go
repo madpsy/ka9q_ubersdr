@@ -1431,6 +1431,13 @@ func main() {
 	}
 	defer eibiSchedule.Stop()
 
+	// Initialize the DRM broadcast schedule (fed to the DRM decoder panel)
+	drmSchedule := NewDRMSchedule(&config.DRMExtension)
+	if err := drmSchedule.Start(); err != nil {
+		log.Printf("Warning: Failed to start DRM schedule: %v", err)
+	}
+	defer drmSchedule.Stop()
+
 	// Initialize MCP server if enabled
 	var mcpServer *MCPServer
 	if config.MCP.Enabled {
@@ -2778,6 +2785,9 @@ func main() {
 	})
 	http.HandleFunc("/api/bands", func(w http.ResponseWriter, r *http.Request) {
 		handleBands(w, r, config)
+	})
+	http.HandleFunc("/api/drm/schedule", func(w http.ResponseWriter, r *http.Request) {
+		handleDRMSchedule(w, r, config, drmSchedule)
 	})
 	http.HandleFunc("/api/ui-config", func(w http.ResponseWriter, r *http.Request) {
 		handleUIConfig(w, r, config, *configDir)

@@ -215,6 +215,98 @@ func (b websdrBand) CentreHz() float64 { return b.StartHz + b.WidthHz()/2 }
 // MaxZoomPixels is the width of the maxzoom pixel grid the client sends `start` offsets in.
 func (b websdrBand) MaxZoomPixels() int { return scaleImgW << uint(b.MaxZoom) }
 
+// ClampZoom pins a zoom level to the range the band advertises in bandinfo.js.
+func (b websdrBand) ClampZoom(zoom int) int {
+	if zoom < 0 {
+		return 0
+	}
+	if zoom > b.MaxZoom {
+		return b.MaxZoom
+	}
+	return zoom
+}
+
+// ClampWidth pins a waterfall width to the range the row encoder can carry.
+func (b websdrBand) ClampWidth(wfWidth int) int {
+	if wfWidth < 1 || wfWidth > scaleImgW {
+		return scaleImgW
+	}
+	return wfWidth
+}
+
+// VisiblePixels is the width of the window on screen, measured in maxzoom-grid pixels.
+//
+// One screen pixel at zoom z covers 2^(maxzoom-z) grid pixels, so a waterfall wfWidth
+// screen pixels wide shows wfWidth<<(maxzoom-z) of them — the whole band at zoom 0 only
+// when wfWidth is the full 1024. websdr/m.html sizes its waterfall to the device width
+// and builds its axis from that number, so the span has to come from the same place
+// rather than from a hardcoded 1024, or a phone is shown the wrong width of spectrum.
+func (b websdrBand) VisiblePixels(zoom, wfWidth int) int {
+	return b.ClampWidth(wfWidth) << uint(b.MaxZoom-b.ClampZoom(zoom))
+}
+
+// ClampStart pins a maxzoom-grid start offset so the visible window lies wholly inside
+// the band.
+//
+// This is the clamp the WebSDR client itself applies when its `H` flag is set, and the
+// reason it matters is that the shipped flag is 0, which instead lets the view hang half
+// a screen off either edge (websdr-waterfall.js, functions N/w) — and `setband`/`setzoom`
+// bound the offset not at all. At zoom 0 on a 60 MHz receiver that admits any start in
+// ±30 MHz, so a wheel zoom-out anchored under the pointer leaves the band wherever the
+// pointer happened to be: 0 Hz in the middle of the screen with negative frequencies to
+// its left, or a right-hand edge reading 50 MHz on a 60 MHz receiver.
+//
+// The server clamps as well as the client because the client is not the only one: an old
+// cached page, the mobile controls' setband path, or anything else speaking the protocol
+// can still ask for a window that is not there. Whatever asks, the answer is the window
+// that exists, echoed back in init frame 1 so the client can put the row where it belongs.
+func (b websdrBand) ClampStart(start, zoom, wfWidth int) int {
+	limit := b.MaxZoomPixels() - b.VisiblePixels(zoom, wfWidth)
+	if limit < 0 {
+		limit = 0
+	}
+	if start < 0 {
+		return 0
+	}
+	if start > limit {
+		return limit
+	}
+	return start
+}
+
+// websdrView is one waterfall window: what the client is drawing, and what radiod has to
+// be asked for to fill it. Every field is derived from the clamped (zoom, start, width),
+// so a view is in-band by construction and the centre needs no clamp of its own.
+type websdrView struct {
+	Zoom     int // clamped to [0, MaxZoom]
+	Start    int // maxzoom-grid pixels from the band's left edge, clamped into the band
+	Width    int // waterfall width in screen pixels
+	StartHz  float64
+	BWHz     float64
+	CentreHz float64
+	Req      websdrSpectrumRequest
+}
+
+// websdrViewFor builds the view for a client's requested zoom, start and width.
+func websdrViewFor(rx ReceiverConfig, zoom, start, wfWidth int) websdrView {
+	b := websdrBandFor(rx)
+
+	v := websdrView{}
+	v.Zoom = b.ClampZoom(zoom)
+	v.Width = b.ClampWidth(wfWidth)
+	v.Start = b.ClampStart(start, v.Zoom, v.Width)
+
+	// The band and the grid are two ways of measuring the same axis; one conversion
+	// factor keeps the window, the centre and the scale tiles on it.
+	hzPerGridPixel := b.WidthHz() / float64(b.MaxZoomPixels())
+	v.StartHz = b.StartHz + float64(v.Start)*hzPerGridPixel
+	v.BWHz = float64(b.VisiblePixels(v.Zoom, v.Width)) * hzPerGridPixel
+	v.CentreHz = v.StartHz + v.BWHz/2
+
+	v.Req = websdrSpectrumParams(v.BWHz, v.Width, rx.Samprate())
+	return v
+}
+
 // websdrMaxWidebandFFT bounds the FFT length radiod is asked for on its wideband path.
 //
 // radiod has two spectrum algorithms and the requested bin bandwidth picks between them:

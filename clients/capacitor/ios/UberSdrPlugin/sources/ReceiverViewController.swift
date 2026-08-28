@@ -95,6 +95,11 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         controller.addUserScript(WKUserScript(source: Self.audioHandle,
                                               injectionTime: .atDocumentStart,
                                               forMainFrameOnly: true))
+        // What stops the ring switch silencing the receiver. Installed before
+        // the handle, which is what starts it. See silentAnchor.
+        controller.addUserScript(WKUserScript(source: Self.silentAnchor,
+                                              injectionTime: .atDocumentStart,
+                                              forMainFrameOnly: true))
         #if DEBUG
         // The page's console, into the device log.
         //
@@ -207,10 +212,10 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         NotificationCenter.default.addObserver(
             self, selector: #selector(audioInterrupted(_:)),
             name: AVAudioSession.interruptionNotification, object: nil)
-        // The audio session category is not this app's alone: WebKit sets it for
-        // the page's own media and can leave it somewhere the ring switch
-        // silences. See PlaybackSession.reassert — a category change is posted
-        // here, as a route change with that reason.
+        // The app's own session, which an interruption or another app can leave
+        // somewhere else — a category change is posted here, as a route change
+        // with that reason. Not the ring switch: that is the page's session and
+        // is not this process's to set. See silentAnchor.
         NotificationCenter.default.addObserver(
             self, selector: #selector(routeChanged(_:)),
             name: AVAudioSession.routeChangeNotification, object: nil)
@@ -444,11 +449,33 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
             if !self.describedAudio {
                 self.describedAudio = true
                 PlaybackSession.describe("audio started")
+                self.describeAnchor()
             }
             PlaybackSession.reassert()
         }
         RunLoop.main.add(timer, forMode: .common)
         audioWatch = timer
+    }
+
+    /// Whether the page is holding a media element for WebKit to classify.
+    ///
+    /// The part of the ring switch that can be checked without one. A simulator
+    /// enforces no category and has no switch, so the fix itself cannot be seen
+    /// there — but its mechanism can: the element either exists and is playing,
+    /// unmuted and above zero, or the page is Web Audio alone and back to being
+    /// ambient. Written to the same log build-mac.sh --bgtest reads.
+    private func describeAnchor() {
+        webView?.evaluateJavaScript("""
+        (function(){
+          var el = document.querySelector('audio[data-ubersdr-anchor]');
+          if (!el) return 'missing';
+          return (el.paused ? 'paused' : 'playing')
+            + ' volume=' + el.volume + ' muted=' + el.muted
+            + ' readyState=' + el.readyState;
+        })();
+        """) { value, _ in
+            NSLog("[UberSDR audio] silent anchor: %@", (value as? String) ?? "(no answer)")
+        }
     }
 
     /// Start the audio again after the system has stopped it.
@@ -466,6 +493,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         PlaybackSession.recover()
         webView?.evaluateJavaScript("""
         (function(){
+          try { window.__ubersdrKeepAudible(); } catch(e) {}
           var list = window.__ubersdrAudioContexts || [];
           var resumed = 0;
           for (var i = 0; i < list.length; i++) {
@@ -616,6 +644,95 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// resumes it on the way back. v2 cannot be expected to handle that — a page
     /// in a browser is never suspended like this — so the host does it, and
     /// this is how it finds what to resume.
+    /// What stops the ring switch silencing the receiver.
+    ///
+    /// The page's audio is not this app's. It is rendered in the WebContent
+    /// process, which has an `AVAudioSession` of its own — sessions are
+    /// per-process — and WebKit chooses *that* session's category from what the
+    /// page is playing. A page whose only audio is an AudioContext is read as
+    /// Web Audio and given the `ambient` category, which is the one category
+    /// the ring switch silences.
+    ///
+    /// Nothing this process does to its own session reaches that one, which is
+    /// why claiming `.playback` here never fixed it and why the reassertion in
+    /// PlaybackSession never saw anything to reclaim: the session it inspects
+    /// is not the session refusing the audio. It presented as the app's own
+    /// audio being fine — background playback is this process, and audible with
+    /// the switch on silent — while the page in front of you was mute.
+    ///
+    /// What WebKit does read is what kind of media the page holds. A media
+    /// element that *could* produce audio moves the page off ambient, and
+    /// "could" is a question about the element — an audio track, not muted,
+    /// volume above zero — and not about the samples. So this plays a second of
+    /// digital silence on a loop, built in the page rather than carried as a
+    /// data URI, and the receiver's own audio becomes audible alongside it.
+    ///
+    /// Started with the first AudioContext rather than at load, so opening a
+    /// receiver does not interrupt whatever the phone was already playing
+    /// before the receiver has anything of its own to say. Paused while the
+    /// page is hidden, so that WebKit's session does not sit alongside this
+    /// process's own during the background handover — see BackgroundAudio,
+    /// which is what plays from there.
+    private static let silentAnchor = """
+    (function(){
+      if (window.__ubersdrKeepAudible) return;
+      var el = null;
+
+      // A WAV of silence. 16-bit, so silence really is zeroes and the whole
+      // body is the buffer's own.
+      function silence(seconds) {
+        var rate = 8000, bytes = rate * seconds * 2;
+        var buf = new ArrayBuffer(44 + bytes), view = new DataView(buf);
+        function tag(at, s) {
+          for (var i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i));
+        }
+        tag(0, 'RIFF');  view.setUint32(4, 36 + bytes, true);
+        tag(8, 'WAVE');
+        tag(12, 'fmt '); view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);        // PCM
+        view.setUint16(22, 1, true);        // mono
+        view.setUint32(24, rate, true);
+        view.setUint32(28, rate * 2, true); // bytes per second
+        view.setUint16(32, 2, true);        // block align
+        view.setUint16(34, 16, true);       // bits
+        tag(36, 'data'); view.setUint32(40, bytes, true);
+        return new Blob([buf], { type: 'audio/wav' });
+      }
+
+      window.__ubersdrKeepAudible = function() {
+        try {
+          if (!el) {
+            var parent = document.body || document.documentElement;
+            if (!parent) return;
+            el = document.createElement('audio');
+            // Without this iOS takes the audio fullscreen rather than playing
+            // it where it is, which a hidden element cannot do.
+            el.setAttribute('playsinline', '');
+            el.setAttribute('data-ubersdr-anchor', '');
+            el.loop = true;
+            el.muted = false;
+            el.volume = 1;
+            el.style.display = 'none';
+            el.src = URL.createObjectURL(silence(1));
+            parent.appendChild(el);
+          }
+          if (document.hidden) return;
+          var started = el.play();
+          if (started && started.catch) started.catch(function(){});
+        } catch (e) {}
+      };
+
+      // Handed back while the page is not in front. Done from in here rather
+      // than from the host because the host's message may not be delivered
+      // before the content process is frozen, and this one runs on the way out.
+      document.addEventListener('visibilitychange', function() {
+        if (!el) return;
+        if (document.hidden) { try { el.pause(); } catch (e) {} }
+        else window.__ubersdrKeepAudible();
+      });
+    })();
+    """
+
     private static let audioHandle = """
     (function(){
       try {
@@ -625,6 +742,9 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         var Wrapped = function() {
           var ctx = new Native(...arguments);
           try { window.__ubersdrAudioContexts.push(ctx); } catch(e) {}
+          // The page now has audio to lose to the ring switch — see
+          // silentAnchor.
+          try { window.__ubersdrKeepAudible(); } catch(e) {}
           return ctx;
         };
         Wrapped.prototype = Native.prototype;

@@ -148,19 +148,25 @@ enum PlaybackSession {
         }
     }
 
-    /// Put the category back after WebKit has moved it.
+    /// Put the category back if something has moved it.
     ///
-    /// The category is not this app's alone. WebKit sets it for the page's own
-    /// media, and where it lands is its decision rather than ours — a page whose
-    /// audio it does not read as playback gets an *ambient* category, which is
-    /// the one kind the ring switch silences. The app's own engine is not
-    /// affected by that, which is exactly how it presented: silent in the app,
-    /// and audible the moment it was backgrounded, with BackgroundAudio playing
-    /// over the very session that had just refused the page.
+    /// This is *not* what fixed the ring switch, and the belief that it would
+    /// is worth recording so that it is not arrived at twice. The reasoning was
+    /// that WebKit sets the category for the page's own media and can leave it
+    /// somewhere the ring switch silences. The first half is true and the
+    /// second does not follow: audio sessions are per-process, and the page's
+    /// audio is rendered in the WebContent process, so the category WebKit
+    /// chooses is one this process can neither see nor set. Checking it here
+    /// looks at the app's own session, which was `.playback` all along — which
+    /// is why the reclaim never logged and the phone stayed mute.
     ///
-    /// Claimed once at open and never looked at again, that state had no way
-    /// back. So it is checked whenever the route changes and while a receiver is
-    /// making audio — see ReceiverViewController.routeChanged and audioWatch.
+    /// What actually moves the page off ambient is giving WebKit a media
+    /// element to classify: see ReceiverViewController.silentAnchor.
+    ///
+    /// Kept because the app's session is still worth defending — an
+    /// interruption or another app can leave it somewhere else, and the silent
+    /// engine and BackgroundAudio both play into it. It costs a property read
+    /// on a route change and on the audio watch's tick.
     ///
     /// Only from ambient, deliberately. `.playAndRecord` is WebKit capturing,
     /// and the one thing that captures here is the output picker asking for the

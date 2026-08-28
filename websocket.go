@@ -1710,6 +1710,38 @@ func channelSignalQuality(radiod radiodController, cfg *Config, session *Session
 	return
 }
 
+// fullPCMHeaderAlways reports whether every pcm-zstd packet should carry the
+// full header rather than the 13-byte minimal one.
+//
+// The minimal header says "metadata as before" and omits the signal-quality
+// fields, so a stream carrying them only on the first packet gives a client one
+// reading and then nothing.  Outside IQ every packet is full for exactly that
+// reason.  IQ used to be the exception on the grounds that the fields were
+// "less useful" there and the streams are wide, and neither half holds up:
+//
+//   - radiod measures IQ channels identically.  The `iq` preset is `demod =
+//     linear` with stereo output, and downconvert() in radio.c computes
+//     sig.bb_power and smooths sig.n0 before any mode-specific branch, so
+//     radio_status.c encodes BASEBAND_POWER and NOISE_DENSITY for an IQ channel
+//     the same as for USB.  The figures are real, live, and specific to the
+//     ±6 kHz passband being streamed.
+//
+//   - the saving is backwards.  The extra 24 bytes ride ~50 packets a second,
+//     about 1.2 kB/s: some 2.5% of plain `iq` (12 kHz stereo, ~960 B of samples
+//     per packet) and under 0.1% of iq384.  It costs most on the narrowest IQ
+//     mode and nothing worth counting on the wide ones the argument was about.
+//
+// Version 1 is still excluded, because its full header has no signal-quality
+// fields at all — see buildFullHeaderPacket — so forcing it would add 16 bytes
+// a packet and deliver nothing.  That also keeps the change away from the
+// clients most likely to be fragile: everything in clients/ that reads
+// pcm-zstd without negotiating a version (go, rtl_sdr, iq-recorder,
+// soapy_driver, CW_Skimmer, multi_instance) hardcodes the 29-byte v1 full
+// header, and none of them ask for 2.
+func fullPCMHeaderAlways(isIQ bool, version int) bool {
+	return !isIQ || version >= 2
+}
+
 // Audio gate constants.
 const (
 	// audioGateDisabled is the sentinel that turns a gate threshold off. The
@@ -2006,8 +2038,9 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 						silenceDuration := session.SampleRate / 50        // 20ms frame
 						silenceSamples := make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each (zeros)
 
-						// Silence packets for non-IQ modes always use full header so signal
-						// quality data is included even when squelch is closed.
+						// Silence packets carry a full header so signal quality data is
+						// included even when the squelch is closed — see
+						// fullPCMHeaderAlways for the one case that does not.
 						isIQModeSilence := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
 						packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
 							silenceSamples,
@@ -2016,7 +2049,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 							session.Channels,
 							basebandPower,
 							noiseFigure,
-							!isIQModeSilence, // forceFullHeader for non-IQ modes
+							fullPCMHeaderAlways(isIQModeSilence, version),
 						)
 						if err != nil {
 							continue // Skip this update on error
@@ -2320,12 +2353,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					audioPacket.PCMData = make([]byte, len(audioPacket.PCMData))
 				}
 
-				// Encode PCM packet with hybrid header strategy.
-				// Non-IQ modes force a full header on every packet so that signal quality
-				// data (basebandPower / noiseFigure) is delivered continuously, matching
-				// the behaviour of the Opus v2 format.
-				// IQ modes keep the minimal-header optimisation to reduce bandwidth on
-				// high-rate streams where signal quality fields are less useful.
+				// Encode PCM packet with hybrid header strategy.  Every packet gets a
+				// full header so signal quality (basebandPower / noiseFigure) is
+				// delivered continuously, matching the Opus v2 format; the minimal
+				// header survives only for version 1, which has no room for those
+				// fields — see fullPCMHeaderAlways.
 				// Use audioPacket.SampleRate (stamped at receive time) not session.SampleRate
 				// (which may already reflect a new mode for buffered packets).
 				packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
@@ -2335,7 +2367,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					session.Channels,
 					basebandPower,
 					noiseFigure,
-					!isIQMode, // forceFullHeader for non-IQ modes
+					fullPCMHeaderAlways(isIQMode, version),
 				)
 				if err != nil {
 					log.Printf("PCM binary encoding error: %v", err)

@@ -39,7 +39,7 @@ globalThis.removeEventListener = () => {};
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 
 const {
-    deep, render, reset, walk, useHoldPress, HOLD_MS,
+    deep, render, reset, walk, words, useHoldPress, HOLD_MS,
     MultipadPanel, SignalPanel, DEFAULTS, SQUELCH_MIN,
 } = require('./.build/holdpress.cjs');
 
@@ -159,11 +159,11 @@ t('a real press a moment later is not swallowed', () => {
 // of the wrapper around it — which passes every test above and does nothing at
 // all on the one screen it was asked for.
 
-function pad(squelch, snr) {
+function pad(squelch, snr, mode = 'usb') {
     reset();
     const sent = [];
     const ctx = {
-        tuning: { mode: 'usb', frequency: 14_200_000, bandwidthLow: 50, bandwidthHigh: 2700 },
+        tuning: { mode, frequency: 14_200_000, bandwidthLow: 50, bandwidthHigh: 2700 },
         running: true,
         squelch,
         sent,
@@ -200,8 +200,12 @@ function pad(squelch, snr) {
     const nodes = deep(tree);
     return {
         sent,
+        text: words(tree),
         hold: nodes.find((n) => n.props?.className === 'pad-row__hold'),
         auto: nodes.find((n) => n.props?.className === 'chip chip--button pad-row__act'),
+        // The width slider is on the same row in the minimal pad; the squelch
+        // is the one whose scale is the squelch's.
+        slider: nodes.find((n) => n.props?.className === 'slider' && n.props?.min === SQUELCH_MIN),
     };
 }
 
@@ -342,6 +346,40 @@ t('the full view keeps its Off button as well', () => {
     const { hold, sent } = signal(ON, 12, { minimal: false });
     assert.ok(hold, 'the gesture is on both views');
     assert.deepStrictEqual(sent, []);
+});
+
+// --- IQ ----------------------------------------------------------------------
+//
+// The server skips the audio gate for a quadrature stream — see the isIQMode
+// checks around audioGateAllows — so every control on this row would move and
+// change nothing. Worth its own test since the SNR beside them is live in IQ
+// like anywhere else: the reading is real, the gate is not, and a marker
+// tracking along a working-looking slider is exactly the wrong thing to draw.
+
+t('the pad squelch is inert in IQ, where nothing is gating', () => {
+    const iq = pad(ON, 12, 'iq');
+    assert.strictEqual(iq.slider.props.disabled, true, 'the slider');
+    assert.strictEqual(iq.auto.props.disabled, true, 'Auto');
+    assert.ok(/Unavailable/.test(iq.text), 'the row says so: ' + iq.text);
+});
+
+t('and live everywhere else, on the same reading', () => {
+    const usb = pad(ON, 12);
+    assert.strictEqual(usb.slider.props.disabled, false, 'the slider');
+    assert.strictEqual(usb.auto.props.disabled, false, 'Auto');
+    assert.ok(!/Unavailable/.test(usb.text), usb.text);
+});
+
+t('the hold that turns the squelch off does nothing in IQ either', () => {
+    // The gesture rides on a wrapper rather than the button, so a disabled Auto
+    // does not disable it — the wrapper is what makes "off" reachable over a
+    // dead band. In IQ there is nothing to turn off, and the button beside it
+    // says so, but the press itself still reaches setSquelch: this records that
+    // it is the panel's refusal, not the gesture's.
+    const { hold, sent } = pad(ON, 12, 'iq');
+    assert.ok(hold, 'the gesture wrapper is still drawn');
+    hold.props.onContextMenu(menu().event);
+    assert.deepStrictEqual(sent, [SQUELCH_MIN]);
 });
 
 console.log(`\n${pass} passed`);

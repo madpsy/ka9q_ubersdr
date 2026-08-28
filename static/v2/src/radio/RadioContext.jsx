@@ -419,12 +419,12 @@ export function RadioProvider({ children }) {
             player.pushPCM(planes, sampleRate, channels);
         }));
         offs.push(audioConn.on('quality', ({ basebandPower, noisePower }) => {
-            // Dropped outright in IQ. One full-header packet arrives after the
-            // mode change carrying a genuine reading, and taking it would pin
-            // every meter to a number that then never moves — see the blanking
-            // effect. A ref because this handler is subscribed once and must not
-            // re-subscribe on every retune.
-            if (iqRef.current) return;
+            // Taken in every mode, IQ included. radiod measures an IQ channel
+            // like any other — `iq` is the linear demod with stereo output, and
+            // baseband power and N0 are computed before the mode-specific
+            // branch — and the server now sends the full header on every packet
+            // for protocol 2 and up, so these arrive at the packet rate rather
+            // than once. See fullPCMHeaderAlways in websocket.go.
             // Before anything else: the figure only counts as evidence when it
             // changes, and the packet handler is the only place it is seen raw.
             noteSamPower(samWatch.current, basebandPower, Date.now());
@@ -446,7 +446,15 @@ export function RadioProvider({ children }) {
             // Mirror audioGateAllows() so the indicator reflects what the
             // server is doing, including its 500 ms hang timer — otherwise the
             // badge flickers closed on every syllable gap in speech.
-            const threshold = gateRef.current;
+            //
+            // IQ is held open whatever the threshold says, because the server
+            // skips the gate entirely for it (see the isIQMode checks around
+            // audioGateAllows). The threshold itself survives a trip through IQ
+            // — the panel only hides its control — so without this the badge
+            // would read CLOSED over a stream nothing is gating. A ref because
+            // this handler is subscribed once and must not re-subscribe on
+            // every retune.
+            const threshold = iqRef.current ? null : gateRef.current;
             const now = performance.now();
             if (threshold == null) {
                 m.squelchOpen = true;
@@ -780,25 +788,12 @@ export function RadioProvider({ children }) {
         sm.streamRate = 0;
         sm.channels = 0;
         if (!iq) return;
-        // Blank the signal meters, and keep them blank — see the guard in the
-        // 'quality' handler.
-        //
-        // IQ does carry one real reading: the server sends a full header on the
-        // first packet after the mode change and minimal ones from then on, so
-        // basebandPower and noisePower arrive once and never again. Showing that
-        // is the worst of the three options — a needle sitting at a plausible
-        // number, never moving, indistinguishable from a steady signal. Reading
-        // nothing is the honest one, and every meter already draws null as '--'.
-        //
-        // The history goes too, or the squelch's Auto would set a threshold from
-        // samples taken in another mode once IQ is left again.
+        // The meters keep reading in IQ — the figures behind them are as real
+        // there as anywhere, and arrive at the packet rate like anywhere else;
+        // see the 'quality' handler. Only the gate indicator needs saying: the
+        // server does not gate IQ at all, so it must not claim to be holding
+        // anything closed while it waits for the next packet to say so.
         const m = meters.current;
-        m.basebandPower = null;
-        m.noisePower = null;
-        m.snr = null;
-        m.snrHistory.length = 0;
-        // The server does not gate IQ at all, so the indicator must not claim it
-        // is holding anything closed.
         m.squelchOpen = true;
         m.lastGateOpenAt = performance.now();
     }, [tuning.mode]);
@@ -1351,7 +1346,14 @@ export function RadioProvider({ children }) {
             setSquelch: applySquelch,
 
             // Sits just above the noise the receiver is currently hearing.
+            //
+            // Refused in IQ, where the server does not run the gate at all: the
+            // history is real there, so this would otherwise pick a plausible
+            // threshold, apply nothing, and then take effect on whatever mode
+            // came next. The buttons are disabled too — this is the backstop for
+            // the keyboard function and the bridge command, which are not.
             autoSquelch() {
+                if (iqRef.current) return;
                 const value = autoSquelchValue(meters.current.snrHistory);
                 if (value == null) return;
                 applySquelch(value);

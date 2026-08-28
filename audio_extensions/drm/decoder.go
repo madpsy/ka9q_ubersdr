@@ -199,9 +199,11 @@ func (d *DRMDecoder) Start(audioChan <-chan AudioSample, resultChan chan<- []byt
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
-			if line := strings.TrimSpace(sc.Text()); line != "" {
-				log.Printf("[DRM] %s", line)
+			line := strings.TrimSpace(sc.Text())
+			if line == "" || isPeriodicStatusLine(line) {
+				continue
 			}
+			log.Printf("[DRM] %s", line)
 		}
 	}()
 
@@ -258,6 +260,17 @@ func (d *DRMDecoder) Stop() error {
 
 	log.Printf("[DRM] Subprocess stopped")
 	return nil
+}
+
+// isPeriodicStatusLine reports whether a stderr line is one of the binary's
+// once-a-second acquisition telemetry lines, e.g.
+//
+//	[ubersdr-drm] acq=1 fac=3 sdc=1 audio=0 wmer=4.9 dB service=""
+//
+// They say nothing a state change doesn't already log, and at one per second
+// they bury everything else, so they are dropped rather than relayed.
+func isPeriodicStatusLine(line string) bool {
+	return strings.Contains(line, "acq=") && strings.Contains(line, "wmer=")
 }
 
 // writeLoop reads AudioSamples from audioChan and writes stereo IQ int16 PCM

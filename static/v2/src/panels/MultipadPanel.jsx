@@ -897,7 +897,7 @@ function WidthRow() {
 // secondary press puts it back on the floor. Right-click or hold, the same
 // gesture the panel zoom uses to get back to the global size. See
 // lib/useHoldPress.
-function AutoSquelch({ snr }) {
+function AutoSquelch({ snr, iq }) {
     const { squelch, actions } = useRadio();
     const off = useCallback(() => {
         if (!squelch.enabled) return;
@@ -919,12 +919,14 @@ function AutoSquelch({ snr }) {
                 type="button"
                 className="chip chip--button pad-row__act"
                 title={[
-                    snr == null
-                        ? 'Waiting for a signal reading to set the threshold from'
-                        : 'Set the threshold just above the recent noise level',
-                    squelch.enabled ? 'right-click or hold to turn the squelch off' : null,
+                    iq
+                        ? 'Not available in IQ mode: the receiver does not gate a quadrature stream'
+                        : snr == null
+                            ? 'Waiting for a signal reading to set the threshold from'
+                            : 'Set the threshold just above the recent noise level',
+                    squelch.enabled && !iq ? 'right-click or hold to turn the squelch off' : null,
                 ].filter(Boolean).join(' — ')}
-                disabled={snr == null}
+                disabled={snr == null || iq}
                 onClick={() => {
                     if (afterHold()) return;
                     actions.autoSquelch();
@@ -939,9 +941,15 @@ function AutoSquelch({ snr }) {
 // Its own component so the 12 Hz meter sampling behind the live SNR marker
 // re-renders this line alone, and not the barrels above it.
 function SquelchRow() {
-    const { squelch, actions } = useRadio();
+    const { squelch, actions, tuning } = useRadio();
     const m = useMeters(12);
     const snr = m.snr;
+    // The server skips the audio gate entirely for IQ, so every control on this
+    // row would move and change nothing — the same refusal the Signal panel
+    // makes, and for the same reason. The SNR beside them is real (radiod
+    // measures an IQ channel like any other), which is exactly why the row has
+    // to say so: a live marker on a dead slider reads as a working squelch.
+    const iq = isIQ(tuning.mode);
 
     return (
         <PadRow
@@ -957,7 +965,7 @@ function SquelchRow() {
 
                Dropped in CSS rather than here because the layout it depends on
                is now decided in CSS — see .pad__pair. */
-            value={squelch.enabled ? `${squelch.value.toFixed(0)} dB` : 'Off'}
+            value={iq ? 'Unavailable' : squelch.enabled ? `${squelch.value.toFixed(0)} dB` : 'Off'}
             /* The Signal panel's Auto, on the same line for the same reason it
                is on the same line there: it sets the number the slider sets, so
                it belongs beside it rather than under it. It also turns the
@@ -979,7 +987,7 @@ function SquelchRow() {
                Auto itself is disabled until there is an SNR to measure against,
                and it says so — a threshold set from no measurement would be a
                guess. */
-            action={<AutoSquelch snr={snr} />}
+            action={<AutoSquelch snr={snr} iq={iq} />}
         >
             <Slider
                 value={squelch.value}
@@ -987,8 +995,9 @@ function SquelchRow() {
                 max={SQUELCH_MAX}
                 step={SQUELCH_STEP}
                 onChange={actions.setSquelch}
+                disabled={iq}
                 marker={snr == null ? null : snr}
-                markerTone={squelch.enabled && !m.squelchOpen ? 'closed' : 'open'}
+                markerTone={squelch.enabled && !iq && !m.squelchOpen ? 'closed' : 'open'}
                 markerTitle={snr == null ? undefined : `Current SNR: ${snr.toFixed(1)} dB`}
             />
         </PadRow>

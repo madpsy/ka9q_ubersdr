@@ -55,6 +55,17 @@ const (
 	// +/-10% of quantisation error and a 0.2% one is mostly noise.
 	noiseFloorCalibrationMinPct = 1.5
 
+	// noiseFloorCalibrationMinAveragedPct is the same threshold once the reading is a
+	// rolling mean rather than one 2-second window. Averaging pulls the jiffy down as
+	// 1/sqrt(n), so bands that were pure quantisation noise become real measurements
+	// and the fit gets the narrow end of the range it never had.
+	noiseFloorCalibrationMinAveragedPct = 0.3
+
+	// noiseFloorCalibrationAveragedSamples is how many samples a mean needs before the
+	// lower threshold applies. At 16 the residual quantisation is about 0.04% of a
+	// core, an order below the readings being admitted.
+	noiseFloorCalibrationAveragedSamples = 16
+
 	// noiseFloorSuggestMinSavingPct is how much of a CPU core a proposed change must
 	// save before it is worth showing. Below this it is churn: a reconfigure, a
 	// restart, and a step in the band's history, for nothing measurable.
@@ -213,13 +224,14 @@ func noiseFloorEstimatedCPUPct(deliveredSpanHz, calibration float64) float64 {
 // noiseFloorCalibration fits the model to what radiod is actually reporting, returning
 // a scale factor and how many bands it was fitted over.
 //
-// Only bands whose measurement clears noiseFloorCalibrationMinPct are used: below that
-// the CSV's single decimal place is a bigger effect than anything being measured, and
-// including them drags the fit around for no reason.
-func noiseFloorCalibration(bands []noiseFloorBandCost) (factor float64, samples int) {
+// Only bands whose measurement clears minPct are used: below that the reading's own
+// resolution is a bigger effect than anything being measured, and including them drags
+// the fit around for no reason. How coarse that resolution is depends on how many
+// samples the measurement is averaged over, so the caller chooses the threshold.
+func noiseFloorCalibration(bands []noiseFloorBandCost, minPct float64) (factor float64, samples int) {
 	var measured, modelled float64
 	for _, b := range bands {
-		if b.MeasuredCPUPct == nil || *b.MeasuredCPUPct < noiseFloorCalibrationMinPct {
+		if b.MeasuredCPUPct == nil || *b.MeasuredCPUPct < minPct {
 			continue
 		}
 		if b.BinBandwidth > radiodSpectrumCrossoverHz {
@@ -233,6 +245,15 @@ func noiseFloorCalibration(bands []noiseFloorBandCost) (factor float64, samples 
 		return 1, samples
 	}
 	return measured / modelled, samples
+}
+
+// noiseFloorCalibrationFloor is the smallest measurement worth fitting against, given
+// how many samples the measurements are averaged over.
+func noiseFloorCalibrationFloor(samples int) float64 {
+	if samples >= noiseFloorCalibrationAveragedSamples {
+		return noiseFloorCalibrationMinAveragedPct
+	}
+	return noiseFloorCalibrationMinPct
 }
 
 // noiseFloorBandParamsRequest is the POST body.
@@ -311,6 +332,11 @@ type noiseFloorCostReport struct {
 	MeasuredTotalCPUPct  *float64 `json:"measured_total_cpu_percent,omitempty"`
 	ThreadStatsAvailable bool     `json:"thread_stats_available"`
 
+	// MeasuredSamples is how many 2-second windows each measured figure is averaged
+	// over. One sample is quantised to a jiffy -- 0.5% of a core -- so this is what
+	// decides how many decimal places the measured column can honestly carry.
+	MeasuredSamples int `json:"measured_samples,omitempty"`
+
 	// EstimateCalibration is measured/modelled over the bands with readings solid
 	// enough to fit against, and EstimateCalibrationBands is how many that was. 1
 	// means the model is being used as-is, either because nothing could be measured
@@ -344,7 +370,8 @@ func costNoiseFloorBands(report *noiseFloorCostReport, cfg *Config) {
 	// more than one of them at a time. Scaling by what this receiver's own measured
 	// bands are doing fixes all of them, and leaves the constants meaning what they
 	// say: the cost on the reference machine.
-	report.EstimateCalibration, report.EstimateCalibrationBands = noiseFloorCalibration(report.Bands)
+	report.EstimateCalibration, report.EstimateCalibrationBands =
+		noiseFloorCalibration(report.Bands, noiseFloorCalibrationFloor(report.MeasuredSamples))
 	calibration := report.EstimateCalibration
 	for i := range report.Bands {
 		row := &report.Bands[i]
@@ -417,8 +444,11 @@ func noiseFloorCostsFor(cfg *Config, nfm *NoiseFloorMonitor) *noiseFloorCostRepo
 		report.BackgroundPollMs = cfg.Spectrum.BackgroundPollPeriodMs
 	}
 
-	threadStats, statsAvailable := readThreadStats()
+	threadStats, samples, statsAvailable := threadStatsForReport()
 	report.ThreadStatsAvailable = statsAvailable
+	if statsAvailable {
+		report.MeasuredSamples = samples
+	}
 
 	// SSRC per band name, from the live monitor. bandSpectrums is built once at
 	// startup and only read afterwards, which is how noise_floor_health.go reads it
@@ -500,6 +530,18 @@ func noiseFloorCostsFor(cfg *Config, nfm *NoiseFloorMonitor) *noiseFloorCostRepo
 	report.Notes = append(report.Notes,
 		"percentages are of one CPU core; below the crossover a band's cost is its width alone "+
 			"and does not change with the poll rate")
+	if report.ThreadStatsAvailable {
+		if report.MeasuredSamples > 1 {
+			report.Notes = append(report.Notes, fmt.Sprintf(
+				"measured CPU is averaged over %d samples; a single 2-second sample is quantised to one "+
+					"jiffy (0.5%% of a core), which averaging pulls down to about %.2f%%",
+				report.MeasuredSamples, 0.5/math.Sqrt(12*float64(report.MeasuredSamples))))
+		} else {
+			report.Notes = append(report.Notes,
+				"measured CPU is a single 2-second sample, so it is quantised to one jiffy (0.5% of a "+
+					"core); differences smaller than that between bands are not real")
+		}
+	}
 	report.Notes = append(report.Notes,
 		"noise_floor_db is per-bin power, so bands with different bin_bandwidth are not directly "+
 			"comparable; noise_floor_db_per_hz refers them all to 1 Hz and is the column to compare")

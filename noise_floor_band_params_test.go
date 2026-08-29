@@ -283,13 +283,13 @@ func TestNoiseFloorCalibration(t *testing.T) {
 	pct := func(v float64) *float64 { return &v }
 
 	// Nothing measurable: use the model as-is rather than inventing a factor.
-	if f, n := noiseFloorCalibration([]noiseFloorBandCost{{BinCount: 1000, BinBandwidth: 200}}); f != 1 || n != 0 {
+	if f, n := noiseFloorCalibration([]noiseFloorBandCost{{BinCount: 1000, BinBandwidth: 200}}, noiseFloorCalibrationMinPct); f != 1 || n != 0 {
 		t.Errorf("no measurements: factor %v over %d bands, want 1 over 0", f, n)
 	}
 
 	// One solid band is not enough to fit against.
 	one := []noiseFloorBandCost{{BinCount: 1000, BinBandwidth: 200, MeasuredCPUPct: pct(1.5)}}
-	if f, n := noiseFloorCalibration(one); f != 1 || n != 1 {
+	if f, n := noiseFloorCalibration(one, noiseFloorCalibrationMinPct); f != 1 || n != 1 {
 		t.Errorf("single band: factor %v over %d, want 1", f, n)
 	}
 
@@ -298,7 +298,7 @@ func TestNoiseFloorCalibration(t *testing.T) {
 		{BinCount: 500, BinBandwidth: 100, MeasuredCPUPct: pct(0.5)},
 		{BinCount: 500, BinBandwidth: 200, MeasuredCPUPct: pct(0.5)},
 	}
-	if f, n := noiseFloorCalibration(noisy); n != 0 || f != 1 {
+	if f, n := noiseFloorCalibration(noisy, noiseFloorCalibrationMinPct); n != 0 || f != 1 {
 		t.Errorf("sub-threshold readings: factor %v over %d bands, want them ignored", f, n)
 	}
 
@@ -307,7 +307,7 @@ func TestNoiseFloorCalibration(t *testing.T) {
 		{BinCount: 2500, BinBandwidth: 200, MeasuredCPUPct: pct(1.58)}, // model 3.16
 		{BinCount: 1000, BinBandwidth: 200, MeasuredCPUPct: pct(1.76)}, // model 1.52 -> hmm
 	}
-	f, n := noiseFloorCalibration(half)
+	f, n := noiseFloorCalibration(half, noiseFloorCalibrationMinPct)
 	if n != 2 {
 		t.Fatalf("fitted over %d bands, want 2", n)
 	}

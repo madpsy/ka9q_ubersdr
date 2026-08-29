@@ -4822,12 +4822,17 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             const colHelp = {
                 'Est. CPU': 'What the cost model says this band should cost, scaled by how this receiver is ' +
                             'actually performing against the model (see the calibration figure above)',
-                'Actual CPU': "radiod's own per-thread figure for this band's channel"
+                'Actual CPU': "radiod's own per-thread figure for this band's channel, averaged over recent " +
+                              "samples: one 2-second sample can only report whole jiffies, 0.5% of a core"
             };
             head.innerHTML = cols.map(c =>
                 '<th' + (colHelp[c] ? ' title="' + colHelp[c] + '" style="cursor:help;' : ' style="') +
                 ' text-align:left; padding:6px 8px; border-bottom:1px solid #dee2e6; color:#333333; white-space:nowrap;">' +
                 c + '</th>').join('');
+
+            // One 2-second sample is quantised to a jiffy: 0.5% of a core. A second
+            // decimal place is only honest once the figure is a rolling mean.
+            const measuredDp = (d.measured_samples || 1) > 1 ? 2 : 1;
 
             body.innerHTML = (d.bands || []).map(b => {
                 const wide = b.radiod_algorithm && b.radiod_algorithm.indexOf('wideband') === 0;
@@ -4865,7 +4870,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                     '<td style="' + td + (wide ? ' color:#dc3545;' : ' color:#2e7d32;') + '">' +
                         (wide ? 'wideband' : 'downconverter') + '</td>' +
                     '<td style="' + td + '">' + nfNum(b.estimated_cpu_percent, 2, '%') + '</td>' +
-                    '<td style="' + td + '"' + drift + '>' + nfNum(b.measured_cpu_percent, 1, '%') + '</td>' +
+                    '<td style="' + td + '"' + drift + '>' + nfNum(b.measured_cpu_percent, measuredDp, '%') + '</td>' +
                     '<td style="' + td + '">' + nfNum(b.noise_floor_db, 1, ' dB') + '</td>' +
                     '<td style="' + td + '">' + nfNum(b.noise_floor_db_per_hz, 1) + '</td>' +
                     '<td style="' + td + '">' + nfNum(b.occupancy_pct, 1, '%') + '</td>' +
@@ -4874,7 +4879,11 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             }).join('') || '<tr><td colspan="12" style="padding:10px; color:#666666;">No bands configured.</td></tr>';
 
             const measured = d.measured_total_cpu_percent !== undefined
-                ? ' &nbsp;|&nbsp; Actual: <strong>' + d.measured_total_cpu_percent.toFixed(1) + '%</strong>'
+                ? ' &nbsp;|&nbsp; Actual: <strong>' + d.measured_total_cpu_percent.toFixed(measuredDp) + '%</strong>' +
+                  ((d.measured_samples || 1) > 1
+                      ? ' <span style="color:#666666;" title="Each 2-second sample can only report a whole jiffy, 0.5% of a core. ' +
+                        'Averaging independent samples pulls that error down as 1/sqrt(n).">(mean of ' + d.measured_samples + ' samples)</span>'
+                      : '')
                 : ' &nbsp;|&nbsp; <span style="color:#666666;">actual unavailable' +
                   (d.thread_stats_available ? '' : ' (no radiod thread stats)') + '</span>';
             summary.innerHTML =

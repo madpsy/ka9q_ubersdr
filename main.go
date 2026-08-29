@@ -809,6 +809,10 @@ func main() {
 	// Must be called after sessions is initialized so it can check for active users
 	StartVersionChecker(config.Admin.VersionCheckEnabled, config.Admin.VersionCheckInterval, sessions)
 
+	// Start the radiod thread-CPU averager. One sample is quantised to a jiffy --
+	// 0.5% of a core -- so the measured CPU columns are built from a rolling mean.
+	globalThreadStats.Start()
+
 	// Start NTP background checker (polls every 64 seconds, caches result for /api/time)
 	// Also start the NTP history tracker so offset/RTT trends are recorded.
 	globalNTPHistory.Start()

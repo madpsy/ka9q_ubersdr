@@ -121,6 +121,7 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 		frm.binCount,
 		frm.binBandwidth,
 		ssrc,
+		radiodSpectrumCrossoverHz, // no opinion: radiod's own default
 	); err != nil {
 		return fmt.Errorf("failed to create frequency reference spectrum channel: %w", err)
 	}

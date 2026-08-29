@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 )
 
 // The WebSDR waterfall used to come back from a zoom somewhere other than where it went.
@@ -237,5 +238,231 @@ func TestWebSDRServesThePatchedWaterfallJS(t *testing.T) {
 	}
 	if rec.Header().Get("ETag") == "" {
 		t.Error("no ETag, so every load re-sends the whole file")
+	}
+}
+
+// ── Waterfall rate ───────────────────────────────────────────────────────────
+//
+// The client's speed selector was parsed into wfSlow and read by nothing, so
+// every WebSDR client polled radiod at full rate however slow a waterfall it
+// asked for -- and each poll is a whole spectrum response, which above radiod's
+// crossover is an FFT over the entire front end.
+
+// waterparamConn is the least applyWaterparamCommand needs: a session to carry
+// the divisor, and a handler for the view rebuild a zoom or pan triggers. The
+// session ID is left empty so the retune, which would need a live radiod, is
+// skipped.
+func waterparamConn() *websdrConn {
+	h := &WebSDRHandler{sessions: &SessionManager{}, config: &Config{}}
+	h.config.Receiver = testReceiver(60_000_000)
+	return &websdrConn{
+		handler:     h,
+		session:     &Session{IsSpectrum: true},
+		wfWidth:     1024,
+		wfSlow:      4,
+		wfFormat:    9,
+		wfState:     NewWebSDRWaterfallState(9),
+		wfViewValid: false,
+	}
+}
+
+func TestWebSDRSpeedSetsThePollDivisor(t *testing.T) {
+	// speed n means slow = 4/n: the client's fastest setting polls at full rate,
+	// its slowest at a quarter.
+	tests := []struct {
+		cmd  string
+		want int32
+	}{
+		{"/~~waterparam?speed=1", 4},
+		{"/~~waterparam?speed=2", 2},
+		{"/~~waterparam?speed=3", 1}, // 4/3 truncates
+		{"/~~waterparam?speed=4", 1},
+		{"/~~waterparam?slow=1", 1},
+		{"/~~waterparam?slow=3", 3},
+		{"/~~waterparam?slow=8", 8},
+	}
+	for _, tc := range tests {
+		c := waterparamConn()
+		c.applyWaterparamCommand(tc.cmd)
+		if got := c.session.PollDivisor.Load(); got != tc.want {
+			t.Errorf("%s: poll divisor %d, want %d", tc.cmd, got, tc.want)
+		}
+	}
+}
+
+// The keepalive rides on the poll, so the divisor may not run away: radiod
+// reaps a spectrum channel spectrumLifetimeFrames after its last command.
+func TestWebSDRPollDivisorIsBounded(t *testing.T) {
+	for _, cmd := range []string{"/~~waterparam?slow=9", "/~~waterparam?slow=1000"} {
+		c := waterparamConn()
+		c.applyWaterparamCommand(cmd)
+		if got := c.session.PollDivisor.Load(); got != websdrMaxPollDivisor {
+			t.Errorf("%s: poll divisor %d, want it clamped to %d", cmd, got, websdrMaxPollDivisor)
+		}
+	}
+
+	// The bound has to leave the keepalive room at the configured poll period.
+	// 250 blocks x 20 ms is 5 s; the slowest poll must be well inside that.
+	slowestPoll := time.Duration(websdrMaxPollDivisor) * 250 * time.Millisecond // the largest PollPeriodMs LoadConfig allows
+	lifetime := time.Duration(spectrumLifetimeFrames) * 20 * time.Millisecond
+	if slowestPoll >= lifetime {
+		t.Errorf("slowest poll %v is not inside the %v channel lifetime -- the channel would reap itself between polls",
+			slowestPoll, lifetime)
+	}
+}
+
+// A client that never asks keeps the rate it has today. This honours the
+// parsed value; it does not impose one. Both exit paths: a zoom rebuilds the
+// view, a scale change returns early, and neither may invent a rate.
+func TestWebSDRPollDivisorUntouchedWithoutASpeed(t *testing.T) {
+	for _, cmd := range []string{
+		"/~~waterparam?zoom=8",
+		"/~~waterparam?start=488735",
+		"/~~waterparam?scale=1",
+		"/~~waterparam?speed=0", // 0 is not a rate; ignored, as it always was
+	} {
+		c := waterparamConn()
+		if got := c.session.PollDivisor.Load(); got != 0 {
+			t.Fatalf("%s: divisor started at %d, want the 0 zero value", cmd, got)
+		}
+		c.applyWaterparamCommand(cmd)
+		if got := c.session.PollDivisor.Load(); got != 0 {
+			t.Errorf("%s: poll divisor %d, want it left at 0 (full rate)", cmd, got)
+		}
+	}
+}
+
+// wfSlow persists across commands, so a later command that carries no speed
+// must not reset the rate the client chose earlier.
+func TestWebSDRPollDivisorSurvivesLaterCommands(t *testing.T) {
+	c := waterparamConn()
+	c.applyWaterparamCommand("/~~waterparam?slow=4")
+	if got := c.session.PollDivisor.Load(); got != 4 {
+		t.Fatalf("poll divisor %d after slow=4, want 4", got)
+	}
+	c.applyWaterparamCommand("/~~waterparam?scale=2")
+	if got := c.session.PollDivisor.Load(); got != 4 {
+		t.Errorf("poll divisor %d after a command with no speed, want 4 kept", got)
+	}
+}
+
+// A zoom that carries a speed takes the other exit -- the one that rebuilds the
+// view and retunes radiod -- and must apply the rate there too. This is the
+// common case: the real client sends its whole parameter set on every zoom.
+func TestWebSDRPollDivisorAppliesOnAZoom(t *testing.T) {
+	c := waterparamConn()
+	c.applyWaterparamCommand("/~~waterparam?zoom=8&start=488735&width=1024&speed=1")
+	if got := c.session.PollDivisor.Load(); got != 4 {
+		t.Errorf("poll divisor %d after a zoom carrying speed=1, want 4", got)
+	}
+	if c.wfZoom != 8 {
+		t.Errorf("zoom %d, want 8 -- the rate must not have swallowed the view change", c.wfZoom)
+	}
+}
+
+// The Speed selector and the waterfall script both carry the default rate, and a
+// mismatch is invisible until someone notices the dropdown says one thing and the
+// waterfall does another. Both are patched, so both are checked.
+func TestWebSDRControlsDefaultToFast(t *testing.T) {
+	raw, err := os.ReadFile("websdr/websdr-controls.html")
+	if err != nil {
+		t.Skipf("vendored client not present: %v", err)
+	}
+	patched, missed := websdrPatchControlsHTML(raw)
+	if len(missed) > 0 {
+		t.Fatalf("websdr-controls.html no longer matches %v — re-derive against the vendored client", missed)
+	}
+	if !bytes.Contains(patched, []byte(`<option value="1" selected>fast</option>`)) {
+		t.Error("fast is not the selected Speed option")
+	}
+	// Exactly one option inside THIS select may be marked, or the browser picks the
+	// last one and the patch silently stops meaning anything. Scoped to the speed
+	// control: the page has other selects with their own selected options.
+	i := bytes.Index(patched, []byte(`id="wfspeed"`))
+	if i < 0 {
+		t.Fatal(`no id="wfspeed" select in websdr-controls.html`)
+	}
+	j := bytes.Index(patched[i:], []byte("</select>"))
+	if j < 0 {
+		t.Fatal("unterminated wfspeed select")
+	}
+	if n := bytes.Count(patched[i:i+j], []byte(" selected")); n != 1 {
+		t.Errorf("%d selected options in the Speed selector, want exactly 1", n)
+	}
+}
+
+// All three places that carry the waterfall rate must agree, because they are not
+// equivalent and the one that wins is not the one that acts first: the applet's b.A
+// governs at page load, and websdr-base.js's waterslowness takes over on the first
+// zoom. Patching a subset is what made the waterfall fast until you touched it.
+func TestWebSDRWaterfallRateDefaultsAgreeAcrossAllThreeFiles(t *testing.T) {
+	read := func(name string) []byte {
+		b, err := os.ReadFile("websdr/" + name)
+		if err != nil {
+			t.Skipf("vendored client not present: %v", err)
+		}
+		return b
+	}
+	baseJS, missed := websdrPatchBaseJS(read("websdr-base.js"))
+	if len(missed) > 0 {
+		t.Fatalf("websdr-base.js no longer matches %v — the waterfall would go slow on the first zoom", missed)
+	}
+	if !bytes.Contains(baseJS, []byte("var waterslowness=1;")) {
+		t.Error("websdr-base.js does not default the page's waterfall rate to fast")
+	}
+	// The applet's own initial rate, which governs before base.js speaks.
+	wfJS, _ := websdrPatchWaterfallJS(read("websdr-waterfall.js"))
+	if !bytes.Contains(wfJS, []byte(";b.A=1;")) {
+		t.Error("websdr-waterfall.js does not start the applet at the fast rate")
+	}
+	// And the selector has to show what the other two are doing.
+	html, _ := websdrPatchControlsHTML(read("websdr-controls.html"))
+	if !bytes.Contains(html, []byte(`<option value="1" selected>fast</option>`)) {
+		t.Error("the Speed selector does not show fast")
+	}
+}
+
+// value="1" is what the selector sends, and 1 is what the script must start at:
+// the two are the same number in two files, which is exactly how they drift.
+func TestWebSDRWaterfallScriptStartsAtTheSelectedSpeed(t *testing.T) {
+	js, err := os.ReadFile("websdr/websdr-waterfall.js")
+	if err != nil {
+		t.Skipf("vendored client not present: %v", err)
+	}
+	patchedJS, missed := websdrPatchWaterfallJS(js)
+	if len(missed) > 0 {
+		t.Fatalf("websdr-waterfall.js no longer matches %v", missed)
+	}
+	html, _ := os.ReadFile("websdr/websdr-controls.html")
+	patchedHTML, _ := websdrPatchControlsHTML(html)
+
+	// Whatever the dropdown marks selected has to be the script's initial b.A.
+	var want []byte
+	for _, v := range [][]byte{[]byte(`"1"`), []byte(`"2"`), []byte(`"4"`)} {
+		if bytes.Contains(patchedHTML, append(append([]byte(`<option value=`), v...), []byte(" selected>")...)) {
+			want = bytes.Trim(v, `"`)
+		}
+	}
+	if want == nil {
+		t.Fatal("no Speed option is marked selected")
+	}
+	init := append(append([]byte(";b.A="), want...), ';')
+	if !bytes.Contains(patchedJS, init) {
+		t.Errorf("script does not start at the selected speed: want %q in the patched client", init)
+	}
+}
+
+// A fast waterfall is four polls where a slow one is one, and every poll is a whole
+// spectrum response. This is the number that turns the selector into CPU.
+func TestWebSDRFastSpeedMeansFullPollRate(t *testing.T) {
+	c := waterparamConn()
+	c.applyWaterparamCommand("/~~waterparam?speed=4") // the selector's "fast" sends slow=1
+	if got := c.session.PollDivisor.Load(); got != 1 {
+		t.Errorf("fast: poll divisor %d, want 1 (full rate)", got)
+	}
+	c = waterparamConn()
+	c.applyWaterparamCommand("/~~waterparam?slow=1")
+	if got := c.session.PollDivisor.Load(); got != 1 {
+		t.Errorf("slow=1: poll divisor %d, want 1", got)
 	}
 }

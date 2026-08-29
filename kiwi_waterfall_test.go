@@ -5,6 +5,12 @@ import (
 	"testing"
 )
 
+// kiwiTestSamprate is the front end these tests cost the wideband path against.
+// Which path a zoom lands on depends on it: wideband cost is samprate/bin_bw and
+// narrowband cost is not, so a wider front end pushes more zooms onto the
+// downconverter. 129.6 Msps is the receiver this was measured on.
+const kiwiTestSamprate = 129_600_000
+
 // radiodFFTLength reproduces the search in ka9q-radio src/spectrum.c
 // setup_narrowband(): start at bin_count + margin/rbw and step up until the
 // length is FFT-friendly and the resulting sample rate is a multiple of
@@ -49,7 +55,7 @@ func TestKiwiSpectrumParamsStayCheap(t *testing.T) {
 	const maxAcceptableFFT = 4096
 
 	for zoom := 0; zoom <= kiwiMaxZoom; zoom++ {
-		req := kiwiSpectrumParams(zoom)
+		req := kiwiSpectrumParams(zoom, kiwiTestSamprate)
 		if req.BinBandwidth > radiodSpectrumCrossoverHz {
 			continue // wideband mode: no search, no downconverter
 		}
@@ -80,7 +86,7 @@ func TestKiwiSpectrumParamsStayCheap(t *testing.T) {
 // radiod for.
 func TestKiwiSpectrumParamsDisplayGrid(t *testing.T) {
 	for zoom := 0; zoom <= kiwiMaxZoom; zoom++ {
-		req := kiwiSpectrumParams(zoom)
+		req := kiwiSpectrumParams(zoom, kiwiTestSamprate)
 		wantSpan := kiwiFullSpanHz / math.Pow(2, float64(zoom))
 
 		if req.DisplayBins != kiwiWaterfallBins {
@@ -104,11 +110,16 @@ func TestKiwiSpectrumParamsDisplayGrid(t *testing.T) {
 	}
 }
 
-// Zoom 0-7 are the levels the emulation already offered; they must keep asking
-// for exactly what they always did, so this change cannot regress them.
+// The shallow zooms stay on the wideband path at exactly the bandwidth the client's
+// axis assumes, so the resample is a no-op there and nothing regressed.
+//
+// It stops at 3 because from 4 down the downconverter is measurably cheaper and the
+// levels deliberately move onto it -- see TestKiwiDeepZoomsUseTheDownconverter. Where
+// that boundary falls depends on the front end: wideband cost is samprate/bin_bw and
+// narrowband cost is not, so a wider receiver pushes more zooms across.
 func TestKiwiSpectrumParamsPreservesShallowZoom(t *testing.T) {
-	for zoom := 0; zoom <= 7; zoom++ {
-		req := kiwiSpectrumParams(zoom)
+	for zoom := 0; zoom <= 3; zoom++ {
+		req := kiwiSpectrumParams(zoom, kiwiTestSamprate)
 		want := kiwiFullSpanHz / math.Pow(2, float64(zoom)) / kiwiWaterfallBins
 
 		if math.Abs(req.BinBandwidth-want) > 0.0001 {
@@ -118,41 +129,82 @@ func TestKiwiSpectrumParamsPreservesShallowZoom(t *testing.T) {
 		if req.BinCount != kiwiWaterfallBins {
 			t.Errorf("zoom %d: bin count %d, want %d", zoom, req.BinCount, kiwiWaterfallBins)
 		}
-		if req.BinBandwidth <= radiodSpectrumCrossoverHz {
-			t.Errorf("zoom %d: bin_bw %.4f is at or below the crossover, so this level "+
-				"is no longer on the wideband path", zoom, req.BinBandwidth)
+		if req.Crossover != 0 {
+			t.Errorf("zoom %d: crossover %v, want 0 -- these levels must stay wideband",
+				zoom, req.Crossover)
 		}
 	}
 }
 
-// Zoom 8 is the first level below the crossover and the first that was
-// previously unreachable.
-func TestKiwiSpectrumParamsCrossoverBoundary(t *testing.T) {
-	if req := kiwiSpectrumParams(7); req.BinBandwidth <= radiodSpectrumCrossoverHz {
-		t.Errorf("zoom 7 bin_bw %.4f should be above the %.0f Hz crossover",
-			req.BinBandwidth, radiodSpectrumCrossoverHz)
+// The levels that used to sit on the wideband path transforming the whole front end
+// to deliver 1,024 bins of it. Zoom 7 was the worst: 566,231 points for a 234 kHz
+// view, measured at 95% of a core on a 129.6 Msps receiver.
+func TestKiwiDeepZoomsUseTheDownconverter(t *testing.T) {
+	for zoom := 4; zoom <= kiwiMaxZoom; zoom++ {
+		req := kiwiSpectrumParams(zoom, kiwiTestSamprate)
+		if req.BinBandwidth > req.Crossover {
+			t.Errorf("zoom %d: %v Hz/bin against crossover %v -- still on the wideband path",
+				zoom, req.BinBandwidth, req.Crossover)
+		}
+		// Never softer than the grid the client draws.
+		if req.BinBandwidth > req.DisplayBinBW {
+			t.Errorf("zoom %d: serving %v Hz/bin for a %v Hz display grid",
+				zoom, req.BinBandwidth, req.DisplayBinBW)
+		}
+		// And the downconverter is not paying for span the client never sees.
+		if over := float64(req.BinCount)*req.BinBandwidth - req.DisplaySpanHz(); over > 2*req.BinBandwidth {
+			t.Errorf("zoom %d: delivers %.0f Hz beyond the view", zoom, over)
+		}
 	}
-	req := kiwiSpectrumParams(8)
-	if req.BinBandwidth > radiodSpectrumCrossoverHz {
-		t.Fatalf("zoom 8 bin_bw %.4f should be at or below the crossover", req.BinBandwidth)
+}
+
+// Where the two paths swap is a cost boundary, not a fixed bin bandwidth, and it
+// moves with the front end: wideband cost is samprate/bin_bw and narrowband cost is
+// the span, so doubling the sample rate pushes another zoom onto the downconverter.
+//
+// This is the property a fixed threshold got wrong -- it would have put a 64.8 Msps
+// receiver's zoom 4 on the downconverter, where the wideband FFT is cheaper.
+func TestKiwiCrossoverBoundaryFollowsTheSampleRate(t *testing.T) {
+	boundary := func(samprate int) int {
+		for zoom := 0; zoom <= kiwiMaxZoom; zoom++ {
+			if req := kiwiSpectrumParams(zoom, samprate); req.Crossover != 0 {
+				return zoom
+			}
+		}
+		return -1
 	}
-	// Rounded up, not down: with the bin count pinned, a narrower bandwidth
-	// would deliver less span than the client draws.
-	if req.BinBandwidth != 200 {
-		t.Errorf("zoom 8 bin_bw = %v, want the 200 Hz ladder step", req.BinBandwidth)
+	wide, narrow := boundary(129_600_000), boundary(64_800_000)
+	if wide < 0 || narrow < 0 {
+		t.Fatalf("no zoom uses the downconverter (129.6: %d, 64.8: %d)", wide, narrow)
+	}
+	if wide >= narrow {
+		t.Errorf("boundary at zoom %d on 129.6 Msps and %d on 64.8 Msps: a wider front end "+
+			"makes the wideband path dearer, so it must cross sooner, not later", wide, narrow)
+	}
+	// Every zoom from the boundary down stays on the downconverter; the choice must
+	// be monotonic or the waterfall would flip paths as you zoom.
+	for _, sr := range []int{129_600_000, 64_800_000} {
+		seen := false
+		for zoom := 0; zoom <= kiwiMaxZoom; zoom++ {
+			narrowband := kiwiSpectrumParams(zoom, sr).Crossover != 0
+			if seen && !narrowband {
+				t.Errorf("%d Msps: zoom %d went back to the wideband path", sr/1_000_000, zoom)
+			}
+			seen = seen || narrowband
+		}
 	}
 }
 
 func TestKiwiSpectrumParamsClampsZoom(t *testing.T) {
-	if got, want := kiwiSpectrumParams(-3), kiwiSpectrumParams(0); got != want {
+	if got, want := kiwiSpectrumParams(-3, kiwiTestSamprate), kiwiSpectrumParams(0, kiwiTestSamprate); got != want {
 		t.Errorf("negative zoom = %+v, want it clamped to zoom 0 (%+v)", got, want)
 	}
-	if got, want := kiwiSpectrumParams(99), kiwiSpectrumParams(kiwiMaxZoom); got != want {
+	if got, want := kiwiSpectrumParams(99, kiwiTestSamprate), kiwiSpectrumParams(kiwiMaxZoom, kiwiTestSamprate); got != want {
 		t.Errorf("zoom 99 = %+v, want it clamped to zoom %d (%+v)", got, kiwiMaxZoom, want)
 	}
 }
 
-// A pass-through must be exactly that: zoom 0-7 deliver the display grid
+// A pass-through must be exactly that: the shallow zooms deliver the display grid
 // already, and the data must reach the client untouched.
 func TestResampleKiwiWaterfallIdentity(t *testing.T) {
 	src := make([]float32, kiwiWaterfallBins)
@@ -187,7 +239,7 @@ func TestResampleKiwiWaterfallAlwaysDisplayBins(t *testing.T) {
 // input bin in seven.
 func TestResampleKiwiWaterfallKeepsNarrowCarriers(t *testing.T) {
 	// Zoom 8 geometry: 1024 bins at 200 Hz up to 1024 bins at 114.4409 Hz.
-	req := kiwiSpectrumParams(8)
+	req := kiwiSpectrumParams(8, kiwiTestSamprate)
 	const floor, carrier = -130.0, -20.0
 
 	lost := 0
@@ -221,7 +273,7 @@ func TestResampleKiwiWaterfallKeepsNarrowCarriers(t *testing.T) {
 // A carrier must land at the right place, not merely survive: this is the
 // property the whole zoom limit existed to protect.
 func TestResampleKiwiWaterfallPreservesFrequency(t *testing.T) {
-	req := kiwiSpectrumParams(9)
+	req := kiwiSpectrumParams(9, kiwiTestSamprate)
 	const floor, carrier = -130.0, -20.0
 
 	// Put a carrier at a known offset from the centre of the view and check it
@@ -288,24 +340,27 @@ func TestResampleKiwiWaterfallDegenerateInput(t *testing.T) {
 
 // The bin count must never change between zoom levels.
 //
-// radiod sizes a spectrum channel's bin_data buffer on its first allocation and
-// the guard meant to resize it can never fire (spectrum.c updates the local it
-// compares against before the check), so asking an existing channel for more
-// bins than it was created with overruns a heap block and aborts radiod with
-// "corrupted size vs. prev_size in fastbins". Varying only the bin bandwidth is
-// what keeps the emulation clear of it.
-func TestKiwiSpectrumParamsBinCountNeverChanges(t *testing.T) {
+// The bin count used to be pinned at 1024 because radiod sized a channel's bin_data
+// once and raising it overran a heap block. ubersdr-radiod
+// patches/0002-spectrum-bin-data-resize.patch fixes that, so the count now follows
+// the view -- but two properties still bind.
+func TestKiwiSpectrumParamsBinCountIsServable(t *testing.T) {
 	for zoom := 0; zoom <= kiwiMaxZoom; zoom++ {
-		req := kiwiSpectrumParams(zoom)
-		if req.BinCount != kiwiSpectrumBins {
-			t.Errorf("zoom %d: bin count %d, want %d at every zoom -- a change would crash radiod",
-				zoom, req.BinCount, kiwiSpectrumBins)
-		}
-		// Even, too: the FFT unwrap swaps halves, and an odd length leaves the
-		// last bin unwritten.
+		req := kiwiSpectrumParams(zoom, kiwiTestSamprate)
+		// Even: radiod returns raw FFT order and the unwrap swaps two halves, so
+		// an odd count leaves a bin unwritten.
 		if req.BinCount%2 != 0 {
 			t.Errorf("zoom %d: bin count %d is odd; the half-swap unwrap would drop a bin",
 				zoom, req.BinCount)
+		}
+		// And no more than one datagram carries.
+		if req.BinCount > maxSpectrumBins {
+			t.Errorf("zoom %d: bin count %d is more than one datagram carries (%d)",
+				zoom, req.BinCount, maxSpectrumBins)
+		}
+		// The delivered span must still cover what the client draws.
+		if delivered, display := float64(req.BinCount)*req.BinBandwidth, req.DisplaySpanHz(); delivered < display-1 {
+			t.Errorf("zoom %d: delivers %.0f Hz for a %.0f Hz view", zoom, delivered, display)
 		}
 	}
 }

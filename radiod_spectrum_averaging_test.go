@@ -275,3 +275,64 @@ func TestWidebandBudgetNeverRaises(t *testing.T) {
 		}
 	}
 }
+
+// ── CROSSOVER on the wire ────────────────────────────────────────────────────
+//
+// radiod picks between its two spectrum algorithms with `rbw > crossover`, so
+// this tag is what decides whether a request downconverts or transforms the
+// whole front end. Nothing else proves it leaves the process.
+
+func TestCreateSpectrumCommandCarriesCrossover(t *testing.T) {
+	buf := buildCreateSpectrumCommand(14_100_000, 1172, 200, 0x1234, 4, 200)
+	if findTag(buf, tagCrossover) < 0 {
+		t.Error("CROSSOVER missing from a create command")
+	}
+}
+
+// 0 is not "absent" here -- it is how a wideband request is expressed, since
+// nothing can be at or below zero. A zero test in place of the flag would drop
+// exactly the requests that need it most.
+func TestUpdateSpectrumCommandCarriesZeroCrossover(t *testing.T) {
+	wide := buildUpdateSpectrumCommand(0x1234, spectrumUpdate{
+		binBandwidth: 3662.109375, binCount: 1024, crossover: 0, sendCrossover: true,
+	})
+	if findTag(wide, tagCrossover) < 0 {
+		t.Error("CROSSOVER 0 dropped from a wideband update -- radiod would keep its old algorithm")
+	}
+
+	narrow := buildUpdateSpectrumCommand(0x1234, spectrumUpdate{
+		binBandwidth: 200, binCount: 2344, crossover: 200, sendCrossover: true,
+	})
+	if findTag(narrow, tagCrossover) < 0 {
+		t.Error("CROSSOVER missing from a narrowband update")
+	}
+
+	// A pan carries no bandwidth, so it has no algorithm choice to restate.
+	pan := buildUpdateSpectrumCommand(0x1234, spectrumUpdate{frequency: 14_075_000})
+	if findTag(pan, tagCrossover) >= 0 {
+		t.Error("CROSSOVER sent on a pan, which does not change the algorithm")
+	}
+}
+
+// Coalescing may drop commands but not parameters: a pan folded onto a zoom must
+// keep the zoom's crossover, or the bin bandwidth arrives without the choice that
+// makes sense of it.
+func TestSpectrumUpdateMergeKeepsCrossover(t *testing.T) {
+	zoom := spectrumUpdate{binBandwidth: 200, binCount: 2344, sendBinCount: true, crossover: 200, sendCrossover: true}
+	merged := zoom
+	merged.merge(spectrumUpdate{frequency: 14_075_000})
+
+	if !merged.sendCrossover || merged.crossover != 200 {
+		t.Errorf("crossover %v (sent=%v) after a pan coalesced onto a zoom, want 200 kept",
+			merged.crossover, merged.sendCrossover)
+	}
+
+	// And a wideband zoom's 0 must survive the same way -- the case a zero test breaks.
+	wide := spectrumUpdate{binBandwidth: 3662, binCount: 1024, crossover: 0, sendCrossover: true}
+	merged = wide
+	merged.merge(spectrumUpdate{frequency: 14_075_000})
+	if !merged.sendCrossover || merged.crossover != 0 {
+		t.Errorf("crossover %v (sent=%v) after coalescing a wideband zoom, want 0 kept",
+			merged.crossover, merged.sendCrossover)
+	}
+}

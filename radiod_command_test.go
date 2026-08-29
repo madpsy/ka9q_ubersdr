@@ -167,7 +167,7 @@ func TestBuildCreateSpectrumCommand(t *testing.T) {
 		binBW    = 7324.21875
 	)
 
-	pktType, tlvs := parseCommandPacket(t, buildCreateSpectrumCommand(freq, binCount, binBW, ssrc, defaultSpectrumFFTAverages))
+	pktType, tlvs := parseCommandPacket(t, buildCreateSpectrumCommand(freq, binCount, binBW, ssrc, defaultSpectrumFFTAverages, radiodSpectrumCrossoverHz))
 
 	if pktType != pktTypeCmd {
 		t.Errorf("packet type = %d, want %d (CMD)", pktType, pktTypeCmd)
@@ -338,7 +338,7 @@ func TestCommandSSRC(t *testing.T) {
 		"terminate":       buildTerminateCommand(ssrc),
 		"keepalive":       buildKeepaliveCommand(ssrc, audioLifetimeFrames),
 		"poll":            buildPollCommand(ssrc),
-		"spectrum create": buildCreateSpectrumCommand(14_000_000, 1024, 100, ssrc, 4),
+		"spectrum create": buildCreateSpectrumCommand(14_000_000, 1024, 100, ssrc, 4, radiodSpectrumCrossoverHz),
 		"spectrum update": buildUpdateSpectrumCommand(ssrc, spectrumUpdate{frequency: 14_000_000, binBandwidth: 100}),
 	}
 	for name, pkt := range packets {

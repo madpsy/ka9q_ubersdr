@@ -581,9 +581,15 @@ func TestWebSDRSpectrumParamsPicksTheCheapRegime(t *testing.T) {
 				t.Errorf("zoom %d: wideband fft_n %.0f exceeds the %d cap", zoom, fftN, websdrMaxWidebandFFT)
 			}
 		} else {
-			// Narrowband: full display width, and a bandwidth off the ladder.
-			if req.BinCount != width {
-				t.Errorf("zoom %d: narrowband should keep the full width, got %d bins", zoom, req.BinCount)
+			// Narrowband: at least the display width -- a view too wide to reach
+			// the crossover at 1024 bins reaches it at more (websdrNarrowbandBins)
+			// -- and a bandwidth off the ladder.
+			if req.BinCount < width {
+				t.Errorf("zoom %d: narrowband below the display width, got %d bins", zoom, req.BinCount)
+			}
+			if req.BinCount > maxSpectrumBins {
+				t.Errorf("zoom %d: %d bins is more than one datagram carries (%d)",
+					zoom, req.BinCount, maxSpectrumBins)
 			}
 			found := false
 			for _, l := range radiodBinBandwidthLadder {
@@ -598,15 +604,20 @@ func TestWebSDRSpectrumParamsPicksTheCheapRegime(t *testing.T) {
 	}
 }
 
-// Zooms 0-7 must ask radiod for exactly what they always did. The point of the change was
-// to reach deeper cheaply, not to make the existing levels more expensive — and the two
-// zooms just above the crossover are where that could silently have gone wrong.
+// The shallow zooms must ask radiod for exactly what they always did. The point of the
+// change was to reach deeper cheaply, not to make the existing levels more expensive.
+//
+// It stops at 4 because from 5 down the narrowband path is measurably cheaper and the
+// zooms deliberately move onto it -- see TestWebSDRZoomsAboveTheCrossoverGoNarrowband.
+// On this 64.8 Msps receiver zoom 5 is a 937.5 kHz view: 1.17M points/s to downconvert
+// against 2.83M to transform the whole front end. Where that boundary falls depends on the
+// sample rate, which is why the code compares the two rather than testing a threshold.
 func TestWebSDRShallowZoomsCostRadiodNoMore(t *testing.T) {
 	const sr = 64_800_000
 	const width = 1024
 	geom := websdrBandFor(testReceiver(30_000_000))
 
-	for zoom := 0; zoom <= 7; zoom++ {
+	for zoom := 0; zoom <= 4; zoom++ {
 		visible := geom.WidthHz() / float64(int(1)<<uint(zoom))
 
 		// What the old code did: halve the bin count until bin_bw reached 500 Hz.
@@ -633,8 +644,14 @@ func TestWebSDRDeepZoomIsSharperAndCheaper(t *testing.T) {
 	visible := geom.WidthHz() / 256 // zoom 8
 
 	req := websdrSpectrumParams(visible, width, sr)
-	if req.BinCount != width {
-		t.Errorf("zoom 8 bins: got %d, want the full %d", req.BinCount, width)
+	// At least the display width, and no wider a span than the view -- the bin count
+	// now follows the span rather than being pinned to 1024 with the bandwidth rounded
+	// up, which used to ask for 204.8 kHz to draw a 117.2 kHz view.
+	if req.BinCount < width {
+		t.Errorf("zoom 8 bins: got %d, want at least the display width %d", req.BinCount, width)
+	}
+	if over := float64(req.BinCount)*req.BinBandwidth - visible; over > 2*req.BinBandwidth {
+		t.Errorf("zoom 8 delivers %.0f Hz over a %.0f Hz view", over, visible)
 	}
 	if req.BinBandwidth > radiodSpectrumCrossoverHz {
 		t.Errorf("zoom 8 should be on the cheap narrowband path, got %v Hz/bin", req.BinBandwidth)
@@ -830,7 +847,7 @@ func TestKiwiGeometryIsIndependentOfReceiverSpan(t *testing.T) {
 	}
 
 	// Whatever the receiver, zoom 0 asks for a 30 MHz window of 1024 bins.
-	req := kiwiSpectrumParams(0)
+	req := kiwiSpectrumParams(0, 129_600_000)
 	if got := req.DisplayBinBW * float64(req.DisplayBins); got != 30e6 {
 		t.Errorf("zoom 0 display span %v, want 30000000", got)
 	}
@@ -1304,5 +1321,194 @@ func TestSharedSpectrumPollsAtFullRate(t *testing.T) {
 	}
 	if polled != 10 {
 		t.Errorf("polled on %d of 10 ticks, want 10", polled)
+	}
+}
+
+// The two zooms that used to be stuck on the wideband path, and are the whole point of
+// ubersdr-radiod patches/0002-spectrum-bin-data-resize.patch: they need more bins than the
+// display has, which radiod could not be asked for until that patch let a live channel's
+// bin count grow.
+//
+// Before, both were capped wideband — 512 and 256 bins at 915.5 Hz, the same resolution
+// for two different zoom levels, so zooming in stopped adding detail. Now each gets the
+// span it draws at 200 Hz per bin, finer than its own display grid.
+func TestWebSDRZoomsAboveTheCrossoverGoNarrowband(t *testing.T) {
+	const sr = 64_800_000
+	const width = 1024
+	geom := websdrBandFor(testReceiver(30_000_000))
+
+	tests := []struct {
+		zoom     int
+		wantBins int
+	}{
+		{zoom: 6, wantBins: 2344}, // 468.75 kHz / 200
+		{zoom: 7, wantBins: 1172}, // 234.375 kHz / 200
+	}
+	for _, tc := range tests {
+		visible := geom.WidthHz() / float64(int(1)<<uint(tc.zoom))
+		req := websdrSpectrumParams(visible, width, sr)
+
+		if req.BinBandwidth != radiodSpectrumCrossoverHz {
+			t.Errorf("zoom %d: %v Hz/bin, want the crossover %v -- it is still on the wideband path",
+				tc.zoom, req.BinBandwidth, radiodSpectrumCrossoverHz)
+		}
+		if req.BinCount != tc.wantBins {
+			t.Errorf("zoom %d: %d bins, want %d", tc.zoom, req.BinCount, tc.wantBins)
+		}
+		// Sharper than the grid the client draws, not softer.
+		if req.BinBandwidth > req.DisplayBinBW {
+			t.Errorf("zoom %d: serving %v Hz/bin for a %v Hz display grid -- that is a softer picture",
+				tc.zoom, req.BinBandwidth, req.DisplayBinBW)
+		}
+	}
+}
+
+// The narrowband geometry must sit just sharper than the display grid -- never softer,
+// never wastefully finer -- and must fall back when it cannot be reached at all.
+func TestWebSDRNarrowbandFor(t *testing.T) {
+	tests := []struct {
+		name      string
+		visible   float64
+		display   float64
+		wantBinBW float64
+		wantBins  int
+		wantOK    bool
+	}{
+		{"z5 1.87 MHz", 1_875_000, 1831.0546875, 1000, 1876, true},
+		{"z6 937 kHz", 937_500, 915.52734375, 500, 1876, true},
+		{"z7 469 kHz", 468_750, 457.763671875, 200, 2344, true},
+		{"z8 234 kHz", 234_375, 228.8818359375, 200, 1172, true},
+		{"z9 117 kHz", 117_187.5, 114.44091796875, 100, 1172, true},
+		{"z10 59 kHz", 58_593.75, 57.220458984375, 50, 1172, true},
+		{"z11 29 kHz", 29_296.875, 28.6102294921875, 20, 1466, true},
+	}
+	for _, tc := range tests {
+		binBW, bins, ok := radiodNarrowbandFor(tc.visible, tc.display)
+		if ok != tc.wantOK {
+			t.Errorf("%s: ok=%v, want %v", tc.name, ok, tc.wantOK)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if binBW != tc.wantBinBW || bins != tc.wantBins {
+			t.Errorf("%s: %d bins @ %v Hz, want %d @ %v", tc.name, bins, binBW, tc.wantBins, tc.wantBinBW)
+		}
+		// Never softer than the grid the client draws...
+		if binBW > tc.display {
+			t.Errorf("%s: %v Hz/bin is softer than the %v Hz display grid", tc.name, binBW, tc.display)
+		}
+		// ...and never more than one ladder step sharper than it needs to be, which
+		// would be payload spent on detail the resample discards.
+		if binBW*4 < tc.display {
+			t.Errorf("%s: %v Hz/bin is needlessly fine for a %v Hz grid", tc.name, binBW, tc.display)
+		}
+		// The delivered span must cover the view, and barely.
+		delivered := float64(bins) * binBW
+		if delivered < tc.visible {
+			t.Errorf("%s: delivers %.0f Hz for a %.0f Hz view", tc.name, delivered, tc.visible)
+		}
+		// Up to two bins of slack: one from covering the span, one from rounding
+		// the count up to even for the unwrap.
+		if delivered > tc.visible+2*binBW {
+			t.Errorf("%s: delivers %.0f Hz for a %.0f Hz view -- the downconverter pays for the excess",
+				tc.name, delivered, tc.visible)
+		}
+		if bins > maxSpectrumBins {
+			t.Errorf("%s: %d bins is more than one datagram carries", tc.name, bins)
+		}
+		// Even, or the FFT half-swap unwrap leaves a bin unwritten.
+		if bins%2 != 0 {
+			t.Errorf("%s: %d bins is odd", tc.name, bins)
+		}
+	}
+}
+
+// The deepest zooms used to pin the bin count to the display width and round the bandwidth
+// up, so they asked for up to twice the span they drew and the downconverter was paid for
+// spectrum that was cropped off before it reached the client.
+func TestWebSDRDeepZoomsDoNotOverdeliverSpan(t *testing.T) {
+	const width = 1024
+	geom := websdrBandFor(testReceiver(60_000_000))
+	for zoom := 5; zoom <= geom.MaxZoom; zoom++ {
+		visible := geom.WidthHz() / float64(int(1)<<uint(zoom))
+		req := websdrSpectrumParams(visible, width, 129_600_000)
+		if req.BinBandwidth > radiodSpectrumCrossoverHz && req.Crossover == 0 {
+			continue // wideband
+		}
+		over := float64(req.BinCount)*req.BinBandwidth - visible
+		if over > 2*req.BinBandwidth {
+			t.Errorf("zoom %d: delivers %.0f Hz over a %.0f Hz view -- %.1f%% of the downconverter is cropped away",
+				zoom, over, visible, 100*over/visible)
+		}
+	}
+}
+
+// Which radiod algorithm runs is our decision, sent as CROSSOVER, not a coincidence of
+// where the bin bandwidth happened to land relative to radiod's 200 Hz default.
+func TestWebSDRCrossoverMatchesTheChosenPath(t *testing.T) {
+	const width = 1024
+	for _, spanHz := range []uint64{30_000_000, 60_000_000} {
+		geom := websdrBandFor(testReceiver(spanHz))
+		sr := 64_800_000
+		if spanHz > 30_000_000 {
+			sr = 129_600_000
+		}
+		for zoom := 0; zoom <= geom.MaxZoom; zoom++ {
+			visible := geom.WidthHz() / float64(int(1)<<uint(zoom))
+			req := websdrSpectrumParams(visible, width, sr)
+			// radiod: rbw > crossover is wideband, rbw <= crossover is narrowband.
+			narrowband := req.BinBandwidth <= req.Crossover
+			if req.Crossover == 0 && narrowband {
+				t.Errorf("%d MHz zoom %d: crossover 0 must mean wideband", spanHz/1_000_000, zoom)
+			}
+			if req.Crossover != 0 && req.Crossover != req.BinBandwidth {
+				t.Errorf("%d MHz zoom %d: crossover %v does not match bin bandwidth %v",
+					spanHz/1_000_000, zoom, req.Crossover, req.BinBandwidth)
+			}
+			// And it may only be chosen where it actually costs radiod less.
+			if narrowband {
+				wide := radiodWidebandPointsPerSec(visible/float64(width), sr)
+				got := radiodNarrowbandPointsPerSec(float64(req.BinCount) * req.BinBandwidth)
+				if got >= wide {
+					t.Errorf("%d MHz zoom %d: narrowband costs %.0f points/s against wideband's %.0f",
+						spanHz/1_000_000, zoom, got, wide)
+				}
+			}
+		}
+	}
+}
+
+// Whatever regime is chosen, radiod has to be able to serve it: the narrowband FFT search
+// must terminate, and the channel's usable width must cover the view. This is the check
+// that would have caught asking for a bin count whose fft_n search runs to 65536.
+func TestWebSDRNarrowbandRequestsAreServable(t *testing.T) {
+	const width = 1024
+	for _, spanHz := range []uint64{30_000_000, 60_000_000} {
+		geom := websdrBandFor(testReceiver(spanHz))
+		sr := 64_800_000
+		if spanHz > 30_000_000 {
+			sr = 129_600_000
+		}
+		for zoom := 0; zoom <= geom.MaxZoom; zoom++ {
+			visible := geom.WidthHz() / float64(int(1)<<uint(zoom))
+			req := websdrSpectrumParams(visible, width, sr)
+			if req.BinBandwidth > radiodSpectrumCrossoverHz {
+				continue // wideband: no search, no downconverter
+			}
+
+			fftLen, samprate := radiodFFTLength(req.BinBandwidth, req.BinCount)
+			if fftLen == 0 {
+				t.Errorf("%d MHz zoom %d: %d bins @ %v Hz -- radiod finds no valid FFT length",
+					spanHz/1_000_000, zoom, req.BinCount, req.BinBandwidth)
+				continue
+			}
+			// setup_narrowband reserves radiodFilterMarginHz for the filter skirts.
+			usable := float64(samprate) - radiodFilterMarginHz
+			if display := float64(req.DisplayBins) * req.DisplayBinBW; usable < display {
+				t.Errorf("%d MHz zoom %d: usable width %.0f Hz < the %.0f Hz view; its edges sit in the filter skirt",
+					spanHz/1_000_000, zoom, usable, display)
+			}
+		}
 	}
 }

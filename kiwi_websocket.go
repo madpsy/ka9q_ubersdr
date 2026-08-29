@@ -1725,7 +1725,7 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		// resampled onto that grid in streamWaterfall -- which is what lets the
 		// request use a bin bandwidth radiod can serve cheaply instead of the
 		// exact fractional one. See kiwi_waterfall.go.
-		req := kiwiSpectrumParams(zoom)
+		req := kiwiSpectrumParams(zoom, kc.sessions.config.Receiver.Samprate())
 		binCount := req.BinCount
 		binBandwidth := req.BinBandwidth
 
@@ -1747,7 +1747,7 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		// W/F connection has not yet created the spectrum session (benign race
 		// during connection setup), so no error is logged on failure.
 		if kc.userSessionID != "" {
-			kc.sessions.UpdateSpectrumSessionByUserIDWithBinCount(kc.userSessionID, freq, binBandwidth, binCount)
+			kc.sessions.UpdateSpectrumSessionByUserIDWithBinCount(kc.userSessionID, freq, binBandwidth, binCount, req.Crossover)
 		}
 		return
 	}
@@ -2362,13 +2362,13 @@ func (kc *kiwiConn) sendInitMessages() {
 			// Same chooser the zoom handler uses, so streamWaterfall's geometry
 			// is correct from the first packet rather than only after the
 			// client's first SET zoom.
-			initialReq := kiwiSpectrumParams(0)
+			initialReq := kiwiSpectrumParams(0, kc.sessions.config.Receiver.Samprate())
 			initialFreq := uint64(15000000) // Center frequency: 15 MHz
 			kc.mu.Lock()
 			kc.wfRequest = initialReq
 			kc.mu.Unlock()
 			updated := kc.sessions.UpdateSpectrumSessionByUserIDWithBinCount(
-				kc.userSessionID, initialFreq, initialReq.BinBandwidth, initialReq.BinCount)
+				kc.userSessionID, initialFreq, initialReq.BinBandwidth, initialReq.BinCount, initialReq.Crossover)
 			if !updated {
 				log.Printf("Warning: Failed to configure initial spectrum session")
 			}

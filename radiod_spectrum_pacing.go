@@ -46,6 +46,14 @@ type spectrumUpdate struct {
 	// scales with 1/bin_bw, so the two have to move together. Zero means "not
 	// carried", as for every other field here.
 	fftAverages int
+	// crossover is radiod's CROSSOVER, which decides WHICH spectrum algorithm
+	// runs at this bin bandwidth. It travels with the bandwidth for the same
+	// reason the averaging does: a bandwidth that crosses the boundary without
+	// it would land on the wrong algorithm. Unlike the fields above, 0 is a
+	// meaningful value -- it means "always wideband" -- so sendCrossover, not a
+	// zero test, says whether it is carried.
+	crossover     float64
+	sendCrossover bool
 }
 
 // merge folds a newer request into a pending one.
@@ -60,6 +68,10 @@ func (u *spectrumUpdate) merge(next spectrumUpdate) {
 	prev := *u
 	*u = next
 	u.sendBinCount = prev.sendBinCount || next.sendBinCount
+	u.sendCrossover = prev.sendCrossover || next.sendCrossover
+	if !next.sendCrossover {
+		u.crossover = prev.crossover
+	}
 	if next.frequency == 0 {
 		u.frequency = prev.frequency
 	}

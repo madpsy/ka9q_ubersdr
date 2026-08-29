@@ -801,7 +801,14 @@ func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, got 
 		if session != nil {
 			session.noteSpectrumCommand()
 		}
-		if err := usm.radiod.UpdateSpectrumChannel(ssrc, want.frequency, want.binBW, want.binCount, m&mismatchBinCount != 0); err != nil {
+		// The crossover goes with it: radiod picks its algorithm from bin_bw
+		// against the crossover, so restating one without the other could put
+		// the channel on the path we did not choose.
+		crossover := radiodSpectrumCrossoverHz
+		if session != nil {
+			crossover = session.crossoverIntent()
+		}
+		if err := usm.radiod.UpdateSpectrumChannel(ssrc, want.frequency, want.binBW, want.binCount, m&mismatchBinCount != 0, crossover); err != nil {
 			log.Printf("ERROR: Failed to retry spectrum update for SSRC 0x%08x: %v", ssrc, err)
 		}
 	}

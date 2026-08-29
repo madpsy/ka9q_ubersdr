@@ -45,11 +45,6 @@ type RadiodController struct {
 	terminatedMu sync.Mutex
 	terminated   map[uint32]time.Time
 
-	// Bin count each live spectrum channel was created with, so an update can
-	// never ask for more than its buffer holds. See spectrumBinCeiling.
-	spectrumBinsMu sync.Mutex
-	spectrumBins   map[uint32]int
-
 	// Spacing between commands to one audio channel, so two of ours never land
 	// in the same radiod block and get one of them dropped. See
 	// radiod_audio_pacing.go.
@@ -641,7 +636,7 @@ func (rc *RadiodController) widebandAveragesFor(binBandwidth float64) int {
 }
 
 // buildCreateSpectrumCommand builds the packet that creates a spectrum channel.
-func buildCreateSpectrumCommand(frequency uint64, binCount int, binBandwidth float64, ssrc uint32, fftAverages int) []byte {
+func buildCreateSpectrumCommand(frequency uint64, binCount int, binBandwidth float64, ssrc uint32, fftAverages int, crossover float64) []byte {
 	buf := make([]byte, 0, 1500)
 
 	buf = append(buf, pktTypeCmd)
@@ -665,6 +660,13 @@ func buildCreateSpectrumCommand(frequency uint64, binCount int, binBandwidth flo
 	buf = encodeInt32(&buf, tagBinCount, uint32(binCount))
 	buf = encodeFloat(&buf, tagNoncoherentBinBw, float32(binBandwidth))
 
+	// CROSSOVER decides which of radiod's two spectrum algorithms runs: it uses
+	// the wideband one when bin_bw > crossover and the downconverter otherwise
+	// (upstream spectrum.c). Sent explicitly on every channel so the choice is
+	// ours; radiodSpectrumCrossoverHz is radiod's own default and preserves the
+	// behaviour of every caller that has no opinion.
+	buf = encodeFloat(&buf, tagCrossover, float32(crossover))
+
 	// SPECTRUM_AVG; see the bounds constants above. radiod defaults to 10.
 	buf = encodeInt32(&buf, tagSpectrumAvg, uint32(fftAverages))
 
@@ -683,7 +685,7 @@ func buildCreateSpectrumCommand(frequency uint64, binCount int, binBandwidth flo
 
 // CreateSpectrumChannel creates a new radiod spectrum channel with specified parameters
 // CRITICAL: Must send PRESET first to set demod_type, then override parameters
-func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64, binCount int, binBandwidth float64, ssrc uint32) error {
+func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64, binCount int, binBandwidth float64, ssrc uint32, crossover float64) error {
 	log.Printf("CreateSpectrumChannel called: name=%s, freq=%d, bins=%d, bw=%.1f, ssrc=0x%08x",
 		name, frequency, binCount, binBandwidth, ssrc)
 
@@ -693,84 +695,59 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 	rc.clearTerminated(ssrc)
 
 	// Send command
-	if err := rc.sendCommand(buildCreateSpectrumCommand(frequency, binCount, binBandwidth, ssrc, rc.spectrumAveragesFor(binBandwidth))); err != nil {
+	if err := rc.sendCommand(buildCreateSpectrumCommand(frequency, binCount, binBandwidth, ssrc, rc.spectrumAveragesFor(binBandwidth), crossover)); err != nil {
 		return fmt.Errorf("failed to send create spectrum command: %w", err)
 	}
-
-	rc.noteSpectrumBins(ssrc, binCount)
 
 	log.Printf("Spectrum channel created: SSRC 0x%08x, freq=%d Hz, bins=%d, bw=%.1f Hz (span %.1f Hz)",
 		ssrc, frequency, binCount, binBandwidth, float64(binCount)*binBandwidth)
 	return nil
 }
 
-// A radiod spectrum channel's bin_data buffer is sized once and never resized.
+// maxSpectrumBins bounds how many bins a spectrum channel may be asked for.
 //
-// ka9q-radio src/spectrum.c means to reallocate it whenever bin_count changes,
-// but the guard compares chan->spectrum.bin_count against a local that the
-// reinitialisation block a few lines earlier has already set to the same value,
-// so only its "buffer is NULL" arm can ever fire. Every later change leaves the
-// buffer at its original size while narrowband_poll and wideband_poll memset
-// and fill bin_count entries into it.
+// This used to be a per-SSRC ceiling recorded at channel creation, because
+// ka9q-radio sized chan->spectrum.bin_data once and never resized it: the guard
+// in src/spectrum.c compares bin_count against a local the reinitialisation
+// block has already synced to it, so only its "buffer is NULL" arm could fire,
+// and raising a live channel's bin count wrote past the end of a heap block.
+// radiod aborted with glibc's "corrupted size vs. prev_size in fastbins",
+// taking every user's audio with it.
 //
-// Asking a live channel for more bins than it was created with therefore writes
-// past the end of a heap block, and radiod aborts with glibc's "corrupted size
-// vs. prev_size in fastbins" -- taking every user's audio and waterfall with it,
-// not just the one that asked. Fewer bins is harmless: the buffer is merely
-// larger than needed.
+// ubersdr-radiod patches/0002-spectrum-bin-data-resize.patch fixes that guard,
+// so a bin count may now be raised as well as lowered and the creation count is
+// no longer a limit. The two images are built and pushed together; if that ever
+// stops being true, this is the coupling that breaks first.
 //
-// This is enforced here rather than in each caller because the consequence is
-// a dead receiver, and a future protocol has no way to know the rule exists.
-// Drop it if upstream fixes the guard and UPSTREAM_REF moves past the fix.
-func (rc *RadiodController) noteSpectrumBins(ssrc uint32, binCount int) {
-	if binCount <= 0 {
-		return
-	}
-	rc.spectrumBinsMu.Lock()
-	if rc.spectrumBins == nil {
-		rc.spectrumBins = make(map[uint32]int)
-	}
-	rc.spectrumBins[ssrc] = binCount
-	rc.spectrumBinsMu.Unlock()
-}
-
-// spectrumBinCeiling returns the largest bin count this SSRC's channel can
-// safely be asked for, or 0 when we did not create it and so cannot know.
-func (rc *RadiodController) spectrumBinCeiling(ssrc uint32) int {
-	rc.spectrumBinsMu.Lock()
-	defer rc.spectrumBinsMu.Unlock()
-	return rc.spectrumBins[ssrc]
-}
-
-// forgetSpectrumBins drops the record for a torn-down SSRC, so a later channel
-// on the same SSRC is measured against its own creation count.
-func (rc *RadiodController) forgetSpectrumBins(ssrc uint32) {
-	rc.spectrumBinsMu.Lock()
-	delete(rc.spectrumBins, ssrc)
-	rc.spectrumBinsMu.Unlock()
-}
+// What remains is the wire. Spectrum bins reach us as BIN_DATA (tag 96), a
+// float32 vector, so bin_count x 4 bytes rides in one UDP datagram every poll:
+// 4096 bins is 16 KB, about twelve IP fragments at a 1500-byte MTU, and losing
+// any one of them loses the whole frame. v2 has run 2048 bins (8 KB) in
+// production for a long time; this is one doubling past that and not more.
+const maxSpectrumBins = 4096
 
 // UpdateSpectrumChannel updates spectrum channel parameters (for zoom/pan)
 // binCount is needed to calculate filter edges when binBandwidth changes
 // If binCount changes, it will also be sent to radiod
-func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool) error {
-	// Never above what the channel was created with; see noteSpectrumBins.
-	if ceiling := rc.spectrumBinCeiling(ssrc); ceiling > 0 && binCount > ceiling {
-		log.Printf("radiod: refusing to raise SSRC 0x%08x from %d to %d spectrum bins -- "+
-			"radiod would overrun its bin_data buffer and abort; capping at %d",
-			ssrc, ceiling, binCount, ceiling)
-		binCount = ceiling
+func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool, crossover float64) error {
+	// Never more than one datagram's worth; see maxSpectrumBins.
+	if binCount > maxSpectrumBins {
+		log.Printf("radiod: capping SSRC 0x%08x at %d spectrum bins (asked for %d)",
+			ssrc, maxSpectrumBins, binCount)
+		binCount = maxSpectrumBins
 	}
 
 	// Paced rather than sent outright: radiod drops commands that arrive faster
 	// than it drains them, and where a channel ends up then depends on which of
 	// a burst happened to survive. See radiod_spectrum_pacing.go.
 	return rc.spectrumPacer().Submit(ssrc, spectrumUpdate{
-		frequency:    frequency,
-		binBandwidth: binBandwidth,
-		binCount:     binCount,
-		sendBinCount: sendBinCount,
-		fftAverages:  rc.spectrumAveragesFor(binBandwidth),
+		frequency:     frequency,
+		binBandwidth:  binBandwidth,
+		binCount:      binCount,
+		sendBinCount:  sendBinCount,
+		fftAverages:   rc.spectrumAveragesFor(binBandwidth),
+		crossover:     crossover,
+		sendCrossover: binBandwidth > 0,
 	})
 }
 
@@ -798,6 +775,10 @@ func buildUpdateSpectrumCommand(ssrc uint32, u spectrumUpdate) []byte {
 	// Add NONCOHERENT_BIN_BW (tag 93 = 0x5d) if changed
 	// No LOW_EDGE/HIGH_EDGE follows: radiod recomputes the spectrum filter from
 	// bin count and bin bandwidth on its own.  See CreateSpectrumChannel.
+	if u.sendCrossover {
+		buf = encodeFloat(&buf, tagCrossover, float32(u.crossover))
+	}
+
 	if u.binBandwidth > 0 {
 		buf = encodeFloat(&buf, tagNoncoherentBinBw, float32(u.binBandwidth))
 		// The averaging window scales with 1/bin_bw, so a zoom that changes the
@@ -1250,10 +1231,6 @@ func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
 	// send already queued behind cmdMu cannot slip past it and resurrect the
 	// channel. The terminate itself bypasses the check by going out raw.
 	rc.markTerminated(ssrc)
-
-	// The bin ceiling belonged to the channel being torn down; the next one on
-	// this SSRC gets its own. See noteSpectrumBins.
-	rc.forgetSpectrumBins(ssrc)
 
 	if err := rc.sendCommandRaw(buildTerminateCommand(ssrc)); err != nil {
 		log.Printf("Terminate for SSRC 0x%08x was NOT sent: %v", ssrc, err)

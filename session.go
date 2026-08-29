@@ -31,9 +31,9 @@ const fmSquelchEnabled = false
 // *RadiodController satisfies this interface; tests can inject a stub.
 type radiodController interface {
 	CreateChannelWithBandwidth(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int) error
-	CreateSpectrumChannel(name string, frequency uint64, binCount int, binBandwidth float64, ssrc uint32) error
+	CreateSpectrumChannel(name string, frequency uint64, binCount int, binBandwidth float64, ssrc uint32, crossover float64) error
 	TerminateChannel(name string, ssrc uint32) error
-	UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool) error
+	UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool, crossover float64) error
 	UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error
 	UpdateChannelWithAGC(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, agc *AGCParams) error
 	UpdateSquelch(ssrc uint32, squelchOpen, squelchClose float32) error
@@ -267,6 +267,16 @@ type Session struct {
 	radiodBinCount     int
 	radiodSpectrumAt   time.Time
 	spectrumSentAt     time.Time
+
+	// spectrumCrossover is radiod's CROSSOVER for this channel: which of its two
+	// spectrum algorithms runs. It is remembered because the resync watchdog
+	// re-sends the bin bandwidth, and a bandwidth restated against a stale
+	// crossover would land on the other algorithm.
+	//
+	// 0 is a meaningful value here -- it means "always wideband" -- so the
+	// separate flag, not a zero test, says whether anyone has an opinion.
+	spectrumCrossover    float64
+	spectrumCrossoverSet bool
 }
 
 // spectrumParamTolerance is how close two bin bandwidths must be to count as
@@ -311,6 +321,18 @@ func (s *Session) spectrumIntent() (frequency uint64, binBandwidth float64, binC
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Frequency, s.BinBandwidth, s.BinCount, s.spectrumSentAt
+}
+
+// crossoverIntent returns the CROSSOVER this session wants radiod to use, which
+// for anything that never expressed a preference is radiod's own default -- so
+// stating it explicitly changes nothing for them.
+func (s *Session) crossoverIntent() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.spectrumCrossoverSet {
+		return radiodSpectrumCrossoverHz
+	}
+	return s.spectrumCrossover
 }
 
 // radiodContradicts reports whether radiod is known to be running this channel
@@ -1047,7 +1069,7 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		// packet — which may well have been generated before radiod got round to
 		// creating the channel — is not read as radiod ignoring us.
 		session.spectrumSentAt = time.Now()
-		if err := sm.radiod.CreateSpectrumChannel(channelName, frequency, binCount, binBandwidth, ssrc); err != nil {
+		if err := sm.radiod.CreateSpectrumChannel(channelName, frequency, binCount, binBandwidth, ssrc, radiodSpectrumCrossoverHz); err != nil {
 			return nil, fmt.Errorf("failed to create radiod spectrum channel: %w", err)
 		}
 		sm.sessions[sessionID] = session
@@ -1133,7 +1155,7 @@ func (sm *SessionManager) subscribeToSharedChannel(session *Session) error {
 		}
 		def := sm.config.Spectrum.Default
 		sharedName := fmt.Sprintf("spectrum-shared-%08x", sharedSSRC)
-		if err := sm.radiod.CreateSpectrumChannel(sharedName, def.CenterFrequency, def.BinCount, def.BinBandwidth, sharedSSRC); err != nil {
+		if err := sm.radiod.CreateSpectrumChannel(sharedName, def.CenterFrequency, def.BinCount, def.BinBandwidth, sharedSSRC, radiodSpectrumCrossoverHz); err != nil {
 			return fmt.Errorf("failed to create shared radiod spectrum channel: %w", err)
 		}
 		sdc = &SharedDefaultChannel{
@@ -1161,7 +1183,27 @@ func (sm *SessionManager) subscribeToSharedChannel(session *Session) error {
 // If the session is currently a shared-channel subscriber and the new parameters
 // differ from the defaults, the session is transparently migrated to a private
 // radiod channel so that only this user sees the zoomed view.
+// crossoverUnchanged asks a spectrum update to leave the channel on whichever of
+// radiod's two algorithms it is already using. 0 cannot mean this -- it is how a
+// wideband request is expressed -- so the sentinel is negative.
+const crossoverUnchanged = -1.0
+
+// UpdateSpectrumSession updates a spectrum session's geometry, leaving radiod on
+// its default crossover -- which is what every caller but the WebSDR waterfall
+// wants, and is exactly the behaviour they had before CROSSOVER was sent at all.
 func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint64, binBandwidth float64, binCount int) error {
+	return sm.updateSpectrumSession(sessionID, frequency, binBandwidth, binCount, radiodSpectrumCrossoverHz, false)
+}
+
+// UpdateSpectrumSessionWithCrossover also chooses which of radiod's two spectrum
+// algorithms runs. See websdrSpectrumParams: at most zoom levels the
+// downconverter is far cheaper than the front-end-wide FFT, but reaching it
+// means a bin bandwidth radiod would otherwise route to the wideband path.
+func (sm *SessionManager) UpdateSpectrumSessionWithCrossover(sessionID string, frequency uint64, binBandwidth float64, binCount int, crossover float64) error {
+	return sm.updateSpectrumSession(sessionID, frequency, binBandwidth, binCount, crossover, true)
+}
+
+func (sm *SessionManager) updateSpectrumSession(sessionID string, frequency uint64, binBandwidth float64, binCount int, crossover float64, setCrossover bool) error {
 	session, ok := sm.GetSession(sessionID)
 	if !ok {
 		return fmt.Errorf("session not found: %s", sessionID)
@@ -1268,7 +1310,7 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 
 		// Create the private radiod channel.
 		privateName := fmt.Sprintf("spectrum-%s", sessionID[:8])
-		if err := sm.radiod.CreateSpectrumChannel(privateName, newFreq, newBinCount, newBinBW, privateSSRC); err != nil {
+		if err := sm.radiod.CreateSpectrumChannel(privateName, newFreq, newBinCount, newBinBW, privateSSRC, crossover); err != nil {
 			sm.mu.Unlock()
 			return fmt.Errorf("failed to create private spectrum channel during zoom: %w", err)
 		}
@@ -1293,6 +1335,10 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		session.radiodBinCount = 0
 		session.radiodSpectrumAt = time.Time{}
 		session.spectrumSentAt = time.Now()
+		if setCrossover {
+			session.spectrumCrossover = crossover
+			session.spectrumCrossoverSet = true
+		}
 		session.mu.Unlock()
 
 		sm.ssrcToSession[privateSSRC] = session
@@ -1327,6 +1373,10 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		session.BinCount = newBinCount
 		binCountChanged = true
 	}
+	if setCrossover {
+		session.spectrumCrossover = crossover
+		session.spectrumCrossoverSet = true
+	}
 	session.LastActive = time.Now()
 	session.mu.Unlock()
 
@@ -1339,7 +1389,14 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	// does not put it on the wire; the frequency always goes, because the clamp
 	// can have changed it when the caller did not.
 	session.noteSpectrumCommand()
-	if err := sm.radiod.UpdateSpectrumChannel(session.SSRC, newFreq, binBandwidth, session.BinCount, binCountChanged); err != nil {
+	// A caller with no opinion restates what this session already asked for, rather
+	// than radiod's default: a frequency-only sync must not move a channel off the
+	// algorithm its zoom chose. Same for the migration create above, which happens
+	// before this and reads the value the caller did supply.
+	if !setCrossover {
+		crossover = session.crossoverIntent()
+	}
+	if err := sm.radiod.UpdateSpectrumChannel(session.SSRC, newFreq, binBandwidth, session.BinCount, binCountChanged, crossover); err != nil {
 		return fmt.Errorf("failed to update radiod spectrum channel: %w", err)
 	}
 
@@ -1405,14 +1462,17 @@ func (sm *SessionManager) ReturnToSharedChannel(sessionID string) error {
 // This is used by KiwiSDR protocol to sync waterfall with audio frequency
 // Returns true if a spectrum session was found and updated, false otherwise
 func (sm *SessionManager) UpdateSpectrumSessionByUserID(userSessionID string, frequency uint64, binBandwidth float64) bool {
-	return sm.UpdateSpectrumSessionByUserIDWithBinCount(userSessionID, frequency, binBandwidth, 0)
+	// Negative crossover: this path syncs the waterfall to the audio frequency and
+	// has no view of its own, so it must not disturb which spectrum algorithm the
+	// session's zoom put it on.
+	return sm.UpdateSpectrumSessionByUserIDWithBinCount(userSessionID, frequency, binBandwidth, 0, crossoverUnchanged)
 }
 
 // UpdateSpectrumSessionByUserIDWithBinCount finds and updates the spectrum session for a given userSessionID
 // with optional bin count adjustment (0 = don't change)
 // This is used by KiwiSDR protocol to sync waterfall with audio frequency
 // Returns true if a spectrum session was found and updated, false otherwise
-func (sm *SessionManager) UpdateSpectrumSessionByUserIDWithBinCount(userSessionID string, frequency uint64, binBandwidth float64, binCount int) bool {
+func (sm *SessionManager) UpdateSpectrumSessionByUserIDWithBinCount(userSessionID string, frequency uint64, binBandwidth float64, binCount int, crossover float64) bool {
 	if userSessionID == "" {
 		return false
 	}
@@ -1433,7 +1493,12 @@ func (sm *SessionManager) UpdateSpectrumSessionByUserIDWithBinCount(userSessionI
 	}
 
 	// Update the spectrum session
-	err := sm.UpdateSpectrumSession(spectrumSessionID, frequency, binBandwidth, binCount)
+	var err error
+	if crossover < 0 {
+		err = sm.UpdateSpectrumSession(spectrumSessionID, frequency, binBandwidth, binCount)
+	} else {
+		err = sm.UpdateSpectrumSessionWithCrossover(spectrumSessionID, frequency, binBandwidth, binCount, crossover)
+	}
 	if err != nil {
 		log.Printf("KiwiSDR: UpdateSpectrumSession failed: %v", err)
 		return false

@@ -348,6 +348,10 @@ func (h *WebSDRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The vendored waterfall client, with its pan clamp switched on; see websdr_client_patch.go
 	case path == "/websdr-waterfall.js":
 		h.serveWaterfallJS(w, r)
+	// The page-level waterfall rate lives here and overrides the applet's after the
+	// first zoom; see websdrBaseJSPatches.
+	case path == "/websdr-base.js":
+		h.serveBaseJS(w, r)
 	default:
 		h.serveStaticFile(w, r)
 	}
@@ -753,6 +757,47 @@ func (c *websdrConn) applyParamCommand(text string) {
 	}
 }
 
+// websdrMaxPollDivisor bounds how far a client may slow its own polling.
+//
+// The same ceiling set_rate applies (user_spectrum_websocket.go), and for the
+// same reason: the poll is also the channel's keepalive. radiod reloads
+// spectrumLifetimeFrames -- 250 blocks, 5 s -- on every command, so at the 100 ms
+// poll period a divisor of 8 leaves a 5x margin. Something much larger would let
+// the channel reap itself between polls and the waterfall would stall.
+const websdrMaxPollDivisor = 8
+
+// applyPollDivisor gives the client the waterfall rate it asked for, by polling
+// radiod at that rate rather than by discarding rows afterwards.
+//
+// `slow` is what the client's speed selector means: send one row in every `slow`.
+// It was parsed into c.wfSlow and then read by nothing at all, so every WebSDR
+// client has been polling radiod at the full rate whatever it asked for -- and
+// each of those polls is a whole spectrum response. Above radiod's crossover
+// that response is an FFT over the entire front end (see
+// maxWidebandTransformPoints), so the rate is a straight multiplier on the most
+// expensive thing a waterfall client can cost.
+//
+// This applies only when the client has actually asked. A client that never
+// sends speed or slow keeps the rate it gets today, so nothing slows down on its
+// own; the parsed value is honoured, not imposed.
+//
+// Shared-channel sessions ignore the divisor by design -- one channel serves
+// every default-view client, so no one of them sets the pace. It takes effect if
+// a zoom or pan moves the session onto a private channel, which is also where the
+// cost is.
+func (c *websdrConn) applyPollDivisor(slow int) {
+	if c.session == nil {
+		return
+	}
+	if slow < 1 {
+		slow = 1
+	}
+	if slow > websdrMaxPollDivisor {
+		slow = websdrMaxPollDivisor
+	}
+	c.session.PollDivisor.Store(int32(slow))
+}
+
 func (c *websdrConn) applyWaterparamCommand(text string) {
 	idx := strings.Index(text, "?")
 	if idx < 0 {
@@ -806,6 +851,7 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 			reset = true
 		}
 	}
+	speedAsked := false
 	if v := vals.Get("speed"); v != "" {
 		n, _ := strconv.Atoi(v)
 		if n > 0 {
@@ -814,20 +860,26 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 				slow = 1
 			}
 			c.wfSlow = slow
+			speedAsked = true
 		}
 	}
 	if v := vals.Get("slow"); v != "" {
 		n, _ := strconv.Atoi(v)
 		if n > 0 {
 			c.wfSlow = n
+			speedAsked = true
 		}
 	}
+	slow := c.wfSlow
 	if v := vals.Get("scale"); v != "" {
 		c.wfScale, _ = strconv.Atoi(v)
 	}
 
 	if !reset {
 		c.mu.Unlock()
+		if speedAsked {
+			c.applyPollDivisor(slow)
+		}
 		return
 	}
 
@@ -902,14 +954,19 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 
 	c.mu.Unlock()
 
+	if speedAsked {
+		c.applyPollDivisor(slow)
+	}
+
 	// Call UpdateSpectrumSession outside the lock to avoid deadlock with
 	// streamWaterfall (which holds c.mu while draining SpectrumChan).
 	if sessionID != "" {
-		if err := c.handler.sessions.UpdateSpectrumSession(
+		if err := c.handler.sessions.UpdateSpectrumSessionWithCrossover(
 			sessionID,
 			uint64(view.CentreHz),
 			view.Req.BinBandwidth,
 			view.Req.BinCount,
+			view.Req.Crossover,
 		); err != nil {
 			log.Printf("WebSDR waterparam: UpdateSpectrumSession error: %v", err)
 		}
@@ -1124,7 +1181,7 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 		c.wfServedBinBW = view.Req.BinBandwidth
 		c.wfDisplayBins = view.Req.DisplayBins
 		c.mu.Unlock()
-		_ = h.sessions.UpdateSpectrumSession(session.ID, uint64(view.CentreHz), view.Req.BinBandwidth, view.Req.BinCount)
+		_ = h.sessions.UpdateSpectrumSessionWithCrossover(session.ID, uint64(view.CentreHz), view.Req.BinBandwidth, view.Req.BinCount, view.Req.Crossover)
 	}
 
 	defer func() {
@@ -2461,7 +2518,13 @@ func (h *WebSDRHandler) handleIndexHTML(w http.ResponseWriter, r *http.Request) 
 	}
 
 	head := expandSSI("websdr-head.html")
-	controls := expandSSI("websdr-controls.html")
+	controlsHTML, missedControls := websdrPatchControlsHTML([]byte(expandSSI("websdr-controls.html")))
+	if len(missedControls) > 0 {
+		websdrControlsHTMLWarnOnce.Do(func() {
+			log.Printf("WebSDR: websdr-controls.html not patched (%v); the Speed selector will disagree with the waterfall", missedControls)
+		})
+	}
+	controls := string(controlsHTML)
 
 	// Get the public URL for the UberSDR frontend link.
 	publicURL := cfg.InstanceReporting.ConstructPublicURL()

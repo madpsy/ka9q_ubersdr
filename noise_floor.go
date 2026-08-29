@@ -407,6 +407,7 @@ func (nfm *NoiseFloorMonitor) Start() error {
 		wbBins,
 		wbBinBW,
 		wideBandSSRC,
+		radiodSpectrumCrossoverHz, // no opinion: radiod's own default
 	); err != nil {
 		return fmt.Errorf("failed to create wide-band spectrum channel: %w", err)
 	}
@@ -479,6 +480,7 @@ func (nfm *NoiseFloorMonitor) Start() error {
 			band.BinCount,
 			band.BinBandwidth,
 			ssrc,
+			radiodSpectrumCrossoverHz, // no opinion: radiod's own default
 		); err != nil {
 			return fmt.Errorf("failed to create spectrum channel for %s: %w", band.Name, err)
 		}
@@ -1690,6 +1692,7 @@ func (nfm *NoiseFloorMonitor) reconnectBand(bandName string, bs *BandSpectrum) e
 		bs.Band.BinCount,
 		bs.Band.BinBandwidth,
 		bs.SSRC,
+		radiodSpectrumCrossoverHz, // no opinion: radiod's own default
 	); err != nil {
 		return fmt.Errorf("failed to recreate spectrum channel: %w", err)
 	}

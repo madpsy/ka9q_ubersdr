@@ -336,19 +336,28 @@ type websdrSpectrumRequest struct {
 	BinCount     int     // bins to request
 	DisplayBinBW float64 // Hz per bin the client's axis assumes
 	DisplayBins  int     // the client's pixel width
+
+	// Crossover is radiod's CROSSOVER for this request: the bin bandwidth above
+	// which it uses the wideband algorithm. Sent explicitly rather than left at
+	// radiod's 200 Hz default so which path it takes is our decision and not a
+	// coincidence of where the bin bandwidth landed. BinBandwidth for a
+	// narrowband request (radiod tests rbw > crossover, so equal is narrowband);
+	// 0 for a wideband one, which nothing can be at or below.
+	Crossover float64
 }
 
 // websdrSpectrumParams chooses radiod parameters for a view.
 //
-// Below radiod's crossover the narrowband path serves the full display width cheaply, so
-// it is used at full width with the bandwidth rounded up onto radiodBinBandwidthLadder.
-// This is what the old code could not reach: it believed 500 Hz was a floor and halved
-// the bin count instead, drawing 128 bins across 1024 pixels at full zoom.
+// Narrowband wherever it is the cheaper path, which is most of the ladder: its cost is the
+// span the client is looking at, while the wideband path's is set by the front end and is
+// the same whether the view is 30 MHz or 30 kHz. See websdrNarrowbandMaxBinBW for the
+// measurements behind that, and radiodNarrowbandFor for the geometry.
 //
-// Above the crossover the only lever is the bin count, because the bandwidth is pinned to
-// the span the client draws. Halve it until the wideband FFT fits websdrMaxWidebandFFT --
-// the same trade the old code made, now made against radiod's actual cost rather than an
-// invented limit.
+// Otherwise wideband, where the only lever is the bin count, because the bandwidth is
+// pinned to the span the client draws. Halve it until the FFT fits websdrMaxWidebandFFT.
+// That trade costs resolution -- it is what pinned three zoom levels to the same 1831 Hz
+// per bin, so zooming in magnified the picture without adding to it -- which is why it is
+// now the fallback rather than the rule.
 func websdrSpectrumParams(visibleBWHz float64, wfWidth int, samprate int) websdrSpectrumRequest {
 	if wfWidth < 1 {
 		wfWidth = 1
@@ -358,20 +367,28 @@ func websdrSpectrumParams(visibleBWHz float64, wfWidth int, samprate int) websdr
 		DisplayBinBW: visibleBWHz / float64(wfWidth),
 	}
 
-	if req.DisplayBinBW <= radiodSpectrumCrossoverHz {
-		req.BinCount = wfWidth
-		req.BinBandwidth = radiodRoundUpBinBW(req.DisplayBinBW)
-		return req
+	// Both candidates, then whichever costs radiod less. Wideband first: bin_count x
+	// bin_bw must stay equal to the visible span, so trading bins for bandwidth is the
+	// only way to shorten the transform.
+	wideBins := wfWidth
+	for wideBins > 1 && samprate > 0 && float64(samprate)/(visibleBWHz/float64(wideBins)) > websdrMaxWidebandFFT {
+		wideBins /= 2
+	}
+	wideBinBW := visibleBWHz / float64(wideBins)
+
+	if binBW, bins, ok := radiodNarrowbandFor(visibleBWHz, req.DisplayBinBW); ok {
+		narrow := radiodNarrowbandPointsPerSec(float64(bins) * binBW)
+		if narrow < radiodWidebandPointsPerSec(wideBinBW, samprate) {
+			req.BinBandwidth = binBW
+			req.BinCount = bins
+			req.Crossover = binBW // rbw > crossover is wideband, so equal is narrowband
+			return req
+		}
 	}
 
-	// Wideband. bin_count x bin_bw must stay equal to the visible span, so trading bins
-	// for bandwidth is the only way to shorten the transform.
-	bins := wfWidth
-	for bins > 1 && samprate > 0 && float64(samprate)/(visibleBWHz/float64(bins)) > websdrMaxWidebandFFT {
-		bins /= 2
-	}
-	req.BinCount = bins
-	req.BinBandwidth = visibleBWHz / float64(bins)
+	req.BinCount = wideBins
+	req.BinBandwidth = wideBinBW
+	req.Crossover = 0 // nothing is at or below 0, so radiod always picks wideband
 	return req
 }
 

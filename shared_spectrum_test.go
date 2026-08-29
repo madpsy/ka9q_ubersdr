@@ -17,13 +17,18 @@ type stubRadiod struct {
 	terminateCalls int
 	lastCreateSSRC uint32
 	lastTermSSRC   uint32
+	// Recorded so a test can check which of radiod's two spectrum algorithms a
+	// channel was asked for; see websdrSpectrumParams.
+	lastCreateCrossover float64
+	lastUpdateCrossover float64
 }
 
-func (r *stubRadiod) CreateSpectrumChannel(name string, freq uint64, binCount int, binBW float64, ssrc uint32) error {
+func (r *stubRadiod) CreateSpectrumChannel(name string, freq uint64, binCount int, binBW float64, ssrc uint32, crossover float64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.createCalls++
 	r.lastCreateSSRC = ssrc
+	r.lastCreateCrossover = crossover
 	return nil
 }
 
@@ -38,7 +43,10 @@ func (r *stubRadiod) TerminateChannel(name string, ssrc uint32) error {
 func (r *stubRadiod) CreateChannelWithBandwidth(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int) error {
 	return nil
 }
-func (r *stubRadiod) UpdateSpectrumChannel(ssrc uint32, freq uint64, binBW float64, binCount int, binCountChanged bool) error {
+func (r *stubRadiod) UpdateSpectrumChannel(ssrc uint32, freq uint64, binBW float64, binCount int, binCountChanged bool, crossover float64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lastUpdateCrossover = crossover
 	return nil
 }
 func (r *stubRadiod) UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error {

@@ -121,6 +121,7 @@ const (
 	// upstream: same number, same meaning, so the name is kept.
 	tagNoncoherentBinBw = 93 // NONCOHERENT_BIN_BW / RESOLUTION_BW
 	tagBinCount         = 94 // BIN_COUNT
+	tagCrossover        = 95 // CROSSOVER
 	tagBinData          = 96 // BIN_DATA
 
 	// SPECTRUM_AVG is how many FFTs radiod averages into each spectrum response.

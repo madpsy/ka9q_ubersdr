@@ -84,6 +84,17 @@ RUN apt-get update && apt-get install -y \
     && cp /tmp/wsjtx-extract/usr/bin/wsprd /usr/bin/wsprd \
     && chmod +x /usr/bin/jt9 /usr/bin/wsprd \
     && rm -rf /tmp/wsjtx.deb /tmp/wsjtx-extract \
+    # M0LTE wsprd build, installed alongside stock wsprd and used when
+    # decoder.wsprd_m0lte_mode is enabled
+    && if [ "${TARGETARCH}" = "arm64" ]; then \
+         wget https://github.com/M0LTE/wsjtx/releases/download/v3.0.2-m0lte-b411a33/wsjtx-3.0.2-m0lte-b411a33-linux-aarch64.deb -O /tmp/wsprd-m0lte.deb; \
+       else \
+         wget https://github.com/M0LTE/wsjtx/releases/download/v3.0.2-m0lte-b411a33/wsjtx-3.0.2-m0lte-b411a33-linux-x86_64.deb -O /tmp/wsprd-m0lte.deb; \
+       fi \
+    && dpkg-deb -x /tmp/wsprd-m0lte.deb /tmp/wsprd-m0lte-extract \
+    && cp /tmp/wsprd-m0lte-extract/usr/bin/wsprd /usr/bin/wsprd-m0lte \
+    && chmod +x /usr/bin/wsprd-m0lte \
+    && rm -rf /tmp/wsprd-m0lte.deb /tmp/wsprd-m0lte-extract \
     && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode_${TARGETARCH} -O /usr/local/bin/jt9_decode \
     && chmod +x /usr/local/bin/jt9_decode \
     && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/cw-decoder_${TARGETARCH} -O /usr/local/bin/cw-decoder \

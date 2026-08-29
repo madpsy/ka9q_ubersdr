@@ -171,6 +171,7 @@ type DecoderConfig struct {
 	// Binary paths
 	JT9Path        string `yaml:"jt9_path"`         // Path to jt9 binary (for FT8/FT4)
 	WSPRDPath      string `yaml:"wsprd_path"`       // Path to wsprd binary (for WSPR)
+	WSPRDM0LTEPath string `yaml:"wsprd_m0lte_path"` // Path to the M0LTE wsprd build (used when wsprd_m0lte_mode is true)
 	JS8Path        string `yaml:"js8_path"`         // Path to js8 binary (for JS8)
 	JT9WrapperPath string `yaml:"jt9_wrapper_path"` // Path to jt9_wrapper binary (for FT2)
 
@@ -178,6 +179,9 @@ type DecoderConfig struct {
 	IncludeDeadTime           bool `yaml:"include_dead_time"`            // Record entire cycle including dead time
 	ClampExecutionTime        bool `yaml:"clamp_execution_time"`         // Kill decoder if it exceeds cycle time (default: false)
 	MaxConcurrentWSPRDecoders int  `yaml:"max_concurrent_wspr_decoders"` // Max simultaneous wsprd processes (0 = unlimited, default: 0)
+
+	// WSPR decoder variant
+	WSPRDM0LTEMode bool `yaml:"wsprd_m0lte_mode"` // Use the M0LTE wsprd build and its flag set (default: false)
 
 	// Receiver information
 	ReceiverCallsign string `yaml:"receiver_callsign"`
@@ -222,6 +226,22 @@ type DecoderConfig struct {
 }
 
 // Validate checks if the decoder configuration is valid
+// wsprdM0LTEDefaultPath is where the container image installs the M0LTE wsprd
+// build; it sits alongside stock wsprd so both are always available.
+const wsprdM0LTEDefaultPath = "/usr/bin/wsprd-m0lte"
+
+// WSPRDBinary returns the wsprd binary to invoke for WSPR decoding. In M0LTE
+// mode this is a different build entirely, not stock wsprd with extra flags.
+func (dc *DecoderConfig) WSPRDBinary() string {
+	if !dc.WSPRDM0LTEMode {
+		return dc.WSPRDPath
+	}
+	if dc.WSPRDM0LTEPath != "" {
+		return dc.WSPRDM0LTEPath
+	}
+	return wsprdM0LTEDefaultPath
+}
+
 func (dc *DecoderConfig) Validate() error {
 	if !dc.Enabled {
 		return nil // Not enabled, no validation needed
@@ -262,7 +282,7 @@ func (dc *DecoderConfig) Validate() error {
 	if needsJT9 && dc.JT9Path == "" {
 		return fmt.Errorf("jt9_path required for FT8/FT4 decoding")
 	}
-	if needsWSPRD && dc.WSPRDPath == "" {
+	if needsWSPRD && dc.WSPRDBinary() == "" {
 		return fmt.Errorf("wsprd_path required for WSPR decoding")
 	}
 	if needsJS8 && dc.JS8Path == "" {

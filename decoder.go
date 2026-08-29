@@ -130,6 +130,11 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		log.Printf("WSPR decoder concurrency: unlimited (all wsprd processes spawn simultaneously)")
 	}
 
+	if config.WSPRDM0LTEMode {
+		log.Printf("WSPR decoder: M0LTE wsprd mode enabled — using %s (fixed -C %d, per-band depth ignored)",
+			config.WSPRDBinary(), wsprdM0LTECycles)
+	}
+
 	md := &MultiDecoder{
 		config:            config,
 		radiod:            radiod,

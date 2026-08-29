@@ -14363,6 +14363,13 @@ function resetStationIdColor() {
             wsprdPathField.appendChild(wsprdSmall);
             globalSection.appendChild(wsprdPathField);
 
+            const wsprdM0LTEPathField = createConfigField('WSPRD M0LTE Path', 'text', currentDecoderConfig.wsprd_m0lte_path || '/usr/bin/wsprd-m0lte', 'wsprd_m0lte_path');
+            wsprdM0LTEPathField.querySelector('input').placeholder = '/usr/bin/wsprd-m0lte';
+            const wsprdM0LTEPathSmall = document.createElement('small');
+            wsprdM0LTEPathSmall.textContent = 'Path to the M0LTE wsprd build, used only when WSPRD M0LTE Mode is enabled below';
+            wsprdM0LTEPathField.appendChild(wsprdM0LTEPathSmall);
+            globalSection.appendChild(wsprdM0LTEPathField);
+
             const js8PathField = createConfigField('JS8 Binary Path', 'text', currentDecoderConfig.js8_path || '/usr/local/bin/js8', 'js8_path');
             js8PathField.querySelector('input').placeholder = '/usr/local/bin/js8';
             const js8Small = document.createElement('small');
@@ -14398,6 +14405,9 @@ function resetStationIdColor() {
             maxWSPRSmall.textContent = '0 = unlimited (all wsprd processes spawn at once). Set to 2–4 to limit concurrent wsprd processes on CPU-constrained systems. All WSPR bands trigger at the same 2-minute boundary; queued decodes are not discarded.';
             maxWSPRField.appendChild(maxWSPRSmall);
             globalSection.appendChild(maxWSPRField);
+
+            const wsprdM0LTEField = createConfigField('WSPRD M0LTE Mode', 'checkbox', currentDecoderConfig.wsprd_m0lte_mode || false, 'wsprd_m0lte_mode', 'Decode WSPR with the M0LTE wsprd build and its flag set (fixed 500 decode cycles \u2014 the per-band WSPR depth is ignored). Uses the M0LTE wsprd path above; both binaries ship in the container image.');
+            globalSection.appendChild(wsprdM0LTEField);
 
             container.appendChild(globalSection);
 

@@ -150,6 +150,34 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 	return outputFile, logFile, executionTime, nil
 }
 
+// wsprdM0LTECycles is the -C value used in M0LTE mode. It replaces the
+// per-band depth, so every WSPR band decodes with the same cycle budget
+// regardless of what the band config asks for.
+const wsprdM0LTECycles = 500
+
+// wsprdM0LTEArgs builds the argument list for the M0LTE wsprd build. dataDir
+// is the band working directory, which is also the process working directory,
+// so hashtable.txt and wspr_spots.txt land where the parser expects them.
+func wsprdM0LTEArgs(dataDir, wavFile string, frequency uint64) []string {
+	return []string{
+		"-C", fmt.Sprintf("%d", wsprdM0LTECycles),
+		"-o", "4",
+		"-d",
+		"-N", "20",
+		"-n", "a",
+		"-X", "1",
+		"-A",
+		"-S", "0,-1",
+		"-Y", "4",
+		"-P", "1",
+		"-G",
+		"-r",
+		"-a", dataDir,
+		"-f", fmt.Sprintf("%.6f", float64(frequency)/1e6),
+		wavFile,
+	}
+}
+
 // buildDecoderCommand builds the command to execute the decoder
 func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string, frequency uint64, workDir, logFile string, depth int) (*exec.Cmd, *os.File) {
 	// Build arguments by replacing placeholders
@@ -162,13 +190,19 @@ func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string,
 		args[i] = arg
 	}
 
+	// The M0LTE wsprd build takes a different flag set entirely, so its
+	// arguments replace the mode registry's rather than extending them.
+	if modeInfo.DecoderCommand == "wsprd" && ds.config.WSPRDM0LTEMode {
+		args = wsprdM0LTEArgs(workDir, wavFile, frequency)
+	}
+
 	// Get the binary path from config
 	var binaryPath string
 	switch modeInfo.DecoderCommand {
 	case "jt9":
 		binaryPath = ds.config.JT9Path
 	case "wsprd":
-		binaryPath = ds.config.WSPRDPath
+		binaryPath = ds.config.WSPRDBinary()
 	case "jt9_wrapper":
 		binaryPath = ds.config.JT9WrapperPath
 	default:
@@ -242,8 +276,11 @@ func CheckDecoderAvailability(config *DecoderConfig, modes []DecoderMode) error 
 			binaryPath = config.JT9Path
 			binaryName = "jt9"
 		case ModeWSPR:
-			binaryPath = config.WSPRDPath
+			binaryPath = config.WSPRDBinary()
 			binaryName = "wsprd"
+			if config.WSPRDM0LTEMode {
+				binaryName = "wsprd (M0LTE build)"
+			}
 		default:
 			continue
 		}

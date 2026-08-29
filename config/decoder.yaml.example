@@ -12,6 +12,7 @@ decoder:
   # Decoder binary paths (absolute paths recommended)
   jt9_path: "/usr/bin/jt9"              # Path to jt9 binary (for FT8/FT4)
   wsprd_path: "/usr/bin/wsprd"          # Path to wsprd binary (for WSPR)
+  wsprd_m0lte_path: "/usr/bin/wsprd-m0lte" # Path to the M0LTE wsprd build (only used when wsprd_m0lte_mode is true)
   js8_path: "/usr/bin/js8"              # Path to js8 binary (for JS8)
   jt9_wrapper_path: "/usr/local/bin/jt9_decode" # Path to jt9_decode wrapper binary
 
@@ -36,6 +37,16 @@ decoder:
                                    # they all launch at once and compete for CPU. Queued goroutines run as slots
                                    # free — no decodes are discarded.
                                    # Recommended: 0 (unlimited) or 2-4 for CPU-constrained systems.
+
+  # M0LTE wsprd mode
+  wsprd_m0lte_mode: false          # false (default): call wsprd_path (stock wsprd) as
+                                   #   wsprd -f <dial MHz> -C <band depth> -w <file.wav>
+                                   # true: call wsprd_m0lte_path (the M0LTE build) as
+                                   #   wsprd-m0lte -C 500 -o 4 -d -N 20 -n a -X 1 -A -S 0,-1 -Y 4 -P 1 -G -r \
+                                   #               -a <band work dir> -f <dial MHz> <file.wav>
+                                   # In M0LTE mode the cycle count is fixed at 500 and the per-band
+                                   # "depth" setting is ignored. Both binaries are installed in the
+                                   # container image, so this is just a switch between them.
 
   # Receiver information (required for reporting)
   receiver_callsign: "N0CALL"

@@ -29,6 +29,12 @@ type RadiodController struct {
 	// would clamp that to 1 and silently give the noisiest setting.
 	spectrumFFTAverages int
 
+	// frontendSamprate is the front end's sample rate, which is what decides how
+	// expensive radiod's wideband spectrum algorithm is: setup_wideband() takes
+	// fft_n = samprate / bin_bw. Zero means "not configured", in which case
+	// spectrumAveragesFor leaves the wideband side alone.
+	frontendSamprate int
+
 	// Rate limit for spectrum retune commands, built on first use so that a
 	// zero-value controller still works. See radiod_spectrum_pacing.go.
 	pacerOnce sync.Once
@@ -67,6 +73,19 @@ func (rc *RadiodController) SetSpectrumFFTAverages(n int) {
 		n = maxSpectrumFFTAverages
 	}
 	rc.spectrumFFTAverages = n
+}
+
+// SetFrontendSamprate records the front end's sample rate for spectrumAveragesFor.
+//
+// Taken from ReceiverConfig.Samprate() rather than from a status packet so it is
+// known before the first channel is created, and so it is the same number the
+// waterfall geometry is built from (websdr_scale.go). receiver_span.go already
+// warns if radiod reports a different one.
+func (rc *RadiodController) SetFrontendSamprate(hz int) {
+	if hz < 0 {
+		hz = 0
+	}
+	rc.frontendSamprate = hz
 }
 
 // fftAverages returns the configured SPECTRUM_AVG, defaulting if never set.
@@ -534,19 +553,67 @@ const (
 // changes -- 10 Hz/bin with four averages is already only 0.4 s.
 const maxSpectrumAveragingWindow = 0.5 // seconds
 
+// maxWidebandTransformPoints bounds the transform work one wideband spectrum
+// response may cost.
+//
+// radiod has two spectrum algorithms and the bin bandwidth picks between them.
+// Above the crossover it uses the wideband one, and src/spectrum.c
+// setup_wideband() sizes that from the FRONT END, not from the view:
+//
+//	fft_n = frontend samprate / bin_bw
+//
+// bin_count does not appear. So a 469 kHz view at 458 Hz/bin on a 129.6 Msps
+// receiver makes radiod transform 283,116 points and keep 1,024 of them, and
+// wideband_poll() does that fft_avg times per response. The length doubles with
+// every zoom step, without limit -- setup_wideband's own comment says "should
+// limit to a sane value" and then does not.
+//
+// Measured on a 129.6 Msps receiver, one websdr client per row, four averages
+// at a 10 Hz poll:
+//
+//	view       bin_bw    fft_n     thread CPU
+//	3.75 MHz   3662 Hz    35,389        12.0%
+//	937 kHz     916 Hz   141,558        46.9%
+//	469 kHz     458 Hz   283,116        97.2%
+//
+// which is 8.6e-5 %% per (fft_n x fft_avg) point across all three. This budget is
+// 2^18 points, a little above what the top row already costs, so the shallow
+// views that are affordable today keep all their averaging and only the deep ones
+// give it up.
+//
+// Averaging is the right thing to trade there. It is a plain multiplier on the
+// wideband cost, and at 458 Hz/bin four averages span 8.7 ms of a 100 ms frame
+// interval -- it buys a little smoothness, not the frequency resolution or the
+// span, both of which are untouched by this. radiod normalises the accumulator by
+// fft_avg (gain = 2/(fft_avg * fft_n * fft_n)), so the levels do not move either;
+// only the variance grows.
+//
+// It does NOT fix the underlying waste -- 99.6%% of that transform is still
+// discarded -- it just bounds it. Asking radiod for a bin bandwidth on the
+// narrowband side of the crossover is the real repair; see websdrSpectrumParams.
+const maxWidebandTransformPoints = 1 << 18
+
 // spectrumAveragesFor returns the SPECTRUM_AVG to use at a given bin bandwidth:
 // the configured value, reduced where it would otherwise average over more than
-// maxSpectrumAveragingWindow of signal.
+// maxSpectrumAveragingWindow of signal, or cost more than
+// maxWidebandTransformPoints of transform.
 //
 // The window is computed as fft_avg/bin_bw, which assumes radiod's spectrum
 // overlap is zero. Any overlap makes the real window shorter, so this errs
 // toward responsiveness rather than toward the lag it exists to prevent.
+//
+// The two limits bite at opposite ends -- the window at deep zoom below the
+// crossover, the transform budget at deep zoom above it -- so neither can be
+// dropped in favour of the other.
 func (rc *RadiodController) spectrumAveragesFor(binBandwidth float64) int {
 	configured := rc.fftAverages()
 	if binBandwidth <= 0 {
 		return configured
 	}
 	allowed := int(maxSpectrumAveragingWindow * binBandwidth)
+	if n := rc.widebandAveragesFor(binBandwidth); n < allowed {
+		allowed = n
+	}
 	if allowed >= configured {
 		return configured
 	}
@@ -554,6 +621,23 @@ func (rc *RadiodController) spectrumAveragesFor(binBandwidth float64) int {
 		return minSpectrumFFTAverages
 	}
 	return allowed
+}
+
+// widebandAveragesFor returns how many averages maxWidebandTransformPoints
+// affords at a bin bandwidth, or configured (i.e. no opinion) when this is not a
+// wideband request or the front end sample rate was never set.
+func (rc *RadiodController) widebandAveragesFor(binBandwidth float64) int {
+	configured := rc.fftAverages()
+	if rc.frontendSamprate <= 0 || binBandwidth <= radiodSpectrumCrossoverHz {
+		// At or below the crossover radiod downconverts instead, and fft_n is
+		// then about the bin count -- the front end's rate does not enter it.
+		return configured
+	}
+	fftN := math.Round(float64(rc.frontendSamprate) / binBandwidth)
+	if fftN < 1 {
+		return configured
+	}
+	return int(maxWidebandTransformPoints / fftN)
 }
 
 // buildCreateSpectrumCommand builds the packet that creates a spectrum channel.

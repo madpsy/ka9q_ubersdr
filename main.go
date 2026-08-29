@@ -728,6 +728,11 @@ func main() {
 	// spectrum_fft_averages in config.yaml.example. Already clamped by LoadConfig.
 	radiod.SetSpectrumFFTAverages(config.Spectrum.FFTAverages)
 
+	// The front end rate decides how long radiod's wideband spectrum FFT is
+	// (fft_n = samprate / bin_bw), which is what the averaging budget in
+	// spectrumAveragesFor is spent against.
+	radiod.SetFrontendSamprate(config.Receiver.Samprate())
+
 	// Initialize GeoIP service (internal use only, admin API access)
 	// Must be initialized BEFORE SessionManager so it can be passed to it
 	var geoIPService *GeoIPService

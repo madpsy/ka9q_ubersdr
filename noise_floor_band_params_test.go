@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,7 +28,7 @@ func TestNoiseFloorBandParamsAlwaysLandsOnTheDownconverter(t *testing.T) {
 		{"tiny", 10000000, 10001000},
 	}
 	for _, r := range ranges {
-		p, err := noiseFloorBandParamsFor(r.name, r.start, r.end, 1)
+		p, err := noiseFloorBandParamsFor(r.name, r.start, r.end, noiseFloorFit{Scale: 1})
 		if err != nil {
 			t.Errorf("%s: %v", r.name, err)
 			continue
@@ -68,7 +70,7 @@ func TestNoiseFloorBandParamsAlwaysLandsOnTheDownconverter(t *testing.T) {
 func TestNoiseFloorBandParamsAgreesWithTheDefaults(t *testing.T) {
 	cfg := loadConfigForTest(t, "")
 	for _, b := range cfg.NoiseFloor.Bands {
-		p, err := noiseFloorBandParamsFor(b.Name, b.Start, b.End, 1)
+		p, err := noiseFloorBandParamsFor(b.Name, b.Start, b.End, noiseFloorFit{Scale: 1})
 		if err != nil {
 			t.Errorf("%s: %v", b.Name, err)
 			continue
@@ -83,10 +85,10 @@ func TestNoiseFloorBandParamsAgreesWithTheDefaults(t *testing.T) {
 // A range too wide to cover below the crossover within one datagram must say so rather
 // than quietly hand back something that costs a core.
 func TestNoiseFloorBandParamsRefusesRangesItCannotSize(t *testing.T) {
-	if _, err := noiseFloorBandParamsFor("huge", 1_000_000, 6_000_000, 1); err == nil {
+	if _, err := noiseFloorBandParamsFor("huge", 1_000_000, 6_000_000, noiseFloorFit{Scale: 1}); err == nil {
 		t.Error("a 5 MHz range was accepted; it cannot be covered at 200 Hz/bin within the bin limit")
 	}
-	if _, err := noiseFloorBandParamsFor("backwards", 7_300_000, 7_000_000, 1); err == nil {
+	if _, err := noiseFloorBandParamsFor("backwards", 7_300_000, 7_000_000, noiseFloorFit{Scale: 1}); err == nil {
 		t.Error("end below start was accepted")
 	}
 }
@@ -438,5 +440,89 @@ func TestNoiseFloorEstimatesAreCalibrated(t *testing.T) {
 	if want := noiseFloorEstimatedCPUPct(200_000, 1); plain.Bands[0].EstimatedCPUPct != want {
 		t.Errorf("unmeasured receiver: estimate %.3f%%, want the raw model %.3f%%",
 			plain.Bands[0].EstimatedCPUPct, want)
+	}
+}
+
+// bandCosts builds report rows from (delivered span, measured %) pairs, all on the
+// downconverter, so a fit can be exercised without a radiod.
+func bandCosts(t *testing.T, pairs [][2]float64) []noiseFloorBandCost {
+	t.Helper()
+	rows := make([]noiseFloorBandCost, 0, len(pairs))
+	for i, p := range pairs {
+		m := p[1]
+		bw := 200.0
+		if p[0] < 0.01e6 {
+			bw = 5 // the 2200m end of the ladder
+		}
+		rows = append(rows, noiseFloorBandCost{
+			Name: fmt.Sprintf("b%d", i), Start: 1_000_000, End: 1_000_000 + uint64(p[0]),
+			SpanHz: uint64(p[0]), BinCount: int(p[0] / bw), BinBandwidth: bw, MeasuredCPUPct: &m,
+		})
+	}
+	return rows
+}
+
+// A receiver whose residuals have a shape the scale factor cannot express gets both
+// terms fitted to it.
+//
+// These are real measurements from a receiver reporting 131% of the modelled cost. Under
+// a single scale factor every band below 100 kHz came out ~0.2% high and every band above
+// 350 kHz ~0.3% low: its per-channel overhead is a smaller fraction of its per-MHz cost
+// than the reference machine's, which no scale factor can fix.
+func TestNoiseFloorFitsBothTermsWhenTheShapeIsWrong(t *testing.T) {
+	rows := bandCosts(t, [][2]float64{
+		{2_500, 0.50}, {7_000, 0.57}, {200_000, 1.97}, {500_000, 4.42}, {200_000, 1.88},
+		{200_000, 1.85}, {50_000, 0.73}, {350_000, 3.52}, {100_000, 1.07}, {450_000, 4.10},
+		{100_000, 1.10}, {300_000, 2.67},
+	})
+	fit := noiseFloorFitFor(rows, noiseFloorCalibrationMinAveragedPct)
+	if !fit.TwoTerm {
+		t.Fatalf("fell back to a scale factor of %.3f on 12 well-spread bands", fit.Scale)
+	}
+	if fit.Bands != len(rows) {
+		t.Errorf("fitted over %d bands, want all %d", fit.Bands, len(rows))
+	}
+
+	// It must beat the scale factor on the very measurements that motivated it.
+	var twoTerm, scaled float64
+	scaleOnly := noiseFloorFit{Scale: fit.Scale}
+	for _, r := range rows {
+		delivered := float64(r.BinCount) * r.BinBandwidth
+		d := fit.estimate(delivered) - *r.MeasuredCPUPct
+		twoTerm += d * d
+		d = scaleOnly.estimate(delivered) - *r.MeasuredCPUPct
+		scaled += d * d
+	}
+	if twoTerm >= scaled {
+		t.Errorf("two-term residual %.4f is no better than the scale factor's %.4f", twoTerm, scaled)
+	}
+	// The narrow end is where the scale factor was worst, so it is where the fit has
+	// to earn its place: 50 kHz measured 0.73%, scaling predicted 0.92%.
+	if got := fit.estimate(50_000); math.Abs(got-0.73) > 0.1 {
+		t.Errorf("50 kHz band: fitted estimate %.2f%%, measured 0.73%%", got)
+	}
+}
+
+// ...and a receiver that cannot support the extra parameter keeps the scale factor.
+//
+// Five usable bands, all between 200 and 500 kHz: the intercept is an extrapolation
+// well outside the measurements, and fitting it made the predictions worse.
+func TestNoiseFloorKeepsScaleWhenTheFitIsUnsupported(t *testing.T) {
+	rows := bandCosts(t, [][2]float64{
+		{200_000, 1.5}, {500_000, 2.0}, {350_000, 2.0}, {450_000, 2.0}, {500_000, 3.0},
+	})
+	fit := noiseFloorFitFor(rows, noiseFloorCalibrationMinPct)
+	if fit.TwoTerm {
+		t.Errorf("fitted %.2f%% + %.2f%%/MHz from five bands spanning only 200-500 kHz",
+			fit.Fixed, fit.PerMHz)
+	}
+	if math.Abs(fit.Scale-0.80) > 0.02 {
+		t.Errorf("scale %.3f, want about 0.80", fit.Scale)
+	}
+
+	// Too few bands is refused however wide their spread.
+	few := bandCosts(t, [][2]float64{{2_500, 0.5}, {100_000, 1.1}, {500_000, 4.4}})
+	if f := noiseFloorFitFor(few, noiseFloorCalibrationMinAveragedPct); f.TwoTerm {
+		t.Errorf("fitted two terms from %d bands, below the %d minimum", f.Bands, noiseFloorFitMinBands)
 	}
 }

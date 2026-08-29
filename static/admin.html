@@ -4891,12 +4891,19 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 '<div>Estimated total: <strong>' + d.estimated_total_cpu_percent.toFixed(1) + '%</strong> of one core' + measured + '</div>' +
                 '<div style="color:#666666; font-size:12px; margin-top:6px;">Background poll ' +
                     d.background_poll_period_ms + ' ms &nbsp;|&nbsp; radiod crossover ' + d.radiod_crossover_hz + ' Hz' +
-                    (d.estimate_calibration_bands >= 2
-                        ? ' &nbsp;|&nbsp; <span title="Fitted from the measured bands and applied to every estimate on this page, ' +
-                          'so a fast or slow machine does not make the whole column wrong" style="cursor:help;">this receiver runs at <strong>' +
-                          (d.estimate_calibration * 100).toFixed(0) + '%</strong> of the modelled cost (fitted over ' +
-                          d.estimate_calibration_bands + ' bands, and applied to the estimates)</span>'
-                        : '') + '</div>' +
+                    (d.estimate_two_term
+                        ? ' &nbsp;|&nbsp; <span title="Both terms of the cost model fitted to this receiver, not just scaled. ' +
+                          'A scale factor cannot describe a machine whose per-channel overhead is a different fraction of its ' +
+                          'per-MHz cost." style="cursor:help;">cost model fitted to this receiver: <strong>' +
+                          d.estimate_fixed_percent.toFixed(2) + '% per channel + ' + d.estimate_percent_per_mhz.toFixed(2) +
+                          '%/MHz</strong> (over ' + d.estimate_calibration_bands + ' bands, ' +
+                          (d.estimate_calibration * 100).toFixed(0) + '% of the reference machine overall)</span>'
+                        : (d.estimate_calibration_bands >= 2
+                            ? ' &nbsp;|&nbsp; <span title="Fitted from the measured bands and applied to every estimate on this page, ' +
+                              'so a fast or slow machine does not make the whole column wrong" style="cursor:help;">this receiver runs at <strong>' +
+                              (d.estimate_calibration * 100).toFixed(0) + '%</strong> of the modelled cost (fitted over ' +
+                              d.estimate_calibration_bands + ' bands, and applied to the estimates)</span>'
+                            : '')) + '</div>' +
                 (d.notes || []).map(n => '<div style="color:#666666; font-size:12px; margin-top:4px;">' + n + '</div>').join('') +
                 '</div>';
         }

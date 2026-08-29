@@ -66,6 +66,30 @@ const (
 	// core, an order below the readings being admitted.
 	noiseFloorCalibrationAveragedSamples = 16
 
+	// A receiver whose measurements are precise enough, and spread widely enough
+	// across band widths, gets both terms of the model fitted to it rather than one
+	// scale factor. The reason is visible in the residuals: on a 131% receiver the
+	// scaled model ran ~0.2% high on every band under 100 kHz and ~0.3% low on every
+	// band over 350 kHz. That is a shape error, and no scale factor can remove it --
+	// the machine's per-channel overhead is genuinely a different fraction of its
+	// per-MHz cost than the reference machine's.
+	//
+	// The guards exist because the same fit made things WORSE on a receiver with five
+	// usable bands all between 200 and 500 kHz: with no narrow band to anchor it, the
+	// intercept is an extrapolation and the split between the two terms is noise.
+	noiseFloorFitMinBands = 5
+
+	// noiseFloorFitLeverRatio is the span ratio the fitted bands must cover -- the
+	// narrowest no wider than a quarter of the widest -- so the per-channel term is
+	// interpolated from real measurements rather than extrapolated to zero width.
+	noiseFloorFitLeverRatio = 4
+
+	// noiseFloorFitMinImprovement is how much better the two-term fit's residual must
+	// be before it is used. Both residuals are divided by their remaining degrees of
+	// freedom, so the extra parameter has already paid for itself before this margin
+	// is applied.
+	noiseFloorFitMinImprovement = 0.95
+
 	// noiseFloorSuggestMinSavingPct is how much of a CPU core a proposed change must
 	// save before it is worth showing. Below this it is churn: a reconfigure, a
 	// restart, and a step in the band's history, for nothing measurable.
@@ -105,7 +129,7 @@ type noiseFloorBandParams struct {
 // datagram carries, and skipping any value radiod's own FFT search cannot resolve.
 // Coarsest-that-qualifies rather than finest-available because below the crossover
 // resolution is free in CPU but not in bytes.
-func noiseFloorBandParamsFor(name string, start, end uint64, calibration float64) (noiseFloorBandParams, error) {
+func noiseFloorBandParamsFor(name string, start, end uint64, fit noiseFloorFit) (noiseFloorBandParams, error) {
 	if end <= start {
 		return noiseFloorBandParams{}, fmt.Errorf("end (%d Hz) must be above start (%d Hz)", end, start)
 	}
@@ -169,7 +193,7 @@ func noiseFloorBandParamsFor(name string, start, end uint64, calibration float64
 	p.Algorithm = "narrowband (downconverter)"
 	// Cost is the delivered span: measured at 4.5% of a core for a 469 kHz
 	// downconverter on a 129.6 Msps receiver, and independent of the poll rate.
-	p.EstimatedCPUPct = noiseFloorEstimatedCPUPct(p.DeliveredSpanHz, calibration)
+	p.EstimatedCPUPct = fit.estimate(p.DeliveredSpanHz)
 	p.BytesPerPoll = best.bins * 4 // BIN_DATA is a float32 vector
 
 	if best.bins < noiseFloorTargetBins {
@@ -245,6 +269,105 @@ func noiseFloorCalibration(bands []noiseFloorBandCost, minPct float64) (factor f
 		return 1, samples
 	}
 	return measured / modelled, samples
+}
+
+// noiseFloorFit is how this receiver's real cost relates to the reference model.
+//
+// Two forms, because two are warranted: a scale factor when all that can be said is
+// that the machine is faster or slower, and this receiver's own two terms when the
+// measurements are good enough to separate the per-channel overhead from the per-MHz
+// cost. Everything downstream asks it for an estimate and never sees which it is.
+type noiseFloorFit struct {
+	Scale   float64 // measured/modelled over the fitted bands; 1 when nothing was measured
+	Fixed   float64 // this receiver's own per-channel cost, % of a core
+	PerMHz  float64 // and its own cost per MHz of delivered span
+	TwoTerm bool    // whether Fixed/PerMHz were fitted, or only Scale
+	Bands   int     // how many measurements the fit is built from
+}
+
+// estimate is what a narrowband channel of this delivered span should cost here.
+func (f noiseFloorFit) estimate(deliveredSpanHz float64) float64 {
+	if f.TwoTerm {
+		return f.Fixed + f.PerMHz*deliveredSpanHz/1e6
+	}
+	return noiseFloorEstimatedCPUPct(deliveredSpanHz, f.Scale)
+}
+
+// noiseFloorFitFor fits the model to what radiod is reporting: a scale factor always,
+// and both terms when the measurements can support them.
+func noiseFloorFitFor(bands []noiseFloorBandCost, minPct float64) noiseFloorFit {
+	scale, n := noiseFloorCalibration(bands, minPct)
+	fit := noiseFloorFit{Scale: scale, Bands: n}
+
+	// The same bands the scale factor was fitted over.
+	var xs, ys []float64
+	for _, b := range bands {
+		if b.MeasuredCPUPct == nil || *b.MeasuredCPUPct < minPct {
+			continue
+		}
+		if b.BinBandwidth > radiodSpectrumCrossoverHz {
+			continue
+		}
+		xs = append(xs, float64(b.BinCount)*b.BinBandwidth/1e6)
+		ys = append(ys, *b.MeasuredCPUPct)
+	}
+	if len(xs) < noiseFloorFitMinBands {
+		return fit
+	}
+
+	// A lever arm: without a narrow band the intercept is extrapolated, and the two
+	// terms trade off against each other freely.
+	lo, hi := xs[0], xs[0]
+	for _, x := range xs {
+		lo, hi = math.Min(lo, x), math.Max(hi, x)
+	}
+	if lo <= 0 || hi/lo < noiseFloorFitLeverRatio {
+		return fit
+	}
+
+	var sx, sy float64
+	for i := range xs {
+		sx, sy = sx+xs[i], sy+ys[i]
+	}
+	mx, my := sx/float64(len(xs)), sy/float64(len(ys))
+	var sxy, sxx float64
+	for i := range xs {
+		sxy += (xs[i] - mx) * (ys[i] - my)
+		sxx += (xs[i] - mx) * (xs[i] - mx)
+	}
+	if sxx <= 0 {
+		return fit
+	}
+	perMHz := sxy / sxx
+	fixed := my - perMHz*mx
+	if fixed <= 0 || perMHz <= 0 {
+		return fit // noise won; a channel cannot cost nothing, or less as it widens
+	}
+
+	// Accept it only if it actually predicts these measurements better than the scale
+	// factor does, each residual charged for the parameters it used.
+	two := noiseFloorFit{Fixed: fixed, PerMHz: perMHz, TwoTerm: true}
+	if residualSpread(xs, ys, two.estimate, 2) >= noiseFloorFitMinImprovement*residualSpread(xs, ys, fit.estimate, 1) {
+		return fit
+	}
+	two.Scale, two.Bands = scale, n
+	return two
+}
+
+// residualSpread is the RMS residual of a prediction over the fitted points, divided by
+// the degrees of freedom left after fitting params of them -- so a model cannot buy a
+// better score simply by having more parameters to spend.
+func residualSpread(xs, ys []float64, predict func(float64) float64, params int) float64 {
+	dof := len(xs) - params
+	if dof <= 0 {
+		return math.Inf(1)
+	}
+	var ss float64
+	for i := range xs {
+		d := predict(xs[i]*1e6) - ys[i]
+		ss += d * d
+	}
+	return math.Sqrt(ss / float64(dof))
 }
 
 // noiseFloorCalibrationFloor is the smallest measurement worth fitting against, given
@@ -341,11 +464,20 @@ type noiseFloorCostReport struct {
 	// enough to fit against, and EstimateCalibrationBands is how many that was. 1
 	// means the model is being used as-is, either because nothing could be measured
 	// or because it already agrees.
-	EstimateCalibration      float64  `json:"estimate_calibration"`
-	EstimateCalibrationBands int      `json:"estimate_calibration_bands"`
-	BackgroundPollMs         int      `json:"background_poll_period_ms"`
-	CrossoverHz              float64  `json:"radiod_crossover_hz"`
-	Notes                    []string `json:"notes,omitempty"`
+	EstimateCalibration      float64 `json:"estimate_calibration"`
+	EstimateCalibrationBands int     `json:"estimate_calibration_bands"`
+
+	// Set when this receiver's measurements were good enough to fit both terms of
+	// the model rather than scaling the reference one. A scale factor cannot express
+	// a machine whose per-channel overhead is a different fraction of its per-MHz
+	// cost, and the residuals say plainly when that is the case.
+	EstimateTwoTerm   bool    `json:"estimate_two_term,omitempty"`
+	EstimateFixedPct  float64 `json:"estimate_fixed_percent,omitempty"`
+	EstimatePerMHzPct float64 `json:"estimate_percent_per_mhz,omitempty"`
+
+	BackgroundPollMs int      `json:"background_poll_period_ms"`
+	CrossoverHz      float64  `json:"radiod_crossover_hz"`
+	Notes            []string `json:"notes,omitempty"`
 }
 
 // handleNoiseFloorBandCosts answers GET /admin/noisefloor-band-params: every
@@ -370,9 +502,10 @@ func costNoiseFloorBands(report *noiseFloorCostReport, cfg *Config) {
 	// more than one of them at a time. Scaling by what this receiver's own measured
 	// bands are doing fixes all of them, and leaves the constants meaning what they
 	// say: the cost on the reference machine.
-	report.EstimateCalibration, report.EstimateCalibrationBands =
-		noiseFloorCalibration(report.Bands, noiseFloorCalibrationFloor(report.MeasuredSamples))
-	calibration := report.EstimateCalibration
+	fit := noiseFloorFitFor(report.Bands, noiseFloorCalibrationFloor(report.MeasuredSamples))
+	report.EstimateCalibration, report.EstimateCalibrationBands = fit.Scale, fit.Bands
+	report.EstimateTwoTerm = fit.TwoTerm
+	report.EstimateFixedPct, report.EstimatePerMHzPct = fit.Fixed, fit.PerMHz
 	for i := range report.Bands {
 		row := &report.Bands[i]
 		delivered := float64(row.BinCount) * row.BinBandwidth
@@ -385,10 +518,12 @@ func costNoiseFloorBands(report *noiseFloorCostReport, cfg *Config) {
 				pollHz := 1000.0 / float64(cfg.Spectrum.BackgroundPollPeriodMs)
 				avg := math.Floor(float64(maxWidebandTransformPoints) / fftN)
 				avg = math.Max(1, math.Min(float64(defaultSpectrumFFTAverages), avg))
-				row.EstimatedCPUPct = calibration * 27.0 / 2.835e6 * pollHz * avg * fftN
+				// Only the scale factor: the two-term fit describes a
+				// downconverter channel, and this is not one.
+				row.EstimatedCPUPct = fit.Scale * 27.0 / 2.835e6 * pollHz * avg * fftN
 			}
 		} else {
-			row.EstimatedCPUPct = noiseFloorEstimatedCPUPct(delivered, calibration)
+			row.EstimatedCPUPct = fit.estimate(delivered)
 		}
 		report.EstimatedTotalCPUPct += row.EstimatedCPUPct
 
@@ -398,7 +533,7 @@ func costNoiseFloorBands(report *noiseFloorCostReport, cfg *Config) {
 		// band can be "improved" by 20% of nothing, and surfacing that next to a
 		// 500 kHz band that cannot be improved at all inverts the whole page.
 		// Both sides are calibrated, so the saving is in this receiver's CPU.
-		s, err := noiseFloorBandParamsFor(row.Name, row.Start, row.End, calibration)
+		s, err := noiseFloorBandParamsFor(row.Name, row.Start, row.End, fit)
 		if err != nil {
 			continue
 		}
@@ -546,7 +681,16 @@ func noiseFloorCostsFor(cfg *Config, nfm *NoiseFloorMonitor) *noiseFloorCostRepo
 		"noise_floor_db is per-bin power, so bands with different bin_bandwidth are not directly "+
 			"comparable; noise_floor_db_per_hz refers them all to 1 Hz and is the column to compare")
 
-	if report.EstimateCalibrationBands >= 2 && math.Abs(report.EstimateCalibration-1) > 0.05 {
+	switch {
+	case report.EstimateTwoTerm:
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"the cost model is fitted to this receiver across %d measured bands: %.2f%% per channel plus "+
+				"%.2f%% per MHz of delivered span (the reference machine is %.2f%% + %.2f%%/MHz, and it runs "+
+				"at %.0f%% of that overall). Scaling alone could not fit it: its per-channel overhead is a "+
+				"different fraction of its per-MHz cost",
+			report.EstimateCalibrationBands, report.EstimateFixedPct, report.EstimatePerMHzPct,
+			noiseFloorChannelFixedPct, noiseFloorPctPerMHz, 100*report.EstimateCalibration))
+	case report.EstimateCalibrationBands >= 2 && math.Abs(report.EstimateCalibration-1) > 0.05:
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"this receiver runs at %.0f%% of the modelled cost across %d measured bands; every estimate here is "+
 				"scaled by that, so the column reads in this receiver's CPU and not the reference machine's",
@@ -575,13 +719,17 @@ func handleNoiseFloorBandParams(w http.ResponseWriter, r *http.Request, cfg *Con
 	// Predictions use this receiver's own calibration; there is no measurement to
 	// compare a band that does not exist yet against, so the best available number is
 	// the model corrected by what the live bands are doing.
-	calibration := 1.0
+	fit := noiseFloorFit{Scale: 1}
 	if nfm != nil {
 		if report := noiseFloorCostsFor(cfg, nfm); report != nil {
-			calibration = report.EstimateCalibration
+			fit = noiseFloorFit{
+				Scale: report.EstimateCalibration, Fixed: report.EstimateFixedPct,
+				PerMHz: report.EstimatePerMHzPct, TwoTerm: report.EstimateTwoTerm,
+				Bands: report.EstimateCalibrationBands,
+			}
 		}
 	}
-	params, err := noiseFloorBandParamsFor(req.Name, req.Start, req.End, calibration)
+	params, err := noiseFloorBandParamsFor(req.Name, req.Start, req.End, fit)
 	if err != nil {
 		writeJSONError(w, err.Error(), http.StatusBadRequest)
 		return

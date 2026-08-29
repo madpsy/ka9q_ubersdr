@@ -333,6 +333,69 @@ func handleNoiseFloorBandCosts(w http.ResponseWriter, cfg *Config, nfm *NoiseFlo
 	_ = json.NewEncoder(w).Encode(noiseFloorCostsFor(cfg, nfm))
 }
 
+// costNoiseFloorBands fills in every band's estimate, suggestion and cost note, plus
+// the report's estimated total, from rows that already carry their geometry and their
+// measured CPU. Split out from noiseFloorCostsFor because it is the part worth testing
+// directly: it needs no radiod, no thread-stats CSV and no live monitor.
+func costNoiseFloorBands(report *noiseFloorCostReport, cfg *Config) {
+	// The model was fitted on one receiver; measured across three others it ran at
+	// 147%, 79% and 100% of it. That spread is the machine -- CPU, clock and memory
+	// bandwidth -- not the shape of the model, and no edit to the constants can fix
+	// more than one of them at a time. Scaling by what this receiver's own measured
+	// bands are doing fixes all of them, and leaves the constants meaning what they
+	// say: the cost on the reference machine.
+	report.EstimateCalibration, report.EstimateCalibrationBands = noiseFloorCalibration(report.Bands)
+	calibration := report.EstimateCalibration
+	for i := range report.Bands {
+		row := &report.Bands[i]
+		delivered := float64(row.BinCount) * row.BinBandwidth
+		if row.BinBandwidth > radiodSpectrumCrossoverHz {
+			// The poll rate multiplies this one, and the calibration is fitted
+			// on narrowband bands -- but it measures the machine, which is what
+			// both models are ultimately expressed in.
+			if cfg != nil && cfg.Spectrum.BackgroundPollPeriodMs > 0 {
+				fftN := float64(cfg.Receiver.Samprate()) / row.BinBandwidth
+				pollHz := 1000.0 / float64(cfg.Spectrum.BackgroundPollPeriodMs)
+				avg := math.Floor(float64(maxWidebandTransformPoints) / fftN)
+				avg = math.Max(1, math.Min(float64(defaultSpectrumFFTAverages), avg))
+				row.EstimatedCPUPct = calibration * 27.0 / 2.835e6 * pollHz * avg * fftN
+			}
+		} else {
+			row.EstimatedCPUPct = noiseFloorEstimatedCPUPct(delivered, calibration)
+		}
+		report.EstimatedTotalCPUPct += row.EstimatedCPUPct
+
+		// Only propose a change that actually saves something.
+		//
+		// The threshold is absolute rather than proportional on purpose: a 2 kHz
+		// band can be "improved" by 20% of nothing, and surfacing that next to a
+		// 500 kHz band that cannot be improved at all inverts the whole page.
+		// Both sides are calibrated, so the saving is in this receiver's CPU.
+		s, err := noiseFloorBandParamsFor(row.Name, row.Start, row.End, calibration)
+		if err != nil {
+			continue
+		}
+		saving := row.EstimatedCPUPct - s.EstimatedCPUPct
+		switch {
+		case row.BinBandwidth > radiodSpectrumCrossoverHz:
+			// Wrong algorithm entirely: always worth saying, whatever the
+			// arithmetic works out to.
+			row.Suggested = &s
+			row.CostNote = fmt.Sprintf("moving below the crossover would cost about %.2f%% instead", s.EstimatedCPUPct)
+		case saving >= noiseFloorSuggestMinSavingPct:
+			row.Suggested = &s
+			row.CostNote = fmt.Sprintf("delivers %.0f Hz for a %d Hz range; trimming it saves about %.2f%%",
+				delivered, row.SpanHz, saving)
+		default:
+			row.AtCostFloor = true
+			row.CostNote = fmt.Sprintf(
+				"at the floor: on the downconverter, delivering %s for a %s range. Below the crossover a band's "+
+					"cost is its width, so only a narrower range reduces it.",
+				formatHz(delivered), formatHz(float64(row.SpanHz)))
+		}
+	}
+}
+
 // noiseFloorCostsFor builds the report: every configured band, what it should cost, and
 // what radiod says it is costing.
 //
@@ -376,27 +439,17 @@ func noiseFloorCostsFor(cfg *Config, nfm *NoiseFloorMonitor) *noiseFloorCostRepo
 			BinCount: b.BinCount, BinBandwidth: b.BinBandwidth,
 		}
 
-		delivered := float64(b.BinCount) * b.BinBandwidth
 		if b.BinBandwidth > radiodSpectrumCrossoverHz {
 			// The expensive algorithm: an FFT over the whole front end, every
 			// poll, so the poll rate multiplies it.
 			row.Algorithm = "wideband (whole front end)"
-			if cfg != nil && cfg.Spectrum.BackgroundPollPeriodMs > 0 {
-				fftN := float64(cfg.Receiver.Samprate()) / b.BinBandwidth
-				pollHz := 1000.0 / float64(cfg.Spectrum.BackgroundPollPeriodMs)
-				avg := math.Floor(float64(maxWidebandTransformPoints) / fftN)
-				avg = math.Max(1, math.Min(float64(defaultSpectrumFFTAverages), avg))
-				row.EstimatedCPUPct = 27.0 / 2.835e6 * pollHz * avg * fftN
-			}
 			row.Warnings = append(row.Warnings, fmt.Sprintf(
 				"%.0f Hz per bin is above the %.0f Hz crossover, so radiod transforms the whole "+
 					"front end for this band on every poll; its cost rises with background_poll_period_ms",
 				b.BinBandwidth, radiodSpectrumCrossoverHz))
 		} else {
 			row.Algorithm = "narrowband (downconverter)"
-			row.EstimatedCPUPct = noiseFloorEstimatedCPUPct(delivered, 1)
 		}
-		report.EstimatedTotalCPUPct += row.EstimatedCPUPct
 
 		if ssrc, ok := ssrcs[b.Name]; ok && ssrc != 0 {
 			row.SSRC = ssrc
@@ -432,33 +485,10 @@ func noiseFloorCostsFor(cfg *Config, nfm *NoiseFloorMonitor) *noiseFloorCostRepo
 			}
 		}
 
-		// Only propose a change that actually saves something.
-		//
-		// The threshold is absolute rather than proportional on purpose: a 2 kHz
-		// band can be "improved" by 20% of nothing, and surfacing that next to a
-		// 500 kHz band that cannot be improved at all inverts the whole page.
-		if s, err := noiseFloorBandParamsFor(b.Name, b.Start, b.End, 1); err == nil {
-			saving := row.EstimatedCPUPct - s.EstimatedCPUPct
-			switch {
-			case b.BinBandwidth > radiodSpectrumCrossoverHz:
-				// Wrong algorithm entirely: always worth saying, whatever the
-				// arithmetic works out to.
-				row.Suggested = &s
-				row.CostNote = fmt.Sprintf("moving below the crossover would cost about %.2f%% instead", s.EstimatedCPUPct)
-			case saving >= noiseFloorSuggestMinSavingPct:
-				row.Suggested = &s
-				row.CostNote = fmt.Sprintf("delivers %.0f Hz for a %d Hz range; trimming it saves about %.2f%%",
-					delivered, span, saving)
-			default:
-				row.AtCostFloor = true
-				row.CostNote = fmt.Sprintf(
-					"at the floor: on the downconverter, delivering %s for a %s range. Below the crossover a band's "+
-						"cost is its width, so only a narrower range reduces it.",
-					formatHz(delivered), formatHz(float64(span)))
-			}
-		}
 		report.Bands = append(report.Bands, row)
 	}
+
+	costNoiseFloorBands(&report, cfg)
 
 	if anyMeasured {
 		report.MeasuredTotalCPUPct = &measuredTotal
@@ -474,11 +504,10 @@ func noiseFloorCostsFor(cfg *Config, nfm *NoiseFloorMonitor) *noiseFloorCostRepo
 		"noise_floor_db is per-bin power, so bands with different bin_bandwidth are not directly "+
 			"comparable; noise_floor_db_per_hz refers them all to 1 Hz and is the column to compare")
 
-	report.EstimateCalibration, report.EstimateCalibrationBands = noiseFloorCalibration(report.Bands)
 	if report.EstimateCalibrationBands >= 2 && math.Abs(report.EstimateCalibration-1) > 0.05 {
 		report.Notes = append(report.Notes, fmt.Sprintf(
-			"this receiver runs at %.0f%% of the modelled cost across %d measured bands; new-band predictions "+
-				"are scaled by that, the per-band estimates above are not",
+			"this receiver runs at %.0f%% of the modelled cost across %d measured bands; every estimate here is "+
+				"scaled by that, so the column reads in this receiver's CPU and not the reference machine's",
 			100*report.EstimateCalibration, report.EstimateCalibrationBands))
 	}
 	return &report

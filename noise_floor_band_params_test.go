@@ -382,3 +382,61 @@ func TestNoiseFloorSilentWhenConfigAgrees(t *testing.T) {
 		}
 	}
 }
+
+// The per-band estimates must be calibrated, not just the predictions for bands that
+// do not exist yet.
+//
+// Three receivers running the same twelve default bands measured at 147%, 79% and 100%
+// of the modelled cost. An uncalibrated column is therefore wrong on two of the three
+// -- and wrong in opposite directions, so it cannot be fixed by retuning the constants.
+func TestNoiseFloorEstimatesAreCalibrated(t *testing.T) {
+	pct := func(v float64) *float64 { return &v }
+
+	// Two bands wide enough to clear the quantisation floor, both measured at 60%
+	// of what the model says -- the shape of the 79% receiver.
+	const runsAt = 0.6
+	rows := []noiseFloorBandCost{
+		{Name: "80m", Start: 3_500_000, End: 4_000_000, SpanHz: 500_000,
+			BinCount: 2500, BinBandwidth: 200, MeasuredCPUPct: pct(runsAt * noiseFloorEstimatedCPUPct(500_000, 1))},
+		{Name: "15m", Start: 21_000_000, End: 21_450_000, SpanHz: 450_000,
+			BinCount: 2250, BinBandwidth: 200, MeasuredCPUPct: pct(runsAt * noiseFloorEstimatedCPUPct(450_000, 1))},
+	}
+	report := &noiseFloorCostReport{Bands: rows}
+	costNoiseFloorBands(report, nil)
+
+	if diff := report.EstimateCalibration - runsAt; diff > 0.001 || diff < -0.001 {
+		t.Fatalf("calibration %.4f, want %.2f", report.EstimateCalibration, runsAt)
+	}
+	var total float64
+	for _, b := range report.Bands {
+		want := noiseFloorEstimatedCPUPct(float64(b.BinCount)*b.BinBandwidth, report.EstimateCalibration)
+		if diff := b.EstimatedCPUPct - want; diff > 0.001 || diff < -0.001 {
+			t.Errorf("%s: estimate %.3f%%, want the calibrated %.3f%%", b.Name, b.EstimatedCPUPct, want)
+		}
+		// The whole point: the column now agrees with what radiod reports.
+		if b.MeasuredCPUPct != nil {
+			if diff := b.EstimatedCPUPct - *b.MeasuredCPUPct; diff > 0.001 || diff < -0.001 {
+				t.Errorf("%s: estimate %.3f%% still disagrees with the measured %.3f%%",
+					b.Name, b.EstimatedCPUPct, *b.MeasuredCPUPct)
+			}
+		}
+		total += b.EstimatedCPUPct
+	}
+	if diff := report.EstimatedTotalCPUPct - total; diff > 0.001 || diff < -0.001 {
+		t.Errorf("total %.3f%%, want the sum of the calibrated bands %.3f%%",
+			report.EstimatedTotalCPUPct, total)
+	}
+
+	// An uncalibrated receiver is left exactly as the model has it.
+	plain := &noiseFloorCostReport{Bands: []noiseFloorBandCost{
+		{Name: "160m", Start: 1_800_000, End: 2_000_000, SpanHz: 200_000, BinCount: 1000, BinBandwidth: 200},
+	}}
+	costNoiseFloorBands(plain, nil)
+	if plain.EstimateCalibration != 1 {
+		t.Fatalf("no measurements: calibration %v, want 1", plain.EstimateCalibration)
+	}
+	if want := noiseFloorEstimatedCPUPct(200_000, 1); plain.Bands[0].EstimatedCPUPct != want {
+		t.Errorf("unmeasured receiver: estimate %.3f%%, want the raw model %.3f%%",
+			plain.Bands[0].EstimatedCPUPct, want)
+	}
+}

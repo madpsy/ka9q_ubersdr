@@ -4819,8 +4819,15 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
             const cols = ['Band', 'Range', 'Span', 'Bins', 'Hz/bin', 'Algorithm', 'Est. CPU', 'Actual CPU',
                           'Noise floor', 'dB/Hz', 'Occupancy', 'Age'];
+            const colHelp = {
+                'Est. CPU': 'What the cost model says this band should cost, scaled by how this receiver is ' +
+                            'actually performing against the model (see the calibration figure above)',
+                'Actual CPU': "radiod's own per-thread figure for this band's channel"
+            };
             head.innerHTML = cols.map(c =>
-                '<th style="text-align:left; padding:6px 8px; border-bottom:1px solid #dee2e6; color:#333333; white-space:nowrap;">' + c + '</th>').join('');
+                '<th' + (colHelp[c] ? ' title="' + colHelp[c] + '" style="cursor:help;' : ' style="') +
+                ' text-align:left; padding:6px 8px; border-bottom:1px solid #dee2e6; color:#333333; white-space:nowrap;">' +
+                c + '</th>').join('');
 
             body.innerHTML = (d.bands || []).map(b => {
                 const wide = b.radiod_algorithm && b.radiod_algorithm.indexOf('wideband') === 0;
@@ -4876,8 +4883,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 '<div style="color:#666666; font-size:12px; margin-top:6px;">Background poll ' +
                     d.background_poll_period_ms + ' ms &nbsp;|&nbsp; radiod crossover ' + d.radiod_crossover_hz + ' Hz' +
                     (d.estimate_calibration_bands >= 2
-                        ? ' &nbsp;|&nbsp; this receiver runs at <strong>' + (d.estimate_calibration * 100).toFixed(0) +
-                          '%</strong> of the modelled cost (fitted over ' + d.estimate_calibration_bands + ' bands)'
+                        ? ' &nbsp;|&nbsp; <span title="Fitted from the measured bands and applied to every estimate on this page, ' +
+                          'so a fast or slow machine does not make the whole column wrong" style="cursor:help;">this receiver runs at <strong>' +
+                          (d.estimate_calibration * 100).toFixed(0) + '%</strong> of the modelled cost (fitted over ' +
+                          d.estimate_calibration_bands + ' bands, and applied to the estimates)</span>'
                         : '') + '</div>' +
                 (d.notes || []).map(n => '<div style="color:#666666; font-size:12px; margin-top:4px;">' + n + '</div>').join('') +
                 '</div>';
@@ -14714,7 +14723,7 @@ function resetStationIdColor() {
                 <strong style="color: #856404;">⚠️ CPU Requirements:</strong>
                 <span style="color: #856404;">
                     Higher depths require significantly more CPU. Depth 3 can use 3-5× more CPU than Depth 1.
-                    WSPR cycles scale linearly (20000 cycles ≈ 2× CPU vs 10000 cycles).
+                    WSPR cycles scale linearly (10000 cycles ≈ 2× CPU vs 5000 cycles).
                     Monitor system load to avoid overloading your server.
                 </span>
             `;
@@ -14744,7 +14753,7 @@ function resetStationIdColor() {
             const currentFT8Depth = getCurrentDepth('FT8', 2);
             const currentFT4Depth = getCurrentDepth('FT4', 2);
             const currentFT2Depth = getCurrentDepth('FT2', 2);
-            const currentWSPRDepth = getCurrentDepth('WSPR', 10000);
+            const currentWSPRDepth = getCurrentDepth('WSPR', 5000);
             const currentJS8Depth = getCurrentDepth('JS8', 2);
 
             // FT8 depth control
@@ -14806,9 +14815,7 @@ function resetStationIdColor() {
                     <option value="1000" ${currentWSPRDepth === 1000 ? 'selected' : ''}>1000 cycles (Ultra Fast)</option>
                     <option value="2500" ${currentWSPRDepth === 2500 ? 'selected' : ''}>2500 cycles (Very Fast)</option>
                     <option value="5000" ${currentWSPRDepth === 5000 ? 'selected' : ''}>5000 cycles (Fast)</option>
-                    <option value="10000" ${currentWSPRDepth === 10000 ? 'selected' : ''}>10000 cycles (Default)</option>
-                    <option value="20000" ${currentWSPRDepth === 20000 ? 'selected' : ''}>20000 cycles (Deep)</option>
-                    <option value="50000" ${currentWSPRDepth === 50000 ? 'selected' : ''}>50000 cycles (Very Deep)</option>
+                    <option value="10000" ${currentWSPRDepth === 10000 ? 'selected' : ''}>10000 cycles (Deep)</option>
                 </select>
                 <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('WSPR')">Apply</button>
             `;
@@ -14937,8 +14944,8 @@ function resetStationIdColor() {
                 </div>
                 <div class="config-field" id="depthFieldWSPR" style="display: none;">
                     <label>Decoder Cycles</label>
-                    <input type="number" id="newDecoderBandCycles" placeholder="e.g., 10000" min="1" value="10000">
-                    <small>Maximum decoder cycles per bit (default: 10000, lower=faster, higher=deeper)</small>
+                    <input type="number" id="newDecoderBandCycles" placeholder="e.g., 5000" min="1" value="5000">
+                    <small>Maximum decoder cycles per bit (default: 5000, lower=faster, higher=deeper)</small>
                 </div>
                 <button class="btn" onclick="saveDecoderBand()">Save Band</button>
                 <button class="btn btn-secondary" onclick="cancelDecoderBandForm()">Cancel</button>
@@ -14990,7 +14997,7 @@ function resetStationIdColor() {
             document.getElementById('newDecoderBandMode').value = 'FT8';
             document.getElementById('newDecoderBandFreq').value = '';
             document.getElementById('newDecoderBandDepth').value = '2';
-            document.getElementById('newDecoderBandCycles').value = '10000';
+            document.getElementById('newDecoderBandCycles').value = '5000';
             document.getElementById('newDecoderBandEnabled').value = 'true';
             updateDepthFieldVisibility('FT8');
             document.getElementById('addDecoderBandForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });

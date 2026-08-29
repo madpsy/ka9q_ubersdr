@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import WebKit
 import AVFoundation
+import MediaPlayer
 
 /// One receiver: its loopback proxy, its WebView, and the script that runs
 /// before the page's first.
@@ -193,6 +194,9 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
 
         host = HostChannel(webView: webView, instanceId: instanceId, label: label,
                            prefsScope: prefsScope)
+        host?.onTransport = { [weak self] action in
+            DispatchQueue.main.async { self?.transport(action) }
+        }
         host?.onStopped = { [weak self] in
             // v2's own power button is the way back on a phone: there is no
             // window to close and no control was added to the interface to do
@@ -366,7 +370,76 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     @objc private func appWillResignActive() {
-        startBackgroundAudio()
+        // Claimed here, on the way out, and not from the background.
+        //
+        // The session has to be taken back *before* the app stops being active,
+        // because taking it is an interruption of somebody and only a
+        // foreground app is allowed to interrupt. Asked from the background the
+        // activation is refused outright — `CannotInterruptOthers` — and what
+        // is left is the stream decoding at full rate into a stopped engine:
+        // silence, with every part of it apparently working.
+        //
+        // The somebody is this app's own WebView. The silent anchor exists to
+        // make WebKit classify the page as media rather than Web Audio, which
+        // is what stops the ring switch silencing it — and a media page takes a
+        // *non-mixable* session, so WebKit interrupts this process the moment
+        // the page starts playing and the silent engine has been stopped ever
+        // since. The two fixes want the same session, and this is where they
+        // are ordered: the page has it while the app is in front, and the app
+        // takes it back on the way out, which is exactly when the page is about
+        // to stop being able to use it anyway.
+        guard UIApplication.shared.applicationState == .active else {
+            startBackgroundAudio()
+            return
+        }
+        // And taken only once the page has let go of it. Claiming alone is not
+        // enough: the page still holds a running AudioContext and the anchor
+        // element, and the `audio` background mode is exactly what lets WebKit
+        // carry on playing a media element once the app is down. So it
+        // re-activates its own session on the way into the background, half a
+        // second after this claim, and interrupts the app at the one moment the
+        // app is no longer allowed to answer.
+        releasePageAudio { [weak self] in
+            guard let self = self else { return }
+            PlaybackSession.begin()
+            // Before the stream's node is attached, so a replaced engine costs
+            // nothing to reattach.
+            PlaybackSession.recover()
+            self.startBackgroundAudio()
+        }
+    }
+
+    /// Have the page put its audio down, so the app can pick the session up.
+    ///
+    /// The anchor is paused and every live context suspended. Both are restored
+    /// by resumeAudio on the way back — the contexts by the resume loop, the
+    /// anchor by `__ubersdrKeepAudible` — so this is a handover and not a stop.
+    ///
+    /// Answered on the main thread, and answered *once*: the claim that follows
+    /// must not be skipped because the page was slow or the WebView was gone, so
+    /// a fallback fires it anyway. Half a second is longer than the round trip
+    /// and shorter than the window `willResignActive` leaves.
+    private func releasePageAudio(_ done: @escaping () -> Void) {
+        var answered = false
+        let once = {
+            guard !answered else { return }
+            answered = true
+            done()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: once)
+
+        guard let webView = webView else { once(); return }
+        webView.callAsyncJavaScript("""
+        var el = document.querySelector('audio[data-ubersdr-anchor]');
+        if (el) { try { el.pause(); } catch (e) {} }
+        var live = (window.__ubersdrAudioContexts || []).filter(function(c) {
+          return c.state === 'running';
+        });
+        for (var i = 0; i < live.length; i++) {
+          try { await live[i].suspend(); } catch (e) {}
+        }
+        return live.length;
+        """, arguments: [:], in: nil, in: .page) { _ in once() }
     }
 
     @objc private func appBecameActive() {
@@ -397,8 +470,15 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     @objc private func audioInterrupted(_ note: Notification) {
         guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-        // `.began` needs nothing: the system has already stopped it. What
-        // matters is being ready when it ends.
+        // `.began` needs nothing, and not for the reason it used to: the
+        // thought was that the system has already stopped the audio and what
+        // matters is being ready when it ends. What matters is not being
+        // interrupted in the first place — see appWillResignActive — because
+        // there is no answer from here. iOS refuses `setActive` to a
+        // backgrounded app holding a non-mixable category whatever else is or
+        // is not playing, which was measured: three attempts on a ladder, all
+        // refused with `CannotInterruptOthers`, while `isOtherAudioPlaying`
+        // said no. Recovery is not available; only prevention is.
         guard type == .ended else { return }
         resumeAudio()
     }
@@ -423,6 +503,58 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         resumeAudio()
         guard wasBackground else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.startBackgroundAudio()
+        }
+    }
+
+    /// Play and pause from the lock screen, answered by the host.
+    ///
+    /// Only while the app is not in front. In the foreground the page owns the
+    /// audio and its own handler — play/pause as mute — is the right one, and
+    /// the forward in HostChannel has already sent it there. In the background
+    /// the page is suspended and the native stream is what is playing, so the
+    /// stream is what has to stop and start.
+    ///
+    /// Stopped rather than held: this is a live receiver, and a paused one has
+    /// nothing to catch up on. Stopping hands the audio back the way coming
+    /// into the foreground does, and play asks for it again.
+    private func transport(_ action: String) {
+        let wantsPlay: Bool
+        switch action {
+        case "play": wantsPlay = true
+        case "pause": wantsPlay = false
+        case "toggle": wantsPlay = !backgroundAudio.isRunning
+        default: return
+        }
+        MPNowPlayingInfoCenter.default().playbackState = wantsPlay ? .playing : .paused
+        guard UIApplication.shared.applicationState != .active else { return }
+        if wantsPlay {
+            // The session may have been let go with the audio — see
+            // appWillResignActive, which is the only other place this is
+            // claimed. Nothing is holding it now, so this is allowed from the
+            // background where the reclaim ladder's attempts are not.
+            PlaybackSession.begin()
+            PlaybackSession.recover()
+            startBackgroundAudio()
+        } else {
+            stopBackgroundAudio()
+        }
+    }
+
+    /// Put the background stream back on a graph that has been replaced.
+    ///
+    /// Started again rather than reattached: its player node and converter are
+    /// built from the stream's header, which has gone past. The beat is for the
+    /// hand-back, which unwinds on the stream's own queue.
+    private func restartBackgroundStream() {
+        guard backgroundAudio.isRunning else { return }
+        stopBackgroundAudio()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            // Not if the app came back in the meantime: the restart is for a
+            // stream that is still the only thing playing, and starting one in
+            // the foreground would take the audio off the page that has just
+            // been handed it back.
+            guard UIApplication.shared.applicationState != .active else { return }
             self?.startBackgroundAudio()
         }
     }
@@ -478,6 +610,50 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         }
     }
 
+    /// Restart a graph that says it is running and is not.
+    ///
+    /// The state flags are no help here. An AudioContext interrupted with the
+    /// app in the background comes back reporting `running` while its renderer
+    /// is gone, so the resume loop below finds nothing to resume and the page
+    /// stays silent with every flag healthy. What tells the truth is
+    /// `currentTime`, which stops advancing.
+    ///
+    /// So the graph is timed rather than asked, and a context that has not
+    /// moved is suspended and resumed — the pair, not a bare `resume()`, which
+    /// a context that believes it is running treats as nothing to do.
+    private func unstallGraph() {
+        webView?.callAsyncJavaScript("""
+        var live = (window.__ubersdrAudioContexts || []).filter(function(c) {
+          return c.state !== 'closed';
+        });
+        if (!live.length) return '';
+        function stamp() { return live.map(function(c) { return c.currentTime; }); }
+        var before = stamp();
+        await new Promise(function(r) { setTimeout(r, 1500); });
+        var after = stamp();
+        var kicked = 0, stuck = 0;
+        for (var i = 0; i < live.length; i++) {
+          var ctx = live[i];
+          if (after[i] > before[i]) continue;
+          try {
+            await ctx.suspend();
+            await ctx.resume();
+          } catch (e) { stuck++; continue; }
+          await new Promise(function(r) { setTimeout(r, 800); });
+          if (ctx.currentTime > after[i]) { kicked++; } else { stuck++; }
+        }
+        if (!kicked && !stuck) return '';
+        return 'restarted ' + kicked + ', still stalled ' + stuck;
+        """, arguments: [:], in: nil, in: .page) { result in
+            // Silent when there was nothing to do, which is the ordinary case.
+            // A graph that had to be restarted is worth a line: it means the
+            // system stopped rendering the page's audio without saying so.
+            guard case .success(let value) = result,
+                  let what = value as? String, !what.isEmpty else { return }
+            NSLog("[UberSDR audio] stalled graph: %@", what)
+        }
+    }
+
     /// Start the audio again after the system has stopped it.
     ///
     /// Two halves, and both are needed. The **audio session** may have been
@@ -490,7 +666,12 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// way out, which is a poor thing to have to know.
     private func resumeAudio() {
         PlaybackSession.begin()
-        PlaybackSession.recover()
+        // A replaced engine orphans the background stream — see
+        // PlaybackSession.recover. Started again rather than reattached: the
+        // player node is built from the stream's header, which has gone past.
+        // Only reached from the background, because the foreground path hands
+        // the audio back before it gets here.
+        if PlaybackSession.recover() { restartBackgroundStream() }
         webView?.evaluateJavaScript("""
         (function(){
           try { window.__ubersdrKeepAudible(); } catch(e) {}
@@ -506,7 +687,11 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
           }
           return resumed;
         })();
-        """)
+        """) { [weak self] _, _ in
+            // After the states have been dealt with, because this is about the
+            // ones the states do not describe.
+            self?.unstallGraph()
+        }
     }
 
     /// Keep the display awake while a receiver is on screen.

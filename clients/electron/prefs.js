@@ -30,7 +30,12 @@ const PREFIX = 'ubersdr.v2.';
 // messages have been shown, keyed by digests of that receiver's wording.
 const SKIP_EXACT = new Set(['ubersdr.v2.radio', 'ubersdr.v2.notices-seen']);
 // Keys the chooser's settings page may read and write — see readOne.
-const APP_LEVEL = new Set(['ubersdr.v2.shell']);
+//
+// `ubersdr.v2.media` is here for one field of it: whether v2 publishes a media
+// session at all. The blob is shared like any other v2 setting, which is right
+// for the rest of what it holds, but it means one receiver's answer reaches
+// every other — so there has to be somewhere outside a receiver to set it back.
+const APP_LEVEL = new Set(['ubersdr.v2.shell', 'ubersdr.v2.media']);
 
 /**
  * The interface settings the receiver windows share, or keep apart.

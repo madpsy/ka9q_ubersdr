@@ -78,9 +78,22 @@ final class Prefs {
 
     /** Where a receiver's own snapshot lives, when settings are not shared. */
     private static final String PER_RECEIVER = "prefs:";
-    /** Keys the chooser's settings page may read and write. See readOne. */
+    /**
+     * Keys the chooser's settings page may read and write. See readOne.
+     *
+     * <p>{@code ubersdr.v2.media} is here for one field of it — whether the
+     * lock screen carries the receiver. The blob is shared like any other v2
+     * setting, and that is right for what else it holds (which markers the skip
+     * buttons stop on, and how), but it means one receiver's answer reaches
+     * every other. Somewhere to set it for the app is what makes that
+     * recoverable: without it, a {@code false} arriving from a receiver is a
+     * lock screen with no frequency, no artwork and dead skip buttons, and
+     * nowhere to say otherwise except by finding the panel inside a receiver
+     * that has it.
+     */
     private static final java.util.Set<String> APP_LEVEL =
-            java.util.Collections.singleton("ubersdr.v2.shell");
+            new java.util.HashSet<>(java.util.Arrays.asList(
+                    "ubersdr.v2.shell", "ubersdr.v2.media"));
 
     private final SharedPreferences store;
     /** Which entry this receiver reads and writes — see {@link #keyFor}. */

@@ -180,6 +180,19 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         enableRemoteCommands(message["actions"] as? [String] ?? [])
     }
 
+    /// The transport buttons, answered here as well as forwarded.
+    ///
+    /// Forwarding alone was enough while the app was in front and is not once it
+    /// is not: with the app backgrounded the page's content process is
+    /// suspended, and a message posted into a suspended process is not handled
+    /// until the app is opened again. Pause appeared to work and play did
+    /// nothing, which is the worst shape this could take — the lock screen is
+    /// the only handle on the audio at exactly the moment the page cannot
+    /// answer for it.
+    ///
+    /// Still forwarded, so that v2's own mute state catches up when it thaws.
+    var onTransport: ((String) -> Void)?
+
     /// The artwork arrives as a data: URL, already cropped or fitted by v2's own
     /// `lib/cardArt.js` — the same picture, prepared the same way, as the one
     /// the Android notification gets.
@@ -216,6 +229,10 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
             nowPlaying[MPNowPlayingInfoPropertyIsLiveStream] = true
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlaying
         }
+        // Armed with the card and not with the page's metadata, which may
+        // never arrive — see enableRemoteCommands. A card whose buttons go
+        // nowhere is worse than no card.
+        enableRemoteCommands(nil)
     }
 
     private func ended() {
@@ -224,34 +241,68 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         onStopped?()
     }
 
-    /// Only the buttons the page actually handles are enabled, which is what
-    /// stops the lock screen offering a skip that does nothing.
-    private func enableRemoteCommands(_ actions: [String]) {
+    /// The lock screen's buttons.
+    ///
+    /// Two kinds, and they are armed from different places. **Transport** —
+    /// play, pause, toggle, stop — the host answers itself, so it is valid from
+    /// the moment there is a card to put it on and is armed by `began`.
+    /// **Next and previous** are the page's: they step the frequency or hop a
+    /// bookmark, only v2 can do that, and only v2 knows whether it has handlers
+    /// registered. So those follow the metadata message and nothing else.
+    ///
+    /// `actions` nil means "transport only, leave the page's buttons as they
+    /// are". Passing an empty list instead would *disable* them, which is how
+    /// arming the transport from `began` managed to switch off the track
+    /// buttons a metadata message had just enabled.
+    private func enableRemoteCommands(_ actions: [String]?) {
         let centre = MPRemoteCommandCenter.shared()
-        let wanted = Set(actions)
 
-        func wire(_ command: MPRemoteCommand, _ action: String) {
-            command.isEnabled = wanted.contains(action)
+        // Targets are added once for the life of the channel; enablement is set
+        // on every call.
+        func target(_ command: MPRemoteCommand, page: String, native: String? = nil) {
             guard !haveRemoteCommands else { return }
             command.addTarget { [weak self] _ in
-                self?.deliver("action:\(action)")
+                if let native = native { self?.onTransport?(native) }
+                self?.deliver("action:\(page)")
                 return .success
             }
         }
 
-        wire(centre.playCommand, "play")
-        wire(centre.pauseCommand, "pause")
-        wire(centre.togglePlayPauseCommand, "play")
-        wire(centre.nextTrackCommand, "nexttrack")
-        wire(centre.previousTrackCommand, "previoustrack")
-        // Stop is the one control this client adds rather than forwards: with
-        // the screen off, the lock screen is the only handle on the app.
+        // Transport, always. It used to be gated on the page's list like the
+        // rest, on the reasoning that a button the page does not handle is a
+        // button that does nothing. That stopped being true when the host
+        // learned to answer these itself, and it left the worst possible
+        // arrangement wherever metadata had not arrived yet: a Now Playing
+        // card, published by `began`, whose buttons had no target at all. iOS
+        // does not leave such a press unanswered — with nothing to call it
+        // interrupts the app's audio session instead, and a backgrounded app
+        // cannot reactivate a non-mixable one. Pause killed the audio for good
+        // and play had nothing to send it to.
+        centre.playCommand.isEnabled = true
+        centre.pauseCommand.isEnabled = true
+        centre.togglePlayPauseCommand.isEnabled = true
+        // Stop pauses. It does not stop. `began` advertises the receiver as a
+        // live stream and iOS draws a live stream's transport as a single Stop
+        // rather than a play/pause pair, so the teardown control this client
+        // used to add here was not sitting *beside* pause — it *was* pause, and
+        // reaching for pause ended the session and the audio with it. Closing
+        // the receiver stays where it can be meant: the page's power button.
         centre.stopCommand.isEnabled = true
-        if !haveRemoteCommands {
-            centre.stopCommand.addTarget { [weak self] _ in
-                self?.ended()
-                return .success
-            }
+
+        target(centre.playCommand, page: "play", native: "play")
+        target(centre.pauseCommand, page: "pause", native: "pause")
+        // The page is told "play" for a toggle, which is what its own handler
+        // expects; the host is told it was a toggle, because it is the half
+        // that knows whether anything is playing.
+        target(centre.togglePlayPauseCommand, page: "play", native: "toggle")
+        target(centre.stopCommand, page: "pause", native: "pause")
+        target(centre.nextTrackCommand, page: "nexttrack")
+        target(centre.previousTrackCommand, page: "previoustrack")
+
+        if let actions = actions {
+            let wanted = Set(actions)
+            centre.nextTrackCommand.isEnabled = wanted.contains("nexttrack")
+            centre.previousTrackCommand.isEnabled = wanted.contains("previoustrack")
         }
         haveRemoteCommands = true
     }
@@ -489,7 +540,16 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     /// Keys the chooser's settings page may read and write. The snapshot is the
     /// page's own store and this app treats it as opaque everywhere else, so
     /// what it does understand is named rather than left to a caller.
-    static let appLevelKeys: Set<String> = ["ubersdr.v2.shell"]
+    ///
+    /// `ubersdr.v2.media` is here for one field of it — whether the lock screen
+    /// carries the receiver. The blob is shared like any other v2 setting, and
+    /// that is right for what else it holds (which markers the skip buttons
+    /// stop on, and how), but it means one receiver's answer reaches every
+    /// other. Somewhere to set it for the app is what makes that recoverable:
+    /// without it, a `false` arriving from a receiver is a lock screen with no
+    /// frequency, no artwork and dead skip buttons, and nowhere to say
+    /// otherwise except by finding the panel inside a receiver that has it.
+    static let appLevelKeys: Set<String> = ["ubersdr.v2.shell", "ubersdr.v2.media"]
 
     /// One setting, read from outside a receiver — for the chooser's settings
     /// page, which is a different page in a different origin with no

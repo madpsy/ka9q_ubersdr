@@ -319,6 +319,43 @@ async function showSettings() {
         ));
     }
 
+    // Whether the operator's system shows the receiver's media controls.
+    //
+    // v2's own setting, reached through the host like the layout above, and one
+    // field of a blob that holds three others — so this reads it, changes the
+    // one, and writes the rest back untouched.
+    //
+    // It is offered here because the blob is *shared*: turned off on one
+    // receiver it is off on every other, and the only way back is the Media
+    // Session panel inside a receiver whose controls have already stopped
+    // working. On a phone that is a lock screen with no frequency, no artwork
+    // and dead skip buttons, and nothing anywhere saying why.
+    if (api.prefGet) {
+        let media = {};
+        try { media = JSON.parse(await api.prefGet('ubersdr.v2.media')) || {}; }
+        catch (e) { media = {}; }
+        const lock = el('input', 'switch');
+        lock.type = 'checkbox';
+        lock.setAttribute('role', 'switch');
+        // Absent means v2's own default, which it decides per platform — see
+        // defaultEnabled in static/v2/src/radio/media/support.js. Only an
+        // explicit false is off, which is the rule v2 reads it by too, so an
+        // untouched setting is left untouched rather than written on sight.
+        lock.checked = media.enabled !== false;
+        lock.addEventListener('change', () => {
+            media.enabled = lock.checked;
+            api.prefSet('ubersdr.v2.media', JSON.stringify(media));
+        });
+        add(settingRow(
+            'Media controls',
+            'Show the receiver in the system’s own media controls — the lock screen on '
+            + 'a phone — with its frequency, mode and the operator’s photo, and answer '
+            + 'the play, pause and skip buttons there. Takes effect on the next receiver '
+            + 'you open, and can also be changed in its Media Session panel.',
+            lock,
+        ));
+    }
+
     add(settingGroup('Starting up'));
     add(settingRow(
         'Open the last receiver on launch',

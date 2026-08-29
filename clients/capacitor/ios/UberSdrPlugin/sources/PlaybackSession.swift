@@ -130,22 +130,43 @@ enum PlaybackSession {
         DispatchQueue.main.sync { detachNow(node) }
     }
 
+    /// Only from the engine the node is actually in.
+    ///
+    /// Not defensive tidying: `recover` and `rebuild` both *replace* the
+    /// engine, and a node attached to the one they discarded is still what the
+    /// caller holds. `disconnectNodeOutput` raises on a node the engine has
+    /// never seen, and a raised NSException in this process is an abort — which
+    /// is what opening Control Centre and closing it again did, every time. The
+    /// interruption that Control Centre ends restarts the engine, and the
+    /// foreground hand-back then detached the background stream's node from its
+    /// replacement.
+    ///
+    /// `node.engine` is a back-reference and goes nil with the engine it names,
+    /// so this covers the discarded-engine case and the deallocated one alike.
     private static func detachNow(_ node: AVAudioPlayerNode) {
-        guard let engine = engine else { return }
+        guard let engine = engine, node.engine === engine else { return }
         engine.disconnectNodeOutput(node)
         engine.detach(node)
     }
 
     /// Restart it after the system has taken the audio away — an interruption
     /// that ended, or the media server resetting under everything.
-    static func recover() {
-        guard engine != nil || player != nil else { return }
+    ///
+    /// Answers whether the engine was *replaced* rather than merely restarted,
+    /// which is the caller's problem and not this one's: a replacement is a new
+    /// graph, and anything hung off the old one — BackgroundAudio's player node
+    /// — is left playing into nothing. Silence with no error, which is exactly
+    /// the failure `rebuild` exists for, arriving by a quieter road.
+    @discardableResult
+    static func recover() -> Bool {
+        guard engine != nil || player != nil else { return false }
         if engine?.isRunning == false {
             stopSilentEngine()
             startSilentEngine()
-        } else {
-            player?.play()
+            return true
         }
+        player?.play()
+        return false
     }
 
     /// Put the category back if something has moved it.

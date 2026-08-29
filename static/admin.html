@@ -14406,7 +14406,7 @@ function resetStationIdColor() {
             maxWSPRField.appendChild(maxWSPRSmall);
             globalSection.appendChild(maxWSPRField);
 
-            const wsprdM0LTEField = createConfigField('WSPRD M0LTE Mode', 'checkbox', currentDecoderConfig.wsprd_m0lte_mode || false, 'wsprd_m0lte_mode', 'Decode WSPR with the M0LTE wsprd build and its flag set (fixed 500 decode cycles \u2014 the per-band WSPR depth is ignored). Uses the M0LTE wsprd path above; both binaries ship in the container image.');
+            const wsprdM0LTEField = createConfigField('WSPRD M0LTE Mode (Experimental \u2014 requires a lot of CPU)', 'checkbox', currentDecoderConfig.wsprd_m0lte_mode || false, 'wsprd_m0lte_mode', 'Experimental \u2014 requires a lot of CPU. Decode WSPR with the M0LTE wsprd build and its flag set (fixed 500 decode cycles \u2014 the per-band WSPR depth is ignored). Uses the M0LTE wsprd path above; both binaries ship in the container image.');
             globalSection.appendChild(wsprdM0LTEField);
 
             container.appendChild(globalSection);

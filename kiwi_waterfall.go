@@ -77,6 +77,55 @@ const (
 // what uses them and why a channel that can vary its bin count rounds the other way.
 var radiodBinBandwidthLadder = []float64{0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000}
 
+// radiodSamprateBase is the sample-rate quantum a narrowband spectrum channel must
+// land on: lcm(blockrate, L*blockrate/N). With a 20 ms block time and the 5/4 overlap
+// this front end runs, that is lcm(50, 40) = 200 Hz, at either supported sample rate.
+const radiodSamprateBase = 200
+
+// radiodIsGoodFFTLength reproduces goodchoice() from ka9q-radio src/filter.c: any
+// number of factors of 2, 3, 5 and 7, plus at most one of 11 or 13. Anything else and
+// FFTW has no efficient plan for it.
+func radiodIsGoodFFTLength(n int) bool {
+	if n < 1 {
+		return false
+	}
+	elevens := 0
+	for _, p := range []int{2, 3, 5, 7} {
+		for n%p == 0 {
+			n /= p
+		}
+	}
+	for _, p := range []int{11, 13} {
+		for n%p == 0 {
+			n /= p
+			elevens++
+		}
+	}
+	return n == 1 && elevens <= 1
+}
+
+// radiodNarrowbandFFT reproduces the search in ka9q-radio src/spectrum.c
+// setup_narrowband(): start at bin_count + margin/rbw and step up until the length is
+// FFT-friendly and the resulting sample rate is a multiple of radiodSamprateBase.
+//
+// Returns the chosen length and sample rate, or 0,0 if the search runs off the end as
+// radiod's does at 65536. That failure is not theoretical: asking for an unrounded bin
+// bandwidth sends the search a very long way up, which is what radiodBinBandwidthLadder
+// exists to avoid.
+func radiodNarrowbandFFT(binBW float64, binCount int) (fftLen, samprate int) {
+	if binBW <= 0 || binCount < 1 {
+		return 0, 0
+	}
+	n := int(math.Round(float64(binCount) + radiodFilterMarginHz/binBW))
+	for n < 65536 {
+		if sr := int(math.Round(float64(n) * binBW)); radiodIsGoodFFTLength(n) && sr%radiodSamprateBase == 0 {
+			return n, sr
+		}
+		n++
+	}
+	return 0, 0
+}
+
 // radiodRoundUpBinBW returns the bin bandwidth to ask radiod for when a display wants
 // `want` Hz per bin.
 //

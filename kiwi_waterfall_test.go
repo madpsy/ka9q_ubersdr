@@ -11,41 +11,6 @@ import (
 // downconverter. 129.6 Msps is the receiver this was measured on.
 const kiwiTestSamprate = 129_600_000
 
-// radiodFFTLength reproduces the search in ka9q-radio src/spectrum.c
-// setup_narrowband(): start at bin_count + margin/rbw and step up until the
-// length is FFT-friendly and the resulting sample rate is a multiple of
-// samprate_base. Returns the chosen length and sample rate, or 0,0 if the
-// search runs off the end as radiod's does at 65536.
-func radiodFFTLength(rbw float64, binCount int) (int, int) {
-	const samprateBase = 200 // lcm(blockrate 50, L*blockrate/N 40) for this front end
-	n := int(math.Round(float64(binCount) + radiodFilterMarginHz/rbw))
-	for n < 65536 {
-		if radiodGoodChoice(n) && int(math.Round(float64(n)*rbw))%samprateBase == 0 {
-			return n, int(math.Round(float64(n) * rbw))
-		}
-		n++
-	}
-	return 0, 0
-}
-
-// radiodGoodChoice reproduces goodchoice() from ka9q-radio src/filter.c: any
-// number of factors of 2, 3, 5, 7 plus at most one of 11 or 13.
-func radiodGoodChoice(n int) bool {
-	elevens := 0
-	for _, p := range []int{2, 3, 5, 7} {
-		for n%p == 0 {
-			n /= p
-		}
-	}
-	for _, p := range []int{11, 13} {
-		for n%p == 0 {
-			n /= p
-			elevens++
-		}
-	}
-	return n == 1 && elevens <= 1
-}
-
 // Every zoom level must ask radiod for something it can serve without the FFT
 // search running away. This is the whole reason the ladder exists: the exact
 // Kiwi bin bandwidths (29296.875 / 2^zoom) drive fft_n into the tens of
@@ -60,7 +25,7 @@ func TestKiwiSpectrumParamsStayCheap(t *testing.T) {
 			continue // wideband mode: no search, no downconverter
 		}
 
-		fftLen, samprate := radiodFFTLength(req.BinBandwidth, req.BinCount)
+		fftLen, samprate := radiodNarrowbandFFT(req.BinBandwidth, req.BinCount)
 		if fftLen == 0 {
 			t.Errorf("zoom %d: bin_bw %.4f Hz x %d bins -- radiod finds no valid FFT length",
 				zoom, req.BinBandwidth, req.BinCount)

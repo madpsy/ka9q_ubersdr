@@ -1456,8 +1456,28 @@ noisefloor:
   #   - bin_count: Number of FFT bins for this band
   #   - bin_bandwidth: Bandwidth per bin in Hz (determines resolution)
   #
-  # Example: 20m band with 350 Hz/bin can clearly see 50 Hz wide FT8 signals!
+  # Example: 20m band with 200 Hz/bin can clearly see 50 Hz wide FT8 signals!
   # Compare to old 3 kHz/bin where FT8 was averaged out.
+  #
+  # KEEP bin_bandwidth AT OR BELOW 200 Hz. This is not about resolution -- it is
+  # which algorithm radiod uses, and the two cost wildly different things:
+  #
+  #   bin_bandwidth <= 200   radiod downconverts to the band and transforms only
+  #                          that. Cost is the band's width, and it does NOT rise
+  #                          with the poll rate.
+  #   bin_bandwidth >  200   radiod transforms the ENTIRE front end at that
+  #                          resolution and keeps the bins you asked for. A 300 kHz
+  #                          band at 500 Hz/bin is a 259,200-point FFT of all
+  #                          129.6 MHz, every poll, to look at 300 kHz of it.
+  #
+  # These bands were all above the crossover and cost about 26% of a CPU core at
+  # the 1000 ms default background poll -- and 200%, two whole cores, at the 100 ms
+  # people usually set for a smooth SSE spectrum stream. Below the crossover the
+  # whole set costs about 28% at ANY poll rate, and most bands gained resolution.
+  #
+  # Because the cost below the crossover is the band's width and nothing else,
+  # finer bins are free: only bin_count (and so packet size) grows. Keep bin_count
+  # even -- the FFT unwrap swaps two halves and an odd count drops a bin.
   #
   # If you omit these parameters, sensible defaults will be calculated automatically.
   bands:
@@ -1479,32 +1499,32 @@ noisefloor:
       start: 1800000          # 1.8 MHz
       end: 2000000            # 2.0 MHz
       center_frequency: 1900000  # Center frequency for this band's spectrum (Hz)
-      bin_count: 400          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
-      bin_bandwidth: 500      # 500 Hz resolution
+      bin_count: 1000          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
+      bin_bandwidth: 200      # 500 Hz resolution
       ft8_frequency: 1840000  # 1.840 MHz - FT8 calling frequency
     
     - name: "80m"
       start: 3500000          # 3.5 MHz
       end: 4000000            # 4.0 MHz
       center_frequency: 3750000
-      bin_count: 1000
-      bin_bandwidth: 500      # 500 Hz resolution
+      bin_count: 2500
+      bin_bandwidth: 200      # 500 Hz resolution
       ft8_frequency: 3573000  # 3.573 MHz - FT8 calling frequency
     
     - name: "60m"
       start: 5250000          # 5.25 MHz
       end: 5450000            # 5.45 MHz
       center_frequency: 5350000
-      bin_count: 400          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
-      bin_bandwidth: 500      # 500 Hz resolution
+      bin_count: 1000          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
+      bin_bandwidth: 200      # 500 Hz resolution
       ft8_frequency: 5357000  # 5.357 MHz - FT8 calling frequency
     
     - name: "40m"
       start: 7000000          # 7.0 MHz
       end: 7200000            # 7.2 MHz
       center_frequency: 7100000
-      bin_count: 400          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
-      bin_bandwidth: 500      # 500 Hz resolution
+      bin_count: 1000          # 400 bins × 500 Hz = 200 kHz coverage (60% fewer bins vs 1000)
+      bin_bandwidth: 200      # 500 Hz resolution
       ft8_frequency: 7074000  # 7.074 MHz - FT8 calling frequency
     
     - name: "30m"
@@ -1519,8 +1539,8 @@ noisefloor:
       start: 14000000         # 14.0 MHz
       end: 14350000           # 14.35 MHz
       center_frequency: 14175000
-      bin_count: 700          # 700 bins × 500 Hz = 350 kHz coverage (30% fewer bins vs 1000)
-      bin_bandwidth: 500      # 500 Hz resolution
+      bin_count: 1750          # 700 bins × 500 Hz = 350 kHz coverage (30% fewer bins vs 1000)
+      bin_bandwidth: 200      # 500 Hz resolution
       ft8_frequency: 14074000 # 14.074 MHz - FT8 calling frequency
     
     - name: "17m"
@@ -1535,8 +1555,8 @@ noisefloor:
       start: 21000000         # 21.0 MHz
       end: 21450000           # 21.45 MHz
       center_frequency: 21225000
-      bin_count: 900          # 900 bins × 500 Hz = 450 kHz coverage (10% fewer bins vs 1000)
-      bin_bandwidth: 500      # 500 Hz resolution
+      bin_count: 2250          # 900 bins × 500 Hz = 450 kHz coverage (10% fewer bins vs 1000)
+      bin_bandwidth: 200      # 500 Hz resolution
       ft8_frequency: 21074000 # 21.074 MHz - FT8 calling frequency
     
     - name: "12m"
@@ -1551,8 +1571,8 @@ noisefloor:
       start: 28000000         # 28.0 MHz
       end: 28300000           # 28.3 MHz (lower portion)
       center_frequency: 28150000
-      bin_count: 600          # 600 bins × 500 Hz = 300 kHz coverage (40% fewer bins vs 1000)
-      bin_bandwidth: 500      # 500 Hz resolution
+      bin_count: 1500          # 600 bins × 500 Hz = 300 kHz coverage (40% fewer bins vs 1000)
+      bin_bandwidth: 200      # 500 Hz resolution
       ft8_frequency: 28074000 # 28.074 MHz - FT8 calling frequency
 
     # 6m — only reachable when the RX888 runs at its full 129.6 MSPS.
@@ -1577,8 +1597,8 @@ noisefloor:
       start: 50000000         # 50.0 MHz
       end: 50500000           # 50.5 MHz (lower portion — see above)
       center_frequency: 50250000
-      bin_count: 1000         # 1000 bins × 500 Hz = 500 kHz coverage
-      bin_bandwidth: 500      # 500 Hz resolution
+      bin_count: 2500         # 1000 bins × 500 Hz = 500 kHz coverage
+      bin_bandwidth: 200      # 500 Hz resolution
       ft8_frequency: 50313000 # 50.313 MHz - FT8 calling frequency
 
 # ==============================================================================

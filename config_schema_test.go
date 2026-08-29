@@ -998,3 +998,89 @@ func TestLoadYAMLWithRepairKeepsOriginalErrorAndFile(t *testing.T) {
 		t.Error("backup written for a failed repair")
 	}
 }
+
+// Every noise floor band must sit on radiod's downconverter.
+//
+// This is not about resolution. Above the crossover radiod transforms the entire front
+// end at the requested bin bandwidth and keeps only the bins asked for, so a 300 kHz
+// band at 500 Hz/bin is a 259,200-point FFT of all 129.6 MHz on every poll. Below it
+// radiod downconverts to the band and the cost is the band's width -- and, unlike the
+// wideband path, does not rise with the poll rate at all.
+//
+// These defaults were all above the crossover: ~26% of a core at the 1000 ms
+// background poll, and ~200% at the 100 ms operators usually set for a smooth SSE
+// spectrum stream.
+func TestNoiseFloorBandsStayOnTheDownconverter(t *testing.T) {
+	cfg := loadConfigForTest(t, "")
+
+	// %CPU per point/s, from the measurements on the live 129.6 Msps receiver.
+	const perNarrowbandPoint = 4.5 / 585937.5
+	total := 0.0
+
+	for _, b := range cfg.NoiseFloor.Bands {
+		if b.BinBandwidth > radiodSpectrumCrossoverHz {
+			t.Errorf("band %s: %.0f Hz/bin is above the %.0f Hz crossover -- radiod would "+
+				"transform the whole front end for it, on every poll",
+				b.Name, b.BinBandwidth, radiodSpectrumCrossoverHz)
+		}
+		// The delivered span must cover the band, or the edges are simply not measured.
+		if span := float64(b.BinCount) * b.BinBandwidth; span < float64(b.End-b.Start) {
+			t.Errorf("band %s: %d bins x %.0f Hz = %.0f Hz does not cover its %d Hz",
+				b.Name, b.BinCount, b.BinBandwidth, span, b.End-b.Start)
+		}
+		// Even, or the FFT unwrap's half-swap leaves a bin unwritten.
+		if b.BinCount%2 != 0 {
+			t.Errorf("band %s: %d bins is odd", b.Name, b.BinCount)
+		}
+		if b.BinCount > maxSpectrumBins {
+			t.Errorf("band %s: %d bins is more than one datagram carries", b.Name, b.BinCount)
+		}
+		total += perNarrowbandPoint * 1.25 * float64(b.BinCount) * b.BinBandwidth
+	}
+
+	// The whole set, at any poll rate. Well under one core.
+	if total > 40 {
+		t.Errorf("noise floor bands cost %.1f%% of a core in total, want well under 40%%", total)
+	}
+	t.Logf("%d bands, %.1f%% of a core in total, independent of the poll rate",
+		len(cfg.NoiseFloor.Bands), total)
+}
+
+// A band configured with only start/end and a bin count can still land above the
+// crossover. Widening the bin count is free below it; widening the bandwidth is not.
+func TestNoiseFloorDerivedBandIsPulledBelowTheCrossover(t *testing.T) {
+	cfg := loadConfigForTest(t, `
+noisefloor:
+  bands:
+    - name: wide
+      start: 7000000
+      end: 7300000
+      bin_count: 100
+`) // 300 kHz over 100 bins would derive 3000 Hz/bin
+
+	b := cfg.NoiseFloor.Bands[0]
+	if b.BinBandwidth > radiodSpectrumCrossoverHz {
+		t.Errorf("derived %.0f Hz/bin, want it pulled to at most %.0f", b.BinBandwidth, radiodSpectrumCrossoverHz)
+	}
+	if span := float64(b.BinCount) * b.BinBandwidth; span < 300000 {
+		t.Errorf("%d bins x %.0f Hz = %.0f Hz, does not cover the 300 kHz band", b.BinCount, b.BinBandwidth, span)
+	}
+	if b.BinCount%2 != 0 {
+		t.Errorf("%d bins is odd", b.BinCount)
+	}
+}
+
+// loadConfigForTest runs extra YAML through the real LoadConfig, so the defaults under
+// test are the ones a receiver actually starts with rather than a reimplementation.
+func loadConfigForTest(t *testing.T, extra string) *Config {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(extra), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	return cfg
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"strings"
@@ -687,7 +688,14 @@ type NoiseFloorBand struct {
 	CenterFrequency uint64  `yaml:"center_frequency"` // Center frequency for this band's spectrum
 	BinCount        int     `yaml:"bin_count"`        // Number of FFT bins for this band
 	BinBandwidth    float64 `yaml:"bin_bandwidth"`    // Bandwidth per bin in Hz for this band
-	FT8Frequency    uint64  `yaml:"ft8_frequency"`    // FT8 frequency for SNR calculation (0 = disabled)
+
+	// What the config file asked for, when it differs from what is being run --
+	// see the crossover guard in LoadConfig. yaml:"-" so a config the admin UI
+	// rewrites cannot persist the corrected values back over the operator's own,
+	// and so the file keeps saying what the operator wrote until they change it.
+	ConfiguredBinBandwidth float64 `yaml:"-" json:"configured_bin_bandwidth,omitempty"`
+	ConfiguredBinCount     int     `yaml:"-" json:"configured_bin_count,omitempty"`
+	FT8Frequency           uint64  `yaml:"ft8_frequency"` // FT8 frequency for SNR calculation (0 = disabled)
 }
 
 // FrequencyReferenceConfig contains frequency reference tracking settings
@@ -1745,22 +1753,45 @@ func LoadConfig(filename string) (*Config, error) {
 	// NotifyInstanceStartup defaults to false (already false by default from YAML unmarshaling)
 
 	// Set default amateur radio bands with per-band spectrum parameters if not specified
+	// Every band's bin_bandwidth is at or below radiodSpectrumCrossoverHz, and that
+	// is what decides which of radiod's two spectrum algorithms runs for it -- not
+	// how sharp the picture is.
+	//
+	// Above the crossover radiod transforms the ENTIRE front end at the requested
+	// resolution and keeps the bins asked for, so a 300 kHz band at 500 Hz/bin is a
+	// 259,200-point FFT of all 129.6 MHz, on every poll, to look at 300 kHz of it.
+	// Below it radiod downconverts to the band and transforms only that: the cost is
+	// the band's width, and unlike the wideband path it does not rise with the poll
+	// rate at all.
+	//
+	// These defaults used to sit above the crossover and cost about 26% of a core at
+	// the 1000 ms background poll -- and 200%, two whole cores, at the 100 ms
+	// operators usually set for a smooth SSE spectrum stream. Below it the whole set
+	// costs about 29% whatever the poll rate, and most bands gained resolution
+	// rather than losing it.
+	//
+	// Two rules for anyone editing these: keep bin_bandwidth <= 200, and keep
+	// bin_count even, because the FFT unwrap swaps two halves and an odd count
+	// leaves a bin unwritten. Below the crossover finer bins cost no CPU at all --
+	// only bin_count, and so packet size, grows.
 	if len(config.NoiseFloor.Bands) == 0 {
 		config.NoiseFloor.Bands = []NoiseFloorBand{
+			// bin_bandwidth is at or below radiodSpectrumCrossoverHz on every band,
+			// and that is the load-bearing property -- see the note below.
 			{Name: "160m", Start: 1800000, End: 2000000, CenterFrequency: 1900000, BinCount: 1000, BinBandwidth: 200},
-			{Name: "80m", Start: 3500000, End: 4000000, CenterFrequency: 3750000, BinCount: 1000, BinBandwidth: 500},
+			{Name: "80m", Start: 3500000, End: 4000000, CenterFrequency: 3750000, BinCount: 2500, BinBandwidth: 200},
 			{Name: "60m", Start: 5250000, End: 5450000, CenterFrequency: 5350000, BinCount: 1000, BinBandwidth: 200},
-			{Name: "40m", Start: 7000000, End: 7300000, CenterFrequency: 7150000, BinCount: 1000, BinBandwidth: 300},
+			{Name: "40m", Start: 7000000, End: 7300000, CenterFrequency: 7150000, BinCount: 1500, BinBandwidth: 200},
 			{Name: "30m", Start: 10100000, End: 10150000, CenterFrequency: 10125000, BinCount: 500, BinBandwidth: 100},
-			{Name: "20m", Start: 14000000, End: 14350000, CenterFrequency: 14175000, BinCount: 1000, BinBandwidth: 350},
+			{Name: "20m", Start: 14000000, End: 14350000, CenterFrequency: 14175000, BinCount: 1750, BinBandwidth: 200},
 			{Name: "17m", Start: 18068000, End: 18168000, CenterFrequency: 18118000, BinCount: 500, BinBandwidth: 200},
-			{Name: "15m", Start: 21000000, End: 21450000, CenterFrequency: 21225000, BinCount: 1000, BinBandwidth: 450},
+			{Name: "15m", Start: 21000000, End: 21450000, CenterFrequency: 21225000, BinCount: 2250, BinBandwidth: 200},
 			{Name: "12m", Start: 24890000, End: 24990000, CenterFrequency: 24940000, BinCount: 500, BinBandwidth: 200},
-			{Name: "10m", Start: 28000000, End: 28300000, CenterFrequency: 28150000, BinCount: 1000, BinBandwidth: 300, FT8Frequency: 28074000},
+			{Name: "10m", Start: 28000000, End: 28300000, CenterFrequency: 28150000, BinCount: 1500, BinBandwidth: 200, FT8Frequency: 28074000},
 			// Only reachable at 129.6 Msps; pruneOutOfRangeChannels skips it on a
 			// narrower front end. The lower 500 kHz, where the narrowband activity is —
 			// see the 6m entry in config.yaml.example for why not the whole 50-52 MHz.
-			{Name: "6m", Start: 50000000, End: 50500000, CenterFrequency: 50250000, BinCount: 1000, BinBandwidth: 500, FT8Frequency: 50313000},
+			{Name: "6m", Start: 50000000, End: 50500000, CenterFrequency: 50250000, BinCount: 2500, BinBandwidth: 200, FT8Frequency: 50313000},
 		}
 	}
 
@@ -1778,6 +1809,30 @@ func LoadConfig(filename string) (*Config, error) {
 			// Calculate bin bandwidth to cover the band
 			bandwidth := float64(band.End - band.Start)
 			band.BinBandwidth = bandwidth / float64(band.BinCount)
+		}
+		// A band configured with only start/end and a bin count can still land
+		// above the crossover, which is the expensive algorithm -- so widen the bin
+		// count instead of the bandwidth. Cost below the crossover is the band's
+		// width alone, so the extra bins are free.
+		if band.BinBandwidth > radiodSpectrumCrossoverHz {
+			// Remembered so the admin UI can say the file and the running
+			// configuration disagree. Correcting this silently is right -- the
+			// alternative is a receiver burning cores because of a stale line in
+			// a YAML file -- but leaving no trace of it is not: the operator ends
+			// up reading a page that says everything is optimal while their
+			// config.yaml still says otherwise.
+			band.ConfiguredBinBandwidth = band.BinBandwidth
+			band.ConfiguredBinCount = band.BinCount
+			span := float64(band.End - band.Start)
+			band.BinBandwidth = radiodSpectrumCrossoverHz
+			band.BinCount = int(math.Ceil(span / band.BinBandwidth))
+			log.Printf("Config: noise floor band %s asked for more than %.0f Hz per bin, which makes radiod "+
+				"transform the whole front end; using %.0f Hz x %d bins instead",
+				band.Name, radiodSpectrumCrossoverHz, band.BinBandwidth, band.BinCount)
+		}
+		// Even, or the FFT unwrap's half-swap leaves a bin unwritten.
+		if band.BinCount%2 != 0 {
+			band.BinCount++
 		}
 	}
 

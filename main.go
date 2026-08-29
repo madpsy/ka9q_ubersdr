@@ -3167,6 +3167,12 @@ func main() {
 	http.HandleFunc("/admin/noisefloor-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorHealth(w, r, noiseFloorMonitor)
 	}))
+	// Sizes a new noise-floor band for a frequency range. See
+	// noiseFloorBandParamsFor: bin_bandwidth decides which radiod algorithm runs for
+	// the channel, and getting it wrong costs whole CPU cores.
+	http.HandleFunc("/admin/noisefloor-band-params", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorBandParams(w, r, config, noiseFloorMonitor)
+	}))
 	http.HandleFunc("/admin/notifications/health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNotificationsHealth(w, r, notifManager)
 	}))

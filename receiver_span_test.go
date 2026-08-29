@@ -1497,7 +1497,7 @@ func TestWebSDRNarrowbandRequestsAreServable(t *testing.T) {
 				continue // wideband: no search, no downconverter
 			}
 
-			fftLen, samprate := radiodFFTLength(req.BinBandwidth, req.BinCount)
+			fftLen, samprate := radiodNarrowbandFFT(req.BinBandwidth, req.BinCount)
 			if fftLen == 0 {
 				t.Errorf("%d MHz zoom %d: %d bins @ %v Hz -- radiod finds no valid FFT length",
 					spanHz/1_000_000, zoom, req.BinCount, req.BinBandwidth)

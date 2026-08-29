@@ -971,6 +971,7 @@
                     <button class="tab" onclick="switchTab('proxy')">Addons</button>
                     <button class="tab" onclick="switchTab('radiod')">Radiod</button>
                     <button class="tab" onclick="switchTab('radiod-channels')">Radiod Channels</button>
+                    <button class="tab" onclick="switchTab('noise')">Noise</button>
                     <button class="tab" id="gpsdoTab" onclick="switchTab('gpsdo')" style="display: none;">GPSDO</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
@@ -985,6 +986,46 @@
                 </div>
 
                 <!-- Sessions Tab -->
+                <div id="noiseTab" class="tab-content">
+                    <div style="margin-bottom:14px; color:#555555; font-size:13px; line-height:1.5;">
+                        Every noise-floor band is a permanent radiod spectrum channel. What decides its cost is
+                        <strong>bin bandwidth</strong>, not resolution: at or below the crossover radiod downconverts to
+                        the band and the cost is the band's width alone &mdash; it does <em>not</em> rise with the poll
+                        rate. Above it radiod transforms the <em>entire front end</em> on every poll to hand back the
+                        bins you asked for.
+                        <div style="margin-top:8px;">
+                            Below the crossover a band's cost <em>is</em> its width, so a band already on the
+                            downconverter and delivering no more span than it was asked for is marked
+                            <span style="color:#2e7d32; font-weight:600;">at cost floor</span> &mdash; the only way to
+                            make it cheaper is a narrower frequency range. Suggestions appear only where a change would
+                            actually save CPU.
+                        </div>
+                    </div>
+                    <div id="noiseSummary" style="margin-bottom:14px;"></div>
+                    <div style="overflow-x:auto;">
+                        <table id="noiseBandsTable" style="width:100%; border-collapse:collapse; font-size:13px;">
+                            <thead><tr id="noiseBandsHead"></tr></thead>
+                            <tbody id="noiseBandsBody"></tbody>
+                        </table>
+                    </div>
+
+                    <h3 style="margin-top:26px;">Size a new band</h3>
+                    <div style="color:#555555; font-size:13px; margin-bottom:10px;">
+                        Give a frequency range and this works out the cheapest geometry radiod can serve it with,
+                        validated against radiod's own FFT-length search.
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+                        <label style="font-size:12px; color:#555555;">Name<br>
+                            <input type="text" id="noiseNewName" placeholder="30m" style="width:110px;"></label>
+                        <label style="font-size:12px; color:#555555;">Start (Hz)<br>
+                            <input type="number" id="noiseNewStart" placeholder="10100000" style="width:150px;"></label>
+                        <label style="font-size:12px; color:#555555;">End (Hz)<br>
+                            <input type="number" id="noiseNewEnd" placeholder="10150000" style="width:150px;"></label>
+                        <button class="btn" onclick="sizeNoiseFloorBand()">Calculate</button>
+                    </div>
+                    <div id="noiseNewResult"></div>
+                </div>
+
                 <div id="sessionsTab" class="tab-content active">
                     <!-- Analytics Links Section -->
                     <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
@@ -4741,6 +4782,146 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             document.getElementById('password').value = '';
         }
 
+        // ── Noise tab ────────────────────────────────────────────────────────────
+        //
+        // /admin/noisefloor-band-params: GET reports every configured band with what it
+        // should cost and what radiod says it is costing; POST sizes a new one.
+
+        function nfNum(v, digits, suffix) {
+            if (v === undefined || v === null) return '<span style="color:#bbbbbb">&mdash;</span>';
+            return Number(v).toFixed(digits) + (suffix || '');
+        }
+
+        function nfHz(hz) {
+            if (hz >= 1e6) return (hz / 1e6).toFixed(3).replace(/\.?0+$/, '') + ' MHz';
+            if (hz >= 1e3) return (hz / 1e3).toFixed(2).replace(/\.?0+$/, '') + ' kHz';
+            return hz + ' Hz';
+        }
+
+        async function loadNoiseFloorBands() {
+            const body = document.getElementById('noiseBandsBody');
+            const head = document.getElementById('noiseBandsHead');
+            const summary = document.getElementById('noiseSummary');
+            body.innerHTML = '<tr><td colspan="12" style="padding:10px; color:#666666;">Loading…</td></tr>';
+
+            let r;
+            try {
+                r = await fetch('/admin/noisefloor-band-params', { credentials: 'same-origin' });
+            } catch (e) {
+                body.innerHTML = '<tr><td colspan="12" style="padding:10px; color:#dc3545;">' + e + '</td></tr>';
+                return;
+            }
+            if (!r.ok) {
+                body.innerHTML = '<tr><td colspan="12" style="padding:10px; color:#dc3545;">HTTP ' + r.status + '</td></tr>';
+                return;
+            }
+            const d = await r.json();
+
+            const cols = ['Band', 'Range', 'Span', 'Bins', 'Hz/bin', 'Algorithm', 'Est. CPU', 'Actual CPU',
+                          'Noise floor', 'dB/Hz', 'Occupancy', 'Age'];
+            head.innerHTML = cols.map(c =>
+                '<th style="text-align:left; padding:6px 8px; border-bottom:1px solid #dee2e6; color:#333333; white-space:nowrap;">' + c + '</th>').join('');
+
+            body.innerHTML = (d.bands || []).map(b => {
+                const wide = b.radiod_algorithm && b.radiod_algorithm.indexOf('wideband') === 0;
+                // Only flag a real disagreement: the estimate is a model, not a promise.
+                const drift = (b.measured_cpu_percent !== undefined && b.estimated_cpu_percent > 0 &&
+                               Math.abs(b.measured_cpu_percent - b.estimated_cpu_percent) > Math.max(1, b.estimated_cpu_percent))
+                    ? ' title="measured differs from the estimate by more than the estimate itself" style="color:#e65100"' : '';
+                const warn = (b.warnings || []).length
+                    ? ' <span title="' + b.warnings.join(' — ').replace(/"/g, '&quot;') + '" style="color:#e65100; cursor:help;">&#9888;</span>' : '';
+                // A suggestion only appears when it would actually save CPU. A band with
+                // none is either optimal or unchangeable, and saying which matters far
+                // more on this page than saying nothing.
+                const note = (b.cost_note || '').replace(/"/g, '&quot;');
+                const sugg = b.suggested
+                    ? '<div style="font-size:11px; color:#e65100; margin-top:2px;" title="' + note + '">suggest ' +
+                      b.suggested.bin_count + ' bins @ ' + b.suggested.bin_bandwidth + ' Hz (' +
+                      nfNum(b.suggested.estimated_cpu_percent, 2, '%') + ')</div>'
+                    : (b.at_cost_floor
+                        ? '<div style="font-size:11px; color:#2e7d32; margin-top:2px;" title="' + note + '">at cost floor</div>'
+                        : '');
+                // The loader corrects a band that would use radiod's expensive algorithm,
+                // so the receiver is already cheap -- but the file still says otherwise,
+                // and nothing else on this page would ever reveal that.
+                const stale = b.configured_bin_bandwidth
+                    ? '<div style="font-size:11px; color:#e65100; margin-top:2px;">config.yaml says ' +
+                      b.configured_bin_count + ' @ ' + b.configured_bin_bandwidth + ' Hz &mdash; corrected at startup</div>'
+                    : '';
+                const td = 'padding:6px 8px; border-bottom:1px solid #eeeeee; color:#333; white-space:nowrap;';
+                return '<tr>' +
+                    '<td style="' + td + '"><strong>' + b.name + '</strong>' + warn + sugg + stale + '</td>' +
+                    '<td style="' + td + ' color:#555555;">' + nfHz(b.start) + ' – ' + nfHz(b.end) + '</td>' +
+                    '<td style="' + td + '">' + nfHz(b.span_hz) + '</td>' +
+                    '<td style="' + td + '">' + b.bin_count + '</td>' +
+                    '<td style="' + td + '">' + b.bin_bandwidth + '</td>' +
+                    '<td style="' + td + (wide ? ' color:#dc3545;' : ' color:#2e7d32;') + '">' +
+                        (wide ? 'wideband' : 'downconverter') + '</td>' +
+                    '<td style="' + td + '">' + nfNum(b.estimated_cpu_percent, 2, '%') + '</td>' +
+                    '<td style="' + td + '"' + drift + '>' + nfNum(b.measured_cpu_percent, 1, '%') + '</td>' +
+                    '<td style="' + td + '">' + nfNum(b.noise_floor_db, 1, ' dB') + '</td>' +
+                    '<td style="' + td + '">' + nfNum(b.noise_floor_db_per_hz, 1) + '</td>' +
+                    '<td style="' + td + '">' + nfNum(b.occupancy_pct, 1, '%') + '</td>' +
+                    '<td style="' + td + ' color:#666666;">' + (b.measurement_age_sec !== undefined ? b.measurement_age_sec + 's' : '&mdash;') + '</td>' +
+                    '</tr>';
+            }).join('') || '<tr><td colspan="12" style="padding:10px; color:#666666;">No bands configured.</td></tr>';
+
+            const measured = d.measured_total_cpu_percent !== undefined
+                ? ' &nbsp;|&nbsp; Actual: <strong>' + d.measured_total_cpu_percent.toFixed(1) + '%</strong>'
+                : ' &nbsp;|&nbsp; <span style="color:#666666;">actual unavailable' +
+                  (d.thread_stats_available ? '' : ' (no radiod thread stats)') + '</span>';
+            summary.innerHTML =
+                '<div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:5px; padding:12px 14px; color:#333;">' +
+                '<div>Estimated total: <strong>' + d.estimated_total_cpu_percent.toFixed(1) + '%</strong> of one core' + measured + '</div>' +
+                '<div style="color:#666666; font-size:12px; margin-top:6px;">Background poll ' +
+                    d.background_poll_period_ms + ' ms &nbsp;|&nbsp; radiod crossover ' + d.radiod_crossover_hz + ' Hz' +
+                    (d.estimate_calibration_bands >= 2
+                        ? ' &nbsp;|&nbsp; this receiver runs at <strong>' + (d.estimate_calibration * 100).toFixed(0) +
+                          '%</strong> of the modelled cost (fitted over ' + d.estimate_calibration_bands + ' bands)'
+                        : '') + '</div>' +
+                (d.notes || []).map(n => '<div style="color:#666666; font-size:12px; margin-top:4px;">' + n + '</div>').join('') +
+                '</div>';
+        }
+
+        async function sizeNoiseFloorBand() {
+            const out = document.getElementById('noiseNewResult');
+            const payload = {
+                name: document.getElementById('noiseNewName').value.trim(),
+                start: parseInt(document.getElementById('noiseNewStart').value, 10),
+                end: parseInt(document.getElementById('noiseNewEnd').value, 10)
+            };
+            if (!payload.start || !payload.end) {
+                out.innerHTML = '<div style="color:#dc3545;">Enter a start and end frequency in Hz.</div>';
+                return;
+            }
+            out.innerHTML = '<div style="color:#666666;">Calculating…</div>';
+            const r = await fetch('/admin/noisefloor-band-params', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const d = await r.json();
+            if (!r.ok) {
+                out.innerHTML = '<div style="color:#dc3545;">' + (d.error || ('HTTP ' + r.status)) + '</div>';
+                return;
+            }
+            const warn = (d.warnings || []).map(x =>
+                '<div style="color:#e65100; font-size:12px; margin-top:4px;">&#9888; ' + x + '</div>').join('');
+            out.innerHTML =
+                '<div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:5px; padding:12px 14px; color:#333;">' +
+                '<div>' + d.bin_count + ' bins &times; ' + d.bin_bandwidth + ' Hz &nbsp;=&nbsp; ' +
+                    nfHz(d.delivered_span_hz) + ' delivered for a ' + nfHz(d.span_hz) + ' range</div>' +
+                '<div style="color:#2e7d32; margin-top:4px;">' + d.radiod_algorithm +
+                    ' &nbsp;|&nbsp; about ' + d.estimated_cpu_percent.toFixed(2) + '% of a core, at any poll rate</div>' +
+                '<div style="color:#666666; font-size:12px; margin-top:4px;">radiod fft_n ' + d.radiod_fft_length +
+                    ', channel rate ' + d.radiod_channel_samprate + ' Hz, ' + d.bytes_per_poll + ' bytes per poll</div>' +
+                warn +
+                '<pre style="background:#ffffff; border:1px solid #dee2e6; border-radius:4px; color:#333; padding:10px; margin-top:10px; overflow-x:auto; font-size:12px;">' +
+                    d.yaml.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>' +
+                '<div style="color:#666666; font-size:12px;">Add this under <code>noisefloor.bands</code> in config.yaml, then restart.</div>' +
+                '</div>';
+        }
+
         function switchTab(tab) {
             currentTab = tab;
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -4940,6 +5121,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
                 startMonitorAutoRefresh();
+            } else if (tab === 'noise') {
+                activateTabBtn('noise');
+                document.getElementById('noiseTab').classList.add('active');
+                loadNoiseFloorBands();
             } else if (tab === 'system') {
                 activateTabBtn('system');
                 document.getElementById('systemTab').classList.add('active');

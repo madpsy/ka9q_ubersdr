@@ -2356,6 +2356,20 @@ func (kc *kiwiConn) sendInitMessages() {
 				log.Printf("Failed to create KiwiSDR spectrum session: %v", err)
 				return
 			}
+
+			// The KiwiSDR protocol has no waterfall-rate control, so unlike WebSDR
+			// there is nothing for the client to say and this is the whole story:
+			// without it every Kiwi waterfall polls radiod at the full tick for as
+			// long as the tab is open. kiwisdr_spectrum_divisor.
+			base := defaultEmulationPollDivisor
+			tick := 0
+			if kc.sessions != nil && kc.sessions.config != nil {
+				if d := kc.sessions.config.Server.KiwiSDRSpectrumDivisor; d > 0 {
+					base = d
+				}
+				tick = kc.sessions.config.Spectrum.PollPeriodMs
+			}
+			session.PollDivisor.Store(int32(spectrumPollDivisor(base, tick)))
 			kc.session = session
 
 			// Configure initial spectrum parameters (zoom 0 = full 30 MHz span).
@@ -3071,11 +3085,28 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 }
 
 // streamWaterfall streams spectrum data in KiwiSDR W/F format
+//
+// Rows leave at the poll tick, which is faster than radiod is polled:
+// kiwisdr_spectrum_divisor thins the polling so radiod is not asked to produce a
+// whole spectrum response for every row, and the gap is filled by repeating the last
+// packet with a fresh sequence number.
+//
+// The repeat carries nothing new, so each measurement occupies two rows of waterfall
+// and half as much history fits on screen. What it buys is the scroll rate: a real
+// KiwiSDR runs its waterfall at the full rate, and a visibly slower one reads as a
+// broken receiver rather than a cheaper one. The KiwiSDR protocol has no waterfall
+// speed control, so unlike WebSDR there is no client setting to respect here -- the
+// rate is entirely the operator's to set.
 func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 	log.Printf("Starting KiwiSDR waterfall stream")
 
 	packetCount := 0
 	wfSequence := uint32(0)
+
+	var lastPacket []byte
+	var fill waterfallFill
+	repeat := time.NewTicker(kc.wfRowInterval())
+	defer repeat.Stop()
 
 	for {
 		// Wait for session to be created by zoom command
@@ -3090,6 +3121,28 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 
 		case <-kc.session.Done:
 			return
+
+		case <-repeat.C:
+			fill.SetFactor(kc.wfFillFactor())
+			if !fill.Take() {
+				continue
+			}
+			repeated := make([]byte, len(lastPacket))
+			copy(repeated, lastPacket)
+			// Sequence sits after the "W/F\x00" tag and the x_bin/flags_zoom
+			// words; a repeat with a stale one is a duplicate, not a new row.
+			binary.LittleEndian.PutUint32(repeated[12:16], wfSequence)
+			kc.conn.writeMu.Lock()
+			if err := kc.conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				log.Printf("Error setting write deadline: %v", err)
+			}
+			err := kc.conn.conn.WriteMessage(websocket.BinaryMessage, repeated)
+			kc.conn.writeMu.Unlock()
+			if err != nil {
+				return
+			}
+			kc.session.AddWaterfallBytes(uint64(len(repeated)))
+			wfSequence++
 
 		case spectrumData, ok := <-kc.session.SpectrumChan:
 			if !ok {
@@ -3228,8 +3281,36 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 			kc.session.AddWaterfallBytes(uint64(len(fullPacket)))
 
 			wfSequence++
+
+			// Kept for the repeat ticker, and the ticker restarted so a fill only
+			// ever lands in a gap rather than straight after a real row.
+			lastPacket = append(lastPacket[:0], fullPacket...)
+			fill.Real()
+			repeat.Reset(kc.wfRowInterval())
 		}
 	}
+}
+
+// wfFillFactor is how many rows the client should see for each one radiod produces.
+func (kc *kiwiConn) wfFillFactor() int {
+	if kc.sessions == nil || kc.sessions.config == nil {
+		return 1
+	}
+	d := kc.sessions.config.Server.KiwiSDRSpectrumDivisor
+	if d < 1 {
+		return 1
+	}
+	return d
+}
+
+// wfRowInterval is how often a row should reach the client: the poll tick, with the
+// operator's thinning filled back in.
+func (kc *kiwiConn) wfRowInterval() time.Duration {
+	tick := 100
+	if kc.sessions != nil && kc.sessions.config != nil && kc.sessions.config.Spectrum.PollPeriodMs > 0 {
+		tick = kc.sessions.config.Spectrum.PollPeriodMs
+	}
+	return time.Duration(tick) * time.Millisecond
 }
 
 // generateUUID generates a simple UUID v4

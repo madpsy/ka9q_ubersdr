@@ -795,7 +795,24 @@ func (c *websdrConn) applyPollDivisor(slow int) {
 	if slow > websdrMaxPollDivisor {
 		slow = websdrMaxPollDivisor
 	}
-	c.session.PollDivisor.Store(int32(slow))
+	// The configured base is the rate at "fast"; the selector only ever multiplies
+	// it, so a client can slow itself down but never speed itself past what the
+	// operator set. websdr_spectrum_divisor.
+	c.session.PollDivisor.Store(int32(c.pollDivisorFor(slow)))
+}
+
+// pollDivisorFor combines the operator's base rate with the client's Speed setting,
+// bounded so the poll still keeps the channel alive.
+func (c *websdrConn) pollDivisorFor(slow int) int {
+	base := defaultEmulationPollDivisor
+	tick := 0
+	if c.handler != nil && c.handler.config != nil {
+		if d := c.handler.config.Server.WebSDRSpectrumDivisor; d > 0 {
+			base = d
+		}
+		tick = c.handler.config.Spectrum.PollPeriodMs
+	}
+	return spectrumPollDivisor(base*slow, tick)
 }
 
 func (c *websdrConn) applyWaterparamCommand(text string) {
@@ -971,6 +988,35 @@ func (c *websdrConn) applyWaterparamCommand(text string) {
 			log.Printf("WebSDR waterparam: UpdateSpectrumSession error: %v", err)
 		}
 	}
+}
+
+// pollFillFactor is how many rows the client should see for each one radiod
+// produces: the operator's divisor, and nothing the client chose.
+func (c *websdrConn) pollFillFactor() int {
+	if c.handler == nil || c.handler.config == nil {
+		return 1
+	}
+	d := c.handler.config.Server.WebSDRSpectrumDivisor
+	if d < 1 {
+		return 1
+	}
+	return d
+}
+
+// rowInterval is how often a row should reach the client: the poll tick times the
+// client's own Speed setting, with the operator's thinning filled back in.
+func (c *websdrConn) rowInterval() time.Duration {
+	tick := 100
+	if c.handler != nil && c.handler.config != nil && c.handler.config.Spectrum.PollPeriodMs > 0 {
+		tick = c.handler.config.Spectrum.PollPeriodMs
+	}
+	c.mu.RLock()
+	slow := c.wfSlow
+	c.mu.RUnlock()
+	if slow < 1 {
+		slow = 1
+	}
+	return time.Duration(tick*slow) * time.Millisecond
 }
 
 func websdrModeString(mode int, loKHz, hiKHz float64) string {
@@ -1170,6 +1216,10 @@ func (h *WebSDRHandler) handleWaterfallStream(w http.ResponseWriter, r *http.Req
 	c.session = session
 	c.sessionID = userSessionID
 
+	// Start at the operator's rate. A client that never touches its Speed selector
+	// would otherwise poll at the full tick, which is the case this exists for.
+	c.applyPollDivisor(c.wfSlow)
+
 	// BUG-D: tune the spectrum session immediately to the view from the handshake so
 	// the waterfall shows data before the first /~~waterparam command arrives — which
 	// on a first connect never comes.
@@ -1211,13 +1261,44 @@ func (c *websdrConn) readWaterfallCommands(done chan struct{}) {
 }
 
 // streamWaterfall streams waterfall rows to the client.
+//
+// Rows leave at the rate the client asked for, which is not the rate radiod is
+// polled at. websdr_spectrum_divisor thins the polling so radiod is not asked to
+// produce a whole spectrum response for every row -- see applyPollDivisor -- and the
+// gap that leaves is filled by repeating the last row.
+//
+// That is a real trade, not a free one: the repeat carries nothing new, so each
+// measurement occupies two rows of waterfall and half as much history fits on screen.
+// What it buys is the scroll rate. A real WebSDR runs its waterfall at the full rate,
+// and a visibly slower one reads as a broken receiver rather than a cheaper one. It
+// costs little on the wire -- format 9 codes an unchanged row as one bit per pixel,
+// 128 bytes against about 164 for a real one.
+//
+// Only the operator's share of the divisor is filled. The client's own Speed setting
+// multiplies on top and is left alone: someone who picked "slow" asked for a slow
+// waterfall and gets one.
 func (c *websdrConn) streamWaterfall(done <-chan struct{}) {
+	var lastRow []byte
+	var fill waterfallFill
+	repeat := time.NewTicker(c.rowInterval())
+	defer repeat.Stop()
+
 	for {
 		select {
 		case <-done:
 			return
 		case <-c.session.Done:
 			return
+		case <-repeat.C:
+			fill.SetFactor(c.pollFillFactor())
+			if !fill.Take() {
+				continue
+			}
+			encoded := c.wfState.EncodeRow(lastRow)
+			if err := c.sendBinary(encoded); err != nil {
+				return
+			}
+			c.session.AddWaterfallBytes(uint64(len(encoded)))
 		case pkt, ok := <-c.session.SpectrumChan:
 			if !ok {
 				return
@@ -1291,6 +1372,12 @@ func (c *websdrConn) streamWaterfall(done <-chan struct{}) {
 			}
 			// Track waterfall bytes sent in session (feeds admin panel throughput display)
 			c.session.AddWaterfallBytes(uint64(len(encoded)))
+
+			// Kept for the repeat ticker, and the ticker restarted so a fill only
+			// ever lands in a gap rather than straight after a real row.
+			lastRow = append(lastRow[:0], pixels...)
+			fill.Real()
+			repeat.Reset(c.rowInterval())
 		}
 	}
 }

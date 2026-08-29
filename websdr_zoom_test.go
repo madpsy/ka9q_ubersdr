@@ -269,17 +269,20 @@ func waterparamConn() *websdrConn {
 func TestWebSDRSpeedSetsThePollDivisor(t *testing.T) {
 	// speed n means slow = 4/n: the client's fastest setting polls at full rate,
 	// its slowest at a quarter.
+	// The operator's base rate is the "fast" setting; the selector multiplies it.
+	// Expectations are written as base x slow so the composition is the assertion.
+	const base = defaultEmulationPollDivisor
 	tests := []struct {
 		cmd  string
 		want int32
 	}{
-		{"/~~waterparam?speed=1", 4},
-		{"/~~waterparam?speed=2", 2},
-		{"/~~waterparam?speed=3", 1}, // 4/3 truncates
-		{"/~~waterparam?speed=4", 1},
-		{"/~~waterparam?slow=1", 1},
-		{"/~~waterparam?slow=3", 3},
-		{"/~~waterparam?slow=8", 8},
+		{"/~~waterparam?speed=1", base * 4},
+		{"/~~waterparam?speed=2", base * 2},
+		{"/~~waterparam?speed=3", base * 1}, // 4/3 truncates
+		{"/~~waterparam?speed=4", base * 1},
+		{"/~~waterparam?slow=1", base * 1},
+		{"/~~waterparam?slow=3", base * 3},
+		{"/~~waterparam?slow=8", base * 8},
 	}
 	for _, tc := range tests {
 		c := waterparamConn()
@@ -296,8 +299,20 @@ func TestWebSDRPollDivisorIsBounded(t *testing.T) {
 	for _, cmd := range []string{"/~~waterparam?slow=9", "/~~waterparam?slow=1000"} {
 		c := waterparamConn()
 		c.applyWaterparamCommand(cmd)
-		if got := c.session.PollDivisor.Load(); got != websdrMaxPollDivisor {
-			t.Errorf("%s: poll divisor %d, want it clamped to %d", cmd, got, websdrMaxPollDivisor)
+		if got, want := c.session.PollDivisor.Load(), int32(defaultEmulationPollDivisor*websdrMaxPollDivisor); got != want {
+			t.Errorf("%s: poll divisor %d, want the client's share clamped to %d (x base = %d)",
+				cmd, got, websdrMaxPollDivisor, want)
+		}
+	}
+
+	// And the product is bounded against the real tick, not just the client's half:
+	// a slow client on a receiver with a long tick must still poll inside the
+	// channel lifetime, or the waterfall stops.
+	for _, tick := range []int{10, 75, 100, 250} {
+		d := spectrumPollDivisor(defaultEmulationPollDivisor*websdrMaxPollDivisor, tick)
+		if period := d * tick; period*2 > spectrumLifetimeFrames*20 {
+			t.Errorf("tick %d ms: slowest poll %d ms is not inside half the %d ms lifetime",
+				tick, period, spectrumLifetimeFrames*20)
 		}
 	}
 
@@ -336,13 +351,14 @@ func TestWebSDRPollDivisorUntouchedWithoutASpeed(t *testing.T) {
 // must not reset the rate the client chose earlier.
 func TestWebSDRPollDivisorSurvivesLaterCommands(t *testing.T) {
 	c := waterparamConn()
+	const want = defaultEmulationPollDivisor * 4
 	c.applyWaterparamCommand("/~~waterparam?slow=4")
-	if got := c.session.PollDivisor.Load(); got != 4 {
-		t.Fatalf("poll divisor %d after slow=4, want 4", got)
+	if got := c.session.PollDivisor.Load(); got != want {
+		t.Fatalf("poll divisor %d after slow=4, want %d", got, want)
 	}
 	c.applyWaterparamCommand("/~~waterparam?scale=2")
-	if got := c.session.PollDivisor.Load(); got != 4 {
-		t.Errorf("poll divisor %d after a command with no speed, want 4 kept", got)
+	if got := c.session.PollDivisor.Load(); got != want {
+		t.Errorf("poll divisor %d after a command with no speed, want %d kept", got, want)
 	}
 }
 
@@ -352,8 +368,8 @@ func TestWebSDRPollDivisorSurvivesLaterCommands(t *testing.T) {
 func TestWebSDRPollDivisorAppliesOnAZoom(t *testing.T) {
 	c := waterparamConn()
 	c.applyWaterparamCommand("/~~waterparam?zoom=8&start=488735&width=1024&speed=1")
-	if got := c.session.PollDivisor.Load(); got != 4 {
-		t.Errorf("poll divisor %d after a zoom carrying speed=1, want 4", got)
+	if got, want := c.session.PollDivisor.Load(), int32(defaultEmulationPollDivisor*4); got != want {
+		t.Errorf("poll divisor %d after a zoom carrying speed=1, want %d", got, want)
 	}
 	if c.wfZoom != 8 {
 		t.Errorf("zoom %d, want 8 -- the rate must not have swallowed the view change", c.wfZoom)
@@ -452,17 +468,71 @@ func TestWebSDRWaterfallScriptStartsAtTheSelectedSpeed(t *testing.T) {
 	}
 }
 
-// A fast waterfall is four polls where a slow one is one, and every poll is a whole
-// spectrum response. This is the number that turns the selector into CPU.
-func TestWebSDRFastSpeedMeansFullPollRate(t *testing.T) {
-	c := waterparamConn()
-	c.applyWaterparamCommand("/~~waterparam?speed=4") // the selector's "fast" sends slow=1
-	if got := c.session.PollDivisor.Load(); got != 1 {
-		t.Errorf("fast: poll divisor %d, want 1 (full rate)", got)
+// "fast" is the operator's configured rate, not the full tick. A WebSDR client can
+// only ever slow itself below what websdr_spectrum_divisor allows -- every poll
+// is a whole spectrum response, so letting a client raise its own rate would put the
+// receiver's CPU in the client's hands.
+func TestWebSDRFastSpeedIsTheConfiguredRate(t *testing.T) {
+	for _, cmd := range []string{
+		"/~~waterparam?speed=4", // the selector's "fast" sends slow=1
+		"/~~waterparam?slow=1",
+	} {
+		c := waterparamConn()
+		c.applyWaterparamCommand(cmd)
+		if got := c.session.PollDivisor.Load(); got != defaultEmulationPollDivisor {
+			t.Errorf("%s: poll divisor %d, want the configured base %d",
+				cmd, got, defaultEmulationPollDivisor)
+		}
 	}
-	c = waterparamConn()
-	c.applyWaterparamCommand("/~~waterparam?slow=1")
-	if got := c.session.PollDivisor.Load(); got != 1 {
-		t.Errorf("slow=1: poll divisor %d, want 1", got)
+}
+
+// An operator setting must be honoured, not just the built-in default.
+func TestWebSDRPollDivisorHonoursTheConfiguredBase(t *testing.T) {
+	c := waterparamConn()
+	c.handler.config.Server.WebSDRSpectrumDivisor = 3
+	c.applyWaterparamCommand("/~~waterparam?slow=2")
+	if got := c.session.PollDivisor.Load(); got != 6 {
+		t.Errorf("base 3 x slow 2: poll divisor %d, want 6", got)
+	}
+}
+
+// The row rate the client sees is the poll tick times its own Speed setting, not the
+// rate radiod is polled at. The operator's divisor thins the polling and the gap is
+// filled by repeating the last row, so a "fast" waterfall scrolls at a real WebSDR's
+// pace without radiod producing a spectrum response for every row.
+func TestWebSDRRowIntervalIgnoresTheOperatorsThinning(t *testing.T) {
+	c := waterparamConn()
+	c.handler.config.Spectrum.PollPeriodMs = 100
+
+	for _, tc := range []struct {
+		divisor int
+		slow    int
+		wantMs  int
+		wantFil int
+	}{
+		{divisor: 1, slow: 1, wantMs: 100, wantFil: 1}, // no thinning, no filling
+		{divisor: 2, slow: 1, wantMs: 100, wantFil: 2}, // fast: polled 200ms, drawn 100ms
+		{divisor: 2, slow: 2, wantMs: 200, wantFil: 2}, // medium: the client asked to halve it
+		{divisor: 2, slow: 4, wantMs: 400, wantFil: 2}, // slow: and to quarter it
+		{divisor: 4, slow: 1, wantMs: 100, wantFil: 4},
+	} {
+		c.handler.config.Server.WebSDRSpectrumDivisor = tc.divisor
+		c.mu.Lock()
+		c.wfSlow = tc.slow
+		c.mu.Unlock()
+
+		if got := c.rowInterval(); got != time.Duration(tc.wantMs)*time.Millisecond {
+			t.Errorf("divisor %d slow %d: row interval %v, want %dms",
+				tc.divisor, tc.slow, got, tc.wantMs)
+		}
+		if got := c.pollFillFactor(); got != tc.wantFil {
+			t.Errorf("divisor %d slow %d: fill factor %d, want %d",
+				tc.divisor, tc.slow, got, tc.wantFil)
+		}
+		// The client's Speed setting must never be filled back in: someone who
+		// picked "slow" asked for a slow waterfall.
+		if tc.slow > 1 && c.rowInterval() <= time.Duration(tc.wantMs/tc.slow)*time.Millisecond {
+			t.Errorf("slow %d: the client's own thinning was filled in too", tc.slow)
+		}
 	}
 }

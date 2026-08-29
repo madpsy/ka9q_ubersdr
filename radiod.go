@@ -586,7 +586,28 @@ const maxSpectrumAveragingWindow = 0.5 // seconds
 // It does NOT fix the underlying waste -- 99.6%% of that transform is still
 // discarded -- it just bounds it. Asking radiod for a bin bandwidth on the
 // narrowband side of the crossover is the real repair; see websdrSpectrumParams.
-const maxWidebandTransformPoints = 1 << 18
+// It is deliberately not a round power of two. Two constraints bracket it, both
+// from the 129.6 Msps receiver these were measured on:
+//
+//	>= 70,780   the noise-floor wideband channel (7324 Hz/bin, fft_n 17,695) must
+//	            keep all four averages. Its cost is negligible -- it is polled at
+//	            1 Hz, not the user rate -- and its output feeds a measurement, not
+//	            a display, so there is nothing to gain by coarsening it. This
+//	            budget counts points per RESPONSE and so cannot see poll rate,
+//	            which is the one thing that would otherwise distinguish it.
+//	<  106,167  the 3.75 MHz view (fft_n 35,389) must come down to two averages.
+//	            At four it costs 18% of a core and is one of the two worst levels
+//	            on the ladder.
+//
+// 98,304 sits inside that. It leaves the shallow zooms and every internal channel
+// exactly as they were, takes the 3.75 MHz view from 18% to 9%, and -- the part
+// that is easy to miss -- makes the wideband path cheap enough at 1.875 MHz to
+// beat the downconverter there, which moves the crossing a level deeper and drops
+// that level from 18% to 9% as well.
+//
+// 9% is then the floor: it is a single average on one side and a span-determined
+// downconverter on the other, and neither responds to any knob here.
+const maxWidebandTransformPoints = 98304
 
 // spectrumAveragesFor returns the SPECTRUM_AVG to use at a given bin bandwidth:
 // the configured value, reduced where it would otherwise average over more than
@@ -600,13 +621,13 @@ const maxWidebandTransformPoints = 1 << 18
 // The two limits bite at opposite ends -- the window at deep zoom below the
 // crossover, the transform budget at deep zoom above it -- so neither can be
 // dropped in favour of the other.
-func (rc *RadiodController) spectrumAveragesFor(binBandwidth float64) int {
+func (rc *RadiodController) spectrumAveragesFor(binBandwidth, crossover float64) int {
 	configured := rc.fftAverages()
 	if binBandwidth <= 0 {
 		return configured
 	}
 	allowed := int(maxSpectrumAveragingWindow * binBandwidth)
-	if n := rc.widebandAveragesFor(binBandwidth); n < allowed {
+	if n := rc.widebandAveragesFor(binBandwidth, crossover); n < allowed {
 		allowed = n
 	}
 	if allowed >= configured {
@@ -621,11 +642,17 @@ func (rc *RadiodController) spectrumAveragesFor(binBandwidth float64) int {
 // widebandAveragesFor returns how many averages maxWidebandTransformPoints
 // affords at a bin bandwidth, or configured (i.e. no opinion) when this is not a
 // wideband request or the front end sample rate was never set.
-func (rc *RadiodController) widebandAveragesFor(binBandwidth float64) int {
+func (rc *RadiodController) widebandAveragesFor(binBandwidth, crossover float64) int {
 	configured := rc.fftAverages()
-	if rc.frontendSamprate <= 0 || binBandwidth <= radiodSpectrumCrossoverHz {
+	if rc.frontendSamprate <= 0 || binBandwidth <= crossover {
 		// At or below the crossover radiod downconverts instead, and fft_n is
 		// then about the bin count -- the front end's rate does not enter it.
+		//
+		// Tested against the crossover we actually SENT, not radiod's 200 Hz
+		// default. Once the WebSDR and Kiwi paths began choosing the algorithm
+		// explicitly, a 1000 Hz/bin channel on the downconverter was still being
+		// costed as though it were transforming the whole front end, and lost
+		// half its averaging to a bill it was not paying.
 		return configured
 	}
 	fftN := math.Round(float64(rc.frontendSamprate) / binBandwidth)
@@ -695,7 +722,7 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 	rc.clearTerminated(ssrc)
 
 	// Send command
-	if err := rc.sendCommand(buildCreateSpectrumCommand(frequency, binCount, binBandwidth, ssrc, rc.spectrumAveragesFor(binBandwidth), crossover)); err != nil {
+	if err := rc.sendCommand(buildCreateSpectrumCommand(frequency, binCount, binBandwidth, ssrc, rc.spectrumAveragesFor(binBandwidth, crossover), crossover)); err != nil {
 		return fmt.Errorf("failed to send create spectrum command: %w", err)
 	}
 
@@ -745,7 +772,7 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 		binBandwidth:  binBandwidth,
 		binCount:      binCount,
 		sendBinCount:  sendBinCount,
-		fftAverages:   rc.spectrumAveragesFor(binBandwidth),
+		fftAverages:   rc.spectrumAveragesFor(binBandwidth, crossover),
 		crossover:     crossover,
 		sendCrossover: binBandwidth > 0,
 	})

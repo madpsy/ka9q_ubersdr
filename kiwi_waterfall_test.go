@@ -139,8 +139,13 @@ func TestKiwiSpectrumParamsPreservesShallowZoom(t *testing.T) {
 // The levels that used to sit on the wideband path transforming the whole front end
 // to deliver 1,024 bins of it. Zoom 7 was the worst: 566,231 points for a 234 kHz
 // view, measured at 95% of a core on a 129.6 Msps receiver.
+//
+// It starts at 5, not 4. Tightening maxWidebandTransformPoints made the wideband
+// path cheap enough at 1.875 MHz to beat the downconverter there, so zoom 4 went
+// back to it -- at half what the downconverter would have charged. Both sides of
+// the crossing moving together is the point; neither number is fixed.
 func TestKiwiDeepZoomsUseTheDownconverter(t *testing.T) {
-	for zoom := 4; zoom <= kiwiMaxZoom; zoom++ {
+	for zoom := 5; zoom <= kiwiMaxZoom; zoom++ {
 		req := kiwiSpectrumParams(zoom, kiwiTestSamprate)
 		if req.BinBandwidth > req.Crossover {
 			t.Errorf("zoom %d: %v Hz/bin against crossover %v -- still on the wideband path",

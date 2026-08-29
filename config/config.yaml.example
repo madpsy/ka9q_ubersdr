@@ -483,6 +483,20 @@ server:
   # Leave empty to disable registration even if kiwisdr_register_kiwisdrcom is true.
   kiwisdr_host: "kiwisdr.mydomain.com"
 
+  # Waterfall poll rate for KiwiSDR clients, as a divisor of spectrum.poll_period_ms
+  # (default: 2). At the default 100 ms poll period this is a 200 ms waterfall.
+  #
+  # Every poll makes radiod produce a whole spectrum response, and at wide zoom
+  # levels that is an FFT over the entire front end, so CPU is linear in this rate.
+  # 2 rather than 1 because the KiwiSDR protocol has no waterfall-speed control and
+  # its client has no idle throttle: a forgotten browser tab polls forever at
+  # whatever rate is set here.
+  #
+  # 1 = the full rate the native UberSDR frontend uses. Raise it to trade waterfall
+  # smoothness for CPU on a busy receiver. Capped so a channel still polls well
+  # inside its own keepalive.
+  kiwisdr_spectrum_divisor: 2
+
   # Register with the rx.kiwisdr.com public receiver directory (default: false)
   # Requires enable_kiwisdr: true — the directory entry points clients at port
   # 8073, so the KiwiSDR server must be running for the listing to be useful.
@@ -505,6 +519,23 @@ server:
   # Waterfall dBFS→pixel calibration offset (default: -13.0).
   # Adjust this if the WebSDR waterfall appears too bright or too dark.
   websdr_waterfall_calibration: 20.0
+
+  # Waterfall poll rate for WebSDR clients at their "fast" Speed setting, as a
+  # divisor of spectrum.poll_period_ms (default: 2). At the default 100 ms poll
+  # period this is a 200 ms waterfall.
+  #
+  # Every poll makes radiod produce a whole spectrum response, and at wide zoom
+  # levels that is an FFT over the entire front end, so CPU is linear in this rate.
+  # 2 rather than 1 because the WebSDR client has no idle throttle -- a forgotten
+  # browser tab polls forever.
+  #
+  # The client's Speed selector multiplies this rather than replacing it, so it sets
+  # the ceiling on the rate and a client may only go below it:
+  #   fast = this value, medium = x2, slow = x4
+  #
+  # 1 = the full rate the native UberSDR frontend uses. Capped so even the slowest
+  # Speed setting still polls well inside the channel's keepalive.
+  websdr_spectrum_divisor: 2
 
   # Operator contact email shown in the WebSDR UI /~~orgstatus response.
   # XOR-obfuscated before transmission. Defaults to admin.email if not set.

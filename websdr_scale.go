@@ -367,18 +367,31 @@ func websdrSpectrumParams(visibleBWHz float64, wfWidth int, samprate int) websdr
 		DisplayBinBW: visibleBWHz / float64(wfWidth),
 	}
 
-	// Both candidates, then whichever costs radiod less. Wideband first: bin_count x
-	// bin_bw must stay equal to the visible span, so trading bins for bandwidth is the
-	// only way to shorten the transform.
+	// Both candidates, then whichever costs radiod less -- but the two are only
+	// comparable while the wideband one is serving the full display width.
+	//
+	// bin_count x bin_bw must equal the visible span, so the only way to shorten a
+	// wideband transform is to deliver fewer, wider bins. A halved candidate is
+	// therefore not the same picture: at a 937 kHz view it costs the same as the
+	// downconverter and delivers 512 bins where the downconverter delivers 1,876.
+	// Comparing those two on cost alone picks the soft one on a tie, which is how
+	// this ladder ended up serving three zoom levels at the same 1831 Hz per bin in
+	// the first place.
+	//
+	// So halving is a last resort, for views too wide for the downconverter, and not
+	// an option that competes. It never loses anything by being ranked this way:
+	// halving only begins above 131,072 points, and by then the view is narrow
+	// enough that the downconverter is the cheaper of the two anyway.
 	wideBins := wfWidth
 	for wideBins > 1 && samprate > 0 && float64(samprate)/(visibleBWHz/float64(wideBins)) > websdrMaxWidebandFFT {
 		wideBins /= 2
 	}
 	wideBinBW := visibleBWHz / float64(wideBins)
+	widebandFullWidth := wideBins == wfWidth
 
 	if binBW, bins, ok := radiodNarrowbandFor(visibleBWHz, req.DisplayBinBW); ok {
 		narrow := radiodNarrowbandPointsPerSec(float64(bins) * binBW)
-		if narrow < radiodWidebandPointsPerSec(wideBinBW, samprate) {
+		if !widebandFullWidth || narrow < radiodWidebandPointsPerSec(wideBinBW, samprate) {
 			req.BinBandwidth = binBW
 			req.BinCount = bins
 			req.Crossover = binBW // rbw > crossover is wideband, so equal is narrowband

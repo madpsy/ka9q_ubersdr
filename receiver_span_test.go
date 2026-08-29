@@ -1512,3 +1512,74 @@ func TestWebSDRNarrowbandRequestsAreServable(t *testing.T) {
 		}
 	}
 }
+
+// A wideband request that has had to halve its bin count is not the same picture as
+// one that has not, and must never be preferred to a downconverter that can serve the
+// full width.
+//
+// The two paths are compared on cost, and halving is how the wideband side buys cost
+// reductions -- by delivering fewer, wider bins. Left to compete freely it wins ties
+// while looking three or four times softer: at a 937 kHz view it costs what the
+// downconverter costs and delivers 512 bins where the downconverter delivers 1,876.
+// That is how this ladder came to serve three zoom levels at an identical 1831 Hz per
+// bin, and it reappeared the moment the averaging budget moved.
+func TestWebSDRHalvedWidebandNeverBeatsTheDownconverter(t *testing.T) {
+	const width = 1024
+	for _, spanHz := range []uint64{30_000_000, 60_000_000} {
+		geom := websdrBandFor(testReceiver(spanHz))
+		sr := 64_800_000
+		if spanHz > 30_000_000 {
+			sr = 129_600_000
+		}
+		for zoom := 0; zoom <= geom.MaxZoom; zoom++ {
+			visible := geom.WidthHz() / float64(int(1)<<uint(zoom))
+			req := websdrSpectrumParams(visible, width, sr)
+			if req.Crossover != 0 || req.BinCount >= width {
+				continue // downconverter, or wideband at the full display width
+			}
+			// A halved wideband result is only defensible when the downconverter
+			// could not have served this view at all.
+			if _, _, ok := radiodNarrowbandFor(visible, req.DisplayBinBW); ok {
+				t.Errorf("%d MHz zoom %d: %d bins @ %.1f Hz (halved from %d) chosen over an "+
+					"available downconverter -- same cost, softer picture",
+					spanHz/1_000_000, zoom, req.BinCount, req.BinBandwidth, width)
+			}
+		}
+	}
+}
+
+// No level on either ladder may cost more than the crossing does. The peak is where
+// the two curves meet and it is a floor: a single average on the wideband side, a
+// span-determined downconverter on the other.
+func TestSpectrumLaddersHaveNoPeakAboveTheCrossing(t *testing.T) {
+	const sr = 129_600_000
+	rc := &RadiodController{}
+	rc.SetFrontendSamprate(sr)
+	// %CPU per unit of work, from the two measurements on the live receiver.
+	const perWidebandPoint = 27.0 / 212337.0 // fft_n x avg
+	const perNarrowbandHz = 4.5 / 468750.0   // Hz of delivered span
+	const ceiling = 9.5                      // the 9% crossing, with a little slack
+
+	cost := func(binCount int, binBW, crossover float64) float64 {
+		avg := float64(rc.spectrumAveragesFor(binBW, crossover))
+		if binBW <= crossover {
+			return perNarrowbandHz * float64(binCount) * binBW
+		}
+		return perWidebandPoint * (float64(sr) / binBW) * avg
+	}
+
+	geom := websdrBandFor(testReceiver(60_000_000))
+	for zoom := 0; zoom <= geom.MaxZoom; zoom++ {
+		visible := geom.WidthHz() / float64(int(1)<<uint(zoom))
+		r := websdrSpectrumParams(visible, 1024, sr)
+		if c := cost(r.BinCount, r.BinBandwidth, r.Crossover); c > ceiling {
+			t.Errorf("websdr zoom %d costs %.1f%%, above the %.1f%% crossing", zoom, c, ceiling)
+		}
+	}
+	for zoom := 0; zoom <= kiwiMaxZoom; zoom++ {
+		r := kiwiSpectrumParams(zoom, sr)
+		if c := cost(r.BinCount, r.BinBandwidth, r.Crossover); c > ceiling {
+			t.Errorf("kiwi zoom %d costs %.1f%%, above the %.1f%% crossing", zoom, c, ceiling)
+		}
+	}
+}

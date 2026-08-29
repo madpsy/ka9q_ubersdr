@@ -18,7 +18,7 @@ func TestSpectrumAveragesForBoundsTheWindow(t *testing.T) {
 
 	// Every bandwidth the zoom ladder can reach, wide to narrow.
 	for _, binBW := range []float64{29296.875, 5000, 2000, 1000, 500, 300, 200, 100, 50, 20, 10, 5, 2, 1, 0.5} {
-		avg := rc.spectrumAveragesFor(binBW)
+		avg := rc.spectrumAveragesFor(binBW, radiodSpectrumCrossoverHz)
 
 		if avg < minSpectrumFFTAverages {
 			t.Errorf("bin_bw %g: averages %d below the minimum %d", binBW, avg, minSpectrumFFTAverages)
@@ -44,7 +44,7 @@ func TestSpectrumAveragesForLeavesShallowZoomAlone(t *testing.T) {
 	configured := rc.fftAverages()
 
 	for _, binBW := range []float64{29296.875, 200, 50, 20, 10} {
-		if got := rc.spectrumAveragesFor(binBW); got != configured {
+		if got := rc.spectrumAveragesFor(binBW, radiodSpectrumCrossoverHz); got != configured {
 			t.Errorf("bin_bw %g: averages %d, want the configured %d unchanged", binBW, got, configured)
 		}
 	}
@@ -64,7 +64,7 @@ func TestSpectrumAveragesForDeepZoom(t *testing.T) {
 		{binBW: 2, wantAvg: 1, wantWindow: 0.50},  // was 4 averages, 2.00s
 	}
 	for _, tc := range tests {
-		got := rc.spectrumAveragesFor(tc.binBW)
+		got := rc.spectrumAveragesFor(tc.binBW, radiodSpectrumCrossoverHz)
 		if got != tc.wantAvg {
 			t.Errorf("bin_bw %g: averages %d, want %d", tc.binBW, got, tc.wantAvg)
 		}
@@ -80,7 +80,7 @@ func TestSpectrumAveragesForNeverRaises(t *testing.T) {
 	rc.SetSpectrumFFTAverages(1)
 
 	for _, binBW := range []float64{29296.875, 10, 2} {
-		if got := rc.spectrumAveragesFor(binBW); got != 1 {
+		if got := rc.spectrumAveragesFor(binBW, radiodSpectrumCrossoverHz); got != 1 {
 			t.Errorf("bin_bw %g: averages %d with 1 configured, want 1", binBW, got)
 		}
 	}
@@ -92,7 +92,7 @@ func TestSpectrumAveragesForIgnoresNonPositive(t *testing.T) {
 	configured := rc.fftAverages()
 
 	for _, binBW := range []float64{0, -5} {
-		if got := rc.spectrumAveragesFor(binBW); got != configured {
+		if got := rc.spectrumAveragesFor(binBW, radiodSpectrumCrossoverHz); got != configured {
 			t.Errorf("bin_bw %g: averages %d, want the configured %d", binBW, got, configured)
 		}
 	}
@@ -165,14 +165,14 @@ func TestSpectrumAveragesForBoundsTheWidebandTransform(t *testing.T) {
 		wantAvg int
 	}{
 		{view: "60 MHz", binBW: 58593.75, wantAvg: 4},        // 2,212 pts
-		{view: "3.75 MHz", binBW: 3662.109375, wantAvg: 4},   // 35,389 pts: the measured 12% row, untouched
-		{view: "1.87 MHz", binBW: 1831.0546875, wantAvg: 3},  // 70,779 pts
+		{view: "3.75 MHz", binBW: 3662.109375, wantAvg: 2},   // 35,389 pts: one of the two worst levels; 18% -> 9%
+		{view: "1.87 MHz", binBW: 1831.0546875, wantAvg: 1},  // 70,779 pts: cheap enough now to beat the downconverter
 		{view: "937 kHz", binBW: 915.52734375, wantAvg: 1},   // 141,558 pts: the measured 47% row
 		{view: "469 kHz", binBW: 457.763671875, wantAvg: 1},  // 283,116 pts: the measured 97% row
 		{view: "234 kHz", binBW: 228.8818359375, wantAvg: 1}, // 566,231 pts: deepest wideband view
 	}
 	for _, tc := range tests {
-		got := rc.spectrumAveragesFor(tc.binBW)
+		got := rc.spectrumAveragesFor(tc.binBW, radiodSpectrumCrossoverHz)
 		if got != tc.wantAvg {
 			t.Errorf("%s (%g Hz/bin): averages %d, want %d", tc.view, tc.binBW, got, tc.wantAvg)
 		}
@@ -189,8 +189,9 @@ func TestSpectrumAveragesForBoundsTheWidebandTransform(t *testing.T) {
 }
 
 // What the budget is worth: every deep wideband view gives up averaging in
-// proportion to what it costs, so the three measured rows drop by the factor
-// their averaging drops by. Nothing shallow pays anything.
+// proportion to what it costs. Nothing shallower than the 3.75 MHz view pays
+// anything -- see TestSpectrumAveragesForLeavesInternalChannelsAlone, which pins
+// the lower bracket on the budget.
 func TestSpectrumAveragesForCutsDeepWidebandCost(t *testing.T) {
 	const samprate = 129_600_000
 	rc := &RadiodController{}
@@ -202,12 +203,12 @@ func TestSpectrumAveragesForCutsDeepWidebandCost(t *testing.T) {
 		binBW     float64
 		wantRatio float64 // cost after / cost before
 	}{
-		{view: "3.75 MHz (12.0%)", binBW: 3662.109375, wantRatio: 1.0},
+		{view: "3.75 MHz (18.0%)", binBW: 3662.109375, wantRatio: 0.5},
 		{view: "937 kHz (46.9%)", binBW: 915.52734375, wantRatio: 0.25},
 		{view: "469 kHz (97.2%)", binBW: 457.763671875, wantRatio: 0.25},
 	}
 	for _, tc := range tests {
-		got := float64(rc.spectrumAveragesFor(tc.binBW)) / float64(before)
+		got := float64(rc.spectrumAveragesFor(tc.binBW, radiodSpectrumCrossoverHz)) / float64(before)
 		if math.Abs(got-tc.wantRatio) > 0.001 {
 			t.Errorf("%s: now costs %.2fx what it did, want %.2fx", tc.view, got, tc.wantRatio)
 		}
@@ -222,7 +223,7 @@ func TestSpectrumAveragesForLeavesNarrowbandAlone(t *testing.T) {
 	bare := &RadiodController{}
 
 	for _, binBW := range []float64{200, 100, 50, 20, 10, 5, 2, 1, 0.5} {
-		if got, want := rc.spectrumAveragesFor(binBW), bare.spectrumAveragesFor(binBW); got != want {
+		if got, want := rc.spectrumAveragesFor(binBW, radiodSpectrumCrossoverHz), bare.spectrumAveragesFor(binBW, radiodSpectrumCrossoverHz); got != want {
 			t.Errorf("bin_bw %g: averages %d with a known samprate, %d without -- the wideband budget leaked below the crossover",
 				binBW, got, want)
 		}
@@ -244,7 +245,7 @@ func TestSpectrumAveragesForLeavesInternalChannelsAlone(t *testing.T) {
 		{"full-span default, 60 MHz rx", 29296.875},
 		{"noise floor wideband", nfWidebandBinBandwidth},
 	} {
-		if got := rc.spectrumAveragesFor(tc.binBW); got != configured {
+		if got := rc.spectrumAveragesFor(tc.binBW, radiodSpectrumCrossoverHz); got != configured {
 			t.Errorf("%s (%g Hz/bin): averages %d, want the configured %d", tc.what, tc.binBW, got, configured)
 		}
 	}
@@ -257,7 +258,7 @@ func TestSpectrumAveragesForIgnoresUnknownSamprate(t *testing.T) {
 	configured := rc.fftAverages()
 
 	for _, binBW := range []float64{29296.875, 3662.109375, 457.763671875, 228.8818359375} {
-		if got := rc.spectrumAveragesFor(binBW); got != configured {
+		if got := rc.spectrumAveragesFor(binBW, radiodSpectrumCrossoverHz); got != configured {
 			t.Errorf("bin_bw %g with no samprate: averages %d, want the configured %d", binBW, got, configured)
 		}
 	}
@@ -270,7 +271,7 @@ func TestWidebandBudgetNeverRaises(t *testing.T) {
 	rc.SetSpectrumFFTAverages(1)
 
 	for _, binBW := range []float64{29296.875, 3662.109375, 228.8818359375} {
-		if got := rc.spectrumAveragesFor(binBW); got != 1 {
+		if got := rc.spectrumAveragesFor(binBW, radiodSpectrumCrossoverHz); got != 1 {
 			t.Errorf("bin_bw %g: averages %d with 1 configured, want 1", binBW, got)
 		}
 	}
@@ -334,5 +335,40 @@ func TestSpectrumUpdateMergeKeepsCrossover(t *testing.T) {
 	if !merged.sendCrossover || merged.crossover != 0 {
 		t.Errorf("crossover %v (sent=%v) after coalescing a wideband zoom, want 0 kept",
 			merged.crossover, merged.sendCrossover)
+	}
+}
+
+// The crossover is now ours to choose, so the averaging budget has to be spent
+// against the algorithm actually running -- not against radiod's 200 Hz default.
+//
+// The WebSDR and Kiwi ladders reach the downconverter at 500 and 1000 Hz per bin.
+// Costed against the default those look like wideband requests over the whole
+// front end, and they lost half their averaging to a bill they were not paying.
+func TestSpectrumAveragesForRespectsTheChosenCrossover(t *testing.T) {
+	rc := &RadiodController{}
+	rc.SetFrontendSamprate(129_600_000)
+	configured := rc.fftAverages()
+
+	for _, binBW := range []float64{2000, 1000, 500, 200} {
+		// Narrowband: the request said so, by sending a crossover at or above the
+		// bin bandwidth. fft_n follows the bin count, so the front end's rate --
+		// and this budget -- do not enter.
+		if got := rc.spectrumAveragesFor(binBW, binBW); got != configured {
+			t.Errorf("bin_bw %g on the downconverter: %d averages, want the configured %d",
+				binBW, got, configured)
+		}
+		// Wideband: crossover 0 means nothing can be at or below it.
+		if got := rc.spectrumAveragesFor(binBW, 0); got > configured {
+			t.Errorf("bin_bw %g wideband: %d averages, want no more than %d", binBW, got, configured)
+		}
+	}
+
+	// And the specific regression: 1000 Hz/bin was returning 2, 500 Hz/bin was
+	// returning 1, for channels on the downconverter.
+	for _, binBW := range []float64{1000, 500} {
+		if got := rc.spectrumAveragesFor(binBW, binBW); got < configured {
+			t.Errorf("bin_bw %g: %d averages -- the wideband budget leaked onto a narrowband channel",
+				binBW, got)
+		}
 	}
 }

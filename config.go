@@ -377,8 +377,10 @@ type ServerConfig struct {
 	KiwiSDRPort                     int               `yaml:"kiwisdr_port"`                        // Port advertised to rx.kiwisdr.com for directory registration (default: 8073)
 	KiwiSDRPublicEmail              string            `yaml:"kiwisdr_public_email"`                // Public email for KiwiSDR status endpoint (default: "admin@example.com")
 	KiwiSDRSmeterOffset             float32           `yaml:"kiwisdr_smeter_offset"`               // S-meter calibration offset (dBFS to dBm, default: 30.0)
+	KiwiSDRSpectrumDivisor          int               `yaml:"kiwisdr_spectrum_divisor"`            // Waterfall poll rate for KiwiSDR clients, as a divisor of spectrum.poll_period_ms (default: 2)
 	EnableWebSDR                    bool              `yaml:"enable_websdr"`                       // Enable WebSDR protocol compatibility server (default: false)
 	WebSDRWaterfallCalibration      float32           `yaml:"websdr_waterfall_calibration"`        // Waterfall dBFS→pixel calibration offset (default: -13.0)
+	WebSDRSpectrumDivisor           int               `yaml:"websdr_spectrum_divisor"`             // Waterfall poll rate for WebSDR clients at their "fast" setting, as a divisor of spectrum.poll_period_ms (default: 2)
 	WebSDREmail                     string            `yaml:"websdr_email"`                        // Operator contact email shown in WebSDR UI /~~orgstatus (XOR-obfuscated; defaults to admin.email)
 	WebSDRRegisterWebSDROrg         bool              `yaml:"websdr_register_websdrorg"`           // Register with the websdr.org public directory (default: false)
 	WebSDRHostname                  string            `yaml:"websdr_hostname"`                     // Public hostname advertised to websdr.org (empty = derive from admin.public_url)
@@ -1483,6 +1485,40 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Spectrum.PollPeriodMs > 250 {
 		config.Spectrum.PollPeriodMs = 250
 	}
+	// Per-emulation waterfall poll rates, as divisors of the shared poll tick --
+	// which is the only granularity the poll loop has (see spectrumPollDivisor).
+	//
+	// 2 rather than 1 because every poll makes radiod produce a whole spectrum
+	// response, and neither emulated client stands down when nobody is watching:
+	// the v2 frontend drops its rate on mobile and throttles when the tab goes
+	// idle, and the WebSDR and KiwiSDR clients have no equivalent. At the default
+	// 100 ms tick this is a 200 ms waterfall.
+	//
+	// For WebSDR this is the rate at its "fast" Speed setting; medium and slow
+	// multiply it rather than replacing it, so the config sets the ceiling on the
+	// rate and the client may only go below it.
+	for _, e := range []struct {
+		name string
+		p    *int
+	}{
+		{"kiwisdr_spectrum_divisor", &config.Server.KiwiSDRSpectrumDivisor},
+		{"websdr_spectrum_divisor", &config.Server.WebSDRSpectrumDivisor},
+	} {
+		if *e.p == 0 {
+			*e.p = defaultEmulationPollDivisor
+			continue
+		}
+		if *e.p < 1 {
+			log.Printf("Config: %s = %d is below 1; using 1 (every tick)", e.name, *e.p)
+			*e.p = 1
+		}
+		if *e.p > maxEmulationPollDivisor {
+			log.Printf("Config: %s = %d exceeds the maximum %d; using %d",
+				e.name, *e.p, maxEmulationPollDivisor, maxEmulationPollDivisor)
+			*e.p = maxEmulationPollDivisor
+		}
+	}
+
 	if config.Spectrum.BackgroundPollPeriodMs == 0 {
 		config.Spectrum.BackgroundPollPeriodMs = 1000 // 1s default for internal background sessions (noisefloor, frequency-reference)
 	}

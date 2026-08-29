@@ -212,6 +212,51 @@ func (usm *UserSpectrumManager) pollLoop() {
 	}
 }
 
+// Waterfall poll rates for the protocol emulations, as divisors of the shared tick.
+//
+// A poll is not cheap: each one makes radiod produce a whole spectrum response, and
+// above its crossover that is an FFT over the entire front end. Cost is linear in the
+// rate, so this is the one lever that scales every zoom level at once.
+//
+// 2 is the starting point for both emulations rather than the native full rate,
+// because neither emulated client stands down when nobody is watching. The v2
+// frontend drops its rate on mobile and throttles when the tab goes idle
+// (spectrumPreferredDivisor, idle-detector.js); the WebSDR and KiwiSDR clients have
+// no equivalent, so a forgotten tab polls at full rate indefinitely.
+//
+// A WebSDR client can still slow itself further with its Speed selector -- that
+// multiplies this rather than replacing it, so "fast" is exactly this rate.
+const (
+	defaultEmulationPollDivisor = 2
+
+	// Beyond this a channel starts risking its own keepalive: the poll IS the
+	// keepalive (spectrumLifetimeFrames, 250 blocks = 5 s), and a WebSDR client's
+	// own Speed divisor multiplies whatever is set here. spectrumPollDivisor
+	// applies the real bound to the product.
+	maxEmulationPollDivisor = 8
+)
+
+// spectrumPollDivisor bounds a poll divisor so a channel cannot outlive its own
+// keepalive.
+//
+// The poll doubles as the keepalive, so an effective period beyond the channel
+// lifetime means radiod reaps the channel between polls and the waterfall stops. The
+// bound is half the lifetime, so even a dropped poll is not fatal -- and it is
+// computed from the configured tick rather than assumed, because a receiver running
+// a 250 ms tick has a quarter of the headroom one running 75 ms does.
+func spectrumPollDivisor(want, tickMs int) int {
+	if want < 1 {
+		return 1
+	}
+	if tickMs <= 0 {
+		return want
+	}
+	if maxD := spectrumLifetimeFrames * 20 / 2 / tickMs; maxD >= 1 && want > maxD {
+		return maxD
+	}
+	return want
+}
+
 // pollUserSpectrumSessions sends poll commands for user-facing spectrum sessions only.
 // Background sessions (noisefloor, frequency-reference) are excluded and polled separately
 // at a lower rate to avoid saturating the radio stat thread with expensive wide-bin spectrum_poll() calls.

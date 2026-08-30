@@ -112,10 +112,9 @@ export function setMeasureResult(next) {
 /**
  * Start measuring.
  *
- * Any region already drawn is kept: somebody who stopped to read the numbers
- * and pressed Start again meant "carry on", not "throw that away". What is
- * thrown away is the run — the min/max/occupancy figures are about a period,
- * and a period that was interrupted is two periods.
+ * A fresh region and a fresh run every time, because Stop takes both away — see
+ * below. The reading is dropped explicitly all the same: the min/max/occupancy
+ * figures are about a period, and a period that was interrupted is two periods.
  */
 export function startMeasure() {
     setMeasureResult(null);
@@ -123,14 +122,19 @@ export function startMeasure() {
 }
 
 /**
- * Stop.
+ * Stop: the mode ends, and the region and the reading go with it.
  *
- * The region and the last reading stay on screen. Stopping is what an operator
- * does in order to *read* the thing, so clearing it would be the opposite of
- * what the press meant; Clear is a separate button for the separate intention.
+ * Stop is the way out — the panel's button, the badge over the spectrum, and
+ * Escape all land here — and what it leaves behind has to be the display the
+ * operator had before the tool was opened. A shaded region and a set of numbers
+ * outliving the mode that made them are a picture of something nothing on screen
+ * is still measuring, and the longer they sit there the more they look like a
+ * live reading. Read the numbers with Hold, which is the button for stopping to
+ * look; Stop is for being finished.
  */
 export function stopMeasure() {
-    setMeasureState({ active: false, drawing: false, frozen: false });
+    setMeasureResult(null);
+    setMeasureState({ active: false, drawing: false, frozen: false, selection: null });
 }
 
 /** Region gone, reading gone, tool left as it was. */

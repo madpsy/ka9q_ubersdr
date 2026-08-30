@@ -820,25 +820,33 @@ t('a region is normalised, and a zero-width one is not a region', () => {
     assert.strictEqual(tool.measureState().selection, null);
 });
 
-t('starting keeps the region and drops the run; stopping keeps both', () => {
+t('starting drops the run; stopping takes the region and the reading with it', () => {
     tool.resetMeasure();
     tool.setSelection({ loHz: 100, hiHz: 200 });
     tool.setMeasureResult({ stats: { snrDb: 12 } });
     tool.startMeasure();
     assert.strictEqual(tool.measureState().active, true);
-    assert.deepStrictEqual(tool.measureState().selection, { loHz: 100, hiHz: 200 },
-        'Start again should carry on, not throw the region away');
     assert.strictEqual(tool.measureResult(), null, 'a new run starts with no reading');
 
     tool.setMeasureResult({ stats: { snrDb: 12 } });
     tool.stopMeasure();
     assert.strictEqual(tool.measureState().active, false);
-    assert.ok(tool.measureResult(), 'stopping is how you read it, so the reading stays');
-    assert.ok(tool.measureState().selection);
+    assert.strictEqual(tool.measureState().selection, null,
+        'Stop leaves the display as it was before the tool was opened');
+    assert.strictEqual(tool.measureResult(), null,
+        'and a reading nothing is still taking is not left on screen');
+    assert.strictEqual(tool.measureState().frozen, false);
+});
 
+t('Clear is Stop without leaving the mode', () => {
+    tool.resetMeasure();
+    tool.startMeasure();
+    tool.setSelection({ loHz: 100, hiHz: 200 });
+    tool.setMeasureResult({ stats: { snrDb: 12 } });
     tool.clearMeasure();
     assert.strictEqual(tool.measureState().selection, null);
     assert.strictEqual(tool.measureResult(), null);
+    assert.strictEqual(tool.measureState().active, true, 'the tool still has the gestures');
 });
 
 t('freezing is a flag on the state, so the engine can stop counting too', () => {

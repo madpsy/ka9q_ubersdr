@@ -485,7 +485,8 @@ export default function MeasurePanel({ minimal }) {
         if (drawing) return 'Drawing…';
         if (result && result.reason === 'outside') return 'The region is not in this view — pan back to it.';
         if (result && result.reason === 'narrow') return `Only ${result.bins} bins across at this zoom, which is too few to measure — zoom in.`;
-        if (!active) return 'Stopped. Press Start to measure this region.';
+        // No "stopped, press Start to measure this region" case: Stop takes the
+        // region with it, so a region and an inactive tool cannot both exist.
         return 'Waiting for the spectrum…';
     }, [active, selection, drawing, stats, result]);
 
@@ -497,7 +498,7 @@ export default function MeasurePanel({ minimal }) {
                     icon={active ? <Icon.Stop /> : <Icon.Play />}
                     onClick={active ? stopMeasure : startMeasure}
                     title={active
-                        ? 'Stop measuring — clicks on the spectrum go back to tuning'
+                        ? 'Stop measuring — the region and its reading are cleared, and clicks on the spectrum go back to tuning'
                         : 'Take the spectrum\'s presses: drag to draw a region, and nothing tunes or pans until you stop'}
                 >
                     {active ? 'Stop' : 'Start'}

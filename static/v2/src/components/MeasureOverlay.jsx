@@ -232,7 +232,7 @@ export default function MeasureOverlay({ view, bottom = 0 }) {
                     <button
                         type="button"
                         className="measure-hud__btn measure-hud__btn--stop"
-                        title="Stop measuring — clicks on the spectrum go back to tuning"
+                        title="Stop measuring — the region and its reading are cleared, and clicks on the spectrum go back to tuning"
                         onClick={stopMeasure}
                     >
                         <Icon.Stop size={12} />

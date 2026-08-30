@@ -136,13 +136,16 @@ t('nobody listening is no rows at all, and a bad frequency is not a dot', () => 
     assert.deepStrictEqual(bandRows([ch(0)]), []);
 });
 
-t('the chosen view is remembered, and a stored oddity opens the list', () => {
+t('the bands are what it opens on, and only a choice of the list is kept', () => {
+    // Nothing stored, and anything that is not the list — including a value
+    // from a version that stored something else — is the default view.
+    assert.strictEqual(savedView(), BANDS_VIEW);
+    saveView(LIST_VIEW);
     assert.strictEqual(savedView(), LIST_VIEW);
     saveView(BANDS_VIEW);
     assert.strictEqual(savedView(), BANDS_VIEW);
     store['ubersdr.v2.listeners.view'] = 'waterfall';
-    assert.strictEqual(savedView(), LIST_VIEW);
-    saveView(LIST_VIEW);
+    assert.strictEqual(savedView(), BANDS_VIEW);
 });
 
 // ── What it draws ───────────────────────────────────────────────────────────

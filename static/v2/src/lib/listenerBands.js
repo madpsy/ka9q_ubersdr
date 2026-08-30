@@ -142,17 +142,24 @@ const VIEW_KEY = 'ubersdr.v2.listeners.view';
  * Remembered for the reason the band stats metric is: an operator who watches
  * the bands watches them every session, and the panel is opened often enough
  * that having to switch it every time would be worse than not having the view.
+ *
+ * The bands are what the panel opens on. "Who is here" is a list of names that
+ * mostly are not names — a chat username is optional and usually absent — while
+ * "where is everybody" is answered at a glance and is the reason to open the
+ * panel at all. Only an explicit choice of the list is stored as one; anything
+ * else, including a value from a version that stored something else, opens the
+ * bands.
  */
 export function savedView() {
     try {
-        return localStorage.getItem(VIEW_KEY) === BANDS_VIEW ? BANDS_VIEW : LIST_VIEW;
+        return localStorage.getItem(VIEW_KEY) === LIST_VIEW ? LIST_VIEW : BANDS_VIEW;
     } catch (e) {
-        return LIST_VIEW;
+        return BANDS_VIEW;
     }
 }
 
 export function saveView(view) {
     try {
-        localStorage.setItem(VIEW_KEY, view === BANDS_VIEW ? BANDS_VIEW : LIST_VIEW);
+        localStorage.setItem(VIEW_KEY, view === LIST_VIEW ? LIST_VIEW : BANDS_VIEW);
     } catch (e) { /* private mode */ }
 }

@@ -11,10 +11,10 @@
 // does not tune anywhere, and neither does an IQ channel: there is no audio in
 // it and its passband means something else.
 //
-// The second view is the map page's band strip, compacted: the same listeners
-// as dots across the bands they are on. It answers a different question — where
-// everybody is rather than who they are — and it is the same click to tune.
-// See components/ListenerBands.jsx.
+// The panel opens on the other view: the map page's band strip, compacted —
+// the same listeners as dots across the bands they are on, and the same click
+// to tune. It answers where everybody is rather than who they are, which is
+// what the panel is usually opened to find out. See components/ListenerBands.jsx.
 
 import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';

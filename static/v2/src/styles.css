@@ -1439,6 +1439,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .lsn-dot.is-many.is-you { color: var(--accent-ink); }
 
+/* A dot is 9 px because the row is 14 px, and 9 px is not a target — on a phone
+   it is a third of what a finger can reliably hit, and this is the one control
+   in the panel whose whole job is being clicked. The hit area is grown around it
+   instead, so tuning is forgiving without the dots getting fatter.
+
+   Only the ones that tune get it: a static dot with the same margin would sit
+   over its neighbours and swallow clicks meant for them. */
+button.lsn-dot::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+}
+
 /* Nobody to tune to — your own dot, or an IQ channel. Read, not pressed, as the
    static list rows are. */
 .lsn-dot.is-static { cursor: default; }

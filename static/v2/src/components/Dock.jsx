@@ -24,6 +24,31 @@ function shareOf(weights, id) {
     return (panel && panel.weight) || 1;
 }
 
+// The strip of spectrum the bottom dock may never take, however far the resizer
+// is dragged. 75% of a short column still leaves the waterfall a sliver, and the
+// waterfall is what the receiver is for.
+const SPECTRUM_KEEP = 200;
+
+// How tall the bottom dock may be made right now, measured rather than fixed:
+// it shares .shell__column with the spectrum, so what it may take is a share of
+// that column and not a number of pixels settled on in advance.
+//
+// The same figure as the `max-height` on `.dock--bottom` in styles.css, which is
+// what caps the dock as the window changes size — no re-render needed, and the
+// operator's chosen size survives in the layout for when the space comes back.
+// This one caps what a *drag* stores: without it, dragging on past the floor
+// went on counting, and the resizer then had hundreds of pixels of dead travel
+// to come back through before the dock moved at all.
+//
+// Only the bottom dock: the side docks are bounded by their own minSize/maxSize,
+// and a window narrow enough for that to matter has the mobile shell.
+function dockCeiling(el, side, minSize) {
+    const column = el && el.parentElement;
+    if (side !== 'bottom' || !column) return Infinity;
+    const h = column.clientHeight;
+    return Math.max(minSize, Math.min(h * 0.75, h - SPECTRUM_KEEP));
+}
+
 // Drag handle between two bottom-dock panels. Converts a pixel delta into a
 // share of the pair's combined width, so the rest of the row is undisturbed.
 function SectionSplitter({ before, after, weights, setWeights }) {
@@ -233,8 +258,17 @@ export default function Dock({ side }) {
         // nothing said. The capture is what keeps the drag alive once the finger
         // has left an 18px strip, which is immediately.
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        resizeRef.current = { start: side === 'bottom' ? e.clientY : e.clientX, size: dock.size };
-    }, [dock.size, side]);
+        const el = e.currentTarget.parentElement;
+        resizeRef.current = {
+            start: side === 'bottom' ? e.clientY : e.clientX,
+            // What is on screen, which on a window the dock no longer fits is
+            // shorter than what is stored: starting from the stored figure
+            // would snap the dock back to its full height on the first pixel of
+            // a drag that was trying to make it smaller.
+            size: side === 'bottom' && el ? el.getBoundingClientRect().height : dock.size,
+            max: dockCeiling(el, side, dock.minSize),
+        };
+    }, [dock.size, dock.minSize, side]);
 
     const onResizeMove = useCallback((e) => {
         const r = resizeRef.current;
@@ -245,7 +279,7 @@ export default function Dock({ side }) {
             : side === 'right'
                 ? r.start - e.clientX
                 : r.start - e.clientY;
-        setDockSize(side, r.size + delta);
+        setDockSize(side, Math.min(r.max, r.size + delta));
     }, [side, setDockSize]);
 
     const onResizeUp = useCallback((e) => {

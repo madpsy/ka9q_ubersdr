@@ -937,7 +937,24 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .dock--left { border-right: 1px solid var(--border); }
 .dock--right { border-left: 1px solid var(--border); }
-.dock--bottom { border-top: 1px solid var(--border); }
+/* The bottom dock shares .shell__column with the spectrum, so its ceiling is a
+   share of that column rather than a fixed number of pixels. 560px — what the
+   layout clamp used to allow — was two thirds of a 768px laptop's column and a
+   quarter of a 1440p one: too much on the machine that could least afford it,
+   and a cap that never engaged on the one that could.
+   Three terms, in the order they bind: three quarters of the column; then a
+   200px strip the spectrum keeps regardless, because 75% of a short column
+   still leaves the waterfall a sliver; then the dock's own 120px floor, which
+   wins on a window too short for either — there the spectrum gives way, since a
+   dock shorter than one panel header is no use to anybody.
+   This caps what is *drawn*, and does it at every window size without a
+   re-render. The size the operator dragged to is kept as it is, so maximising
+   the window brings it back. Dock.jsx clamps the drag itself to the same
+   figure — see dockCeiling there. */
+.dock--bottom {
+    border-top: 1px solid var(--border);
+    max-height: max(120px, min(75%, calc(100% - 200px)));
+}
 
 .dock__header {
     display: flex;

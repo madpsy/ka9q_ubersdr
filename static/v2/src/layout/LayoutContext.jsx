@@ -91,7 +91,13 @@ const FLOAT_CASCADE = 26;
 const DOCK_DEFAULTS = {
     left: { size: 320, collapsed: false, minSize: 220, maxSize: 560 },
     right: { size: 320, collapsed: true, minSize: 220, maxSize: 560 },
-    bottom: { size: 240, collapsed: true, minSize: 120, maxSize: 560 },
+    // The bottom dock's real ceiling is measured, not fixed: it is a share of
+    // the column it shares with the spectrum, applied by `max-height` in
+    // styles.css and by dockCeiling() in Dock.jsx. A fixed 560 here would bind
+    // first on any tall window and undo both. What is left is a sanity bound on
+    // the stored number — far enough out to be reached only by an edited or
+    // corrupted layout.
+    bottom: { size: 240, collapsed: true, minSize: 120, maxSize: 1600 },
 };
 
 // Is this a phone, for the purpose of picking first-run defaults?

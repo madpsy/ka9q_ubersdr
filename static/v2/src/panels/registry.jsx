@@ -251,31 +251,6 @@ const BUILT_IN = [
         minimal: true,
         Component: IFSpectrumPanel,
     },
-    // Measuring a piece of the spectrum: draw a region on the display and read
-    // its width, its skirts, how far it stands above the noise and how much of
-    // that moves.
-    //
-    // Ships hidden, which is not the usual caution about clutter. Starting it
-    // takes the display's presses — a drag draws a region instead of panning
-    // and a click does not tune — and a panel that can do that should be one
-    // somebody went and found rather than one they met by scrolling the dock.
-    // Everything about the running state is loud for the same reason: a badge
-    // over the spectrum with the Stop button on it, and Escape.
-    //
-    // Minimal: the readings and the run, without the buttons that act on them
-    // or the settings behind them. The rule the other panels follow — a cut-down
-    // panel is a readout — and it suits this one particularly well, since the
-    // tool is driven from the spectrum rather than from here.
-    {
-        id: 'measure',
-        title: 'Measure',
-        icon: <Icon.Callipers />,
-        dock: 'left',
-        defaultOpen: false,
-        defaultHidden: true,
-        minimal: true,
-        Component: MeasurePanel,
-    },
     // The four VFOs, laid out. The Receiver panel's own row of A–D buttons is
     // the control; this is the view — four frequencies readable at once rather
     // than one at a time in a tooltip. Ships collapsed: most sessions use one
@@ -648,9 +623,42 @@ const BUILT_IN = [
     // because it is a threshold on the SNR the meter is drawing, and it is the
     // one control here you touch while listening.
     { id: 'signal', title: 'Signal', icon: <Icon.Gauge />, dock: 'right', minimal: true, Component: SignalPanel },
-    // Directly under Signal: the band you are on and how it is doing are read
-    // together, and the chips are a row of buttons rather than a wide table —
-    // they fit a dock column better than they fit the bottom rail.
+    // Measuring a piece of the spectrum: draw a region on the display and read
+    // its width, its skirts, how far it stands above the noise and how much of
+    // that moves.
+    //
+    // Under Signal, and that is the whole placement argument. Signal says how
+    // strong the thing you are tuned to is; this says how wide and how strong
+    // anything you draw a box round is. They are the same question asked of the
+    // dial and of the display, and an operator reaching for one has usually just
+    // reached for the other.
+    //
+    // Ships open and visible. It was hidden at first, on the reasoning that a
+    // panel which takes the display's presses — a drag draws a region instead
+    // of panning, and a click does not tune — should be one somebody went and
+    // found. That was the wrong call: it made the panel undiscoverable rather
+    // than deliberate, which is not the same thing. What guards the mode is that
+    // nothing happens until Start is pressed, and that once it is there is a
+    // badge over the spectrum saying so with the Stop button on it. Idle, this
+    // panel is a row of three buttons and a line of text, so it costs the dock
+    // almost nothing to be open.
+    //
+    // Minimal: the readings and the run, without the buttons that act on them
+    // or the settings behind them. The rule the other panels follow — a cut-down
+    // panel is a readout — and it suits this one particularly well, since the
+    // tool is driven from the spectrum rather than from here.
+    {
+        id: 'measure',
+        title: 'Measure',
+        icon: <Icon.Callipers />,
+        dock: 'right',
+        minimal: true,
+        Component: MeasurePanel,
+    },
+    // Directly under the two readouts above it: the band you are on and how it
+    // is doing are read together, and the chips are a row of buttons rather than
+    // a wide table — they fit a dock column better than they fit the bottom
+    // rail.
     // Minimal: the amateur bands only, without the operator's quick-tune row.
     {
         id: 'quickbands',

@@ -30,22 +30,19 @@
 // its own is a number that means something only next to another one.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
-import { Button, Empty, Field, Icon, Readout, Segmented, Switch } from '../components/ui.jsx';
+import { Button, Empty, Field, Icon, Readout, Segmented } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { formatFreqExact, formatSpan } from '../lib/format.js';
 import { strokeCurve, xAt } from '../lib/rollingChart.js';
 import {
-    HISTORY_MS, OBW_PERCENTS, X_DB_LEVELS, drift, occupancyOf, reportLines, spreadOf,
+    HISTORY_MS, OBW_PERCENTS, X_DB_LEVELS, axisFor, busyRuns, drift, histogram, occupancyOf,
+    reportLines, seriesOf, spreadOf,
 } from '../lib/measure.js';
 import {
     AVERAGE_MS, clearMeasure, measureSettings, onMeasureSettings, saveMeasureSettings,
     setMeasureFrozen, startMeasure, stopMeasure,
 } from '../lib/measureTool.js';
 import { useMeasureResult, useMeasureState } from '../lib/useMeasure.js';
-
-// The level-against-time strip, in CSS px. Short: it is there to show the shape
-// of a fade, not to be read off — the numbers beside it are the reading.
-const CHART_H = 48;
 
 const dbText = (v, places = 1) => (Number.isFinite(v) ? v.toFixed(places) : '—');
 
@@ -71,56 +68,106 @@ function elapsedText(ms) {
     return `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
+// ── charts ──────────────────────────────────────────────────────────────────
+//
+// A card is a number; the run behind it is a shape. Which of those you want
+// depends on the question — "how strong is it" is a number, "is it fading, and
+// how fast" is not a number at all — and the panel cannot know which you are
+// asking. So every reading with a shape worth seeing is a card you can press,
+// and pressing it opens the chart underneath, across the panel's full width.
+//
+// One at a time. Ten charts is a wall, and the point of a card is that a dozen
+// readings fit in a glance; the expanded one is the question you are on.
+//
+// Deliberately not the same chart for every reading. What a series has to say
+// differs in kind, not just in data:
+//
+//   trace       the reading against time. The workhorse: a fade, a drifting
+//               noise floor, a filter opening and closing.
+//   deviation   the same, but drawn about a reference line with a symmetric
+//               axis. For a frequency, where the absolute number is not the
+//               reading — the excursion either side of it is.
+//   raster      a strip of busy and clear over the window. For occupancy, where
+//               a percentage cannot tell one long transmission from a carrier
+//               keying every two seconds.
+//   histogram   the distribution rather than the order. For SNR over a run,
+//               where one hump and two humps have the same min, max and σ and
+//               are not the same signal at all.
+//
+// The specs live in CHARTS below, keyed by card. A card with no entry there is
+// a plain readout and does not invite a press: Bins and Resolution do not have
+// a shape, and offering a chart of a constant is worse than offering none.
+
+// How tall an expanded chart is, in CSS px. Taller than the strip this replaced
+// (48px), because it now has the panel's full width and a shape is easier to
+// read the closer its aspect is to square.
+const CHART_H = 64;
+
 /**
- * SNR against time, over the run's window.
+ * What each card expands into.
  *
- * SNR and not the channel power, though the run keeps both. Power is on the
- * uncalibrated scale, so a chart of it has no y-axis anybody can read; SNR is a
- * difference and is therefore the one of the two that means the same thing on
- * every receiver. It is also the reading the picture is *for* — the depth and
- * period of a fade — and a fade in the signal and a rise in the noise look
- * identical in the power trace and opposite in this one.
+ *   key    the field in the run's history — see accumulate()
+ *   kind   which of the four pictures
+ *   least  the narrowest the axis may be, in the reading's own units. This is
+ *          the anti-weather number: without it a reading that has not moved
+ *          auto-scales to its own last digit and draws a mountain range.
+ *   hz     format the axis in frequency rather than decibels
  */
-function Chart({ run, at }) {
+// The keys are quoted because they are data rather than identifiers: they are
+// the vocabulary the open card is persisted in (see measureTool's `expanded`),
+// so they have to survive a rename of anything in this file.
+const CHARTS = {
+    'snr': { key: 'snrDb', kind: 'trace', least: 10, caption: 'SNR' },
+    // Beside SNR these answer the question SNR alone cannot: whether the signal
+    // faded or the noise came up. They are the two halves of it.
+    'peak-level': { key: 'peakDb', kind: 'trace', least: 10, caption: 'Peak level' },
+    'floor': { key: 'floorDb', kind: 'trace', least: 10, caption: 'Noise floor' },
+    'power': { key: 'powerDb', kind: 'trace', least: 10, caption: 'Channel power' },
+    'median': { key: 'medianDb', kind: 'trace', least: 10, caption: 'Region median' },
+    'crest': { key: 'crestDb', kind: 'trace', least: 6, caption: 'Crest' },
+    'flatness': { key: 'flatnessDb', kind: 'trace', least: 6, caption: 'Flatness' },
+    'width': { key: 'widthHz', kind: 'trace', least: 100, hz: true, caption: 'Width' },
+    // The drift picture. About the run's own mean rather than about zero: a
+    // carrier on 14.1 MHz that wanders 30 Hz is a 30 Hz story, and an axis
+    // starting at zero would draw it as a flat line at the top of the box.
+    'peak': { key: 'peakHz', kind: 'deviation', least: 20, hz: true, caption: 'Peak, about its mean' },
+    'occupancy': { key: 'snrDb', kind: 'raster', caption: 'Busy' },
+    'snr-spread': { key: 'snrDb', kind: 'histogram', least: 10, caption: 'SNR, how often' },
+};
+
+/** The y-axis label for a value, in whichever units the series is in. */
+const axisText = (v, hz) => (hz ? formatSpan(Math.abs(v)) : `${v.toFixed(1)} dB`);
+
+/**
+ * One expanded chart.
+ *
+ * All four kinds share this canvas, its sizing and its colours, because they
+ * share a box and must look like one family. What differs is thirty lines in
+ * the middle.
+ */
+function MeasureChart({ spec, run, at, occupancyDb }) {
     const ref = useRef(null);
 
     useEffect(() => {
         const c = ref.current;
-        if (!c) return;
+        if (!c) return undefined;
         const dpr = Math.min(3, window.devicePixelRatio || 1);
         const w = Math.max(1, Math.round(c.clientWidth * dpr));
         const h = Math.max(1, Math.round(CHART_H * dpr));
         if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
         const ctx = c.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) return undefined;
         ctx.clearRect(0, 0, w, h);
 
-        const pts = (run && run.history) || [];
         // Read off this canvas rather than through lib/spectrumTrace's
         // themeColors(). That cache is keyed on the theme alone and filled by
         // whichever caller asks first, so a caller with a short list of
         // variables leaves every later caller's missing — and the spectrum's own
-        // draw loop is one of them. A getComputedStyle five times a second on
-        // one small element is not worth that risk.
+        // draw loop is one of them.
         const cs = window.getComputedStyle(c);
         const accent = cs.getPropertyValue('--accent').trim() || '#08a2fb';
-        const rule = cs.getPropertyValue('--border').trim() || 'rgba(255,255,255,0.12)';
-
-        // The scale is the data's, with a floor under it: a signal that has not
-        // moved for a minute would otherwise be drawn as a mountain range,
-        // because auto-scaling a flat line magnifies its noise until it fills
-        // the box. Ten decibels is the least the axis may span.
-        let lo = Infinity;
-        let hi = -Infinity;
-        for (const p of pts) {
-            if (p.snrDb < lo) lo = p.snrDb;
-            if (p.snrDb > hi) hi = p.snrDb;
-        }
-        if (!Number.isFinite(lo)) { lo = 0; hi = 10; }
-        if (hi - lo < 10) { const mid = (lo + hi) / 2; lo = mid - 5; hi = mid + 5; }
-        const pad = (hi - lo) * 0.12;
-        lo -= pad;
-        hi += pad;
+        const rule = cs.getPropertyValue('--border').trim() || 'rgba(255,255,255,0.14)';
+        const faint = cs.getPropertyValue('--surface-3').trim() || 'rgba(255,255,255,0.06)';
 
         ctx.lineWidth = Math.max(1, dpr);
         ctx.strokeStyle = rule;
@@ -129,26 +176,122 @@ function Chart({ run, at }) {
         ctx.lineTo(w, h - 0.5);
         ctx.stroke();
 
-        if (pts.length >= 2) {
-            const xy = pts.map((p) => ({
-                x: xAt(p.t, at, HISTORY_MS, w),
-                y: h - ((p.snrDb - lo) / (hi - lo)) * h,
-            }));
-            ctx.lineWidth = Math.max(1.2, 1.2 * dpr);
-            ctx.lineJoin = 'round';
-            strokeCurve(ctx, xy, () => accent);
+        if (spec.kind === 'raster') {
+            // Blocks rather than a line: this is a state over an interval, and
+            // a line between two samples of a boolean invents a ramp between
+            // them that never happened.
+            for (const seg of busyRuns(run, occupancyDb, at)) {
+                const x0 = xAt(seg.from, at, HISTORY_MS, w);
+                const x1 = xAt(seg.to, at, HISTORY_MS, w);
+                ctx.fillStyle = seg.busy ? accent : faint;
+                ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h - 1);
+            }
+            return undefined;
         }
-        return undefined;
-    }, [run, at]);
 
-    const s = spreadOf(run && run.snr);
+        if (spec.kind === 'histogram') {
+            const hist = histogram(seriesOf(run, spec.key).map((p) => p.v));
+            if (!hist || !hist.max) return undefined;
+            const bw = w / hist.counts.length;
+            ctx.fillStyle = accent;
+            for (let i = 0; i < hist.counts.length; i++) {
+                const bh = (hist.counts[i] / hist.max) * (h - 2);
+                if (bh <= 0) continue;
+                // A pixel of gap, so adjacent buckets read as bars rather than
+                // as one filled area.
+                ctx.fillRect(i * bw, h - 1 - bh, Math.max(1, bw - dpr), bh);
+            }
+            return undefined;
+        }
+
+        const pts = seriesOf(run, spec.key);
+        if (pts.length < 2) return undefined;
+        const mean = spec.kind === 'deviation'
+            ? pts.reduce((a, p) => a + p.v, 0) / pts.length
+            : null;
+        const ax = axisFor(pts.map((p) => p.v), spec.least, mean);
+        const yOf = (v) => h - ((v - ax.lo) / (ax.hi - ax.lo)) * h;
+
+        // The reference line a deviation is measured from. Drawn under the
+        // trace, so a line sitting exactly on it still reads as the trace.
+        if (ax.mid != null) {
+            ctx.strokeStyle = rule;
+            ctx.setLineDash([2 * dpr, 3 * dpr]);
+            ctx.beginPath();
+            ctx.moveTo(0, yOf(ax.mid));
+            ctx.lineTo(w, yOf(ax.mid));
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        ctx.lineWidth = Math.max(1.2, 1.2 * dpr);
+        ctx.lineJoin = 'round';
+        strokeCurve(ctx, pts.map((p) => ({ x: xAt(p.t, at, HISTORY_MS, w), y: yOf(p.v) })), () => accent);
+        return undefined;
+    }, [spec, run, at, occupancyDb]);
+
     return (
         <div className="measure-chart">
             <canvas ref={ref} style={{ height: CHART_H }} />
             <div className="measure-chart__axis">
-                <span>{s ? `${dbText(s.min)} – ${dbText(s.max)} dB` : ''}</span>
-                <span>SNR, last {Math.round(HISTORY_MS / 1000)} s</span>
+                <span>{chartRange(spec, run, occupancyDb)}</span>
+                <span>{spec.caption}, last {Math.round(HISTORY_MS / 1000)} s</span>
             </div>
+        </div>
+    );
+}
+
+/** What the picture is drawn against, said in words under it. */
+function chartRange(spec, run, occupancyDb) {
+    const vals = seriesOf(run, spec.key).map((p) => p.v);
+    if (!vals.length) return '';
+    if (spec.kind === 'raster') {
+        const busy = vals.filter((v) => v >= occupancyDb).length;
+        return `busy ${Math.round((busy / vals.length) * 100)}% of it`;
+    }
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    if (spec.kind === 'deviation') {
+        const mean = vals.reduce((a, v) => a + v, 0) / vals.length;
+        return `±${axisText(Math.max(hi - mean, mean - lo), spec.hz)} about the mean`;
+    }
+    return `${axisText(lo, spec.hz)} – ${axisText(hi, spec.hz)}`;
+}
+
+/**
+ * A reading, and the chart it opens into.
+ *
+ * The head is a button and the chart is not, so pressing the picture does not
+ * put it away again — which is what happens if the whole card is one button,
+ * and it is maddening the first time you try to look closely at something.
+ *
+ * A card with no chart is a plain readout with no press and no cursor: an
+ * affordance that does nothing is worse than none, because it has to be tried
+ * before it can be ruled out.
+ */
+function Card({ id, label, value, unit, wide, open, onOpen, run, at, occupancyDb }) {
+    const spec = CHARTS[id];
+    const readout = <Readout label={label} value={value} unit={unit} />;
+    // Nothing measured yet is nothing to chart. The card stays, and stays
+    // inert, rather than offering a press that would open an empty box.
+    if (!spec || !run || !run.frames) {
+        return wide ? <span className="measure-wide">{readout}</span> : readout;
+    }
+    return (
+        <div className={`measure-card${open ? ' is-open' : ''}${open || wide ? ' measure-wide' : ''}`}>
+            <button
+                type="button"
+                className="measure-card__head"
+                aria-expanded={open}
+                onClick={() => onOpen(open ? '' : id)}
+                title={open ? 'Close the chart' : `Chart ${spec.caption.toLowerCase()} over the run`}
+            >
+                {readout}
+                <Icon.Bars size={11} className="measure-card__cue" />
+            </button>
+            {open && (
+                <MeasureChart spec={spec} run={run} at={at} occupancyDb={occupancyDb} />
+            )}
         </div>
     );
 }
@@ -163,6 +306,28 @@ export default function MeasurePanel({ minimal }) {
 
     const stats = result && result.stats;
     const run = result && result.run;
+
+    // Which card is open as a chart. Persisted, because it is the question you
+    // came to this panel to watch — coming back to a collapsed panel and having
+    // to remember which reading you were following is the sort of small tax
+    // that stops somebody using a tool.
+    const open = settings.expanded;
+    const setOpen = useCallback((id) => saveMeasureSettings({ expanded: id }), []);
+    const card = (id, label, value, unit, wide) => (
+        <Card
+            key={id}
+            id={id}
+            label={label}
+            value={value}
+            unit={unit}
+            wide={wide}
+            open={open === id}
+            onOpen={setOpen}
+            run={run}
+            at={(result && result.at) || Date.now()}
+            occupancyDb={settings.occupancyDb}
+        />
+    );
 
     const copy = useCallback(() => {
         if (!result || !navigator.clipboard) return;
@@ -248,16 +413,22 @@ export default function MeasurePanel({ minimal }) {
             {stats && (
                 <>
                     <div className="readout-grid">
-                        <Readout label="Width" value={formatSpan(stats.widthHz)} />
-                        <Readout label="SNR" value={dbText(stats.snrDb)} unit="dB" />
-                        <Readout label="Peak" value={formatFreqExact(stats.peakHz)} />
+                        {card('width', 'Width', formatSpan(stats.widthHz))}
+                        {card('snr', 'SNR', dbText(stats.snrDb), 'dB')}
+                        {/* A frequency is ten characters and will not share a
+                            dock column with anything — the IF panel's stats row
+                            reaches the same conclusion about the same reading,
+                            and half a column is exactly where it escaped the
+                            card. Its chart is the drift: the absolute number is
+                            not what moves, and what moves is the reading. */}
+                        {card('peak', 'Peak', formatFreqExact(stats.peakHz), undefined, true)}
                         <Readout label="Peak vs dial" value={offsetText(stats.peakHz - tuning.frequency)} />
-                        <Readout label="Peak level" value={dbText(stats.peakDb)} unit="dB rel" />
+                        {card('peak-level', 'Peak level', dbText(stats.peakDb), 'dB rel')}
                         {/* The view's floor, not the region's — see
                             selectionStats for the argument. The region's own
                             median is below, under Density, where it reads as
                             what it is: how full the box is. */}
-                        <Readout label="Noise floor" value={dbText(stats.floorDb)} unit="dB rel" />
+                        {card('floor', 'Noise floor', dbText(stats.floorDb), 'dB rel')}
                     </div>
 
                     {/* The peak sitting on the edge of the region means the
@@ -272,67 +443,83 @@ export default function MeasurePanel({ minimal }) {
                         </div>
                     )}
 
+                    {/* Every row holds its place, measurable or not.
+                        These are the readings that come and go on their own: a
+                        −60 dB skirt disappears behind a neighbour, an occupied
+                        bandwidth needs something above the floor, and the tone
+                        spacing needs two peaks the finder is willing to call
+                        two. On a real signal each of those flickers frame to
+                        frame, and a row that vanishes takes its height with it —
+                        so the rows below jumped up and down several times a
+                        second, which made the whole block unreadable while you
+                        were trying to read one number in it.
+                        A dash also says something the missing row did not: this
+                        is a measurement that cannot be made here, as against one
+                        the panel does not offer. */}
                     <div className="measure-rows">
                         {(result.widths || []).map((w) => (
                             <div className="measure-row" key={w.downDb}>
                                 <span className="measure-row__label">−{w.downDb} dB width</span>
                                 <span className={`measure-row__value${w.clipped ? ' is-bound' : ''}`}>
-                                    {w.clipped ? '> ' : ''}{formatSpan(w.widthHz)}
+                                    {w.widthHz == null ? '—' : `${w.clipped ? '> ' : ''}${formatSpan(w.widthHz)}`}
                                 </span>
                             </div>
                         ))}
-                        {result.obw && (
-                            <div className="measure-row">
-                                <span className="measure-row__label">Occupied ({result.obw.percent}%)</span>
-                                <span className="measure-row__value">{formatSpan(result.obw.widthHz)}</span>
-                            </div>
-                        )}
-                        {result.shape && (
-                            <div className="measure-row" title="The −60 dB width over the −6 dB one: how brick-wall the thing being measured is. 1 is a perfect filter; under about 2 is a good one.">
-                                <span className="measure-row__label">Shape factor</span>
-                                <span className={`measure-row__value${result.shape.clipped ? ' is-bound' : ''}`}>
-                                    {result.shape.clipped ? '< ' : ''}{result.shape.ratio.toFixed(2)}:1
-                                </span>
-                            </div>
-                        )}
-                        {result.fsk && (
-                            <div className="measure-row" title="The spacing of the two strongest tones in the region — an FSK signal's shift, read off the spectrum.">
-                                <span className="measure-row__label">Tone spacing</span>
-                                <span className="measure-row__value">
-                                    {Math.round(result.fsk.hz)} Hz
-                                    {result.fsk.standard && (
-                                        <span className="chip">{result.fsk.standard.hz} {result.fsk.standard.name}</span>
-                                    )}
-                                </span>
-                            </div>
-                        )}
+                        <div className="measure-row">
+                            <span className="measure-row__label">Occupied ({settings.obw}%)</span>
+                            <span className="measure-row__value">
+                                {result.obw ? formatSpan(result.obw.widthHz) : '—'}
+                            </span>
+                        </div>
+                        <div className="measure-row" title="The −60 dB width over the −6 dB one: how brick-wall the thing being measured is. 1 is a perfect filter; under about 2 is a good one.">
+                            <span className="measure-row__label">Shape factor</span>
+                            <span className={`measure-row__value${result.shape && result.shape.clipped ? ' is-bound' : ''}`}>
+                                {result.shape
+                                    ? `${result.shape.clipped ? '< ' : ''}${result.shape.ratio.toFixed(2)}:1`
+                                    : '—'}
+                            </span>
+                        </div>
+                        <div className="measure-row" title="The spacing of the two strongest tones in the region — an FSK signal's shift, read off the spectrum. A dash means there is only one tone in here that the peak finder will call a tone.">
+                            <span className="measure-row__label">Tone spacing</span>
+                            <span className="measure-row__value">
+                                {result.fsk ? `${Math.round(result.fsk.hz)} Hz` : '—'}
+                                {result.fsk && result.fsk.standard && (
+                                    <span className="chip">{result.fsk.standard.hz} {result.fsk.standard.name}</span>
+                                )}
+                            </span>
+                        </div>
                     </div>
 
                     <div className="readout-grid">
-                        <Readout label="Channel power" value={dbText(stats.powerDb)} unit="dB rel" />
+                        {card('power', 'Channel power', dbText(stats.powerDb), 'dB rel')}
+                        {/* No chart of its own: density is the channel power
+                            less a constant, so its line is the same line. */}
                         <Readout label="Density" value={dbText(stats.densityDb)} unit="dB rel/Hz" />
                         {/* How far the peak stands above the average power in
                             the region: high on a carrier, low on noise, and the
                             quickest way to tell one from the other. */}
-                        <Readout label="Crest" value={dbText(stats.crestDb)} unit="dB" />
+                        {card('crest', 'Crest', dbText(stats.crestDb), 'dB')}
                         {/* Zero is a flat trace, about −2.5 dB is Gaussian
                             noise, and far below that is something with a
                             structure in it. */}
-                        <Readout label="Flatness" value={dbText(stats.flatnessDb)} unit="dB" />
-                        <Readout
-                            label="Centroid"
-                            value={stats.centroidHz == null ? '—' : formatFreqExact(stats.centroidHz)}
-                        />
-                        <Readout
-                            label="Resolution"
-                            value={formatSpan(result.rbw)}
-                            unit={`/bin · ${result.bins}`}
-                        />
+                        {card('flatness', 'Flatness', dbText(stats.flatnessDb), 'dB')}
+                        <span className="measure-wide">
+                            <Readout
+                                label="Centroid"
+                                value={stats.centroidHz == null ? '—' : formatFreqExact(stats.centroidHz)}
+                            />
+                        </span>
+                        {/* Two cards and not one with "10 Hz/bin · 21" in it:
+                            that read as a single quantity, and they are two —
+                            how fine the measurement can be, and how many samples
+                            it is over. */}
+                        <Readout label="Resolution" value={formatSpan(result.rbw)} unit="/bin" />
+                        <Readout label="Bins" value={result.bins} />
                         {/* The middle of the region itself. Next to the floor
                             it says how much of the box is signal: close to the
                             floor is a box with a signal in it, well above is a
                             box that is mostly signal. */}
-                        <Readout label="Region median" value={dbText(stats.medianDb)} unit="dB rel" />
+                        {card('median', 'Region median', dbText(stats.medianDb), 'dB rel')}
                     </div>
                 </>
             )}
@@ -346,16 +533,26 @@ export default function MeasurePanel({ minimal }) {
                         </span>
                     </div>
                     <div className="readout-grid">
-                        <Readout
-                            label="Occupancy"
-                            value={busy == null ? '—' : Math.round(busy * 100)}
-                            unit={busy == null ? '' : `% over ${settings.occupancyDb} dB`}
-                        />
-                        <Readout
-                            label="SNR range"
-                            value={snrRun ? `${dbText(snrRun.min)} – ${dbText(snrRun.max)}` : '—'}
-                            unit={snrRun ? 'dB' : ''}
-                        />
+                        {/* The threshold belongs in the label, not the unit.
+                            The unit of this reading is per cent; "over 6 dB" is
+                            what it counted, and putting it after the number
+                            read as though the receiver measured percent-over-
+                            decibels. */}
+                        {card(
+                            'occupancy',
+                            `Occupancy over ${settings.occupancyDb} dB`,
+                            busy == null ? '—' : Math.round(busy * 100),
+                            busy == null ? '' : '%',
+                        )}
+                        {/* The distribution, not the trace: one hump and two
+                            humps have the same min, max and σ, and are a steady
+                            signal and an intermittent one. */}
+                        {card(
+                            'snr-spread',
+                            'SNR range',
+                            snrRun ? `${dbText(snrRun.min)} – ${dbText(snrRun.max)}` : '—',
+                            snrRun ? 'dB' : '',
+                        )}
                         <Readout
                             label="SNR σ"
                             value={snrRun ? dbText(snrRun.sigma) : '—'}
@@ -374,7 +571,6 @@ export default function MeasurePanel({ minimal }) {
                         />
                         <Readout label="Frames" value={run.frames} />
                     </div>
-                    {settings.chart && <Chart run={run} at={result.at || Date.now()} />}
                 </>
             )}
 
@@ -483,11 +679,6 @@ export default function MeasurePanel({ minimal }) {
                             options={[3, 6, 10, 20].map((d) => ({ value: d, label: `${d} dB` }))}
                         />
                     </Field>
-                    <Switch
-                        checked={settings.chart}
-                        onChange={(v) => saveMeasureSettings({ chart: v })}
-                        label="SNR against time"
-                    />
                 </>
             )}
         </div>

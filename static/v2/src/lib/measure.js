@@ -595,7 +595,27 @@ export function accumulate(run, stats, nowMs, { occupancyDb = DEFAULT_OCCUPANCY_
     if (width && Number.isFinite(width.widthHz)) addSpread(run.width, width.widthHz);
     const last = run.history[run.history.length - 1];
     if (!last || nowMs - last.t >= HISTORY_EVERY_MS) {
-        run.history.push({ t: nowMs, powerDb: stats.powerDb, snrDb: stats.snrDb });
+        // Every reading a card can be expanded into a chart of, not just the
+        // two that had a chart at first. They are a handful of doubles four
+        // times a second and the window holds a few hundred points, so the whole
+        // set costs less than deciding which of them to keep — and deciding
+        // wrongly means the picture cannot be drawn at all, because the frames
+        // it needed are gone.
+        run.history.push({
+            t: nowMs,
+            snrDb: stats.snrDb,
+            powerDb: stats.powerDb,
+            peakDb: stats.peakDb,
+            floorDb: stats.floorDb,
+            medianDb: stats.medianDb,
+            crestDb: stats.crestDb,
+            flatnessDb: stats.flatnessDb,
+            peakHz: stats.peakHz,
+            // The headline width, which is a level the operator chose — see
+            // frameStats. Null where it could not be measured this frame, and
+            // the series skips it rather than drawing a hole at zero.
+            widthHz: width && Number.isFinite(width.widthHz) ? width.widthHz : null,
+        });
         trimHistory(run, nowMs);
     }
     return run;
@@ -639,6 +659,121 @@ export function drift(run) {
     const s = spreadOf(run && run.peakHz);
     if (!s) return null;
     return { range: s.range, min: s.min, max: s.max, sigma: s.sigma };
+}
+
+// ── what a chart is drawn from ──────────────────────────────────────────────
+//
+// A card in the panel expands into a chart of its own reading over the run.
+// These are the parts of that which are arithmetic rather than canvas calls:
+// pulling one reading out of the history, and bucketing it.
+
+/**
+ * One reading's series over the run, as `{t, v}`, oldest first.
+ *
+ * Points where the reading could not be taken are dropped rather than carried
+ * as zero or as a gap — a width that was unmeasurable for a second is missing
+ * from the line, and a line that dipped to zero for a second would be a
+ * measurement of something that did not happen.
+ */
+export function seriesOf(run, key) {
+    if (!run || !Array.isArray(run.history)) return [];
+    const out = [];
+    for (const p of run.history) {
+        const v = p[key];
+        if (Number.isFinite(v)) out.push({ t: p.t, v });
+    }
+    return out;
+}
+
+/**
+ * The range a series should be drawn against, with a floor under it.
+ *
+ * The floor is the whole reason this is not two lines of inline code. A reading
+ * that has not moved for a minute auto-scales to its own noise: a line flat to
+ * within a tenth of a decibel fills the box with what looks like weather, and
+ * somebody reads a fade into it. `least` is the narrowest the axis may be, in
+ * the reading's own units, so a steady signal draws a steady line.
+ *
+ * `about` centres the axis on a value — the run's mean for a drift chart, where
+ * what matters is the excursion either side and not the absolute frequency.
+ */
+export function axisFor(values, least, about = null) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const v of values) {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+    }
+    if (!Number.isFinite(lo)) return { lo: about != null ? about - least / 2 : 0, hi: about != null ? about + least / 2 : least, mid: about };
+    if (about != null) {
+        // Symmetric, so the reference line sits in the middle and an excursion
+        // up reads the same size as the same excursion down.
+        const reach = Math.max(Math.abs(hi - about), Math.abs(about - lo), least / 2);
+        return { lo: about - reach, hi: about + reach, mid: about };
+    }
+    if (hi - lo < least) {
+        const mid = (lo + hi) / 2;
+        return { lo: mid - least / 2, hi: mid + least / 2, mid: null };
+    }
+    const pad = (hi - lo) * 0.12;
+    return { lo: lo - pad, hi: hi + pad, mid: null };
+}
+
+/**
+ * A histogram of `values`, for the shape of a distribution rather than its
+ * order in time.
+ *
+ * Worth its own chart kind for one reading in particular: SNR over a run. A
+ * single hump is a signal that was there throughout at some strength; two humps
+ * is a signal that was present and absent, which the min, max and σ beside it
+ * describe identically and wrongly — they report a wide, variable signal where
+ * what actually happened is an intermittent one.
+ *
+ * A flat series has no width to bucket, so it is widened to one unit either
+ * side: the answer is a single bar, which is the truth about it.
+ */
+export function histogram(values, buckets = 16) {
+    const vals = values.filter((v) => Number.isFinite(v));
+    if (!vals.length || !(buckets > 0)) return null;
+    let lo = Math.min(...vals);
+    let hi = Math.max(...vals);
+    if (!(hi > lo)) { lo -= 0.5; hi += 0.5; }
+    const counts = new Array(buckets).fill(0);
+    const span = hi - lo;
+    for (const v of vals) {
+        // The top value belongs in the last bucket rather than in a
+        // (buckets + 1)th one that does not exist.
+        const i = Math.min(buckets - 1, Math.floor(((v - lo) / span) * buckets));
+        counts[i] += 1;
+    }
+    return { lo, hi, counts, max: Math.max(...counts), n: vals.length };
+}
+
+/**
+ * The run's history as busy/clear runs, for the occupancy strip.
+ *
+ * `[{ from, to, busy }]` in milliseconds, adjacent runs merged. A percentage
+ * says how much of the window was busy and this says *when* — the difference
+ * between one long transmission and a carrier keying every two seconds, which
+ * are the same number and not the same signal.
+ *
+ * Each point stands for the interval up to the next one, and the last for the
+ * interval up to `until` — the reading is a sample of a period, not an instant.
+ */
+export function busyRuns(run, occupancyDb = DEFAULT_OCCUPANCY_DB, until = null) {
+    const pts = seriesOf(run, 'snrDb');
+    if (!pts.length) return [];
+    const end = until != null ? Math.max(until, pts[pts.length - 1].t) : pts[pts.length - 1].t;
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+        const busy = pts[i].v >= occupancyDb;
+        const to = i + 1 < pts.length ? pts[i + 1].t : end;
+        if (to <= pts[i].t) continue;
+        const last = out[out.length - 1];
+        if (last && last.busy === busy && last.to === pts[i].t) last.to = to;
+        else out.push({ from: pts[i].t, to, busy });
+    }
+    return out;
 }
 
 // ── the gesture ─────────────────────────────────────────────────────────────
@@ -759,7 +894,20 @@ export function readingOf(trace, view, sel, settings = {}, run = null, at = Date
         ...base,
         reason: 'ok',
         stats,
-        widths: xDb.map(width).filter(Boolean),
+        // One entry per level asked for, measurable or not — an unmeasurable one
+        // comes back with a null width rather than being dropped.
+        //
+        // Dropping it is what a filtered list would do, and it made the panel
+        // jump: a −20 dB skirt that is measurable on one frame and not the next
+        // took its whole row away and pulled everything below it up, several
+        // times a second. A row that holds its place and says "—" is both
+        // steadier and more honest — it is the difference between "this cannot
+        // be measured here" and "there is no such measurement".
+        //
+        // Whoever is *drawing* the widths filters them out; see MeasureOverlay.
+        widths: xDb.map((d) => width(d) || {
+            downDb: d, loHz: null, hiHz: null, widthHz: null, clipped: false,
+        }),
         headline: f.headline,
         obw: occupiedBandwidth(trace, view, range, stats.floorDb, obwPercent),
         // The shape factor's pair is measured whether or not those two levels
@@ -819,7 +967,12 @@ export function reportLines(result, { tuning, at = Date.now() } = {}) {
     out.push('');
 
     for (const w of result.widths || []) {
-        row(`−${w.downDb} dB width`, `${w.clipped ? '>' : ''}${formatSpan(w.widthHz)}`);
+        // Said in words rather than dashed. This one is read by somebody who
+        // cannot see the spectrum it came off, and a "—" in a pasted log is
+        // indistinguishable from a measurement of nothing.
+        row(`−${w.downDb} dB width`, w.widthHz == null
+            ? 'not measurable in this region'
+            : `${w.clipped ? '>' : ''}${formatSpan(w.widthHz)}`);
     }
     if (result.obw) row(`Occupied bandwidth (${result.obw.percent}%)`, formatSpan(result.obw.widthHz));
     if (result.shape) {

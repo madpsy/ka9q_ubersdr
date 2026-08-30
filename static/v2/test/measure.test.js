@@ -342,6 +342,135 @@ t('one tone is not a shift', () => {
     assert.strictEqual(m.fskShift(flat(-110), VIEW, m.binRange(VIEW, N, all)), null);
 });
 
+// --- what a chart is drawn from ----------------------------------------------
+
+/** A run whose history holds a known series, one point per second. */
+const runOf = (values, key = 'snrDb') => {
+    const run = m.newRun(0);
+    values.forEach((v, i) => {
+        m.accumulate(run, {
+            snrDb: key === 'snrDb' ? v : 20,
+            powerDb: -50,
+            peakDb: -40,
+            floorDb: -100,
+            medianDb: -90,
+            crestDb: 6,
+            flatnessDb: -3,
+            peakHz: key === 'peakHz' ? v : 14_200_000,
+        }, i * 1000, { width: key === 'widthHz' ? { widthHz: v } : null });
+    });
+    return run;
+};
+
+t('a series is one reading out of the history, in time order', () => {
+    const run = runOf([1, 2, 3]);
+    assert.deepStrictEqual(m.seriesOf(run, 'snrDb').map((p) => p.v), [1, 2, 3]);
+    assert.deepStrictEqual(m.seriesOf(run, 'snrDb').map((p) => p.t), [0, 1000, 2000]);
+    // Every reading a card can chart is kept, not just the two that had one.
+    assert.deepStrictEqual(m.seriesOf(run, 'floorDb').map((p) => p.v), [-100, -100, -100]);
+});
+
+t('a reading that could not be taken is missing from its series, not zero', () => {
+    // A width that was unmeasurable for a second must not draw a line down to
+    // zero and back — that is a picture of something that did not happen.
+    const run = m.newRun(0);
+    const frame = { snrDb: 20, powerDb: -50, peakDb: -40, floorDb: -100, medianDb: -90, crestDb: 6, flatnessDb: -3, peakHz: 1 };
+    m.accumulate(run, frame, 0, { width: { widthHz: 2400 } });
+    m.accumulate(run, frame, 1000, { width: null });
+    m.accumulate(run, frame, 2000, { width: { widthHz: 2600 } });
+    assert.deepStrictEqual(m.seriesOf(run, 'widthHz').map((p) => p.v), [2400, 2600]);
+    assert.strictEqual(m.seriesOf(run, 'widthHz').length, 2);
+    assert.strictEqual(m.seriesOf(null, 'widthHz').length, 0);
+});
+
+t('an axis never draws weather: a steady reading gets the floor, not its own noise', () => {
+    // The failure: auto-scaling a line that has moved by a tenth of a decibel
+    // fills the box with what looks like a fade.
+    const steady = m.axisFor([20, 20.05, 19.95], 10);
+    assert.ok(steady.hi - steady.lo >= 10, `axis collapsed to ${steady.hi - steady.lo}`);
+    assert.ok(Math.abs((steady.lo + steady.hi) / 2 - 20) < 1e-9, 'centred on the reading');
+    // A reading that does move gets its own range, with a little air.
+    const moving = m.axisFor([0, 100], 10);
+    assert.ok(moving.lo < 0 && moving.hi > 100);
+    assert.strictEqual(moving.mid, null, 'no reference line unless one was asked for');
+});
+
+t('a deviation axis is symmetric about its reference, so up and down read alike', () => {
+    // 30 Hz above the mean and 5 below: the axis has to reach 30 either way, or
+    // the same excursion drawn downwards would look smaller than upwards.
+    const ax = m.axisFor([970, 1030, 995], 20, 1000);
+    assert.strictEqual(ax.mid, 1000);
+    assert.strictEqual(ax.hi - 1000, 1000 - ax.lo);
+    assert.ok(ax.hi - 1000 >= 30);
+    // Nothing to draw still gives a usable axis rather than a divide by zero.
+    const empty = m.axisFor([], 20, 1000);
+    assert.ok(empty.hi > empty.lo);
+});
+
+t('a histogram buckets every value, top one included', () => {
+    const h = m.histogram([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 10);
+    assert.strictEqual(h.lo, 0);
+    assert.strictEqual(h.hi, 10);
+    // Eleven values into ten buckets: the 10 lands in the last one rather than
+    // in an eleventh that does not exist.
+    assert.strictEqual(h.counts.reduce((a, b) => a + b, 0), 11);
+    assert.strictEqual(h.counts.length, 10);
+    assert.strictEqual(h.counts[9], 2, '9 and 10 share the top bucket');
+    assert.strictEqual(h.max, 2);
+});
+
+t('a histogram of one value is one bar, not a divide by zero', () => {
+    const h = m.histogram([7, 7, 7], 8);
+    assert.ok(h.hi > h.lo, 'widened so there is something to bucket into');
+    assert.strictEqual(h.counts.reduce((a, b) => a + b, 0), 3);
+    assert.strictEqual(m.histogram([]), null);
+    assert.strictEqual(m.histogram([1, 2], 0), null);
+});
+
+t('a histogram tells a fading signal from an intermittent one', () => {
+    // The whole reason this chart kind exists. These two have the same min, the
+    // same max and nearly the same mean — the spread figures beside the card
+    // describe them identically — and one is a signal that was there throughout
+    // and faded, the other a signal that was there half the time.
+    const fading = [];
+    const onOff = [];
+    for (let i = 0; i < 111; i++) {
+        fading.push(2 + (i % 37));
+        onOff.push(i % 2 ? 38 : 2);
+    }
+    const a = m.histogram(fading, 8);
+    const b = m.histogram(onOff, 8);
+    assert.strictEqual(a.lo, b.lo);
+    assert.strictEqual(a.hi, b.hi);
+
+    const filled = (h) => h.counts.filter((n) => n > 0).length;
+    assert.strictEqual(filled(a), 8, `a fade fills the range: ${a.counts}`);
+    assert.strictEqual(filled(b), 2, `on and off is two spikes: ${b.counts}`);
+});
+
+t('busy runs say when it was busy, which a percentage cannot', () => {
+    // Busy, clear, busy — one long transmission and a keyed carrier are the same
+    // percentage and not the same signal.
+    const run = runOf([20, 20, 1, 1, 20]);
+    const segs = m.busyRuns(run, 6, 5000);
+    assert.deepStrictEqual(segs.map((r) => r.busy), [true, false, true]);
+    assert.deepStrictEqual(segs.map((r) => [r.from, r.to]), [[0, 2000], [2000, 4000], [4000, 5000]]);
+});
+
+t('a run of one point still covers the interval it stands for', () => {
+    // Each reading is a sample of a period up to the next one, and the last runs
+    // to now — a zero-width block would flicker the newest state in and out.
+    const segs = m.busyRuns(runOf([20]), 6, 1000);
+    assert.deepStrictEqual(segs, [{ from: 0, to: 1000, busy: true }]);
+    assert.deepStrictEqual(m.busyRuns(m.newRun(0), 6, 1000), []);
+});
+
+t('the occupancy threshold decides the runs, so changing it redraws them', () => {
+    const run = runOf([4, 4, 4]);
+    assert.deepStrictEqual(m.busyRuns(run, 6, 3000).map((r) => r.busy), [false]);
+    assert.deepStrictEqual(m.busyRuns(run, 3, 3000).map((r) => r.busy), [true]);
+});
+
 // --- the gesture -------------------------------------------------------------
 
 t('a press near an edge takes that edge, anchored on the far one', () => {
@@ -512,6 +641,31 @@ t('the headline width is the narrowest asked for, and −6 dB when none are', ()
     assert.strictEqual(none.headline.downDb, 6);
 });
 
+t('there is an entry for every level asked for, measurable or not', () => {
+    // The panel draws a row per entry, so a level that dropped out of this list
+    // on one frame and came back on the next took its row's height with it and
+    // jumped everything below. Whoever draws callipers filters the list; the
+    // list itself keeps a place.
+    for (const xDb of [[3], [3, 6, 20], [3, 6, 20, 26, 60]]) {
+        const r = m.readingOf(SIGNAL, VIEW, AROUND, { xDb }, null, 0);
+        assert.deepStrictEqual(r.widths.map((w) => w.downDb), xDb);
+    }
+    // ...on an empty patch of band as much as on a signal.
+    const quiet = m.readingOf(flat(-100), VIEW, all, { xDb: [3, 6, 20] }, null, 0);
+    assert.deepStrictEqual(quiet.widths.map((w) => w.downDb), [3, 6, 20]);
+});
+
+t('an unmeasurable width is a null, not a zero', () => {
+    // formatSpan(null) is "0 Hz", so a missing width that reached the readout as
+    // a null field would print as a measurement of nothing at all. The report
+    // says it in words for the same reason.
+    const entry = { downDb: 60, loHz: null, hiHz: null, widthHz: null, clipped: false };
+    const r = { ...m.readingOf(SIGNAL, VIEW, AROUND, { xDb: [] }, null, 0), widths: [entry] };
+    const text = m.reportLines(r, { at: 0 }).join('\n');
+    assert.ok(/−60 dB width: not measurable/.test(text), text);
+    assert.ok(!/−60 dB width: 0 Hz/.test(text), 'a null width must never read as zero');
+});
+
 t('each way of having no reading says which one it is', () => {
     const off = m.readingOf(SIGNAL, VIEW, { loHz: BASE - 9000, hiHz: BASE - 8000 }, {}, null, 0);
     assert.strictEqual(off.reason, 'outside');
@@ -649,12 +803,31 @@ t('settings fall back field by field rather than all at once', () => {
     const d = tool.cleanSettings(null);
     assert.deepStrictEqual(d.xDb, m.DEFAULT_X_DB);
     assert.strictEqual(d.obw, m.DEFAULT_OBW);
-    assert.strictEqual(d.chart, true);
+    assert.strictEqual(d.expanded, 'snr');
     // One bad field must not take the good ones with it.
-    const s = tool.cleanSettings({ obw: 12345, xDb: [6, 3], chart: false });
+    const s = tool.cleanSettings({ obw: 12345, xDb: [6, 3], expanded: 'width' });
     assert.strictEqual(s.obw, m.DEFAULT_OBW);
     assert.deepStrictEqual(s.xDb, [3, 6], 'kept, sorted');
-    assert.strictEqual(s.chart, false);
+    assert.strictEqual(s.expanded, 'width');
+});
+
+t('the open card is whatever was stored, including nothing', () => {
+    // No vocabulary is enforced: the ids are the panel's, and a stored answer to
+    // a question that no longer exists should open nothing rather than being
+    // corrected into a default nobody chose.
+    assert.strictEqual(tool.cleanSettings({ expanded: '' }).expanded, '');
+    assert.strictEqual(tool.cleanSettings({ expanded: 'a-card-this-build-dropped' }).expanded,
+        'a-card-this-build-dropped');
+    assert.strictEqual(tool.cleanSettings({ expanded: 7 }).expanded, 'snr', 'not a string, so not an answer');
+});
+
+t('somebody who had switched the old strip off gets no card open', () => {
+    // The chart used to be one strip along the bottom with a switch. "Off" was a
+    // real choice and its honest translation is "no card open", not the default.
+    assert.strictEqual(tool.cleanSettings({ chart: false }).expanded, '');
+    assert.strictEqual(tool.cleanSettings({ chart: true }).expanded, 'snr');
+    // ...and only where nothing newer has been stored.
+    assert.strictEqual(tool.cleanSettings({ chart: false, expanded: 'snr' }).expanded, 'snr');
 });
 
 t('no widths at all is a choice; a vocabulary this build has none of is not', () => {

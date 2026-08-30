@@ -72,6 +72,18 @@ const SIGNAL = (() => {
 })();
 const REGION = { loHz: measure.binToHz(VIEW, N, 40), hiHz: measure.binToHz(VIEW, N, 60) };
 
+// The same region with two tones in it, so the reading has a tone spacing. That
+// row is the one that used to come and go on a real signal — the peak finder
+// calls two tones two on one frame and one on the next — and everything under
+// it moved when it did.
+const TWO_TONE = (() => {
+    const a = new Float32Array(N).fill(-110);
+    for (const at of [45, 55]) {
+        for (let i = -2; i <= 2; i++) a[at + i] = -110 + 45 - Math.abs(i) * 8;
+    }
+    return a;
+})();
+
 /** A run with some frames in it, so the "over the run" block has something. */
 function withRun(result, frames = 12) {
     const run = measure.newRun(1000);
@@ -169,6 +181,45 @@ t('a level is never printed as though the receiver were calibrated', () => {
     assert.ok(units.includes('dB'), `differences should be plain dB: ${JSON.stringify(units)}`);
 });
 
+// The cards are two to a row in a dock column that can be 220px wide, so about
+// eighty pixels of usable width each. Two things used to run out past the right
+// edge of a card and over its neighbour, and both are checked here rather than
+// left to be noticed on somebody's screen.
+
+t('a full-precision frequency gets the whole row, because it cannot share one', () => {
+    state({ active: true, selection: REGION, result: fixture() });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    const wide = deep(tree).filter((n) => n.props && n.props.className === 'measure-wide');
+    assert.ok(wide.length >= 1, 'no full-width cards at all');
+
+    // formatFreqExact always writes six decimal places, so this matches a
+    // frequency at full precision and nothing else the panel prints — an offset
+    // of "+10 Hz" or a width of "2.40 kHz" is not one of these.
+    const EXACT = /\d\.\d{6} MHz/g;
+    const all = (say(tree).match(EXACT) || []).length;
+    const inWide = (wide.map(say).join(' ').match(EXACT) || []).length;
+    assert.ok(all > 0, 'the fixture should print at least one exact frequency');
+    assert.strictEqual(inWide, all, 'a frequency reading is in a half-width card');
+});
+
+t('no unit is long enough to push a reading out of its card', () => {
+    state({ active: true, selection: REGION, result: withRun(fixture()) });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    const units = deep(tree)
+        .filter((n) => n && n.props && n.props.className === 'readout__unit')
+        .map((n) => say(n).trim())
+        .filter(Boolean);
+    assert.ok(units.length >= 6, `expected units on most cards, got ${JSON.stringify(units)}`);
+    // Ten characters at the unit's 10px is about sixty pixels, which still
+    // leaves room for a number beside it. Anything longer belongs in the label:
+    // "Occupancy over 6 dB" reads correctly and "% over 6 dB" does not, since
+    // the unit of that reading is per cent.
+    const long = units.filter((u) => u.length > 10);
+    assert.deepStrictEqual(long, [], 'units this long belong in the label');
+});
+
 t('each way of having no reading says which one it is, and they differ', () => {
     const said = {};
     for (const reason of ['outside', 'narrow', 'nodata']) {
@@ -186,6 +237,43 @@ t('each way of having no reading says which one it is, and they differ', () => {
     assert.ok(/pan back/i.test(said.outside), said.outside);
     assert.ok(/zoom in/i.test(said.narrow), said.narrow);
     assert.ok(/waiting/i.test(said.nodata), said.nodata);
+});
+
+t('every reading keeps its row whether or not it has a value', () => {
+    // The complaint this fixes: Tone spacing appeared and disappeared, and
+    // everything below it shifted each time. The rows are the same rows either
+    // way, and the ones with nothing to say say so.
+    const rows = (result) => {
+        state({ active: true, selection: REGION, result });
+        reset();
+        const { tree } = render(MeasurePanel, {}, context());
+        return deep(tree)
+            .filter((n) => n && n.props && n.props.className === 'measure-row__label')
+            .map((n) => say(n));
+    };
+
+    const settings = tool.measureSettings();
+    const two = measure.readingOf(TWO_TONE, VIEW, REGION, settings, null, 0);
+    const one = measure.readingOf(SIGNAL, VIEW, REGION, settings, null, 0);
+    assert.ok(two.fsk, 'the two-tone fixture should have a shift');
+    assert.strictEqual(one.fsk, null, 'the single-tone fixture should not');
+
+    assert.deepStrictEqual(rows(one), rows(two), 'the rows moved when a reading came and went');
+    assert.ok(rows(one).some((l) => /Tone spacing/.test(l)), 'no Tone spacing row without a shift');
+});
+
+t('a row with nothing to say says so, rather than saying nothing', () => {
+    const one = measure.readingOf(SIGNAL, VIEW, REGION, tool.measureSettings(), null, 0);
+    state({ active: true, selection: REGION, result: one });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    // Pair each label with the value beside it: they are siblings in the row.
+    const values = deep(tree)
+        .filter((n) => n && n.props && String(n.props.className || '').startsWith('measure-row__value'))
+        .map((n) => say(n).trim());
+    assert.ok(values.includes('—'), `expected a dash for the missing shift: ${JSON.stringify(values)}`);
+    // ...and never a zero standing in for one.
+    assert.ok(!values.includes('0 Hz'), `a missing reading must not read as zero: ${JSON.stringify(values)}`);
 });
 
 t('a peak on the edge of the region is called out, because the widths are then bounds', () => {
@@ -239,6 +327,96 @@ t('Filter to region is refused while the dial is outside it', () => {
     // The passband is set in offsets from the dial, so a region the dial is not
     // in would ask for a filter with the signal outside it.
     assert.ok(outside[0].props.disabled, 'the dial is a hundred kilohertz away');
+});
+
+// --- cards that open into charts ---------------------------------------------
+
+/** Every card head in the tree, by the label it carries. */
+function heads(tree) {
+    return deep(tree).filter((n) => n.type === 'button'
+        && String((n.props && n.props.className) || '').startsWith('measure-card__head'));
+}
+
+const openCards = (tree) => deep(tree).filter((n) => n && n.props
+    && String(n.props.className || '').includes('measure-card') && /is-open/.test(n.props.className));
+
+t('a reading with a shape is a card you can press; one without is not', () => {
+    state({ active: true, selection: REGION, result: withRun(fixture()) });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    const labels = heads(tree).map((n) => say(n));
+    assert.ok(labels.some((l) => /SNR/.test(l)), `SNR should open a chart: ${labels}`);
+    assert.ok(labels.some((l) => /Occupancy/.test(l)), `Occupancy should: ${labels}`);
+    // Bins and Resolution are constants. An affordance that does nothing is
+    // worse than none, because it has to be tried before it can be ruled out.
+    assert.ok(!labels.some((l) => /\bBins\b/.test(l)), `Bins must not: ${labels}`);
+    assert.ok(!labels.some((l) => /Resolution/.test(l)), `Resolution must not: ${labels}`);
+});
+
+t('nothing has been measured yet, so no card offers a chart of it', () => {
+    // A run with no frames has no series behind any card. The cards stay and
+    // stay inert rather than opening an empty box.
+    state({ active: true, selection: REGION, result: fixture() });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    assert.strictEqual(heads(tree).length, 0);
+    // ...and the readings are still all there.
+    assert.ok(/SNR/.test(say(tree)));
+});
+
+t('exactly one card is open, and it is the one the settings name', () => {
+    state({ active: true, selection: REGION, result: withRun(fixture()) });
+    tool.saveMeasureSettings({ expanded: 'snr' });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    const open = openCards(tree);
+    assert.strictEqual(open.length, 1, 'one chart at a time — ten of them is a wall');
+    assert.ok(/SNR/.test(say(open[0])), `the wrong card is open: ${say(open[0])}`);
+    // An open card takes the whole row: a chart in half a dock column is not a
+    // chart of anything.
+    assert.ok(/measure-wide/.test(open[0].props.className), open[0].props.className);
+});
+
+t('another card opens, and closing leaves none open', () => {
+    state({ active: true, selection: REGION, result: withRun(fixture()) });
+    tool.saveMeasureSettings({ expanded: 'floor' });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    assert.ok(/Noise floor/.test(say(openCards(tree)[0])));
+
+    tool.saveMeasureSettings({ expanded: '' });
+    reset();
+    assert.strictEqual(openCards(render(MeasurePanel, {}, context()).tree).length, 0);
+    tool.saveMeasureSettings({ expanded: 'snr' });
+});
+
+t('pressing a card is what changes which one is open', () => {
+    state({ active: true, selection: REGION, result: withRun(fixture()) });
+    tool.saveMeasureSettings({ expanded: 'snr' });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    const floor = heads(tree).find((n) => /Noise floor/.test(say(n)));
+    assert.ok(floor, 'no Noise floor card');
+    floor.props.onClick();
+    assert.strictEqual(tool.measureSettings().expanded, 'floor');
+    // Pressing the open one again closes it rather than reopening it.
+    reset();
+    const again = heads(render(MeasurePanel, {}, context()).tree)
+        .find((n) => /Noise floor/.test(say(n)));
+    again.props.onClick();
+    assert.strictEqual(tool.measureSettings().expanded, '');
+    tool.saveMeasureSettings({ expanded: 'snr' });
+});
+
+t('a card that names a chart this build dropped simply opens nothing', () => {
+    state({ active: true, selection: REGION, result: withRun(fixture()) });
+    tool.saveMeasureSettings({ expanded: 'a-card-this-build-dropped' });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    assert.strictEqual(openCards(tree).length, 0);
+    // ...and the panel is otherwise entirely fine.
+    assert.ok(/SNR/.test(say(tree)));
+    tool.saveMeasureSettings({ expanded: 'snr' });
 });
 
 // --- the overlay -------------------------------------------------------------

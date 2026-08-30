@@ -195,10 +195,16 @@ export const MEASURE_DEFAULTS = {
     obw: DEFAULT_OBW,
     occupancyDb: DEFAULT_OCCUPANCY_DB,
     averageMs: 1000,
-    // The level-against-time strip. On by default: it is the half of the panel
-    // that says something a single reading cannot, and it costs one small
-    // canvas.
-    chart: true,
+    // Which card is open as a chart, by its id in MeasurePanel's CHARTS — or ''
+    // for none. Persisted because it is the question somebody came to the panel
+    // to watch, and having to re-open it every time the panel is collapsed is
+    // the sort of small tax that stops a tool being used.
+    //
+    // SNR to begin with. It is the reading a chart says the most about — a fade
+    // has a depth and a period and no single number carries either — and it is
+    // the one that was a fixed strip along the bottom before any of this was a
+    // card you could press.
+    expanded: 'snr',
 };
 
 const num = (v, allowed, fallback) => (allowed.includes(v) ? v : fallback);
@@ -223,7 +229,18 @@ export function cleanSettings(raw) {
             ? Math.max(0, Math.min(40, Number(s.occupancyDb)))
             : MEASURE_DEFAULTS.occupancyDb,
         averageMs: num(Number(s.averageMs), AVERAGE_MS, MEASURE_DEFAULTS.averageMs),
-        chart: s.chart !== false,
+        // Any id is accepted, because the vocabulary is the panel's and this
+        // module has no business holding a second copy of it: a card that has
+        // been renamed or removed simply opens nothing, which is what a stored
+        // answer to a question that no longer exists should do.
+        //
+        // The `chart` line is what this replaced — one strip along the bottom,
+        // switchable on and off. Somebody who had switched it off had said "no
+        // chart", and the honest translation of that is "no card open", not the
+        // default. Read only where nothing newer has been stored.
+        expanded: typeof s.expanded === 'string'
+            ? s.expanded
+            : (s.chart === false ? '' : MEASURE_DEFAULTS.expanded),
     };
 }
 

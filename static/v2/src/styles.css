@@ -3722,13 +3722,39 @@ a.btn { text-decoration: none; }
     font-family: var(--mono);
     font-size: calc(15px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
+    /* Wraps rather than running out of the card.
+     *
+     * These are two to a row in a dock column that can be 220px wide, so a card
+     * is about eighty pixels of usable width — and plenty of readings do not fit
+     * in that on one line: a frequency ("14.200000 MHz"), a range ("12.0 – 38.4
+     * dB"), or any number carrying a unit as long as "dB rel/Hz". This used to
+     * be `nowrap`, and with nothing clipping the card the text simply ran out
+     * past its own border and over the card beside it.
+     *
+     * Wrapping and not clipping, because every one of these is a measurement:
+     * an ellipsis or a hidden overflow would turn a wrong-looking layout into a
+     * wrong number, which is much worse. The pieces are separated by spaces
+     * already, so the line breaks between them and the card grows a line —
+     * neighbours in the same grid row grow with it, so the rows stay level.
+     *
+     * `break-word` is the backstop for a single token with nowhere to break. It
+     * only bites when there is no other option, so nothing that fits is touched. */
+    overflow-wrap: break-word;
 }
 /* Wide enough to hold whatever width Readout's `reserve` asks for, which only
    the cards metering a live number ask for at all. `ch` is exact rather than
    approximate because .readout__value is monospace and tabular. */
 .readout__num { display: inline-block; }
-.readout__unit { font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); margin-left: 3px; }
+/* Kept whole, and moved to its own line entire when it will not fit beside the
+   number. A unit split across two lines ("dB" on one and "rel/Hz" on the next)
+   reads as two different units. */
+.readout__unit {
+    display: inline-block;
+    white-space: nowrap;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    margin-left: 3px;
+}
 .readout--good .readout__value { color: var(--good); }
 .readout--ok .readout__value { color: var(--text); }
 .readout--weak .readout__value { color: var(--warn); }
@@ -12029,7 +12055,61 @@ a.btn { text-decoration: none; }
 }
 .measure-warn svg { flex: none; margin-top: 2px; }
 
+/* A card that takes the whole grid row, for a reading that cannot fit half of
+   one: a frequency at full precision. Same device the IF spectrum panel uses for
+   the same reading (.ifs__fit), including the `display: block; min-width: 0` —
+   the wrapper is a span, so the card inside has to be told to fill it. */
+.measure-wide { grid-column: 1 / -1; display: block; min-width: 0; }
+
 .measure-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* A card that opens into a chart.
+ *
+ * The head is a button and the chart is not: pressing the picture must not put
+ * it away, which is what a whole-card button does and is maddening the first
+ * time you lean in to look at something. */
+.measure-card { min-width: 0; }
+.measure-card__head {
+    position: relative;
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+/* The affordance. A press that opens a chart is not something a card announces
+   by itself, and the panel is a grid of cards where only some of them do it —
+   so the ones that can carry a small graph mark, faint until the pointer is on
+   them. Hidden from assistive tech: aria-expanded on the button already says
+   what this is drawing. */
+.measure-card__cue {
+    position: absolute;
+    top: 5px;
+    right: 6px;
+    color: var(--text-faint);
+    opacity: 0.55;
+    pointer-events: none;
+}
+@media (hover: hover) {
+    .measure-card__head:hover .readout { border-color: var(--border-strong); }
+    .measure-card__head:hover .measure-card__cue { opacity: 1; color: var(--text-dim); }
+}
+.measure-card__head:focus-visible .readout { border-color: var(--accent); }
+
+/* Open: the card and its chart are one box, so the border runs round both
+   rather than drawing a line between a reading and the picture of it. */
+.measure-card.is-open {
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.measure-card.is-open .readout { background: none; border-color: transparent; }
+.measure-card.is-open .measure-card__cue { color: var(--accent); opacity: 1; }
+.measure-card__head + .measure-chart { padding: 0 8px 6px; }
 
 .measure-chart canvas { display: block; width: 100%; }
 .measure-chart__axis {

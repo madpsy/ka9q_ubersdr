@@ -103,7 +103,10 @@ export default function MeasureOverlay({ view, bottom = 0 }) {
 
     const band = selection && spanStyle(selection.loHz, selection.hiHz, view);
     const stats = result && result.stats;
-    const widths = (result && result.widths) || [];
+    // Only the ones there is something to draw. The reading keeps a place for
+    // every level asked for, so the panel's rows hold still (see measure.js);
+    // a calliper with no width is not a mark, it is nothing.
+    const widths = ((result && result.widths) || []).filter((w) => w.widthHz != null);
     const obw = result && result.obw;
 
     // The stack grows upward from the badge. Counted rather than laid out with

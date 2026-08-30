@@ -10,7 +10,6 @@
 // you hover it, and the line marking where your own dial is.
 
 import React, { useLayoutEffect, useMemo, useRef, useState } from '../react.js';
-import { countryFlag } from '../lib/format.js';
 import { activeLabel } from '../lib/listeners.js';
 import { bandRows, gapPct, pctOf } from '../lib/listenerBands.js';
 
@@ -20,15 +19,18 @@ const MAX_LINES = 6;
 
 // One listener as a line of the tooltip: where, who, and how long since they
 // moved — the same fields the list row carries, on one line instead of two.
+//
+// The country goes in by name and not as a flag, unlike the list row. A native
+// `title` is drawn by the browser's own chrome, which never consults the page's
+// stylesheet, so the Twemoji face that makes countryFlag() a flag everywhere
+// else cannot reach it: the regional indicators would come out as two lettered
+// boxes on Windows and as nothing legible on most Linux.
 function line(channel, now) {
     const where = [
         `${(channel.frequency / 1000).toFixed(3)} kHz`,
         channel.mode ? channel.mode.toUpperCase() : '',
     ].filter(Boolean).join(' ');
-    const who = [
-        channel.chatUsername,
-        [countryFlag(channel.countryCode), channel.country].filter(Boolean).join(' '),
-    ].filter(Boolean).join(' ');
+    const who = [channel.chatUsername, channel.country].filter(Boolean).join(' ');
     const when = channel.you ? 'you' : activeLabel(channel.lastActive, now);
     return [where, who, when].filter(Boolean).join(' · ');
 }

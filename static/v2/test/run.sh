@@ -319,6 +319,8 @@ esbuild ../src/lib/panelScale.js --bundle --format=cjs --platform=node \
     --outfile=.build/panelscale.cjs --log-level=warning
 esbuild ../src/lib/headerRoom.js --bundle --format=cjs --platform=node \
     --outfile=.build/headerroom.cjs --log-level=warning
+esbuild ../src/lib/dockSize.js --bundle --format=cjs --platform=node \
+    --outfile=.build/docksize.cjs --log-level=warning
 esbuild ../src/lib/edgeHit.js --bundle --format=cjs --platform=node \
     --outfile=.build/edgehit.cjs --log-level=warning
 esbuild ../src/lib/haptics.js --bundle --format=cjs --platform=node \
@@ -496,6 +498,7 @@ node roomfor.test.js
 node fitscale.test.js
 node panelscale.test.js
 node headerroom.test.js
+node docksize.test.js
 node edgehit.test.js
 node haptics.test.js
 node appheight.test.js

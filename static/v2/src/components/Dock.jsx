@@ -11,6 +11,7 @@ import Section from './Section.jsx';
 import { Icon } from './ui.jsx';
 import { useDragEndReset } from '../lib/useDragEnd.js';
 import { draggingPanel, nearestPanelGap } from '../lib/panelDrag.js';
+import { columnOf, dockCeiling, fitDock } from '../lib/dockSize.js';
 
 // A panel's share of the bottom dock's width: what the operator dragged it to,
 // otherwise what the panel asks for, otherwise an equal share. Reading the
@@ -24,29 +25,40 @@ function shareOf(weights, id) {
     return (panel && panel.weight) || 1;
 }
 
-// The strip of spectrum the bottom dock may never take, however far the resizer
-// is dragged. 75% of a short column still leaves the waterfall a sliver, and the
-// waterfall is what the receiver is for.
-const SPECTRUM_KEEP = 200;
-
-// How tall the bottom dock may be made right now, measured rather than fixed:
-// it shares .shell__column with the spectrum, so what it may take is a share of
-// that column and not a number of pixels settled on in advance.
-//
-// The same figure as the `max-height` on `.dock--bottom` in styles.css, which is
-// what caps the dock as the window changes size — no re-render needed, and the
-// operator's chosen size survives in the layout for when the space comes back.
-// This one caps what a *drag* stores: without it, dragging on past the floor
-// went on counting, and the resizer then had hundreds of pixels of dead travel
-// to come back through before the dock moved at all.
+// The column the bottom dock shares with the spectrum, and how tall it may be
+// made in it. Climbed to rather than taken as the parent: a peeked dock is an
+// overlay rendered *inside* the collapsed rail, so its parent is a 30px strip
+// and not the column it is drawn over. Reading the parent capped the peek at the
+// dock's 120px floor and left its resizer unable to move it, which is the whole
+// reason the ceiling is measured here and not asked of CSS — see lib/dockSize.js.
 //
 // Only the bottom dock: the side docks are bounded by their own minSize/maxSize,
 // and a window narrow enough for that to matter has the mobile shell.
-function dockCeiling(el, side, minSize) {
-    const column = el && el.parentElement;
-    if (side !== 'bottom' || !column) return Infinity;
-    const h = column.clientHeight;
-    return Math.max(minSize, Math.min(h * 0.75, h - SPECTRUM_KEEP));
+function useDockCeiling(rootRef, side, minSize, collapsed) {
+    const [ceiling, setCeiling] = useState(Infinity);
+
+    useEffect(() => {
+        if (side !== 'bottom') return undefined;
+        const column = columnOf(rootRef.current);
+        if (!column) return undefined;
+        const measure = () => setCeiling(dockCeiling(column.clientHeight, minSize));
+        measure();
+        // The column's height is the shell's, not the dock's — it is stretched
+        // by .shell__main and does not move when the dock inside it is resized
+        // — so watching it cannot feed back into itself.
+        if (typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', measure);
+            return () => window.removeEventListener('resize', measure);
+        }
+        const ro = new ResizeObserver(measure);
+        ro.observe(column);
+        return () => ro.disconnect();
+        // `collapsed` swaps which element carries the ref, so the column has to
+        // be found again — it is the same one, but the ref it is climbed from
+        // has been remounted.
+    }, [rootRef, side, minSize, collapsed]);
+
+    return ceiling;
 }
 
 // Drag handle between two bottom-dock panels. Converts a pixel delta into a
@@ -205,6 +217,13 @@ export default function Dock({ side }) {
     // callback ref and has no `.current` of its own.
     const bodyEl = useRef(null);
 
+    // The dock's outermost element, which is all the ceiling needs: it climbs
+    // from there to the column. On the outer element rather than the peek
+    // overlay so it survives a peek opening and closing, the same reason the
+    // scroll offset above is kept here.
+    const rootEl = useRef(null);
+    const ceiling = useDockCeiling(rootEl, side, dock.minSize, dock.collapsed);
+
     const bodyRef = useCallback((el) => {
         bodyEl.current = el;
         if (!el) return;
@@ -258,17 +277,16 @@ export default function Dock({ side }) {
         // nothing said. The capture is what keeps the drag alive once the finger
         // has left an 18px strip, which is immediately.
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        const el = e.currentTarget.parentElement;
         resizeRef.current = {
             start: side === 'bottom' ? e.clientY : e.clientX,
             // What is on screen, which on a window the dock no longer fits is
             // shorter than what is stored: starting from the stored figure
             // would snap the dock back to its full height on the first pixel of
             // a drag that was trying to make it smaller.
-            size: side === 'bottom' && el ? el.getBoundingClientRect().height : dock.size,
-            max: dockCeiling(el, side, dock.minSize),
+            size: fitDock(dock.size, ceiling),
+            max: ceiling,
         };
-    }, [dock.size, dock.minSize, side]);
+    }, [dock.size, ceiling, side]);
 
     const onResizeMove = useCallback((e) => {
         const r = resizeRef.current;
@@ -299,7 +317,7 @@ export default function Dock({ side }) {
 
     // Computed even while collapsed: the peek overlay is the same markup and
     // needs the same size, and the collapsed rail does not use it.
-    const style = side === 'bottom' ? { height: dock.size } : { width: dock.size };
+    const style = side === 'bottom' ? { height: fitDock(dock.size, ceiling) } : { width: dock.size };
 
     // Peeking: the dock is collapsed, and the pointer is over its rail.
     //
@@ -316,6 +334,9 @@ export default function Dock({ side }) {
         <div
             className={`dock dock--${side}${extra.className || ''}`}
             style={style}
+            // The collapsed branch below owns the ref while a peek is open: the
+            // rail is then the outer element, and one ref cannot be on two.
+            ref={dock.collapsed ? undefined : rootEl}
             /* Read by the float drag's hit test, which finds a dock body under
                the pointer and has to know which dock it belongs to — see
                dockBodyAt in lib/panelDrag.js. */
@@ -422,6 +443,7 @@ export default function Dock({ side }) {
         return (
             <div
                 className={`dock dock--${side} is-collapsed`}
+                ref={rootEl}
                 onPointerLeave={endPeek}
             >
                 <button

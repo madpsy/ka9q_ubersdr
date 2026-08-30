@@ -7,7 +7,7 @@
 // migration must only ever add what this machine has never had an opinion about.
 
 const assert = require('assert');
-const { DOCKS, PANEL_BY_ID, REV, defaultLayout, insertNear, reconcile } = require('./.build/layout.cjs');
+const { DOCKS, PANEL_BY_ID, REV, defaultLayout, dockCeiling, insertNear, reconcile } = require('./.build/layout.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -463,6 +463,30 @@ t('nothing is stored for a panel with no minimal view at all', () => {
         assert.ok(!('minimalMobile' in JSON.parse(JSON.stringify(l)).sections.display),
             'and it does not survive a round trip through localStorage');
     }
+});
+
+
+// --- dock sizes --------------------------------------------------------------
+
+t('the bottom dock\'s stored clamp does not bind before the measured ceiling', () => {
+    // Two bounds on one number, in different files: maxSize here guards what can
+    // be *stored*, and dockCeiling caps what the window can actually show. The
+    // stored one used to be 560 — less than the ceiling on any ordinary desktop,
+    // so it, and not the window, decided how tall the dock could be, and making
+    // the ceiling follow the window changed nothing at all.
+    const { minSize, maxSize } = defaultLayout(MOUSE).docks.bottom;
+    // A 1440p column, which is as tall as the column realistically gets.
+    assert.ok(maxSize >= dockCeiling(1396, minSize), `maxSize ${maxSize} binds first`);
+    // ...and it is still a bound, not an absence of one.
+    assert.ok(Number.isFinite(maxSize) && maxSize < 1e4);
+});
+
+t('the bottom dock opens at a height the ceiling allows on any usable window', () => {
+    const { size, minSize } = defaultLayout(MOUSE).docks.bottom;
+    // 480px of column is a very short window; the first-run height must still
+    // not be one the ceiling immediately overrides, or the dock opens a
+    // different size than it says it does.
+    assert.ok(size <= dockCeiling(480 + 200, minSize) || size <= minSize, `default ${size}`);
 });
 
 console.log(`\n${pass} ok`);

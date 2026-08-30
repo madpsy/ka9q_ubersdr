@@ -9,7 +9,8 @@ import IQPanel from '../src/panels/IQPanel.jsx';
 import { PANEL_BY_ID } from '../src/panels/registry.jsx';
 import { GROUPS } from '../src/panels/groups.jsx';
 import {
-    IQ_FFT_SIZE, IQSpectrum, binsToPixels, fftInPlace, fractionOffset, hannWindow, offsetFraction,
+    DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, aimCancel, aimDown, aimMove, aimUp, binsToPixels,
+    fftInPlace, fractionOffset, hannWindow, newAim, offsetFraction,
 } from '../src/lib/iqSpectrum.js';
 import {
     DEMOD_MODES, IQ_HALF_SPAN, DemodChain,
@@ -19,7 +20,8 @@ import {
 
 module.exports = {
     deep, render, reset, walk, words,
-    IQ_FFT_SIZE, IQSpectrum, binsToPixels, fftInPlace, fractionOffset, hannWindow, offsetFraction,
+    DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, aimCancel, aimDown, aimMove, aimUp, binsToPixels,
+    fftInPlace, fractionOffset, hannWindow, newAim, offsetFraction,
     IQPanel, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, DemodChain,
     activeWidth, clampOffset, clampWidth, demodSettings, designLowpass, getIQDemod,

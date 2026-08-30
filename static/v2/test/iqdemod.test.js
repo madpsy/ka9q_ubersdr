@@ -35,7 +35,8 @@ globalThis.TextDecoder = globalThis.TextDecoder || require('util').TextDecoder;
 
 const {
     render, reset, walk, words,
-    IQ_FFT_SIZE, IQSpectrum, binsToPixels, fftInPlace, fractionOffset, hannWindow, offsetFraction,
+    DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, aimCancel, aimDown, aimMove, aimUp, binsToPixels,
+    fftInPlace, fractionOffset, hannWindow, newAim, offsetFraction,
     IQPanel, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, DemodChain,
     activeWidth, clampOffset, clampWidth, demodSettings, designLowpass, getIQDemod,
@@ -481,6 +482,84 @@ t('resampling to pixels keeps a carrier rather than averaging it away', () => {
     let others = 0;
     for (let i = 0; i < px.length; i++) if (px[i] > -99) others++;
     assert.strictEqual(others, 1, 'it should not have smeared');
+});
+
+// ── aiming with a finger ────────────────────────────────────────────────────
+//
+// The picture sits in a column that scrolls, so the same touch that might be
+// aiming might be a swipe past the panel — and the browser only says which after
+// a few pixels, by cancelling. None of this is visible without a touch screen in
+// hand, and the failure it guards against is the worst kind: scrolling the panel
+// silently moves the receiver.
+
+const ev = (over) => ({ pointerId: 1, clientX: 100, pointerType: 'touch', ...over });
+const mouse = (over) => ev({ pointerType: 'mouse', ...over });
+
+t('a mouse tunes on the way down', () => {
+    const st = newAim();
+    assert.deepStrictEqual(aimDown(st, mouse()), { tune: true, capture: true });
+    // And not again on the way up, or every click would tune twice.
+    assert.deepStrictEqual(aimUp(st, mouse()), { tune: false });
+});
+
+t('a finger does not tune on the way down', () => {
+    // The whole point: at pointerdown nobody yet knows whether this is a tap or
+    // the start of a scroll, and a cancel arrives far too late to undo a tune.
+    const st = newAim();
+    assert.deepStrictEqual(aimDown(st, ev()), { tune: false, capture: false });
+});
+
+t('a tap tunes when it lifts', () => {
+    const st = newAim();
+    aimDown(st, ev());
+    assert.deepStrictEqual(aimUp(st, ev()), { tune: true });
+});
+
+t('a thumb that wobbles is still a tap', () => {
+    const st = newAim();
+    aimDown(st, ev({ clientX: 100 }));
+    // Inside the slop, so it has not become a drag.
+    assert.strictEqual(aimMove(st, ev({ clientX: 100 + DRAG_SLOP_PX - 1 })).tune, false);
+    assert.deepStrictEqual(aimUp(st, ev()), { tune: true });
+});
+
+t('a finger that travels becomes a drag, and takes the gesture', () => {
+    const st = newAim();
+    aimDown(st, ev({ clientX: 100 }));
+    // Past the slop: tune, and capture — by now the browser has evidently not
+    // claimed it for a scroll, and capture is what keeps the drag alive when it
+    // runs off the end of the canvas.
+    assert.deepStrictEqual(aimMove(st, ev({ clientX: 130 })), { tune: true, capture: true });
+    // Every move after that tunes, but the capture is only asked for once.
+    assert.deepStrictEqual(aimMove(st, ev({ clientX: 160 })), { tune: true, capture: false });
+    // And the lift does not tune again, which would snap the offset back to
+    // wherever the finger happened to leave.
+    assert.deepStrictEqual(aimUp(st, ev()), { tune: false });
+});
+
+t('a scroll tunes nothing at all', () => {
+    // The failure this whole arrangement exists for: a swipe down the panel that
+    // happened to start on the picture must leave the receiver alone.
+    const st = newAim();
+    aimDown(st, ev());
+    aimCancel(st);
+    assert.deepStrictEqual(aimUp(st, ev()), { tune: false }, 'a cancelled gesture tuned');
+    // ...including a stray move arriving after the cancel.
+    assert.strictEqual(aimMove(st, ev({ clientX: 400 })).tune, false);
+});
+
+t('a second finger is ignored while one is in hand', () => {
+    const st = newAim();
+    aimDown(st, ev({ pointerId: 1 }));
+    assert.strictEqual(aimMove(st, ev({ pointerId: 2, clientX: 400 })).tune, false);
+    assert.deepStrictEqual(aimUp(st, ev({ pointerId: 2 })), { tune: false });
+});
+
+t('a move with nothing pressed does nothing', () => {
+    // Hovering a mouse across the picture is not aiming.
+    const st = newAim();
+    assert.strictEqual(aimMove(st, mouse({ clientX: 300 })).tune, false);
+    assert.deepStrictEqual(aimUp(st, mouse()), { tune: false });
 });
 
 // ── the panel ───────────────────────────────────────────────────────────────

@@ -261,3 +261,75 @@ export function binsToPixels(bins, out) {
     }
     return out;
 }
+
+// ── Aiming ───────────────────────────────────────────────────────────────────
+//
+// Deciding when a pointer on the picture means "tune here".
+//
+// A press and a drag are the same act with a mouse and two different ones with a
+// finger, and getting that wrong is not a cosmetic bug. The canvas sits in a
+// dock column that scrolls, so the same touch that might be aiming might equally
+// be the start of a swipe past the panel. `touch-action: pan-y` leaves the
+// column its vertical drags and the browser decides which the gesture was after
+// a few pixels — sending a pointercancel if it chose to scroll. That decision
+// arrives well after a pointerdown, so tuning on the way down would move the
+// demodulator every time somebody scrolled past the picture, with the cancel far
+// too late to take it back.
+//
+// Hence: a mouse tunes on the way down, because nothing else wants the gesture
+// and waiting for the button to rise would make the control feel late. A finger
+// tunes on the way *up*, and only if it never travelled — a tap. Either of them
+// dragging tunes continuously once past the slop, and a cancel tunes nothing.
+//
+// Pulled out of the panel because it is pure and the panel is not: the whole of
+// it is invisible without a touch screen in hand, and "a swipe moved the
+// receiver" is the sort of thing that gets discovered by an operator rather than
+// by a reviewer.
+
+// How far a pointer travels before a press becomes a drag. Four pixels: enough
+// that a tap with a thumb is still a tap, small enough that a deliberate drag
+// starts tuning at once.
+export const DRAG_SLOP_PX = 4;
+
+export function newAim() {
+    return { drag: null };
+}
+
+/**
+ * A pointer went down. `{ tune, capture }` — whether to tune now, and whether to
+ * take the gesture.
+ */
+export function aimDown(st, e) {
+    const mouse = e.pointerType === 'mouse';
+    st.drag = { id: e.pointerId, x: e.clientX, moved: false, mouse };
+    return { tune: mouse, capture: mouse };
+}
+
+/**
+ * A pointer moved. Captures on the first committed move of a touch drag: by then
+ * the browser has evidently not claimed the gesture for a scroll, and capturing
+ * is what keeps the drag alive once it runs off the end of the canvas.
+ */
+export function aimMove(st, e, slop = DRAG_SLOP_PX) {
+    const d = st.drag;
+    if (!d || d.id !== e.pointerId) return { tune: false, capture: false };
+    if (d.moved) return { tune: true, capture: false };
+    if (Math.abs(e.clientX - d.x) < slop) return { tune: false, capture: false };
+    d.moved = true;
+    return { tune: true, capture: !d.mouse };
+}
+
+/**
+ * A pointer came up. Tunes only for a tap — a mouse press has already tuned and
+ * a drag has been tuning all along.
+ */
+export function aimUp(st, e) {
+    const d = st.drag;
+    st.drag = null;
+    return { tune: !!d && d.id === e.pointerId && !d.moved && !d.mouse };
+}
+
+/** The browser took the gesture for a scroll. Nothing was tuned and nothing is. */
+export function aimCancel(st) {
+    st.drag = null;
+}

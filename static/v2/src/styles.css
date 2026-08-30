@@ -12172,10 +12172,29 @@ a.btn { text-decoration: none; }
     width: 100%;
     border-radius: var(--radius-sm, 5px);
     background: var(--surface-3);
-    /* Or a drag across the picture scrolls the dock instead of tuning. */
-    touch-action: none;
     cursor: crosshair;
+    /* A long press on a canvas raises the selection callout on iOS, which lands
+       over the picture in the middle of aiming at something. */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    /* The column keeps its vertical drags; a tap here still tunes, because a tap
+       is not a pan. Same rule and the same reasoning as .ifs__chart: `pan-y`
+       does not mean "we get the horizontal ones" — the browser watches the first
+       few pixels and hands the whole gesture to whichever it decided, and a
+       finger never travels exactly sideways. So on a touch screen a drag across
+       this often becomes a scroll, and the panel gets a pointercancel rather
+       than a drag. IQPanel handles that by tuning on the way up, so a swipe past
+       the picture scrolls the panel and leaves the demodulator alone. */
+    touch-action: pan-y;
 }
+/* While it is actually demodulating the picture claims both directions, so
+   dragging across the band works with a finger rather than only with a mouse.
+   Deliberately not the default: it costs the column its scroll over a 96-pixel
+   block, which is only worth it once somebody is listening through this — a
+   state they chose with Start and leave with Stop, and the column can be
+   scrolled from anywhere else in it. */
+.iq-scope__canvas.is-live { touch-action: none; }
 .iq-scope__veil {
     position: absolute;
     inset: 0;

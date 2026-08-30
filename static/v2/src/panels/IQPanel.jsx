@@ -44,12 +44,16 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { resolveMaxFps, useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
 import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { haptic } from '../lib/haptics.js';
 import { Bar, Button, Field, Icon, Readout, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { isIQ } from '../radio/constants.js';
 import { formatFreqExact, formatSpan } from '../lib/format.js';
 import { cssVar, sizedCanvas } from '../lib/audioWaterfall.js';
 import { createLevels, updateLevels } from '../lib/ifSpectrum.js';
-import { IQSpectrum, binsToPixels, fractionOffset, offsetFraction } from '../lib/iqSpectrum.js';
+import {
+    IQSpectrum, aimCancel, aimDown, aimMove, aimUp, binsToPixels, fractionOffset, newAim,
+    offsetFraction,
+} from '../lib/iqSpectrum.js';
 import {
     DEMOD_MODES, PITCH_MAX, PITCH_MIN,
     activeWidth, demodMode, getIQDemod, offsetLimits, onDemodSettings, passbandFor, planFor,
@@ -104,7 +108,7 @@ function offsetLabel(hz) {
  * order somebody actually does this in, and a picture that only appeared after
  * Start would be a picture that arrived too late to be used.
  */
-function IQScope({ player, live, iq, band, offsetHz, onOffset, maxFps, marks }) {
+function IQScope({ player, live, iq, running, band, offsetHz, onOffset, maxFps, marks }) {
     const ref = useRef(null);
     const st = useRef({
         spec: new IQSpectrum(),
@@ -112,6 +116,7 @@ function IQScope({ player, live, iq, band, offsetHz, onOffset, maxFps, marks }) 
         px: null,
         last: 0,
         ready: false,
+        aim: newAim(),
     });
     // Read by the draw loop, which must not restart on every render — a new tap
     // and a fresh transform each time the offset moved by ten hertz would blank
@@ -156,10 +161,6 @@ function IQScope({ player, live, iq, band, offsetHz, onOffset, maxFps, marks }) 
         };
     }, [player, live, iq, maxFps, marks.dial, marks.edge]);
 
-    // The press and the drag are the same act, so they run the same line.
-    // Pointer capture is what makes a drag that leaves the canvas keep tuning
-    // rather than stopping at the edge — which is exactly where somebody chasing
-    // a signal towards the end of the span ends up.
     const aim = (e) => {
         const canvas = ref.current;
         if (!canvas) return;
@@ -169,32 +170,53 @@ function IQScope({ player, live, iq, band, offsetHz, onOffset, maxFps, marks }) 
         onOffset(Math.round(fractionOffset(frac, st.current.spec.rate)));
     };
 
-    const down = (e) => {
-        if (!live || !iq) return;
-        e.currentTarget.setPointerCapture(e.pointerId);
-        aim(e);
+    const grab = (e) => {
+        if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
     };
-    const move = (e) => {
-        if (!e.currentTarget.hasPointerCapture || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
-        aim(e);
-    };
-    const up = (e) => {
+    const release = (e) => {
         if (e.currentTarget.hasPointerCapture && e.currentTarget.hasPointerCapture(e.pointerId)) {
             e.currentTarget.releasePointerCapture(e.pointerId);
         }
+    };
+
+    // What each of these means is in lib/iqSpectrum.js, under "Aiming" — the
+    // rule is pure, and it is the part that cannot be seen without a touch
+    // screen in hand.
+    const act = (e, { tune, capture }) => {
+        if (capture) grab(e);
+        if (!tune) return;
+        aim(e);
+    };
+
+    const down = (e) => {
+        if (!live || !iq) return;
+        const r = aimDown(st.current.aim, e);
+        act(e, r);
+        if (r.tune) haptic('tune', 'spectrum');
+    };
+    const move = (e) => act(e, aimMove(st.current.aim, e));
+    const up = (e) => {
+        const r = aimUp(st.current.aim, e);
+        release(e);
+        act(e, r);
+        if (r.tune) haptic('tune', 'spectrum');
+    };
+    const cancel = (e) => {
+        aimCancel(st.current.aim);
+        release(e);
     };
 
     return (
         <div className="iq-scope">
             <canvas
                 ref={ref}
-                className="iq-scope__canvas"
+                className={`iq-scope__canvas${running ? ' is-live' : ''}`}
                 style={{ height: `${SCOPE_H}px` }}
                 title="Press or drag to move the demodulator inside the stream"
                 onPointerDown={down}
                 onPointerMove={move}
                 onPointerUp={up}
-                onPointerCancel={up}
+                onPointerCancel={cancel}
             />
             {!(live && iq) && (
                 <div className="iq-scope__veil">
@@ -402,6 +424,7 @@ export default function IQPanel({ minimal }) {
                 player={player}
                 live={live}
                 iq={iq}
+                running={on}
                 band={band}
                 offsetHz={s.offsetHz}
                 onOffset={setOffset}
@@ -419,22 +442,28 @@ export default function IQPanel({ minimal }) {
                 />
             </Field>
 
-            {/* The control this panel is for. The range is what the passband can
-                reach without hanging off the end of the stream, so it narrows as
-                the bandwidth widens rather than letting the filter run out over
-                an edge where there is nothing at all. */}
-            <Field
-                label="Offset in stream"
-                hint={offsetLabel(s.offsetHz)}
-            >
+            {/* The fine adjustment for what the picture above is aimed with.
+                Its range is what the passband can reach without hanging off the
+                end of the stream, so it narrows as the bandwidth widens rather
+                than letting the filter run out over an edge where there is
+                nothing at all — which for USB and LSB makes it asymmetric about
+                the dial, since their passbands hang off one side.
+
+                Deliberately without a mark at the dial, though it is the obvious
+                thing to put on it. The scale here is the *offset's* legal range
+                and the scale above is the stream, and those are not the same
+                axis: on USB at 2.7 kHz zero sits two thirds of the way along
+                this track and dead centre of that picture. One dial drawn in two
+                places a centimetre apart is worse than one drawn in the place
+                that can show the passband with it. The signed reading beside the
+                label is what says which side of the dial this is. */}
+            <Field label="Offset in stream" hint={offsetLabel(s.offsetHz)}>
                 <Slider
                     value={s.offsetHz}
                     min={Math.round(limits.min)}
                     max={Math.round(limits.max)}
                     step={OFFSET_STEP}
                     onChange={setOffset}
-                    marker={0}
-                    markerTitle="The dial"
                 />
             </Field>
 

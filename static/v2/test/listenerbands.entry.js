@@ -7,11 +7,13 @@
 import { deep, render, reset, walk, words } from './hookStub.js';
 import ListenerBands from '../src/components/ListenerBands.jsx';
 import {
-    BANDS_VIEW, CLUSTER_PCT, LIST_VIEW, OTHER_ROW, bandRows, pctOf, saveView, savedView,
+    BANDS_VIEW, CLUSTER_PCT, LIST_VIEW, MIN_DOT_GAP_PX, OTHER_ROW,
+    bandRows, gapPct, pctOf, saveView, savedView,
 } from '../src/lib/listenerBands.js';
 
 module.exports = {
     deep, render, reset, walk, words,
     ListenerBands,
-    BANDS_VIEW, CLUSTER_PCT, LIST_VIEW, OTHER_ROW, bandRows, pctOf, saveView, savedView,
+    BANDS_VIEW, CLUSTER_PCT, LIST_VIEW, MIN_DOT_GAP_PX, OTHER_ROW,
+    bandRows, gapPct, pctOf, saveView, savedView,
 };

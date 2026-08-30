@@ -29,7 +29,8 @@ globalThis.removeEventListener = () => {};
 const {
     deep, render, reset,
     ListenerBands,
-    BANDS_VIEW, CLUSTER_PCT, LIST_VIEW, OTHER_ROW, bandRows, pctOf, saveView, savedView,
+    BANDS_VIEW, CLUSTER_PCT, LIST_VIEW, MIN_DOT_GAP_PX, OTHER_ROW,
+    bandRows, gapPct, pctOf, saveView, savedView,
 } = require('./.build/listenerbands.cjs');
 
 let pass = 0;
@@ -146,6 +147,57 @@ t('the bands are what it opens on, and only a choice of the list is kept', () =>
     assert.strictEqual(savedView(), BANDS_VIEW);
     store['ubersdr.v2.listeners.view'] = 'waterfall';
     assert.strictEqual(savedView(), BANDS_VIEW);
+});
+
+// ── A busy receiver ─────────────────────────────────────────────────────────
+
+t('the threshold follows the bar, so a dot means the same at every dock width', () => {
+    // The dock runs 220-560 px (LayoutContext), which is a bar of roughly
+    // 145-485. A fixed percentage would be 7 px at one end and 24 at the other.
+    const narrow = gapPct(145);
+    const wide = gapPct(485);
+    assert.ok(narrow > wide, `${narrow} should be coarser than ${wide}`);
+    assert.ok(Math.abs((narrow / 100) * 145 - MIN_DOT_GAP_PX) < 0.001);
+    assert.ok(Math.abs((wide / 100) * 485 - MIN_DOT_GAP_PX) < 0.001);
+    // Nothing measured yet, and nothing absurd from a bar of one pixel.
+    assert.strictEqual(gapPct(0), CLUSTER_PCT);
+    assert.strictEqual(gapPct(undefined), CLUSTER_PCT);
+    assert.strictEqual(gapPct(2), 25);
+});
+
+t('fifty listeners on one band stay a row of dots that do not touch', () => {
+    // A contest evening: fifty stations spread across 40m, in the narrowest
+    // dock there is.
+    const bar = 145;
+    const crowd = [];
+    for (let i = 0; i < 50; i++) crowd.push(ch(7000000 + i * 6000));
+    const rows = bandRows(crowd, 10000, 30000000, gapPct(bar));
+    assert.strictEqual(rows.length, 1);
+
+    const { spots } = rows[0];
+    // Every listener is still on the row, either as a dot or inside one.
+    assert.strictEqual(spots.reduce((n, s) => n + s.channels.length, 0), 50);
+    // And no two dots overlap: the gap between neighbours is never less than a
+    // dot is wide, whatever the receiver is doing.
+    for (let i = 1; i < spots.length; i++) {
+        const gap = ((spots[i].pct - spots[i - 1].pct) / 100) * bar;
+        assert.ok(gap >= MIN_DOT_GAP_PX - 0.001, `dots ${i - 1} and ${i} are ${gap.toFixed(1)} px apart`);
+    }
+    // Which is what bounds the drawing: the row holds what fits across it, not
+    // one element per listener.
+    assert.ok(spots.length <= Math.ceil(100 / gapPct(bar)) + 1, `${spots.length} dots`);
+});
+
+t('fifty listeners across every band is one row per band, not one per listener', () => {
+    const crowd = [];
+    const spread = [1900000, 3700000, 5300000, 7100000, 10120000, 14074000,
+        18100000, 21074000, 24915000, 28074000, 6070000];
+    for (let i = 0; i < 50; i++) crowd.push(ch(spread[i % spread.length] + (i * 700)));
+    const rows = bandRows(crowd, 10000, 30000000, gapPct(240));
+    // Ten amateur bands plus the broadcast row, and that is the ceiling however
+    // many listeners arrive — the panel's height is the bands, not the crowd.
+    assert.strictEqual(rows.length, 11);
+    assert.strictEqual(rows[rows.length - 1].name, OTHER_ROW);
 });
 
 // ── What it draws ───────────────────────────────────────────────────────────

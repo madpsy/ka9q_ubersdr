@@ -47,13 +47,34 @@ export const BAND_HUE = {
 // showing two of them would read as a bug rather than as a filter.
 export const OTHER_ROW = 'Other';
 
-// Two listeners closer than this share a dot, as a percentage of the row's
-// width. A dot is 9 px and a bar in a dock is 130-200 px wide, so 5% is about
-// where two dots would start to overlap — below that they are drawn as one and
-// counted, rather than hidden behind each other.
+const clamp = (v, lo, hi) => (v < lo ? lo : (v > hi ? hi : v));
+
+// Two dots are separate dots only if their centres are this far apart in
+// pixels. A dot is 9 px, so anything under about 12 leaves them touching, and
+// the ones that tune carry a few pixels of slop around them besides.
+export const MIN_DOT_GAP_PX = 12;
+
+// The threshold before the bar has been measured, as a percentage of it. Only
+// the first render and the tests get here — see gapPct.
 export const CLUSTER_PCT = 5;
 
-const clamp = (v, lo, hi) => (v < lo ? lo : (v > hi ? hi : v));
+/**
+ * The cluster threshold for a bar this wide, as a percentage of its width.
+ *
+ * Pixels rather than a fixed percentage because the dock is resizable across a
+ * factor of two and a half (220-560 px, LayoutContext), and a percentage is
+ * wrong at both ends of that: 5% is 7 px in the narrowest dock, where dots
+ * overlap, and 24 px in the widest, where two listeners a hundred kilohertz
+ * apart are drawn as one for no reason. The bar is measured and the threshold
+ * follows it, so a dot means the same thing at every width.
+ *
+ * Bounded either side: a bar that has not been laid out yet measures 0, and a
+ * threshold of a quarter of the band is as coarse as this is allowed to get.
+ */
+export function gapPct(barPx) {
+    if (!(barPx > 0)) return CLUSTER_PCT;
+    return clamp((MIN_DOT_GAP_PX / barPx) * 100, 0.5, 25);
+}
 
 /** Where `hz` sits across `min`..`max`, as 0-100, or null if it is outside. */
 export function pctOf(hz, min, max) {
@@ -64,7 +85,7 @@ export function pctOf(hz, min, max) {
 }
 
 // One row's listeners, left to right, with anything overlapping collapsed.
-function cluster(list, min, max) {
+function cluster(list, min, max, threshold) {
     const span = max - min;
     const sorted = list.slice().sort((a, b) => a.frequency - b.frequency);
     const spots = [];
@@ -75,7 +96,7 @@ function cluster(list, min, max) {
         // Against the group's leftmost member, not against its running mean: a
         // mean that walks right as members join would swallow a whole band one
         // listener at a time.
-        if (last && pct - last.anchor <= CLUSTER_PCT) {
+        if (last && pct - last.anchor <= threshold) {
             last.channels.push(channel);
             last.sum += pct;
         } else {
@@ -103,8 +124,15 @@ function cluster(list, min, max) {
  * width whatever the receiver can reach. A band nobody is in gets no row: ten
  * empty bars would fill the panel with the one thing it has nothing to say
  * about.
+ *
+ * `threshold` is how close two listeners have to be to share a dot, as a
+ * percentage of the row — gapPct(barWidth), or the default for a caller with
+ * nothing measured. It is what bounds the work: however many listeners the
+ * server reports, a row holds at most 100/threshold dots and the panel holds at
+ * most one row per band, so both the height and the element count are capped by
+ * the geometry rather than by how busy the receiver is.
  */
-export function bandRows(channels, minHz = 10000, maxHz = 30000000) {
+export function bandRows(channels, minHz = 10000, maxHz = 30000000, threshold = CLUSTER_PCT) {
     const list = Array.isArray(channels) ? channels.filter((c) => c && c.frequency > 0) : [];
     if (list.length === 0) return [];
 
@@ -115,7 +143,7 @@ export function bandRows(channels, minHz = 10000, maxHz = 30000000) {
         const inBand = list.filter((c) => c.frequency >= min && c.frequency <= max);
         if (inBand.length === 0) continue;
         for (const c of inBand) claimed.add(c);
-        rows.push({ name, min, max, hue: BAND_HUE[name] ?? null, spots: cluster(inBand, min, max) });
+        rows.push({ name, min, max, hue: BAND_HUE[name] ?? null, spots: cluster(inBand, min, max, threshold) });
     }
 
     const rest = list.filter((c) => !claimed.has(c));
@@ -125,7 +153,7 @@ export function bandRows(channels, minHz = 10000, maxHz = 30000000) {
         // pinned to the edge lies about where they are.
         const min = Math.min(minHz, ...rest.map((c) => c.frequency));
         const max = Math.max(maxHz, ...rest.map((c) => c.frequency));
-        rows.push({ name: OTHER_ROW, min, max, hue: null, spots: cluster(rest, min, max) });
+        rows.push({ name: OTHER_ROW, min, max, hue: null, spots: cluster(rest, min, max, threshold) });
     }
 
     return rows;

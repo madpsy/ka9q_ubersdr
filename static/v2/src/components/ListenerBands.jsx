@@ -9,10 +9,10 @@
 // things that are drawing decisions rather than layout: what a dot says when
 // you hover it, and the line marking where your own dial is.
 
-import React, { useMemo } from '../react.js';
+import React, { useLayoutEffect, useMemo, useRef, useState } from '../react.js';
 import { countryFlag } from '../lib/format.js';
 import { activeLabel } from '../lib/listeners.js';
-import { bandRows, pctOf } from '../lib/listenerBands.js';
+import { bandRows, gapPct, pctOf } from '../lib/listenerBands.js';
 
 // A dot standing for more listeners than this lists the first few and says how
 // many are left. A tooltip is not a panel.
@@ -103,13 +103,42 @@ function Row({ row, dialHz, now, onTune }) {
 }
 
 export default function ListenerBands({ channels, dialHz, minHz, maxHz, now, onTune }) {
+    const wrap = useRef(null);
+    // How wide a bar actually is, which is what decides how close two listeners
+    // have to be to share a dot. See gapPct: the dock is resizable across a
+    // factor of two and a half, and a threshold in percent is wrong at both
+    // ends of that.
+    const [barPx, setBarPx] = useState(0);
+
+    useLayoutEffect(() => {
+        const el = wrap.current;
+        if (!el) return undefined;
+        const measure = () => {
+            // The bar itself rather than the container less the label column:
+            // the label is `calc(30px * var(--ui-scale))` and the arithmetic
+            // would be this file's copy of a number the stylesheet owns.
+            const bar = el.querySelector('.lsn-band__bar');
+            const w = bar ? bar.clientWidth : 0;
+            // Only a real change, and never a fractional one: this runs after
+            // every render, and a setter called with a value that differs in
+            // the eighth decimal is a render loop.
+            setBarPx((prev) => (Math.abs(prev - w) < 1 ? prev : w));
+        };
+        measure();
+        if (typeof ResizeObserver === 'undefined') return undefined;
+        // The dock is dragged wider with nothing here re-rendering.
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
     const rows = useMemo(
-        () => bandRows(channels, minHz, maxHz),
-        [channels, minHz, maxHz],
+        () => bandRows(channels, minHz, maxHz, gapPct(barPx)),
+        [channels, minHz, maxHz, barPx],
     );
 
     return (
-        <div className="lsn-bands">
+        <div className="lsn-bands" ref={wrap}>
             {rows.map((row) => (
                 <Row key={row.name} row={row} dialHz={dialHz} now={now} onTune={onTune} />
             ))}

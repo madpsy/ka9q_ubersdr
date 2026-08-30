@@ -1377,6 +1377,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
     border-radius: 3px;
     background: hsla(var(--lsn-hue), 70%, 50%, 0.16);
     border: 1px solid hsla(var(--lsn-hue), 70%, 55%, 0.3);
+    /* A stacking context of its own, so the dots' hit areas below can sit
+       behind the dots without falling behind this bar's background — where they
+       would be unclickable rather than merely underneath. */
+    isolation: isolate;
 }
 
 /* Anything that is not an amateur band, across the receiver's whole range. Grey
@@ -1414,7 +1418,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
     cursor: pointer;
     transition: transform var(--dur) var(--ease);
-    z-index: 1;
 }
 
 .lsn-dot.is-you { background: var(--accent); }
@@ -1450,6 +1453,11 @@ button.lsn-dot::after {
     content: '';
     position: absolute;
     inset: -6px;
+    /* Behind every dot, including its neighbours'. On a busy band the slop
+       around one dot reaches over the next one, and painting it on top would
+       mean a click on a dot tuning to the listener beside it. Underneath, a dot
+       always wins its own pixels and the slop only competes with other slop. */
+    z-index: -1;
 }
 
 /* Nobody to tune to — your own dot, or an IQ channel. Read, not pressed, as the

@@ -182,6 +182,8 @@ esbuild ../src/lib/needle.js --bundle --format=cjs --platform=node \
     --outfile=.build/needle.cjs --log-level=warning
 esbuild ../src/lib/listeners.js --bundle --format=cjs --platform=node \
     --outfile=.build/listeners.cjs --log-level=warning
+esbuild listenerbands.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/listenerbands.cjs --log-level=warning
 esbuild ../src/radio/idle.js --bundle --format=cjs --platform=node \
     --outfile=.build/idle.cjs --log-level=warning
 esbuild ../src/lib/myip.js --bundle --format=cjs --platform=node \
@@ -434,6 +436,7 @@ node scanner.test.js
 node scannerpanel.test.js
 node needle.test.js
 node listeners.test.js
+node listenerbands.test.js
 node idle.test.js
 node myip.test.js
 node voice.test.js

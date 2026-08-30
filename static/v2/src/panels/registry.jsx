@@ -834,8 +834,9 @@ const BUILT_IN = [
         Component: ScopePanel,
     },
     { id: 'display', title: 'Display', icon: <Icon.Sliders />, dock: 'right', defaultOpen: false, Component: DisplayPanel },
-    // Who else is on the receiver, and the map popup that shows where they are.
-    // Minimal: the list without the count and the map button.
+    // Who else is on the receiver, as a list or as dots across the bands, and the
+    // map popup that shows where they are.
+    // Minimal: the chosen view without the count, the switch and the map button.
     {
         id: 'listeners',
         title: 'Listeners',

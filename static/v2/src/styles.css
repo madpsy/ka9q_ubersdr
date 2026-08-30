@@ -12257,16 +12257,26 @@ a.btn { text-decoration: none; }
     background: var(--surface-2);
     overflow: hidden;
 }
-.iq-vfo.is-open { border-color: color-mix(in srgb, var(--vfo) 55%, var(--border)); }
+ /* Active and open are two different things and the row shows both: active is
+    which demodulator the picture is aimed at, open is whether this row's
+    controls are showing. Only the first is worth a colour — being open is
+    already obvious from the controls being there. */
+.iq-vfo.is-active { border-color: color-mix(in srgb, var(--vfo) 55%, var(--border)); }
 
 .iq-vfo__head { display: flex; align-items: stretch; gap: 4px; padding: 3px; }
 
 /* The identity and the summary, which together are the button that opens the
    row. Grows; everything else in the head is a fixed size, so a narrow dock
    takes it out of the summary rather than out of the controls. */
+/* Every child counted here is `flex: none` and the growing is done by the
+   spacer at the end, which lib/roomFor.js skips. That is its one rule: a
+   measured child that shrinks makes the figure that is supposed to hold still
+   follow the row's width, and the optional tag then flickers on and off for
+   ever. See useRoomFor in IQPanel. */
 .iq-vfo__pick {
     flex: 1 1 auto;
     min-width: 0;
+    overflow: hidden;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -12281,7 +12291,10 @@ a.btn { text-decoration: none; }
     cursor: pointer;
 }
 .iq-vfo__pick:hover { background: var(--surface-hover); }
-.iq-vfo.is-open .iq-vfo__pick { color: var(--text); }
+.iq-vfo.is-active .iq-vfo__pick { color: var(--text); }
+.iq-vfo__pick > svg { flex: none; width: 12px; height: 12px; opacity: 0.7; }
+/* Takes the slack, and is skipped by the measurement — it is room, not content. */
+.iq-vfo__slack { flex: 1 1 auto; min-width: 0; }
 
 /* Four pixels of the colour it is drawn in, full height of the row: a swatch
    rather than a dot, so it reads as the same mark as the line on the picture. */
@@ -12300,15 +12313,24 @@ a.btn { text-decoration: none; }
     color: var(--vfo);
 }
 /* Mode, width and place, in that order — what it is, then how much of it, then
-   where. Truncated rather than wrapped: the row is a glance, and the exact
-   figures are in the body when it is open. */
+   where. Clipped rather than wrapped: the row is a glance, and the exact figures
+   are in the body when it is open. */
 .iq-vfo__sum {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    flex: none;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
 }
+/* And where that actually is on the band, when the dock is wide enough to say
+   so. The first thing to go as it narrows — the row still names the demodulator
+   and its place in the stream without it. */
+.iq-vfo__freq {
+    flex: none;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
+}
+.iq-vfo.is-active .iq-vfo__freq { color: var(--text-dim); }
 
 .iq-vfo__pan { flex: none; }
 .iq-vfo__mute {
@@ -12325,10 +12347,12 @@ a.btn { text-decoration: none; }
 .iq-vfo__mute:hover { background: var(--surface-hover); color: var(--text); }
 .iq-vfo__mute.is-muted { background: var(--bad); border-color: var(--bad); color: #fff; }
 
-/* Its output level, as the row's own underline. Two pixels across the bottom of
-   the head so all four are readable at once without a meter each — which is the
-   question you actually ask of a row you are not editing: is anything on it. */
-.iq-vfo__level { height: 2px; background: var(--border); }
+/* Its output level, as the row's own underline. Three pixels across the bottom
+   of the head, on every row whether or not it is open — which is the point: the
+   question you ask of a demodulator you are *not* editing is whether anything is
+   on it, and a meter that only appeared with the controls would answer it for
+   the one row that did not need asking. */
+.iq-vfo__level { height: 3px; background: var(--border); }
 .iq-vfo__level i {
     display: block;
     height: 100%;
@@ -12346,3 +12370,30 @@ a.btn { text-decoration: none; }
 }
 
 .iq-add { width: 100%; }
+
+/* The listening frequency, which is a reading until it is pressed and a kHz box
+   after that. Both wear .readout__value, so the card does not change size when
+   it becomes editable — a control that jumps as you reach for it is a control
+   you miss. */
+.iq-freq__open {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: text;
+}
+.iq-freq__open:hover { color: var(--accent); }
+.iq-freq {
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--accent);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    outline: none;
+}
+.iq-freq.is-invalid { border-bottom-color: var(--bad); color: var(--bad); }

@@ -12,6 +12,12 @@
 // silent retune to 30 MHz, which looks like the box working; refusing says the
 // number was wrong while the number is still on screen to be corrected.
 //
+// What counts as in range is usually the receiver's own limits, and is a caller's
+// to override: the IQ panel's demodulators can only be moved within the twelve
+// kilohertz the stream carries, which is a far narrower window than the dial's
+// and one that moves with the dial. `inRange` and `hint` are that, and they
+// default to the receiver — so the three callers that mean the dial say nothing.
+//
 // Enter or moving focus away commits; Escape abandons. Mounted only while
 // editing, so it opens focused with the current value selected — start typing
 // and the old frequency is gone, which is what you want when retuning, while
@@ -34,7 +40,7 @@ const rangeHint = () => `Frequency in kHz, ${MIN_FREQ / 1000} to ${MAX_FREQ / 10
 // lib/fitScale.js. It has to carry the same key the button it replaced does, or
 // the measurement counts an 11ch input as fixed furniture *and* the frequency it
 // stands in for, and the readout shrinks while somebody is typing into it.
-export default function FreqEntry({ frequency, className, fitKey, onDone }) {
+export default function FreqEntry({ frequency, className, fitKey, onDone, inRange, hint }) {
     const [draft, setDraft] = useState(() => freqToKHz(frequency));
     const ref = useRef(null);
     const done = useRef(false);
@@ -46,7 +52,8 @@ export default function FreqEntry({ frequency, className, fitKey, onDone }) {
     }, []);
 
     const hz = parseFreqInput(draft);
-    const valid = freqInRange(hz);
+    const valid = (inRange || freqInRange)(hz);
+    const range = hint || rangeHint();
 
     // Enter commits and the input then loses focus on unmount, which would
     // otherwise commit a second time — harmless for a plain retune, not for the
@@ -66,7 +73,7 @@ export default function FreqEntry({ frequency, className, fitKey, onDone }) {
             inputMode="decimal"
             aria-label="Frequency in kHz"
             aria-invalid={valid ? undefined : true}
-            title={valid ? rangeHint() : `${rangeHint()} — ${draft.trim() ? 'out of range' : 'enter a frequency'}`}
+            title={valid ? range : `${range} — ${draft.trim() ? 'out of range' : 'enter a frequency'}`}
             onChange={(e) => setDraft(e.target.value)}
             // Clicking away from a box that cannot be committed abandons the
             // edit: leaving it open would trap focus in a control the operator

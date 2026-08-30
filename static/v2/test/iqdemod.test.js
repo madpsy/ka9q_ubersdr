@@ -37,11 +37,11 @@ const {
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
-    IQPanel, vfoSummary, PANEL_BY_ID, GROUPS,
+    IQPanel, ListeningCard, vfoSummary, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, VFO_LABELS, DemodChain,
     addVfo, clampOffset, clampWidth, demodSettings, designLowpass, getIQDemod, offsetLimits,
     passbandFor, planFor, planForVfo, removeVfo, resetDemodSettings, saveDemodSettings, selectVfo,
-    tapsFor, updateVfo, vfoPassband, vfoWidth,
+    tapsFor, toggleVfo, updateVfo, vfoPassband, vfoWidth,
 } = require('./.build/iqdemod.cjs');
 
 // Storage that actually remembers, so the settings tests exercise the real path
@@ -651,6 +651,124 @@ t('a row says what it is, how wide, and where', () => {
     assert.strictEqual(vfoSummary(vfo0()), 'CW 500 · −3.4 kHz');
 });
 
+t('a header press selects a row, or closes the one already selected', () => {
+    // Two questions on one press, and which it means depends on where it lands.
+    // Selecting a row and leaving it shut would look like the press had done
+    // nothing; toggling a row that was not selected would leave the picture
+    // aimed somewhere the operator is no longer looking.
+    fresh();
+    addVfo();                                   // two, editing the second
+    assert.strictEqual(demodSettings().active, 1);
+
+    // A row that is not the current one: select it, and show it.
+    updateVfo(0, { open: false });
+    let st = toggleVfo(0);
+    assert.strictEqual(st.active, 0);
+    assert.strictEqual(st.vfos[0].open, true, 'selecting a row left it shut');
+
+    // The row that already is: open or close it, and keep the aim.
+    st = toggleVfo(0);
+    assert.strictEqual(st.active, 0, 'closing a row gave up the aim');
+    assert.strictEqual(st.vfos[0].open, false);
+    st = toggleVfo(0);
+    assert.strictEqual(st.vfos[0].open, true);
+
+    // Expansion is per row: closing one says nothing about the others.
+    assert.strictEqual(st.vfos[1].open, true);
+    assert.strictEqual(toggleVfo(9).active, 0, 'a row that is not there');
+});
+
+t('a new demodulator arrives open', () => {
+    // You pressed Add because you want to set it up.
+    fresh();
+    updateVfo(0, { open: false });
+    const st = addVfo();
+    assert.strictEqual(st.vfos[1].open, true);
+    assert.strictEqual(st.active, 1);
+    // ...and it does not reopen the one it was copied from.
+    assert.strictEqual(st.vfos[0].open, false);
+});
+
+t('whether a row is open survives being read back', () => {
+    // It is a view state, but a persisted one: which rows somebody has left open
+    // is part of how they have arranged the panel. The write itself is deferred
+    // by a quarter second so a slider drag does not hit the disk sixty times a
+    // second (see WRITE_DELAY_MS), so what is exercised here is the reading —
+    // which is the half that can silently drop a field.
+    delete store['ubersdr.v2.iqdemod'];
+    resetDemodSettings();
+    store['ubersdr.v2.iqdemod'] = JSON.stringify({
+        active: 1,
+        vfos: [{ mode: 'usb', open: false }, { mode: 'cw', open: true }],
+    });
+    const back = demodSettings();
+    assert.strictEqual(back.vfos.length, 2);
+    assert.strictEqual(back.vfos[0].open, false);
+    assert.strictEqual(back.vfos[1].open, true);
+    assert.strictEqual(back.active, 1);
+});
+
+// ── typing a frequency ──────────────────────────────────────────────────────
+
+t('the listening reading can be typed into, within the stream', () => {
+    // The offset slider and the picture are both relative; the number an
+    // operator actually has is absolute. This is the conversion, and the range
+    // is the narrow one — a demodulator can only be moved as far as leaves its
+    // passband inside the twelve kilohertz.
+    const dialHz = 7_100_000;
+    const limits = offsetLimits('usb', 2700);      // -6000 .. +3300
+    const tuned = [];
+    reset();
+    let out = render(ListeningCard, {
+        listening: dialHz, dialHz, limits, onTune: (hz) => tuned.push(hz),
+    }, {});
+
+    // It reads as a reading until it is pressed.
+    let entry = walk(out.tree).find((n) => n && n.props && typeof n.props.inRange === 'function');
+    assert.ok(!entry, 'the box was open before anybody asked for it');
+    const open = walk(out.tree).find((n) => cls(n).includes('iq-freq__open'));
+    assert.ok(open, 'no way to start typing');
+    open.props.onClick();
+
+    out = render(ListeningCard, {
+        listening: dialHz, dialHz, limits, onTune: (hz) => tuned.push(hz),
+    }, {});
+    entry = walk(out.tree).find((n) => n && n.props && typeof n.props.inRange === 'function');
+    assert.ok(entry, 'pressing the reading did not open a box');
+
+    // The window is the dial plus what the offset may be, not the receiver's
+    // whole range: 2.7 kHz of USB stops 2.7 kHz short of the top of the stream.
+    const { inRange } = entry.props;
+    assert.strictEqual(inRange(dialHz), true);
+    assert.strictEqual(inRange(dialHz - 6000), true);
+    assert.strictEqual(inRange(dialHz + 3300), true);
+    assert.strictEqual(inRange(dialHz - 6001), false, 'accepted below the stream');
+    assert.strictEqual(inRange(dialHz + 3301), false, 'accepted past where the filter fits');
+    assert.strictEqual(inRange(dialHz + 5000), false);
+    assert.strictEqual(inRange(NaN), false);
+    assert.strictEqual(inRange(null), false);
+
+    // And what it commits is the offset that lands the demodulator there.
+    entry.props.onDone(dialHz + 1500);
+    assert.deepStrictEqual(tuned, [dialHz + 1500]);
+});
+
+t('abandoning the box tunes nothing', () => {
+    const dialHz = 7_100_000;
+    const tuned = [];
+    reset();
+    let out = render(ListeningCard, {
+        listening: dialHz, dialHz, limits: offsetLimits('usb', 2700), onTune: (hz) => tuned.push(hz),
+    }, {});
+    walk(out.tree).find((n) => cls(n).includes('iq-freq__open')).props.onClick();
+    out = render(ListeningCard, {
+        listening: dialHz, dialHz, limits: offsetLimits('usb', 2700), onTune: (hz) => tuned.push(hz),
+    }, {});
+    // Escape and an unusable entry both arrive as null — see FreqEntry.
+    walk(out.tree).find((n) => n.props && n.props.inRange).props.onDone(null);
+    assert.deepStrictEqual(tuned, [], 'a cancelled edit retuned');
+});
+
 // ── picking one off the picture ─────────────────────────────────────────────
 
 t('a press near a marker picks that demodulator up', () => {
@@ -944,10 +1062,10 @@ t('it never releases a duck that was not its own', () => {
     own.ducked = false;
 });
 
-t('every demodulator gets a row, and only the open one shows its controls', () => {
+t('every demodulator gets a row, and exactly one is the aimed one', () => {
     // The layout claim: survey and adjustment at once. Four rows visible so you
-    // can see where they all are, one set of controls so there is never a
-    // question of which demodulator you are changing.
+    // can see where they all are, and one of them marked as the one the picture
+    // is aimed at — which is a different question from which rows are open.
     fresh();
     addVfo();
     addVfo();
@@ -957,16 +1075,33 @@ t('every demodulator gets a row, and only the open one shows its controls', () =
     const { tree, cleanups } = render(IQPanel, {}, context());
     const nodes = deep(tree);
 
-    const rows = nodes.filter((n) => cls(n).startsWith('iq-vfo ') || cls(n) === 'iq-vfo');
+    const rows = nodes.filter((n) => /^iq-vfo( |$)/.test(cls(n)));
     assert.strictEqual(rows.length, MAX_VFOS, `expected ${MAX_VFOS} rows, got ${rows.length}`);
-    const bodies = nodes.filter((n) => cls(n) === 'iq-vfo__body');
-    assert.strictEqual(bodies.length, 1, 'more than one row was open at once');
-    // And it is the one that was selected.
-    const open = nodes.filter((n) => cls(n).includes('is-open'));
-    assert.ok(open.length >= 1, 'nothing marked as the open row');
+    const active = rows.filter((n) => cls(n).includes('is-active'));
+    assert.strictEqual(active.length, 1, 'the picture can only be aimed at one');
     // Each row names itself, so a line on the picture can be tied to a row.
     const names = nodes.filter((n) => cls(n) === 'iq-vfo__name').map((n) => words(n));
     assert.deepStrictEqual(names, VFO_LABELS.slice(0, MAX_VFOS));
+    for (const off of cleanups) off();
+});
+
+t('a collapsed row keeps its level meter', () => {
+    // The whole reason the meter is an underline on the head rather than a bar
+    // in the body: the question you ask of a demodulator you are not editing is
+    // whether anything is on it, and a meter that went away with the controls
+    // would answer it only for the row that did not need asking.
+    fresh();
+    addVfo();
+    toggleVfo(0);                    // 0 is not active, so this selects and opens it
+    toggleVfo(0);                    // ...and this closes it
+    assert.strictEqual(demodSettings().vfos[0].open, false, 'the row did not close');
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const nodes = deep(tree);
+    assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__body').length, 1,
+        'the closed row still drew its controls');
+    assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__level').length, 2,
+        'a row lost its meter when it was collapsed');
     for (const off of cleanups) off();
 });
 

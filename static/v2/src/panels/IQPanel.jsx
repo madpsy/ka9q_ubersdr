@@ -58,15 +58,17 @@
 // are, and components/IQDemodWatch.jsx is what pushes the mode and the volume
 // into it. This file is a view over that object and a set of controls.
 
-import React, { useEffect, useReducer, useRef } from '../react.js';
+import React, { useEffect, useReducer, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { resolveMaxFps, useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
 import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { Button, Field, Icon, Readout, Segmented, Slider, Switch } from '../components/ui.jsx';
+import FreqEntry from '../components/FreqEntry.jsx';
 import { isIQ } from '../radio/constants.js';
 import { formatFreqExact, formatSpan } from '../lib/format.js';
 import { haptic } from '../lib/haptics.js';
+import { useRoomFor } from '../lib/useRoomFor.js';
 import { cssVar, sizedCanvas } from '../lib/audioWaterfall.js';
 import { createLevels, updateLevels } from '../lib/ifSpectrum.js';
 import {
@@ -76,7 +78,7 @@ import {
 import {
     DEMOD_MODES, MAX_VFOS, PANS, PITCH_MAX, PITCH_MIN, VFO_LABELS,
     addVfo, demodMode, getIQDemod, offsetLimits, onDemodSettings, planForVfo, removeVfo,
-    selectVfo, tapsFor, updateVfo, vfoPassband, vfoWidth,
+    selectVfo, tapsFor, toggleVfo, updateVfo, vfoPassband, vfoWidth,
 } from '../lib/iqDemod.js';
 
 // How often the level meters are redrawn while running. Twelve a second, which
@@ -88,6 +90,10 @@ const METER_MS = 80;
 // between a signal and the noise it is sitting in to be worth looking at, short
 // enough to leave room under it for four rows in a dock column.
 const SCOPE_H = 96;
+
+// What the listening frequency costs a row header, before it has been on screen
+// once to be measured. A nine-character reading at the row's font, plus its gap.
+const FREQ_TAG_W = 88;
 
 const MODE_OPTIONS = DEMOD_MODES.map((m) => ({
     value: m.id, label: m.label, title: m.summary,
@@ -398,18 +404,89 @@ function draw(canvas, s, dt, marks) {
 }
 
 /**
- * One demodulator: its row, and its controls when it is the one open.
+ * Where this demodulator is listening, as a reading and as a place to type one.
+ *
+ * A frequency you can read but not enter is half a control. The offset slider
+ * and the picture are both relative — "somewhere left of the dial" — and the
+ * number an operator actually has is absolute: a net on 7.1585, a beacon on
+ * 14.1, something a friend has just given them over the air. Converting that to
+ * an offset in their head, twice, is the friction this removes.
+ *
+ * It is the shared kHz box (components/FreqEntry.jsx), so it accepts exactly
+ * what the dial does — a bare number is kHz, explicit units still work — and
+ * commits and abandons the same way. What differs is the range: a demodulator
+ * can only be moved within the twelve kilohertz the stream carries, and only as
+ * far as leaves its passband inside that, so the window is narrower than the
+ * dial's and moves with the dial. Out of it is refused rather than clamped, for
+ * the reason FreqEntry gives: clamping turns a slip into a silent retune to
+ * somewhere nobody asked for, and the number is still on screen to be corrected.
+ */
+export function ListeningCard({ listening, dialHz, limits, onTune }) {
+    const [editing, setEditing] = useState(false);
+    const lo = dialHz + Math.round(limits.min);
+    const hi = dialHz + Math.round(limits.max);
+    const inRange = (hz) => Number.isFinite(hz) && hz >= lo && hz <= hi;
+    const hint = `Frequency in kHz, ${lo / 1000} to ${hi / 1000} — inside the stream`;
+
+    return (
+        <div className="readout">
+            <div className="readout__label">Listening</div>
+            {editing ? (
+                <FreqEntry
+                    frequency={listening}
+                    className="readout__value iq-freq"
+                    inRange={inRange}
+                    hint={hint}
+                    onDone={(hz) => {
+                        setEditing(false);
+                        if (hz != null) onTune(hz);
+                    }}
+                />
+            ) : (
+                <button
+                    type="button"
+                    className="readout__value iq-freq__open"
+                    title={`${hint} — press to type one`}
+                    onClick={() => setEditing(true)}
+                >
+                    <span className="readout__num">{formatFreqExact(listening)}</span>
+                </button>
+            )}
+        </div>
+    );
+}
+
+/**
+ * One demodulator: its row, and its controls when it is open.
  *
  * The head is a glance and two controls; the body is everything else. Pan and
  * mute live in the head rather than the body deliberately — see the note at the
  * top of this file.
+ *
+ * `active` and `open` are two different things and the row shows both. Active is
+ * which demodulator the picture is aimed at — the one a press on the canvas
+ * moves, and the one drawn brightest. Open is whether this row's controls are
+ * showing, which is per row and independent: pressing the header of the active
+ * row closes it without giving up the aim.
  */
-function VfoRow({ index, vfo, open, level, taps, dialHz, minimal, canRemove }) {
+function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove }) {
     const mode = demodMode(vfo.mode);
     const width = vfoWidth(vfo);
     const limits = offsetLimits(vfo.mode, width);
     const band = vfoPassband(vfo);
     const set = (patch) => updateVfo(index, patch);
+    const open = vfo.open !== false;
+    const listening = dialHz + vfo.offsetHz;
+
+    // The listening frequency is worth showing on the header and is the first
+    // thing that should go when the dock is narrow — the row still says what the
+    // demodulator is and where in the stream it sits without it, and dropping it
+    // beats letting the summary squeeze or the row wrap. Same mechanism as the
+    // top bar's optional tags; see lib/roomFor.js, whose one rule this layout has
+    // to hold up: every child counted here is `flex: none`, and the growing is
+    // done by a spacer the measurement skips.
+    const headRef = useRef(null);
+    const room = useRoomFor(headRef, [{ key: 'freq', width: FREQ_TAG_W }]);
 
     // Coarse enough that the slider crosses twelve kilohertz in a drag, fine
     // enough to land on a carrier: ten hertz is a fifth of the narrowest CW
@@ -418,19 +495,30 @@ function VfoRow({ index, vfo, open, level, taps, dialHz, minimal, canRemove }) {
 
     return (
         <div
-            className={`iq-vfo${open ? ' is-open' : ''}${vfo.muted ? ' is-muted' : ''}`}
+            className={`iq-vfo${active ? ' is-active' : ''}${open ? ' is-open' : ''}${vfo.muted ? ' is-muted' : ''}`}
             style={{ '--vfo': `var(--iq-vfo-${(index % MAX_VFOS) + 1})` }}
         >
             <div className="iq-vfo__head">
                 <button
+                    ref={headRef}
                     type="button"
                     className="iq-vfo__pick"
-                    onClick={() => selectVfo(index)}
-                    title={open ? 'The demodulator being edited' : 'Edit this demodulator'}
+                    aria-expanded={open}
+                    onClick={() => toggleVfo(index)}
+                    title={active
+                        ? (open ? 'Hide these controls' : 'Show this demodulator’s controls')
+                        : 'Edit this demodulator'}
                 >
+                    {open ? <Icon.ChevronUp /> : <Icon.Chevron />}
                     <i className="iq-vfo__swatch" />
                     <span className="iq-vfo__name">{VFO_LABELS[index]}</span>
                     <span className="iq-vfo__sum">{vfoSummary(vfo)}</span>
+                    {room.freq && (
+                        <span className="iq-vfo__freq" data-optional="freq">
+                            {formatFreqExact(listening)}
+                        </span>
+                    )}
+                    <i className="iq-vfo__slack" data-slack />
                 </button>
                 <Segmented
                     className="iq-vfo__pan"
@@ -512,7 +600,12 @@ function VfoRow({ index, vfo, open, level, taps, dialHz, minimal, canRemove }) {
                     )}
 
                     <div className="readout-grid">
-                        <Readout label="Listening" value={formatFreqExact(dialHz + vfo.offsetHz)} />
+                        <ListeningCard
+                            listening={listening}
+                            dialHz={dialHz}
+                            limits={limits}
+                            onTune={(hz) => set({ offsetHz: hz - dialHz })}
+                        />
                         <Readout label="Filter" value={taps} unit="taps" />
                     </div>
 
@@ -653,7 +746,7 @@ export default function IQPanel({ minimal }) {
                         key={i}
                         index={i}
                         vfo={vfo}
-                        open={i === active}
+                        active={i === active}
                         level={hearing ? demod.levelOf(i) : 0}
                         taps={tapsFor(planForVfo(vfo).cutoffHz, demod.rate || 12000)}
                         dialHz={tuning.frequency}

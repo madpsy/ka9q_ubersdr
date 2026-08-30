@@ -583,6 +583,10 @@ const VFO_DEFAULTS = {
     gain: 1,
     pan: 'center',
     muted: false,
+    // Whether its controls are showing. A view state, but a persisted one: which
+    // rows somebody has left open is part of how they have arranged the panel,
+    // the same way the dock's own collapsed sections are.
+    open: true,
 };
 
 export const DEMOD_DEFAULTS = {
@@ -634,6 +638,7 @@ function sanitiseVfo(raw) {
         gain: Number.isFinite(gain) ? clamp(gain, 0, 4) : 1,
         pan: PAN_VALUES.includes(src.pan) ? src.pan : 'center',
         muted: src.muted === true,
+        open: src.open !== false,
     };
 }
 
@@ -708,6 +713,34 @@ export function updateVfo(index, patch) {
     return publish({ ...before, vfos });
 }
 
+/**
+ * What a press on a row's header does.
+ *
+ * Two things, because a header is answering two questions at once — which
+ * demodulator the picture is aimed at, and whether this row's controls are
+ * showing — and which one a press means depends on where it lands:
+ *
+ *   a row that is not the current one   select it, and show it. Selecting a row
+ *                                       and leaving it shut would look like the
+ *                                       press had done nothing.
+ *   the row that already is             open or close it. By then selecting is
+ *                                       not on offer, so the press has only one
+ *                                       thing left to mean.
+ *
+ * Expansion is per row and independent: two open at once is a comparison
+ * somebody asked for, and closing one is a press away.
+ */
+export function toggleVfo(index) {
+    const before = demodSettings();
+    if (!before.vfos[index]) return before;
+    if (index !== before.active) {
+        const vfos = before.vfos.map((v, i) => (i === index ? { ...v, open: true } : v));
+        return publish({ ...before, vfos, active: index });
+    }
+    const vfos = before.vfos.map((v, i) => (i === index ? { ...v, open: !v.open } : v));
+    return publish({ ...before, vfos });
+}
+
 export function selectVfo(index) {
     const before = demodSettings();
     if (!before.vfos[index] || index === before.active) return before;
@@ -734,7 +767,9 @@ export function addVfo() {
     // would look like the button had done nothing.
     let offsetHz = clampOffset(from.mode, from.offsetHz + w, w);
     if (offsetHz === from.offsetHz) offsetHz = clampOffset(from.mode, from.offsetHz - w, w);
-    const vfos = [...before.vfos, { ...from, widths: { ...from.widths }, offsetHz }];
+    const vfos = [...before.vfos, {
+        ...from, widths: { ...from.widths }, offsetHz, open: true,
+    }];
     return publish({ ...before, vfos, active: vfos.length - 1 });
 }
 

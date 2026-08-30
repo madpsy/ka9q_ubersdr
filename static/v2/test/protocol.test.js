@@ -533,19 +533,27 @@ t('the arrow is on the side the mark went', () => {
     assert.deepStrictEqual(mk.offscreenArrows({ dialHz: 7.3e6, ...w }).left, []);
 });
 
-t('the dial comes first, so the pair never swaps places as you pan', () => {
-    // Both gone the same way: the dial's arrow is the one at the end of the bar.
+t('the dial comes first, so the arrows never swap places as you pan', () => {
+    // Both gone the same way: the dial's arrow is the one at the end of the bar,
+    // and the whole passband is behind it — one arrow per edge.
     const both = mk.offscreenArrows({
         dialHz: 6.9e6, edgeHz: [6.8997e6, 6.9003e6], startFreq: 7.0e6, endFreq: 7.2e6,
     });
-    assert.deepStrictEqual(both, { left: ['dial', 'edge'], right: [] });
+    assert.deepStrictEqual(both, { left: ['dial', 'edge', 'edge'], right: [] });
 });
 
-t('two edges off one side are one arrow, not two of the same colour', () => {
+t('two edges off one side are two arrows — the filter has a width', () => {
     const one = mk.offscreenArrows({
         dialHz: 7.1e6, edgeHz: [6.8e6, 6.9e6], startFreq: 7.0e6, endFreq: 7.2e6,
     });
-    assert.deepStrictEqual(one, { left: ['edge'], right: [] });
+    assert.deepStrictEqual(one, { left: ['edge', 'edge'], right: [] });
+});
+
+t('one edge out, one still in view, is one arrow', () => {
+    const half = mk.offscreenArrows({
+        dialHz: 7.0005e6, edgeHz: [6.9999e6, 7.001e6], startFreq: 7.0e6, endFreq: 7.2e6,
+    });
+    assert.deepStrictEqual(half, { left: ['edge'], right: [] });
 });
 
 t('a passband wider than the view points both ways', () => {

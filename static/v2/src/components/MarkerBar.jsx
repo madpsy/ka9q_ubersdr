@@ -130,7 +130,7 @@ const SPOT_STYLE = {
 const ARROW_W = 7;                          // base to tip, CSS px
 const ARROW_H = 11;
 const ARROW_PAD = 2;                        // clear of the end of the bar
-const ARROW_GAP = 3;                        // between the dial's arrow and the filter's
+const ARROW_GAP = 3;                        // between one arrow and the next
 const ARROW_HALO = 'rgba(0, 0, 0, 0.72)';
 
 export default function MarkerBar({ width }) {

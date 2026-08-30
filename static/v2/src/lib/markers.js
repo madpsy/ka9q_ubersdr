@@ -221,15 +221,19 @@ export function bandLabelPositions({ x0, x1, labelWidth, baseSpacing = 220, minG
 /**
  * Which indicators each end of the bar owes, as arrays of 'dial' and 'edge'.
  *
- * `edgeHz` is the passband's two edges; one arrow covers both, because the
- * question an indicator answers is "where has my filter gone" and two arrows of
- * the same colour on the same side answer it twice. A filter wider than the view
- * puts one edge off each side and gets an arrow at each end, which is right —
- * that is a passband the view sits inside, and both ends of it are elsewhere.
+ * One arrow per mark that has left the view: the marks on the spectrum are a
+ * dial and two edges, and the indicators are those same three marks seen from
+ * the end of the bar. A whole passband gone off one side is three arrows, not
+ * two — collapsing the pair into one would say the filter is somewhere over
+ * there without saying how much of it, and the view is then sitting outside a
+ * filter whose width is exactly the thing you are trying to find again. A
+ * filter wider than the view puts one edge off each side and gets an arrow at
+ * each end, which is the same rule read the other way.
  *
- * Dial first in each list, so the drawing puts it at the very end of the bar with
- * the filter's inboard of it: they can be off the same side at once, and a fixed
- * order is what stops the pair swapping places as you pan.
+ * Dial first in each list and the edges in the order given, so the drawing puts
+ * the dial at the very end of the bar with the filter's inboard of it: they can
+ * be off the same side at once, and a fixed order is what stops the arrows
+ * swapping places as you pan.
  *
  * A mark exactly on the boundary counts as in view — it is drawn, so there is
  * nothing to point at.
@@ -244,8 +248,10 @@ export function offscreenArrows({ dialHz, edgeHz = [], startFreq, endFreq }) {
 
     if (below(dialHz)) left.push('dial');
     if (above(dialHz)) right.push('dial');
-    if (edgeHz.some(below)) left.push('edge');
-    if (edgeHz.some(above)) right.push('edge');
+    for (const hz of edgeHz) {
+        if (below(hz)) left.push('edge');
+        else if (above(hz)) right.push('edge');
+    }
 
     return { left, right };
 }

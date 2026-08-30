@@ -375,6 +375,8 @@ esbuild filterreset.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/filterreset.cjs --log-level=warning
 esbuild holdpress.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/holdpress.cjs --log-level=warning
+esbuild padiq.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/padiq.cjs --log-level=warning
 esbuild panelhost.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/panelhost.cjs --log-level=warning
 esbuild floatdrag.entry.js --bundle --format=cjs --platform=node \
@@ -528,6 +530,7 @@ node custompanels.test.js
 node layoutpanel.test.js
 node filterreset.test.js
 node holdpress.test.js
+node padiq.test.js
 node panelhost.test.js
 node floatdrag.test.js
 node panelgate.test.js

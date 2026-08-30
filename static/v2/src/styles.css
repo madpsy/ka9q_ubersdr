@@ -3556,6 +3556,11 @@ a.btn { text-decoration: none; }
     font-size: calc(11px * var(--ui-scale));
     font-family: var(--mono);
 }
+/* .select has no disabled state of its own — it sets its own colour and
+   background, which is enough to defeat what the browser would have greyed out
+   — so the one place a pad select goes inert says so itself, at the same weight
+   as the chip beside it. */
+.pad__nr:disabled { opacity: 0.45; cursor: not-allowed; }
 .pad-row .slider, .pad-row .slider-wrap { flex: 1; min-width: 0; }
 
 /* The marker picker under the drum — the pad's only ordinary field, and it takes

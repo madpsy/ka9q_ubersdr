@@ -631,7 +631,7 @@ function ZoomWheel() {
 // until touched — with both on it shows the client's, being the nearer stage
 // to the ear.
 function NoiseSelect() {
-    const { dsp, noise, actions, running } = useRadio();
+    const { dsp, noise, actions, running, tuning } = useRadio();
     // The entry below comes and goes with the bridge's state, so this has to
     // hear about it changing rather than waiting for the next tuning event.
     const rm = getRmNoise();
@@ -664,9 +664,21 @@ function NoiseSelect() {
     // passing everything straight through. The Noise panel is where that gets
     // sorted out, and it says so in red.
     const rmDead = clientType === 'rmn' && !showRmn;
-    const value = noise.nr.enabled && !rmDead
-        ? `client:${clientType}`
-        : dsp.enabled && dsp.filter ? dsp.filter : 'off';
+    // Nothing in this list runs on an I/Q stream. The client engines are wired
+    // out of the graph on the way in (see AudioPlayer.setIQ — signal-dependent
+    // gain applied to I and Q independently stops the pair describing the same
+    // complex signal), and the receiver's inserts are refused outright:
+    // set_dsp on an IQ session is answered with "DSP insert cannot be used
+    // with IQ modes". The Noise panel says all of that in a sentence; the pad
+    // has one row, so it says it the way it already says a chosen-but-dead RMN
+    // — reads off, and does not take a choice it cannot carry out. The stored
+    // selection is untouched and comes back on the way out of IQ.
+    const iq = isIQ(tuning.mode);
+    const value = iq
+        ? 'off'
+        : noise.nr.enabled && !rmDead
+            ? `client:${clientType}`
+            : dsp.enabled && dsp.filter ? dsp.filter : 'off';
 
     const choose = (v) => {
         if (v.startsWith('client:')) {
@@ -687,7 +699,10 @@ function NoiseSelect() {
             className="select pad__nr"
             value={value}
             onChange={(e) => choose(e.target.value)}
-            title="Noise reduction"
+            disabled={iq}
+            title={iq
+                ? 'Noise reduction — not available in IQ mode; your settings are kept'
+                : 'Noise reduction'}
             aria-label="Noise reduction"
         >
             <option value="off">NR Off</option>
@@ -722,14 +737,21 @@ function NoiseSelect() {
 // dropdown whose options were not mutually exclusive would be lying about
 // being a dropdown.
 function NbToggle() {
-    const { noise, actions, running } = useRadio();
+    const { noise, actions, running, tuning } = useRadio();
     if (!running) return null;
-    const on = noise.nb.enabled;
+    // Out of circuit in IQ for the reason the NR beside it is — see
+    // NoiseSelect. Unlit rather than lit-but-dead: an active chip is a claim
+    // that impulses are being cut, and nothing is. The setting is kept.
+    const iq = isIQ(tuning.mode);
+    const on = noise.nb.enabled && !iq;
     return (
         <button
             type="button"
             className={`chip chip--button pad__nb${on ? ' is-active' : ''}`}
-            title="Noise blanker — cuts impulse noise, works alongside any NR"
+            disabled={iq}
+            title={iq
+                ? 'Noise blanker — not available in IQ mode; your setting is kept'
+                : 'Noise blanker — cuts impulse noise, works alongside any NR'}
             aria-pressed={on}
             onClick={() => actions.setNoise({ nb: { enabled: !on } })}
         >

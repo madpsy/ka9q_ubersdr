@@ -1735,6 +1735,14 @@ export default function SpectrumView() {
     // measured yet, which is what makes the marks absent rather than drawn at
     // some default.
     gfx.current.freqRef = refMarks(radio.serverInfo);
+    // Whether the measure tool has the pointer, for the hover band — see
+    // hoverBandPx. Marked dirty on the change rather than left to the next
+    // frame: the spectrum can be paused, and toggling the tool would then leave
+    // the band shaded (or missing) until something else asked for a repaint.
+    if (gfx.current.measuring !== measuring) {
+        gfx.current.measuring = measuring;
+        gfx.current.dirty = true;
+    }
     gfx.current.peaksWanted = peakCount(display.peakMarks);
     gfx.current.peaksSnr = peakSnr(display.peakMinSnr);
     gfx.current.peaksPlace = peakPlace(display.peakMarksAt);
@@ -3802,8 +3810,17 @@ const HOVER_BAND_ALPHA = 0.5;
  * *is* setting the filter, and a ghost of the same filter trailing the pointer while you
  * do it is two answers to one question; a pan does not change the frequency under the
  * pointer at all, so there would be nothing to say.
+ *
+ * Nor while the measure tool has the pointer. The band is a preview of a click — this is
+ * what you would be listening to — and with the tool running a click marks a measurement
+ * and leaves the dial where it is. Shading a passband the pointer cannot move promises a
+ * retune that is not on offer, and it is the wrong shape besides: what a drag is about to
+ * claim is the region between the two ends of it, not a filter's width about one end.
+ * Stopping the tool brings it straight back, since nothing about it is remembered.
  */
-const hoverBandPx = (g, dpr) => (g.hover && !g.drag && !g.edge ? g.hover.x * dpr : null);
+const hoverBandPx = (g, dpr) => (
+    g.hover && !g.drag && !g.edge && !g.measuring ? g.hover.x * dpr : null
+);
 
 // Peak markers: a caret above each of the strongest signals, and its frequency.
 //
@@ -4382,8 +4399,9 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
         + `${tuning.bandwidthLow}|${tuning.bandwidthHigh}|${g.hover ? g.hover.x : ''}|`
         // Whether a gesture is running, because it decides whether the hover band is
         // drawn: without it, letting go of an edge without moving the pointer would
-        // leave the band missing until the next flicker of the mouse.
-        + `${g.drag ? 'd' : ''}${g.edge ? 'e' : ''}|`
+        // leave the band missing until the next flicker of the mouse. The measure
+        // tool decides the same thing and is in here for the same reason.
+        + `${g.drag ? 'd' : ''}${g.edge ? 'e' : ''}${g.measuring ? 'm' : ''}|`
         + `${colVfo}|${colEdge}|${colBand}`;
     if (g.marksKey === key) return;
     g.marksKey = key;

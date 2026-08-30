@@ -565,6 +565,14 @@ export default function TopBar({ compact }) {
     // actions.setBandwidth, which refuses it however it is asked.
     const iqFixed = isIQ(tuning.mode);
 
+    // Under the callsign, where the product name used to be: the server's own
+    // version, which is the one thing about this receiver that is worth a line
+    // of the top bar and is otherwise three clicks away in the Status panel.
+    // Falls back to the name until /api/serverinfo has answered, and on a server
+    // from before the version was published — an empty caption, or a bare "v",
+    // would read as something being broken.
+    const version = serverInfo?.version ? `v${serverInfo.version}` : null;
+
     const linkTone = audioState === 'open' ? 'good'
         : audioState === 'reconnecting' || audioState === 'connecting' ? 'warn'
             : audioState === 'rejected' ? 'bad' : 'idle';
@@ -575,7 +583,16 @@ export default function TopBar({ compact }) {
                 <LinksMenu serverInfo={serverInfo} compact={compact} />
                 <div className="topbar__id">
                     <span className="topbar__name">{serverInfo?.receiver?.callsign || 'UberSDR'}</span>
-                    {!compact && <span className="topbar__sub">UberSDR</span>}
+                    {!compact && (
+                        <span
+                            className={`topbar__sub${version ? ' topbar__sub--version' : ''}`}
+                            /* The product name has to go somewhere once the line
+                               below the callsign is the version. */
+                            title={version ? `UberSDR ${version}` : 'UberSDR'}
+                        >
+                            {version || 'UberSDR'}
+                        </span>
+                    )}
                 </div>
             </div>
 

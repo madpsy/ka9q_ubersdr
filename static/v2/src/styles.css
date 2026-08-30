@@ -504,6 +504,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .topbar__name { font-weight: 650; letter-spacing: 0.01em; }
 .topbar__sub { font-size: calc(10.5px * var(--ui-scale)); text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-faint); }
+/* A version is not a caption: uppercasing it gives "V0.1.61", and the `v` is
+   lower case wherever else a version is written. The tracking stays — it is what
+   makes the line sit under the callsign as a caption rather than a second
+   reading. */
+.topbar__sub--version { text-transform: none; }
 
 .topbar__clock {
     display: flex;

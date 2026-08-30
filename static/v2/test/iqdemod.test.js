@@ -1288,12 +1288,17 @@ t('the canvas has a fallback for every slot', () => {
 
 // ── where it lives ──────────────────────────────────────────────────────────
 
-t('the panel ships open in the left dock', () => {
+t('the panel ships collapsed, not hidden, in the left dock', () => {
     const entry = PANEL_BY_ID.iqdemod;
     assert.ok(entry, 'no iqdemod entry in the panel registry');
     assert.strictEqual(entry.dock, 'left');
-    // Enabled by default: neither shipped collapsed nor shipped hidden.
-    assert.notStrictEqual(entry.defaultOpen, false);
+    // Collapsed rather than open: the body costs a dock column that has more to
+    // show than room to show it, and nothing here runs until Start is pressed.
+    assert.strictEqual(entry.defaultOpen, false);
+    // But not hidden, which is the part that matters. A closed section still
+    // draws its header, so the panel is found by reading the dock; hidden would
+    // take the Layout panel to get back, and this is the only entry point to
+    // browser-side demodulation.
     assert.notStrictEqual(entry.defaultHidden, true);
 });
 

@@ -255,15 +255,23 @@ const BUILT_IN = [
     // Demodulating the quadrature stream in the browser, which is the one way
     // of listening on this receiver that does not go through the server's
     // demodulator — so the offset can sit anywhere in the 12 kHz without the
-    // dial moving. Ships open, because a panel nobody can find is a feature
-    // nobody has: it is the entry point to a mode the interface otherwise only
-    // mentions in a warning dialog. It costs nothing until Start is pressed.
+    // dial moving.
+    //
+    // Ships collapsed. It shipped open for a while, on the argument that a panel
+    // nobody can find is a feature nobody has — this being the entry point to a
+    // mode the interface otherwise only mentions in a warning dialog. That
+    // argument was against the wrong thing: `hidden` is what makes a panel
+    // unfindable, and collapsed is not hidden. A closed section still draws its
+    // full header in the dock — icon, title, chevron — so this is a row reading
+    // "IQ Demod" either way, and being open bought discoverability it already
+    // had at the price of a dock column that has to hold everything else too.
     // Minimal is the operating controls without the gain, the AGC or the prose.
     {
         id: 'iqdemod',
         title: 'IQ Demod',
         icon: <Icon.Waves />,
         dock: 'left',
+        defaultOpen: false,
         minimal: true,
         Component: IQPanel,
     },
@@ -649,15 +657,16 @@ const BUILT_IN = [
     // dial and of the display, and an operator reaching for one has usually just
     // reached for the other.
     //
-    // Ships open and visible. It was hidden at first, on the reasoning that a
-    // panel which takes the display's presses — a drag draws a region instead
-    // of panning, and a click does not tune — should be one somebody went and
-    // found. That was the wrong call: it made the panel undiscoverable rather
-    // than deliberate, which is not the same thing. What guards the mode is that
+    // Ships collapsed, which is not the same as the hidden it started out as.
+    // Hiding it was the wrong call — a panel that takes the display's presses,
+    // where a drag draws a region instead of panning and a click does not tune,
+    // ought to be something you notice exists, and hidden made it undiscoverable
+    // rather than deliberate. Collapsed is the middle the first two attempts
+    // missed: the header is there in the dock with its icon and title, so it is
+    // found by reading the column, while the body stays out of a dock that has
+    // more to show than room to show it. What guards the mode either way is that
     // nothing happens until Start is pressed, and that once it is there is a
-    // badge over the spectrum saying so with the Stop button on it. Idle, this
-    // panel is a row of three buttons and a line of text, so it costs the dock
-    // almost nothing to be open.
+    // badge over the spectrum saying so with the Stop button on it.
     //
     // Minimal: the readings and the run, without the buttons that act on them
     // or the settings behind them. The rule the other panels follow — a cut-down
@@ -668,6 +677,7 @@ const BUILT_IN = [
         title: 'Measure',
         icon: <Icon.Callipers />,
         dock: 'right',
+        defaultOpen: false,
         minimal: true,
         Component: MeasurePanel,
     },

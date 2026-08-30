@@ -383,6 +383,60 @@ t('a reading that could not be taken is missing from its series, not zero', () =
     assert.strictEqual(m.seriesOf(null, 'widthHz').length, 0);
 });
 
+t('a dense series is thinned to fit the pixels, and a short one is left alone', () => {
+    // Two minutes at four readings a second is more points than a dock-column
+    // chart has pixels, and a curve through all of them is a fuzzy band rather
+    // than a line.
+    const dense = [];
+    for (let i = 0; i < 480; i++) dense.push({ t: i * 250, v: i });
+    const thin = m.decimate(dense, 60);
+    assert.ok(thin.length <= 60, `still ${thin.length} points`);
+    assert.ok(thin.length >= 55, `thinned too far: ${thin.length}`);
+    // The ends stay where they were, so the line still starts and finishes at
+    // the moments it did.
+    assert.ok(thin[0].t < 2000, `${thin[0].t}`);
+    assert.ok(thin[thin.length - 1].t > 118_000, `${thin[thin.length - 1].t}`);
+
+    // A series that already fits is returned untouched — nothing is averaged
+    // that did not need to be.
+    const few = [{ t: 0, v: 1 }, { t: 1, v: 2 }];
+    assert.strictEqual(m.decimate(few, 60), few);
+    assert.strictEqual(m.decimate([], 60).length, 0);
+});
+
+t('thinning averages within a bucket rather than picking one point out of it', () => {
+    // Picking is what makes a dense trace twitch: which sample wins a bucket
+    // changes as the window scrolls, so the line moves while the data does not.
+    // A mean of a straight line is a point on that line.
+    const line = [];
+    for (let i = 0; i < 100; i++) line.push({ t: i * 100, v: i });
+    const thin = m.decimate(line, 10);
+    for (const p of thin) {
+        // v = t / 100 for every point on the input, so it must be for the mean
+        // of any run of them too.
+        assert.ok(Math.abs(p.v - p.t / 100) < 1e-9, `${p.t} -> ${p.v}`);
+    }
+    // A flat series stays flat rather than acquiring a shape.
+    const flatLine = line.map((p) => ({ t: p.t, v: 7 }));
+    assert.deepStrictEqual([...new Set(m.decimate(flatLine, 10).map((p) => p.v))], [7]);
+});
+
+t('the history outlives the window the chart draws, and the lag behind it', () => {
+    // The left edge is HISTORY_MS behind a moment that is itself held back by
+    // the draw lag, and the segment crossing it starts at a point older still.
+    // Trimmed to the window exactly, a gap opens at the left edge and grows and
+    // shrinks with every sample.
+    const run = m.newRun(0);
+    const frame = { snrDb: 20, powerDb: -50, peakDb: -40, floorDb: -100, medianDb: -90, crestDb: 6, flatnessDb: -3, peakHz: 1 };
+    const now = 200_000;
+    for (let t = 0; t <= now; t += 1000) m.accumulate(run, frame, t, {});
+    const back = now - run.history[0].t;
+    // 250 ms is the most drawLag will ever hold the edge back — see
+    // lib/rollingChart.js, where it is clamped.
+    assert.ok(back > m.HISTORY_MS + 250,
+        `only ${back} ms kept, and the chart draws ${m.HISTORY_MS + 250} ms of it`);
+});
+
 t('an axis never draws weather: a steady reading gets the floor, not its own noise', () => {
     // The failure: auto-scaling a line that has moved by a tenth of a decibel
     // fills the box with what looks like a fade.

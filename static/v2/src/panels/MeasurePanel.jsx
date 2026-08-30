@@ -32,11 +32,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { Button, Empty, Field, Icon, Readout, Segmented } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { formatFreqExact, formatSpan } from '../lib/format.js';
-import { strokeCurve, xAt } from '../lib/rollingChart.js';
+import { resolveMaxFps, useDisplay } from '../display/DisplayContext.jsx';
+import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { formatFreqExact, formatSpan, padReading } from '../lib/format.js';
+import { drawLag, medianGap, strokeCurve, xAt } from '../lib/rollingChart.js';
 import {
     HISTORY_MS, OBW_PERCENTS, X_DB_LEVELS, axisFor, busyRuns, drift, histogram, occupancyOf,
-    reportLines, seriesOf, spreadOf,
+    decimate, reportLines, seriesOf, spreadOf,
 } from '../lib/measure.js';
 import {
     AVERAGE_MS, clearMeasure, measureSettings, onMeasureSettings, saveMeasureSettings,
@@ -44,13 +46,34 @@ import {
 } from '../lib/measureTool.js';
 import { useMeasureResult, useMeasureState } from '../lib/useMeasure.js';
 
-const dbText = (v, places = 1) => (Number.isFinite(v) ? v.toFixed(places) : '—');
+/**
+ * A decibel reading at a fixed width, so the card under it never changes shape.
+ *
+ * The bug this is here for: the unit sits beside the number until it no longer
+ * fits, and then wraps under it. A noise floor crossing −100 dB gains a digit,
+ * the unit drops to a second line, the card grows, and every card below it moves
+ * — several times a second, on a panel somebody is trying to read a number off.
+ *
+ * padReading pads with U+00A0, which in this typeface is a digit wide, so
+ * "−99.5" and "−100.5" occupy the same six columns and the unit beside them
+ * never moves at all. It is what the Signal panel's meters already use, for the
+ * same reason.
+ */
+const dbText = (v) => padReading(v, 3, 1);
 
-/** A signed frequency offset, spoken the way an operator would say it. */
+/**
+ * A signed frequency offset.
+ *
+ * This used to say "on the dial" for an offset that rounded to zero, which was
+ * friendlier and eleven characters long — nearly twice any other value this card
+ * can hold, so the card reflowed the moment the peak wandered onto the dial and
+ * off again. A reading that changes shape as well as value is the thing this
+ * panel cannot afford.
+ */
 function offsetText(hz) {
     if (!Number.isFinite(hz)) return '—';
     const r = Math.round(hz);
-    if (r === 0) return 'on the dial';
+    if (r === 0) return '0 Hz';
     return `${r > 0 ? '+' : '−'}${formatSpan(Math.abs(r))}`;
 }
 
@@ -139,96 +162,175 @@ const CHARTS = {
 const axisText = (v, hz) => (hz ? formatSpan(Math.abs(v)) : `${v.toFixed(1)} dB`);
 
 /**
- * One expanded chart.
+ * One expanded chart, painted.
+ *
+ * A module function taking a canvas, the state and a moment — the shape the
+ * Signal panel's drawSnr has, and for its reasons: the caller is a frame loop,
+ * and a loop that had to reach into a component for its inputs would restart
+ * every time one of them changed.
  *
  * All four kinds share this canvas, its sizing and its colours, because they
  * share a box and must look like one family. What differs is thirty lines in
  * the middle.
  */
-function MeasureChart({ spec, run, at, occupancyDb }) {
+function paintChart(c, { spec, run, occupancyDb }, now) {
+    if (!c) return;
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    const w = Math.max(1, Math.round(c.clientWidth * dpr));
+    const h = Math.max(1, Math.round(CHART_H * dpr));
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    // Read off this canvas rather than through lib/spectrumTrace's
+    // themeColors(). That cache is keyed on the theme alone and filled by
+    // whichever caller asks first, so a caller with a short list of variables
+    // leaves every later caller's missing — and the spectrum's own draw loop is
+    // one of them.
+    const cs = window.getComputedStyle(c);
+    const accent = cs.getPropertyValue('--accent').trim() || '#08a2fb';
+    const rule = cs.getPropertyValue('--border').trim() || 'rgba(255,255,255,0.14)';
+    const faint = cs.getPropertyValue('--surface-3').trim() || 'rgba(255,255,255,0.06)';
+
+    ctx.lineWidth = Math.max(1, dpr);
+    ctx.strokeStyle = rule;
+    ctx.beginPath();
+    ctx.moveTo(0, h - 0.5);
+    ctx.lineTo(w, h - 0.5);
+    ctx.stroke();
+
+    const raw = seriesOf(run, spec.key);
+
+    if (spec.kind === 'histogram') {
+        // Every reading, not the thinned line: a distribution is a count, and
+        // averaging pairs of samples together before counting them would be a
+        // count of something else.
+        const hist = histogram(raw.map((p) => p.v));
+        if (!hist || !hist.max) return;
+        const bw = w / hist.counts.length;
+        ctx.fillStyle = accent;
+        for (let i = 0; i < hist.counts.length; i++) {
+            const bh = (hist.counts[i] / hist.max) * (h - 2);
+            if (bh <= 0) continue;
+            // A pixel of gap, so adjacent buckets read as bars rather than as
+            // one filled area.
+            ctx.fillRect(i * bw, h - 1 - bh, Math.max(1, bw - dpr), bh);
+        }
+        return;
+    }
+
+    // The right-hand edge is held one sample-interval behind live.
+    //
+    // Without it the newest reading appears *at* the edge and the segment
+    // leading to it arrives all at once — a twitch at the end of the line, once
+    // per sample. Held back, that stretch of trace is already known by the time
+    // it comes into view and the line arrives at the edge instead of appearing
+    // there. Everything newer is drawn beyond the edge and clipped by the
+    // canvas, which is where it should be. See lib/rollingChart.js.
+    const at = now - drawLag(medianGap(raw));
+
+    // Thinned to about one point every three pixels before it is drawn. At two
+    // minutes and four readings a second there are more points than pixels, and
+    // a curve through all of them is a fuzzy band rather than a line — see
+    // decimate(). The lag above is taken from the *raw* gaps, because it is
+    // about how often a reading actually arrives.
+    const pts = decimate(raw, Math.max(2, Math.round(c.clientWidth / 3)));
+
+    if (spec.kind === 'raster') {
+        // Blocks rather than a line: this is a state over an interval, and a
+        // line between two samples of a boolean invents a ramp between them
+        // that never happened.
+        for (const seg of busyRuns(run, occupancyDb, now)) {
+            const x0 = xAt(seg.from, at, HISTORY_MS, w);
+            const x1 = xAt(seg.to, at, HISTORY_MS, w);
+            ctx.fillStyle = seg.busy ? accent : faint;
+            ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h - 1);
+        }
+        return;
+    }
+
+    if (pts.length < 2) return;
+    const mean = spec.kind === 'deviation'
+        ? pts.reduce((a, p) => a + p.v, 0) / pts.length
+        : null;
+    const ax = axisFor(pts.map((p) => p.v), spec.least, mean);
+    const yOf = (v) => h - ((v - ax.lo) / (ax.hi - ax.lo)) * h;
+
+    // The reference line a deviation is measured from. Drawn under the trace,
+    // so a line sitting exactly on it still reads as the trace.
+    if (ax.mid != null) {
+        ctx.strokeStyle = rule;
+        ctx.setLineDash([2 * dpr, 3 * dpr]);
+        ctx.beginPath();
+        ctx.moveTo(0, yOf(ax.mid));
+        ctx.lineTo(w, yOf(ax.mid));
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    ctx.lineWidth = Math.max(1.2, 1.2 * dpr);
+    ctx.lineJoin = 'round';
+    strokeCurve(ctx, pts.map((p) => ({ x: xAt(p.t, at, HISTORY_MS, w), y: yOf(p.v) })), () => accent);
+}
+
+/**
+ * The canvas, and the clock that drives it.
+ *
+ * Two clocks are in play and tying the picture to the wrong one is what makes a
+ * live chart look cheap. The readings arrive four times a second and reach the
+ * screen five; the display refreshes sixty. Redraw on the data's clock — which
+ * is what this did at first, through a `useEffect` keyed on the reading — and
+ * the trace hops sideways by a fraction of a column five times a second and
+ * shimmers, however smooth the curve through the points is.
+ *
+ * So the picture is tied to the display's clock instead: a frame loop, x as a
+ * function of time rather than of position in an array, and between two
+ * readings the same points are simply drawn a fraction of a column further
+ * left. Nothing is invented — every point on screen is a reading that happened,
+ * at the place its timestamp puts it. This is exactly what the Signal panel's
+ * SNR trace does, and lib/rollingChart.js is the shared arithmetic behind both.
+ *
+ * The histogram is deliberately left out of the loop. It has no time axis, so
+ * there is nothing to animate, and an animation frame requested for ever to
+ * redraw an unchanged picture is a cost charged to the compositor for nothing —
+ * the same reason the spectrum's own loop stops when it has nothing to draw.
+ */
+function MeasureChart({ spec, run, at, occupancyDb, maxFps }) {
     const ref = useRef(null);
+    // What the loop reads. A ref rather than the loop's dependencies, so a new
+    // reading does not tear down and restart the frame loop four times a second.
+    const live = useRef(null);
+    live.current = { spec, run, occupancyDb };
+
+    const scrolls = spec.kind !== 'histogram';
 
     useEffect(() => {
-        const c = ref.current;
-        if (!c) return undefined;
-        const dpr = Math.min(3, window.devicePixelRatio || 1);
-        const w = Math.max(1, Math.round(c.clientWidth * dpr));
-        const h = Math.max(1, Math.round(CHART_H * dpr));
-        if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
-        const ctx = c.getContext('2d');
-        if (!ctx) return undefined;
-        ctx.clearRect(0, 0, w, h);
+        if (!scrolls) return undefined;
+        let raf = 0;
+        let timer = 0;
+        // The display's own frame cap, honoured here as everywhere: this panel
+        // is not worth a paint the spectrum has been told not to take. Capped,
+        // the wait is a timer and the paint is still an animation frame, so
+        // nothing is scheduled between ticks and a hidden tab stops dead.
+        const capMs = maxFps > 0 ? 1000 / maxFps : 0;
+        const frame = () => {
+            // Date.now(), not performance.now(): the history is timestamped on
+            // the wall clock by MeasureWatch, and a chart is a subtraction of
+            // two moments that must come from the same clock.
+            paintChart(ref.current, live.current, Date.now());
+            if (capMs) timer = setTimeout(() => { raf = requestAnimationFrame(frame); }, capMs);
+            else raf = requestAnimationFrame(frame);
+        };
+        raf = requestAnimationFrame(frame);
+        return () => { cancelAnimationFrame(raf); clearTimeout(timer); };
+    }, [scrolls, maxFps]);
 
-        // Read off this canvas rather than through lib/spectrumTrace's
-        // themeColors(). That cache is keyed on the theme alone and filled by
-        // whichever caller asks first, so a caller with a short list of
-        // variables leaves every later caller's missing — and the spectrum's own
-        // draw loop is one of them.
-        const cs = window.getComputedStyle(c);
-        const accent = cs.getPropertyValue('--accent').trim() || '#08a2fb';
-        const rule = cs.getPropertyValue('--border').trim() || 'rgba(255,255,255,0.14)';
-        const faint = cs.getPropertyValue('--surface-3').trim() || 'rgba(255,255,255,0.06)';
-
-        ctx.lineWidth = Math.max(1, dpr);
-        ctx.strokeStyle = rule;
-        ctx.beginPath();
-        ctx.moveTo(0, h - 0.5);
-        ctx.lineTo(w, h - 0.5);
-        ctx.stroke();
-
-        if (spec.kind === 'raster') {
-            // Blocks rather than a line: this is a state over an interval, and
-            // a line between two samples of a boolean invents a ramp between
-            // them that never happened.
-            for (const seg of busyRuns(run, occupancyDb, at)) {
-                const x0 = xAt(seg.from, at, HISTORY_MS, w);
-                const x1 = xAt(seg.to, at, HISTORY_MS, w);
-                ctx.fillStyle = seg.busy ? accent : faint;
-                ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h - 1);
-            }
-            return undefined;
-        }
-
-        if (spec.kind === 'histogram') {
-            const hist = histogram(seriesOf(run, spec.key).map((p) => p.v));
-            if (!hist || !hist.max) return undefined;
-            const bw = w / hist.counts.length;
-            ctx.fillStyle = accent;
-            for (let i = 0; i < hist.counts.length; i++) {
-                const bh = (hist.counts[i] / hist.max) * (h - 2);
-                if (bh <= 0) continue;
-                // A pixel of gap, so adjacent buckets read as bars rather than
-                // as one filled area.
-                ctx.fillRect(i * bw, h - 1 - bh, Math.max(1, bw - dpr), bh);
-            }
-            return undefined;
-        }
-
-        const pts = seriesOf(run, spec.key);
-        if (pts.length < 2) return undefined;
-        const mean = spec.kind === 'deviation'
-            ? pts.reduce((a, p) => a + p.v, 0) / pts.length
-            : null;
-        const ax = axisFor(pts.map((p) => p.v), spec.least, mean);
-        const yOf = (v) => h - ((v - ax.lo) / (ax.hi - ax.lo)) * h;
-
-        // The reference line a deviation is measured from. Drawn under the
-        // trace, so a line sitting exactly on it still reads as the trace.
-        if (ax.mid != null) {
-            ctx.strokeStyle = rule;
-            ctx.setLineDash([2 * dpr, 3 * dpr]);
-            ctx.beginPath();
-            ctx.moveTo(0, yOf(ax.mid));
-            ctx.lineTo(w, yOf(ax.mid));
-            ctx.stroke();
-            ctx.setLineDash([]);
-        }
-
-        ctx.lineWidth = Math.max(1.2, 1.2 * dpr);
-        ctx.lineJoin = 'round';
-        strokeCurve(ctx, pts.map((p) => ({ x: xAt(p.t, at, HISTORY_MS, w), y: yOf(p.v) })), () => accent);
-        return undefined;
-    }, [spec, run, at, occupancyDb]);
+    // The still picture: repainted when its data changes and not otherwise.
+    useEffect(() => {
+        if (scrolls) return;
+        paintChart(ref.current, live.current, Date.now());
+    }, [scrolls, spec, run, at, occupancyDb]);
 
     return (
         <div className="measure-chart">
@@ -269,7 +371,7 @@ function chartRange(spec, run, occupancyDb) {
  * affordance that does nothing is worse than none, because it has to be tried
  * before it can be ruled out.
  */
-function Card({ id, label, value, unit, wide, open, onOpen, run, at, occupancyDb }) {
+function Card({ id, label, value, unit, wide, open, onOpen, run, at, occupancyDb, maxFps }) {
     const spec = CHARTS[id];
     const readout = <Readout label={label} value={value} unit={unit} />;
     // Nothing measured yet is nothing to chart. The card stays, and stays
@@ -290,7 +392,13 @@ function Card({ id, label, value, unit, wide, open, onOpen, run, at, occupancyDb
                 <Icon.Bars size={11} className="measure-card__cue" />
             </button>
             {open && (
-                <MeasureChart spec={spec} run={run} at={at} occupancyDb={occupancyDb} />
+                <MeasureChart
+                    spec={spec}
+                    run={run}
+                    at={at}
+                    occupancyDb={occupancyDb}
+                    maxFps={maxFps}
+                />
             )}
         </div>
     );
@@ -298,6 +406,10 @@ function Card({ id, label, value, unit, wide, open, onOpen, run, at, occupancyDb
 
 export default function MeasurePanel({ minimal }) {
     const { tuning, actions, view } = useRadio();
+    const display = useDisplay();
+    // The same cap the Signal panel's traces honour, resolved the same way: a
+    // phone gets 30 unless somebody has said otherwise, a desktop is uncapped.
+    const maxFps = resolveMaxFps(display.maxFps, useMediaQuery(TOUCH_QUERY));
     const { active, selection, drawing, frozen } = useMeasureState();
     const result = useMeasureResult();
     const [settings, setSettings] = useState(measureSettings);
@@ -326,6 +438,7 @@ export default function MeasurePanel({ minimal }) {
             run={run}
             at={(result && result.at) || Date.now()}
             occupancyDb={settings.occupancyDb}
+            maxFps={maxFps}
         />
     );
 
@@ -377,7 +490,7 @@ export default function MeasurePanel({ minimal }) {
     }, [active, selection, drawing, stats, result]);
 
     return (
-        <div className="stack">
+        <div className="stack measure-panel">
             <div className="measure-panel__head">
                 <Button
                     variant={active ? 'danger' : 'primary'}
@@ -544,13 +657,20 @@ export default function MeasurePanel({ minimal }) {
                             busy == null ? '—' : Math.round(busy * 100),
                             busy == null ? '' : '%',
                         )}
-                        {/* The distribution, not the trace: one hump and two
-                            humps have the same min, max and σ, and are a steady
-                            signal and an intermittent one. */}
+                        {/* One number, not two. "−10.0 – 99.9" is a compound
+                            twelve characters wide whose length changes with
+                            every digit either end of it, so the card reflowed
+                            constantly — and no padding can fix a value that is
+                            two values. The spread is the figure you compare
+                            between signals anyway, and the endpoints are in the
+                            chart's own caption and in the copied report.
+                            The chart is the distribution, not the trace: one
+                            hump and two humps have the same spread and σ, and
+                            are a fading signal and an intermittent one. */}
                         {card(
                             'snr-spread',
-                            'SNR range',
-                            snrRun ? `${dbText(snrRun.min)} – ${dbText(snrRun.max)}` : '—',
+                            'SNR spread',
+                            snrRun ? dbText(snrRun.range) : '—',
                             snrRun ? 'dB' : '',
                         )}
                         <Readout
@@ -565,9 +685,12 @@ export default function MeasurePanel({ minimal }) {
                             label="Peak drift"
                             value={wander ? formatSpan(wander.range) : '—'}
                         />
+                        {/* As above: "2.40 kHz – 2.60 kHz" is nineteen
+                            characters and three lines in a dock column. How much
+                            the width moved is the reading. */}
                         <Readout
-                            label="Width range"
-                            value={widthRun ? `${formatSpan(widthRun.min)} – ${formatSpan(widthRun.max)}` : '—'}
+                            label="Width spread"
+                            value={widthRun ? formatSpan(widthRun.range) : '—'}
                         />
                         <Readout label="Frames" value={run.frames} />
                     </div>

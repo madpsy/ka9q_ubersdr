@@ -12063,6 +12063,29 @@ a.btn { text-decoration: none; }
 
 .measure-acts { display: flex; flex-wrap: wrap; gap: 6px; }
 
+/* Every card in this panel is the same height whether its unit sits beside the
+   number or under it.
+ *
+ * The readings here change several times a second, and two of the things that
+ * change are the *shape* of a card rather than its value: a noise floor crossing
+ * −100 dB gains a digit, which pushes "dB rel" onto a second line, which makes
+ * the card a line taller, which moves every card below it. Watching a number you
+ * are trying to read walk down the panel is worse than the overflow this
+ * replaced.
+ *
+ * Fixed-width readings (see dbText) stop the unit moving on the cards that hold
+ * a decibel figure. This is the guarantee for the rest: one value line plus one
+ * unit line, always reserved. 1.25em is the value's own line box — line-height
+ * is a number, so it multiplies each element's font size — and 0.833em is the
+ * unit's, being 10px against the value's 15px. Both scale with --ui-scale
+ * because `em` resolves against the value's own computed size.
+ *
+ * Scoped to this panel deliberately. The same latent reflow exists wherever a
+ * readout carries a long unit, but nowhere else does the number change while
+ * you are looking at it, and reserving a line everywhere would make every panel
+ * in the interface taller to fix a flicker only this one has. */
+.measure-panel .readout__value { min-height: 2.1em; }
+
 /* A card that opens into a chart.
  *
  * The head is a button and the chart is not: pressing the picture must not put

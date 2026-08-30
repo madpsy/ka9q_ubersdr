@@ -34,6 +34,9 @@ globalThis.cancelAnimationFrame = () => {};
 globalThis.fetch = () => Promise.reject(new Error('no network in a test'));
 globalThis.addEventListener = () => {};
 globalThis.removeEventListener = () => {};
+// The panel reads the display's frame cap, which asks whether this is a
+// touchscreen — the same question the Signal panel's traces ask.
+globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 
 const {
     deep, render, reset, walk, words, MeasurePanel, MeasureOverlay, measure, tool,
@@ -49,6 +52,20 @@ function say(node) {
             : ((n.props && n.props.children != null) ? [n.props.children] : []);
         return c.filter((x) => typeof x === 'string' || typeof x === 'number').map(String);
     }).join(' ');
+}
+
+/** Every readout in a tree, as `{label, num, unit}`. */
+function readouts(tree) {
+    return deep(tree)
+        .filter((n) => n && n.props && n.props.className === 'readout')
+        .map((n) => {
+            const parts = deep(n).filter((x) => x && x.props);
+            const of = (cls) => {
+                const hit = parts.find((x) => String(x.props.className || '') === cls);
+                return hit ? say(hit).trim() : '';
+            };
+            return { label: of('readout__label'), num: of('readout__num'), unit: of('readout__unit') };
+        });
 }
 
 /** The <button> whose label reads as `label` — not the <span> inside it. */
@@ -218,6 +235,50 @@ t('no unit is long enough to push a reading out of its card', () => {
     // the unit of that reading is per cent.
     const long = units.filter((u) => u.length > 10);
     assert.deepStrictEqual(long, [], 'units this long belong in the label');
+});
+
+t('a decibel reading is the same width whatever its magnitude', () => {
+    // The bug: a noise floor crossing −100 dB gains a digit, which pushes its
+    // unit onto a second line, which makes the card a line taller, which moves
+    // every card below it — several times a second, on a panel somebody is
+    // trying to read a number off.
+    const floorOf = (db) => {
+        const a = new Float32Array(N).fill(db);
+        for (let i = 0; i < N; i++) a[i] = Math.max(a[i], db + 40 - Math.abs(i - 50) * 4);
+        return a;
+    };
+    const numFor = (db) => {
+        state({
+            active: true,
+            selection: REGION,
+            result: measure.readingOf(floorOf(db), VIEW, REGION, tool.measureSettings(), null, 0),
+        });
+        reset();
+        const row = readouts(render(MeasurePanel, {}, context()).tree)
+            .find((r) => /NOISE FLOOR|Noise floor/i.test(r.label));
+        assert.ok(row, 'no Noise floor readout');
+        return row.num;
+    };
+
+    const two = numFor(-99.5);
+    const three = numFor(-100.5);
+    assert.notStrictEqual(two, three, 'the fixture should actually change the reading');
+    assert.strictEqual(two.length, three.length,
+        `"${two}" and "${three}" must occupy the same columns`);
+});
+
+t('no reading is long enough to reflow the card it is in', () => {
+    state({ active: true, selection: REGION, result: withRun(fixture()) });
+    reset();
+    const { tree } = render(MeasurePanel, {}, context());
+    // A card is about nine characters of the value's monospace in a narrow dock
+    // column. A full-precision frequency is longer than that and is why those
+    // cards take the whole row instead; everything else has to fit.
+    const EXACT = /\d\.\d{6} MHz/;
+    const long = readouts(tree)
+        .filter((r) => r.num && !EXACT.test(r.num) && r.num.length > 10)
+        .map((r) => `${r.label}: ${r.num}`);
+    assert.deepStrictEqual(long, [], 'a value this long needs its own row, or to be one number');
 });
 
 t('each way of having no reading says which one it is, and they differ', () => {

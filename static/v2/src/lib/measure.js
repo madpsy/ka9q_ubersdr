@@ -556,6 +556,18 @@ export const HISTORY_MS = 120000;
  */
 export const HISTORY_EVERY_MS = 250;
 
+/**
+ * How much more than the window is kept.
+ *
+ * The chart is drawn slightly behind live — see drawLag in lib/rollingChart.js
+ * — so the moment at its left edge is a little older than `now − HISTORY_MS`,
+ * and the segment crossing that edge starts at a point older still. Trimming to
+ * the window exactly leaves a gap at the left that grows and shrinks with every
+ * sample. The Signal panel's traces keep the same second in hand for the same
+ * reason.
+ */
+export const HISTORY_KEEP_MS = 1000;
+
 export function newRun(nowMs) {
     return {
         startedAt: nowMs,
@@ -626,7 +638,7 @@ export function accumulate(run, stats, nowMs, { occupancyDb = DEFAULT_OCCUPANCY_
  * it so the segment crossing the left edge still has somewhere to start — the
  * same rule, and the same reason, as lib/rollingChart.js's trimBefore.
  */
-export function trimHistory(run, nowMs, spanMs = HISTORY_MS) {
+export function trimHistory(run, nowMs, spanMs = HISTORY_MS + HISTORY_KEEP_MS) {
     const cutoff = nowMs - spanMs;
     const h = run.history;
     let keep = 0;
@@ -682,6 +694,61 @@ export function seriesOf(run, key) {
         const v = p[key];
         if (Number.isFinite(v)) out.push({ t: p.t, v });
     }
+    return out;
+}
+
+/**
+ * Thin a series to at most `max` points, by averaging within equal buckets of
+ * time.
+ *
+ * The reason a chart needs this at all: two minutes of history at four readings
+ * a second is nearly five hundred points, and a chart two hundred pixels wide
+ * has two and a half of them per pixel. Drawn as a curve that is not a smooth
+ * line — every segment is a fraction of a pixel long and a good deal narrower
+ * than the stroke, so consecutive segments overlap into a thick fuzzy band that
+ * reads as noise. The smoothing between the points has no room to do anything.
+ * The Signal panel's trace looks smooth partly because its ten-second window
+ * holds a point every two pixels, where a curve through them is a curve.
+ *
+ * Averaging within the bucket rather than picking one point out of it, because
+ * picking is what makes a dense trace flicker: which sample wins a bucket
+ * changes as the window scrolls, so the line twitches while the data does not.
+ * A mean moves smoothly as points enter and leave.
+ *
+ * It is a box-window average and it does flatten a brief excursion — that is
+ * what any drawing of more data than there are pixels must do. The exact
+ * extremes are not lost: they are the min and max on the cards beside the
+ * chart, taken over every frame rather than over what fitted on screen.
+ *
+ * A series that already fits is returned untouched, so nothing is averaged that
+ * did not need to be.
+ */
+export function decimate(pts, max) {
+    if (!Array.isArray(pts) || pts.length <= max || max < 2) return pts;
+    const t0 = pts[0].t;
+    const span = pts[pts.length - 1].t - t0;
+    if (!(span > 0)) return pts;
+    const out = [];
+    let bucket = -1;
+    let sumT = 0;
+    let sumV = 0;
+    let n = 0;
+    for (const p of pts) {
+        // The newest point sits exactly on the far edge and would otherwise
+        // land in a (max + 1)th bucket that does not exist.
+        const b = Math.min(max - 1, Math.floor(((p.t - t0) / span) * max));
+        if (b !== bucket) {
+            if (n) out.push({ t: sumT / n, v: sumV / n });
+            bucket = b;
+            sumT = 0;
+            sumV = 0;
+            n = 0;
+        }
+        sumT += p.t;
+        sumV += p.v;
+        n += 1;
+    }
+    if (n) out.push({ t: sumT / n, v: sumV / n });
     return out;
 }
 

@@ -152,17 +152,28 @@
     --accent-line: rgba(8, 162, 251, 0.4);
     --violet: #8b7cf8;
 
-    /* The four browser-side demodulators, on the picture and on the rows that
-       list them. Chosen apart in hue rather than in lightness, because the
-       tie between a passband on a dark canvas and a swatch on a panel is the
-       only thing saying which row is which — and a listener with one of the
-       common colour deficiencies has to be able to make that tie too, which
-       four evenly spaced hues do and a red/green pair does not. Kept off the
-       accent blue, which is the trace itself. */
+    /* The six browser-side demodulators, on the picture and on the rows that
+       list them. Spread around the wheel rather than up and down a lightness
+       ramp: the tie between a passband on a dark canvas and a swatch on a panel
+       is what says which row is which, and a listener with one of the common
+       colour deficiencies has to be able to make that tie too — which separated
+       hues allow and a red/green pair does not.
+
+       No blues, at any of the six. The trace under them is drawn in --accent,
+       which is one, and a marker in the same family would read as part of the
+       picture rather than as a mark on it. That is what decides the set: with
+       the blue quarter of the wheel spent, six leaves about thirty degrees
+       between neighbours at the closest — enough to tell apart, not enough to
+       carry the identity alone, which is why every marker also wears its number.
+
+       Positional, so 1 through 4 are exactly what they were before there were
+       six: an operator with four set up keeps the colours they had. */
     --iq-vfo-1: #f2b544;
     --iq-vfo-2: #45d69a;
     --iq-vfo-3: #f472b6;
     --iq-vfo-4: #a78bfa;
+    --iq-vfo-5: #9ad64a;
+    --iq-vfo-6: #f0836b;
 
     --good: #45d69a;
     --warn: #f2b544;
@@ -250,14 +261,16 @@
 }
 
 [data-theme="light"] {
-    /* The same four hues, taken down far enough to read as ink on white. The
-       dark theme's are chosen to glow on a black canvas and would be washed
-       out here — and these are label colours as much as they are line colours,
-       so contrast against the panel matters as much as against the picture. */
+    /* The same six hues, taken down far enough to read as ink on white. The dark
+       theme's are chosen to glow on a black canvas and would be washed out here
+       — and these are label colours as much as they are line colours, so
+       contrast against the panel matters as much as against the picture. */
     --iq-vfo-1: #b57500;
     --iq-vfo-2: #0f8f63;
     --iq-vfo-3: #c02d78;
     --iq-vfo-4: #6d4bd0;
+    --iq-vfo-5: #5f8a12;
+    --iq-vfo-6: #c24a2c;
 
     --bg: #e9edf3;
     --surface: #ffffff;
@@ -12320,9 +12333,17 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
 }
-/* And where that actually is on the band, when the dock is wide enough to say
-   so. The first thing to go as it narrows — the row still names the demodulator
-   and its place in the stream without it. */
+/* Where it is listening, relative to the dial. The first of the two to go as the
+   dock narrows: the picture above already draws it as a line, and the body
+   repeats it whenever the row is open. */
+.iq-vfo__off {
+    flex: none;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+/* And the frequency itself, which is the number an operator actually has in
+   their head. Kept longer than the offset for that reason, and dropped only when
+   the row cannot hold it either. */
 .iq-vfo__freq {
     flex: none;
     white-space: nowrap;
@@ -12346,6 +12367,30 @@ a.btn { text-decoration: none; }
 }
 .iq-vfo__mute:hover { background: var(--surface-hover); color: var(--text); }
 .iq-vfo__mute.is-muted { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+/* Removing one. Same box as the mute so the row's right-hand end stays a tidy
+   pair, with a little more air between them than the head's own gap: they are
+   the same size and a thumb's width apart, and only one of them can be undone
+   by pressing it again. Red on hover rather than red at rest — a row of four
+   permanently red buttons reads as an alarm rather than as a control. */
+.iq-vfo__del {
+    flex: none;
+    width: 26px;
+    margin-left: 3px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius-sm) - 2px);
+    background: var(--surface);
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.iq-vfo__del:hover:not(:disabled) {
+    background: var(--bad);
+    border-color: var(--bad);
+    color: #fff;
+}
+.iq-vfo__del:disabled { opacity: 0.35; cursor: default; }
 
 /* Its output level, as the row's own underline. Three pixels across the bottom
    of the head, on every row whether or not it is open — which is the point: the

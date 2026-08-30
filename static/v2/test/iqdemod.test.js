@@ -37,7 +37,7 @@ const {
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
-    IQPanel, ListeningCard, vfoSummary, PANEL_BY_ID, GROUPS,
+    IQPanel, ListeningCard, VFO_FALLBACK, vfoSummary, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, VFO_LABELS, DemodChain,
     addVfo, clampOffset, clampWidth, demodSettings, designLowpass, getIQDemod, offsetLimits,
     passbandFor, planFor, planForVfo, removeVfo, resetDemodSettings, saveDemodSettings, selectVfo,
@@ -523,7 +523,7 @@ t('it starts with one', () => {
     assert.strictEqual(st.vfos[0].muted, false);
 });
 
-t('up to four can be added, and no more', () => {
+t('demodulators can be added up to the limit, and no further', () => {
     fresh();
     for (let want = 2; want <= MAX_VFOS; want++) {
         const st = addVfo();
@@ -532,7 +532,7 @@ t('up to four can be added, and no more', () => {
         assert.strictEqual(st.active, want - 1);
     }
     const full = addVfo();
-    assert.strictEqual(full.vfos.length, MAX_VFOS, 'a fifth was added');
+    assert.strictEqual(full.vfos.length, MAX_VFOS, 'one past the limit was added');
     // And there is a label for every one of them, or a row would render blank.
     assert.strictEqual(VFO_LABELS.length, MAX_VFOS);
 });
@@ -644,11 +644,31 @@ t('a stored pan this build does not know becomes centre', () => {
     }
 });
 
-t('a row says what it is, how wide, and where', () => {
+t('a row always says what it is and how wide', () => {
+    // Where it is listening is two further readings and neither is guaranteed a
+    // place on the row — see the header's optional tags. This is the part that
+    // is always there, so it is the part that has to stand on its own.
     fresh({ mode: 'usb', offsetHz: 1200, widths: { usb: 2700 } });
-    assert.strictEqual(vfoSummary(vfo0()), 'USB 2.7k · +1.2 kHz');
+    assert.strictEqual(vfoSummary(vfo0()), 'USB 2.7k');
     updateVfo(0, { mode: 'cw', offsetHz: -3400, widths: { cw: 500 } });
-    assert.strictEqual(vfoSummary(vfo0()), 'CW 500 · −3.4 kHz');
+    assert.strictEqual(vfoSummary(vfo0()), 'CW 500');
+});
+
+t('the header keeps the frequency for longer than the offset', () => {
+    // The frequency is the number somebody has in their head and would read out;
+    // the offset is relative, is already a line on the picture above, and is
+    // repeated in the body whenever the row is open. So as the dock narrows the
+    // offset goes first. The order of the specs is what says so — measureRoom
+    // takes them in keep order — and getting it the other way round would drop
+    // the reading this row exists to show.
+    const src = require('fs').readFileSync(
+        require('path').join(__dirname, '..', 'src', 'panels', 'IQPanel.jsx'), 'utf8',
+    );
+    const specs = src.slice(src.indexOf('useRoomFor(headRef'));
+    const freqAt = specs.indexOf("key: 'freq'");
+    const offsetAt = specs.indexOf("key: 'offset'");
+    assert.ok(freqAt > 0 && offsetAt > 0, 'the header no longer has both tags');
+    assert.ok(freqAt < offsetAt, 'the offset would survive a narrow dock and the frequency would not');
 });
 
 t('a header press selects a row, or closes the one already selected', () => {
@@ -772,7 +792,7 @@ t('abandoning the box tunes nothing', () => {
 // ── picking one off the picture ─────────────────────────────────────────────
 
 t('a press near a marker picks that demodulator up', () => {
-    // With four on one picture a press has two plausible meanings, and this is
+    // With several on one picture a press has two plausible meanings, and this is
     // what tells them apart: near a marker it is "that one", anywhere else it is
     // "the one I am working on, to here".
     const offsets = [-3000, 0, 3000];
@@ -1063,13 +1083,12 @@ t('it never releases a duck that was not its own', () => {
 });
 
 t('every demodulator gets a row, and exactly one is the aimed one', () => {
-    // The layout claim: survey and adjustment at once. Four rows visible so you
-    // can see where they all are, and one of them marked as the one the picture
-    // is aimed at — which is a different question from which rows are open.
+    // The layout claim: survey and adjustment at once. Every demodulator gets a
+    // row so you can see where they all are, and one of them is marked as the
+    // one the picture is aimed at — which is a different question from which
+    // rows are open.
     fresh();
-    addVfo();
-    addVfo();
-    addVfo();
+    while (demodSettings().vfos.length < MAX_VFOS) addVfo();
     selectVfo(1);
     reset();
     const { tree, cleanups } = render(IQPanel, {}, context());
@@ -1151,23 +1170,51 @@ t('a row can be picked without changing anything on it', () => {
     for (const off of cleanups) off();
 });
 
-t('the add button stops at four and remove is absent when there is one', () => {
+const deleteButtons = (tree) => deep(tree).filter((n) => cls(n) === 'iq-vfo__del');
+
+t('the add button stops at the limit, and the last row cannot be deleted', () => {
     fresh();
     reset();
     let out = render(IQPanel, {}, context());
     assert.ok(deepWords(out.tree).includes('Add demodulator'), 'no way to add a second');
-    assert.ok(!deepWords(out.tree).includes('Remove demodulator'),
-        'offered to remove the only demodulator');
+    // Present but refused, rather than absent: a control that comes and goes as
+    // you add and remove is harder to aim at than one that greys out.
+    let dels = deleteButtons(out.tree);
+    assert.strictEqual(dels.length, 1);
+    assert.strictEqual(dels[0].props.disabled, true, 'offered to remove the only demodulator');
     for (const off of out.cleanups) off();
 
-    addVfo();
-    addVfo();
-    addVfo();
+    while (demodSettings().vfos.length < MAX_VFOS) addVfo();
     reset();
     out = render(IQPanel, {}, context());
-    assert.ok(!deepWords(out.tree).includes('Add demodulator'), 'offered a fifth');
-    assert.ok(deepWords(out.tree).includes('Remove demodulator'));
+    assert.ok(!deepWords(out.tree).includes('Add demodulator'), 'offered one past the limit');
+    dels = deleteButtons(out.tree);
+    assert.strictEqual(dels.length, MAX_VFOS, 'a row without a delete');
+    assert.ok(dels.every((n) => n.props.disabled === false));
     for (const off of out.cleanups) off();
+});
+
+t('deleting from a row removes that row, open or not', () => {
+    // On the head beside the mute rather than in the body, so a demodulator can
+    // be got rid of without expanding it first — the same reason pan and mute
+    // are there.
+    fresh({ mode: 'usb' });
+    addVfo();
+    updateVfo(1, { mode: 'cw' });
+    addVfo();
+    updateVfo(2, { mode: 'am' });
+    selectVfo(2);
+    updateVfo(0, { open: false });
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const dels = deleteButtons(tree);
+    assert.strictEqual(dels.length, 3);
+    // The first row, which is collapsed and is not the one being edited.
+    dels[0].props.onClick();
+    const st = demodSettings();
+    assert.strictEqual(st.vfos.length, 2);
+    assert.deepStrictEqual(st.vfos.map((v) => v.mode), ['cw', 'am'], 'it removed the wrong one');
+    for (const off of cleanups) off();
 });
 
 t('pressing a marker on the picture picks that demodulator up', () => {
@@ -1185,6 +1232,58 @@ t('pressing a marker on the picture picks that demodulator up', () => {
     scope.props.onPick(1);
     assert.strictEqual(demodSettings().active, 1);
     for (const off of cleanups) off();
+});
+
+// ── one colour each ─────────────────────────────────────────────────────────
+//
+// Raising MAX_VFOS is a one-line change everywhere except here: a demodulator
+// whose --iq-vfo-N is not defined draws its marker and its passband in the
+// canvas default, which on this picture is black on near-black — a demodulator
+// that is running, is audible, and cannot be seen or picked up. Nothing else in
+// the tree would notice.
+
+t('every demodulator slot has a colour, in both themes', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+
+    for (let i = 1; i <= MAX_VFOS; i++) {
+        const hits = [...css.matchAll(new RegExp(`--iq-vfo-${i}:\\s*([^;]+);`, 'g'))]
+            .map((m) => m[1].trim());
+        assert.strictEqual(hits.length, 2,
+            `--iq-vfo-${i} is defined ${hits.length} times; want one per theme`);
+    }
+    // And nothing past the limit, which would be a colour nothing can reach.
+    assert.strictEqual(css.includes(`--iq-vfo-${MAX_VFOS + 1}:`), false,
+        'a colour defined for a demodulator that cannot exist');
+});
+
+t('no two demodulators share a colour', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+    // Two per slot, in source order: the dark theme's block comes first and the
+    // light one after it, so the odd and even picks are the two themes.
+    const dark = [];
+    const light = [];
+    for (let i = 1; i <= MAX_VFOS; i++) {
+        const hits = [...css.matchAll(new RegExp(`--iq-vfo-${i}:\\s*([^;]+);`, 'g'))]
+            .map((m) => m[1].trim().toLowerCase());
+        dark.push(hits[0]);
+        light.push(hits[1]);
+    }
+    assert.strictEqual(new Set(dark).size, MAX_VFOS, `repeated dark colour: ${dark.join(' ')}`);
+    assert.strictEqual(new Set(light).size, MAX_VFOS, `repeated light colour: ${light.join(' ')}`);
+});
+
+t('the canvas has a fallback for every slot', () => {
+    // Read before the stylesheet has resolved, which is a real moment on a cold
+    // load. One short of the limit is the last demodulator drawn in whatever
+    // colour the modulo lands on — its neighbour's.
+    assert.ok(VFO_FALLBACK.length >= MAX_VFOS,
+        `${VFO_FALLBACK.length} fallbacks for ${MAX_VFOS} demodulators`);
+    assert.strictEqual(new Set(VFO_FALLBACK.slice(0, MAX_VFOS)).size, MAX_VFOS,
+        'two demodulators would fall back to the same colour');
 });
 
 // ── where it lives ──────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { UI_CONFIG_DEFAULTS, parseUiConfig } from './uiConfig.js';
 import { UI_COLOR_VARS, uiColorVars } from '../lib/uiColors.js';
 import { invalidateThemeColors } from '../lib/spectrumTrace.js';
+import { invalidateCssVars } from '../lib/audioWaterfall.js';
 import { IF_VIEW_DEFAULT } from '../lib/ifSpectrum.js';
 import { setDialCentered } from '../lib/viewFollow.js';
 import { SHAPE_SEC_DEFAULT } from '../lib/ifShape.js';
@@ -685,11 +686,19 @@ export function DisplayProvider({ children }) {
             if (vars[name]) root.setProperty(name, vars[name]);
             else root.removeProperty(name);
         }
-        // The spectrum resolves its colours once per theme and caches them —
-        // --accent among them, for the dial line — so a colour changed without
-        // the theme changing would not reach the canvas until something else
-        // did. See themeColors.
+        // Every canvas in the interface resolves its colours once per theme and
+        // caches them — --accent among them, for the dial line — so a colour
+        // changed without the theme changing would not reach any of them until
+        // something else moved the key.
+        //
+        // Two caches, because there are two: the spectrum's own (themeColors)
+        // and the shared one behind cssVar, which the audio waterfall, the
+        // needle meters, the noise chart, the IQ demodulator's picture and the
+        // QRSS and FT8 displays all read through. Eight of the nine colour
+        // schemes are dark, so switching between two of them leaves data-theme
+        // exactly where it was — which is the case that made this visible.
         invalidateThemeColors();
+        invalidateCssVars();
     }, [state.uiColors, state.theme]);
 
     // The debug switches that are answered in CSS, as attributes on the root.

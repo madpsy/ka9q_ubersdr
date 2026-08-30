@@ -61,6 +61,25 @@ export function sizedCanvas(canvas, cssH) {
 // and is dropped as soon as one is.
 const VARS = { theme: null, seen: new Map() };
 
+/**
+ * Drop the cache.
+ *
+ * The key above is the theme, which was enough while these values came only
+ * from the stylesheet. They do not any more: several of them are settable (see
+ * UI_COLOR_VARS), and — the case that actually bites — the interface ships nine
+ * colour schemes of which eight are dark. Switching between two of those changes
+ * --accent and the rest while `data-theme` stays "dark", so the key does not
+ * move, the cache is never dropped, and every canvas in the interface keeps the
+ * previous scheme's colours until the page is reloaded.
+ *
+ * spectrumTrace.js has the same cache and the same escape hatch for the same
+ * reason; DisplayContext calls both from the effect that writes the colours.
+ */
+export function invalidateCssVars() {
+    VARS.theme = null;
+    VARS.seen.clear();
+}
+
 export function cssVar(name, fallback) {
     const theme = document.documentElement.dataset.theme || '';
     if (VARS.theme !== theme) {

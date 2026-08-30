@@ -5,8 +5,16 @@
 // waterfall dead with nothing on screen to say why.
 
 const assert = require('assert');
+// Enough browser for cssVar, which is the other thing in this module worth
+// pinning. Set before the bundle: the module reads nothing at import time, but
+// the tests below call straight into it.
+const theme = { theme: 'dark' };
+const vars = { '--accent': '#08a2fb' };
+globalThis.document = { documentElement: { dataset: theme } };
+globalThis.getComputedStyle = () => ({ getPropertyValue: (n) => vars[n] || '' });
+
 const {
-    AUDIO_WF_RATE_MAX, AUDIO_WF_RATE_MIN, audioRowMs, barWidth,
+    AUDIO_WF_RATE_MAX, AUDIO_WF_RATE_MIN, audioRowMs, barWidth, cssVar, invalidateCssVars,
 } = require('./.build/audiowaterfall.cjs');
 
 let pass = 0;
@@ -97,6 +105,70 @@ t('an unknown fft size draws rather than vanishing', () => {
         const px = barWidth(bad);
         assert.ok(Number.isFinite(px) && px > 0, `${String(bad)} gave ${px}`);
     }
+});
+
+
+// --- the colour cache --------------------------------------------------------
+//
+// Every canvas in the interface reads its colours through cssVar, and it caches
+// them because getComputedStyle inside a draw loop costs more than the drawing.
+// The key is the theme, which was enough while the values came only from the
+// stylesheet — and stopped being enough when the accent became settable and the
+// interface grew nine colour schemes, eight of them dark.
+
+t('a colour is read once and then remembered', () => {
+    invalidateCssVars();
+    assert.strictEqual(cssVar('--accent', '#000'), '#08a2fb');
+    // The whole point of the cache: a second read does not go near the DOM.
+    let reads = 0;
+    const real = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => { reads++; return real(); };
+    assert.strictEqual(cssVar('--accent', '#000'), '#08a2fb');
+    assert.strictEqual(reads, 0, 'the cache was not used');
+    globalThis.getComputedStyle = real;
+});
+
+t('changing the theme drops it', () => {
+    invalidateCssVars();
+    cssVar('--accent', '#000');
+    vars['--accent'] = '#ff0000';
+    theme.theme = 'light';
+    assert.strictEqual(cssVar('--accent', '#000'), '#ff0000');
+});
+
+t('a colour that changed without the theme changing reaches the canvas', () => {
+    // The bug this exists for. Eight of the nine schemes are dark, so switching
+    // between two of them rewrites --accent while data-theme stays "dark" — the
+    // key does not move, the cache is never dropped, and every canvas keeps the
+    // previous scheme's colours until the page is reloaded. DisplayContext calls
+    // the invalidator from the effect that writes the colours.
+    invalidateCssVars();
+    theme.theme = 'dark';
+    assert.strictEqual(cssVar('--accent', '#000'), '#ff0000');
+    vars['--accent'] = '#00ff00';
+    assert.strictEqual(cssVar('--accent', '#000'), '#ff0000', 'the cache should still hold');
+    invalidateCssVars();
+    assert.strictEqual(cssVar('--accent', '#000'), '#00ff00', 'the canvas is stuck on the old scheme');
+});
+
+t('a token the stylesheet does not define falls back', () => {
+    invalidateCssVars();
+    assert.strictEqual(cssVar('--nothing-here', '#abc'), '#abc');
+});
+
+t('the colours are invalidated wherever they are written', () => {
+    // A source check, because the bug is a *missing call*: the cache and the
+    // effect that changes the colours are in different files, and nothing in
+    // either would notice the other not being told.
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+        path.join(__dirname, '..', 'src', 'display', 'DisplayContext.jsx'), 'utf8',
+    );
+    assert.ok(/invalidateCssVars\(\)/.test(src),
+        'DisplayContext writes the colours but never drops the cssVar cache');
+    // Beside the spectrum's own, which has the same problem and the same answer.
+    assert.ok(/invalidateThemeColors\(\)/.test(src));
 });
 
 console.log(`\n${pass} ok`);

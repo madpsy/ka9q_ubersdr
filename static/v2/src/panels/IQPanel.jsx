@@ -16,17 +16,17 @@
 //
 // ── The layout, and why it is this one ───────────────────────────────────────
 //
-// Four demodulators is two different jobs and they want opposite things. One is
+// Six demodulators is two different jobs and they want opposite things. One is
 // survey — where are they, what are they doing, which is muted — which wants
 // every one of them visible at once and compact. The other is adjustment, which
 // wants full-size controls and only ever concerns one of them.
 //
-// A row per demodulator with the selected one *opening in place* serves both.
-// The list is the picture's legend, so every row carries the colour its passband
-// is drawn in; the row you are working on expands where it sits, so there is
-// never a question of which one the controls below belong to. With a single
-// demodulator — the default — this reads as an ordinary panel with one header
-// line above it. With four it is still one set of controls.
+// A row per demodulator, each opening in place, serves both. The list is the
+// picture's legend, so every row carries the colour its passband is drawn in;
+// a row you are working on expands where it sits, so there is never a question
+// of which one the controls below belong to. With a single demodulator — the
+// default — this reads as an ordinary panel with one header line above it. With
+// six it is six lines and whichever of them you have left open.
 //
 // The two controls that do *not* wait to be selected are pan and mute, which sit
 // on every row. Those are the ones you reach for while juggling several — which
@@ -91,9 +91,11 @@ const METER_MS = 80;
 // enough to leave room under it for four rows in a dock column.
 const SCOPE_H = 96;
 
-// What the listening frequency costs a row header, before it has been on screen
-// once to be measured. A nine-character reading at the row's font, plus its gap.
+// What the two optional parts of a row header cost, before they have been on
+// screen once to be measured. A twelve-character reading and a signed offset,
+// at the row's font, each plus its gap.
 const FREQ_TAG_W = 88;
+const OFFSET_TAG_W = 62;
 
 const MODE_OPTIONS = DEMOD_MODES.map((m) => ({
     value: m.id, label: m.label, title: m.summary,
@@ -113,16 +115,28 @@ function offsetLabel(hz) {
     return `${r > 0 ? '+' : '−'}${formatSpan(Math.abs(r))}`;
 }
 
-/** The one line a collapsed row gets: what it is, how much of it, and where. */
+/**
+ * What a row always says: which demodulator it is and how wide.
+ *
+ * Where it is listening is two further readings — the offset from the dial and
+ * the frequency itself — and both are optional, because a dock column is not
+ * always wide enough for either. See the header below.
+ */
 export function vfoSummary(vfo) {
-    const mode = demodMode(vfo.mode);
-    return `${mode.label} ${widthLabel(vfoWidth(vfo))} · ${offsetLabel(vfo.offsetHz)}`;
+    return `${demodMode(vfo.mode).label} ${widthLabel(vfoWidth(vfo))}`;
 }
 
-/** The theme's four demodulator colours, read once per draw rather than per mark. */
+/**
+ * The theme's demodulator colours, read once per draw rather than per mark.
+ *
+ * The fallbacks are the dark theme's, for the moment before the stylesheet has
+ * resolved — a marker drawn in `undefined` is a marker drawn in black, which on
+ * this canvas is a marker that is not drawn at all.
+ */
+export const VFO_FALLBACK = ['#f2b544', '#45d69a', '#f472b6', '#a78bfa', '#9ad64a', '#f0836b'];
+
 function vfoColours() {
-    const fallback = ['#f2b544', '#45d69a', '#f472b6', '#a78bfa'];
-    return fallback.map((f, i) => cssVar(`--iq-vfo-${i + 1}`, f));
+    return VFO_FALLBACK.slice(0, MAX_VFOS).map((f, i) => cssVar(`--iq-vfo-${i + 1}`, f));
 }
 
 /**
@@ -132,12 +146,13 @@ function vfoColours() {
  * a demodulator's offset is a place in a piece of spectrum, and a place in a
  * piece of spectrum is something you point at. Every demodulator's passband is
  * drawn here in its own colour, so the picture is the one view that shows all
- * four at once and the rows below are its legend.
+ * all of them at once, and the rows below are its legend.
  *
  * Pressing has two meanings and the markers tell them apart: a press within a
  * few pixels of one picks *that* demodulator up and drags it — selecting it on
  * the way — and a press anywhere else moves the one already selected. That is
- * what makes all four directly draggable rather than only the current one.
+ * what makes every one of them directly draggable rather than only the
+ * current one.
  *
  * The transform is computed here, from the same quadrature the demodulators are
  * listening to — see lib/iqSpectrum.js, and the note there about why a complex
@@ -375,9 +390,10 @@ function draw(canvas, s, dt, marks) {
     line(0, marks.dial, [4, 4], 1);
 
     // Each marker wears its number. With one demodulator that is a redundant
-    // label; with four it is the only thing tying a line on the picture to a row
-    // in the list, and adding it only once there is more than one would mean the
-    // picture changed shape as a demodulator was added.
+    // label; with six it is what carries the identity, since six hues that avoid
+    // the trace's blue leave about thirty degrees between neighbours at the
+    // closest. Drawn from the first demodulator rather than only once there is
+    // more than one: the picture should not change shape as one is added.
     const tag = (i, x) => {
         const label = VFO_LABELS[i] || String(i + 1);
         const pad = 3 * dpr;
@@ -478,15 +494,24 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
     const open = vfo.open !== false;
     const listening = dialHz + vfo.offsetHz;
 
-    // The listening frequency is worth showing on the header and is the first
-    // thing that should go when the dock is narrow — the row still says what the
-    // demodulator is and where in the stream it sits without it, and dropping it
-    // beats letting the summary squeeze or the row wrap. Same mechanism as the
-    // top bar's optional tags; see lib/roomFor.js, whose one rule this layout has
-    // to hold up: every child counted here is `flex: none`, and the growing is
-    // done by a spacer the measurement skips.
+    // Where the demodulator is listening, said twice over, and neither reading
+    // is guaranteed a place: a dock column can be narrower than a row wants.
+    //
+    // The frequency is the one to keep. It is the number an operator has in
+    // their head and the one they would read out to somebody; the offset is a
+    // relative figure the picture above already shows as a line, and it is
+    // repeated in the body whenever the row is open. So the offset goes first as
+    // the dock narrows, and the frequency after it — and what is left, always,
+    // is which demodulator this is and how wide.
+    //
+    // Same mechanism as the top bar's optional tags; see lib/roomFor.js, whose
+    // one rule this layout has to hold up: every child counted here is
+    // `flex: none`, and the growing is done by a spacer the measurement skips.
     const headRef = useRef(null);
-    const room = useRoomFor(headRef, [{ key: 'freq', width: FREQ_TAG_W }]);
+    const room = useRoomFor(headRef, [
+        { key: 'freq', width: FREQ_TAG_W },
+        { key: 'offset', width: OFFSET_TAG_W },
+    ]);
 
     // Coarse enough that the slider crosses twelve kilohertz in a drag, fine
     // enough to land on a carrier: ten hertz is a fifth of the narrowest CW
@@ -513,6 +538,11 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
                     <i className="iq-vfo__swatch" />
                     <span className="iq-vfo__name">{VFO_LABELS[index]}</span>
                     <span className="iq-vfo__sum">{vfoSummary(vfo)}</span>
+                    {room.offset && (
+                        <span className="iq-vfo__off" data-optional="offset">
+                            {`· ${offsetLabel(vfo.offsetHz)}`}
+                        </span>
+                    )}
                     {room.freq && (
                         <span className="iq-vfo__freq" data-optional="freq">
                             {formatFreqExact(listening)}
@@ -536,10 +566,27 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
                 >
                     {vfo.muted ? <Icon.Mute /> : <Icon.Volume />}
                 </button>
+                {/* Last, at the edge of the row, and set apart from the mute
+                    beside it: the two are the same size and a thumb's width
+                    apart, and one of them cannot be undone by pressing it
+                    again. Disabled rather than hidden on the only demodulator —
+                    a control that comes and goes as you add and remove is
+                    harder to aim at than one that greys out. */}
+                <button
+                    type="button"
+                    className="iq-vfo__del"
+                    disabled={!canRemove}
+                    title={canRemove
+                        ? `Remove demodulator ${VFO_LABELS[index]}`
+                        : 'The last demodulator cannot be removed'}
+                    onClick={() => removeVfo(index)}
+                >
+                    <Icon.Trash size={13} />
+                </button>
             </div>
 
-            {/* The row's own underline. All four are readable at once, which is
-                the question you ask of a demodulator you are not editing: is
+            {/* The row's own underline. Every row has one, open or not, which
+                is the question you ask of a demodulator you are not editing: is
                 anything on it. */}
             <div className="iq-vfo__level">
                 <i style={{ width: `${Math.min(100, level * 400)}%` }} />
@@ -626,16 +673,6 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
                                     onChange={(gain) => set({ gain })}
                                 />
                             </Field>
-                            {canRemove && (
-                                <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    icon={<Icon.Trash />}
-                                    onClick={() => removeVfo(index)}
-                                >
-                                    Remove demodulator
-                                </Button>
-                            )}
                         </>
                     )}
                 </div>

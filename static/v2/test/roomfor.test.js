@@ -35,6 +35,9 @@ function el({ w = 0, optional, slack, gap = 0, children = [] } = {}) {
             const inner = children.reduce((sum, c) => sum + c.offsetWidth, 0);
             return inner + gap * Math.max(0, children.length - 1);
         },
+        getBoundingClientRect() {
+            return { width: node.offsetWidth };
+        },
         querySelectorAll() {
             const found = [];
             const walk = (kids) => {
@@ -48,6 +51,24 @@ function el({ w = 0, optional, slack, gap = 0, children = [] } = {}) {
         },
     };
     return node;
+}
+
+/**
+ * An inline SVG child, which is not an HTMLElement and so has no offsetWidth.
+ *
+ * The icon sets in this interface are inline SVG (components/icons.jsx), so any
+ * row with an icon in it has one of these among its children. Every row that
+ * used this until now happened to be all spans.
+ */
+function svgEl(w) {
+    return {
+        children: [],
+        dataset: {},
+        gap: 0,
+        clientWidth: w,
+        getBoundingClientRect: () => ({ width: w }),
+        querySelectorAll: () => [],
+    };
 }
 
 global.getComputedStyle = (node) => ({
@@ -201,3 +222,34 @@ t('the same answer compares equal, so the hook can keep the old object', () => {
 });
 
 console.log(`\n${pass} ok`);
+
+// --- an icon among the children ---------------------------------------------
+
+t('an inline SVG child is measured like any other', () => {
+    // SVGElement is not an HTMLElement and has no offsetWidth, so reading one
+    // returns undefined — and one undefined in the sum makes the whole figure
+    // NaN, which fails every comparison. The optional child is then hidden for
+    // ever, at any width, with nothing on screen to say why. That is what the IQ
+    // panel's demodulator rows hit: they lead with a chevron.
+    const row = el({
+        w: 400,
+        gap: 6,
+        children: [svgEl(12), el({ w: 40 }), el({ w: 100 }), el({ w: 80, optional: 'freq' })],
+    });
+    const fits = measureRoom(row, [{ key: 'freq', width: 80 }], {}, {});
+    assert.strictEqual(fits.freq, true, 'a row with room said no — the sum went NaN');
+});
+
+t('an SVG child still takes up its own width', () => {
+    // ...and it is not simply skipped: a row that is exactly full with the icon
+    // counted must say no, or the optional child overlaps it.
+    const row = el({
+        w: 150,
+        gap: 6,
+        children: [svgEl(40), el({ w: 40 }), el({ w: 80, optional: 'freq' })],
+    });
+    const fits = measureRoom(row, [{ key: 'freq', width: 80 }], {}, {});
+    assert.strictEqual(fits.freq, false, 'the icon was measured as nothing');
+});
+
+console.log(`\n${pass} passed`);

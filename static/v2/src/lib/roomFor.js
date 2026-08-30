@@ -45,6 +45,29 @@ const CUSHION = 8;
 const gapOf = (el) => parseFloat(getComputedStyle(el).columnGap) || 0;
 
 /**
+ * How wide a child is, whatever kind of element it is.
+ *
+ * `offsetWidth` is defined on HTMLElement, and an inline SVG icon is an
+ * SVGElement — so reading it on one gives `undefined` in the browsers that
+ * follow the spec. That is not a small error: one undefined in the sum below
+ * makes the whole figure NaN, every comparison against it is false, and the
+ * row's optional children are hidden at *every* width, on a row with plenty of
+ * space, with nothing on screen to say why.
+ *
+ * Every row that used this until now happened to be all spans. The IQ panel's
+ * demodulator rows lead with a chevron, and that is how this was found.
+ *
+ * The rect is rounded up to match what offsetWidth would have given, so a row
+ * of ordinary elements measures exactly as it always did.
+ */
+function widthOf(el) {
+    const w = el.offsetWidth;
+    if (typeof w === 'number') return w;
+    const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
+    return rect ? Math.ceil(rect.width) : 0;
+}
+
+/**
  * What a direct child contributes to the row, discounting any optional children
  * nested inside it — and recording what those cost, since a nested child is
  * never seen by the loop over the row's own children.
@@ -53,13 +76,13 @@ const gapOf = (el) => parseFloat(getComputedStyle(el).columnGap) || 0;
  * remove it and the row gives back both.
  */
 function costOf(child, widths) {
-    let w = child.offsetWidth;
+    let w = widthOf(child);
     const inside = child.querySelectorAll('[data-optional]');
     if (!inside.length) return w;
 
     const innerGap = gapOf(child);
     for (const el of inside) {
-        const cost = el.offsetWidth + innerGap;
+        const cost = widthOf(el) + innerGap;
         widths[el.dataset.optional] = { w: cost, nested: true };
         w -= cost;
     }
@@ -88,7 +111,7 @@ export function measureRoom(el, specs, widths, shown = {}) {
     for (const child of el.children) {
         if (child.dataset.slack != null) continue;
         if (child.dataset.optional != null) {
-            widths[child.dataset.optional] = { w: child.offsetWidth, nested: false };
+            widths[child.dataset.optional] = { w: widthOf(child), nested: false };
             continue;
         }
         used += costOf(child, widths);

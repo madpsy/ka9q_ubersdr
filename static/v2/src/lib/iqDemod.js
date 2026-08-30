@@ -537,12 +537,26 @@ const KEY = 'ubersdr.v2.iqdemod';
 /**
  * How many demodulators may run at once.
  *
- * Four because that is where the arithmetic and the panel meet: four narrow CW
- * filters is about fifty million multiplies a second, which is a few percent of
- * one core, and four is as many rows of controls as a dock column can carry
- * without becoming a list to scroll rather than a panel to read.
+ * Six, and the two limits it sits between are worth naming because neither is
+ * where you would guess.
+ *
+ * The arithmetic is not the binding one. Six of the narrowest CW filter — the
+ * most expensive case there is, at 511 taps — is about seventy million
+ * multiplies a second over a 12 kHz complex stream, which is a few percent of
+ * one core. Six is not close to the edge of that; sixty would be.
+ *
+ * The panel is. Six rows is as many as a dock column can hold and still be read
+ * at a glance rather than scrolled, and that only became true once a row could
+ * be collapsed: with every row's controls always showing, four was already a
+ * list. So the limit is a judgement about how much of this a person can hold in
+ * their head at once, not about what the machine will do.
+ *
+ * Raising it further would want more than a bigger number. Six distinct colours
+ * is already at the point where the hues have to be helped along by the numbers
+ * on the markers, and the mix would need a look — see the note on the graph
+ * below about nothing scaling with the voice count.
  */
-export const MAX_VFOS = 4;
+export const MAX_VFOS = 6;
 
 /**
  * Numbered rather than lettered, unlike the receiver's own VFOs.
@@ -552,7 +566,7 @@ export const MAX_VFOS = 4;
  * those. They are demodulators inside one stream, all live together, and reusing
  * the letters would put two different four-item vocabularies on one screen.
  */
-export const VFO_LABELS = ['1', '2', '3', '4'];
+export const VFO_LABELS = ['1', '2', '3', '4', '5', '6'];
 
 /**
  * Where each one is sent.
@@ -847,11 +861,15 @@ const PAN_POSITION = { left: -1, center: 0, right: 1 };
  * demodulated audio is not the receiver's audio and must not go through its
  * filter chain — but it is what is being listened to.
  *
- * Nothing scales with the number of voices. Four at the AGC's target sum to
- * about full scale, which is where they should be, and panning a pair apart
- * separates them further; asking the operator's volume control to absorb the
- * rest is better than having the loudness of one demodulator change because a
- * second was switched on somewhere else.
+ * Nothing scales with the number of voices, and that is deliberate rather than
+ * an oversight. Four at the AGC's target sum to about full scale; six could
+ * exceed it, and the master would clip on the rare moment they all peak
+ * together. The alternative is dividing by the count, which would change the
+ * loudness of a demodulator you are listening to because a *different* one was
+ * switched on somewhere else — a worse fault than an occasional clip, and one
+ * that happens every time rather than rarely. In practice signals do not peak
+ * in step and panning a pair apart separates them further; the operator's volume
+ * control is the right place to absorb what is left.
  */
 export class IQDemod extends Emitter {
     constructor(player) {

@@ -1472,9 +1472,14 @@
                 <div id="radiodTab" class="tab-content">
                     <div id="radiodWarning" class="alert" style="margin-bottom: 20px; background: #fff3cd; border: 2px solid #ffc107; color: #856404;">
                         ⚠️ <strong>WARNING:</strong> Editing the radiod configuration is for advanced users only and may break UberSDR.
-                        <div style="margin-top: 15px;">
+                        <div style="margin-top: 15px; display: flex; gap: 10px; align-items: center;">
                             <button class="btn" onclick="enableRadiodEditing()" style="background: #dc3545; font-weight: bold;">I Have No Fear</button>
-                            <button class="btn" id="generateWisdomBtn" onclick="openGenerateWisdom()" style="background: #805ad5; color: white; font-weight: bold; margin-left: 10px;">✨ Generate Wisdom</button>
+                            <button class="btn" id="generateWisdomBtn" onclick="openGenerateWisdom()" style="background: #805ad5; color: white; font-weight: bold;">✨ Generate Wisdom</button>
+                            <!-- Rate toggle. Sits on the far right because it is the one
+                                 button here that changes the hardware rather than the
+                                 editor, and it saves and restarts on its own — so it asks
+                                 for the same typed agreement the editor's save path does. -->
+                            <button class="btn" id="radiodSamprateToggleBtn" onclick="toggleRadiodSamprate()" style="display: none; background: #0d6efd; color: white; font-weight: bold; margin-left: auto;"></button>
                         </div>
                     </div>
                     <!-- Shown whenever the saved config is at 129.6 MSPS. Separate from
@@ -19772,7 +19777,7 @@ const tooltipLine2 = timeStr;
         // The agreement for 129.6 MSPS. Typed rather than clicked: this is the one action
         // in the admin interface that can physically destroy the receiver, and a button
         // that only needs a click gets clicked.
-        function confirmThermalRisk() {
+        function confirmThermalRisk(extra) {
             const warning =
                 'STOP — READ THIS\n\n'
                 + 'Running the RX888 MkII at 129.6 MSPS makes it run very hot.\n\n'
@@ -19781,6 +19786,7 @@ const tooltipLine2 = timeStr;
                 + 'This is not a warning about performance. The hardware physically breaks. '
                 + 'ka9q-radio ships 64.8 MSPS as the default for this reason.\n\n'
                 + 'Only continue if this receiver\'s RX888 has been modified for it.\n\n'
+                + (extra ? extra + '\n\n' : '')
                 + 'Type  MODIFIED  to confirm:';
             const answer = window.prompt(warning, '');
             return answer !== null && answer.trim().toUpperCase() === 'MODIFIED';
@@ -19807,8 +19813,100 @@ const tooltipLine2 = timeStr;
         // warning before pressing save is the point.
         function updateRadiodSamprateWarning(text) {
             const banner = document.getElementById('radiodSamprateWarning');
-            if (!banner) return;
-            banner.style.display = readRx888Samprate(text) === RATE_FULL ? 'block' : 'none';
+            if (banner) {
+                banner.style.display = readRx888Samprate(text) === RATE_FULL ? 'block' : 'none';
+            }
+            updateRadiodSamprateToggle(text);
+        }
+
+        // Which rate the toggle would move to, or null when it should not be offered:
+        // no [rx888] samprate to rewrite, or a rate that is neither of the two supported
+        // ones — that has to be fixed in the editor, not flipped.
+        function radiodToggleTarget(text) {
+            const rate = readRx888Samprate(text);
+            if (rate === RATE_FULL) return RATE_HALF;
+            if (rate === RATE_HALF) return RATE_FULL;
+            return null;
+        }
+
+        // Label the toggle with where it goes, not where it is — a button that names the
+        // current state reads as a status line and gets pressed by mistake.
+        function updateRadiodSamprateToggle(text) {
+            const btn = document.getElementById('radiodSamprateToggleBtn');
+            if (!btn) return;
+            const target = radiodToggleTarget(text);
+            if (target === null) {
+                btn.style.display = 'none';
+                return;
+            }
+            btn.style.display = '';
+            if (target === RATE_FULL) {
+                btn.textContent = '🔥 Switch to 129.6 MSPS (0–60 MHz)';
+                btn.style.background = '#dc3545';
+                btn.title = 'Raise the RX888 to its full rate. Requires thermal modifications, '
+                    + 'saves the config and restarts the server.';
+            } else {
+                btn.textContent = '❄ Switch to 64.8 MSPS (0–30 MHz)';
+                btn.style.background = '#0d6efd';
+                btn.title = 'Return the RX888 to the ka9q-radio default rate. Saves the config '
+                    + 'and restarts the server.';
+            }
+        }
+
+        // Rewrite every active samprate assignment in [rx888] — the last one is the one
+        // radiod honours, so leaving an earlier one behind would change what the file
+        // means. Commented lines, including the "for full speed use" hint, are left
+        // alone. The trailing comment is rewritten too: keeping "Half speed for
+        // stability" next to 129600000 would be worse than losing the note.
+        function setRx888Samprate(text, rate) {
+            const note = rate === RATE_FULL
+                ? '  # Full speed (129.6 MHz, 0-60 MHz) — needs ADC heatsink + airflow'
+                : '  # Half speed for stability (64.8 MHz, 0-30 MHz)';
+            let section = '';
+            return String(text || '').split('\n').map(raw => {
+                const line = raw.trim();
+                if (line.startsWith('[') && line.endsWith(']')) {
+                    section = line.slice(1, -1).trim().toLowerCase();
+                    return raw;
+                }
+                if (section !== 'rx888' || !line || line.startsWith('#')) return raw;
+                const eq = raw.indexOf('=');
+                if (eq < 1 || raw.slice(0, eq).trim().toLowerCase() !== 'samprate') return raw;
+                const indent = raw.slice(0, raw.length - raw.trimStart().length);
+                return `${indent}samprate = ${rate}${note}`;
+            }).join('\n');
+        }
+
+        // One click that changes the hardware: it edits the config, saves it and restarts
+        // radiod. Deliberately still gated on the typed agreement in the raising
+        // direction — this is the shortcut, not an exemption.
+        async function toggleRadiodSamprate() {
+            const editor = document.getElementById('radiodConfigEditor');
+            const text = editor ? editor.value : currentRadiodConfig;
+            const target = radiodToggleTarget(text);
+            if (target === null) return;
+
+            if (target === RATE_FULL) {
+                if (!confirmThermalRisk('This also saves the config and restarts the server, '
+                        + 'which drops every listener.')) {
+                    showAlert('Sample rate change cancelled — nothing was saved.', 'info');
+                    return;
+                }
+            } else if (!window.confirm(
+                    'Return the RX888 to 64.8 MSPS (0-30 MHz)?\n\n'
+                    + 'Coverage above 30 MHz — including 6m — goes away.\n\n'
+                    + 'The config is saved and the server restarts, which drops every listener.')) {
+                showAlert('Sample rate change cancelled — nothing was saved.', 'info');
+                return;
+            }
+
+            const updated = setRx888Samprate(text, target);
+            if (editor) editor.value = updated;
+            updateRadiodSamprateWarning(updated);
+            updateRadiodConfigWarnings(updated);
+            // preAck: the agreement was just taken above, so the save path must not ask
+            // for it a second time.
+            await actualSaveRadiodConfig(true, true);
         }
 
         function renderRadiodConfig() {
@@ -19860,7 +19958,7 @@ const tooltipLine2 = timeStr;
             await actualSaveRadiodConfig(restart);
         }
 
-        async function actualSaveRadiodConfig(restart = false) {
+        async function actualSaveRadiodConfig(restart = false, preAck = false) {
             const saveButton = event?.target || document.querySelector('#radiodButtons .btn');
             const originalText = saveButton?.textContent;
             if (saveButton) {
@@ -19898,7 +19996,7 @@ const tooltipLine2 = timeStr;
                 // through the one warning here that describes physical damage.
                 let thermalAck = false;
                 if (rate === RATE_FULL && currentRadiodSamprate !== RATE_FULL) {
-                    if (!confirmThermalRisk()) {
+                    if (!preAck && !confirmThermalRisk()) {
                         showAlert('Sample rate change cancelled — nothing was saved.', 'info');
                         return;
                     }

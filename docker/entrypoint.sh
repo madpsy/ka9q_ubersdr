@@ -282,9 +282,15 @@ fix_docker_networking() {
     echo "Docker bridge networking configuration applied"
 }
 
-# Migrate noisefloor bands: for any band that exists in both the user config and the
-# example config (matched by name), overwrite its fields with the canonical example values.
-# This corrects stale defaults from older installs without touching user-added bands.
+# Migrate noisefloor bands against the example config, matching by name:
+#   - a band in both files has its fields overwritten with the canonical example values
+#   - a band only in the example is appended to the user config
+#   - a band only in the user config is left alone
+# This corrects stale defaults from older installs, and lets a band added upstream
+# (6m, 2200m, 630m) reach an existing install, without touching operator-added bands.
+# The generic merge_config_keys pass cannot do the second part: yq's `*` replaces
+# arrays wholesale with the right-hand side, so noisefloor.bands never gains entries
+# there -- the user's list always wins entire.
 migrate_noisefloor_bands() {
     local user_config="/app/config/config.yaml"
     local example_config="/etc/ka9q_ubersdr/config.yaml.example"
@@ -296,22 +302,23 @@ migrate_noisefloor_bands() {
     echo "Migrating noisefloor bands to match example config..."
 
     local updated=0
+    local added=0
     while IFS= read -r name; do
         [ -z "$name" ] && continue
+
+        # Read canonical values from example
+        local start end cf bc bb ft8
+        start=$(yq eval ".noisefloor.bands[] | select(.name == \"$name\") | .start"            "$example_config")
+        end=$(yq eval   ".noisefloor.bands[] | select(.name == \"$name\") | .end"              "$example_config")
+        cf=$(yq eval    ".noisefloor.bands[] | select(.name == \"$name\") | .center_frequency" "$example_config")
+        bc=$(yq eval    ".noisefloor.bands[] | select(.name == \"$name\") | .bin_count"        "$example_config")
+        bb=$(yq eval    ".noisefloor.bands[] | select(.name == \"$name\") | .bin_bandwidth"    "$example_config")
+        ft8=$(yq eval   ".noisefloor.bands[] | select(.name == \"$name\") | .ft8_frequency"    "$example_config")
 
         # Check if this band name exists in the user config
         local count
         count=$(yq eval ".noisefloor.bands[] | select(.name == \"$name\") | .name" "$user_config" 2>/dev/null | wc -l)
         if [ "$count" -gt 0 ]; then
-            # Read canonical values from example
-            local start end cf bc bb ft8
-            start=$(yq eval ".noisefloor.bands[] | select(.name == \"$name\") | .start"            "$example_config")
-            end=$(yq eval   ".noisefloor.bands[] | select(.name == \"$name\") | .end"              "$example_config")
-            cf=$(yq eval    ".noisefloor.bands[] | select(.name == \"$name\") | .center_frequency" "$example_config")
-            bc=$(yq eval    ".noisefloor.bands[] | select(.name == \"$name\") | .bin_count"        "$example_config")
-            bb=$(yq eval    ".noisefloor.bands[] | select(.name == \"$name\") | .bin_bandwidth"    "$example_config")
-            ft8=$(yq eval   ".noisefloor.bands[] | select(.name == \"$name\") | .ft8_frequency"    "$example_config")
-
             # Build the yq expression; only set ft8_frequency if the example has one
             local expr
             expr="(.noisefloor.bands[] | select(.name == \"$name\") | .start) = $start |
@@ -329,11 +336,29 @@ migrate_noisefloor_bands() {
             else
                 echo "  ⚠ Warning: Failed to update noisefloor band: $name"
             fi
+        else
+            # Not in the user config at all -- a band added to the example after
+            # this config.yaml was written. Append it with the example's values;
+            # the list is appended to rather than sorted, since the UI orders
+            # bands by frequency itself and the file order is only cosmetic.
+            local entry
+            entry="{\"name\": \"$name\", \"start\": $start, \"end\": $end, \"center_frequency\": $cf, \"bin_count\": $bc, \"bin_bandwidth\": $bb"
+            if [ -n "$ft8" ] && [ "$ft8" != "null" ]; then
+                entry="$entry, \"ft8_frequency\": $ft8"
+            fi
+            entry="$entry}"
+
+            if yq eval -i ".noisefloor.bands += [$entry]" "$user_config" 2>/dev/null; then
+                echo "  + Added noisefloor band: $name"
+                added=$((added + 1))
+            else
+                echo "  ⚠ Warning: Failed to add noisefloor band: $name"
+            fi
         fi
     done < <(yq eval '.noisefloor.bands[].name' "$example_config" 2>/dev/null)
 
-    if [ "$updated" -gt 0 ]; then
-        echo "✓ Noisefloor band migration complete ($updated band(s) updated)"
+    if [ "$updated" -gt 0 ] || [ "$added" -gt 0 ]; then
+        echo "✓ Noisefloor band migration complete ($updated band(s) updated, $added added)"
     else
         echo "✓ Noisefloor bands are up to date"
     fi

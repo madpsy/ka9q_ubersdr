@@ -126,13 +126,16 @@ function analyzeRadiodConfig(configText) {
     
     const rx888Config = config['rx888'];
     
-    // 1. Check samprate
+    // 1. Check samprate. 64.8 MSPS and 129.6 MSPS are the only two supported rates;
+    // 129.6 already has its own permanent red thermal banner above the editor, so
+    // repeating it here as a yellow warning is just noise. Anything else is a rate
+    // radiod will refuse, so it still gets flagged.
     if (rx888Config['samprate']) {
         const samprate = parseInt(rx888Config['samprate']);
-        if (samprate !== 64800000) {
+        if (samprate !== 64800000 && samprate !== 129600000) {
             warnings.push({
                 type: 'samprate',
-                message: `Sample rate is set to ${samprate.toLocaleString()} Hz. For optimal stability with RX888, it is recommended to use 64800000 Hz (64.8 MHz).`,
+                message: `Sample rate is set to ${samprate.toLocaleString()} Hz. Only 64800000 Hz (64.8 MSPS, 0-30 MHz) and 129600000 Hz (129.6 MSPS, 0-60 MHz) are supported.`,
                 suggestion: 'Set samprate = 64800000 in the [rx888] section'
             });
         }

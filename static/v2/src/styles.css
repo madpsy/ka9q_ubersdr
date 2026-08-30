@@ -152,6 +152,18 @@
     --accent-line: rgba(8, 162, 251, 0.4);
     --violet: #8b7cf8;
 
+    /* The four browser-side demodulators, on the picture and on the rows that
+       list them. Chosen apart in hue rather than in lightness, because the
+       tie between a passband on a dark canvas and a swatch on a panel is the
+       only thing saying which row is which — and a listener with one of the
+       common colour deficiencies has to be able to make that tie too, which
+       four evenly spaced hues do and a red/green pair does not. Kept off the
+       accent blue, which is the trace itself. */
+    --iq-vfo-1: #f2b544;
+    --iq-vfo-2: #45d69a;
+    --iq-vfo-3: #f472b6;
+    --iq-vfo-4: #a78bfa;
+
     --good: #45d69a;
     --warn: #f2b544;
     /* The tuning lock's gold. Deliberately not themed and deliberately not
@@ -238,6 +250,15 @@
 }
 
 [data-theme="light"] {
+    /* The same four hues, taken down far enough to read as ink on white. The
+       dark theme's are chosen to glow on a black canvas and would be washed
+       out here — and these are label colours as much as they are line colours,
+       so contrast against the panel matters as much as against the picture. */
+    --iq-vfo-1: #b57500;
+    --iq-vfo-2: #0f8f63;
+    --iq-vfo-3: #c02d78;
+    --iq-vfo-4: #6d4bd0;
+
     --bg: #e9edf3;
     --surface: #ffffff;
     --surface-2: #f5f8fc;
@@ -12218,3 +12239,110 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
     font-variant-numeric: tabular-nums;
 }
+
+/* ── The demodulator rows ────────────────────────────────────────────────────
+   The list under the picture is its legend as much as it is a set of controls,
+   which is what decides the shape: every row carries the colour it is drawn in,
+   and the row you are working on opens in place rather than filling a separate
+   block below. With one demodulator that reads as an ordinary panel with a
+   header line; with four you can see all of them and are still only ever
+   editing one, without having to remember which.
+
+   `--vfo` is set inline per row, from the four tokens above. */
+.iq-vfos { display: flex; flex-direction: column; gap: 4px; }
+
+.iq-vfo {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    overflow: hidden;
+}
+.iq-vfo.is-open { border-color: color-mix(in srgb, var(--vfo) 55%, var(--border)); }
+
+.iq-vfo__head { display: flex; align-items: stretch; gap: 4px; padding: 3px; }
+
+/* The identity and the summary, which together are the button that opens the
+   row. Grows; everything else in the head is a fixed size, so a narrow dock
+   takes it out of the summary rather than out of the controls. */
+.iq-vfo__pick {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 4px;
+    border: 0;
+    border-radius: calc(var(--radius-sm) - 2px);
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: calc(11px * var(--ui-scale));
+    text-align: left;
+    cursor: pointer;
+}
+.iq-vfo__pick:hover { background: var(--surface-hover); }
+.iq-vfo.is-open .iq-vfo__pick { color: var(--text); }
+
+/* Four pixels of the colour it is drawn in, full height of the row: a swatch
+   rather than a dot, so it reads as the same mark as the line on the picture. */
+.iq-vfo__swatch {
+    flex: none;
+    width: 4px;
+    align-self: stretch;
+    min-height: 16px;
+    border-radius: 2px;
+    background: var(--vfo);
+}
+.iq-vfo__name {
+    flex: none;
+    font-family: var(--mono);
+    font-weight: 600;
+    color: var(--vfo);
+}
+/* Mode, width and place, in that order — what it is, then how much of it, then
+   where. Truncated rather than wrapped: the row is a glance, and the exact
+   figures are in the body when it is open. */
+.iq-vfo__sum {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.iq-vfo__pan { flex: none; }
+.iq-vfo__mute {
+    flex: none;
+    width: 26px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius-sm) - 2px);
+    background: var(--surface);
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.iq-vfo__mute:hover { background: var(--surface-hover); color: var(--text); }
+.iq-vfo__mute.is-muted { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+/* Its output level, as the row's own underline. Two pixels across the bottom of
+   the head so all four are readable at once without a meter each — which is the
+   question you actually ask of a row you are not editing: is anything on it. */
+.iq-vfo__level { height: 2px; background: var(--border); }
+.iq-vfo__level i {
+    display: block;
+    height: 100%;
+    background: var(--vfo);
+    transition: width 90ms linear;
+}
+.iq-vfo.is-muted .iq-vfo__level i { background: var(--text-faint); }
+
+.iq-vfo__body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 7px 9px;
+    border-top: 1px solid var(--border);
+}
+
+.iq-add { width: 100%; }

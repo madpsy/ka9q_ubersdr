@@ -34,14 +34,49 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 globalThis.TextDecoder = globalThis.TextDecoder || require('util').TextDecoder;
 
 const {
-    render, reset, walk, words,
-    DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, aimCancel, aimDown, aimMove, aimUp, binsToPixels,
-    fftInPlace, fractionOffset, hannWindow, newAim, offsetFraction,
-    IQPanel, PANEL_BY_ID, GROUPS,
-    DEMOD_MODES, IQ_HALF_SPAN, DemodChain,
-    activeWidth, clampOffset, clampWidth, demodSettings, designLowpass, getIQDemod,
-    offsetLimits, passbandFor, planFor, resetDemodSettings, saveDemodSettings, tapsFor,
+    deep, render, reset, walk, words,
+    DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
+    binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
+    IQPanel, vfoSummary, PANEL_BY_ID, GROUPS,
+    DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, VFO_LABELS, DemodChain,
+    addVfo, clampOffset, clampWidth, demodSettings, designLowpass, getIQDemod, offsetLimits,
+    passbandFor, planFor, planForVfo, removeVfo, resetDemodSettings, saveDemodSettings, selectVfo,
+    tapsFor, updateVfo, vfoPassband, vfoWidth,
 } = require('./.build/iqdemod.cjs');
+
+// Storage that actually remembers, so the settings tests exercise the real path
+// rather than a stub that forgets between calls.
+const store = {};
+globalThis.localStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
+};
+
+/**
+ * Start from the defaults: one demodulator, in USB, on the dial.
+ *
+ * Always ends in a publish, even with nothing to patch. resetDemodSettings only
+ * drops the cached copy — it does not notify — and the engine holds a copy of
+ * its own that it keeps in step by subscribing. Without the publish, a test that
+ * reset the settings and then rendered the panel would be looking at the
+ * previous test's demodulators.
+ */
+function fresh(patch) {
+    delete store['ubersdr.v2.iqdemod'];
+    resetDemodSettings();
+    return patch ? updateVfo(0, patch) : saveDemodSettings({});
+}
+
+const vfo0 = () => demodSettings().vfos[0];
+
+// The panel's controls live inside components it does not export, so a plain
+// walk() stops above them. deep() expands those; this is the text of the whole
+// rendered tree.
+const deepWords = (tree) => deep(tree).map((n) => words(n)).join(' ');
+
+/** An element's class name, or '' — several assertions below key off it. */
+const cls = (n) => (n && n.props && typeof n.props.className === 'string' ? n.props.className : '');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -309,22 +344,16 @@ t('a width too wide for the span leaves the offset with nowhere to go', () => {
 });
 
 t('each mode keeps its own width', () => {
-    resetDemodSettings();
-    const store = {};
-    globalThis.localStorage = {
-        getItem: (k) => (k in store ? store[k] : null),
-        setItem: (k, v) => { store[k] = v; },
-        removeItem: (k) => { delete store[k]; },
-    };
-
-    saveDemodSettings({ mode: 'usb', widths: { usb: 2400 } });
-    saveDemodSettings({ mode: 'cw', widths: { cw: 250 } });
+    fresh();
+    updateVfo(0, { mode: 'usb', widths: { usb: 2400 } });
+    updateVfo(0, { mode: 'cw', widths: { cw: 250 } });
     // Going back to USB must not find CW's 250 Hz filter — a single shared
     // figure would be wrong on one side of every mode change.
-    const back = saveDemodSettings({ mode: 'usb' });
-    assert.strictEqual(activeWidth(back), 2400);
-    assert.strictEqual(back.widths.cw, 250);
-    assert.strictEqual(activeWidth(saveDemodSettings({ mode: 'cw' })), 250);
+    updateVfo(0, { mode: 'usb' });
+    assert.strictEqual(vfoWidth(vfo0()), 2400);
+    assert.strictEqual(vfo0().widths.cw, 250);
+    updateVfo(0, { mode: 'cw' });
+    assert.strictEqual(vfoWidth(vfo0()), 250);
 });
 
 t('a stored width the mode will not take is brought into range', () => {
@@ -484,6 +513,169 @@ t('resampling to pixels keeps a carrier rather than averaging it away', () => {
     assert.strictEqual(others, 1, 'it should not have smeared');
 });
 
+// ── more than one demodulator ───────────────────────────────────────────────
+
+t('it starts with one', () => {
+    const st = fresh();
+    assert.strictEqual(st.vfos.length, 1);
+    assert.strictEqual(st.active, 0);
+    assert.strictEqual(st.vfos[0].pan, 'center');
+    assert.strictEqual(st.vfos[0].muted, false);
+});
+
+t('up to four can be added, and no more', () => {
+    fresh();
+    for (let want = 2; want <= MAX_VFOS; want++) {
+        const st = addVfo();
+        assert.strictEqual(st.vfos.length, want);
+        // The new one is the one being edited: adding is asking for it.
+        assert.strictEqual(st.active, want - 1);
+    }
+    const full = addVfo();
+    assert.strictEqual(full.vfos.length, MAX_VFOS, 'a fifth was added');
+    // And there is a label for every one of them, or a row would render blank.
+    assert.strictEqual(VFO_LABELS.length, MAX_VFOS);
+});
+
+t('a new one lands beside the old one, not on top of it', () => {
+    // Started from the defaults, a second demodulator would sit in USB at the
+    // dial — exactly where the first one is. That is the same audio twice and
+    // one line on the picture, which looks like the button having done nothing.
+    fresh({ mode: 'usb', offsetHz: 0, widths: { usb: 2700 } });
+    const st = addVfo();
+    const [a, b] = st.vfos;
+    assert.strictEqual(b.mode, a.mode, 'it should be a copy of the one it came from');
+    assert.strictEqual(vfoWidth(b), vfoWidth(a));
+    assert.notStrictEqual(b.offsetHz, a.offsetHz, 'it landed on top of the original');
+    // Clear of it, so the two passbands do not overlap.
+    assert.ok(vfoPassband(b).lo >= vfoPassband(a).hi - 1,
+        `${JSON.stringify(vfoPassband(b))} overlaps ${JSON.stringify(vfoPassband(a))}`);
+});
+
+t('at the top of the span the new one goes below instead', () => {
+    // There is nowhere further up, and stacking it back on the original would
+    // look like the button having done nothing.
+    fresh({ mode: 'usb', widths: { usb: 2700 } });
+    updateVfo(0, { offsetHz: IQ_HALF_SPAN });   // clamps to the top it can reach
+    const top = vfo0().offsetHz;
+    const st = addVfo();
+    assert.ok(st.vfos[1].offsetHz < top, `expected below ${top}, got ${st.vfos[1].offsetHz}`);
+});
+
+t('one can be removed, but never the last', () => {
+    fresh();
+    assert.strictEqual(removeVfo(0).vfos.length, 1, 'the last one was removed');
+
+    addVfo();
+    addVfo();                       // three, editing the third
+    assert.strictEqual(demodSettings().active, 2);
+    // Removing one before the open row keeps the same row open, which means its
+    // index moves down with it.
+    let st = removeVfo(0);
+    assert.strictEqual(st.vfos.length, 2);
+    assert.strictEqual(st.active, 1, 'the open row changed under the operator');
+    // Removing the open row steps back rather than forward: forward would be off
+    // the end of the list.
+    st = removeVfo(1);
+    assert.strictEqual(st.vfos.length, 1);
+    assert.strictEqual(st.active, 0);
+});
+
+t('changing one leaves the others alone', () => {
+    fresh({ mode: 'usb' });
+    addVfo();
+    updateVfo(1, { mode: 'cw', pan: 'right', muted: true, gain: 2 });
+    const [a, b] = demodSettings().vfos;
+    assert.strictEqual(a.mode, 'usb');
+    assert.strictEqual(a.pan, 'center');
+    assert.strictEqual(a.muted, false);
+    assert.strictEqual(b.mode, 'cw');
+    assert.strictEqual(b.pan, 'right');
+    assert.strictEqual(b.muted, true);
+    assert.strictEqual(b.gain, 2);
+    // ...including the per-mode widths, which are a nested merge.
+    updateVfo(1, { widths: { cw: 250 } });
+    assert.strictEqual(demodSettings().vfos[1].widths.usb, a.widths.usb);
+    assert.strictEqual(demodSettings().vfos[1].widths.cw, 250);
+});
+
+t('selecting picks a row without disturbing anything', () => {
+    fresh();
+    addVfo();
+    const before = JSON.stringify(demodSettings().vfos);
+    const st = selectVfo(0);
+    assert.strictEqual(st.active, 0);
+    assert.strictEqual(JSON.stringify(st.vfos), before);
+    // Out of range is refused rather than clamped: it would be a bug in the
+    // caller, and moving the operator to a row they did not ask for is worse
+    // than doing nothing.
+    assert.strictEqual(selectVfo(9).active, 0);
+});
+
+t('settings written before there was more than one are read as the first', () => {
+    // The shape this panel shipped with. Somebody's filter widths and their
+    // place in the stream are exactly the things worth not losing.
+    delete store['ubersdr.v2.iqdemod'];
+    resetDemodSettings();
+    store['ubersdr.v2.iqdemod'] = JSON.stringify({
+        mode: 'cw', offsetHz: -1500, widths: { cw: 250, usb: 2400 }, pitchHz: 600,
+        agc: false, gain: 1.5,
+    });
+    const st = demodSettings();
+    assert.strictEqual(st.vfos.length, 1);
+    assert.strictEqual(st.vfos[0].mode, 'cw');
+    assert.strictEqual(st.vfos[0].offsetHz, -1500);
+    assert.strictEqual(st.vfos[0].widths.cw, 250);
+    assert.strictEqual(st.vfos[0].pitchHz, 600);
+    assert.strictEqual(st.vfos[0].agc, false);
+    // And the fields that did not exist then get their defaults rather than
+    // undefined, which would reach the panner as NaN.
+    assert.strictEqual(st.vfos[0].pan, 'center');
+    assert.strictEqual(st.vfos[0].muted, false);
+});
+
+t('a stored pan this build does not know becomes centre', () => {
+    fresh();
+    updateVfo(0, { pan: 'behind' });
+    assert.strictEqual(vfo0().pan, 'center');
+    for (const p of PANS) {
+        updateVfo(0, { pan: p.value });
+        assert.strictEqual(vfo0().pan, p.value);
+    }
+});
+
+t('a row says what it is, how wide, and where', () => {
+    fresh({ mode: 'usb', offsetHz: 1200, widths: { usb: 2700 } });
+    assert.strictEqual(vfoSummary(vfo0()), 'USB 2.7k · +1.2 kHz');
+    updateVfo(0, { mode: 'cw', offsetHz: -3400, widths: { cw: 500 } });
+    assert.strictEqual(vfoSummary(vfo0()), 'CW 500 · −3.4 kHz');
+});
+
+// ── picking one off the picture ─────────────────────────────────────────────
+
+t('a press near a marker picks that demodulator up', () => {
+    // With four on one picture a press has two plausible meanings, and this is
+    // what tells them apart: near a marker it is "that one", anywhere else it is
+    // "the one I am working on, to here".
+    const offsets = [-3000, 0, 3000];
+    const w = 300;                       // 40 Hz a pixel over the 12 kHz
+    const xOf = (hz) => offsetFraction(hz, 12000) * w;
+
+    assert.strictEqual(markerAt(offsets, xOf(0), w, 12000), 1);
+    assert.strictEqual(markerAt(offsets, xOf(-3000) + 3, w, 12000), 0);
+    assert.strictEqual(markerAt(offsets, xOf(3000) - MARKER_GRAB_PX, w, 12000), 2);
+    // Past the threshold it is a place, not a marker.
+    assert.strictEqual(markerAt(offsets, xOf(0) + MARKER_GRAB_PX + 1, w, 12000), -1);
+    assert.strictEqual(markerAt([], xOf(0), w, 12000), -1);
+    // A canvas that has not been laid out yet cannot be hit-tested.
+    assert.strictEqual(markerAt(offsets, 10, 0, 12000), -1);
+});
+
+t('two markers on the same spot resolve to the one drawn on top', () => {
+    // Which is the later one — see the draw order in IQPanel.
+    assert.strictEqual(markerAt([1000, 1000], offsetFraction(1000, 12000) * 300, 300, 12000), 1);
+});
+
 // ── aiming with a finger ────────────────────────────────────────────────────
 //
 // The picture sits in a column that scrolls, so the same touch that might be
@@ -607,8 +799,7 @@ t('it renders before the receiver is running', () => {
 
 t('it renders every demodulator', () => {
     for (const m of DEMOD_MODES) {
-        resetDemodSettings();
-        saveDemodSettings({ mode: m.id });
+        fresh({ mode: m.id });
         reset();
         const { tree, cleanups } = render(IQPanel, {}, context());
         assert.ok(tree, `${m.id} produced nothing`);
@@ -616,43 +807,41 @@ t('it renders every demodulator', () => {
     }
     // CW is the one with a control of its own, so it is the one that can render
     // differently from the rest without anything above noticing.
-    resetDemodSettings();
-    saveDemodSettings({ mode: 'cw' });
+    fresh({ mode: 'cw' });
     reset();
     const { tree, cleanups } = render(IQPanel, {}, context());
-    assert.ok(words(tree).includes('CW pitch'), 'CW should offer a pitch control');
+    assert.ok(deepWords(tree).includes('CW pitch'), 'CW should offer a pitch control');
     for (const off of cleanups) off();
-    resetDemodSettings();
-    saveDemodSettings({ mode: 'usb' });
+
+    fresh({ mode: 'usb' });
     reset();
     const usb = render(IQPanel, {}, context());
-    assert.ok(!words(usb.tree).includes('CW pitch'), 'only CW has a pitch');
+    assert.ok(!deepWords(usb.tree).includes('CW pitch'), 'only CW has a pitch');
     for (const off of usb.cleanups) off();
 });
 
-t('pressing the spectrum moves the demodulator, and cannot leave the span', () => {
-    // The panel hands the picture a passband and takes back a place to listen.
-    // The arithmetic on both ends is pinned above; this is the wiring, which is
-    // the half that would silently do nothing.
-    resetDemodSettings();
-    saveDemodSettings({ mode: 'usb', offsetHz: 0, widths: { usb: 2700 } });
+t('pressing the spectrum moves that demodulator, and cannot leave the span', () => {
+    // The panel hands the picture every demodulator and takes back an index and
+    // a place to listen. The arithmetic on both ends is pinned above; this is
+    // the wiring, which is the half that would silently do nothing.
+    fresh({ mode: 'usb', offsetHz: 0, widths: { usb: 2700 } });
     reset();
     const { tree, cleanups } = render(IQPanel, {}, context());
     const scope = walk(tree).find((n) => n && n.props && typeof n.props.onOffset === 'function');
     assert.ok(scope, 'no spectrum in the panel');
     // What it is told to draw is what is actually running, or aiming at a signal
     // would put the filter somewhere else.
-    assert.deepStrictEqual(scope.props.band, passbandFor('usb', 0, 2700));
+    assert.deepStrictEqual(scope.props.vfos.map(vfoPassband), [passbandFor('usb', 0, 2700)]);
 
-    scope.props.onOffset(2500);
-    assert.strictEqual(demodSettings().offsetHz, 2500, 'a press did not move the demodulator');
+    scope.props.onOffset(0, 2500);
+    assert.strictEqual(vfo0().offsetHz, 2500, 'a press did not move the demodulator');
 
     // A press near the end of the picture cannot push the passband off it: in
     // USB at 2.7 kHz the offset stops 2.7 kHz short of the top.
-    scope.props.onOffset(99999);
-    assert.strictEqual(demodSettings().offsetHz, IQ_HALF_SPAN - 2700);
-    scope.props.onOffset(-99999);
-    assert.strictEqual(demodSettings().offsetHz, -IQ_HALF_SPAN);
+    scope.props.onOffset(0, 99999);
+    assert.strictEqual(vfo0().offsetHz, IQ_HALF_SPAN - 2700);
+    scope.props.onOffset(0, -99999);
+    assert.strictEqual(vfo0().offsetHz, -IQ_HALF_SPAN);
     for (const off of cleanups) off();
 });
 
@@ -753,6 +942,114 @@ t('it never releases a duck that was not its own', () => {
     eng.setQuadrature(false);
     assert.strictEqual(own.ducked, true, 'and again on the way back out');
     own.ducked = false;
+});
+
+t('every demodulator gets a row, and only the open one shows its controls', () => {
+    // The layout claim: survey and adjustment at once. Four rows visible so you
+    // can see where they all are, one set of controls so there is never a
+    // question of which demodulator you are changing.
+    fresh();
+    addVfo();
+    addVfo();
+    addVfo();
+    selectVfo(1);
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const nodes = deep(tree);
+
+    const rows = nodes.filter((n) => cls(n).startsWith('iq-vfo ') || cls(n) === 'iq-vfo');
+    assert.strictEqual(rows.length, MAX_VFOS, `expected ${MAX_VFOS} rows, got ${rows.length}`);
+    const bodies = nodes.filter((n) => cls(n) === 'iq-vfo__body');
+    assert.strictEqual(bodies.length, 1, 'more than one row was open at once');
+    // And it is the one that was selected.
+    const open = nodes.filter((n) => cls(n).includes('is-open'));
+    assert.ok(open.length >= 1, 'nothing marked as the open row');
+    // Each row names itself, so a line on the picture can be tied to a row.
+    const names = nodes.filter((n) => cls(n) === 'iq-vfo__name').map((n) => words(n));
+    assert.deepStrictEqual(names, VFO_LABELS.slice(0, MAX_VFOS));
+    for (const off of cleanups) off();
+});
+
+t('pan and mute are on every row, not only the open one', () => {
+    // The two you reach for while juggling several — which of these am I
+    // listening to, and in which ear. Having to select a demodulator before you
+    // could silence it would be the wrong way round.
+    fresh();
+    addVfo();
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const nodes = deep(tree);
+    const mutes = nodes.filter((n) => cls(n).startsWith('iq-vfo__mute'));
+    assert.strictEqual(mutes.length, 2, 'a row without a mute');
+    const pans = nodes.filter((n) => cls(n).includes('iq-vfo__pan'));
+    assert.strictEqual(pans.length, 2, 'a row without a pan control');
+    for (const off of cleanups) off();
+});
+
+t('muting one row silences that one and selects nothing', () => {
+    fresh();
+    addVfo();
+    selectVfo(1);
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const mutes = deep(tree).filter((n) => cls(n).startsWith('iq-vfo__mute'));
+    // The first row, which is not the one being edited.
+    mutes[0].props.onClick();
+    const st = demodSettings();
+    assert.strictEqual(st.vfos[0].muted, true);
+    assert.strictEqual(st.vfos[1].muted, false, 'it muted the wrong one');
+    assert.strictEqual(st.active, 1, 'muting a row should not move the editor to it');
+    for (const off of cleanups) off();
+});
+
+t('a row can be picked without changing anything on it', () => {
+    fresh();
+    addVfo();
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const picks = deep(tree).filter((n) => cls(n) === 'iq-vfo__pick');
+    assert.strictEqual(picks.length, 2);
+    const before = JSON.stringify(demodSettings().vfos);
+    picks[0].props.onClick();
+    assert.strictEqual(demodSettings().active, 0);
+    assert.strictEqual(JSON.stringify(demodSettings().vfos), before);
+    for (const off of cleanups) off();
+});
+
+t('the add button stops at four and remove is absent when there is one', () => {
+    fresh();
+    reset();
+    let out = render(IQPanel, {}, context());
+    assert.ok(deepWords(out.tree).includes('Add demodulator'), 'no way to add a second');
+    assert.ok(!deepWords(out.tree).includes('Remove demodulator'),
+        'offered to remove the only demodulator');
+    for (const off of out.cleanups) off();
+
+    addVfo();
+    addVfo();
+    addVfo();
+    reset();
+    out = render(IQPanel, {}, context());
+    assert.ok(!deepWords(out.tree).includes('Add demodulator'), 'offered a fifth');
+    assert.ok(deepWords(out.tree).includes('Remove demodulator'));
+    for (const off of out.cleanups) off();
+});
+
+t('pressing a marker on the picture picks that demodulator up', () => {
+    fresh();
+    addVfo();
+    selectVfo(0);
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const scope = walk(tree).find((n) => n && n.props && typeof n.props.onPick === 'function');
+    assert.ok(scope, 'the picture is not wired to pick');
+    // It is handed every demodulator, which is what lets it draw and hit-test
+    // all of them rather than only the one being edited.
+    assert.strictEqual(scope.props.vfos.length, 2);
+    assert.strictEqual(scope.props.active, 0);
+    scope.props.onPick(1);
+    assert.strictEqual(demodSettings().active, 1);
+    for (const off of cleanups) off();
 });
 
 // ── where it lives ──────────────────────────────────────────────────────────

@@ -333,3 +333,37 @@ export function aimUp(st, e) {
 export function aimCancel(st) {
     st.drag = null;
 }
+
+/**
+ * Which demodulator's marker a press landed on, or -1 for none.
+ *
+ * With four of them on one picture, a press has two plausible meanings: "move
+ * the one I am working on to here" and "pick up that one there". Hit-testing the
+ * markers is what separates them, and it is what makes all four directly
+ * draggable rather than only the selected one — the picture becomes the control
+ * for every demodulator at once instead of a display with one handle.
+ *
+ * The threshold is generous because the target is a one-pixel line and the
+ * pointer is often a thumb. Twelve pixels either side is about a finger's
+ * accuracy and still narrower than the gap between two demodulators anybody
+ * would bother running separately; a press further out than that reads as
+ * pointing at a place rather than at a marker, which is the other meaning.
+ *
+ * Later markers win a tie, because that is the one drawn on top.
+ */
+export const MARKER_GRAB_PX = 12;
+
+export function markerAt(offsets, xPx, widthPx, rateHz, grabPx = MARKER_GRAB_PX) {
+    if (!widthPx) return -1;
+    let best = -1;
+    let bestD = grabPx;
+    for (let i = 0; i < offsets.length; i++) {
+        const x = offsetFraction(offsets[i], rateHz) * widthPx;
+        const d = Math.abs(x - xPx);
+        if (d <= bestD) {
+            bestD = d;
+            best = i;
+        }
+    }
+    return best;
+}

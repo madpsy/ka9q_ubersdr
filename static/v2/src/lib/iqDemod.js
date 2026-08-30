@@ -534,7 +534,43 @@ export class DemodChain {
 
 const KEY = 'ubersdr.v2.iqdemod';
 
-export const DEMOD_DEFAULTS = {
+/**
+ * How many demodulators may run at once.
+ *
+ * Four because that is where the arithmetic and the panel meet: four narrow CW
+ * filters is about fifty million multiplies a second, which is a few percent of
+ * one core, and four is as many rows of controls as a dock column can carry
+ * without becoming a list to scroll rather than a panel to read.
+ */
+export const MAX_VFOS = 4;
+
+/**
+ * Numbered rather than lettered, unlike the receiver's own VFOs.
+ *
+ * A–D already means something on this receiver: the four frequency memories in
+ * lib/vfos.js, which are places the *dial* can be, one at a time. These are not
+ * those. They are demodulators inside one stream, all live together, and reusing
+ * the letters would put two different four-item vocabularies on one screen.
+ */
+export const VFO_LABELS = ['1', '2', '3', '4'];
+
+/**
+ * Where each one is sent.
+ *
+ * The point of more than one demodulator is hearing them at once, and two voices
+ * in the same ear is not hearing two voices — it is hearing neither. Putting one
+ * left and one right is what makes a pair of them usable, and it is what an
+ * operator with two receivers has always done.
+ */
+export const PANS = [
+    { value: 'left', label: 'L', title: 'Left ear only' },
+    { value: 'center', label: 'C', title: 'Both ears' },
+    { value: 'right', label: 'R', title: 'Right ear only' },
+];
+
+const PAN_VALUES = PANS.map((p) => p.value);
+
+const VFO_DEFAULTS = {
     mode: 'usb',
     offsetHz: 0,
     // One width per mode rather than one width. The modes differ by two orders
@@ -545,6 +581,13 @@ export const DEMOD_DEFAULTS = {
     pitchHz: 700,
     agc: true,
     gain: 1,
+    pan: 'center',
+    muted: false,
+};
+
+export const DEMOD_DEFAULTS = {
+    vfos: [{ ...VFO_DEFAULTS }],
+    active: 0,
 };
 
 const listeners = new Set();
@@ -556,7 +599,7 @@ let writeTimer = null;
 //
 // Every control in the panel is a slider, and a slider being dragged fires an
 // event per frame. Persisting on each of those is sixty synchronous writes a
-// second of the same two hundred bytes, which on the browsers that back
+// second of the same few hundred bytes, which on the browsers that back
 // localStorage with the disk is a visible stutter on the one control where
 // smoothness is the whole point. So the value propagates immediately — the
 // engine hears it on the next packet either way — and only the record of it
@@ -573,7 +616,7 @@ function persist(value) {
     }, WRITE_DELAY_MS);
 }
 
-function sanitise(raw) {
+function sanitiseVfo(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
     const mode = demodMode(src.mode).id;
     const widths = {};
@@ -586,9 +629,31 @@ function sanitise(raw) {
         mode,
         widths,
         offsetHz: clampOffset(mode, src.offsetHz, widths[mode]),
-        pitchHz: clamp(Math.round(Number(src.pitchHz) || DEMOD_DEFAULTS.pitchHz), PITCH_MIN, PITCH_MAX),
+        pitchHz: clamp(Math.round(Number(src.pitchHz) || VFO_DEFAULTS.pitchHz), PITCH_MIN, PITCH_MAX),
         agc: src.agc !== false,
         gain: Number.isFinite(gain) ? clamp(gain, 0, 4) : 1,
+        pan: PAN_VALUES.includes(src.pan) ? src.pan : 'center',
+        muted: src.muted === true,
+    };
+}
+
+function sanitise(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    let list;
+    if (Array.isArray(src.vfos) && src.vfos.length) {
+        list = src.vfos.slice(0, MAX_VFOS).map(sanitiseVfo);
+    } else if (src.mode || src.widths || src.offsetHz !== undefined) {
+        // A settings record from before there was more than one demodulator.
+        // Read as the first of them rather than discarded: somebody's filter
+        // widths and their place in the stream are exactly the things worth not
+        // losing, and this costs one branch.
+        list = [sanitiseVfo(src)];
+    } else {
+        list = [sanitiseVfo(null)];
+    }
+    return {
+        vfos: list,
+        active: clamp(Math.round(Number(src.active) || 0), 0, list.length - 1),
     };
 }
 
@@ -605,27 +670,27 @@ export function demodSettings() {
     return current;
 }
 
+function publish(next) {
+    current = sanitise(next);
+    persist(current);
+    for (const fn of Array.from(listeners)) {
+        try { fn(current); } catch (err) { /* one listener must not cost the others */ }
+    }
+    return current;
+}
+
 /**
- * Merge a change in, persist it, and tell everyone.
+ * Merge a change into the settings as a whole, persist it, and tell everyone.
  *
  * Through here rather than through the panel's own state because the panel can
  * be on screen twice — docked and floating, or docked and in a phone's sheet —
  * and the second copy has to see a change as it is made. Same shape as
  * lib/scannerSettings.js, for the same reason.
+ *
+ * Most changes are to one demodulator and should go through updateVfo.
  */
 export function saveDemodSettings(patch) {
-    const before = demodSettings();
-    const merged = sanitise({
-        ...before,
-        ...patch,
-        widths: { ...before.widths, ...(patch && patch.widths) },
-    });
-    current = merged;
-    persist(merged);
-    for (const fn of Array.from(listeners)) {
-        try { fn(merged); } catch (err) { /* one listener must not cost the others */ }
-    }
-    return merged;
+    return publish({ ...demodSettings(), ...patch });
 }
 
 export function onDemodSettings(fn) {
@@ -633,10 +698,76 @@ export function onDemodSettings(fn) {
     return () => listeners.delete(fn);
 }
 
-/** The width in force for the mode currently selected. */
-export function activeWidth(settings) {
-    const s = settings || demodSettings();
-    return clampWidth(s.mode, s.widths[s.mode]);
+/** Change one demodulator, leaving the others exactly as they were. */
+export function updateVfo(index, patch) {
+    const before = demodSettings();
+    if (!before.vfos[index]) return before;
+    const vfos = before.vfos.map((v, i) => (i === index
+        ? { ...v, ...patch, widths: { ...v.widths, ...(patch && patch.widths) } }
+        : v));
+    return publish({ ...before, vfos });
+}
+
+export function selectVfo(index) {
+    const before = demodSettings();
+    if (!before.vfos[index] || index === before.active) return before;
+    return publish({ ...before, active: index });
+}
+
+/**
+ * Add one, and make it the one being edited.
+ *
+ * Copied from the demodulator that was active rather than started from the
+ * defaults, and placed immediately beside it: adding a second is nearly always
+ * "another one like this, next to this", whether that is the other sideband of
+ * the same signal or the station a couple of kilohertz up. Starting at the
+ * defaults would put it on top of the first one in USB at the dial, which is
+ * both invisible on the picture and the same audio twice.
+ */
+export function addVfo() {
+    const before = demodSettings();
+    if (before.vfos.length >= MAX_VFOS) return before;
+    const from = before.vfos[before.active] || before.vfos[0];
+    const w = clampWidth(from.mode, from.widths[from.mode]);
+    // Above if there is room, below if there is not — at the top of the stream
+    // there is nowhere further up to go, and stacking it back on the original
+    // would look like the button had done nothing.
+    let offsetHz = clampOffset(from.mode, from.offsetHz + w, w);
+    if (offsetHz === from.offsetHz) offsetHz = clampOffset(from.mode, from.offsetHz - w, w);
+    const vfos = [...before.vfos, { ...from, widths: { ...from.widths }, offsetHz }];
+    return publish({ ...before, vfos, active: vfos.length - 1 });
+}
+
+/** Remove one. The last one cannot go: the panel would have nothing to be. */
+export function removeVfo(index) {
+    const before = demodSettings();
+    if (before.vfos.length <= 1 || !before.vfos[index]) return before;
+    const vfos = before.vfos.filter((v, i) => i !== index);
+    // Keep editing the same one where that still means something, and step back
+    // rather than forward when the one removed was the last.
+    const active = before.active > index ? before.active - 1
+        : Math.min(before.active, vfos.length - 1);
+    return publish({ ...before, vfos, active });
+}
+
+/** The width in force for a demodulator's current mode. */
+export function vfoWidth(vfo) {
+    return clampWidth(vfo.mode, vfo.widths[vfo.mode]);
+}
+
+/** The plan a demodulator's settings reduce to. */
+export function planForVfo(vfo) {
+    return planFor({
+        mode: vfo.mode,
+        offsetHz: vfo.offsetHz,
+        widthHz: vfoWidth(vfo),
+        pitchHz: vfo.pitchHz,
+    });
+}
+
+/** Where a demodulator's passband lands, as offsets from the dial. */
+export function vfoPassband(vfo) {
+    return passbandFor(vfo.mode, vfo.offsetHz, vfoWidth(vfo));
 }
 
 /** Testing seam: forget the cached copy so the next read goes to storage. */
@@ -657,18 +788,43 @@ const LEAD_IN_SEC = 0.02;
 // accumulates delay that never comes back.
 const MAX_QUEUE_SEC = 0.5;
 
+const PAN_POSITION = { left: -1, center: 0, right: 1 };
+
 /**
- * The demodulator as a thing with a lifetime.
+ * The demodulators as a thing with a lifetime.
  *
- * Owns the tap on the player, the audio it produces, and the duck that keeps
- * the receiver's own quadrature noise out of the way while it runs. Emits
- * 'change' when any of that changes, which is what the panel re-renders on.
+ * Owns the tap on the player, the audio the demodulators produce, and the duck
+ * that keeps the receiver's own quadrature noise out of the way while they run.
+ * Emits 'change' when any of that changes, which is what the panel re-renders
+ * on.
+ *
+ * ── The graph ────────────────────────────────────────────────────────────────
+ *
+ * Each demodulator gets its own voice, and they meet at one master:
+ *
+ *     buffer source ─► voice gain (mute) ─► panner (L/C/R) ─┐
+ *     buffer source ─► voice gain (mute) ─► panner (L/C/R) ─┼─► master ─► out
+ *                                                     …    ─┘
+ *
+ * The voice gain is mute and nothing else: the demodulator's own gain is applied
+ * in the arithmetic, where it is followed by a clip that keeps a runaway AGC out
+ * of Web Audio. The master carries the receiver's volume and mute, because
+ * demodulated audio is not the receiver's audio and must not go through its
+ * filter chain — but it is what is being listened to.
+ *
+ * Nothing scales with the number of voices. Four at the AGC's target sum to
+ * about full scale, which is where they should be, and panning a pair apart
+ * separates them further; asking the operator's volume control to absorb the
+ * rest is better than having the loudness of one demodulator change because a
+ * second was switched on somewhere else.
  */
 export class IQDemod extends Emitter {
     constructor(player) {
         super();
         this.player = player;
-        this.chain = new DemodChain();
+        // One per demodulator, index-aligned with the settings' `vfos`.
+        this.chains = [];
+        this.voices = [];
         this.active = false;
         // Whether the stream arriving really is a quadrature pair.
         //
@@ -697,14 +853,14 @@ export class IQDemod extends Emitter {
         // setMode, since only it can reach the actions.
         this.restoreMode = null;
         this._untap = null;
-        this._gain = null;
+        this._master = null;
         this._ctx = null;
-        this._nextPlayTime = 0;
         this._volume = 1;
         this._muted = false;
         this._settings = demodSettings();
         this._offSettings = onDemodSettings((s) => {
             this._settings = s;
+            this._sync();
             this.emit('change');
         });
     }
@@ -718,34 +874,20 @@ export class IQDemod extends Emitter {
         return this._quad;
     }
 
-    get level() {
-        return this.active && this._quad ? this.chain.level : 0;
-    }
-
-    get tapCount() {
-        return this.chain.n;
-    }
-
     get settings() {
         return this._settings;
     }
 
-    /** The plan in force, for the panel's readouts. */
-    get plan() {
-        const s = this._settings;
-        return planFor({
-            mode: s.mode,
-            offsetHz: s.offsetHz,
-            widthHz: activeWidth(s),
-            pitchHz: s.pitchHz,
-        });
+    /** Output level of one demodulator, for its meter. */
+    levelOf(index) {
+        const chain = this.chains[index];
+        return this.active && this._quad && chain ? chain.level : 0;
     }
 
     start() {
         if (this.active) return;
         this.active = true;
-        this.chain.reset();
-        this._nextPlayTime = 0;
+        for (const c of this.chains) c.reset();
         this._untap = this.player.onAudio((planes, frames, sampleRate) => {
             this._onAudio(planes, frames, sampleRate);
         });
@@ -759,31 +901,26 @@ export class IQDemod extends Emitter {
         if (this._untap) this._untap();
         this._untap = null;
         this._applyDuck();
-        this.chain.reset();
+        for (const c of this.chains) c.reset();
         this.rate = 0;
         this.frames = 0;
-        this._nextPlayTime = 0;
-        if (this._gain) {
-            try { this._gain.disconnect(); } catch (err) { /* context already gone */ }
-            this._gain = null;
-            this._ctx = null;
-        }
+        this._teardown();
         this.emit('change');
     }
 
     /**
      * Say whether the stream is quadrature, i.e. whether the receiver is in IQ.
      *
-     * Flipping it on resets the chain: what came before was a different mode and
-     * carrying its filter history into this one would be a click at best.
+     * Flipping it on resets the chains: what came before was a different mode
+     * and carrying its filter history into this one would be a click at best.
      */
     setQuadrature(on) {
         const next = !!on;
         if (next === this._quad) return;
         this._quad = next;
         if (next) {
-            this.chain.reset();
-            this._nextPlayTime = 0;
+            for (const c of this.chains) c.reset();
+            for (const v of this.voices) v.nextPlayTime = 0;
         }
         this._applyDuck();
         this.emit('change');
@@ -805,42 +942,86 @@ export class IQDemod extends Emitter {
         this.player.setDucked(want);
     }
 
-    /**
-     * The receiver's volume and mute, pushed in from the outside.
-     *
-     * The demodulated audio is not the receiver's audio and must not go through
-     * its filter chain — but it *is* what is being listened to, so it follows the
-     * same volume control. This is exactly what the DRM panel does with its own
-     * gain node, and for the same reason.
-     */
+    /** The receiver's volume and mute, pushed in from the outside. */
     setOutput(volume, muted) {
         this._volume = Number.isFinite(volume) ? volume : 1;
         this._muted = !!muted;
-        const g = this._gain;
-        if (g && this._ctx) {
-            g.gain.setTargetAtTime(this._muted ? 0 : this._volume, this._ctx.currentTime, 0.015);
+        if (this._master && this._ctx) {
+            this._master.gain.setTargetAtTime(
+                this._muted ? 0 : this._volume, this._ctx.currentTime, 0.015,
+            );
         }
     }
 
-    /** Change a setting. Everything goes through the store, so both copies of
-     *  the panel and the engine see it at once. */
-    set(patch) {
-        saveDemodSettings(patch);
+    /**
+     * Match the number of chains to the number of demodulators.
+     *
+     * Index-aligned with the settings rather than keyed by an id, because the
+     * settings are a plain array and adding an identity to them would be a
+     * second thing to keep in step. The cost is that removing the first of three
+     * shifts the other two onto different chains — one packet of filter history
+     * belonging to the wrong demodulator, which is inaudible, against an id that
+     * would have to survive storage, migration and every patch above.
+     */
+    _sync() {
+        const want = this._settings.vfos.length;
+        while (this.chains.length < want) this.chains.push(new DemodChain());
+        while (this.chains.length > want) this.chains.pop();
+        while (this.voices.length > want) this._dropVoice(this.voices.pop());
     }
 
-    _ensureGain() {
+    _dropVoice(voice) {
+        if (!voice) return;
+        try { voice.gain.disconnect(); } catch (err) { /* context already gone */ }
+        try { voice.panner.disconnect(); } catch (err) { /* context already gone */ }
+    }
+
+    _teardown() {
+        for (const v of this.voices) this._dropVoice(v);
+        this.voices = [];
+        if (this._master) {
+            try { this._master.disconnect(); } catch (err) { /* context already gone */ }
+        }
+        this._master = null;
+        this._ctx = null;
+    }
+
+    _ensureMaster() {
         const ctx = this.player && this.player.ctx;
         if (!ctx || ctx.state === 'closed') return null;
-        if (this._gain && this._ctx === ctx) return this._gain;
-        const g = ctx.createGain();
-        g.gain.value = this._muted ? 0 : this._volume;
-        g.connect(ctx.destination);
-        this._gain = g;
+        if (this._master && this._ctx === ctx) return this._master;
+        // The player rebuilds its context on a format or rate change, and every
+        // node hanging off the old one is now attached to a stopped clock.
+        this._teardown();
+        const master = ctx.createGain();
+        master.gain.value = this._muted ? 0 : this._volume;
+        master.connect(ctx.destination);
+        this._master = master;
         this._ctx = ctx;
-        // The player rebuilds its context on a format or rate change, and the
-        // old schedule is meaningless against the new clock.
-        this._nextPlayTime = 0;
-        return g;
+        return master;
+    }
+
+    _voice(index) {
+        const ctx = this._ctx;
+        const master = this._master;
+        if (!ctx || !master) return null;
+        let v = this.voices[index];
+        if (!v) {
+            const gain = ctx.createGain();
+            // A panner is not universal — a browser without one gets the audio
+            // in both ears rather than no audio, which is the right way for a
+            // stereo placement to degrade.
+            const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+            if (panner) {
+                gain.connect(panner);
+                panner.connect(master);
+            } else {
+                gain.connect(master);
+            }
+            v = { gain, panner, nextPlayTime: 0, pan: null, muted: null };
+            this.voices[index] = v;
+        }
+        return v;
     }
 
     _onAudio(planes, frames, sampleRate) {
@@ -854,23 +1035,7 @@ export class IQDemod extends Emitter {
 
         const ctx = this.player.ctx;
         if (!ctx || ctx.state === 'closed') return;
-        const gain = this._ensureGain();
-        if (!gain) return;
-
-        const rate = sampleRate > 0 ? sampleRate : this.rate || 12000;
-        const s = this._settings;
-        this.chain.configure(planFor({
-            mode: s.mode,
-            offsetHz: s.offsetHz,
-            widthHz: activeWidth(s),
-            pitchHz: s.pitchHz,
-        }), rate);
-
-        const audio = this.chain.process(planes[0], planes[1], frames, {
-            agc: s.agc,
-            gain: s.gain,
-        });
-        if (!audio) return;
+        if (!this._ensureMaster()) return;
 
         // Re-asserted rather than set once: the recorder's preview unducks on
         // the way out (see RecorderPanel), and a demodulator that went silently
@@ -879,25 +1044,62 @@ export class IQDemod extends Emitter {
         // thing making the sound — see _applyDuck for the other half of the rule.
         if (!this.player.ducked) this.player.setDucked(true);
 
-        const buffer = ctx.createBuffer(1, frames, rate);
-        buffer.copyToChannel(audio.subarray(0, frames), 0);
+        const rate = sampleRate > 0 ? sampleRate : this.rate || 12000;
+        const vfos = this._settings.vfos;
+        this._sync();
 
-        const now = ctx.currentTime;
-        if (this._nextPlayTime < now) this._nextPlayTime = now + LEAD_IN_SEC;
-        else if (this._nextPlayTime - now > MAX_QUEUE_SEC) return;
-        const src = ctx.createBufferSource();
-        src.buffer = buffer;
-        src.connect(gain);
-        src.start(this._nextPlayTime);
-        this._nextPlayTime += buffer.duration;
+        for (let i = 0; i < vfos.length; i++) {
+            this._playOne(i, vfos[i], planes, frames, rate, ctx);
+        }
 
-        // Read by the panel's meter. Latched here so the readouts can say what
-        // the stream is without the panel having to ask the player.
+        // Read by the panel's readouts. Latched here so they can say what the
+        // stream is without the panel having to ask the player.
         if (this.rate !== rate || this.frames !== frames) {
             this.rate = rate;
             this.frames = frames;
             this.emit('change');
         }
+    }
+
+    _playOne(index, vfo, planes, frames, rate, ctx) {
+        const chain = this.chains[index];
+        const voice = this._voice(index);
+        if (!chain || !voice) return;
+
+        chain.configure(planForVfo(vfo), rate);
+
+        // Muted still demodulates. The level meter goes on reading, so the
+        // picture and the meters still say what is on a demodulator you have
+        // silenced to hear another one — which is most of why you would silence
+        // it — and unmuting is instant rather than a filter refilling.
+        const audio = chain.process(planes[0], planes[1], frames, {
+            agc: vfo.agc,
+            gain: vfo.gain,
+        });
+        if (!audio) return;
+
+        const now = ctx.currentTime;
+        if (voice.pan !== vfo.pan) {
+            voice.pan = vfo.pan;
+            if (voice.panner) {
+                voice.panner.pan.setTargetAtTime(PAN_POSITION[vfo.pan] || 0, now, 0.015);
+            }
+        }
+        if (voice.muted !== vfo.muted) {
+            voice.muted = vfo.muted;
+            voice.gain.gain.setTargetAtTime(vfo.muted ? 0 : 1, now, 0.015);
+        }
+
+        const buffer = ctx.createBuffer(1, frames, rate);
+        buffer.copyToChannel(audio.subarray(0, frames), 0);
+
+        if (voice.nextPlayTime < now) voice.nextPlayTime = now + LEAD_IN_SEC;
+        else if (voice.nextPlayTime - now > MAX_QUEUE_SEC) return;
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(voice.gain);
+        src.start(voice.nextPlayTime);
+        voice.nextPlayTime += buffer.duration;
     }
 
     destroy() {
@@ -908,7 +1110,7 @@ export class IQDemod extends Emitter {
 
 let engine = null;
 
-/** The one demodulator. Built on first use, like the recorder's. */
+/** The one demodulator bank. Built on first use, like the recorder's. */
 export function getIQDemod(player) {
     if (!engine) engine = new IQDemod(player);
     return engine;

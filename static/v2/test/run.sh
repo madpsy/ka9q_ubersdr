@@ -419,6 +419,12 @@ esbuild ../src/extensions/whisper/speech.js --bundle --format=cjs --platform=nod
     --outfile=.build/whisperspeech.cjs --log-level=warning
 esbuild ../src/extensions/whisper/languages.js --bundle --format=cjs --platform=node \
     --outfile=.build/whisperlang.cjs --log-level=warning
+esbuild ../src/lib/measure.js --bundle --format=cjs --platform=node \
+    --outfile=.build/measure.cjs --log-level=warning
+esbuild ../src/lib/measureTool.js --bundle --format=cjs --platform=node \
+    --outfile=.build/measuretool.cjs --log-level=warning
+esbuild measurepanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/measurepanel.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
@@ -581,3 +587,5 @@ node oliviapanel.test.js
 node drmpanel.test.js
 node tuningrange.test.js
 node bandtune.test.js
+node measure.test.js
+node measurepanel.test.js

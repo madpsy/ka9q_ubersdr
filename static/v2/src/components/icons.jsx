@@ -56,6 +56,11 @@ export const Icon = {
     // it is a width being stated, not somewhere to go.
     Span: (p) => <Svg {...p}><path d="M3 7v10M21 7v10" /><path d="M6 12h12" /><path d="m8.5 9.5-2.5 2.5 2.5 2.5" /><path d="m15.5 9.5 2.5 2.5-2.5 2.5" /></Svg>,
     Pointer: (p) => <Svg {...p}><path d="M5 3.5 18 11l-5.6 1.5L9.6 17.5z" /></Svg>,
+    // Callipers: two jaws closed on something, with the beam and its scale
+    // behind them. Not Span, which is next door and is a width being *stated* —
+    // this is a width being taken off the thing itself, which is the difference
+    // between the zoom control and the Measure panel.
+    Callipers: (p) => <Svg {...p}><path d="M4 3v13M20 3v13" /><path d="M4 20h16" /><path d="M4 16h4M20 16h-4" /><path d="M8 6h2M8 9h2M14 6h2M14 9h2" /></Svg>,
     // A radar sweep: the dish arc and the line going round it. The Scanner is
     // the one control that moves the dial by itself, so its icon says "looking"
     // rather than "pointing at" — which is what Target and Pointer already say

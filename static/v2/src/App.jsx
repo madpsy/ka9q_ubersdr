@@ -28,6 +28,7 @@ import OperatorNotice from './components/OperatorNotice.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import DXClusterWatch from './components/DXClusterWatch.jsx';
+import MeasureWatch from './components/MeasureWatch.jsx';
 import { MediaSessionProvider } from './radio/media/MediaSessionContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
 import BridgeHost from './bridge/BridgeHost.jsx';
@@ -270,6 +271,15 @@ export default function App() {
                                     counting — so the clock is here and the panel
                                     only draws what it finds. */}
                                 <TopFreqWatch />
+                                {/* The Measure tool's engine. Here rather than
+                                    in its panel for the same reason as the rest
+                                    of this block, and one of its own: on a phone
+                                    the panel sits in a sheet over the spectrum
+                                    being measured, so a measurement that only
+                                    ran while the panel was mounted would stop
+                                    the moment you shut the sheet to look at the
+                                    band. */}
+                                <MeasureWatch />
                                 <StartOverlay />
                                 {/* After the overlay, and drawn above it: the
                                     operator's notices appear the moment the page

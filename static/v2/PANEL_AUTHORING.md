@@ -115,7 +115,7 @@ Addons · Announcements · Antenna switch · Audio · Audio filters
 Audio scope · Backup · Band plan · Bands · Band Spectrum · Bookmarks
 Callsign lookup · Chat · Display · Doppler · DX cluster · Events
 Extensions · HFDL · IF Spectrum · Layout · Lightning · Listeners
-Local bookmarks · Markers · Media controls · Mini Games · Most used
+Local bookmarks · Markers · Measure · Media controls · Mini Games · Most used
 Multipad · NAVTEX · News · Noise reduction · Notifications · Packet
 Quick bands · Radio control · Ranking · Receiver · Receiver info
 Recorder · Rotator · Scanner · SDR control · Shortcuts · Signal
@@ -140,8 +140,8 @@ receiver's.
 beside it. The names, as of this version:
 
 ```
-Anchor Announce Antenna Archive Bars Bell Bolt Bookmark Captions Chat
-Chevron ChevronLeft ChevronRight ChevronUp Clock Close Cloud Collapse
+Anchor Announce Antenna Archive Bars Bell Bolt Bookmark Callipers Captions
+Chat Chevron ChevronLeft ChevronRight ChevronUp Clock Close Cloud Collapse
 Compass Copy Custom Dice Download Drag Expand External Eye EyeOff Fax
 Gauge Grid Info Keyboard Knob Layers Link List Lock LockScreen Mic Minus
 Moon Morse Mute News Packet Pad Pause Picture Play Plug Plus Podium

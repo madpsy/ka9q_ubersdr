@@ -174,6 +174,25 @@
     /* The spectrum trace and fill are coloured from the active waterfall
        palette, not from tokens — see paletteGradients() in SpectrumView.jsx. */
     --spec-band: rgba(139, 124, 248, 0.22);
+    /* The Measure tool's marks, over the canvas.
+     *
+     * Not themed, for the reason --scope-peak is not: the surface under them is
+     * a waterfall, which is dark in both themes. Not taken from the palette
+     * either, which is what the dial line and the passband edges do — those have
+     * one line each to place and can afford to be tuned per palette, whereas
+     * this is a wash, two edges, two hairlines and up to four callipers, and a
+     * set that changed colour with the palette would be a different picture on
+     * every one of them.
+     *
+     * Magenta because no waterfall palette in this build runs through it: they
+     * go dark → blue/green → yellow → white, so a saturated pink is the one hue
+     * guaranteed to be the tool's rather than the band's. The callipers are
+     * amber and cyan against it — the three are far enough apart in hue to be
+     * told apart at a glance and all three clear the dark end of every palette. */
+    --measure: #f857c8;
+    --measure-wash: rgba(248, 87, 200, 0.13);
+    --measure-width: #ffc247;
+    --measure-obw: #5ad9ff;
     /* The dial line and the passband edges are not tokens either: they have to
        contrast with the waterfall palette rather than with the theme, so they
        come from paletteMarks() and the Display panel's per-palette overrides. */
@@ -11801,3 +11820,229 @@ a.btn { text-decoration: none; }
     cursor: pointer;
 }
 .opnotice__close:hover { background: var(--surface-hover); color: var(--text); }
+
+
+/* =========================================================================
+   Measure — the overlay on the spectrum, and the panel
+   ========================================================================= */
+
+/* The tool has the display's presses. A ring rather than a cursor change,
+   because the cursor is already a crosshair here and because a mode you can
+   only discover by moving the pointer is not one you can discover at all — this
+   is visible from across the room, which is what a mode that stops clicks
+   tuning has to be. The badge below carries the explanation and the way out. */
+.spectrum__canvas--measuring { box-shadow: inset 0 0 0 1px var(--measure); }
+
+.measure {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    /* Under the paused overlay's 5 and above the canvases, and taking nothing:
+       every gesture underneath belongs to the spectrum. */
+    pointer-events: none;
+    overflow: hidden;
+}
+
+/* The region. A wash across both panes rather than a box round one, so it reads
+   as a column of the display — which is what a frequency range is. */
+.measure__band {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--measure-wash);
+}
+/* While the drag is live. Brighter, because the edges are following a finger
+   and the thing that has to be legible is where they are now. */
+.measure__band--drawing { background: rgba(248, 87, 200, 0.2); }
+/* Stopped, and being read. Dimmed to say the numbers beside it are a record
+   rather than a reading — without taking it off the screen, since being able to
+   see what was measured is the whole reason stopping does not clear it. */
+.measure__band--held { opacity: 0.55; }
+
+.measure__edge {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 1px solid var(--measure);
+    /* A dark halo, for the same reason the canvas marks have one: the line
+       crosses every value of the palette on the way down, and any single colour
+       is invisible somewhere. */
+    box-shadow: -1px 0 0 rgba(0, 0, 0, 0.6), 1px 0 0 rgba(0, 0, 0, 0.6);
+}
+
+/* The loudest bin, and the middle of the energy. Two lines and not one because
+   on a clean carrier they coincide and on a wide or lopsided signal they do
+   not — which is itself the reading. */
+.measure__peak,
+.measure__centroid {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 1px solid var(--measure);
+    opacity: 0.9;
+}
+.measure__centroid { border-left-style: dashed; opacity: 0.6; }
+
+/* The derived widths, stacked above the badge. See MeasureOverlay for why they
+   are horizontal callipers rather than a hairline per edge. */
+.measure__stack { position: absolute; left: 0; right: 0; }
+.measure__row { position: absolute; left: 0; right: 0; height: 15px; }
+
+.measure-cal {
+    position: absolute;
+    top: 9px;
+    height: 0;
+    border-top: 1px solid currentColor;
+    /* The end caps: what makes it a measurement of something rather than a rule
+       drawn across it. */
+    box-shadow: none;
+}
+.measure-cal::before,
+.measure-cal::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    width: 0;
+    height: 9px;
+    border-left: 1px solid currentColor;
+}
+.measure-cal::before { left: 0; }
+.measure-cal::after { right: 0; }
+.measure-cal--width { color: var(--measure-width); }
+.measure-cal--obw { color: var(--measure-obw); }
+
+.measure-cal__label {
+    position: absolute;
+    left: 50%;
+    bottom: 2px;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    line-height: 1;
+    /* Over a waterfall, so the halo is the legibility rather than a background:
+       a filled label would cover the picture the measurement is of. */
+    text-shadow:
+        0 0 3px rgba(0, 0, 0, 0.95), 1px 0 2px rgba(0, 0, 0, 0.9),
+        -1px 0 2px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.9),
+        0 -1px 2px rgba(0, 0, 0, 0.9);
+}
+
+/* The badge. The one part of this layer that takes presses, and the reason the
+   whole overlay can afford to take the display's gestures away: it says the tool
+   is on, and it carries the button that turns it off. */
+.measure-hud {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100% - 16px);
+    padding: 4px 6px 4px 9px;
+    border: 1px solid var(--measure);
+    border-radius: 99px;
+    background: rgba(6, 10, 16, 0.9);
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: #e9eef6;
+    white-space: nowrap;
+    overflow: hidden;
+    pointer-events: auto;
+}
+.measure-hud__dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--measure);
+    animation: measure-pulse 1.6s ease-in-out infinite;
+}
+/* Held: the same dot, not pulsing. The animation is what says "live", so
+   stopping it is what says the reading is not. */
+.measure-hud__dot--held { animation: none; opacity: 0.55; }
+@keyframes measure-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+    .measure-hud__dot { animation: none; }
+}
+.measure-hud__title { font-weight: 650; color: var(--measure); }
+.measure-hud__hint { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
+.measure-hud__num { font-variant-numeric: tabular-nums; }
+.measure-hud__num--dim { color: var(--text-dim); }
+.measure-hud__btn {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.measure-hud__btn:hover { background: var(--surface-hover); color: var(--text); }
+.measure-hud__btn--stop:hover { background: var(--bad); color: #150406; }
+
+/* ---- the panel ---------------------------------------------------------- */
+
+.measure-panel__head { display: flex; gap: 6px; flex-wrap: wrap; }
+.measure-panel__head > .btn { flex: 1 1 auto; justify-content: center; }
+
+/* The widths, as rows rather than as readout tiles. They are a list of the same
+   measurement at different levels, and a grid of tiles would say they were
+   different quantities. */
+.measure-rows { display: flex; flex-direction: column; gap: 2px; }
+.measure-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: calc(11.5px * var(--ui-scale));
+}
+.measure-row:last-child { border-bottom: none; }
+.measure-row__label { color: var(--text-dim); }
+.measure-row__value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+/* A width whose skirt ran out of the region: the figure is a bound, and the
+   panel prints a ">" in front of it. Dimmed as well, so a column of them reads
+   as "these are not measurements" without having to notice the sign. */
+.measure-row__value.is-bound { color: var(--warn); }
+
+.measure-warn {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    color: var(--warn);
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1.35;
+}
+.measure-warn svg { flex: none; margin-top: 2px; }
+
+.measure-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.measure-chart canvas { display: block; width: 100%; }
+.measure-chart__axis {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 2px;
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+}
+/* The range the chart is drawn against on the left, what it is on the right.
+   The range first because it is the reading; the caption is there once, to be
+   read once. */
+.measure-chart__axis > :first-child { color: var(--text-dim); }

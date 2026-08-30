@@ -115,6 +115,7 @@ import HFDLPanel, { hfdlAvailable } from './HFDLPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 import IFSpectrumPanel from './IFSpectrumPanel.jsx';
+import MeasurePanel from './MeasurePanel.jsx';
 
 /**
  * Whether the host allows a chat panel at all.
@@ -249,6 +250,31 @@ const BUILT_IN = [
         defaultOpen: false,
         minimal: true,
         Component: IFSpectrumPanel,
+    },
+    // Measuring a piece of the spectrum: draw a region on the display and read
+    // its width, its skirts, how far it stands above the noise and how much of
+    // that moves.
+    //
+    // Ships hidden, which is not the usual caution about clutter. Starting it
+    // takes the display's presses — a drag draws a region instead of panning
+    // and a click does not tune — and a panel that can do that should be one
+    // somebody went and found rather than one they met by scrolling the dock.
+    // Everything about the running state is loud for the same reason: a badge
+    // over the spectrum with the Stop button on it, and Escape.
+    //
+    // Minimal: the readings and the run, without the buttons that act on them
+    // or the settings behind them. The rule the other panels follow — a cut-down
+    // panel is a readout — and it suits this one particularly well, since the
+    // tool is driven from the spectrum rather than from here.
+    {
+        id: 'measure',
+        title: 'Measure',
+        icon: <Icon.Callipers />,
+        dock: 'left',
+        defaultOpen: false,
+        defaultHidden: true,
+        minimal: true,
+        Component: MeasurePanel,
     },
     // The four VFOs, laid out. The Receiver panel's own row of A–D buttons is
     // the control; this is the view — four frequencies readable at once rather

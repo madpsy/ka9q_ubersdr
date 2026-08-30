@@ -81,6 +81,10 @@ import {
 } from '../lib/dss.js';
 import { dxCanSpot } from '../lib/dxclusterSession.js';
 import SpotOnCluster from './SpotOnCluster.jsx';
+import MeasureOverlay from './MeasureOverlay.jsx';
+import { useMeasureActive } from '../lib/useMeasure.js';
+import { measureState, setSelection } from '../lib/measureTool.js';
+import { grabMode } from '../lib/measure.js';
 
 // How near a passband edge counts as grabbing it, and how wide the passband
 // has to be on screen before either edge can be grabbed at all.
@@ -117,6 +121,36 @@ const EDGE_MIN_PX = 3 * EDGE_ZONE_MIN_PX;
 // reach, as it must — at some span everything is a pixel wide — but that undoes
 // itself by zooming back in, and it is not something a gesture did to you.
 const EDGE_FLOOR_PX = EDGE_MIN_PX + 4;
+
+// ---- the Measure tool's gestures ------------------------------------------
+//
+// While the tool is running the display's presses belong to it: no tune, no
+// pan, no passband edge. Two gestures are deliberately left alone. A pinch is
+// two fingers and cannot be confused with drawing a region, and it is the only
+// way to zoom on a phone — framing the thing being measured is part of
+// measuring it. A right-click still opens the frequency menu, because a mouse
+// button that cannot be held cannot be part of a drag, and bookmarking what you
+// have just measured is a reasonable next thing to do.
+//
+// The long-press menu is the one that goes. It is a held finger, which is how
+// a drag starts, and the two cannot both have it — so while the tool is on, the
+// menu is a mouse gesture. The badge over the spectrum says the tool is on and
+// carries the button that turns it off, which is what makes taking the gestures
+// away survivable at all.
+
+// How near an existing region's edge counts as taking hold of it, in CSS px.
+// Larger than the passband's EDGE_GRAB_PX because the consequence of missing is
+// different: missing a filter edge tunes the receiver, missing a measurement
+// edge throws away a region that can simply be drawn again.
+const MEASURE_GRAB_PX = 10;
+
+// How far a press has to travel before it is a region rather than a tap.
+//
+// A tap does nothing at all — deliberately. The obvious alternative, clearing
+// the region, means a stray finger on the glass destroys a measurement that has
+// been accumulating for ten minutes, with no undo. Clearing is a button on the
+// panel, where it takes an aim.
+const MEASURE_SLOP_PX = 4;
 
 // The same, for a finger. Six pixels is not a touch target — a fingertip is
 // nearer forty across and the contact point is not where you think it is — so
@@ -1030,6 +1064,21 @@ export default function SpectrumView() {
     const [paused, setPaused] = useState(spectrumPaused);
     useEffect(() => onSpectrumPaused(setPaused), []);
 
+    // Whether the Measure tool has the display's gestures.
+    //
+    // Only the flag, never the region: this component is the largest tree here
+    // and a region being dragged writes to the store on every pointer move, so
+    // subscribing to the whole of it would put a full reconciliation between
+    // the finger and the edge it is dragging. The handlers read the region
+    // straight out of the store when they need it, which is once per press.
+    //
+    // Mirrored into a ref as well, because the handlers keep their identity for
+    // the life of a gesture and a handler swapped mid-drag would have React
+    // re-attaching listeners while a finger is down.
+    const measuring = useMeasureActive();
+    const measureRef = useRef(measuring);
+    measureRef.current = measuring;
+
 
     // Stopping and starting it by hand, which is the toolbar's toggle and the
     // overlay's button. The same state either way: there is one paused spectrum,
@@ -1102,6 +1151,10 @@ export default function SpectrumView() {
         held: false,         // ...and whether it got there, which a tap must not undo
         pts: new Map(),      // live pointers, id -> {x, y}; two of them is a pinch
         pinch: null,         // {dist, bw, last} the view the fingers went down on
+        // The Measure tool's gesture: {mode, anchor, startX, startHz, moved}.
+        // 'new' draws a region from where the press landed, 'edge' pivots about
+        // the far edge of the one already there, 'move' slides the whole thing.
+        measure: null,
         bgImage: null,       // operator backdrop, split view only
         bgOpacity: 0,
         bgUrl: '',
@@ -1803,6 +1856,96 @@ export default function SpectrumView() {
         return cfg.centerFreq - cfg.span / 2 + frac * cfg.span;
     }, []);
 
+    /**
+     * What a press means to the Measure tool: draw a new region, take hold of
+     * an edge of the one already there, or slide it along.
+     *
+     * The order is the order a pointer can be aimed. An edge is a line and is
+     * tested first; the inside of the region is an area and is tested second;
+     * anything else starts a new region. Without the middle case a press inside
+     * a region you had just drawn would silently replace it, which is what makes
+     * a region feel like an object rather than like a mark that has to be
+     * redrawn every time it is a pixel out.
+     *
+     * The frequency is the flat one — where the pointer sits against the ruler
+     * — everywhere, including over the 3D surface, where a click to tune reads
+     * the trapezoid instead. Deliberate: a region is a frequency *range* and is
+     * drawn as a column across the whole display, so its edges have to mean the
+     * same thing at the top of the box as at the bottom. Taking them off the
+     * surface would give a region whose two edges were read at two different
+     * depths, which is not a range of anything.
+     */
+    const beginMeasure = useCallback((clientX) => {
+        const el = wrapRef.current;
+        const cfg = cfgRef.current;
+        if (!el || !cfg.span) return null;
+        const hz = freqAtX(clientX);
+        if (hz == null) return null;
+        const r = el.getBoundingClientRect();
+        const grab = MEASURE_GRAB_PX * (cfg.span / r.width);
+        return {
+            startX: clientX,
+            startHz: hz,
+            moved: false,
+            ...grabMode(measureState().selection, hz, grab),
+        };
+    }, [freqAtX]);
+
+    // One write per animation frame while a region is being dragged.
+    //
+    // Same reason the split drag is paced (see setSplit): a pointer reports far
+    // faster than the screen refreshes — a high-rate mouse is 1 kHz — and every
+    // write here re-renders the overlay and wakes the engine's listener. One per
+    // frame is all that can be shown, so it is all that is done. The end of the
+    // gesture flushes whatever is held, so the region ends where the finger left
+    // it rather than wherever the last frame fell.
+    const measureRaf = useRef(0);
+    const measureNext = useRef(null);
+
+    const pushSelection = useCallback((sel) => {
+        measureNext.current = sel;
+        if (measureRaf.current) return;
+        measureRaf.current = requestAnimationFrame(() => {
+            measureRaf.current = 0;
+            if (measureNext.current) setSelection(measureNext.current, { drawing: true });
+        });
+    }, []);
+
+    /**
+     * The region is final: whatever the drag last asked for, marked done.
+     *
+     * The pending frame is cancelled rather than left to run, or it would land
+     * after the release and put `drawing` back — which would stop the run
+     * accumulating for ever, silently, since nothing else ever clears it.
+     */
+    const endSelection = useCallback(() => {
+        if (measureRaf.current) { cancelAnimationFrame(measureRaf.current); measureRaf.current = 0; }
+        const sel = measureNext.current || measureState().selection;
+        measureNext.current = null;
+        if (sel) setSelection(sel, { drawing: false });
+    }, []);
+
+    useEffect(() => () => {
+        if (measureRaf.current) cancelAnimationFrame(measureRaf.current);
+    }, []);
+
+    /** The cursor that says which of those three a press would be. */
+    const measureCursor = useCallback((clientX) => {
+        const el = wrapRef.current;
+        const cfg = cfgRef.current;
+        const sel = measureState().selection;
+        if (!el || !cfg.span || !sel) return 'crosshair';
+        const hz = freqAtX(clientX);
+        if (hz == null) return 'crosshair';
+        const grab = MEASURE_GRAB_PX * (cfg.span / el.getBoundingClientRect().width);
+        // The same decision the press will make, so the cursor cannot promise
+        // one thing and the gesture do another.
+        const { mode } = grabMode(sel, hz, grab);
+        if (mode === 'edge') return 'col-resize';
+        if (mode === 'move') return 'move';
+        return 'crosshair';
+    }, [freqAtX]);
+
     // ---- dragging the scale to re-share the height ----------------------
     //
     // The frequency scale sits exactly on the join between the two panes, which
@@ -1903,6 +2046,10 @@ export default function SpectrumView() {
     const openMenu = useCallback((x, y) => {
         const g = gfx.current;
         if (g.held) return false;
+        // A region is being dragged. Android's WebView answers a long press with
+        // a contextmenu event of its own, and a menu opening over a measurement
+        // half drawn is the one way the two gestures can still collide.
+        if (g.measure && g.measure.moved) return false;
         const f = freqAtX(x, y);
         if (f == null) return false;   // no view yet; leave the browser menu alone
         if (g.hold) { clearTimeout(g.hold.timer); g.hold = null; }
@@ -1941,6 +2088,12 @@ export default function SpectrumView() {
             if (g.hold) { clearTimeout(g.hold.timer); g.hold = null; }
             g.drag = null;
             g.edge = null;
+            // A second finger landing mid-measurement ends the drag rather than
+            // abandoning it. Dropping `g.measure` alone would leave `drawing`
+            // set in the store with no gesture left to clear it, and a region
+            // stuck "being drawn" never starts a run — silently, and for the
+            // rest of the session.
+            if (g.measure) { g.measure = null; endSelection(); }
             g.hover = null;
             setHoverInfo(null);
             const pair = pinchPair(g.pts);
@@ -1970,6 +2123,18 @@ export default function SpectrumView() {
             return;
         }
         if (g.pts.size > 2) return;   // a third finger changes nothing
+
+        // The Measure tool, if it is running, has everything a single pointer
+        // does. After the pinch above, which it deliberately does not take, and
+        // before the passband edge below, so the two can never both be live.
+        // Returning here also means no hold timer is armed — see the note at
+        // MEASURE_GRAB_PX for why the long-press menu is the gesture that goes.
+        if (measureRef.current) {
+            g.measure = beginMeasure(e.clientX);
+            g.drag = null;
+            g.edge = null;
+            return;
+        }
 
         // An edge under the pointer takes the gesture: no pan, and no tune on
         // release. Checked before the pan so the two cannot both be live.
@@ -2028,7 +2193,7 @@ export default function SpectrumView() {
                 }, HOLD_MS),
             };
         }
-    }, [freqAtX, edgeAtX, openMenu]);
+    }, [freqAtX, edgeAtX, openMenu, beginMeasure, endSelection]);
 
     /// Nothing is being held any more — moved too far, lifted, or taken away.
     const dropHold = useCallback(() => {
@@ -2128,6 +2293,30 @@ export default function SpectrumView() {
             });
         }
 
+        // The tool's drag. After the hover readout — the tooltip is as useful
+        // while measuring as at any other time, and more so, since it is what
+        // says what the pointer is about to put an edge on.
+        if (g.measure) {
+            const m = g.measure;
+            if (f == null) return;
+            if (!m.moved) {
+                // Still a tap. The same rule the pan and the passband edge use,
+                // and for the same reason: the gestures start identically and
+                // this is the instant the choice is made.
+                if (Math.abs(e.clientX - m.startX) < MEASURE_SLOP_PX) return;
+                m.moved = true;
+                haptic('grab', 'spectrum');
+            }
+            if (m.mode === 'move') {
+                const shift = f - m.startHz;
+                pushSelection({ loHz: m.lo + shift, hiHz: m.hi + shift });
+            } else {
+                // 'new' and 'edge' are the same gesture with a different anchor.
+                pushSelection({ loHz: m.anchor, hiHz: f });
+            }
+            return;
+        }
+
         if (g.edge) {
             // Still undecided: a finger resting near an edge, which is a tap
             // until it travels far enough to be a drag.
@@ -2165,7 +2354,9 @@ export default function SpectrumView() {
 
         // The affordance. Without it nothing says the lines can be grabbed.
         if (e.pointerType !== 'touch') {
-            el.style.cursor = edgeAtX(e.clientX) ? 'col-resize' : '';
+            el.style.cursor = measureRef.current
+                ? measureCursor(e.clientX)
+                : (edgeAtX(e.clientX) ? 'col-resize' : '');
         }
 
         if (g.drag) {
@@ -2201,7 +2392,7 @@ export default function SpectrumView() {
                 if (paced != null) actions.setSpectrumCenter(paced);
             }
         }
-    }, [actions, freqAtX, edgeAtX, markAtX, dropHold]);
+    }, [actions, freqAtX, edgeAtX, markAtX, dropHold, measureCursor, pushSelection]);
 
     // A release that means "tune here". Snapped to whatever the Receiver panel's
     // step is set to, so clicking the spectrum and pressing +/- agree about where
@@ -2229,6 +2420,7 @@ export default function SpectrumView() {
             g.held = false;
             g.drag = null;
             g.edge = null;
+            if (g.measure) { g.measure = null; endSelection(); }
             return;
         }
 
@@ -2237,6 +2429,22 @@ export default function SpectrumView() {
         // finger picks up a pan from wherever it happens to be.
         if (g.pinch) {
             if (g.pts.size === 0) g.pinch = null;
+            return;
+        }
+
+        // The tool's drag is finished. A press that never travelled is a tap and
+        // leaves the region exactly as it was — see MEASURE_SLOP_PX for why
+        // that, and not "clear it".
+        if (g.measure) {
+            const { moved } = g.measure;
+            g.measure = null;
+            if (moved) {
+                // The region is final. Saying so is what lets the run start
+                // accumulating: nothing is counted while the edges are moving,
+                // or the minimum would be over a region that no longer exists.
+                endSelection();
+                haptic('step', 'spectrum');
+            }
             return;
         }
 
@@ -2267,7 +2475,7 @@ export default function SpectrumView() {
             return;
         }
         tuneAt(e.clientX, e.clientY);
-    }, [actions, tuneAt, dropHold]);
+    }, [actions, tuneAt, dropHold, endSelection]);
 
     // A gesture taken away from us — the browser claiming it, the window losing
     // the pointer — is abandoned, not completed. Sharing onPointerUp would tune
@@ -2280,6 +2488,13 @@ export default function SpectrumView() {
         dropHold();
         g.held = false;
         g.edge = null;
+        // A cancelled measurement keeps whatever the drag got to, and stops
+        // being a drag: the edges the operator saw are the edges they get, and
+        // leaving `drawing` set would stop the run for ever.
+        if (g.measure) {
+            g.measure = null;
+            endSelection();
+        }
         // The pan is not undone by the cancel — the moves already sent have
         // moved the view — so the held one is still sent, leaving it where the
         // gesture actually got to. That is not the same as completing the
@@ -2292,7 +2507,7 @@ export default function SpectrumView() {
             if (trailing != null) actions.setSpectrumCenter(trailing);
         }
         if (g.pts.size === 0) g.pinch = null;
-    }, [actions, dropHold]);
+    }, [actions, dropHold, endSelection]);
 
     // The readout has to follow the data, not the mouse: standing still over a
     // signal and watching it fade should change the numbers. Recomputed from
@@ -2866,7 +3081,7 @@ export default function SpectrumView() {
             <MarkerBar width={sizes.w} />
 
             <div
-                className="spectrum__canvas"
+                className={`spectrum__canvas${measuring ? ' spectrum__canvas--measuring' : ''}`}
                 ref={wrapRef}
                 onContextMenu={onContextMenu}
                 onPointerDown={onPointerDown}
@@ -2919,6 +3134,11 @@ export default function SpectrumView() {
                     so the offset clears whichever one it is and the readout sits
                     in the same place on screen either way, rather than moving up
                     and down as the view is switched. */}
+                {/* The measurement, and the badge that says the display's
+                    presses belong to it. Given the same clearance the stats
+                    readout gets, and for the same reason: the ruler along the
+                    bottom is a different height in each view mode. */}
+                <MeasureOverlay view={view} bottom={(wfScaleH || SCALE_H) + STATS_GAP} />
                 {statsAt !== 'off' && (
                     <SpectrumStats
                         place={statsAt}

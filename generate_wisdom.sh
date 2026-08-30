@@ -31,6 +31,9 @@
 #   generate_wisdom.sh --upload-only --fft-sizes=rof1620000,rof3240000
 #                                         ...declaring what it contains, for a file
 #                                         generated before sidecars existed
+#   generate_wisdom.sh --transform-json   print what the installed wisdom covers as
+#                                         JSON and exit; no prompts, no output but
+#                                         the JSON, exit 0 even with no wisdom
 
 # Exit on error
 set -e
@@ -140,6 +143,7 @@ cpu_name_for() {
 
 MAX_RATE=0
 UPLOAD_ONLY=0
+TRANSFORM_JSON=0
 FFT_SIZES_OVERRIDE=""
 for arg in "$@"; do
     case $arg in
@@ -149,6 +153,11 @@ for arg in "$@"; do
             ;;
         --upload-only)
             UPLOAD_ONLY=1
+            shift
+            ;;
+        --transform-json)
+            # A query, not a run: see the block below the argument loop.
+            TRANSFORM_JSON=1
             shift
             ;;
         --fft-sizes=*)
@@ -162,12 +171,158 @@ for arg in "$@"; do
     esac
 done
 
-echo "=== UberSDR FFTW Wisdom Generator ==="
-echo
-
 # ── Script directory (used for sibling script references) ─────────────────────
+#
+# Set before the banner because --transform-json answers below it and must print
+# nothing but its JSON.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Where the wisdom and its sidecar live, and the two supported rates ────────
+#
+# Declared up here rather than beside the generation code because --transform-json
+# needs them before any of that runs — and because a second copy of the volume path
+# is exactly the kind of thing that drifts.
+
+# UBERSDR_WISDOM_FILE overrides the location, which is what the tests point at a
+# temporary file — nothing in normal operation sets it.
+WISDOM_FILE="${UBERSDR_WISDOM_FILE:-/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom}"
+WISDOM_META_FILE="${WISDOM_FILE}.json"
+
+RATE_LOW=64800000       # 0-30 MHz
+RATE_HIGH=129600000     # 0-60 MHz
+FFT_LOW="rof1620000"    # 64.8 MSPS at the default blocktime/overlap
+FFT_HIGH="rof3240000"   # 129.6 MSPS at the default blocktime/overlap
+
+# ── --transform-json: what does the installed wisdom actually cover? ──────────
+#
+# Answers the question the admin interface asks before it lets someone flip the
+# front end sample rate: is there wisdom for the transform the *other* rate makes
+# radiod plan? Switching to a rate with no wisdom for it is not an error — radiod
+# starts and plans from scratch — but on these transform sizes that is hours of a
+# dead receiver, so it is worth saying before the restart rather than after.
+#
+# Everything it reports comes from the sidecar (see "The sidecar" above), which is
+# written on generation, on catalog download, and on upload. It never probes: a
+# probe costs seconds per transform and needs fftwf-wisdom, and this runs behind a
+# web request. A wisdom file with no current sidecar is reported as unknown rather
+# than guessed at — "known":false — and the caller can say so honestly.
+#
+# Prints one line of JSON and nothing else. Exit 0 whenever the question could be
+# answered, including "there is no wisdom at all", which is an answer.
+emit_transform_json() {
+    # The wisdom lives in a root-owned Docker volume. Read it unprivileged when the
+    # permissions allow, and only then reach for sudo -n — never plain sudo, which
+    # would sit waiting for a password nobody can type behind an HTTP request.
+    _wis_readable() { [ -r "$1" ] || sudo -n test -r "$1" 2>/dev/null; }
+    _wis_cat() {
+        if [ -r "$1" ]; then cat "$1" 2>/dev/null
+        elif sudo -n test -r "$1" 2>/dev/null; then sudo -n cat "$1" 2>/dev/null
+        else return 1
+        fi
+    }
+    _wis_exists() { [ -e "$1" ] || sudo -n test -e "$1" 2>/dev/null; }
+
+    # A JSON string value, with the two characters that would break the document
+    # removed. These fields come off the wire in the catalog-download path, so this
+    # is not a formality.
+    _json_str() { printf '%s' "${1:-}" | tr -d '"\\' | tr -d '\n\r\t'; }
+
+    local _present=false _sha="" _readable=false
+    if _wis_exists "$WISDOM_FILE"; then
+        _present=true
+        if _wis_readable "$WISDOM_FILE"; then
+            _readable=true
+            _sha=$(_wis_cat "$WISDOM_FILE" | sha256sum 2>/dev/null | awk '{print $1}') || _sha=""
+        fi
+    fi
+
+    # The sidecar counts only when it describes the file that is actually there —
+    # the same rule read_sidecar_sizes applies before an upload. A sidecar left
+    # behind by a hand-replaced or restored wisdom names transforms this file may
+    # not hold, and acting on that is the failure the sha256 is there to prevent.
+    local _meta="" _meta_present=false _meta_sha="" _current=false
+    local _sizes="" _src="" _fftw="" _when=""
+    if _wis_exists "$WISDOM_META_FILE" && _meta=$(_wis_cat "$WISDOM_META_FILE"); then
+        _meta_present=true
+        _meta_sha=$(printf '%s' "$_meta" | sed -n 's/.*"wisdom_sha256"[[:space:]]*:[[:space:]]*"\([0-9a-f]*\)".*/\1/p')
+        if [ -n "$_sha" ] && [ "$_meta_sha" = "$_sha" ]; then
+            _current=true
+            _sizes=$(printf '%s' "$_meta" | sed -n 's/.*"fft_sizes"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' | tr -d '" ' | tr ',' ' ')
+            _src=$(printf '%s' "$_meta" | sed -n 's/.*"fft_sizes_source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+            _fftw=$(printf '%s' "$_meta" | sed -n 's/.*"fftw_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+            _when=$(printf '%s' "$_meta" | sed -n 's/.*"generated_at"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+        fi
+    fi
+
+    # No wisdom is a definite answer — it covers nothing. Unknown is only for a file
+    # whose contents cannot be established: present, but with no current sidecar.
+    local _known=true
+    if [ "$_present" = true ] && [ "$_current" != true ]; then
+        _known=false
+    fi
+
+    # The transform name is not a property of the sample rate alone: radiod plans
+    # N = samprate x blocktime x overlap/(overlap-1), so a receiver with a non-default
+    # blocktime or overlap lands on names that are neither rof1620000 nor rof3240000.
+    # Ask get-samprate.sh for this receiver's values and derive both names from them,
+    # so the answer is about this machine rather than about the defaults.
+    local _blocktime="" _overlap=""
+    local _sr_info
+    _sr_info=$("${SCRIPT_DIR}/get-samprate.sh" 2>/dev/null || true)
+    if [ -n "$_sr_info" ]; then
+        _blocktime=$(printf '%s' "$_sr_info" | sed -n 's/^blocktime=//p' | head -1)
+        _overlap=$(printf '%s' "$_sr_info" | sed -n 's/^overlap=//p' | head -1)
+    fi
+    # ka9q-radio's defaults, and the ones get-samprate.sh falls back to.
+    _blocktime="${_blocktime:-0.02}"
+    _overlap="${_overlap:-5}"
+
+    _fft_name_for() {
+        awk -v s="$1" -v b="$_blocktime" -v o="$_overlap" \
+            'BEGIN{ if (o <= 1) exit 1; printf "rof%.0f", (s * b) * o / (o - 1) }' 2>/dev/null
+    }
+
+    # covered: does the sidecar's list contain this rate's transform? Extra
+    # transforms in the file are harmless; a missing one is the whole point.
+    _covered_for() {
+        [ "$_known" = true ] || { echo false; return; }
+        case " $_sizes " in
+            *" $1 "*) echo true ;;
+            *)        echo false ;;
+        esac
+    }
+
+    local _rates_json="" _rate _name
+    for _rate in "$RATE_LOW" "$RATE_HIGH"; do
+        _name=$(_fft_name_for "$_rate")
+        [ -n "$_rates_json" ] && _rates_json="${_rates_json},"
+        _rates_json="${_rates_json}{\"samprate\":${_rate},\"fft_name\":\"${_name}\",\"covered\":$(_covered_for "$_name")}"
+    done
+
+    local _sizes_json="" _sz
+    for _sz in $_sizes; do
+        [ -n "$_sizes_json" ] && _sizes_json="${_sizes_json},"
+        _sizes_json="${_sizes_json}\"$(_json_str "$_sz")\""
+    done
+
+    printf '{"schema":1,"wisdom_file":"%s","wisdom_present":%s,"readable":%s,"wisdom_sha256":"%s",' \
+        "$(_json_str "$WISDOM_FILE")" "$_present" "$_readable" "$(_json_str "$_sha")"
+    printf '"sidecar_present":%s,"sidecar_current":%s,"known":%s,' \
+        "$_meta_present" "$_current" "$_known"
+    printf '"fft_sizes":[%s],"fft_sizes_source":"%s","fftw_version":"%s","generated_at":"%s",' \
+        "$_sizes_json" "$(_json_str "$_src")" "$(_json_str "$_fftw")" "$(_json_str "$_when")"
+    printf '"blocktime":"%s","overlap":"%s","rates":[%s]}\n' \
+        "$(_json_str "$_blocktime")" "$(_json_str "$_overlap")" "$_rates_json"
+}
+
+if [ $TRANSFORM_JSON -eq 1 ]; then
+    emit_transform_json
+    exit 0
+fi
+
+echo "=== UberSDR FFTW Wisdom Generator ==="
+echo
 
 # ── Dependency checks ─────────────────────────────────────────────────────────
 
@@ -198,8 +353,8 @@ CPU_NAME=$("${SCRIPT_DIR}/get-cpu.sh" 2>/dev/null | grep -i 'CPU Name' | sed 's/
 # 129.6 MSPS receiver "generate my own" means two transforms, the larger of which is
 # hours by itself. That is not something to disclose after the decision.
 
-FFT_LOW="rof1620000"    # 64.8 MSPS
-FFT_HIGH="rof3240000"   # 129.6 MSPS
+# FFT_LOW / FFT_HIGH are defined near the top, beside the wisdom paths, because
+# --transform-json answers before this point is reached.
 
 # `|| true` because set -e is on: without it a missing helper — or a receiver that
 # cannot be reached — takes the whole script down instead of falling through to the
@@ -232,6 +387,41 @@ if [ -n "$_SR_INFO" ]; then
         echo "  safe rate does not leave radiod planning a transform with no wisdom."
     else
         FFT_SIZES="$fft_name"
+
+        # At the low rate, offer the other one — because this is the only moment at
+        # which it is cheap to decide.
+        #
+        # The admin interface refuses to switch the front end to a rate whose transform
+        # has no wisdom, so someone who runs this at 64.8 and later wants 0-60 MHz has
+        # to come back and do the whole thing again. Asked rather than assumed: unlike
+        # the 129.6 case above, where the extra size is a small fraction of what has
+        # already been accepted, here it is the expensive one and the answer is a real
+        # trade rather than an obvious yes.
+        #
+        # Only when a person is actually there to answer. --upload-only is documented as
+        # non-interactive, and a piped stdin means the read would take EOF as the reply.
+        if [ "$samprate" = "$RATE_LOW" ] && [ $MAX_RATE -eq 0 ] && [ $UPLOAD_ONLY -eq 0 ] && [ -t 0 ]; then
+            # Doubling the sample rate doubles the transform exactly, so this is right
+            # for a receiver with a non-default blocktime or overlap too — where neither
+            # name is rof1620000 or rof3240000.
+            _other_fft=$(awk -v n="$fft_size" 'BEGIN{printf "rof%.0f", n*2}')
+            echo
+            echo "The other supported rate, 129.6 MSPS (0-60 MHz), plans ${_other_fft}."
+            echo "  The admin interface will not switch the front end to a rate it has no"
+            echo "  wisdom for, so adding it now is what makes that switch possible later"
+            echo "  without a second run of this script."
+            echo "  If the catalog has a file covering both, this is free — same download,"
+            echo "  same few seconds. If it does not, ${_other_fft} is generated here"
+            echo "  instead and may take SEVERAL HOURS on its own."
+            read -p "  Also generate wisdom for 129.6 MSPS (${_other_fft})? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                FFT_SIZES="$fft_name $_other_fft"
+                echo "  Generating for BOTH sample rates (${FFT_SIZES})."
+            else
+                echo "  Generating for ${fft_name} only. Re-run with --max-rate to cover both."
+            fi
+        fi
     fi
 else
     FFT_SIZES="$FFT_LOW"
@@ -492,8 +682,7 @@ fi
 
 # ── Wisdom file and session setup ─────────────────────────────────────────────
 
-WISDOM_FILE="/var/lib/docker/volumes/ubersdr_radiod-data/_data/wisdom"
-WISDOM_META_FILE="${WISDOM_FILE}.json"
+# WISDOM_FILE / WISDOM_META_FILE are defined near the top; see --transform-json.
 SESSION_NAME="generate-wisdom"
 
 # ── The sidecar, and why it exists ────────────────────────────────────────────

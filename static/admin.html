@@ -5447,10 +5447,12 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
         }
 
-        // Open Generate Wisdom script in popup window
-        function openGenerateWisdom() {
+        // Open Generate Wisdom script in popup window. `args` is appended to the
+        // command line — the rate toggle passes --max-rate so a run started from a
+        // refused switch covers the transform that refused it.
+        function openGenerateWisdom(args) {
             const terminalPath = currentConfig?.ssh_proxy?.path || '/terminal';
-            const command = '~/ubersdr/generate_wisdom.sh';
+            const command = '~/ubersdr/generate_wisdom.sh' + (args ? ' ' + args : '');
             const url = `${terminalPath}/?arg=${encodeURIComponent(command)}`;
 
             // Open popup window with specific dimensions (similar to ubersdr-gotty direct command)
@@ -19877,6 +19879,100 @@ const tooltipLine2 = timeStr;
             }).join('\n');
         }
 
+        // Ask the host what the installed FFTW wisdom covers, via generate_wisdom.sh
+        // --transform-json over the terminal service.
+        //
+        // Returns null when the question could not be asked at all — the SSH proxy is
+        // disabled, the script is from an older release, the call timed out. Null means
+        // "no answer" and must never be read as "no wisdom": refusing to switch rates
+        // because an optional service is off would be worse than the problem.
+        async function fetchWisdomCoverage() {
+            try {
+                const resp = await authenticatedFetch('/terminal/api/exec', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        // The grep guard is not decoration. A generate_wisdom.sh from
+                        // before this flag existed ignores unknown arguments and would
+                        // start the full interactive generator instead of answering —
+                        // over an API call with no terminal attached. Confirm the flag
+                        // is there before passing it.
+                        command: "grep -q -- '--transform-json' ~/ubersdr/generate_wisdom.sh"
+                            + ' && ~/ubersdr/generate_wisdom.sh --transform-json',
+                        timeout: 20
+                    })
+                });
+                if (!resp || !resp.ok) return null;
+                const data = await resp.json();
+                if (!data || data.exit_code !== 0 || !data.stdout) return null;
+                // The script prints one line of JSON and nothing else, but a login
+                // banner or a profile on the far side can still get in front of it, so
+                // take the last line that looks like an object.
+                const line = String(data.stdout).trim().split('\n')
+                    .filter(l => l.trim().startsWith('{')).pop();
+                return line ? JSON.parse(line) : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        // Judge the installed wisdom against the rate being switched to.
+        //
+        // Wisdom matters in both directions. A file generated at 129.6 MSPS by an older
+        // release covers only rof3240000, so dropping back to 64.8 lands on a transform
+        // with no plan just as surely as raising does.
+        //
+        // Returns { status, fft, text }:
+        //   'covered'   — the transform is there; nothing to say.
+        //   'missing'   — it is positively known not to be there. The switch is refused:
+        //                 radiod would spend hours planning it with the receiver down,
+        //                 and that is a worse outcome than not switching.
+        //   'unknown'   — a wisdom file is installed but nothing records its contents.
+        //                 Warn, but do not refuse: every file from a release predating
+        //                 the sidecar is in this state and may well be complete.
+        //   'unchecked' — the question could not be asked at all. Same treatment, for the
+        //                 same reason: an optional service being off is not evidence.
+        function wisdomVerdict(coverage, rate) {
+            const rateName = rate === RATE_FULL ? '129.6 MSPS' : '64.8 MSPS';
+            const consequence =
+                'radiod would have to measure that transform itself on the next start, '
+                + 'which at these sizes can take HOURS with the receiver down for all of it.';
+
+            if (!coverage) {
+                return {
+                    status: 'unchecked',
+                    fft: '',
+                    text: 'FFTW WISDOM: could not be checked — the terminal service did not '
+                        + 'answer, so whether there is a plan for ' + rateName + ' is unknown.'
+                };
+            }
+            const row = (coverage.rates || []).find(r => Number(r.samprate) === rate);
+            const fft = row ? row.fft_name : '';
+            if (row && row.covered) return { status: 'covered', fft: fft, text: '' };
+
+            const named = fft || 'the transform for ' + rateName;
+            if (coverage.known === false) {
+                return {
+                    status: 'unknown',
+                    fft: fft,
+                    text: 'FFTW WISDOM: a wisdom file is installed but nothing records what '
+                        + 'it contains, so it may or may not cover ' + named + '. If it does '
+                        + 'not, ' + consequence
+                };
+            }
+            const has = coverage.wisdom_present === false
+                ? 'There is no FFTW wisdom installed on this receiver at all.'
+                : 'The installed wisdom covers ' + ((coverage.fft_sizes || []).join(', ')
+                    || 'nothing') + '.';
+            return {
+                status: 'missing',
+                fft: named,
+                text: 'Switching to ' + rateName + ' needs FFTW wisdom for ' + named + '.\n\n'
+                    + has + '\n\n' + consequence + '\n\n'
+                    + 'Generate wisdom for both rates first, then switch.'
+            };
+        }
+
         // One click that changes the hardware: it edits the config, saves it and restarts
         // radiod. Deliberately still gated on the typed agreement in the raising
         // direction — this is the shortcut, not an exemption.
@@ -19886,16 +19982,48 @@ const tooltipLine2 = timeStr;
             const target = radiodToggleTarget(text);
             if (target === null) return;
 
+            // Checked before the dialog rather than after, so the wisdom finding is part
+            // of the decision instead of an apology that follows it.
+            const btn = document.getElementById('radiodSamprateToggleBtn');
+            const btnLabel = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = 'Checking wisdom…'; }
+            let coverage = null;
+            try {
+                coverage = await fetchWisdomCoverage();
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = btnLabel; }
+            }
+            const verdict = wisdomVerdict(coverage, target);
+
+            // The refusal. Offered with the way out attached — the generator run it
+            // opens is passed --max-rate, so it covers both rates and this cannot be
+            // hit again from the other direction.
+            if (verdict.status === 'missing') {
+                if (window.confirm(verdict.text + '\n\n'
+                        + 'Open Generate Wisdom now? It checks the community catalog for a '
+                        + 'precomputed file for this CPU first, which usually takes minutes.')) {
+                    openGenerateWisdom('--max-rate');
+                } else {
+                    showAlert('Sample rate not changed — no FFTW wisdom for '
+                        + verdict.fft + '.', 'error');
+                }
+                return;
+            }
+
+            const wisdomNote = verdict.text;
+
             if (target === RATE_FULL) {
-                if (!confirmThermalRisk('This also saves the config and restarts the server, '
-                        + 'which drops every listener.')) {
+                const extra = 'This also saves the config and restarts the server, which '
+                    + 'drops every listener.' + (wisdomNote ? '\n\n' + wisdomNote : '');
+                if (!confirmThermalRisk(extra)) {
                     showAlert('Sample rate change cancelled — nothing was saved.', 'info');
                     return;
                 }
             } else if (!window.confirm(
                     'Return the RX888 to 64.8 MSPS (0-30 MHz)?\n\n'
                     + 'Coverage above 30 MHz — including 6m — goes away.\n\n'
-                    + 'The config is saved and the server restarts, which drops every listener.')) {
+                    + 'The config is saved and the server restarts, which drops every listener.'
+                    + (wisdomNote ? '\n\n' + wisdomNote : ''))) {
                 showAlert('Sample rate change cancelled — nothing was saved.', 'info');
                 return;
             }

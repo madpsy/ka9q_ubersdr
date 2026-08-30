@@ -84,8 +84,13 @@ export const GROUPS = [
         icon: <Icon.Teleprinter />,
         // Everything that turns a signal into content. The Extensions launcher
         // leads it because most of what is in here is reached through it.
+        // The IQ demodulator is here rather than under Audio with the sound
+        // controls: it is not a way of shaping what the receiver sends, it is a
+        // way of turning a signal the receiver has not demodulated into
+        // something to listen to — the same question the decoders are asking,
+        // answered for voice and CW instead of for data.
         panels: [
-            'extensions', 'sstv', 'navtex', 'wefax',
+            'extensions', 'iqdemod', 'sstv', 'navtex', 'wefax',
             'packet', 'hfdl', 'voiceskimmer', 'addons',
         ],
     },

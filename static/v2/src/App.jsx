@@ -29,6 +29,7 @@ import { ChatProvider } from './chat/ChatContext.jsx';
 import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import DXClusterWatch from './components/DXClusterWatch.jsx';
 import MeasureWatch from './components/MeasureWatch.jsx';
+import IQDemodWatch from './components/IQDemodWatch.jsx';
 import { MediaSessionProvider } from './radio/media/MediaSessionContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
 import BridgeHost from './bridge/BridgeHost.jsx';
@@ -280,6 +281,12 @@ export default function App() {
                                     the moment you shut the sheet to look at the
                                     band. */}
                                 <MeasureWatch />
+                                {/* And the frontend demodulator's, for the
+                                    same reason and one more: it holds the
+                                    receiver in IQ and ducks its output, so a
+                                    collapsed panel would leave both in place
+                                    with nothing on screen to undo them. */}
+                                <IQDemodWatch />
                                 <StartOverlay />
                                 {/* After the overlay, and drawn above it: the
                                     operator's notices appear the moment the page

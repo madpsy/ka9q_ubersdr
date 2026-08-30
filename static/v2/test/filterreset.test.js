@@ -184,7 +184,9 @@ t('the Receiver panel draws a reset for each of its two sliders', () => {
         .filter((l) => l && /^Reset filter/.test(l));
     assert.deepStrictEqual(labels.sort(), ['Reset filter shift', 'Reset filter width']);
     // Each beside its own field rather than inside it — a Field is a <label>.
-    assert.strictEqual(walk(tree).filter((n) => n.props?.className === 'filter-row').length, 2);
+    // The wrapper is `field-row`; it was called `filter-row` when this was
+    // written, and the rename left the count silently reading zero.
+    assert.strictEqual(walk(tree).filter((n) => n.props?.className === 'field-row').length, 2);
 });
 
 t('the Receiver panel’s width reset leaves the shift alone', () => {

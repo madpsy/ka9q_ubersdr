@@ -115,6 +115,7 @@ import HFDLPanel, { hfdlAvailable } from './HFDLPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 import IFSpectrumPanel from './IFSpectrumPanel.jsx';
+import IQPanel from './IQPanel.jsx';
 import MeasurePanel from './MeasurePanel.jsx';
 
 /**
@@ -250,6 +251,21 @@ const BUILT_IN = [
         defaultOpen: false,
         minimal: true,
         Component: IFSpectrumPanel,
+    },
+    // Demodulating the quadrature stream in the browser, which is the one way
+    // of listening on this receiver that does not go through the server's
+    // demodulator — so the offset can sit anywhere in the 12 kHz without the
+    // dial moving. Ships open, because a panel nobody can find is a feature
+    // nobody has: it is the entry point to a mode the interface otherwise only
+    // mentions in a warning dialog. It costs nothing until Start is pressed.
+    // Minimal is the operating controls without the gain, the AGC or the prose.
+    {
+        id: 'iqdemod',
+        title: 'IQ Demod',
+        icon: <Icon.Waves />,
+        dock: 'left',
+        minimal: true,
+        Component: IQPanel,
     },
     // The four VFOs, laid out. The Receiver panel's own row of A–D buttons is
     // the control; this is the view — four frequencies readable at once rather

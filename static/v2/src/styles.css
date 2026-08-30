@@ -12149,3 +12149,53 @@ a.btn { text-decoration: none; }
    The range first because it is the reading; the caption is there once, to be
    read once. */
 .measure-chart__axis > :first-child { color: var(--text-dim); }
+
+/* ── IQ demodulator panel ───────────────────────────────────────────────────
+   The run control and a line saying what it is doing, side by side. Its own
+   rule rather than .chip-row because that scrolls horizontally and stretches
+   its children: the sentence beside the button has to wrap and sit on the
+   button's centre line, which is the opposite of what a row of chips wants. */
+.iq-run { display: flex; align-items: center; gap: 8px; }
+.iq-run__hint {
+    min-width: 0;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
+/* The mini spectrum of the quadrature stream, and the two things over it.
+   Its own block rather than a reuse of the IF spectrum's: that one is a view of
+   the server's bins with a veil, a ruler and five layouts, and this is a fixed
+   picture of a fixed span whose whole interaction is "press here". */
+.iq-scope { position: relative; }
+.iq-scope__canvas {
+    display: block;
+    width: 100%;
+    border-radius: var(--radius-sm, 5px);
+    background: var(--surface-3);
+    /* Or a drag across the picture scrolls the dock instead of tuning. */
+    touch-action: none;
+    cursor: crosshair;
+}
+.iq-scope__veil {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius-sm, 5px);
+    background: color-mix(in srgb, var(--surface) 78%, transparent);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+    text-align: center;
+    padding: 0 10px;
+}
+/* Only the two ends and the middle are labelled. The span never changes, so a
+   full ruler would be three numbers of information drawn as fifteen. */
+.iq-scope__scale {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 2px;
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+}

@@ -114,7 +114,7 @@ interface's own panels:
 Addons · Announcements · Antenna switch · Audio · Audio filters
 Audio scope · Backup · Band plan · Bands · Band Spectrum · Bookmarks
 Callsign lookup · Chat · Display · Doppler · DX cluster · Events
-Extensions · HFDL · IF Spectrum · Layout · Lightning · Listeners
+Extensions · HFDL · IF Spectrum · IQ Demod · Layout · Lightning · Listeners
 Local bookmarks · Markers · Measure · Media controls · Mini Games · Most used
 Multipad · NAVTEX · News · Noise reduction · Notifications · Packet
 Quick bands · Radio control · Ranking · Receiver · Receiver info

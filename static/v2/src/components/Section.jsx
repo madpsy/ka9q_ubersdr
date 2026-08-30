@@ -27,6 +27,15 @@ const DOCK_LABEL = { left: 'left dock', right: 'right dock', bottom: 'bottom doc
 const SNAP = 8;
 const snap = (v) => Math.round(v / SNAP) * SNAP;
 
+// How tall a panel may be made in the bottom dock: the dock body's own content
+// box, less its padding. `clientHeight` already excludes the horizontal
+// scrollbar the row may be showing.
+const dockRoom = (body) => {
+    if (!body) return Infinity;
+    const pad = parseFloat(getComputedStyle(body).paddingTop) || 0;
+    return Math.max(90, body.clientHeight - pad * 2);
+};
+
 export default function Section({ panel, dock, index, weight, height, prev, next, dropEdge }) {
     const {
         sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, movePanelNear,
@@ -97,6 +106,13 @@ export default function Section({ panel, dock, index, weight, height, prev, next
             x: e.clientX,
             y: e.clientY,
             h: me.getBoundingClientRect().height,
+            // A panel is never taller than the dock holding it. CSS caps what
+            // is drawn, but the number is also what gets stored and what the
+            // next drag starts from, so it is clamped here too — otherwise
+            // dragging on past the dock's floor kept counting, and the grip
+            // then had thousands of pixels to come back through before the
+            // panel moved at all.
+            max: dockRoom(me.parentElement),
             mw: me.getBoundingClientRect().width,
             sw: sibling ? sibling.getBoundingClientRect().width : 0,
             other: sibling ? sibling.dataset.panel : null,
@@ -108,7 +124,7 @@ export default function Section({ panel, dock, index, weight, height, prev, next
     const onGripMove = (e) => {
         const g = grip.current;
         if (!g) return;
-        setPanelHeight(panel.id, snap(g.h + (e.clientY - g.y)));
+        setPanelHeight(panel.id, Math.min(g.max, snap(g.h + (e.clientY - g.y))));
         if (!g.other) return;
         const total = g.mw + g.sw;
         const MIN = 140;

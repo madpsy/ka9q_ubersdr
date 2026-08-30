@@ -987,9 +987,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dock--bottom .dock__body {
     flex-direction: row;
     align-items: flex-start;
-    overflow: auto;
+    /* Sideways only: with every panel capped to the dock's height there is
+       nothing left to scroll to vertically, and leaving the axis on `auto`
+       only offered a second scrollbar that moved the row a few pixels. */
+    overflow-x: auto;
+    overflow-y: hidden;
 }
-.dock--bottom .section { flex: 1 1 280px; min-width: 220px; }
+/* Never taller than the dock. `align-items: flex-start` lets a panel keep its
+   natural height, which for a list that grows — spots, listeners, a band plan —
+   is however tall the content happens to be, so the panel drew past the dock's
+   bottom edge and the whole row scrolled vertically instead of the panel. The
+   cap is on the section rather than its body because an explicit height set
+   with the corner grip lands on the section too, and `max-height` constrains
+   that as well: drag the dock shorter and the panels come with it. */
+.dock--bottom .section { flex: 1 1 280px; min-width: 220px; max-height: 100%; }
 /* A bottom-dock panel can be given an explicit height with the corner grip, and
    the dock itself can be dragged shorter. Either way the body has to be the
    scroller: without `min-height: 0` a flex item refuses to shrink below its

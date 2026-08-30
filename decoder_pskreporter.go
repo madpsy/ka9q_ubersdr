@@ -127,11 +127,21 @@ func (psk *PSKReporter) Submit(decode *DecodeInfo) error {
 		return nil // Skip reports without callsign
 	}
 
+	// PSKReporter's sender record carries the transmitter's actual RF frequency.
+	// For FT8/FT4/JS8 that is what Frequency holds, but ParseWSPRLine puts the dial
+	// frequency there and the decoded transmit frequency in TxFrequency, which is
+	// why the wsprnet path reads TxFrequency. TxFrequency is only ever set for WSPR,
+	// so this leaves every other mode untouched.
+	frequency := decode.Frequency
+	if decode.TxFrequency != 0 {
+		frequency = decode.TxFrequency
+	}
+
 	report := PSKReport{
 		Callsign:  decode.Callsign,
 		Locator:   decode.Locator,
 		SNR:       decode.SNR,
-		Frequency: decode.Frequency,
+		Frequency: frequency,
 		EpochTime: decode.Timestamp,
 		Mode:      decode.Mode,
 	}

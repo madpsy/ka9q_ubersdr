@@ -87,9 +87,9 @@ RUN apt-get update && apt-get install -y \
     # M0LTE wsprd build, installed alongside stock wsprd and used when
     # decoder.wsprd_m0lte_mode is enabled
     && if [ "${TARGETARCH}" = "arm64" ]; then \
-         wget https://github.com/M0LTE/wsjtx/releases/download/v3.0.2-m0lte-b411a33/wsjtx-3.0.2-m0lte-b411a33-linux-aarch64.deb -O /tmp/wsprd-m0lte.deb; \
+         wget https://github.com/M0LTE/wsjtx/releases/download/v3.0.2-m0lte-36b4635/wsjtx-3.0.2-m0lte-36b4635-linux-aarch64.deb -O /tmp/wsprd-m0lte.deb; \
        else \
-         wget https://github.com/M0LTE/wsjtx/releases/download/v3.0.2-m0lte-b411a33/wsjtx-3.0.2-m0lte-b411a33-linux-x86_64.deb -O /tmp/wsprd-m0lte.deb; \
+         wget https://github.com/M0LTE/wsjtx/releases/download/v3.0.2-m0lte-36b4635/wsjtx-3.0.2-m0lte-36b4635-linux-x86_64.deb -O /tmp/wsprd-m0lte.deb; \
        fi \
     && dpkg-deb -x /tmp/wsprd-m0lte.deb /tmp/wsprd-m0lte-extract \
     && cp /tmp/wsprd-m0lte-extract/usr/bin/wsprd /usr/bin/wsprd-m0lte \

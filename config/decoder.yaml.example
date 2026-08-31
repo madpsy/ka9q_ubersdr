@@ -42,7 +42,7 @@ decoder:
   wsprd_m0lte_mode: false          # false (default): call wsprd_path (stock wsprd) as
                                    #   wsprd -f <dial MHz> -C <band depth> -w <file.wav>
                                    # true: call wsprd_m0lte_path (the M0LTE build) as
-                                   #   wsprd-m0lte -C 500 -o 4 -d -N 20 -X 1 -A -S 0,-1 -Y 4 -G -r \
+                                   #   wsprd-m0lte -C 500 -o 4 -d -N 20 -X 1 -A -S 0,-1 -Y 4 -P 1 -G -r \
                                    #               -a <band work dir> -f <dial MHz> <file.wav>
                                    # In M0LTE mode the cycle count is fixed at 500 and the per-band
                                    # "depth" setting is ignored. Both binaries are installed in the

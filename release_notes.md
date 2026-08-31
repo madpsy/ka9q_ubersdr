@@ -1,4 +1,27 @@
-# Latest Stable - 0.1.61
+# Latest Stable - 0.1.62
+
+## Version 0.1.62 - 31th Aug 2026
+
+### New Features
+- Added **128 MSPS (0-60 MHz) Support** for instances with modified RX888 hardare (suitable heat transfer/cooling)
+- Added **various v2 UI improvements** including scoll to tune in top frequency readout, per mode tuning steps, tune lock
+- Added **Optimised Noise Floor defaults** to reduce CPU overhead
+- Added **Upstream ka9q-radio** so UberSDR now follows the official version (currently still applies two patches)
+
+### Bug Fixes
+- Fixed the **v2 Bottom Bar** so panels can track height properly
+- Fixed websdr.org registration for those running WebSDR emulation with a publically accessible port opened
+- Fixed KiwiSDR emulation - including sample rate for AM and removed the 7 step zoom level restriction
+
+### Important information
+
+128 MSPS / 0-60 MHz Support
+
+For instances who want to run at 0-60 MHz note that a new FFTW Wisdom is required, especially on older CPUs. The Generate Wisdom button in Admin -> Radiod will generate (or download from the catalog) the required transforms. Generating for rof3240000 may take several hours. I have already generated wisdoms for some CPUs, including ARM Cortex (that took 26 hours)
+
+WARNING - Do not attempt to run at the wider bandwidth unless your RX888 hardware has been modified. It will be physically damanged otherwise because the factory fitted thermal transfer pads are not sufficient. You have been warned!
+
+You may also need to increase fft-threads in Admin -> Radiod -> fft-threads, this is entirely dependant on your CPU
 
 ## Version 0.1.61 - 18th Aug 2026
 

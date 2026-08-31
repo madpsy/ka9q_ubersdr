@@ -168,6 +168,7 @@ func wsprdM0LTEArgs(dataDir, wavFile string, frequency uint64) []string {
 		"-A",
 		"-S", "0,-1",
 		"-Y", "4",
+		"-P", "1",
 		"-G",
 		"-r",
 		"-a", dataDir,

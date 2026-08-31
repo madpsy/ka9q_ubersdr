@@ -303,6 +303,51 @@ export const CW_TONE_OFFSET = 700;
 
 export const TUNING_STEPS = [1, 10, 100, 500, 1000, 5000, 9000, 10000, 100000];
 
+// The step a mode starts on, before anybody has chosen one for it.
+//
+// The step is one live figure shared by everything that tunes, and the *choice*
+// is remembered per mode (tuneStepByMode in display/DisplayContext.jsx, put back
+// by components/TuneStepWatch.jsx). Until this table existed, a mode with
+// nothing on record simply kept whatever step was in force — which meant the
+// first step you picked anywhere followed you into every mode you had not
+// visited yet, and the only way out was to go round and set all of them by
+// hand. That is the complaint this answers: an unvisited mode now starts on the
+// step its own band plan is written in, not on the last one you happened to use.
+//
+// One entry per MODES id. Every figure is a member of TUNING_STEPS, because the
+// panels' <select> has to be able to show it — a default outside the list would
+// draw an empty box.
+export const DEFAULT_STEP_BY_MODE = {
+    // SSB is tuned by ear rather than to a channel; 500 Hz is the usual grid and
+    // was the single default this whole interface used.
+    lsb: 500,
+    usb: 500,
+    // CW is netted onto a signal within the width of the filter itself (±200 Hz),
+    // so anything coarser than this overshoots the station you are aiming at.
+    cwl: 100,
+    cwu: 100,
+    // HF broadcast is on 5 kHz channels. Medium wave is 9 or 10, both of which
+    // are in the list a press away for anyone who works it.
+    am: 5000,
+    sam: 5000,
+    // NBFM channel spacing.
+    nfm: 5000,
+    fm: 5000,
+    // Not a listening mode — the dial is a capture centre, and IQ carries ±6 kHz
+    // either side of it, so a kilohertz is fine enough to place the window with.
+    iq: 1000,
+};
+
+// The step `mode` starts on, or null for a mode with no default of its own.
+//
+// Null rather than a fallback figure: the caller keeps the step in force, which
+// is the right answer for a mode this table has not heard of — a server-side
+// addition, say — and a wrong one for every mode it has.
+export function defaultStepFor(mode) {
+    const hz = DEFAULT_STEP_BY_MODE[String(mode || '').toLowerCase()];
+    return Number.isFinite(hz) && hz > 0 ? hz : null;
+}
+
 export function stepLabel(hz) {
     if (hz >= 1000) return (hz / 1000) + ' kHz';
     return hz + ' Hz';

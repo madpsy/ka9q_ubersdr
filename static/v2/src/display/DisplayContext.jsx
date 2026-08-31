@@ -149,10 +149,10 @@ export const DEFAULTS = {
     // mode change.
     //
     // Empty until somebody actually chooses a step, and only ever written by
-    // that choice — see setTuneStep. A mode nobody has picked one for therefore
-    // keeps whatever step is in force rather than being snapped to a guess,
-    // which is what makes this invisible to anyone happy with one step for
-    // everything. Applied by components/TuneStepWatch.jsx.
+    // that choice — see setTuneStep. A mode nobody has picked one for falls back
+    // to DEFAULT_STEP_BY_MODE in radio/constants.js rather than to this map, so
+    // an unvisited mode starts on its own band plan's step instead of inheriting
+    // the last one used anywhere. Applied by components/TuneStepWatch.jsx.
     tuneStepByMode: {},
     // Which way the Multipad's frequency drum turns. Off is the direction the
     // spectrum pans in — drag right and the values to the left of the index line

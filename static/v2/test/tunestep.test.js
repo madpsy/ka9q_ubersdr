@@ -41,6 +41,7 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 const {
     deep, render, reset,
     TuneStepWatch, ReceiverPanel, MultipadPanel, DEFAULTS, withTuneStep, TUNING_STEPS,
+    DEFAULT_STEP_BY_MODE, MODES, defaultStepFor,
 } = require('./.build/tunestep.cjs');
 
 let pass = 0;
@@ -146,18 +147,33 @@ t('the mode’s own step is put back on the way into it', () => {
     assert.deepStrictEqual(watch('am', { usb: 100, am: 9000 }), [{ tuneStep: 9000 }]);
 });
 
-t('a mode nobody has chosen a step for keeps the one in force', () => {
-    // The half that keeps this invisible to anyone happy with one step for
-    // everything: an unrecorded mode must not be snapped to a guess.
-    assert.deepStrictEqual(watch('cwu', { usb: 100 }), []);
-    assert.deepStrictEqual(watch('usb', {}), []);
-    assert.deepStrictEqual(watch('usb', undefined), []);
+t('a mode nobody has chosen a step for gets its own default', () => {
+    // The bug this replaced: an unrecorded mode kept whatever step was in force,
+    // so one choice made anywhere followed the operator into every mode they had
+    // not visited yet and the only cure was to set all of them by hand.
+    assert.deepStrictEqual(watch('cwu', { usb: 100 }), [{ tuneStep: 100 }]);
+    assert.deepStrictEqual(watch('am', { usb: 100 }), [{ tuneStep: 5000 }]);
+    assert.deepStrictEqual(watch('usb', {}), [{ tuneStep: 500 }]);
+    assert.deepStrictEqual(watch('nfm', undefined), [{ tuneStep: 5000 }]);
 });
 
-t('a corrupt record is ignored rather than tuned by', () => {
+t('a chosen step still beats the default', () => {
+    // The record is consulted first, or the defaults would make the <select>
+    // useless in every mode that has one.
+    assert.deepStrictEqual(watch('am', { am: 9000 }), [{ tuneStep: 9000 }]);
+    assert.deepStrictEqual(watch('cwu', { cwu: 1 }), [{ tuneStep: 1 }]);
+});
+
+t('a corrupt record falls through to the default, not to nothing', () => {
     for (const bad of [0, -1, 'wide', null]) {
-        assert.deepStrictEqual(watch('am', { am: bad }), [], String(bad));
+        assert.deepStrictEqual(watch('am', { am: bad }), [{ tuneStep: 5000 }], String(bad));
     }
+});
+
+t('a mode with no default of its own keeps the step in force', () => {
+    // A mode id this build has never heard of — a server-side addition, say.
+    // Guessing 500 Hz for it would be worse than leaving the dial's grid alone.
+    assert.deepStrictEqual(watch('drm', {}), []);
 });
 
 t('with no mode yet it does nothing', () => {
@@ -224,11 +240,45 @@ t('USB at 100 Hz and AM at 9 kHz survive switching between them', () => {
     };
 
     choose(100, 'usb');
-    assert.strictEqual(enter('am'), 100, 'AM has no step of its own yet');
+    assert.strictEqual(enter('am'), 5000, 'AM has no step of its own yet, so its default');
     choose(9000, 'am');
     assert.strictEqual(enter('usb'), 100, 'back to USB and its 100 Hz');
     assert.strictEqual(enter('am'), 9000, 'and to AM and its 9 kHz');
-    assert.strictEqual(enter('cwu'), 9000, 'CW never chose one, so it keeps AM’s');
+    assert.strictEqual(enter('cwu'), 100, 'CW never chose one, so its own default');
+    assert.strictEqual(enter('am'), 9000, 'and AM’s choice is still AM’s');
 });
+
+
+// --- the defaults themselves -------------------------------------------------
+
+t('every mode has a default step', () => {
+    // A mode added to MODES without one here is a mode that silently goes back
+    // to inheriting, which is the bug this table exists to fix.
+    for (const m of MODES) {
+        assert.ok(defaultStepFor(m.id), m.id + ' has no default step');
+    }
+});
+
+t('every default is a step the panels can draw', () => {
+    // The <select> is built from TUNING_STEPS, so a default outside that list
+    // would show as an empty box until the operator picked something.
+    for (const [mode, hz] of Object.entries(DEFAULT_STEP_BY_MODE)) {
+        assert.ok(TUNING_STEPS.includes(hz), mode + ' is not a listed step: ' + hz);
+    }
+});
+
+t('SSB keeps the step this interface has always used', () => {
+    // Changing this one would move the dial's grid under everybody, which is not
+    // what the per-mode defaults are for.
+    assert.strictEqual(defaultStepFor('usb'), DEFAULTS.tuneStep);
+    assert.strictEqual(defaultStepFor('lsb'), DEFAULTS.tuneStep);
+});
+
+t('an unknown or absent mode has no default', () => {
+    for (const bad of ['', null, undefined, 'nonesuch', 42]) {
+        assert.strictEqual(defaultStepFor(bad), null, String(bad));
+    }
+});
+
 
 console.log(`\n${pass} passed`);

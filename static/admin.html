@@ -971,7 +971,6 @@
                     <button class="tab" onclick="switchTab('proxy')">Addons</button>
                     <button class="tab" onclick="switchTab('radiod')">Radiod</button>
                     <button class="tab" onclick="switchTab('radiod-channels')">Radiod Channels</button>
-                    <button class="tab" onclick="switchTab('noise')">Noise</button>
                     <button class="tab" id="gpsdoTab" onclick="switchTab('gpsdo')" style="display: none;">GPSDO</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
@@ -986,46 +985,6 @@
                 </div>
 
                 <!-- Sessions Tab -->
-                <div id="noiseTab" class="tab-content">
-                    <div style="margin-bottom:14px; color:#555555; font-size:13px; line-height:1.5;">
-                        Every noise-floor band is a permanent radiod spectrum channel. What decides its cost is
-                        <strong>bin bandwidth</strong>, not resolution: at or below the crossover radiod downconverts to
-                        the band and the cost is the band's width alone &mdash; it does <em>not</em> rise with the poll
-                        rate. Above it radiod transforms the <em>entire front end</em> on every poll to hand back the
-                        bins you asked for.
-                        <div style="margin-top:8px;">
-                            Below the crossover a band's cost <em>is</em> its width, so a band already on the
-                            downconverter and delivering no more span than it was asked for is marked
-                            <span style="color:#2e7d32; font-weight:600;">at cost floor</span> &mdash; the only way to
-                            make it cheaper is a narrower frequency range. Suggestions appear only where a change would
-                            actually save CPU.
-                        </div>
-                    </div>
-                    <div id="noiseSummary" style="margin-bottom:14px;"></div>
-                    <div style="overflow-x:auto;">
-                        <table id="noiseBandsTable" style="width:100%; border-collapse:collapse; font-size:13px;">
-                            <thead><tr id="noiseBandsHead"></tr></thead>
-                            <tbody id="noiseBandsBody"></tbody>
-                        </table>
-                    </div>
-
-                    <h3 style="margin-top:26px;">Size a new band</h3>
-                    <div style="color:#555555; font-size:13px; margin-bottom:10px;">
-                        Give a frequency range and this works out the cheapest geometry radiod can serve it with,
-                        validated against radiod's own FFT-length search.
-                    </div>
-                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
-                        <label style="font-size:12px; color:#555555;">Name<br>
-                            <input type="text" id="noiseNewName" placeholder="30m" style="width:110px;"></label>
-                        <label style="font-size:12px; color:#555555;">Start (Hz)<br>
-                            <input type="number" id="noiseNewStart" placeholder="10100000" style="width:150px;"></label>
-                        <label style="font-size:12px; color:#555555;">End (Hz)<br>
-                            <input type="number" id="noiseNewEnd" placeholder="10150000" style="width:150px;"></label>
-                        <button class="btn" onclick="sizeNoiseFloorBand()">Calculate</button>
-                    </div>
-                    <div id="noiseNewResult"></div>
-                </div>
-
                 <div id="sessionsTab" class="tab-content active">
                     <!-- Analytics Links Section -->
                     <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6;">
@@ -1510,18 +1469,72 @@
 
                 <!-- Radiod Channels Tab -->
                 <div id="radiodChannelsTab" class="tab-content">
-                    <div class="alert alert-info" style="margin-bottom: 20px;">
-                        ℹ️ <strong>Info:</strong> This shows all active channels in radiod, including decoder channels, user audio/spectrum sessions, and noise floor monitors. Auto-refreshes every 5 seconds.
+                    <!-- Sub-tabs for Radiod Channels -->
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #ddd; padding-bottom: 0;">
+                        <button class="radiod-channels-subtab active" id="allChannelsSubTab" onclick="switchRadiodChannelsSubTab('all')" style="padding: 10px 20px; border: none; background: none; cursor: pointer; font-weight: bold; border-bottom: 3px solid #007bff; color: #007bff;">
+                            All Channels
+                        </button>
+                        <button class="radiod-channels-subtab" id="noiseChannelsSubTab" onclick="switchRadiodChannelsSubTab('noise')" style="padding: 10px 20px; border: none; background: none; cursor: pointer; font-weight: bold; border-bottom: 3px solid transparent; color: #666;">
+                            Noise Channels
+                        </button>
                     </div>
-                    <div style="margin-bottom: 12px;">
-                        <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
-                            <input type="checkbox" id="showUnknownChannels" onchange="loadRadiodChannels()">
-                            Show Unknown Channels
-                        </label>
+
+                    <!-- All Channels Sub-tab -->
+                    <div id="radiodChannelsAllPane" class="radiod-channels-subtab-content">
+                        <div class="alert alert-info" style="margin-bottom: 20px;">
+                            ℹ️ <strong>Info:</strong> This shows all active channels in radiod, including decoder channels, user audio/spectrum sessions, and noise floor monitors. Auto-refreshes every 5 seconds.
+                        </div>
+                        <div style="margin-bottom: 12px;">
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="showUnknownChannels" onchange="loadRadiodChannels()">
+                                Show Unknown Channels
+                            </label>
+                        </div>
+                        <div id="radiodChannelsList" class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading radiod channels...</p>
+                        </div>
                     </div>
-                    <div id="radiodChannelsList" class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading radiod channels...</p>
+
+                    <!-- Noise Channels Sub-tab -->
+                    <div id="radiodChannelsNoisePane" class="radiod-channels-subtab-content" style="display: none;">
+                        <div style="margin-bottom:14px; color:#555555; font-size:13px; line-height:1.5;">
+                            Every noise-floor band is a permanent radiod spectrum channel. What decides its cost is
+                            <strong>bin bandwidth</strong>, not resolution: at or below the crossover radiod downconverts to
+                            the band and the cost is the band's width alone &mdash; it does <em>not</em> rise with the poll
+                            rate. Above it radiod transforms the <em>entire front end</em> on every poll to hand back the
+                            bins you asked for.
+                            <div style="margin-top:8px;">
+                                Below the crossover a band's cost <em>is</em> its width, so a band already on the
+                                downconverter and delivering no more span than it was asked for is marked
+                                <span style="color:#2e7d32; font-weight:600;">at cost floor</span> &mdash; the only way to
+                                make it cheaper is a narrower frequency range. Suggestions appear only where a change would
+                                actually save CPU.
+                            </div>
+                        </div>
+                        <div id="noiseSummary" style="margin-bottom:14px;"></div>
+                        <div style="overflow-x:auto;">
+                            <table id="noiseBandsTable" style="width:100%; border-collapse:collapse; font-size:13px;">
+                                <thead><tr id="noiseBandsHead"></tr></thead>
+                                <tbody id="noiseBandsBody"></tbody>
+                            </table>
+                        </div>
+
+                        <h3 style="margin-top:26px;">Size a new band</h3>
+                        <div style="color:#555555; font-size:13px; margin-bottom:10px;">
+                            Give a frequency range and this works out the cheapest geometry radiod can serve it with,
+                            validated against radiod's own FFT-length search.
+                        </div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+                            <label style="font-size:12px; color:#555555;">Name<br>
+                                <input type="text" id="noiseNewName" placeholder="30m" style="width:110px;"></label>
+                            <label style="font-size:12px; color:#555555;">Start (Hz)<br>
+                                <input type="number" id="noiseNewStart" placeholder="10100000" style="width:150px;"></label>
+                            <label style="font-size:12px; color:#555555;">End (Hz)<br>
+                                <input type="number" id="noiseNewEnd" placeholder="10150000" style="width:150px;"></label>
+                            <button class="btn" onclick="sizeNoiseFloorBand()">Calculate</button>
+                        </div>
+                        <div id="noiseNewResult"></div>
                     </div>
                 </div>
 
@@ -3232,7 +3245,7 @@
                     <button class="btn btn-secondary" onclick="importRadiodConfig()">Import Config</button>
                 </div>
                 <div class="button-group" id="radiodChannelsButtons" style="display: none;">
-                    <button class="btn btn-secondary" onclick="loadRadiodChannels()">Refresh</button>
+                    <button class="btn btn-secondary" onclick="refreshRadiodChannelsTab()">Refresh</button>
                 </div>
                 <div class="button-group" id="gpsdoButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="reloadGPSDOIframe()">Refresh</button>
@@ -5062,9 +5075,8 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 // Always reset to unchecked so browser-restored state doesn't silently
                 // include unknown channels without the user explicitly opting in.
                 document.getElementById('showUnknownChannels').checked = false;
-                // Fetch radiod values first (awaited inside loadRadiodChannels on first load)
-                loadRadiodChannels();
-                startRadiodChannelsAutoRefresh();
+                // The sub-tab owns loading and auto-refresh for whichever pane is showing
+                switchRadiodChannelsSubTab(radiodChannelsSubTab);
             } else if (tab === 'gpsdo') {
                 activateTabBtn('gpsdo');
                 document.getElementById('gpsdoTabContent').classList.add('active');
@@ -5151,10 +5163,6 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
                 startMonitorAutoRefresh();
-            } else if (tab === 'noise') {
-                activateTabBtn('noise');
-                document.getElementById('noiseTab').classList.add('active');
-                loadNoiseFloorBands();
             } else if (tab === 'system') {
                 activateTabBtn('system');
                 document.getElementById('systemTab').classList.add('active');
@@ -28979,6 +28987,52 @@ const tooltipLine2 = timeStr;
 
         // Radiod Channels management
         let radiodChannelsRefreshInterval = null;
+
+        // Which Radiod Channels sub-tab is showing; remembered across tab switches
+        let radiodChannelsSubTab = 'all';
+
+        function switchRadiodChannelsSubTab(tab) {
+            radiodChannelsSubTab = tab;
+            const allBtn = document.getElementById('allChannelsSubTab');
+            const noiseBtn = document.getElementById('noiseChannelsSubTab');
+            const activate = (btn) => {
+                btn.classList.add('active');
+                btn.style.borderBottom = '3px solid #007bff';
+                btn.style.color = '#007bff';
+            };
+            const deactivate = (btn) => {
+                btn.classList.remove('active');
+                btn.style.borderBottom = '3px solid transparent';
+                btn.style.color = '#666';
+            };
+
+            if (tab === 'noise') {
+                activate(noiseBtn);
+                deactivate(allBtn);
+                document.getElementById('radiodChannelsAllPane').style.display = 'none';
+                document.getElementById('radiodChannelsNoisePane').style.display = 'block';
+                // Nothing to poll for while the channel list is hidden
+                stopRadiodChannelsAutoRefresh();
+                loadNoiseFloorBands();
+            } else {
+                activate(allBtn);
+                deactivate(noiseBtn);
+                document.getElementById('radiodChannelsNoisePane').style.display = 'none';
+                document.getElementById('radiodChannelsAllPane').style.display = 'block';
+                // Fetch radiod values first (awaited inside loadRadiodChannels on first load)
+                loadRadiodChannels();
+                startRadiodChannelsAutoRefresh();
+            }
+        }
+
+        // The tab's Refresh button reloads whichever sub-tab is showing
+        function refreshRadiodChannelsTab() {
+            if (radiodChannelsSubTab === 'noise') {
+                loadNoiseFloorBands();
+            } else {
+                loadRadiodChannels();
+            }
+        }
 
         async function loadRadiodChannels() {
             try {

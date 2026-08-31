@@ -16,6 +16,10 @@
 #   4. Select N cores from the preferred cluster/L3 domain (lowest CPU number
 #      order), spilling into other domains only if more cores are needed.
 #      Current idle% is not used.
+#   5. Raise the suggested core count to 3 on an ARM big.LITTLE system with 4 or
+#      more big cores when the front end sample rate (via get-samprate.sh) is
+#      above the stock 64.8 MHz, since the forward FFT cost scales with that
+#      rate independently of listener count.
 #
 # Usage:
 #   ./suggest-radiod-cpuset.sh [--cores N] [--cluster auto|big|little|prime] [--quiet]
@@ -89,6 +93,45 @@ arm_cluster_role() {
         *X1*|*X2*|*X3*|*Neoverse*) echo "prime" ;;
         *) echo "" ;;
     esac
+}
+
+# arm_effective_cluster_role → LITTLE | big | prime | ""
+# Resolves CLUSTER_PREF into the role that will actually be used, mapping
+# "auto" to big → prime → LITTLE.  Empty on x86 and on homogeneous ARM.
+# Reads arm_cluster_cores, so only call this after section 2b has populated it.
+arm_effective_cluster_role() {
+    $IS_ARM && $ARM_IS_HETEROGENEOUS || { echo ""; return; }
+    case "$CLUSTER_PREF" in
+        little) echo "LITTLE" ;;
+        big)    echo "big" ;;
+        prime)  echo "prime" ;;
+        auto)
+            if   [[ -n "${arm_cluster_cores[big]:-}" ]];   then echo "big"
+            elif [[ -n "${arm_cluster_cores[prime]:-}" ]]; then echo "prime"
+            else                                               echo "LITTLE"
+            fi ;;
+        *) echo "" ;;
+    esac
+}
+
+# ── Front end sample rate ────────────────────────────────────────────────────
+# radiod's forward FFT is a fixed per-second cost: it scales with the front end
+# sample rate and does not depend on how many listeners are connected.  A
+# receiver running above the stock 64.8 MHz therefore needs more cores than the
+# listener tiers alone would ask for.  get-samprate.sh already works this out —
+# it asks the running server and falls back to the radiod .conf — so defer to it
+# rather than re-implementing the lookup here.  Only called on a board that can
+# act on the answer, since it may spend up to 5s waiting on the server.
+#
+# Leaves FRONTEND_SAMPRATE empty when neither source can answer (a first install
+# with nothing running and no conf yet); callers treat that as "unknown" and
+# fall back to the listener tiers.
+FRONTEND_SAMPRATE=""
+detect_frontend_samprate() {
+    local _sr_script="${SCRIPT_DIR}/get-samprate.sh" _sr_out
+    [[ -f "$_sr_script" ]] || return 0
+    _sr_out=$(bash "$_sr_script" 2>/dev/null) || return 0
+    FRONTEND_SAMPRATE=$(printf '%s\n' "$_sr_out" | sed -n 's/^samprate=\([0-9]\{1,\}\)$/\1/p')
 }
 
 # ── tmux session launcher (no-args / interactive mode) ───────────────────────
@@ -738,6 +781,32 @@ if $INTERACTIVE; then
         _arm_min_applied=true
     fi
 
+    # On ARM big.LITTLE with a big cluster of 4 or more cores, a front end
+    # running above the stock 64.8 MHz raises that floor to 3.  The forward FFT
+    # cost scales with the sample rate and is independent of listener count, so
+    # the listener tiers on their own under-provision a high rate receiver at
+    # low listener counts; measured, 3 big cores keep up until listener count
+    # becomes the dominant cost, by which point the tiers already ask for more.
+    # Hence a floor rather than a fixed count.
+    #
+    # Restricted to big.LITTLE deliberately: taking 3 big cores leaves a spare
+    # big core plus the whole LITTLE cluster for the OS, UberSDR and Docker.  A
+    # homogeneous 4 core board has no such spare cluster — and 3 there would
+    # exceed the half of logical CPUs cap below — so it keeps the 2 core floor.
+    _samprate_min_applied=false
+    _big_core_count=$(echo "${arm_cluster_cores[big]:-}" | wc -w)
+    if $IS_ARM && $ARM_IS_HETEROGENEOUS \
+       && [[ "$(arm_effective_cluster_role)" == "big" ]] \
+       && (( _big_core_count >= 4 )) && (( _max_cores_by_half >= 3 )); then
+        detect_frontend_samprate
+        if [[ -n "$FRONTEND_SAMPRATE" ]] && (( FRONTEND_SAMPRATE > 64800000 )); then
+            if (( _recommended_cores < 3 )); then
+                _recommended_cores=3
+                _samprate_min_applied=true
+            fi
+        fi
+    fi
+
     # Build a human-readable explanation of the recommendation
     if (( _expected_users <= 50 )); then
         echo "  With ${_expected_users} concurrent user(s) (≤ 50), we recommend ${_recommended_cores} physical core(s)."
@@ -751,7 +820,13 @@ if $INTERACTIVE; then
         _logical_for_rec=$(( _recommended_cores * _lcpus_per_core ))
         echo "  (${_recommended_cores} physical core(s) = ${_logical_for_rec} logical CPU(s) on this HT system)"
     fi
-    if $_arm_min_applied; then
+    if $_samprate_min_applied; then
+        echo ""
+        echo -e "\033[0;36m  ℹ  Front end note: this receiver runs at ${FRONTEND_SAMPRATE} Hz, above the stock\033[0m"
+        echo -e "\033[0;36m     64.8 MHz, so radiod's forward FFT costs proportionally more per second.\033[0m"
+        echo -e "\033[0;36m     That cost does not depend on listener count, so a minimum of 3 big core(s)\033[0m"
+        echo -e "\033[0;36m     is recommended. The LITTLE cores stay free for the OS, UberSDR and Docker.\033[0m"
+    elif $_arm_min_applied; then
         echo ""
         echo -e "\033[0;36m  ℹ  ARM note: minimum 2 physical core(s) recommended — ARM cores have lower\033[0m"
         echo -e "\033[0;36m     single-thread IPC than x86, so radiod needs at least 2 cores to keep up\033[0m"
@@ -823,24 +898,7 @@ fi
 
 # Resolve effective cluster preference for ARM
 # "auto" on a heterogeneous ARM system → prefer big, then prime, then LITTLE
-_effective_cluster_role=""
-if $IS_ARM && $ARM_IS_HETEROGENEOUS; then
-    case "$CLUSTER_PREF" in
-        little) _effective_cluster_role="LITTLE" ;;
-        big)    _effective_cluster_role="big" ;;
-        prime)  _effective_cluster_role="prime" ;;
-        auto)
-            # Prefer big, then prime, then LITTLE
-            if [[ -n "${arm_cluster_cores[big]:-}" ]]; then
-                _effective_cluster_role="big"
-            elif [[ -n "${arm_cluster_cores[prime]:-}" ]]; then
-                _effective_cluster_role="prime"
-            else
-                _effective_cluster_role="LITTLE"
-            fi
-            ;;
-    esac
-fi
+_effective_cluster_role="$(arm_effective_cluster_role)"
 
 # Sort core_list by lowest first-CPU number (stable, deterministic order)
 declare -a sorted_cores

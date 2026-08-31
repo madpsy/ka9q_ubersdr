@@ -19,7 +19,7 @@
 
 For instances who want to run at 0-60 MHz note that a new FFTW Wisdom is required, especially on older CPUs. The Generate Wisdom button in Admin -> Radiod will generate (or download from the catalog) the required transforms. Generating for rof3240000 may take several hours. I have already generated wisdoms for some CPUs, including ARM Cortex (that took 26 hours)
 
-WARNING - Do not attempt to run at the wider bandwidth unless your RX888 hardware has been modified. It will be physically damanged otherwise because the factory fitted thermal transfer pads are not sufficient. You have been warned!
+WARNING - Do not attempt to run at the wider bandwidth unless your RX888 hardware has been modified. It will be physically damaged otherwise because the factory fitted thermal transfer pads are not sufficient. You have been warned!
 
 You may also need to increase fft-threads in Admin -> Radiod -> fft-threads, this is entirely dependant on your CPU
 

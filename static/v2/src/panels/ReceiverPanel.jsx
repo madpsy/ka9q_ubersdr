@@ -110,7 +110,9 @@ export default function ReceiverPanel({ minimal }) {
     // Shared with click-to-tune on the spectrum, so both land on the same grid.
     const display = useDisplay();
     const step = display.tuneStep || 500;
-    const setStep = (hz) => display.set({ tuneStep: hz });
+    // Remembered against the mode it is chosen in, so USB's 100 Hz and AM's
+    // 9 kHz both survive switching between them — see TuneStepWatch.
+    const setStep = (hz) => display.setTuneStep(hz, tuning.mode);
 
     const mode = MODE_BY_ID[tuning.mode] || MODES[0];
     const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);

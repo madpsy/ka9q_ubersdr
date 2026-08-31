@@ -7806,9 +7806,28 @@ a.btn { text-decoration: none; }
  * two lines of conversation over a spectrum nobody is looking at mid-sentence.
  * While the focus is in the sheet, the sheet is what the screen is for; the
  * moment it leaves, the keyboard goes and the spectrum gets its share back.
- * :focus-within is the keyboard signal without any script: nothing raises one
- * except an editable child with focus. */
-.sheet:focus-within { --sheet-height: 88%; }
+ * The focus is the keyboard signal without any script: nothing raises one except
+ * an editable child with focus.
+ *
+ * That reasoning is sound; `:focus-within`, which is how it was first asked for,
+ * is not. Chrome focuses a <button> when it is tapped, so *every* button in every
+ * sheet was raising the cap — and on a panel taller than it, which IQ Demod and
+ * Measure both are on a phone, that is the sheet growing by a sixth of the screen
+ * in the middle of the tap that pressed Start. The sheet is anchored to the
+ * bottom, so it grows upwards and takes the panel up with it: the click a touch
+ * leaves behind is hit-tested against the DOM as it is then — the same retargeting
+ * useHeadGesture has to suppress — so the press landed on whatever had slid into
+ * that spot, and the panel looked as though it had switched between its minimal
+ * and full views rather than starting anything.
+ *
+ * So the editable children are named rather than described. Not `input` flat: a
+ * slider, a checkbox, a radio or a colour well each take focus from a finger and
+ * none of them raises a keyboard, and these panels are full of the first. */
+.sheet:has(textarea:focus, [contenteditable]:focus,
+    input:focus:not([type="range"], [type="checkbox"], [type="radio"], [type="color"],
+        [type="button"], [type="submit"], [type="reset"], [type="file"])) {
+    --sheet-height: 88%;
+}
 
 /* A `fill` panel keeps its own scroller — a chat log, a cluster terminal, a spot
    table — with its controls pinned below it. That only works if the panel can be

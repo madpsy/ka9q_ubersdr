@@ -373,6 +373,8 @@ esbuild layoutpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/layoutpanel.cjs --log-level=warning
 esbuild filterreset.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/filterreset.cjs --log-level=warning
+esbuild tunestep.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/tunestep.cjs --log-level=warning
 esbuild holdpress.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/holdpress.cjs --log-level=warning
 esbuild padiq.entry.js --bundle --format=cjs --platform=node \
@@ -529,6 +531,7 @@ node layout.test.js
 node custompanels.test.js
 node layoutpanel.test.js
 node filterreset.test.js
+node tunestep.test.js
 node holdpress.test.js
 node padiq.test.js
 node panelhost.test.js

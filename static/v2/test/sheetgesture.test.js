@@ -71,4 +71,33 @@ t('every intent a drag can produce is one sheetWants answers', () => {
     }
 });
 
+// --- and the sheet resizing on its own ---------------------------------------
+
+t('only an editable child raises the sheet to make room for a keyboard', () => {
+    // The stylesheet's half of the same problem, and the reason it is asserted
+    // here rather than left to the eye: a sheet that resizes mid-tap moves the
+    // panel out from under the finger, and the click a touch leaves behind is
+    // hit-tested against the DOM as it is then. `:focus-within` did exactly that
+    // on every button press, because Chrome focuses a <button> when it is
+    // tapped — so pressing Start on a panel taller than the cap grew the sheet
+    // by a sixth of the screen and the press landed somewhere else.
+    const fs = require('fs');
+    const path = require('path');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+
+    assert.ok(!/\.sheet:focus-within/.test(css),
+        ':focus-within is any focusable child, buttons included — name the editable ones');
+
+    const rule = css.match(/\.sheet:has\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*\{[^}]*--sheet-height[^}]*\}/);
+    assert.ok(rule, 'the sheet still gets its room back for a keyboard');
+    const sel = rule[1];
+    assert.ok(/textarea:focus/.test(sel) && /contenteditable\]:focus/.test(sel) && /input:focus/.test(sel),
+        sel);
+    // The input types that take focus from a finger and raise no keyboard. A
+    // slider is the one that matters — the panels are full of them.
+    for (const type of ['range', 'checkbox', 'radio', 'color', 'button', 'submit']) {
+        assert.ok(sel.includes(`[type="${type}"]`), `${type} is not excluded: ${sel}`);
+    }
+});
+
 console.log(`\n${pass} ok`);

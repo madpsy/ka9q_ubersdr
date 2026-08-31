@@ -441,7 +441,7 @@ function FreqWheel({ headRef, showBw, minimal }) {
                     value={step}
                     aria-label="Tuning step"
                     title="How far one detent of the wheel tunes"
-                    onChange={(e) => display.set({ tuneStep: Number(e.target.value) })}
+                    onChange={(e) => display.setTuneStep(Number(e.target.value), tuning.mode)}
                 >
                     {TUNING_STEPS.map((s) => <option key={s} value={s}>{stepLabel(s)}</option>)}
                 </select>

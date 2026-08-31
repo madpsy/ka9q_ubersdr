@@ -141,6 +141,19 @@ export const DEFAULTS = {
     // lands on the same grid as the +/- buttons. 500 Hz suits SSB, which is
     // what most of this band is.
     tuneStep: 500,
+    // The step each mode was last set to, keyed by mode id — { usb: 100, am: 9000 }.
+    // `tuneStep` above stays the one live figure everything tunes by; this is
+    // only a record of what it was set to and in which mode, so going back to a
+    // mode brings its step back with it. 500 Hz is right for SSB and absurd for
+    // broadcast AM, and somebody who works both was re-picking the step at every
+    // mode change.
+    //
+    // Empty until somebody actually chooses a step, and only ever written by
+    // that choice — see setTuneStep. A mode nobody has picked one for therefore
+    // keeps whatever step is in force rather than being snapped to a guess,
+    // which is what makes this invisible to anyone happy with one step for
+    // everything. Applied by components/TuneStepWatch.jsx.
+    tuneStepByMode: {},
     // Which way the Multipad's frequency drum turns. Off is the direction the
     // spectrum pans in — drag right and the values to the left of the index line
     // come to it — which is what every other surface here does. Some people read a
@@ -484,6 +497,21 @@ export const DEFAULTS = {
     markOverrides: {},
 };
 
+// `tuneStep` set to `hz`, and remembered as this mode's. A figure that cannot be
+// tuned by changes nothing at all: this is reached from a <select>, a control
+// surface and the bridge, and a stored 0 or NaN would leave every step-by button
+// in the interface moving the dial nowhere.
+//
+// Module-level and pure so the rule lives in one place — the provider's
+// setTuneStep is this in a setState, and the test calls it directly.
+export function withTuneStep(state, hz, mode) {
+    const step = Number(hz);
+    if (!Number.isFinite(step) || step <= 0) return state;
+    const next = { ...state, tuneStep: step };
+    if (mode) next.tuneStepByMode = { ...(state.tuneStepByMode || {}), [mode]: step };
+    return next;
+}
+
 // Text-size range and step for the top bar's zoom buttons.
 export const UI_SCALE_MIN = 0.75;
 export const UI_SCALE_MAX = 1.6;
@@ -738,6 +766,11 @@ export function DisplayProvider({ children }) {
     }, [state.uiScale]);
 
     const set = useCallback((patch) => setState((s) => ({ ...s, ...patch })), []);
+    // The step, set and remembered for the mode it was set in. Everything that
+    // offers the step as a choice goes through here rather than set({ tuneStep })
+    // — the Receiver panel's select, the Multipad's — so there is no way to move
+    // the live figure without also saying which mode it was chosen for.
+    const setTuneStep = useCallback((hz, mode) => setState((s) => withTuneStep(s, hz, mode)), []);
     const reset = useCallback(() => setState({ ...DEFAULTS, v: SETTINGS_VERSION }), []);
 
     // One marker colour for one palette. `hex` empty puts that mark back on the
@@ -760,8 +793,8 @@ export function DisplayProvider({ children }) {
     })), []);
 
     const value = useMemo(
-        () => ({ ...state, server, set, reset, setMarkColor, setUiColor }),
-        [state, server, set, reset, setMarkColor, setUiColor],
+        () => ({ ...state, server, set, setTuneStep, reset, setMarkColor, setUiColor }),
+        [state, server, set, setTuneStep, reset, setMarkColor, setUiColor],
     );
     return <DisplayContext.Provider value={value}>{children}</DisplayContext.Provider>;
 }

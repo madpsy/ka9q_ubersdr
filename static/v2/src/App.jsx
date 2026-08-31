@@ -23,6 +23,7 @@ import ShortcutWatch from './components/ShortcutWatch.jsx';
 import HapticWatch from './components/HapticWatch.jsx';
 import ControlWatch from './components/ControlWatch.jsx';
 import TopFreqWatch from './components/TopFreqWatch.jsx';
+import TuneStepWatch from './components/TuneStepWatch.jsx';
 import StartOverlay from './components/StartOverlay.jsx';
 import OperatorNotice from './components/OperatorNotice.jsx';
 import { ChatProvider } from './chat/ChatContext.jsx';
@@ -272,6 +273,13 @@ export default function App() {
                                     counting — so the clock is here and the panel
                                     only draws what it finds. */}
                                 <TopFreqWatch />
+                                {/* The tuning step, put back to whatever it was
+                                    last set to in the mode being switched into.
+                                    Here because the mode can change from four
+                                    panels, the keyboard, a bookmark, a control
+                                    surface or the URL, and none of those panels
+                                    is reliably mounted. */}
+                                <TuneStepWatch />
                                 {/* The Measure tool's engine. Here rather than
                                     in its panel for the same reason as the rest
                                     of this block, and one of its own: on a phone

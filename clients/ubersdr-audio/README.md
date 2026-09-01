@@ -114,8 +114,24 @@ fyne package -os windows -name "UberSDR Audio" -appID io.github.ka9q.ubersdr.aud
 The client uses the standard UberSDR WebSocket protocol:
 
 1. `POST /connection` with `{"user_session_id":"<uuid>"}` → checks if connection is allowed
-2. `WebSocket /ws?frequency=X&mode=Y&format=pcm-zstd&user_session_id=<uuid>&bandwidthLow=L&bandwidthHigh=H`
-3. Binary frames: zstd-compressed → 13-byte (PM) or 29-byte (PC) header → big-endian int16 PCM
+2. `WebSocket /ws?frequency=X&mode=Y&format=pcm-zstd&version=4&user_session_id=<uuid>&bandwidthLow=L&bandwidthHigh=H`
+3. Binary frames, in the shape protocol version 4 gives them:
+   - **Lossless** (`format=pcm-zstd`): a `PCM4` magic, a flags byte, then only
+     the fields that changed since the last packet, and a body coded by an
+     adaptive predictor with Rice-coded residuals. Roughly half the bytes of the
+     version 3 zstd form on audio, and a squelched session drops to almost
+     nothing because a silent packet has no body at all.
+   - **Opus** (`format=opus`): the same header minus the fields only a predictor
+     needs, then the raw Opus packet. Variable-length, so where the packet starts
+     has to be parsed rather than assumed.
+   - The server picks the format **per packet**, so an Opus session receives
+     lossless frames the moment it tunes to IQ. Frames are told apart by their
+     leading bytes, not by what was negotiated.
+   - Version 4 is the only protocol this client reads. A server from 0.1.63 on
+     refuses a version it cannot serve, so the handshake fails with the reason
+     in a 400. Older ones clamp the request to 1-3 and answer with version 1
+     instead of refusing; their frames are recognisable, and the client reports
+     that the receiver needs 0.1.63 rather than playing silence.
 4. Live retune: `{"type":"tune","frequency":N,"mode":"usb","bandwidthLow":-2400,"bandwidthHigh":2400}`
 5. Keepalive: `{"type":"ping"}` every 30 seconds
 
@@ -131,6 +147,13 @@ REST API and the bundled web UI as `frequency_min_hz` / `frequency_max_hz`; see
 go test ./...
 ```
 
+`TestPCMv4DecodesServerStream` and `TestOpusV4HeaderMatchesServer` decode packet
+streams in `testdata/` that the **server's** encoder produced, and check the
+samples come back bit for bit. The version 4 predictor is backward adaptive, so
+the two sides derive their filter taps independently and any arithmetic
+difference between them turns audio into noise without failing anything — these
+are what would catch that.
+
 One test reaches the network and is skipped unless enabled. It checks that the
 range a real receiver publishes is the one this client then clamps to:
 
@@ -144,7 +167,10 @@ UBERSDR_TEST_SERVER=http://example.org:8080 go test -run TestLiveTuningRange -v
 clients/windows-audio/
 ├── main.go          # Fyne GUI entry point
 ├── client.go        # RadioClient (WebSocket connection management)
-├── pcm_decoder.go   # PCM-zstd binary frame decoder
+├── pcm_v4_header.go   # variable-length version 4 header (lossless and Opus)
+├── pcm_predictive.go  # version 4 payload codec: adaptive predictor + Rice
+├── pcm_v4_stream.go   # version 4 packet assembly, header + codec
+├── opus_frame.go      # Opus frame framing, shared across platforms
 ├── audio_output.go  # oto v3 WASAPI audio output
 ├── go.mod
 └── README.md

@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -161,44 +160,4 @@ func (d *opusDecoder) Close() {
 		d.dll.Release()
 		d.dll = nil
 	}
-}
-
-// decodeOpusFrame parses the server's v2 Opus binary frame and returns
-// PCM bytes, sampleRate, channels, basebandPower, noiseDensity.
-//
-// Frame layout (v2):
-//
-//	[0:8]   uint64 LE  GPS timestamp (ignored)
-//	[8:12]  uint32 LE  sample rate
-//	[12]    uint8      channels
-//	[13:17] float32 LE baseband power
-//	[17:21] float32 LE noise (density on version 2, passband power on 3)
-//	[21:]   bytes      raw Opus packet
-func decodeOpusFrame(data []byte, dec **opusDecoder) (pcm []byte, sampleRate, channels int, basebandPower, noiseDensity float32, err error) {
-	const headerV2 = 21
-	if len(data) < headerV2+1 {
-		err = fmt.Errorf("opus frame too short: %d bytes", len(data))
-		return
-	}
-
-	sampleRate = int(binary.LittleEndian.Uint32(data[8:12]))
-	channels = int(data[12])
-	basebandPower = math.Float32frombits(binary.LittleEndian.Uint32(data[13:17]))
-	noiseDensity = math.Float32frombits(binary.LittleEndian.Uint32(data[17:21]))
-	opusPacket := data[headerV2:]
-
-	// (Re)create decoder if sample rate or channel count changed.
-	if *dec == nil || (*dec).sampleRate != sampleRate || (*dec).channels != channels {
-		if *dec != nil {
-			(*dec).Close()
-			*dec = nil
-		}
-		*dec, err = newOpusDecoder(sampleRate, channels)
-		if err != nil {
-			return
-		}
-	}
-
-	pcm, err = (*dec).Decode(opusPacket)
-	return
 }

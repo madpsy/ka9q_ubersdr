@@ -22,8 +22,11 @@ import (
 type AudioFormat int
 
 const (
-	FormatPCMZstd AudioFormat = iota // lossless PCM, zstd-compressed on the wire
-	FormatOpus                       // lossy Opus (requires server Opus support)
+	// FormatPCMZstd is the lossless path. The name is the one the server still
+	// uses in the query string; from protocol version 4 the wire form is a
+	// predictive codec rather than zstd, which is where its bandwidth went.
+	FormatPCMZstd AudioFormat = iota
+	FormatOpus                // lossy Opus (requires server Opus support)
 )
 
 // ConnectionState represents the current connection state.
@@ -279,7 +282,6 @@ type RadioClient struct {
 	channels           int
 	volume             float64 // current volume (0.0–1.0); applied to new AudioOutput on creation
 	channelMode        int     // ChannelModeBoth/Left/Right; applied to new AudioOutput on creation
-	pcmDecoder         *PCMBinaryDecoder
 	audioOut           *AudioOutput
 	cancelFn           context.CancelFunc
 	connMaxSessionTime int      // MaxSessionTime from last /connection response (0 = unlimited)
@@ -298,17 +300,37 @@ type RadioClient struct {
 	// Read and reset atomically with BytesReceivedAndReset().
 	bytesReceived atomic.Int64
 
+	// pcmV4Decoder decodes lossless frames, and opusV4Header reads the header
+	// off Opus frames.
+	//
+	// They are separate instances because the server tracks the two streams
+	// separately -- it holds one header encoder for each -- so a shared decoder
+	// would apply one stream's deltas to the other's baseline. Both are stateful
+	// per connection and created in connectAndStream.
+	//
+	// pcmV4Decoder additionally carries the predictor's adaptation, which means
+	// every version 4 lossless frame MUST be decoded, even one that is then
+	// dropped for a full delivery queue: a frame that never reaches it leaves
+	// this side's filters where the server's no longer are.
+	pcmV4Decoder *PCMv4StreamDecoder
+	opusV4Header *PCMv4HeaderDecoder
+
 	// opusDec is the Opus decoder instance (nil until first Opus frame).
 	// Protected by mu.
 	opusDec *opusDecoder
 
-	// opusDecodeCh is a buffered channel of raw Opus wire frames.
+	// opusDecodeCh is a buffered channel of Opus wire frames whose headers have
+	// already been parsed.
 	// The WebSocket receive goroutine enqueues frames here non-blocking;
 	// a dedicated worker goroutine calls opus_decode (a DLL syscall that
 	// pins an OS thread) so the receive goroutine is never stalled by it.
 	// This keeps the IOCP completion path as short as possible and prevents
 	// the Go network poller from being starved on Windows.
-	opusDecodeCh chan []byte
+	//
+	// The header is read before the hand-off rather than in the worker because
+	// version 4 headers are change-tracked: a frame dropped here for a full
+	// queue must still have been parsed, or the next delta has no baseline.
+	opusDecodeCh chan opusWireFrame
 
 	// pcmDeliverCh is a buffered channel of decoded PCM packets.
 	// The WebSocket receive goroutine decodes and enqueues here non-blocking;
@@ -499,6 +521,21 @@ func (c *RadioClient) parseBaseURL() (scheme, host string, err error) {
 	return scheme, host, nil
 }
 
+// pcmProtocolVersion is the audio protocol this client speaks, and the only one
+// it speaks.
+//
+// Version 4 replaces the zstd wrapper on the lossless path with a predictive
+// codec (pcm_predictive.go), and the fixed 37-byte header with one carrying only
+// what changed (pcm_v4_header.go). Opus frames keep their payload but lose most
+// of their header. Measured against the same receiver: USB 26.6 -> 12.2 kB/s,
+// IQ 12k 50.7 -> 34.3, and a squelched session 2.90 -> 0.49.
+//
+// A server from 0.1.63 on refuses a version it cannot serve, so asking for this
+// one either works or fails loudly. Older servers instead clamp the request to
+// 1-3 and silently answer with version 1; handleBinary recognises what comes
+// back and says so, which is the only accommodation made for them.
+const pcmProtocolVersion = 4
+
 // buildWSURL constructs the WebSocket URL from BaseURL.
 func (c *RadioClient) buildWSURL() (string, error) {
 	httpScheme, host, err := c.parseBaseURL()
@@ -525,14 +562,7 @@ func (c *RadioClient) buildWSURL() (string, error) {
 	q.Set("frequency", fmt.Sprintf("%d", c.Frequency))
 	q.Set("mode", c.Mode)
 	q.Set("format", format)
-	// Version 3 headers: same 21-byte layout as version 2 (basebandPower, noise),
-	// but the noise field is the power over the demodulator passband rather than
-	// radiod's density N0 in dBFS/Hz, so `basebandPower - noise` is an SNR in dB
-	// instead of S/N0 in dB·Hz — about 34 dB lower on a 2.65 kHz filter, and a
-	// different amount on every other filter width. See channelNoisePower in
-	// radiod_status.go. A server older than 0.1.60 does not know version 3 and
-	// falls back to version 1, whose header has no signal-quality fields at all.
-	q.Set("version", "3")
+	q.Set("version", fmt.Sprintf("%d", pcmProtocolVersion))
 	q.Set("user_session_id", c.userSessionID)
 	if !isWideIQMode(c.Mode) {
 		q.Set("bandwidthLow", fmt.Sprintf("%d", c.BandwidthLow))
@@ -843,6 +873,9 @@ func (c *RadioClient) connectAndStream(ctx context.Context, gen uint64) {
 		ReadBufferSize:   256 * 1024,
 		WriteBufferSize:  32 * 1024,
 	}
+	// A server from 0.1.63 on answers 400 for a protocol version it cannot
+	// serve, so its refusal arrives here as a failed handshake with the reason
+	// in the body rather than as a stream that quietly is not version 4.
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
 		c.setState(gen, StateError, fmt.Sprintf("WebSocket dial: %v", err))
@@ -855,28 +888,26 @@ func (c *RadioClient) connectAndStream(ctx context.Context, gen uint64) {
 
 	c.setState(gen, StateConnected, "")
 
-	// Initialise PCM decoder
-	pcmDec, err := NewPCMBinaryDecoder()
-	if err != nil {
-		c.setState(gen, StateError, fmt.Sprintf("PCM decoder init: %v", err))
-		conn.Close()
-		return
-	}
+	// Both decoders are stateful across the whole connection and must not
+	// outlive it: the predictor's taps carry every sample decoded so far, the
+	// headers carry what the server has stopped repeating, and a fresh socket
+	// starts a fresh stream at the other end.
 	c.mu.Lock()
-	c.pcmDecoder = pcmDec
+	c.pcmV4Decoder = NewPCMv4StreamDecoder()
+	c.opusV4Header = NewPCMv4HeaderDecoder()
 	c.mu.Unlock()
 
 	// Create the Opus decode channel and start the worker goroutine.
 	// The worker owns all opus_decode DLL calls so the receive goroutine
 	// (and therefore the IOCP poller) is never blocked by them.
-	opusDecodeCh := make(chan []byte, 8)
+	opusDecodeCh := make(chan opusWireFrame, 8)
 	c.mu.Lock()
 	c.opusDecodeCh = opusDecodeCh
 	c.mu.Unlock()
 
 	go func() {
-		for raw := range opusDecodeCh {
-			c.decodeAndDeliverOpus(raw)
+		for frame := range opusDecodeCh {
+			c.decodeAndDeliverOpus(frame)
 		}
 	}()
 
@@ -935,7 +966,10 @@ func (c *RadioClient) connectAndStream(ctx context.Context, gen uint64) {
 
 		if msgType == websocket.BinaryMessage {
 			c.bytesReceived.Add(int64(len(data)))
-			c.handleBinary(data)
+			if err := c.handleBinary(data); err != nil {
+				c.setState(gen, StateError, err.Error())
+				return
+			}
 		} else if msgType == websocket.TextMessage {
 			c.handleJSON(data)
 		}
@@ -997,25 +1031,46 @@ func (c *RadioClient) handleJSON(data []byte) {
 	}
 }
 
-// handleBinary processes a binary WebSocket frame (PCM-zstd or Opus).
-func (c *RadioClient) handleBinary(data []byte) {
-	c.mu.RLock()
-	format := c.Format
-	c.mu.RUnlock()
-
-	if format == FormatOpus {
-		c.handleOpusBinary(data)
-	} else {
-		c.handlePCMBinary(data)
+// handleBinary processes a binary WebSocket frame, returning an error only for
+// a stream this client cannot read at all -- which ends the connection.
+//
+// Two shapes arrive, and the frame itself has to say which it is rather than the
+// negotiated format: the server picks the format PER PACKET, so a session
+// negotiated as Opus receives lossless PCM the moment it tunes to IQ, and one
+// that asked for Opus from a server built without libopus receives it always.
+//
+// The lossless magic is four bytes, which is not decoration. An Opus frame
+// begins with a timestamp, so its leading bytes are uniformly distributed and
+// the width of the magic is a false-positive rate -- each false positive being
+// one frame of audio played as metadata, which is an audible click. Two bytes
+// would mistake one frame in 65536, about one a minute at IQ packet rates.
+func (c *RadioClient) handleBinary(data []byte) error {
+	if PCMv4IsHeader(data) {
+		c.handlePCMv4Binary(data)
+		return nil
 	}
+	// Version 4 has no zstd anywhere, so a zstd frame is not a stream this
+	// client misread -- it is a server older than 0.1.63, which clamps the
+	// requested version to 1-3 and answers with version 1 rather than refusing.
+	// Saying so beats playing nothing and explaining nothing.
+	if isZstdFrame(data) {
+		return fmt.Errorf("server does not support audio protocol version %d (needs UberSDR 0.1.63 or later)", pcmProtocolVersion)
+	}
+	return c.handleOpusBinary(data)
 }
 
-// handlePCMBinary decodes a PCM-zstd binary frame and enqueues it for delivery
-// by the PCM worker goroutine.  This returns immediately so the WebSocket receive
-// goroutine (and the IOCP poller) is never stalled by deliverAudio or NewAudioOutput.
-func (c *RadioClient) handlePCMBinary(data []byte) {
+// handlePCMv4Binary decodes a version 4 lossless frame and enqueues it for
+// delivery by the PCM worker goroutine.
+//
+// The decode is unconditional even though the delivery below is not. The
+// predictor is backward adaptive, so its taps are derived from samples already
+// decoded: a frame that never reaches the codec leaves this side's filters
+// where the server's no longer are, and every frame after it decodes as noise.
+// Dropping the RESULT when the worker is behind costs 20 ms of audio; dropping
+// the decode would cost the rest of the connection.
+func (c *RadioClient) handlePCMv4Binary(data []byte) {
 	c.mu.RLock()
-	dec := c.pcmDecoder
+	dec := c.pcmV4Decoder
 	ch := c.pcmDeliverCh
 	c.mu.RUnlock()
 
@@ -1023,51 +1078,70 @@ func (c *RadioClient) handlePCMBinary(data []byte) {
 		return
 	}
 
-	pcmLE, sampleRate, channels, basebandPower, noiseDensity, err := dec.DecodePCMBinary(data)
+	pcmLE, sampleRate, channels, basebandPower, noise, err := dec.DecodePacketLE(data)
 	if err != nil {
+		dbg("PCMv4: %v", err)
 		return
 	}
 
-	// Non-blocking enqueue: drop if the worker is momentarily behind rather
-	// than stalling the receive goroutine.
 	select {
-	case ch <- pcmDecodedPacket{pcmLE, sampleRate, channels, basebandPower, noiseDensity}:
+	case ch <- pcmDecodedPacket{pcmLE, sampleRate, channels, basebandPower, noise}:
 	default:
 	}
 }
 
-// handleOpusBinary enqueues a raw Opus wire frame for decoding by the worker
-// goroutine.  This returns immediately so the WebSocket receive goroutine (and
-// the underlying IOCP poller) is never blocked by the opus_decode DLL call.
-func (c *RadioClient) handleOpusBinary(data []byte) {
+// handleOpusBinary parses an Opus wire frame and enqueues it for decoding by
+// the worker goroutine.  This returns immediately so the WebSocket receive
+// goroutine (and the underlying IOCP poller) is never blocked by the
+// opus_decode DLL call.
+//
+// The header is read here rather than in the worker because from version 4 it
+// is change-tracked: a frame dropped below for a full queue must still have had
+// its header parsed, or the next frame's delta has no baseline to apply to.
+// parseOpusFrame copies the Opus payload out, since the WebSocket library
+// reuses the buffer under data as soon as this returns.
+func (c *RadioClient) handleOpusBinary(data []byte) error {
 	c.mu.RLock()
 	ch := c.opusDecodeCh
+	v4 := c.opusV4Header
 	c.mu.RUnlock()
-	if ch == nil {
-		return
+	if ch == nil || v4 == nil {
+		return nil
 	}
-	// Copy data — the WebSocket library reuses the underlying buffer.
-	cp := make([]byte, len(data))
-	copy(cp, data)
+
+	frame, err := parseOpusFrame(data, v4)
+	if err != nil {
+		// An Opus frame carries no magic, so it is identified by elimination
+		// and there is nothing else this could have been. The socket is ordered
+		// and reliable, so a header that will not parse is not a corrupted
+		// frame; it is a header of a shape this client does not read, which is
+		// what a server older than 0.1.63 sends after clamping the requested
+		// version to 1-3.
+		return fmt.Errorf("unreadable Opus frame: %w (server may predate audio protocol version %d)", err, pcmProtocolVersion)
+	}
+
 	// Non-blocking enqueue: if the worker is momentarily behind, drop rather
 	// than stalling the receive goroutine.
 	select {
-	case ch <- cp:
+	case ch <- frame:
 	default:
 	}
+	return nil
 }
 
 // decodeAndDeliverOpus is called by the Opus worker goroutine.
 // It performs the actual DLL call and delivers PCM to the audio output.
-func (c *RadioClient) decodeAndDeliverOpus(data []byte) {
+func (c *RadioClient) decodeAndDeliverOpus(frame opusWireFrame) {
 	c.mu.Lock()
 	opusDec := c.opusDec
 	c.mu.Unlock()
 
-	pcmLE, sampleRate, channels, basebandPower, noiseDensity, err := decodeOpusFrame(data, &opusDec)
+	pcmLE, err := decodeOpusFrame(frame, &opusDec)
 	if err != nil {
 		return
 	}
+	sampleRate, channels := frame.sampleRate, frame.channels
+	basebandPower, noiseDensity := frame.basebandPower, frame.noise
 
 	// Store back the (possibly newly created) decoder.
 	c.mu.Lock()
@@ -1264,13 +1338,15 @@ func (c *RadioClient) cleanup() {
 	c.mu.Lock()
 	conn := c.conn
 	out := c.audioOut
-	dec := c.pcmDecoder
 	opusDec := c.opusDec
 	decodeCh := c.opusDecodeCh
 	pcmCh := c.pcmDeliverCh
 	c.conn = nil
 	c.audioOut = nil
-	c.pcmDecoder = nil
+	// Dropped rather than reset: a decoder's predictor and header state is only
+	// meaningful against the encoder on the other end of this socket.
+	c.pcmV4Decoder = nil
+	c.opusV4Header = nil
 	c.opusDec = nil
 	c.opusDecodeCh = nil
 	c.pcmDeliverCh = nil
@@ -1292,9 +1368,6 @@ func (c *RadioClient) cleanup() {
 	}
 	if out != nil {
 		out.Close()
-	}
-	if dec != nil {
-		dec.Close()
 	}
 	if opusDec != nil {
 		opusDec.Close()

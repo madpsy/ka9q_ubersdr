@@ -1875,6 +1875,14 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 	// from the other's history.
 	var opusV4Header *PCMv4HeaderEncoder
 
+	// opusPacketBuf is the assembled version 4 Opus packet, reused across
+	// frames: WriteMessage completes before the next frame is built, so the
+	// buffer is free again by then. opusSilenceBuf holds the all-zero PCM the
+	// signal-quality ticker encodes while the squelch is closed; nothing ever
+	// writes into it, so it stays zero however often it is reused.
+	var opusPacketBuf []byte
+	var opusSilenceBuf []byte
+
 	// Opus encoder settings, and the sample rate the current encoder was built
 	// for.  Both are needed outside this block so the encoder can be rebuilt
 	// when the mode changes (see ensureOpusEncoder below).
@@ -2047,8 +2055,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 
 						// Create silence samples (20ms worth - standard Opus frame size)
 						// Opus works best with 20ms frames (2.5, 5, 10, 20, 40, 60ms are valid)
-						silenceDuration := session.SampleRate / 50        // 20ms frame
-						silenceSamples := make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each (all zeros)
+						silenceDuration := session.SampleRate / 50 // 20ms frame
+						if cap(opusSilenceBuf) < silenceDuration*2 {
+							opusSilenceBuf = make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each (all zeros)
+						}
+						silenceSamples := opusSilenceBuf[:silenceDuration*2]
 
 						opusData, err := opusEncoder.EncodeBinary(silenceSamples)
 						if err != nil {
@@ -2058,7 +2069,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 						// Build version 2 packet with signal quality
 						var packet []byte
 						if version >= 4 {
-							packet = ensureOpusV4Header().AppendOpusHeader(nil, PCMv4Header{
+							packet = ensureOpusV4Header().AppendOpusHeader(opusPacketBuf[:0], PCMv4Header{
 								TimestampNanos: uint64(time.Now().UnixNano()),
 								SampleRate:     session.SampleRate,
 								Channels:       session.Channels,
@@ -2066,6 +2077,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 								Noise:          noiseFigure,
 							})
 							packet = append(packet, opusData...)
+							opusPacketBuf = packet
 						} else {
 							packet = make([]byte, 21+len(opusData))
 							binary.LittleEndian.PutUint64(packet[0:8], uint64(time.Now().UnixNano()))
@@ -2361,7 +2373,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					// the fields only a predictor needs. Timestamp, metadata and
 					// signal quality are tracked and encoded identically, so a
 					// client has one parser for both formats rather than two.
-					packet = ensureOpusV4Header().AppendOpusHeader(nil, PCMv4Header{
+					packet = ensureOpusV4Header().AppendOpusHeader(opusPacketBuf[:0], PCMv4Header{
 						TimestampNanos: uint64(audioPacket.GPSTimeNs),
 						SampleRate:     audioPacket.SampleRate,
 						Channels:       session.Channels,
@@ -2369,6 +2381,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 						Noise:          noiseFigure,
 					})
 					packet = append(packet, opusData...)
+					opusPacketBuf = packet
 				} else if version >= 2 {
 					// Version 2: include signal quality metrics
 					packet = make([]byte, 21+len(opusData))

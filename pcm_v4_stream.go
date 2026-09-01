@@ -129,8 +129,9 @@ func (e *PCMv4StreamEncoder) EncodePacket(
 	if silent {
 		// The predictor still has to run. The decoder advances its own filters
 		// over the same zeros, and the two must agree sample for sample or
-		// everything after this packet decodes wrongly.
-		if _, _, err := e.codec.EncodeBody(e.samples); err != nil {
+		// everything after this packet decodes wrongly. Advancing without
+		// coding skips the Rice bitstream a discarded body used to pay for.
+		if err := e.codec.AdvanceSilence(len(e.samples)); err != nil {
 			return nil, fmt.Errorf("pcm v4: %w", err)
 		}
 	} else {
@@ -163,9 +164,6 @@ type PCMv4StreamDecoder struct {
 	header  *PCMv4HeaderDecoder
 	codec   *PredictiveCodec
 	profile byte
-
-	// zeros is reused when reconstructing a silent packet.
-	zeros []int16
 }
 
 // NewPCMv4StreamDecoder returns a decoder with no state, which will reject
@@ -199,19 +197,12 @@ func (d *PCMv4StreamDecoder) DecodePacket(pkt []byte) (PCMv4Header, []int16, err
 	}
 
 	if h.Silent {
-		// No body was sent. Reconstruct the zeros and advance the predictor
-		// over them exactly as the encoder did.
+		// No body was sent. Advance the predictor over the implied zeros
+		// exactly as the encoder did.
 		if len(pkt) != off {
 			return h, nil, fmt.Errorf("pcm v4: silent packet carries %d bytes of body", len(pkt)-off)
 		}
-		if cap(d.zeros) < h.SampleCount {
-			d.zeros = make([]int16, h.SampleCount)
-		}
-		zeros := d.zeros[:h.SampleCount]
-		for i := range zeros {
-			zeros[i] = 0
-		}
-		if _, _, err := d.codec.EncodeBody(zeros); err != nil {
+		if err := d.codec.AdvanceSilence(h.SampleCount); err != nil {
 			return h, nil, fmt.Errorf("pcm v4: %w", err)
 		}
 		out := make([]int16, h.SampleCount)

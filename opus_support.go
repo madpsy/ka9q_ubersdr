@@ -7,10 +7,20 @@ import (
 	opus "gopkg.in/hraban/opus.v2"
 )
 
-// OpusEncoderWrapper wraps the Opus encoder
+// OpusEncoderWrapper wraps the Opus encoder.
+//
+// The scratch buffers make it single-goroutine, per-connection state -- which
+// it already was in practice, since the underlying Opus encoder is stateful
+// across frames.
 type OpusEncoderWrapper struct {
 	encoder *opus.Encoder
 	enabled bool
+
+	// pcm and buf are reused by every EncodeBinary call, keeping the sample
+	// conversion and the 4 kB output buffer off the allocator at 50 frames a
+	// second. The returned frame aliases buf.
+	pcm []int16
+	buf []byte
 }
 
 // NewOpusEncoder creates a new Opus encoder (always disabled - only used when client requests it)
@@ -48,7 +58,12 @@ func NewOpusEncoderForClient(sampleRate int, bitrate int, complexity int) (*Opus
 	return wrapper, nil
 }
 
-// EncodeBinary encodes PCM data to Opus (returns raw binary bytes)
+// EncodeBinary encodes PCM data to Opus (returns raw binary bytes).
+//
+// The returned slice aliases a buffer the next call reuses, so it must be
+// consumed -- written or copied -- before EncodeBinary is called again. Every
+// caller already did exactly that; making the contract explicit is what lets
+// the buffers be reused rather than allocated 50 times a second.
 func (w *OpusEncoderWrapper) EncodeBinary(pcmData []byte) (encoded []byte, err error) {
 	if !w.enabled || w.encoder == nil {
 		// Return PCM as-is
@@ -57,22 +72,27 @@ func (w *OpusEncoderWrapper) EncodeBinary(pcmData []byte) (encoded []byte, err e
 
 	// Convert PCM bytes to int16 samples for Opus
 	numSamples := len(pcmData) / 2
-	pcmInt16 := make([]int16, numSamples)
+	if cap(w.pcm) < numSamples {
+		w.pcm = make([]int16, numSamples)
+	}
+	pcmInt16 := w.pcm[:numSamples]
 	for i := 0; i < numSamples; i++ {
 		// Big-endian int16
 		pcmInt16[i] = int16(binary.BigEndian.Uint16(pcmData[i*2 : i*2+2]))
 	}
 
 	// Encode with Opus
-	opusData := make([]byte, 4000) // Max Opus frame size
-	n, err := w.encoder.Encode(pcmInt16, opusData)
+	if w.buf == nil {
+		w.buf = make([]byte, 4000) // Max Opus frame size
+	}
+	n, err := w.encoder.Encode(pcmInt16, w.buf)
 	if err != nil {
 		// Fall back to PCM on error
 		return pcmData, err
 	}
 
 	// Successfully encoded with Opus - return raw bytes
-	return opusData[:n], nil
+	return w.buf[:n], nil
 }
 
 // IsEnabled returns whether Opus encoding is enabled

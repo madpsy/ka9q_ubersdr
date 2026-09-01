@@ -194,21 +194,41 @@ func (s spectrumV2Scale) encode(db float32) uint8 {
 	return uint8(code)
 }
 
-// fits reports whether a reading lands inside the scale rather than saturating
-// against either end.
+// encodeInto converts a whole frame to codes -- matching encode exactly, bin
+// for bin -- in a single pass with the scale constants hoisted out of the loop.
 //
-// A scale is derived once per full frame and then used by every delta that
-// follows, so the signal can outgrow it -- a carrier rising 10 dB over the next
-// few seconds would otherwise clamp at 255 and read as a flat ceiling. The
-// encoder checks this and re-keys instead, which is the only way the error stays
-// bounded rather than depending on how long ago the last keyframe was.
-func (s spectrumV2Scale) fits(db float32) bool {
-	f := float64(db)
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return true // handled by encode, and not a reason to re-key every frame
+// When trackMisfit is set it also reports whether any finite reading landed
+// outside the scale, judged on the value before rounding. A scale is derived
+// once per full frame and then used by every delta that follows, so the signal
+// can outgrow it -- a carrier rising 10 dB over the next few seconds would
+// otherwise clamp at 255 and read as a flat ceiling. The encoder checks this
+// and re-keys instead, which is the only way the error stays bounded rather
+// than depending on how long ago the last keyframe was. Non-finite readings
+// are excluded: encode already pins them, and they are not a reason to re-key
+// every frame.
+func (s spectrumV2Scale) encodeInto(codes []uint8, data []float32, trackMisfit bool) (misfit bool) {
+	ref := float64(s.refCentiDB)
+	step := float64(s.stepCentiDB)
+	for i, v := range data {
+		f := float64(v)
+		if math.IsNaN(f) {
+			codes[i] = 0
+			continue
+		}
+		c := (f*100 - ref) / step
+		if trackMisfit && !math.IsInf(f, 0) && (c < 0 || c > 255) {
+			misfit = true
+		}
+		r := math.Round(c)
+		if r < 0 {
+			codes[i] = 0
+		} else if r > 255 {
+			codes[i] = 255
+		} else {
+			codes[i] = uint8(r)
+		}
 	}
-	code := (f*100 - float64(s.refCentiDB)) / float64(s.stepCentiDB)
-	return code >= 0 && code <= 255
+	return misfit
 }
 
 // decode is the inverse, provided for tests and for any Go client.
@@ -227,6 +247,14 @@ type spectrumV2State struct {
 	// next one re-states everything rather than describing a change from
 	// something the client never received.
 	forceFull bool
+
+	// Scratch reused frame to frame, so the encoder allocates nothing but the
+	// packet itself -- which has to be fresh each time because the write queue
+	// retains it. codesBuf becomes previous on commit (a swap, not a copy);
+	// mask and values live only for the duration of one encode.
+	codesBuf  []uint8
+	maskBuf   []byte
+	valuesBuf []uint8
 }
 
 // spectrumV2Encode builds one frame.
@@ -248,9 +276,19 @@ func spectrumV2Encode(st *spectrumV2State, data []float32, timestampNanos uint64
 	if full {
 		scale = spectrumV2ChooseScale(data)
 	}
-	codes = make([]uint8, n)
-	for i, v := range data {
-		codes[i] = scale.encode(v)
+	if cap(st.codesBuf) < n {
+		st.codesBuf = make([]uint8, n)
+	}
+	codes = st.codesBuf[:n]
+
+	// One pass encodes every bin and notices at the same time whether any
+	// finite reading landed outside the scale. A scale that no longer covers
+	// the data has to be replaced, and only a full frame may carry a new one.
+	misfit := scale.encodeInto(codes, data, !full)
+	if !full && misfit {
+		full = true
+		scale = spectrumV2ChooseScale(data)
+		scale.encodeInto(codes, data, false)
 	}
 
 	// A delta only pays for itself while few bins have moved. The mask costs
@@ -259,32 +297,32 @@ func spectrumV2Encode(st *spectrumV2State, data []float32, timestampNanos uint64
 	// and below that a delta is always the smaller of the two. Version 1's
 	// equivalent break-even was a third, which is why its threshold mattered so
 	// much and this one barely does.
-	// A scale that no longer covers the data has to be replaced, and only a
-	// full frame may carry a new one.
-	if !full {
-		for _, v := range data {
-			if !scale.fits(v) {
-				full = true
-				break
-			}
-		}
-		if full {
-			scale = spectrumV2ChooseScale(data)
-			for i, v := range data {
-				codes[i] = scale.encode(v)
-			}
-		}
-	}
-
 	var mask []byte
 	var values []uint8
 	if !full {
 		maskLen := (n + 7) / 8
-		mask = make([]byte, maskLen)
-		values = make([]uint8, 0, n)
-		thresholdCodes := deltaThresholdDB * 100 / float64(scale.stepCentiDB)
+		if cap(st.maskBuf) < maskLen {
+			st.maskBuf = make([]byte, maskLen)
+		}
+		mask = st.maskBuf[:maskLen]
+		for i := range mask {
+			mask[i] = 0
+		}
+		if cap(st.valuesBuf) < n {
+			st.valuesBuf = make([]uint8, 0, n)
+		}
+		values = st.valuesBuf[:0]
+		// The codes are integers, so "moved by more than the threshold" is an
+		// integer comparison: for integer d, d > x ⇔ d ≥ ⌊x⌋+1. That keeps
+		// the per-bin work free of float conversions and math.Abs calls.
+		minDiff := int(math.Floor(deltaThresholdDB*100/float64(scale.stepCentiDB))) + 1
+		prev := st.previous
 		for i := 0; i < n; i++ {
-			if math.Abs(float64(codes[i])-float64(st.previous[i])) > thresholdCodes {
+			d := int(codes[i]) - int(prev[i])
+			if d < 0 {
+				d = -d
+			}
+			if d >= minDiff {
 				mask[i>>3] |= 1 << (uint(i) & 7)
 				values = append(values, codes[i])
 			} else {
@@ -292,15 +330,13 @@ func spectrumV2Encode(st *spectrumV2State, data []float32, timestampNanos uint64
 				// comparison next time is against what it holds rather than
 				// against the truth. That bounds the error at the threshold
 				// instead of letting it drift.
-				codes[i] = st.previous[i]
+				codes[i] = prev[i]
 			}
 		}
 		if maskLen+len(values) >= n {
 			full = true
 			scale = spectrumV2ChooseScale(data)
-			for i, v := range data {
-				codes[i] = scale.encode(v)
-			}
+			scale.encodeInto(codes, data, false)
 		}
 	}
 
@@ -337,11 +373,12 @@ func spectrumV2Encode(st *spectrumV2State, data []float32, timestampNanos uint64
 // spectrumV2Commit records what the client now holds. The caller invokes it
 // only after the frame has actually been queued for the socket; if the send was
 // dropped it calls spectrumV2Dropped instead.
+//
+// codes must be the slice the immediately preceding spectrumV2Encode returned:
+// it is the state's own scratch buffer, so committing is a swap with previous
+// rather than a kilobyte copy every frame.
 func spectrumV2Commit(st *spectrumV2State, codes []uint8, full bool) {
-	if len(st.previous) != len(codes) {
-		st.previous = make([]uint8, len(codes))
-	}
-	copy(st.previous, codes)
+	st.previous, st.codesBuf = codes, st.previous
 	st.forceFull = false
 	if full {
 		st.sinceFull = 0

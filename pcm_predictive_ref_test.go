@@ -1,5 +1,12 @@
 package main
 
+// FROZEN REFERENCE COPY of the version 4 predictive codec as it stood before
+// the CPU optimisation pass, produced by mechanically prefixing every
+// package-level identifier with "ref". It exists so the wire-identity test in
+// pcm_predictive_wire_test.go can drive the optimised codec and this one in
+// lockstep and require byte-identical output. Do not edit it to track
+// pcm_predictive.go -- being left behind is its entire purpose.
+
 import (
 	"encoding/binary"
 	"fmt"
@@ -69,7 +76,7 @@ import (
 // so self-description costs no extra bytes. A client reads the declaration and
 // obeys it; it never inspects the mode, the channel count or the sample rate.
 //
-// This keeps predictor choice a server-side policy question. ProfileForChannels
+// This keeps predictor choice a server-side policy question. refProfileForChannels
 // can be retuned -- for instance to give carrier-heavy bands a deeper cascade,
 // worth 1.89x -> 2.18x on a medium-wave capture -- without touching a single
 // deployed client. Inferring the codec from the channel count would instead
@@ -129,11 +136,11 @@ import (
 //	IQ 384 kHz     1590 kB/s -> 1116 kB/s  (30% less)
 
 const (
-	// predTapShift is the fixed-point scale of the filter taps: they are
+	// refPredTapShift is the fixed-point scale of the filter taps: they are
 	// integers in Q16, so 65536 represents a tap of 1.0.
-	predTapShift = 16
+	refPredTapShift = 16
 
-	// predTapLimit bounds |tap| to 2^24, a real-valued magnitude of 256.
+	// refPredTapLimit bounds |tap| to 2^24, a real-valued magnitude of 256.
 	//
 	// It serves two purposes. It caps the prediction sum far below int64
 	// overflow no matter what the input does -- an order-16 filter at the
@@ -146,22 +153,22 @@ const (
 	// never fires in practice: across two hours of live IQ the largest tap
 	// observed was 63 against the limit of 256. It must nonetheless be applied
 	// identically on both sides, since if it ever does fire the two must agree.
-	predTapLimit = 1 << 24
+	refPredTapLimit = 1 << 24
 
-	// predEscapeFlag marks a body carrying verbatim samples.
-	predEscapeFlag = 1 << 7
+	// refPredEscapeFlag marks a body carrying verbatim samples.
+	refPredEscapeFlag = 1 << 7
 
-	// predProfileMask extracts the profile id from the flags byte.
-	predProfileMask = 0x0f
+	// refPredProfileMask extracts the profile id from the flags byte.
+	refPredProfileMask = 0x0f
 )
 
-// PredictorProfile describes one predictor configuration.
+// refPredictorProfile describes one predictor configuration.
 //
 // A profile is data, not code. Both filter forms are the same sign-sign LMS
 // algorithm -- the real one is the complex one with the imaginary terms
 // dropped -- so a profile only chooses which form to instantiate and with what
 // stage shapes.
-type PredictorProfile struct {
+type refPredictorProfile struct {
 	// ID is what travels on the wire. Fixed for the life of a protocol
 	// version; see the note on profile stability above.
 	ID byte
@@ -184,16 +191,16 @@ type PredictorProfile struct {
 // Profile ids. These values are part of the version 4 wire format and must not
 // be reassigned.
 const (
-	// PredProfileIQ is a single complex filter of order 16.
+	// refPredProfileIQ is a single complex filter of order 16.
 	//
 	// Deeper cascades were measured and rejected for IQ: 8/8/4/2 gave 1.391x
 	// against this profile's 1.396x at roughly double the CPU, and 16/8/4/2
 	// gave 1.403x at more than double. Order 32 alone gives 1.438x but costs
 	// 75 us per packet against 37, which at the 1098 packets/second of a
 	// 384 kHz stream is the difference between 2.2% and 8.2% of a core.
-	PredProfileIQ byte = 0
+	refPredProfileIQ byte = 0
 
-	// PredProfileAudio is a four-stage real cascade, orders 8/8/4/2.
+	// refPredProfileAudio is a four-stage real cascade, orders 8/8/4/2.
 	//
 	// Depth matters far more here than filter length. On a USB capture the
 	// progression was 1.370x for a single order-16 filter, 1.580x for 32/8,
@@ -201,85 +208,81 @@ const (
 	// cheapest of the deep configurations. A 12 kHz channel carrying a 2.65 kHz
 	// passband is about 4x oversampled, leaving structure at several scales for
 	// successive stages to remove.
-	PredProfileAudio byte = 1
+	refPredProfileAudio byte = 1
 )
 
-// predProfiles is the registry the wire format refers to.
-var predProfiles = map[byte]PredictorProfile{
-	PredProfileIQ: {
-		ID: PredProfileIQ, Name: "iq-complex-o16", Complex: true,
+// refPredProfiles is the registry the wire format refers to.
+var refPredProfiles = map[byte]refPredictorProfile{
+	refPredProfileIQ: {
+		ID: refPredProfileIQ, Name: "iq-complex-o16", Complex: true,
 		Orders: []int{16}, Mus: []int64{16},
 	},
-	PredProfileAudio: {
-		ID: PredProfileAudio, Name: "audio-real-8/8/4/2", Complex: false,
+	refPredProfileAudio: {
+		ID: refPredProfileAudio, Name: "audio-real-8/8/4/2", Complex: false,
 		Orders: []int{8, 8, 4, 2}, Mus: []int64{16, 16, 32, 32},
 	},
 }
 
-// ProfileForChannels is the server's policy for which predictor to use.
+// refProfileForChannels is the server's policy for which predictor to use.
 //
 // This is the only place the decision is made, and nothing on the wire depends
 // on it: the packet declares the result, so this can be changed freely --
 // including per band or per mode -- without breaking any deployed client.
-func ProfileForChannels(channels int) byte {
+func refProfileForChannels(channels int) byte {
 	if channels >= 2 {
-		return PredProfileIQ
+		return refPredProfileIQ
 	}
-	return PredProfileAudio
+	return refPredProfileAudio
 }
 
-// PredictiveProfileID reports which profile a payload was coded with, so a
+// refPredictiveProfileID reports which profile a payload was coded with, so a
 // receiver can build or rebuild its codec before decoding. It does not
-// validate the id; NewPredictiveCodec does that.
-func PredictiveProfileID(payload []byte) (byte, bool) {
+// validate the id; refNewPredictiveCodec does that.
+func refPredictiveProfileID(payload []byte) (byte, bool) {
 	if len(payload) < 1 {
 		return 0, false
 	}
-	return payload[0] & predProfileMask, true
+	return payload[0] & refPredProfileMask, true
 }
 
 // ---------------------------------------------------------------------------
 // Adaptive filter stages
 // ---------------------------------------------------------------------------
 
-// predSign is a branchless sign, returning -1, 0 or +1.
-func predSign(v int64) int64 {
+// refPredSign is a branchless sign, returning -1, 0 or +1.
+func refPredSign(v int64) int64 {
 	return (v >> 63) | int64(uint64(-v)>>63)
 }
 
-// predRoundShift divides by 2^shift, rounding to nearest and away from zero on
+// refPredRoundShift divides by 2^shift, rounding to nearest and away from zero on
 // ties. A plain arithmetic shift would round negative values towards negative
 // infinity, biasing the predictor; more importantly the decoder must round
 // identically, so this is the single definition both directions use.
-//
-// Branchless on purpose: the sign of a prediction sum is close to a coin flip,
-// so a branch here mispredicts constantly -- it measured 8% of encode time.
-// The mask form computes round(|v|) and restores the sign, which is the same
-// value the branchy form produced for every input the filters can generate.
-func predRoundShift(v int64, shift uint) int64 {
-	m := v >> 63
-	r := (((v ^ m) - m) + 1<<(shift-1)) >> shift
-	return (r ^ m) - m
+func refPredRoundShift(v int64, shift uint) int64 {
+	if v >= 0 {
+		return (v + 1<<(shift-1)) >> shift
+	}
+	return -((-v + 1<<(shift-1)) >> shift)
 }
 
-// predClampTap applies predTapLimit. See the constant for why.
-func predClampTap(w int64) int64 {
-	if w > predTapLimit {
-		return predTapLimit
+// refPredClampTap applies refPredTapLimit. See the constant for why.
+func refPredClampTap(w int64) int64 {
+	if w > refPredTapLimit {
+		return refPredTapLimit
 	}
-	if w < -predTapLimit {
-		return -predTapLimit
+	if w < -refPredTapLimit {
+		return -refPredTapLimit
 	}
 	return w
 }
 
-// predHistoryLen sizes the sliding history window for a given filter order.
+// refPredHistoryLen sizes the sliding history window for a given filter order.
 //
 // History is kept linear rather than circular so the tap loops walk contiguous
 // memory with no index wrapping, which matters at 1098 packets a second. The
 // cost is periodically sliding the newest `order` entries back to the front;
 // making the window several times the order amortises that to negligible.
-func predHistoryLen(order int) int {
+func refPredHistoryLen(order int) int {
 	n := order * 8
 	if n < 64 {
 		n = 64
@@ -287,27 +290,19 @@ func predHistoryLen(order int) int {
 	return n
 }
 
-// complexStage is one adaptive complex filter.
+// refComplexStage is one adaptive complex filter.
 //
 // Sign-sign LMS is used rather than true NLMS: the update needs only the signs
 // of the error and of the history, so it costs two multiplies per tap with no
 // division and no normalisation, and it is exactly reproducible in integers.
 // Measured compression is within a fraction of a percent of a floating-point
 // NLMS of the same order.
-type complexStage struct {
+type refComplexStage struct {
 	order int
 	mu    int64
 
-	// Taps in Q16, stored oldest-first: wr[i] weighs the history sample at
-	// hr[idx-order+i], so predict and adapt walk taps and history forward
-	// together and the compiler can drop the per-element bounds checks. The
-	// pre-optimisation form indexed newest-first; the two are mirror images
-	// and every tap trajectory is identical under the reversal.
+	// Taps in Q16.
 	wr, wi []int64
-
-	// fast is true while this packet provably cannot drive any tap past
-	// predTapLimit, letting adapt skip the clamp; see beginPacket.
-	fast bool
 
 	// History of reconstructed samples, and their signs kept alongside so the
 	// update loop does not recompute a sign per tap per sample. Newest entry
@@ -317,9 +312,9 @@ type complexStage struct {
 	idx    int
 }
 
-func newComplexStage(order int, mu int64) *complexStage {
-	n := predHistoryLen(order)
-	return &complexStage{
+func refNewComplexStage(order int, mu int64) *refComplexStage {
+	n := refPredHistoryLen(order)
+	return &refComplexStage{
 		order: order, mu: mu,
 		wr: make([]int64, order), wi: make([]int64, order),
 		hr: make([]int64, n), hi: make([]int64, n),
@@ -329,96 +324,37 @@ func newComplexStage(order int, mu int64) *complexStage {
 }
 
 // predict returns the filter's estimate of the next sample.
-func (f *complexStage) predict() (int64, int64) {
-	wr := f.wr
-	lo := f.idx - len(wr)
-	hr := f.hr[lo:f.idx]
-	hr = hr[:len(wr)]
-	hi := f.hi[lo:f.idx]
-	hi = hi[:len(wr)]
-	wi := f.wi[:len(wr)]
+func (f *refComplexStage) predict() (int64, int64) {
 	var pr, pi int64
-	for j, w := range wr {
-		br, bi := hr[j], hi[j]
-		wiv := wi[j]
-		pr += w*br - wiv*bi
-		pi += w*bi + wiv*br
+	base := f.idx - 1
+	for j := 0; j < f.order; j++ {
+		br, bi := f.hr[base-j], f.hi[base-j]
+		pr += f.wr[j]*br - f.wi[j]*bi
+		pi += f.wr[j]*bi + f.wi[j]*br
 	}
-	return predRoundShift(pr, predTapShift), predRoundShift(pi, predTapShift)
+	return refPredRoundShift(pr, refPredTapShift), refPredRoundShift(pi, refPredTapShift)
 }
 
 // adapt nudges each tap by mu in the direction that would have reduced this
 // error. The conjugate of the history is used, as the complex LMS gradient
 // requires; here that is simply the negated sign of the imaginary part.
-//
-// A zero error is a genuine no-op -- both steps are zero and every tap is
-// already inside the clamp -- so it returns without touching the taps. That
-// costs nothing on live signal and turns the adapt pass over silence into a
-// return.
-func (f *complexStage) adapt(er, ei int64) {
-	if er == 0 && ei == 0 {
-		return
+func (f *refComplexStage) adapt(er, ei int64) {
+	mr := f.mu * refPredSign(er)
+	mi := f.mu * refPredSign(ei)
+	base := f.idx - 1
+	for j := 0; j < f.order; j++ {
+		hrs := f.sr[base-j]
+		his := -f.si[base-j]
+		f.wr[j] = refPredClampTap(f.wr[j] + mr*hrs - mi*his)
+		f.wi[j] = refPredClampTap(f.wi[j] + mr*his + mi*hrs)
 	}
-	mr := f.mu * predSign(er)
-	mi := f.mu * predSign(ei)
-	wr := f.wr
-	lo := f.idx - len(wr)
-	sr := f.sr[lo:f.idx]
-	sr = sr[:len(wr)]
-	si := f.si[lo:f.idx]
-	si = si[:len(wr)]
-	wi := f.wi[:len(wr)]
-	if f.fast {
-		for j := range wr {
-			hrs := sr[j]
-			his := -si[j]
-			wr[j] += mr*hrs - mi*his
-			wi[j] += mr*his + mi*hrs
-		}
-		return
-	}
-	for j := range wr {
-		hrs := sr[j]
-		his := -si[j]
-		wr[j] = predClampTap(wr[j] + mr*hrs - mi*his)
-		wi[j] = predClampTap(wi[j] + mr*his + mi*hrs)
-	}
-}
-
-// beginPacket decides, once per packet, whether adapt may skip the tap clamp.
-//
-// One complex update moves a tap by at most 2*mu (each of the two sign terms
-// contributes at most mu), so if every tap starts further than 2*mu*steps
-// from the limit, no update in this packet can reach it and the clamp is an
-// identity. Taps settle around 2^16 against a limit of 2^24, so this is the
-// path that always runs in practice; the clamped loop remains for the case
-// the scan cannot rule out, and produces identical values when it does run.
-func (f *complexStage) beginPacket(steps int) {
-	var maxAbs int64
-	for _, w := range f.wr {
-		if w < 0 {
-			w = -w
-		}
-		if w > maxAbs {
-			maxAbs = w
-		}
-	}
-	for _, w := range f.wi {
-		if w < 0 {
-			w = -w
-		}
-		if w > maxAbs {
-			maxAbs = w
-		}
-	}
-	f.fast = maxAbs+2*f.mu*int64(steps) <= predTapLimit
 }
 
 // push appends a reconstructed sample to the history, sliding the window when
 // it fills.
-func (f *complexStage) push(xr, xi int64) {
+func (f *refComplexStage) push(xr, xi int64) {
 	f.hr[f.idx], f.hi[f.idx] = xr, xi
-	f.sr[f.idx], f.si[f.idx] = predSign(xr), predSign(xi)
+	f.sr[f.idx], f.si[f.idx] = refPredSign(xr), refPredSign(xi)
 	f.idx++
 	if f.idx == len(f.hr) {
 		n := f.order
@@ -431,7 +367,7 @@ func (f *complexStage) push(xr, xi int64) {
 }
 
 // forward is the encoder direction: return the residual for a known sample.
-func (f *complexStage) forward(xr, xi int64) (int64, int64) {
+func (f *refComplexStage) forward(xr, xi int64) (int64, int64) {
 	pr, pi := f.predict()
 	er, ei := xr-pr, xi-pi
 	f.adapt(er, ei)
@@ -442,7 +378,7 @@ func (f *complexStage) forward(xr, xi int64) (int64, int64) {
 // inverse is the decoder direction: reconstruct a sample from its residual.
 // It performs the same prediction, adaptation and history update as forward,
 // which is what keeps the two sides identical.
-func (f *complexStage) inverse(er, ei int64) (int64, int64) {
+func (f *refComplexStage) inverse(er, ei int64) (int64, int64) {
 	pr, pi := f.predict()
 	xr, xi := er+pr, ei+pi
 	f.adapt(er, ei)
@@ -450,22 +386,19 @@ func (f *complexStage) inverse(er, ei int64) (int64, int64) {
 	return xr, xi
 }
 
-// realStage is complexStage with the imaginary terms removed, for mono audio.
-// Its taps are stored oldest-first and it carries the same per-packet fast
-// flag; see complexStage for both.
-type realStage struct {
+// refRealStage is refComplexStage with the imaginary terms removed, for mono audio.
+type refRealStage struct {
 	order int
 	mu    int64
 	w     []int64
 	h     []int64
 	s     []int64
 	idx   int
-	fast  bool
 }
 
-func newRealStage(order int, mu int64) *realStage {
-	n := predHistoryLen(order)
-	return &realStage{
+func refNewRealStage(order int, mu int64) *refRealStage {
+	n := refPredHistoryLen(order)
+	return &refRealStage{
 		order: order, mu: mu,
 		w:   make([]int64, order),
 		h:   make([]int64, n),
@@ -474,53 +407,25 @@ func newRealStage(order int, mu int64) *realStage {
 	}
 }
 
-func (f *realStage) predict() int64 {
-	w := f.w
-	h := f.h[f.idx-len(w) : f.idx]
-	h = h[:len(w)]
+func (f *refRealStage) predict() int64 {
 	var p int64
-	for j, wv := range w {
-		p += wv * h[j]
+	base := f.idx - 1
+	for j := 0; j < f.order; j++ {
+		p += f.w[j] * f.h[base-j]
 	}
-	return predRoundShift(p, predTapShift)
+	return refPredRoundShift(p, refPredTapShift)
 }
 
-func (f *realStage) adapt(e int64) {
-	if e == 0 {
-		return
-	}
-	m := f.mu * predSign(e)
-	w := f.w
-	s := f.s[f.idx-len(w) : f.idx]
-	s = s[:len(w)]
-	if f.fast {
-		for j, sv := range s {
-			w[j] += m * sv
-		}
-		return
-	}
-	for j, sv := range s {
-		w[j] = predClampTap(w[j] + m*sv)
+func (f *refRealStage) adapt(e int64) {
+	m := f.mu * refPredSign(e)
+	base := f.idx - 1
+	for j := 0; j < f.order; j++ {
+		f.w[j] = refPredClampTap(f.w[j] + m*f.s[base-j])
 	}
 }
 
-// beginPacket is the real form of complexStage.beginPacket: one update moves a
-// tap by at most mu, so the bound is mu*steps.
-func (f *realStage) beginPacket(steps int) {
-	var maxAbs int64
-	for _, w := range f.w {
-		if w < 0 {
-			w = -w
-		}
-		if w > maxAbs {
-			maxAbs = w
-		}
-	}
-	f.fast = maxAbs+f.mu*int64(steps) <= predTapLimit
-}
-
-func (f *realStage) push(x int64) {
-	f.h[f.idx], f.s[f.idx] = x, predSign(x)
+func (f *refRealStage) push(x int64) {
+	f.h[f.idx], f.s[f.idx] = x, refPredSign(x)
 	f.idx++
 	if f.idx == len(f.h) {
 		n := f.order
@@ -530,7 +435,7 @@ func (f *realStage) push(x int64) {
 	}
 }
 
-func (f *realStage) forward(x int64) int64 {
+func (f *refRealStage) forward(x int64) int64 {
 	p := f.predict()
 	e := x - p
 	f.adapt(e)
@@ -538,7 +443,7 @@ func (f *realStage) forward(x int64) int64 {
 	return e
 }
 
-func (f *realStage) inverse(e int64) int64 {
+func (f *refRealStage) inverse(e int64) int64 {
 	p := f.predict()
 	x := e + p
 	f.adapt(e)
@@ -562,20 +467,20 @@ func (f *realStage) inverse(e int64) int64 {
 // FLAC-style partitioning changed nothing. Unary accounts for only 16-24% of
 // the coded bits, so there is no escape-coding win hiding either.
 
-// predZigzag folds a signed value onto the non-negative integers so small
+// refPredZigzag folds a signed value onto the non-negative integers so small
 // magnitudes of either sign get short codes.
-func predZigzag(v int32) uint32 {
+func refPredZigzag(v int32) uint32 {
 	return uint32((v << 1) ^ (v >> 31))
 }
 
-// riceEncodeResiduals appends the Rice bitstream for res to dst and returns it.
+// refRiceEncodeResiduals appends the Rice bitstream for res to dst and returns it.
 //
 // dst must have capacity for the worst case, which the caller sizes; see
-// predScratchLen.
-func riceEncodeResiduals(res []int32, dst []byte) []byte {
+// refPredScratchLen.
+func refRiceEncodeResiduals(res []int32, dst []byte) []byte {
 	var sum uint64
 	for _, v := range res {
-		sum += uint64(predZigzag(v))
+		sum += uint64(refPredZigzag(v))
 	}
 	k := uint(0)
 	if m := sum / uint64(len(res)); m > 0 {
@@ -590,18 +495,27 @@ func riceEncodeResiduals(res []int32, dst []byte) []byte {
 	buf := dst[start+1 : cap(dst)]
 	buf = buf[:cap(buf)]
 
-	// The bit accumulator lives in locals rather than behind a closure: a
-	// closure containing a loop cannot inline, and the call per codeword was
-	// measurable. The accumulator is flushed in 32-bit units, so nbits is
-	// always below 32 at the top of each iteration and anything appended must
-	// be at most 32 bits wide for its shift to stay inside a uint64.
 	var acc uint64
 	var nbits uint
 	i := 0
 	mask := uint32(1)<<k - 1
 
+	// put writes w low bits of v. The accumulator is flushed in 32-bit units,
+	// so nbits is always below 32 on entry and v must be at most 32 bits wide
+	// for the shift to stay inside a uint64.
+	put := func(v uint64, w uint) {
+		acc |= v << nbits
+		nbits += w
+		for nbits >= 32 {
+			binary.LittleEndian.PutUint32(buf[i:], uint32(acc))
+			i += 4
+			acc >>= 32
+			nbits -= 32
+		}
+	}
+
 	for _, v := range res {
-		u := predZigzag(v)
+		u := refPredZigzag(v)
 		q := uint(u >> k)
 
 		// The whole codeword fits one write when it is short enough. The bound
@@ -611,35 +525,19 @@ func riceEncodeResiduals(res []int32, dst []byte) []byte {
 		// bug, and it only showed up on the large unpredicted samples of a
 		// high-dynamic-range band, where the unary run gets long.
 		if q+k+1 <= 24 {
-			acc |= ((uint64(u&mask)<<1)<<q | (uint64(1)<<q - 1)) << nbits
-			nbits += q + k + 1
-		} else {
-			// Long unary run: emit it in chunks, then the stop bit and
-			// remainder.
-			for r := q; r > 0; {
-				c := r
-				if c > 24 {
-					c = 24
-				}
-				acc |= (uint64(1)<<c - 1) << nbits
-				nbits += c
-				for nbits >= 32 {
-					binary.LittleEndian.PutUint32(buf[i:], uint32(acc))
-					i += 4
-					acc >>= 32
-					nbits -= 32
-				}
-				r -= c
+			put((uint64(u&mask)<<1)<<q|(uint64(1)<<q-1), q+k+1)
+			continue
+		}
+		// Long unary run: emit it in chunks, then the stop bit and remainder.
+		for r := q; r > 0; {
+			c := r
+			if c > 24 {
+				c = 24
 			}
-			acc |= (uint64(u&mask) << 1) << nbits
-			nbits += k + 1
+			put(uint64(1)<<c-1, c)
+			r -= c
 		}
-		for nbits >= 32 {
-			binary.LittleEndian.PutUint32(buf[i:], uint32(acc))
-			i += 4
-			acc >>= 32
-			nbits -= 32
-		}
+		put(uint64(u&mask)<<1, k+1)
 	}
 
 	for nbits > 0 {
@@ -654,9 +552,9 @@ func riceEncodeResiduals(res []int32, dst []byte) []byte {
 	return dst[:start+1+i]
 }
 
-// riceDecodeResiduals reverses riceEncodeResiduals into out, which must have
+// refRiceDecodeResiduals reverses refRiceEncodeResiduals into out, which must have
 // length count.
-func riceDecodeResiduals(src []byte, out []int32) error {
+func refRiceDecodeResiduals(src []byte, out []int32) error {
 	if len(src) < 1 {
 		return fmt.Errorf("rice: empty bitstream")
 	}
@@ -720,76 +618,63 @@ func riceDecodeResiduals(src []byte, out []int32) error {
 // Codec
 // ---------------------------------------------------------------------------
 
-// PredictiveCodec codes one direction of one stream.
+// refPredictiveCodec codes one direction of one stream.
 //
 // It is stateful across packets and NOT safe for concurrent use: create one per
 // connection per direction, call it from a single goroutine, and drop it when
 // the connection ends. See the stream lifetime note at the top of this file.
-type PredictiveCodec struct {
-	prof PredictorProfile
-	cx   []*complexStage
-	rl   []*realStage
+type refPredictiveCodec struct {
+	prof refPredictorProfile
+	cx   []*refComplexStage
+	rl   []*refRealStage
 
 	res []int32
 	buf []byte
 	hdr []byte // scratch for DecodeBody
 }
 
-// NewPredictiveCodec builds a codec for the given profile id, rejecting one it
+// refNewPredictiveCodec builds a codec for the given profile id, rejecting one it
 // does not implement.
 //
 // The error is deliberate. Falling back to a default profile would decode a
 // stream with the wrong predictor and return plausible-looking noise rather
 // than failing, which is the worst possible behaviour for a codec whose entire
 // promise is bit-exactness.
-func NewPredictiveCodec(profileID byte) (*PredictiveCodec, error) {
-	p, ok := predProfiles[profileID]
+func refNewPredictiveCodec(profileID byte) (*refPredictiveCodec, error) {
+	p, ok := refPredProfiles[profileID]
 	if !ok {
 		return nil, fmt.Errorf("predictive codec: unknown profile id %d", profileID)
 	}
-	c := &PredictiveCodec{prof: p}
+	c := &refPredictiveCodec{prof: p}
 	for i := range p.Orders {
 		if p.Complex {
-			c.cx = append(c.cx, newComplexStage(p.Orders[i], p.Mus[i]))
+			c.cx = append(c.cx, refNewComplexStage(p.Orders[i], p.Mus[i]))
 		} else {
-			c.rl = append(c.rl, newRealStage(p.Orders[i], p.Mus[i]))
+			c.rl = append(c.rl, refNewRealStage(p.Orders[i], p.Mus[i]))
 		}
 	}
 	return c, nil
 }
 
 // Profile reports the configuration in use, for logging.
-func (c *PredictiveCodec) Profile() PredictorProfile { return c.prof }
+func (c *refPredictiveCodec) Profile() refPredictorProfile { return c.prof }
 
 // samplesPerStep is 2 for interleaved I/Q, 1 for mono.
-func (c *PredictiveCodec) samplesPerStep() int {
+func (c *refPredictiveCodec) samplesPerStep() int {
 	if c.prof.Complex {
 		return 2
 	}
 	return 1
 }
 
-// predScratchLen sizes the working buffer. The escape body is 2 bytes per
+// refPredScratchLen sizes the working buffer. The escape body is 2 bytes per
 // sample; the coded body cannot exceed that by more than the flag and k bytes
 // because the escape is taken when it would, but the encoder writes the coded
 // form first and so must have room for a pathological bitstream.
-func predScratchLen(n int) int { return n*5 + 64 }
-
-// beginPacket lets every stage decide once, from where its taps stand,
-// whether this packet's adapt calls may skip the clamp. steps is how many
-// times each stage will adapt: sample count for a real cascade, frame count
-// for a complex one.
-func (c *PredictiveCodec) beginPacket(steps int) {
-	for _, s := range c.cx {
-		s.beginPacket(steps)
-	}
-	for _, s := range c.rl {
-		s.beginPacket(steps)
-	}
-}
+func refPredScratchLen(n int) int { return n*5 + 64 }
 
 // forward runs the cascade in the encoder direction over one sample position.
-func (c *PredictiveCodec) forward(a, b int64) (int64, int64) {
+func (c *refPredictiveCodec) forward(a, b int64) (int64, int64) {
 	if c.prof.Complex {
 		for _, s := range c.cx {
 			a, b = s.forward(a, b)
@@ -810,17 +695,17 @@ func (c *PredictiveCodec) forward(a, b int64) (int64, int64) {
 // v4 packet from an Opus frame. Repeating them in the body would waste a byte
 // on every packet. Encode wraps this for standalone use, where a payload that
 // describes itself is more convenient than one that does not.
-func (c *PredictiveCodec) EncodeBody(samples []int16) (body []byte, escape bool, err error) {
+func (c *refPredictiveCodec) EncodeBody(samples []int16) (body []byte, escape bool, err error) {
 	full, err := c.Encode(samples)
 	if err != nil {
 		return nil, false, err
 	}
-	return full[1:], full[0]&predEscapeFlag != 0, nil
+	return full[1:], full[0]&refPredEscapeFlag != 0, nil
 }
 
 // DecodeBody reverses EncodeBody. The caller supplies the escape flag from
 // wherever it was carried.
-func (c *PredictiveCodec) DecodeBody(body []byte, count int, escape bool) ([]int16, error) {
+func (c *refPredictiveCodec) DecodeBody(body []byte, count int, escape bool) ([]int16, error) {
 	// Decode expects the flags byte in front. Rebuilding it here keeps one
 	// decode path rather than two that could drift apart.
 	if cap(c.hdr) < 1+len(body) {
@@ -829,7 +714,7 @@ func (c *PredictiveCodec) DecodeBody(body []byte, count int, escape bool) ([]int
 	c.hdr = c.hdr[:1+len(body)]
 	c.hdr[0] = c.prof.ID
 	if escape {
-		c.hdr[0] |= predEscapeFlag
+		c.hdr[0] |= refPredEscapeFlag
 	}
 	copy(c.hdr[1:], body)
 	return c.Decode(c.hdr, count)
@@ -840,7 +725,7 @@ func (c *PredictiveCodec) DecodeBody(body []byte, count int, escape bool) ([]int
 // For a complex profile, samples are interleaved I/Q and len(samples) must be
 // even. The returned slice aliases an internal buffer that the next Encode
 // call reuses, so copy it if it must outlive that.
-func (c *PredictiveCodec) Encode(samples []int16) ([]byte, error) {
+func (c *refPredictiveCodec) Encode(samples []int16) ([]byte, error) {
 	n := len(samples)
 	step := c.samplesPerStep()
 	if n == 0 {
@@ -857,12 +742,11 @@ func (c *PredictiveCodec) Encode(samples []int16) ([]byte, error) {
 	if cap(c.res) < n {
 		c.res = make([]int32, n)
 	}
-	if cap(c.buf) < predScratchLen(n) {
-		c.buf = make([]byte, predScratchLen(n))
+	if cap(c.buf) < refPredScratchLen(n) {
+		c.buf = make([]byte, refPredScratchLen(n))
 	}
 	c.res = c.res[:n]
 
-	c.beginPacket(n / step)
 	for i := 0; i < n; i += step {
 		a := int64(int32(samples[i]))
 		var b int64
@@ -877,7 +761,7 @@ func (c *PredictiveCodec) Encode(samples []int16) ([]byte, error) {
 	}
 
 	out := c.buf[:1]
-	out = riceEncodeResiduals(c.res, out)
+	out = refRiceEncodeResiduals(c.res, out)
 
 	// If prediction and coding did not pay for themselves, send the samples
 	// as they are. The filters have already adapted over this packet above,
@@ -885,7 +769,7 @@ func (c *PredictiveCodec) Encode(samples []int16) ([]byte, error) {
 	// step through an escape.
 	if len(out)-1 >= n*2 {
 		out = c.buf[:1+n*2]
-		out[0] = predEscapeFlag | c.prof.ID
+		out[0] = refPredEscapeFlag | c.prof.ID
 		for i, v := range samples {
 			binary.LittleEndian.PutUint16(out[1+2*i:], uint16(v))
 		}
@@ -895,39 +779,13 @@ func (c *PredictiveCodec) Encode(samples []int16) ([]byte, error) {
 	return out, nil
 }
 
-// AdvanceSilence advances the filters over count zero-valued samples without
-// producing a bitstream.
-//
-// The silent path in pcm_v4_stream.go needs the predictor to move exactly as
-// if it had coded the zeros -- the decoder advances its own filters over the
-// same zeros, and the two must agree sample for sample -- but it discards the
-// body, so Rice coding the residuals was pure waste. A squelched session sends
-// silent packets indefinitely, which made that waste permanent. Only the
-// filter state changes here, and identically to Encode over a zero buffer:
-// Rice coding never touches the filters and the escape decision reads only
-// the coded length.
-func (c *PredictiveCodec) AdvanceSilence(count int) error {
-	step := c.samplesPerStep()
-	if count <= 0 {
-		return fmt.Errorf("predictive codec: empty packet")
-	}
-	if count%step != 0 {
-		return fmt.Errorf("predictive codec: %d samples is not a whole number of %d-channel frames", count, step)
-	}
-	c.beginPacket(count / step)
-	for i := 0; i < count; i += step {
-		c.forward(0, 0)
-	}
-	return nil
-}
-
 // Decode reconstructs the samples of one packet body.
 //
 // count is the number of int16 samples the packet carries, which the caller
 // derives from the packet length and header. The payload must have been coded
-// with this codec's profile; check PredictiveProfileID first and rebuild if it
+// with this codec's profile; check refPredictiveProfileID first and rebuild if it
 // has changed.
-func (c *PredictiveCodec) Decode(payload []byte, count int) ([]int16, error) {
+func (c *refPredictiveCodec) Decode(payload []byte, count int) ([]int16, error) {
 	step := c.samplesPerStep()
 	if len(payload) < 1 {
 		return nil, fmt.Errorf("predictive codec: empty payload")
@@ -935,13 +793,13 @@ func (c *PredictiveCodec) Decode(payload []byte, count int) ([]int16, error) {
 	if count <= 0 || count%step != 0 {
 		return nil, fmt.Errorf("predictive codec: bad sample count %d for %d-channel profile", count, step)
 	}
-	if got := payload[0] & predProfileMask; got != c.prof.ID {
+	if got := payload[0] & refPredProfileMask; got != c.prof.ID {
 		return nil, fmt.Errorf("predictive codec: payload declares profile %d, codec is %d", got, c.prof.ID)
 	}
 
 	out := make([]int16, count)
 
-	if payload[0]&predEscapeFlag != 0 {
+	if payload[0]&refPredEscapeFlag != 0 {
 		if len(payload) < 1+count*2 {
 			return nil, fmt.Errorf("predictive codec: escape payload truncated (%d bytes for %d samples)", len(payload), count)
 		}
@@ -950,7 +808,6 @@ func (c *PredictiveCodec) Decode(payload []byte, count int) ([]int16, error) {
 		}
 		// Advance the filters over these samples exactly as the encoder did,
 		// discarding the residuals it produced.
-		c.beginPacket(count / step)
 		for i := 0; i < count; i += step {
 			a := int64(int32(out[i]))
 			var b int64
@@ -966,11 +823,10 @@ func (c *PredictiveCodec) Decode(payload []byte, count int) ([]int16, error) {
 		c.res = make([]int32, count)
 	}
 	c.res = c.res[:count]
-	if err := riceDecodeResiduals(payload[1:], c.res); err != nil {
+	if err := refRiceDecodeResiduals(payload[1:], c.res); err != nil {
 		return nil, err
 	}
 
-	c.beginPacket(count / step)
 	if c.prof.Complex {
 		for i := 0; i < count; i += 2 {
 			a, b := int64(c.res[i]), int64(c.res[i+1])

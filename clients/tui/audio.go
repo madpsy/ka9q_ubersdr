@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -16,22 +15,14 @@ import (
 	"github.com/pion/opus"
 )
 
-// Audio packets are a fixed header followed by the encoded payload:
+// Audio packets are a variable-length header followed by the Opus payload; see
+// audioheader.go for the layout and audioHeaderDecoder for the reader.
 //
-//	[0:8]   uint64 LE  capture timestamp, nanoseconds
-//	[8:12]  uint32 LE  sample rate of the source channel
-//	[12]    uint8      channel count
-//	[13:17] float32 LE baseband power, dBFS
-//	[17:21] float32 LE noise power over the demodulator passband, dBFS
-//	[21:]              Opus packet
-//
-// The noise field is what protocol version 3 changed. Version 2 sent radiod's
-// noise density N0 in dBFS/Hz, so power minus noise came out as S/N0 in dB·Hz —
-// about 34 dB above the true SNR on a 2.65 kHz filter, and a different amount
-// on every other filter width, which is why a squelch set on SSB gated wrongly
-// on CW. Version 3 sends the noise over the same passband as the signal, so the
-// subtraction is an SNR in dB. The layout is otherwise identical.
-const audioHeaderLen = 21
+// The noise field is a power over the demodulator passband, so power minus
+// noise is an SNR in dB. Protocol version 2 sent radiod's noise density N0 in
+// dBFS/Hz instead, which came out as S/N0 in dB·Hz — about 34 dB above the true
+// SNR on a 2.65 kHz filter, and a different amount on every other filter width,
+// which is why a squelch set on SSB gated wrongly on CW.
 
 // opusOutputRate is what the decoder produces. Opus always reconstructs at
 // 48 kHz regardless of the rate the encoder was fed, so the source rate in the
@@ -185,7 +176,7 @@ func (a *AudioClient) session(ctx context.Context) error {
 	q := url.Values{}
 	q.Set("user_session_id", a.sessionID)
 	q.Set("format", "opus")
-	q.Set("version", "3")
+	q.Set("version", fmt.Sprintf("%d", audioProtocolVersion))
 	if a.password != "" {
 		q.Set("password", a.password)
 	}
@@ -243,10 +234,12 @@ func (a *AudioClient) session(ctx context.Context) error {
 		conn.Close()
 	}()
 
-	// The decoder carries inter-frame state, so it must live for the whole
-	// session and be discarded when the socket drops.
+	// Both readers carry inter-frame state — the codec its own, the header what
+	// the server has stopped repeating — so they live for the whole session and
+	// are discarded when the socket drops.
 	decoder := opus.NewDecoder()
 	dec := &decoder
+	hdr := newAudioHeaderDecoder()
 	pcm := make([]int16, opusOutputRate) // one second, far above any frame
 
 	for {
@@ -258,16 +251,37 @@ func (a *AudioClient) session(ctx context.Context) error {
 
 		switch msgType {
 		case websocket.BinaryMessage:
-			a.handleAudio(data, dec, pcm)
+			if err := a.handleAudio(data, hdr, dec, pcm); err != nil {
+				return err
+			}
 		case websocket.TextMessage:
 			a.handleText(data)
 		}
 	}
 }
 
-func (a *AudioClient) handleAudio(data []byte, dec *opus.Decoder, pcm []int16) {
-	if len(data) <= audioHeaderLen {
-		return
+// handleAudio decodes one binary frame. It returns an error only for a stream
+// this client cannot read at all, which drops the socket and reconnects — as
+// distinct from a frame it merely failed on, which is dropped in place.
+func (a *AudioClient) handleAudio(data []byte, hdr *audioHeaderDecoder, dec *opus.Decoder, pcm []int16) error {
+	// The server picks the format per packet and can send lossless PCM to a
+	// session that asked for Opus: on IQ modes, which this client does not
+	// offer, and on a server built without libopus, which it can do nothing
+	// about. Naming the case beats feeding RF samples to an Opus decoder and
+	// reporting a decode error 50 times a second.
+	if magic, lossless := frameIsLossless(data); lossless {
+		if magic == zstdMagic {
+			return fmt.Errorf("server does not support audio protocol version %d (needs UberSDR 0.1.63 or later)", audioProtocolVersion)
+		}
+		return fmt.Errorf("server is sending lossless PCM, which this client cannot play (its Opus encoder is unavailable)")
+	}
+
+	// The header is framing rather than payload: one that will not parse means
+	// the frames are not the shape this client reads, which reconnecting at
+	// least reports rather than silently dropping every frame.
+	h, off, err := hdr.decode(data)
+	if err != nil {
+		return err
 	}
 
 	// The header describes the radio channel, not the PCM we get back. The
@@ -279,33 +293,30 @@ func (a *AudioClient) handleAudio(data []byte, dec *opus.Decoder, pcm []int16) {
 	// The channel count does matter: a stereo stream decodes to interleaved
 	// pairs, and treating that as mono would halve the duration and play back
 	// at double speed.
-	srcRate := binary.LittleEndian.Uint32(data[8:12])
-	channels := int(data[12])
+	channels := h.Channels
 	if channels < 1 {
 		channels = 1
 	}
 
 	// Both halves of the signal report: the meter shows either the absolute
 	// level or the difference between them.
-	power := math.Float32frombits(binary.LittleEndian.Uint32(data[13:17]))
-	noise := math.Float32frombits(binary.LittleEndian.Uint32(data[17:21]))
-	if isReportedLevel(power) {
+	if isReportedLevel(h.Power) {
 		select {
-		case a.Level <- Signal{Power: power, Noise: noise, SourceRate: int(srcRate), Channels: channels}:
+		case a.Level <- Signal{Power: h.Power, Noise: h.Noise, SourceRate: h.SourceRate, Channels: channels}:
 		default:
 		}
 	}
 
-	n, err := dec.DecodeToInt16(data[audioHeaderLen:], pcm)
+	n, err := dec.DecodeToInt16(data[off:], pcm)
 	if err != nil {
 		// A single bad frame is not fatal — Opus is resilient and the next
 		// frame usually recovers, so drop this one rather than tearing the
 		// stream down.
 		a.report("audio decode: " + err.Error())
-		return
+		return nil
 	}
 	if n <= 0 {
-		return
+		return nil
 	}
 
 	// n counts samples per channel; the decoder writes n*channels values.
@@ -361,6 +372,7 @@ func (a *AudioClient) handleAudio(data []byte, dec *opus.Decoder, pcm []int16) {
 		default:
 		}
 	}
+	return nil
 }
 
 func (a *AudioClient) handleText(data []byte) {

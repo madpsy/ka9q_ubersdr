@@ -42,8 +42,9 @@ Audio is the part where that took work, since the obvious libraries all need C:
   takes the PulseAudio path instead.
 
 If the pure-Go Opus decoder ever meets a frame it cannot handle, the frame is
-dropped rather than tearing down the stream; the server also offers `pcm-zstd`,
-which needs no codec at all, as a fallback worth adding if that ever bites.
+dropped rather than tearing down the stream. The server also offers a lossless
+format, which needs no codec — though from protocol version 4 it needs a
+predictive decoder instead, so it is no longer the free fallback it was.
 
 The terminal layer is [tcell](https://github.com/gdamore/tcell), a from-scratch
 Go implementation of what ncurses does (including terminfo handling), so there
@@ -341,8 +342,9 @@ to — this is a receiver. `m` mutes and unmutes. If you only want the spectrum,
 a demodulator.
 
 The audio stream is a **separate WebSocket sharing the spectrum session's
-UUID**, so the server counts you as one user rather than two. It negotiates
-Opus, the most compact format on offer, and the decoded passband is shaded
+UUID**, so the server counts you as one user rather than two. It asks for
+`format=opus&version=4`, the most compact combination on offer, and the decoded
+passband is shaded
 across both the spectrum and the waterfall so it is obvious what is being
 demodulated — the shading is offset to one side of the marker for sideband
 modes, and dims when muted.
@@ -365,6 +367,16 @@ The packet header carries the channel's sample rate and channel count. Neither
 affects the playback rate — Opus always reconstructs at 48 kHz — but the channel
 count decides whether a frame is folded to mono, and both are shown in the `d`
 panel.
+
+Protocol version 4 is the only one this client reads, and its header is where
+that shows: a flags byte and then only the fields that changed since the last
+frame, typically about four bytes against the 21 versions 1–3 spent on every
+one. At 50 frames a second that is 0.84 kB/s, between 12% and 19% of an Opus
+stream, the frames being small enough that the fixed header was a sixth of one.
+Being variable-length, where the Opus packet starts has to be parsed rather than
+assumed. A receiver older than 0.1.63 cannot serve version 4 — it clamps the
+request to 1–3 and answers with version 1 instead of refusing — and the client
+says so rather than dropping every frame in silence.
 
 ### Two outputs
 
@@ -786,7 +798,10 @@ go test ./...
 
 The suite covers the binary protocol decoders, layout arithmetic across a wide
 range of terminal sizes, the picker's key handling, and renders every view mode
-to a simulated screen to catch panics.
+to a simulated screen to catch panics. `TestAudioHeaderMatchesServer` reads
+frames in `testdata/` that the **server's** encoder produced and checks the
+parse field by field — the header carries forward what the server stopped
+repeating, so an error there is silent rather than loud.
 
 These reach the network and are skipped unless enabled:
 

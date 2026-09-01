@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/tls"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -30,7 +29,7 @@ func TestServerEncoderRebuild(t *testing.T) {
 	q := url.Values{}
 	q.Set("user_session_id", sp.sessionID)
 	q.Set("format", "opus")
-	q.Set("version", "3")
+	q.Set("version", fmt.Sprintf("%d", audioProtocolVersion))
 	q.Set("frequency", "7100000")
 	q.Set("mode", "lsb")
 	scheme := "ws"
@@ -46,6 +45,7 @@ func TestServerEncoderRebuild(t *testing.T) {
 	defer conn.Close()
 
 	dec := opus.NewDecoder()
+	hdr := newAudioHeaderDecoder()
 	out := make([]int16, 48000)
 
 	// Frame durations by Opus config, RFC 6716 Table 2.
@@ -58,17 +58,25 @@ func TestServerEncoderRebuild(t *testing.T) {
 		start := time.Now()
 		pkts, samples := 0, 0
 		tocs := map[byte]int{}
-		var srcRate uint32
+		var srcRate int
 		for time.Since(start) < time.Duration(seconds*float64(time.Second)) {
 			conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 			mt, data, err := conn.ReadMessage()
-			if err != nil || mt != websocket.BinaryMessage || len(data) <= 21 {
+			if err != nil || mt != websocket.BinaryMessage {
 				continue
 			}
+			// Version 4 headers are variable-length, so where the Opus packet
+			// begins is parsed rather than assumed — which is also what makes
+			// the retune under test visible, since the rate it changes is one
+			// of the fields the header stops repeating until it moves.
+			h, off, err := hdr.decode(data)
+			if err != nil {
+				t.Fatalf("%s: %v", label, err)
+			}
 			pkts++
-			srcRate = binary.LittleEndian.Uint32(data[8:12])
-			tocs[data[21]]++
-			if n, err := dec.DecodeToInt16(data[21:], out); err == nil {
+			srcRate = h.SourceRate
+			tocs[data[off]]++
+			if n, err := dec.DecodeToInt16(data[off:], out); err == nil {
 				samples += n
 			}
 		}

@@ -117,6 +117,12 @@ export function scaleOf(body) {
     return { ref: ((body[0] | (body[1] << 8)) << 16) >> 16, step };
 }
 
+// Popcount of a byte. The delta validation has to count every set bit in the
+// mask before touching a single bin, and doing that a bit at a time cost more
+// than the apply itself. One table lookup per mask byte instead.
+const POPCOUNT = new Uint8Array(256);
+for (let i = 0; i < 256; i++) POPCOUNT[i] = POPCOUNT[i >> 1] + (i & 1);
+
 // Folds a frame's body into a Uint8Array of codes.
 //
 // Returns the array to hold — a new one when the width changed — or null when
@@ -126,6 +132,26 @@ export function scaleOf(body) {
 // callers want: they redraw from one buffer.
 export function applyBody(codes, frame, binCount) {
     if (!frame) return codes;
+    const r = applyBodyChanges(codes, frame, binCount, null);
+    return r ? r.codes : null;
+}
+
+// applyBody, reporting WHICH bins a version 2 delta wrote.
+//
+// The waterfall keeps a dB buffer derived from the codes, and a delta that
+// moved a dozen bins used to cost a full reconversion of all of them because
+// nothing said which dozen. `changed` is the caller's Uint32Array (at least
+// binCount long, reused frame to frame); the applied raw-order indices land in
+// its first `changed` entries of the result.
+//
+// The result's `changed` count is -1 when every bin must be treated as
+// changed: any full frame, and also a version 1 delta — its triples can repeat
+// an index and point past the end, so a faithful count is not worth the
+// bookkeeping for a format the v2 socket never sends.
+//
+// Returns { codes, changed } or null, with exactly applyBody's nulls: the two
+// are one function, and applyBody is the shape for callers that do not track.
+export function applyBodyChanges(codes, frame, binCount, changed) {
     const { flags, body } = frame;
 
     if (flags === FRAME_V2_FULL) {
@@ -133,7 +159,7 @@ export function applyBody(codes, frame, binCount) {
         if (!scaleOf(body)) return null;
         const next = (codes && codes.length === binCount) ? codes : new Uint8Array(binCount);
         next.set(body.subarray(3));
-        return next;
+        return { codes: next, changed: -1 };
     }
 
     if (flags === FRAME_V2_DELTA) {
@@ -144,24 +170,54 @@ export function applyBody(codes, frame, binCount) {
         // One value byte per set bit, so the count is implied. A length that
         // disagrees with the mask is malformed, and applying it part way would
         // leave the codes half-updated and wrong until the next keyframe.
+        //
+        // Stray bits in the trailing byte — past binCount — are counted here,
+        // exactly as the value bytes a server that set them would have sent,
+        // and then never applied. That is what the old bin-at-a-time walk did
+        // by construction, and a well-formed frame has none.
         let expected = 0;
-        for (let b = 0; b < maskLen; b++) {
-            let m = body[b];
-            while (m) { expected += m & 1; m >>= 1; }
-        }
+        for (let b = 0; b < maskLen; b++) expected += POPCOUNT[body[b]];
         if (body.length !== maskLen + expected) return null;
+
+        // Byte-wise, because the mask of a quiet delta is mostly zero bytes
+        // and each one skipped is eight bins never looked at. Within a byte,
+        // peel set bits low to high: `m & -m` isolates the lowest, clz32 names
+        // it, `m &= m - 1` clears it — the same low-to-high order the value
+        // bytes were packed in.
         let vi = maskLen;
-        for (let i = 0; i < n; i++) {
-            if (body[i >> 3] & (1 << (i & 7))) codes[i] = body[vi++];
+        let ci = 0;
+        const whole = n >> 3;
+        for (let b = 0; b < whole; b++) {
+            let m = body[b];
+            if (m === 0) continue;
+            const base = b << 3;
+            do {
+                const i = base + (31 - Math.clz32(m & -m));
+                codes[i] = body[vi++];
+                if (changed) changed[ci] = i;
+                ci++;
+                m &= m - 1;
+            } while (m);
         }
-        return codes;
+        if (whole < maskLen) {
+            let m = body[whole] & ((1 << (n & 7)) - 1);
+            const base = whole << 3;
+            while (m) {
+                const i = base + (31 - Math.clz32(m & -m));
+                codes[i] = body[vi++];
+                if (changed) changed[ci] = i;
+                ci++;
+                m &= m - 1;
+            }
+        }
+        return { codes, changed: ci };
     }
 
     if (flags === FRAME_FULL) {
         if (body.length !== binCount) return null;
         const next = (codes && codes.length === binCount) ? codes : new Uint8Array(binCount);
         next.set(body);
-        return next;
+        return { codes: next, changed: -1 };
     }
 
     if (flags === FRAME_DELTA) {
@@ -174,7 +230,7 @@ export function applyBody(codes, frame, binCount) {
             const idx = body[off] | (body[off + 1] << 8);
             if (idx < codes.length) codes[idx] = body[off + 2];
         }
-        return codes;
+        return { codes, changed: -1 };
     }
 
     return null;

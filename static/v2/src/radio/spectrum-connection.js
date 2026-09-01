@@ -23,13 +23,25 @@ import { connectionCheck, frameSize, getBypassPassword, getSessionId, wsBase } f
 import { clampCenter } from '../lib/zoom.js';
 import { failureKind } from '../lib/connectFailure.js';
 import {
-    FRAME_V2_FULL, SPEC_PROTOCOL_VERSION, SPEC_V2, applyBody, isFullFrame, parseFrame, scaleOf,
+    FRAME_V2_FULL, SPEC_PROTOCOL_VERSION, SPEC_V2, applyBodyChanges, isFullFrame, parseFrame,
+    scaleOf,
 } from '../lib/specFrame.js';
 import {
     HANDSHAKE_TIMEOUT_MS, abandon, checkSocket, reviveOnWake,
 } from './socket-health.js';
 
 const HEADER_BYTES = 22;
+
+// A little-endian u64 header field as a plain number. Number(getBigUint64())
+// gives the identical double for every 64-bit value — both are the correctly
+// rounded sum of the same integer — but it mints a BigInt per read, twice per
+// frame, on the hottest path this socket has. The multiplies stay exact: each
+// term is an integer below 2^32 scaled by a power of two.
+function readU64(u8, off) {
+    const lo = u8[off] + u8[off + 1] * 0x100 + u8[off + 2] * 0x10000 + u8[off + 3] * 0x1000000;
+    const hi = u8[off + 4] + u8[off + 5] * 0x100 + u8[off + 6] * 0x10000 + u8[off + 7] * 0x1000000;
+    return lo + hi * 0x100000000;
+}
 
 // Narrowest span (Hz) the normal zoom controls will reach. It is a *span*, not
 // a Hz/bin value, so zoom depth does not change with spectrum.bin_count.
@@ -117,7 +129,7 @@ export class SpectrumConnection extends Emitter {
         this.rateDivisor = 1;
 
         // Delta-decode accumulators, in raw radiod bin order.
-        this._float = null;   // Float32Array
+        this._float = null;   // Float32Array — version 1 only
         this._u8 = null;      // Uint8Array
         // Version 2 carries its quantisation scale on each full frame, and the
         // deltas that follow refer to it. The sequence number is how a dropped
@@ -126,6 +138,20 @@ export class SpectrumConnection extends Emitter {
         this._v2Seq = null;
         // Reusable output buffer holding the frequency-ordered bins.
         this._out = null;
+        // The scale as a 256-entry code→dB table, and the scale it was built
+        // for. Rebuilt only when a full frame changes ref or step, which in
+        // practice is almost never — so the per-bin conversion is a lookup
+        // rather than arithmetic, and a delta need only convert the bins it
+        // moved. See _onSpectrumV2.
+        this._lut = null;         // Float32Array(256)
+        this._lutScale = null;
+        // Raw-order indices the last delta wrote, from applyBodyChanges.
+        // Reused frame to frame; only the first `changed` entries mean anything.
+        this._changed = null;     // Uint32Array
+        // Whether _out currently equals _u8 pushed through _lut. Only while it
+        // does may a delta update _out at just the bins it changed; anything
+        // that writes _out another way (the version 1 path) clears it.
+        this._outLive = false;
     }
 
     get connected() {
@@ -489,7 +515,10 @@ export class SpectrumConnection extends Emitter {
         this.emit('state', state);
     }
 
-    async _onMessage(ev) {
+    // Deliberately not async: the spectrum frames are the hot path, and an
+    // async handler charges every one of them a Promise for the sake of the
+    // occasional gzipped control frame. That branch awaits in a helper instead.
+    _onMessage(ev) {
         // Any frame at all, pong included: what this timestamp answers is
         // whether the server is still there, not whether it said anything
         // interesting.
@@ -501,13 +530,21 @@ export class SpectrumConnection extends Emitter {
         }
         const buf = ev.data;
         if (buf.byteLength >= 4) {
-            const head = new Uint8Array(buf, 0, 4);
-            if (head[0] === 0x53 && head[1] === 0x50 && head[2] === 0x45 && head[3] === 0x43) {
-                this._onSpectrum(new DataView(buf));
+            // One view over the whole frame, shared by the magic check and the
+            // decoder — this arrives tens of times a second, and three or four
+            // little views per frame was most of what the decode allocated.
+            const u8 = new Uint8Array(buf);
+            if (u8[0] === 0x53 && u8[1] === 0x50 && u8[2] === 0x45 && u8[3] === 0x43) {
+                if (u8.length >= 5 && u8[4] === SPEC_V2) this._onSpectrumV2(u8);
+                else this._onSpectrum(new DataView(buf));
                 return;
             }
         }
-        // Control messages travel gzipped as binary frames.
+        this._onCompressedControl(buf);
+    }
+
+    // Control messages travel gzipped as binary frames.
+    async _onCompressedControl(buf) {
         try {
             const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
             const text = await new Response(stream).text();
@@ -566,19 +603,59 @@ export class SpectrumConnection extends Emitter {
             : (this._u8 ? this._u8.length : 0);
         if (binCount <= 0) return;
 
-        const next = applyBody(this._u8, frame, binCount);
-        if (!next) return;
-        this._u8 = next;
+        if (!this._changed || this._changed.length < binCount) {
+            this._changed = new Uint32Array(binCount);
+        }
+        const applied = applyBodyChanges(this._u8, frame, binCount, this._changed);
+        if (!applied) return;
+        this._u8 = applied.codes;
         if (isFullFrame(frame.flags)) this._v2Scale = scaleOf(frame.body);
         if (!this._v2Scale) return;
 
-        if (!this._float || this._float.length !== this._u8.length) {
-            this._float = new Float32Array(this._u8.length);
-        }
+        // The scale as a table, rebuilt only when a full frame actually moves
+        // it. Same arithmetic per code as before, run 256 times instead of
+        // once per bin per frame.
         const { ref, step } = this._v2Scale;
-        for (let i = 0; i < this._u8.length; i++) {
-            this._float[i] = (ref + this._u8[i] * step) / 100;
+        let scaleMoved = false;
+        if (!this._lutScale || this._lutScale.ref !== ref || this._lutScale.step !== step) {
+            if (!this._lut) this._lut = new Float32Array(256);
+            for (let c = 0; c < 256; c++) this._lut[c] = (ref + c * step) / 100;
+            this._lutScale = { ref, step };
+            scaleMoved = true;
         }
+
+        // Straight from the codes into the frequency-ordered output — the
+        // rotate that _unwrap does for version 1, folded into the conversion
+        // so the bins are walked once, not twice. Raw order is
+        // [DC..+Nyquist, -Nyquist..DC]; raw bin i therefore lands at i - half
+        // for the top half and (n - half) + i for the bottom, and a rotate by
+        // floor(n/2) keeps an odd count exact, as _unwrap's does.
+        const u = this._u8;
+        const n = u.length;
+        const half = n >> 1;
+        const rot = n - half;
+        const rebuilt = !this._out || this._out.length !== n;
+        if (rebuilt) this._out = new Float32Array(n);
+        const out = this._out;
+        const lut = this._lut;
+
+        // A delta converts only the bins it wrote — the point of tracking them
+        // — but only while the output really is the current codes under the
+        // current scale, and only while the delta is sparse. Past about a third
+        // of the bins, one sequential pass beats that many scattered writes.
+        const changed = applied.changed;
+        const sparse = changed !== -1 && changed * 3 <= n;
+        if (this._outLive && !scaleMoved && !rebuilt && sparse) {
+            const idx = this._changed;
+            for (let k = 0; k < changed; k++) {
+                const i = idx[k];
+                out[i >= half ? i - half : rot + i] = lut[u[i]];
+            }
+        } else {
+            for (let i = half; i < n; i++) out[i - half] = lut[u[i]];
+            for (let i = 0; i < half; i++) out[rot + i] = lut[u[i]];
+        }
+        this._outLive = true;
 
         // A gap means the server dropped a frame for a slow client. It is not an
         // error — the next keyframe repairs it — but it is the only signal that
@@ -590,25 +667,22 @@ export class SpectrumConnection extends Emitter {
 
         this.framesIn++;
         this.attempts = 0;
-        const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
         // 'frame', matching the version 1 path — every consumer listens for that
         // name (SpectrumView, MeasureWatch, IFSpectrumPanel, BridgeHost,
         // RadioContext). Emitting anything else decodes correctly and displays
         // nothing, with no error anywhere to say why.
         this.emit('frame', {
-            bins: this._unwrap(this._float),
-            frequency: Number(view.getBigUint64(16, true)),
-            timestamp: Number(view.getBigUint64(8, true)),
+            bins: out,
+            frequency: readU64(u8, 16),
+            timestamp: readU64(u8, 8),
         });
     }
 
     _onSpectrum(view) {
+        // Version 2 goes straight to _onSpectrumV2 from _onMessage; what
+        // reaches here is version 1 or nothing.
         if (view.byteLength < 5) return;
         const version = view.getUint8(4);
-        if (version === SPEC_V2) {
-            return this._onSpectrumV2(
-                new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
-        }
         if (version !== 0x01) return;
         const flags = view.getUint8(5);
         const timestamp = Number(view.getBigUint64(6, true));
@@ -670,7 +744,10 @@ export class SpectrumConnection extends Emitter {
     // Rotates raw FFT order into ascending frequency order: the second half
     // (negative frequencies) moves to the front. A plain rotate-left by
     // floor(n/2), so odd bin counts stay correct rather than dropping a bin.
+    // Version 1 only — version 2 rotates as it converts. It shares _out, so
+    // writing it here means the buffer no longer matches the v2 accumulator.
     _unwrap(raw) {
+        this._outLive = false;
         const n = raw.length;
         if (!this._out || this._out.length !== n) this._out = new Float32Array(n);
         const half = n >> 1;

@@ -51,6 +51,7 @@ function decoder() {
     const c = Object.create(SpectrumConnection.prototype);
     c._float = null; c._u8 = null; c._out = null;
     c._v2Scale = null; c._v2Seq = null;
+    c._lut = null; c._lutScale = null; c._changed = null; c._outLive = false;
     c.framesIn = 0; c.attempts = 0; c.framesDropped = 0;
     c._handlers = {};
     // Record the event NAME as well as the payload. An earlier version of this
@@ -181,7 +182,10 @@ t('a malformed frame is refused rather than half-applied', () => {
         if (new Uint8Array(all[i].packet)[5] === 0x06) { firstDelta = i; break; }
     }
     assert.ok(firstDelta > 0, 'no delta frame in the sample');
-    const before = Float32Array.from(c._float);
+    // Both halves of the decoder's state: the raw-order code accumulator the
+    // deltas fold into, and the dB buffer the consumers are handed.
+    const beforeCodes = Uint8Array.from(c._u8);
+    const before = Float32Array.from(c._out);
 
     for (const [name, buf] of Object.entries({
         'truncated header': all[firstDelta].packet.slice(0, 10),
@@ -195,7 +199,8 @@ t('a malformed frame is refused rather than half-applied', () => {
         assert.doesNotThrow(() => c._onSpectrumV2(new Uint8Array(buf)), `${name} threw`);
         assert.strictEqual(c._last, null, `${name} was accepted`);
         for (let i = 0; i < before.length; i++) {
-            assert.strictEqual(c._float[i], before[i], `${name} modified bin ${i}`);
+            assert.strictEqual(c._u8[i], beforeCodes[i], `${name} modified code ${i}`);
+            assert.strictEqual(c._out[i], before[i], `${name} modified bin ${i}`);
         }
     }
 });

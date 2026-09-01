@@ -2208,6 +2208,11 @@ function _clipHighlightX(x1raw, x2raw, cw, minPx = 2) {
     return [x1, x2];
 }
 
+// Popcount of a byte, for validating a version 2 delta mask one byte at a
+// time rather than one bit at a time. Same table as specFrame.js keeps.
+const SPEC_POPCOUNT = new Uint8Array(256);
+for (let i = 0; i < 256; i++) SPEC_POPCOUNT[i] = SPEC_POPCOUNT[i >> 1] + (i & 1);
+
 // ── BandPanel — one spectrum+waterfall per band ───────────────────────────────
 class BandPanel {
     constructor(name, meta) {
@@ -2262,6 +2267,9 @@ class BandPanel {
         this._diagWarnedAt   = 0;
         this._lastFlags      = 0;     // wire flags of latest frame (0x03 full / 0x04 delta)
         this._lastDeltaCount = 0;     // changed bins in latest delta (0xFFFF = full)
+        this._dbLut          = null;  // code→dB table; see _rebuildDbLut
+
+
 
         // ── Waterfall render cache ───────────────────────────────────────────
         // Offscreen bitmap holding one pixel row per data row at full bin
@@ -2758,8 +2766,20 @@ class BandPanel {
     // import from there, so a change to the format has to be made in both
     // places. specFrame.js is the one to change first.
     _dbFromByte(v) {
-        if (!this.scale) return v - 256;
-        return (this.scale.ref + v * this.scale.step) / 100;
+        return (this._dbLut || this._rebuildDbLut())[v];
+    }
+
+    // The mapping above as a 256-entry table, rebuilt only when the scale
+    // moves — which is at most once per full frame and in practice almost
+    // never. _commitFrame runs the conversion over every bin of every frame,
+    // and a lookup there is far cheaper than the arithmetic. Float64, not
+    // Float32, so each entry is the very double the expression produced and
+    // nothing downstream can round differently than it used to.
+    _rebuildDbLut() {
+        const lut = this._dbLut || (this._dbLut = new Float64Array(256));
+        const s = this.scale;
+        for (let c = 0; c < 256; c++) lut[c] = s ? (s.ref + c * s.step) / 100 : c - 256;
+        return lut;
     }
 
     applyFrame(data, flags) {
@@ -2771,7 +2791,11 @@ class BandPanel {
             if (data.length - 3 !== binCount) return;
             const step = data[2];
             if (step === 0) return;
-            this.scale = { ref: ((data[0] | (data[1] << 8)) << 16) >> 16, step };
+            const ref = ((data[0] | (data[1] << 8)) << 16) >> 16;
+            if (!this.scale || this.scale.ref !== ref || this.scale.step !== step) {
+                this.scale = { ref, step };
+                this._rebuildDbLut();
+            }
             if (!this.bins || this.bins.length !== binCount) {
                 this.bins = new Uint8Array(binCount);
             }
@@ -2782,21 +2806,43 @@ class BandPanel {
             // Version 2 delta: a one-bit-per-bin mask, then one value byte per
             // set bit. The count is implied, so a length that disagrees with the
             // mask is malformed — applying it part way would leave the bins
-            // half-updated until the next keyframe.
+            // half-updated until the next keyframe. Stray bits past binCount in
+            // the trailing byte are counted here — with the value bytes they
+            // imply — and then never applied, which is what the old
+            // bin-at-a-time walk did by construction.
             if (!this.bins || !this.scale) return;
             const n = this.bins.length;
             const maskLen = (n + 7) >> 3;
             if (data.length < maskLen) return;
             let expected = 0;
-            for (let b = 0; b < maskLen; b++) {
-                let m = data[b];
-                while (m) { expected += m & 1; m >>= 1; }
-            }
+            for (let b = 0; b < maskLen; b++) expected += SPEC_POPCOUNT[data[b]];
             if (data.length !== maskLen + expected) return;
+            // Byte-wise: a quiet delta's mask is mostly zero bytes, and each
+            // one skipped is eight bins never looked at. Within a byte, peel
+            // set bits low to high — `m & -m` isolates the lowest, clz32 names
+            // it — the order the value bytes were packed in.
+            const bins = this.bins;
             let vi = maskLen;
             let changed = 0;
-            for (let i = 0; i < n; i++) {
-                if (data[i >> 3] & (1 << (i & 7))) { this.bins[i] = data[vi++]; changed++; }
+            const whole = n >> 3;
+            for (let b = 0; b < whole; b++) {
+                let m = data[b];
+                if (m === 0) continue;
+                const base = b << 3;
+                do {
+                    bins[base + (31 - Math.clz32(m & -m))] = data[vi++];
+                    changed++;
+                    m &= m - 1;
+                } while (m);
+            }
+            if (whole < maskLen) {
+                let m = data[whole] & ((1 << (n & 7)) - 1);
+                const base = whole << 3;
+                while (m) {
+                    bins[base + (31 - Math.clz32(m & -m))] = data[vi++];
+                    changed++;
+                    m &= m - 1;
+                }
             }
             this._lastFlags = 0x06;
             this._lastDeltaCount = changed;
@@ -2809,7 +2855,10 @@ class BandPanel {
             this.bins.set(data);
             // A version 1 frame means the fixed -256..0 dB mapping applies; any
             // scale left from a version 2 stream would be wrong.
-            this.scale = null;
+            if (this.scale) {
+                this.scale = null;
+                this._rebuildDbLut();
+            }
             this._lastFlags = 0x03;
             this._lastDeltaCount = 0xFFFF;
         } else if (flags === 0x04) {
@@ -3068,7 +3117,8 @@ class BandPanel {
             this._prevVals = new Float32Array(n);
             this._curVals  = new Float32Array(n);
             this._lerpVals = new Float32Array(n);
-            for (let i = 0; i < n; i++) this._curVals[i] = this._dbFromByte(bins[i]);
+            const lut = this._dbLut || this._rebuildDbLut();
+            for (let i = 0; i < n; i++) this._curVals[i] = lut[bins[i]];
             this._prevVals.set(this._curVals);
         } else {
             // Uses the old _lastRowTime — must run before the timing block below.
@@ -3080,7 +3130,11 @@ class BandPanel {
                 for (let i = 0; i < n; i++) prev[i] += (cur[i] - prev[i]) * held;
             }
         }
-        for (let i = 0; i < n; i++) this._curVals[i] = this._dbFromByte(bins[i]);
+        {
+            const lut = this._dbLut || this._rebuildDbLut();
+            const cur = this._curVals;
+            for (let i = 0; i < n; i++) cur[i] = lut[bins[i]];
+        }
 
         // ── Inter-arrival period ─────────────────────────────────────────────
         // This is the interpolation clock, so a wrong value shows up as *level*

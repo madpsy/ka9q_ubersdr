@@ -23,6 +23,9 @@ import { connectionCheck, frameSize, getBypassPassword, getSessionId, wsBase } f
 import { clampCenter } from '../lib/zoom.js';
 import { failureKind } from '../lib/connectFailure.js';
 import {
+    FRAME_V2_FULL, SPEC_PROTOCOL_VERSION, SPEC_V2, applyBody, isFullFrame, parseFrame, scaleOf,
+} from '../lib/specFrame.js';
+import {
     HANDSHAKE_TIMEOUT_MS, abandon, checkSocket, reviveOnWake,
 } from './socket-health.js';
 
@@ -116,6 +119,11 @@ export class SpectrumConnection extends Emitter {
         // Delta-decode accumulators, in raw radiod bin order.
         this._float = null;   // Float32Array
         this._u8 = null;      // Uint8Array
+        // Version 2 carries its quantisation scale on each full frame, and the
+        // deltas that follow refer to it. The sequence number is how a dropped
+        // frame becomes visible; version 1 had no way to notice one.
+        this._v2Scale = null;
+        this._v2Seq = null;
         // Reusable output buffer holding the frequency-ordered bins.
         this._out = null;
     }
@@ -198,6 +206,7 @@ export class SpectrumConnection extends Emitter {
         const q = new URLSearchParams({
             user_session_id: getSessionId(),
             mode: 'binary8',
+            version: String(SPEC_PROTOCOL_VERSION),
         });
         const password = getBypassPassword();
         if (password) q.set('password', password);
@@ -542,8 +551,65 @@ export class SpectrumConnection extends Emitter {
         this.emit('message', msg);
     }
 
+    // Protocol version 2. The frame format itself lives in lib/specFrame.js,
+    // shared with the band panel's SSE decoder — it was written twice, and each
+    // copy needed the same length checks and the same mask walk.
+    //
+    // What stays here is what belongs to this transport: the accumulators, the
+    // sequence-gap count, and the emit.
+    _onSpectrumV2(u8) {
+        const frame = parseFrame(u8);
+        if (!frame || frame.version !== SPEC_V2) return;
+
+        const binCount = isFullFrame(frame.flags)
+            ? (frame.flags === FRAME_V2_FULL ? frame.body.length - 3 : frame.body.length)
+            : (this._u8 ? this._u8.length : 0);
+        if (binCount <= 0) return;
+
+        const next = applyBody(this._u8, frame, binCount);
+        if (!next) return;
+        this._u8 = next;
+        if (isFullFrame(frame.flags)) this._v2Scale = scaleOf(frame.body);
+        if (!this._v2Scale) return;
+
+        if (!this._float || this._float.length !== this._u8.length) {
+            this._float = new Float32Array(this._u8.length);
+        }
+        const { ref, step } = this._v2Scale;
+        for (let i = 0; i < this._u8.length; i++) {
+            this._float[i] = (ref + this._u8[i] * step) / 100;
+        }
+
+        // A gap means the server dropped a frame for a slow client. It is not an
+        // error — the next keyframe repairs it — but it is the only signal that
+        // anything went wrong, so it is counted.
+        if (this._v2Seq !== null && frame.seq !== ((this._v2Seq + 1) & 0xffff)) {
+            this.framesDropped = (this.framesDropped || 0) + 1;
+        }
+        this._v2Seq = frame.seq;
+
+        this.framesIn++;
+        this.attempts = 0;
+        const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+        // 'frame', matching the version 1 path — every consumer listens for that
+        // name (SpectrumView, MeasureWatch, IFSpectrumPanel, BridgeHost,
+        // RadioContext). Emitting anything else decodes correctly and displays
+        // nothing, with no error anywhere to say why.
+        this.emit('frame', {
+            bins: this._unwrap(this._float),
+            frequency: Number(view.getBigUint64(16, true)),
+            timestamp: Number(view.getBigUint64(8, true)),
+        });
+    }
+
     _onSpectrum(view) {
-        if (view.getUint8(4) !== 0x01) return;   // protocol version
+        if (view.byteLength < 5) return;
+        const version = view.getUint8(4);
+        if (version === SPEC_V2) {
+            return this._onSpectrumV2(
+                new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+        }
+        if (version !== 0x01) return;
         const flags = view.getUint8(5);
         const timestamp = Number(view.getBigUint64(6, true));
         const frequency = Number(view.getBigUint64(14, true));

@@ -341,6 +341,37 @@ func HandleNoiseFloorSpectrumStream(
 		}
 		configuredBands[wideBandSSEName] = config.Receiver.Centre()
 
+		// ── parse ?version= ──────────────────────────────────────────────────
+		// Which frame encoding to send. Version 1 is the historical format and
+		// remains the default, so an existing client that asks for nothing is
+		// unaffected. Version 2 replaces the index-per-change delta with a
+		// change mask, carries its own quantisation scale, and rounds rather
+		// than truncating -- see user_spectrum_v2.go for the measurements that
+		// motivated each.
+		//
+		// A version this build does not implement is CLAMPED rather than
+		// refused, which is the opposite of what the audio and waterfall
+		// WebSocket endpoints do, and deliberately so:
+		//
+		//   - the frames carry their own version byte, so a client can simply
+		//     decode whatever arrives. Asking is an optimisation, not a
+		//     contract, and a client that asks for something newer than the
+		//     server has is better served the newest it does have.
+		//
+		//   - an EventSource cannot surface a handshake failure usefully. It
+		//     reconnects on its own schedule forever, so a 400 here would be an
+		//     invisible retry loop rather than an error anyone sees.
+		spectrumVersion := 1
+		if v := r.URL.Query().Get("version"); v != "" {
+			var parsed int
+			if _, err := fmt.Sscanf(v, "%d", &parsed); err == nil && parsed > 1 {
+				spectrumVersion = SpectrumV2Version
+				if parsed < SpectrumV2Version {
+					spectrumVersion = parsed
+				}
+			}
+		}
+
 		// ── parse ?band= query parameters ────────────────────────────────────
 		// Repeatable: ?band=20m&band=40m
 		// If none supplied, stream all configured bands.
@@ -398,9 +429,13 @@ func HandleNoiseFloorSpectrumStream(
 		w.Header().Set("X-Accel-Buffering", "no") // disable nginx/caddy buffering
 
 		// ── per-band encoding state (goroutine-local, never shared) ──────────
+		// One encoder per band: each carries its own scale, its record of what
+		// the client holds, and its own sequence and keyframe counters.
+		v2states := make(map[string]*spectrumV2State, len(bands))
 		states := make(map[string]*spectrumState, len(bands))
 		for _, b := range bands {
 			states[b.name] = &spectrumState{}
+			v2states[b.name] = &spectrumV2State{}
 		}
 
 		deltaThreshold := config.Spectrum.DeltaThresholdDB
@@ -489,7 +524,22 @@ func HandleNoiseFloorSpectrumStream(
 						continue
 					}
 
-					packet := encodeBinary8PacketForSSE(fft.Data, b.centerHz, states[b.name], deltaThreshold)
+					var packet []byte
+					if spectrumVersion >= SpectrumV2Version {
+						st := v2states[b.name]
+						var full bool
+						var codes []uint8
+						packet, full, codes = spectrumV2Encode(st, fft.Data,
+							uint64(time.Now().UnixNano()), b.centerHz, deltaThreshold)
+						// Unlike the WebSocket path there is no non-blocking
+						// write to lose the frame: this write is blocking with a
+						// deadline, so if it returns the client has it. Commit
+						// immediately; a write that fails tears the whole stream
+						// down, which resets the encoder along with it.
+						spectrumV2Commit(st, codes, full)
+					} else {
+						packet = encodeBinary8PacketForSSE(fft.Data, b.centerHz, states[b.name], deltaThreshold)
+					}
 					if packet == nil {
 						continue
 					}

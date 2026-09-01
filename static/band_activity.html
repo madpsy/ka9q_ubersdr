@@ -2746,16 +2746,70 @@ class BandPanel {
     }
 
     // Called by SSE decoder with new float32 dBFS array
+    // dBFS from the wire's uint8. Version 1 fixed this at one decibel a code
+    // over -256..0; version 2 sends its own reference and step with each full
+    // frame, so the resolution follows the data instead of wasting more than
+    // half the range on decibels nothing occupies.
+    //
+    // THIS IS A COPY. The canonical definition of the "SPEC" frame format —
+    // header layout, both versions, the change mask, the scale arithmetic — is
+    // static/v2/src/lib/specFrame.js, which the v2 bundle's waterfall and band
+    // panel both import. This page is plain HTML with no build step and cannot
+    // import from there, so a change to the format has to be made in both
+    // places. specFrame.js is the one to change first.
+    _dbFromByte(v) {
+        if (!this.scale) return v - 256;
+        return (this.scale.ref + v * this.scale.step) / 100;
+    }
+
     applyFrame(data, flags) {
         const binCount = this.meta.bin_count;
 
-        if (flags === 0x03) {
+        if (flags === 0x05) {
+            // Version 2 full frame: [refCentiDB i16][stepCentiDB u8][bins...]
+            if (data.length < 3) return;
+            if (data.length - 3 !== binCount) return;
+            const step = data[2];
+            if (step === 0) return;
+            this.scale = { ref: ((data[0] | (data[1] << 8)) << 16) >> 16, step };
+            if (!this.bins || this.bins.length !== binCount) {
+                this.bins = new Uint8Array(binCount);
+            }
+            this.bins.set(data.subarray(3));
+            this._lastFlags = 0x05;
+            this._lastDeltaCount = 0xFFFF;
+        } else if (flags === 0x06) {
+            // Version 2 delta: a one-bit-per-bin mask, then one value byte per
+            // set bit. The count is implied, so a length that disagrees with the
+            // mask is malformed — applying it part way would leave the bins
+            // half-updated until the next keyframe.
+            if (!this.bins || !this.scale) return;
+            const n = this.bins.length;
+            const maskLen = (n + 7) >> 3;
+            if (data.length < maskLen) return;
+            let expected = 0;
+            for (let b = 0; b < maskLen; b++) {
+                let m = data[b];
+                while (m) { expected += m & 1; m >>= 1; }
+            }
+            if (data.length !== maskLen + expected) return;
+            let vi = maskLen;
+            let changed = 0;
+            for (let i = 0; i < n; i++) {
+                if (data[i >> 3] & (1 << (i & 7))) { this.bins[i] = data[vi++]; changed++; }
+            }
+            this._lastFlags = 0x06;
+            this._lastDeltaCount = changed;
+        } else if (flags === 0x03) {
             // Full uint8 frame
             if (data.length !== binCount) return;
             if (!this.bins || this.bins.length !== binCount) {
                 this.bins = new Uint8Array(binCount);
             }
             this.bins.set(data);
+            // A version 1 frame means the fixed -256..0 dB mapping applies; any
+            // scale left from a version 2 stream would be wrong.
+            this.scale = null;
             this._lastFlags = 0x03;
             this._lastDeltaCount = 0xFFFF;
         } else if (flags === 0x04) {
@@ -3014,7 +3068,7 @@ class BandPanel {
             this._prevVals = new Float32Array(n);
             this._curVals  = new Float32Array(n);
             this._lerpVals = new Float32Array(n);
-            for (let i = 0; i < n; i++) this._curVals[i] = bins[i] - 256;
+            for (let i = 0; i < n; i++) this._curVals[i] = this._dbFromByte(bins[i]);
             this._prevVals.set(this._curVals);
         } else {
             // Uses the old _lastRowTime — must run before the timing block below.
@@ -3026,7 +3080,7 @@ class BandPanel {
                 for (let i = 0; i < n; i++) prev[i] += (cur[i] - prev[i]) * held;
             }
         }
-        for (let i = 0; i < n; i++) this._curVals[i] = bins[i] - 256;
+        for (let i = 0; i < n; i++) this._curVals[i] = this._dbFromByte(bins[i]);
 
         // ── Inter-arrival period ─────────────────────────────────────────────
         // This is the interpolation clock, so a wrong value shows up as *level*
@@ -3904,7 +3958,7 @@ class BandPanel {
         const binEnd   = Math.round(this.zoomEnd   * (n - 1));
         const zn       = Math.max(2, binEnd - binStart + 1);
         const binIdx   = Math.min(n - 1, Math.max(0, binStart + Math.round(frac * (zn - 1))));
-        const db  = this.bins[binIdx] - 256;
+        const db  = this._dbFromByte(this.bins[binIdx]);
         const mhz = (hz / 1e6).toFixed(4);
         _positionTooltip(`${mhz} MHz  ${db.toFixed(1)} dBFS`, e.clientX, e.clientY);
     }
@@ -3971,10 +4025,20 @@ function decodeSSEEvent(b64data) {
     const magic = String.fromCharCode(buf[0], buf[1], buf[2], buf[3]);
     if (magic !== 'SPEC') return null;
 
+    // Dispatch on the frame's own version byte rather than on what was asked
+    // for at connect. ?version= is a request an older server ignores, and every
+    // frame says which encoding it is, so a mismatch costs nothing.
+    const version = buf[4];
     const flags = buf[5];
-    // payload starts at offset 22
+    if (version === 2) {
+        // Version 2: 24-byte header (two more, for a sequence number), a change
+        // mask instead of index triples, and a quantisation scale carried on
+        // each full frame. See user_spectrum_v2.go.
+        if (buf.length < 24) return null;
+        return { version, flags, seq: buf[6] | (buf[7] << 8), payload: buf.subarray(24) };
+    }
     const payload = buf.subarray(22);
-    return { flags, payload };
+    return { version, flags, payload };
 }
 
 // Dump one band's flight recorder (see _diagRecord) as a console table and
@@ -4013,7 +4077,11 @@ window.bandDiag = function(name, rows = 150) {
 // ── SSE connection management ─────────────────────────────────────────────────
 function buildSSEUrl() {
     const params = [...activeBands].map(b => `band=${encodeURIComponent(b)}`).join('&');
-    return `/api/noisefloor/spectrum/stream${params ? '?' + params : ''}`;
+    // version is a request: a server that predates it ignores the parameter and
+    // keeps sending version 1, which decodeSSEEvent recognises from the frame's
+    // own version byte. So this page keeps working against an older receiver.
+    const all = params ? params + '&version=2' : 'version=2';
+    return `/api/noisefloor/spectrum/stream?${all}`;
 }
 
 // Reconnect state — exponential backoff capped at 30 s

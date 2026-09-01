@@ -21,7 +21,7 @@ const IQ_CHANNELS = [
 
 const FORMATS = [
     { value: 'opus', label: 'Opus', title: 'Compressed — the default, and around 50 kbit/s in every mode' },
-    { value: 'pcm-zstd', label: 'Uncompressed', title: 'Lossless 16-bit PCM — 210 kbit/s on SSB and CW, 400 kbit/s on AM, SAM and FM' },
+    { value: 'pcm-zstd', label: 'Uncompressed', title: 'Lossless 16-bit PCM — about 100 kbit/s on SSB, 45 on CW and 170 on AM. An empty channel costs more than a busy one' },
 ];
 
 // Which audio format the stream is asked for, as the Python and Go clients
@@ -84,8 +84,9 @@ function FormatPicker() {
                 ) : (
                     <>
                         Opus is compressed; uncompressed sends lossless 16-bit PCM at
-                        four to eight times the bandwidth, depending on the mode.
-                        Changing this reconnects the audio stream.
+                        roughly two to three times the bandwidth, depending on the mode
+                        and what is on the frequency. Changing this reconnects the
+                        audio stream.
                     </>
                 )}
             </div>
@@ -93,13 +94,31 @@ function FormatPicker() {
                 <Modal onClose={() => setConfirming(false)} label="High bandwidth warning">
                     <div className="stack vibe">
                         <h2 className="vibe__title">High bandwidth warning</h2>
-                        {/* The Go and Python clients say 4×, which is the SSB
-                            figure. This interface offers the AM family too, and
-                            those run at 24 kHz where it is nearer 8×, so both
-                            are given rather than the flattering one. */}
+                        {/* Measured against Opus on a live receiver, both
+                            formats running at once on the same frequency:
+                            1.9x on USB and LSB, 1.3x on CW, 3.1x on a medium
+                            wave broadcast station.
+
+                            The figures were 4x and 8x under protocol version 3,
+                            which wrapped the samples in zstd and so sent them
+                            very slightly LARGER than raw; version 4 predicts
+                            and Rice-codes them, roughly halving every one.
+
+                            What is on the frequency matters as much as the
+                            mode. The same AM measurement against an empty HF
+                            channel came out at 4.5x, because noise is the one
+                            thing a predictor cannot help with — so the range is
+                            given rather than the flattering end of it. CW is
+                            lowest because a narrow tone in a quiet channel is
+                            the easiest case there is. */}
                         <p className="vibe__text">
-                            Uncompressed audio uses approximately 4&times; more bandwidth
-                            than Opus on SSB and CW, and around 8&times; on AM, SAM and FM.
+                            Uncompressed audio uses approximately 2&times; more bandwidth
+                            than Opus on SSB, and around 3&times; on AM, SAM and FM. On CW
+                            it is close to Opus.
+                        </p>
+                        <p className="vibe__text">
+                            An empty channel costs more than a busy one — there is only
+                            noise to send, and noise is what compresses least.
                         </p>
                         <p className="vibe__text">
                             This increases costs for the instance owner. Only switch if you

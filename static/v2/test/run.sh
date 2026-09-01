@@ -24,6 +24,16 @@ esbuild tuningrange.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/tuningrange.cjs --log-level=warning
 esbuild ../src/radio/pcm-stream.js --bundle --format=cjs --platform=node \
     --outfile=.build/pcmstream.cjs --log-level=warning
+esbuild pcmcpu.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/pcmcpu.cjs --log-level=warning
+esbuild pcmv4.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/pcmv4.cjs --log-level=warning
+esbuild opusv4.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/opusv4.cjs --log-level=warning
+esbuild spectrumv2.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/spectrumv2.cjs --log-level=warning
+esbuild bandspectrumv2.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/bandspectrumv2.cjs --log-level=warning
 esbuild ../src/lib/dsp.js --bundle --format=cjs --platform=node \
     --outfile=.build/dsp.cjs --log-level=warning
 esbuild ../src/display/uiConfig.js --bundle --format=cjs --platform=node \
@@ -436,6 +446,11 @@ node unresolved.js
 node protocol.test.js
 node modes.test.js
 node pcmstream.test.js
+node pcmv4.test.js
+node opusv4.test.js
+node spectrumv2.test.js
+node bandspectrumv2.test.js
+node pcmcpu.test.js
 node zoom.test.js
 node panpacing.test.js
 node wake.test.js

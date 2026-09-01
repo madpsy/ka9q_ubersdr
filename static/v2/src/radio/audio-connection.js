@@ -7,11 +7,12 @@
 //   text frame:   JSON control messages (status / error / pong / agc_state ...)
 //
 // The other format the server offers is `pcm-zstd`, lossless 16-bit PCM at
-// four to eight times the bandwidth depending on the mode's sample rate, which
-// the operator can ask for from the Audio panel. Its frames are shaped
-// differently and are decoded in pcm-stream.js. The format is fixed in the
-// connect URL — there is no command for it — so changing it means reopening
-// the socket.
+// roughly two to three times the bandwidth depending on the mode and on what is
+// on the frequency,
+// which the operator can ask for from the Audio panel. Its frames are shaped
+// differently: protocol version 4 decodes them in pcm-v4.js, and the version 3
+// form is still read by pcm-stream.js. The format is fixed in the connect URL —
+// there is no command for it — so changing it means reopening the socket.
 //
 // The server falls back to JSON `audio` messages (base64 PCM) when Opus is
 // unavailable; that path is handled too so the UI still works on such a server.
@@ -19,6 +20,7 @@
 import { Emitter } from './emitter.js';
 import { failureKind } from '../lib/connectFailure.js';
 import { PCMStreamDecoder, isZstdFrame } from './pcm-stream.js';
+import { PCMv4StreamDecoder, OpusV4HeaderDecoder, isV4Frame } from './pcm-v4.js';
 import {
     HANDSHAKE_TIMEOUT_MS, abandon, checkSocket, reviveOnWake,
 } from './socket-health.js';
@@ -28,13 +30,22 @@ import {
 
 // Protocol version asked for at connect.
 //
-// Version 3 differs from 2 only in the second signal-quality field: it carries
+// Version 3 differed from 2 only in the second signal-quality field: it carries
 // the noise power inside the demodulator passband rather than radiod's density
 // N0 in dBFS/Hz. That is what makes `basebandPower - noisePower` an SNR in dB —
 // on version 2 the same subtraction yields S/N0 in dB·Hz, reading about 34 dB
 // high on a 2.65 kHz filter and shifting whenever the filter width changed.
-// The byte layout is identical, so only the meaning of the field moves.
-const PROTOCOL_VERSION = 3;
+//
+// Version 4 replaces the zstd wrapper on the lossless path with a predictive
+// codec, and the fixed 37-byte header with one that carries only what changed.
+// Measured against the same receiver: USB 26.6 -> 12.2 kB/s, IQ 12k 50.7 ->
+// 34.3, IQ 48k 199.6 -> 140.4, and a squelched session 2.90 -> 0.49. Opus
+// frames are untouched by it. See pcm-v4.js.
+//
+// A server too old for this refuses the connection outright rather than
+// serving version 1 silently, which is what it used to do — so there is no
+// half-working state to detect here.
+const PROTOCOL_VERSION = 4;
 
 // Version 2/3 header: timestamp(8) sampleRate(4) channels(1) power(4) noise(4).
 const HEADER_BYTES = 21;
@@ -50,6 +61,16 @@ export class AudioConnection extends Emitter {
         // caller having to remember.
         this.format = 'opus';
         this.pcm = new PCMStreamDecoder();
+        // Version 4's decoder is stateful in a way version 3's is not: its
+        // predictor carries the adaptation of every sample decoded so far. It
+        // lives and dies with the socket for that reason, and reset() below is
+        // what makes a reconnect a clean start rather than a desynchronised
+        // one.
+        this.pcmV4 = new PCMv4StreamDecoder();
+        // Opus headers are change-tracked from version 4 on, so this carries
+        // forward whatever the last frame did not repeat. Same lifecycle as the
+        // decoders above: one per socket, reset on reconnect.
+        this.opusV4 = new OpusV4HeaderDecoder();
         this.closedByUser = false;
         // Whether the socket in hand ever reached open. This endpoint says most
         // of what it has to say *after* the upgrade — see _onMessage — but the
@@ -118,6 +139,8 @@ export class AudioConnection extends Emitter {
         this.params = { ...params };
         // Whatever the last session announced does not describe this one.
         this.pcm.reset();
+        this.pcmV4.reset();
+        this.opusV4.reset();
 
         // Spent here, whatever the check then answers: a re-registration that
         // was refused is not one to make again on the next attempt, and the
@@ -418,11 +441,38 @@ export class AudioConnection extends Emitter {
     }
 
     _onBinary(buffer) {
-        // Two shapes arrive here. What was asked for settles it in the normal
-        // case; the sniff catches the server that answered `format=opus` with
-        // pcm-zstd because it has no Opus encoder.
+        // Three shapes arrive here, and the frame itself has to say which it
+        // is: the server picks the format PER PACKET, so a session negotiated
+        // as Opus receives PCM the moment it tunes to IQ, and one that asked
+        // for Opus from a server built without libopus receives PCM always.
+        //
+        // Both PCM magics are four bytes, which is not decoration: an Opus
+        // frame begins with a timestamp, so the magic width is a false
+        // positive rate. Two bytes would mistake one Opus frame in 65536 —
+        // about one a minute at IQ packet rates, each one a click.
+        if (isV4Frame(buffer)) {
+            this._onPCMv4Binary(buffer);
+            return;
+        }
         if (this.format === 'pcm-zstd' || isZstdFrame(buffer)) {
             this._onPCMBinary(buffer);
+            return;
+        }
+
+        // Opus. From version 4 the header is variable-length and carries only
+        // what changed, so where the Opus packet starts has to be parsed rather
+        // than assumed -- the fixed 21-byte offset below is the version 2 and 3
+        // layout, and slicing at it would feed the decoder eight bytes of audio
+        // as though they were metadata.
+        if (PROTOCOL_VERSION >= 4) {
+            const h = this.opusV4.decode(buffer);
+            if (!h) return;
+            this.emit('quality', h.signal);
+            this.emit('opus', {
+                data: new Uint8Array(buffer, h.bodyOffset),
+                sampleRate: h.sampleRate,
+                channels: h.channels,
+            });
             return;
         }
 
@@ -446,6 +496,21 @@ export class AudioConnection extends Emitter {
             data: new Uint8Array(buffer, HEADER_BYTES),
             sampleRate,
             channels,
+        });
+    }
+
+    // Version 4 lossless frames. Emits exactly what _onPCMBinary does, so
+    // everything downstream — the player, the IQ spectrum tap, the browser-side
+    // demodulator — is unaware of which version produced it.
+    _onPCMv4Binary(buffer) {
+        const frame = this.pcmV4.decode(buffer);
+        if (!frame) return;
+        if (frame.signal) this.emit('quality', frame.signal);
+        this.attempts = 0;
+        this.emit('pcm', {
+            planes: frame.planes,
+            sampleRate: frame.sampleRate,
+            channels: frame.channels,
         });
     }
 

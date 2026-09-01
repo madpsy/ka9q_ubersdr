@@ -426,10 +426,23 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	// 3: same layout as 2, but the noise field is the noise power in the
 	//    demodulator passband (dBFS), so `baseband - noise` is a real SNR.
 	//    See channelNoisePower in radiod_status.go.
+	// 4: predictive lossless codec in place of the zstd wrapper, with a
+	//    variable-length header. See pcm_predictive.go and pcm_v4_header.go.
+	//    Applies to the pcm formats only; Opus frames are unchanged.
 	version := 1
 	if v := query.Get("version"); v != "" {
 		var parsedVer int
-		if _, err := fmt.Sscanf(v, "%d", &parsedVer); err == nil && parsedVer >= 1 && parsedVer <= 3 {
+		if _, err := fmt.Sscanf(v, "%d", &parsedVer); err == nil {
+			// A version this build does not implement is refused rather than
+			// quietly served as version 1. The old behaviour meant a client
+			// asking for something newer got the 29-byte v1 header with no
+			// signal quality and no way to tell that had happened; an explicit
+			// refusal lets it retry with a version it knows.
+			if parsedVer < 1 || parsedVer > pcmMaxProtocolVersion {
+				log.Printf("Rejected WebSocket connection: unsupported version %d from %s (client IP: %s)", parsedVer, sourceIP, clientIP)
+				http.Error(w, fmt.Sprintf("Unsupported protocol version %d. This server supports 1-%d.", parsedVer, pcmMaxProtocolVersion), http.StatusBadRequest)
+				return
+			}
 			version = parsedVer
 		}
 	}
@@ -1848,6 +1861,20 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 	var opusEncoder *OpusEncoderWrapper
 	var pcmBinaryEncoder *PCMBinaryEncoder
 
+	// Version 4 replaces the zstd wrapper with a predictive codec. Its state is
+	// the stream -- the predictor adapts from every sample coded so far -- so
+	// unlike the shared zstd encoders this belongs to one connection and one
+	// goroutine, which is exactly what it gets here.
+	var pcmV4Encoder *PCMv4StreamEncoder
+
+	// Version 4 also slims the Opus header, from a fixed 21 bytes to about 4.
+	// Opus frames are small, so that header was a sixth of the stream. Its own
+	// encoder, because the change-tracking state belongs to the Opus frame
+	// sequence and not to the lossless one -- a session that switches between
+	// them must not have one format's "unchanged since last packet" answered
+	// from the other's history.
+	var opusV4Header *PCMv4HeaderEncoder
+
 	// Opus encoder settings, and the sample rate the current encoder was built
 	// for.  Both are needed outside this block so the encoder can be rebuilt
 	// when the mode changes (see ensureOpusEncoder below).
@@ -1930,8 +1957,31 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 		log.Printf("PCM binary encoder initialized with zstd compression (version %d)", pcmVersion)
 	}
 
+	// ensurePCMv4Encoder mirrors ensurePCMEncoder for the version 4 path. Both
+	// exist because a session that negotiated Opus still reaches the pcm branch
+	// when it tunes to IQ, so neither encoder can be built unconditionally at
+	// connect time.
+	ensurePCMv4Encoder := func() {
+		if pcmV4Encoder != nil {
+			return
+		}
+		pcmV4Encoder = NewPCMv4StreamEncoder()
+		pcmv4LogSession(session.ID, version)
+	}
+
+	ensureOpusV4Header := func() *PCMv4HeaderEncoder {
+		if opusV4Header == nil {
+			opusV4Header = NewPCMv4HeaderEncoder()
+		}
+		return opusV4Header
+	}
+
 	if format == "pcm-zstd" {
-		ensurePCMEncoder()
+		if version >= 4 {
+			ensurePCMv4Encoder()
+		} else {
+			ensurePCMEncoder()
+		}
 	}
 	// Nil-checked: the encoder is created on demand and a session that never
 	// leaves Opus never has one.
@@ -1978,8 +2028,12 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					currentFormat = "pcm-zstd"
 				}
 				if currentFormat == "pcm-zstd" {
-					ensurePCMEncoder()
-					pcmBinaryEncoder.SetFastMode(isIQMode)
+					if version >= 4 {
+						ensurePCMv4Encoder()
+					} else {
+						ensurePCMEncoder()
+						pcmBinaryEncoder.SetFastMode(isIQMode)
+					}
 				}
 
 				// Send silence packet with signal quality data
@@ -2002,13 +2056,25 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 						}
 
 						// Build version 2 packet with signal quality
-						packet := make([]byte, 21+len(opusData))
-						binary.LittleEndian.PutUint64(packet[0:8], uint64(time.Now().UnixNano()))
-						binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
-						packet[12] = byte(session.Channels)
-						binary.LittleEndian.PutUint32(packet[13:17], math.Float32bits(basebandPower))
-						binary.LittleEndian.PutUint32(packet[17:21], math.Float32bits(noiseFigure))
-						copy(packet[21:], opusData)
+						var packet []byte
+						if version >= 4 {
+							packet = ensureOpusV4Header().AppendOpusHeader(nil, PCMv4Header{
+								TimestampNanos: uint64(time.Now().UnixNano()),
+								SampleRate:     session.SampleRate,
+								Channels:       session.Channels,
+								BasebandPower:  basebandPower,
+								Noise:          noiseFigure,
+							})
+							packet = append(packet, opusData...)
+						} else {
+							packet = make([]byte, 21+len(opusData))
+							binary.LittleEndian.PutUint64(packet[0:8], uint64(time.Now().UnixNano()))
+							binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
+							packet[12] = byte(session.Channels)
+							binary.LittleEndian.PutUint32(packet[13:17], math.Float32bits(basebandPower))
+							binary.LittleEndian.PutUint32(packet[17:21], math.Float32bits(noiseFigure))
+							copy(packet[21:], opusData)
+						}
 
 						conn.writeMu.Lock()
 						conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -2033,7 +2099,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					}
 
 				case "pcm-zstd":
-					if pcmBinaryEncoder != nil {
+					if pcmBinaryEncoder != nil || pcmV4Encoder != nil {
 						// Create silence samples (20ms worth to match Opus frame size)
 						silenceDuration := session.SampleRate / 50        // 20ms frame
 						silenceSamples := make([]byte, silenceDuration*2) // 16-bit samples = 2 bytes each (zeros)
@@ -2042,15 +2108,34 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 						// included even when the squelch is closed — see
 						// fullPCMHeaderAlways for the one case that does not.
 						isIQModeSilence := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
-						packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
-							silenceSamples,
-							time.Now().UnixNano(),
-							session.SampleRate,
-							session.Channels,
-							basebandPower,
-							noiseFigure,
-							fullPCMHeaderAlways(isIQModeSilence, version),
-						)
+						var packet []byte
+						var err error
+						if version >= 4 {
+							// All-zero samples are the one input the predictor
+							// handles trivially, so this costs almost nothing on
+							// the wire -- but it still has to run, because the
+							// decoder advances its own filters over the same
+							// packet and the two must stay in step.
+							ensurePCMv4Encoder()
+							packet, err = pcmV4Encoder.EncodePacket(
+								silenceSamples,
+								time.Now().UnixNano(),
+								session.SampleRate,
+								session.Channels,
+								basebandPower,
+								noiseFigure,
+							)
+						} else {
+							packet, err = pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
+								silenceSamples,
+								time.Now().UnixNano(),
+								session.SampleRate,
+								session.Channels,
+								basebandPower,
+								noiseFigure,
+								fullPCMHeaderAlways(isIQModeSilence, version),
+							)
+						}
 						if err != nil {
 							continue // Skip this update on error
 						}
@@ -2208,8 +2293,14 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			// the default.  Set per packet because the mode can change under a
 			// live session — see SetFastMode.
 			if currentFormat == "pcm-zstd" {
-				ensurePCMEncoder()
-				pcmBinaryEncoder.SetFastMode(isIQMode)
+				if version >= 4 {
+					// The v4 codec picks its predictor from the channel count
+					// per packet, so there is no equivalent of SetFastMode.
+					ensurePCMv4Encoder()
+				} else {
+					ensurePCMEncoder()
+					pcmBinaryEncoder.SetFastMode(isIQMode)
+				}
 			}
 
 			switch currentFormat {
@@ -2265,7 +2356,20 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				// radiod) rather than session.SampleRate (which may already reflect a
 				// new mode by the time we dequeue this buffered packet).
 				var packet []byte
-				if version >= 2 {
+				if version >= 4 {
+					// Version 4: the same header the lossless path uses, minus
+					// the fields only a predictor needs. Timestamp, metadata and
+					// signal quality are tracked and encoded identically, so a
+					// client has one parser for both formats rather than two.
+					packet = ensureOpusV4Header().AppendOpusHeader(nil, PCMv4Header{
+						TimestampNanos: uint64(audioPacket.GPSTimeNs),
+						SampleRate:     audioPacket.SampleRate,
+						Channels:       session.Channels,
+						BasebandPower:  basebandPower,
+						Noise:          noiseFigure,
+					})
+					packet = append(packet, opusData...)
+				} else if version >= 2 {
 					// Version 2: include signal quality metrics
 					packet = make([]byte, 21+len(opusData))
 					// GPS timestamp in nanoseconds (8 bytes, little-endian uint64)
@@ -2331,8 +2435,14 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				}
 
 			case "pcm-zstd":
-				// Binary PCM format with hybrid headers (full/minimal) and zstd compression
-				if pcmBinaryEncoder == nil {
+				// Binary PCM: hybrid full/minimal headers with zstd up to version
+				// 3, the predictive codec from version 4.  Exactly one of the two
+				// encoders exists on a given connection; checking the wrong one
+				// here would return and take the whole streaming goroutine with
+				// it, silencing the session until it reconnects.
+				if version >= 4 {
+					ensurePCMv4Encoder()
+				} else if pcmBinaryEncoder == nil {
 					log.Printf("PCM binary encoder not available, cannot continue")
 					return
 				}
@@ -2360,15 +2470,32 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				// fields — see fullPCMHeaderAlways.
 				// Use audioPacket.SampleRate (stamped at receive time) not session.SampleRate
 				// (which may already reflect a new mode for buffered packets).
-				packet, err := pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
-					audioPacket.PCMData,
-					audioPacket.GPSTimeNs,
-					audioPacket.SampleRate,
-					session.Channels,
-					basebandPower,
-					noiseFigure,
-					fullPCMHeaderAlways(isIQMode, version),
-				)
+				var packet []byte
+				var err error
+				if version >= 4 {
+					// Version 4 needs no full/minimal header decision: the
+					// header carries only what changed, and signal quality
+					// rides every packet whose reading has moved.
+					ensurePCMv4Encoder()
+					packet, err = pcmV4Encoder.EncodePacket(
+						audioPacket.PCMData,
+						audioPacket.GPSTimeNs,
+						audioPacket.SampleRate,
+						session.Channels,
+						basebandPower,
+						noiseFigure,
+					)
+				} else {
+					packet, err = pcmBinaryEncoder.EncodePCMPacketWithSignalQuality(
+						audioPacket.PCMData,
+						audioPacket.GPSTimeNs,
+						audioPacket.SampleRate,
+						session.Channels,
+						basebandPower,
+						noiseFigure,
+						fullPCMHeaderAlways(isIQMode, version),
+					)
+				}
 				if err != nil {
 					log.Printf("PCM binary encoding error: %v", err)
 					continue

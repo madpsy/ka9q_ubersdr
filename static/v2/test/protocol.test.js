@@ -1383,19 +1383,40 @@ t('setDSPParams sends the server message shape, and skips empty updates', () => 
 });
 
 // --- audio -----------------------------------------------------------------
+// A version 4 Opus frame: a flags byte, then only what changed. This packet
+// always sets both flags, so it is the resynchronisation form -- a full
+// timestamp, the sample rate and channel count, and the signal quality.
+//
+// Version 3's fixed 21-byte header is gone. Building one here would test a
+// shape the client no longer asks for, and slicing at 21 on a v4 frame would
+// feed the Opus decoder several bytes of audio as though they were metadata --
+// which is exactly the mistake this format change could cause, so it is worth
+// the fixture matching the wire rather than the other way round.
 function audioPacket({ sampleRate = 12000, channels = 1, power = -55.5, noise = -95.25, payload = [1, 2, 3, 4] }) {
-    const buf = new ArrayBuffer(21 + payload.length);
-    const v = new DataView(buf);
-    v.setBigUint64(0, BigInt(Date.now()) * 1000000n, true);
-    v.setUint32(8, sampleRate, true);
-    v.setUint8(12, channels);
-    v.setFloat32(13, power, true);
-    v.setFloat32(17, noise, true);
-    new Uint8Array(buf, 21).set(payload);
+    const head = [];
+    head.push(0x03);                                  // quality + metadata
+    const ts = BigInt(Date.now()) * 1000000n;
+    for (let i = 0; i < 8; i++) head.push(Number((ts >> BigInt(8 * i)) & 0xffn));
+    // sample rate as an unsigned varint
+    let r = sampleRate;
+    while (r >= 0x80) { head.push((r & 0x7f) | 0x80); r >>>= 7; }
+    head.push(r);
+    head.push(channels);
+    // signal quality as signed centidecibels, the same encoding the lossless
+    // path uses; -999 is not representable and becomes the "no reading" code.
+    const cdb = (v) => (v > -998 ? Math.round(v * 100) : -32768);
+    for (const v of [cdb(power), cdb(noise)]) {
+        const u = v & 0xffff;
+        head.push(u & 0xff, (u >> 8) & 0xff);
+    }
+    const buf = new ArrayBuffer(head.length + payload.length);
+    const u8 = new Uint8Array(buf);
+    u8.set(head);
+    u8.set(payload, head.length);
     return buf;
 }
 
-t('v3 audio header parses and strips the 21-byte prefix', () => {
+t('a v4 Opus header is parsed and the body starts after it, wherever that is', () => {
     const a = new AudioConnection();
     let opus = null; let quality = null;
     a.on('opus', (x) => { opus = x; });

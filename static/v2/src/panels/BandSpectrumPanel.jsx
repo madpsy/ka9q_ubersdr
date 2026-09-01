@@ -34,7 +34,8 @@ import { bandForFrequency } from '../lib/bands.js';
 import { getPalette } from '../lib/palettes.js';
 import {
     AUTO_SPAN_DEFAULT, applyFrame, bandsFromConfig, clampDb, configUrl,
-    AUTO_BAND, FULL_ZOOM, ZOOM_FACTOR, bandList, chosenBand, createAutoRange, dbFromByte,
+    AUTO_BAND, FRAME_FULL, FRAME_V2_FULL, FULL_ZOOM, ZOOM_FACTOR, bandList, chosenBand,
+    createAutoRange, dbFromByte,
     decodeFrame, dialWindow, formatAgeSec,
     ACTIVITY_URL, formatDb, formatMHz, ft8Window, isZoomed, panByFraction, rangeOf,
     reportBandRate,
@@ -435,6 +436,14 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
                 const next = applyFrame(st.bins, frame, meta.bin_count);
                 if (!next) return;                  // a delta with no full frame yet
                 st.bins = next;
+                // Version 2 carries its dB scale on each full frame; version 1
+                // has a fixed one, which dbFromByte applies when the scale is
+                // absent. Taking it from full frames only — and taking it even
+                // when undefined — means a stream that falls back to version 1
+                // on a reconnect drops the stale scale rather than keeping it.
+                if (frame.flags === FRAME_FULL || frame.flags === FRAME_V2_FULL) {
+                    st.scale = frame.scale;
+                }
                 commit(st, meta.bin_count);
                 seen = true;
             });
@@ -678,7 +687,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         // fraction — the two are not the same height.
         const overWf = pt.y > spec.getBoundingClientRect().bottom;
 
-        let db = dbFromByte(st.bins[bin]);
+        let db = dbFromByte(st.bins[bin], st.scale);
         let age = null;
         if (overWf) {
             // The clip box, not the canvas: the canvas is sliding within it,
@@ -910,12 +919,12 @@ function commit(st, binCount) {
 
     const n = st.bins.length;
     const row = new Float32Array(n);
-    for (let i = 0; i < n; i++) row[i] = dbFromByte(st.bins[i]);
+    for (let i = 0; i < n; i++) row[i] = dbFromByte(st.bins[i], st.scale);
     st.rows.push(row);
     if (st.rows.length > HISTORY_ROWS) st.rows.shift();
 
     let moved = false;
-    const valid = validValues(st.bins);
+    const valid = validValues(st.bins, st.scale);
     if (valid) moved = updateAutoRange(st.auto, valid, valid.length, now);
 
     // How long the last row took to arrive is the best guess at how long this

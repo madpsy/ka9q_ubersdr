@@ -34,7 +34,14 @@ type spectrumState struct {
 	changesBuf  []changeEntry  // reused by sendBinarySpectrum
 	changes8Buf []changeEntry8 // reused by sendBinary8Spectrum
 	data8Buf    []uint8        // reused by sendBinary8Spectrum for float32→uint8 conversion
-	mu          sync.RWMutex
+
+	// Protocol version 2 encoder state: the scale, what the client is believed
+	// to hold, the sequence number and the keyframe counter. Only used when the
+	// client asked for version 2; see user_spectrum_v2.go.
+	useV2 bool
+	v2    spectrumV2State
+
+	mu sync.RWMutex
 }
 
 // changeEntry is a (index, float32 value) pair used for delta encoding.
@@ -146,6 +153,32 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	// Check for binary8 mode (8-bit encoding)
 	mode := query.Get("mode")
 	useBinary8 := mode == "binary8"
+
+	// Protocol version. Version 1 is the historical format and stays the
+	// default, so every existing client is unaffected. Version 2 replaces the
+	// index-per-change delta with a change mask, carries its quantisation scale
+	// rather than hardcoding one, and adds a sequence number and keyframes --
+	// see user_spectrum_v2.go for why each of those was needed.
+	//
+	// An unsupported version is refused rather than quietly served as version 1:
+	// a client asking for something newer would otherwise decode a format it
+	// did not expect, and spectrum frames have no field that would let it tell.
+	spectrumVersion := 1
+	if v := query.Get("version"); v != "" {
+		var parsed int
+		if _, err := fmt.Sscanf(v, "%d", &parsed); err == nil {
+			if parsed < 1 || parsed > SpectrumV2Version {
+				log.Printf("Rejected spectrum WebSocket: unsupported version %d from %s", parsed, r.RemoteAddr)
+				http.Error(w, fmt.Sprintf("Unsupported spectrum protocol version %d. This server supports 1-%d.",
+					parsed, SpectrumV2Version), http.StatusBadRequest)
+				return
+			}
+			spectrumVersion = parsed
+		}
+	}
+	// Version 2 is defined only for the 8-bit path; the float32 frames it would
+	// replace are not what any client asks for.
+	useV2 := spectrumVersion >= 2 && useBinary8
 
 	// Optional initial view parameters — client passes these on reconnect so the
 	// session starts at the correct frequency/zoom immediately, with no post-connect
@@ -303,6 +336,7 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 		previousData:   make([]float32, session.BinCount),
 		previousData8:  make([]uint8, session.BinCount),
 		useBinary8Mode: useBinary8,
+		useV2:          useV2,
 	}
 
 	// Start spectrum streaming goroutine
@@ -651,7 +685,9 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 
 			// Binary mode with delta encoding - choose format based on state
 			var err error
-			if state.useBinary8Mode {
+			if state.useV2 {
+				err = swsh.sendSpectrumV2(conn, session, spectrumData, state)
+			} else if state.useBinary8Mode {
 				err = swsh.sendBinary8Spectrum(conn, session, spectrumData, state)
 			} else {
 				err = swsh.sendBinarySpectrum(conn, session, spectrumData, state)

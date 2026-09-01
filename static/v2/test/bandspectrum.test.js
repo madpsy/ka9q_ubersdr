@@ -42,7 +42,9 @@ t('a full frame carries one byte per bin, behind a 22-byte header', () => {
 
 t('the bytes are dBFS with 256 subtracted, and read as a noise floor', () => {
     const f = decodeFrame(SAMPLE.full);
-    const db = Array.from(f.payload).map(dbFromByte);
+    // Not `.map(dbFromByte)`: map supplies (value, index, array), and the
+    // second parameter is now the quantisation scale.
+    const db = Array.from(f.payload).map((v) => dbFromByte(v));
     // A real 40m frame: everything below 0 dBFS, nothing at the encoder's floor,
     // and a noise floor somewhere sane for an HF receiver.
     assert.ok(Math.max(...db) < 0, `peak ${Math.max(...db)}`);

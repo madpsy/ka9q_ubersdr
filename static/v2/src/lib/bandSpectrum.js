@@ -1,3 +1,18 @@
+// Imported rather than re-exported straight through: `export { x } from './y'`
+// forwards a name without binding it locally, so this module's own code could
+// not call it — and test/unresolved.js reads such a file as using names it never
+// imported.
+//
+// The two aliases are historical: this module and the panels have always called
+// a code's value dbFromByte and its floor BYTE_FLOOR_DB, and renaming them at
+// every call site would be a large diff for nothing.
+import {
+    FRAME_DELTA, FRAME_FULL, FRAME_V2_DELTA, FRAME_V2_FULL,
+    SPEC_PROTOCOL_VERSION, SPEC_V2,
+    V1_FLOOR_DB as BYTE_FLOOR_DB,
+    applyBody, dbFromCode as dbFromByte, parseFrame, scaleFloorDb, scaleOf,
+} from './specFrame.js';
+
 // One band's live spectrum, as band_activity.html draws it.
 //
 // The server keeps a dedicated FFT per configured band — 40m at 500 Hz a bin
@@ -10,13 +25,11 @@
 // format, the auto-range walk, and the dB scale the two share. The drawing is in
 // BandSpectrumPanel.jsx.
 
-// dBFS from the wire's uint8. The encoder maps the whole scale into a byte with
-// 0 as its hard floor — those are not measurements, see AUTO floor filtering.
-export const BYTE_FLOOR_DB = -256;
-
-export function dbFromByte(v) {
-    return v - 256;
-}
+// Re-exported so this module stays the one import a band consumer needs.
+export {
+    BYTE_FLOOR_DB, FRAME_DELTA, FRAME_FULL, FRAME_V2_DELTA, FRAME_V2_FULL,
+    SPEC_PROTOCOL_VERSION, SPEC_V2, dbFromByte,
+};
 
 export function configUrl() {
     return '/api/noisefloor/config';
@@ -26,7 +39,12 @@ export function configUrl() {
 // for every card it is showing; a panel showing where the dial is needs one, and
 // asking for more would be a stream per band nobody is looking at.
 export function streamUrl(band) {
-    return `/api/noisefloor/spectrum/stream?band=${encodeURIComponent(band)}`;
+    // The version is a request, not a demand: a server that predates it ignores
+    // the parameter and keeps sending version 1, which decodeFrame recognises
+    // from the frame's own version byte and handles. So a new page against an
+    // old receiver keeps working rather than showing an empty panel.
+    return `/api/noisefloor/spectrum/stream?band=${encodeURIComponent(band)}`
+        + `&version=${SPEC_PROTOCOL_VERSION}`;
 }
 
 // What the band stream is costing, bytes per second, or null when it is not
@@ -84,13 +102,8 @@ export function bandsFromConfig(cfg) {
 
 // ── Wire format ──────────────────────────────────────────────────────────────
 //
-// A "SPEC" frame, base64 in the SSE data field: 22 bytes of header, then either
-// every bin (flags 0x03) or a run of changed bins (0x04) as [idx_lo, idx_hi,
-// value] triples behind a uint16 count. Delta frames are why the stream is
-// affordable at 4 Hz — a quiet band changes a handful of bins between frames.
-
-export const FRAME_FULL = 0x03;
-export const FRAME_DELTA = 0x04;
+// A "SPEC" frame, base64 in the SSE data field. The parsing is in specFrame.js;
+// what stays here is the base64 unwrap and this module's own naming for it.
 
 export function decodeFrame(b64) {
     let bin;
@@ -99,41 +112,34 @@ export function decodeFrame(b64) {
     } catch (e) {
         return null;
     }
-    if (bin.length < 22) return null;
-    if (bin[0] !== 'S' || bin[1] !== 'P' || bin[2] !== 'E' || bin[3] !== 'C') return null;
-
     const buf = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-    return { flags: buf[5], payload: buf.subarray(22) };
+    const frame = parseFrame(buf);
+    if (!frame) return null;
+    // `payload` rather than `body`, because that is what this module's callers
+    // and its tests have always called it.
+    return { version: frame.version, flags: frame.flags, seq: frame.seq, payload: frame.body };
 }
 
 // Fold a frame into the bin array, returning the array to hold (a new one when
 // the bin count changed) or null when the frame cannot be used — a delta with
 // no full frame before it, or a full frame of the wrong width.
+//
+// A version 2 full frame also sets `frame.scale`, which the caller keeps and
+// passes to dbFromByte; a delta does not restate it, because the scale may only
+// change on a full frame.
 export function applyFrame(bins, frame, binCount) {
     if (!frame) return bins;
-    const { flags, payload } = frame;
-
-    if (flags === FRAME_FULL) {
-        if (payload.length !== binCount) return bins;
-        const next = (bins && bins.length === binCount) ? bins : new Uint8Array(binCount);
-        next.set(payload);
-        return next;
+    if (frame.flags === FRAME_V2_FULL) frame.scale = scaleOf(frame.payload);
+    const next = applyBody(bins, { flags: frame.flags, body: frame.payload }, binCount);
+    // The historical contract here is to hold the last good frame rather than
+    // discard it, except for a delta with nothing to apply it to, which the
+    // panel treats as "not ready yet".
+    if (next === null) {
+        return (frame.flags === FRAME_DELTA || frame.flags === FRAME_V2_DELTA) && !bins
+            ? null : bins;
     }
-
-    if (flags === FRAME_DELTA) {
-        if (!bins) return null;                 // nothing to apply it to yet
-        const count = payload[0] | (payload[1] << 8);
-        for (let i = 0; i < count; i++) {
-            const off = 2 + i * 3;
-            if (off + 2 >= payload.length) break;
-            const idx = payload[off] | (payload[off + 1] << 8);
-            if (idx < bins.length) bins[idx] = payload[off + 2];
-        }
-        return bins;
-    }
-
-    return bins;
+    return next;
 }
 
 // ── Auto range ───────────────────────────────────────────────────────────────
@@ -271,14 +277,19 @@ export function rangeOf(auto, st, manual, minSpan = AUTO_SPAN_DEFAULT) {
 // Feeding them into the percentiles drags the range toward −256 whenever such
 // frames come and go — the "auto range gone mad" walk. A frame with almost no
 // real bins updates nothing, and the last good range simply holds.
-export function validValues(bins) {
+export function validValues(bins, scale) {
     if (!bins || !bins.length) return null;
     const n = bins.length;
     const out = new Float32Array(n);
+    // Version 1's floor is -256 dB, the code that a missing bin and a wrapped
+    // full-scale bin both land on. Version 2 has no wrap to guard against and
+    // its floor is wherever the transmitted reference put it, so the test is
+    // against that rather than against a constant.
+    const floor = scaleFloorDb(scale);
     let k = 0;
     for (let i = 0; i < n; i++) {
-        const db = dbFromByte(bins[i]);
-        if (db > BYTE_FLOOR_DB + 0.5) out[k++] = db;
+        const db = dbFromByte(bins[i], scale);
+        if (db > floor + 0.5) out[k++] = db;
     }
     if (k < 2 || k < n * 0.1) return null;
     const valid = out.subarray(0, k);

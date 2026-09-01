@@ -11,14 +11,25 @@
 // width.  Version 3 carries the noise power over the demodulator passband
 // instead, which makes the same subtraction an SNR in dB.
 //
+// Version 4 keeps version 3's meaning and replaces the header itself: a flags
+// byte, a varint timestamp delta, and then only the fields that actually
+// changed, with a full resynchronisation on a mode change and every five
+// seconds regardless.  That averages about 4 bytes against 21, which on frames
+// this small is between an eighth and a fifth of the whole stream — worth
+// having on a page holding a socket open to a dozen instances at once.  See
+// pcm_v4_header.go.
+//
 // This file talks to whatever instance the user picked, not to the build that
-// served it, so the default stays at 2: an instance older than 0.1.60 clamps an
-// unrecognised version to 1, whose header is 13 bytes with no signal-quality
-// fields at all, and parsing that at offset 21 feeds garbage to the Opus
-// decoder — audio breaks, not just the meter.  Callers with the instance's
+// served it, so the default stays at 2 and anything newer has to be earned.
+// Asking for a version an instance does not implement is not a clean failure:
+// up to and including 0.1.62 the server silently clamps it to 1, whose header
+// is 13 bytes with no signal-quality fields at all, and parsing that at offset
+// 21 feeds garbage to the Opus decoder — audio breaks, not just the meter.
+// Only from 0.1.63 is the connection refused instead, which is at least a tile
+// that visibly fails rather than one that hisses.  Callers with the instance's
 // reported version in hand pass MinimalRadio.protocolVersionFor(v) instead.
 //
-// Either way this class exposes one scale: `signalSNR` and
+// Whatever is negotiated, this class exposes one scale: `signalSNR` and
 // `getSignalQuality().snr` are always a true SNR in dB, because a version 2
 // noise density is converted to passband noise power on arrival — see
 // _noisePowerFrom() and channelNoisePower in radiod_status.go.
@@ -33,6 +44,86 @@ const DEFAULT_PROTOCOL_VERSION = 2;
 // noise density is converted on arrival either way.
 const V3_MIN_INSTANCE_VERSION = [0, 1, 61];
 
+// And for version 4, by the same rule and for the same reason it is needed.
+//
+// The version constant is bumped when a release is cut, so work that lands
+// after the bump ships in the NEXT release while still reporting the previous
+// number.  Version 3 landed on a tree reporting 0.1.60 and shipped in 0.1.61,
+// which is why its gate reads 0.1.61 rather than 0.1.60; version 4 landed on a
+// tree reporting 0.1.62 and ships in 0.1.63.  The release the work lands on is
+// therefore ambiguous — some builds calling themselves 0.1.62 implement version
+// 4 and some do not — and the ambiguous case has to fall back rather than be
+// optimistic, because a 0.1.62 release answers a request for version 4 with
+// version 1 frames rather than an error.
+const V4_MIN_INSTANCE_VERSION = [0, 1, 63];
+
+// Spectrum wire protocol version asked for at connect.  Unlike the audio
+// socket this needs no gate: an instance too old to know the parameter ignores
+// it and keeps sending version 1, and every build that reads it implements 2,
+// so no build can refuse it.  parseBinarySpectrum reads both formats.
+const SPECTRUM_PROTOCOL_VERSION = 2;
+
+// Version 4 Opus header flags.  They live in the LOW bits deliberately: an Opus
+// frame carries no magic, and frames are sorted by elimination — a version 4
+// PCM magic, else Opus — so the two must not be able to collide.  They cannot:
+// the PCM magic's first byte is 0x50, which has bit 4 set, while a flags byte
+// using only bits 0 and 1 never exceeds 0x03.
+const OPUS_V4_FLAG_QUALITY = 1 << 0;
+const OPUS_V4_FLAG_METADATA = 1 << 1;
+
+// "PCM4" little-endian, the magic on a version 4 lossless frame.
+const PCM_V4_MAGIC = 0x344d4350;
+
+// Version 4 signal quality travels as signed centidecibels, with one codepoint
+// reserved for "radiod reported nothing".  It stands in for the -999 sentinel,
+// which cannot be represented: -99900 overflows an int16.
+const QUALITY_NO_READING = -32768;
+
+// dB from a centidecibel reading.  A missing reading comes back as -999, the
+// sentinel the rest of this file and its callers already test for with
+// `> -900` — shared_session.js relays these as float32 and multi_monitor.js
+// calls toFixed() on them, so a null here would surface as "null dBFS".
+function qualityDb(v) {
+    return v === QUALITY_NO_READING ? -999 : v / 100;
+}
+
+// LEB128, as Go's binary.PutUvarint writes it.  Returns [value, nextOffset], or
+// null for a varint that runs off the end of the frame.
+function opusV4Uvarint(u8, off) {
+    let x = 0, s = 0;
+    for (let i = off; i < u8.length && i < off + 10; i++) {
+        const b = u8[i];
+        if (b < 0x80) return [x + b * Math.pow(2, s), i + 1];
+        x += (b & 0x7f) * Math.pow(2, s);
+        s += 7;
+    }
+    return null;
+}
+
+// The signed form, as binary.PutVarint writes it: zigzag over the above.  The
+// halving is arithmetic rather than a shift because a timestamp delta is not
+// promised to fit in the 32 bits a shift would truncate it to.
+function opusV4Varint(u8, off) {
+    const r = opusV4Uvarint(u8, off);
+    if (!r) return null;
+    const u = r[0];
+    return [(u % 2 === 0) ? u / 2 : -(u + 1) / 2, r[1]];
+}
+
+// Whether a binary frame is a version 4 lossless PCM packet rather than Opus.
+// Both arrive on the same socket, because the server picks the format per
+// packet and forces PCM in IQ modes whatever was negotiated.
+function isPCMv4Frame(buffer) {
+    if (buffer.byteLength < 5) return false;
+    return new DataView(buffer).getUint32(0, true) === PCM_V4_MAGIC;
+}
+
+// Popcount of a byte, for the version 2 spectrum delta: its mask has to be
+// counted in full before a single bin is touched, and a bit at a time cost more
+// than the apply itself.
+const SPEC_POPCOUNT = new Uint8Array(256);
+for (let i = 0; i < 256; i++) SPEC_POPCOUNT[i] = SPEC_POPCOUNT[i >> 1] + (i & 1);
+
 class MinimalRadio {
     constructor(userSessionID = null, baseUrl = null, protocolVersion = DEFAULT_PROTOCOL_VERSION) {
         // Use provided session ID or generate new one
@@ -41,8 +132,18 @@ class MinimalRadio {
         // Base URL for connecting to remote instances (null = use current host)
         this.baseUrl = baseUrl;
 
-        // Audio protocol version to request (2 or 3 — see above)
-        this.protocolVersion = (protocolVersion === 3) ? 3 : DEFAULT_PROTOCOL_VERSION;
+        // Audio protocol version to request (2, 3 or 4 — see above).  Anything
+        // else, including a version this build does not implement, falls back
+        // to the default rather than being passed through to the instance.
+        this.protocolVersion = (protocolVersion === 3 || protocolVersion === 4)
+            ? protocolVersion
+            : DEFAULT_PROTOCOL_VERSION;
+
+        // Version 4 header state.  Stateful by design: a packet carries only
+        // what changed since the last one, so this must be cleared whenever a
+        // socket is opened — what the previous session announced does not
+        // describe this one.
+        this._resetOpusHeaderState();
 
 
         // Audio state
@@ -97,7 +198,8 @@ class MinimalRadio {
         this.spectrumConnected = false;
         this.spectrumCallback = null;
         this.spectrumConfig = null; // Store spectrum config (centerFreq, binCount, etc.)
-        this.binarySpectrumData8 = null; // State for binary8 delta decoding
+        this.binarySpectrumData8 = null; // Wire codes the deltas are applied to
+        this.spectrumScale = null;       // { ref, step } from the last version 2 full frame
         
         // Heartbeat timer
         this.heartbeatInterval = null;
@@ -113,17 +215,26 @@ class MinimalRadio {
     //
     // Anything unparseable or absent — an instance that predates the field, a
     // page whose API does not carry it — is treated as old and gets version 2.
-    // A pre-release of the gate version ("0.1.61-rc1") counts as new enough:
-    // the numbers are what matter, and version 3 was already in 0.1.60.
+    // A pre-release of a gate version ("0.1.61-rc1") counts as new enough: the
+    // numbers are what matter, and version 3 was already in 0.1.60.
+    //
+    // Highest first, so a receiver gets the newest format it can certainly
+    // read.  This only ever walks down from what the instance claims: guessing
+    // upwards costs a tile that will not play at all.
     static protocolVersionFor(instanceVersion) {
         const v = MinimalRadio._parseVersion(instanceVersion);
         if (!v) return DEFAULT_PROTOCOL_VERSION;
+        if (MinimalRadio._atLeast(v, V4_MIN_INSTANCE_VERSION)) return 4;
+        if (MinimalRadio._atLeast(v, V3_MIN_INSTANCE_VERSION)) return 3;
+        return DEFAULT_PROTOCOL_VERSION;
+    }
+
+    // Whether [major, minor, patch] v is not older than gate.
+    static _atLeast(v, gate) {
         for (let i = 0; i < 3; i++) {
-            if (v[i] !== V3_MIN_INSTANCE_VERSION[i]) {
-                return v[i] > V3_MIN_INSTANCE_VERSION[i] ? 3 : DEFAULT_PROTOCOL_VERSION;
-            }
+            if (v[i] !== gate[i]) return v[i] > gate[i];
         }
-        return 3;   // exactly the gate version
+        return true;    // exactly the gate version
     }
 
     // "0.1.61", "v0.1.61", "0.1.61-rc1" → [0, 1, 61].  Null for anything else,
@@ -274,6 +385,7 @@ class MinimalRadio {
         this.opusDecoderInitialized = false;
         this.opusDecoderSampleRate = null;
         this.opusDecoderChannels = null;
+        this._resetOpusHeaderState();
 
         // Reset state
         this.serverSampleRate = null;
@@ -372,6 +484,12 @@ class MinimalRadio {
             const { host: wsHost, protocol: wsProtocol } = this.getTargetHostAndProtocol();
             const protocol = wsProtocol === 'https:' ? 'wss:' : 'ws:';
             let wsUrl = `${protocol}//${wsHost}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus&version=${this.protocolVersion}`;
+
+            // The version 4 header decoder tracks what the peer has told it,
+            // and this socket has been told nothing yet — including on the
+            // reconnect path, where the instance starts a fresh encoder.
+            this._resetOpusHeaderState();
+
             this._connectMuted = this.serverMuted;
             if (this._connectMuted) wsUrl += '&muted=1';
 
@@ -487,7 +605,83 @@ class MinimalRadio {
         return noise + 10 * Math.log10(bandwidth);
     }
 
-    // Handle binary Opus audio messages (version 2/3 protocol)
+    // Clear what the version 4 header decoder has been told.  A fresh socket
+    // gets a fresh encoder on the instance, so this has to run in step with one.
+    _resetOpusHeaderState() {
+        this._opusHeader = {
+            haveMetadata: false,
+            sampleRate: 0,
+            channels: 1,
+            power: QUALITY_NO_READING,
+            noise: QUALITY_NO_READING
+        };
+    }
+
+    // Decode the version 4 header at the front of an Opus frame, returning
+    // { bodyOffset, sampleRate, channels, basebandPower, noise } or null for a
+    // frame that cannot be read — including one that arrives before any
+    // resynchronisation point, which is what joining a stream part-way through
+    // looks like.  The five-second resync is what ends that.
+    //
+    // The mirror of AppendOpusHeader in pcm_v4_header.go, and a copy of
+    // OpusV4HeaderDecoder in static/v2/src/radio/pcm-v4.js.  This page is plain
+    // scripts with no build step and cannot import from there, so a change to
+    // the format has to be made in both places; pcm-v4.js is the one to change
+    // first.
+    _decodeOpusHeader(buffer) {
+        const u8 = new Uint8Array(buffer);
+        const view = new DataView(buffer);
+        if (u8.length < 2) return null;
+
+        const flags = u8[0];
+        if (flags & ~(OPUS_V4_FLAG_QUALITY | OPUS_V4_FLAG_METADATA)) return null;
+
+        const state = this._opusHeader;
+        let off = 1;
+
+        // The metadata bit marks a resynchronisation, which is also what
+        // carries a full timestamp; the two never differ.  The timestamp itself
+        // is stepped over — nothing in this class reads it, and version 3 did
+        // not expose it either.
+        if (flags & OPUS_V4_FLAG_METADATA) {
+            if (off + 8 > u8.length) return null;
+            off += 8;
+        } else {
+            if (!state.haveMetadata) return null;
+            const d = opusV4Varint(u8, off);
+            if (!d) return null;
+            off = d[1];
+        }
+
+        if (flags & OPUS_V4_FLAG_METADATA) {
+            const r = opusV4Uvarint(u8, off);
+            if (!r) return null;
+            state.sampleRate = r[0];
+            off = r[1];
+            if (off >= u8.length) return null;
+            state.channels = u8[off++] || 1;
+            state.haveMetadata = true;
+        }
+
+        if (flags & OPUS_V4_FLAG_QUALITY) {
+            if (off + 4 > u8.length) return null;
+            state.power = view.getInt16(off, true);
+            state.noise = view.getInt16(off + 2, true);
+            off += 4;
+        }
+
+        if (!state.sampleRate) return null;
+
+        return {
+            bodyOffset: off,
+            sampleRate: state.sampleRate,
+            channels: state.channels,
+            basebandPower: qualityDb(state.power),
+            noise: qualityDb(state.noise)
+        };
+    }
+
+    // Handle binary Opus audio messages (version 2/3/4 protocol)
     async handleBinaryMessage(data) {
         try {
             // Convert Blob to ArrayBuffer if needed
@@ -498,23 +692,56 @@ class MinimalRadio {
                 arrayBuffer = data;
             }
 
-            // Parse binary Opus packet header - version 2/3 layout
-            // Format: [timestamp:8][sampleRate:4][channels:1][basebandPower:4][noise:4][opusData...]
-            const view = new DataView(arrayBuffer);
+            let sampleRate, channels, basebandPower, noisePower, opusData;
 
-            if (arrayBuffer.byteLength < 21) {
-                console.error(`Binary packet too short for version ${this.protocolVersion}:`, arrayBuffer.byteLength, 'bytes (expected ≥21)');
-                return;
+            if (this.protocolVersion >= 4) {
+                // Sort the frame before parsing it.  The instance picks the
+                // format per packet, so a session that negotiated Opus is sent
+                // lossless PCM the moment it tunes to IQ, and always if the
+                // instance was built without libopus.  This class decodes Opus
+                // only; the four-byte magic is what tells the two apart, and it
+                // cannot false-positive on an Opus frame (see
+                // OPUS_V4_FLAG_QUALITY).
+                if (isPCMv4Frame(arrayBuffer)) return;
+
+                // The version 4 header is variable length and carries only what
+                // changed, so where the Opus payload begins has to be parsed
+                // rather than assumed.  Slicing at version 3's fixed offset
+                // would not fail loudly — it would feed the decoder a few bytes
+                // of audio as though they were metadata, which sounds like
+                // noise rather than like an error.
+                const header = this._decodeOpusHeader(arrayBuffer);
+                if (!header) {
+                    console.error('Unreadable version 4 Opus header:', arrayBuffer.byteLength, 'bytes');
+                    return;
+                }
+                sampleRate = header.sampleRate;
+                channels = header.channels;
+                basebandPower = header.basebandPower;
+                noisePower = this._noisePowerFrom(header.noise);
+                opusData = new Uint8Array(arrayBuffer, header.bodyOffset);
+            } else {
+                // Version 2/3 layout, a fixed header on every packet
+                // Format: [timestamp:8][sampleRate:4][channels:1][basebandPower:4][noise:4][opusData...]
+                const view = new DataView(arrayBuffer);
+
+                if (arrayBuffer.byteLength < 21) {
+                    console.error(`Binary packet too short for version ${this.protocolVersion}:`, arrayBuffer.byteLength, 'bytes (expected ≥21)');
+                    return;
+                }
+
+                // Parse header fields
+                sampleRate = view.getUint32(8, true);     // 4 bytes, little-endian
+                channels = view.getUint8(12);             // 1 byte
+                basebandPower = view.getFloat32(13, true); // 4 bytes, little-endian
+                // Density on version 2, passband power on version 3 — normalised
+                // to passband power either way so everything downstream sees one
+                // scale.
+                noisePower = this._noisePowerFrom(view.getFloat32(17, true));
+
+                // Opus data starts at byte 21 on version 2/3
+                opusData = new Uint8Array(arrayBuffer, 21);
             }
-
-            // Parse header fields
-            const timestamp = view.getBigUint64(0, true);   // 8 bytes, little-endian
-            const sampleRate = view.getUint32(8, true);     // 4 bytes, little-endian
-            const channels = view.getUint8(12);             // 1 byte
-            const basebandPower = view.getFloat32(13, true); // 4 bytes, little-endian
-            // Density on version 2, passband power on version 3 — normalised to
-            // passband power either way so everything downstream sees one scale.
-            const noisePower = this._noisePowerFrom(view.getFloat32(17, true));
 
             // Store signal quality metrics
             this.basebandPower = basebandPower;
@@ -526,9 +753,6 @@ class MinimalRadio {
             } else {
                 this.signalSNR = null;
             }
-
-            // Opus data starts at byte 21 on version 2/3
-            const opusData = new Uint8Array(arrayBuffer, 21);
 
             // Relay callback — fires before decode so the owner can forward raw Opus bytes
             // without paying the cost of decoding twice. Signal metrics are included so
@@ -827,8 +1051,15 @@ class MinimalRadio {
                 wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
             }
 
-            // Request binary8 mode for maximum bandwidth reduction (8-bit encoding)
-            wsUrl += `&mode=binary8`;
+            // Request binary8 mode for maximum bandwidth reduction (8-bit
+            // encoding), and version 2 of the frame format on top of it — a
+            // change mask instead of an index per changed bin, and a
+            // quantisation scale derived from the data rather than a fixed
+            // 1 dB step over a 256 dB window.  Measured on real frames that is
+            // about 2.15x smaller for the same content; see user_spectrum_v2.go.
+            // No version gate: an instance too old to know the parameter
+            // ignores it and keeps sending version 1, which is still read.
+            wsUrl += `&mode=binary8&version=${SPECTRUM_PROTOCOL_VERSION}`;
 
             console.log('Connecting to spectrum WebSocket:', wsUrl);
             this.spectrumWs = new WebSocket(wsUrl);
@@ -933,64 +1164,60 @@ class MinimalRadio {
     }
 
     // Parse binary spectrum message (matching spectrum-display.js)
+    // Parse a binary "SPEC" spectrum frame.
+    //
+    // Both versions arrive here. Frames are self-describing, and a server too
+    // old to understand the version parameter keeps sending version 1 whatever
+    // was asked for:
+    //
+    //   v1 (22-byte header)
+    //     0x03 full  : [code u8 × n]                       dB = code - 256
+    //     0x04 delta : [count u16][index u16, value u8] × count
+    //   v2 (24-byte header, two more for a sequence number)
+    //     0x05 full  : [refCentiDB i16][stepCentiDB u8][code u8 × n]
+    //     0x06 delta : [mask ⌈n/8⌉ bytes][value u8 per set bit]
+    //                                            dB = (ref + code × step) / 100
+    //
+    // Version 2's scale travels with each full frame rather than being fixed,
+    // so the resolution follows the data instead of spending more than half a
+    // 256 dB window on decibels the bins never occupy. A delta never restates
+    // it: the scale may only change on a full frame.
+    //
+    // THIS IS A COPY. The canonical definition of the format — header layout,
+    // both versions, the change mask, the scale arithmetic — is
+    // static/v2/src/lib/specFrame.js, which the v2 bundle's waterfall and band
+    // panel both import. This page is plain scripts with no build step and
+    // cannot import from there, as are band_activity.html and
+    // static/minimal-radio.js, which carry the same copy. specFrame.js is the
+    // one to change first.
     parseBinarySpectrum(view) {
-        // Parse header (22 bytes)
-        const version = view.getUint8(4);
-        const flags = view.getUint8(5);
-        const timestamp = Number(view.getBigUint64(6, true)); // little-endian
-        const frequency = Number(view.getBigUint64(14, true)); // little-endian
+        const u8 = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+        if (u8.length < 22) return null;
 
-        if (version !== 0x01) {
+        const version = u8[4];
+        const flags = u8[5];
+        if (version !== 0x01 && version !== 0x02) {
             console.error('Unsupported binary protocol version:', version);
             return null;
         }
 
-        let spectrumData;
+        // Version 2 puts a sequence number at offset 6 and pushes everything
+        // after it along by two.
+        const headerLen = version === 0x02 ? 24 : 22;
+        if (u8.length < headerLen) return null;
+        const tsOffset = version === 0x02 ? 8 : 6;
+        const timestamp = Number(view.getBigUint64(tsOffset, true)); // little-endian
+        const frequency = Number(view.getBigUint64(tsOffset + 8, true)); // little-endian
 
-        if (flags === 0x03) {
-            // Full frame (uint8) - binary8 format
-            const binCount = view.byteLength - 22;
-            spectrumData = new Float32Array(binCount);
+        if (!this._applySpectrumFrame(flags, u8.subarray(headerLen))) return null;
 
-            for (let i = 0; i < binCount; i++) {
-                // Convert uint8 to dBFS: 0 = -256 dB, 255 = -1 dB
-                const uint8Value = view.getUint8(22 + i);
-                spectrumData[i] = uint8Value - 256;
-            }
-
-            // Store for delta decoding (as uint8)
-            this.binarySpectrumData8 = new Uint8Array(binCount);
-            for (let i = 0; i < binCount; i++) {
-                this.binarySpectrumData8[i] = view.getUint8(22 + i);
-            }
-
-        } else if (flags === 0x04) {
-            // Delta frame (uint8) - binary8 format
-            if (!this.binarySpectrumData8) {
-                console.error('Binary8 delta frame received before full frame');
-                return null;
-            }
-
-            const changeCount = view.getUint16(22, true); // little-endian
-            let offset = 24;
-
-            // Apply changes to previous uint8 data
-            for (let i = 0; i < changeCount; i++) {
-                const index = view.getUint16(offset, true); // little-endian
-                const value = view.getUint8(offset + 2); // uint8 value
-                this.binarySpectrumData8[index] = value;
-                offset += 3; // 2 bytes index + 1 byte value
-            }
-
-            // Convert uint8 array to float32 for display
-            spectrumData = new Float32Array(this.binarySpectrumData8.length);
-            for (let i = 0; i < this.binarySpectrumData8.length; i++) {
-                spectrumData[i] = this.binarySpectrumData8[i] - 256;
-            }
-
-        } else {
-            console.error('Unknown binary frame flags:', flags);
-            return null;
+        // Codes to dBFS. Version 1 has no scale of its own, which is what the
+        // null case below stands for.
+        const codes = this.binarySpectrumData8;
+        const scale = this.spectrumScale;
+        const spectrumData = new Float32Array(codes.length);
+        for (let i = 0; i < codes.length; i++) {
+            spectrumData[i] = scale ? (scale.ref + codes[i] * scale.step) / 100 : codes[i] - 256;
         }
 
         // Return in same format as JSON messages
@@ -1000,6 +1227,104 @@ class MinimalRadio {
             frequency: frequency,
             timestamp: timestamp
         };
+    }
+
+    // Fold one frame's body into the accumulated codes, returning whether they
+    // can now be read. A frame is dropped whole rather than applied part way:
+    // half-updated bins would stay wrong until the next full frame.
+    _applySpectrumFrame(flags, body) {
+        if (flags === 0x05) {
+            // Version 2 full frame: [refCentiDB i16][stepCentiDB u8][codes...]
+            if (body.length < 3) return false;
+            const step = body[2];
+            if (step === 0) return false;
+            const ref = ((body[0] | (body[1] << 8)) << 16) >> 16;
+            const binCount = body.length - 3;
+            this.spectrumScale = { ref: ref, step: step };
+            if (!this.binarySpectrumData8 || this.binarySpectrumData8.length !== binCount) {
+                this.binarySpectrumData8 = new Uint8Array(binCount);
+            }
+            this.binarySpectrumData8.set(body.subarray(3));
+            return true;
+        }
+
+        if (flags === 0x06) {
+            // Version 2 delta: one bit per bin, then one value byte per set
+            // bit. The count is implied, so a length that disagrees with the
+            // mask is malformed. Stray bits past binCount in the trailing byte
+            // are counted here — with the value bytes they imply — and then
+            // never applied.
+            const codes = this.binarySpectrumData8;
+            if (!codes || !this.spectrumScale) {
+                console.error('Spectrum delta frame received before a full frame');
+                return false;
+            }
+            const n = codes.length;
+            const maskLen = (n + 7) >> 3;
+            if (body.length < maskLen) return false;
+            let expected = 0;
+            for (let b = 0; b < maskLen; b++) expected += SPEC_POPCOUNT[body[b]];
+            if (body.length !== maskLen + expected) return false;
+
+            // Byte-wise, because a quiet delta's mask is mostly zero bytes and
+            // each one skipped is eight bins never looked at. Within a byte,
+            // peel set bits low to high — `m & -m` isolates the lowest, clz32
+            // names it, `m &= m - 1` clears it — the order they were packed in.
+            let vi = maskLen;
+            const whole = n >> 3;
+            for (let b = 0; b < whole; b++) {
+                let m = body[b];
+                if (m === 0) continue;
+                const base = b << 3;
+                do {
+                    codes[base + (31 - Math.clz32(m & -m))] = body[vi++];
+                    m &= m - 1;
+                } while (m);
+            }
+            if (whole < maskLen) {
+                let m = body[whole] & ((1 << (n & 7)) - 1);
+                const base = whole << 3;
+                while (m) {
+                    codes[base + (31 - Math.clz32(m & -m))] = body[vi++];
+                    m &= m - 1;
+                }
+            }
+            return true;
+        }
+
+        if (flags === 0x03) {
+            // Version 1 full frame (uint8) — binary8 format
+            const binCount = body.length;
+            if (!this.binarySpectrumData8 || this.binarySpectrumData8.length !== binCount) {
+                this.binarySpectrumData8 = new Uint8Array(binCount);
+            }
+            this.binarySpectrumData8.set(body);
+            // The fixed -256..0 dB mapping applies; a scale left over from a
+            // version 2 stream would be wrong.
+            this.spectrumScale = null;
+            return true;
+        }
+
+        if (flags === 0x04) {
+            // Version 1 delta (uint8) — [count u16] then index/value triples
+            const codes = this.binarySpectrumData8;
+            if (!codes) {
+                console.error('Binary8 delta frame received before full frame');
+                return false;
+            }
+            if (body.length < 2) return false;
+            const count = body[0] | (body[1] << 8);
+            if (2 + count * 3 > body.length) return false;
+            for (let i = 0; i < count; i++) {
+                const off = 2 + i * 3;
+                const idx = body[off] | (body[off + 1] << 8);
+                if (idx < codes.length) codes[idx] = body[off + 2];
+            }
+            return true;
+        }
+
+        console.error('Unknown binary frame flags:', flags);
+        return false;
     }
 
     // Handle spectrum WebSocket messages
@@ -1071,6 +1396,9 @@ class MinimalRadio {
         this.spectrumConnected = false;
         this.spectrumCallback = null;
         this.spectrumConfig = null;
+        // The accumulator and the scale describe the stream that just ended.
+        this.binarySpectrumData8 = null;
+        this.spectrumScale = null;
     }
 
     // Get current signal quality metrics (from the audio header)

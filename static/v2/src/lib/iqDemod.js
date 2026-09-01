@@ -333,6 +333,108 @@ const DC_CORNER_HZ = 20;
 // sounds like the demodulator is wrong.
 const DEEMPHASIS_SEC = 750e-6;
 
+// ── squelch ──────────────────────────────────────────────────────────────────
+//
+// Measured on the filtered complex signal, between stages 2 and 3, and that
+// choice is the whole design.
+//
+// It is the power *in this demodulator's passband*, which is the only quantity
+// that means the same thing in all five modes: an SSB detector's output level
+// says nothing about whether anything is there when the AGC has just wound the
+// noise up to the same amplitude a voice would have, and an FM discriminator's
+// output is loudest when there is no carrier at all. Taken before the mode's own
+// step and before the AGC, the figure is simply how much energy is arriving
+// between the filter's skirts — so one threshold behaves the same way whichever
+// demodulator it is set on, and moving the offset onto a signal raises it.
+//
+// It is in dBFS, referred the same way lib/iqSpectrum.js refers the picture: the
+// low-pass has unity gain at DC, so a full-scale carrier inside the passband
+// reads 0 dB in both. That is what lets the panel draw the threshold as a line
+// across the passband on the spectrum — see squelchLineDb there for the one
+// correction that needs, which is a bandwidth one and not a reference one.
+//
+// The floor of the range is "off" rather than a threshold nothing can reach: an
+// operator who has dragged the slider to the bottom means the squelch to be out
+// of the way, and a control with a separate switch beside it would be two
+// gestures for one decision.
+//
+// -60 dB is where that floor sits, and it is a statement about this stream
+// rather than about decibels. What arrives here is 12 kHz of baseband at the
+// receiver's own scaling, and everything a squelch is ever set between — the
+// noise in a voice passband and the signals standing out of it — is in the top
+// sixty decibels of full scale. A range reaching down to the quantisation floor
+// would spend most of the slider's travel below anything that ever happens,
+// which is most of its precision thrown away at exactly the place the control
+// needs it.
+export const SQUELCH_OFF = -60;
+export const SQUELCH_MAX = 0;
+
+// How far the level has to fall back before the gate shuts again. Without it a
+// signal sitting on the threshold chops the audio into fragments at the rate the
+// envelope wanders, which is the one failure that makes a squelch worse than no
+// squelch.
+const SQUELCH_HYSTERESIS_DB = 3;
+
+// And how long it stays open after the level has gone.
+//
+// Half a second, which is long by the standards of an FM repeater's tail and
+// deliberately so: this is squelching SSB and CW as often as FM, where the gaps
+// are the spaces between words and the spaces between characters. A tail short
+// enough to go unnoticed on FM chops those into fragments, and a chopped signal
+// is harder to copy than an open channel.
+//
+// The asymmetry with the opening below is the whole shape of the control:
+// shutting is a decision that can afford to be wrong for half a second, and
+// opening is one that cannot be late at all, because what it would be late for
+// is the start of somebody's transmission.
+const SQUELCH_HANG_SEC = 0.5;
+
+// The detector's own smoothing, asymmetric for the same reason.
+//
+// Three milliseconds up, so the level is at the signal within a syllable's
+// onset and the gate opens on the first thing said rather than the second.
+// Fifty down, so it does not follow the troughs of a modulated signal into the
+// hysteresis and back out again between one word and the next.
+const SQUELCH_ATTACK_SEC = 0.003;
+const SQUELCH_DECAY_SEC = 0.05;
+
+// And the gate's own edges, which exist only to keep it from clicking.
+//
+// Two milliseconds open — far below anything the ear places, so the gate is
+// instant in every sense that matters and still not a step discontinuity —
+// against fifteen shut, where there is no hurry and the slower fade is the
+// quieter one.
+const SQUELCH_OPEN_SEC = 0.002;
+const SQUELCH_SHUT_SEC = 0.015;
+
+// What the level reads when there is nothing at all, rather than -Infinity —
+// which is not a number a slider or a canvas can be given.
+export const SQUELCH_SILENT_DB = -160;
+
+// The bottom of the row's signal meter, in dBFS, and it is the squelch's floor
+// on purpose rather than by coincidence.
+//
+// The threshold is drawn as a mark on this meter, so the two are one scale or
+// they are nothing: a meter reaching further down than the slider could put a
+// mark in only the top part of the bar, and one reaching less far would clamp
+// thresholds an operator can still set. Sharing the figure makes the mark's
+// travel and the fill's travel the same travel, which is what lets the bar be
+// read as "how far over the threshold is it".
+export const SIGNAL_FLOOR_DB = SQUELCH_OFF;
+
+/**
+ * A passband level as a fraction of the row's meter, 0..1.
+ *
+ * Exported and pure because it is used twice over and the two have to agree:
+ * once for the bar itself, and once for the mark on it showing where the
+ * squelch is set. A threshold drawn on a different scale from the level it is a
+ * threshold for would be worse than no mark at all.
+ */
+export function signalMeter(db) {
+    if (db == null || !Number.isFinite(db)) return 0;
+    return clamp((db - SIGNAL_FLOOR_DB) / -SIGNAL_FLOOR_DB, 0, 1);
+}
+
 /**
  * One demodulator's worth of state.
  *
@@ -358,10 +460,22 @@ export class DemodChain {
         this.dcY = 0;
         this.deY = 0;
         this.env = 0;
+        this.sigPow = 0;
+        this.gateOn = true;
+        this.gateGain = 1;
+        this.hang = 0;
         this.out = new Float32Array(0);
         // Published for the meter, and for the panel to show that something is
-        // arriving even when the audio is muted.
+        // arriving even when the audio is muted. Taken before the squelch, for
+        // the same reason: a gate that has shut is a thing to show, not a
+        // reason to stop measuring.
         this.level = 0;
+        // The squelch's own two readings — how much is in the passband, in
+        // dBFS, and whether that is currently enough. Both are drawn by the
+        // panel: the level as a marker on the threshold slider, and the gate
+        // as the state of the row.
+        this.sigDb = SQUELCH_SILENT_DB;
+        this.gateOpen = true;
     }
 
     /**
@@ -409,6 +523,15 @@ export class DemodChain {
         this.deY = 0;
         this.env = 0;
         this.level = 0;
+        this.sigPow = 0;
+        // Open, so starting never clips the first syllable. With a squelch set
+        // and nothing arriving it shuts again within a few tens of
+        // milliseconds, which is the right way round for the two mistakes.
+        this.gateOn = true;
+        this.gateGain = 1;
+        this.hang = 0;
+        this.sigDb = SQUELCH_SILENT_DB;
+        this.gateOpen = true;
     }
 
     /**
@@ -418,7 +541,7 @@ export class DemodChain {
      * next one — the caller copies it into an AudioBuffer immediately, which is
      * the only thing that reads it.
      */
-    process(planeI, planeQ, frames, { agc = true, gain = 1 } = {}) {
+    process(planeI, planeQ, frames, { agc = true, gain = 1, squelchDb = SQUELCH_OFF } = {}) {
         if (!this.plan || !this.taps || !frames) return null;
         if (this.out.length < frames) this.out = new Float32Array(frames);
         const out = this.out;
@@ -440,7 +563,20 @@ export class DemodChain {
         // width control gives it: a 10 kHz NFM filter is +/-5 kHz of deviation.
         const fmScale = cutoffHz > 0 ? rate / (2 * Math.PI * cutoffHz) : 0;
 
+        // The squelch, in the units the inner loop can use: powers rather than
+        // decibels, and per-sample coefficients rather than seconds. All of it
+        // is computed here so the loop itself carries no logarithms.
+        const squelching = squelchDb > SQUELCH_OFF;
+        const openPow = 10 ** (squelchDb / 10);
+        const shutPow = 10 ** ((squelchDb - SQUELCH_HYSTERESIS_DB) / 10);
+        const hangSamples = Math.round(rate * SQUELCH_HANG_SEC);
+        const sigAtk = 1 - Math.exp(-1 / (rate * SQUELCH_ATTACK_SEC));
+        const sigDec = 1 - Math.exp(-1 / (rate * SQUELCH_DECAY_SEC));
+        const gateUp = 1 - Math.exp(-1 / (rate * SQUELCH_OPEN_SEC));
+        const gateDown = 1 - Math.exp(-1 / (rate * SQUELCH_SHUT_SEC));
+
         let { pos, mixPhase, shiftPhase, lastI, lastQ, dcX, dcY, deY, env } = this;
+        let { sigPow, gateOn, gateGain, hang } = this;
         let sumSq = 0;
 
         for (let k = 0; k < frames; k++) {
@@ -466,6 +602,30 @@ export class DemodChain {
                 fi += h * bufI[pos + t];
                 fq += h * bufQ[pos + t];
             }
+
+            // The squelch's measurement, taken here because this is the only
+            // point in the chain where the number means "how much is in the
+            // passband" rather than "how loud the mode made it". Power rather
+            // than magnitude: the comparison is against a squared threshold, so
+            // the square root belongs once per block and not once per sample.
+            const sigNow = fi * fi + fq * fq;
+            sigPow += (sigNow > sigPow ? sigAtk : sigDec) * (sigNow - sigPow);
+            if (squelching) {
+                if (sigPow >= openPow) {
+                    // Instantly, and from wherever the gate was: a signal over
+                    // the threshold opens it and hands it the whole hang again.
+                    gateOn = true;
+                    hang = hangSamples;
+                } else if (sigPow < shutPow) {
+                    // Between the two thresholds nothing is decided — that gap
+                    // is the hysteresis — and below the lower one the hang has
+                    // to run out before the gate shuts.
+                    if (hang > 0) hang--;
+                    else gateOn = false;
+                }
+            }
+            const want = squelching ? (gateOn ? 1 : 0) : 1;
+            gateGain += (want > gateGain ? gateUp : gateDown) * (want - gateGain);
 
             // 3 — the mode's own step.
             let y;
@@ -509,7 +669,12 @@ export class DemodChain {
             }
             y *= gain;
 
+            // Measured before the gate and heard after it: the meter goes on
+            // saying what the demodulator is producing while the squelch is
+            // holding it back, which is what makes a threshold set by eye
+            // possible at all.
             sumSq += y * y;
+            y *= gateGain;
             out[k] = y > 1 ? 1 : (y < -1 ? -1 : y);
         }
 
@@ -525,7 +690,15 @@ export class DemodChain {
         this.dcY = dcY;
         this.deY = deY;
         this.env = env;
+        this.sigPow = sigPow;
+        this.gateOn = gateOn;
+        this.gateGain = gateGain;
+        this.hang = hang;
         this.level = Math.sqrt(sumSq / frames);
+        this.sigDb = sigPow > 0
+            ? Math.max(SQUELCH_SILENT_DB, 10 * Math.log10(sigPow))
+            : SQUELCH_SILENT_DB;
+        this.gateOpen = !squelching || gateOn;
         return out;
     }
 }
@@ -595,6 +768,10 @@ const VFO_DEFAULTS = {
     pitchHz: 700,
     agc: true,
     gain: 1,
+    // Off, and deliberately: a squelch is a thing you reach for on a quiet
+    // channel, and one set by default would be a demodulator that is silent on
+    // arrival with nothing on screen saying why.
+    squelchDb: SQUELCH_OFF,
     pan: 'center',
     muted: false,
     // Whether its controls are showing. A view state, but a persisted one: which
@@ -643,6 +820,7 @@ function sanitiseVfo(raw) {
         widths[m.id] = Number.isFinite(Number(stored)) ? clampWidth(m.id, stored) : m.fallback;
     }
     const gain = Number(src.gain);
+    const squelchDb = Number(src.squelchDb);
     return {
         mode,
         widths,
@@ -650,6 +828,9 @@ function sanitiseVfo(raw) {
         pitchHz: clamp(Math.round(Number(src.pitchHz) || VFO_DEFAULTS.pitchHz), PITCH_MIN, PITCH_MAX),
         agc: src.agc !== false,
         gain: Number.isFinite(gain) ? clamp(gain, 0, 4) : 1,
+        squelchDb: Number.isFinite(squelchDb)
+            ? clamp(Math.round(squelchDb), SQUELCH_OFF, SQUELCH_MAX)
+            : SQUELCH_OFF,
         pan: PAN_VALUES.includes(src.pan) ? src.pan : 'center',
         muted: src.muted === true,
         open: src.open !== false,
@@ -752,6 +933,42 @@ export function toggleVfo(index) {
         return publish({ ...before, vfos, active: index });
     }
     const vfos = before.vfos.map((v, i) => (i === index ? { ...v, open: !v.open } : v));
+    return publish({ ...before, vfos });
+}
+
+/**
+ * Shut every row's controls at once.
+ *
+ * What the panel's minimal toggle does on its way in. Minimal is a request for
+ * less of this panel, and with six demodulators open the rows are most of its
+ * height — so trimming the gain and the prose off the bottom of each of them
+ * and leaving all six expanded answers the request with the smaller half. One
+ * publish rather than six: this is one action from the operator's side and
+ * undoing it should be one press of the header, not six.
+ */
+export function collapseVfos() {
+    const before = demodSettings();
+    if (before.vfos.every((v) => v.open === false)) return before;
+    return publish({ ...before, vfos: before.vfos.map((v) => ({ ...v, open: false })) });
+}
+
+/**
+ * And open the one being edited, which is what the same toggle does on the way
+ * back out.
+ *
+ * Only that one. Coming out of the minimal view is a request for more of the
+ * panel and not for all of it — reopening six rows because six were open before
+ * somebody made the panel small would undo their reason for making it small,
+ * and there is no record of which of them mattered anyway. The selected row is
+ * the one the picture is aimed at and the one every other control here acts on,
+ * so it is the row a person is coming back for.
+ */
+export function expandActiveVfo() {
+    const before = demodSettings();
+    const at = before.active;
+    const vfo = before.vfos[at];
+    if (!vfo || vfo.open) return before;
+    const vfos = before.vfos.map((v, i) => (i === at ? { ...v, open: true } : v));
     return publish({ ...before, vfos });
 }
 
@@ -935,6 +1152,25 @@ export class IQDemod extends Emitter {
     levelOf(index) {
         const chain = this.chains[index];
         return this.active && this._quad && chain ? chain.level : 0;
+    }
+
+    /**
+     * How much is in one demodulator's passband, in dBFS, or null when there is
+     * nothing to measure.
+     *
+     * Null rather than the silent floor while stopped: the panel draws this as a
+     * marker against the squelch threshold, and a marker pinned to the bottom of
+     * the slider would be a reading, when the truth is that there is none.
+     */
+    signalDbOf(index) {
+        const chain = this.chains[index];
+        return this.active && this._quad && chain ? chain.sigDb : null;
+    }
+
+    /** Whether a demodulator's squelch is letting anything through. */
+    gateOpenOf(index) {
+        const chain = this.chains[index];
+        return this.active && this._quad && chain ? chain.gateOpen : true;
     }
 
     start() {
@@ -1128,6 +1364,7 @@ export class IQDemod extends Emitter {
         const audio = chain.process(planes[0], planes[1], frames, {
             agc: vfo.agc,
             gain: vfo.gain,
+            squelchDb: vfo.squelchDb,
         });
         if (!audio) return;
 

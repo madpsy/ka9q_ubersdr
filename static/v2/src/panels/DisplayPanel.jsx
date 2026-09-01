@@ -280,6 +280,15 @@ export default function DisplayPanel() {
             <Field label="VFOs" inline>
                 <Switch checked={d.markerVfos !== false} onChange={(v) => d.set({ markerVfos: v })} />
             </Field>
+            {/* Everybody else tuned in, as dots along the band strip — the
+                Listeners panel's band view laid over the spectrum. Not the chat:
+                this is who the receiver is feeding, typing or not. */}
+            <Field label="Listeners" inline>
+                <Switch
+                    checked={d.markerListeners !== false}
+                    onChange={(v) => d.set({ markerListeners: v })}
+                />
+            </Field>
             {/* Only where the receiver runs the detector: with no noise floor
                 monitor there is nothing behind this switch. */}
             {serverInfo?.noise_floor && (

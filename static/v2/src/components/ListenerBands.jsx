@@ -5,43 +5,13 @@
 // frequencies do not add up to "the whole club is on 40" at a glance, and one
 // row of dots does.
 //
-// The geometry is in lib/listenerBands.js. This draws it, and owns the two
-// things that are drawing decisions rather than layout: what a dot says when
-// you hover it, and the line marking where your own dial is.
+// The geometry is in lib/listenerBands.js, and so is what a dot says when you
+// hover it — the marker bar above the spectrum draws the same dots with the
+// same tip. This draws the row, and owns the one thing that is neither: the
+// line marking where your own dial is.
 
 import React, { useLayoutEffect, useMemo, useRef, useState } from '../react.js';
-import { activeLabel } from '../lib/listeners.js';
-import { bandRows, gapPct, pctOf } from '../lib/listenerBands.js';
-
-// A dot standing for more listeners than this lists the first few and says how
-// many are left. A tooltip is not a panel.
-const MAX_LINES = 6;
-
-// One listener as a line of the tooltip: where, who, and how long since they
-// moved — the same fields the list row carries, on one line instead of two.
-//
-// The country goes in by name and not as a flag, unlike the list row. A native
-// `title` is drawn by the browser's own chrome, which never consults the page's
-// stylesheet, so the Twemoji face that makes countryFlag() a flag everywhere
-// else cannot reach it: the regional indicators would come out as two lettered
-// boxes on Windows and as nothing legible on most Linux.
-function line(channel, now) {
-    const where = [
-        `${(channel.frequency / 1000).toFixed(3)} kHz`,
-        channel.mode ? channel.mode.toUpperCase() : '',
-    ].filter(Boolean).join(' ');
-    const who = [channel.chatUsername, channel.country].filter(Boolean).join(' ');
-    const when = channel.you ? 'you' : activeLabel(channel.lastActive, now);
-    return [where, who, when].filter(Boolean).join(' · ');
-}
-
-function dotTitle(spot, now) {
-    const lines = spot.channels.slice(0, MAX_LINES).map((c) => line(c, now));
-    const over = spot.channels.length - lines.length;
-    if (over > 0) lines.push(`and ${over} more`);
-    if (spot.tune) lines.push('Click to listen here');
-    return lines.join('\n');
-}
+import { bandRows, dotTitle, gapPct, pctOf } from '../lib/listenerBands.js';
 
 // What the row covers, as the row's own tooltip. Its own formatter rather than
 // formatFreqShort: that one drops the decimals from a round megahertz, so a

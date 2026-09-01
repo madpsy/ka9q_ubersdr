@@ -27,6 +27,9 @@
 //     supposed to hold still falls in step with the window and the optional
 //     children are never dropped — they just get drawn on top of. Non-optional
 //     children of a measured row want `flex: none` and a bounded width.
+//     One exception is handled rather than asked for, because a row can want it:
+//     a child that clips (`overflow: hidden`) is counted at the width it needs,
+//     not the width it was given — see widthOf.
 //   * an optional child is absent from the DOM when it does not fit, not merely
 //     invisible. A `visibility: hidden` child still measures.
 //
@@ -62,23 +65,64 @@ const gapOf = (el) => parseFloat(getComputedStyle(el).columnGap) || 0;
  */
 function widthOf(el) {
     const w = el.offsetWidth;
-    if (typeof w === 'number') return w;
-    const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
-    return rect ? Math.ceil(rect.width) : 0;
+    let box;
+    if (typeof w === 'number') {
+        box = w;
+    } else {
+        const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
+        box = rect ? Math.ceil(rect.width) : 0;
+    }
+
+    // A child that clips its own content reports the box it was *given* rather
+    // than the width it needs, and the two stop agreeing at exactly the moment
+    // this is being asked. The IQ panel's row header is the case: the label
+    // button is `overflow: hidden` with `min-width: 0`, so once the row is short
+    // of space the button shrinks instead of the row overflowing — and its
+    // measured width then falls in step with the window. That is the failure
+    // the note at the top of this file describes: the figure that is supposed to
+    // hold still moves, so nothing is ever dropped and the tags are drawn on top
+    // of instead. On screen it looks like the panel ignoring the width entirely.
+    //
+    // The overflow is exactly what was clipped, so adding it back gives the
+    // width the child would have taken if it had been allowed to. An element
+    // that is not clipping has scrollWidth equal to clientWidth and is left
+    // alone, which is every row that used this before.
+    const { scrollWidth, clientWidth } = el;
+    if (typeof scrollWidth === 'number' && typeof clientWidth === 'number'
+        && scrollWidth > clientWidth) {
+        box += scrollWidth - clientWidth;
+    }
+    return box;
 }
 
 /**
- * What a direct child contributes to the row, discounting any optional children
- * nested inside it — and recording what those cost, since a nested child is
- * never seen by the loop over the row's own children.
+ * What a direct child contributes to the row, discounting what is inside it that
+ * is not its own content — and recording what the optional part of that cost,
+ * since a nested child is never seen by the loop over the row's own children.
  *
- * A nested child costs its parent its own width *and* one of the parent's gaps:
- * remove it and the row gives back both.
+ * Anything discounted costs its parent its own width *and* one of the parent's
+ * gaps: remove it and the row gives back both.
+ *
+ * Two kinds are discounted, for one reason. The row is only measurable if every
+ * counted child is the width it says it is, and both of these are children that
+ * are not:
+ *
+ *   an optional child   because it is the thing being decided about, so a figure
+ *                       that included it would move as the answer moved.
+ *   a nested spacer     because a box holding one is as wide as the row let it
+ *                       be rather than as wide as its content. The IQ panel's
+ *                       demodulator rows are the case: the head is the measured
+ *                       row and the button in it grows to fill, so without this
+ *                       the button reports the whole row and there is never
+ *                       space for anything. Taking the spacer out leaves the
+ *                       button's own content, which is the figure that holds
+ *                       still.
  */
 function costOf(child, widths) {
     let w = widthOf(child);
     const inside = child.querySelectorAll('[data-optional]');
-    if (!inside.length) return w;
+    const spacers = child.querySelectorAll('[data-slack]');
+    if (!inside.length && !spacers.length) return w;
 
     const innerGap = gapOf(child);
     for (const el of inside) {
@@ -86,6 +130,9 @@ function costOf(child, widths) {
         widths[el.dataset.optional] = { w: cost, nested: true };
         w -= cost;
     }
+    // A spacer of no width still costs the gap beside it, so this subtracts one
+    // even when the row is full and there is nothing left for it to hold.
+    for (const el of spacers) w -= widthOf(el) + innerGap;
     return w;
 }
 

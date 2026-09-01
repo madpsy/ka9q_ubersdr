@@ -28,6 +28,11 @@ function el({ w = 0, optional, slack, gap = 0, children = [] } = {}) {
         dataset,
         gap,
         clientWidth: w,
+        // A box that clips reports what it was given, and says what it is
+        // holding through scrollWidth. Only set by clipping() below: an
+        // ordinary stub leaves both undefined, which is what a row of plain
+        // elements looked like before there was such a thing.
+        scrollWidth: undefined,
         get offsetWidth() {
             // A container is as wide as its children and the gaps between them,
             // which is what makes the nesting bug possible in the first place.
@@ -38,11 +43,12 @@ function el({ w = 0, optional, slack, gap = 0, children = [] } = {}) {
         getBoundingClientRect() {
             return { width: node.offsetWidth };
         },
-        querySelectorAll() {
+        querySelectorAll(selector) {
+            const key = selector === '[data-slack]' ? 'slack' : 'optional';
             const found = [];
             const walk = (kids) => {
                 for (const c of kids) {
-                    if (c.dataset.optional != null) found.push(c);
+                    if (c.dataset[key] != null) found.push(c);
                     walk(c.children);
                 }
             };
@@ -250,6 +256,79 @@ t('an SVG child still takes up its own width', () => {
     });
     const fits = measureRoom(row, [{ key: 'freq', width: 80 }], {}, {});
     assert.strictEqual(fits.freq, false, 'the icon was measured as nothing');
+});
+
+/**
+ * A box that has been squeezed below its content and is clipping the rest.
+ *
+ * `given` is the width it ended up with; the content is whatever the children
+ * add up to. This is the IQ panel's row header: a button with `overflow:
+ * hidden` and `min-width: 0`, which shrinks rather than letting the row
+ * overflow.
+ */
+function clipping({ given, gap = 0, children = [] }) {
+    const node = el({ w: given, gap, children });
+    const content = children.reduce((sum, c) => sum + c.offsetWidth, 0)
+        + gap * Math.max(0, children.length - 1);
+    Object.defineProperty(node, 'offsetWidth', { get: () => given });
+    node.clientWidth = given;
+    node.scrollWidth = content;
+    return node;
+}
+
+t('a child that clips is counted at the width it needs', () => {
+    // Otherwise the figure that is supposed to hold still falls in step with the
+    // window: the button shrinks as the row does, so there is always room for
+    // one more tag and the tags are drawn on top of instead of dropped. On
+    // screen that looks like the row ignoring its width altogether.
+    const label = clipping({
+        given: 90,
+        gap: 6,
+        children: [el({ w: 70 }), el({ w: 60, optional: 'freq' }), el({ slack: true, w: 0 })],
+    });
+    const row = el({ w: 220, gap: 4, children: [label, el({ w: 26 }), el({ w: 26 })] });
+    const widths = {};
+    const fits = measureRoom(row, [{ key: 'freq', width: 60 }], widths);
+    // 70 of content + two 26px buttons is 122; the tag wants 66 with its gap,
+    // and three gaps of 4 puts the row at 200 — inside 220, so it stays.
+    assert.strictEqual(fits.freq, true, 'a tag that fits was dropped');
+    assert.strictEqual(widths.freq.w, 66, 'the tag was measured through the clip');
+
+    // The same row, narrower than its content: now the tag has to go, and it is
+    // the clip correction that makes that visible at all — without it the
+    // button reports 90 whatever it is holding.
+    const tight = el({ w: 150, gap: 4, children: [label, el({ w: 26 }), el({ w: 26 })] });
+    assert.strictEqual(measureRoom(tight, [{ key: 'freq', width: 60 }], {}).freq, false,
+        'the row kept a tag it has no room for');
+});
+
+t('a box with a spacer in it is counted at its content width', () => {
+    // The IQ panel's demodulator rows: the head is the measured row and the
+    // button in it grows to fill, so its own width is whatever is left rather
+    // than what it holds. Without discounting the spacer inside it the button
+    // reports the entire row and nothing optional ever fits — at any width, on
+    // a row with room to spare, with nothing on screen to say why.
+    const grower = el({
+        gap: 6,
+        children: [el({ w: 60 }), el({ slack: true, w: 300 })],
+    });
+    const row = el({
+        w: 400,
+        gap: 4,
+        children: [grower, el({ w: 26 }), el({ w: 26 })],
+    });
+    const fits = measureRoom(row, [{ key: 'freq', width: 88 }], {});
+    assert.strictEqual(fits.freq, true,
+        'the button was counted at its stretched width, so nothing could fit beside it');
+
+    // And the spacer's own gap goes with it: a box holding a spacer of no width
+    // is still one gap wider than its content.
+    const full = el({ gap: 6, children: [el({ w: 60 }), el({ slack: true, w: 0 })] });
+    const tight = el({ w: 100, gap: 4, children: [full, el({ w: 26 })] });
+    assert.strictEqual(
+        measureRoom(tight, [{ key: 'freq', width: 88 }], {}).freq, false,
+        'a 100px row cannot hold 60 + 26 + an 88px tag',
+    );
 });
 
 console.log(`\n${pass} passed`);

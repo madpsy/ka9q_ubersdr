@@ -1,4 +1,15 @@
-# Latest Stable - 0.1.62
+# Latest Stable - 0.1.63
+
+## Version 0.1.63 - 1st Sep 2026
+
+### New Features
+- Added **Improved Data Compression** for both audio and spectrum streams in the v2 interface. This was intentionally left out of the previous release to prevent too many changes at once.
+
+### Important information
+
+The compression improves Spectrum, Opus (AF compressed) and PCM (AF/IQ uncompressed) streams. This decreases the on-wire bandwidth required for them all. The PCM compression is lossless (bit perfect) and akin to FLAC but tuned for web SDR application (often narrow bandwidth speech/CW) so out performs FLAC for this use case. The spectrum data compression roughly halfs the on-wire throughput for 90% of spectrum shapes. The audio PCM data compression can be up to 2x less throughput. IQ data compresses as well, though unsurprisingly not as well (10-20%).
+
+In short - this release roughly halves the amount of network bandwidth required to serve the majority of listeners using the v2 interface.
 
 ## Version 0.1.62 - 31th Aug 2026
 

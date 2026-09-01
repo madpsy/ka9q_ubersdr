@@ -12377,6 +12377,18 @@ a.btn { text-decoration: none; }
 }
 .iq-vfo.is-active .iq-vfo__freq { color: var(--text-dim); }
 
+/* The width, beside the mode rather than part of it — so a collapsed row that
+   has run out of space can drop the figure and keep the letters. */
+.iq-vfo__bw {
+    flex: none;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* A box around the pan control, and it earns its place: roomFor decides what
+   fits from data attributes on the row's children, and Segmented draws its own
+   element rather than passing one through. */
+.iq-vfo__panbox { flex: none; display: flex; }
 .iq-vfo__pan { flex: none; }
 .iq-vfo__mute {
     flex: none;
@@ -12416,19 +12428,93 @@ a.btn { text-decoration: none; }
 }
 .iq-vfo__del:disabled { opacity: 0.35; cursor: default; }
 
-/* Its output level, as the row's own underline. Three pixels across the bottom
-   of the head, on every row whether or not it is open — which is the point: the
-   question you ask of a demodulator you are *not* editing is whether anything is
-   on it, and a meter that only appeared with the controls would answer it for
-   the one row that did not need asking. */
-.iq-vfo__level { height: 3px; background: var(--border); }
-.iq-vfo__level i {
+/* The row's own picture, in the minimal view where there is no shared one above
+   the rows. Full width and two thirds the height of the header it sits under,
+   showing the span between this demodulator's filter skirts and nothing else — see VfoStrip
+   for why the minimal view answers with a different picture rather than a
+   smaller one. Flush to the row's edges, like the meters below it: it is the
+   row's own band and not a control inside it. */
+.iq-vfo__strip { display: block; width: 100%; }
+
+/* The row's own underline: two three-pixel bars across the bottom of the head,
+   on every row whether or not it is open — which is the point: the question you
+   ask of a demodulator you are *not* editing is whether anything is on it, and a
+   meter that only appeared with the controls would answer it for the one row
+   that did not need asking.
+
+   Two of them because that question has two halves. The lower bar is the audio
+   this demodulator is producing; the upper one is the signal arriving in its
+   passband, read before the mute, the squelch and the gain — so a row that has
+   gone quiet still says whether it went quiet because nothing is there or
+   because something here silenced it. Stacked in that order, which is the order
+   the signal travels. */
+.iq-vfo__meters { display: flex; flex-direction: column; gap: 1px; }
+/* Each meter is a line rather than a bare bar, so the labelled form below can
+   put a name and a figure either side of it without the bar moving. Collapsed,
+   the line holds only the bar and the bar takes the whole width — which is the
+   underline it was before there was anything to label. */
+.iq-vfo__meter { display: flex; align-items: center; gap: 6px; }
+.iq-vfo__level,
+.iq-vfo__signal {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 3px;
+    background: var(--border);
+}
+.iq-vfo__level i,
+.iq-vfo__signal i {
     display: block;
     height: 100%;
     background: var(--vfo);
     transition: width 90ms linear;
 }
+/* Dimmer than the audio bar, deliberately. The two are the same colour because
+   they are the same demodulator, and the one you are listening to is the one
+   that should be brightest — this is the context for it rather than the reading
+   itself. */
+.iq-vfo__signal i { opacity: 0.45; }
+
+/* Where the squelch is set, on the meter it is a threshold for. Standing a pixel
+   proud at each end so it reads as a mark on the scale rather than as part of
+   the fill, and in the same red as the line across this demodulator's passband
+   on the spectrum above — one threshold, said in two places. */
+.iq-vfo__signal b {
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background: var(--bad);
+}
+
+/* Open, the row is being worked on rather than scanned, so each bar says what it
+   is and what it is reading. Padded to the body's own inset so the two names
+   line up with the controls under them, and the figures are right-aligned in a
+   fixed column so they do not shuffle the bars sideways as they change. */
+.iq-vfo__meters.is-labelled { gap: 2px; padding: 3px 7px 4px; }
+.iq-vfo__meter-name,
+.iq-vfo__meter-val {
+    flex: none;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+.iq-vfo__meter-name { width: 6ch; }
+.iq-vfo__meter-val {
+    width: 8ch;
+    text-align: right;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Muting takes the audio bar and leaves the signal bar alone, which is the whole
+   reason there are two. */
 .iq-vfo.is-muted .iq-vfo__level i { background: var(--text-faint); }
+/* And the same grey when the squelch has shut, which is the other way a
+   demodulator that is receiving something can be inaudible. */
+.iq-vfo.is-shut .iq-vfo__level i { background: var(--text-faint); }
 
 .iq-vfo__body {
     display: flex;

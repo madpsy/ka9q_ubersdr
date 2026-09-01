@@ -241,6 +241,46 @@ export class IQSpectrum {
     }
 }
 
+// The Hann window's noise-equivalent bandwidth, in bins.
+//
+// `frame()` normalises by the window's coherent gain, so a carrier reads its own
+// amplitude — but noise, being spread over the whole of every bin, reads 1.5
+// bins' worth rather than one. It is the factor that turns "bins" into "the
+// bandwidth a bin is actually measuring", and it is only ever needed by the
+// conversion below.
+const HANN_ENBW_BINS = 1.5;
+
+/**
+ * Where a squelch threshold belongs on this picture.
+ *
+ * The two figures are referred the same way — 0 dBFS is a full-scale carrier in
+ * both, because the demodulator's low-pass has unity gain at DC and `frame()`
+ * divides by the window's coherent gain — so for a *carrier* the threshold could
+ * be drawn where it stands and would be right. Noise is where they part company,
+ * and it is the case a squelch is set against.
+ *
+ * The detector measures the whole passband: a 2.7 kHz filter collects 2.7 kHz of
+ * noise. A bin of this picture measures about 17 Hz of it. So a noise floor that
+ * reads -80 dB on the trace is arriving at the detector some twenty-two
+ * decibels louder, and a line drawn at the raw threshold would sit far above the
+ * trace it is supposed to be compared with — an operator placing it just clear
+ * of the noise would get a squelch that never closed.
+ *
+ * This is that ratio taken out: the level the *trace* would have to reach for a
+ * flat noise floor to open the gate. Placing the line just above the grass then
+ * does what placing it there looks like it should.
+ *
+ * A carrier, correspondingly, pokes above the line by more than it pokes above
+ * the noise, which is the right way round for a control whose question is "is
+ * this signal strong enough to be worth hearing".
+ */
+export function squelchLineDb(thresholdDb, widthHz, rateHz, size = IQ_FFT_SIZE) {
+    const rate = rateHz > 0 ? rateHz : 12000;
+    const binHz = (rate / size) * HANN_ENBW_BINS;
+    const width = Math.max(binHz, Math.abs(widthHz) || binHz);
+    return thresholdDb - 10 * Math.log10(width / binHz);
+}
+
 /**
  * Resample a bin array down to a pixel width, keeping the maximum in each.
  *

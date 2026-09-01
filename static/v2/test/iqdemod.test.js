@@ -37,11 +37,14 @@ const {
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
+    squelchLineDb,
     IQPanel, ListeningCard, VFO_FALLBACK, vfoSummary, PANEL_BY_ID, GROUPS,
-    DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, VFO_LABELS, DemodChain,
-    addVfo, clampOffset, clampWidth, demodSettings, designLowpass, getIQDemod, offsetLimits,
-    passbandFor, planFor, planForVfo, removeVfo, resetDemodSettings, saveDemodSettings, selectVfo,
-    tapsFor, toggleVfo, updateVfo, vfoPassband, vfoWidth,
+    DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
+    VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
+    designLowpass, expandActiveVfo, getIQDemod, offsetLimits, passbandFor, planFor,
+    planForVfo, removeVfo,
+    resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
+    vfoPassband, vfoWidth,
 } = require('./.build/iqdemod.cjs');
 
 // Storage that actually remembers, so the settings tests exercise the real path
@@ -308,6 +311,233 @@ t('a packet boundary is not audible', () => {
     assert.ok(worst < 1e-4, `blocking changed the output by ${worst}`);
 });
 
+// ── the squelch ─────────────────────────────────────────────────────────────
+//
+// The one part of the chain whose failure is silence, which is the failure an
+// operator is least able to diagnose from the outside: a squelch that never
+// opens and a demodulator that has stopped look exactly alike. So each of these
+// asks the same question in two directions — it must let the signal through,
+// and it must not let the noise through.
+
+/** Run one demodulator with a threshold set, and report what it did. */
+function withSquelch(plan, gen, squelchDb, { frames = 12000, skip = 3000 } = {}) {
+    const chain = new DemodChain();
+    chain.configure(plan, RATE);
+    const I = new Float32Array(frames);
+    const Q = new Float32Array(frames);
+    for (let i = 0; i < frames; i++) {
+        const s = gen(i / RATE);
+        I[i] = s.i;
+        Q[i] = s.q;
+    }
+    // AGC off, as everywhere else here: with it on, a gated output would be
+    // wound back up to the target the moment it fell and the test would be
+    // measuring the AGC.
+    const out = chain.process(I, Q, frames, { agc: false, gain: 1, squelchDb });
+    assert.ok(out, 'the chain produced nothing');
+    let sum = 0;
+    for (let i = skip; i < frames; i++) sum += out[i] * out[i];
+    return { rms: Math.sqrt(sum / (frames - skip)), chain };
+}
+
+// Silence, which is what a squelch is set against.
+const quiet = () => ({ i: 0, q: 0 });
+
+t('the gate opens above the threshold and shuts below it', () => {
+    const plan = planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700 });
+
+    // A tone at half full scale is -6 dBFS in the passband, so a threshold at
+    // -20 is one it clears and a threshold at -3 is one it does not.
+    const loud = withSquelch(plan, tone(1000, 0.5), -20);
+    assert.ok(loud.chain.gateOpen, 'a signal 14 dB over the threshold left the gate shut');
+    assert.ok(loud.rms > 0.3, `expected to hear the tone, got ${loud.rms.toFixed(4)}`);
+
+    const under = withSquelch(plan, tone(1000, 0.5), -3);
+    assert.ok(!under.chain.gateOpen, 'a signal 3 dB under the threshold opened the gate');
+    // Not merely quieter — inaudible. The comparison is against the same
+    // signal with no squelch, which is what the gate is subtracting.
+    const open = withSquelch(plan, tone(1000, 0.5), SQUELCH_OFF);
+    assert.ok(under.rms < open.rms / 1000,
+        `the gate only attenuated by ${(open.rms / under.rms).toFixed(1)}x`);
+});
+
+t('the level it measures is the level in the passband', () => {
+    const plan = planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700 });
+    for (const [amp, db] of [[1, 0], [0.5, -6.02], [0.05, -26.02]]) {
+        const { chain } = withSquelch(plan, tone(1000, amp), SQUELCH_OFF);
+        assert.ok(Math.abs(chain.sigDb - db) < 0.5,
+            `amplitude ${amp} should read ${db} dBFS, read ${chain.sigDb.toFixed(2)}`);
+    }
+    // And a signal outside the filter is not in the passband, however loud.
+    const { chain } = withSquelch(plan, tone(-2000, 1), SQUELCH_OFF);
+    assert.ok(chain.sigDb < -60,
+        `a rejected signal read ${chain.sigDb.toFixed(1)} dBFS in the passband`);
+});
+
+t('one threshold means the same thing in every mode', () => {
+    // The reason the measurement is taken before the mode's own step. An AM
+    // envelope of a steady carrier is a constant, and an FM discriminator is
+    // loudest with no carrier at all — so a squelch reading either mode's
+    // *output* would be backwards. Read in the passband, all five agree.
+    const inBand = { usb: 1000, lsb: -1000, cw: 0, am: 0, nfm: 0 };
+    for (const m of DEMOD_MODES) {
+        const plan = planFor({ mode: m.id, offsetHz: 0, widthHz: m.fallback, pitchHz: 700 });
+        const heard = withSquelch(plan, tone(inBand[m.id], 0.5), -20);
+        assert.ok(heard.chain.gateOpen, `${m.id}: a -6 dBFS signal did not open a -20 dB gate`);
+        assert.ok(Math.abs(heard.chain.sigDb - -6.02) < 1,
+            `${m.id}: read ${heard.chain.sigDb.toFixed(1)} dBFS for a -6 dBFS signal`);
+
+        const silence = withSquelch(plan, quiet, -20);
+        assert.ok(!silence.chain.gateOpen, `${m.id}: the gate stayed open on silence`);
+        assert.ok(silence.rms < 1e-6, `${m.id}: silence came out at ${silence.rms}`);
+    }
+});
+
+/**
+ * A chain to feed by hand, a block at a time.
+ *
+ * The timing tests are about what happens *between* blocks — a gap in the
+ * signal, and the state the gate is left in — so they cannot use the
+ * single-shot helper above.
+ */
+function running(squelchDb, plan = planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700 })) {
+    const chain = new DemodChain();
+    chain.configure(plan, RATE);
+    const feed = (gen, ms) => {
+        const frames = Math.round((RATE * ms) / 1000);
+        const I = new Float32Array(frames);
+        const Q = new Float32Array(frames);
+        for (let i = 0; i < frames; i++) {
+            const s = gen(i / RATE);
+            I[i] = s.i;
+            Q[i] = s.q;
+        }
+        // Copied: the chain reuses its output array between calls.
+        return Float32Array.from(chain.process(I, Q, frames, { agc: false, gain: 1, squelchDb }));
+    };
+    return { chain, feed };
+}
+
+const rmsOf = (a, from = 0, to = a.length) => {
+    let sum = 0;
+    for (let i = from; i < to; i++) sum += a[i] * a[i];
+    return Math.sqrt(sum / (to - from));
+};
+
+t('the gate hangs on for half a second after the signal goes', () => {
+    // Both halves matter and they pull opposite ways: without the hang a CW
+    // signal is chopped into its own elements, and with too much of it the tail
+    // is the thing you hear. Half a second, so a gap between words must not
+    // shut it and a station that has stopped must.
+    const { chain, feed } = running(-20);
+
+    feed(tone(1000, 0.5), 500);
+    assert.ok(chain.gateOpen, 'half a second of signal left the gate shut');
+    feed(quiet, 300);
+    assert.ok(chain.gateOpen, 'a 300 ms gap shut the gate — the hang is too short');
+    feed(quiet, 800);
+    assert.ok(!chain.gateOpen, 'the gate never shut after the signal stopped');
+});
+
+t('the gate opens the instant the signal arrives', () => {
+    // The other side of the hang, and the one with no tolerance in it: what a
+    // late gate is late for is the start of a transmission. Half a second is a
+    // reasonable thing to be wrong about on the way down and an unreasonable
+    // one on the way up.
+    // Two things have to be held apart here. A filter whose delay line is full
+    // of silence takes a dozen milliseconds to fill whatever the squelch is
+    // doing, and that lag belongs to the filter. So the gate is shut on a
+    // signal that is *present but under the threshold* — the filter is then
+    // already full — and what is timed is the step up over it. The same chain
+    // with no squelch on it is fed exactly the same samples, and the ratio
+    // between the two is the gate and nothing else.
+    const weak = tone(1000, 0.002);
+    const loud = tone(1000, 0.5);
+    const gated = running(-20);
+    const ungated = running(SQUELCH_OFF);
+    gated.feed(weak, 1500);
+    ungated.feed(weak, 1500);
+    assert.ok(!gated.chain.gateOpen, 'a signal 40 dB under the threshold left the gate open');
+
+    const on = gated.feed(loud, 30);
+    const free = ungated.feed(loud, 30);
+    assert.ok(gated.chain.gateOpen, 'a signal 14 dB over the threshold did not open the gate');
+
+    // How late the gate is, in milliseconds, and against the right reference:
+    // the ungated chain does not produce the signal at the instant it arrives
+    // either — the filter has a group delay of its own — so the question is how
+    // far behind *that* the gate is, and not how far behind the sample where
+    // the amplitude changed.
+    const half = rmsOf(free, Math.round(RATE * 0.02)) / 2;
+    const ms = Math.round(RATE / 1000);
+    const arrives = (a) => {
+        for (let i = 0; i + ms <= a.length; i += ms) if (rmsOf(a, i, i + ms) > half) return i / ms;
+        return Infinity;
+    };
+    const late = arrives(on) - arrives(free);
+    assert.ok(late <= 2, `the gate opened ${late} ms behind the audio it is gating`);
+
+    const from = Math.round(RATE * 0.015);
+    const held = rmsOf(on, from) / rmsOf(free, from);
+    assert.ok(held > 0.99,
+        `15 ms in, the gate was still holding back ${((1 - held) * 100).toFixed(1)}%`);
+});
+
+t('a threshold a signal is sitting on does not chatter', () => {
+    // The hysteresis. A level wandering either side of the threshold must not
+    // take the gate with it, or the audio arrives in fragments — which is worse
+    // than no squelch, because it is unlistenable rather than merely noisy.
+    const { chain, feed } = running(-20);
+    const at = (amp, ms) => {
+        feed(tone(1000, amp), ms);
+        return chain.gateOpen;
+    };
+
+    // Open it, then drop the signal to a decibel under the threshold: inside
+    // the hysteresis, so it stays open.
+    assert.ok(at(0.5, 500), 'a loud signal left the gate shut');
+    assert.ok(at(10 ** (-21 / 20), 500), 'a decibel under the threshold shut the gate');
+    // Well under it, and it shuts — once the hang has run out, which is the
+    // half second the test above is about.
+    assert.ok(!at(10 ** (-40 / 20), 800), 'the gate stayed open 20 dB under the threshold');
+});
+
+t('the threshold draws below the trace by the filter\'s bandwidth', () => {
+    // The correction that makes the red line on the picture mean something. The
+    // detector hears the whole passband; a bin of the picture hears about
+    // 17 Hz of it, so the line has to come down by the ratio or an operator
+    // placing it just clear of the noise would get a squelch that never shut.
+    const line = squelchLineDb(-50, 2700, 12000, 1024);
+    assert.ok(Math.abs(line - (-50 - 10 * Math.log10(2700 / ((12000 / 1024) * 1.5)))) < 1e-9,
+        `2.7 kHz at -50 dB drew at ${line.toFixed(2)}`);
+    assert.ok(line < -50, 'the line must sit below the threshold, never above it');
+
+    // A wider filter collects more noise for the same threshold, so its line is
+    // lower — which is the whole reason this is per demodulator.
+    assert.ok(squelchLineDb(-50, 6000, 12000) < squelchLineDb(-50, 500, 12000),
+        'a wider filter should draw a lower line');
+    // And a filter narrower than a bin cannot draw above the threshold.
+    assert.ok(squelchLineDb(-50, 1, 12000) <= -50, 'a sub-bin filter drew above its threshold');
+});
+
+t('the squelch is off by default, and is remembered per demodulator', () => {
+    fresh();
+    assert.strictEqual(vfo0().squelchDb, SQUELCH_OFF,
+        'a demodulator must arrive with its squelch out of the way');
+    addVfo();
+    updateVfo(1, { squelchDb: -42 });
+    assert.strictEqual(demodSettings().vfos[0].squelchDb, SQUELCH_OFF,
+        'setting one demodulator\'s squelch changed another\'s');
+    assert.strictEqual(demodSettings().vfos[1].squelchDb, -42);
+
+    // Off the end in either direction, and not a number at all: a stored
+    // setting is whatever was in storage last time, including a older build's.
+    for (const [stored, want] of [[-999, SQUELCH_OFF], [50, SQUELCH_MAX], ['loud', SQUELCH_OFF]]) {
+        updateVfo(0, { squelchDb: stored });
+        assert.strictEqual(vfo0().squelchDb, want, `${stored} was read as ${vfo0().squelchDb}`);
+    }
+});
+
 // ── the passband arithmetic the controls are built on ───────────────────────
 
 t('the passband hangs off the offset the way each mode says', () => {
@@ -521,6 +751,7 @@ t('it starts with one', () => {
     assert.strictEqual(st.active, 0);
     assert.strictEqual(st.vfos[0].pan, 'center');
     assert.strictEqual(st.vfos[0].muted, false);
+    assert.strictEqual(st.vfos[0].squelchDb, SQUELCH_OFF);
 });
 
 t('demodulators can be added up to the limit, and no further', () => {
@@ -654,21 +885,73 @@ t('a row always says what it is and how wide', () => {
     assert.strictEqual(vfoSummary(vfo0()), 'CW 500');
 });
 
-t('the header keeps the frequency for longer than the offset', () => {
+t('the header gives things up in keep order, and a shut row gives up more', () => {
     // The frequency is the number somebody has in their head and would read out;
-    // the offset is relative, is already a line on the picture above, and is
-    // repeated in the body whenever the row is open. So as the dock narrows the
-    // offset goes first. The order of the specs is what says so — measureRoom
-    // takes them in keep order — and getting it the other way round would drop
-    // the reading this row exists to show.
+    // on a shut row it is also the only place that number appears, since an open
+    // one repeats it in the body. So a shut row will give up its bandwidth and
+    // its pan control to hold on to it, and an open one gives up neither.
+    //
+    // The order of the specs is what says all of that — measureRoom takes them
+    // in keep order, last going first — and getting it wrong drops the reading
+    // this row exists to show while keeping a figure the body already has.
     const src = require('fs').readFileSync(
         require('path').join(__dirname, '..', 'src', 'panels', 'IQPanel.jsx'), 'utf8',
     );
-    const specs = src.slice(src.indexOf('useRoomFor(headRef'));
-    const freqAt = specs.indexOf("key: 'freq'");
-    const offsetAt = specs.indexOf("key: 'offset'");
-    assert.ok(freqAt > 0 && offsetAt > 0, 'the header no longer has both tags');
-    assert.ok(freqAt < offsetAt, 'the offset would survive a narrow dock and the frequency would not');
+    const block = src.slice(src.indexOf('useRoomFor(headBox'), src.indexOf('const has ='));
+    const [whenOpen, whenShut] = block.split('] : [');
+    assert.ok(whenOpen && whenShut, 'the header no longer has a list for each state');
+
+    const at = (text, k) => text.indexOf(`key: '${k}'`);
+    // Open: the two readings, and nothing else is on offer.
+    assert.ok(at(whenOpen, 'freq') > 0 && at(whenOpen, 'offset') > 0,
+        'an open row should still be able to drop both readings');
+    assert.ok(at(whenOpen, 'freq') < at(whenOpen, 'offset'),
+        'the offset would survive a narrow dock and the frequency would not');
+    assert.strictEqual(at(whenOpen, 'pan'), -1, 'an open row must never drop the pan control');
+    assert.strictEqual(at(whenOpen, 'bw'), -1, 'an open row must never drop the bandwidth');
+
+    // Shut: everything, in the order it goes.
+    const order = ['freq', 'pan', 'bw', 'offset'].map((k) => at(whenShut, k));
+    assert.ok(order.every((i) => i > 0), 'a shut row is missing one of the four');
+    assert.deepStrictEqual(order.slice().sort((a, b) => a - b), order,
+        'a shut row should give up the offset, then the bandwidth, then the pan, then the frequency');
+});
+
+t('the mode stands on its own, with the width beside it', () => {
+    // Two elements rather than one string, so a shut row that has run out of
+    // space can drop the figure and keep the letters — USB against LSB is not a
+    // detail. The pair is still on the tooltip.
+    fresh({ mode: 'usb', widths: { usb: 2700 } });
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const nodes = deep(tree);
+    const sum = nodes.find((n) => cls(n) === 'iq-vfo__sum');
+    assert.ok(sum, 'the row lost its mode');
+    assert.strictEqual(words(sum).trim(), 'USB', 'the mode should stand on its own');
+    assert.strictEqual(sum.props.title, 'USB 2.7k', 'the whole summary should still be askable');
+    assert.strictEqual(words(nodes.find((n) => cls(n) === 'iq-vfo__bw')).trim(), '2.7k');
+    for (const off of cleanups) off();
+});
+
+t('only a shut row offers up its pan and its bandwidth', () => {
+    // Both rows draw both — what is on *offer* is not what is gone. The
+    // difference is whether roomFor is allowed to take them, and an open row
+    // never lets it: the pan is the only place the ear is chosen, and opening
+    // the row is what brings it back to a shut one that has lost it.
+    fresh();
+    addVfo();
+    updateVfo(0, { open: false });
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const nodes = deep(tree);
+    const offered = (key) => nodes.filter((n) => n.props && n.props['data-optional'] === key).length;
+    assert.strictEqual(offered('pan'), 1, 'exactly the shut row should offer its pan');
+    assert.strictEqual(offered('bw'), 1, 'exactly the shut row should offer its bandwidth');
+    assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__panbox').length, 2,
+        'a row lost its pan control outright');
+    assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__bw').length, 2,
+        'a row lost its bandwidth outright');
+    for (const off of cleanups) off();
 });
 
 t('a header press selects a row, or closes the one already selected', () => {
@@ -1120,7 +1403,11 @@ t('a collapsed row keeps its level meter', () => {
     assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__body').length, 1,
         'the closed row still drew its controls');
     assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__level').length, 2,
-        'a row lost its meter when it was collapsed');
+        'a row lost its audio meter when it was collapsed');
+    // And the signal meter with it: that one is the whole point of a collapsed
+    // row, since it is the only reading left that says anything is arriving.
+    assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__signal').length, 2,
+        'a row lost its signal meter when it was collapsed');
     for (const off of cleanups) off();
 });
 
@@ -1135,7 +1422,7 @@ t('pan and mute are on every row, not only the open one', () => {
     const nodes = deep(tree);
     const mutes = nodes.filter((n) => cls(n).startsWith('iq-vfo__mute'));
     assert.strictEqual(mutes.length, 2, 'a row without a mute');
-    const pans = nodes.filter((n) => cls(n).includes('iq-vfo__pan'));
+    const pans = nodes.filter((n) => cls(n) === 'iq-vfo__panbox');
     assert.strictEqual(pans.length, 2, 'a row without a pan control');
     for (const off of cleanups) off();
 });
@@ -1232,6 +1519,200 @@ t('pressing a marker on the picture picks that demodulator up', () => {
     scope.props.onPick(1);
     assert.strictEqual(demodSettings().active, 1);
     for (const off of cleanups) off();
+});
+
+t('the minimal view swaps the shared picture for one per row', () => {
+    // Ninety-six pixels of shared spectrum is the first thing that has to go
+    // when the dock column has something else in it — but aiming a demodulator
+    // at a passband you cannot see is the state this panel exists to get an
+    // operator out of, so what replaces it is a picture per row and not
+    // nothing.
+    fresh();
+    addVfo();
+    addVfo();
+    reset();
+    const full = render(IQPanel, { minimal: false }, context());
+    const wide = deep(full.tree);
+    assert.strictEqual(wide.filter((n) => cls(n) === 'iq-scope').length, 1,
+        'the full view lost its shared picture');
+    assert.strictEqual(wide.filter((n) => cls(n) === 'iq-vfo__strip').length, 0,
+        'the full view drew per-row strips as well as the shared picture');
+    for (const off of full.cleanups) off();
+
+    reset();
+    const small = render(IQPanel, { minimal: true }, context());
+    const thin = deep(small.tree);
+    assert.strictEqual(thin.filter((n) => cls(n) === 'iq-scope').length, 0,
+        'the minimal view kept the shared picture');
+    const strips = thin.filter((n) => cls(n) === 'iq-vfo__strip');
+    assert.strictEqual(strips.length, 3, 'every row should have a strip of its own');
+    // As tall as the header above it, which before a measurement arrives is the
+    // fallback — never zero, or the canvas would be sized to nothing.
+    for (const strip of strips) {
+        assert.ok(/^\d+px$/.test(strip.props.style.height) && strip.props.style.height !== '0px',
+            `a strip was sized ${strip.props.style.height}`);
+    }
+    for (const off of small.cleanups) off();
+});
+
+t('every row offers a squelch, and says when it is off', () => {
+    fresh();
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const text = deepWords(tree);
+    assert.ok(text.includes('Squelch'), 'the open row has no squelch control');
+    assert.ok(text.includes('Off'), 'a squelch at the floor should read as off');
+    for (const off of cleanups) off();
+
+    // And it survives the minimal view: a squelch is set while listening, which
+    // is the test that view applies.
+    fresh({ squelchDb: -45 });
+    reset();
+    const min = render(IQPanel, { minimal: true }, context());
+    assert.ok(deepWords(min.tree).includes('-45 dBFS')
+        || deepWords(min.tree).includes('−45 dBFS'),
+        `the threshold is not shown: ${deepWords(min.tree).slice(0, 400)}`);
+    for (const off of min.cleanups) off();
+});
+
+t('going minimal shuts every row', () => {
+    // The rows are most of the panel's height, so trimming the gain and the
+    // prose off each of them and leaving all of them expanded would answer
+    // "show me less of this" with the smaller half of it.
+    fresh();
+    addVfo();
+    reset();
+    const full = render(IQPanel, { minimal: false }, context());
+    for (const off of full.cleanups) off();
+    assert.ok(demodSettings().vfos.every((v) => v.open), 'the rows should have started open');
+
+    // The same panel, told to go minimal — the hook state is not reset, so this
+    // is a change of prop rather than a fresh mount.
+    const small = render(IQPanel, { minimal: true }, context());
+    for (const off of small.cleanups) off();
+    assert.ok(demodSettings().vfos.every((v) => v.open === false),
+        'switching to the minimal view left rows open');
+});
+
+t('coming back out of minimal opens the row that is selected', () => {
+    // The other direction of the same toggle. Only the selected row: it is the
+    // one the picture is aimed at and the one every other control acts on, so
+    // it is the row somebody is coming back for — and reopening all of them
+    // would restore a state nobody asked to have restored.
+    fresh();
+    addVfo();
+    addVfo();
+    selectVfo(1);
+    collapseVfos();
+    reset();
+    const small = render(IQPanel, { minimal: true }, context());
+    for (const off of small.cleanups) off();
+
+    const full = render(IQPanel, { minimal: false }, context());
+    for (const off of full.cleanups) off();
+    const open = demodSettings().vfos.map((v) => v.open);
+    assert.deepStrictEqual(open, [false, true, false],
+        `only the selected row should have opened: ${open.join(', ')}`);
+});
+
+t('opening the selected row changes nothing else', () => {
+    fresh({ squelchDb: -30 });
+    addVfo();
+    selectVfo(0);
+    collapseVfos();
+    const after = expandActiveVfo();
+    assert.strictEqual(after.active, 0, 'opening a row changed which one is selected');
+    assert.deepStrictEqual(after.vfos.map((v) => v.open), [true, false]);
+    assert.strictEqual(after.vfos[0].squelchDb, -30);
+    // Idempotent, so returning to a panel that is already open is not a write.
+    assert.strictEqual(expandActiveVfo(), after);
+});
+
+t('a panel that mounts minimal leaves the rows as they were', () => {
+    // The other half of the rule, and the one that needs the ref: this panel is
+    // unmounted and remounted whenever its section is collapsed, moved between
+    // docks, or drawn a second time in a floating window. Shutting the rows on
+    // the state rather than on the change would undo an operator's choice every
+    // time they folded the dock away.
+    fresh();
+    addVfo();
+    reset();
+    const { cleanups } = render(IQPanel, { minimal: true }, context());
+    for (const off of cleanups) off();
+    assert.ok(demodSettings().vfos.every((v) => v.open),
+        'a remount in the minimal view shut rows that were open');
+});
+
+t('collapsing the rows leaves everything else alone', () => {
+    fresh({ mode: 'cw', squelchDb: -30 });
+    addVfo();
+    selectVfo(1);
+    const after = collapseVfos();
+    assert.ok(after.vfos.every((v) => v.open === false), 'a row was left open');
+    assert.strictEqual(after.active, 1, 'collapsing changed which row is selected');
+    assert.strictEqual(after.vfos[0].mode, 'cw');
+    assert.strictEqual(after.vfos[0].squelchDb, -30);
+    // Idempotent, so a second minimal press is not a second write.
+    assert.strictEqual(collapseVfos(), after);
+});
+
+t('the signal meter spans a stream\'s worth of range, and clamps', () => {
+    // One scale for the meter and the threshold that is marked on it, or the
+    // mark could only ever travel part of the bar.
+    assert.strictEqual(SIGNAL_FLOOR_DB, SQUELCH_OFF,
+        'the meter and the squelch must share a floor');
+    assert.strictEqual(signalMeter(0), 1, 'a full-scale signal should fill the meter');
+    assert.strictEqual(signalMeter(SIGNAL_FLOOR_DB), 0, 'the floor should be empty');
+    assert.strictEqual(signalMeter(SIGNAL_FLOOR_DB / 2), 0.5, 'the scale should be linear in dB');
+    // Off either end, and off the end of the *squelch* range in particular:
+    // a threshold below the meter's floor is drawn as a mark on it.
+    assert.strictEqual(signalMeter(20), 1);
+    assert.strictEqual(signalMeter(SQUELCH_OFF), 0);
+    // And nothing to read is an empty meter rather than a NaN width.
+    for (const nothing of [null, undefined, NaN, 'loud']) {
+        assert.strictEqual(signalMeter(nothing), 0, `${nothing} was not read as empty`);
+    }
+});
+
+t('an open row names its two meters and their unit; a closed one does not', () => {
+    // Six collapsed rows are a glance down a column and six pairs of labels
+    // would be text where the point was that there is none. An open row is
+    // being worked on, and a bar whose units nobody can name is a bar nobody
+    // can act on.
+    fresh();
+    addVfo();
+    toggleVfo(0);
+    toggleVfo(0);                    // row 0 closed, row 1 open
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    const names = deep(tree).filter((n) => cls(n) === 'iq-vfo__meter-name').map((n) => words(n));
+    assert.deepStrictEqual(names, ['Signal', 'Audio'],
+        `the open row should name both meters and the closed one neither: ${names.join(', ')}`);
+    // And the unit with them, even before the receiver has produced a reading.
+    const vals = deep(tree).filter((n) => cls(n) === 'iq-vfo__meter-val').map((n) => words(n));
+    assert.deepStrictEqual(vals, ['—', '—'],
+        `a meter with nothing to read should say so: ${vals.join(', ')}`);
+    for (const off of cleanups) off();
+});
+
+t('the squelch puts a mark on the signal meter, and only when it is set', () => {
+    fresh();
+    reset();
+    const off = render(IQPanel, {}, context());
+    const marks = (tree) => deep(tree).filter((n) => n.type === 'b'
+        && n.props && n.props.style && n.props.style.left !== undefined);
+    assert.strictEqual(marks(off.tree).length, 0, 'an unset squelch drew a threshold mark');
+    for (const c of off.cleanups) c();
+
+    fresh({ squelchDb: -30 });
+    reset();
+    const on = render(IQPanel, {}, context());
+    const drawn = marks(on.tree);
+    assert.strictEqual(drawn.length, 1, 'a set squelch drew no threshold mark');
+    // On the meter's scale and not the slider's, or the mark would stand
+    // somewhere other than the level it is a threshold for.
+    assert.strictEqual(drawn[0].props.style.left, `${signalMeter(-30) * 100}%`);
+    for (const c of on.cleanups) c();
 });
 
 // ── one colour each ─────────────────────────────────────────────────────────

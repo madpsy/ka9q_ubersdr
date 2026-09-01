@@ -95,6 +95,12 @@ export const DEFAULTS = {
     // marker this one is a *shared* frequency rather than one station, which is why its
     // tooltip is a list — see packetTip in MarkerBar.
     markerPacket: true,
+    // The other listeners, from the same /stats poll the Listeners panel reads: a
+    // dot in the band strip per person, or one dot with a count where several
+    // share a frequency. Never you — the dial already says where you are. Nothing
+    // to do with the chat: this is everybody the receiver is feeding audio to,
+    // whether or not they have ever typed anything.
+    markerListeners: true,
     // The frequency reference: one pill on the frequency the receiver measures its own
     // accuracy against, next to the two lines the spectrum draws there. Only where the
     // operator runs the monitor, and only once it has measured something. It outranks

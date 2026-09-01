@@ -15,7 +15,7 @@
 // all.
 
 import { HAM_BANDS } from './bands.js';
-import { tunable } from './listeners.js';
+import { activeLabel, tunable } from './listeners.js';
 
 // One hue per band, in degrees, close to the colours channels-map.html paints
 // its rows with. Hues rather than the map's hex, because this view has to work
@@ -84,8 +84,15 @@ export function pctOf(hz, min, max) {
     return clamp(((hz - min) / span) * 100, 0, 100);
 }
 
-// One row's listeners, left to right, with anything overlapping collapsed.
-function cluster(list, min, max, threshold) {
+/**
+ * One row's listeners, left to right, with anything overlapping collapsed.
+ *
+ * Exported because the marker bar wants the same picture across the spectrum's
+ * own window rather than across a band: `min`/`max` are whatever range is being
+ * drawn and `threshold` is a percentage of it, so the same function serves a
+ * 300 kHz band row and a 30 MHz view without knowing which it is looking at.
+ */
+export function clusterSpots(list, min, max, threshold) {
     const span = max - min;
     const sorted = list.slice().sort((a, b) => a.frequency - b.frequency);
     const spots = [];
@@ -117,6 +124,45 @@ function cluster(list, min, max, threshold) {
     }));
 }
 
+// ── What a dot says when you hover it ────────────────────────────────────────
+//
+// Here rather than in the component because two of them draw these dots now —
+// the panel's band view and the marker bar above the spectrum — and a listener
+// hovered in one place has to read the same as the same listener hovered in the
+// other.
+
+// A dot standing for more listeners than this lists the first few and says how
+// many are left. A tooltip is not a panel.
+export const MAX_TIP_LINES = 6;
+
+// One listener as a line of the tooltip: where, who, and how long since they
+// moved — the same fields the list row carries, on one line instead of two.
+//
+// The country goes in by name and not as a flag, unlike the list row. The
+// panel's tip is a native `title`, drawn by the browser's own chrome, which
+// never consults the page's stylesheet: the Twemoji face that makes
+// countryFlag() a flag everywhere else cannot reach it, so the regional
+// indicators would come out as two lettered boxes on Windows and as nothing
+// legible on most Linux.
+function line(channel, now) {
+    const where = [
+        `${(channel.frequency / 1000).toFixed(3)} kHz`,
+        channel.mode ? channel.mode.toUpperCase() : '',
+    ].filter(Boolean).join(' ');
+    const who = [channel.chatUsername, channel.country].filter(Boolean).join(' ');
+    const when = channel.you ? 'you' : activeLabel(channel.lastActive, now);
+    return [where, who, when].filter(Boolean).join(' · ');
+}
+
+/** One line per listener behind the dot, then how many were left off. */
+export function dotTitle(spot, now) {
+    const lines = spot.channels.slice(0, MAX_TIP_LINES).map((c) => line(c, now));
+    const over = spot.channels.length - lines.length;
+    if (over > 0) lines.push(`and ${over} more`);
+    if (spot.tune) lines.push('Click to listen here');
+    return lines.join('\n');
+}
+
 /**
  * The rows to draw, in band order, for the channels the server reported.
  *
@@ -143,7 +189,7 @@ export function bandRows(channels, minHz = 10000, maxHz = 30000000, threshold = 
         const inBand = list.filter((c) => c.frequency >= min && c.frequency <= max);
         if (inBand.length === 0) continue;
         for (const c of inBand) claimed.add(c);
-        rows.push({ name, min, max, hue: BAND_HUE[name] ?? null, spots: cluster(inBand, min, max, threshold) });
+        rows.push({ name, min, max, hue: BAND_HUE[name] ?? null, spots: clusterSpots(inBand, min, max, threshold) });
     }
 
     const rest = list.filter((c) => !claimed.has(c));
@@ -153,7 +199,7 @@ export function bandRows(channels, minHz = 10000, maxHz = 30000000, threshold = 
         // pinned to the edge lies about where they are.
         const min = Math.min(minHz, ...rest.map((c) => c.frequency));
         const max = Math.max(maxHz, ...rest.map((c) => c.frequency));
-        rows.push({ name: OTHER_ROW, min, max, hue: null, spots: cluster(rest, min, max, threshold) });
+        rows.push({ name: OTHER_ROW, min, max, hue: null, spots: clusterSpots(rest, min, max, threshold) });
     }
 
     return rows;

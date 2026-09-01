@@ -265,7 +265,7 @@ const BUILT_IN = [
     // full header in the dock — icon, title, chevron — so this is a row reading
     // "IQ Demod" either way, and being open bought discoverability it already
     // had at the price of a dock column that has to hold everything else too.
-    // Minimal is the operating controls without the gain, the AGC or the prose.
+    // Minimal is the operating controls without the gain or the AGC.
     {
         id: 'iqdemod',
         title: 'IQ Demod',

@@ -58,7 +58,7 @@
 // are, and components/IQDemodWatch.jsx is what pushes the mode and the volume
 // into it. This file is a view over that object and a set of controls.
 
-import React, { useEffect, useReducer, useRef, useState } from '../react.js';
+import React, { useEffect, useLayoutEffect, useReducer, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { resolveMaxFps, useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
@@ -73,18 +73,34 @@ import { cssVar, sizedCanvas } from '../lib/audioWaterfall.js';
 import { createLevels, updateLevels } from '../lib/ifSpectrum.js';
 import {
     IQSpectrum, aimCancel, aimDown, aimMove, aimUp, binsToPixels, fractionOffset, markerAt,
-    newAim, offsetFraction,
+    newAim, offsetFraction, squelchLineDb,
 } from '../lib/iqSpectrum.js';
 import {
-    DEMOD_MODES, MAX_VFOS, PANS, PITCH_MAX, PITCH_MIN, VFO_LABELS,
-    addVfo, demodMode, getIQDemod, offsetLimits, onDemodSettings, planForVfo, removeVfo,
-    selectVfo, tapsFor, toggleVfo, updateVfo, vfoPassband, vfoWidth,
+    DEMOD_MODES, MAX_VFOS, PANS, PITCH_MAX, PITCH_MIN, SQUELCH_MAX, SQUELCH_OFF, VFO_LABELS,
+    addVfo, collapseVfos, demodMode, expandActiveVfo, getIQDemod, offsetLimits, onDemodSettings,
+    planForVfo, removeVfo, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo, vfoPassband,
+    vfoWidth,
 } from '../lib/iqDemod.js';
 
 // How often the level meters are redrawn while running. Twelve a second, which
 // is the rate the Signal panel's meters are sampled at and as fast as a bar is
 // worth reading; the audio itself is not driven from here.
 const METER_MS = 80;
+
+// A row's own strip, as a share of the header above it.
+//
+// Two thirds rather than the whole. Matching the header exactly was the first
+// answer and it made the picture the loudest thing in the row: a strip as tall
+// as the line above it reads as a second row rather than as a band under one,
+// and with six demodulators the column becomes a stack of spectra with names
+// attached. At two thirds there is still room for thirty decibels to be worth
+// looking at, and the row still reads as a row.
+const STRIP_SHARE = 0.66;
+
+// What the header measures as before it has been measured, in CSS pixels. Only
+// ever what the strip is drawn at for the one frame before the real figure
+// arrives — see useBoxHeight.
+const HEAD_H = 26;
 
 // Height of the spectrum, in CSS pixels. Tall enough for the thirty decibels
 // between a signal and the noise it is sitting in to be worth looking at, short
@@ -96,6 +112,10 @@ const SCOPE_H = 96;
 // at the row's font, each plus its gap.
 const FREQ_TAG_W = 88;
 const OFFSET_TAG_W = 62;
+// ...and the two a collapsed row will also give up: three segmented buttons,
+// and a width like "2.7k" plus its gap.
+const PAN_TAG_W = 72;
+const BW_TAG_W = 34;
 
 const MODE_OPTIONS = DEMOD_MODES.map((m) => ({
     value: m.id, label: m.label, title: m.summary,
@@ -106,6 +126,179 @@ function widthLabel(hz) {
     if (hz < 1000) return `${hz}`;
     const k = hz / 1000;
     return Number.isInteger(k) ? `${k}k` : `${k.toFixed(1)}k`;
+}
+
+/**
+ * An element's height in CSS pixels, kept up to date.
+ *
+ * For the strip, whose whole specification is "as tall as the header above it".
+ * That height is not a constant anybody can write down: it follows the row's
+ * font, the interface scale and whatever the pan control's buttons measure on
+ * this platform. Asking the element is the only answer that stays right when
+ * one of those changes, and an observer is the only way to hear about it — the
+ * header can grow without this component rendering.
+ */
+function useBoxHeight(ref, fallback) {
+    const [h, setH] = useState(fallback);
+    useLayoutEffect(() => {
+        const el = ref.current;
+        if (!el || typeof ResizeObserver === 'undefined') return undefined;
+        const read = () => {
+            const box = Math.round(el.getBoundingClientRect().height);
+            setH(box > 0 ? box : fallback);
+        };
+        read();
+        const ro = new ResizeObserver(read);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, [ref, fallback]);
+    return h;
+}
+
+/**
+ * The same picture, cropped to one demodulator's passband.
+ *
+ * What the minimal view has instead of the full scope, and it is a different
+ * answer rather than a smaller one. Minimal is a dock column with something
+ * else in it, so ninety-six pixels of shared spectrum is the first thing that
+ * has to go — but what it was doing is not optional. Aiming a demodulator by
+ * ear, at a passband you cannot see, is the state this panel exists to get an
+ * operator out of.
+ *
+ * So each row keeps a picture of its own — two thirds the height of its own
+ * header, see STRIP_SHARE — showing exactly the span between its filter's
+ * skirts and nothing else. Where the full
+ * scope answers "what else is in the twelve kilohertz", this answers "is my
+ * signal still in my filter, and where in it" — which is the question you have
+ * once you are listening rather than looking, and it is the one a row can
+ * answer in twenty-six pixels.
+ *
+ * It is drawn in the same language as the big one, because it is the big one
+ * cropped: the whole strip is tinted in this demodulator's colour, since the
+ * whole strip *is* its passband; the trace is the same accent; and the squelch
+ * sits at the same corrected height, over the width of the strip rather than
+ * part of it.
+ */
+function VfoStrip({ source, vfo, index, armed, height }) {
+    const ref = useRef(null);
+    const st = useRef({ levels: createLevels(), px: null });
+    // Read inside the draw, which must not resubscribe as a slider moves.
+    st.current.vfo = vfo;
+    st.current.index = index;
+    st.current.h = height;
+    st.current.rate = source.spec.rate;
+
+    useEffect(() => {
+        st.current.levels = createLevels();
+        if (!armed) return undefined;
+        return source.subscribe((bins, dt) => drawStrip(ref.current, st.current, bins, dt));
+    }, [source, armed, height]);
+
+    // Off air, there is no loop to redraw this and the last frame would sit
+    // there looking like a signal. Drawn on every render instead, which while
+    // stopped is only when something has actually changed — and drawn through
+    // the same path, so a strip with nothing to show is a strip showing its
+    // passband and no trace rather than a blank rectangle.
+    useEffect(() => {
+        if (!armed) drawStrip(ref.current, st.current, null, 0);
+    });
+
+    return (
+        <canvas
+            ref={ref}
+            className="iq-vfo__strip"
+            style={{ height: `${height}px` }}
+            title="This demodulator’s passband"
+        />
+    );
+}
+
+/** One frame of one strip. */
+function drawStrip(canvas, s, bins, dt) {
+    if (!canvas) return;
+    const { w, h, dpr } = sizedCanvas(canvas, s.h || Math.round(HEAD_H * STRIP_SHARE));
+    const c = canvas.getContext('2d');
+    if (!c) return;
+
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, w, h);
+    c.fillStyle = cssVar('--surface-3', '#1a2130');
+    c.fillRect(0, 0, w, h);
+
+    const { vfo } = s;
+    const colour = cssVar(`--iq-vfo-${(s.index % MAX_VFOS) + 1}`, VFO_FALLBACK[s.index % MAX_VFOS]);
+    // The whole strip is the passband, so the shading the full scope draws over
+    // part of its width covers all of this one. It is what makes a row's strip
+    // recognisably that row's at a glance down the column.
+    c.globalAlpha = 0.22;
+    c.fillStyle = colour;
+    c.fillRect(0, 0, w, h);
+    c.globalAlpha = 1;
+
+    const rate = s.rate || 12000;
+    const band = vfoPassband(vfo);
+    const span = Math.max(1, band.hi - band.lo);
+
+    if (bins) {
+        // The slice of the transform this passband covers. Taken by index
+        // rather than resampled from the whole array: at a 500 Hz filter that
+        // is forty bins of a thousand, and stretching the other nine hundred
+        // and sixty across the same pixels first would cost as much as the
+        // transform did.
+        const n = bins.length;
+        const at = (hz) => Math.round((hz / rate + 0.5) * n);
+        const i0 = Math.max(0, Math.min(n - 1, at(band.lo)));
+        const i1 = Math.max(i0 + 1, Math.min(n, at(band.hi)));
+        if (!s.px || s.px.length !== w) s.px = new Float32Array(w);
+        binsToPixels(bins.subarray(i0, i1), s.px);
+        const { floor, ceil } = updateLevels(s.levels, s.px, dt);
+        const range = Math.max(1, ceil - floor);
+        const yOf = (db) => h - ((db - floor) / range) * h;
+
+        c.beginPath();
+        c.moveTo(0, h);
+        for (let x = 0; x < w; x++) {
+            const y = s.px[x];
+            c.lineTo(x, Number.isFinite(y) ? Math.max(0, Math.min(h, yOf(y))) : h);
+        }
+        c.lineTo(w, h);
+        c.closePath();
+        const accent = cssVar('--accent', '#08a2fb');
+        c.globalAlpha = 0.32;
+        c.fillStyle = accent;
+        c.fill();
+        c.globalAlpha = 1;
+        c.lineWidth = Math.max(1, dpr);
+        c.strokeStyle = accent;
+        c.stroke();
+
+        // And the squelch across it, at the same corrected height as the line
+        // on the full picture — one threshold, drawn the same way wherever the
+        // spectrum is being shown.
+        if (vfo.squelchDb > SQUELCH_OFF) {
+            const y = Math.round(Math.max(1, Math.min(
+                h - 1, yOf(squelchLineDb(vfo.squelchDb, span, rate)),
+            ))) + 0.5;
+            c.beginPath();
+            c.moveTo(0, y);
+            c.lineTo(w, y);
+            c.lineWidth = Math.max(1, dpr * 1.5);
+            c.strokeStyle = cssVar('--bad', '#f2646a');
+            c.stroke();
+        }
+    }
+}
+
+/**
+ * A meter's reading, or an em dash when there is nothing to read.
+ *
+ * A dash rather than a zero or a floor figure: "-100 dBFS" is a measurement and
+ * a stopped receiver has not made one. Whole decibels, because the meter beside
+ * it is three pixels tall and a tenth of a decibel is a digit that changes
+ * twelve times a second and means nothing.
+ */
+function levelLabel(db) {
+    return db == null || !Number.isFinite(db) ? '—' : `${Math.round(db)} dBFS`;
 }
 
 /** A signed offset from the dial, in the shape the Measure panel uses. */
@@ -140,6 +333,81 @@ function vfoColours() {
 }
 
 /**
+ * One transform of the stream, and everyone who draws it.
+ *
+ * There are two pictures of the same twelve kilohertz now — the full one above
+ * the rows, and a strip inside each row showing only that demodulator's
+ * passband — and only one of them is ever on screen at a time. That is still
+ * not a reason to give each its own transform: the ring, the FFT and the
+ * smoothing are the expensive part and none of it depends on who is looking, so
+ * this owns them once and hands the same bins to whoever asked.
+ *
+ * `frame()` is the reason it has to be exactly once. It carries the smoothing
+ * from one call to the next, so two consumers each calling it per frame would
+ * be advancing one average twice as fast as it was written for — the noise
+ * floor would stop boiling and a CW element would be gone before it was drawn.
+ * Here the loop calls it, and the subscribers are handed what came back.
+ *
+ * It runs whenever the receiver is in IQ, not only while demodulating: looking
+ * at what is in the twelve kilohertz before deciding where to listen is the
+ * order somebody actually does this in, and a picture that only appeared after
+ * Start would be a picture that arrived too late to be used.
+ */
+function useIQFrames(player, live, iq, maxFps) {
+    const ref = useRef(null);
+    if (!ref.current) {
+        ref.current = {
+            spec: new IQSpectrum(),
+            subs: new Set(),
+            subscribe(fn) {
+                ref.current.subs.add(fn);
+                return () => ref.current.subs.delete(fn);
+            },
+        };
+    }
+    const src = ref.current;
+
+    useEffect(() => {
+        if (!live || !iq) {
+            src.spec.reset();
+            return undefined;
+        }
+
+        const untap = player.onAudio((planes, frames, sampleRate) => {
+            // A mono stream is not a quadrature pair, and reading one as though
+            // it were would draw a plausible picture of nothing.
+            if (planes.length < 2) return;
+            src.spec.push(planes[0], planes[1], frames, sampleRate);
+        });
+
+        let raf = 0;
+        let timer = 0;
+        let last = 0;
+        const capMs = maxFps > 0 ? 1000 / maxFps : 0;
+        const frame = () => {
+            const now = performance.now();
+            const dt = last ? Math.min(1, (now - last) / 1000) : 0.05;
+            last = now;
+            const bins = src.spec.frame(dt);
+            // A copy of the set, so a subscriber that unsubscribes on its way
+            // out of the tree cannot alter what is being iterated.
+            for (const fn of Array.from(src.subs)) fn(bins, dt);
+            if (capMs) timer = setTimeout(() => { raf = requestAnimationFrame(frame); }, capMs);
+            else raf = requestAnimationFrame(frame);
+        };
+        raf = requestAnimationFrame(frame);
+
+        return () => {
+            untap();
+            cancelAnimationFrame(raf);
+            clearTimeout(timer);
+        };
+    }, [player, live, iq, maxFps, src]);
+
+    return src;
+}
+
+/**
  * The picture of the stream, and the way you aim inside it.
  *
  * This is the panel's reason for being a panel rather than a list of sliders:
@@ -154,67 +422,31 @@ function vfoColours() {
  * what makes every one of them directly draggable rather than only the
  * current one.
  *
- * The transform is computed here, from the same quadrature the demodulators are
- * listening to — see lib/iqSpectrum.js, and the note there about why a complex
- * transform can show the two sides of the dial apart when the audio analyser
- * behind the Audio scope cannot.
- *
- * It runs whenever the receiver is in IQ, not only while demodulating: looking
- * at what is in the twelve kilohertz before deciding where to listen is the
- * order somebody actually does this in, and a picture that only appeared after
- * Start would be a picture that arrived too late to be used.
+ * The transform it draws is lib/iqSpectrum.js's, computed once per frame by
+ * useIQFrames above from the same quadrature the demodulators are listening to
+ * — see the note there about why a complex transform can show the two sides of
+ * the dial apart when the audio analyser behind the Audio scope cannot.
  */
-function IQScope({ player, live, iq, running, vfos, active, onOffset, onPick, maxFps, marks }) {
+function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, marks }) {
     const ref = useRef(null);
     const st = useRef({
-        spec: new IQSpectrum(),
         levels: createLevels(),
         px: null,
-        last: 0,
         aim: newAim(),
         target: -1,
     });
-    // Read by the draw loop, which must not restart on every render — a new tap
-    // and a fresh transform each time an offset moved by ten hertz would blank
-    // the picture on the one gesture it exists to serve.
+    // Read by the draw loop, which must not resubscribe on every render — a
+    // fresh subscription each time an offset moved by ten hertz would blank the
+    // picture on the one gesture it exists to serve.
     st.current.vfos = vfos;
     st.current.active = active;
+    st.current.rate = source.spec.rate;
 
     useEffect(() => {
-        const s = st.current;
-        if (!live || !iq) {
-            s.spec.reset();
-            s.levels = createLevels();
-            return undefined;
-        }
-
-        const untap = player.onAudio((planes, frames, sampleRate) => {
-            // A mono stream is not a quadrature pair, and reading one as though
-            // it were would draw a plausible picture of nothing.
-            if (planes.length < 2) return;
-            s.spec.push(planes[0], planes[1], frames, sampleRate);
-        });
-
-        let raf = 0;
-        let timer = 0;
-        const capMs = maxFps > 0 ? 1000 / maxFps : 0;
-        const frame = () => {
-            const now = performance.now();
-            const dt = s.last ? Math.min(1, (now - s.last) / 1000) : 0.05;
-            s.last = now;
-            draw(ref.current, s, dt, marks);
-            if (capMs) timer = setTimeout(() => { raf = requestAnimationFrame(frame); }, capMs);
-            else raf = requestAnimationFrame(frame);
-        };
-        raf = requestAnimationFrame(frame);
-
-        return () => {
-            untap();
-            cancelAnimationFrame(raf);
-            clearTimeout(timer);
-            s.last = 0;
-        };
-    }, [player, live, iq, maxFps, marks.dial, marks.edge]);
+        st.current.levels = createLevels();
+        if (!live || !iq) return undefined;
+        return source.subscribe((bins, dt) => draw(ref.current, st.current, bins, dt, marks));
+    }, [source, live, iq, marks.dial, marks.edge]);
 
     // Where in the picture the pointer is, in pixels from its left edge, or null
     // if it cannot be measured.
@@ -235,7 +467,7 @@ function IQScope({ player, live, iq, running, vfos, active, onOffset, onPick, ma
         // picture must not change which demodulator is selected either.
         if (s.target >= 0 && s.target !== s.active) onPick(s.target);
         const index = s.target >= 0 ? s.target : s.active;
-        onOffset(index, Math.round(fractionOffset(at.x / at.w, s.spec.rate)));
+        onOffset(index, Math.round(fractionOffset(at.x / at.w, s.rate)));
     };
 
     const grab = (e) => {
@@ -263,7 +495,7 @@ function IQScope({ player, live, iq, running, vfos, active, onOffset, onPick, ma
         // deciding it again on every move would let a drag hand itself over to
         // whichever marker it happened to pass.
         s.target = at
-            ? markerAt(s.vfos.map((v) => v.offsetHz), at.x, at.w, s.spec.rate)
+            ? markerAt(s.vfos.map((v) => v.offsetHz), at.x, at.w, s.rate)
             : -1;
         const r = aimDown(s.aim, e);
         act(e, r);
@@ -316,9 +548,8 @@ function IQScope({ player, live, iq, running, vfos, active, onOffset, onPick, ma
  * marks the selected demodulator goes last, so where two sit on the same
  * frequency the one you are working on is the one you can see.
  */
-function draw(canvas, s, dt, marks) {
+function draw(canvas, s, bins, dt, marks) {
     if (!canvas) return;
-    const bins = s.spec.frame(dt);
     const { w, h, dpr } = sizedCanvas(canvas, SCOPE_H);
     const c = canvas.getContext('2d');
     if (!c) return;
@@ -328,7 +559,7 @@ function draw(canvas, s, dt, marks) {
     c.fillStyle = cssVar('--surface-3', '#1a2130');
     c.fillRect(0, 0, w, h);
 
-    const rate = s.spec.rate || 12000;
+    const rate = s.rate || 12000;
     const xOf = (hz) => offsetFraction(hz, rate) * w;
     const vfos = s.vfos || [];
     const colours = vfoColours();
@@ -346,12 +577,17 @@ function draw(canvas, s, dt, marks) {
     }
     c.globalAlpha = 1;
 
+    // Set once the scale is known, and read afterwards by the squelch lines —
+    // which are a level on this picture and cannot be placed until there is a
+    // picture to place them on.
+    let yOf = null;
+
     if (bins) {
         if (!s.px || s.px.length !== w) s.px = new Float32Array(w);
         binsToPixels(bins, s.px);
         const { floor, ceil } = updateLevels(s.levels, s.px, dt);
         const span = Math.max(1, ceil - floor);
-        const yOf = (db) => h - ((db - floor) / span) * h;
+        yOf = (db) => h - ((db - floor) / span) * h;
 
         // Filled to the floor rather than a bare line: at this height a stroke
         // on its own reads as a scribble, and the fill is what makes a carrier
@@ -372,6 +608,41 @@ function draw(canvas, s, dt, marks) {
         c.lineWidth = Math.max(1, dpr);
         c.strokeStyle = accent;
         c.stroke();
+    }
+
+    // Every squelch that is set, drawn as a red line across the passband it
+    // gates, at the height the trace has to reach for the gate to open.
+    //
+    // Across the passband rather than the whole width, because that is what it
+    // is a statement about: with six demodulators there can be six of these and
+    // a set of full-width lines would say nothing about which threshold belongs
+    // to which filter. Over the trace rather than under it, so a signal poking
+    // through the threshold is read the way it is meant to be — the line is the
+    // question and the trace is the answer.
+    if (yOf) {
+        const red = cssVar('--bad', '#f2646a');
+        for (let i = 0; i < vfos.length; i++) {
+            const v = vfos[i];
+            if (!(v.squelchDb > SQUELCH_OFF)) continue;
+            const band = vfoPassband(v);
+            const x0 = xOf(band.lo);
+            const x1 = xOf(band.hi);
+            // Clamped rather than dropped when it lands off the scale: a
+            // threshold pinned to the top of the picture is the answer to why
+            // nothing is being heard, and one at the bottom is the answer to
+            // why everything is.
+            const y = Math.round(Math.max(1, Math.min(h - 1, yOf(
+                squelchLineDb(v.squelchDb, vfoWidth(v), rate),
+            )))) + 0.5;
+            c.beginPath();
+            c.moveTo(x0, y);
+            c.lineTo(Math.max(x0 + dpr, x1), y);
+            c.lineWidth = Math.max(1, dpr * 1.5);
+            c.strokeStyle = red;
+            c.globalAlpha = i === s.active ? 0.95 : 0.5;
+            c.stroke();
+            c.globalAlpha = 1;
+        }
     }
 
     const line = (hz, colour, dash, width) => {
@@ -485,7 +756,9 @@ export function ListeningCard({ listening, dialHz, limits, onTune }) {
  * showing, which is per row and independent: pressing the header of the active
  * row closes it without giving up the aim.
  */
-function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove }) {
+function VfoRow({
+    index, vfo, active, level, signalDb, gateOpen, taps, dialHz, minimal, canRemove, source, armed,
+}) {
     const mode = demodMode(vfo.mode);
     const width = vfoWidth(vfo);
     const limits = offsetLimits(vfo.mode, width);
@@ -493,25 +766,62 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
     const set = (patch) => updateVfo(index, patch);
     const open = vfo.open !== false;
     const listening = dialHz + vfo.offsetHz;
+    const squelched = vfo.squelchDb > SQUELCH_OFF;
+    const shut = squelched && !gateOpen;
+    // The audio meter's reading, in the same unit as the signal meter's so the
+    // two lines can be read one after the other. The bar itself is linear in
+    // amplitude and full at the AGC's target, which is a different scale from
+    // this figure — the bar is for watching and the number is for reading, and
+    // a decibel is what an operator would say either of them in.
+    const audioDb = level > 0 ? 20 * Math.log10(level) : null;
 
-    // Where the demodulator is listening, said twice over, and neither reading
-    // is guaranteed a place: a dock column can be narrower than a row wants.
+    // What the head gives up as the dock narrows, in the order it gives it up.
     //
-    // The frequency is the one to keep. It is the number an operator has in
-    // their head and the one they would read out to somebody; the offset is a
-    // relative figure the picture above already shows as a line, and it is
-    // repeated in the body whenever the row is open. So the offset goes first as
-    // the dock narrows, and the frequency after it — and what is left, always,
-    // is which demodulator this is and how wide.
+    // The frequency is the one to keep and everything here is arranged around
+    // that. It is the number an operator has in their head and the one they
+    // would read out to somebody, and on a *collapsed* row it is the only place
+    // that number appears — an open row repeats it in the body, so this is a
+    // question about rows that are shut.
+    //
+    // Which is why a shut row will give up more to hold on to it. In keep order,
+    // last going first:
+    //
+    //   offset      a relative figure the picture already draws as a line, and
+    //               the body repeats whenever the row is open.
+    //   bandwidth   a readout. The mode beside it stays whatever happens — USB
+    //               against LSB is not a detail — and the whole summary is on
+    //               the mode's tooltip once the width has gone.
+    //   pan         a control, and the reason it outlasts the bandwidth: it is
+    //               half of what makes several demodulators usable at once. It
+    //               is not lost with the row either — opening the row brings it
+    //               back, since an open row never drops it.
+    //   frequency   last, and only when the row cannot hold anything at all.
+    //
+    // An open row keeps the pan and the bandwidth at any width, so only the two
+    // readings are optional there. That is the whole of the difference, and it
+    // is why the spec list is built from `open`.
     //
     // Same mechanism as the top bar's optional tags; see lib/roomFor.js, whose
-    // one rule this layout has to hold up: every child counted here is
-    // `flex: none`, and the growing is done by a spacer the measurement skips.
-    const headRef = useRef(null);
-    const room = useRoomFor(headRef, [
+    // one rule this layout has to hold up: every child counted here is either
+    // `flex: none` or discounted, which for the head means the button — it
+    // grows to fill the row, and the spacer inside it is what roomFor takes off
+    // to get back to its content.
+    const headBox = useRef(null);
+    const headH = useBoxHeight(headBox, HEAD_H);
+    const room = useRoomFor(headBox, open ? [
         { key: 'freq', width: FREQ_TAG_W },
         { key: 'offset', width: OFFSET_TAG_W },
+    ] : [
+        { key: 'freq', width: FREQ_TAG_W },
+        { key: 'pan', width: PAN_TAG_W },
+        { key: 'bw', width: BW_TAG_W },
+        { key: 'offset', width: OFFSET_TAG_W },
     ]);
+    // Absent only when a measurement has actually said so. A key that has just
+    // joined the list has not been measured yet, and a child that is never on
+    // screen is a child whose real width is never learned — so the first answer
+    // is always "show it", and the measurement that follows decides.
+    const has = (key) => room[key] !== false;
 
     // Coarse enough that the slider crosses twelve kilohertz in a drag, fine
     // enough to land on a carrier: ten hertz is a fifth of the narrowest CW
@@ -520,12 +830,11 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
 
     return (
         <div
-            className={`iq-vfo${active ? ' is-active' : ''}${open ? ' is-open' : ''}${vfo.muted ? ' is-muted' : ''}`}
+            className={`iq-vfo${active ? ' is-active' : ''}${open ? ' is-open' : ''}${vfo.muted ? ' is-muted' : ''}${shut ? ' is-shut' : ''}`}
             style={{ '--vfo': `var(--iq-vfo-${(index % MAX_VFOS) + 1})` }}
         >
-            <div className="iq-vfo__head">
+            <div className="iq-vfo__head" ref={headBox}>
                 <button
-                    ref={headRef}
                     type="button"
                     className="iq-vfo__pick"
                     aria-expanded={open}
@@ -537,26 +846,38 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
                     {open ? <Icon.ChevronUp /> : <Icon.Chevron />}
                     <i className="iq-vfo__swatch" />
                     <span className="iq-vfo__name">{VFO_LABELS[index]}</span>
-                    <span className="iq-vfo__sum">{vfoSummary(vfo)}</span>
-                    {room.offset && (
+                    {/* The mode always, the width beside it while there is room.
+                        The tooltip is the pair of them, so a row that has given
+                        the width up can still be asked. */}
+                    <span className="iq-vfo__sum" title={vfoSummary(vfo)}>{mode.label}</span>
+                    {has('bw') && (
+                        <span className="iq-vfo__bw" data-optional={open ? undefined : 'bw'}>
+                            {widthLabel(width)}
+                        </span>
+                    )}
+                    {has('offset') && (
                         <span className="iq-vfo__off" data-optional="offset">
                             {`· ${offsetLabel(vfo.offsetHz)}`}
                         </span>
                     )}
-                    {room.freq && (
+                    {has('freq') && (
                         <span className="iq-vfo__freq" data-optional="freq">
                             {formatFreqExact(listening)}
                         </span>
                     )}
                     <i className="iq-vfo__slack" data-slack />
                 </button>
-                <Segmented
-                    className="iq-vfo__pan"
-                    options={PANS}
-                    value={vfo.pan}
-                    onChange={(pan) => set({ pan })}
-                    size="sm"
-                />
+                {has('pan') && (
+                    <span className="iq-vfo__panbox" data-optional={open ? undefined : 'pan'}>
+                        <Segmented
+                            className="iq-vfo__pan"
+                            options={PANS}
+                            value={vfo.pan}
+                            onChange={(pan) => set({ pan })}
+                            size="sm"
+                        />
+                    </span>
+                )}
                 <button
                     type="button"
                     className={`iq-vfo__mute${vfo.muted ? ' is-muted' : ''}`}
@@ -585,11 +906,70 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
                 </button>
             </div>
 
-            {/* The row's own underline. Every row has one, open or not, which
-                is the question you ask of a demodulator you are not editing: is
-                anything on it. */}
-            <div className="iq-vfo__level">
-                <i style={{ width: `${Math.min(100, level * 400)}%` }} />
+            {/* And in the minimal view, where there is no shared picture above
+                the rows, this row's own: the same spectrum cropped to this
+                demodulator's passband, the height of the header it sits under.
+                See VfoStrip. */}
+            {minimal && (
+                <VfoStrip
+                    source={source}
+                    vfo={vfo}
+                    index={index}
+                    armed={armed}
+                    height={Math.max(1, Math.round(headH * STRIP_SHARE))}
+                />
+            )}
+
+            {/* The row's own underline, and it is two meters rather than one:
+                what is arriving and what is coming out.
+
+                They are different questions and a single bar could only answer
+                one of them. The audio level says what you are hearing, which
+                goes to nothing when the row is muted or the squelch has shut —
+                and at that point the first question, the one you ask of a
+                demodulator you are not editing, has no meter left to answer it.
+                So the signal meter sits above it, reading the passband before
+                any of that is applied: something is on this one, and here is
+                what is being done with it.
+
+                In that order because it is the order the signal travels, and it
+                is why the threshold mark is on the upper bar — the squelch is a
+                decision about the input, so it belongs on the meter of the
+                input. Every row has both, open or not.
+
+                Named and read out only while the row is open, and that is the
+                one difference between the two forms. Collapsed, these are an
+                underline: six rows of them are a glance down a column, and six
+                pairs of labels would be text where the point was that there is
+                none. Open, the row is being worked on rather than scanned, and
+                a bar whose units nobody can name is a bar nobody can act on —
+                so each grows a name and the figure it is showing. */}
+            <div className={`iq-vfo__meters${open ? ' is-labelled' : ''}`}>
+                <div className="iq-vfo__meter">
+                    {open && <span className="iq-vfo__meter-name">Signal</span>}
+                    <div
+                        className="iq-vfo__signal"
+                        title={signalDb == null
+                            ? 'Signal in this demodulator’s passband'
+                            : `Signal in this demodulator’s passband: ${Math.round(signalDb)} dBFS`}
+                    >
+                        <i style={{ width: `${signalMeter(signalDb) * 100}%` }} />
+                        {squelched && (
+                            <b
+                                style={{ left: `${signalMeter(vfo.squelchDb) * 100}%` }}
+                                title={`Squelch at ${vfo.squelchDb} dBFS`}
+                            />
+                        )}
+                    </div>
+                    {open && <span className="iq-vfo__meter-val">{levelLabel(signalDb)}</span>}
+                </div>
+                <div className="iq-vfo__meter">
+                    {open && <span className="iq-vfo__meter-name">Audio</span>}
+                    <div className="iq-vfo__level" title="What this demodulator is putting out">
+                        <i style={{ width: `${Math.min(100, level * 400)}%` }} />
+                    </div>
+                    {open && <span className="iq-vfo__meter-val">{levelLabel(audioDb)}</span>}
+                </div>
             </div>
 
             {open && (
@@ -646,6 +1026,36 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
                         </Field>
                     )}
 
+                    {/* Per demodulator, and it has to be: the whole point of
+                        six of them is that they are on six different signals,
+                        and one threshold across the bank would be set by
+                        whichever of them was quietest.
+
+                        The marker is the level in this demodulator's passband
+                        right now, in the slider's own units, so the threshold
+                        is set by putting the thumb where the marker is not —
+                        and the same two figures are the red line and the trace
+                        on the picture above. Kept in the minimal view: a
+                        squelch is something you adjust while listening, which
+                        is the test that view applies. */}
+                    <Field
+                        label="Squelch"
+                        hint={!squelched ? 'Off'
+                            : `${vfo.squelchDb} dBFS${signalDb == null ? '' : shut ? ' · closed' : ' · open'}`}
+                    >
+                        <Slider
+                            value={vfo.squelchDb}
+                            min={SQUELCH_OFF}
+                            max={SQUELCH_MAX}
+                            step={1}
+                            onChange={(squelchDb) => set({ squelchDb })}
+                            marker={signalDb == null ? null : signalDb}
+                            markerTone={shut ? 'closed' : 'open'}
+                            markerTitle={signalDb == null ? undefined
+                                : `In the passband now: ${Math.round(signalDb)} dBFS`}
+                        />
+                    </Field>
+
                     <div className="readout-grid">
                         <ListeningCard
                             listening={listening}
@@ -683,8 +1093,8 @@ function VfoRow({ index, vfo, active, level, taps, dialHz, minimal, canRemove })
 
 /**
  * `minimal` keeps what you operate — the picture, the rows, and for the open one
- * where it is listening and how wide — and drops what you set once: the gain,
- * the AGC and the prose. See the registry's `minimal`.
+ * where it is listening, how wide and where the squelch is — and drops what you
+ * set once: the gain and the AGC. See the registry's `minimal`.
  */
 export default function IQPanel({ minimal }) {
     const { running, audioState, tuning, actions, player } = useRadio();
@@ -695,6 +1105,11 @@ export default function IQPanel({ minimal }) {
     // edges with, so a mark means the same thing in both pictures.
     const marks = markColors(display);
     const demod = getIQDemod(player);
+    const iq = isIQ(tuning.mode);
+    const live = running && audioState === 'open';
+    // One transform for whichever picture is on screen — the full scope, or a
+    // strip in every row. See useIQFrames.
+    const source = useIQFrames(player, live, iq, maxFps);
 
     // The engine is not React state, so a change on it has to be turned into a
     // render by hand — the recorder panel does the same over the same kind of
@@ -702,6 +1117,37 @@ export default function IQPanel({ minimal }) {
     const [, bump] = useReducer((n) => n + 1, 0);
     useEffect(() => demod.on('change', bump), [demod]);
     useEffect(() => onDemodSettings(bump), []);
+
+    // The header's minimal toggle works the rows as well as the panel, in both
+    // directions.
+    //
+    // Going minimal is a request for less of this panel, and with several
+    // demodulators open the rows are most of its height — so trimming the gain
+    // and the AGC off the bottom of each of them and leaving all of them
+    // expanded would answer that request with the smaller half of it. Every row
+    // shuts.
+    //
+    // Coming back out is the same request in reverse and gets the same
+    // treatment, but only for the selected row: that is the one the picture is
+    // aimed at and the one every other control acts on, so it is the row a
+    // person is coming back for. Reopening all of them would be restoring a
+    // state nobody asked to have restored, and this does not remember which
+    // were open anyway.
+    //
+    // Both fire on the *change* and not on the state, and that distinction is
+    // the whole of the ref: the panel is unmounted and remounted whenever its
+    // section is collapsed, or moved between docks, or drawn a second time in a
+    // floating window, so an effect keyed on the value would work the rows on
+    // every one of those — closing rows somebody had opened, or reopening one
+    // they had just shut.
+    const wasMinimal = useRef(minimal);
+    useEffect(() => {
+        const was = wasMinimal.current;
+        wasMinimal.current = minimal;
+        if (minimal === was) return;
+        if (minimal) collapseVfos();
+        else expandActiveVfo();
+    }, [minimal]);
 
     const on = demod.running;
     useEffect(() => {
@@ -712,8 +1158,6 @@ export default function IQPanel({ minimal }) {
 
     const s = demod.settings;
     const { vfos, active } = s;
-    const iq = isIQ(tuning.mode);
-    const live = running && audioState === 'open';
     const hearing = on && demod.quadrature;
 
     // Start remembers where the operator was, so stopping does not strand them
@@ -763,19 +1207,26 @@ export default function IQPanel({ minimal }) {
             </div>
 
             {/* The picture first: it is the map every row below is a legend for,
-                and the control the offsets are actually set with. */}
-            <IQScope
-                player={player}
-                live={live}
-                iq={iq}
-                running={on}
-                vfos={vfos}
-                active={active}
-                onOffset={(index, offsetHz) => updateVfo(index, { offsetHz })}
-                onPick={selectVfo}
-                maxFps={maxFps}
-                marks={marks}
-            />
+                and the control the offsets are actually set with.
+
+                Dropped in the minimal view, where a dock column has something
+                else in it — but not simply dropped: each row grows a strip of
+                its own passband instead, so the one thing this picture does
+                that nothing else can, showing a demodulator where its filter is
+                sitting, survives the trim. */}
+            {!minimal && (
+                <IQScope
+                    source={source}
+                    live={live}
+                    iq={iq}
+                    running={on}
+                    vfos={vfos}
+                    active={active}
+                    onOffset={(index, offsetHz) => updateVfo(index, { offsetHz })}
+                    onPick={selectVfo}
+                    marks={marks}
+                />
+            )}
 
             <div className="iq-vfos">
                 {vfos.map((vfo, i) => (
@@ -785,10 +1236,14 @@ export default function IQPanel({ minimal }) {
                         vfo={vfo}
                         active={i === active}
                         level={hearing ? demod.levelOf(i) : 0}
+                        signalDb={hearing ? demod.signalDbOf(i) : null}
+                        gateOpen={hearing ? demod.gateOpenOf(i) : true}
                         taps={tapsFor(planForVfo(vfo).cutoffHz, demod.rate || 12000)}
                         dialHz={tuning.frequency}
                         minimal={minimal}
                         canRemove={vfos.length > 1}
+                        source={source}
+                        armed={live && iq}
                     />
                 ))}
                 {vfos.length < MAX_VFOS && (
@@ -803,17 +1258,6 @@ export default function IQPanel({ minimal }) {
                     </Button>
                 )}
             </div>
-
-            {!minimal && (
-                <div className="note note--tight">
-                    Experimental. The receiver sends 12 kHz of raw baseband and this
-                    demodulates it here, so each demodulator picks any point inside
-                    that span without retuning &mdash; but IQ costs the receiver&rsquo;s
-                    owner about six times the bandwidth of Opus, and in IQ the noise
-                    blanker, noise reduction and audio filters are all bypassed. The
-                    bandwidths above are the only filtering there is.
-                </div>
-            )}
         </div>
     );
 }

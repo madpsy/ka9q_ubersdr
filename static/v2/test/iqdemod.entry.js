@@ -11,21 +11,27 @@ import { GROUPS } from '../src/panels/groups.jsx';
 import {
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
+    squelchLineDb,
 } from '../src/lib/iqSpectrum.js';
 import {
-    DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, VFO_LABELS, DemodChain,
-    addVfo, clampOffset, clampWidth, demodSettings, designLowpass, getIQDemod, offsetLimits,
-    passbandFor, planFor, planForVfo, removeVfo, resetDemodSettings, saveDemodSettings, selectVfo,
-    tapsFor, toggleVfo, updateVfo, vfoPassband, vfoWidth,
+    DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
+    VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
+    designLowpass, expandActiveVfo, getIQDemod, offsetLimits, passbandFor, planFor,
+    planForVfo, removeVfo,
+    resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
+    vfoPassband, vfoWidth,
 } from '../src/lib/iqDemod.js';
 
 module.exports = {
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
+    squelchLineDb,
     IQPanel, ListeningCard, VFO_FALLBACK, vfoSummary, PANEL_BY_ID, GROUPS,
-    DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, VFO_LABELS, DemodChain,
-    addVfo, clampOffset, clampWidth, demodSettings, designLowpass, getIQDemod, offsetLimits,
-    passbandFor, planFor, planForVfo, removeVfo, resetDemodSettings, saveDemodSettings, selectVfo,
-    tapsFor, toggleVfo, updateVfo, vfoPassband, vfoWidth,
+    DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
+    VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
+    designLowpass, expandActiveVfo, getIQDemod, offsetLimits, passbandFor, planFor,
+    planForVfo, removeVfo,
+    resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
+    vfoPassband, vfoWidth,
 };

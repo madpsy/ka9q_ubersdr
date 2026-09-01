@@ -27,6 +27,8 @@ import {
     REF_MARKER_LABEL, freqRefAvailable, refMarkerFreq, refMarkerLayout, refMarkerTip,
 } from '../lib/freqRef.js';
 import { subscribePacketMarkers } from '../lib/packetMarkers.js';
+import { subscribeListeners } from '../lib/listeners.js';
+import { clusterSpots, dotTitle, gapPct } from '../lib/listenerBands.js';
 import { subscribeConfirmedVoice } from '../lib/voiceConfirmed.js';
 import { tuneTarget, voiceSkimmerAvailable } from '../lib/voiceSkimmer.js';
 import { haptic } from '../lib/haptics.js';
@@ -117,6 +119,25 @@ const SPOT_STYLE = {
     cw: { pill: 'rgba(23, 162, 184, 0.95)', stem: 'rgba(23, 162, 184, 0.55)', ink: '#ffffff' },
 };
 
+// Listeners: where everybody else on the receiver is tuned, one dot per person
+// and a dot with a count where several share a frequency — the Listeners
+// panel's band view, drawn across the spectrum's own window instead of across a
+// band. lib/listenerBands.js does the clustering for both.
+//
+// The one layer that is not a pill and does not take a marker row. It lives in
+// the band strip along the top, above everything else in the bar, and so it can
+// never be pushed up a row or dropped for want of space: the band labels give
+// way to it instead. That is the right way round — a label repeats every couple
+// of hundred pixels and losing one costs nothing, while a listener that is
+// sometimes drawn and sometimes not is not an indicator.
+//
+// White with a dark ring, which is exactly what the panel paints (.lsn-dot, on
+// --text). Not a new colour to learn, and the two views cannot be confused with
+// each other because nothing else is ever in this lane.
+const LSN_R = 5;            // dot radius, CSS px — the strip is 13 high
+const LSN_MIN_W = 15;       // a dot carrying a count grows sideways, as the panel's does
+const LSN_LABEL_PAD = 5;    // clearance a band label keeps from a dot
+
 // Off-screen indicators for the dial and the passband edges. Their colours are
 // not fixed here: they are the operator's own marks, from the palette or from
 // the pickers in the Display panel, and an arrow that did not match the line it
@@ -180,6 +201,10 @@ export default function MarkerBar({ width }) {
     // Packet channels, gated on the addon being installed — the toggle would otherwise
     // promise markers that can never appear.
     const showPacket = display.markerPacket !== false && packetAvailable(serverInfo);
+    // Where the other listeners are. Not you: the dial already says where this
+    // receiver is pointed, and a dot for yourself would be the one mark in the
+    // bar that tells you something you are looking at.
+    const showListeners = display.markerListeners !== false;
     // The frequency reference, gated on the operator running the monitor at all.
     // refMarkerFreq stays null until it has averaged a measurement, so the pill
     // arrives with the first lock rather than at load — the same "enabled, but
@@ -213,6 +238,20 @@ export default function MarkerBar({ width }) {
         if (!showConfirmed) { setConfirmed([]); return undefined; }
         return subscribeConfirmedVoice((list) => setConfirmed(list || []));
     }, [showConfirmed]);
+
+    // The same refcounted /stats poll the Listeners panel and the spectrum's
+    // stats readout use — see lib/listeners.js. Subscribing joins whichever loop
+    // is already running or starts one, so this costs a request every ten
+    // seconds only when nothing else was asking. Gated on `running` as the spot
+    // layers are: a stopped receiver leaving stale dots on the bar would be the
+    // one place in the app still claiming to know who is listening.
+    const [listeners, setListeners] = useState([]);
+    useEffect(() => {
+        if (!showListeners || !live) { setListeners([]); return undefined; }
+        return subscribeListeners((state) => {
+            setListeners(((state && state.channels) || []).filter((c) => !c.you));
+        });
+    }, [showListeners, live]);
 
     // One shared poll with the voice activity panel; subscribing is what starts
     // it, so with the toggle off nothing is fetched.
@@ -295,7 +334,7 @@ export default function MarkerBar({ width }) {
 
         hitsRef.current = {
             bookmarks: [], bands: [], voice: [], confirmed: [], spots: [], vfos: [], packet: [],
-            ref: [],
+            ref: [], listeners: [],
         };
         if (!span) return;
 
@@ -305,6 +344,35 @@ export default function MarkerBar({ width }) {
         const accent = css.getPropertyValue('--accent').trim() || '#08a2fb';
         const accentInk = css.getPropertyValue('--accent-ink').trim() || '#04141a';
         const dim = css.getPropertyValue('--text-faint').trim() || '#5c6779';
+        // The listener dots, from the same two tokens the panel's dots use.
+        const ink = css.getPropertyValue('--text').trim() || '#e8eef7';
+        const paper = css.getPropertyValue('--bg').trim() || '#0b0f16';
+
+        // ---- listeners: clustered first, drawn after the band strip --------
+        // Laid out before the bands because the band labels have to fit around
+        // the dots rather than the other way round, and the labels are drawn in
+        // the block below.
+        //
+        // Clustered across the visible window with the same pixel gap the panel
+        // uses, so what counts as "the same frequency" tightens as you zoom in:
+        // at full span half the receiver is one dot, and at 20 kHz two people
+        // 300 Hz apart are two.
+        const lsnSpots = showListeners && listeners.length
+            ? clusterSpots(
+                listeners.filter((c) => c.frequency >= startFreq && c.frequency <= endFreq),
+                startFreq, endFreq, gapPct(width),
+            )
+            : [];
+        c.font = '700 8px ui-monospace, SFMono-Regular, monospace';
+        const lsnDots = lsnSpots.map((spot) => ({
+            spot,
+            x: (spot.pct / 100) * width,
+            // A single dot is round; several share a capsule wide enough for the
+            // count, exactly as .lsn-dot.is-many does in the panel.
+            w: spot.channels.length > 1
+                ? Math.max(LSN_MIN_W, c.measureText(String(spot.channels.length)).width + 8)
+                : LSN_R * 2,
+        }));
 
         // ---- band allocations -------------------------------------------
         if (showBands && catalog.bands) {
@@ -340,11 +408,56 @@ export default function MarkerBar({ width }) {
                 if (!name) continue;
                 const labelWidth = c.measureText(name).width + 6;
                 for (const x of bandLabelPositions({ x0: s.x0, x1: s.x1, labelWidth })) {
+                    // A label under a listener dot is dropped rather than moved.
+                    // The positions are evenly spread across the band and sliding
+                    // one along would break that spacing for the sake of a name
+                    // that is repeated every couple of hundred pixels anyway.
+                    if (lsnDots.some((d) => (
+                        Math.abs(d.x - x) < (d.w + labelWidth) / 2 + LSN_LABEL_PAD
+                    ))) continue;
                     c.fillStyle = 'rgba(0,0,0,0.45)';
                     c.fillRect(x - labelWidth / 2, 1.5, labelWidth, BAND_H - 3);
                     c.fillStyle = 'rgba(255,255,255,0.92)';
                     c.fillText(name, x, BAND_H / 2 + 0.5);
                 }
+            }
+        }
+
+        // ---- listeners, drawn ----------------------------------------------
+        // Over the band strip and its labels, and before the pills so that a
+        // stem is covered by whatever it passes behind rather than drawn across
+        // it. The stem is what makes a mark at the top of the bar point at a
+        // frequency at the bottom of it, which every other marker here needs too.
+        if (lsnDots.length) {
+            const cy = BAND_H / 2;
+            for (const d of lsnDots) {
+                c.strokeStyle = 'rgba(255,255,255,0.28)';
+                c.lineWidth = 1;
+                c.beginPath();
+                c.moveTo(Math.round(d.x) + 0.5, cy + LSN_R);
+                c.lineTo(Math.round(d.x) + 0.5, MARKER_BAR_H);
+                c.stroke();
+
+                c.fillStyle = ink;
+                roundRect(c, d.x - d.w / 2, cy - LSN_R, d.w, LSN_R * 2, LSN_R);
+                c.fill();
+                // The panel gives its dots a dark ring for the same reason: they
+                // land on band colours, on the bar's background and on each
+                // other's stems, and none of those is a reliable backdrop.
+                c.strokeStyle = 'rgba(0,0,0,0.55)';
+                c.stroke();
+
+                if (d.spot.channels.length > 1) {
+                    c.font = '700 8px ui-monospace, SFMono-Regular, monospace';
+                    c.textBaseline = 'middle';
+                    c.textAlign = 'center';
+                    c.fillStyle = paper;
+                    c.fillText(String(d.spot.channels.length), d.x, cy + 0.5);
+                }
+
+                hitsRef.current.listeners.push({
+                    x: d.x, y: cy - LSN_R, w: d.w, h: LSN_R * 2, spot: d.spot,
+                });
             }
         }
 
@@ -756,7 +869,7 @@ export default function MarkerBar({ width }) {
     }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency,
         showVoice, voice, showConfirmed, confirmed,
         showDx, showCw, dxSpots, cwSpots, ageTick, showPacket, packet,
-        showVfos, vfos, tuning.frequency, showRef, refFreq,
+        showVfos, vfos, tuning.frequency, showRef, refFreq, showListeners, listeners,
         dialColor, edgeColor, edgeLowHz, edgeHighHz]);
 
     const locate = useCallback((e) => {
@@ -765,6 +878,13 @@ export default function MarkerBar({ width }) {
         const r = canvas.getBoundingClientRect();
         const x = e.clientX - r.left;
         const y = e.clientY - r.top;
+        // The dots first. They are alone in the band strip, so this cannot take a
+        // hit from a pill — but it has to come before the band fallback below,
+        // which claims the whole of that strip.
+        const ls = hitsRef.current.listeners.find(
+            (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
+        );
+        if (ls) return { kind: 'listener', ...ls };
         const rf = hitsRef.current.ref.find(
             (b) => y >= b.y && y <= b.y + b.h && x >= b.x - b.w / 2 && x <= b.x + b.w / 2,
         );
@@ -809,7 +929,9 @@ export default function MarkerBar({ width }) {
         const r = canvasRef.current.getBoundingClientRect();
         setTip({
             x: e.clientX - r.left,
-            text: hit.kind === 'ref'
+            text: hit.kind === 'listener'
+                ? dotTitle(hit.spot, Date.now())
+                : hit.kind === 'ref'
                 ? refMarkerTip(serverInfo)
                 : hit.kind === 'vfo'
                 ? `VFO ${hit.vfo.id} · ${formatFreqShort(hit.vfo.frequency)}${hit.vfo.mode ? ' · ' + hit.vfo.mode.toUpperCase() : ''}`
@@ -834,7 +956,21 @@ export default function MarkerBar({ width }) {
         // the tap found something, and no pulse says it did not.
         if (!hit) return;
         haptic('tune', 'spectrum');
-        if (hit.kind === 'ref') {
+        if (hit.kind === 'listener') {
+            // The same tune the panel's dots make — frequency, mode and the
+            // passband they are using — so listening in on somebody lands
+            // identically wherever you click them. A dot with nobody tunable
+            // behind it (an IQ channel) is read rather than pressed, as it is
+            // there.
+            const t = hit.spot.tune;
+            if (!t || !freqInRange(t.frequency)) return;
+            actions.tuneTo({
+                frequency: t.frequency,
+                mode: t.mode,
+                bandwidthLow: t.bandwidthLow,
+                bandwidthHigh: t.bandwidthHigh,
+            });
+        } else if (hit.kind === 'ref') {
             // Where this receiver hears the reference, which is where the dial has
             // to be to hear it — not the frequency the station transmits on, which
             // is the same number only for a receiver that is exactly right. No
@@ -918,7 +1054,7 @@ export default function MarkerBar({ width }) {
     // Packet was missing from this list, which hid the whole bar for anyone who
     // had turned everything else off and kept the packet channels.
     if (!showBands && !showServer && !showLocal && !showVoice && !showConfirmed
-        && !showDx && !showCw && !showVfos && !showPacket && !showRef) {
+        && !showDx && !showCw && !showVfos && !showPacket && !showRef && !showListeners) {
         return null;
     }
 

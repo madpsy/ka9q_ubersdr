@@ -161,8 +161,14 @@ type clientSession struct {
 	// and IQ forwarding goroutines have been launched.
 	streamingStarted bool
 
-	// PCM decoder (one per session)
-	pcmDecoder *PCMBinaryDecoder
+	// Protocol version 4 packet decoder.
+	//
+	// Replaced rather than reset when a socket opens, and read under mu by the
+	// receive goroutine, which is the only thing that decodes: the predictor is
+	// backward adaptive, so an instance is only meaningful against the encoder
+	// at the other end of one particular connection, and a fresh socket means
+	// the server has built a fresh encoder.
+	pcmDecoder *PCMv4StreamDecoder
 
 	// stopCh is closed when the bridge is stopping (shared with bridge)
 	stopCh chan struct{}
@@ -211,11 +217,7 @@ func NewRTLTCPBridge(ubersdrURL, password, listenAddr string, initialFreq int64,
 }
 
 // newClientSession allocates a fresh clientSession for an incoming TCP connection.
-func (b *RTLTCPBridge) newClientSession(conn net.Conn) (*clientSession, error) {
-	pcmDecoder, err := NewPCMBinaryDecoder()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create PCM decoder: %w", err)
-	}
+func (b *RTLTCPBridge) newClientSession(conn net.Conn) *clientSession {
 	return &clientSession{
 		bridge:        b,
 		userSessionID: uuid.New().String(),
@@ -226,9 +228,9 @@ func (b *RTLTCPBridge) newClientSession(conn net.Conn) (*clientSession, error) {
 		iqChan:        make(chan []byte, 512),
 		clientDone:    make(chan struct{}),
 		forwardDone:   nil,
-		pcmDecoder:    pcmDecoder,
+		pcmDecoder:    NewPCMv4StreamDecoder(),
 		stopCh:        b.stopCh,
-	}, nil
+	}
 }
 
 // getURLForFrequency returns the appropriate URL and password for a given frequency
@@ -361,6 +363,14 @@ func (s *clientSession) connectToUberSDR(clientAddr net.Addr) error {
 	query := url.Values{}
 	query.Set("frequency", fmt.Sprintf("%d", frequency))
 	query.Set("mode", mode)
+	// "pcm-zstd" is still the server's name for the lossless format, and IQ is
+	// only ever served losslessly in any case; from protocol version 4 what it
+	// carries is a predictive codec rather than a zstd wrapper, which is where
+	// the bandwidth went -- 384 kHz IQ falls from 1590 kB/s to 1116. Version 4
+	// is the only one this bridge reads, and a server from 0.1.63 on refuses a
+	// version it cannot serve rather than quietly sending an older one.
+	query.Set("format", "pcm-zstd")
+	query.Set("version", fmt.Sprintf("%d", pcmProtocolVersion))
 	query.Set("user_session_id", s.userSessionID)
 	if targetPassword != "" {
 		query.Set("password", targetPassword)
@@ -389,6 +399,11 @@ func (s *clientSession) connectToUberSDR(clientAddr net.Addr) error {
 	s.mu.Lock()
 	s.wsConn = conn
 	s.currentURL = targetURL
+	// A fresh socket is a fresh stream. A new instance rather than a reset,
+	// because the receive goroutine holds no lock while it decodes: it takes
+	// the pointer under mu and works on whatever it got, so swapping one in
+	// cannot race with a decode already under way on the old one.
+	s.pcmDecoder = NewPCMv4StreamDecoder()
 	s.mu.Unlock()
 
 	log.Printf("[%s] Connected to UberSDR at %s (%d Hz, %s)", s.userSessionID[:8], targetURL, frequency, mode)
@@ -505,7 +520,21 @@ func (s *clientSession) receiveFromUberSDR() {
 		}
 
 		if messageType == websocket.BinaryMessage {
-			pcmData, sampleRate, _, err := s.pcmDecoder.DecodePCMBinary(message, true)
+			// A server older than 0.1.63 clamps the requested version to 1-3
+			// and answers with version 1 rather than refusing it, so its frames
+			// arrive as zstd rather than as an error. Naming that beats a
+			// stream of "bad magic" a hundred times a second.
+			if isZstdFrame(message) {
+				log.Printf("[%s] Server does not support protocol version %d (needs UberSDR 0.1.63 or later)",
+					s.userSessionID[:8], pcmProtocolVersion)
+				return
+			}
+
+			s.mu.RLock()
+			dec := s.pcmDecoder
+			s.mu.RUnlock()
+
+			pcmData, sampleRate, _, _, _, err := dec.DecodePacketLE(message)
 			if err != nil {
 				log.Printf("[%s] PCM decode error: %v", s.userSessionID[:8], err)
 				continue
@@ -807,13 +836,7 @@ func (b *RTLTCPBridge) handleClient(conn net.Conn) {
 		return
 	}
 
-	sess, err := b.newClientSession(conn)
-	if err != nil {
-		b.sessionsMu.Unlock()
-		log.Printf("Bridge: Failed to create session for %s: %v", clientAddr, err)
-		_ = conn.Close()
-		return
-	}
+	sess := b.newClientSession(conn)
 	b.sessions[sess.userSessionID] = sess
 	total := len(b.sessions)
 	b.sessionsMu.Unlock()
@@ -833,9 +856,6 @@ func (b *RTLTCPBridge) handleClient(conn net.Conn) {
 		log.Printf("Bridge: rtl_tcp client disconnected from %s [session %s] (%d active)",
 			clientAddr, sess.userSessionID[:8], remaining)
 
-		if sess.pcmDecoder != nil {
-			sess.pcmDecoder.Close()
-		}
 	}()
 
 	// Send dongle info header: "RTL0" + tuner_type (BE uint32) + tuner_gain_count (BE uint32)

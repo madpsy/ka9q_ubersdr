@@ -93,9 +93,9 @@ When the limit is reached, new connections are rejected immediately with a log m
    - If the client limit (`-max-clients`) is reached, the connection is rejected immediately and logged
    - The bridge checks connection permission via UberSDR's `/connection` HTTP endpoint
    - Sends the 12-byte `RTL0` dongle info header (emulating an R820T tuner with 29 gain steps)
-4. On the first `SET_FREQ` command, the session connects to UberSDR via WebSocket (`/ws?frequency=N&mode=iq192&user_session_id=UUID`)
-5. UberSDR streams IQ data as pcm-zstd binary WebSocket frames
-6. The bridge decodes the pcm-zstd frames and converts int16 IQ → uint8 offset-binary IQ
+4. On the first `SET_FREQ` command, the session connects to UberSDR via WebSocket (`/ws?frequency=N&mode=iq192&format=pcm-zstd&version=4&user_session_id=UUID`)
+5. UberSDR streams IQ as binary lossless packets — see Wire Format below
+6. The bridge decodes them and converts int16 IQ → uint8 offset-binary IQ
 7. The uint8 IQ stream is forwarded continuously to the TCP client
 8. When the client sends commands (frequency, sample rate, gain, etc.):
    - **Frequency** (`0x01`): Sends `{"type":"tune","frequency":N,"mode":"iq192"}` to UberSDR
@@ -155,9 +155,37 @@ When the client requests a rate different from 192 kHz, the bridge resamples usi
 | 192 kHz | iq192 | 192 kHz | None (pass-through) |
 | Any other rate | iq192 | 192 kHz | Kaiser-windowed sinc to requested rate |
 
+## Wire Format
+
+The bridge requests `format=pcm-zstd&version=4` — the lossless path, which is
+the only one IQ is ever served on, at the only protocol version it reads.
+`pcm-zstd` is still the server's name for that format, but from version 4 what
+it carries is not zstd:
+
+- **Packet**: a `PCM4` magic, a flags byte, then only the fields that changed
+  since the last packet. Sample rate, channel count, sample count and the two
+  signal levels are each re-sent when they move and every five seconds
+  regardless. About 9 bytes against the 29 version 1 spent on every one.
+- **Body**: each sample is predicted from those before it by an adaptive complex
+  filter and only the prediction error is sent, Rice coded. The filter is
+  *backward* adaptive — its taps come from samples already decoded — so no
+  coefficients travel and the decoder recomputes them independently.
+- **Bandwidth**: 192 kHz IQ falls by about 30%, and 384 kHz from 1590 kB/s to
+  1116. zstd achieved nothing here: it is an LZ77 matcher over bytes, and a
+  band-limited RF signal has no repeated byte strings, so every IQ mode measured
+  at 0.99x — the compressed stream *larger* than the samples it carried.
+- **Lossless**: bit-exact, and checked as such. `TestPCMv4DecodesServerStream`
+  decodes a packet stream in `testdata/` that the server's own encoder produced
+  and compares the samples that come back; the predictor fails silently
+  otherwise, and an rtl_tcp client would only report a receiver that suddenly
+  hears nothing.
+- **Requires UberSDR 0.1.63 or later.** Older servers clamp the requested
+  version to 1-3 and answer with version 1 rather than refusing; the bridge
+  recognises those frames and logs why instead of decoding noise.
+
 ## IQ Sample Conversion
 
-UberSDR delivers int16 stereo PCM (little-endian, interleaved I/Q). The `rtl_tcp` protocol requires uint8 offset-binary IQ pairs:
+The decoder produces int16 stereo PCM (little-endian, interleaved I/Q). The `rtl_tcp` protocol requires uint8 offset-binary IQ pairs:
 
 ```
 uint8_val = (int16_val >> 8) + 128

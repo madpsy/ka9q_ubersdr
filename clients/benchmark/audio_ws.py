@@ -6,9 +6,15 @@ binary PCM-zstd (or Opus) frames, counts bytes/messages, and discards the
 data.  No decoding or audio output is performed.
 
 WebSocket URL format (mirrors radio_client.py build_websocket_url()):
-    /ws?frequency=<hz>&mode=<mode>&format=<opus|pcm-zstd>&version=2
+    /ws?frequency=<hz>&mode=<mode>&format=<opus|pcm-zstd>&version=<1-4>
         &user_session_id=<uuid>[&bandwidthLow=<n>&bandwidthHigh=<n>]
         [&password=<pw>]
+
+The protocol version comes from BenchmarkConfig.protocol_version and defaults
+to 4, so the server runs the same predictive-codec encode path real clients
+hit.  Nothing here decodes the result -- frames are counted and discarded --
+so the version only changes what the server spends CPU and bandwidth on,
+which is the point of measuring it.
 
 Keepalive: {"type": "ping"} every 30 seconds (matches real client).
 
@@ -162,7 +168,7 @@ class AudioWebSocket:
             'mode': state.mode,
             'user_session_id': self._stats.session_id,
             'format': self._cfg.audio_format,
-            'version': '2',
+            'version': str(self._cfg.protocol_version),
         }
 
         # Only include bandwidth for non-IQ modes (matches original client)
@@ -259,7 +265,9 @@ class AudioWebSocket:
                         raise exc
                 except (json.JSONDecodeError, AttributeError):
                     pass
-            # Binary frames (PCM-zstd): just counted above, discarded
+            # Binary frames (PCM v1-v3 zstd, v4 predictive, or Opus): the
+            # length was counted above and the payload is discarded unread, so
+            # no per-version header parsing is needed here.
 
     async def _tune_loop(
         self,

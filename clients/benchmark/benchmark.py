@@ -16,7 +16,8 @@ Default behaviour
   Interactive mode is used whenever --users is NOT specified.
   The tool prompts for number of users and duration, runs the benchmark,
   then prompts again.  Persistent settings (--url, --threads, --audio-format,
-  etc.) can be given on the command line and are used as defaults in the loop.
+  --protocol-version, etc.) can be given on the command line and are used as
+  defaults in the loop.
 
   Pass --users to run once non-interactively and exit.
 
@@ -324,6 +325,18 @@ def build_parser() -> argparse.ArgumentParser:
             'IQ modes always use pcm-zstd regardless of this setting.'
         ),
     )
+    audio.add_argument(
+        '--protocol-version', type=int, default=4, choices=[1, 2, 3, 4],
+        metavar='N',
+        help=(
+            'Audio WebSocket protocol version requested from the server '
+            '(default 4, matching the web, Electron, TUI and SDR-bridge clients). '
+            'Version 4 uses the predictive lossless codec instead of the zstd '
+            'wrapper. A server that does not implement the requested version '
+            'refuses the connection with HTTP 400, so lower this to benchmark '
+            'an older instance.'
+        ),
+    )
 
     # --- Feature flags ---
     feat = parser.add_argument_group('Feature flags')
@@ -623,7 +636,7 @@ def run_interactive(base_config: BenchmarkConfig, admin_password: Optional[str])
     print("║  Press Enter to accept defaults.  Type 'q' or Ctrl-C to exit.║")
     print("╚══════════════════════════════════════════════════════════════╝")
     print(f"  Server:       {base_config.url}")
-    print(f"  Audio format: {base_config.audio_format}")
+    print(f"  Audio format: {base_config.audio_format} (protocol v{base_config.protocol_version})")
     print(f"  Threads:      up to {base_config.threads} (capped at user count)")
     print()
 
@@ -799,6 +812,7 @@ def main() -> None:
             spectrum_zoom_khz=args.spectrum_zoom,
             spectrum_default=args.spectrum_default,
             audio_format=args.audio_format,
+            protocol_version=args.protocol_version,
             enable_audio=not args.no_audio,
             enable_spectrum=not args.no_spectrum,
             enable_dxcluster=not args.no_dxcluster,
@@ -825,6 +839,7 @@ def main() -> None:
             spectrum_zoom_khz=args.spectrum_zoom,
             spectrum_default=args.spectrum_default,
             audio_format=args.audio_format,
+            protocol_version=args.protocol_version,
             enable_audio=not args.no_audio,
             enable_spectrum=not args.no_spectrum,
             enable_dxcluster=not args.no_dxcluster,

@@ -237,6 +237,25 @@ class BenchmarkConfig:
     audio_format: str = 'opus'
     """Audio encoding format sent to the server: ``'opus'`` (default) or ``'pcm-zstd'``."""
 
+    protocol_version: int = 4
+    """Audio WebSocket protocol version sent as ``?version=``.
+
+    Mirrors the negotiation in websocket.go:
+
+    - 1: no signal-quality fields in the audio header.
+    - 2: adds baseband power and the noise density N0 (dBFS/Hz).
+    - 3: same layout as 2, but the noise field is passband noise power (dBFS).
+    - 4: predictive lossless codec in place of the zstd wrapper, with a
+      variable-length header.  Affects the pcm formats only; Opus frames
+      carry a v4 header but the same Opus payload.
+
+    Defaults to 4 to match what the web, Electron, TUI, hpsdr, rtl_sdr and
+    soapy clients ask for, so a benchmark run exercises the same encode path
+    real users hit.  A server that does not implement the requested version
+    refuses the WebSocket with HTTP 400 rather than serving an older one, so
+    lower this when pointing the benchmark at an older instance.
+    """
+
     # --- Feature flags ---
     enable_audio: bool = True
     """Connect the audio WebSocket (``/ws``)."""

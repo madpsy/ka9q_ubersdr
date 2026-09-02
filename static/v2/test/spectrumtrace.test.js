@@ -7,7 +7,7 @@
 
 const assert = require('assert');
 const {
-    TRACE_FLOOR, TRACE_WIDTH, binsToPixels, frequencyTicks,
+    TRACE_FLOOR, TRACE_WIDTH, binsToPixels, drawDbScale, frequencyTicks,
 } = require('./.build/spectrumtrace.cjs');
 
 let pass = 0;
@@ -119,6 +119,83 @@ t('the ruler follows the view, so a pan moves every tick with it', () => {
 t('a zero span gives nothing rather than dividing by it', () => {
     const { ticks } = frequencyTicks(view(7.1e6, 0), 800);
     assert.ok(ticks.every((k) => Number.isFinite(k.frac)) || ticks.length === 0);
+});
+
+// ── The dB scale ─────────────────────────────────────────────────────────────
+//
+// Drawn over the picture by the audio scope and by every IF view that has an
+// axis of levels, which between them run from a 57 px split trace to a 320 px
+// fusion and from a 45 dB auto window to the 140 dB the manual sliders reach.
+// The two things it must do across all of that: put a label where that level is
+// drawn, and stay sparse enough to be read at a glance.
+
+// A context that records the text it was asked for and ignores the rest.
+function labelsOf({ hCss, floor, ceil, contrast = 1, dpr = 2 }) {
+    const out = [];
+    const noop = () => {};
+    const c = {
+        fillStyle: '', strokeStyle: '', lineWidth: 0, lineJoin: '',
+        font: '', textBaseline: '', textAlign: '',
+        beginPath: noop, moveTo: noop, lineTo: noop, stroke: noop, strokeText: noop,
+        fillText: (text, x, y) => out.push({ db: Number(text), y }),
+    };
+    drawDbScale(c, { h: hCss * dpr, dpr, floor, range: ceil - floor, contrast, ink: '#fff' });
+    return out;
+}
+
+// The panes these are drawn in: the IF panel's split trace, its shortest whole
+// pane and its tallest, and the audio scope's fixed canvas.
+const PANE_H = [57, 96, 130, 320];
+// Auto windows at both ends of their range, and the manual sliders' extremes.
+const WINDOWS = [[-95, -50], [-110, -20], [-100, -40], [-140, 0]];
+
+t('a label sits where its own level is drawn', () => {
+    for (const hCss of PANE_H) {
+        for (const [floor, ceil] of WINDOWS) {
+            for (const { db, y } of labelsOf({ hCss, floor, ceil })) {
+                const want = (hCss * 2) - ((db - floor) / (ceil - floor)) * (hCss * 2);
+                assert.ok(Math.abs(y - want) < 0.51,
+                    `${hCss}px ${floor}..${ceil}: ${db} drawn at ${y.toFixed(1)}, belongs at ${want.toFixed(1)}`);
+            }
+        }
+    }
+});
+
+t('the scale is sparse, and never empty where there is room for it', () => {
+    for (const hCss of PANE_H) {
+        for (const [floor, ceil] of WINDOWS) {
+            const labels = labelsOf({ hCss, floor, ceil });
+            const where = `${hCss}px ${floor}..${ceil}`;
+            // Two on the shortest pane there is, which is what makes it a scale
+            // rather than a number.
+            assert.ok(labels.length >= 2, `${where}: ${labels.length} labels`);
+            // ...and never a wall of them on the tallest.
+            assert.ok(labels.length <= 7, `${where}: ${labels.length} labels`);
+            for (let i = 1; i < labels.length; i++) {
+                assert.ok(labels[i].y - labels[i - 1].y >= 18 * 2,
+                    `${where}: ${labels[i - 1].db} and ${labels[i].db} are on top of each other`);
+            }
+            // Whole, inside the canvas: half a label reads as a different one.
+            for (const { y } of labels) assert.ok(y > 0 && y < hCss * 2, `${where}: a label at ${y}`);
+            // Every one of them a round number of dB on the same ladder.
+            const step = labels.length > 1 ? Math.abs(labels[1].db - labels[0].db) : 10;
+            // `===` rather than strictEqual: -60 % 20 is -0, which is a perfectly
+            // good zero and not the one Object.is would accept.
+            for (const { db } of labels) assert.ok(db % step === 0, `${where}: ${db} is off the ladder`);
+        }
+    }
+});
+
+t('the geometry gamma moves the labels with the picture', () => {
+    // The audio scope draws its columns through a contrast gamma, so the scale
+    // has to bend the same way — a linear scale over a bent picture is wrong
+    // everywhere but the two ends.
+    const flat = labelsOf({ hCss: 96, floor: -90, ceil: 0 });
+    const bent = labelsOf({ hCss: 96, floor: -90, ceil: 0, contrast: 2.5 });
+    const sameDb = bent.filter((b) => flat.some((f) => f.db === b.db));
+    assert.ok(sameDb.length, 'no label to compare');
+    assert.ok(sameDb.some((b) => Math.abs(b.y - flat.find((f) => f.db === b.db).y) > 1),
+        'the gamma moved the picture and left the scale where it was');
 });
 
 console.log(`\n${pass} passed`);

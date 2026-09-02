@@ -471,4 +471,43 @@ t('the ruler does not crowd, at any width the dock can be', () => {
     }
 });
 
+// The dB scale down the left of the picture, and the switch that turns it off.
+//
+// Which views offer it is the point: the mirror's axis is symmetric about the
+// centre line and the bare waterfall's is time, so a scale of absolute levels
+// over either would be a scale for an axis that is not there. A switch offered
+// in a view that cannot draw the thing is worse than no switch.
+const scaleSwitch = (tree) => walk(tree).filter((n) => n && n.props && n.props.label === 'dB scale');
+
+t('the dB scale is offered by the views that draw a trace, and only those', () => {
+    for (const view of ['split', 'spectrum', 'fusion', 'shape']) {
+        reset();
+        const { tree } = render(IFSpectrumPanel, {}, context({ ifView: view }));
+        assert.strictEqual(scaleSwitch(tree).length, 1, `no dB scale switch in ${view}`);
+    }
+    for (const view of ['waterfall', 'mirror']) {
+        reset();
+        const { tree } = render(IFSpectrumPanel, {}, context({ ifView: view }));
+        assert.strictEqual(scaleSwitch(tree).length, 0,
+            `${view} has no axis of levels to scale, but offers the switch`);
+    }
+});
+
+t('the dB scale is on to begin with, and is a control rather than a picture', () => {
+    // On: a trace without it can say which signal is louder but not how loud.
+    assert.notStrictEqual(DEFAULTS.ifScale, false);
+    reset();
+    const { tree } = render(IFSpectrumPanel, {}, context({}));
+    assert.strictEqual(scaleSwitch(tree)[0].props.checked, true);
+
+    reset();
+    const { tree: off } = render(IFSpectrumPanel, {}, context({ ifScale: false }));
+    assert.strictEqual(scaleSwitch(off)[0].props.checked, false);
+
+    // A setting, so the minimal view drops the switch and keeps the drawing.
+    reset();
+    const { tree: min } = render(IFSpectrumPanel, { minimal: true }, context({}));
+    assert.strictEqual(scaleSwitch(min).length, 0, 'the minimal view should not carry the switch');
+});
+
 console.log(`\n${pass} passed`);

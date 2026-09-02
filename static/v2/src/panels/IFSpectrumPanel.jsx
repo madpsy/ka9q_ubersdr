@@ -35,7 +35,9 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
 import { getPalette } from '../lib/palettes.js';
-import { GRAD_STOPS, TRACE_FLOOR, TRACE_WIDTH, paletteGradients, themeColors } from '../lib/spectrumTrace.js';
+import {
+    GRAD_STOPS, TRACE_FLOOR, TRACE_WIDTH, drawDbScale, paletteGradients, themeColors,
+} from '../lib/spectrumTrace.js';
 import { RING_BG, RING_PAD, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
 import { retentionFor } from '../lib/timeConstant.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
@@ -88,7 +90,7 @@ const STATS_MS = 250;
 // Theme values this pane reads, through the same cached lookup the main
 // spectrum uses — getComputedStyle inside a draw loop costs more than the
 // drawing does.
-const THEME_VARS = ['--spec-bg', '--spec-grid', '--spec-band', '--warn'];
+const THEME_VARS = ['--spec-bg', '--spec-grid', '--spec-band', '--warn', '--scope-scale'];
 
 // The Filter card's long wording, keyed by verdict — the card itself is a
 // fixed cell and only has room for a couple of words (see formatFit).
@@ -876,6 +878,19 @@ export default function IFSpectrumPanel({ minimal }) {
                 </Field>
             )}
 
+            {/* The numbers down the left of the picture. Not with the mirror,
+                whose axis is symmetric about the centre line — the same reason
+                the dB grid sits it out — and not with the bare waterfall, whose
+                vertical axis is time. */}
+            {!minimal && has.trace && !has.mirror && (
+                <Switch
+                    checked={display.ifScale !== false}
+                    onChange={(v) => display.set({ ifScale: v })}
+                    label="dB scale"
+                    title="The levels the trace is drawn against, down the left of the picture. On, because a spectrum without them can only say which signal is louder, not how loud either of them is"
+                />
+            )}
+
             {/* Only in the Shape view, which is the only one that has a window
                 to set. Seconds rather than a frame count, because that is what
                 it actually is — see lib/ifShape.js. */}
@@ -1468,6 +1483,20 @@ function drawTrace(st, canvas, trace, levels, opts) {
             c.stroke();
         }
     });
+
+    // The levels the trace is drawn against, down the left and over it. Last,
+    // so it is read against the picture rather than buried under it — and in
+    // the fusion view it lands on the overlay, which is the only surface that
+    // view's trace exists on.
+    //
+    // `contrast` is 1 rather than the setting: here it only colours the
+    // gradients, where the audio scope's bends the geometry as well.
+    if (d.ifScale !== false) {
+        drawDbScale(c, {
+            h, dpr: st.dpr, floor: levels.floor, range: span, contrast: 1,
+            ink: col['--scope-scale'] || 'rgba(255,255,255,0.92)',
+        });
+    }
 }
 
 // ── The shape ────────────────────────────────────────────────────────────────
@@ -1587,6 +1616,17 @@ function drawShape(st, canvas, stats, levels) {
         c.lineJoin = 'round';
         c.stroke();
     });
+
+    // The same scale the other views carry. It matters more here than anywhere:
+    // this view's window is fitted to the passband rather than to the pane, so
+    // without the numbers there is nothing to say how far the envelope has
+    // actually been magnified.
+    if (d.ifScale !== false) {
+        drawDbScale(c, {
+            h, dpr: st.dpr, floor: levels.floor, range: span, contrast: 1,
+            ink: col['--scope-scale'] || 'rgba(255,255,255,0.92)',
+        });
+    }
 }
 
 // The marks over a waterfall — and, in the fusion view, the trace with them.

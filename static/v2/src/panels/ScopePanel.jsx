@@ -165,6 +165,7 @@ export default function ScopePanel({ minimal }) {
     // than at whatever rate the audio happens to be arriving.
     const peaks = display.scopePeaks !== false;
     const heat = display.scopeHeat !== false;
+    const scale = display.scopeScale !== false;
 
     // Persist the choices with the other display settings.
     useEffect(() => {
@@ -225,6 +226,7 @@ export default function ScopePanel({ minimal }) {
                     fftSize,
                     peaks,
                     heat,
+                    scale,
                 });
                 drawAudioRuler(barRulerRef.current, tuning, f.sampleRate, f.binCount);
             } else if (showScope) {
@@ -248,8 +250,8 @@ export default function ScopePanel({ minimal }) {
                 drawAudioRuler(rulerRef.current, tuning, f.sampleRate, f.binCount);
             }
         });
-    }, [player, fftSize, showScope, showWf, spectrum, bars, peaks, heat, timebase, tuning, display.palette,
-        contrast, rate, wfRate, autoLevel, floorDb, iq, stats]);
+    }, [player, fftSize, showScope, showWf, spectrum, bars, peaks, heat, scale, timebase, tuning,
+        display.palette, contrast, rate, wfRate, autoLevel, floorDb, iq, stats]);
 
     // A new passband, a new resolution or a stopped stream all make the
     // accumulated average describe something that is no longer on screen.
@@ -428,8 +430,8 @@ export default function ScopePanel({ minimal }) {
                 </Field>
             )}
 
-            {/* The spectrum views' two extras, side by side because they are
-                the same kind of choice — what is drawn besides the trace — and
+            {/* The spectrum views' extras, side by side because they are the
+                same kind of choice — what is drawn besides the trace — and
                 because each is a word and a switch. Only with a spectrum
                 showing: neither means anything over a waveform or a
                 waterfall. Shared by both shapes, since they are the same two
@@ -448,6 +450,12 @@ export default function ScopePanel({ minimal }) {
                             onChange={(v) => display.set({ scopeHeat: v })}
                             label="Heat"
                             title="Colours the space above the spectrum by how much of the audio's energy each part of the band is carrying — green for an average share, red for more, blue for less"
+                        />
+                        <Switch
+                            checked={scale}
+                            onChange={(v) => display.set({ scopeScale: v })}
+                            label="Scale"
+                            title="A dB scale down the left of the picture, in whatever window the levels are being drawn in — so a signal can be read as a level rather than only compared with its neighbours"
                         />
                     </div>
                 </Field>

@@ -206,7 +206,7 @@ const DEV_H = CANVAS_H * 2;          // at the dpr above
 const canvasFor = (c) => ({ clientWidth: 300, clientHeight: CANVAS_H, width: 0, height: 0, getContext: () => c });
 
 // One frame, and the labels it drew: value in dB and where it put them.
-function scaleLabels(draw, { floorDb, contrast }) {
+function scaleLabels(draw, { floorDb, contrast, scale = true }) {
     const binCount = 2048;
     const bins = new Float32Array(binCount).fill(-100);
     bins[100] = -20;
@@ -219,7 +219,7 @@ function scaleLabels(draw, { floorDb, contrast }) {
     draw({
         canvas: canvasFor(c), bins, binCount, sampleRate: 12000,
         tuning: { mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
-        palette: 'classic', contrast, level, floorDb, fftSize: 4096, heat: false, peaks: false,
+        palette: 'classic', contrast, level, floorDb, fftSize: 4096, heat: false, peaks: false, scale,
     });
     // The window the frame was drawn in, read back the way the drawing read it.
     // Over every bin rather than the passband the draw used, which is the same
@@ -228,7 +228,7 @@ function scaleLabels(draw, { floorDb, contrast }) {
     return {
         floor,
         range,
-        labels: c.texts.map(({ t, y }) => ({ db: Number(String(t).replace(' dB', '')), unit: /dB/.test(t), y })),
+        labels: c.texts.map(({ t, y }) => ({ db: Number(t), y })),
     };
 }
 
@@ -262,17 +262,25 @@ for (const draw of [drawAudioBars, drawAudioLine]) {
             // Not a wall of numbers on a 96 px canvas, and never two of them on
             // top of each other — which is what the contrast gamma does to a
             // step chosen from dB per pixel alone.
-            assert.ok(labels.length <= 6, `${JSON.stringify(cs)}: ${labels.length} labels on ${CANVAS_H} px`);
+            assert.ok(labels.length <= 7, `${JSON.stringify(cs)}: ${labels.length} labels on ${CANVAS_H} px`);
             for (let i = 1; i < labels.length; i++) {
-                assert.ok(labels[i].y - labels[i - 1].y >= 20 * 2,
+                // The module's own minimum, in device px at the dpr above.
+                assert.ok(labels[i].y - labels[i - 1].y >= 18 * 2,
                     `${JSON.stringify(cs)}: ${labels[i - 1].db} and ${labels[i].db} are on top of each other`);
             }
             // Inside the canvas, whole: half a label reads as a different one.
             for (const { y } of labels) assert.ok(y > 0 && y < DEV_H, `${JSON.stringify(cs)}: a label at ${y}`);
-            // The unit is named once, on the top label.
-            assert.strictEqual(labels.filter((l) => l.unit).length, 1,
-                `${JSON.stringify(cs)}: the unit should be on exactly one label`);
-            assert.ok(!labels.length || labels[0].unit, 'the unit belongs on the top label');
+            // Numbers, with no unit on any of them: down the side of an audio
+            // spectrum they are dB and the word is width the passband wants.
+            for (const { db } of labels) assert.ok(Number.isFinite(db), `${JSON.stringify(cs)}: a label that is not a number`);
+        }
+    });
+
+    t(`the ${view} scale can be turned off`, () => {
+        for (const cs of SCALE_CASES) {
+            const { labels } = scaleLabels(draw, { ...cs, scale: false });
+            assert.strictEqual(labels.length, 0,
+                `${JSON.stringify(cs)}: the switch is off and there is still a scale`);
         }
     });
 }

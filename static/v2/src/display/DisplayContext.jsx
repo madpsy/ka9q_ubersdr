@@ -308,12 +308,16 @@ export const DEFAULTS = {
     // which is the same rule statsPlace and the idle delays follow.
     maxFps: null,
     scopeShape: 'bars',
-    // The two things the bar view draws besides the bars: the falling peak
-    // marks, and the background wash showing where the energy sits (see
+    // What the spectrum views draw besides the spectrum itself: the falling
+    // peak marks, and the background wash showing where the energy sits (see
     // lib/audioTint.js). Both on — they are what the view is for, and each is
-    // one tap away from off for anyone who wants the bars bare.
+    // one switch away from off for anyone who wants the picture bare.
     scopePeaks: true,
     scopeHeat: true,
+    // The dB scale down the left of them, over the picture. On: it is what
+    // makes a level readable as a level rather than only as taller than the
+    // bin beside it, and it costs a few characters of the low-frequency end.
+    scopeScale: true,
     // The readings under the pictures: peak frequency, how far it stands above
     // the noise, where the energy is centred, and the floor itself. On, and
     // shown in the minimal view as well — they are read at a glance like the
@@ -400,6 +404,12 @@ export const DEFAULTS = {
     ifAuto: true,
     ifFloor: -110,
     ifCeil: -20,
+    // The dB numbers down the left of the IF pane's trace, over the picture —
+    // the same scale the audio scope draws (see scopeScale). On: whichever
+    // window the levels above settle on, this is what says what it was. Not in
+    // the mirror view, whose axis is symmetric about the centre line, nor in
+    // the bare waterfall, whose vertical axis is time.
+    ifScale: true,
     // Whether the audio scope and waterfall find their own dB window or use a
     // floor the operator set. Auto by default: it is right until the question
     // is "how quiet is this", which is what the manual scale answers.

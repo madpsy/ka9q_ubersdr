@@ -2,3 +2,9 @@ ubersdr-rtltcp-bridge
 
 # Release binaries from build.sh
 build/
+
+# Stray build output: a bare `go build .` in this directory writes an
+# executable named after it, which is how this 10 MB binary came to be
+# committed in the first place. The real release artefacts are
+# build/ubersdr-rtltcp-bridge_* and are ignored above.
+rtl_sdr

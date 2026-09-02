@@ -1124,6 +1124,26 @@ void *ws_thread(void *arg)
          * arrive inside lws_service below. */
         pcmv4_stream_reset(&rcb->pcm);
 
+        /*
+         * And so does the rate this connection is expected to carry.
+         *
+         * The guard in ws_callback exists to catch the rate changing UNDER a
+         * live connection, which would silently reframe the IQ the client is
+         * being sent. Across a reconnect a change is not a surprise, it is the
+         * point: the mode is baked into the URL, so changing rate is precisely
+         * why we are reconnecting. Leaving the old value here made the first
+         * frame of the new connection disagree with it, set reconnect_needed,
+         * and break out before it could be updated — a loop that reconnects
+         * forever and never delivers a sample.
+         *
+         * It bites at any rate other than the 192 kHz this bridge starts at, so
+         * it was reachable before 384 kHz was: a client that enables a DDC
+         * first and sets the rate afterwards connects once at the default, and
+         * every connection after that disagrees with it.
+         */
+        rcb->last_sample_rate = 0;
+        rcb->last_channels    = 0;
+
         struct lws *wsi = lws_client_connect_via_info(&ci);
         if (!wsi) {
             t_print("ws_thread(%d): lws_client_connect_via_info failed\n", rcb->rcvr_num);

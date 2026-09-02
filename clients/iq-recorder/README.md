@@ -1,10 +1,11 @@
 # UberSDR IQ Recorder
 
-A simple Go client for recording IQ48 data from UberSDR to WAV files.
+A simple Go client for recording IQ data from UberSDR to WAV files, at any
+of the receiver's IQ rates from 12 kHz to 384 kHz.
 
 ## Features
 
-- Records IQ48 data streams from UberSDR instances
+- Records IQ data streams from UberSDR instances at 12, 48, 96, 192 or 384 kHz
 - **Multi-instance recording**: Record from multiple instances simultaneously
 - **GPS timestamp alignment**: Automatically synchronizes recordings to start at the same GPS timestamp
 - **Sample-accurate synchronization**: Ensures all recordings have identical sample counts
@@ -18,10 +19,46 @@ A simple Go client for recording IQ48 data from UberSDR to WAV files.
 
 ## Building
 
+For the host you are on:
+
 ```bash
 cd clients/iq-recorder
 go build -o build/iq-recorder .
 ```
+
+### Release binaries
+
+`build.sh` cross-compiles the published pair. The client is pure Go with nothing
+to link against, so both architectures build from any host — no container, no
+cross toolchain, no emulator:
+
+```bash
+./build.sh              # both, into build/
+./build.sh amd64        # just the one — amd64 or arm64
+./build.sh --test       # run the tests first
+```
+
+The binaries are static, which is what lets one file run on any distribution.
+The cost is that Go's own resolver replaces libc's: hostnames, addresses and
+`localhost` all resolve, but `-host something.local` will not, because the pure
+resolver cannot call nss-mdns. Point the recorder at a name or an address.
+
+### Publishing
+
+`--publish` uploads what the run built to the rolling `latest` release,
+replacing the assets already there. It asks before it does:
+
+```bash
+./build.sh --test --publish     # or: make publish
+./build.sh --test --publish --yes   # unattended; answers the prompt in advance
+```
+
+The assets are `iq-recorder_amd64` and `iq-recorder_arm64`. Note the hyphen —
+the `iq_recorder` and `iq_recorder.exe` on the same release are the separate
+Python GUI recorder in `clients/python_iq_recorder`.
+
+Requires the GitHub CLI, logged in (`gh auth login`). `UBERSDR_REPO` and
+`UBERSDR_TAG` override the destination.
 
 ## Usage
 
@@ -37,6 +74,10 @@ Basic usage (single instance):
 - `-name` - Optional friendly name for instance (can be specified multiple times)
 - `-password` - Server password if required (can be specified multiple times)
 - `-frequency` - Frequency to record in Hz (default: 14074000)
+- `-mode` - IQ capture mode: `iq`, `iq48`, `iq96`, `iq192` or `iq384`, giving
+  12, 48, 96, 192 and 384 kHz respectively (default: `iq48`). Each receiver
+  publishes which of these it permits, and the recorder refuses one that is
+  not on that list rather than opening a connection that will be dropped.
 - `-duration` - Recording duration in seconds, 0 for unlimited (default: 60)
 - `-output-dir` - Output directory for WAV files (default: ".")
 - `-ssl` - Use SSL/TLS connection for all instances (default: false)
@@ -99,7 +140,7 @@ Basic usage (single instance):
 
 The recorder creates standard WAV files with the following specifications:
 - Format: PCM (uncompressed)
-- Sample Rate: 48 kHz (IQ48 mode)
+- Sample Rate: set by `-mode` — 12, 48, 96, 192 or 384 kHz
 - Channels: 2 (I and Q)
 - Bit Depth: 16-bit
 - Byte Order: Little-endian
@@ -170,7 +211,7 @@ When recording from multiple instances simultaneously (default behavior), the re
 3. An alignment timestamp is calculated (1 second after the latest first timestamp)
 4. Each recorder processes its buffer, trimming samples before the alignment point
 5. All recordings begin writing from the exact same GPS timestamp
-6. A target sample count is calculated based on the duration (duration × 48000 samples/second)
+6. A target sample count is calculated based on the duration (duration × the mode's sample rate)
 7. All recorders stop when they reach the exact target sample count
 8. The final sample counts are verified and logged
 
@@ -199,7 +240,15 @@ Instance 2 (w1aw.tunnel.ubersdr.org): 240000 samples
 
 ## Notes
 
-- The IQ48 mode provides 48 kHz sample rate with I/Q data
+- Each IQ mode is two channels of 16-bit I/Q; `-mode` picks the rate, and
+  `iq384` is eight times the data of `iq48` on disk and on the wire
+- The recorder speaks audio protocol version 4, whose predictive lossless codec
+  replaced the zstd wrapper used by versions 1-3. It needs UberSDR 0.1.63 or
+  later; against an older server it says so and stops rather than writing an
+  empty file
+- The receiver's tuning range is read from `/api/description` at startup, per
+  instance. A frequency outside it is a warning rather than a refusal — the
+  range can be stale or absent, so the server is left to give the real answer
 - Recording will automatically stop when the specified duration is reached
 - Press Ctrl+C to stop all recordings early (all instances will stop gracefully)
 - The WAV header is properly updated with file sizes when recording stops

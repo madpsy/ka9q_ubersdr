@@ -1,4 +1,4 @@
-.PHONY: all build clean install
+.PHONY: all build release publish clean install deps test run
 
 BINARY_NAME=iq-recorder
 BUILD_DIR=build
@@ -10,6 +10,16 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) .
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+
+# Release artifacts are build.sh's job, not this file's: it cross-compiles both
+# architectures under the names the GitHub release serves them by, and knows how
+# to upload them. Delegating rather than duplicating keeps one definition of
+# what a published binary is.
+release:
+	@./build.sh --test
+
+publish:
+	@./build.sh --test --publish
 
 clean:
 	@echo "Cleaning..."

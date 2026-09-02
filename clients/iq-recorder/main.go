@@ -85,10 +85,14 @@ type PCMPacket struct {
 	Channels   int
 }
 
-// IQRecorder records IQ48 data to a WAV file
+// IQRecorder records IQ data to a WAV file
 type IQRecorder struct {
 	config            InstanceConfig
 	frequency         int
+	iqMode            string // IQ capture mode: iq, iq48, iq96, iq192 or iq384
+	modeSampleRate    int    // Sample rate iqMode delivers, from the mode table
+	minFreqHz         int64  // Receiver tuning range, from /api/description
+	maxFreqHz         int64
 	duration          *int
 	outputFile        string
 	outputDir         string // Directory for output files
@@ -99,7 +103,7 @@ type IQRecorder struct {
 	sampleRate        int
 	startTime         time.Time
 	conn              *websocket.Conn
-	pcmDecoder        *PCMBinaryDecoder
+	pcmDecoder        *PCMv4StreamDecoder
 	firstTimestamp    uint64        // First wall clock timestamp (nanoseconds)
 	lastTimestamp     uint64        // Last wall clock timestamp (nanoseconds)
 	firstTimestampSet bool          // Whether first timestamp has been set
@@ -117,16 +121,24 @@ type IQRecorder struct {
 }
 
 // NewIQRecorder creates a new IQ recorder
-func NewIQRecorder(config InstanceConfig, frequency int, duration *int, outputDir string, alignmentEnabled bool, alignStartTime *uint64, targetSamples *uint32) (*IQRecorder, error) {
-	// Initialize PCM decoder
-	pcmDecoder, err := NewPCMBinaryDecoder()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize PCM decoder: %w", err)
+func NewIQRecorder(config InstanceConfig, frequency int, iqMode string, duration *int, outputDir string, alignmentEnabled bool, alignStartTime *uint64, targetSamples *uint32) (*IQRecorder, error) {
+	rate, ok := sampleRateForIQMode(iqMode)
+	if !ok {
+		return nil, validateIQMode(iqMode)
 	}
+
+	// The version 4 decoder carries the predictor's adaptation state and the
+	// header fields the server chose not to repeat, so it belongs to one
+	// connection: StartRecording replaces it on every connect.
+	pcmDecoder := NewPCMv4StreamDecoder()
 
 	recorder := &IQRecorder{
 		config:           config,
 		frequency:        frequency,
+		iqMode:           iqMode,
+		modeSampleRate:   rate,
+		minFreqHz:        MinFrequencyHz,
+		maxFreqHz:        MaxFrequencyHz,
 		duration:         duration,
 		outputDir:        outputDir,
 		userSessionID:    uuid.New().String(),
@@ -238,10 +250,13 @@ func (r *IQRecorder) checkConnectionAllowed() (bool, error) {
 		return false, fmt.Errorf("connection rejected: %s", respData.Reason)
 	}
 
-	// Check if IQ48 mode is allowed
+	// Check that the mode being recorded is one this receiver offers. The list
+	// is per-instance, so in a multi-instance run one receiver may permit iq384
+	// while another stops at iq48 -- which is worth failing on by name rather
+	// than discovering as a recording that never starts.
 	if len(respData.AllowedIQModes) > 0 && !respData.Bypassed {
-		if !containsString(respData.AllowedIQModes, "iq48") {
-			return false, fmt.Errorf("IQ48 mode not allowed by server (allowed modes: %v)", respData.AllowedIQModes)
+		if !containsString(respData.AllowedIQModes, r.iqMode) {
+			return false, fmt.Errorf("%s mode not allowed by server (allowed modes: %v)", r.iqMode, respData.AllowedIQModes)
 		}
 	}
 
@@ -305,6 +320,12 @@ func (r *IQRecorder) fetchMetadata() error {
 	r.metadata = buf.Bytes()
 	log.Printf("[%s] Fetched metadata (%d bytes)", r.getInstanceIdentifier(), len(r.metadata))
 
+	// The same document carries how far this receiver tunes. Read it here
+	// rather than with a second request, and per instance rather than once for
+	// the run: a multi-instance capture can span receivers with different front
+	// ends, and the one that cannot reach the frequency is the one to name.
+	r.minFreqHz, r.maxFreqHz = tuningRangeFrom(r.metadata)
+
 	return nil
 }
 
@@ -346,6 +367,16 @@ func (r *IQRecorder) Start() error {
 		// Continue anyway - metadata is optional
 	}
 
+	// Warn rather than refuse when the frequency falls outside what the receiver
+	// published. The range is advisory -- it can be stale, or absent, and a
+	// receiver is entitled to serve an edge it did not advertise -- so this
+	// names the mismatch and lets the server give the real answer.
+	if int64(r.frequency) < r.minFreqHz || int64(r.frequency) > r.maxFreqHz {
+		log.Printf("[%s] Warning: %.6f MHz is outside the receiver's published tuning range (%.6f - %.6f MHz); trying anyway",
+			r.getInstanceIdentifier(), float64(r.frequency)/1e6,
+			float64(r.minFreqHz)/1e6, float64(r.maxFreqHz)/1e6)
+	}
+
 	// Check if connection is allowed
 	allowed, err := r.checkConnectionAllowed()
 	if err != nil {
@@ -379,9 +410,14 @@ func (r *IQRecorder) Start() error {
 
 	q := u.Query()
 	q.Set("frequency", fmt.Sprintf("%d", r.frequency))
-	q.Set("mode", "iq48")
+	q.Set("mode", r.iqMode)
 	q.Set("user_session_id", r.userSessionID)
-	q.Set("format", "pcm-zstd") // Request pcm-zstd format
+	q.Set("format", "pcm-zstd") // Lossless; IQ is served this way regardless
+	// Named explicitly rather than left to the server's default of 1, so the
+	// query says which format this recorder actually reads. A server from
+	// 0.1.63 on refuses a version it cannot serve; older ones clamp silently
+	// and receiveData recognises what comes back.
+	q.Set("version", fmt.Sprintf("%d", pcmProtocolVersion))
 	if r.config.Password != "" {
 		q.Set("password", url.QueryEscape(r.config.Password))
 	}
@@ -404,7 +440,13 @@ func (r *IQRecorder) Start() error {
 	r.conn = conn
 	r.startTime = time.Now()
 
-	log.Printf("[%s] Connected. Recording IQ48 data at %d Hz...", r.getInstanceIdentifier(), r.frequency)
+	// The predictor adapts from the samples already decoded, so its state is
+	// only meaningful within one socket. A reconnect must start from nothing or
+	// it decodes the new stream against the old stream's taps.
+	r.pcmDecoder = NewPCMv4StreamDecoder()
+
+	log.Printf("[%s] Connected. Recording %s (%d Hz sample rate) at %d Hz...",
+		r.getInstanceIdentifier(), r.iqMode, r.modeSampleRate, r.frequency)
 
 	// Start receiving data
 	go r.receiveData()
@@ -421,12 +463,15 @@ func (r *IQRecorder) receiveData() {
 
 	headerWritten := false
 
-	// Pre-initialize decoder with IQ48 defaults since server doesn't send initial status for binary formats
-	// IQ48 mode always uses 48000 Hz sample rate and 2 channels
-	r.pcmDecoder.lastSampleRate = 48000
-	r.pcmDecoder.lastChannels = 2
-	r.sampleRate = 48000
-	log.Printf("[%s] Initialized for IQ48 mode: 48000 Hz, 2 channels", r.getInstanceIdentifier())
+	// Versions 1-3 needed the rate assigned up front, because a minimal-header
+	// packet carried none and the server sends no initial status for a binary
+	// format. Version 4 resynchronises every five seconds and on any change, so
+	// the stream states its own rate and channel count and the first packet
+	// carries them. The mode's expected rate is still recorded so a server that
+	// serves something other than what was asked for is visible rather than
+	// silently written into the WAV header.
+	r.sampleRate = r.modeSampleRate
+	log.Printf("[%s] Expecting %s: %d Hz, 2 channels", r.getInstanceIdentifier(), r.iqMode, r.modeSampleRate)
 
 	// If alignment is enabled, wait for alignment timestamp to be set
 	if r.alignmentEnabled {
@@ -459,8 +504,18 @@ func (r *IQRecorder) receiveData() {
 		}
 
 		if messageType == websocket.BinaryMessage {
-			// Binary message contains compressed IQ data - decode it
-			pcmData, sampleRate, channels, gpsTimestampNanos, err := r.pcmDecoder.DecodePCMBinary(message, true)
+			// A server older than 0.1.63 clamps the requested version to 1-3
+			// and answers with version 1 rather than refusing it, so its frames
+			// arrive as zstd rather than as an error. Naming that beats filling
+			// a log with "bad magic" and leaving an empty WAV behind.
+			if isZstdFrame(message) {
+				log.Printf("[%s] Server does not support audio protocol version %d (needs UberSDR 0.1.63 or later)",
+					r.getInstanceIdentifier(), pcmProtocolVersion)
+				return
+			}
+
+			// Binary message contains coded IQ data - decode it
+			pcmData, sampleRate, channels, gpsTimestampNanos, err := r.pcmDecoder.DecodePacketLE(message)
 			if err != nil {
 				// Log error with packet details for debugging
 				log.Printf("[%s] Warning: Failed to decode PCM data (packet size: %d bytes): %v", r.getInstanceIdentifier(), len(message), err)
@@ -477,11 +532,23 @@ func (r *IQRecorder) receiveData() {
 
 			r.mu.Lock()
 
-			// Update sample rate and channels from decoded data (if we got them)
-			// For minimal headers, sampleRate and channels will be from the last full header
-			if r.sampleRate == 0 && sampleRate > 0 {
-				r.sampleRate = sampleRate
-				log.Printf("[%s] Detected sample rate: %d Hz, channels: %d", r.getInstanceIdentifier(), sampleRate, channels)
+			// The stream is authoritative about its own rate: every version 4
+			// packet carries it, forward-filled from the last resynchronisation
+			// point. Adopt it, and say so when it is not what the mode promised
+			// -- the WAV header is written once from this value, so a rate that
+			// differs unnoticed is a file that plays back at the wrong speed.
+			if sampleRate > 0 && sampleRate != r.sampleRate {
+				if headerWritten {
+					log.Printf("[%s] Warning: sample rate changed to %d Hz mid-recording; the WAV header still says %d Hz",
+						r.getInstanceIdentifier(), sampleRate, r.sampleRate)
+				} else {
+					if sampleRate != r.modeSampleRate {
+						log.Printf("[%s] Warning: server is sending %d Hz for %s, not the expected %d Hz",
+							r.getInstanceIdentifier(), sampleRate, r.iqMode, r.modeSampleRate)
+					}
+					log.Printf("[%s] Stream sample rate: %d Hz, channels: %d", r.getInstanceIdentifier(), sampleRate, channels)
+					r.sampleRate = sampleRate
+				}
 			}
 
 			// Track first timestamp
@@ -711,10 +778,10 @@ func (r *IQRecorder) Stop() {
 		r.conn = nil
 	}
 
-	if r.pcmDecoder != nil {
-		r.pcmDecoder.Close()
-		r.pcmDecoder = nil
-	}
+	// The version 4 decoder is left in place. It holds no OS resources -- the
+	// zstd reader that had to be closed here is gone -- and Stop runs on the
+	// signal handler's goroutine while receiveData may still be inside a
+	// decode, so clearing it would race for nothing to gain.
 
 	if r.file != nil {
 		// Update WAV header with final sizes
@@ -788,6 +855,8 @@ func main() {
 	flag.Var(&passwords, "password", "Server password if required (can be specified multiple times)")
 
 	frequency := flag.Int("frequency", 14074000, "Frequency in Hz")
+	iqMode := flag.String("mode", "iq48", "IQ capture mode: "+strings.Join(iqModeList(), ", ")+
+		" (12, 48, 96, 192 and 384 kHz respectively). A receiver publishes which it permits.")
 	duration := flag.Int("duration", 60, "Recording duration in seconds (0 for unlimited)")
 	outputDir := flag.String("output-dir", ".", "Output directory for WAV files")
 	ssl := flag.Bool("ssl", false, "Use SSL/TLS connection for all instances")
@@ -798,6 +867,11 @@ func main() {
 	// Validate that we have at least one host
 	if len(hosts) == 0 {
 		log.Fatal("At least one -host must be specified")
+	}
+
+	// Reject an unknown mode before anything is dialled or any file is created.
+	if err := validateIQMode(*iqMode); err != nil {
+		log.Fatal(err)
 	}
 
 	// If no ports specified, use default for all hosts
@@ -855,23 +929,29 @@ func main() {
 	// Determine if alignment is needed (only for multiple instances)
 	alignmentEnabled := *align && len(instances) > 1
 	if alignmentEnabled {
-		log.Printf("Recording from %d instance(s) at %d Hz with timestamp alignment", len(instances), *frequency)
+		log.Printf("Recording %s from %d instance(s) at %d Hz with timestamp alignment", *iqMode, len(instances), *frequency)
 	} else {
-		log.Printf("Recording from %d instance(s) at %d Hz", len(instances), *frequency)
+		log.Printf("Recording %s from %d instance(s) at %d Hz", *iqMode, len(instances), *frequency)
 	}
 
 	// Shared alignment timestamp (0 means not set yet)
 	var alignStartTime uint64 = 0
 
-	// Calculate target sample count for synchronized recording
-	// IQ48 mode always uses 48000 Hz sample rate
+	// Calculate target sample count for synchronized recording.
+	//
+	// The rate comes from the mode rather than the 48000 this assumed while
+	// iq48 was the only option: at iq384 that constant would have stopped every
+	// recording at an eighth of the requested duration, and the alignment would
+	// still have called the result a success because all instances agreed on
+	// the same wrong count.
+	modeRate, _ := sampleRateForIQMode(*iqMode)
 	var targetSamples uint32
 	var targetSamplesPtr *uint32
 	if alignmentEnabled && durationPtr != nil {
-		targetSamples = uint32(*durationPtr * 48000)
+		targetSamples = uint32(*durationPtr * modeRate)
 		targetSamplesPtr = &targetSamples
-		log.Printf("Target sample count for synchronized recording: %d samples (%d seconds at 48000 Hz)",
-			targetSamples, *durationPtr)
+		log.Printf("Target sample count for synchronized recording: %d samples (%d seconds at %d Hz)",
+			targetSamples, *durationPtr, modeRate)
 	}
 
 	// Create recorders for each instance
@@ -879,7 +959,7 @@ func main() {
 	var wg sync.WaitGroup
 
 	for _, config := range instances {
-		recorder, err := NewIQRecorder(config, *frequency, durationPtr, *outputDir, alignmentEnabled, &alignStartTime, targetSamplesPtr)
+		recorder, err := NewIQRecorder(config, *frequency, *iqMode, durationPtr, *outputDir, alignmentEnabled, &alignStartTime, targetSamplesPtr)
 		if err != nil {
 			log.Fatalf("Failed to create recorder for %s:%d: %v", config.Host, config.Port, err)
 		}

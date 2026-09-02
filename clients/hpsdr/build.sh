@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build.sh — build ubersdr-hpsdr-bridge for amd64 and arm64, and publish them.
 #
-# This one is C, and it links libwebsockets, zstd, uuid and bsd — so unlike the
+# This one is C, and it links libwebsockets, uuid and bsd — so unlike the
 # pure-Go clients it cannot simply be told to emit another architecture. It needs
 # the target's headers and shared libraries, which means a target-architecture
 # root filesystem.
@@ -73,7 +73,7 @@ BINARY="ubersdr-hpsdr-bridge"
 # the directory writable, so a container-built .o never lands in the working tree
 # — an aarch64 ka9q_hpsdr.o left behind here would be picked up by the next
 # native `make` and fail the link in a thoroughly confusing way.
-SOURCES=(ka9q_hpsdr.c ka9q_hpsdr.h Makefile)
+SOURCES=(ka9q_hpsdr.c ka9q_hpsdr.h pcm_v4.c pcm_v4.h Makefile)
 
 # platform:docker-platform
 TARGETS=(
@@ -289,23 +289,27 @@ for target in "${TARGETS[@]}"; do
   # problem and never appear in the working tree. Only build/ is writable.
   if ! docker run --rm --platform "$platform" \
       -v "$PWD:/src:ro" -v "$PWD/$OUT:/out" \
-      -e "SOURCES=${SOURCES[*]}" -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" \
+      -e "SOURCES=${SOURCES[*]}" -e "BINARY=$BINARY" \
+      -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" \
       "$IMAGE" bash -c '
         set -e
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
         apt-get install -y -qq --no-install-recommends \
-          build-essential libwebsockets-dev libzstd-dev uuid-dev libbsd-dev
+          build-essential libwebsockets-dev uuid-dev libbsd-dev
         mkdir -p /work && cd /work
         for f in $SOURCES; do cp "/src/$f" .; done
         make
-        cp ubersdr-hpsdr-bridge /out/
+        # The Makefile names its output after the architecture, and under qemu
+        # the container's uname is the target's, so what it produced already
+        # carries the release asset name.
+        cp build/${BINARY}_* /out/
         # Handed back to the user who started the build. The container is root
         # and the bind mount carries its ownership straight out to the host, so
         # without this the binary lands root-owned in the working tree and the
         # next run cannot overwrite it — and neither can the person who wants to
         # delete it. Done in here because in here is where we are root.
-        chown "$HOST_UID:$HOST_GID" /out/ubersdr-hpsdr-bridge
+        chown "$HOST_UID:$HOST_GID" /out/${BINARY}_*
       ' >"$OUT/.$name.log" 2>&1; then
     echo -e "${RED}failed${NC}"
     echo
@@ -315,9 +319,13 @@ for target in "${TARGETS[@]}"; do
     exit 1
   fi
 
-  # Named per architecture only now, so the Makefile inside the container stays
-  # untouched and the release asset names live in exactly one place — here.
-  mv "$OUT/$BINARY" "$asset"
+  # The container's make already named it: build.sh and the Makefile agree on
+  # ${BINARY}_<arch>, so there is nothing to rename here.
+  if [ ! -f "$asset" ]; then
+    echo -e "${RED}failed${NC}"
+    echo "  the build produced no $asset" >&2
+    exit 1
+  fi
   rm -f "$OUT/.$name.log"
 
   echo "$(du -h --apparent-size "$asset" | cut -f1)"

@@ -30,7 +30,7 @@
  *
  * This file has been heavily modified from its original form for use with
  * UberSDR. It connects to the UberSDR WebSocket API using IQ mode
- * (iq48/iq96/iq192) rather than consuming ka9q-radio multicast streams.
+ * (iq48/iq96/iq192/iq384) rather than consuming ka9q-radio multicast streams.
  *
  * Key modifications:
  *   - WebSocket client using libwebsockets (one connection per DDC receiver)
@@ -40,7 +40,7 @@
  *   - lws context destroy/recreate on reconnect to avoid TLS teardown delays
  *   - Client disconnect watchdog: if no high-priority packet is received for
  *     5 seconds, streaming is stopped and DDC state is cleared
- *   - zstd decompression of PCM frames received from UberSDR
+ *   - protocol version 4 decoding of the PCM frames received from UberSDR
  */
 
 #include "ka9q_hpsdr.h"
@@ -135,6 +135,102 @@ void generate_uuid(char *buf)
  * Returns true if allowed (or if the check itself fails — same behaviour
  * as the Go client which continues on network error).
  */
+/*
+ * How far this receiver tunes, from /api/description's `tuning_range`.
+ *
+ * The receiver is not always the 0-30 MHz box this bridge assumed: the span
+ * follows the front end sample rate, so a 129.6 Msps RX888 reaches 60 MHz and
+ * has 6 m in it. The server publishes the numbers from one place
+ * (ReceiverConfig.TuningRange in receiver_span.go) and every other client reads
+ * them the same way.
+ *
+ * The fallback is a contract rather than padding: a receiver that publishes
+ * nothing — an older server, or one this bridge could not reach — must behave
+ * exactly as this bridge did before the span became configurable.
+ */
+long ubersdr_min_freq = 10000;
+long ubersdr_max_freq = 30000000;
+
+/* Pull one JSON number out of an object, or leave *out alone if it is absent,
+ * unparseable or not positive. Each field falls back on its own: the two are
+ * independent facts, and a receiver that states one must not reset the other. */
+static void parse_json_long(const char *obj, const char *key, long *out)
+{
+    char pat[64];
+    snprintf(pat, sizeof(pat), "\"%s\"", key);
+    const char *p = strstr(obj, pat);
+    if (!p) return;
+    p = strchr(p, ':');
+    if (!p) return;
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+    char *end = NULL;
+    double v = strtod(p, &end);
+    if (end == p || !(v > 0)) return;
+    *out = (long)v;
+}
+
+/*
+ * Ask the receiver how much spectrum it covers.
+ *
+ * Failure is not an error: every path out leaves the 10 kHz - 30 MHz default in
+ * force. A bridge that starts and warns wrongly beats one that refuses to
+ * start, and there is nothing here a listener cannot work around by tuning.
+ */
+void fetch_ubersdr_tuning_range(const char *url)
+{
+    size_t ulen = strlen(url);
+    if (ulen > 0 && url[ulen - 1] == '/') ulen--;
+
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd),
+             "curl -s --max-time 10 -A 'UberSDR_HPSDR/1.0' '%.*s/api/description' 2>/dev/null",
+             (int)ulen, url);
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return;
+
+    /* The object is far down a large document, so the whole body is read
+     * rather than scanned line by line. */
+    char *resp = NULL;
+    size_t rlen = 0;
+    char line[1024];
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        size_t ll = strlen(line);
+        char *tmp = realloc(resp, rlen + ll + 1);
+        if (!tmp) { free(resp); pclose(fp); return; }
+        resp = tmp;
+        memcpy(resp + rlen, line, ll);
+        rlen += ll;
+        resp[rlen] = '\0';
+    }
+    pclose(fp);
+    if (!resp) return;
+
+    /* Read out of tuning_range and not from whatever else in the payload shares
+     * the name: noise_floor publishes min_frequency too. */
+    const char *tr = strstr(resp, "\"tuning_range\"");
+    if (tr) {
+        long min = 10000, max = 30000000;
+        parse_json_long(tr, "min_frequency", &min);
+        parse_json_long(tr, "max_frequency", &max);
+        /* A max at or below the min is not a receiver, it is a
+         * misconfiguration, and adopting it would leave every check below
+         * inverted. Refused outright, both edges. */
+        if (max > min) {
+            ubersdr_min_freq = min;
+            ubersdr_max_freq = max;
+        } else {
+            t_print("Receiver reports an inverted range (%ld - %ld Hz); assuming %ld - %ld\n",
+                    min, max, ubersdr_min_freq, ubersdr_max_freq);
+        }
+    }
+    free(resp);
+
+    t_print("Receiver tunes %.3f kHz - %.3f MHz\n",
+            ubersdr_min_freq / 1000.0, ubersdr_max_freq / 1000000.0);
+}
+
 bool check_ubersdr_connection(const char *url)
 {
     /* url is the base HTTP URL; append /connection */
@@ -288,127 +384,61 @@ static bool check_ubersdr_connection_rcb(const char *base_url, struct rcvr_cb *r
 }
 
 /*
- * Decode a zstd-compressed (or raw) PCM binary frame from ubersdr.
+ * Decode one protocol version 4 binary frame from ubersdr into complex floats.
  *
- * Exact header layout (from ubersdr server source / Go client pcm_decoder.go):
+ * Version 4 replaced the zstd wrapper and the fixed 37-byte header this used to
+ * parse with a predictive codec and a header carrying only what changed; see
+ * pcm_v4.h. The decoder is stateful across the whole socket, so it lives in the
+ * receiver control block and every frame must reach it — a frame that skips it
+ * leaves this side's filters where the server's no longer are, and everything
+ * after decodes as noise.
  *
- * Full header (magic 0x5043 "PC" LE, 37 bytes):
- *   [0..1]   magic 0x5043 (little-endian uint16)
- *   [2]      version (must be 2)
- *   [3]      format type (0=PCM, 2=PCM-zstd)
- *   [4..11]  RTP timestamp (uint64, little-endian)
- *   [12..19] wall clock time (uint64, little-endian)
- *   [20..23] sample rate (uint32, little-endian)
- *   [24]     channels (uint8)
- *   [25..28] baseband power (float32, little-endian)
- *   [29..32] noise density (float32, little-endian)
- *   [33..36] reserved (uint32)
- *   [37+]    PCM data (big-endian int16 interleaved stereo: I=left, Q=right)
+ * Samples arrive interleaved I/Q as int16, which is what this scales to ±1.0.
  *
- * Minimal header (magic 0x504D "PM" LE, 13 bytes):
- *   [0..1]   magic 0x504D (little-endian uint16)
- *   [2]      version
- *   [3..10]  RTP timestamp (uint64, little-endian)
- *   [11..12] reserved (uint16)
- *   [13+]    PCM data (same format as above)
- *   sample_rate and channels are inherited from the last full header.
- *
- * The entire frame (header + PCM) is zstd-compressed before transmission.
- *
- * On success, fills iq_out[] with complex float samples (scaled to ±1.0),
- * sets *out_count, *out_sample_rate, *out_channels, and returns true.
- * Returns false on any error.
+ * On success, fills iq_out[] with complex float samples, sets *out_count,
+ * *out_sample_rate, *out_channels, and returns true. Returns false on any
+ * error.
  */
 bool decode_pcm_frame(struct rcvr_cb *rcb,
-                      const uint8_t *compressed, size_t compressed_len,
+                      const uint8_t *frame, size_t frame_len,
                       float complex *iq_out, int max_samples,
                       int *out_count, int *out_sample_rate, int *out_channels)
 {
-    /* Try zstd decompression first; fall back to treating data as raw if it fails */
-    size_t dec_size = ZSTD_decompressDCtx(rcb->zstd_dctx,
-                                           rcb->ws_rx_buf, WS_RX_BUF_SIZE,
-                                           compressed, compressed_len);
-    const uint8_t *p;
-    size_t p_len;
-
-    if (ZSTD_isError(dec_size)) {
-        /* Not zstd — treat the raw bytes as the decompressed frame */
-        if (compressed_len > WS_RX_BUF_SIZE) {
-            t_print("decode_pcm_frame: raw frame too large (%zu)\n", compressed_len);
-            return false;
-        }
-        memcpy(rcb->ws_rx_buf, compressed, compressed_len);
-        p     = rcb->ws_rx_buf;
-        p_len = compressed_len;
-    } else {
-        p     = rcb->ws_rx_buf;
-        p_len = dec_size;
-    }
-
-    if (p_len < 4) {
-        t_print("decode_pcm_frame: frame too short (%zu bytes)\n", p_len);
+    /* A server older than 0.1.63 clamps the requested version to 1-3 and
+     * answers with version 1 rather than refusing it, so its frames arrive as
+     * zstd rather than as an error. Naming that beats a stream of bad magic
+     * hundreds of times a second. */
+    if (pcmv4_is_zstd_frame(frame, frame_len)) {
+        t_print("decode_pcm_frame(%d): server does not support protocol version %d "
+                "(needs UberSDR 0.1.63 or later)\n", rcb->rcvr_num, PCMV4_PROTOCOL_VERSION);
         return false;
     }
 
-    /* Magic is little-endian uint16 */
-    uint16_t magic = (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
-    const uint8_t *pcm_data;
-    size_t pcm_len;
-
-    if (magic == PCM_MAGIC_FULL) {
-        /* Full header: 37 bytes */
-        if (p_len < PCM_FULL_HEADER_SIZE) {
-            t_print("decode_pcm_frame: full header too short (%zu)\n", p_len);
-            return false;
-        }
-        uint8_t version = p[2];
-        if (version != 2) {
-            t_print("decode_pcm_frame: unsupported version %d\n", version);
-            return false;
-        }
-        /* sample_rate at bytes 20-23 (LE uint32) */
-        int sr = (int)((uint32_t)p[20] | ((uint32_t)p[21] << 8) |
-                       ((uint32_t)p[22] << 16) | ((uint32_t)p[23] << 24));
-        int ch = (int)p[24];
-        *out_sample_rate = sr;
-        *out_channels    = ch;
-        /* Cache for minimal-header packets */
-        rcb->last_sample_rate = sr;
-        rcb->last_channels    = ch;
-        pcm_data = p + PCM_FULL_HEADER_SIZE;
-        pcm_len  = p_len - PCM_FULL_HEADER_SIZE;
-
-    } else if (magic == PCM_MAGIC_MINIMAL) {
-        /* Minimal header: 13 bytes; sample_rate/channels from last full header */
-        if (p_len < PCM_MINIMAL_HEADER_SIZE) {
-            t_print("decode_pcm_frame: minimal header too short (%zu)\n", p_len);
-            return false;
-        }
-        if (rcb->last_sample_rate == 0 || rcb->last_channels == 0) {
-            t_print("decode_pcm_frame: minimal header before full header\n");
-            return false;
-        }
-        *out_sample_rate = rcb->last_sample_rate;
-        *out_channels    = rcb->last_channels;
-        pcm_data = p + PCM_MINIMAL_HEADER_SIZE;
-        pcm_len  = p_len - PCM_MINIMAL_HEADER_SIZE;
-
-    } else {
-        t_print("decode_pcm_frame: unknown magic 0x%04X\n", magic);
+    struct pcmv4_header h;
+    const int16_t *samples;
+    char err[128];
+    if (!pcmv4_decode(&rcb->pcm, frame, frame_len, &h, &samples, err, sizeof(err))) {
+        t_print("decode_pcm_frame(%d): %s\n", rcb->rcvr_num, err);
         return false;
     }
 
-    /* PCM data is big-endian int16 interleaved stereo: I=left, Q=right */
-    int n_complex = (int)(pcm_len / 4); /* 4 bytes per complex sample (2×int16) */
+    if (h.channels != 2) {
+        t_print("decode_pcm_frame(%d): expected 2 channels of I/Q, got %d\n",
+                rcb->rcvr_num, h.channels);
+        return false;
+    }
+
+    *out_sample_rate = h.sample_rate;
+    *out_channels    = h.channels;
+
+    int n_complex = h.sample_count / 2;
     if (n_complex > max_samples)
         n_complex = max_samples;
 
     for (int i = 0; i < n_complex; i++) {
-        int16_t i_raw = (int16_t)(((uint16_t)pcm_data[4*i]   << 8) | pcm_data[4*i+1]);
-        int16_t q_raw = (int16_t)(((uint16_t)pcm_data[4*i+2] << 8) | pcm_data[4*i+3]);
-        float fi = (float)i_raw / 32768.0f;
-        float fq = (float)q_raw / 32768.0f;
-        iq_out[i] = fi + fq * _Complex_I;
+        const float fi = (float)samples[2 * i]     / 32768.0f;
+        const float fq = (float)samples[2 * i + 1] / 32768.0f;
+        iq_out[i] = fi + fq * I;
     }
 
     *out_count = n_complex;
@@ -417,7 +447,7 @@ bool decode_pcm_frame(struct rcvr_cb *rcb,
 
 /*
  * Fetch public UberSDR instances from the instances API.
- * Filters to only those supporting iq48/iq96/iq192 (≤192 kHz).
+ * Filters to only those supporting the rates HPSDR carries (48-384 kHz).
  * Prints a numbered list and prompts the user to pick one.
  * On success, writes the chosen HTTP base URL into url_out (size url_out_size)
  * and returns true.  Returns false if discovery fails or user cancels.
@@ -513,11 +543,12 @@ static int json_bool(const char *obj, const char *key)
 }
 
 /* Parse the public_iq_modes array from an instance JSON object.
- * Only keeps modes ≤ iq192 (i.e. iq48, iq96, iq192).
+ * Keeps the IQ modes this bridge can serve: 48, 96, 192 and 384 kHz, which are
+ * exactly the four DDC rates the HPSDR protocol carries.
  * Returns number of modes found. */
 static int parse_iq_modes(const char *obj, char modes[][16], int max_modes)
 {
-    static const char *allowed[] = {"iq48", "iq96", "iq192", NULL};
+    static const char *allowed[] = {"iq48", "iq96", "iq192", "iq384", NULL};
     int n = 0;
     const char *p = strstr(obj, "\"public_iq_modes\"");
     if (!p) return 0;
@@ -534,7 +565,7 @@ static int parse_iq_modes(const char *obj, char modes[][16], int max_modes)
             char mode[16];
             memcpy(mode, q1 + 1, mlen);
             mode[mlen] = '\0';
-            /* Only keep modes ≤ iq192 */
+            /* Only keep the rates the HPSDR protocol has a code for */
             for (int i = 0; allowed[i]; i++) {
                 if (strcmp(mode, allowed[i]) == 0) {
                     /* mlen < sizeof(modes[0])-1 is guaranteed by the outer if */
@@ -909,7 +940,7 @@ static struct lws_protocols ws_protocols[] = {
 /*
  * ws_thread — one per receiver.
  *
- * Connects to ubersdr via WebSocket, receives PCM-zstd frames,
+ * Connects to ubersdr via WebSocket, receives lossless PCM frames,
  * decodes them, and feeds iqSamples[] for rx_thread to consume.
  * Handles reconnection when reconnect_needed is set (e.g. rate change).
  *
@@ -933,12 +964,9 @@ void *ws_thread(void *arg)
     rcb->last_channels    = 0;
     rcb->wsi_closed       = 0;
 
-    /* Allocate a ZSTD decompression context for this receiver */
-    rcb->zstd_dctx = ZSTD_createDCtx();
-    if (!rcb->zstd_dctx) {
-        t_print("ws_thread(%d): ZSTD_createDCtx failed\n", rcb->rcvr_num);
-        pthread_exit(NULL);
-    }
+    /* The version 4 decoder for this receiver's socket. Allocation happens
+     * lazily inside it; init only has to make it empty. */
+    pcmv4_stream_init(&rcb->pcm);
 
     t_print("ws_thread(%d): starting, url=%s\n", rcb->rcvr_num, mcb.ubersdr_url);
 
@@ -1003,8 +1031,7 @@ void *ws_thread(void *arg)
 
     if (!ctx) {
         t_print("ws_thread(%d): lws_create_context failed\n", rcb->rcvr_num);
-        ZSTD_freeDCtx(rcb->zstd_dctx);
-        rcb->zstd_dctx = NULL;
+        pcmv4_stream_free(&rcb->pcm);
         pthread_exit(NULL);
     }
 
@@ -1052,16 +1079,24 @@ void *ws_thread(void *arg)
         char full_path[512];
         {
             int rate_khz = rcb->output_rate / 1000;
-            if (rate_khz > 192) rate_khz = 192;
+            if (rate_khz > 384) rate_khz = 384;
+            /* "pcm-zstd" is still the server's name for the lossless format,
+             * and IQ is only ever served losslessly; from version 4 what it
+             * carries is a predictive codec rather than a zstd wrapper. Named
+             * explicitly rather than left to the server's default, so the query
+             * says what this bridge actually reads. */
             if (mcb.ubersdr_password[0]) {
                 snprintf(full_path, sizeof(full_path),
-                         "/ws?frequency=%d&mode=iq%d&user_session_id=%s&password=%s&version=2",
+                         "/ws?frequency=%d&mode=iq%d&user_session_id=%s&password=%s"
+                         "&format=pcm-zstd&version=%d",
                          rcb->curr_freq, rate_khz, rcb->session_id,
-                         mcb.ubersdr_password);
+                         mcb.ubersdr_password, PCMV4_PROTOCOL_VERSION);
             } else {
                 snprintf(full_path, sizeof(full_path),
-                         "/ws?frequency=%d&mode=iq%d&user_session_id=%s&version=2",
-                         rcb->curr_freq, rate_khz, rcb->session_id);
+                         "/ws?frequency=%d&mode=iq%d&user_session_id=%s"
+                         "&format=pcm-zstd&version=%d",
+                         rcb->curr_freq, rate_khz, rcb->session_id,
+                         PCMV4_PROTOCOL_VERSION);
             }
         }
 
@@ -1083,6 +1118,12 @@ void *ws_thread(void *arg)
 
         t_print("ws_thread(%d): calling lws_client_connect_via_info (rate=%d kHz, path=%s)\n",
                 rcb->rcvr_num, rcb->output_rate / 1000, full_path);
+        /* A fresh socket is a fresh stream: the server builds a new encoder
+         * for it, so the predictor state and header baseline start over too.
+         * Done before connecting rather than after, because the first frame can
+         * arrive inside lws_service below. */
+        pcmv4_stream_reset(&rcb->pcm);
+
         struct lws *wsi = lws_client_connect_via_info(&ci);
         if (!wsi) {
             t_print("ws_thread(%d): lws_client_connect_via_info failed\n", rcb->rcvr_num);
@@ -1160,8 +1201,7 @@ void *ws_thread(void *arg)
     }
 
     lws_context_destroy(ctx);
-    ZSTD_freeDCtx(rcb->zstd_dctx);
-    rcb->zstd_dctx = NULL;
+    pcmv4_stream_free(&rcb->pcm);
     t_print("ws_thread(%d): exiting\n", rcb->rcvr_num);
     pthread_exit(NULL);
 }
@@ -1346,6 +1386,11 @@ int main (int argc, char *argv[])
         }
     }
     printf("\n");
+
+    /* Asked once, now the URL is settled, and reported: it is the only place a
+     * listener learns that this receiver reaches past 30 MHz, since the HPSDR
+     * protocol gives the client no way to be told. */
+    fetch_ubersdr_tuning_range(mcb.ubersdr_url);
 
     int same_int = 0, prgms_found = 0;
     char myproc[MAX_PRGMS][16] = {0,};
@@ -1547,7 +1592,11 @@ int main (int argc, char *argv[])
             buffer[13] = (mcb.device_type == HERMES_LITE) ? 62 : HERMES_FW_VER;
             buffer[20] = mcb.num_rxs;
             buffer[21] = 1;
-            buffer[22] = 7; // sample rate bitmask: bits 0+1+2 = 48/96/192 kHz (ubersdr cap)
+            /* Sample rate bitmask, bits 0-3 = 48/96/192/384 kHz. This is the
+             * one field that tells the client which rates it may ask for, so a
+             * stale 7 here is what made 384 kHz unreachable however wide the
+             * receiver was. */
+            buffer[22] = 0x0f;
 
             sendto(sock_udp, buffer, 60, 0, (struct sockaddr *)&addr_from, sizeof(addr_from));
             continue;
@@ -1863,6 +1912,17 @@ void *highprio_thread(void *data)
             }
 
             if (freq != rxfreq[i]) {
+                /* Reported rather than clamped, and not advertised at all: the
+                 * HPSDR protocol has no field for a tuning range — the
+                 * discovery reply carries a board type and firmware version and
+                 * nothing else — so the client takes its limits from whatever
+                 * hardware it thinks it is talking to. Passing the request on
+                 * and saying so is the most this end can do. */
+                if (freq != 0 && (freq < ubersdr_min_freq || freq > ubersdr_max_freq)) {
+                    t_print("RX: WARNING DDC%d tuned to %.3f MHz, outside the receiver's "
+                            "%.3f kHz - %.3f MHz\n", i, freq / 1e6,
+                            ubersdr_min_freq / 1000.0, ubersdr_max_freq / 1000000.0);
+                }
                 mcb.rcb[i].new_freq = rxfreq[i] = freq;
                 if (mcb.debug)
                     t_print("HP: DDC%d freq: %lu\n", i, freq);
@@ -2016,11 +2076,14 @@ void *ddc_specific_thread(void *data)
             struct rcvr_cb *rcb = &mcb.rcb[i];
 
             rc = (ddc_buffer[18 + 6 * i] << 8) + ddc_buffer[19 + 6 * i];
-            /* Clamp to 192 kHz — ubersdr WebSocket only supports up to iq192 */
-            if (rc > 192) {
-                t_print("RX: WARNING DDC%d requested %d kHz but ubersdr max is 192 kHz — "
+            /* 384 kHz is the widest IQ mode the server offers, and the widest
+             * rate the HPSDR protocol defines, so the two meet exactly. Note
+             * the server only serves the wide modes to a bypassed session — an
+             * unprivileged one is refused at /connection rather than here. */
+            if (rc > 384) {
+                t_print("RX: WARNING DDC%d requested %d kHz but ubersdr max is 384 kHz — "
                         "expect broken audio/spectrum at this rate\n", i, rc);
-                rc = 192;
+                rc = 384;
             }
             if (rc != rxrate[i] && rc != 0) {
                 rxrate[i] = rc;
@@ -2035,6 +2098,28 @@ void *ddc_specific_thread(void *data)
                     mcb.rcb[i].scale = 6000.0f;
                     break;
                 case 192:
+                    mcb.rcb[i].scale = 4000.0f;
+                    break;
+                case 384:
+                    /*
+                     * The ladder above is amplitude compensation for bandwidth:
+                     * a wider channel collects more noise power, so the same
+                     * spectral density arrives as larger samples and needs less
+                     * gain to display at the same level. That is a 1/sqrt(BW)
+                     * law, and the existing entries follow it — 48 kHz at 8000
+                     * gives 8000/sqrt(4) = 4000 at 192, which is exactly what
+                     * is there. (96's 6000 is the odd one out against the 5657
+                     * the law predicts; a round number, chosen by ear.)
+                     *
+                     * Continuing it: 8000/sqrt(8) = 2828.
+                     *
+                     * This sets a display level rather than anything the
+                     * decoder depends on, so it is worth a look on a real
+                     * client — a wrong value here is a spectrum that reads high
+                     * or low at 384 kHz and is correct everywhere else.
+                     */
+                    mcb.rcb[i].scale = 2828.0f;
+                    break;
                 default:
                     mcb.rcb[i].scale = 4000.0f;
                     break;

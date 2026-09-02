@@ -3,7 +3,7 @@
 On Debian/Ubuntu-based systems, install the required development libraries before building:
 
 ```bash
-sudo apt install libwebsockets-dev libbsd-dev libzstd-dev uuid-dev
+sudo apt install libwebsockets-dev libbsd-dev uuid-dev
 ```
 
 Then build with:
@@ -11,6 +11,57 @@ Then build with:
 ```bash
 make
 ```
+
+libzstd is no longer needed: protocol version 4 replaced the zstd wrapper on the
+lossless path with a predictive codec, which lives in `pcm_v4.c` and depends on
+nothing.
+
+## Wire format
+
+The bridge asks for `format=pcm-zstd&version=4`, the lossless path at the only
+protocol version it reads. `pcm-zstd` is still the server's name for that
+format, but from version 4 what it carries is not zstd:
+
+- **Packet**: a `PCM4` magic, a flags byte, then only the fields that changed
+  since the last packet — sample rate, channel count, sample count and the two
+  signal levels are each re-sent when they move and every five seconds
+  regardless. About 9 bytes against the 37 version 2 spent on every one.
+- **Body**: each sample is predicted from those before it by an adaptive complex
+  filter and only the prediction error is sent, Rice coded. The filter is
+  *backward* adaptive — its taps come from samples already decoded — so no
+  coefficients travel and the decoder recomputes them independently.
+- **Bandwidth**, measured live at version 4: iq48 141 kB/s, iq96 281, iq192 563,
+  iq384 1129, against 191/381/760/1525 raw. zstd achieved nothing here: it is an
+  LZ77 matcher over bytes, and a band-limited RF signal has no repeated byte
+  strings, so every IQ mode measured at 0.99x — the compressed stream *larger*
+  than the samples it carried.
+- **Lossless**, and checked as such: the predictor fails silently, so `test/run.sh`
+  decodes a stream the server's own encoder produced and compares the samples
+  that come back, under the sanitizers as well.
+- **Requires UberSDR 0.1.63 or later.** Older servers clamp the requested version
+  to 1-3 and answer with version 1 rather than refusing; the bridge recognises
+  those frames and says so.
+
+## Sample rates
+
+48, 96, 192 and 384 kHz — the four DDC rates the HPSDR protocol defines, which
+is now exactly what the server offers. The discovery reply advertises all four
+in its rate bitmask, so a client may ask for any of them.
+
+384 kHz needs a bypassed session: the server offers the wide IQ modes only to a
+password- or IP-privileged user, and refuses at `/connection` otherwise.
+
+## Tuning range
+
+Read from `/api/description` at startup and printed. The receiver is not always
+a 0-30 MHz box — the span follows the front end sample rate, so a 129.6 Msps
+RX888 reaches 60 MHz — and a receiver that publishes nothing falls back to
+10 kHz - 30 MHz, which is what this bridge assumed before.
+
+It cannot be passed on to the client: the HPSDR discovery reply carries a board
+type and a firmware version and has no field for a tuning range, so the client
+takes its limits from whatever hardware it believes it is talking to. A request
+outside the receiver's range is forwarded anyway and logged.
 
 ---
 

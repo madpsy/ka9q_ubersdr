@@ -5,10 +5,13 @@ ubersdr-hpsdr-bridge.exe
 # Config
 routing.yaml
 
-# Go build artifacts
+# Build artifacts. *.d are the Makefile's generated dependency files, which sit
+# beside the sources they describe and are regenerated on every build — the same
+# category as the objects, and tracked here by accident until now.
 *.o
 *.a
 *.so
+*.d
 
 # Go test files
 *.test

@@ -54,7 +54,7 @@
 #include <ctype.h>
 
 #include <uuid/uuid.h>
-#include <zstd.h>
+#include "pcm_v4.h"
 #include <libwebsockets.h>
 
 #define HERMES_FW_VER 18
@@ -104,8 +104,12 @@ struct main_cb {
 
         char session_id[37];    /* UUID v4 string */
 
-        /* zstd decompression context — one per receiver */
-        ZSTD_DCtx *zstd_dctx;
+        /* Protocol version 4 packet decoder — one per receiver, because each
+         * has its own WebSocket and the decoder IS that stream: its predictor
+         * taps carry the adaptation of every sample decoded on it so far.
+         * Reset when the socket reconnects, since the server builds a fresh
+         * encoder for a fresh socket, and fed every packet that arrives. */
+        struct pcmv4_stream pcm;
 
         /* last PCM full-header values (reused for minimal-header packets) */
         int last_sample_rate;
@@ -125,6 +129,13 @@ void sdr_sighandler(int signum);
 void new_protocol_general_packet(unsigned char *buffer);
 void generate_uuid(char *buf);
 bool check_ubersdr_connection(const char *url);
+
+/* How far the receiver tunes, read from /api/description at startup. Defaults
+ * to 10 kHz - 30 MHz, which is what this bridge assumed before the span became
+ * configurable. */
+extern long ubersdr_min_freq;
+extern long ubersdr_max_freq;
+void fetch_ubersdr_tuning_range(const char *url);
 
 //
 // message printing

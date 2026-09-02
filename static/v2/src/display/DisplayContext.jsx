@@ -286,15 +286,6 @@ export const DEFAULTS = {
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope
-    // What the scope canvas draws: 'bars' (the spectrum as a bar meter),
-    // 'line' (the same spectrum as a filled trace, in the same language as the
-    // RF spectrum above the waterfall) or 'wave' (the oscilloscope). Tapping
-    // the canvas cycles them — see ScopePanel.
-    //
-    // Bars by default because they answer the question most people open this
-    // panel with — what is in the audio — where the waveform answers a narrower
-    // one that mostly matters for CW and carriers. The others are one tap
-    // away and the choice is remembered.
     // Frames a second the spectrum loop may run at, 0 being the display's own
     // rate and the default. Not a debug setting, though it started as one: it is
     // the single largest thing an operator can do about what this page costs a
@@ -307,7 +298,20 @@ export const DEFAULTS = {
     // resolveMaxFps. An explicit 0 is a choice like any other and survives,
     // which is the same rule statsPlace and the idle delays follow.
     maxFps: null,
-    scopeShape: 'bars',
+    // What the scope canvas draws: 'line' (the spectrum as a filled trace, in
+    // the same language as the RF spectrum above the waterfall), 'bars' (the
+    // same spectrum as a bar meter) or 'wave' (the oscilloscope). Tapping the
+    // canvas cycles them — see ScopePanel, which reads the fallback for an
+    // unknown stored value from here rather than repeating it.
+    //
+    // A spectrum by default, because it answers the question most people open
+    // this panel with — what is in the audio — where the waveform answers a
+    // narrower one that mostly matters for CW and carriers. The line of the
+    // two, so the audio reads in the same language as the band it came from:
+    // the pane above the waterfall draws a spectrum exactly this way. The bars
+    // are the same reading as a meter per bucket, which is the better one for
+    // levels — one tap away, and the choice is remembered.
+    scopeShape: 'line',
     // What the spectrum views draw besides the spectrum itself: the falling
     // peak marks, and the background wash showing where the energy sits (see
     // lib/audioTint.js). Both on — they are what the view is for, and each is
@@ -538,7 +542,7 @@ export const UI_SCALE_STEP = 0.05;
 // to. Everything in this file is persisted, defaults included — the save effect
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
-const SETTINGS_VERSION = 9;
+const SETTINGS_VERSION = 10;
 
 
 
@@ -620,6 +624,19 @@ function migrate(saved) {
     // those are different enough that carrying the number across would be
     // guessing at what somebody meant. The new default is a good one.
     delete saved.wheelRate;
+
+    // v10: the audio scope opens on the line rather than the bars.
+    //
+    // A stored 'bars' from before this is the old default written out on first
+    // load — settings are persisted whole, so everybody who has opened the
+    // interface has one — and it would hold the new default off for ever. The
+    // waveform and the line could only ever have been arrived at by tapping the
+    // canvas, so those are choices and stay.
+    //
+    // The one thing this cannot tell apart is somebody who tapped all the way
+    // round back to the bars. They get the line and one tap to put it back,
+    // which is the same tap they made before and is what the switch costs.
+    if (!(saved.v >= 10) && saved.scopeShape === 'bars') delete saved.scopeShape;
 
     return saved;
 }

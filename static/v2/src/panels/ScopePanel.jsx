@@ -19,7 +19,7 @@
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { useDisplay } from '../display/DisplayContext.jsx';
+import { DEFAULTS, useDisplay } from '../display/DisplayContext.jsx';
 import { Empty, Field, Segmented, Slider, Switch } from '../components/ui.jsx';
 import { isIQ } from '../radio/constants.js';
 import { audioBins } from '../lib/audioBand.js';
@@ -49,9 +49,14 @@ const FFT_SIZES = [
 ];
 
 // What the top canvas can be, in the order a tap goes round them. Two views of
-// the spectrum and one of the waveform: the bars read as a meter per bucket,
-// the line as the shape of the whole band, and the waveform as the audio itself.
-const SHAPES = ['bars', 'line', 'wave'];
+// the spectrum and one of the waveform: the line reads as the shape of the
+// whole band, the bars as a meter per bucket, and the waveform as the audio
+// itself.
+//
+// The default first, and the two spectra together: from where the panel opens,
+// one tap is the other way of drawing the same reading and two is the waveform,
+// which is the order they are wanted in.
+const SHAPES = ['line', 'bars', 'wave'];
 const SHAPE_LABEL = {
     bars: 'Spectrum bars',
     line: 'Spectrum line',
@@ -91,9 +96,11 @@ export default function ScopePanel({ minimal }) {
     // because what is on screen is not answering the question — so the picture
     // is the right place to press. It is also the only control the minimal view
     // could have, where there is nothing but the canvases. An unknown stored
-    // value falls back to the default rather than blanking the canvas.
+    // value falls back to the default — taken from DEFAULTS rather than written
+    // out again, so the two cannot drift apart — rather than blanking the
+    // canvas.
     const [shape, setShape] = useState(
-        SHAPES.includes(display.scopeShape) ? display.scopeShape : 'bars',
+        SHAPES.includes(display.scopeShape) ? display.scopeShape : DEFAULTS.scopeShape,
     );
     // Auto ranging, or a floor the operator chose.
     //

@@ -97,11 +97,31 @@ t('it renders in every view, with the stats on', () => {
 
 // A stored shape from a build that did not have it, or a corrupted setting:
 // the panel must fall back to a shape it can draw rather than render a canvas
-// nothing paints.
-t('it renders with an unknown stored shape', () => {
+// nothing paints — and to the *default* shape, not to a second opinion about
+// what that is written out in the panel.
+const shapeTitle = (tree) => {
+    const c = deep(tree).find((n) => n && n.props
+        && String(n.props.className || '').includes('scope__canvas--tap'));
+    return c ? String(c.props.title || '') : null;
+};
+
+t('an unknown stored shape falls back to the default one', () => {
     reset();
-    render(ScopePanel, {}, context({ scopeShape: 'sonogram', scopeStats: true }));
-    assert.ok(true);
+    const { tree: odd } = render(ScopePanel, {}, context({ scopeShape: 'sonogram', scopeStats: true }));
+    reset();
+    const { tree: def } = render(ScopePanel, {}, context({ scopeShape: DEFAULTS.scopeShape, scopeStats: true }));
+    assert.ok(shapeTitle(def), 'no picture to read the shape off');
+    assert.strictEqual(shapeTitle(odd), shapeTitle(def));
+});
+
+// The panel is opened to see what is in the audio, and both spectrum shapes
+// answer that where the waveform answers a narrower question. Which of the two
+// is the default is a choice; opening on the oscilloscope would not be one.
+t('the panel opens on a spectrum', () => {
+    assert.notStrictEqual(DEFAULTS.scopeShape, 'wave');
+    reset();
+    const { tree } = render(ScopePanel, {}, context({}));
+    assert.ok(/Spectrum/.test(shapeTitle(tree)), `opens on ${shapeTitle(tree)}`);
 });
 
 t('it renders in IQ, where there is no audio spectrum to read', () => {

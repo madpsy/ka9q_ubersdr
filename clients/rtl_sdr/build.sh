@@ -28,10 +28,31 @@
 # arm64 runs under qemu, registered with binfmt_misc. The registration does not
 # survive a reboot, so --check reports it and the build offers to install it.
 #
+# --remote builds arm64 on a real arm64 machine over ssh instead, which is
+# faster than qemu and needs no binfmt registration. It produces an equivalent
+# binary rather than merely a similar one, and both halves of that are worth
+# checking before trusting it:
+#
+#   * The toolchain matches. GOTOOLCHAIN is `auto` by default, so the go.mod
+#     `toolchain` directive pulls the same Go the container uses even where the
+#     builder's own go is older — measured go1.22.5 on the host building with
+#     go1.24.3.
+#   * The glibc floor matches, which is the one that looks like it should not.
+#     The builder ran Debian 13 (glibc 2.41) against the image's Debian 12
+#     (2.36), and the binary still asked only for GLIBC_2.34, because the floor
+#     is set by what the program references rather than by what the host has.
+#     Go's runtime touches nothing newer.
+#
+# Neither is assumed: the build reports the floor for every binary it makes, so
+# a builder that did raise it would say so before anything was published.
+#
 # Usage:
 #   ./build.sh                 both architectures into build/
 #   ./build.sh amd64           just the one — amd64 or arm64
 #   ./build.sh --check         report whether this machine can build both, and stop
+#   ./build.sh --remote        build arm64 natively over ssh on $UBERSDR_ARM_HOST
+#                              (default pi5) rather than under qemu
+#   ./build.sh --remote=HOST   ...on HOST
 #   ./build.sh --test          run the tests before building
 #   ./build.sh --publish       ...then upload what this run built to the `latest`
 #                              release, replacing what is there. Asks first.
@@ -46,6 +67,20 @@ ASSUME_YES=0
 PUBLISH=0
 CHECK_ONLY=0
 RUN_TESTS=0
+
+# The machine --remote builds arm64 on. Empty means qemu, which is the default:
+# a container is always there, and another machine is not.
+REMOTE_HOST=""
+REMOTE_DEFAULT="${UBERSDR_ARM_HOST:-pi5}"
+
+# Where the toolchain lives on a builder that has one installed by hand rather
+# than packaged. Prepended, not replaced, so a packaged go on PATH still wins.
+REMOTE_GO_PATH=/usr/local/go/bin
+
+# Set when preflight failed on the builder rather than on qemu, so the advice
+# afterwards is about the thing that actually went wrong. Registering binfmt
+# handlers does not make an unreachable host reachable.
+PREFLIGHT_REMOTE_FAILED=0
 
 # Same tag, repo and override variables as the other clients' build scripts: one
 # release holds them all. The asset names are the filenames built below, because
@@ -84,6 +119,8 @@ for arg in "$@"; do
     --yes) ASSUME_YES=1 ;;
     --check) CHECK_ONLY=1 ;;
     --test) RUN_TESTS=1 ;;
+    --remote) REMOTE_HOST="$REMOTE_DEFAULT" ;;
+    --remote=*) REMOTE_HOST="${arg#--remote=}" ;;
     -*) echo "unknown option: $arg" >&2; exit 2 ;;
     *) WANTED+=("$arg") ;;
   esac
@@ -126,9 +163,58 @@ install_binfmt() {
   docker run --privileged --rm tonistiigi/binfmt --install arm64 >/dev/null 2>&1
 }
 
+# One remote command, with the toolchain on PATH that a non-interactive ssh
+# session does not get, and without the X11 line the builder prints in front of
+# everything when it offers forwarding this host cannot use.
+remote() {
+  ssh -o BatchMode=yes -o ConnectTimeout=15 "$REMOTE_HOST" \
+    "export PATH=$REMOTE_GO_PATH:\$PATH; $*" \
+    2> >(grep -v "X11 forwarding request failed" >&2)
+}
+
+# Builds one architecture on a real machine of that architecture.
+#
+# The source goes over as named files rather than as the directory: build/ holds
+# binaries from previous runs, and shipping those to the builder and back would
+# be a slow way of achieving nothing. The remote copy is removed afterwards; the
+# module cache under ~/go is not, so a second build fetches nothing.
+build_remote() {
+  local asset="$1"
+  local dir=".cache/ubersdr-rtltcp-build"
+
+  tar czf - go.mod go.sum ./*.go testdata \
+    | remote "rm -rf $dir && mkdir -p $dir && tar xzf - -C $dir" || return 1
+
+  # The same flags the container uses, for the reason in the header: cgo stays
+  # on so libc resolves names, which is what makes an mDNS --url work.
+  remote "cd $dir && CGO_ENABLED=1 go build -ldflags='-s -w' -o '$BINARY' ." || return 1
+
+  remote "cat $dir/$BINARY" > "$asset" || return 1
+  chmod +x "$asset"
+  remote "rm -rf $dir" || true
+}
+
 preflight() {
   local ok=0
   echo -e "${GREEN}  Build environment${NC}"
+
+  if [ -n "$REMOTE_HOST" ]; then
+    # Reported before docker, because with --remote the arm64 half does not
+    # need docker at all and a failure here is the one that stops the build.
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" true 2>/dev/null; then
+      echo -e "    remote         ${RED}cannot reach $REMOTE_HOST${NC} without a password — set up key auth, or drop --remote."
+      PREFLIGHT_REMOTE_FAILED=1
+      return 1
+    fi
+    local rgo
+    rgo="$(remote 'command -v go >/dev/null 2>&1 && go version' 2>/dev/null || true)"
+    if [ -z "$rgo" ]; then
+      echo -e "    remote         ${RED}$REMOTE_HOST has no go${NC} on PATH or in $REMOTE_GO_PATH."
+      PREFLIGHT_REMOTE_FAILED=1
+      return 1
+    fi
+    echo    "    remote         $REMOTE_HOST — $(remote 'uname -m') — $rgo"
+  fi
 
   if ! command -v docker >/dev/null 2>&1; then
     echo -e "    docker         ${RED}not found${NC} — install it; every architecture builds in a container."
@@ -145,6 +231,10 @@ preflight() {
   for target in "${TARGETS[@]}"; do
     name="${target%%:*}"
     platform="${target#*:}"
+    if [ "$name" = "arm64" ] && [ -n "$REMOTE_HOST" ]; then
+      echo  "    $name          built on $REMOTE_HOST, not under qemu"
+      continue
+    fi
     if can_run_platform "$platform"; then
       echo    "    $name          can run $platform"
     else
@@ -233,8 +323,12 @@ publish_release() {
 if [ "$CHECK_ONLY" -eq 1 ]; then
   preflight && echo -e "\n  ${GREEN}ready.${NC}" || {
     echo
-    echo "  ./build.sh registers the qemu handlers itself, or:"
-    echo "      docker run --privileged --rm tonistiigi/binfmt --install arm64"
+    if [ "$PREFLIGHT_REMOTE_FAILED" -eq 1 ]; then
+      echo "  Fix the builder above, or drop --remote to build arm64 under qemu."
+    else
+      echo "  ./build.sh registers the qemu handlers itself, or:"
+      echo "      docker run --privileged --rm tonistiigi/binfmt --install arm64"
+    fi
     exit 1
   }
   exit 0
@@ -242,6 +336,12 @@ fi
 
 if ! preflight; then
   echo
+  # Only qemu is offered to be fixed here, because only qemu can be: a builder
+  # that cannot be reached is not something this script should try to repair.
+  if [ "$PREFLIGHT_REMOTE_FAILED" -eq 1 ]; then
+    echo "  Fix the builder above, or drop --remote to build arm64 under qemu." >&2
+    exit 1
+  fi
   if [ "$ASSUME_YES" -eq 1 ] || [ -t 0 ]; then
     reply='yes'
     if [ "$ASSUME_YES" -eq 0 ]; then
@@ -283,6 +383,20 @@ for target in "${TARGETS[@]}"; do
   asset="$OUT/${BINARY}_$name"
 
   echo -ne "${YELLOW}  $name${NC} … "
+
+  if [ "$name" = "arm64" ] && [ -n "$REMOTE_HOST" ]; then
+    if ! build_remote "$asset" >"$OUT/.$name.log" 2>&1; then
+      echo -e "${RED}failed${NC}"
+      echo
+      tail -25 "$OUT/.$name.log" | sed 's/^/      /' >&2
+      echo
+      echo "  full log: $OUT/.$name.log" >&2
+      exit 1
+    fi
+    rm -f "$OUT/.$name.log"
+    echo "$(du -h --apparent-size "$asset" | cut -f1)  (built on $REMOTE_HOST)"
+    continue
+  fi
 
   # The source is mounted read-only and copied inside, so nothing the build does
   # — a rewritten go.sum, a stray binary — reaches the working tree. Only build/

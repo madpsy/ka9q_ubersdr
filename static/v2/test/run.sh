@@ -387,6 +387,8 @@ esbuild tunestep.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/tunestep.cjs --log-level=warning
 esbuild holdpress.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/holdpress.cjs --log-level=warning
+esbuild inview.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/inview.cjs --log-level=warning
 esbuild padiq.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/padiq.cjs --log-level=warning
 esbuild panelhost.entry.js --bundle --format=cjs --platform=node \
@@ -548,6 +550,7 @@ node layoutpanel.test.js
 node filterreset.test.js
 node tunestep.test.js
 node holdpress.test.js
+node inview.test.js
 node padiq.test.js
 node panelhost.test.js
 node floatdrag.test.js

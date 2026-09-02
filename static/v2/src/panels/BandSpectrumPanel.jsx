@@ -12,11 +12,18 @@
 // the main waterfall's, from the same palette setting, so the two read as one
 // instrument rather than two.
 //
-// Streaming is tied to the panel being open. Section only mounts a panel's body
-// while its section is open, so the EventSource is opened on mount and closed on
-// unmount: a collapsed panel holds no connection and the server sends it
-// nothing. Same for a hidden panel, a closed mobile sheet, and a dock collapsed
-// to its rail.
+// Streaming is tied to the panel being open *and* on screen. Section only mounts
+// a panel's body while its section is open, so the EventSource is opened on
+// mount and closed on unmount: a collapsed panel holds no connection and the
+// server sends it nothing. Same for a hidden panel, a closed mobile sheet, and a
+// dock collapsed to its rail.
+//
+// Being mounted is not enough, though. A dock column is taller than the window
+// and a phone's stack is much taller, so an open panel scrolled three screens
+// away was still holding a stream and painting a chart nobody could see. It is
+// closed after a couple of seconds off screen and reopened as it comes back —
+// lib/useInView.js, which has the reasoning and the reason leaving is delayed
+// and returning is not.
 //
 // While it *is* open the stream is kept open: a failure reopens it on a backoff
 // and keeps trying for as long as the panel is there, so a receiver restarted
@@ -53,6 +60,7 @@ import { RING_BG, RING_PAD, ringSlices, smoothInterval } from '../lib/waterfallR
 import { TRACE_WIDTH, binsToPixels, paletteGradients, themeColors } from '../lib/spectrumTrace.js';
 import { retentionFor } from '../lib/timeConstant.js';
 import useFeedsAllowed from '../lib/useServerFeeds.js';
+import useInView from '../lib/useInView.js';
 
 // The card's proportions, from band_activity.html: the block is this much of its
 // own width, and the spectrum trace takes the top of it with the waterfall below.
@@ -281,6 +289,15 @@ function formatSpanMHz(meta) {
 function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }) {
     const feeds = useFeedsAllowed();
     const wrapRef = useRef(null);
+    // Whether the chart is on screen. The panel being open is not the same
+    // question as the panel being looked at once it is in a column taller than
+    // the window — see lib/useInView.js.
+    const inView = useInView(wrapRef);
+    // The same answer where the stream's cleanup can read it, so the line it
+    // logs can say which of the two ended it. Assigned during render, so by the
+    // time a change of view runs that cleanup this already holds the new value.
+    const inViewRef = useRef(inView);
+    inViewRef.current = inView;
     const specRef = useRef(null);
     const wfRef = useRef(null);
     const clipRef = useRef(null);
@@ -389,7 +406,9 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     //
     // Opened here and closed by the cleanup, which is what ties it to the panel
     // being open: an unmounted panel — collapsed, hidden, or a sheet that is not
-    // showing — has no EventSource at all.
+    // showing — has no EventSource at all. `inView` is a dependency for the same
+    // reason `feeds` is: a panel scrolled off the end of a dock column is as
+    // unwatched as a collapsed one, and closing the stream is the same act.
     //
     // And reopened by this effect rather than by the browser. EventSource retries
     // a dropped stream itself, on a fixed timer and only for that one case; a
@@ -402,7 +421,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         // Gated with the rest of the app's feeds: this is a continuous stream,
         // and the loudest thing a stopped receiver was still asking for. See
         // lib/serverFeeds.js.
-        if (!feeds) return undefined;
+        if (!feeds || !inView) return undefined;
         let es = null;
         let retry = null;
         let attempts = 0;
@@ -499,11 +518,15 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
             // reported, so a collapsed dock left a "Band spectrum connected"
             // as the last word on a stream that had stopped — or worse, a
             // "retrying in 30s" for a retry that would never happen.
-            logEvent('info', `Band spectrum closed (${band})`);
+            // Scrolled away rather than shut says something different — the
+            // panel is still open, so a bare "closed" reads as a fault.
+            logEvent('info', inViewRef.current
+                ? `Band spectrum closed (${band})`
+                : `Band spectrum paused (${band}) — scrolled out of view`);
             onRate(null);
             reportBandRate(null);
         };
-    }, [band, meta.bin_count, st, onRate, feeds]);
+    }, [band, meta.bin_count, st, onRate, feeds, inView]);
 
     useEffect(() => { st.dirty = true; }, [zoom, st]);
     useEffect(() => {

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Tests the range the SoapySDR driver advertises to its host.
+# Tests the range the SoapySDR driver advertises to its host, and that its
+# protocol version 4 decoder agrees with the server's encoder.
 #
 # getFrequencyRange() is the only place any UberSDR client tells its host how far the
 # receiver tunes, and GQRX / CubicSDR / GNU Radio clamp their tuning UI to it — so a wrong
@@ -29,6 +30,8 @@ echo "== building driver and probe =="
 cmake -S .. -B "$BUILD" >/dev/null || { echo "cmake configure failed"; exit 1; }
 cmake --build "$BUILD" >/dev/null || { echo "driver build failed"; exit 1; }
 g++ -O0 -o "$BUILD/probe_range" probe_range.cpp -lSoapySDR || { echo "probe build failed"; exit 1; }
+g++ -std=c++11 -O2 -Wall -Wextra -o "$BUILD/pcmv4_conformance" pcmv4_conformance.cpp \
+    || { echo "conformance build failed"; exit 1; }
 
 pass=0; fail=0
 server_pid=""
@@ -74,9 +77,28 @@ check() {
     fi
 }
 
+# The lossless decoder, against packets the SERVER's encoder produced.
+#
+# This is the one case that needs no server: testdata/pcmv4_stream.bin is a
+# recorded stream and PCMV4_SHA256 is the hash of the samples that went into it.
+# It matters more than it looks. The version 4 predictor is backward adaptive —
+# the two ends derive their filter taps independently and never exchange a
+# coefficient — so an arithmetic difference between this decoder and the Go one
+# produces plausible noise rather than an error, and nothing short of comparing
+# the samples would catch it. The stream covers ordinary mono audio, silent
+# packets carrying no body, an escape to verbatim samples, a sample-rate change
+# and the interleaved I/Q this driver actually uses.
+PCMV4_SHA256=ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c13948f78d1
+echo "== cases =="
+got=$("$BUILD/pcmv4_conformance" testdata/pcmv4_stream.bin 2>/dev/null | sha256sum | cut -d" " -f1)
+if [ "$got" = "$PCMV4_SHA256" ]; then
+    echo "PASS pcmv4-conformance"; pass=$((pass+1))
+else
+    echo "FAIL pcmv4-conformance: decoded samples hash to $got, want $PCMV4_SHA256"; fail=$((fail+1))
+fi
+
 # Unreachable server: nothing is listening on this port at all. The driver must still
 # load and must advertise the pre-span range rather than refusing to construct.
-echo "== cases =="
 got=$("$BUILD/probe_range" "ws://127.0.0.1:1/ws" 2>/dev/null)
 if [ "$got" = "$FALLBACK_MIN $FALLBACK_MAX" ]; then
     echo "PASS unreachable-server -> $got"; pass=$((pass+1))

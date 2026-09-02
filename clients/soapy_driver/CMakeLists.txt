@@ -23,12 +23,8 @@ find_package(OpenSSL REQUIRED)
 # Find CURL (for HTTP connection check)
 find_package(CURL REQUIRED)
 
-# Find zstd (for pcm-zstd decompression)
-find_library(ZSTD_LIBRARY NAMES zstd)
-if(NOT ZSTD_LIBRARY)
-    message(FATAL_ERROR "zstd library not found. Install with: sudo apt-get install libzstd-dev")
-endif()
-message(STATUS "zstd library: ${ZSTD_LIBRARY}")
+# No zstd: protocol version 4 replaced the zstd wrapper on the lossless path
+# with the predictive codec in pcm_v4.hpp, which is header-only and pure C++11.
 
 # Build the driver module
 add_library(uberSDRSupport MODULE
@@ -46,7 +42,6 @@ target_link_libraries(uberSDRSupport
     ${Boost_LIBRARIES}
     ${OPENSSL_LIBRARIES}
     ${CURL_LIBRARIES}
-    ${ZSTD_LIBRARY}
     pthread
 )
 

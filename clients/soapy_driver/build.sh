@@ -18,7 +18,7 @@
 #
 # Requirements, all of which CMakeLists.txt also checks:
 #   sudo apt install cmake libsoapysdr-dev libwebsocketpp-dev libboost-system-dev \
-#                    libssl-dev libcurl4-openssl-dev libzstd-dev
+#                    libssl-dev libcurl4-openssl-dev
 #
 # Usage:
 #   ./build.sh             package the source into soapy_driver.zip
@@ -70,6 +70,7 @@ CONTENTS=(
   CMakeLists.txt
   README.md
   SoapyUberSDR.cpp
+  pcm_v4.hpp
 )
 
 GREEN='\033[0;32m'

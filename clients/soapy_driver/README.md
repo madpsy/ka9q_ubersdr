@@ -21,7 +21,6 @@ This is a SoapySDR driver that provides access to KA9Q UberSDR's wide IQ modes v
 - Boost (system library)
 - OpenSSL (for WSS support)
 - libcurl (for HTTP connection check)
-- zstd (for pcm-zstd decompression)
 
 ### Ubuntu/Debian Installation
 
@@ -33,8 +32,7 @@ sudo apt-get install \
     libwebsocketpp-dev \
     libboost-system-dev \
     libssl-dev \
-    libcurl4-openssl-dev \
-    libzstd-dev
+    libcurl4-openssl-dev
 ```
 
 ### Fedora/RHEL Installation
@@ -47,8 +45,7 @@ sudo dnf install \
     websocketpp-devel \
     boost-devel \
     openssl-devel \
-    libcurl-devel \
-    libzstd-devel
+    libcurl-devel
 ```
 
 ## Building
@@ -297,20 +294,37 @@ Contributions welcome! Please submit pull requests to the main ka9q_ubersdr repo
 
 1. **HTTP Connection Check**: Before connecting, the driver sends a POST request to `/connection` with the UUID and optional password
 2. **Server Authorization**: Server responds with `{"allowed":true}` or `{"allowed":false,"reason":"..."}`
-3. **WebSocket Connection**: If allowed, driver connects via WebSocket with UUID, mode, format (pcm-zstd), and optional password in query parameters
-4. **Audio Streaming**: Server sends binary I/Q data compressed with zstd (pcm-zstd format)
+3. **WebSocket Connection**: If allowed, driver connects via WebSocket with UUID, mode, `format=pcm-zstd&version=4`, and optional password in query parameters
+4. **I/Q Streaming**: Server sends binary lossless packets, decoded by `pcm_v4.hpp`
 5. **Frequency Control**: Driver sends JSON tune commands for frequency changes
 
-## Audio Format
+## Wire Format
 
-The driver uses the **pcm-zstd** format for efficient lossless I/Q data transmission:
+The driver requests `format=pcm-zstd&version=4` — the lossless path, which is
+the only one that makes sense for I/Q, at the only protocol version it reads.
+`pcm-zstd` is still the server's name for that format, but from version 4 what
+it carries is not zstd:
 
-- **Binary format**: Hybrid header (full or minimal) + PCM data
-- **Compression**: zstd compression applied to entire packet (header + data)
-- **Header**: Little-endian binary header with magic bytes (0x5043 for full, 0x504D for minimal)
-- **PCM data**: Big-endian 16-bit signed integers (I/Q interleaved)
-- **Bandwidth savings**: 2.5-3.5x compression ratio vs uncompressed PCM
-- **Latency**: Low latency suitable for real-time streaming
+- **Packet**: a `PCM4` magic, a flags byte, then only the fields that changed
+  since the last packet — sample rate, channel count, sample count and the two
+  signal levels are each re-sent when they move and every five seconds
+  regardless. About 9 bytes against the 37 versions 2 and 3 spent on every one.
+- **Body**: each sample is predicted from those before it by an adaptive complex
+  filter and only the prediction error is sent, Rice coded. The filter is
+  *backward* adaptive — its taps come from samples already decoded — so no
+  coefficients travel and the decoder recomputes them independently.
+- **Bandwidth**: 384 kHz I/Q falls from 1590 kB/s to 1116, and 48 kHz from 199.6
+  to 140.4 — about 30%. zstd achieved nothing at all here: it is an LZ77 matcher
+  over bytes, and a band-limited RF signal has no repeated byte strings, so
+  every IQ mode measured at 0.99x, the compressed stream *larger* than the
+  samples it carried.
+- **Lossless**: bit-exact, and checked as such. All state is integer with
+  shifts, never floating point, so the C++ decoder and the Go encoder agree on
+  every platform. `test/run.sh` decodes a stream the server's own encoder
+  produced and compares the samples that come back.
+- **Requires UberSDR 0.1.63 or later.** Older servers clamp the requested
+  version to 1-3 and answer with version 1 rather than refusing; the driver
+  recognises those frames and says so.
 
 ## Password Authentication
 

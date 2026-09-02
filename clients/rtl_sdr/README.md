@@ -93,13 +93,13 @@ When the limit is reached, new connections are rejected immediately with a log m
    - If the client limit (`-max-clients`) is reached, the connection is rejected immediately and logged
    - The bridge checks connection permission via UberSDR's `/connection` HTTP endpoint
    - Sends the 12-byte `RTL0` dongle info header (emulating an R820T tuner with 29 gain steps)
-4. On the first `SET_FREQ` command, the session connects to UberSDR via WebSocket (`/ws?frequency=N&mode=iq192&format=pcm-zstd&version=4&user_session_id=UUID`)
+4. On the first `SET_FREQ` command, the session connects to UberSDR via WebSocket (`/ws?frequency=N&mode=iq384&format=pcm-zstd&version=4&user_session_id=UUID`)
 5. UberSDR streams IQ as binary lossless packets — see Wire Format below
 6. The bridge decodes them and converts int16 IQ → uint8 offset-binary IQ
 7. The uint8 IQ stream is forwarded continuously to the TCP client
 8. When the client sends commands (frequency, sample rate, gain, etc.):
-   - **Frequency** (`0x01`): Sends `{"type":"tune","frequency":N,"mode":"iq192"}` to UberSDR
-   - **Sample rate** (`0x02`): IQ is resampled from 192 kHz to the requested rate using Kaiser-windowed sinc interpolation
+   - **Frequency** (`0x01`): Sends `{"type":"tune","frequency":N,"mode":"iq384"}` to UberSDR
+   - **Sample rate** (`0x02`): IQ is resampled from 384 kHz to the requested rate using a Kaiser-windowed sinc
    - **Gain/AGC/other** (`0x03`–`0x0e`): Acknowledged silently (UberSDR manages gain)
 
 ## rtl_tcp Protocol
@@ -124,7 +124,7 @@ Offset  Size  Content
 | Cmd  | Name | Bridge Action |
 |------|------|---------------|
 | 0x01 | SET_FREQ | Tune UberSDR to frequency |
-| 0x02 | SET_SAMPLE_RATE | Map to iq48/iq96/iq192 mode |
+| 0x02 | SET_SAMPLE_RATE | Resample from iq384 to the requested rate |
 | 0x03 | SET_GAIN_MODE | No-op |
 | 0x04 | SET_GAIN | No-op |
 | 0x05 | SET_FREQ_CORRECTION | No-op |
@@ -140,20 +140,23 @@ Offset  Size  Content
 
 ## Sample Rate
 
-`rtl_tcp` clients typically request sample rates of 225 kHz to 3.2 MHz. The bridge always uses `iq192` (192 kHz) from UberSDR.
+`rtl_tcp` clients typically request sample rates of 225 kHz to 3.2 MHz. The bridge always uses `iq384` (384 kHz) from UberSDR, so the real signal spans **±192 kHz** of the tuned frequency — wide enough to cover the usual requests outright.
 
-When the client requests a rate different from 192 kHz, the bridge resamples using a **Kaiser-windowed sinc interpolator** (β=8, 25-tap FIR, ~80 dB stopband attenuation). This is the mathematically correct approach:
+**This requires a bypassed session.** The server offers the wide IQ modes only to a password- or IP-bypassed user, and the bridge refuses to connect when `iq384` is absent from `allowed_iq_modes`. It is a tool for receiver owners, not for pointing at somebody else's public instance. It also doubles the wire against `iq192` — measured 1129 kB/s against 563 on protocol version 4 — which the receiver's operator pays for.
 
-- Frequencies within **±96 kHz** of centre contain the real signal from UberSDR
-- Frequencies **outside ±96 kHz** are filled with zeros — no signal, no spectral images
-- The output byte rate matches exactly what the client requested
+When the client asks for a different rate, the bridge resamples with a **Kaiser-windowed sinc** (β=8, ~80 dB stopband), and which way it is going matters:
 
-**Recommended client setting: set your SDR software's bandwidth to 250 kHz.** This keeps the display within the valid ±96 kHz passband.
+| Client Requested Rate | Direction | Filter | Result |
+|---|---|---|---|
+| 384 kHz | — | none | pass-through |
+| Below 384 kHz (225, 250, 300 kHz …) | decimation | 65-tap, cutoff pulled to 0.85 of the new Nyquist | anti-aliased: measured ≥83 dB rejection at the fold |
+| Above 384 kHz (1.024, 2.4 MHz …) | interpolation | 25-tap | the extra span carries no signal |
 
-| Client Requested Rate | UberSDR Mode | Actual IQ Rate | Resampling |
-|-----------------------|--------------|----------------|------------|
-| 192 kHz | iq192 | 192 kHz | None (pass-through) |
-| Any other rate | iq192 | 192 kHz | Kaiser-windowed sinc to requested rate |
+Decimation is the case that needs the long kernel. A windowed-sinc is 6 dB down *at* its cutoff, so putting the cutoff on the output Nyquist folds half the transition band back into the passband however many taps are used — and the transition width is set by the window length in **input** samples, so it does not shrink with the ratio. At 250 kHz out the result is flat to 97.9 kHz, −3 dB at 103.3 kHz and 83 dB down at the 125 kHz fold: slightly more usable span than the ±96 kHz `iq192` gave, and properly filtered where that was not. `resampler_test.go` measures this by pushing tones through the real filter rather than trusting the design.
+
+Interpolation keeps the short kernel deliberately: there is nothing to alias, and 65 taps at 2.4 Msps would be real CPU for nothing.
+
+The rejection figures above are measured at 225–300 kHz, which is the range `rtl_tcp` clients actually ask for. Because the transition width is fixed in input samples, a request far below that — 48 kHz, say, decimating 8:1 — has a transition band comparable to its whole output bandwidth and is not well filtered. It was not well filtered from `iq192` either; it is simply outside what the protocol is for.
 
 ## Wire Format
 
@@ -170,8 +173,8 @@ it carries is not zstd:
   filter and only the prediction error is sent, Rice coded. The filter is
   *backward* adaptive — its taps come from samples already decoded — so no
   coefficients travel and the decoder recomputes them independently.
-- **Bandwidth**: 192 kHz IQ falls by about 30%, and 384 kHz from 1590 kB/s to
-  1116. zstd achieved nothing here: it is an LZ77 matcher over bytes, and a
+- **Bandwidth**: 384 kHz IQ falls from 1590 kB/s to 1116 — measured 1129 kB/s
+  live against 1525 raw, a ratio of 1.35x. zstd achieved nothing here: it is an LZ77 matcher over bytes, and a
   band-limited RF signal has no repeated byte strings, so every IQ mode measured
   at 0.99x — the compressed stream *larger* than the samples it carried.
 - **Lossless**: bit-exact, and checked as such. `TestPCMv4DecodesServerStream`
@@ -257,7 +260,7 @@ sudo make install-service
 
 - **Client limit**: Up to `-max-clients` (default 4) simultaneous `rtl_tcp` clients. Set to 0 for unlimited. Each client consumes one UberSDR WebSocket session.
 - **Coverage**: whatever the receiver covers — 10 kHz–30 MHz on a stock RX888, up to 60 MHz at 129.6 Msps. Anything above that is not supported.
-- **Sample rate**: Always 192 kHz from UberSDR. Clients requesting any other rate receive Kaiser-windowed sinc resampled data — the inner ±96 kHz contains real signal, the outer bands are clean zeros. Set client bandwidth to 250 kHz for best results.
+- **Sample rate**: Always 384 kHz from UberSDR, so the inner ±192 kHz carries real signal. Clients requesting any other rate receive Kaiser-windowed sinc resampled data; below 384 kHz it is anti-aliased, above it the extra span is empty.
 - **Gain control**: UberSDR manages gain automatically. Gain commands from the client are acknowledged but have no effect.
 - **No wideband spectrum**: Spectrum/waterfall data is not provided (IQ stream only).
 
@@ -277,8 +280,8 @@ sudo make install-service
 
 ### SDR# shows wrong sample rate
 
-- SDR# may display the requested rate (e.g., 2.048 MHz) rather than the actual delivered rate (192 kHz)
-- This is cosmetic — the actual IQ data is at 192 kHz
+- SDR# may display the requested rate (e.g., 2.048 MHz) rather than the actual delivered rate (384 kHz)
+- This is cosmetic — the actual IQ data is at 384 kHz
 
 ## License
 

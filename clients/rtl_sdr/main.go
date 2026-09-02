@@ -110,11 +110,23 @@ type RoutingConfig struct {
 }
 
 // IQMode is the only UberSDR IQ mode this bridge uses.
-// rtl_tcp clients request arbitrary rates; we always receive iq192 (192 kHz)
-// from UberSDR and resample to the client's requested rate using windowed-sinc
-// interpolation. Frequencies outside ±96 kHz are filled with zeros.
-const IQMode = "iq192"
-const IQModeRate = 192000
+//
+// rtl_tcp clients request arbitrary rates; we always receive iq384 (384 kHz)
+// from UberSDR and resample to whatever was asked for. Frequencies outside
+// ±192 kHz of centre carry no signal.
+//
+// The widest mode is taken deliberately, and it is why this bridge is for
+// receiver owners rather than for pointing at somebody else's instance: the
+// server only offers the wide IQ modes to a bypassed session, so a public
+// receiver will refuse this outright (see the allowed_iq_modes check in
+// checkConnection). It also doubles the wire, measured at 1129 kB/s against
+// iq192's 563 on protocol version 4, which the receiver's operator pays for.
+//
+// What it buys is bandwidth the client can actually use. A typical rtl_tcp
+// client asks for 225 kHz or more, and from iq192 everything beyond ±96 kHz
+// was zero-fill; from iq384 the real span covers the usual requests outright.
+const IQMode = "iq384"
+const IQModeRate = 384000
 
 // clientSession holds all state for a single connected rtl_tcp client.
 // Each accepted TCP connection gets its own independent clientSession so that
@@ -137,17 +149,19 @@ type clientSession struct {
 	mu            sync.RWMutex
 	frequency     int64
 	currentURL    string // URL of the currently connected UberSDR instance
-	sampleRate    int    // actual UberSDR sample rate (always IQModeRate = 192000)
+	sampleRate    int    // actual UberSDR sample rate (always IQModeRate = 384000)
 	requestedRate uint32 // rate requested by rtl_tcp client (e.g. 2048000)
 
 	// resampler performs bandlimited windowed-sinc resampling from the UberSDR
-	// delivery rate (192 kHz) to the rate the client requested via SET_SAMPLE_RATE.
+	// delivery rate (384 kHz) to the rate the client requested via SET_SAMPLE_RATE.
 	// It is created/replaced whenever SET_SAMPLE_RATE is received.
 	// Access is serialised by receiveFromUberSDR (single goroutine) so no mutex needed.
 	resampler *IQResampler
 
-	// IQ output channel (uint8 pairs sent to TCP client).
-	// Sized for ~10 s of headroom at 192 kHz.
+	// IQ output channel (uint8 pairs sent to TCP client), one buffer per packet
+	// received. At iq384's ~1090 packets a second that is about half a second of
+	// headroom, which is what absorbs a stalled TCP write without adding
+	// latency that a listener would hear.
 	iqChan chan []byte
 
 	// clientDone is closed when the command loop exits, signalling forwardIQToClient to stop.
@@ -306,7 +320,7 @@ func (s *clientSession) checkConnection(targetURL, targetPassword string, client
 		return false, nil
 	}
 
-	// If the server advertises which IQ modes are available, verify iq192 is among them.
+	// If the server advertises which IQ modes are available, verify ours is among them.
 	if len(respData.AllowedIQModes) > 0 {
 		hasIQ192 := false
 		for _, m := range respData.AllowedIQModes {
@@ -1108,11 +1122,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  # Unlimited clients\n")
 		fmt.Fprintf(os.Stderr, "  %s --max-clients 0\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Sample Rate:\n")
-		fmt.Fprintf(os.Stderr, "  Always uses iq192 (192 kHz) from UberSDR. If the client requests a different\n")
-		fmt.Fprintf(os.Stderr, "  rate via SET_SAMPLE_RATE, the bridge resamples using a Kaiser-windowed sinc\n")
-		fmt.Fprintf(os.Stderr, "  interpolator (~80 dB stopband attenuation). Frequencies outside ±96 kHz of\n")
-		fmt.Fprintf(os.Stderr, "  centre are filled with zeros (no signal, no images).\n")
-		fmt.Fprintf(os.Stderr, "  Recommended: set your SDR client's bandwidth to 250 kHz.\n\n")
+		fmt.Fprintf(os.Stderr, "  Always uses iq384 (384 kHz) from UberSDR, so the real signal spans ±192 kHz\n")
+		fmt.Fprintf(os.Stderr, "  of the tuned frequency. If the client requests a different rate via\n")
+		fmt.Fprintf(os.Stderr, "  SET_SAMPLE_RATE, the bridge resamples with a Kaiser-windowed sinc\n")
+		fmt.Fprintf(os.Stderr, "  (~80 dB stopband). Below 384 kHz it decimates, anti-aliased; above it,\n")
+		fmt.Fprintf(os.Stderr, "  the extra span carries no signal.\n")
+		fmt.Fprintf(os.Stderr, "  Requires a bypassed session: public receivers do not offer iq384.\n\n")
 		fmt.Fprintf(os.Stderr, "Frequency Range:\n")
 		fmt.Fprintf(os.Stderr, "  Read from the receiver at startup. Assumed %d Hz (%.0f kHz) to\n",
 			MinFrequencyHz, float64(MinFrequencyHz)/1000.0)

@@ -384,6 +384,25 @@ static bool check_ubersdr_connection_rcb(const char *base_url, struct rcvr_cb *r
 }
 
 /*
+ * The IQ mode this receiver is running, in kHz.
+ *
+ * Named in two places — the connect URL and the tune message — and they have to
+ * agree: the server changes a session's mode to whatever a tune tells it, so a
+ * tune carrying a different mode from the one the socket was opened with
+ * silently reconfigures the session. That is not hypothetical; it is what a
+ * clamp left behind in one of the two did, downgrading a 384 kHz session to 192
+ * the moment the client first moved the VFO. One function so there is one
+ * answer.
+ */
+static int rcvr_iq_khz(const struct rcvr_cb *rcb)
+{
+    int khz = rcb->output_rate / 1000;
+    if (khz > 384) khz = 384;   /* the widest mode the server offers */
+    if (khz < 48) khz = 48;     /* and the narrowest */
+    return khz;
+}
+
+/*
  * Decode one protocol version 4 binary frame from ubersdr into complex floats.
  *
  * Version 4 replaced the zstd wrapper and the fixed 37-byte header this used to
@@ -893,8 +912,7 @@ static int ws_callback(struct lws *wsi,
             rcb->curr_freq = freq;
 
             char json[256];
-            int rate_khz = rcb->output_rate / 1000;
-            if (rate_khz > 192) rate_khz = 192;
+            int rate_khz = rcvr_iq_khz(rcb);
             int jlen = snprintf(json + LWS_PRE, sizeof(json) - LWS_PRE,
                                 "{\"type\":\"tune\",\"frequency\":%ld,\"mode\":\"iq%d\"}",
                                 freq, rate_khz);
@@ -1078,8 +1096,7 @@ void *ws_thread(void *arg)
         /* --- Step 2: build the WebSocket path with query string --- */
         char full_path[512];
         {
-            int rate_khz = rcb->output_rate / 1000;
-            if (rate_khz > 384) rate_khz = 384;
+            int rate_khz = rcvr_iq_khz(rcb);
             /* "pcm-zstd" is still the server's name for the lossless format,
              * and IQ is only ever served losslessly; from version 4 what it
              * carries is a predictive codec rather than a zstd wrapper. Named

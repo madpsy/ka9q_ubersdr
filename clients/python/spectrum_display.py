@@ -35,6 +35,17 @@ except ImportError:
 
 from tuning_range import DEFAULT_MAX_FREQUENCY, DEFAULT_MIN_FREQUENCY
 
+
+# Spectrum wire protocol version 2 -- the only one this client reads.
+#
+# Version 2 is defined only for the 8-bit path: the server computes
+# `useV2 := spectrumVersion >= 2 && useBinary8`, so binary8 and version=2 travel
+# together and asking for one without the other silently yields version 1.
+SPECTRUM_PROTOCOL_VERSION = 2
+SPECTRUM_HEADER_SIZE = 24
+SPECTRUM_FLAG_FULL = 0x05
+SPECTRUM_FLAG_DELTA = 0x06
+
 class SpectrumDisplay:
     """Spectrum display widget showing RF spectrum as a line chart."""
     
@@ -92,9 +103,17 @@ class SpectrumDisplay:
 
         # Binary protocol support
         self.using_binary_protocol: bool = False
-        self.binary_spectrum_data: Optional[np.ndarray] = None  # State for delta decoding (float32)
-        self.binary_spectrum_data8: Optional[np.ndarray] = None  # State for delta decoding (uint8)
-        self.binary8_logged: bool = False  # Track if we've logged binary8 activation
+        # Version 2 decode state. The codes the last full frame established and
+        # the scale they read against; a delta carries neither and refers to
+        # whatever the last full frame set.
+        self.binary_spectrum_codes: Optional[np.ndarray] = None
+        self.spectrum_scale: Optional[tuple] = None
+        # Sequence of the last frame accepted, for spotting a gap. The server's
+        # write is non-blocking and drops for a slow reader, so frames do go
+        # missing; keyframes repair it and this is what reports it.
+        self.spectrum_last_sequence: Optional[int] = None
+        self.spectrum_sequence_gaps: int = 0
+        self.binary8_logged: bool = False  # Track if we've logged protocol activation
         
         # Current tuned frequency and bandwidth (for filter visualization)
         self.tuned_freq: float = 0
@@ -211,8 +230,10 @@ class SpectrumDisplay:
             params['user_session_id'] = user_session_id
         if password:
             params['password'] = password
-        # Request binary8 mode for maximum bandwidth reduction (8-bit encoding)
+        # Request binary8 mode for maximum bandwidth reduction (8-bit encoding),
+        # and version 2, which is defined only for that path.
         params['mode'] = 'binary8'
+        params['version'] = str(SPECTRUM_PROTOCOL_VERSION)
 
         # Add query parameters if any
         if params:
@@ -260,8 +281,11 @@ class SpectrumDisplay:
         # Reset binary protocol state so delta frames from the new connection
         # are not applied to stale data from the old connection (which would
         # produce garbage dB values and slow rendering).
-        self.binary_spectrum_data = None
-        self.binary_spectrum_data8 = None
+        # A reconnect starts from nothing: the codes and scale belong to the
+        # stream that established them.
+        self.binary_spectrum_codes = None
+        self.spectrum_scale = None
+        self.spectrum_last_sequence = None
         self.binary8_logged = False
         self.using_binary_protocol = False
         self.initial_bin_bandwidth = 0  # Force re-zoom on next connect
@@ -432,23 +456,29 @@ class SpectrumDisplay:
             print(f"Failed to parse spectrum message: {e}")
 
     def _parse_binary_spectrum(self, message: bytes) -> Optional[dict]:
-        """Parse binary spectrum protocol message.
+        """Parse a spectrum wire protocol version 2 frame.
 
-        Binary format:
-        - Header (22 bytes):
-          - Magic: 0x53 0x50 0x45 0x43 (4 bytes) "SPEC"
-          - Version: 0x01 (1 byte)
-          - Flags: 0x01=full (float32), 0x02=delta (float32), 0x03=full (uint8), 0x04=delta (uint8) (1 byte)
-          - Timestamp: uint64 milliseconds (8 bytes, little-endian)
-          - Frequency: uint64 Hz (8 bytes, little-endian)
-        - For full frame (float32): all bins as float32 (binCount * 4 bytes, little-endian)
-        - For delta frame (float32):
-          - ChangeCount: uint16 (2 bytes, little-endian)
-          - Changes: array of [index: uint16, value: float32] (6 bytes each, little-endian)
-        - For full frame (uint8): all bins as uint8 (binCount * 1 byte)
-        - For delta frame (uint8):
-          - ChangeCount: uint16 (2 bytes, little-endian)
-          - Changes: array of [index: uint16, value: uint8] (3 bytes each, little-endian)
+        Version 1 sent an index and a value for every changed bin, hardcoded its
+        quantisation as `value - 256`, and had no way to notice a dropped frame:
+        the server recorded what the client would hold before attempting a send
+        that could fail, so a dropped delta desynchronised those bins until
+        something forced a full frame by luck. Version 2 replaces the index list
+        with a change mask, carries the scale it was quantised with, and numbers
+        its frames with periodic keyframes. It measures about 2.15x smaller.
+
+            [magic "SPEC"]        4
+            [version = 2]         1
+            [flags]               1   0x05 full, 0x06 delta
+            [sequence uint16]     2
+            [timestamp uint64]    8   nanoseconds
+            [centreFreq uint64]   8
+                                 24
+
+            full  0x05: [refCentiDB int16][stepCentiDB uint8][code uint8 x bins]
+            delta 0x06: [mask ceil(bins/8) bytes][value uint8 per set bit]
+
+        A delta carries no scale: it refers to whatever the last full frame
+        established, which is why the scale may only change on a full frame.
 
         Args:
             message: Binary message bytes
@@ -457,98 +487,97 @@ class SpectrumDisplay:
             Dictionary with 'type', 'data', 'frequency', 'timestamp' or None on error
         """
         try:
-            if len(message) < 22:
+            if len(message) < SPECTRUM_HEADER_SIZE:
                 print(f"Binary message too short: {len(message)} bytes")
                 return None
 
-            # Parse header
-            magic = message[0:4]
-            if magic != b'SPEC':
-                print(f"Invalid magic: {magic}")
+            if message[0:4] != b'SPEC':
+                print(f"Invalid magic: {message[0:4]}")
                 return None
 
+            # A version that is not 2 is an error rather than a fallback: this
+            # client asks for 2 explicitly and the server refuses a version it
+            # cannot serve, so anything else means the frame is not what it
+            # claims to be.
             version = message[4]
-            if version != 0x01:
-                print(f"Unsupported version: {version}")
+            if version != SPECTRUM_PROTOCOL_VERSION:
+                print(f"Unsupported spectrum version {version} "
+                      f"(this client reads {SPECTRUM_PROTOCOL_VERSION} only)")
                 return None
 
             flags = message[5]
-            timestamp = struct.unpack('<Q', message[6:14])[0]  # little-endian uint64
-            frequency = struct.unpack('<Q', message[14:22])[0]  # little-endian uint64
+            sequence = struct.unpack_from('<H', message, 6)[0]
+            timestamp = struct.unpack_from('<Q', message, 8)[0]
+            frequency = struct.unpack_from('<Q', message, 16)[0]
+            body = message[SPECTRUM_HEADER_SIZE:]
 
-            if flags == 0x01:
-                # Full frame (float32)
-                bin_count = (len(message) - 22) // 4
-                spectrum_data = np.zeros(bin_count, dtype=np.float32)
+            # A gap means frames were dropped for a slow reader. Nothing to
+            # repair here -- the next keyframe restates everything, which is
+            # what they are for -- but worth counting rather than silently
+            # rendering stale bins until then.
+            if self.spectrum_last_sequence is not None and \
+                    sequence != (self.spectrum_last_sequence + 1) & 0xFFFF:
+                self.spectrum_sequence_gaps += 1
+            self.spectrum_last_sequence = sequence
 
-                for i in range(bin_count):
-                    offset = 22 + i * 4
-                    spectrum_data[i] = struct.unpack('<f', message[offset:offset+4])[0]  # little-endian float32
-
-                # Store for delta decoding
-                self.binary_spectrum_data = spectrum_data.copy()
-
-            elif flags == 0x02:
-                # Delta frame (float32)
-                if self.binary_spectrum_data is None:
-                    print("Delta frame received before full frame")
+            if flags == SPECTRUM_FLAG_FULL:
+                if len(body) < 3:
+                    print(f"Truncated full frame: {len(body)} bytes")
                     return None
+                ref_centi_db = struct.unpack_from('<h', body, 0)[0]
+                step_centi_db = body[2]
+                if step_centi_db == 0:
+                    print("Full frame declares a zero quantisation step")
+                    return None
+                self.spectrum_scale = (ref_centi_db, step_centi_db)
+                self.binary_spectrum_codes = np.frombuffer(body[3:], dtype=np.uint8).copy()
 
-                change_count = struct.unpack('<H', message[22:24])[0]  # little-endian uint16
-                offset = 24
-
-                # Apply changes to previous data
-                for i in range(change_count):
-                    index = struct.unpack('<H', message[offset:offset+2])[0]  # little-endian uint16
-                    value = struct.unpack('<f', message[offset+2:offset+6])[0]  # little-endian float32
-                    self.binary_spectrum_data[index] = value
-                    offset += 6
-
-                spectrum_data = self.binary_spectrum_data
-
-            elif flags == 0x03:
-                # Full frame (uint8) - binary8 format
-                bin_count = len(message) - 22
-                spectrum_data = np.zeros(bin_count, dtype=np.float32)
-
-                # Read uint8 values and convert to dBFS
-                for i in range(bin_count):
-                    uint8_value = message[22 + i]
-                    # Convert: 0 = -256 dB, 255 = -1 dB
-                    spectrum_data[i] = float(uint8_value) - 256.0
-
-                # Store uint8 data for delta decoding
-                self.binary_spectrum_data8 = np.frombuffer(message[22:], dtype=np.uint8).copy()
-
-                # Log first binary8 frame
                 if not self.binary8_logged:
                     self.binary8_logged = True
-                    print('🚀 Binary8 protocol active - 75% bandwidth reduction vs float32!')
+                    print('🚀 Spectrum protocol version 2 active '
+                          '(change mask + carried scale, ~2.15x smaller than version 1)')
 
-            elif flags == 0x04:
-                # Delta frame (uint8) - binary8 format
-                if self.binary_spectrum_data8 is None:
-                    print("Binary8 delta frame received before full frame")
+            elif flags == SPECTRUM_FLAG_DELTA:
+                if self.binary_spectrum_codes is None:
+                    # Normal for a client that joined mid-stream; the next
+                    # keyframe is at most five seconds away.
                     return None
-
-                change_count = struct.unpack('<H', message[22:24])[0]  # little-endian uint16
-                offset = 24
-
-                # Apply changes to previous uint8 data
-                for i in range(change_count):
-                    index = struct.unpack('<H', message[offset:offset+2])[0]  # little-endian uint16
-                    value = message[offset + 2]  # uint8 value
-                    self.binary_spectrum_data8[index] = value
-                    offset += 3  # 2 bytes index + 1 byte value
-
-                # Convert uint8 array to float32 for display
-                spectrum_data = self.binary_spectrum_data8.astype(np.float32) - 256.0
+                n = len(self.binary_spectrum_codes)
+                mask_len = (n + 7) // 8
+                if len(body) < mask_len:
+                    print(f"Delta frame shorter than its mask: {len(body)} < {mask_len}")
+                    return None
+                mask = np.frombuffer(body[:mask_len], dtype=np.uint8)
+                # Validated whole before a single bin is touched: a body whose
+                # length disagrees with its mask is malformed, and applying it
+                # part way would leave the frame half updated with nothing to
+                # indicate it.
+                expected = int(np.unpackbits(mask).sum())
+                if len(body) != mask_len + expected:
+                    print(f"Delta frame carries {len(body) - mask_len} values "
+                          f"for {expected} mask bits")
+                    return None
+                if expected:
+                    # Bits are LSB-first within each byte, which is what
+                    # bitorder='little' selects; the default would walk them
+                    # backwards and scatter the values across the wrong bins.
+                    changed = np.unpackbits(mask, bitorder='little')[:n].astype(bool)
+                    self.binary_spectrum_codes[changed] = np.frombuffer(
+                        body[mask_len:], dtype=np.uint8)
 
             else:
-                print(f"Unknown flags: {flags}")
+                print(f"Unknown spectrum flags: 0x{flags:02x}")
                 return None
 
-            # Return in same format as JSON messages
+            if self.spectrum_scale is None:
+                return None
+            ref_centi_db, step_centi_db = self.spectrum_scale
+            # dB = ref/100 + code * step/100. Version 1 hardcoded value-256;
+            # carrying the scale is what stops it clipping on a receiver whose
+            # gain settings put the bins somewhere else.
+            spectrum_data = (self.binary_spectrum_codes.astype(np.float32) *
+                             (step_centi_db / 100.0)) + (ref_centi_db / 100.0)
+
             return {
                 'type': 'spectrum',
                 'data': spectrum_data.tolist(),

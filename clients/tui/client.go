@@ -685,14 +685,6 @@ func (c *Client) spanForLocked(binCount int) float64 {
 	return c.cfg.TotalBandwidth
 }
 
-func u8ToDB(src []uint8) []float32 {
-	out := make([]float32, len(src))
-	for i, v := range src {
-		out[i] = float32(v) - 256.0
-	}
-	return out
-}
-
 // unwrapFFT rotates raw FFT bin order (positive frequencies first, then
 // negative) into ascending frequency order for display.
 func unwrapFFT(bins []float32) []float32 {

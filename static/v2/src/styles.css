@@ -230,6 +230,12 @@
        Not a theme token for the same reason the dial line is not — the panel is
        dark in both themes. */
     --scope-peak: rgba(233, 240, 255, 0.82);
+    /* The dB scale down the left of the spectrum views. White rather than the
+       ruler's grey: it is drawn over the picture instead of on a bar of its
+       own, so it has the palette behind it rather than --scale-bg. Not quite
+       opaque, so it reads as an overlay on the spectrum rather than as part of
+       it — and dark in neither theme, for the reason above. */
+    --scope-scale: rgba(255, 255, 255, 0.92);
 
     --radius: 10px;
     --radius-sm: 7px;

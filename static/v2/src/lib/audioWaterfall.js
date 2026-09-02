@@ -329,6 +329,117 @@ function drawBarTint(c, w, h, bins, start, count, state) {
     c.fillRect(0, 0, w, h);
 }
 
+// The dB scale down the left of both spectrum views.
+//
+// A ladder rather than a fixed step: the window these are drawn in is 45 dB
+// wide at its narrowest and 120 at its widest — auto ranging picks it from the
+// audio, and the Floor slider can put it anywhere — so a step that reads well
+// in one is a wall of numbers or a single lonely label in another. The first
+// step that leaves the labels far enough apart wins.
+//
+// 10/20/50 because those are the divisions a dB axis is read in. 25 would fit
+// a 90 dB window more evenly than 20 does and was left out anyway: an axis
+// counting in 25s costs more to read than the one wasted label saves.
+const DB_STEPS = [10, 20, 50, 100];
+const DB_LABEL_GAP = 20;   // CSS px, the closest two labels may sit
+const DB_TICK = 5;         // CSS px, the length of a notch
+
+// Where a step's labels would land, top first, with the ones that would hang
+// off an edge dropped: half a label is worse than none, because it reads as a
+// different number.
+function scaleTicks(step, floor, range, h, contrast, pad) {
+    const out = [];
+    for (let db = Math.floor((floor + range) / step) * step; db > floor; db -= step) {
+        let t = (db - floor) / range;
+        if (contrast && contrast !== 1) t = Math.pow(t, 1 / contrast);
+        const y = h - t * h;
+        if (y < pad || y > h - pad) continue;
+        out.push({ db, y });
+    }
+    return out;
+}
+
+/**
+ * The scale, drawn over the picture it belongs to.
+ *
+ * Over rather than beside: the canvas is 96 px tall and a gutter wide enough
+ * for "-100 dB" would take an eighth of the width away from the spectrum, in a
+ * panel where the width is the whole passband. The cost is that the labels sit
+ * on the lowest few hundred Hz of the display, which is the part of an SSB
+ * passband with the least in it.
+ *
+ * `contrast` has to be applied here exactly as the columns apply it, or the
+ * numbers would describe a linear scale the picture is not drawn on and every
+ * label but the ends would be in the wrong place.
+ *
+ * Only the top label carries the unit. It names the axis once, where a "dB" on
+ * every line is four copies of a word nobody needed the second time.
+ */
+function drawDbScale(c, h, dpr, floor, range, contrast) {
+    const font = 8.5 * dpr;
+    const pad = font * 0.75;                          // keeps a label off either edge
+    const tick = Math.max(2, Math.round(DB_TICK * dpr));
+    const x = tick + 3 * dpr;
+    const ink = cssVar('--scope-scale', 'rgba(255,255,255,0.92)');
+
+    // The first step whose labels are actually far enough apart — measured on
+    // the positions themselves, not on dB per pixel. Contrast bends the scale,
+    // and it bends it hardest at the top, so a step that divides the window
+    // evenly can still put its top two labels on each other.
+    //
+    // A step that leaves fewer than two labels in the window is too coarse to
+    // be a scale at all, so the search stops before it and keeps the last one
+    // that was: two tight labels say more than one comfortable one.
+    const min = DB_LABEL_GAP * dpr;
+    const spaced = (t) => t.every((v, i) => i === 0 || v.y - t[i - 1].y >= min);
+    let ticks = [];
+    for (const step of DB_STEPS) {
+        const t = scaleTicks(step, floor, range, h, contrast, pad);
+        if (t.length < 2) break;
+        ticks = t;
+        if (spaced(t)) break;
+    }
+    // Not even the finest step put two labels in the window — a narrow window
+    // with the contrast turned down does it, which pushes everything below the
+    // bottom label off the panel. One label is still worth drawing: it is a
+    // level, and a level is the thing being asked for.
+    if (!ticks.length) ticks = scaleTicks(DB_STEPS[0], floor, range, h, contrast, pad);
+    // If none of them passed, the kept set is the coarsest that had two labels
+    // in it and is still crowded somewhere: drop the ones that crowd, measuring
+    // from the last label kept rather than from the last one considered. A set
+    // that did pass loses nothing here, so this needs no condition of its own.
+    const kept = [];
+    for (const t of ticks) if (!kept.length || t.y - kept[kept.length - 1].y >= min) kept.push(t);
+    ticks = kept;
+
+    c.font = `${font}px ui-monospace, monospace`;
+    c.textBaseline = 'middle';
+    c.textAlign = 'left';
+    c.lineJoin = 'round';
+
+    // Top first, so the one that gets the unit is the first one drawn.
+    let top = true;
+    for (const { db, y } of ticks) {
+        c.strokeStyle = ink;
+        c.lineWidth = Math.max(1, Math.round(dpr));
+        c.beginPath();
+        c.moveTo(0, Math.round(y) + 0.5);
+        c.lineTo(tick, Math.round(y) + 0.5);
+        c.stroke();
+
+        const label = top ? `${Math.round(db)} dB` : String(Math.round(db));
+        top = false;
+        // Outlined, because what is behind a label changes: the black headroom,
+        // the energy wash, and the top of a full-scale bar are three different
+        // backgrounds, and white on its own is unreadable against the third.
+        c.lineWidth = Math.max(2, Math.round(2 * dpr));
+        c.strokeStyle = 'rgba(0,0,0,0.65)';
+        c.strokeText(label, x, y);
+        c.fillStyle = ink;
+        c.fillText(label, x, y);
+    }
+}
+
 /**
  * The spectrum reduced to `n` columns, each a fraction of the panel height.
  *
@@ -454,6 +565,9 @@ export function drawAudioBars({
             c.fillRect(b * step, top, target, thick);
         }
     }
+
+    // Last, so it is over the bars rather than under them.
+    drawDbScale(c, h, dpr, floor, range, contrast);
 }
 
 /**
@@ -563,6 +677,8 @@ export function drawAudioLine({
         }
         c.stroke();
     }
+
+    drawDbScale(c, h, dpr, floor, range, contrast);
 }
 
 export function drawAudioRuler(canvas, tuning, sampleRate, binCount) {

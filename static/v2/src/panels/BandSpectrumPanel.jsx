@@ -25,6 +25,12 @@
 // lib/useInView.js, which has the reasoning and the reason leaving is delayed
 // and returning is not.
 //
+// Nor is being on screen enough: a tab in the background, or an app sent to the
+// background on a phone, leaves the panel scrolled to and visible as far as the
+// layout is concerned. That is lib/usePageVisible.js, on the same five-second
+// grace period the main spectrum's socket gets, so backgrounding a tab drops
+// both together.
+//
 // While it *is* open the stream is kept open: a failure reopens it on a backoff
 // and keeps trying for as long as the panel is there, so a receiver restarted
 // under it is found again without anybody touching the panel. See retryDelay in
@@ -61,6 +67,7 @@ import { TRACE_WIDTH, binsToPixels, paletteGradients, themeColors } from '../lib
 import { retentionFor } from '../lib/timeConstant.js';
 import useFeedsAllowed from '../lib/useServerFeeds.js';
 import useInView from '../lib/useInView.js';
+import usePageVisible from '../lib/usePageVisible.js';
 
 // The card's proportions, from band_activity.html: the block is this much of its
 // own width, and the spectrum trace takes the top of it with the waterfall below.
@@ -293,11 +300,21 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     // question as the panel being looked at once it is in a column taller than
     // the window — see lib/useInView.js.
     const inView = useInView(wrapRef);
-    // The same answer where the stream's cleanup can read it, so the line it
-    // logs can say which of the two ended it. Assigned during render, so by the
-    // time a change of view runs that cleanup this already holds the new value.
-    const inViewRef = useRef(inView);
-    inViewRef.current = inView;
+    // ...and whether anybody is looking at the page at all. A hidden tab leaves
+    // the panel exactly where it was, so the observer above has nothing to say
+    // about it — and in a background tab it is not called at all. Same rule and
+    // the same grace period the main spectrum's socket gets, so a backgrounded
+    // tab drops both at the same moment.
+    const pageVisible = usePageVisible();
+    const watched = inView && pageVisible;
+    // Why the stream stopped, where its cleanup can read it: closing the panel
+    // and scrolling away from it are different events and the log should not
+    // call them the same thing. Assigned during render, so by the time a change
+    // runs that cleanup this already holds the new answer.
+    const stopReason = useRef('');
+    stopReason.current = !pageVisible ? 'the tab is hidden'
+        : !inView ? 'scrolled out of view'
+        : '';
     const specRef = useRef(null);
     const wfRef = useRef(null);
     const clipRef = useRef(null);
@@ -421,7 +438,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
         // Gated with the rest of the app's feeds: this is a continuous stream,
         // and the loudest thing a stopped receiver was still asking for. See
         // lib/serverFeeds.js.
-        if (!feeds || !inView) return undefined;
+        if (!feeds || !watched) return undefined;
         let es = null;
         let retry = null;
         let attempts = 0;
@@ -518,15 +535,16 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
             // reported, so a collapsed dock left a "Band spectrum connected"
             // as the last word on a stream that had stopped — or worse, a
             // "retrying in 30s" for a retry that would never happen.
-            // Scrolled away rather than shut says something different — the
-            // panel is still open, so a bare "closed" reads as a fault.
-            logEvent('info', inViewRef.current
-                ? `Band spectrum closed (${band})`
-                : `Band spectrum paused (${band}) — scrolled out of view`);
+            // Scrolled away, or a tab in the background, says something
+            // different — the panel is still open, so a bare "closed" reads as
+            // a fault.
+            logEvent('info', stopReason.current
+                ? `Band spectrum paused (${band}) — ${stopReason.current}`
+                : `Band spectrum closed (${band})`);
             onRate(null);
             reportBandRate(null);
         };
-    }, [band, meta.bin_count, st, onRate, feeds, inView]);
+    }, [band, meta.bin_count, st, onRate, feeds, watched]);
 
     useEffect(() => { st.dirty = true; }, [zoom, st]);
     useEffect(() => {

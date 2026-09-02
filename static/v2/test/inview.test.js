@@ -1,4 +1,5 @@
-// Stopping a panel's stream when the panel is scrolled out of view.
+// Stopping a panel's stream when nobody can see it — scrolled out of the dock
+// column, or a tab sent to the background.
 //
 // The band spectrum's EventSource was tied to the panel being mounted, which a
 // dock column taller than the window makes into the wrong question: a panel
@@ -26,6 +27,20 @@ const elapse = (ms) => {
     }
 };
 
+// A page that can be hidden, and one listener — the only two things the
+// visibility half of this touches.
+const listeners = [];
+globalThis.document = {
+    hidden: false,
+    addEventListener: (type, fn) => { if (type === 'visibilitychange') listeners.push(fn); },
+    removeEventListener: (type, fn) => {
+        const i = listeners.indexOf(fn);
+        if (i >= 0) listeners.splice(i, 1);
+    },
+};
+/** Background or foreground the tab, as the browser would. */
+const setHidden = (v) => { document.hidden = v; for (const fn of [...listeners]) fn(); };
+
 // The browser's observer, reduced to the two things this uses: it is handed a
 // callback, and it is disconnected.
 let observers = [];
@@ -37,7 +52,8 @@ class FakeIO {
 globalThis.IntersectionObserver = FakeIO;
 
 const {
-    render, reset, useInView, IN_VIEW_MARGIN, OFF_SCREEN_MS, React,
+    render, reset, useInView, usePageVisible,
+    IN_VIEW_MARGIN, OFF_SCREEN_MS, HIDDEN_SUSPEND_MS, React,
 } = require('./.build/inview.cjs');
 
 let pass = 0;
@@ -182,6 +198,80 @@ t('everything is in view without IntersectionObserver', () => {
     } finally {
         globalThis.IntersectionObserver = real;
     }
+});
+
+// --- the hidden tab -----------------------------------------------------------
+//
+// The other half of the gate, and the one the observer above cannot answer: a
+// background tab leaves the panel laid out exactly where it was, and stops
+// delivering intersections at all.
+
+function mountVisible(opts) {
+    reset();
+    listeners.length = 0;
+    timers.clear();
+    document.hidden = false;
+    const seen = [];
+    const Probe = () => {
+        seen.push(usePageVisible(opts));
+        return { type: 'div', props: {} };
+    };
+    const first = render(Probe, {}, null);
+    return {
+        seen,
+        read: () => { render(Probe, {}, null); return seen[seen.length - 1]; },
+        cleanups: first.cleanups,
+    };
+}
+
+t('a page in front is visible', () => {
+    const m = mountVisible();
+    assert.strictEqual(m.seen[0], true);
+    assert.strictEqual(listeners.length, 1, 'nothing is listening for visibilitychange');
+});
+
+t('a tab hidden for a moment keeps it', () => {
+    const m = mountVisible();
+    setHidden(true);
+    elapse(HIDDEN_SUSPEND_MS - 1);
+    assert.strictEqual(m.read(), true);
+    setHidden(false);
+    elapse(HIDDEN_SUSPEND_MS * 10);
+    assert.strictEqual(m.read(), true);
+});
+
+t('a tab hidden for the whole grace period stops it', () => {
+    const m = mountVisible();
+    setHidden(true);
+    elapse(HIDDEN_SUSPEND_MS);
+    assert.strictEqual(m.read(), false);
+    setHidden(false);
+    assert.strictEqual(m.read(), true);
+});
+
+t('mounting in a background tab never starts', () => {
+    reset();
+    listeners.length = 0;
+    timers.clear();
+    document.hidden = true;
+    const seen = [];
+    const Probe = () => { seen.push(usePageVisible()); return { type: 'div', props: {} }; };
+    render(Probe, {}, null);
+    assert.strictEqual(seen[0], false, 'a stream opened in a tab nobody was looking at');
+    // ...and coming to the front still starts it, which is the case the
+    // countdown's "never suspended anything" guard would otherwise swallow.
+    setHidden(false);
+    render(Probe, {}, null);
+    assert.strictEqual(seen[seen.length - 1], true);
+});
+
+t('unmounting drops the listener and the countdown', () => {
+    const m = mountVisible();
+    setHidden(true);
+    assert.strictEqual(timers.size, 1);
+    for (const off of m.cleanups) off();
+    assert.strictEqual(listeners.length, 0, 'a visibilitychange listener outlived the component');
+    assert.strictEqual(timers.size, 0, 'a pending countdown outlived the component');
 });
 
 console.log(`\n${pass} passed`);

@@ -6,7 +6,10 @@
 // holdpress.entry.js.
 import { render, reset } from './hookStub.js';
 import useInView, { IN_VIEW_MARGIN, OFF_SCREEN_MS } from '../src/lib/useInView.js';
+import usePageVisible from '../src/lib/usePageVisible.js';
+import { HIDDEN_SUSPEND_MS } from '../src/radio/idle.js';
 
 module.exports = {
-    render, reset, useInView, IN_VIEW_MARGIN, OFF_SCREEN_MS, React: window.React,
+    render, reset, useInView, usePageVisible,
+    IN_VIEW_MARGIN, OFF_SCREEN_MS, HIDDEN_SUSPEND_MS, React: window.React,
 };

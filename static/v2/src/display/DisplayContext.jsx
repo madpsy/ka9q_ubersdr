@@ -286,13 +286,14 @@ export const DEFAULTS = {
     scopeView: 'both',      // audio scope panel: 'both' | 'scope' | 'waterfall'
     scopeFft: 4096,         // analyser FFT size while that panel is open
     scopeTimebase: 20,      // ms across the oscilloscope
-    // What the scope canvas draws: 'bars' (the spectrum as a bar meter) or
-    // 'wave' (the oscilloscope). Tapping the canvas swaps them — see
-    // ScopePanel.
+    // What the scope canvas draws: 'bars' (the spectrum as a bar meter),
+    // 'line' (the same spectrum as a filled trace, in the same language as the
+    // RF spectrum above the waterfall) or 'wave' (the oscilloscope). Tapping
+    // the canvas cycles them — see ScopePanel.
     //
     // Bars by default because they answer the question most people open this
     // panel with — what is in the audio — where the waveform answers a narrower
-    // one that mostly matters for CW and carriers. The waveform is one tap
+    // one that mostly matters for CW and carriers. The others are one tap
     // away and the choice is remembered.
     // Frames a second the spectrum loop may run at, 0 being the display's own
     // rate and the default. Not a debug setting, though it started as one: it is

@@ -28,7 +28,8 @@ import { accumulateAudioStats, newAudioStats, readAudioStats } from '../lib/audi
 import {
     AUDIO_WF_RATE_MAX, AUDIO_WF_RATE_MIN,
     SCOPE_FLOOR_DEFAULT, SCOPE_FLOOR_MAX, SCOPE_FLOOR_MIN,
-    cssVar, drawAudioBars, drawAudioRuler, drawAudioWaterfall, fmtHz, newBarLevel, newRing, sizedCanvas,
+    cssVar, drawAudioBars, drawAudioLine, drawAudioRuler, drawAudioWaterfall, fmtHz, newBarLevel,
+    newRing, sizedCanvas,
 } from '../lib/audioWaterfall.js';
 
 const VIEWS = [
@@ -46,6 +47,16 @@ const FFT_SIZES = [
     { value: 8192, label: 'Detail' },
     { value: 16384, label: 'Max' },
 ];
+
+// What the top canvas can be, in the order a tap goes round them. Two views of
+// the spectrum and one of the waveform: the bars read as a meter per bucket,
+// the line as the shape of the whole band, and the waveform as the audio itself.
+const SHAPES = ['bars', 'line', 'wave'];
+const SHAPE_LABEL = {
+    bars: 'Spectrum bars',
+    line: 'Spectrum line',
+    wave: 'Waveform',
+};
 
 const SCOPE_H = 96;
 const WF_H = 120;
@@ -72,14 +83,18 @@ export default function ScopePanel({ minimal }) {
     const [contrast, setContrast] = useState(display.scopeContrast || 1);
     const [wfRate, setWfRate] = useState(display.scopeRate || AUDIO_WF_RATE_MAX);   // rows/s
     const [rate, setRate] = useState(null);   // audio sample rate, once known
-    // What the top canvas is: the waveform, or the spectrum as bars.
+    // What the top canvas is: the spectrum as bars, the spectrum as a filled
+    // line, or the waveform.
     //
-    // A tap on the picture rather than a control beside it. The two are the
-    // same thing seen two ways and the choice is made by looking — you switch
+    // A tap on the picture rather than a control beside it. They are the same
+    // thing seen three ways and the choice is made by looking — you switch
     // because what is on screen is not answering the question — so the picture
     // is the right place to press. It is also the only control the minimal view
-    // could have, where there is nothing but the canvases.
-    const [shape, setShape] = useState(display.scopeShape === 'wave' ? 'wave' : 'bars');
+    // could have, where there is nothing but the canvases. An unknown stored
+    // value falls back to the default rather than blanking the canvas.
+    const [shape, setShape] = useState(
+        SHAPES.includes(display.scopeShape) ? display.scopeShape : 'bars',
+    );
     // Auto ranging, or a floor the operator chose.
     //
     // Auto is right most of the time and has one cost: it is *relative*. The
@@ -119,9 +134,9 @@ export default function ScopePanel({ minimal }) {
     // Smoothed vertical gain for the scope, so the trace does not jump as the
     // gate opens and closes.
     const scope = useRef({ gain: 1 });
-    // The bar view's auto-level, which is its own: it and the waterfall ease
-    // towards the same target but are not the same instrument, and sharing one
-    // would have whichever drew second ease twice as fast.
+    // The spectrum view's auto-level, which is its own: it and the waterfall
+    // ease towards the same target but are not the same instrument, and sharing
+    // one would have whichever drew second ease twice as fast.
     const barLevel = useRef(newBarLevel());
     const barRulerRef = useRef(null);
     // The bars get their own pointer state rather than sharing the waterfall's.
@@ -135,9 +150,18 @@ export default function ScopePanel({ minimal }) {
     const iq = isIQ(tuning.mode);
     const showScope = view !== 'waterfall';
     const showWf = view !== 'scope';
-    const bars = showScope && shape === 'bars';
-    // The bar view's two extras. Read here rather than inside the draw so the
-    // effect has them as dependencies and a toggle repaints at once, rather
+    // Either spectrum shape, against the waveform. Everything that is about a
+    // spectrum being on screen rather than about which of the two it is — the
+    // frequency ruler, the hover readout, the level and resolution controls —
+    // asks this.
+    const spectrum = showScope && shape !== 'wave';
+    const bars = spectrum && shape === 'bars';
+    // What the next tap gets. A cycle rather than a switch now that there are
+    // three of them, and the title says which one is coming so the tap is not
+    // a guess.
+    const nextShape = SHAPES[(SHAPES.indexOf(shape) + 1) % SHAPES.length];
+    // The spectrum views' two extras. Read here rather than inside the draw so
+    // the effect has them as dependencies and a toggle repaints at once, rather
     // than at whatever rate the audio happens to be arriving.
     const peaks = display.scopePeaks !== false;
     const heat = display.scopeHeat !== false;
@@ -163,13 +187,13 @@ export default function ScopePanel({ minimal }) {
         if (iq) return undefined;
         // One shared FFT: the filter panel's preview reads the same node, and
         // whichever of them is open drives it (see lib/audioSpectrum.js).
-        // Bars need the spectrum, not the waveform — so what is asked of the
-        // analyser follows the shape, and a scope showing bars costs no
-        // time-domain read at all.
+        // Both spectrum shapes need the bins, not the waveform — so what is
+        // asked of the analyser follows the shape, and a scope showing the
+        // spectrum costs no time-domain read at all.
         return subscribeAudioSpectrum(player, {
             // Stats are read from the spectrum, so they need the bins even in
             // the waveform view where nothing else does.
-            fftSize, bins: showWf || bars || stats, wave: showScope && !bars,
+            fftSize, bins: showWf || spectrum || stats, wave: showScope && !spectrum,
         }, (f) => {
             if (f.sampleRate !== rate) setRate(f.sampleRate);
             if (stats) {
@@ -180,12 +204,15 @@ export default function ScopePanel({ minimal }) {
                     setStatsRead(readAudioStats(statsAcc.current, f.sampleRate, f.binCount, tuning));
                 }
             }
-            if (bars) {
+            if (spectrum) {
                 // The frame the tooltip is answered from, kept whichever view
                 // drew it: the readings are the frame's, not the picture's.
                 last.current = { bins: f.bins, sampleRate: f.sampleRate, binCount: f.binCount, tuning };
                 refreshTip(barHover.current, last.current, barTipAt, setBarTip);
-                drawAudioBars({
+                // One call either way: the two shapes take the same frame, the
+                // same window and the same extras, and differ only in the mark
+                // they draw with it.
+                (bars ? drawAudioBars : drawAudioLine)({
                     canvas: scopeRef.current,
                     bins: f.bins,
                     binCount: f.binCount,
@@ -221,8 +248,8 @@ export default function ScopePanel({ minimal }) {
                 drawAudioRuler(rulerRef.current, tuning, f.sampleRate, f.binCount);
             }
         });
-    }, [player, fftSize, showScope, showWf, bars, peaks, heat, timebase, tuning, display.palette, contrast, rate,
-        wfRate, autoLevel, floorDb, iq, stats]);
+    }, [player, fftSize, showScope, showWf, spectrum, bars, peaks, heat, timebase, tuning, display.palette,
+        contrast, rate, wfRate, autoLevel, floorDb, iq, stats]);
 
     // A new passband, a new resolution or a stopped stream all make the
     // accumulated average describe something that is no longer on screen.
@@ -297,34 +324,34 @@ export default function ScopePanel({ minimal }) {
             {!minimal && <Segmented options={VIEWS} value={view} onChange={setView} size="sm" />}
 
             {showScope && (
-                <div className={`scope${bars ? ' scope--hover' : ''}`}>
+                <div className={`scope${spectrum ? ' scope--hover' : ''}`}>
                     <canvas
                         ref={scopeRef}
                         className="scope__canvas scope__canvas--tap"
                         style={{ height: SCOPE_H }}
-                        title={bars ? 'Spectrum bars — tap for the waveform' : 'Waveform — tap for spectrum bars'}
-                        onClick={() => setShape(bars ? 'wave' : 'bars')}
-                        // Only the bars have a frequency under the pointer to
+                        title={`${SHAPE_LABEL[shape]} — tap for the ${SHAPE_LABEL[nextShape].toLowerCase()}`}
+                        onClick={() => setShape(nextShape)}
+                        // Only a spectrum has a frequency under the pointer to
                         // report. A waveform's x axis is time, and the same
                         // readout over it would be answering a question nobody
                         // asked of it.
-                        onPointerMove={bars ? (e) => {
+                        onPointerMove={spectrum ? (e) => {
                             const r = e.currentTarget.getBoundingClientRect();
                             barHover.current = { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width };
                         } : undefined}
-                        onPointerLeave={bars ? () => { barHover.current = null; setBarTip(null); } : undefined}
+                        onPointerLeave={spectrum ? () => { barHover.current = null; setBarTip(null); } : undefined}
                     />
-                    {/* The frequencies the bars are standing on. Only with the
-                        bars: a waveform's x axis is time, and a frequency scale
+                    {/* The frequencies the spectrum is standing on. Only with
+                        it: a waveform's x axis is time, and a frequency scale
                         under it would be a scale for the wrong axis. */}
-                    {bars && (
+                    {spectrum && (
                         <canvas
                             ref={barRulerRef}
                             className="scope__canvas scope__ruler"
                             style={{ height: RULER_H }}
                         />
                     )}
-                    {bars && <HoverTip tip={barTip} />}
+                    {spectrum && <HoverTip tip={barTip} />}
                 </div>
             )}
 
@@ -367,7 +394,7 @@ export default function ScopePanel({ minimal }) {
             {/* Level ranging, and where the bottom of the scale sits when it is
                 not automatic. Offered whenever either picture is on, because
                 both are drawn in the same dB window — see levelWindow. */}
-            {!minimal && (showWf || bars) && (
+            {!minimal && (showWf || spectrum) && (
                 <Field label="Levels" hint={autoLevel ? 'follows the audio' : `${Math.round(floorDb)} dB to full scale`}>
                     <Segmented
                         options={[
@@ -383,7 +410,7 @@ export default function ScopePanel({ minimal }) {
 
             {/* Only with a manual scale: in auto it would be a control that
                 does nothing, which is worse than one that is not there. */}
-            {!minimal && (showWf || bars) && !autoLevel && (
+            {!minimal && (showWf || spectrum) && !autoLevel && (
                 <Field label="Floor" hint={`${Math.round(floorDb)} dB`}>
                     <Slider
                         value={floorDb}
@@ -401,25 +428,26 @@ export default function ScopePanel({ minimal }) {
                 </Field>
             )}
 
-            {/* The bar view's two extras, side by side because they are the
-                same kind of choice — what is drawn besides the bars — and
-                because each is a word and a switch. Only with the bars
+            {/* The spectrum views' two extras, side by side because they are
+                the same kind of choice — what is drawn besides the trace — and
+                because each is a word and a switch. Only with a spectrum
                 showing: neither means anything over a waveform or a
-                waterfall. */}
-            {!minimal && bars && (
-                <Field label="Bars">
+                waterfall. Shared by both shapes, since they are the same two
+                readings drawn to suit whichever is on screen. */}
+            {!minimal && spectrum && (
+                <Field label={bars ? 'Bars' : 'Line'}>
                     <div className="scope__toggles">
                         <Switch
                             checked={peaks}
                             onChange={(v) => display.set({ scopePeaks: v })}
                             label="Peak"
-                            title="A mark that jumps to each bar's top and falls back, holding the loudest moment for a second after the bar has dropped"
+                            title="A mark that jumps to the top of the spectrum and falls back, holding the loudest moment for a second after the audio has dropped"
                         />
                         <Switch
                             checked={heat}
                             onChange={(v) => display.set({ scopeHeat: v })}
                             label="Heat"
-                            title="Colours the space above the bars by how much of the audio's energy each part of the band is carrying — green for an average share, red for more, blue for less"
+                            title="Colours the space above the spectrum by how much of the audio's energy each part of the band is carrying — green for an average share, red for more, blue for less"
                         />
                     </div>
                 </Field>
@@ -442,11 +470,12 @@ export default function ScopePanel({ minimal }) {
                 </Field>
             )}
 
-            {/* Offered for the bars as well as the waterfall: it sets how many
-                bars there are (lib/audioWaterfall.js barWidth), so gating it on
-                the waterfall would leave a scope-only bar view with a control
-                it can see the effect of but not reach. */}
-            {!minimal && (showWf || bars) && (
+            {/* Offered for the spectrum as well as the waterfall: it sets how
+                many bars there are, and how far apart the line's points sit
+                (lib/audioWaterfall.js barWidth), so gating it on the waterfall
+                would leave a scope-only spectrum with a control it can see the
+                effect of but not reach. */}
+            {!minimal && (showWf || spectrum) && (
                 <Field label="Resolution" hint={rate ? `${Math.round(rate / fftSize)} Hz/bin` : ''}>
                     <Segmented
                         options={FFT_SIZES.map((f) => ({ value: String(f.value), label: f.label }))}

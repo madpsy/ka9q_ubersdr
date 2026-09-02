@@ -87,11 +87,20 @@ t('it renders in the minimal view', () => {
 
 t('it renders in every view, with the stats on', () => {
     for (const scopeView of ['both', 'scope', 'waterfall']) {
-        for (const scopeShape of ['bars', 'wave']) {
+        for (const scopeShape of ['bars', 'line', 'wave']) {
             reset();
             render(ScopePanel, {}, context({ scopeView, scopeShape, scopeStats: true }));
         }
     }
+    assert.ok(true);
+});
+
+// A stored shape from a build that did not have it, or a corrupted setting:
+// the panel must fall back to a shape it can draw rather than render a canvas
+// nothing paints.
+t('it renders with an unknown stored shape', () => {
+    reset();
+    render(ScopePanel, {}, context({ scopeShape: 'sonogram', scopeStats: true }));
     assert.ok(true);
 });
 

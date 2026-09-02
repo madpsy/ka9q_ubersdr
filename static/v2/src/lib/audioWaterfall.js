@@ -8,6 +8,7 @@
 import { getPalette } from './palettes.js';
 import { audioBins } from './audioBand.js';
 import { TINT_SILENT, TINT_ZONES, stepPeaks, tintColour, tintZones } from './audioTint.js';
+import { TRACE_WIDTH, paletteGradients } from './spectrumTrace.js';
 
 // How fast the history scrolls, in rows a second. A setting rather than the
 // fixed 33 ms v1 runs at: what it should be depends on what is being watched —
@@ -328,6 +329,34 @@ function drawBarTint(c, w, h, bins, start, count, state) {
     c.fillRect(0, 0, w, h);
 }
 
+/**
+ * The spectrum reduced to `n` columns, each a fraction of the panel height.
+ *
+ * The bar view and the line view are the same reading drawn two ways, so this
+ * is the reading: the loudest bin in each column's slice of the passband, put
+ * in the dB window the waterfall is using, with the contrast gamma applied.
+ * Sharing it is what keeps a peak in one view at the same height in the other.
+ *
+ * The maximum rather than the mean, for the reason the RF trace takes one (see
+ * binsToPixels): there are always more bins than columns, and averaging a
+ * carrier with the noise either side of it is how a signal disappears as the
+ * resolution goes up.
+ */
+function columnLevels(bins, start, count, n, floor, range, contrast) {
+    const frac = new Float32Array(n);
+    for (let b = 0; b < n; b++) {
+        const lo = start + Math.floor((b / n) * count);
+        const hi = Math.max(lo + 1, start + Math.floor(((b + 1) / n) * count));
+        let v = -Infinity;
+        for (let i = lo; i < hi; i++) if (bins[i] > v) v = bins[i];
+        let t = (v - floor) / range;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (contrast && contrast !== 1) t = Math.pow(t, 1 / contrast);
+        frac[b] = t;
+    }
+    return frac;
+}
+
 export function drawAudioBars({
     canvas, bins, binCount, sampleRate, tuning, palette, contrast, level, floorDb, fftSize,
     heat = true, peaks = true,
@@ -369,18 +398,12 @@ export function drawAudioBars({
     c.fillStyle = grad;
 
     // Heights first, because the background is drawn to fit around them.
+    const frac = columnLevels(bins, start, count, bars, floor, range, contrast);
     const heights = new Int32Array(bars);
     for (let b = 0; b < bars; b++) {
-        const lo = start + Math.floor((b / bars) * count);
-        const hi = Math.max(lo + 1, start + Math.floor(((b + 1) / bars) * count));
-        let v = -Infinity;
-        for (let i = lo; i < hi; i++) if (bins[i] > v) v = bins[i];
-        let t = (v - floor) / range;
-        t = t < 0 ? 0 : t > 1 ? 1 : t;
-        if (contrast && contrast !== 1) t = Math.pow(t, 1 / contrast);
         // A floor of one pixel: a bar of no height reads as a gap in the
         // display rather than as silence, and silence is a thing to show.
-        heights[b] = Math.max(1, Math.round(t * h));
+        heights[b] = Math.max(1, Math.round(frac[b] * h));
     }
 
     // The background: where the energy is, as a proportion of the whole band —
@@ -430,6 +453,115 @@ export function drawAudioBars({
             const top = Math.min(h - thick, Math.max(0, Math.round(y - thick / 2)));
             c.fillRect(b * step, top, target, thick);
         }
+    }
+}
+
+/**
+ * The audio spectrum as a filled line — the third thing the scope canvas can be.
+ *
+ * The same reading as the bars above, drawn as an outline with the space under
+ * it filled: same window, same auto-level, same columns (columnLevels), same
+ * peak marks and the same headroom tint. Only the mark changes. Bars separate
+ * the band into buckets and read as a meter per bucket, which is what you want
+ * for levels; a continuous trace reads as a shape, which is what you want for
+ * the *form* of a signal — the skirts of an SSB voice, the notch a filter has
+ * cut, the two humps of a shifted FSK pair. The RF spectrum above the waterfall
+ * is drawn this way, so this also gives the audio a picture in the same
+ * language as the band it came from.
+ *
+ * It borrows that pane's gradients as well (lib/spectrumTrace.js): an opaque
+ * fill coloured by height, and a trace taken from a compressed slice of the
+ * palette so the outline still reads where the fill under it has gone
+ * near-black. `contrast` is left out of them and applied to the heights
+ * instead, exactly as the bars do it — passing it to both would gamma the
+ * picture twice and the two views would stop agreeing.
+ */
+export function drawAudioLine({
+    canvas, bins, binCount, sampleRate, tuning, palette, contrast, level, floorDb, fftSize,
+    heat = true, peaks = true,
+}) {
+    if (!canvas || !bins || bins.length !== binCount) return;
+    const { w, h, dpr } = sizedCanvas(canvas);
+    const c = canvas.getContext('2d', { alpha: false });
+    c.fillStyle = BAR_BG;
+    c.fillRect(0, 0, w, h);
+
+    const { start, count } = audioBins(
+        tuning.bandwidthLow, tuning.bandwidthHigh, sampleRate, binCount,
+    );
+    if (!(count > 0)) return;
+
+    const { floor, range } = levelWindow(bins, start, count, level, floorDb);
+
+    // One point per bar pitch, plus the one that closes the right edge. Tying
+    // the spacing to the bar width rather than to the pixel is what keeps the
+    // Resolution control meaning something here: the same four steps that make
+    // the bars coarse or fine make this trace blocky or smooth, and the two
+    // views stay the same reading at the same detail.
+    const pitch = Math.max(2, Math.round(barWidth(fftSize) * dpr));
+    const n = Math.max(2, Math.floor(w / pitch) + 1);
+    const frac = columnLevels(bins, start, count, n, floor, range, contrast);
+
+    const lw = Math.max(1, Math.round(TRACE_WIDTH * dpr));
+    const xAt = (i) => (i / (n - 1)) * w;
+    // Half a stroke clear of the top edge: a point at full scale drawn on the
+    // edge itself loses the upper half of its line and reads as a thinner
+    // trace than the rest, which looks like the signal fading at its loudest.
+    const yAt = (t) => Math.min(h, Math.max(lw / 2, h - t * h));
+
+    // The outline, as an open path — stroked as it stands, and closed down to
+    // the bottom corners when it is used as the edge of a filled area.
+    const trace = () => {
+        c.beginPath();
+        for (let i = 0; i < n; i++) {
+            const x = xAt(i);
+            const y = yAt(frac[i]);
+            if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+        }
+    };
+    const area = () => {
+        trace();
+        c.lineTo(w, h);
+        c.lineTo(0, h);
+        c.closePath();
+    };
+
+    // The energy wash, in the headroom above the trace only — the same rule the
+    // bars follow, and the same reason: below the trace the panel is the
+    // signal, and colouring that as well would be two readings in one place.
+    //
+    // Painted across the whole canvas and left to be covered by the fill below,
+    // which is opaque and stops exactly at the trace. The bars have to cut
+    // theirs back explicitly because their fill is a row of rectangles with
+    // gaps in it; a filled line has no gaps, so the cut is the next fill.
+    if (heat && level && level.tint) drawBarTint(c, w, h, bins, start, count, level.tint);
+
+    const grads = paletteGradients(c, h, palette, 1);
+    c.fillStyle = grads.fill;
+    area();
+    c.fill();
+
+    c.strokeStyle = grads.trace;
+    c.lineWidth = lw;
+    c.lineJoin = 'round';
+    trace();
+    c.stroke();
+
+    // The falling marks, as a line of their own above the trace rather than the
+    // row of dashes the bars get: over a continuous shape, a hold that is also
+    // continuous reads as where the signal has *been*, which is the same thing
+    // the dashes say over the bars.
+    if (peaks && level && level.peaks) {
+        const marks = stepPeaks(level.peaks, frac, performance.now());
+        c.strokeStyle = cssVar('--scope-peak', 'rgba(233,240,255,0.82)');
+        c.lineWidth = Math.max(1, Math.round(dpr));
+        c.beginPath();
+        for (let i = 0; i < n; i++) {
+            const x = xAt(i);
+            const y = yAt(marks[i].v);
+            if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+        }
+        c.stroke();
     }
 }
 

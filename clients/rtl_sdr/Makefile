@@ -7,6 +7,13 @@ BINARY := ubersdr-rtltcp-bridge
 # overwriting each other.
 OUT := build
 
+# Named with the architecture, as build.sh names its two: the release assets are
+# ubersdr-rtltcp-bridge_amd64 and _arm64, and a local build that dropped the
+# suffix would sit beside them looking like a third thing. Taken from the Go
+# environment rather than uname, so `GOARCH=arm64 make` cross-compiles to the
+# name that architecture's asset already has.
+ARCH := $(shell go env GOARCH)
+
 GOFLAGS := -ldflags="-s -w"
 
 .PHONY: all build clean install
@@ -15,13 +22,13 @@ all: build
 
 build:
 	@mkdir -p $(OUT)
-	go build $(GOFLAGS) -o $(OUT)/$(BINARY) .
+	go build $(GOFLAGS) -o $(OUT)/$(BINARY)_$(ARCH) .
 
 clean:
-	rm -f $(OUT)/$(BINARY)
+	rm -f $(OUT)/$(BINARY)_$(ARCH)
 
 install: build
-	install -m 755 $(OUT)/$(BINARY) /usr/local/bin/$(BINARY)
+	install -m 755 $(OUT)/$(BINARY)_$(ARCH) /usr/local/bin/$(BINARY)
 
 install-service: install
 	install -m 644 ubersdr-rtltcp-bridge.service /etc/systemd/system/

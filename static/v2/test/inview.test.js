@@ -101,6 +101,13 @@ t('observes the element it was given, with the margin', () => {
     assert.strictEqual(m.io().opts.rootMargin, IN_VIEW_MARGIN);
 });
 
+// Pinned, because it is the difference between "not in view" and "nearly in
+// view": a margin here is symmetric, so anything it lets keep streaming it also
+// lets *start* streaming on a page load that never showed the panel.
+t('no margin, so nearly on screen is off screen', () => {
+    assert.strictEqual(IN_VIEW_MARGIN, '0px');
+});
+
 t('starts off screen, so a panel mounted below the fold never opens anything', () => {
     const m = mount();
     assert.strictEqual(m.seen[0], false);

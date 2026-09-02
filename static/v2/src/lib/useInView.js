@@ -32,9 +32,14 @@
 // has no such problem: the panel is being looked at, and the sooner it fills the
 // better.
 //
-// The margin is the other half of that: the stream is already open by the time
-// the panel is scrolled to, rather than starting from an empty chart at the
-// moment it appears.
+// There is deliberately no margin. An earlier version had a generous one, on the
+// grounds that a panel would then be warm by the time it was scrolled to — but a
+// margin is symmetric, and "nearly on screen" counted as on screen at load, so a
+// panel a couple of hundred pixels below the fold opened a stream on a page that
+// had never shown it. Not starting is the whole point of this, and the countdown
+// below is what keeps a panel scrolled past from flapping, so the margin was
+// paying for a warm chart with the case it exists to prevent. It stays a
+// parameter for a caller that wants one.
 //
 // Without IntersectionObserver — nothing current, but this is the gate on a
 // feature working at all — everything is in view. A missing API is not a reason
@@ -46,10 +51,8 @@ import { visibilityPause } from './visibilityPause.js';
 // How long an element has to be off screen before whatever it feeds is stopped.
 export const OFF_SCREEN_MS = 2000;
 
-// How far outside the window still counts as on screen. About a panel's height:
-// far enough that scrolling one into place finds it already running, near enough
-// that the rest of a long column is genuinely stopped.
-export const IN_VIEW_MARGIN = '250px';
+// How far outside the window still counts as on screen: nothing. See above.
+export const IN_VIEW_MARGIN = '0px';
 
 const supported = () => typeof IntersectionObserver !== 'undefined';
 

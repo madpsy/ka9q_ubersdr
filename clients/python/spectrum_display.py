@@ -33,9 +33,19 @@ except ImportError:
     TIMESTAMP_SYNC_AVAILABLE = False
 
 
+from tuning_range import DEFAULT_MAX_FREQUENCY, DEFAULT_MIN_FREQUENCY
+
 class SpectrumDisplay:
     """Spectrum display widget showing RF spectrum as a line chart."""
     
+    # How far the receiver tunes. Set by the GUI once /api/description has been
+    # read; until then it is the pre-tuning_range assumption, so nothing that
+    # worked before changes. Panning and click-tuning clamp to these rather than
+    # to a hardcoded 30 MHz, which on a 60 MHz receiver stopped the display at
+    # half its own span.
+    min_frequency = DEFAULT_MIN_FREQUENCY
+    max_frequency = DEFAULT_MAX_FREQUENCY
+
     def __init__(self, parent: tk.Widget, width: int = 800, height: int = 200, click_tune_var=None, center_tune_var=None, bookmarks: list = None):
         """Initialize spectrum display widget.
 
@@ -601,7 +611,7 @@ class SpectrumDisplay:
             frequency: New tuned frequency in Hz
         """
         # Constrain frequency to valid range (10 kHz - 30 MHz)
-        frequency = max(10000, min(30000000, frequency))
+        frequency = max(self.min_frequency, min(self.max_frequency, frequency))
 
         # Update tuned frequency (this is what we're listening to)
         self.tuned_freq = frequency
@@ -621,7 +631,7 @@ class SpectrumDisplay:
 
                     # Constrain to keep view within 10 kHz - 30 MHz
                     min_center = 10000 + half_bandwidth
-                    max_center = 30000000 - half_bandwidth
+                    max_center = self.max_frequency - half_bandwidth
                     pan_center = max(min_center, min(max_center, pan_center))
 
                     asyncio.run_coroutine_threadsafe(
@@ -645,7 +655,7 @@ class SpectrumDisplay:
 
                         # Constrain to keep view within 10 kHz - 30 MHz
                         min_center = 10000 + half_bandwidth
-                        max_center = 30000000 - half_bandwidth
+                        max_center = self.max_frequency - half_bandwidth
                         pan_center = max(min_center, min(max_center, pan_center))
 
                         asyncio.run_coroutine_threadsafe(
@@ -1238,7 +1248,7 @@ class SpectrumDisplay:
         # Constrain to valid range (keep view within 10 kHz - 30 MHz)
         half_bw = self.total_bandwidth / 2
         min_center = 10000 + half_bw
-        max_center = 30000000 - half_bw
+        max_center = self.max_frequency - half_bw
         new_center = max(min_center, min(max_center, new_center))
 
         # Check if tuned frequency will be off-screen after pan
@@ -1581,7 +1591,7 @@ class SpectrumDisplay:
         # Constrain center frequency to keep view within 10 kHz - 30 MHz
         half_bandwidth = new_total_bandwidth / 2
         min_center = 10000 + half_bandwidth  # 10 kHz + half bandwidth
-        max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
+        max_center = self.max_frequency - half_bandwidth
         zoom_center = max(min_center, min(max_center, zoom_center))
         
         print(f"Zoom in: {self.total_bandwidth/1000:.1f} KHz -> {new_total_bandwidth/1000:.1f} KHz ({new_bin_bandwidth:.2f} Hz/bin)")
@@ -1626,7 +1636,7 @@ class SpectrumDisplay:
         # Constrain center frequency to keep view within 10 kHz - 30 MHz
         half_bandwidth = new_total_bandwidth / 2
         min_center = 10000 + half_bandwidth  # 10 kHz + half bandwidth
-        max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
+        max_center = self.max_frequency - half_bandwidth
         zoom_center = max(min_center, min(max_center, zoom_center))
         
         print(f"Zoom out: {self.total_bandwidth/1000:.1f} KHz -> {new_total_bandwidth/1000:.1f} KHz ({new_bin_bandwidth:.2f} Hz/bin)")
@@ -1655,7 +1665,7 @@ class SpectrumDisplay:
         # Constrain center frequency to keep view within 10 kHz - 30 MHz
         half_bandwidth = desired_bandwidth / 2
         min_center = 10000 + half_bandwidth  # 10 kHz + half bandwidth
-        max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
+        max_center = self.max_frequency - half_bandwidth
         zoom_center = max(min_center, min(max_center, zoom_center))
         
         print(f"Reset zoom to {desired_bandwidth/1000:.1f} KHz")

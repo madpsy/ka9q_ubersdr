@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"net/http"
 	"net/url"
 	"strings"
@@ -67,8 +68,22 @@ type Client struct {
 
 	// Delta-decode state. The server sends one full frame then deltas against
 	// it, so this must be reset on every reconnect or deltas land on stale bins.
-	prevF32 []float32
-	prevU8  []uint8
+	// The codes the last full frame established, and the scale they decode
+	// against. A delta frame carries neither: it refers to whatever the last
+	// full frame set, which is why the scale may only change on a full frame.
+	prevU8 []uint8
+	scale  spectrumScale
+
+	// How many sequence gaps have been seen, i.e. frames the server dropped
+	// for a slow reader. Diagnostic only; version 2's keyframes repair them.
+	spectrumGaps int
+
+	// Sequence of the last frame accepted, for spotting a gap. The server's
+	// write is non-blocking and drops for a slow client, so frames do go
+	// missing; version 2's keyframes are what repair it, and this is what
+	// reports it.
+	haveSeq bool
+	lastSeq uint16
 
 	// Commands are rate limited to 10/s to match the server's expectations.
 	cmdMu       sync.Mutex
@@ -375,6 +390,10 @@ func (c *Client) session(ctx context.Context, initialFreq, initialBinBW float64)
 	q := url.Values{}
 	q.Set("user_session_id", c.sessionID)
 	q.Set("mode", "binary8")
+	// binary8 and version 2 travel together: the server defines version 2 only
+	// for the 8-bit path, so asking for one without the other silently yields
+	// version 1. This client reads version 2 and nothing else.
+	q.Set("version", fmt.Sprintf("%d", spectrumProtocolVersion))
 	if c.password != "" {
 		q.Set("password", c.password)
 	}
@@ -408,7 +427,7 @@ func (c *Client) session(ctx context.Context, initialFreq, initialBinBW float64)
 	c.conn = conn
 	c.connected = true
 	// Stale delta state from the previous session would corrupt the new one.
-	c.prevF32, c.prevU8 = nil, nil
+	c.prevU8, c.scale, c.haveSeq = nil, spectrumScale{}, false
 	c.mu.Unlock()
 
 	c.report("connected to " + c.host)
@@ -512,94 +531,145 @@ func (c *Client) handleJSON(data []byte) error {
 	return nil
 }
 
-// handleBinarySpectrum decodes the "SPEC" framing.
+// Spectrum wire protocol version 2, the only one this client reads.
 //
-// Header (22 bytes): magic "SPEC" | version u8 | flags u8 | timestamp u64 LE |
-// frequency u64 LE. Flags select the payload: 0x01 full float32, 0x02 delta
-// float32, 0x03 full uint8, 0x04 delta uint8. Delta payloads are a u16 change
-// count followed by (index u16, value) pairs. uint8 bins encode dBFS as
-// value-256, giving a -256..-1 dB range.
-func (c *Client) handleBinarySpectrum(msg []byte) error {
-	if len(msg) < 22 {
-		return fmt.Errorf("binary frame too short: %d bytes", len(msg))
+// Version 1 sent an index and a value for every changed bin, hardcoded its
+// quantisation, and had no way to notice a dropped frame -- the server recorded
+// what the client would hold before attempting a send that could fail, so a
+// dropped delta desynchronised those bins until something forced a full frame
+// by luck. Version 2 replaces the index list with a change mask, carries the
+// scale it was quantised with, and numbers its frames with periodic keyframes.
+// It measures about 2.15x smaller on the same content.
+//
+//	[magic "SPEC"]        4
+//	[version = 2]         1
+//	[flags]               1   0x05 full, 0x06 delta
+//	[sequence uint16]     2
+//	[timestamp uint64]    8   nanoseconds
+//	[centreFreq uint64]   8
+//	                     24
+//
+//	full  0x05: [refCentiDB int16][stepCentiDB uint8][code uint8 x bins]
+//	delta 0x06: [mask ceil(bins/8) bytes][value uint8 per set bit]
+//
+// A delta carries no scale: it refers to whatever the last full frame
+// established.
+const (
+	spectrumProtocolVersion = 2
+	spectrumHeaderSize      = 24
+	spectrumFlagFull        = 0x05
+	spectrumFlagDelta       = 0x06
+)
+
+// spectrumScale converts an 8-bit code back to dBFS.
+//
+// The scale travels with each full frame rather than being fixed, because the
+// values move with the receiver's gain settings and a hardcoded window would
+// clip on somebody's configuration.
+type spectrumScale struct {
+	refCentiDB  int16
+	stepCentiDB uint8
+}
+
+// dB converts one code. Centidecibels throughout, so the scale fits in three
+// bytes and the arithmetic matches the server's exactly.
+func (s spectrumScale) dB(code uint8) float32 {
+	return float32(float64(s.refCentiDB)/100 + float64(code)*float64(s.stepCentiDB)/100)
+}
+
+// codesToDB converts a whole frame.
+func (s spectrumScale) codesToDB(codes []uint8) []float32 {
+	out := make([]float32, len(codes))
+	for i, c := range codes {
+		out[i] = s.dB(c)
 	}
-	if version := msg[4]; version != 0x01 {
-		return fmt.Errorf("unsupported binary version %d", version)
+	return out
+}
+
+// handleBinarySpectrum decodes one version 2 "SPEC" frame.
+//
+// A version byte that is not 2 is an error rather than a fallback: this client
+// asks for version 2 explicitly and the server refuses a version it cannot
+// serve, so anything else means the frame is not what it claims to be.
+func (c *Client) handleBinarySpectrum(msg []byte) error {
+	if len(msg) < spectrumHeaderSize {
+		return fmt.Errorf("spectrum frame too short: %d bytes", len(msg))
+	}
+	if version := msg[4]; version != spectrumProtocolVersion {
+		return fmt.Errorf("unsupported spectrum version %d (this client reads %d only)",
+			version, spectrumProtocolVersion)
 	}
 
 	flags := msg[5]
-	timestamp := int64(binary.LittleEndian.Uint64(msg[6:14]))
+	sequence := binary.LittleEndian.Uint16(msg[6:8])
+	timestamp := int64(binary.LittleEndian.Uint64(msg[8:16]))
 	// The server stamps every frame with the centre frequency it was captured
-	// at (session.Frequency), which is authoritative for this frame even when a
-	// pan is in flight and the config message has not caught up.
-	frameCenter := float64(binary.LittleEndian.Uint64(msg[14:22]))
-	payload := msg[22:]
+	// at, which is authoritative for this frame even when a pan is in flight
+	// and the config message has not caught up.
+	frameCenter := float64(binary.LittleEndian.Uint64(msg[16:24]))
+	body := msg[spectrumHeaderSize:]
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var bins []float32
+	// A gap means frames were dropped for a slow reader. Nothing to repair
+	// here: the next keyframe restates everything, which is what they are for.
+	// Worth noticing rather than silently rendering stale bins until then.
+	if c.haveSeq && sequence != c.lastSeq+1 {
+		c.spectrumGaps++
+	}
+	c.lastSeq, c.haveSeq = sequence, true
 
 	switch flags {
-	case 0x01: // full, float32
-		n := len(payload) / 4
-		bins = make([]float32, n)
-		for i := 0; i < n; i++ {
-			bins[i] = math.Float32frombits(binary.LittleEndian.Uint32(payload[i*4:]))
+	case spectrumFlagFull:
+		if len(body) < 3 {
+			return fmt.Errorf("truncated full frame: %d bytes", len(body))
 		}
-		c.prevF32 = append(c.prevF32[:0], bins...)
+		c.scale = spectrumScale{
+			refCentiDB:  int16(binary.LittleEndian.Uint16(body[0:2])),
+			stepCentiDB: body[2],
+		}
+		if c.scale.stepCentiDB == 0 {
+			return fmt.Errorf("full frame declares a zero quantisation step")
+		}
+		c.prevU8 = append(c.prevU8[:0], body[3:]...)
 
-	case 0x02: // delta, float32
-		if c.prevF32 == nil {
-			return fmt.Errorf("delta frame before full frame")
-		}
-		if len(payload) < 2 {
-			return fmt.Errorf("truncated delta frame")
-		}
-		count := int(binary.LittleEndian.Uint16(payload[0:2]))
-		off := 2
-		for i := 0; i < count; i++ {
-			if off+6 > len(payload) {
-				return fmt.Errorf("truncated delta frame")
-			}
-			idx := int(binary.LittleEndian.Uint16(payload[off:]))
-			val := math.Float32frombits(binary.LittleEndian.Uint32(payload[off+2:]))
-			if idx < len(c.prevF32) {
-				c.prevF32[idx] = val
-			}
-			off += 6
-		}
-		bins = append([]float32(nil), c.prevF32...)
-
-	case 0x03: // full, uint8
-		c.prevU8 = append(c.prevU8[:0], payload...)
-		bins = u8ToDB(c.prevU8)
-
-	case 0x04: // delta, uint8
+	case spectrumFlagDelta:
 		if c.prevU8 == nil {
-			return fmt.Errorf("delta frame before full frame")
+			// Not an error worth failing the stream over: a client that joins
+			// mid-stream sees this until the next keyframe, at most five
+			// seconds away.
+			return nil
 		}
-		if len(payload) < 2 {
-			return fmt.Errorf("truncated delta frame")
+		n := len(c.prevU8)
+		maskLen := (n + 7) / 8
+		if len(body) < maskLen {
+			return fmt.Errorf("delta frame shorter than its mask: %d < %d", len(body), maskLen)
 		}
-		count := int(binary.LittleEndian.Uint16(payload[0:2]))
-		off := 2
-		for i := 0; i < count; i++ {
-			if off+3 > len(payload) {
-				return fmt.Errorf("truncated delta frame")
+		// The mask is validated whole before a single bin is touched: a body
+		// whose length disagrees with it is malformed, and applying it part way
+		// would leave the frame half updated with no way to tell.
+		expected := 0
+		for _, b := range body[:maskLen] {
+			expected += bits.OnesCount8(b)
+		}
+		if len(body) != maskLen+expected {
+			return fmt.Errorf("delta frame carries %d values for %d mask bits",
+				len(body)-maskLen, expected)
+		}
+		vi := maskLen
+		for i := 0; i < n; i++ {
+			if body[i>>3]&(1<<(uint(i)&7)) != 0 {
+				c.prevU8[i] = body[vi]
+				vi++
 			}
-			idx := int(binary.LittleEndian.Uint16(payload[off:]))
-			if idx < len(c.prevU8) {
-				c.prevU8[idx] = payload[off+2]
-			}
-			off += 3
 		}
-		bins = u8ToDB(c.prevU8)
 
 	default:
-		return fmt.Errorf("unknown binary flags 0x%02x", flags)
+		return fmt.Errorf("unknown spectrum flags 0x%02x", flags)
 	}
 
+	bins := c.scale.codesToDB(c.prevU8)
 	c.emitLocked(unwrapFFT(bins), timestamp, frameCenter, c.spanForLocked(len(bins)))
 	return nil
 }

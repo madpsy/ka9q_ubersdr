@@ -22,7 +22,7 @@ class IQFileManager:
         'freq': 'Frequency in Hz',
         'freq_hz': 'Frequency in Hz (for SDR++ compatibility)',
         'freq_mhz': 'Frequency in MHz (deprecated, use freq_hz)',
-        'mode': 'IQ mode (iq48/iq96/iq192)',
+        'mode': 'IQ mode (iq48/iq96/iq192/iq384)',
         'stream_id': 'Stream ID number'
     }
     
@@ -41,7 +41,7 @@ class IQFileManager:
         
         Args:
             frequency: Frequency in Hz
-            iq_mode: IQ mode string (iq48, iq96, iq192)
+            iq_mode: IQ mode string (iq48, iq96, iq192, iq384)
             stream_id: Stream ID number
             template: Template name or custom template string
         
@@ -181,7 +181,7 @@ class IQFileManager:
         Estimate recording file size
 
         Args:
-            iq_mode: IQ mode (iq48, iq96, iq192)
+            iq_mode: IQ mode (iq48, iq96, iq192, iq384)
             duration_seconds: Recording duration in seconds
 
         Returns:
@@ -191,9 +191,13 @@ class IQFileManager:
         sample_rates = {
             'iq48': 48000,
             'iq96': 96000,
-            'iq192': 192000
+            'iq192': 192000,
+            'iq384': 384000
         }
 
+        # An unknown mode falling back to 48000 would under-report the disk an
+        # iq384 recording needs by a factor of eight, and the estimate is what
+        # the free-space check is made against.
         sample_rate = sample_rates.get(iq_mode.lower(), 48000)
 
         # WAV format: 2 channels (I and Q), 16-bit int (2 bytes per sample)

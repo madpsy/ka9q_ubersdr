@@ -20,6 +20,7 @@ import platform
 
 # Import local bookmarks manager
 from local_bookmarks import LocalBookmarkManager
+from tuning_range import format_range
 
 # Import spectrum display
 try:
@@ -4003,12 +4004,19 @@ class RadioGUI:
         try:
             freq_hz = self.get_frequency_hz()
 
-            # Validate frequency range: 10 kHz to 30 MHz
-            if freq_hz < 10000:  # 10 kHz
-                messagebox.showerror("Invalid Frequency", "Frequency must be at least 10 kHz")
-                return
-            if freq_hz > 30000000:  # 30 MHz
-                messagebox.showerror("Invalid Frequency", "Frequency must not exceed 30 MHz")
+            # Validate against what this receiver says it covers, rather than
+            # against a hardcoded 30 MHz. A receiver publishing a 60 MHz span is
+            # an ordinary configuration, and refusing to tune 6 m on it was a
+            # client limit wearing a receiver's clothes. Until a description has
+            # been read the range is the old assumption, so nothing that worked
+            # before stops working.
+            lo = getattr(self.client, 'min_frequency', 10000)
+            hi = getattr(self.client, 'max_frequency', 30000000)
+            if not (lo <= freq_hz <= hi):
+                messagebox.showerror(
+                    "Invalid Frequency",
+                    "This receiver tunes %s.\n\n%.6f MHz is outside that range."
+                    % (format_range(lo, hi), freq_hz / 1e6))
                 return
 
             self.client.frequency = freq_hz
@@ -5839,6 +5847,25 @@ class RadioGUI:
     # ------------------------------------------------------------------
     # Server-side DSP NR helpers
     # ------------------------------------------------------------------
+
+    def _apply_tuning_range(self):
+        """Push the receiver's tuning range to the widgets that clamp to it.
+
+        The spectrum and waterfall widgets have no client reference, so the
+        range is handed to them here once /api/description has been read. Until
+        that happens they hold the pre-tuning_range assumption, so a receiver
+        that publishes nothing behaves exactly as before.
+        """
+        if not self.client:
+            return
+        lo = getattr(self.client, 'min_frequency', None)
+        hi = getattr(self.client, 'max_frequency', None)
+        if not lo or not hi or hi <= lo:
+            return
+        for widget in (self.spectrum, self.waterfall_display):
+            if widget is not None:
+                widget.min_frequency = lo
+                widget.max_frequency = hi
 
     def _update_server_dsp_controls(self):
         """Enable or disable the Server NR controls based on availability."""
@@ -9358,6 +9385,7 @@ class RadioGUI:
                     # lock checkboxes are not engaged (respects user overrides).
                     # Also update Server NR controls now that DSP availability is known.
                     self._update_server_dsp_controls()
+                    self._apply_tuning_range()
                     if self.client and getattr(self.client, 'server_dsp_available', False):
                         # Pre-fetch full filter descriptors in the background
                         asyncio.run_coroutine_threadsafe(

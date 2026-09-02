@@ -27,6 +27,7 @@ except ImportError:
     print("Warning: radio_client not available. Please ensure it's in the python path.")
 
 from iq_stream_config import StreamConfig, StreamStatus, IQMode
+from tuning_range import tuning_range_from
 from iq_file_manager import IQFileManager
 from iq_spectrum_display import IQSpectrumDisplay
 from iq_recording_client import IQRecordingClient
@@ -36,17 +37,42 @@ from config_manager import ConfigManager
 
 
 class AddStreamDialog:
-    """Dialog for adding a new IQ stream"""
-    
-    def __init__(self, parent, file_manager: IQFileManager, next_stream_id: int):
+    """Dialog for adding a new IQ stream, or editing an existing one.
+
+    Add and edit ask for exactly the same four things, so they are one dialog
+    rather than two that would have to be kept in step. Pass `stream` to edit
+    it: the fields start from its current values, the example filename is
+    generated against its own id rather than the next free one, and the button
+    says what will happen.
+    """
+
+    def __init__(self, parent, file_manager: IQFileManager, next_stream_id: int,
+                 stream: Optional[StreamConfig] = None,
+                 allowed_modes: Optional[List[str]] = None,
+                 tuning_range: Optional[tuple] = None):
         self.result = None
         self.file_manager = file_manager
         self.next_stream_id = next_stream_id
+        self.stream = stream
+        self.editing = stream is not None
+        # Modes the instance said it serves. None means it was never asked or
+        # could not be reached, and then every mode is offered -- an unreachable
+        # receiver must not stop you configuring a stream for later.
+        self.allowed_modes = [m.lower() for m in allowed_modes] if allowed_modes else None
+        # (min_hz, max_hz) the receiver published, or None when it was never
+        # asked or could not be reached.
+        self.tuning_range = tuning_range
+        # Which id the example filename is generated for.
+        self.preview_stream_id = stream.stream_id if stream else next_stream_id
         
         # Create dialog window
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Add IQ Stream")
-        self.dialog.geometry("750x400")
+        self.dialog.title("Edit IQ Stream" if self.editing else "Add IQ Stream")
+        # 460 rather than 400: the mode list is one radio button per IQMode and
+        # gained a fourth with iq384, after which the content asks for 445 and
+        # the buttons at the bottom went under the edge on a receiver offering
+        # every mode. Measured rather than guessed -- 440 was still 5px short.
+        self.dialog.geometry("750x460")
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -66,7 +92,8 @@ class AddStreamDialog:
         
         # Frequency
         ttk.Label(main_frame, text="Frequency (MHz):").grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.freq_var = tk.StringVar(value="14.100")
+        self.freq_var = tk.StringVar(
+            value=f"{self.stream.frequency_mhz:g}" if self.editing else "14.100")
         freq_entry = ttk.Entry(main_frame, textvariable=self.freq_var, width=20)
         freq_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5)
         
@@ -99,17 +126,38 @@ class AddStreamDialog:
         
         # IQ Mode
         ttk.Label(main_frame, text="IQ Mode:").grid(row=2, column=0, sticky=tk.W, pady=5)
-        self.mode_var = tk.StringVar(value="iq96")
+        self.mode_var = tk.StringVar(
+            value=self.stream.iq_mode.mode_name if self.editing else "iq96")
         mode_frame = ttk.Frame(main_frame)
         mode_frame.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5)
         
         # Update example filename and frequency range when mode changes
         self.mode_var.trace_add('write', lambda *args: self.update_displays())
         
+        # Every mode is listed, but one the instance does not serve is disabled
+        # rather than hidden: a stream already set to it has to stay visible and
+        # correctly labelled, and a list that silently loses an entry looks like
+        # a bug rather than a receiver limit.
+        current_mode = self.stream.iq_mode.mode_name if self.editing else None
         for mode in IQMode:
-            rb = ttk.Radiobutton(mode_frame, text=f"{mode.mode_name} ({mode.bandwidth})",
+            allowed = self.allowed_modes is None or mode.mode_name in self.allowed_modes
+            label = f"{mode.mode_name} ({mode.bandwidth})"
+            if not allowed:
+                label += "  — not offered by this receiver"
+            rb = ttk.Radiobutton(mode_frame, text=label,
                                variable=self.mode_var, value=mode.mode_name)
+            # The mode a stream is already set to stays selectable even when the
+            # receiver has stopped offering it, so opening Edit cannot silently
+            # move the stream to a different bandwidth.
+            if not allowed and mode.mode_name != current_mode:
+                rb.state(['disabled'])
             rb.pack(anchor=tk.W)
+
+        # Land on something selectable when the remembered default is not served.
+        if self.allowed_modes is not None and self.mode_var.get() not in self.allowed_modes:
+            first = next((m.mode_name for m in IQMode if m.mode_name in self.allowed_modes), None)
+            if first and not self.editing:
+                self.mode_var.set(first)
         
         # Frequency Range Display
         ttk.Label(main_frame, text="Frequency Range:").grid(row=3, column=0, sticky=tk.W, pady=5)
@@ -120,7 +168,8 @@ class AddStreamDialog:
         
         # Filename template
         ttk.Label(main_frame, text="Filename Template:").grid(row=4, column=0, sticky=tk.W, pady=5)
-        self.template_var = tk.StringVar(value="default")
+        self.template_var = tk.StringVar(
+            value=self.stream.filename_template if self.editing else "default")
         template_combo = ttk.Combobox(main_frame, textvariable=self.template_var,
                                      values=["default", "simple", "detailed"],
                                      state="readonly", width=18)
@@ -140,7 +189,8 @@ class AddStreamDialog:
         
         # Recording enabled checkbox
         ttk.Label(main_frame, text="Recording:").grid(row=7, column=0, sticky=tk.W, pady=5)
-        self.recording_enabled_var = tk.BooleanVar(value=True)
+        self.recording_enabled_var = tk.BooleanVar(
+            value=self.stream.recording_enabled if self.editing else True)
         recording_check = ttk.Checkbutton(main_frame, text="Enable recording to disk",
                                          variable=self.recording_enabled_var)
         recording_check.grid(row=7, column=1, sticky=tk.W, pady=5)
@@ -152,7 +202,8 @@ class AddStreamDialog:
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=9, column=0, columnspan=2, pady=20)
         
-        ttk.Button(button_frame, text="Add Stream", command=self.add_stream).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Save Changes" if self.editing else "Add Stream",
+                   command=self.add_stream).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=self.dialog.destroy).pack(side=tk.LEFT, padx=5)
         
         # Generate initial displays
@@ -181,7 +232,7 @@ class AddStreamDialog:
             
             # Update example filename
             filename = self.file_manager.generate_filename(
-                freq_hz, mode_str, self.next_stream_id, template
+                freq_hz, mode_str, self.preview_stream_id, template
             )
             self.example_var.set(filename)
         except ValueError:
@@ -197,16 +248,44 @@ class AddStreamDialog:
         try:
             # Validate frequency
             freq_mhz = float(self.freq_var.get())
-            if freq_mhz <= 0 or freq_mhz > 30000:
+            if freq_mhz <= 0:
                 messagebox.showerror("Invalid Frequency",
-                                   "Frequency must be between 0 and 30000 MHz",
-                                   parent=self.dialog)
+                                     "Frequency must be greater than zero",
+                                     parent=self.dialog)
                 return
-            
+
             freq_hz = int(freq_mhz * 1_000_000)
+
+            # Checked against the receiver's published range rather than the old
+            # `> 30000` guard, which was in MHz and so accepted 30 GHz while the
+            # receiver stopped at 30 MHz -- permissive where it looked strict.
+            # Unknown range means unchecked here; the server gives the real
+            # answer when recording starts.
+            if self.tuning_range:
+                lo, hi = self.tuning_range
+                if not (lo <= freq_hz <= hi):
+                    messagebox.showerror(
+                        "Frequency Out Of Range",
+                        "This receiver tunes %.6f - %.6f MHz.\n\n%.6f MHz is outside that."
+                        % (lo / 1e6, hi / 1e6, freq_mhz),
+                        parent=self.dialog)
+                    return
             
             # Validate mode
             mode = IQMode.from_string(self.mode_var.get())
+
+            # The radio button for a disallowed mode is disabled, so reaching
+            # here means it was the stream's existing mode and the receiver has
+            # since stopped offering it. Better to say so now than to let the
+            # recording fail at connect time.
+            if (self.allowed_modes is not None
+                    and mode.mode_name not in self.allowed_modes):
+                messagebox.showerror(
+                    "Mode Not Available",
+                    f"This receiver does not offer {mode.mode_name}.\n\n"
+                    f"It offers: {', '.join(self.allowed_modes) or '(none)'}",
+                    parent=self.dialog)
+                return
             
             # Get template and recording enabled
             template = self.template_var.get()
@@ -256,6 +335,23 @@ class IQRecorderGUI:
         # Spectrum windows and displays
         self.spectrum_windows: Dict[int, tk.Toplevel] = {}  # stream_id -> window
         self.spectrum_displays: Dict[int, IQSpectrumDisplay] = {}  # stream_id -> display
+
+        # What the instance said it will serve, from /connection's
+        # allowed_iq_modes. None means "not asked yet or the ask failed", which
+        # is deliberately different from an empty list: unknown offers every
+        # mode, so an unreachable receiver never stops you configuring streams,
+        # while a receiver that genuinely allows none says so.
+        self.allowed_iq_modes: Optional[List[str]] = None
+
+        # The receiver's tuning range, from the same /api/description-adjacent
+        # lookup. None until asked; see refresh_allowed_iq_modes.
+        self.tuning_range: Optional[tuple] = None
+
+        # The (host, port) the list above came from. Cached answers belong to
+        # the receiver that gave them: pointing the recorder at a different one
+        # must not leave it offering the previous receiver's modes, so this is
+        # compared before the cache is reused.
+        self._allowed_modes_endpoint: Optional[tuple] = None
         
         # Scheduler
         self.scheduler = IQScheduler()
@@ -402,6 +498,8 @@ class IQRecorderGUI:
         self.stream_menu.add_separator()
         self.stream_menu.add_command(label="Toggle Spectrum", command=self.toggle_spectrum_for_selected)
         self.stream_menu.add_separator()
+        self.stream_menu.add_command(label="Edit Stream...", command=self.edit_selected_stream)
+        self.stream_menu.add_separator()
         self.stream_menu.add_command(label="Remove", command=self.remove_selected_stream)
 
         self.stream_tree.bind("<Button-3>", self.show_stream_menu)
@@ -504,6 +602,100 @@ class IQRecorderGUI:
         schedules_data = [s.to_dict() for s in self.scheduler.schedules]
         self.config_manager.set_schedules(schedules_data)
     
+    @staticmethod
+    def _connection_urls(host: str, port: int) -> List[str]:
+        """The /connection URLs to try, best guess first.
+
+        The recorder has no SSL setting, so the scheme is inferred: 443 and 8443
+        are https by convention and everything else is http, with the other
+        scheme kept as a fallback because neither convention is a rule. Without
+        this a tunnelled receiver -- which is what most public instances are --
+        answers nothing and every capability lookup fails silently.
+        """
+        schemes = ['https', 'http'] if port in (443, 8443) else ['http', 'https']
+        return [f"{scheme}://{host}:{port}/connection" for scheme in schemes]
+
+    def refresh_allowed_iq_modes(self, timeout: float = 3.0) -> Optional[List[str]]:
+        """Which IQ modes this instance serves, asking it only when needed.
+
+        Called before the Add and Edit dialogs open so their mode list matches
+        the receiver rather than a list fixed at build time -- the same
+        allowed_iq_modes that Test Connection displays.
+
+        The answer is cached against the host and port it came from, so opening
+        the dialog repeatedly costs one request rather than one each time, while
+        pointing the recorder at a different receiver refetches instead of
+        offering the previous one's modes.
+
+        Synchronous and short-timeout on purpose: it runs on a button press with
+        a dialog about to appear, and a stale list is worse than a brief wait.
+        Any failure leaves the cache alone and returns what is already known,
+        which for a receiver never contacted is None -- meaning "offer
+        everything" rather than "offer nothing".
+        """
+        host = self.host.get()
+        port = self.port.get()
+        if not host:
+            return self.allowed_iq_modes
+
+        endpoint = (host, port)
+        if self.allowed_iq_modes is not None and self._allowed_modes_endpoint == endpoint:
+            return self.allowed_iq_modes
+
+        # Pointing at a different receiver discards what the previous one said
+        # before asking the new one, so a refetch that fails falls back to
+        # "unknown" -- every mode offered -- rather than to another receiver's
+        # capabilities, which would be a confident wrong answer.
+        if self._allowed_modes_endpoint != endpoint:
+            self.allowed_iq_modes = None
+            self.tuning_range = None
+            self._allowed_modes_endpoint = None
+
+        import uuid
+        for url in self._connection_urls(host, port):
+            try:
+                response = requests.post(
+                    url,
+                    json={"user_session_id": str(uuid.uuid4())},
+                    headers={'Content-Type': 'application/json',
+                             'User-Agent': 'UberSDR IQ Recorder (python)'},
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                modes = response.json().get('allowed_iq_modes')
+                if isinstance(modes, list):
+                    self.allowed_iq_modes = modes
+                    self._allowed_modes_endpoint = endpoint
+                    # The range lives in /api/description rather than
+                    # /connection, so it is a second request -- made only when
+                    # the first succeeded, against the scheme already proven to
+                    # work.
+                    self.tuning_range = self._fetch_tuning_range(
+                        url.rsplit('/', 1)[0] + '/api/description', timeout)
+                    break
+            except Exception:
+                # Deliberately silent, and on to the other scheme. This is a
+                # convenience lookup behind a dialog the user asked for; a
+                # receiver that cannot be reached is reported when recording is
+                # actually attempted, not as a popup here.
+                continue
+        return self.allowed_iq_modes
+
+    def _fetch_tuning_range(self, url: str, timeout: float) -> Optional[tuple]:
+        """(min_hz, max_hz) from /api/description, or None if it cannot be read.
+
+        Silent on failure like its caller: the range is advisory, and a receiver
+        that cannot be reached is reported when recording is attempted.
+        """
+        try:
+            response = requests.get(
+                url, headers={'User-Agent': 'UberSDR IQ Recorder (python)'},
+                timeout=timeout)
+            response.raise_for_status()
+            return tuning_range_from(response.json())
+        except Exception:
+            return None
+
     def test_connection(self):
         """Test connection to server and display /connection endpoint results"""
         host = self.host.get()
@@ -543,7 +735,16 @@ class IQRecorderGUI:
             
             # Parse JSON response
             data = response.json()
-            
+
+            # Remember what this instance serves, so the Add and Edit dialogs
+            # can offer its modes rather than a list compiled at build time.
+            modes = data.get('allowed_iq_modes')
+            if isinstance(modes, list):
+                def _remember(m=modes, e=(host, port)):
+                    self.allowed_iq_modes = m
+                    self._allowed_modes_endpoint = e
+                self.root.after(0, _remember)
+
             # Schedule display in main thread
             self.root.after(0, lambda: self._show_connection_results(data, None))
             
@@ -694,7 +895,9 @@ class IQRecorderGUI:
 
     def add_stream(self):
         """Add a new stream"""
-        dialog = AddStreamDialog(self.root, self.file_manager, self.next_stream_id)
+        allowed = self.refresh_allowed_iq_modes()
+        dialog = AddStreamDialog(self.root, self.file_manager, self.next_stream_id,
+                                 allowed_modes=allowed, tuning_range=self.tuning_range)
         self.root.wait_window(dialog.dialog)
         
         if dialog.result:
@@ -714,6 +917,66 @@ class IQRecorderGUI:
             # Auto-save streams configuration
             self._save_streams_to_config()
     
+    def edit_selected_stream(self):
+        """Edit the selected stream's frequency, mode, template and recording flag.
+
+        Reached from the stream list's right-click menu. Double-click is not
+        used: it already starts the stream, and a gesture that either starts a
+        recording or opens a dialog depending on where the click landed is worse
+        than no shortcut at all.
+        """
+        selection = self.stream_tree.selection()
+        if not selection:
+            return
+
+        item = selection[0]
+        stream_id = int(self.stream_tree.item(item)['values'][0])
+        stream = next((s for s in self.streams if s.stream_id == stream_id), None)
+        if not stream:
+            return
+
+        # Frequency and mode are fixed for the life of a connection -- they are
+        # query parameters on the WebSocket, and the sample rate is written into
+        # the WAV header once at the start. Changing either underneath a running
+        # recording would produce a file whose contents stop matching its own
+        # header, so the stream has to be stopped first. Matches how
+        # toggle_recording_for_selected refuses mid-recording.
+        if stream.status == StreamStatus.RECORDING:
+            messagebox.showinfo("Cannot Edit",
+                                "Stop the stream before editing its properties.",
+                                parent=self.root)
+            return
+
+        allowed = self.refresh_allowed_iq_modes()
+        dialog = AddStreamDialog(self.root, self.file_manager, self.next_stream_id,
+                                 stream=stream, allowed_modes=allowed,
+                                 tuning_range=self.tuning_range)
+        self.root.wait_window(dialog.dialog)
+
+        if not dialog.result:
+            return
+
+        stream.frequency = dialog.result['frequency']
+        stream.iq_mode = dialog.result['iq_mode']
+        stream.filename_template = dialog.result['filename_template']
+        stream.recording_enabled = dialog.result.get('recording_enabled', True)
+
+        # The old name was generated for the old frequency and mode, and is
+        # regenerated when recording next starts; leaving it would show a stale
+        # filename in the list until then.
+        stream.output_file = None
+
+        # A spectrum window open on this stream is drawing the old span, so it
+        # is closed rather than left mislabelled against the new one. toggle_spectrum
+        # is the one place that knows how to tear both halves down, and calling it
+        # on an open window closes it.
+        if stream.stream_id in self.spectrum_windows:
+            self.toggle_spectrum(stream)
+
+        self.update_stream_list()
+        self.update_status()
+        self._save_streams_to_config()
+
     def remove_selected_stream(self):
         """Remove selected stream"""
         selection = self.stream_tree.selection()
@@ -1273,7 +1536,7 @@ class IQRecorderGUI:
             "About UberSDR IQ Stream Recorder",
             "UberSDR IQ Stream Recorder v1.0\n\n"
             "Multi-stream IQ recording application for ka9q_ubersdr\n\n"
-            "Supports IQ48, IQ96, and IQ192 modes\n"
+            "Supports IQ48, IQ96, IQ192 and IQ384 modes\n"
             "Record unlimited simultaneous streams\n\n"
             "© 2026"
         )

@@ -16,10 +16,15 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 # SPECPATH is clients/python_iq_recorder, so we go up one level to clients, then into python
 parent_python_dir = os.path.abspath(os.path.join(SPECPATH, '..', 'python'))
 radio_client_path = os.path.join(parent_python_dir, 'radio_client.py')
+# radio_client imports this for protocol version 4; it is pure Python with no
+# dependencies of its own. Bundled by name because radio_client.py is carried as
+# a data file rather than analysed as source, so its imports are not traced.
+pcm_v4_path = os.path.join(parent_python_dir, 'pcm_v4.py')
 
-# Verify the path exists
-if not os.path.exists(radio_client_path):
-    raise FileNotFoundError(f"radio_client.py not found at: {radio_client_path}")
+# Verify the paths exist
+for _required in (radio_client_path, pcm_v4_path):
+    if not os.path.exists(_required):
+        raise FileNotFoundError(f"{os.path.basename(_required)} not found at: {_required}")
 
 block_cipher = None
 
@@ -31,8 +36,9 @@ a = Analysis(
     ],
     binaries=[],
     datas=[
-        # Include radio_client.py from parent directory
+        # Include radio_client.py and its version 4 decoder from clients/python
         (radio_client_path, '.'),
+        (pcm_v4_path, '.'),
         
         # Include README and documentation
         ('README.md', '.'),
@@ -41,6 +47,7 @@ a = Analysis(
     hiddenimports=[
         # Core dependencies from parent directory
         'radio_client',
+        'pcm_v4',
         
         # Standard library modules that might not be auto-detected
         'asyncio',

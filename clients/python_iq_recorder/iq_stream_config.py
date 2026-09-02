@@ -24,6 +24,7 @@ class IQMode(Enum):
     IQ48 = ("iq48", 48000, "±24 kHz")
     IQ96 = ("iq96", 96000, "±48 kHz")
     IQ192 = ("iq192", 192000, "±96 kHz")
+    IQ384 = ("iq384", 384000, "±192 kHz")
     
     def __init__(self, mode_name: str, sample_rate: int, bandwidth: str):
         self.mode_name = mode_name

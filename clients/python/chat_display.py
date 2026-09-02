@@ -1284,16 +1284,22 @@ class ChatDisplay:
             # Calculate total bandwidth from bin bandwidth
             new_total_bandwidth = zoom_bw * spectrum.bin_count
 
-            # Constrain zoom center to keep view within 0-30 MHz (matches web UI)
-            # Web UI uses 0-30 MHz range (chat-ui.js lines 2180-2183)
+            # Constrain the zoom centre to the receiver's own span, taken from
+            # the spectrum display the GUI keeps in step with /api/description.
+            # This used to be a hard 0-30 MHz, which clamped a 60 MHz receiver
+            # to half its range and logged the clamp as if it were the user's
+            # fault.
+            spectrum_widget = getattr(self.radio_gui, 'spectrum', None)
+            span_max = getattr(spectrum_widget, 'max_frequency', 30000000)
             half_bandwidth = new_total_bandwidth / 2
             min_center = 0 + half_bandwidth  # 0 Hz + half bandwidth
-            max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
+            max_center = span_max - half_bandwidth
             clamped_center = max(min_center, min(max_center, freq))
 
             # Log if we adjusted the center frequency
             if clamped_center != freq:
-                print(f"[Chat] Clamped synced zoom center from {freq/1e6:.6f} to {clamped_center/1e6:.6f} MHz to stay within 0-30 MHz range")
+                print(f"[Chat] Clamped synced zoom center from {freq/1e6:.6f} to "
+                      f"{clamped_center/1e6:.6f} MHz to stay within 0-{span_max/1e6:.3f} MHz")
 
             # Always set tuned_freq to the original frequency (where we're actually tuned)
             # The marker should show the actual tuned frequency, not the clamped zoom center

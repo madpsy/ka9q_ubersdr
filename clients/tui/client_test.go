@@ -63,13 +63,25 @@ func TestUnwrapFFT(t *testing.T) {
 	}
 }
 
-func TestU8ToDB(t *testing.T) {
-	// The wire format encodes dBFS as value-256, so 0 is -256 dB and 255 is -1 dB.
-	got := u8ToDB([]uint8{0, 128, 255})
-	want := []float32{-256, -128, -1}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("u8ToDB = %v, want %v", got, want)
+func TestSpectrumScale(t *testing.T) {
+	// dB = refCentiDB/100 + code * stepCentiDB/100. Version 1 hardcoded
+	// value-256; version 2 carries the scale so it cannot clip on a receiver
+	// whose gain puts the bins somewhere else.
+	s := spectrumScale{refCentiDB: -12000, stepCentiDB: 50} // -120 dB, 0.5 dB steps
+	cases := []struct {
+		code byte
+		want float32
+	}{{0, -120}, {2, -119}, {200, -20}, {255, -92.5 + 0}}
+	for _, tc := range cases[:3] {
+		if got := s.dB(tc.code); got != tc.want {
+			t.Errorf("dB(%d) = %v, want %v", tc.code, got, tc.want)
+		}
+	}
+	// The whole-frame conversion agrees with the per-code one.
+	got := s.codesToDB([]uint8{0, 2, 200})
+	for i, want := range []float32{-120, -119, -20} {
+		if got[i] != want {
+			t.Fatalf("codesToDB = %v, want -120 -119 -20", got)
 		}
 	}
 }
@@ -206,42 +218,72 @@ func TestUUIDMatchesServerFormat(t *testing.T) {
 }
 
 // buildSpecFrame assembles a binary "SPEC" message for the decoder tests.
-func buildSpecFrame(flags byte, payload []byte) []byte {
-	msg := make([]byte, 22, 22+len(payload))
+// buildSpecFrame assembles a version 2 frame with the given flags and body.
+// seq lets a test drive the sequence number the gap detector watches.
+func buildSpecFrame(flags byte, body []byte) []byte { return buildSpecFrameSeq(flags, 0, body) }
+
+func buildSpecFrameSeq(flags byte, seq uint16, body []byte) []byte {
+	msg := make([]byte, spectrumHeaderSize, spectrumHeaderSize+len(body))
 	copy(msg, "SPEC")
-	msg[4] = 0x01
+	msg[4] = spectrumProtocolVersion
 	msg[5] = flags
-	binary.LittleEndian.PutUint64(msg[6:14], 1234)
-	binary.LittleEndian.PutUint64(msg[14:22], 7_100_000)
-	return append(msg, payload...)
+	binary.LittleEndian.PutUint16(msg[6:8], seq)
+	binary.LittleEndian.PutUint64(msg[8:16], 1234)
+	binary.LittleEndian.PutUint64(msg[16:24], 7_100_000)
+	return append(msg, body...)
 }
 
-func TestBinaryFullAndDeltaU8(t *testing.T) {
+// buildFullBody prefixes codes with the scale a full frame carries.
+func buildFullBody(refCentiDB int16, stepCentiDB uint8, codes ...byte) []byte {
+	body := make([]byte, 3, 3+len(codes))
+	binary.LittleEndian.PutUint16(body[0:2], uint16(refCentiDB))
+	body[2] = stepCentiDB
+	return append(body, codes...)
+}
+
+// buildDeltaBody builds a mask-and-values body for n bins, LSB-first per byte
+// exactly as the server writes it.
+func buildDeltaBody(n int, changes map[int]byte) []byte {
+	maskLen := (n + 7) / 8
+	body := make([]byte, maskLen)
+	for i := 0; i < n; i++ {
+		if _, ok := changes[i]; ok {
+			body[i>>3] |= 1 << (uint(i) & 7)
+		}
+	}
+	for i := 0; i < n; i++ {
+		if v, ok := changes[i]; ok {
+			body = append(body, v)
+		}
+	}
+	return body
+}
+
+func TestBinaryFullAndDelta(t *testing.T) {
 	c := &Client{Frames: make(chan Frame, 4), Status: make(chan string, 4)}
 
-	// A full uint8 frame establishes the baseline.
-	full := buildSpecFrame(0x03, []byte{10, 20, 30, 40})
+	// A full frame establishes both the codes and the scale they read against.
+	// -120 dB reference, 0.5 dB steps.
+	full := buildSpecFrame(spectrumFlagFull, buildFullBody(-12000, 50, 10, 20, 30, 40))
 	if err := c.handleBinarySpectrum(full); err != nil {
 		t.Fatalf("full frame: %v", err)
 	}
 	frame := <-c.Frames
-	// unwrapFFT rotates by half: [30,40,10,20] in dB.
-	want := []float32{30 - 256, 40 - 256, 10 - 256, 20 - 256}
+	// unwrapFFT rotates by half, so the second half comes first.
+	want := []float32{-120 + 15, -120 + 20, -120 + 5, -120 + 10}
 	for i := range want {
 		if frame.Bins[i] != want[i] {
 			t.Fatalf("full frame bins = %v, want %v", frame.Bins, want)
 		}
 	}
 
-	// A delta then patches index 0 to 99, leaving the rest intact.
-	delta := make([]byte, 2)
-	binary.LittleEndian.PutUint16(delta, 1)
-	delta = append(delta, 0, 0, 99) // index u16 = 0, value u8 = 99
-	if err := c.handleBinarySpectrum(buildSpecFrame(0x04, delta)); err != nil {
+	// A delta patches bin 0 only, leaving the others and the scale intact.
+	delta := buildSpecFrameSeq(spectrumFlagDelta, 1, buildDeltaBody(4, map[int]byte{0: 200}))
+	if err := c.handleBinarySpectrum(delta); err != nil {
 		t.Fatalf("delta frame: %v", err)
 	}
 	frame = <-c.Frames
-	want = []float32{30 - 256, 40 - 256, 99 - 256, 20 - 256}
+	want = []float32{-120 + 15, -120 + 20, -120 + 100, -120 + 10}
 	for i := range want {
 		if frame.Bins[i] != want[i] {
 			t.Fatalf("delta frame bins = %v, want %v", frame.Bins, want)
@@ -249,44 +291,112 @@ func TestBinaryFullAndDeltaU8(t *testing.T) {
 	}
 }
 
-func TestBinaryDeltaBeforeFullIsRejected(t *testing.T) {
+// A delta that changes several non-adjacent bins exercises the mask walk, which
+// is the part most easily got wrong: the bits are LSB-first within each byte.
+func TestBinaryDeltaMaskWalk(t *testing.T) {
 	c := &Client{Frames: make(chan Frame, 4), Status: make(chan string, 4)}
-	delta := []byte{1, 0, 0, 0, 99}
-	if err := c.handleBinarySpectrum(buildSpecFrame(0x04, delta)); err == nil {
-		t.Error("expected an error for a delta frame with no preceding full frame")
-	}
-}
 
-func TestBinaryTruncatedDeltaIsRejected(t *testing.T) {
-	c := &Client{Frames: make(chan Frame, 4), Status: make(chan string, 4)}
-	if err := c.handleBinarySpectrum(buildSpecFrame(0x03, []byte{1, 2, 3, 4})); err != nil {
+	codes := make([]byte, 20)
+	for i := range codes {
+		codes[i] = 10
+	}
+	if err := c.handleBinarySpectrum(buildSpecFrame(spectrumFlagFull,
+		buildFullBody(0, 100, codes...))); err != nil {
 		t.Fatal(err)
 	}
 	<-c.Frames
 
-	// Claims two changes but only carries one.
-	delta := make([]byte, 2)
-	binary.LittleEndian.PutUint16(delta, 2)
-	delta = append(delta, 0, 0, 42)
-	if err := c.handleBinarySpectrum(buildSpecFrame(0x04, delta)); err == nil {
-		t.Error("expected an error for a truncated delta frame")
+	// Bins 0, 7, 8 and 19: either side of a byte boundary, and the last bin,
+	// where the mask's final byte is only partly used.
+	changes := map[int]byte{0: 1, 7: 2, 8: 3, 19: 4}
+	if err := c.handleBinarySpectrum(buildSpecFrameSeq(spectrumFlagDelta, 1,
+		buildDeltaBody(20, changes))); err != nil {
+		t.Fatalf("delta: %v", err)
+	}
+	<-c.Frames
+
+	for i := 0; i < 20; i++ {
+		want := byte(10)
+		if v, ok := changes[i]; ok {
+			want = v
+		}
+		if c.prevU8[i] != want {
+			t.Fatalf("bin %d = %d, want %d", i, c.prevU8[i], want)
+		}
 	}
 }
 
-func TestBinaryFullFloat32(t *testing.T) {
+// The scale may only change on a full frame; a delta must leave it alone.
+func TestBinaryDeltaKeepsScale(t *testing.T) {
 	c := &Client{Frames: make(chan Frame, 4), Status: make(chan string, 4)}
+	if err := c.handleBinarySpectrum(buildSpecFrame(spectrumFlagFull,
+		buildFullBody(-9000, 25, 4, 4))); err != nil {
+		t.Fatal(err)
+	}
+	<-c.Frames
+	before := c.scale
+	if err := c.handleBinarySpectrum(buildSpecFrameSeq(spectrumFlagDelta, 1,
+		buildDeltaBody(2, map[int]byte{1: 8}))); err != nil {
+		t.Fatal(err)
+	}
+	<-c.Frames
+	if c.scale != before {
+		t.Fatalf("scale changed on a delta: %+v -> %+v", before, c.scale)
+	}
+}
 
-	payload := make([]byte, 8)
-	binary.LittleEndian.PutUint32(payload[0:], math.Float32bits(-70.5))
-	binary.LittleEndian.PutUint32(payload[4:], math.Float32bits(-95.25))
-	if err := c.handleBinarySpectrum(buildSpecFrame(0x01, payload)); err != nil {
-		t.Fatalf("float32 full frame: %v", err)
+// A client joining mid-stream sees deltas before any full frame. That is not an
+// error: the next keyframe restates everything, at most five seconds away.
+func TestBinaryDeltaBeforeFullIsIgnored(t *testing.T) {
+	c := &Client{Frames: make(chan Frame, 4), Status: make(chan string, 4)}
+	if err := c.handleBinarySpectrum(buildSpecFrame(spectrumFlagDelta,
+		buildDeltaBody(8, map[int]byte{0: 9}))); err != nil {
+		t.Errorf("a delta before the first full frame should be ignored, got %v", err)
+	}
+	select {
+	case f := <-c.Frames:
+		t.Fatalf("a frame was emitted with no baseline: %v", f.Bins)
+	default:
+	}
+}
+
+// A body whose length disagrees with its mask is malformed. It must be refused
+// whole rather than applied part way, which would leave bins half updated with
+// nothing to indicate it.
+func TestBinaryMalformedDeltaIsRejected(t *testing.T) {
+	c := &Client{Frames: make(chan Frame, 4), Status: make(chan string, 4)}
+	if err := c.handleBinarySpectrum(buildSpecFrame(spectrumFlagFull,
+		buildFullBody(0, 50, 1, 2, 3, 4))); err != nil {
+		t.Fatal(err)
+	}
+	<-c.Frames
+
+	// Mask claims two changes, body carries one value.
+	short := append(buildDeltaBody(4, map[int]byte{0: 7, 1: 8})[:1], 7)
+	if err := c.handleBinarySpectrum(buildSpecFrameSeq(spectrumFlagDelta, 1, short)); err == nil {
+		t.Error("expected an error for a delta whose values do not match its mask")
 	}
 
-	frame := <-c.Frames
-	// Two bins, so unwrapping swaps them.
-	if frame.Bins[0] != -95.25 || frame.Bins[1] != -70.5 {
-		t.Errorf("float32 bins = %v, want [-95.25 -70.5]", frame.Bins)
+	// Body shorter than the mask itself.
+	if err := c.handleBinarySpectrum(buildSpecFrameSeq(spectrumFlagDelta, 2, nil)); err == nil {
+		t.Error("expected an error for a delta with no mask")
+	}
+}
+
+// A gap in the sequence means the server dropped frames for a slow reader.
+// Noticing it is what tells an operator why the display stuttered; the keyframe
+// is what repairs it.
+func TestBinarySequenceGapIsCounted(t *testing.T) {
+	c := &Client{Frames: make(chan Frame, 8), Status: make(chan string, 8)}
+	body := buildFullBody(0, 50, 1, 2)
+	for _, seq := range []uint16{1, 2, 5} {
+		if err := c.handleBinarySpectrum(buildSpecFrameSeq(spectrumFlagFull, seq, body)); err != nil {
+			t.Fatal(err)
+		}
+		<-c.Frames
+	}
+	if c.spectrumGaps != 1 {
+		t.Errorf("spectrumGaps = %d, want 1 (2 -> 5 is the only gap)", c.spectrumGaps)
 	}
 }
 
@@ -297,14 +407,22 @@ func TestBinaryRejectsBadHeaders(t *testing.T) {
 		t.Error("expected an error for a short frame")
 	}
 
-	badVersion := buildSpecFrame(0x03, []byte{1, 2})
-	badVersion[4] = 0x02
-	if err := c.handleBinarySpectrum(badVersion); err == nil {
-		t.Error("expected an error for an unsupported version")
+	// Version 1 is no longer read: this client asks for 2 explicitly, so a
+	// version 1 frame means the stream is not what it claims to be.
+	v1 := buildSpecFrame(spectrumFlagFull, buildFullBody(0, 50, 1, 2))
+	v1[4] = 0x01
+	if err := c.handleBinarySpectrum(v1); err == nil {
+		t.Error("expected an error for a version 1 frame")
 	}
 
 	if err := c.handleBinarySpectrum(buildSpecFrame(0x09, []byte{1, 2})); err == nil {
 		t.Error("expected an error for unknown flags")
+	}
+
+	// A zero step would make every bin read as the reference.
+	if err := c.handleBinarySpectrum(buildSpecFrame(spectrumFlagFull,
+		buildFullBody(0, 0, 1, 2))); err == nil {
+		t.Error("expected an error for a zero quantisation step")
 	}
 }
 

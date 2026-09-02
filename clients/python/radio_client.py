@@ -63,14 +63,18 @@ except Exception as e:
     print(f"Error: {e}", file=sys.stderr)
     print("Opus decoding disabled. Ensure opus.dll is in the same directory as the executable.", file=sys.stderr)
 
-# Import zstd decompressor (optional)
-try:
-    import zstandard as zstd
-    ZSTD_AVAILABLE = True
-except ImportError:
-    ZSTD_AVAILABLE = False
-    print("Warning: zstandard not available, pcm-zstd decoding will use uncompressed PCM", file=sys.stderr)
-    print("Install with: pip install zstandard", file=sys.stderr)
+# Version 4: the predictive lossless codec that replaced the zstd wrapper.
+# Pure Python and always available -- there is nothing to install.
+from pcm_v4 import PCM_PROTOCOL_VERSION, PCMv4Decoder, PCMv4Error, is_zstd_frame
+from tuning_range import (
+    DEFAULT_MAX_FREQUENCY, DEFAULT_MIN_FREQUENCY, format_range, tuning_range_from,
+)
+
+# zstandard is no longer imported. It wrapped the version 1-3 bodies, which the
+# predictive codec replaced -- and on this data it made packets LARGER, being an
+# LZ77 matcher over bytes where a band-limited RF signal has no repeated byte
+# strings. is_zstd_frame still recognises a zstd frame by its magic, to name an
+# old server, but nothing decompresses one.
 
 # Import NR2 processor (optional, only if scipy is available)
 try:
@@ -342,6 +346,12 @@ class RadioClient:
         self.sample_rate = 12000  # Default, will be updated from server
         self.ws = None  # WebSocket connection reference for sending messages
         self.server_description = {}  # Server description from /api/description
+
+        # How far this receiver tunes, from /api/description's tuning_range.
+        # Defaults to the pre-tuning_range assumption until a description is
+        # read; see tuning_range.py for why that is no longer a safe constant.
+        self.min_frequency = DEFAULT_MIN_FREQUENCY
+        self.max_frequency = DEFAULT_MAX_FREQUENCY
         self.server_addons = []  # Addon list from /api/description ('addons' key)
         self.countries = []  # Country list from /api/cty/countries
         self.bypassed = False  # Connection bypassed status from /connection endpoint (deprecated)
@@ -365,10 +375,15 @@ class RadioClient:
         elif use_opus and is_iq_mode:
             print("Warning: Opus not supported for IQ modes (lossless required)", file=sys.stderr)
 
-        # PCM-zstd support (for when Opus is not used)
-        self.zstd_decompressor = None
-        if ZSTD_AVAILABLE:
-            self.zstd_decompressor = zstd.ZstdDecompressor()
+        # Protocol version, and the version 4 decoder if that is what we asked
+        # for. The decoder carries the predictor's adaptation and the header
+        # fields the server chose not to repeat, so it belongs to one connection
+        # and is replaced on every connect -- see run().
+        # Version 4 is the only protocol this client speaks. Versions 1-3 and
+        # their zstd wrapper are gone; a server too old to serve 4 is reported
+        # rather than fallen back to.
+        self.protocol_version = PCM_PROTOCOL_VERSION
+        self.pcm_v4_decoder = PCMv4Decoder()
 
         # Track PCM metadata for hybrid header strategy
         self.pcm_last_sample_rate = None
@@ -719,8 +734,7 @@ class RadioClient:
             else:
                 params['format'] = 'pcm-zstd'
 
-            # Add version parameter: request version 2 for signal quality metrics
-            params['version'] = '2'
+            params['version'] = str(PCM_PROTOCOL_VERSION)
 
             return f"{base_url}?{urlencode(params)}"
         else:
@@ -749,8 +763,7 @@ class RadioClient:
             else:
                 url += "&format=pcm-zstd"
 
-            # Add version parameter: request version 2 for signal quality metrics
-            url += "&version=2"
+            url += f"&version={PCM_PROTOCOL_VERSION}"
 
             return url
 
@@ -1000,58 +1013,44 @@ class RadioClient:
                 self.status_callback("error", f"Failed to initialize sounddevice: {e}")
 
     def decode_opus_binary(self, binary_data: bytes) -> bytes:
-        """Decode binary Opus packet to PCM bytes.
+        """Decode a version 4 Opus packet to PCM bytes.
 
-        Binary packet format from server:
-        Version 1 (13 bytes header):
-        - 8 bytes: timestamp (uint64, little-endian)
-        - 4 bytes: sample rate (uint32, little-endian)
-        - 1 byte: channels (uint8)
-        - remaining: Opus encoded data
-
-        Version 2 (21 bytes header):
-        - 8 bytes: timestamp (uint64, little-endian)
-        - 4 bytes: sample rate (uint32, little-endian)
-        - 1 byte: channels (uint8)
-        - 4 bytes: baseband power (float32, little-endian)
-        - 4 bytes: noise density (float32, little-endian)
-        - remaining: Opus encoded data
+        The header is the version 4 Opus shape: a flags byte, then only what
+        changed -- an absolute timestamp, sample rate and channel count at each
+        resynchronisation point, a signed varint timestamp delta in between, and
+        signal quality when it moves. It carries no magic, no sample count and
+        none of the predictive codec's bits; see pcm_v4._OpusHeaderDecoder.
 
         Returns:
             PCM data as bytes (int16, little-endian)
         """
-        if len(binary_data) < 13:
-            print(f"Warning: Binary packet too short: {len(binary_data)} bytes", file=sys.stderr)
+        if self.pcm_v4_decoder is None:
+            self.pcm_v4_decoder = PCMv4Decoder()
+
+        # A server older than 0.1.63 answers a version it cannot serve with
+        # version 1 rather than refusing, and its Opus header is the fixed
+        # 13- or 21-byte shape this no longer reads. There is no magic to test,
+        # so the mismatch surfaces as a header error below rather than here.
+        try:
+            header, offset = self.pcm_v4_decoder.decode_opus_header(binary_data)
+        except PCMv4Error as exc:
+            print(f"Warning: Opus v4 header error ({len(binary_data)} bytes): {exc}",
+                  file=sys.stderr)
             return b''
 
-        # Parse common header fields
-        timestamp = struct.unpack('<Q', binary_data[0:8])[0]
-        sample_rate = struct.unpack('<I', binary_data[8:12])[0]
-        channels = binary_data[12]
+        sample_rate = header.sample_rate
+        channels = header.channels
+        opus_data = binary_data[offset:]
 
-        # Detect version based on packet size and content
-        # Version 2 has 8 extra bytes (2 float32 values) after channels byte
-        # We can detect this by checking if there's enough data for version 2 header
-        if len(binary_data) >= 21:
-            # Try to parse as version 2 (with signal quality)
-            baseband_power = struct.unpack('<f', binary_data[13:17])[0]
-            noise_density = struct.unpack('<f', binary_data[17:21])[0]
-            opus_data = binary_data[21:]
-
-            # Update signal quality metrics (throttle updates to ~100ms like web UI)
-            now = time.time()
-            if now - self.last_signal_quality_update >= 0.1:
-                self.baseband_power = baseband_power
-                self.noise_density = noise_density
-                self.last_signal_quality_update = now
-
-            # Log first version 2 Opus packet to confirm it's working
-            if not hasattr(self, '_opus_v2_logged'):
-                print(f"✓ Receiving version 2 Opus packets with signal quality metrics", file=sys.stderr)
-                self._opus_v2_logged = True
-        else:
-            # Version 1 format (no signal quality)
-            opus_data = binary_data[13:]
+        # Version 3 and 4 both report passband noise power, so the SNR the rest
+        # of the client shows is on one scale.
+        now = time.time()
+        if now - self.last_signal_quality_update >= 0.1:
+            if header.baseband_power > -998:
+                self.baseband_power = header.baseband_power
+            if header.noise > -998:
+                self.noise_density = header.noise
+            self.last_signal_quality_update = now
 
         # Update client sample rate if it changes (e.g., FM/NFM switching from 12kHz to 24kHz)
         if self.sample_rate != sample_rate:
@@ -1154,163 +1153,51 @@ class RadioClient:
             # Return silence for any decode error
             return b''
 
-    def decode_pcm_binary(self, binary_data: bytes, is_zstd: bool = False) -> bytes:
-        """Decode binary PCM packet (with optional zstd compression) to PCM bytes.
+    def decode_pcm_v4(self, binary_data: bytes) -> bytes:
+        """Decode a protocol version 4 packet to little-endian int16 PCM bytes.
 
-        Binary packet format from server (hybrid header strategy):
-        - If zstd compressed: decompress entire packet first
-        - Full header Version 1 (29 bytes):
-          - 2 bytes: Magic (0x5043 = "PC")
-          - 1 byte: Version (1)
-          - 1 byte: Format type (0=PCM, 2=PCM-zstd)
-          - 8 bytes: RTP timestamp (uint64, little-endian)
-          - 8 bytes: Wall clock time (uint64, little-endian)
-          - 4 bytes: Sample rate (uint32, little-endian)
-          - 1 byte: Channels (uint8)
-          - 4 bytes: Reserved
-          - remaining: PCM data (big-endian int16)
-        - Full header Version 2 (37 bytes):
-          - 2 bytes: Magic (0x5043 = "PC")
-          - 1 byte: Version (2)
-          - 1 byte: Format type (0=PCM, 2=PCM-zstd)
-          - 8 bytes: RTP timestamp (uint64, little-endian)
-          - 8 bytes: Wall clock time (uint64, little-endian)
-          - 4 bytes: Sample rate (uint32, little-endian)
-          - 1 byte: Channels (uint8)
-          - 4 bytes: Baseband power (float32, little-endian)
-          - 4 bytes: Noise density (float32, little-endian)
-          - 4 bytes: Reserved
-          - remaining: PCM data (big-endian int16)
-        - Minimal header (13 bytes):
-          - 2 bytes: Magic (0x504D = "PM")
-          - 1 byte: Version (1 or 2)
-          - 8 bytes: RTP timestamp (uint64, little-endian)
-          - 2 bytes: Reserved
-          - remaining: PCM data (big-endian int16)
+        Versions 1-3 sent big-endian samples inside a zstd frame behind a fixed
+        header; version 4 sends a variable-length header and a predictively
+        coded body, and produces little-endian samples directly, so nothing is
+        byte-swapped here.
 
-        Args:
-            binary_data: Raw binary packet from server (possibly zstd-compressed)
-            is_zstd: True if entire packet is zstd-compressed
-
-        Returns:
-            PCM data as bytes (int16, little-endian)
+        Every packet must reach this method even if the result is discarded: the
+        predictor's taps are derived from the samples already decoded, so a
+        skipped packet desynchronises this side from the server for good.
         """
-        # Decompress entire packet first if zstd
-        if is_zstd:
-            if not ZSTD_AVAILABLE or self.zstd_decompressor is None:
-                print("Warning: Received zstd-compressed PCM but zstandard not available", file=sys.stderr)
-                return b''
+        if self.pcm_v4_decoder is None:
+            self.pcm_v4_decoder = PCMv4Decoder()
 
-            try:
-                compressed_size = len(binary_data)
-                binary_data = self.zstd_decompressor.decompress(binary_data)
-                # Log first decompression only
-                if not hasattr(self, '_zstd_logged'):
-                    print(f"DEBUG: PCM-zstd decompression OK (compressed: {compressed_size} -> decompressed: {len(binary_data)} bytes)", file=sys.stderr)
-                    self._zstd_logged = True
-            except Exception as e:
-                print(f"Warning: zstd decompression error: {e}", file=sys.stderr)
-                return b''
-
-        if len(binary_data) < 4:
-            print(f"Warning: Binary PCM packet too short: {len(binary_data)} bytes", file=sys.stderr)
+        # A server older than 0.1.63 clamps a version it cannot serve to 1-3 and
+        # answers with version 1 rather than refusing, so its frames arrive as
+        # zstd. Naming that beats a bad-magic warning per packet.
+        if is_zstd_frame(binary_data):
+            print("Error: server does not support audio protocol version %d. "
+                  "This client speaks version 4 only -- upgrade the receiver to "
+                  "UberSDR 0.1.63 or later." % PCM_PROTOCOL_VERSION, file=sys.stderr)
+            self.running = False
             return b''
 
-        # Check magic bytes (little-endian uint16)
-        magic = struct.unpack('<H', binary_data[0:2])[0]
-
-        if magic == 0x5043:  # "PC" - Full header
-            # Parse version first to determine header size
-            if len(binary_data) < 3:
-                print(f"Warning: PCM packet too short to read version: {len(binary_data)} bytes", file=sys.stderr)
-                return b''
-
-            version = binary_data[2]
-
-            # Determine expected header size based on version
-            if version >= 2:
-                expected_header_size = 37  # Version 2: includes signal quality
-            else:
-                expected_header_size = 29  # Version 1: original format
-
-            if len(binary_data) < expected_header_size:
-                print(f"Warning: Full header PCM packet too short: {len(binary_data)} bytes (expected {expected_header_size} for version {version})", file=sys.stderr)
-                return b''
-
-            # Parse common header fields (little-endian)
-            format_type = binary_data[3]
-            rtp_timestamp = struct.unpack('<Q', binary_data[4:12])[0]
-            wall_clock = struct.unpack('<Q', binary_data[12:20])[0]
-            sample_rate = struct.unpack('<I', binary_data[20:24])[0]
-            channels = binary_data[24]
-
-            # Parse version-specific fields
-            if version >= 2:
-                # Version 2: Extract signal quality metrics
-                baseband_power = struct.unpack('<f', binary_data[25:29])[0]
-                noise_density = struct.unpack('<f', binary_data[29:33])[0]
-                # reserved = struct.unpack('<I', binary_data[33:37])[0]
-                pcm_data = binary_data[37:]
-
-                # Update signal quality metrics (throttle updates to ~100ms like web UI)
-                now = time.time()
-                if now - self.last_signal_quality_update >= 0.1:
-                    self.baseband_power = baseband_power
-                    self.noise_density = noise_density
-                    self.last_signal_quality_update = now
-            else:
-                # Version 1: No signal quality metrics
-                # reserved = struct.unpack('<I', binary_data[25:29])[0]
-                pcm_data = binary_data[29:]
-
-            # Update tracked metadata
-            self.pcm_last_sample_rate = sample_rate
-            self.pcm_last_channels = channels
-
-            # Update client sample rate if changed
-            if self.sample_rate != sample_rate:
-                self.sample_rate = sample_rate
-                print(f"PCM sample rate updated: {sample_rate} Hz", file=sys.stderr)
-
-            # Log first version 2 packet to confirm it's working
-            if version >= 2 and not hasattr(self, '_v2_logged'):
-                print(f"✓ Receiving version 2 PCM packets with signal quality metrics", file=sys.stderr)
-                self._v2_logged = True
-
-        elif magic == 0x504D:  # "PM" - Minimal header
-            if len(binary_data) < 13:
-                print(f"Warning: Minimal header PCM packet too short: {len(binary_data)} bytes", file=sys.stderr)
-                return b''
-
-            # Parse minimal header (little-endian)
-            version = binary_data[2]
-            rtp_timestamp = struct.unpack('<Q', binary_data[3:11])[0]
-            # reserved = struct.unpack('<H', binary_data[11:13])[0]
-            pcm_data = binary_data[13:]
-
-            # Use last known metadata
-            sample_rate = self.pcm_last_sample_rate
-            channels = self.pcm_last_channels
-
-            if sample_rate is None or channels is None:
-                print("Warning: Received minimal header before full header", file=sys.stderr)
-                return b''
-
-        else:
-            print(f"Warning: Invalid PCM magic bytes: {hex(magic)}", file=sys.stderr)
-            return b''
-
-        # Convert from big-endian to little-endian
-        # PCM data is int16, so convert in chunks of 2 bytes
         try:
-            # Parse as big-endian int16 array
-            pcm_array = np.frombuffer(pcm_data, dtype='>i2')
-            # Convert to little-endian int16
-            pcm_array_le = pcm_array.astype('<i2')
-            return pcm_array_le.tobytes()
-        except Exception as e:
-            print(f"Warning: PCM byte order conversion error: {e}", file=sys.stderr)
+            pcm_le, header = self.pcm_v4_decoder.decode_packet_le(binary_data)
+        except PCMv4Error as exc:
+            print(f"Warning: PCM v4 decode error ({len(binary_data)} bytes): {exc}", file=sys.stderr)
             return b''
+
+        # The stream is authoritative about its own parameters: every packet
+        # carries them, forward-filled from the last resynchronisation point.
+        self.pcm_last_sample_rate = header.sample_rate
+        self.pcm_last_channels = header.channels
+
+        # Version 3 and 4 both report passband noise power, so the SNR the rest
+        # of the client shows is on the same scale either way.
+        if header.baseband_power > -998:
+            self.baseband_power = header.baseband_power
+        if header.noise > -998:
+            self.noise_density = header.noise
+        self.last_signal_quality_update = time.time()
+
+        return pcm_le
 
     async def output_audio(self, pcm_data: bytes):
         """Output audio data based on selected mode."""
@@ -1970,6 +1857,10 @@ class RadioClient:
         if description:
             # Store description data for GUI access
             self.server_description = description
+
+            # Adopt the receiver's own range before anything is validated
+            # against it -- including the default frequency sanitised below.
+            self.min_frequency, self.max_frequency = tuning_range_from(description)
             self.server_addons = description.get('addons', [])
             receiver_name = description.get('receiver', {}).get('name', '')
             if receiver_name:
@@ -2010,8 +1901,14 @@ class RadioClient:
                 server_freq = int(server_freq)
             except (TypeError, ValueError):
                 server_freq = 0
-            if not (10000 <= server_freq <= 30000000):
+            # Checked against what this receiver says it covers, not against a
+            # constant. A 60 MHz receiver defaulting to 6 m had its own stated
+            # preference thrown away here and replaced with 14.175 MHz, which is
+            # the client overruling the server about the server's configuration.
+            if not (self.min_frequency <= server_freq <= self.max_frequency):
                 server_freq = 14175000  # built-in fallback
+                if server_freq > self.max_frequency:
+                    server_freq = self.min_frequency
 
             # Resolve the server's preferred mode (sanitised)
             server_mode = description.get('default_mode', '')
@@ -2047,6 +1944,12 @@ class RadioClient:
         url = self.build_websocket_url()
         self._log(f"Connecting to {url}")
         self._log(f"Frequency: {self.frequency} Hz, Mode: {self.mode}")
+
+        # The version 4 predictor adapts from the samples already decoded, so
+        # its state is only meaningful within one socket. A reconnect must start
+        # from nothing, or it decodes the new stream against the old one's taps.
+        # The Opus header decoder inside it resets for the same reason.
+        self.pcm_v4_decoder = PCMv4Decoder()
 
         if self.bandwidth_low is not None and self.bandwidth_high is not None:
             self._log(f"Bandwidth: {self.bandwidth_low} to {self.bandwidth_high} Hz")
@@ -2138,16 +2041,15 @@ class RadioClient:
                                 if not self.check_duration():
                                     self.running = False
                             else:
-                                # Decode binary PCM-zstd packet
-                                pcm_data = self.decode_pcm_binary(message, is_zstd=True)
+                                pcm_data = self.decode_pcm_v4(message)
 
                                 if pcm_data:
                                     await self.output_audio(pcm_data)
                                     pcm_packet_count += 1
                                     # Log first PCM packet to confirm it's working
                                     if pcm_packet_count == 1:
-                                        compression_msg = "zstd-compressed" if ZSTD_AVAILABLE else "uncompressed"
-                                        print(f"✓ Receiving {compression_msg} PCM audio packets from server", file=sys.stderr)
+                                        print("✓ Receiving predictive lossless PCM audio packets from server",
+                                              file=sys.stderr)
                                         # Log if this is IQ mode for TCI
                                         is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
                                         if is_iq_mode and hasattr(self, 'tci_server') and self.tci_server:

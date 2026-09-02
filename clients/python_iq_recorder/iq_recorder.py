@@ -10,6 +10,7 @@ Supported IQ modes:
 - IQ48: 48 kHz sample rate (±24 kHz bandwidth)
 - IQ96: 96 kHz sample rate (±48 kHz bandwidth)
 - IQ192: 192 kHz sample rate (±96 kHz bandwidth)
+- IQ384: 384 kHz sample rate (±192 kHz bandwidth)
 
 Usage:
     GUI mode:

@@ -20,6 +20,8 @@ from collections import deque
 from PIL import Image, ImageTk
 
 
+from tuning_range import DEFAULT_MAX_FREQUENCY, DEFAULT_MIN_FREQUENCY
+
 class WaterfallDisplay:
     """Waterfall display widget showing RF spectrum as a scrolling waterfall.
 
@@ -33,6 +35,14 @@ class WaterfallDisplay:
     # generation and self-terminate immediately.
     _class_generation: int = 0
     
+    # How far the receiver tunes. Set by the GUI once /api/description has been
+    # read; until then it is the pre-tuning_range assumption, so nothing that
+    # worked before changes. Panning and click-tuning clamp to these rather than
+    # to a hardcoded 30 MHz, which on a 60 MHz receiver stopped the display at
+    # half its own span.
+    min_frequency = DEFAULT_MIN_FREQUENCY
+    max_frequency = DEFAULT_MAX_FREQUENCY
+
     def __init__(self, parent: tk.Widget, spectrum_display, width: int = 800, height: int = 400, spectrum_height: int = 200, click_tune_var=None, bookmarks: list = None):
         """Initialize waterfall display widget.
         
@@ -499,7 +509,7 @@ class WaterfallDisplay:
         # Constrain to valid range (keep view within 10 kHz - 30 MHz)
         half_bw = self.spectrum_display.total_bandwidth / 2
         min_center = 10000 + half_bw
-        max_center = 30000000 - half_bw
+        max_center = self.max_frequency - half_bw
         new_center = max(min_center, min(max_center, new_center))
 
         # Check if tuned frequency will be off-screen after pan
@@ -936,7 +946,7 @@ def create_waterfall_window(parent_gui):
                 new_freq = current_freq - step_hz
             
             # Clamp to valid range (10 kHz to 30 MHz)
-            new_freq = max(10000, min(30000000, new_freq))
+            new_freq = max(self.min_frequency, min(self.max_frequency, new_freq))
             
             # Update frequency
             parent_gui.on_spectrum_frequency_click(float(new_freq))

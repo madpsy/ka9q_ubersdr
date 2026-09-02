@@ -6,7 +6,14 @@ receives binary SPEC frames or gzip-compressed JSON, counts bytes/messages,
 and discards the data.
 
 WebSocket URL format (mirrors spectrum_display.py connect()):
-    /ws/user-spectrum?user_session_id=<uuid>&mode=binary8[&password=<pw>]
+    /ws/user-spectrum?user_session_id=<uuid>&mode=binary8&version=2[&password=<pw>]
+
+Version 2 is the only spectrum protocol this tool requests. It is roughly 2.15x
+smaller than version 1 on the same content -- a change mask instead of an index
+per changed bin, a quantisation scale carried in the frame, plus a sequence
+number and keyframes -- so benchmarking version 1 would measure a server cost
+that no current client imposes. The server refuses a version it cannot serve
+rather than quietly serving an older one, so there is nothing to fall back to.
 
 On first config message the real client sends a zoom command:
     {"type": "zoom", "frequency": <tuned_hz>, "binBandwidth": <zoom_hz / binCount>}
@@ -26,6 +33,10 @@ from urllib.parse import urlencode
 
 import websockets
 import websockets.exceptions
+
+#: The spectrum wire protocol version requested. See SpectrumV2Version in
+#: user_spectrum_v2.go; the server rejects anything higher than it implements.
+SPECTRUM_PROTOCOL_VERSION = 2
 
 from config import BenchmarkConfig, UserState
 from stats import UserStats
@@ -150,7 +161,12 @@ class SpectrumWebSocket:
         cfg = self._cfg
         params: dict[str, str] = {
             'user_session_id': self._stats.session_id,
-            'mode': 'binary8',   # request 8-bit binary encoding (max bandwidth reduction)
+            # binary8 and version 2 travel together: the server defines version 2
+            # only for the 8-bit path (`useV2 := spectrumVersion >= 2 &&
+            # useBinary8` in user_spectrum_websocket.go), so asking for one
+            # without the other silently gets version 1.
+            'mode': 'binary8',
+            'version': str(SPECTRUM_PROTOCOL_VERSION),
         }
         if cfg.password:
             params['password'] = cfg.password

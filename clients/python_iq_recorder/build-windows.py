@@ -69,16 +69,18 @@ def check_environment():
         print(f"✗ Icon not found: {icon_path}")
         print("  (Build will continue without icon)")
     
-    # Check for radio_client.py dependency
+    # Check for the clients/python dependencies: radio_client and the protocol
+    # version 4 decoder it imports.
     parent_python_dir = os.path.join(script_dir, '..', 'python')
-    radio_client_path = os.path.join(parent_python_dir, 'radio_client.py')
-    
-    if os.path.exists(radio_client_path):
-        print(f"✓ Found radio_client.py: {radio_client_path}")
-    else:
-        print(f"✗ radio_client.py not found: {radio_client_path}")
-        print("  ERROR: This is required for building!")
-        return False
+
+    for required in ('radio_client.py', 'pcm_v4.py'):
+        required_path = os.path.join(parent_python_dir, required)
+        if os.path.exists(required_path):
+            print(f"✓ Found {required}: {required_path}")
+        else:
+            print(f"✗ {required} not found: {required_path}")
+            print("  ERROR: This is required for building!")
+            return False
     
     print()
     return True

@@ -28,9 +28,6 @@ target_compile_definitions(UberSDRIntf PRIVATE
     IXWEBSOCKET_USE_OPEN_SSL=0
 )
 
-# Find zstd library
-find_package(zstd CONFIG REQUIRED)
-
 # Include directories
 target_include_directories(UberSDRIntf PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -82,7 +79,7 @@ target_sources(UberSDRIntf PRIVATE
 target_link_libraries(UberSDRIntf PRIVATE
     ws2_32
     crypt32
-    zstd::libzstd_static
+    rpcrt4   # UuidCreate / UuidToStringA / RpcStringFreeA
 )
 
 # Set output name

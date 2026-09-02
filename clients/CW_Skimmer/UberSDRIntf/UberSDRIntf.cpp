@@ -15,6 +15,7 @@
 #include <sstream>
 #include <time.h>
 #include <vector>
+#include <cmath>   // cos/sin: MSVC leaks these through other headers, GCC does not
 
 // Now include our headers
 #include "UberSDRIntf.h"

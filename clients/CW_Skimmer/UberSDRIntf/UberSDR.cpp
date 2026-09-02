@@ -21,8 +21,18 @@
 
 #pragma comment(lib, "rpcrt4.lib")
 
-// For zstd decompression
-#include <zstd.h>
+// No zstd. Versions 1-3 wrapped every packet in a zstd frame; version 4's
+// predictive codec replaced it, and on this data zstd was making packets LARGER
+// anyway -- it is an LZ77 matcher over bytes, and a band-limited RF signal has
+// no repeated byte strings. Dropping it removes the vcpkg dependency the build
+// instructions used to require.
+
+// Defined at global scope in UberSDRIntf.cpp. Declared here, outside the
+// namespace, because a block-scope `extern` inside namespace UberSDRIntf names
+// UberSDRIntf::ProcessIQData -- which nothing defines. MSVC resolves it to the
+// global anyway; GCC does not, and GCC is right.
+void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes);
+void TrackCompressedBytes(int receiverID, size_t compressedBytes);
 
 namespace UberSDRIntf
 {
@@ -458,7 +468,14 @@ namespace UberSDRIntf
         url << serverHost << ":" << serverPort;
         url << "/ws?frequency=" << frequency;  // No offset applied here
         url << "&mode=" << mode;
-        url << "&format=pcm-zstd";  // Request binary PCM with zstd compression
+        // The format name is historical: it selects the lossless path, which
+        // from version 4 is the predictive codec rather than a zstd wrapper.
+        url << "&format=pcm-zstd";
+        // Named explicitly rather than left to the server's default of 1. A
+        // server from 0.1.63 on refuses a version it cannot serve; an older one
+        // answers with version 1, which HandleWebSocketMessage recognises and
+        // reports.
+        url << "&version=" << ubersdr::kPCMProtocolVersion;
         url << "&user_session_id=" << uuidString;
         
         return url.str();
@@ -506,6 +523,11 @@ namespace UberSDRIntf
         receivers[receiverID].frequency = frequency;
         receivers[receiverID].mode = mode;
         receivers[receiverID].active = true;
+        // A reconnect must start the predictor from nothing: its taps carry the
+        // adaptation of the previous socket's samples, and decoding a new
+        // stream against them yields plausible noise rather than an error.
+        receivers[receiverID].pcmDecoder.reset();
+
         receivers[receiverID].state = CONNECTING;
         
         // Connect WebSocket (implementation needed)
@@ -1109,105 +1131,81 @@ namespace UberSDRIntf
     }
     
     ///////////////////////////////////////////////////////////////////////////////
-    // Handle WebSocket message - binary pcm-zstd format only
+    // Handle WebSocket message - protocol version 4 binary frames
+    //
+    // Versions 1 to 3 sent a zstd frame wrapping a fixed 29- or 13-byte header
+    // and the samples verbatim. Version 4 sends a variable-length header and a
+    // predictively coded body; see pcm_v4.hpp.
+    //
+    // Every frame must reach the decoder even if the result is discarded: the
+    // predictor derives its filter taps from the samples already decoded, so a
+    // skipped packet desynchronises this side from the server permanently.
     void UberSDR::HandleWebSocketMessage(int receiverID, const std::string& message)
     {
         try {
-            // Check minimum message size
+            if (receiverID < 0 || receiverID >= MAX_RX_COUNT) {
+                return;
+            }
             if (message.size() < 4) {
                 write_text_to_log_file("Message too small");
                 return;
             }
 
-            const uint8_t* compressedData = reinterpret_cast<const uint8_t*>(message.data());
-            size_t compressedSize = message.size();
-            
-            // Track compressed bytes received for accurate network bandwidth measurement
-            // This is called from ProcessIQData which tracks decompressed bytes
-            extern void TrackCompressedBytes(int receiverID, size_t compressedBytes);
-            TrackCompressedBytes(receiverID, compressedSize);
+            const uint8_t* wire = reinterpret_cast<const uint8_t*>(message.data());
+            const size_t wireSize = message.size();
 
-            // Check for zstd magic number (0xFD2FB528 in memory as bytes: 28 B5 2F FD)
-            // The zstd magic number is 0x184D2A28 to 0x184D2A2F (frame magic)
-            // or 0xFD2FB528 (skippable frame magic)
-            // We need to check the first 4 bytes match zstd format
-            uint32_t magic = compressedData[0] | (compressedData[1] << 8) |
-                            (compressedData[2] << 16) | (compressedData[3] << 24);
+            // Bytes actually received, which is what the monitor reports as
+            // network bandwidth. Under version 4 this is the coded size; there
+            // is no separate compressed and decompressed figure any more.
+            ::TrackCompressedBytes(receiverID, wireSize);
 
-            // zstd magic number is 0x28B52FFD when read as little-endian uint32
-            // which appears as bytes: FD 2F B5 28 in memory (big-endian byte order)
-            // or as 0xFD2FB528 when displayed as hex
-            if (magic != 0xFD2FB528) {
+            // A server older than 0.1.63 clamps a version it cannot serve down
+            // to 1 and answers with a zstd frame rather than refusing. Naming
+            // that beats logging a bad magic for every packet at 192 kHz.
+            if (ubersdr::PCMv4StreamDecoder::isZstdFrame(wire, wireSize)) {
+                write_text_to_log_file("Server does not support audio protocol version 4 "
+                                       "(needs UberSDR 0.1.63 or later) - this DLL reads version 4 only");
+                return;
+            }
+
+            ubersdr::PCMv4Header header;
+            std::string err;
+            if (!receivers[receiverID].pcmDecoder.decode(wire, wireSize, header, err)) {
                 std::stringstream ss;
-                ss << "Invalid message format - expected zstd compressed data, got magic: 0x"
-                   << std::hex << magic;
+                ss << "PCM v4 decode error (" << wireSize << " bytes): " << err;
                 write_text_to_log_file(ss.str());
                 return;
             }
 
-            // Get decompressed size
-            size_t decompressedSize = ZSTD_getFrameContentSize(compressedData, compressedSize);
-            if (decompressedSize == ZSTD_CONTENTSIZE_ERROR ||
-                decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN) {
-                write_text_to_log_file("Invalid zstd frame");
+            const int16_t* samples = receivers[receiverID].pcmDecoder.samples();
+            const int sampleCount = header.sampleCount;
+            if (samples == NULL || sampleCount <= 0) {
                 return;
             }
 
-            // Decompress
-            std::vector<uint8_t> decompressed(decompressedSize);
-            size_t actualSize = ZSTD_decompress(decompressed.data(), decompressedSize,
-                                               compressedData, compressedSize);
-            if (ZSTD_isError(actualSize)) {
+            // Must be whole I/Q frames: two channels, two samples per frame.
+            if (sampleCount % 2 != 0) {
                 std::stringstream ss;
-                ss << "Zstd decompression error: " << ZSTD_getErrorName(actualSize);
+                ss << "Sample count not a whole number of I/Q frames: " << sampleCount;
                 write_text_to_log_file(ss.str());
                 return;
             }
 
-            // Parse binary header (little-endian)
-            if (actualSize < 13) {
-                write_text_to_log_file("Packet too small");
-                return;
+            // Serialised big-endian because that is what ProcessIQData reads,
+            // and it reads that because versions 1 to 3 put radiod's own
+            // big-endian samples on the wire untouched. Version 4 changes the
+            // encoding, not the byte order of anything: it carries int16 VALUES
+            // rather than sample bytes, so the byte order here is this DLL's
+            // choice. Keeping it big-endian confines the change to this function
+            // and leaves the code that feeds CW Skimmer exactly as it was.
+            std::vector<uint8_t> iqBytes((size_t)sampleCount * 2);
+            for (int i = 0; i < sampleCount; ++i) {
+                const uint16_t v = (uint16_t)samples[i];
+                iqBytes[(size_t)i * 2]     = (uint8_t)(v >> 8);
+                iqBytes[(size_t)i * 2 + 1] = (uint8_t)(v & 0xFF);
             }
 
-            const uint8_t* data = decompressed.data();
-            uint16_t headerMagic = data[0] | (data[1] << 8);
-
-            size_t dataOffset;
-            if (headerMagic == 0x5043) {  // "PC" - Full header (29 bytes)
-                dataOffset = 29;
-            } else if (headerMagic == 0x504D) {  // "PM" - Minimal header (13 bytes)
-                dataOffset = 13;
-            } else {
-                std::stringstream ss;
-                ss << "Invalid PCM magic: 0x" << std::hex << headerMagic;
-                write_text_to_log_file(ss.str());
-                return;
-            }
-
-            if (actualSize < dataOffset) {
-                write_text_to_log_file("Packet too small for header");
-                return;
-            }
-
-            // Extract PCM data
-            const uint8_t* pcmData = data + dataOffset;
-            size_t pcmSize = actualSize - dataOffset;
-
-            // Validate PCM size (must be multiple of 4: 2 channels * 2 bytes)
-            if (pcmSize % 4 != 0) {
-                std::stringstream ss;
-                ss << "PCM data size not multiple of 4: " << pcmSize;
-                write_text_to_log_file(ss.str());
-                return;
-            }
-
-            // Convert to vector and process
-            std::vector<uint8_t> iqBytes(pcmData, pcmData + pcmSize);
-
-            // Call the ProcessIQData function (defined in UberSDRIntf.cpp)
-            extern void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes);
-            ProcessIQData(receiverID, iqBytes);
+            ::ProcessIQData(receiverID, iqBytes);
         }
         catch (const std::exception& e) {
             std::stringstream ss;

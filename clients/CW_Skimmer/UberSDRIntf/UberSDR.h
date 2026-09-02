@@ -8,6 +8,7 @@
 
 // IXWebSocket library
 #include "IXWebSocket/ixwebsocket/IXWebSocket.h"
+#include "pcm_v4.hpp"
 
 // Forward declaration
 struct UberSDRSharedStatus;
@@ -125,6 +126,15 @@ namespace UberSDRIntf
         // Software frequency shifting (applied in IQ processing, not at tune)
         double phaseAccumulator;  // Current phase for frequency shift
         double phaseIncrement;    // Phase increment per sample (2*PI*offset/sampleRate)
+
+        // Protocol version 4 decoder, one per receiver.
+        //
+        // The predictor adapts from the samples already decoded, so its state
+        // belongs to a single socket: it must be reset on every (re)connect, or
+        // the new stream is decoded against the old stream's filter taps and
+        // comes out as plausible noise rather than as an error. See the reset
+        // in ConnectWebSocket.
+        ubersdr::PCMv4StreamDecoder pcmDecoder;
         
         ReceiverInfo() : frequency(14074000), mode("iq192"), active(false),
                         state(DISCONNECTED), wsClient(nullptr), generation(0),

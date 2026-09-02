@@ -1,0 +1,4 @@
+# Build output. The published archive is produced by ./build.sh --zip, not
+# committed: the DLL and the monitor are build artefacts of the sources beside
+# them, and a binary in git goes stale the moment either changes.
+dist/

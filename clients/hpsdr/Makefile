@@ -23,7 +23,7 @@ TARGET = $(OUT)/$(BINARY)_$(ARCH)
 DEPENDDIR = .
 DEPENDFLAGS = -MM
 
-SRCS = ka9q_hpsdr.c pcm_v4.c
+SRCS = ka9q_hpsdr.c pcm_v4.c hpsdr_p1.c
 
 OBJS = $(SRCS:.c=.o)
 

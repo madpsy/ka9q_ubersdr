@@ -42,6 +42,39 @@ format, but from version 4 what it carries is not zstd:
   to 1-3 and answer with version 1 rather than refusing; the bridge recognises
   those frames and says so.
 
+## Protocols
+
+The bridge answers **openHPSDR protocol 2** and **protocol 1** ("Metis"), and a
+client picks by which discovery packet it sends — both arrive on UDP 1024 and
+cannot be confused, since every protocol 1 datagram opens `EF FE` and every
+protocol 2 one opens with four zero bytes.
+
+Protocol 1 exists because a Hermes Lite 2 *is* a protocol 1 board, so software
+written against real HL2 hardware looks for it and finds nothing on a
+protocol-2-only server. It is the same bridge underneath: the WebSocket, the
+version 4 decoder, the tuning range, the reconnect and rate handling have no
+idea which protocol is on the other side.
+
+**One client at a time, whichever protocol.** Both drive the same receivers, and
+a real radio cannot serve two clients either, so whichever protocol starts first
+holds the bridge until it goes idle: a protocol 1 run command is refused while a
+protocol 2 client is streaming, and protocol 2's control packets are dropped
+while a protocol 1 client is. Both cases say so in the log rather than leaving a
+client silently ignored.
+
+Two clients of the SAME protocol are a different matter and predate this: the
+bridge keeps one client address, so a second protocol 2 client's general packet
+takes the stream over rather than being refused. Discovery reports status 3
+while running, which is the warning a well-behaved client acts on, but nothing
+enforces it.
+
+**Protocol 1 currently serves one receiver.** That is what the discovery reply
+advertises and what a conforming client clamps itself to. More than one is not a
+framing problem but an alignment one: protocol 1 interleaves every receiver into
+a single packet, one sample from each per round, while ours are independent
+WebSockets that drift — so it needs a policy for a starved receiver rather than
+a bigger buffer. Protocol 2 has no such constraint and serves all ten.
+
 ## Sample rates
 
 48, 96, 192 and 384 kHz — the four DDC rates the HPSDR protocol defines, which

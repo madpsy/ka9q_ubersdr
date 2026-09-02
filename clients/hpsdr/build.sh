@@ -73,7 +73,7 @@ BINARY="ubersdr-hpsdr-bridge"
 # the directory writable, so a container-built .o never lands in the working tree
 # — an aarch64 ka9q_hpsdr.o left behind here would be picked up by the next
 # native `make` and fail the link in a thoroughly confusing way.
-SOURCES=(ka9q_hpsdr.c ka9q_hpsdr.h pcm_v4.c pcm_v4.h Makefile)
+SOURCES=(ka9q_hpsdr.c ka9q_hpsdr.h pcm_v4.c pcm_v4.h hpsdr_p1.c hpsdr_p1.h Makefile)
 
 # platform:docker-platform
 TARGETS=(

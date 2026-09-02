@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests the protocol version 4 decoder against packets the SERVER's encoder
-# produced.
+# produced, and the openHPSDR protocol 1 wire logic against synthetic frames.
 #
 # This is the check that matters for this client. The version 4 predictor is
 # backward adaptive — the two ends derive their filter taps independently and
@@ -69,6 +69,22 @@ if [ "$truncated" -eq 7 ]; then
     echo "PASS pcmv4-truncation"; pass=$((pass+1))
 else
     echo "FAIL pcmv4-truncation: $truncated of 7 truncated fixtures refused"; fail=$((fail+1))
+fi
+
+# The protocol 1 command decode, which is the half that fails silently: a wrong
+# sample-rate code or a mis-shifted register address does not crash, it hands
+# the client a correctly framed picture of the wrong thing. Run under the
+# sanitizers for the same reason the decoder is — every length comes off the
+# wire.
+echo
+if ! gcc -std=gnu11 -Wall -Wextra -O1 -g -fsanitize=address,undefined -I.. \
+        -o "$BUILD/p1_framing" p1_framing.c ../hpsdr_p1.c 2>"$BUILD/p1build.log"; then
+    echo "FAIL p1-framing build"; sed 's/^/    /' "$BUILD/p1build.log" | head -20; fail=$((fail+1))
+elif "$BUILD/p1_framing" >"$BUILD/p1.log" 2>&1; then
+    p1pass=$(grep -c '^PASS ' "$BUILD/p1.log")
+    echo "PASS p1-framing ($p1pass cases)"; pass=$((pass+1))
+else
+    echo "FAIL p1-framing"; grep '^FAIL ' "$BUILD/p1.log" | sed 's/^/    /' | head -10; fail=$((fail+1))
 fi
 
 echo

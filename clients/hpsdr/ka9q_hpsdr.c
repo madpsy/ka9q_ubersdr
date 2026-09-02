@@ -44,6 +44,7 @@
  */
 
 #include "ka9q_hpsdr.h"
+#include "hpsdr_p1.h"
 
 static int do_exit = 0;
 struct main_cb mcb;
@@ -381,6 +382,109 @@ static bool check_ubersdr_connection_rcb(const char *base_url, struct rcvr_cb *r
 
     t_print("ws_thread(%d): connection rejected by %s\n", rcb->rcvr_num, http_url);
     return false;
+}
+
+/* ------------------------------------------------------------------------ */
+/* The receiver plumbing protocol 1 drives.                                   */
+/*                                                                            */
+/* Declared in hpsdr_p1.h as an interface so the coupling runs one way: that   */
+/* layer asks the bridge for things, and the bridge knows nothing about        */
+/* protocol 1 beyond handing it datagrams.                                     */
+/* ------------------------------------------------------------------------ */
+
+static unsigned char p1_mac[6] = {0};
+
+/*
+ * Display gain for a channel rate, in kHz.
+ *
+ * Amplitude compensation for bandwidth: a wider channel collects more noise
+ * power, so the same spectral density arrives as larger samples and needs less
+ * gain to display at the same level. That is a 1/sqrt(BW) law, and the entries
+ * follow it — 48 kHz at 8000 gives 8000/sqrt(4) = 4000 at 192, which is what
+ * was there before this became a function. (96's 6000 is the odd one out
+ * against the 5657 the law predicts; a round number, chosen by ear.)
+ *
+ * One table because both protocols pack the same samples into the same 24-bit
+ * field: a client should not see a different level for choosing a different
+ * protocol.
+ */
+static float scale_for_rate(int khz)
+{
+    switch (khz) {
+    case 48:  return 8000.0f;
+    case 96:  return 6000.0f;
+    case 192: return 4000.0f;
+    case 384: return 2828.0f;
+    default:  return 4000.0f;
+    }
+}
+
+const unsigned char *p1_host_mac(void) { return p1_mac; }
+int p1_host_board_type(void) { return mcb.device_type; }
+
+/* Is a protocol 2 client streaming? Both protocols drive the same receivers, so
+ * the second one to arrive has to be turned away rather than allowed to
+ * reconfigure the first one's session out from under it. */
+bool p1_host_p2_busy(void) { return running && gen_rcvd; }
+
+/* A rate change is a mode change, and the mode is baked into the WebSocket URL,
+ * so it is applied the same way the protocol 2 path applies one: set the rate,
+ * set the display gain that goes with it, and ask for a reconnect. */
+void p1_host_set_rate(int rcvr, int rate_hz)
+{
+    if (rcvr < 0 || rcvr >= MAX_RCVRS) return;
+    if (mcb.rcb[rcvr].output_rate == rate_hz) return;
+
+    mcb.rcb[rcvr].output_rate = rate_hz;
+    rxrate[rcvr] = rate_hz / 1000;
+    mcb.rcb[rcvr].scale = scale_for_rate(rate_hz / 1000);
+    mcb.rcb[rcvr].reconnect_needed = 1;
+}
+
+void p1_host_set_freq(int rcvr, long hz)
+{
+    if (rcvr < 0 || rcvr >= MAX_RCVRS) return;
+    if (hz != 0 && (hz < ubersdr_min_freq || hz > ubersdr_max_freq)) {
+        t_print("P1: WARNING tuned to %.3f MHz, outside the receiver's "
+                "%.3f kHz - %.3f MHz\n", hz / 1e6,
+                ubersdr_min_freq / 1000.0, ubersdr_max_freq / 1000000.0);
+    }
+    rxfreq[rcvr] = hz;
+    mcb.rcb[rcvr].new_freq = hz;
+    t_print("P1: DDC%d tuned to %ld Hz\n", rcvr, hz);
+}
+
+void p1_host_enable(int rcvr, bool on)
+{
+    if (rcvr < 0 || rcvr >= MAX_RCVRS) return;
+    ddcenable[rcvr] = on ? 1 : 0;
+    mcb.rcb[rcvr].rcvr_mask = on ? (1 << rcvr) : 0;
+    /* `running` gates the receive threads and the activity watchdog, exactly as
+     * the protocol 2 high-priority packet sets it. */
+    running = on ? 1 : 0;
+    if (!on) {
+        rxrate[rcvr] = 0;
+        rxfreq[rcvr] = 0;
+    }
+    /* Wake anything blocked on the protocol 2 handshake so a disable cannot
+     * wedge a thread that is waiting for a packet that will never come. */
+    pthread_mutex_lock(&send_lock);
+    pthread_cond_broadcast(&send_cond);
+    pthread_mutex_unlock(&send_lock);
+    pthread_mutex_lock(&done_send_lock);
+    pthread_cond_broadcast(&done_send_cond);
+    pthread_mutex_unlock(&done_send_lock);
+}
+
+void p1_host_stop_all(void)
+{
+    for (int i = 0; i < MAX_RCVRS; i++) {
+        ddcenable[i] = 0;
+        mcb.rcb[i].rcvr_mask = 0;
+        rxrate[i] = 0;
+        rxfreq[i] = 0;
+    }
+    running = 0;
 }
 
 /*
@@ -882,9 +986,23 @@ static int ws_callback(struct lws *wsi,
 
             rcb->iqSamples_remaining += n_samples;
 
-            int samps_packet = 238;
+            /*
+             * Which framing the samples leave in, and how many go per packet,
+             * is the only thing about this path that depends on the protocol.
+             * Everything above it — the socket, the decode, the scaling — is
+             * the same either way.
+             *
+             * The stream itself is the pacing in both cases: samples arrive at
+             * the receiver's own rate, so a packet goes out when there are
+             * enough for one and there is no timer to drift against.
+             */
+            const bool p1 = p1_active();
+            const int samps_packet = p1 ? P1_SAMPLES_PER_PACKET : 238;
             while (rcb->iqSamples_remaining >= samps_packet) {
-                load_packet(rcb);
+                if (p1)
+                    p1_send_packet(rcb);
+                else
+                    load_packet(rcb);
                 rcb->iqSamples_remaining -= samps_packet;
                 rcb->iqSample_offset     += samps_packet;
             }
@@ -1492,6 +1610,9 @@ int main (int argc, char *argv[])
     memset(&hwaddr, 0, sizeof(hwaddr));
     strncpy(hwaddr.ifr_name, mcb.interface, IFNAMSIZ - 1);
     ioctl(sock_udp, SIOCGIFHWADDR, &hwaddr);
+    /* Both protocols' discovery replies carry it, and protocol 1's builder is
+     * in another file, so it is kept where either can reach it. */
+    memcpy(p1_mac, hwaddr.ifr_addr.sa_data, 6);
 
     struct ifaddrs *ifap, *ifa;
     struct sockaddr_in *sa;
@@ -1601,6 +1722,15 @@ int main (int argc, char *argv[])
         code = *code0;
 
         /*
+         * Protocol 1 gets first refusal. The two formats cannot be confused —
+         * every protocol 1 datagram opens EF FE and every protocol 2 one opens
+         * with four zero bytes — so this consumes only what is unmistakably
+         * protocol 1 and leaves everything else to the branches below.
+         */
+        if (p1_handle_datagram(sock_udp, buffer, (int)bytes_read, &addr_from))
+            continue;
+
+        /*
          * Here we have to handle the following "non standard" cases:
          * NewProtocol "Discovery" packet   60 bytes starting with 00 00 00 00 02
          * NewProtocol "General"   packet   60 bytes starting with 00 00 00 00 00
@@ -1640,6 +1770,18 @@ int main (int argc, char *argv[])
         }
 
         if (bytes_read == 60 && buffer[4] == 0x00) {
+            /* Protocol 1 has the receivers. Taking the general packet now would
+             * point the IQ at this client while the samples still leave as EP6
+             * to the other one, so it is refused — and said out loud, because a
+             * client that is being ignored deserves to know why. */
+            if (p1_active()) {
+                static bool said = false;
+                if (!said) {
+                    said = true;
+                    t_print("P2: ignoring a client while a protocol 1 client is streaming\n");
+                }
+                continue;
+            }
             // handle "general packet" of the new protocol
             memset(&addr_new, 0, sizeof(addr_new));
             addr_new.sin_family = AF_INET;
@@ -1860,6 +2002,10 @@ void *highprio_thread(void *data)
 
     t_print("Starting highprio_thread()\n");
     while (!do_exit) {
+        /* Protocol 1 owns the receivers; this client's high-priority packets
+         * would reconfigure them under it. Drained and dropped. */
+        if (p1_active()) { usleep(50000); continue; }
+
         if (!running) seqnum = 0;
 
         rc = recvfrom(hp_sock, hp_buffer, 1444, 0, (struct sockaddr *)&addr, &lenaddr);
@@ -2056,6 +2202,10 @@ void *ddc_specific_thread(void *data)
 
     t_print("Starting ddc_specific_thread()\n");
     while (!do_exit) {
+        /* Protocol 1 owns the receivers; this client's DDC-specific packets
+         * would reconfigure them under it. Drained and dropped. */
+        if (p1_active()) { usleep(50000); continue; }
+
         if (!running) {
             seqnum = 0;
             usleep(50000);
@@ -2127,40 +2277,7 @@ void *ddc_specific_thread(void *data)
                 mcb.rcb[i].output_rate = (rxrate[i] * 1000);
                 modified = 1;
 
-                switch(rxrate[i]) {
-                case 48:
-                    mcb.rcb[i].scale = 8000.0f;
-                    break;
-                case 96:
-                    mcb.rcb[i].scale = 6000.0f;
-                    break;
-                case 192:
-                    mcb.rcb[i].scale = 4000.0f;
-                    break;
-                case 384:
-                    /*
-                     * The ladder above is amplitude compensation for bandwidth:
-                     * a wider channel collects more noise power, so the same
-                     * spectral density arrives as larger samples and needs less
-                     * gain to display at the same level. That is a 1/sqrt(BW)
-                     * law, and the existing entries follow it — 48 kHz at 8000
-                     * gives 8000/sqrt(4) = 4000 at 192, which is exactly what
-                     * is there. (96's 6000 is the odd one out against the 5657
-                     * the law predicts; a round number, chosen by ear.)
-                     *
-                     * Continuing it: 8000/sqrt(8) = 2828.
-                     *
-                     * This sets a display level rather than anything the
-                     * decoder depends on, so it is worth a look on a real
-                     * client — a wrong value here is a spectrum that reads high
-                     * or low at 384 kHz and is correct everywhere else.
-                     */
-                    mcb.rcb[i].scale = 2828.0f;
-                    break;
-                default:
-                    mcb.rcb[i].scale = 4000.0f;
-                    break;
-                }
+                mcb.rcb[i].scale = scale_for_rate(rxrate[i]);
 
                 /* Rate change requires WebSocket reconnect (mode is baked into URL) */
                 rcb->reconnect_needed = 1;
@@ -2222,6 +2339,17 @@ void *hpstat_thread(void *data)
 
     t_print("Starting hpstat_thread()\n");
     while (!do_exit) {
+        /* Protocol 1's client-silence watchdog rides this thread's cadence: it
+         * is the one that already ticks whether or not a client is connected,
+         * and a stopped protocol 1 client would otherwise hold a receiver open
+         * against the UberSDR server indefinitely. Protocol 1 sends its own
+         * telemetry inside EP6, so nothing below this applies to it. */
+        p1_check_watchdog();
+        if (p1_active()) {
+            usleep(50000);
+            continue;
+        }
+
         if (!running || !gen_rcvd || addr_new.sin_port == 0 || ddcspec_sock < 0) {
             seqnum = 0;
             usleep(50000);
@@ -2365,8 +2493,15 @@ void *rx_thread(void *data)
 
     t_print("Starting rx_thread(%d)\n", myddc);
     while (!do_exit) {
-        if (!gen_rcvd || ddcenable[myddc] <= 0 || rxrate[myddc] == 0 || rxfreq[myddc] == 0
-            || addr_new.sin_port == 0) {
+        /* Protocol 1 owns the receivers and sends their samples itself. A
+         * protocol 2 client that got as far as a general packet leaves
+         * gen_rcvd and addr_new set, and protocol 1 then sets the enable, rate
+         * and frequency this guard checks — so without this the thread falls
+         * through to a handshake nothing will ever complete. It parks rather
+         * than misbehaves, but parking on a condition variable that cannot be
+         * signalled is not a state worth relying on. */
+        if (p1_active() || !gen_rcvd || ddcenable[myddc] <= 0 || rxrate[myddc] == 0
+            || rxfreq[myddc] == 0 || addr_new.sin_port == 0) {
             usleep(50000);
             seqnum = 0;
             continue;
@@ -2453,7 +2588,9 @@ void *wb_thread(void *data)
 
     t_print("Starting wb_thread()\n");
     while (!do_exit) {
-        if (!gen_rcvd || !running || !wbenable) {
+        /* Likewise: `running` is set by whichever protocol is streaming, so
+         * this has to name the one it belongs to. */
+        if (p1_active() || !gen_rcvd || !running || !wbenable) {
             usleep(50000);
             continue;
         }

@@ -942,11 +942,41 @@ static int ws_callback(struct lws *wsi,
         {
             /* Skip text (JSON) frames — only process binary PCM frames */
             if (!lws_frame_is_binary(wsi)) {
-                /* Log text messages for debugging */
                 char txt[256] = {0};
                 size_t tlen = len < sizeof(txt) - 1 ? len : sizeof(txt) - 1;
                 memcpy(txt, in, tlen);
-                t_print("ws_callback(%d): text msg: %s\n", rcb->rcvr_num, txt);
+
+                char type[32] = {0};
+                json_str(txt, "type", type, sizeof(type));
+
+                /*
+                 * The server sends a status after every tune, so at one line of
+                 * JSON per dial movement this was most of the log. It is worth
+                 * keeping rather than dropping — it is what showed the session
+                 * being downgraded to iq192 while the connect URL said iq384,
+                 * which nothing else reported — so it is summarised, and only
+                 * when it changes.
+                 *
+                 * Everything else prints in full. An error is rare and always
+                 * worth reading, and a type this bridge does not know about is
+                 * exactly the thing that should not be hidden.
+                 */
+                if (strcmp(type, "status") == 0) {
+                    char rate[16] = {0}, mode[16] = {0};
+                    json_num(txt, "sampleRate", rate, sizeof(rate));
+                    json_str(txt, "mode", mode, sizeof(mode));
+                    const int sr_reported = atoi(rate);
+                    if (sr_reported != rcb->last_status_rate ||
+                        strcmp(mode, rcb->last_status_mode) != 0) {
+                        rcb->last_status_rate = sr_reported;
+                        snprintf(rcb->last_status_mode, sizeof(rcb->last_status_mode),
+                                 "%s", mode);
+                        t_print("ws_callback(%d): server serving %s at %d Hz\n",
+                                rcb->rcvr_num, mode, sr_reported);
+                    }
+                } else {
+                    t_print("ws_callback(%d): %s\n", rcb->rcvr_num, txt);
+                }
                 break;
             }
 
@@ -1258,6 +1288,8 @@ void *ws_thread(void *arg)
          * Done before connecting rather than after, because the first frame can
          * arrive inside lws_service below. */
         pcmv4_stream_reset(&rcb->pcm);
+        rcb->last_status_rate = 0;
+        rcb->last_status_mode[0] = '\0';
 
         /*
          * And so does the rate this connection is expected to carry.

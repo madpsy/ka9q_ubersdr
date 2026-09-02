@@ -115,6 +115,12 @@ struct main_cb {
         int last_sample_rate;
         int last_channels;
 
+        /* Last status the server reported, so the same one is not logged again.
+         * It sends one after every tune, which is every time the operator moves
+         * the dial. */
+        int  last_status_rate;
+        char last_status_mode[16];
+
         /* raw receive buffer for WebSocket frames */
         uint8_t ws_rx_buf[WS_RX_BUF_SIZE];
 

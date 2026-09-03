@@ -64,12 +64,9 @@ import { edgeHit } from '../lib/edgeHit.js';
 import {
     onSpectrumPaused, resumeSpectrum, setSpectrumPaused, spectrumPaused, suspendSpectrum,
 } from '../lib/spectrumPause.js';
-import { perSecond, statLines, statsPlace } from '../lib/spectrumStats.js';
-import { readAppStats } from '../lib/appStats.js';
-import { bandRate } from '../lib/bandSpectrum.js';
-import { subscribeListeners } from '../lib/listeners.js';
-import { useChat } from '../chat/ChatContext.jsx';
-import { fetchMyIp, peekMyIp } from '../lib/myip.js';
+import { statLines, statsPlace } from '../lib/spectrumStats.js';
+import useStatsSample from '../lib/useStatsSample.js';
+import { countFrame } from '../lib/frameTicks.js';
 import { haptic } from '../lib/haptics.js';
 import { fetchWeather, windKmh } from '../lib/weather.js';
 import { feedInterval } from '../lib/serverFeeds.js';
@@ -897,108 +894,14 @@ function useStationOverlay(enabled) {
 // The stats readout, in a corner of the waterfall. Off unless the Display panel
 // says otherwise — see statLines for what each figure is and why it earns a line.
 //
-// Its own component and its own once-a-second timer, for the reason every other
-// live readout here is: the view re-renders on pointer moves and the draw loop
-// runs at frame rate, and neither of those should be tied to a diagnostic.
-//
-// Everything is differenced from counters rather than measured directly. The
-// packet path and the draw loop increment an integer and nothing more; the rate
-// is this timer's problem. That is also why the counters are read off the
-// connection objects rather than from `view` — a closure over context state would
-// be a second later, and the whole point is to be able to trust these numbers.
-function SpectrumStats({ place, bottom, gfx, onClose }) {
-    const { spectrumConn, audioConn, meters } = useRadio();
+// Its own component, for the reason every other live readout here is: the view
+// re-renders on pointer moves and the draw loop runs at frame rate, and neither
+// of those should be tied to a diagnostic. The gathering is lib/useStatsSample,
+// shared with the Stats panel, which charts the same figures over time; this
+// end of it is the wording and the corner.
+function SpectrumStats({ place, bottom, onClose }) {
     const [lines, setLines] = useState([]);
-    const prev = useRef(null);
-
-    // How many people are on the receiver, from the poll the Listeners panel
-    // uses. Shared and reference-counted (lib/listeners.js), so this joins the
-    // existing loop when that panel is open and starts one of its own — a request
-    // every ten seconds — when it is not. Held in a ref and read by the tick
-    // below rather than kept in state: it changes on its own schedule and there
-    // is no reason for it to redraw the readout off-beat.
-    // And how many of them are in the chat room. Whatever the Chat panel has —
-    // there is no second socket to open here, and none to open at all while that
-    // panel is hidden, which is when this reads zero and the bracket is dropped.
-    //
-    // Mirrored into a ref on every render rather than closed over: a chat message
-    // arriving must not rebuild the interval below, and the tick wants the latest
-    // value rather than the one from when it was scheduled.
-    const chatUsers = useChat().users.length;
-    const chatRef = useRef(0);
-    chatRef.current = chatUsers;
-
-    // The address the receiver sees this page on. Asked for once a page and
-    // shared with the start map, which asks for the same thing to say hello with —
-    // see lib/myip.js. Whichever of the two gets there first pays for it.
-    const ip = useRef((peekMyIp() || {}).ip || '');
-    useEffect(() => {
-        let alive = true;
-        fetchMyIp().then((d) => { if (alive && d && d.ip) ip.current = d.ip; });
-        return () => { alive = false; };
-    }, []);
-
-    const listeners = useRef(null);
-    useEffect(() => subscribeListeners((state) => {
-        const n = ((state && state.channels) || []).length;
-        // Zero is not a reading — the list always contains this session, so an
-        // empty one is a poll that has not landed or has failed. Leaving the last
-        // count is better than blinking to a number that cannot be true.
-        if (n > 0) listeners.current = n;
-    }), []);
-
-    useEffect(() => {
-        prev.current = null;
-        const tick = () => {
-            const g = gfx.current;
-            const now = performance.now();
-            const at = {
-                t: now,
-                bytes: spectrumConn.bytesIn || 0,
-                audio: (audioConn && audioConn.bytesIn) || 0,
-                frames: spectrumConn.framesIn || 0,
-                ticks: g.ticks || 0,
-            };
-            const was = prev.current;
-            prev.current = at;
-            // Nothing to difference against on the first tick: a rate needs two
-            // readings, and inventing one from a counter's absolute value would
-            // report a session's whole history as one second of traffic.
-            if (!was) return;
-            const ms = at.t - was.t;
-            const m = meters.current;
-            setLines(statLines({
-                fps: perSecond(at.ticks - was.ticks, ms),
-                framesIn: perSecond(at.frames - was.frames, ms),
-                bytesIn: perSecond(at.bytes - was.bytes, ms),
-                audioBytes: perSecond(at.audio - was.audio, ms),
-                // Already a rate, measured by the panel that owns that stream —
-                // null whenever it is closed, which is whenever the stream is.
-                bandBytes: bandRate(),
-                binCount: spectrumConn.binCount,
-                binHz: spectrumConn.binBandwidth,
-                divisor: spectrumConn.rateDivisor,
-                // The stream's own figures, not the AudioContext's — see
-                // AudioPlayer.streamRate for when those two disagree.
-                streamRate: m.streamRate,
-                streamChannels: m.channels,
-                queuedSec: m.queuedSec,
-                outLatSec: m.outLatencySec,
-                underruns: m.underruns,
-                listeners: listeners.current,
-                chatUsers: chatRef.current,
-                ip: ip.current,
-                // Asked once a second, and the asking is what makes the host
-                // measure — see lib/appStats.js. Nothing is read here while the
-                // readout is off, which is the point: this is the only line
-                // whose cost is paid outside the page.
-                app: readAppStats(),
-            }));
-        };
-        tick();
-        const t = setInterval(tick, STATS_MS);
-        return () => clearInterval(t);
-    }, [spectrumConn, audioConn, meters, gfx]);
+    useStatsSample(STATS_MS, (s) => setLines(statLines(s)));
 
     if (!lines.length) return null;
 
@@ -1131,18 +1034,6 @@ export default function SpectrumView() {
         dirty: false,
         dpr: 1,
         rowsPending: 0,
-        // Ever-increasing counters for the stats readout, differenced once a
-        // second by SpectrumStats. Declared here and not left to `g.ticks++` to
-        // create: incrementing an undefined field gives NaN, which then reads
-        // back through `|| 0` as a perfectly plausible zero — the readout showed
-        // "0.0" for both of these while the loop ran perfectly well.
-        //
-        // `ticks` is every animation frame, drawn or not. Counting only the drawn
-        // ones measured the *feed* — the loop paints when a frame arrives and
-        // sleeps otherwise, so "FPS" and "frames in" were the same number twice.
-        // The rate the browser is managing is a different fact, and the only one
-        // of the two this counter can tell you.
-        ticks: 0,            // animation frames, i.e. what the browser is managing
         autoFloor: -110,
         autoCeil: -40,
         hover: null,         // {x, y} in CSS px
@@ -1521,7 +1412,17 @@ export default function SpectrumView() {
 
         const paint = (ts) => {
             const g = gfx.current;
-            g.ticks++;              // before the early return: an idle frame is still a frame
+            // Before the early return: an idle frame is still a frame. Counted
+            // in lib/frameTicks.js rather than on `g`, because the Stats panel
+            // charts the same figure and cannot see this ref — and two counters
+            // for one fact is the arrangement that drifts.
+            //
+            // Every animation frame, drawn or not. Counting only the drawn ones
+            // measured the *feed*: the loop paints when a frame arrives and
+            // sleeps otherwise, so "FPS" and "frames in" were the same number
+            // twice. The rate the browser is managing is a different fact, and
+            // the only one of the two this counter can tell you.
+            countFrame();
             const d = dispRef.current;
             if (!g.bins) return;
 
@@ -3151,7 +3052,6 @@ export default function SpectrumView() {
                     <SpectrumStats
                         place={statsAt}
                         bottom={(wfScaleH || SCALE_H) + STATS_GAP}
-                        gfx={gfx}
                         onClose={() => display.set({ spectrumStats: 'off' })}
                     />
                 )}

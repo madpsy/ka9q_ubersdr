@@ -107,7 +107,11 @@ export function formatThroughput(...streams) {
 // Resolution reads better as Hz per bin than as a span: it is what decides
 // whether two carriers 20 Hz apart are one blob or two, which is the thing the
 // zoom is being changed for.
-function formatHzPerBin(hz) {
+//
+// Exported for the Stats panel, which prints the same figure on a card. The
+// wording of a reading is the part that has to agree wherever it is shown, and
+// a second copy of these thresholds is a second copy that goes stale.
+export function formatHzPerBin(hz) {
     if (!(hz > 0)) return null;
     if (hz < 1) return `${hz.toFixed(2)} Hz`;
     if (hz < 100) return `${hz.toFixed(1)} Hz`;

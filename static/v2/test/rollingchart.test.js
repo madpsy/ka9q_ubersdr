@@ -8,7 +8,9 @@
 // not happen.
 
 const assert = require('assert');
-const { curveControl, drawLag, medianGap, trimBefore, xAt, SPAN_MS } = require('./.build/rollingchart.cjs');
+const {
+    curveControl, curveThrough, drawLag, medianGap, trimBefore, xAt, SPAN_MS,
+} = require('./.build/rollingchart.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -115,6 +117,60 @@ t('the ends of the series, where prev is a and next is b, are still smooth', () 
 
 t('the span is the ten seconds the trace has always shown', () => {
     assert.strictEqual(SPAN_MS, 10000);
+});
+
+
+// --- the filled version of the same curve -------------------------------------
+//
+// The stacked NET chart is not strokes but closed shapes: out along the top of a
+// band, back along the bottom. That only holds together if the traced path is
+// the same curve the stroking version draws — a band whose edge bent differently
+// from the line over it would show as a sliver of the wrong colour — and if it
+// leaves the path open for the caller to close.
+
+// The smallest thing that records what was asked of a 2D context.
+function recorder() {
+    const calls = [];
+    return {
+        calls,
+        moveTo: (...a) => calls.push(['moveTo', ...a]),
+        lineTo: (...a) => calls.push(['lineTo', ...a]),
+        bezierCurveTo: (...a) => calls.push(['bezierCurveTo', ...a]),
+        beginPath: () => calls.push(['beginPath']),
+        closePath: () => calls.push(['closePath']),
+        stroke: () => calls.push(['stroke']),
+    };
+}
+
+t('a traced curve is one segment short of its points, and starts at the second', () => {
+    const pts = [{ x: 0, y: 10 }, { x: 10, y: 20 }, { x: 20, y: 15 }, { x: 30, y: 30 }];
+    const ctx = recorder();
+    curveThrough(ctx, pts);
+    // Three segments for four points, and nothing else: the caller has already
+    // moved to pts[0] and will close the shape itself.
+    assert.strictEqual(ctx.calls.length, 3);
+    assert.ok(ctx.calls.every((c) => c[0] === 'bezierCurveTo'));
+    // Each ends on its own point, in order.
+    assert.deepStrictEqual(ctx.calls.map((c) => [c[5], c[6]]), [[10, 20], [20, 15], [30, 30]]);
+});
+
+t('a traced curve bends exactly as the stroked one does', () => {
+    const pts = [{ x: 0, y: 10 }, { x: 10, y: 20 }, { x: 20, y: 15 }, { x: 30, y: 30 }];
+    const ctx = recorder();
+    curveThrough(ctx, pts);
+    for (let i = 1; i < pts.length; i++) {
+        const c = curveControl(pts[i - 2] || pts[i - 1], pts[i - 1], pts[i], pts[i + 1] || pts[i]);
+        assert.deepStrictEqual(
+            ctx.calls[i - 1].slice(1),
+            [c.c1x, c.c1y, c.c2x, c.c2y, pts[i].x, pts[i].y],
+        );
+    }
+});
+
+t('a single point is not a curve and draws nothing', () => {
+    const ctx = recorder();
+    curveThrough(ctx, [{ x: 0, y: 0 }]);
+    assert.deepStrictEqual(ctx.calls, []);
 });
 
 console.log(`${pass} ok`);

@@ -20,7 +20,7 @@ import {
     LABEL_INSET, NEEDLE_GAP, TICK_IN, TICK_OUT,
 } from '../lib/needle.js';
 import {
-    drawLag, medianGap, strokeCurve, trimBefore, xAt, SPAN_MS,
+    chartPoints, chartSurface, strokeCurve, trimBefore, SPAN_MS,
 } from '../lib/rollingChart.js';
 import useHoldPress from '../lib/useHoldPress.js';
 import { haptic } from '../lib/haptics.js';
@@ -332,42 +332,8 @@ function SquelchControl({ minimal }) {
     );
 }
 
-// Ready a canvas for this frame: size it to its box and hand back a context
-// with the box's pixel dimensions. Returns null when there is nothing to draw
-// on — a collapsed dock leaves the canvas at zero, and a chart drawn into
-// nothing is a frame's work thrown away.
-function surface(c) {
-    if (!c) return null;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const w = Math.round(c.clientWidth * dpr);
-    const ht = Math.round(c.clientHeight * dpr);
-    if (!w || !ht) return null;
-    if (c.width !== w || c.height !== ht) { c.width = w; c.height = ht; }
-    const ctx = c.getContext('2d');
-    ctx.clearRect(0, 0, w, ht);
-    return { ctx, w, ht, dpr };
-}
-
-// Where each reading sits on this frame's canvas.
-//
-// `now` is held one sample-interval back — see drawLag — so the right-hand edge
-// is a moment for which the trace is already known, and the newest reading
-// slides in from beyond the edge rather than appearing at it. Points either
-// side of the visible span are kept and simply drawn off it: the segments
-// crossing both edges have to come from somewhere, and the canvas clips.
-function place(points, now, w, y, value = (p) => p.v) {
-    const at = now - drawLag(medianGap(points));
-    const out = [];
-    for (const p of points) {
-        const v = value(p);
-        if (v == null) continue;
-        out.push({ x: xAt(p.t, at, SPAN_MS, w), y: y(v), p });
-    }
-    return out;
-}
-
 function drawSnr(canvas, points, now) {
-    const s = surface(canvas);
+    const s = chartSurface(canvas);
     if (!s) return;
     const { ctx, w, ht, dpr } = s;
     const vals = points.filter((p) => p.v != null).map((p) => p.v);
@@ -410,76 +376,26 @@ function drawSnr(canvas, points, now) {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     for (const r of runs) {
-        const pts = place(r, now, w, y);
+        const pts = chartPoints(r, now, w, y);
         // Coloured per segment on v1's ramp, so the trace says how good the
         // signal is and not just how it moved.
         strokeCurve(ctx, pts, (i) => snrColour(pts[i].p.v));
     }
 }
 
-function drawBuffer(canvas, points, now, bufferSec) {
-    const s = surface(canvas);
-    if (!s) return;
-    const { ctx, w, ht, dpr } = s;
-    if (points.length < 2) return;
-
-    // The scale is the operator's own ceiling, not the data: this chart is
-    // read against "what did I ask for", and a trace that renormalised as
-    // the queue drained would hide exactly the drain worth seeing. A little
-    // headroom above it, because the queue is allowed to sit at the limit.
-    const ceiling = Math.max(50, (bufferSec || 0.2) * 1000);
-    const hi = Math.max(ceiling * 1.15, ...points.map((p) => p.v));
-    const y = (v) => ht - (Math.max(0, Math.min(hi, v)) / hi) * ht;
-    const pts = place(points, now, w, y);
-
-    // Dropouts first, so the trace is drawn over them rather than lost
-    // behind. Full height and red: this is the failure the whole panel is
-    // watching for, and it is a moment, not a level. Each keeps its place in
-    // time and scrolls with the trace, which is the point of marking it here
-    // rather than counting it in a corner.
-    ctx.fillStyle = cssVar('--bad', '#f2646a');
-    for (const q of pts) {
-        if (!q.p.drops) continue;
-        ctx.fillRect(Math.round(q.x) - dpr / 2, 0, Math.max(1, 1.5 * dpr), ht);
-    }
-
-    // What was asked for, as a line to read the trace against.
-    ctx.strokeStyle = cssVar('--border-strong', 'rgba(255,255,255,0.18)');
-    ctx.lineWidth = dpr;
-    ctx.setLineDash([3 * dpr, 3 * dpr]);
-    ctx.beginPath();
-    ctx.moveTo(0, y(ceiling));
-    ctx.lineTo(w, y(ceiling));
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    const accent = cssVar('--accent', '#4aa8ff');
-    ctx.lineWidth = 1.6 * dpr;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    strokeCurve(ctx, pts, () => accent);
-}
-
 // `minimal` keeps the two meters and the squelch — what you watch and what you
-// ride — and drops the numeric readouts, the SNR trace and the buffer counters.
-// See the registry's `minimal`.
+// ride — and drops the numeric readouts and the SNR trace. See the registry's
+// `minimal`.
 export default function SignalPanel({ minimal }) {
-    const { running, audio } = useRadio();
+    const { running } = useRadio();
     const display = useDisplay();
     const touch = useMediaQuery(TOUCH_QUERY);
     const maxFps = resolveMaxFps(display.maxFps, touch);
     const m = useMeters(15);
     const canvasRef = useRef(null);
     const history = useRef([]);
-    // The buffer's own trace, sampled on the same clock and drawn the same way.
-    // Each entry carries the queue depth and how many dropouts happened in that
-    // sample — `underruns` is a running total, so what matters for a chart is
-    // the *increase*, which is a moment rather than a level.
-    const bufRef = useRef(null);
-    const bufHistory = useRef([]);
-    const seenUnderruns = useRef(0);
 
-    // Sampling only. Both traces are drawn by the frame loop below, on the
+    // Sampling only. The trace is drawn by the frame loop below, on the
     // display's clock rather than the meters' — see lib/rollingChart.js.
     useEffect(() => {
         const h = history.current;
@@ -494,21 +410,6 @@ export default function SignalPanel({ minimal }) {
     }, [m]);
 
     useEffect(() => {
-        const h = bufHistory.current;
-        const total = Number.isFinite(m.underruns) ? m.underruns : 0;
-        // Counters only ever climb, except across a reconnect where the player
-        // starts again from zero — treated as no dropouts rather than as a
-        // negative burst.
-        const drops = total > seenUnderruns.current ? total - seenUnderruns.current : 0;
-        seenUnderruns.current = total;
-        h.push({ t: performance.now(), v: Math.max(0, (m.queuedSec || 0) * 1000), drops });
-        trimBefore(h, performance.now() - SPAN_MS - KEEP_MS);
-        // On the meter clock, as above.
-    }, [m]);
-
-    // One loop for both charts: they show the same ten seconds on the same
-    // clock, and two loops would be two wake-ups a frame for one panel.
-    useEffect(() => {
         if (minimal) return undefined;
         let raf = 0;
         let timer = 0;
@@ -521,15 +422,13 @@ export default function SignalPanel({ minimal }) {
         const capMs = maxFps > 0 ? 1000 / maxFps : 0;
 
         const frame = () => {
-            const now = performance.now();
-            drawSnr(canvasRef.current, history.current, now);
-            drawBuffer(bufRef.current, bufHistory.current, now, audio.bufferSec);
+            drawSnr(canvasRef.current, history.current, performance.now());
             if (capMs) timer = setTimeout(() => { raf = requestAnimationFrame(frame); }, capMs);
             else raf = requestAnimationFrame(frame);
         };
         raf = requestAnimationFrame(frame);
         return () => { cancelAnimationFrame(raf); clearTimeout(timer); };
-    }, [minimal, maxFps, audio.bufferSec]);
+    }, [minimal, maxFps]);
 
 
     const power = m.basebandPower;
@@ -698,29 +597,6 @@ export default function SignalPanel({ minimal }) {
                     <div className="sparkline">
                         <canvas ref={canvasRef} />
                         <span className="sparkline__label">SNR, last 10 s</span>
-                    </div>
-
-                    {/* The two counters that used to be here, as one picture.
-                        Their current values stay in the label: the chart says
-                        when and the label says what, and neither is any use on
-                        its own. */}
-                    <div className="sparkline">
-                        <canvas ref={bufRef} />
-                        {/* The queue is a number that changes several times a
-                            second, and the caption is anchored by its right
-                            edge — so a reading going from 40 to 100 dragged
-                            every word before it sideways. The digits get a
-                            field of their own, wide enough for the three they
-                            can ever need and figures that are all one width, so
-                            the words either side hold still while the number
-                            underneath them changes. */}
-                        <span className="sparkline__label sparkline__label--bottom">
-                            {'Buffer '}
-                            <span className="sparkline__value">{(m.queuedSec * 1000).toFixed(0)}</span>
-                            {' ms'}
-                            {m.underruns > 0 && ` · ${m.underruns} drop${m.underruns === 1 ? '' : 's'}`}
-                            {', last 10 s'}
-                        </span>
                     </div>
 
                     {!running && <div className="note note--tight">Meters are live once the receiver is started.</div>}

@@ -15,9 +15,12 @@
 // left, which is what motion is. Nothing is invented: every point on screen is
 // a reading that happened, at the place its timestamp puts it.
 //
-// Pure, and separate from the panel, because the panel's job is canvas calls
-// and these are the parts that can be wrong in ways a screenshot will not show:
-// what is still in view, where a moment sits, and how a curve is bent.
+// Separate from the panel, because the panel's job is what to draw and these
+// are the parts that can be wrong in ways a screenshot will not show: what is
+// still in view, where a moment sits, and how a curve is bent. The arithmetic
+// above is pure; the two helpers at the foot take a canvas, and they are here
+// rather than in a panel because more than one panel draws one of these traces
+// — see SignalPanel's SNR and StatsPanel's buffer.
 
 /** How much time the chart shows. Ten seconds, as the SNR trace always has. */
 export const SPAN_MS = 10000;
@@ -130,4 +133,68 @@ export function strokeCurve(ctx, pts, colour) {
         ctx.bezierCurveTo(c.c1x, c.c1y, c.c2x, c.c2y, b.x, b.y);
         ctx.stroke();
     }
+}
+
+/**
+ * Continue the current path smoothly through `pts`, from the second onward.
+ *
+ * The stroking version above is one path per segment, because the SNR trace is
+ * coloured by its own value. A filled band cannot be: it is one closed shape —
+ * out along the top, back along the bottom — so the curve has to be traced into
+ * a path the caller opened and will close. Same control points, so a band's
+ * edge and a stroke over it are the same line.
+ *
+ * The caller has already moved to `pts[0]`; this adds the rest.
+ */
+export function curveThrough(ctx, pts) {
+    for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const prev = pts[i - 2] || a;
+        const next = pts[i + 1] || b;
+        const c = curveControl(prev, a, b, next);
+        ctx.bezierCurveTo(c.c1x, c.c1y, c.c2x, c.c2y, b.x, b.y);
+    }
+}
+
+/**
+ * Ready a canvas for this frame: size it to its box and hand back a context
+ * with the box's pixel dimensions. Returns null when there is nothing to draw
+ * on — a collapsed dock leaves the canvas at zero, and a chart drawn into
+ * nothing is a frame's work thrown away.
+ *
+ * Prefixed, as its neighbour is: a bare `surface` or `place` exported into a
+ * namespace this flat collides with a parameter of the same name three panels
+ * away, and test/unresolved.js reads such a collision as a missing import.
+ */
+export function chartSurface(c) {
+    if (!c) return null;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.round(c.clientWidth * dpr);
+    const ht = Math.round(c.clientHeight * dpr);
+    if (!w || !ht) return null;
+    if (c.width !== w || c.height !== ht) { c.width = w; c.height = ht; }
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, w, ht);
+    return { ctx, w, ht, dpr };
+}
+
+/**
+ * Where each reading sits on this frame's canvas.
+ *
+ * `now` is held one sample-interval back — see drawLag — so the right-hand edge
+ * is a moment for which the trace is already known, and the newest reading
+ * slides in from beyond the edge rather than appearing at it. Points either
+ * side of the visible span are kept and simply drawn off it: the segments
+ * crossing both edges have to come from somewhere, and the canvas clips.
+ */
+export function chartPoints(points, now, w, y, value = (p) => p.v) {
+    const at = now - drawLag(medianGap(points));
+    const out = [];
+    for (const p of points) {
+        const v = value(p);
+        if (v == null) continue;
+        out.push({ x: xAt(p.t, at, SPAN_MS, w), y: y(v), p });
+    }
+    return out;
 }

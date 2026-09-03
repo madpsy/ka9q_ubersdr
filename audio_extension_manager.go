@@ -43,6 +43,20 @@ type ActiveAudioExtension struct {
 	Conn          *websocket.Conn
 	Running       bool
 	StartedAt     time.Time
+
+	// Session the audio tap was installed on, captured at attach time.
+	// stopExtension used to look this up again by UserSessionID, which finds
+	// nothing once the session has left the manager's map -- and then closed
+	// the tap channel anyway, with the tap still installed on the session the
+	// audio receiver is holding. Keeping the pointer means the detach and the
+	// close always reach the session the channel was actually attached to.
+	Session *Session
+
+	// Guards the teardown in stopExtension. Two websocket connections can
+	// share a UserSessionID (same UUID, two tabs), so a replace-on-attach and
+	// a disconnect can reach the same record concurrently; without this the
+	// second one closes channels the first already closed.
+	stopOnce sync.Once
 }
 
 // NewAudioExtensionManager creates a new audio extension manager
@@ -173,6 +187,7 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 		Conn:          conn,
 		Running:       true,
 		StartedAt:     time.Now(),
+		Session:       session,
 	}
 
 	// Attach audio tap to session
@@ -452,29 +467,29 @@ func (aem *AudioExtensionManager) forwardResults(activeExtension *ActiveAudioExt
 
 // stopExtension stops an audio extension and cleans up resources
 func (aem *AudioExtensionManager) stopExtension(activeExtension *ActiveAudioExtension) {
-	if !activeExtension.Running {
-		return
-	}
+	activeExtension.stopOnce.Do(func() {
+		activeExtension.Running = false
 
-	activeExtension.Running = false
+		// Signal stop
+		close(activeExtension.StopChan)
 
-	// Signal stop
-	close(activeExtension.StopChan)
+		// Stop extension
+		if err := activeExtension.Extension.Stop(); err != nil {
+			log.Printf("AudioExtension: Error stopping extension: %v", err)
+		}
 
-	// Stop extension
-	if err := activeExtension.Extension.Stop(); err != nil {
-		log.Printf("AudioExtension: Error stopping extension: %v", err)
-	}
+		// Detach the audio tap and close it in one step. Detaching and then
+		// closing separately is what crashed the server on 2026-09-02: the
+		// audio receiver had already loaded the channel and its send landed
+		// after the close. See Session.CloseAudioExtensionTap.
+		if activeExtension.Session != nil {
+			activeExtension.Session.CloseAudioExtensionTap(activeExtension.AudioChan)
+		} else {
+			close(activeExtension.AudioChan)
+		}
 
-	// Detach audio tap from session
-	session := aem.findAudioSessionByUserID(activeExtension.SessionID)
-	if session != nil {
-		session.DetachAudioExtensionTap()
-	}
-
-	// Close channels
-	close(activeExtension.AudioChan)
-	close(activeExtension.ResultChan)
+		close(activeExtension.ResultChan)
+	})
 }
 
 // RemoveSession removes all audio extensions for a session (called when user disconnects)

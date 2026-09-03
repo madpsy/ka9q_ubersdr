@@ -3865,6 +3865,37 @@ a.btn { text-decoration: none; }
     font-variant-numeric: tabular-nums;
 }
 
+/* The key to a stacked chart, under the chart it belongs to.
+   Directly under and tight against it, because a legend a gap away from its
+   chart reads as a row of its own rather than as part of the picture. Small and
+   dim for the same reason the captions are: it is read once, when you first
+   meet the chart, and ignored for ever after. */
+.stats-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    margin-top: -2px;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.stats-legend__item { display: inline-flex; align-items: center; gap: 4px; }
+/* The same alpha the bands are filled at, so the swatch is the colour that is
+   actually on the chart rather than the colour it was mixed from. */
+.stats-legend__swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    opacity: 0.45;
+}
+
+/* An address is longer than half a dock column, so its card takes the whole
+   row rather than wrapping inside a box sized for a three-digit reading. */
+.stats-cards__wide { grid-column: 1 / -1; }
+.stats-cards__wide .readout { width: 100%; }
+/* An IPv6 address has no spaces in it and will not wrap on its own; without
+   this it pushes the dock wider than the column it is in. */
+.stats-cards__wide .readout__num { overflow-wrap: anywhere; text-align: left; }
+
 /* Cursor/peak readout over the spectrum, the waterfall and the audio scope —
    v1 shows the same two lines on all of them. */
 .spec-tip {

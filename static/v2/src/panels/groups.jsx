@@ -113,8 +113,14 @@ export const GROUPS = [
         // The things around the radio rather than the radio. Chat leads it: it
         // is the one panel in here somebody is waiting on an answer from, and
         // the only one that badges.
+        //
+        // Stats is next to Receiver info for the reason it is next to it in the
+        // dock: both are readings of the session rather than of the signal, one
+        // as it stands and one as it moves. It is not under Audio with the
+        // sound controls even though its first chart is the audio buffer — that
+        // chart is about the sound arriving, not about how it is shaped.
         panels: [
-            'chat', 'listeners', 'status', 'news',
+            'chat', 'listeners', 'status', 'stats', 'news',
             'weather', 'clocks', 'ranking', 'games',
         ],
     },

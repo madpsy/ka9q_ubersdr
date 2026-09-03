@@ -199,6 +199,12 @@ export const Icon = {
     // is what the baseline says.
     Bars: (p) => <Svg {...p}><path d="M4 4v16h16" /><path d="M8 20v-5M12.5 20V8M17 20v-8" /></Svg>,
 
+    // A trace on an axis, for the Stats panel. Deliberately not Bars: that is
+    // the band measurements, a set of figures compared against each other,
+    // where this is one figure watched over time — which is what every chart in
+    // Stats is.
+    Trace: (p) => <Svg {...p}><path d="M4 4v16h16" /><path d="M7 15.5 10.5 11l3 2.5L18 7" /></Svg>,
+
     // The fallback for a custom panel whose manifest names an icon this build
     // does not have — a panel with something in it, which is all that can be
     // said about one from here. Deliberately not Puzzle or Plug: those already

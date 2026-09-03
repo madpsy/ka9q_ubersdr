@@ -119,7 +119,7 @@ Local bookmarks · Markers · Measure · Media controls · Mini Games · Most us
 Multipad · NAVTEX · News · Noise reduction · Notifications · Packet
 Quick bands · Radio control · Ranking · Receiver · Receiver info
 Recorder · Rotator · Scanner · SDR control · Shortcuts · Signal
-Space weather · Spectrogram · Spots · SSTV · VFOs · Voice activity
+Space weather · Spectrogram · Spots · SSTV · Stats · VFOs · Voice activity
 Voice skimmer · Weather · Weather fax · World clocks
 ```
 
@@ -146,7 +146,7 @@ Compass Copy Custom Dice Download Drag Expand External Eye EyeOff Fax
 Gauge Grid Info Keyboard Knob Layers Link List Lock LockScreen Mic Minus
 Moon Morse Mute News Packet Pad Pause Picture Play Plug Plus Podium
 Pointer Power Puzzle Radio Record Reset RotateLeft RotateRight Scan
-Search Share Sliders Snail Span Stop Sun Target Teleprinter Tick Trash
+Search Share Sliders Snail Span Stop Sun Target Teleprinter Tick Trace Trash
 Unlock Upload Users ViewSpectrum ViewSplit ViewWaterfall Volume Waves
 Wf2D Wf3D WfBoth Wheel Wind ZoomIn ZoomOut
 ```

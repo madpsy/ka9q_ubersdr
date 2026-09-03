@@ -76,6 +76,7 @@ import AnnouncementsPanel from './AnnouncementsPanel.jsx';
 import ShortcutsPanel from './ShortcutsPanel.jsx';
 import DisplayPanel from './DisplayPanel.jsx';
 import StatusPanel from './StatusPanel.jsx';
+import StatsPanel from './StatsPanel.jsx';
 import ListenersPanel from './ListenersPanel.jsx';
 import LayoutPanel from './LayoutPanel.jsx';
 import NotificationsPanel from './NotificationsPanel.jsx';
@@ -916,6 +917,33 @@ const BUILT_IN = [
         defaultOpen: false,
         minimal: true,
         Component: StatusPanel,
+    },
+    // Directly under Receiver info, because it is the same question with the
+    // working shown: that panel is this session's numbers as they stand, and
+    // this is the ones worth watching move. The audio buffer is the first of
+    // them — it used to sit under the meters in Signal, where a chart of how
+    // the sound is getting here read as a chart about the signal.
+    //
+    // Ships collapsed. A delivery chart is what you open when the audio
+    // stutters, not something you operate with; and it draws at frame rate
+    // while it is open, which is a further reason not to leave it running for
+    // everybody by default — a collapsed dock leaves the canvas at zero and the
+    // loop with nothing to do.
+    //
+    // Minimal: the audio queue and the connection, and nothing else. Those two
+    // are the charts with a failure in them — one draws the stutter and the
+    // other draws the stall that caused it — so between them they answer "is
+    // something wrong" in a fraction of the height. The frame rate, the feed
+    // rate and the process load are the follow-up question, and the cards are
+    // facts that were true before you looked.
+    {
+        id: 'stats',
+        title: 'Stats',
+        icon: <Icon.Trace />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: StatsPanel,
     },
     // Ten games, one at a time — the widget of the same name, native. On the
     // right dock with the other things you are not operating the receiver with,

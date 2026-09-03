@@ -443,6 +443,8 @@ esbuild ../src/lib/measureTool.js --bundle --format=cjs --platform=node \
     --outfile=.build/measuretool.cjs --log-level=warning
 esbuild measurepanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/measurepanel.cjs --log-level=warning
+esbuild statspanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/statspanel.cjs --log-level=warning
 
 node unresolved.js
 node protocol.test.js
@@ -616,3 +618,4 @@ node tuningrange.test.js
 node bandtune.test.js
 node measure.test.js
 node measurepanel.test.js
+node statspanel.test.js

@@ -3831,18 +3831,45 @@ func (s *Session) HasAudioExtension() bool {
 
 // SendAudioToExtension sends PCM audio with timestamps to the attached extension (if any)
 // This should be called from the audio receiver when sending audio to the user
+//
+// The read lock is held across the send, not merely across the load of the
+// channel. Releasing it first left this holding a copy of a channel that the
+// detach path was free to close in the gap, and a send on a closed channel is
+// "ready", so the select chose it over the default and panicked -- the
+// "panic: send on closed channel" of 2026-09-02, where an sstv detach landed
+// between the load and the send. Holding the read lock makes
+// CloseAudioExtensionTap's write lock wait for every in-flight send instead.
+// The send is non-blocking (default case), so the lock is never held for
+// longer than a channel enqueue.
 func (s *Session) SendAudioToExtension(audioSample AudioSample) {
 	s.audioExtensionMu.RLock()
-	extensionChan := s.audioExtensionChan
-	s.audioExtensionMu.RUnlock()
+	defer s.audioExtensionMu.RUnlock()
 
-	if extensionChan != nil {
-		select {
-		case extensionChan <- audioSample:
-		default:
-			// Drop if extension can't keep up (non-blocking)
-		}
+	if s.audioExtensionChan == nil {
+		return
 	}
+
+	select {
+	case s.audioExtensionChan <- audioSample:
+	default:
+		// Drop if extension can't keep up (non-blocking)
+	}
+}
+
+// CloseAudioExtensionTap detaches ch and closes it in a single critical
+// section. Extension consumers use the close as their exit signal, so the
+// channel has to be closed rather than merely dropped; doing it under the
+// write lock is what makes that safe, since no sender can hold the read lock
+// at the same moment. Only clear the field if ch is still the attached tap --
+// a later attach may already have installed its own, which must survive.
+func (s *Session) CloseAudioExtensionTap(ch chan AudioSample) {
+	s.audioExtensionMu.Lock()
+	defer s.audioExtensionMu.Unlock()
+
+	if s.audioExtensionChan == ch {
+		s.audioExtensionChan = nil
+	}
+	close(ch)
 }
 
 // audioKeepaliveInterval is how often keepaliveAudioChannels refreshes the

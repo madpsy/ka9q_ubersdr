@@ -13,6 +13,15 @@
 # of the samples that went into it. The stream covers what the format can do:
 # ordinary mono audio, silent packets carrying no body, an escape to verbatim
 # samples, a sample-rate change, and the interleaved I/Q this bridge uses.
+#
+# testdata/pcmv4_rice_edge.bin covers what a recording of ordinary traffic will
+# not: a Rice codeword whose unary run is exactly 63 bits long and is counted
+# out of a full 64-bit accumulator, so the decoder shifts by 64. Go defines that
+# as zero and C does not, and the difference is silent -- the accumulator keeps
+# its bits, the packet decodes as noise, and the predictor adapts to the noise.
+# It appeared roughly once every quarter of a million packets on live IQ, which
+# is often enough to break a receiver in minutes and rare enough that a recorded
+# fixture only holds one by luck.
 set -uo pipefail
 
 cd "$(dirname "$0")"
@@ -20,6 +29,7 @@ BUILD="${TMPDIR:-/tmp}/ubersdr-hpsdr-test"
 mkdir -p "$BUILD"
 
 EXPECTED_SHA256=ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c13948f78d1
+RICE_EDGE_SHA256=83e3d94b509efbf7a212a3e10193b3eb281fe1460cbfeef6aabe474c92a718c7
 
 pass=0; fail=0
 
@@ -43,6 +53,22 @@ if [ "$got" = "$EXPECTED_SHA256" ]; then
     echo "PASS pcmv4-conformance"; pass=$((pass+1))
 else
     echo "FAIL pcmv4-conformance: samples hash to $got, want $EXPECTED_SHA256"; fail=$((fail+1))
+fi
+
+got=$("$BUILD/pcmv4_conformance" testdata/pcmv4_rice_edge.bin 2>/dev/null | sha256sum | cut -d" " -f1)
+if [ "$got" = "$RICE_EDGE_SHA256" ]; then
+    echo "PASS pcmv4-rice-edge"; pass=$((pass+1))
+else
+    echo "FAIL pcmv4-rice-edge: samples hash to $got, want $RICE_EDGE_SHA256"; fail=$((fail+1))
+fi
+
+# The same fixture under the sanitizers, where the shift itself is the report
+# rather than the samples it corrupted: UBSan names an over-wide shift exactly.
+if "$BUILD/pcmv4_conformance_asan" testdata/pcmv4_rice_edge.bin >/dev/null 2>"$BUILD/asan_edge.log" &&
+   ! grep -q "runtime error\|AddressSanitizer" "$BUILD/asan_edge.log"; then
+    echo "PASS pcmv4-rice-edge-sanitizers"; pass=$((pass+1))
+else
+    echo "FAIL pcmv4-rice-edge-sanitizers"; sed 's/^/    /' "$BUILD/asan_edge.log" | head -20; fail=$((fail+1))
 fi
 
 if "$BUILD/pcmv4_conformance_asan" testdata/pcmv4_stream.bin >/dev/null 2>"$BUILD/asan.log"; then

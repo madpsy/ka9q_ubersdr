@@ -78,6 +78,19 @@ struct UberSDRSharedStatus {
         int16_t iqBuffer[IQ_BUFFER_SIZE];  // Interleaved I/Q samples (big-endian)
         volatile int32_t iqBufferWritePos;  // Current write position
         volatile int32_t iqBufferReadPos;   // Last read position (for monitor)
+
+        // Frames of silence fed while the ring buffer was building its cushion
+        // or while the socket was down, counted apart from ringBufferUnderruns
+        // so the two can be told apart -- a receiver that spends five minutes
+        // reconnecting is drained the whole time, deliberately, to keep the
+        // other seven in step, and reporting that as an underrun buried the
+        // handful that meant the buffer had really run dry.
+        //
+        // Appended at the end of the struct on purpose: every field before it
+        // keeps its offset, so a monitor built before this one still reads the
+        // rest correctly. Appending an int is also safe across the DLL's 32-bit
+        // and the monitor's 64-bit build, which the note in build.sh explains.
+        int ringBufferSilence;
     } receivers[MAX_RX_COUNT];
     
     // Global statistics

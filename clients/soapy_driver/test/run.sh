@@ -88,13 +88,30 @@ check() {
 # the samples would catch it. The stream covers ordinary mono audio, silent
 # packets carrying no body, an escape to verbatim samples, a sample-rate change
 # and the interleaved I/Q this driver actually uses.
+#
+# testdata/pcmv4_rice_edge.bin covers what a recording of ordinary traffic will
+# not: a Rice codeword whose unary run is exactly 63 bits long and is counted
+# out of a full 64-bit accumulator, so the decoder shifts by 64. Go defines that
+# as zero and C++ does not, and the difference is silent -- the accumulator
+# keeps its bits, the packet decodes as noise, and the predictor adapts to the
+# noise. It appeared roughly once every quarter of a million packets on live IQ,
+# which is often enough to break a receiver in minutes and rare enough that a
+# recorded fixture only holds one by luck.
 PCMV4_SHA256=ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c13948f78d1
+PCMV4_RICE_EDGE_SHA256=83e3d94b509efbf7a212a3e10193b3eb281fe1460cbfeef6aabe474c92a718c7
 echo "== cases =="
 got=$("$BUILD/pcmv4_conformance" testdata/pcmv4_stream.bin 2>/dev/null | sha256sum | cut -d" " -f1)
 if [ "$got" = "$PCMV4_SHA256" ]; then
     echo "PASS pcmv4-conformance"; pass=$((pass+1))
 else
     echo "FAIL pcmv4-conformance: decoded samples hash to $got, want $PCMV4_SHA256"; fail=$((fail+1))
+fi
+
+got=$("$BUILD/pcmv4_conformance" testdata/pcmv4_rice_edge.bin 2>/dev/null | sha256sum | cut -d" " -f1)
+if [ "$got" = "$PCMV4_RICE_EDGE_SHA256" ]; then
+    echo "PASS pcmv4-rice-edge"; pass=$((pass+1))
+else
+    echo "FAIL pcmv4-rice-edge: decoded samples hash to $got, want $PCMV4_RICE_EDGE_SHA256"; fail=$((fail+1))
 fi
 
 # Unreachable server: nothing is listening on this port at all. The driver must still

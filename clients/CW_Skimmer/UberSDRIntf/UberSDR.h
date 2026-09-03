@@ -36,8 +36,35 @@ namespace UberSDRIntf
         CRITICAL_SECTION lock;
         int underrunCount;
         int overrunCount;
-        
-        RingBuffer() : writePos(0), readPos(0), capacity(0), underrunCount(0), overrunCount(0) {
+
+        // The cushion the buffer builds before the consumer takes anything
+        // from it, and whether it is building one now.
+        //
+        // Samples do not arrive one at a time. Measured against a live
+        // receiver, eight 96 kHz IQ streams arrive in bursts of about 20 ms
+        // with occasional gaps of 90, so a buffer the consumer starts draining
+        // the instant the socket opens spends the first tenth of a second
+        // empty and then rides at whatever level the burst pattern happens to
+        // leave. Holding a receiver out of the mix until it has a cushion
+        // costs that receiver a tenth of a second of silence once, and removes
+        // every underrun after it: simulated against a recorded arrival trace,
+        // 7,200 underruns per receiver per start became none.
+        size_t primeTarget;
+        bool priming;
+
+        // Frames of silence fed while priming or while the socket is down,
+        // counted apart from underrunCount.
+        //
+        // They were the same figure, and that is what made the monitor's
+        // underrun column unreadable. A receiver whose socket drops keeps
+        // being drained -- deliberately, so the other seven stay in step --
+        // so five minutes off the air was 29 million "underruns" that stayed
+        // on the display for the rest of the session, drowning the handful
+        // that meant the buffer had actually run dry under load.
+        int silenceCount;
+
+        RingBuffer() : writePos(0), readPos(0), capacity(0), underrunCount(0), overrunCount(0),
+                       primeTarget(0), priming(true), silenceCount(0) {
             InitializeCriticalSection(&lock);
         }
         
@@ -45,7 +72,7 @@ namespace UberSDRIntf
             DeleteCriticalSection(&lock);
         }
         
-        void init(size_t capacityInSamples) {
+        void init(size_t capacityInSamples, size_t primeSamples) {
             EnterCriticalSection(&lock);
             capacity = capacityInSamples;
             buffer.resize(capacity * 2);  // *2 for I and Q
@@ -53,6 +80,20 @@ namespace UberSDRIntf
             readPos = 0;
             underrunCount = 0;
             overrunCount = 0;
+            silenceCount = 0;
+            primeTarget = primeSamples;
+            priming = true;
+            LeaveCriticalSection(&lock);
+        }
+
+        // Build the cushion again from here. Called wherever a socket is
+        // opened: the stream restarts with an empty buffer, and a consumer
+        // that resumes on the first frame to arrive would then underrun on
+        // every gap in the burst pattern, for the life of the connection,
+        // because nothing else ever puts a cushion back.
+        void reprime() {
+            EnterCriticalSection(&lock);
+            priming = true;
             LeaveCriticalSection(&lock);
         }
         
@@ -86,9 +127,25 @@ namespace UberSDRIntf
         
         bool read(float& I, float& Q) {
             EnterCriticalSection(&lock);
-            
-            if (available() < 1) {
+
+            const size_t avail = available();
+
+            if (priming) {
+                if (avail < primeTarget) {
+                    silenceCount++;
+                    LeaveCriticalSection(&lock);
+                    return false;  // Still building the cushion
+                }
+                priming = false;
+            }
+
+            if (avail < 1) {
                 underrunCount++;
+                // Rebuild the cushion rather than grind on an empty buffer.
+                // Without this the first gap that catches the buffer out
+                // leaves it with nothing, and every gap after it underruns
+                // again -- one loss becomes a permanent condition.
+                priming = true;
                 LeaveCriticalSection(&lock);
                 return false;  // Buffer empty
             }
@@ -105,6 +162,23 @@ namespace UberSDRIntf
         float fillLevel() {
             // Returns fill level as percentage (0.0 to 1.0)
             return (float)available() / (float)capacity;
+        }
+
+        // available() under the lock, for the consumer's rate trim: it reads
+        // this once a second from another thread, where an unlocked read of
+        // the two cursors could tear.
+        size_t availableSafe() {
+            EnterCriticalSection(&lock);
+            const size_t n = available();
+            LeaveCriticalSection(&lock);
+            return n;
+        }
+
+        bool isPriming() {
+            EnterCriticalSection(&lock);
+            const bool p = priming;
+            LeaveCriticalSection(&lock);
+            return p;
         }
     };
 

@@ -569,6 +569,27 @@ void ConsumeRingBuffers()
     QueryPerformanceFrequency(&frequency);
     int64_t samplesProcessed = 0;
     bool timingInitialized = false;
+
+    // Pacing anchor. Each sample's deadline is measured from here rather than
+    // from the start of the run, so trimConsumeRate below can change the
+    // interval without stepping the schedule.
+    //
+    // It has to be trimmable because the producer and the consumer run on two
+    // different clocks that nothing couples: samples are produced against the
+    // receiver's GPS-disciplined sample clock and consumed against this PC's
+    // performance counter. Measured against a live receiver the two differ by
+    // of the order of 100 ppm, which walks the ring buffer's fill level by
+    // roughly 90 ms an hour -- so a consumer running free at the nominal rate
+    // has to finish a long session at one stop or the other. Simulated against
+    // an hour of recorded arrivals at -100 ppm the level reached 620 ms and
+    // was still climbing, on its way to the 2000 ms cap and then to dropping
+    // what arrives; at +100 ppm it sat on the floor and underran steadily.
+    // Neither end recovers on its own, and a skimmer runs for days.
+    int64_t anchorTicks = 0;
+    int64_t anchorSample = 0;
+    int64_t lastTrimSample = 0;
+    double ticksPerSample = 0.0;
+    double nominalTicksPerSample = 0.0;
     
     std::stringstream ss;
     ss << "Ring buffer consumer: High-resolution timing enabled (frequency: "
@@ -589,6 +610,11 @@ void ConsumeRingBuffers()
         if (!timingInitialized) {
             QueryPerformanceCounter(&startTime);
             samplesProcessed = 0;
+            nominalTicksPerSample = (double)frequency.QuadPart / (double)gSampleRate;
+            ticksPerSample = nominalTicksPerSample;
+            anchorTicks = startTime.QuadPart;
+            anchorSample = 0;
+            lastTrimSample = 0;
             timingInitialized = true;
             
             ss.str("");
@@ -596,10 +622,61 @@ void ConsumeRingBuffers()
             write_text_to_log_file(ss.str());
         }
         
+        // Follow the receiver's sample clock, once a second.
+        //
+        // The ring buffer's fill level is the integral of the difference
+        // between the two clocks, so nudging the consume interval from that
+        // level is exactly what makes the long-run rates equal -- and it
+        // settles the level at the target rather than wherever the burst
+        // pattern happened to leave it.
+        //
+        // The mean is taken over the receivers that are connected and past
+        // their priming cushion. A receiver whose socket is down holds no data
+        // and would otherwise drag the correction to its floor and starve the
+        // seven that are still up.
+        //
+        // Authority is capped at 500 ppm: several times any crystal's error,
+        // far too small to matter to a demodulator, and small enough that a
+        // misread level cannot run the schedule away.
+        if (samplesProcessed - lastTrimSample >= (int64_t)gSampleRate) {
+            // Where this sample was already due under the current interval.
+            // Anchoring there rather than at "now" makes the retrim a pure
+            // reparameterisation: the deadline for this sample is unchanged.
+            const int64_t here = anchorTicks +
+                (int64_t)((double)(samplesProcessed - anchorSample) * ticksPerSample);
+
+            double levelSum = 0.0;
+            int levelCount = 0;
+            for (int rx = 0; rx < gSet.RecvCount; rx++) {
+                if (!myUberSDR.receivers[rx].active) continue;
+                if (myUberSDR.receivers[rx].state != CONNECTED) continue;
+                if (myUberSDR.receivers[rx].ringBuffer.isPriming()) continue;
+                levelSum += (double)myUberSDR.receivers[rx].ringBuffer.availableSafe();
+                levelCount++;
+            }
+
+            if (levelCount > 0) {
+                const double target = (double)((gSampleRate * RING_TARGET_MS) / 1000);
+                const double err = levelSum / (double)levelCount - target;
+
+                // A level error of one whole second's worth of samples asks for
+                // a 2% rate change, so the cap below bites once the level is
+                // about 25 ms off target and the correction is proportional
+                // within that.
+                double corr = 0.02 * err / (double)gSampleRate;
+                if (corr > 500e-6)  corr = 500e-6;
+                if (corr < -500e-6) corr = -500e-6;
+
+                anchorTicks = here;
+                anchorSample = samplesProcessed;
+                ticksPerSample = nominalTicksPerSample / (1.0 + corr);
+            }
+            lastTrimSample = samplesProcessed;
+        }
+
         // Calculate target time for this sample (in performance counter ticks)
-        // Target = startTime + (samplesProcessed * ticksPerSecond / sampleRate)
-        int64_t targetTicks = startTime.QuadPart +
-            ((samplesProcessed * frequency.QuadPart) / gSampleRate);
+        int64_t targetTicks = anchorTicks +
+            (int64_t)((double)(samplesProcessed - anchorSample) * ticksPerSample);
         
         // Try to read one sample from each active receiver's ring buffer
         bool anyBufferEmpty = false;
@@ -764,6 +841,8 @@ void ConsumeRingBuffers()
                             gpSharedStatus->receivers[i].ringBufferFillLevel = fillLevel;
                             gpSharedStatus->receivers[i].ringBufferOverruns = overruns;
                             gpSharedStatus->receivers[i].ringBufferUnderruns = underruns;
+                            gpSharedStatus->receivers[i].ringBufferSilence =
+                                myUberSDR.receivers[i].ringBuffer.silenceCount;
                             gpSharedStatus->receivers[i].ringBufferCapacity = (int)myUberSDR.receivers[i].ringBuffer.capacity;
                         }
                     }

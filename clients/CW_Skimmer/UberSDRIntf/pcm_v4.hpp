@@ -452,8 +452,20 @@ inline bool riceDecodeResiduals(const uint8_t *src, size_t len,
             const unsigned c = predTrailingZeros64(~acc);
             if (c < nbits) {
                 q += c;
-                acc >>= (c + 1);
-                nbits -= (c + 1);
+                // The shift is by c+1, which reaches 64 when a 63-bit unary run
+                // is counted out of a full accumulator -- nbits tops out at
+                // exactly 64 because the refill runs while nbits <= 56. Go's
+                // shift yields zero there; a C++ shift of a uint64_t by 64 is
+                // undefined, and on x86 the count is taken modulo 64, so the
+                // accumulator keeps every bit it had and the next refill ORs
+                // fresh bytes into stale ones. The rest of the packet then
+                // decodes as garbage, which the backward-adaptive predictor
+                // feeds into its taps -- so the stream stays wrong for the life
+                // of the connection, silently, unless the damage happens to
+                // make the bitstream unparseable.
+                const unsigned sh = c + 1;
+                acc = (sh >= 64) ? 0 : (acc >> sh);
+                nbits -= sh;
                 break;
             }
             if (i >= len) {

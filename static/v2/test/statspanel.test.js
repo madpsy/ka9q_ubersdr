@@ -93,6 +93,13 @@ function cards(tree) {
 
 const cardNamed = (tree, label) => cards(tree).find((c) => c.label === label);
 
+/** The colours the stacked chart's key is drawn in, bottom of the stack first. */
+function legendColours(tree) {
+    return deep(tree)
+        .filter((n) => n && n.props && n.props.className === 'stats-legend__swatch')
+        .map((n) => String(n.props.style.background));
+}
+
 /**
  * Every chart caption in a tree, whitespace collapsed.
  *
@@ -296,10 +303,34 @@ t('the stacked chart has a swatch and a name for each of its three streams', () 
     const items = deep(tree).filter((n) => n && n.props && n.props.className === 'stats-legend__item');
     assert.strictEqual(items.length, 3);
     assert.deepStrictEqual(items.map((n) => say(n).trim()), ['Spectrum', 'Audio', 'Band']);
-    const swatches = deep(tree).filter((n) => n && n.props && n.props.className === 'stats-legend__swatch');
+    const colours = legendColours(tree);
     // Three distinct colours, or the legend is decoration rather than a key.
-    const colours = swatches.map((n) => n.props.style.background);
     assert.strictEqual(new Set(colours).size, 3, colours.join(', '));
+});
+
+t('the legend cannot be repainted by the operator picking an accent', () => {
+    // This is the bug the palette was changed for. --accent is the Display
+    // panel's to set, and two of the presets in lib/uiColors.js put it straight
+    // on top of a semantic token: Amber's #ffb000 landed on --warn, so Spectrum
+    // and Band came out the same colour, and Phosphor's #35e07a lands on
+    // --good, which would have done the same to Spectrum and Audio.
+    //
+    // A literal hex is the whole fix, so a literal hex is what is asserted: no
+    // var(), and nothing that could resolve to one.
+    for (const c of legendColours(mount().tree)) {
+        assert.ok(/^#[0-9a-f]{6}$/i.test(c), `${c} is not a fixed colour`);
+    }
+});
+
+t('no series borrows a colour that means how something is doing', () => {
+    // --good, --warn and --bad say whether a thing is healthy. A stream is not
+    // healthy or unhealthy, it is a stream — an amber band would read as a
+    // warning about the band spectrum socket. Checked against the stylesheet's
+    // own values rather than by eye.
+    const SEMANTIC = ['#45d69a', '#f2b544', '#f2646a'];
+    for (const c of legendColours(mount().tree)) {
+        assert.ok(!SEMANTIC.includes(c.toLowerCase()), `${c} is a semantic colour`);
+    }
 });
 
 t('only where a host can answer: no process charts in a browser', () => {

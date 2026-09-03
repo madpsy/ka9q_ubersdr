@@ -51,15 +51,44 @@ const KEEP_MS = 1000;
 // second whatever the caller asks for.
 const SAMPLE_MS = 500;
 
-// The stacked NET chart's three streams, bottom to top, with the tokens they
-// are drawn in. Ordered by how much they usually are and how much can be done
-// about them: the spectrum is the bulk of it and has zoom, poll rate and a
-// pause behind it; the audio is a fixed drip you cannot tune away; the band
-// panel is the one that comes and goes.
+// The stacked NET chart's three streams, bottom to top, with the colour each is
+// drawn in. Ordered by how much they usually are and how much can be done about
+// them: the spectrum is the bulk of it and has zoom, poll rate and a pause
+// behind it; the audio is a fixed drip you cannot tune away; the band panel is
+// the one that comes and goes.
+//
+// ── Why these are fixed hexes and not the theme's tokens ─────────────────────
+//
+// This started as --accent, --good, --warn, and that was wrong twice over.
+//
+// --accent is the operator's, not the theme's: the Display panel's picker sets
+// it to anything, and two of the presets shipped in lib/uiColors.js put it
+// straight on top of one of the other two — Amber is #ffb000 against a --warn
+// of #f2b544, so Spectrum and Band were the same colour, and Phosphor is
+// #35e07a against a --good of #45d69a, so Spectrum and Audio would have been.
+// A key with two identical swatches in it is not a key. No palette built out of
+// a value somebody else can change can promise that its own colours differ.
+//
+// And the other two carry meaning. --good, --warn and --bad say how something
+// is doing, and this chart is not saying that about anything: an amber band is
+// a warning about the band spectrum stream, which is simply a stream. The red
+// dropout marks on the buffer chart are --bad because they really are a
+// failure; nothing here is.
+//
+// So: three hues of this chart's own, in the manner of lib/hfdl.js's band
+// palette — chosen to hold up on both themes at the alpha they are filled at,
+// and blue/orange first because that is the pair that survives every common
+// colour vision deficiency. They are also the two streams that are always both
+// present; violet is the one that comes and goes.
+//
+// Colour is the second encoding here in any case. The bands are stacked in a
+// fixed order, so position says which is which and the legend is read bottom-up
+// to match — a chart that can still be read by somebody who cannot separate two
+// of the hues.
 const NET_SERIES = [
-    { key: 'spec', label: 'Spectrum', token: '--accent', fallback: '#08a2fb' },
-    { key: 'audio', label: 'Audio', token: '--good', fallback: '#45d69a' },
-    { key: 'band', label: 'Band', token: '--warn', fallback: '#f2b544' },
+    { key: 'spec', label: 'Spectrum', colour: '#7fbfff' },
+    { key: 'audio', label: 'Audio', colour: '#ffa657' },
+    { key: 'band', label: 'Band', colour: '#c9a0ff' },
 ];
 
 // Bytes per second, in whatever unit keeps the number short.
@@ -163,7 +192,7 @@ function drawNet(canvas, points, now) {
             // grid of the panel behind shows through as it does on every other
             // chart here.
             ctx.globalAlpha = 0.45;
-            ctx.fillStyle = cssVar(series.token, series.fallback);
+            ctx.fillStyle = series.colour;
             ctx.fill();
             ctx.globalAlpha = 1;
         }
@@ -249,10 +278,7 @@ function NetLegend() {
         <div className="stats-legend">
             {NET_SERIES.map((s) => (
                 <span className="stats-legend__item" key={s.key}>
-                    <i
-                        className="stats-legend__swatch"
-                        style={{ background: `var(${s.token}, ${s.fallback})` }}
-                    />
+                    <i className="stats-legend__swatch" style={{ background: s.colour }} />
                     {s.label}
                 </span>
             ))}
@@ -388,11 +414,17 @@ export default function StatsPanel({ minimal }) {
                 floor: 10, token: '--accent', fallback: '#08a2fb',
             });
             drawBuffer(bufRef.current, bufHistory.current, now, audio.bufferSec);
+            // The accent, like every other single-series chart here. These
+            // were --warn, which said "something is wrong with the processor"
+            // about a machine that is merely running: the semantic colours mean
+            // how a thing is doing, and a load chart has no opinion about
+            // whether its own reading is bad. Only the dropout marks on the
+            // buffer chart claim that, and they have earned it.
             drawTrace(cpuRef.current, cpuHistory.current, now, {
-                floor: 20, token: '--warn', fallback: '#f2b544',
+                floor: 20, token: '--accent', fallback: '#08a2fb',
             });
             drawTrace(memRef.current, memHistory.current, now, {
-                floor: 100e6, token: '--warn', fallback: '#f2b544',
+                floor: 100e6, token: '--accent', fallback: '#08a2fb',
             });
             if (capMs) timer = setTimeout(() => { raf = requestAnimationFrame(frame); }, capMs);
             else raf = requestAnimationFrame(frame);

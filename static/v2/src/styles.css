@@ -3880,7 +3880,11 @@ a.btn { text-decoration: none; }
 }
 .stats-legend__item { display: inline-flex; align-items: center; gap: 4px; }
 /* The same alpha the bands are filled at, so the swatch is the colour that is
-   actually on the chart rather than the colour it was mixed from. */
+   actually on the chart rather than the colour it was mixed from.
+
+   The colours themselves are inline, from NET_SERIES, and are fixed hexes
+   rather than theme tokens — see the note there. A key whose swatches are the
+   operator's accent cannot promise that two of them differ. */
 .stats-legend__swatch {
     width: 9px;
     height: 9px;

@@ -30,7 +30,7 @@ const IQ_CHANNELS = [
 // The range lives in constants.js, mirroring the server's clamp so the control
 // cannot ask for something that will be silently adjusted. The top of the scale
 // is lossless, and is where the slider starts.
-// The margin control, shown when the stream is uncompressed. It only bites on
+// The margin control, shown when the stream is lossless. It only bites on
 // IQ -- a demodulated channel is already an order of magnitude cheaper, and the
 // server ignores the request there -- so it says so rather than appearing to do
 // nothing.
@@ -63,28 +63,41 @@ function MarginPicker() {
 
     return (
         <>
+            {/* Disabled rather than hidden outside IQ, like the format control
+                above is in IQ: that the setting exists and is not available here
+                is the information, and a control that vanished would read as the
+                receiver not offering it at all. */}
             <Field label="Quality" inline hint={lossless ? 'Lossless' : `${value} dB`}>
                 <Slider
                     value={value}
                     min={MARGIN_MIN_DB}
                     max={MARGIN_LOSSLESS}
                     step={MARGIN_STEP_DB}
+                    disabled={!iq}
                     onChange={move}
                     onCommit={() => { if (dragging != null) commit(dragging); }}
                 />
             </Field>
             <div className="note note--tight">
-                Drops bits that fall below the band&rsquo;s noise floor: lower saves
-                more bandwidth, the top sends every bit.
-                {!iq && ' Applies to IQ modes.'}
+                {iq ? (
+                    <>
+                        Drops bits that fall below the band&rsquo;s noise floor: lower
+                        saves more bandwidth, the top sends every bit.
+                    </>
+                ) : (
+                    <>
+                        Only IQ carries enough bandwidth to be worth reducing, so this
+                        applies to IQ modes. Demodulated audio is always sent whole.
+                    </>
+                )}
             </div>
         </>
     );
 }
 
 const FORMATS = [
-    { value: 'opus', label: 'Opus', title: 'Compressed — the default, and around 50 kbit/s in every mode' },
-    { value: 'pcm-zstd', label: 'Uncompressed', title: 'Lossless 16-bit PCM — about 100 kbit/s on SSB, 45 on CW and 170 on AM. An empty channel costs more than a busy one' },
+    { value: 'opus', label: 'Opus', title: 'Lossy — the default, and around 50 kbit/s in every mode' },
+    { value: 'pcm-zstd', label: 'Lossless', title: 'The samples bit for bit — about 100 kbit/s on SSB, 45 on CW and 170 on AM. An empty channel costs more than a busy one' },
 ];
 
 // Which audio format the stream is asked for, as the Python and Go clients
@@ -99,12 +112,12 @@ function FormatPicker() {
     const { audio, actions, tuning } = useRadio();
     const [confirming, setConfirming] = useState(false);
     const saved = audio.format || 'opus';
-    // IQ is always uncompressed, so the control shows that and stops taking
+    // IQ is always lossless, so the control shows that and stops taking
     // input — but `audio.format` is deliberately *not* written. It is the
     // operator's standing preference, and the server restores it by itself the
     // moment the mode is no longer IQ (websocket.go keeps the format the socket
     // connected with and only overrides it per packet). Writing it here would
-    // save uncompressed over the top and leave them on it in every mode
+    // save lossless over the top and leave them on it in every mode
     // afterwards, having never chosen it.
     const iq = isIQ(tuning.mode);
     const current = iq ? 'pcm-zstd' : saved;
@@ -140,14 +153,14 @@ function FormatPicker() {
             <div className="note note--tight">
                 {iq ? (
                     <>
-                        IQ is always uncompressed: Opus is a mono voice codec and
-                        cannot carry a stereo I/Q pair. Your usual choice
-                        (<strong>{saved === 'pcm-zstd' ? 'uncompressed' : 'Opus'}</strong>)
+                        IQ never uses Opus: it is lossy perceptual coding, and it
+                        stops at 48 kHz where IQ runs to 384. Your usual choice
+                        (<strong>{saved === 'pcm-zstd' ? 'lossless' : 'Opus'}</strong>)
                         comes back when you leave IQ.
                     </>
                 ) : (
                     <>
-                        Opus is compressed; uncompressed sends lossless 16-bit PCM at
+                        Opus is lossy; lossless sends the 16-bit samples exactly, at
                         roughly two to three times the bandwidth, depending on the mode
                         and what is on the frequency. Changing this reconnects the
                         audio stream.
@@ -176,7 +189,7 @@ function FormatPicker() {
                             lowest because a narrow tone in a quiet channel is
                             the easiest case there is. */}
                         <p className="vibe__text">
-                            Uncompressed audio uses approximately 2&times; more bandwidth
+                            Lossless audio uses approximately 2&times; more bandwidth
                             than Opus on SSB, and around 3&times; on AM, SAM and FM. On CW
                             it is close to Opus.
                         </p>
@@ -193,7 +206,7 @@ function FormatPicker() {
                                 Cancel
                             </Button>
                             <Button size="sm" variant="primary" onClick={accept}>
-                                Use uncompressed
+                                Use lossless
                             </Button>
                         </div>
                     </div>

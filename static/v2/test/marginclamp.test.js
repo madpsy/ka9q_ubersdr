@@ -23,7 +23,7 @@ const t = (name, fn) => {
 };
 
 t('the range matches the server clamp in pcm_lossy.go', () => {
-    assert.strictEqual(MARGIN_MIN_DB, 20, 'lossyMinMarginDB is 20');
+    assert.strictEqual(MARGIN_MIN_DB, 15, 'lossyMinMarginDB is 15');
     assert.strictEqual(MARGIN_MAX_DB, 60, 'lossyMaxMarginDB is 60');
 });
 
@@ -43,7 +43,7 @@ t('anything unusable becomes lossless rather than the default', () => {
 
 t('a value below the range is raised, not rejected', () => {
     assert.strictEqual(clampMargin(1), MARGIN_MIN_DB);
-    assert.strictEqual(clampMargin(19.9), MARGIN_MIN_DB);
+    assert.strictEqual(clampMargin(14.9), MARGIN_MIN_DB);
 });
 
 t('a value above the range is capped', () => {
@@ -68,8 +68,28 @@ t('every slider position round trips unchanged', () => {
 });
 
 // The top of the slider is lossless, and is where an untouched control sits.
-// This is the promise that "Uncompressed" means uncompressed: a listener who
+// This is the promise that "Lossless" means lossless: a listener who
 // never touches the slider must ask for nothing at all.
+// The step has to divide the distance to the top exactly. A range input only
+// offers min + n*step, so a step that overshoots leaves the lossless position
+// drawn at the end of the track but impossible to select -- which is what
+// happened when the floor moved from 20 to 15 while the step was still 2.
+t('the lossless position is actually reachable on the slider', () => {
+    assert.strictEqual((MARGIN_LOSSLESS - MARGIN_MIN_DB) % MARGIN_STEP_DB, 0,
+        `stepping ${MARGIN_STEP_DB} from ${MARGIN_MIN_DB} never lands on ${MARGIN_LOSSLESS}`);
+    // Walk the track the way the browser will, and check the top is hit.
+    let v = MARGIN_MIN_DB;
+    const seen = [];
+    while (v <= MARGIN_LOSSLESS) { seen.push(v); v += MARGIN_STEP_DB; }
+    assert.strictEqual(seen[seen.length - 1], MARGIN_LOSSLESS,
+        'the last selectable position is not the lossless one');
+    assert.strictEqual(marginFromSlider(seen[seen.length - 1]), 0);
+});
+
+t('the floor is selectable and asks for the floor', () => {
+    assert.strictEqual(marginFromSlider(MARGIN_MIN_DB), MARGIN_MIN_DB);
+});
+
 t('the top of the scale is lossless', () => {
     assert.strictEqual(MARGIN_LOSSLESS, MARGIN_MAX_DB + MARGIN_STEP_DB);
     assert.strictEqual(marginFromSlider(MARGIN_LOSSLESS), 0);

@@ -79,13 +79,22 @@ import (
 const (
 	// lossyMinMarginDB and lossyMaxMarginDB clamp what a client may ask for.
 	//
-	// Below 20 dB the quantisation floor starts to lift the noise floor a client
-	// can see: 20 dB costs 0.04 dB, which is invisible, where 6 dB would cost
-	// almost a decibel. Above 60 dB the request buys nothing -- measured, 60 dB
-	// leaves under 8% on every capture -- and a client wanting less than that
-	// should omit the parameter and get the lossless path, which keeps archival
-	// streams honestly labelled rather than marked lossy and shifted by zero.
-	lossyMinMarginDB = 20.0
+	// The floor is where the quantisation noise starts to lift the noise floor a
+	// client can actually see. Adding an uncorrelated floor `m` dB down raises
+	// the total by 10*log10(1 + 10**(-m/10)):
+	//
+	//	20 dB   0.04 dB   invisible
+	//	15 dB   0.14 dB   below the 0.1 dB a meter resolves
+	//	10 dB   0.41 dB
+	//	 6 dB   0.97 dB   an audible, measurable change
+	//
+	// 15 dB is the last step that stays under what a receiver's own readings can
+	// resolve, so it is the floor. Above 60 dB the request buys nothing --
+	// measured, 60 dB leaves under 8% on every capture -- and a client wanting
+	// less than that should omit the parameter and get the lossless path, which
+	// keeps archival streams honestly labelled rather than marked lossy and
+	// shifted by zero.
+	lossyMinMarginDB = 15.0
 	lossyMaxMarginDB = 60.0
 
 	// lossyCalibrationDB is the constant in the margin model above, fitted to

@@ -24,7 +24,7 @@ export default function IQConfirm() {
         <Modal onClose={actions.cancelIQ} label="Use IQ mode">
             <div className="stack vibe">
                 {/* Worded "Use IQ" rather than "Switch to IQ" to match the
-                    uncompressed dialog's button, and because bare prose in JSX
+                    lossless dialog's button, and because bare prose in JSX
                     is indistinguishable from an identifier to test/unresolved.js
                     — which reads a capitalised Switch as the ui.jsx component. */}
                 <h2 className="vibe__title">Use IQ mode?</h2>
@@ -36,9 +36,10 @@ export default function IQConfirm() {
                     you can listen to.
                 </p>
                 <p className="vibe__text">
-                    It is always uncompressed, at roughly <strong>6&times; the
+                    It is lossless by default, at roughly <strong>6&times; the
                     bandwidth of Opus</strong>. That cost falls on whoever runs this
-                    receiver, so only switch if you have a reason to.
+                    receiver, so only switch if you have a reason to &mdash; the Audio
+                    panel&rsquo;s Quality control can bring it down.
                 </p>
                 <p className="vibe__text">
                     While in IQ the noise blanker, noise reduction, filters and

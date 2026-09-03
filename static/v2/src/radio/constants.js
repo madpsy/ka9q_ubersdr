@@ -459,9 +459,15 @@ export function autoSquelchValue(snrHistory) {
 //
 // 0 means lossless, which is what the server does for anything that does not
 // ask.
-export const MARGIN_MIN_DB = 20;
+export const MARGIN_MIN_DB = 15;
 export const MARGIN_MAX_DB = 60;
-export const MARGIN_STEP_DB = 2;
+
+// One decibel, which is the resolution the protocol actually has -- the server
+// rounds every request to a whole dB -- and it has to divide the distance to
+// MARGIN_LOSSLESS exactly. A range input only offers min + n*step, so a step
+// that does not reach the top would leave the lossless position unselectable
+// while still drawing it at the end of the track.
+export const MARGIN_STEP_DB = 1;
 
 // The slider's top position, one step past the widest margin, means lossless.
 //
@@ -471,7 +477,7 @@ export const MARGIN_STEP_DB = 2;
 // beyond that every packet comes back bit for bit. Lossless is the limit of the
 // control, not an exception to it.
 //
-// It is also the default. "Uncompressed" has to mean uncompressed until someone
+// It is also the default. "Lossless" has to mean lossless until someone
 // says otherwise, so an untouched slider asks for nothing and the stream is
 // exactly what it was before this mode existed.
 export const MARGIN_LOSSLESS = MARGIN_MAX_DB + MARGIN_STEP_DB;

@@ -108,7 +108,7 @@ func TestLossyMarginFromQuery(t *testing.T) {
 		// Whole decibels only, on both sides of the wire.
 		{26.4, true, 26, true},
 		{26.5, true, 27, true},
-		{19.7, true, lossyMinMarginDB, true},
+		{14.4, true, lossyMinMarginDB, true},
 	} {
 		got, lossy := LossyMarginFromQuery(tc.in, tc.present)
 		if got != tc.want || lossy != tc.lossy {
@@ -465,8 +465,8 @@ func TestLossyMarginChangesLive(t *testing.T) {
 // build-time link between the two. A change here must fail marginclamp.test.js
 // as well, which is the point of pinning it on both sides.
 func TestLossyMarginRangeIsPinned(t *testing.T) {
-	if lossyMinMarginDB != 20 {
-		t.Errorf("lossyMinMarginDB = %v, want 20 (MARGIN_MIN_DB in constants.js)", lossyMinMarginDB)
+	if lossyMinMarginDB != 15 {
+		t.Errorf("lossyMinMarginDB = %v, want 15 (MARGIN_MIN_DB in constants.js)", lossyMinMarginDB)
 	}
 	if lossyMaxMarginDB != 60 {
 		t.Errorf("lossyMaxMarginDB = %v, want 60 (MARGIN_MAX_DB in constants.js)", lossyMaxMarginDB)

@@ -483,7 +483,7 @@ function ClipTag() {
     );
 }
 
-// That the audio is coming down uncompressed, and the one-press way back.
+// That the audio is coming down lossless, and the one-press way back.
 //
 // Deliberately the quietest thing in the row: the dim base tone rather than a
 // warning colour, because this is a setting the operator chose on purpose after
@@ -508,7 +508,7 @@ function AudioFormatTag() {
             // "still on" does the job the badge was added for.
             className="tag tag--button tag--bad"
             data-optional="pcm"
-            title="Audio is set to Uncompressed — roughly two to three times the bandwidth of Opus. Click to switch to Opus"
+            title="Audio is set to Lossless — roughly two to three times the bandwidth of Opus. Click to switch to Opus"
             onClick={() => actions.setAudioFormat('opus')}
         >
             PCM

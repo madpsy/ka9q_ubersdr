@@ -689,16 +689,18 @@ void ConsumeRingBuffers()
             
             float I_float, Q_float;
             if (!myUberSDR.receivers[receiverID].ringBuffer.read(I_float, Q_float)) {
-                // Buffer underrun - mark that at least one buffer is empty
+                // Nothing to give: the buffer is building its cushion, the
+                // socket is down, or it ran dry. read() has already put the
+                // event in the right counter; here all three are the same
+                // thing.
                 anyBufferEmpty = true;
                 
-                // Fill with zeros (silence) and continue
-                // This prevents one slow receiver from holding up all others
+                // Fill with zeros (silence) and continue.
+                // This prevents one slow receiver from holding up all others --
+                // and it has to, because a block is only handed to the skimmer
+                // once every receiver has filled one.
                 I_float = 0.0f;
                 Q_float = 0.0f;
-                
-                // Buffer underrun - silently fill with zeros
-                // (Logging removed to reduce log verbosity)
             }
             
             // SOFTWARE FREQUENCY SHIFT: Apply frequency offset in IQ domain

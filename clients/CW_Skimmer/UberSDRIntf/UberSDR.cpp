@@ -495,11 +495,13 @@ namespace UberSDRIntf
         
         // Initialize ring buffer (2000ms at current sample rate for better jitter absorption)
         size_t bufferCapacity = (sampleRate * 2000) / 1000;  // 2000ms worth of samples
-        // 100 ms of cushion before the consumer takes anything: five times the
-        // 20 ms burst the server delivers in and comfortably past the 90 ms
-        // worst gap measured on eight concurrent 96 kHz streams.
-        size_t primeSamples = (sampleRate * 100) / 1000;
-        receivers[receiverID].ringBuffer.init(bufferCapacity, primeSamples);
+        // The cushion this receiver builds before it joins the mix; see
+        // RING_TARGET_MS, which the consumer's rate trim also settles at. The
+        // give-up bound is 2 s, twenty times what building the cushion takes on
+        // a link that can carry the stream.
+        size_t primeSamples = (sampleRate * RING_TARGET_MS) / 1000;
+        size_t primeGiveUpSamples = (size_t)sampleRate * 2;
+        receivers[receiverID].ringBuffer.init(bufferCapacity, primeSamples, primeGiveUpSamples);
         
         ss.str("");
         ss << "Initialized ring buffer for receiver " << receiverID

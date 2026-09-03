@@ -27,6 +27,17 @@ namespace UberSDRIntf
         ERROR_STATE
     };
 
+    // The ring buffer level the consumer aims to hold, in milliseconds.
+    //
+    // One number used twice: the cushion a receiver builds before it joins the
+    // mix, and the level the consumer's rate trim settles at. They have to be
+    // the same or the trim spends its first minutes undoing the priming.
+    //
+    // 100 ms is five times the ~20 ms burst the server delivers in and past the
+    // 90 ms worst gap measured across eight concurrent 96 kHz IQ streams, at a
+    // latency no skimmer notices.
+    static const int RING_TARGET_MS = 100;
+
     // Ring buffer for smoothing WebSocket data arrival
     struct RingBuffer {
         std::vector<float> buffer;  // Interleaved I/Q samples (float)
@@ -52,6 +63,22 @@ namespace UberSDRIntf
         size_t primeTarget;
         bool priming;
 
+        // How long priming may hold a receiver out of the mix while data is
+        // actually arriving, and whether it has given up doing so.
+        //
+        // A link that cannot carry the stream would otherwise leave a receiver
+        // priming for ever -- silent, where before this it was merely degraded.
+        // Only time spent with something in the buffer counts towards the
+        // limit: a socket that is down leaves it at zero, and waiting is the
+        // right answer there, which is what keeps an outage in silenceCount
+        // instead of running the underrun figure back up.
+        //
+        // Giving up latches until the next reprime(), so a starved receiver
+        // pays the wait once per connection rather than once per dry buffer.
+        size_t primeStall;
+        size_t primeGiveUp;
+        bool primeLatched;
+
         // Frames of silence fed while priming or while the socket is down,
         // counted apart from underrunCount.
         //
@@ -64,7 +91,8 @@ namespace UberSDRIntf
         int silenceCount;
 
         RingBuffer() : writePos(0), readPos(0), capacity(0), underrunCount(0), overrunCount(0),
-                       primeTarget(0), priming(true), silenceCount(0) {
+                       primeTarget(0), priming(true), primeStall(0), primeGiveUp(0),
+                       primeLatched(false), silenceCount(0) {
             InitializeCriticalSection(&lock);
         }
         
@@ -72,7 +100,7 @@ namespace UberSDRIntf
             DeleteCriticalSection(&lock);
         }
         
-        void init(size_t capacityInSamples, size_t primeSamples) {
+        void init(size_t capacityInSamples, size_t primeSamples, size_t primeGiveUpSamples) {
             EnterCriticalSection(&lock);
             capacity = capacityInSamples;
             buffer.resize(capacity * 2);  // *2 for I and Q
@@ -82,7 +110,10 @@ namespace UberSDRIntf
             overrunCount = 0;
             silenceCount = 0;
             primeTarget = primeSamples;
+            primeGiveUp = primeGiveUpSamples;
             priming = true;
+            primeStall = 0;
+            primeLatched = false;
             LeaveCriticalSection(&lock);
         }
 
@@ -94,6 +125,8 @@ namespace UberSDRIntf
         void reprime() {
             EnterCriticalSection(&lock);
             priming = true;
+            primeStall = 0;
+            primeLatched = false;
             LeaveCriticalSection(&lock);
         }
         
@@ -111,7 +144,7 @@ namespace UberSDRIntf
             EnterCriticalSection(&lock);
             
             if (space() < 1) {
-                overrunCount++;
+                if (overrunCount < 0x7fffffff) overrunCount++;
                 LeaveCriticalSection(&lock);
                 return false;  // Buffer full
             }
@@ -131,21 +164,34 @@ namespace UberSDRIntf
             const size_t avail = available();
 
             if (priming) {
-                if (avail < primeTarget) {
-                    silenceCount++;
+                if (avail >= primeTarget) {
+                    priming = false;
+                } else if (avail > 0 && ++primeStall >= primeGiveUp) {
+                    // Data is arriving but never enough to build the cushion.
+                    // Take what there is rather than stay silent; see
+                    // primeStall.
+                    priming = false;
+                    primeLatched = true;
+                } else {
+                    // Saturating: an int counts 6.2 hours at 96 kHz, and this
+                    // is the counter that a receiver stuck offline runs up.
+                    // Wrapping it would report the outage as a negative time.
+                    if (silenceCount < 0x7fffffff) silenceCount++;
                     LeaveCriticalSection(&lock);
                     return false;  // Still building the cushion
                 }
-                priming = false;
             }
 
             if (avail < 1) {
-                underrunCount++;
+                if (underrunCount < 0x7fffffff) underrunCount++;
                 // Rebuild the cushion rather than grind on an empty buffer.
                 // Without this the first gap that catches the buffer out
                 // leaves it with nothing, and every gap after it underruns
                 // again -- one loss becomes a permanent condition.
-                priming = true;
+                if (!primeLatched) {
+                    priming = true;
+                    primeStall = 0;
+                }
                 LeaveCriticalSection(&lock);
                 return false;  // Buffer empty
             }

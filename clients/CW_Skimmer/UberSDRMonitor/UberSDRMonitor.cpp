@@ -457,19 +457,32 @@ void UpdateDisplay()
             int bufferPercent = (int)(g_pStatus->receivers[i].ringBufferFillLevel * 100.0f);
             int overruns = g_pStatus->receivers[i].ringBufferOverruns;
             int underruns = g_pStatus->receivers[i].ringBufferUnderruns;
+            // Silence fed while the buffer was priming or the socket was down.
+            // Reported apart from the underruns rather than added to them: it
+            // measures time off the air, where U measures a buffer that ran dry
+            // while the stream was up, and only the second is a tuning problem.
+            //
+            // Shown in seconds, because a count is the wrong unit for it: five
+            // minutes of reconnecting reads as 29 million frames, which is a
+            // number nobody can convert at a glance into the thing it actually
+            // says.
+            int silenceFrames = g_pStatus->receivers[i].ringBufferSilence;
+            int rate = g_pStatus->sampleRate > 0 ? g_pStatus->sampleRate : 1;
+            float silenceSecs = (float)silenceFrames / (float)rate;
             
             // Get per-receiver offset info
             int perRxOffset = g_pStatus->receivers[i].frequencyOffset;
             int totalOffset = g_pStatus->receivers[i].totalFrequencyOffset;
             
-            if (overruns > 0 || underruns > 0) {
-                sprintf_s(buffer, sizeof(buffer), "Rx%d: %s [Active] %.1f KB/s  Buf:%d%% (O:%d U:%d)  Offset:%+d Hz (Total:%+d Hz)",
+            if (overruns > 0 || underruns > 0 || silenceFrames > 0) {
+                sprintf_s(buffer, sizeof(buffer), "Rx%d: %s [Active] %.1f KB/s  Buf:%d%% (O:%d U:%d S:%.1fs)  Offset:%+d Hz (Total:%+d Hz)",
                           i,
                           freqStr,
                           g_pStatus->receivers[i].throughputKBps,
                           bufferPercent,
                           overruns,
                           underruns,
+                          silenceSecs,
                           perRxOffset,
                           totalOffset);
             } else {

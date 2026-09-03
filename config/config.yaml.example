@@ -615,6 +615,22 @@ server:
   # Set to 0 to keep data forever (no automatic pruning).
   session_activity_log_retention_days: 30
 
+  # Public session statistics endpoint (default: true)
+  # When true, exposes a public, unauthenticated endpoint at
+  #   /api/session-stats
+  # returning privacy-conscious aggregates over the last 28 days: session counts
+  # per country, duration buckets, average activity per hour and weekday, and top
+  # browsers/operating systems/bands/modes. No IPs or session IDs are exposed.
+  # This is what the built-in statistics page (session_stats.html) charts, and
+  # what the UberSDR directory collector polls to build its fleet-wide stats.
+  #
+  # Answering it walks the whole session activity retention window, so the result
+  # is computed at most once every 15 minutes and shared by all callers. Set to
+  # false to remove the endpoint entirely (it then returns 404); the statistics
+  # page will show no data and the directory will not list stats for this receiver.
+  # Requires session_activity_log_enabled to produce anything useful.
+  public_session_stats_enabled: true
+
   # Active-listener GeoJSON feed for maps (e.g. Home Assistant)
   # When true, exposes a public, unauthenticated endpoint at
   #   /api/sessions.geojson

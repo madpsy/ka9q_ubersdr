@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ua-parser/uap-go/uaparser"
@@ -50,6 +52,17 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 		return
 	}
 
+	// The endpoint is public and unauthenticated, so it can be turned off entirely.
+	if config == nil || !config.Server.PublicSessionStatsIsEnabled() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "not_enabled",
+			"message": "Public session statistics are disabled on this receiver",
+		})
+		return
+	}
+
 	// Check rate limit (1 request per 3 seconds per IP)
 	clientIP := getClientIP(r)
 	if !rateLimiter.AllowRequest(clientIP) {
@@ -74,35 +87,19 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 		return
 	}
 
-	// Calculate time range: last 4 weeks (28 days)
-	endTime := time.Now().UTC()
-	startTime := endTime.Add(-28 * 24 * time.Hour)
-
-	logs, err := ReadActivityLogsFromDB(readDB, startTime, endTime)
+	// Serve every caller from one shared snapshot. Building these stats walks the
+	// whole retention window, so a page view per visitor -- plus the aux
+	// collector's poll -- must not each pay for a pass.
+	response, err := publicSessionStats.get(r.Context(), func() (map[string]interface{}, error) {
+		return computePublicSessionStats(readDB, geoIPService)
+	})
 	if err != nil {
+		if r.Context().Err() != nil {
+			return // caller hung up while waiting; nothing useful to write
+		}
 		http.Error(w, "Failed to read activity logs", http.StatusInternalServerError)
 		log.Printf("Error reading activity logs for public stats: %v", err)
 		return
-	}
-
-	// Filter to only include 'regular' auth users (not bypassed or password)
-	logs = FilterSessionsByAuthMethod(logs, []string{"regular"})
-
-	// Convert logs to events to get session start/end information
-	events := convertLogsToEvents(logs)
-
-	// Filter to only session_end events (which have duration information)
-	endEvents := filterEventsByType(events, []string{"session_end"})
-
-	// Calculate public statistics
-	stats := calculatePublicSessionStats(endEvents, startTime, endTime, geoIPService)
-
-	// Return statistics
-	response := map[string]interface{}{
-		"period_start": startTime.Format(time.RFC3339),
-		"period_end":   endTime.Format(time.RFC3339),
-		"period_days":  28,
-		"stats":        stats,
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -111,8 +108,239 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 	}
 }
 
-// calculatePublicSessionStats calculates privacy-conscious statistics from session end events
-func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime time.Time, geoIPService *GeoIPService) map[string]interface{} {
+const (
+	// publicSessionStatsDays is the reporting window, in days.
+	publicSessionStatsDays = 28
+	// publicSessionStatsTTL is how long one computed snapshot is served for.
+	publicSessionStatsTTL = 15 * time.Minute
+)
+
+// publicSessionStats holds the shared snapshot for /api/session-stats.
+var publicSessionStats = &publicSessionStatsCache{ttl: publicSessionStatsTTL}
+
+// publicSessionStatsCache serves one computed result to every caller for a TTL and
+// collapses concurrent misses into a single computation, so N simultaneous
+// visitors cost one pass over the window rather than N.
+type publicSessionStatsCache struct {
+	mu       sync.Mutex
+	ttl      time.Duration
+	value    map[string]interface{}
+	computed time.Time
+	inflight chan struct{} // non-nil while a computation is running; closed when it ends
+}
+
+func (c *publicSessionStatsCache) get(ctx context.Context, compute func() (map[string]interface{}, error)) (map[string]interface{}, error) {
+	for {
+		c.mu.Lock()
+		if c.value != nil && time.Since(c.computed) < c.ttl {
+			value := c.value
+			c.mu.Unlock()
+			return value, nil
+		}
+		if wait := c.inflight; wait != nil {
+			c.mu.Unlock()
+			select {
+			case <-wait:
+				continue // recheck: it either filled the cache or failed
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		done := make(chan struct{})
+		c.inflight = done
+		c.mu.Unlock()
+
+		value, err := compute()
+
+		c.mu.Lock()
+		if err == nil {
+			c.value, c.computed = value, time.Now()
+		}
+		c.inflight = nil
+		c.mu.Unlock()
+		close(done)
+		return value, err
+	}
+}
+
+// computePublicSessionStats folds the activity log for the reporting window into
+// the public statistics response without materialising it. The window is millions
+// of rows on a busy receiver, and loading it whole was enough to exhaust the box.
+func computePublicSessionStats(readDB *sql.DB, geoIPService *GeoIPService) (map[string]interface{}, error) {
+	endTime := time.Now().UTC()
+	return computePublicSessionStatsForWindow(readDB, geoIPService, endTime.Add(-publicSessionStatsDays*24*time.Hour), endTime)
+}
+
+// computePublicSessionStatsForWindow is computePublicSessionStats over an explicit
+// window, so the fold can be exercised against a fixed fixture.
+func computePublicSessionStatsForWindow(readDB *sql.DB, geoIPService *GeoIPService, startTime, endTime time.Time) (map[string]interface{}, error) {
+	var streamErr error
+	stats := calculatePublicSessionStats(func(emit func(SessionEvent)) {
+		streamer := newPublicSessionEndStreamer(emit)
+		// Deliberately not the requesting client's context: the result is shared,
+		// so one impatient caller hanging up must not discard the pass that every
+		// other waiter is queued on.
+		streamErr = StreamActivityLogsFromDB(context.Background(), readDB, startTime, endTime, func(entry SessionActivityLog) error {
+			// Only 'regular' auth users, matching FilterSessionsByAuthMethod --
+			// including its dropping of a snapshot once no entry survives, which is
+			// load-bearing: a session's end is inferred from its absence from a
+			// snapshot, so a half-filtered one would end sessions early.
+			filtered := make([]SessionActivityEntry, 0, len(entry.ActiveSessions))
+			for _, session := range entry.ActiveSessions {
+				if session.AuthMethod != "password" && session.AuthMethod != "ip_bypass" {
+					filtered = append(filtered, session)
+				}
+			}
+			if len(filtered) == 0 {
+				return nil
+			}
+			entry.ActiveSessions = filtered
+			streamer.feed(entry)
+			return nil
+		})
+	}, startTime, endTime, geoIPService)
+	if streamErr != nil {
+		return nil, streamErr
+	}
+
+	return map[string]interface{}{
+		"period_start": startTime.Format(time.RFC3339),
+		"period_end":   endTime.Format(time.RFC3339),
+		"period_days":  publicSessionStatsDays,
+		"stats":        stats,
+	}, nil
+}
+
+// publicSessionProgress is one session being followed across snapshots.
+type publicSessionProgress struct {
+	entry     SessionActivityEntry
+	firstSeen time.Time
+	allTypes  map[string]bool
+	allBands  map[string]bool
+	allModes  map[string]bool
+}
+
+// publicSessionEndStreamer reconstructs completed sessions from the activity log
+// and emits one session_end event each. It mirrors the end-event half of
+// convertLogsToEvents -- including dropping sessions still active when the window
+// runs out -- but holds only the sessions in flight rather than every event.
+type publicSessionEndStreamer struct {
+	active map[string]*publicSessionProgress
+	emit   func(SessionEvent)
+}
+
+func newPublicSessionEndStreamer(emit func(SessionEvent)) *publicSessionEndStreamer {
+	return &publicSessionEndStreamer{
+		active: make(map[string]*publicSessionProgress),
+		emit:   emit,
+	}
+}
+
+func (s *publicSessionEndStreamer) feed(entry SessionActivityLog) {
+	// A destroyed event carries the session's final state.
+	if entry.EventType == "session_destroyed" {
+		for _, session := range entry.ActiveSessions {
+			progress, active := s.active[session.UserSessionID]
+			if !active {
+				continue
+			}
+			addNonEmpty(progress.allBands, session.Bands)
+			addNonEmpty(progress.allModes, session.Modes)
+			s.end(session.UserSessionID, progress, entry.Timestamp)
+		}
+		return
+	}
+
+	present := make(map[string]bool, len(entry.ActiveSessions))
+	for _, session := range entry.ActiveSessions {
+		present[session.UserSessionID] = true
+
+		if progress, active := s.active[session.UserSessionID]; active {
+			for _, sessionType := range session.SessionTypes {
+				progress.allTypes[sessionType] = true
+			}
+			addNonEmpty(progress.allBands, session.Bands)
+			addNonEmpty(progress.allModes, session.Modes)
+			// Keep the newest entry; it has the most up-to-date bands and modes.
+			progress.entry = session
+			continue
+		}
+
+		// Session start time, in priority order: when the user first connected,
+		// when this channel was created, then the snapshot itself.
+		firstSeen := entry.Timestamp
+		if !session.CreatedAt.IsZero() {
+			firstSeen = session.CreatedAt
+		}
+		if !session.FirstSeen.IsZero() && session.FirstSeen.Before(firstSeen) {
+			firstSeen = session.FirstSeen
+		}
+
+		progress := &publicSessionProgress{
+			entry:     session,
+			firstSeen: firstSeen,
+			allTypes:  make(map[string]bool, len(session.SessionTypes)),
+			allBands:  make(map[string]bool, len(session.Bands)),
+			allModes:  make(map[string]bool, len(session.Modes)),
+		}
+		for _, sessionType := range session.SessionTypes {
+			progress.allTypes[sessionType] = true
+		}
+		addNonEmpty(progress.allBands, session.Bands)
+		addNonEmpty(progress.allModes, session.Modes)
+		s.active[session.UserSessionID] = progress
+	}
+
+	// A session missing from this snapshot has ended.
+	for sessionID, progress := range s.active {
+		if !present[sessionID] {
+			s.end(sessionID, progress, entry.Timestamp)
+		}
+	}
+}
+
+func (s *publicSessionEndStreamer) end(sessionID string, progress *publicSessionProgress, endTime time.Time) {
+	duration := endTime.Sub(progress.firstSeen).Seconds()
+	s.emit(SessionEvent{
+		Timestamp:     endTime,
+		EventType:     "session_end",
+		UserSessionID: sessionID,
+		ClientIP:      progress.entry.ClientIP,
+		SourceIP:      progress.entry.SourceIP,
+		AuthMethod:    progress.entry.AuthMethod,
+		SessionTypes:  sortedSetKeys(progress.allTypes),
+		Bands:         sortedSetKeys(progress.allBands),
+		Modes:         sortedSetKeys(progress.allModes),
+		UserAgent:     progress.entry.UserAgent,
+		Country:       progress.entry.Country,
+		CountryCode:   progress.entry.CountryCode,
+		Protocol:      progress.entry.Protocol,
+		Duration:      &duration,
+	})
+	delete(s.active, sessionID)
+}
+
+func addNonEmpty(set map[string]bool, values []string) {
+	for _, value := range values {
+		if value != "" {
+			set[value] = true
+		}
+	}
+}
+
+func sortedSetKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// calculatePublicSessionStats calculates privacy-conscious statistics from session
+// end events. It takes a feed rather than a slice so the caller can stream events
+// straight out of the database instead of holding the window in memory.
+func calculatePublicSessionStats(feed func(emit func(SessionEvent)), startTime, endTime time.Time, geoIPService *GeoIPService) map[string]interface{} {
 	// Track unique countries with session counts
 	countryStats := make(map[string]map[string]interface{})
 
@@ -164,10 +392,13 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 	parser := uaparser.NewFromSaved()
 
 	// Process each session end event
-	for _, event := range endEvents {
+	totalSessions := 0
+	feed(func(event SessionEvent) {
+		totalSessions++
+
 		// Skip events without duration
 		if event.Duration == nil {
-			continue
+			return
 		}
 
 		// Track unique IPs (for counting only)
@@ -268,7 +499,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		// Track weekday activity (day when session ended)
 		weekday := int(event.Timestamp.Weekday())
 		weekdayActivity[weekday]++
-	}
+	})
 
 	// Perform GeoIP lookups for all IPs to get country and location data
 	// This will use fresh GeoIP data which may be more accurate than stored event data
@@ -510,7 +741,7 @@ func calculatePublicSessionStats(endEvents []SessionEvent, startTime, endTime ti
 		"unique_countries":      len(countries),
 		"countries":             countries,
 		"unique_users":          len(uniqueIPs),
-		"total_sessions":        len(endEvents),
+		"total_sessions":        totalSessions,
 		"duration_buckets":      durationBucketArray,
 		"avg_hourly_activity":   avgHourlyActivity,
 		"avg_weekday_activity":  avgWeekdayActivity,

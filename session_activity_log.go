@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -510,12 +511,35 @@ func (sal *SessionActivityLogger) Stop() {
 
 // ReadActivityLogsFromDB reads session activity logs from the SQLite database for a given time range.
 // It reconstructs []SessionActivityLog by grouping rows by (snapshot_ts, event_type).
+//
+// This materialises the whole range. On a busy receiver a multi-week window is
+// millions of rows and gigabytes of live objects, so callers that only fold the
+// logs into an accumulator should use StreamActivityLogsFromDB instead.
 func ReadActivityLogsFromDB(db *sql.DB, startTime, endTime time.Time) ([]SessionActivityLog, error) {
+	var logs []SessionActivityLog
+	err := StreamActivityLogsFromDB(context.Background(), db, startTime, endTime, func(entry SessionActivityLog) error {
+		logs = append(logs, entry)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+// StreamActivityLogsFromDB reads the same rows as ReadActivityLogsFromDB but hands
+// each reconstructed SessionActivityLog to fn as soon as it is complete, so peak
+// memory is one snapshot rather than the whole window. Rows arrive ordered by
+// snapshot_ts, so every group for a timestamp is finished once the timestamp
+// advances; fn therefore sees entries in the order ReadActivityLogsFromDB returns
+// them.
+func StreamActivityLogsFromDB(ctx context.Context, db *sql.DB, startTime, endTime time.Time, fn func(SessionActivityLog) error) error {
 	if db == nil {
-		return nil, fmt.Errorf("session activity database not configured")
+		return fmt.Errorf("session activity database not configured")
 	}
 
-	rows, err := db.Query(
+	rows, err := db.QueryContext(
+		ctx,
 		`SELECT snapshot_ts, event_type,
 		        user_session_id, client_ip, source_ip, auth_method,
 		        session_types, bands, modes,
@@ -527,17 +551,29 @@ func ReadActivityLogsFromDB(db *sql.DB, startTime, endTime time.Time) ([]Session
 		startTime.Unix(), endTime.Unix(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("sessions query error: %w", err)
+		return fmt.Errorf("sessions query error: %w", err)
 	}
 	defer rows.Close()
 
-	// Group rows by (snapshot_ts, event_type) to reconstruct SessionActivityLog entries.
-	type snapshotKey struct {
-		ts        int64
-		eventType string
+	// Groups for the timestamp currently being read, keyed by event_type and kept
+	// in first-appearance order so the emitted order matches the batch reader's.
+	var (
+		currentTS   int64
+		haveCurrent bool
+		order       = make([]string, 0, 2)
+	)
+	groups := make(map[string]*SessionActivityLog)
+
+	flush := func() error {
+		for _, eventType := range order {
+			if err := fn(*groups[eventType]); err != nil {
+				return err
+			}
+		}
+		order = order[:0]
+		clear(groups)
+		return nil
 	}
-	order := make([]snapshotKey, 0)
-	groups := make(map[snapshotKey]*SessionActivityLog)
 
 	for rows.Next() {
 		var snapshotTS, createdAt, firstSeen int64
@@ -552,17 +588,25 @@ func ReadActivityLogsFromDB(db *sql.DB, startTime, endTime time.Time) ([]Session
 			&createdAt, &firstSeen, &userAgent, &country, &countryCode,
 			&protocol,
 		); err != nil {
-			return nil, fmt.Errorf("sessions scan error: %w", err)
+			return fmt.Errorf("sessions scan error: %w", err)
 		}
 
-		key := snapshotKey{ts: snapshotTS, eventType: eventType}
-		if _, exists := groups[key]; !exists {
-			groups[key] = &SessionActivityLog{
+		if !haveCurrent || snapshotTS != currentTS {
+			if haveCurrent {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			currentTS, haveCurrent = snapshotTS, true
+		}
+
+		if _, exists := groups[eventType]; !exists {
+			groups[eventType] = &SessionActivityLog{
 				Timestamp:      time.Unix(snapshotTS, 0).UTC(),
 				EventType:      eventType,
 				ActiveSessions: []SessionActivityEntry{},
 			}
-			order = append(order, key)
+			order = append(order, eventType)
 		}
 
 		var sessionTypes, bands, modes []string
@@ -604,17 +648,15 @@ func ReadActivityLogsFromDB(db *sql.DB, startTime, endTime time.Time) ([]Session
 			entry.FirstSeen = time.Unix(firstSeen, 0).UTC()
 		}
 
-		groups[key].ActiveSessions = append(groups[key].ActiveSessions, entry)
+		groups[eventType].ActiveSessions = append(groups[eventType].ActiveSessions, entry)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return err
 	}
-
-	logs := make([]SessionActivityLog, 0, len(order))
-	for _, key := range order {
-		logs = append(logs, *groups[key])
+	if haveCurrent {
+		return flush()
 	}
-	return logs, nil
+	return nil
 }
 
 // FilterSessionsByAuthMethod filters session entries by authentication method

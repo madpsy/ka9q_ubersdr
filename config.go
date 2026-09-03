@@ -395,6 +395,7 @@ type ServerConfig struct {
 	SessionActivityLogIntervalSec   int               `yaml:"session_activity_log_interval_sec"`   // Interval for periodic snapshots in seconds (default: 300)
 	SessionActivityLogRetentionDays int               `yaml:"session_activity_log_retention_days"` // Number of days to retain session activity logs (default: 30, 0 = keep forever)
 	SessionsGeoJSONEnabled          bool              `yaml:"sessions_geojson_enabled"`            // Expose a public /api/sessions.geojson feed of active listeners (approx GeoIP location) for e.g. Home Assistant maps (default: false)
+	PublicSessionStatsEnabled       *bool             `yaml:"public_session_stats_enabled"`        // Serve the public /api/session-stats endpoint (*bool so nil = key absent = enabled; default: true)
 	CustomHeadHTML                  string            `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of both index.html and v2's shell (for analytics, ads, meta tags, etc.)
 	CustomBodyHTML                  string            `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in both index.html and v2's shell (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
 	CustomAdsTxt                    string            `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
@@ -412,6 +413,14 @@ type ServerConfig struct {
 	whisperResolveNames             []string          // Whisper-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from whisper.trusted_containers)
 	addonResolveFn                  func() []string   // Returns the CURRENT addon container hostnames (internal use, set from the live addons.yaml); nil when addon ingest is off
 	addonResolveMu                  sync.RWMutex      // Protects addonResolveFn
+}
+
+// PublicSessionStatsIsEnabled reports whether /api/session-stats is served. The
+// endpoint is public and unauthenticated, and answering it walks the whole
+// session-activity retention window, so operators can switch it off. Defaults to
+// true when the key is absent.
+func (s *ServerConfig) PublicSessionStatsIsEnabled() bool {
+	return s.PublicSessionStatsEnabled == nil || *s.PublicSessionStatsEnabled
 }
 
 // SetAddonContainerResolver installs a callback returning the container

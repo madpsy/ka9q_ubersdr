@@ -3923,8 +3923,15 @@ a.btn { text-decoration: none; }
     font-variant-numeric: tabular-nums;
 }
 /* Four for the NET total, which counts in whole units up to the point its scale
-   flips — 1024 kB/s is the last reading before it becomes 1.0 MB/s. */
-.sparkline__value--wide { min-width: 4ch; }
+   flips — 1024 kB/s is the last reading before it becomes 1.0 MB/s.
+
+   And left-aligned, unlike every other value here, for the same reason the
+   per-stream figures are: this caption's labels have no space after the colon,
+   so the number has to start where the colon ends. The field is still four
+   characters wide, so the slack sits between the figure and its unit — which
+   has a reservation of its own — and the line does not move as the reading
+   gains a digit. */
+.sparkline__value--wide { min-width: 4ch; text-align: left; }
 
 /* The same reservation for every other figure in a caption, and the reason is
    the same one written above: the caption is pinned by its right edge, so a

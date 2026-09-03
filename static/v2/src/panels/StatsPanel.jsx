@@ -294,7 +294,7 @@ function NetChart({ canvasRef, streams, bits, onSwap }) {
         >
             <canvas ref={canvasRef} />
             <span className="sparkline__label sparkline__label--bottom">
-                {'Net: '}
+                {'Net:'}
                 <span className="sparkline__value sparkline__value--wide">
                     {split.total == null ? '—' : split.total}
                 </span>

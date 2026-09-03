@@ -184,6 +184,9 @@ function mount(ctx = context(), props = {}, { ticks = 3, step } = {}) {
     return { tree: again.tree, cleanups: first.cleanups };
 }
 
+// The three streams the NET chart stacks: spectrum, audio, band.
+const NET_STREAMS = 3;
+
 // The panel's own sample interval. Not imported — it is not exported, and the
 // point of a fixed number here is that the test notices if it changes.
 const SAMPLE_MS = 500;
@@ -376,17 +379,33 @@ t('the part letters are coloured as the bands they stand for', () => {
         && String(n.props.className || '').startsWith('sparkline__label')
         && say(n).includes('Net'));
     const inked = deep(caption).filter((n) => n && n.props && n.props.style && n.props.style.color);
-    assert.deepStrictEqual(inked.map((n) => say(n).trim()), ['S:', 'A:']);
-    assert.deepStrictEqual(inked.map((n) => n.props.style.color), legendColours(tree).slice(0, 2));
+    assert.deepStrictEqual(inked.map((n) => say(n).trim()), ['S:', 'A:', 'B:']);
+    assert.deepStrictEqual(inked.map((n) => n.props.style.color), legendColours(tree));
 });
 
-t('a stream that is not running is left out of the caption entirely', () => {
-    // The band spectrum stream exists only while that panel is open. "B: 0"
-    // would read as a stream that has stalled, which is a different and much
-    // more alarming thing than one that is not there — the chart draws it as a
-    // band with no height, which has no such ambiguity.
+t('all three parts are always there, a stream that is not running included', () => {
+    // The band spectrum stream exists only while that panel is open. It still
+    // gets a field, reading nought — because the caption is anchored by its
+    // right edge, and a part that comes and goes drags every word before it
+    // sideways every time the panel is opened or closed. A fixed set of three
+    // fields is what holds the line still.
     const c = captionFor(mount(context(), {}, TRAFFIC).tree, 'Net');
-    assert.ok(!c.includes('B:'), c);
+    for (const letter of ['S:', 'A:', 'B:']) assert.ok(c.includes(letter), c);
+});
+
+t('nothing in the caption can change width as a reading changes', () => {
+    // The complaint this answers: every figure is a fixed-width field with
+    // tabular figures, so a stream going from 9 to 10 kB/s does not shove the
+    // words to its left. Only the total was held still to begin with, and four
+    // unheld numbers beside it were enough to make the line walk every sample.
+    const { tree } = mount(context(), {}, TRAFFIC);
+    const caption = deep(tree).find((n) => n && n.props
+        && String(n.props.className || '').startsWith('sparkline__label')
+        && say(n).includes('Net'));
+    const reserved = deep(caption)
+        .filter((n) => n && n.props && /sparkline__(n|unit|value)\b/.test(String(n.props.className || '')));
+    // The total, the unit, and one field per stream.
+    assert.strictEqual(reserved.length, 2 + NET_STREAMS);
 });
 
 t('before the first two samples there is a dash and nothing else', () => {

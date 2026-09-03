@@ -284,13 +284,6 @@ function Chart({ label, value, note, canvasRef, title }) {
 // reachable from a keyboard, which is the same call SignalPanel's meters made.
 function NetChart({ canvasRef, streams, bits, onSwap }) {
     const split = throughputSplit(streams.map((x) => x.value), bits);
-    // Only the streams that are running, and which of *those* is first — the
-    // separator goes between the parts that are drawn, so a missing spectrum
-    // must not leave the caption opening on a space.
-    const parts = streams
-        .map((x, i) => ({ x, i }))
-        .filter(({ i }) => split.values[i] != null)
-        .map((p, n) => ({ ...p, first: n === 0 }));
     const hint = bits ? 'Click for bytes a second' : 'Click for bits a second';
     return (
         <button
@@ -302,21 +295,42 @@ function NetChart({ canvasRef, streams, bits, onSwap }) {
             <canvas ref={canvasRef} />
             <span className="sparkline__label sparkline__label--bottom">
                 {'Net: '}
-                <span className="sparkline__value">{split.total == null ? '—' : split.total}</span>
+                <span className="sparkline__value sparkline__value--wide">
+                    {split.total == null ? '—' : split.total}
+                </span>
                 {/* A rate needs two samples, so the first half second of a
                     session has nothing to report. A dash on its own, rather
                     than a dash with a unit and a pair of empty brackets after
                     it — "— B/s ()" says the sockets are carrying nothing, when
                     what is true is that nobody has looked yet. */}
-                {split.total != null && ` ${split.unit} (`}
-                {split.total != null && parts.map(({ x, i, first }) => (
-                    <React.Fragment key={x.key}>
-                        {!first && ' '}
-                        <span style={{ color: x.colour }}>{`${x.letter}:`}</span>
-                        {` ${split.values[i]}`}
-                    </React.Fragment>
-                ))}
-                {split.total != null && ')'}
+                {split.total != null && (
+                    <>
+                        {' '}
+                        <span className="sparkline__unit">{split.unit}</span>
+                        {' ('}
+                        {/* All three, always, and a stream that is not running
+                            reads 0 rather than being left out.
+
+                            The caption is anchored by its right edge, so a part
+                            that comes and goes drags every word before it
+                            sideways — and the band spectrum stream comes and
+                            goes with a panel. Three fields that are always there
+                            is what makes the line hold still, which is the whole
+                            point of the reserved widths below. A nought is also
+                            true: the socket is carrying nothing. The chart says
+                            the rest — an absent stream is a band with no height,
+                            which a stalled one would not be. */}
+                        {streams.map((x, i) => (
+                            <React.Fragment key={x.key}>
+                                {i > 0 && ' '}
+                                <span style={{ color: x.colour }}>{`${x.letter}:`}</span>
+                                {' '}
+                                <span className="sparkline__n">{split.values[i] == null ? '0' : split.values[i]}</span>
+                            </React.Fragment>
+                        ))}
+                        {')'}
+                    </>
+                )}
             </span>
         </button>
     );

@@ -3885,6 +3885,30 @@ a.btn { text-decoration: none; }
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
+/* Four for the NET total, which counts in whole units up to the point its scale
+   flips — 1024 kB/s is the last reading before it becomes 1.0 MB/s. */
+.sparkline__value--wide { min-width: 4ch; }
+
+/* The same reservation for every other figure in a caption, and the reason is
+   the same one written above: the caption is pinned by its right edge, so a
+   part that gains a digit shoves the whole line sideways. The NET caption has
+   four numbers and a unit in it, and with only the total held still the other
+   four were enough to make it walk on every sample.
+
+   Left-aligned rather than right, so a figure stays beside the letter that
+   names it — "S: 40" with the space after it, not "S:   40". The field is a
+   fixed width either way, so what follows does not move. */
+.sparkline__n {
+    display: inline-block;
+    min-width: 4ch;
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+}
+/* B/s, kB/s, MB/s — a scale change is rare but it is a change in width, and it
+   happens at the moment a session starts carrying anything, which is when
+   somebody is looking. Both bit units are six characters and hold still on
+   their own; the reservation is for the byte ones. */
+.sparkline__unit { display: inline-block; min-width: 4ch; }
 
 /* The key to a stacked chart, under the chart it belongs to.
    Directly under and tight against it, because a legend a gap away from its

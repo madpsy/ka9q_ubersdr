@@ -3843,7 +3843,13 @@ a.btn { text-decoration: none; }
     font-size: calc(9.5px * var(--ui-scale));
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--text-faint);
+    /* One step up from --text-faint, which is what these captions used to be.
+       Faint is the right register for a label that is read once and ignored
+       after — the legend under the NET chart still is — but these captions
+       carry a live figure, and at 9.5px uppercase over a moving chart the
+       faint grey was being read as decoration rather than as a number. The
+       scrim below fixes the ground; this fixes the ink. */
+    color: var(--text-dim);
 
     /* A scrim under the caption, because the caption is written on top of the
        chart it describes and one of these charts is a filled one.
@@ -3856,10 +3862,11 @@ a.btn { text-decoration: none; }
        written across it. That is not a contrast to be won by picking a better
        grey; the ground underneath is moving and coloured.
 
-       So: the panel's own surface at most of its opacity, which puts the text
-       back on the background it was designed against, plus a blur so the band
-       still reads through as colour rather than being blanked out. Both are on
-       the base class rather than --bottom, so every caption is the same shape
+       So: the panel's own surface, thinned enough that the band still shows
+       through as colour and leaning on the blur for the rest — it is the blur
+       that does the work, taking the high-frequency edge off whatever is under
+       the words while leaving the shape of the stack readable. Both are on the
+       base class rather than --bottom, so every caption is the same shape
        whichever corner it is in and a trace wandering under a top-right one is
        covered too.
 
@@ -3868,9 +3875,9 @@ a.btn { text-decoration: none; }
        it wanted anyway. */
     padding: 1px 4px;
     border-radius: 4px;
-    background: color-mix(in srgb, var(--surface-2) 85%, transparent);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
+    background: color-mix(in srgb, var(--surface-2) 62%, transparent);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
 }
 
 /* A chart you can press. The NET chart swaps bytes for bits on a click, so it
@@ -3907,6 +3914,9 @@ a.btn { text-decoration: none; }
    digit the same width, so 111 and 40 occupy the same field and the words
    around them do not shuffle as it changes. */
 .sparkline__value {
+    /* Full strength, unlike the words around it: the caption is a label and a
+       reading, and the reading is the half anybody is looking at. */
+    color: var(--text);
     display: inline-block;
     min-width: 3ch;
     text-align: right;
@@ -3926,6 +3936,7 @@ a.btn { text-decoration: none; }
    names it — "S: 40" with the space after it, not "S:   40". The field is a
    fixed width either way, so what follows does not move. */
 .sparkline__n {
+    color: var(--text);
     display: inline-block;
     min-width: 4ch;
     text-align: left;

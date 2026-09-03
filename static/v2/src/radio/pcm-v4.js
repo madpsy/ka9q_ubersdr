@@ -54,9 +54,17 @@ const QUALITY_NO_READING = -32768;
 // mono, so the same filter with the imaginary terms dropped — and it wants a
 // deep cascade of short filters, because a 12 kHz channel carrying a 2.65 kHz
 // passband is about 4x oversampled and has structure at several scales.
+//
+// Profile 2 is profile 0 with a reduced-depth front end: the body opens with a
+// shift byte, and the samples were requantised by it before the predictor saw
+// them. The predictor is identical because the scaling happens outside it, so
+// `scaled` only says that the extra byte is there and that the output must be
+// shifted back. A server sends it only to a client that asked for it with
+// `min_margin`; anything else still gets profile 0.
 const PROFILES = {
     0: { name: 'iq-complex-o16', complex: true, orders: [16], mus: [16] },
     1: { name: 'audio-real-8/8/4/2', complex: false, orders: [8, 8, 4, 2], mus: [16, 16, 32, 32] },
+    2: { name: 'iq-complex-o16-scaled', complex: true, orders: [16], mus: [16], scaled: true },
 };
 
 // Round-to-nearest shift by 16, away from zero on ties. A plain >> rounds
@@ -386,6 +394,7 @@ export class PCMv4StreamDecoder {
         if (!p) return false;
         this.stages = p.orders.map((o, i) => new Stage(o, p.mus[i], p.complex));
         this.complex = p.complex;
+        this.scaled = !!p.scaled;
         this.profileId = id;
         return true;
     }
@@ -441,6 +450,17 @@ export class PCMv4StreamDecoder {
         }
         if (!this.sampleRate || this.sampleCount <= 0) return null;
 
+        // The shift leads the body on a scaled profile. It is not in the header
+        // because the flags byte is full, and because a silent packet has no
+        // body and needs no shift.
+        let shift = 0;
+        if (this.scaled && !silent) {
+            if (off >= u8.length) return null;
+            shift = u8[off];
+            if (shift > 15) return null;
+            off += 1;
+        }
+
         const count = this.sampleCount;
         const channels = this.channels;
         const step = this.complex ? 2 : 1;
@@ -459,16 +479,20 @@ export class PCMv4StreamDecoder {
             // planes are already zero-filled
         } else if (escape) {
             if (off + count * 2 > u8.length) return null;
+            // The scale is undone on the way out only: the predictor ran on the
+            // quantised values, exactly as the encoder's did, and shifting
+            // before it would put the two out of step.
+            const g = 1 / 32768 * (1 << shift);
             for (let i = 0; i < count; i += step) {
                 const a = view.getInt16(off + 2 * i, true);
                 if (step === 2) {
                     const b = view.getInt16(off + 2 * i + 2, true);
                     this._advance2(a, b);
-                    planes[0][i / 2] = a / 32768;
-                    if (channels > 1) planes[1][i / 2] = b / 32768;
+                    planes[0][i / 2] = a * g;
+                    if (channels > 1) planes[1][i / 2] = b * g;
                 } else {
                     this._advance1(a);
-                    planes[0][i] = a / 32768;
+                    planes[0][i] = a * g;
                 }
             }
         } else {
@@ -479,16 +503,19 @@ export class PCMv4StreamDecoder {
             }
             if (!riceDecode(body, count, this.residuals)) return null;
             const res = this.residuals;
+            // As on the escape path, the scale is folded into the output gain
+            // rather than applied before the predictor.
+            const g = 1 / 32768 * (1 << shift);
             if (step === 2) {
                 for (let i = 0; i < count; i += 2) {
                     const [xr, xi] = this._step2(res[i], res[i + 1]);
-                    planes[0][i / 2] = xr / 32768;
-                    if (channels > 1) planes[1][i / 2] = xi / 32768;
+                    planes[0][i / 2] = xr * g;
+                    if (channels > 1) planes[1][i / 2] = xi * g;
                 }
             } else {
                 for (let i = 0; i < count; i++) {
                     const x = this._step1(res[i]);
-                    planes[0][i] = x / 32768;
+                    planes[0][i] = x * g;
                 }
             }
         }

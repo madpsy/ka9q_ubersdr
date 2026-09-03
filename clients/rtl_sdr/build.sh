@@ -181,6 +181,7 @@ remote() {
 build_remote() {
   local asset="$1"
   local dir=".cache/ubersdr-rtltcp-build"
+  local tmp="$asset.incoming.$$"
 
   tar czf - go.mod go.sum ./*.go testdata \
     | remote "rm -rf $dir && mkdir -p $dir && tar xzf - -C $dir" || return 1
@@ -189,9 +190,41 @@ build_remote() {
   # on so libc resolves names, which is what makes an mDNS --url work.
   remote "cd $dir && CGO_ENABLED=1 go build -ldflags='-s -w' -o '$BINARY' ." || return 1
 
-  remote "cat $dir/$BINARY" > "$asset" || return 1
-  chmod +x "$asset"
+  # Landed under a temporary name and renamed into place, rather than redirected
+  # straight onto the asset. Two reasons, both of which have bitten the hpsdr
+  # build: `> "$asset"` truncates before the first byte arrives, so a transfer
+  # that dies halfway leaves a corrupt binary under the release name; and it
+  # fails outright with ETXTBSY when the previous binary is still running, which
+  # is the normal state on a machine somebody is testing the bridge on.
+  # rename(2) has neither problem.
+  remote "cat $dir/$BINARY" > "$tmp" || { rm -f "$tmp"; return 1; }
+  chmod +x "$tmp"
+  mv -f "$tmp" "$asset" || { rm -f "$tmp"; return 1; }
   remote "rm -rf $dir" || true
+}
+
+# Whether this run actually produced the asset, rather than whether an asset is
+# merely present.
+#
+# The distinction is the whole point. A previous run's binary sits at this path,
+# so an existence test is satisfied by a file the build had nothing to do with —
+# which is exactly how clients/hpsdr/build.sh published binaries that were weeks
+# old while reporting success every time. The stamp is written immediately
+# before the build, so anything older than it is not from this run.
+check_fresh() {
+  local asset="$1" stamp="$2" log="$3"
+  if [ -f "$asset" ] && [ "$asset" -nt "$stamp" ]; then
+    return 0
+  fi
+  echo -e "${RED}failed${NC}"
+  if [ -f "$asset" ]; then
+    echo "  the build reported success but did not write $asset — what is there is from $(date -r "$asset" '+%Y-%m-%d %H:%M')." >&2
+    [ -f "$log" ] && echo "  full log: $log" >&2
+  else
+    echo "  the build produced no $asset" >&2
+  fi
+  rm -f "$stamp"
+  return 1
 }
 
 preflight() {
@@ -377,12 +410,44 @@ echo
 echo -e "${GREEN}Building $BINARY${NC}"
 mkdir -p "$OUT"
 
+# What runs inside the container, kept in a variable fed by a quoted heredoc
+# rather than written inline as a single-quoted argument to `bash -c`.
+#
+# That is not a style preference. Inline, the whole script is one '…' string, so
+# the first apostrophe in it ends the script — and a comment is exactly where an
+# apostrophe goes unnoticed. clients/hpsdr/build.sh spent weeks doing that: a
+# comment reading "the container's uname" closed the quote partway through, the
+# copy-out below it silently became an argument *to* the script rather than part
+# of it, and every run exited 0 having published stale binaries. This script was
+# one apostrophe away from the same thing.
+#
+# <<'SCRIPT' has no such trap: nothing inside is interpreted by this shell, so
+# apostrophes, quotes and $ are all just text. The variables the script does use
+# come in through -e, as before.
+read -r -d '' CONTAINER_SCRIPT <<'SCRIPT' || true
+set -e
+cp -r /src /work && cd /work
+# -s -w drop the symbol table and DWARF data, as the Makefile does.
+CGO_ENABLED=1 go build -ldflags="-s -w" -o "/out/$BINARY" .
+# Handed back to the user who started the build. The container is root
+# and the bind mount carries its ownership straight out to the host, so
+# without this the binary lands root-owned in the working tree and the
+# next run cannot overwrite it. Done in here because in here is root.
+chown "$HOST_UID:$HOST_GID" "/out/$BINARY"
+SCRIPT
+
 for target in "${TARGETS[@]}"; do
   name="${target%%:*}"
   platform="${target#*:}"
   asset="$OUT/${BINARY}_$name"
 
   echo -ne "${YELLOW}  $name${NC} … "
+
+  # A mark to compare the asset against afterwards, taken before either build
+  # path runs. `-nt` against it is what decides whether this run actually
+  # produced the file — see the check at the bottom of the loop.
+  stamp="$OUT/.$name.stamp"
+  rm -f "$stamp"; : >"$stamp"
 
   if [ "$name" = "arm64" ] && [ -n "$REMOTE_HOST" ]; then
     if ! build_remote "$asset" >"$OUT/.$name.log" 2>&1; then
@@ -391,9 +456,11 @@ for target in "${TARGETS[@]}"; do
       tail -25 "$OUT/.$name.log" | sed 's/^/      /' >&2
       echo
       echo "  full log: $OUT/.$name.log" >&2
+      rm -f "$stamp"
       exit 1
     fi
-    rm -f "$OUT/.$name.log"
+    check_fresh "$asset" "$stamp" "$OUT/.$name.log" || exit 1
+    rm -f "$OUT/.$name.log" "$stamp"
     echo "$(du -h --apparent-size "$asset" | cut -f1)  (built on $REMOTE_HOST)"
     continue
   fi
@@ -405,27 +472,32 @@ for target in "${TARGETS[@]}"; do
   if ! docker run --rm --platform "$platform" \
       -v "$PWD:/src:ro" -v "$PWD/$OUT:/out" -v "$CACHE_VOLUME:/go/pkg/mod" \
       -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" -e "BINARY=$BINARY" \
-      "$IMAGE" bash -c '
-        set -e
-        cp -r /src /work && cd /work
-        # -s -w drop the symbol table and DWARF data, as the Makefile does.
-        CGO_ENABLED=1 go build -ldflags="-s -w" -o "/out/$BINARY" .
-        # Handed back to the user who started the build. The container is root
-        # and the bind mount carries its ownership straight out to the host, so
-        # without this the binary lands root-owned in the working tree and the
-        # next run cannot overwrite it. Done in here because in here is root.
-        chown "$HOST_UID:$HOST_GID" "/out/$BINARY"
-      ' >"$OUT/.$name.log" 2>&1; then
+      "$IMAGE" bash -c "$CONTAINER_SCRIPT" >"$OUT/.$name.log" 2>&1; then
     echo -e "${RED}failed${NC}"
     echo
     tail -25 "$OUT/.$name.log" | sed 's/^/      /' >&2
     echo
     echo "  full log: $OUT/.$name.log" >&2
+    rm -f "$stamp"
     exit 1
   fi
 
-  mv "$OUT/$BINARY" "$asset"
-  rm -f "$OUT/.$name.log"
+  # Said plainly rather than left to `mv` to discover. A container that exits 0
+  # without having written anything used to surface here as `mv: cannot stat`,
+  # which names the symptom and not the problem.
+  if [ ! -f "$OUT/$BINARY" ]; then
+    echo -e "${RED}failed${NC}"
+    echo "  the container exited 0 but wrote no $OUT/$BINARY." >&2
+    echo "  full log: $OUT/.$name.log" >&2
+    rm -f "$stamp"
+    exit 1
+  fi
+
+  # mv and not cp: rename(2) works even when the binary now being replaced is
+  # running, which cp does not.
+  mv -f "$OUT/$BINARY" "$asset"
+  check_fresh "$asset" "$stamp" "$OUT/.$name.log" || exit 1
+  rm -f "$OUT/.$name.log" "$stamp"
 
   echo "$(du -h --apparent-size "$asset" | cut -f1)"
 done

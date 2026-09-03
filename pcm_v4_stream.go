@@ -31,6 +31,14 @@ type PCMv4StreamEncoder struct {
 	// changes the predictor form must change with it, so the codec is rebuilt.
 	profile byte
 
+	// margin is the live reduced-depth request, which a client may move while
+	// the stream is running; marginDB is the value it was created with.
+	// depth chooses the per-packet shift when it is set; see pcm_lossy.go.
+	marginDB  float64
+	margin    *LossyMarginCell
+	depth     *lossyDepthSelector
+	depthRate int
+
 	// samples is reused across packets to keep the big-endian conversion off
 	// the allocator at 1098 packets a second.
 	samples []int16
@@ -41,9 +49,29 @@ type PCMv4StreamEncoder struct {
 
 // NewPCMv4StreamEncoder returns an encoder that has told the peer nothing yet.
 func NewPCMv4StreamEncoder() *PCMv4StreamEncoder {
+	return NewPCMv4StreamEncoderWithMargin(0)
+}
+
+// NewPCMv4StreamEncoderWithMargin returns an encoder for a client that asked for
+// the reduced-depth IQ mode, keeping the quantisation floor at least marginDB
+// below the measured noise floor. A margin of zero is the lossless path, which
+// is what everything that does not ask for the mode gets.
+func NewPCMv4StreamEncoderWithMargin(marginDB float64) *PCMv4StreamEncoder {
+	return &PCMv4StreamEncoder{
+		header:   NewPCMv4HeaderEncoder(),
+		profile:  0xff, // no codec yet; the first packet builds one
+		marginDB: marginDB,
+	}
+}
+
+// NewPCMv4StreamEncoderWithMarginCell is the same, for a client that may move
+// the margin while connected. The cell is read once per packet, which is an
+// atomic load against tens of microseconds of coding.
+func NewPCMv4StreamEncoderWithMarginCell(cell *LossyMarginCell) *PCMv4StreamEncoder {
 	return &PCMv4StreamEncoder{
 		header:  NewPCMv4HeaderEncoder(),
-		profile: 0xff, // no codec yet; the first packet builds one
+		profile: 0xff,
+		margin:  cell,
 	}
 }
 
@@ -76,7 +104,11 @@ func (e *PCMv4StreamEncoder) EncodePacket(
 	// taps trained on the old one would predict it worse than a cold start.
 	// The header notices the same change independently and re-sends metadata,
 	// so the two stay consistent without talking to each other.
-	want := ProfileForChannels(channels)
+	marginDB := e.marginDB
+	if e.margin != nil {
+		marginDB = e.margin.Get()
+	}
+	want := ProfileFor(channels, marginDB > 0)
 	if e.codec == nil || want != e.profile {
 		codec, err := NewPredictiveCodec(want)
 		if err != nil {
@@ -84,6 +116,23 @@ func (e *PCMv4StreamEncoder) EncodePacket(
 		}
 		e.codec = codec
 		e.profile = want
+		// The selector carries a smoothed spectrum of the channel it was built
+		// for, so a mode change rebuilds it alongside the predictor rather than
+		// letting the old band set the depth for the new one.
+		e.depth = nil
+	}
+	if want == PredProfileIQScaled {
+		if e.depth == nil || e.depthRate != sampleRate {
+			e.depth = newLossyDepthSelector(marginDB, sampleRate)
+			e.depthRate = sampleRate
+		} else if e.depth.marginDB != marginDB {
+			// A margin the client moved. Nothing is rebuilt: the depth is chosen
+			// per packet and the shift travels in the packet, so the new setting
+			// applies to the next one with no interruption to the stream.
+			e.depth.setMargin(marginDB)
+		}
+	} else {
+		e.depth = nil
 	}
 
 	// radiod hands over big-endian samples; the codec works on values.
@@ -124,6 +173,16 @@ func (e *PCMv4StreamEncoder) EncodePacket(
 		}
 	}
 
+	// Requantise before the codec sees anything. The predictor then runs on the
+	// small values on both sides, which is what keeps its state bit-identical;
+	// shifting back before coding instead would expand the stream, because Rice
+	// codes magnitude and cannot say "and eight zeros".
+	var shift uint
+	if e.depth != nil && !silent {
+		shift = e.depth.shiftFor(e.samples)
+		lossyQuantise(e.samples, shift)
+	}
+
 	var body []byte
 	var escape bool
 	if silent {
@@ -153,6 +212,12 @@ func (e *PCMv4StreamEncoder) EncodePacket(
 		Escape:         escape,
 		Silent:         silent,
 	})
+	// The shift leads the body rather than riding in the header: the header's
+	// flags byte is full, and a silent packet has no body at all, so putting it
+	// here costs nothing on a squelched or dead channel.
+	if e.depth != nil && !silent {
+		e.packet = append(e.packet, byte(shift))
+	}
 	e.packet = append(e.packet, body...)
 	return e.packet, nil
 }
@@ -209,10 +274,25 @@ func (d *PCMv4StreamDecoder) DecodePacket(pkt []byte) (PCMv4Header, []int16, err
 		return h, out, nil
 	}
 
+	var shift uint
+	if h.Profile == PredProfileIQScaled {
+		if len(pkt) <= off {
+			return h, nil, fmt.Errorf("pcm v4: scaled packet carries no shift")
+		}
+		shift = uint(pkt[off])
+		if shift > 15 {
+			return h, nil, fmt.Errorf("pcm v4: shift %d out of range", shift)
+		}
+		off++
+	}
+
 	samples, err := d.codec.DecodeBody(pkt[off:], h.SampleCount, h.Escape)
 	if err != nil {
 		return h, nil, fmt.Errorf("pcm v4: %w", err)
 	}
+	// Undo the scale only on the way out. The predictor above ran on the
+	// quantised values, exactly as the encoder's did.
+	lossyRestore(samples, shift)
 	return h, samples, nil
 }
 

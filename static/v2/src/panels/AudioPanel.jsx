@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { Button, Field, Icon, Modal, Readout, Segmented, Slider } from '../components/ui.jsx';
-import { isIQ } from '../radio/constants.js';
+import {
+    isIQ, marginFromSlider, MARGIN_LOSSLESS, MARGIN_MIN_DB, MARGIN_STEP_DB,
+    sliderFromMargin,
+} from '../radio/constants.js';
 import {
     listOutputDevices, micPermission, sinkLabel, sinkSupport, unlockDeviceLabels,
 } from '../lib/audioSinks.js';
@@ -18,6 +21,66 @@ const IQ_CHANNELS = [
     { value: 'left', label: 'I', title: 'In-phase only — silences Q' },
     { value: 'right', label: 'Q', title: 'Quadrature only — silences I' },
 ];
+
+// Reduced-depth IQ. The request is a margin in dB -- how far under the band's
+// own noise floor the quantisation floor is held -- rather than a bit depth,
+// because a depth means something different on every band: ten bits leaves 50 dB
+// of headroom on a dead band and 9 dB on medium wave.
+//
+// The range lives in constants.js, mirroring the server's clamp so the control
+// cannot ask for something that will be silently adjusted. The top of the scale
+// is lossless, and is where the slider starts.
+// The margin control, shown when the stream is uncompressed. It only bites on
+// IQ -- a demodulated channel is already an order of magnitude cheaper, and the
+// server ignores the request there -- so it says so rather than appearing to do
+// nothing.
+function MarginPicker() {
+    const { audio, actions, tuning } = useRadio();
+    const iq = isIQ(tuning.mode);
+    // Dragging shows locally and commits on release, so a drag across the track
+    // sends one message rather than one per pixel. The debounce is there for the
+    // keyboard: arrow keys move the slider without ever raising a pointer-up, so
+    // a commit that only hung off release would never fire for them.
+    const [dragging, setDragging] = useState(null);
+    const timer = useRef(null);
+    const value = dragging ?? sliderFromMargin(audio.minMargin);
+    const lossless = value >= MARGIN_LOSSLESS;
+
+    const commit = useCallback((v) => {
+        clearTimeout(timer.current);
+        timer.current = null;
+        setDragging(null);
+        actions.setAudioMargin(marginFromSlider(v));
+    }, [actions]);
+
+    const move = (v) => {
+        setDragging(v);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => commit(v), 250);
+    };
+
+    useEffect(() => () => clearTimeout(timer.current), []);
+
+    return (
+        <>
+            <Field label="Quality" inline hint={lossless ? 'Lossless' : `${value} dB`}>
+                <Slider
+                    value={value}
+                    min={MARGIN_MIN_DB}
+                    max={MARGIN_LOSSLESS}
+                    step={MARGIN_STEP_DB}
+                    onChange={move}
+                    onCommit={() => { if (dragging != null) commit(dragging); }}
+                />
+            </Field>
+            <div className="note note--tight">
+                Drops bits that fall below the band&rsquo;s noise floor: lower saves
+                more bandwidth, the top sends every bit.
+                {!iq && ' Applies to IQ modes.'}
+            </div>
+        </>
+    );
+}
 
 const FORMATS = [
     { value: 'opus', label: 'Opus', title: 'Compressed — the default, and around 50 kbit/s in every mode' },
@@ -73,6 +136,7 @@ function FormatPicker() {
                     size="sm"
                 />
             </Field>
+            {current === 'pcm-zstd' && <MarginPicker />}
             <div className="note note--tight">
                 {iq ? (
                     <>

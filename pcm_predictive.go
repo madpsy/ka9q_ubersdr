@@ -193,6 +193,17 @@ const (
 	// 384 kHz stream is the difference between 2.2% and 8.2% of a core.
 	PredProfileIQ byte = 0
 
+	// PredProfileIQScaled is PredProfileIQ with a reduced-depth front end: the
+	// body carries a shift byte before the Rice parameter, and the samples were
+	// requantised by that shift before the predictor saw them. The predictor
+	// itself is identical, because the scaling happens outside it.
+	//
+	// It is a separate id rather than a flag so that a client which has not
+	// asked for the lossy mode cannot be handed one by accident: an unknown
+	// profile is a hard error here and in every other decoder, where an
+	// unrecognised flag bit might be ignored. See pcm_lossy.go.
+	PredProfileIQScaled byte = 2
+
 	// PredProfileAudio is a four-stage real cascade, orders 8/8/4/2.
 	//
 	// Depth matters far more here than filter length. On a USB capture the
@@ -214,6 +225,10 @@ var predProfiles = map[byte]PredictorProfile{
 		ID: PredProfileAudio, Name: "audio-real-8/8/4/2", Complex: false,
 		Orders: []int{8, 8, 4, 2}, Mus: []int64{16, 16, 32, 32},
 	},
+	PredProfileIQScaled: {
+		ID: PredProfileIQScaled, Name: "iq-complex-o16-scaled", Complex: true,
+		Orders: []int{16}, Mus: []int64{16},
+	},
 }
 
 // ProfileForChannels is the server's policy for which predictor to use.
@@ -222,7 +237,18 @@ var predProfiles = map[byte]PredictorProfile{
 // on it: the packet declares the result, so this can be changed freely --
 // including per band or per mode -- without breaking any deployed client.
 func ProfileForChannels(channels int) byte {
+	return ProfileFor(channels, false)
+}
+
+// ProfileFor is ProfileForChannels with the reduced-depth mode taken into
+// account. The lossy request is honoured for IQ only: a demodulated channel is
+// already an order of magnitude cheaper, and the measurements that justify the
+// mode were made on complex baseband.
+func ProfileFor(channels int, lossy bool) byte {
 	if channels >= 2 {
+		if lossy {
+			return PredProfileIQScaled
+		}
 		return PredProfileIQ
 	}
 	return PredProfileAudio

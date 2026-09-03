@@ -27,8 +27,7 @@ import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, applyTuningRange, bandwidthLimits, defaultAGC,
     hasAGCSettings,
     isIQ, SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
-    autoSquelchValue, squelchEnabled, squelchThreshold,
-} from './constants.js';
+    autoSquelchValue, squelchEnabled, squelchThreshold, clampMargin } from './constants.js';
 import { clamp } from '../lib/format.js';
 import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
@@ -143,6 +142,9 @@ export function RadioProvider({ children }) {
         // Audio wire format: 'opus' | 'pcm-zstd'. Opus unless this browser has
         // been through the bandwidth warning and chosen otherwise.
         format: saved.audioFormat === 'pcm-zstd' ? 'pcm-zstd' : 'opus',
+        // Reduced-depth IQ margin in dB, 0 for lossless. Only IQ streams are
+        // affected; the server ignores it on a demodulated channel.
+        minMargin: clampMargin(saved.audioMinMargin),
         // Output device ID, '' being the system default. Device IDs are
         // per-origin and survive a reload, so this is worth restoring — and if
         // the device has gone since, setAudioSink falls back to the default.
@@ -391,6 +393,9 @@ export function RadioProvider({ children }) {
         // reason: the first connect of the visit has to ask for the restored
         // format, not the built-in one.
         audioConn.setFormat(audio.format);
+        // Likewise for the reduced-depth margin: the first connect has to carry
+        // the restored setting, not the built-in lossless one.
+        audioConn.setMinMargin(audio.minMargin);
         // Only remembered here — there is no context to route until audio
         // starts, and _createContext applies it then.
         player.setSinkId(audio.sinkId).catch(() => { /* reported when it plays */ });
@@ -857,6 +862,7 @@ export function RadioProvider({ children }) {
             channel: audio.channel,
             sinkId: audio.sinkId,
             audioFormat: audio.format,
+            audioMinMargin: audio.minMargin,
             filters,
             noise,
             squelchValueDb: squelchValue,
@@ -1322,6 +1328,17 @@ export function RadioProvider({ children }) {
                 if (next === before || !runningRef.current) return;
                 audioConn.disconnect();
                 await audioConn.connect(tuningRef.current);
+            },
+
+            // Reduced-depth IQ: the quantisation floor is held this far under
+            // the band's own noise floor. 0 is lossless.
+            //
+            // No reconnect, unlike the format: the shift travels in every packet
+            // already, so the server applies a new margin to the next one and
+            // the stream never stops.
+            setAudioMargin(dB) {
+                const next = audioConn.setMinMargin(dB);
+                setAudio((a) => (a.minMargin === next ? a : { ...a, minMargin: next }));
             },
 
             // Which device the audio comes out of; '' is the system default.

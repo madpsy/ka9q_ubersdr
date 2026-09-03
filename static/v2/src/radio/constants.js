@@ -441,3 +441,69 @@ export function autoSquelchValue(snrHistory) {
     // Never land on the floor, which would read as "off".
     return Math.max(SQUELCH_MIN + SQUELCH_STEP, Math.min(SQUELCH_MAX, stepped));
 }
+
+// Reduced-depth IQ streaming
+// ==========================
+//
+// The client asks for a MARGIN in dB -- how far under the band's own noise floor
+// the quantisation floor is held -- rather than a bit depth, because a depth
+// means something different on every band: measured across live captures, ten
+// bits left 50 dB of headroom on a dead band and 9 dB on medium wave. A margin
+// means the same thing everywhere, which is what lets a client reason about the
+// stream without knowing what it is tuned to.
+//
+// These mirror the server's clamp in pcm_lossy.go. They are duplicated rather
+// than fetched because the control has to draw itself before any stream exists;
+// keeping them here means one place to change on this side, and marginclamp.test.js
+// pins the values so the two cannot drift silently.
+//
+// 0 means lossless, which is what the server does for anything that does not
+// ask.
+export const MARGIN_MIN_DB = 20;
+export const MARGIN_MAX_DB = 60;
+export const MARGIN_STEP_DB = 2;
+
+// The slider's top position, one step past the widest margin, means lossless.
+//
+// It sits at the end of the scale rather than off to one side because that is
+// where the measurements put it: asking for a wider and wider margin buys less
+// and less, 60 dB already leaves under 8% of the stream to save, and a little
+// beyond that every packet comes back bit for bit. Lossless is the limit of the
+// control, not an exception to it.
+//
+// It is also the default. "Uncompressed" has to mean uncompressed until someone
+// says otherwise, so an untouched slider asks for nothing and the stream is
+// exactly what it was before this mode existed.
+export const MARGIN_LOSSLESS = MARGIN_MAX_DB + MARGIN_STEP_DB;
+
+// 26 dB is the measured transparent setting: every FT8 decode survives it with
+// its reported strength intact, for about half the bytes. Not the default --
+// lossless is -- but the value worth reaching for first.
+export const MARGIN_DEFAULT_DB = 26;
+
+// Slider position to the margin actually requested. The top means lossless,
+// which the server represents as no request at all.
+export function marginFromSlider(sliderValue) {
+    const v = Number(sliderValue);
+    if (!Number.isFinite(v) || v >= MARGIN_LOSSLESS) return 0;
+    return clampMargin(v);
+}
+
+// And back, so the control can be drawn from the stored setting.
+export function sliderFromMargin(dB) {
+    const v = clampMargin(dB);
+    return v > 0 ? v : MARGIN_LOSSLESS;
+}
+
+// Coerce a requested margin to something the server will honour unchanged.
+//
+// Anything that is not a usable number becomes 0 (lossless) rather than the
+// default, so a broken saved preference or a bad message degrades to today's
+// behaviour instead of silently turning the mode on.
+export function clampMargin(dB) {
+    const v = Number(dB);
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    if (v < MARGIN_MIN_DB) return MARGIN_MIN_DB;
+    if (v > MARGIN_MAX_DB) return MARGIN_MAX_DB;
+    return Math.round(v);
+}

@@ -277,12 +277,63 @@ echo
 echo -e "${GREEN}Building $BINARY${NC}"
 mkdir -p "$OUT"
 
+# What runs inside the container, kept in a variable fed by a quoted heredoc
+# rather than written inline as a single-quoted argument to `bash -c`.
+#
+# That is not a style preference. Inline, the whole script is one '…' string, so
+# the first apostrophe in it ends the script — and a comment is exactly where an
+# apostrophe goes unnoticed. This build spent a while doing that: a comment
+# reading "the container's uname" closed the quote after `make`, so the copy-out
+# below was never part of the script at all. It became an argument *to* it. The
+# container built the binary, dropped it on exit and returned 0, and every run
+# published whatever stale binaries happened to be sitting in build/.
+#
+# <<'SCRIPT' has no such trap: nothing inside is interpreted by this shell, so
+# apostrophes, quotes and $ are all just text. The variables the script does use
+# come in through -e, as before.
+read -r -d '' CONTAINER_SCRIPT <<'SCRIPT' || true
+set -e
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq --no-install-recommends \
+  build-essential libwebsockets-dev uuid-dev libbsd-dev
+mkdir -p /work && cd /work
+for f in $SOURCES; do cp "/src/$f" .; done
+make
+
+# The Makefile names its output after the architecture, and under qemu the
+# container's uname is the target's, so what it produced already carries the
+# release asset name.
+built=$(echo build/${BINARY}_*)
+[ -f "$built" ] || { echo "the container build produced no build/${BINARY}_*" >&2; exit 1; }
+
+# Copied to a temporary name and renamed over the target, rather than written
+# straight onto it.
+#
+# Writing onto it fails with ETXTBSY the moment the previous binary is running —
+# which is the normal state of affairs on the machine where somebody is testing
+# the bridge, and which used to abort the copy. rename(2) does not care: the
+# running process keeps the inode it already has and the new file takes the
+# name. chown before the rename, so the file is never briefly root-owned under
+# the name the host is watching.
+cp "$built" "/out/.tmp_${BINARY}_$$"
+chown "$HOST_UID:$HOST_GID" "/out/.tmp_${BINARY}_$$"
+mv -f "/out/.tmp_${BINARY}_$$" "/out/$(basename "$built")"
+SCRIPT
+
 for target in "${TARGETS[@]}"; do
   name="${target%%:*}"
   platform="${target#*:}"
   asset="$OUT/${BINARY}_$name"
 
   echo -ne "${YELLOW}  $name${NC} … "
+
+  # A mark to compare the asset against afterwards. `-nt` is what decides whether
+  # this run actually produced the file, so the stamp has to exist before the
+  # build and after any previous one; sleeping is not needed because the copy is
+  # minutes later, not milliseconds.
+  stamp="$OUT/.$name.stamp"
+  rm -f "$stamp"; : >"$stamp"
 
   # The source is mounted read-only and copied to a scratch directory inside the
   # container, so the Makefile's in-place .o and binary are the container's
@@ -291,42 +342,36 @@ for target in "${TARGETS[@]}"; do
       -v "$PWD:/src:ro" -v "$PWD/$OUT:/out" \
       -e "SOURCES=${SOURCES[*]}" -e "BINARY=$BINARY" \
       -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" \
-      "$IMAGE" bash -c '
-        set -e
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq
-        apt-get install -y -qq --no-install-recommends \
-          build-essential libwebsockets-dev uuid-dev libbsd-dev
-        mkdir -p /work && cd /work
-        for f in $SOURCES; do cp "/src/$f" .; done
-        make
-        # The Makefile names its output after the architecture, and under qemu
-        # the container's uname is the target's, so what it produced already
-        # carries the release asset name.
-        cp build/${BINARY}_* /out/
-        # Handed back to the user who started the build. The container is root
-        # and the bind mount carries its ownership straight out to the host, so
-        # without this the binary lands root-owned in the working tree and the
-        # next run cannot overwrite it — and neither can the person who wants to
-        # delete it. Done in here because in here is where we are root.
-        chown "$HOST_UID:$HOST_GID" /out/${BINARY}_*
-      ' >"$OUT/.$name.log" 2>&1; then
+      "$IMAGE" bash -c "$CONTAINER_SCRIPT" >"$OUT/.$name.log" 2>&1; then
     echo -e "${RED}failed${NC}"
     echo
     tail -25 "$OUT/.$name.log" | sed 's/^/      /' >&2
     echo
     echo "  full log: $OUT/.$name.log" >&2
+    rm -f "$stamp"
     exit 1
   fi
 
   # The container's make already named it: build.sh and the Makefile agree on
   # ${BINARY}_<arch>, so there is nothing to rename here.
-  if [ ! -f "$asset" ]; then
+  #
+  # Checked for freshness and not merely for existence. A previous run's binary
+  # sits at this path, so `-f` is satisfied by a file this build had nothing to
+  # do with — which is how a container that quietly failed to copy anything out
+  # still looked like a success, and how stale binaries reached the release. The
+  # question worth asking is whether *this* run wrote it.
+  if [ ! -f "$asset" ] || [ ! "$asset" -nt "$stamp" ]; then
     echo -e "${RED}failed${NC}"
-    echo "  the build produced no $asset" >&2
+    if [ -f "$asset" ]; then
+      echo "  the container exited 0 but did not write $asset — what is there is from $(date -r "$asset" '+%Y-%m-%d %H:%M')." >&2
+      echo "  full log: $OUT/.$name.log" >&2
+    else
+      echo "  the build produced no $asset" >&2
+    fi
+    rm -f "$stamp"
     exit 1
   fi
-  rm -f "$OUT/.$name.log"
+  rm -f "$OUT/.$name.log" "$stamp"
 
   echo "$(du -h --apparent-size "$asset" | cut -f1)"
 done

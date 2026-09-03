@@ -331,6 +331,10 @@ type ClientMessage struct {
 	// Valid range: -999 (disabled/sentinel) to +999.
 	MinSNR   *float32 `json:"min_snr,omitempty"`   // minimum SNR (basebandPower − noise, in the session's protocol version); -999 = disabled
 	MinPower *float32 `json:"min_power,omitempty"` // minimum baseband power in dBFS (e.g. -80.0); -999 = disabled
+
+	// MinMargin retargets the reduced-depth IQ mode while connected, in dB.
+	// 0 returns the stream to lossless. See pcm_lossy.go.
+	MinMargin *float64 `json:"min_margin,omitempty"`
 	// Mute field (type: "set_mute") — true = mute audio, false = unmute.
 	Muted *bool `json:"muted,omitempty"`
 }
@@ -445,6 +449,31 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 			}
 			version = parsedVer
 		}
+	}
+
+	// Reduced-depth IQ mode, requested as a margin in dB rather than a bit
+	// depth: `min_margin` is how far under the band's own noise floor the
+	// quantisation floor must stay. Absent -- which is every client that has not
+	// been changed to ask -- means the lossless path, unchanged.
+	//
+	// A margin is the request rather than a depth because a depth means
+	// something different on every band: measured, ten bits left 50 dB of
+	// headroom on a dead 6 m band and 9 dB on medium wave. See pcm_lossy.go.
+	var lossyMargin float64
+	if v := query.Get("min_margin"); v != "" {
+		var parsed float64
+		if _, err := fmt.Sscanf(v, "%g", &parsed); err == nil {
+			// Out-of-range is clamped rather than refused. Unlike the protocol
+			// version, a margin the server will not honour exactly still leaves
+			// a working stream, so there is nothing to be gained by dropping the
+			// connection over it.
+			lossyMargin, _ = LossyMarginFromQuery(parsed, true)
+		}
+	}
+	// Held in a cell so `set_min_margin` can move it without a reconnect.
+	lossyMarginCell := NewLossyMarginCell(lossyMargin)
+	if lossyMargin > 0 {
+		log.Printf("Session requested reduced-depth IQ at %.0f dB margin (client IP: %s)", lossyMargin, clientIP)
 	}
 
 	// Get format from query string (optional): "pcm-zstd" (default) or "opus"
@@ -777,10 +806,10 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	// Start audio streaming goroutine
 	done := make(chan struct{})
-	go wsh.streamAudio(conn, sessionHolder, done, format, version)
+	go wsh.streamAudio(conn, sessionHolder, done, format, version, lossyMarginCell)
 
 	// Handle incoming messages (this will manage session lifecycle)
-	wsh.handleMessages(conn, sessionHolder, done, version)
+	wsh.handleMessages(conn, sessionHolder, done, version, lossyMarginCell)
 
 	// Cleanup
 	currentSession := sessionHolder.getSession()
@@ -863,7 +892,7 @@ func (wsh *WebSocketHandler) ssbAGCFor(session *Session, mode string) *AGCParams
 }
 
 // handleMessages processes incoming WebSocket messages
-func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *sessionHolder, done chan struct{}, version int) {
+func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *sessionHolder, done chan struct{}, version int, lossyMargin *LossyMarginCell) {
 	defer close(done)
 
 	for {
@@ -1541,6 +1570,26 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				"filters":   filterList,
 			}})
 
+		case "set_min_margin":
+			// Retarget the reduced-depth IQ mode without reconnecting.
+			//
+			// This costs nothing on the wire and needs no client change: the
+			// depth is chosen per packet and the shift already travels in each
+			// one, so a new margin simply applies to the next packet. Only
+			// moving between lossy and lossless changes the profile, and the
+			// encoder rebuilds for that exactly as it does for a mode change.
+			//
+			// Out-of-range is clamped rather than refused, as on the connect
+			// URL: a margin the server will not honour exactly still leaves a
+			// working stream. 0 asks for lossless.
+			if msg.MinMargin == nil {
+				wsh.sendError(conn, "set_min_margin requires min_margin")
+				continue
+			}
+			applied, _ := LossyMarginFromQuery(*msg.MinMargin, true)
+			lossyMargin.Set(applied)
+			log.Printf("Reduced-depth margin set to %.0f dB", applied)
+
 		case "set_audio_gate":
 			// Gate audio delivery based on SNR and/or baseband power.
 			// Packets below the threshold are dropped before encoding/sending to the client.
@@ -1850,8 +1899,11 @@ func audioGateAllows(session *Session, basebandPower, noise float32) bool {
 	return false
 }
 
-// streamAudio streams audio data to the client
-func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHolder, done <-chan struct{}, format string, version int) {
+// streamAudio streams audio data to the client.
+//
+// lossyMargin is the reduced-depth IQ request in dB, already clamped, or zero
+// for the lossless path that every unmodified client gets.
+func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHolder, done <-chan struct{}, format string, version int, lossyMargin *LossyMarginCell) {
 	session := sessionHolder.getSession()
 
 	// Track original format requested (for re-enabling after IQ mode)
@@ -1973,7 +2025,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 		if pcmV4Encoder != nil {
 			return
 		}
-		pcmV4Encoder = NewPCMv4StreamEncoder()
+		pcmV4Encoder = NewPCMv4StreamEncoderWithMarginCell(lossyMargin)
 		pcmv4LogSession(session.ID, version)
 	}
 

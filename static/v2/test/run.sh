@@ -28,6 +28,12 @@ esbuild pcmcpu.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/pcmcpu.cjs --log-level=warning
 esbuild pcmv4.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/pcmv4.cjs --log-level=warning
+esbuild marginwire.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/marginwire.cjs --log-level=warning
+esbuild marginclamp.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/marginclamp.cjs --log-level=warning
+esbuild pcmv4scaled.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/pcmv4scaled.cjs --log-level=warning
 esbuild opusv4.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/opusv4.cjs --log-level=warning
 esbuild spectrumv2.entry.js --bundle --format=cjs --platform=node \
@@ -451,6 +457,9 @@ node protocol.test.js
 node modes.test.js
 node pcmstream.test.js
 node pcmv4.test.js
+node pcmv4scaled.test.js
+node marginclamp.test.js
+node marginwire.test.js
 node opusv4.test.js
 node spectrumv2.test.js
 node bandspectrumv2.test.js

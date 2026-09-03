@@ -17,6 +17,7 @@
 // The server falls back to JSON `audio` messages (base64 PCM) when Opus is
 // unavailable; that path is handled too so the UI still works on such a server.
 
+import { marginFromSlider } from './constants.js';
 import { Emitter } from './emitter.js';
 import { failureKind } from '../lib/connectFailure.js';
 import { PCMStreamDecoder, isZstdFrame } from './pcm-stream.js';
@@ -60,6 +61,10 @@ export class AudioConnection extends Emitter {
         // tuning, and on the instance so a reconnect keeps it without the
         // caller having to remember.
         this.format = 'opus';
+        // Reduced-depth IQ request in dB, or 0 for lossless. Like `format` it
+        // rides on the instance so a reconnect keeps it, but unlike `format` it
+        // can also be moved on a live socket -- see setMinMargin.
+        this.minMargin = 0;
         this.pcm = new PCMStreamDecoder();
         // Version 4's decoder is stateful in a way version 3's is not: its
         // predictor carries the adaptation of every sample decoded so far. It
@@ -117,6 +122,27 @@ export class AudioConnection extends Emitter {
     setFormat(format) {
         this.format = format === 'pcm-zstd' ? 'pcm-zstd' : 'opus';
         return this.format;
+    }
+
+    // Reduced-depth IQ: how far under the band's own noise floor the
+    // quantisation floor is held, in dB. 0 is lossless.
+    //
+    // Unlike the format this costs no reconnect. The depth is chosen per packet
+    // and the shift already travels in every packet, so the server applies a new
+    // margin to the next one; when the socket is down it is simply carried into
+    // the next connect URL.
+    setMinMargin(dB) {
+        // marginFromSlider rather than clampMargin, so anything at or above the
+        // lossless position means lossless. Clamping instead would turn a
+        // request for the top of the scale into 60 dB -- a lossy setting, where
+        // the caller asked for none at all.
+        this.minMargin = marginFromSlider(dB);
+        // Unconditionally, like every other command here: send() is already the
+        // one place that knows whether the socket can take a message, and a
+        // second check against `state` is a second thing to get wrong. When the
+        // socket is down the value simply rides the next connect URL instead.
+        this.send({ type: 'set_min_margin', min_margin: this.minMargin });
+        return this.minMargin;
     }
 
     async connect(params) {
@@ -186,6 +212,9 @@ export class AudioConnection extends Emitter {
             format: this.format,
             version: String(PROTOCOL_VERSION),
         });
+        // Omitted entirely when lossless, so the request looks exactly as it did
+        // before the mode existed.
+        if (this.minMargin > 0) q.set('min_margin', String(this.minMargin));
         const password = getBypassPassword();
         if (password) q.set('password', password);
 

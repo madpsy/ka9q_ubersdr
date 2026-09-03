@@ -41,6 +41,49 @@ function code(src) {
         .replace(/"[^"\n]*"/g, '""');
 }
 
+// The names a destructuring pattern binds.
+//
+// `{ a, b: renamed, c = 1, ...rest }` binds a, renamed, c and rest. Aliases bind
+// the right-hand name, defaults are not part of the name, and a rest element
+// drops its dots.
+function namesIn(inner) {
+    const out = [];
+    for (const part of inner.split(',')) {
+        const name = part
+            .split(':').pop()       // `b: renamed` binds renamed
+            .split('=')[0]          // `c = 1` binds c
+            .replace(/\.\.\./, '')  // `...rest` binds rest
+            .trim();
+        if (/^[A-Za-z_$][\w$]*$/.test(name)) out.push(name);
+    }
+    return out;
+}
+
+// Every destructuring pattern that introduces names into a scope.
+//
+// Three shapes, and the third is the one this check was missing. A component
+// taking its props apart in its parameter list -- `function VfoRow({ gateOpen,
+// … })` -- binds those names as surely as a `const` does, but read as a use it
+// looks exactly like referring to an unimported helper of the same name. That is
+// not hypothetical: audio-filters.js exports a `gateOpen` function, IQPanel has a
+// prop called `gateOpen`, and the two are unrelated.
+//
+// Call sites are deliberately not matched. `foo({ bar })` passes an object and
+// binds nothing, so treating it as a declaration would blind the check to a real
+// unimported `bar` somewhere else in the same file. Requiring `function` before
+// the parenthesis, or `=>` after it, separates the two without a parser.
+function destructurePatterns(src) {
+    const out = [];
+    // const/let/var { … } =
+    for (const m of src.matchAll(/(?:const|let|var)\s*\{([^}]*)\}\s*=/g)) out.push(m[1]);
+    // function name({ … })  and  function({ … })
+    for (const m of src.matchAll(/function\s*[A-Za-z_$][\w$]*\s*\(\s*\{([^}]*)\}/g)) out.push(m[1]);
+    for (const m of src.matchAll(/function\s*\(\s*\{([^}]*)\}/g)) out.push(m[1]);
+    // ({ … }) =>
+    for (const m of src.matchAll(/\(\s*\{([^}]*)\}\s*\)\s*=>/g)) out.push(m[1]);
+    return out;
+}
+
 const files = walk(SRC);
 
 // Every name our own modules export.
@@ -60,10 +103,7 @@ for (const file of files) {
     // re-exports the hooks. Missing this let a hook used without importing it
     // slip straight through, which is the exact bug this file is here for.
     for (const m of src.matchAll(/export\s+(?:const|let|var)\s*\{([^}]*)\}\s*=/g)) {
-        for (const n of m[1].split(',')) {
-            const name = n.trim().split(':').pop().trim();
-            if (name) exported.add(name);
-        }
+        for (const name of namesIn(m[1])) exported.add(name);
     }
 }
 
@@ -87,13 +127,8 @@ for (const file of files) {
     const declared = new Set(
         [...src.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
     );
-    // Destructured declarations count as declared — react.js pulls the hooks
-    // off the global with one, and would otherwise flag its own exports.
-    for (const m of src.matchAll(/(?:const|let|var)\s*\{([^}]*)\}\s*=/g)) {
-        for (const n of m[1].split(',')) {
-            const name = n.trim().split(':').pop().trim();
-            if (name) declared.add(name);
-        }
+    for (const pattern of destructurePatterns(src)) {
+        for (const name of namesIn(pattern)) declared.add(name);
     }
 
     // Strip the import statements themselves, so importing a name does not

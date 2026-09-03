@@ -9,7 +9,7 @@
 const assert = require('assert');
 const {
     STATS_DEFAULT_DESKTOP, STATS_DEFAULT_MOBILE, STATS_PLACES,
-    formatThroughput, perSecond, statLines, statsPlace,
+    formatThroughput, perSecond, statLines, statsPlace, throughputSplit,
 } = require('./.build/spectrumstats.cjs');
 
 let pass = 0;
@@ -323,6 +323,70 @@ t('more than one core is a real reading, not a bug to clamp', () => {
     // Every system monitor reports a share of one core, so a busy decoder on a
     // multi-core machine legitimately passes 100.
     assert.strictEqual(value(statLines({ app: { cpu: 148 } }), 'app'), '148%');
+});
+
+
+// --- the same streams, named rather than summed --------------------------------
+//
+// The Stats panel's NET caption. Its chart has already drawn the sum and keyed
+// the parts, so what it needs is the parts labelled — and, on a press, the whole
+// thing in the other unit.
+
+t('the parts are named and the total is the sum of them', () => {
+    const r = throughputSplit([18 * 1024, 3 * 1024, 1 * 1024]);
+    assert.strictEqual(r.unit, 'kB/s');
+    assert.strictEqual(r.total, '22');
+    assert.deepStrictEqual(r.values, ['18', '3', '1']);
+});
+
+t('one unit for all of them, picked from the total', () => {
+    // Two rates in different units side by side is a caption that has to be read
+    // rather than glanced at — so a small stream beside a large one is reported
+    // in the large one's unit.
+    const r = throughputSplit([4 * 1024 * 1024, 6 * 1024]);
+    assert.strictEqual(r.unit, 'MB/s');
+    assert.deepStrictEqual(r.values, ['4.0', '0.0']);
+});
+
+t('an absent stream is null, never a nought', () => {
+    // "B: 0" reads as a stream that has stalled, which is a different and much
+    // more alarming thing than one that is not running. The caller leaves it out.
+    const r = throughputSplit([41 * 1024, 6 * 1024, null]);
+    assert.deepStrictEqual(r.values, ['41', '6', null]);
+    assert.strictEqual(r.total, '47');
+});
+
+t('nothing measured at all has no total to report', () => {
+    const r = throughputSplit([null, null, null]);
+    assert.strictEqual(r.total, null);
+    assert.deepStrictEqual(r.values, [null, null, null]);
+});
+
+t('bits are the same traffic, eight times the number', () => {
+    // 22 kB/s is 180 kbit/s, not 22 — the press changes the unit and the
+    // multiplier together or it is simply mislabelling the same figure.
+    const streams = [18 * 1024, 3 * 1024, 1 * 1024];
+    const bits = throughputSplit(streams, true);
+    assert.strictEqual(bits.unit, 'kbit/s');
+    const bytes = streams.reduce((a, b) => a + b, 0);
+    assert.strictEqual(Number(bits.total), Math.round((bytes * 8) / 1000));
+});
+
+t('bits count in thousands and bytes in 1024s, as each is quoted', () => {
+    // A link is advertised as 100 Mbit/s of exactly 10^8; an allowance is
+    // gibibytes. One base for both would make this disagree with whichever
+    // figure it was being held up against.
+    assert.strictEqual(throughputSplit([1e6 / 8], true).unit, 'Mbit/s');
+    assert.strictEqual(throughputSplit([1e6 / 8], true).total, '1.0');
+    assert.strictEqual(throughputSplit([1023]).unit, 'B/s');
+    assert.strictEqual(throughputSplit([1024]).unit, 'kB/s');
+});
+
+t('the top of a scale keeps the digit that is moving', () => {
+    // Whole units everywhere else, because mixed widths are what make a row of
+    // figures hard to take in — but a megabyte-scale reading rounded whole has
+    // thrown away everything that changes.
+    assert.strictEqual(throughputSplit([1.4 * 1024 * 1024]).total, '1.4');
 });
 
 console.log(`\n${pass} ok`);

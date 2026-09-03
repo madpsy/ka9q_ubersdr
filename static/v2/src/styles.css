@@ -3846,6 +3846,27 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 
+/* A chart you can press. The NET chart swaps bytes for bits on a click, so it
+   is a button — reachable from a keyboard, which a div with an onClick is not —
+   and a button has to be talked back down into being a chart again: no chrome,
+   no padding, the caption left-aligned as the span it replaced was, and the
+   text colour inherited rather than a control's own.
+
+   The only thing it keeps is the cursor and a focus ring, because a chart that
+   takes a press has to say so. */
+.sparkline--press {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.sparkline--press:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* Along the bottom instead, for a chart whose trace lives at the top of its
    box. The buffer is drawn against a fixed ceiling — the queue the operator
    asked for — so a healthy trace sits just under that line, which is exactly

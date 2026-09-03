@@ -143,6 +143,7 @@ function context(over = {}) {
         // useDisplay
         maxFps: 30,
         spectrumStats: 'left',
+        netBits: false,
         set() {},
         ...rest,
     };
@@ -275,12 +276,14 @@ t('the poll divisor is shown even at full rate', () => {
 
 // --- the charts --------------------------------------------------------------
 
-t('every chart says what it is and over what span', () => {
+t('every chart says what it is, and every single trace says over what span', () => {
     const { tree } = mount();
     for (const label of ['Net', 'Feed', 'FPS', 'Buffer']) {
-        const c = captionFor(tree, label);
-        assert.ok(c, `no ${label} caption — got ${captions(tree).join(' | ')}`);
-        assert.ok(c.includes('last 10 s'), `${label} does not say its span: ${c}`);
+        assert.ok(captionFor(tree, label), `no ${label} caption — got ${captions(tree).join(' | ')}`);
+    }
+    // Net is the exception and says why in its own test above.
+    for (const label of ['Feed', 'FPS', 'Buffer']) {
+        assert.ok(captionFor(tree, label).includes('last 10 s'), captionFor(tree, label));
     }
 });
 
@@ -341,26 +344,99 @@ t('only where a host can answer: no process charts in a browser', () => {
     assert.ok(!captionFor(tree, 'Memory'), 'drew a memory chart with no host to measure');
 });
 
-t('the net caption reads the throughput the counters describe', () => {
-    // 20 kB of spectrum and 2 kB of audio every half second is 44 kB/s between
-    // them — the figure somebody is watching, because an allowance is spent by
-    // the sum rather than by either part.
-    const { tree } = mount(context(), {}, {
-        step: (ctx) => {
-            ctx.spectrumConn.bytesIn += 20 * 1024;
-            ctx.audioConn.bytesIn += 2 * 1024;
-        },
-    });
+// 20 kB of spectrum and 2 kB of audio every half second: 44 kB/s between them.
+const TRAFFIC = {
+    step: (ctx) => {
+        ctx.spectrumConn.bytesIn += 20 * 1024;
+        ctx.audioConn.bytesIn += 2 * 1024;
+    },
+};
+
+t('the net caption names the parts instead of declaring the span', () => {
+    // The other charts spend that room on "last 10 s", which they have to
+    // because a single trace says nothing about its own timebase. This one has a
+    // key under it and three streams to account for, and the panel says what ten
+    // seconds looks like directly below.
+    const { tree } = mount(context(), {}, TRAFFIC);
+    // say() collects a node's own strings before descending, so the figures
+    // land after the words they belong to — see captions() above. The parts are
+    // asserted individually for that reason, not because the order is in doubt.
     const c = captionFor(tree, 'Net');
-    assert.ok(c.includes('44 kB/s'), c);
-    assert.ok(c.includes('last 10 s'), c);
+    for (const want of ['44', 'kB/s', 'S:', '40', 'A:', '4']) {
+        assert.ok(c.includes(want), `${want} missing from ${c}`);
+    }
+    assert.ok(!c.includes('last 10 s'), c);
+});
+
+t('the part letters are coloured as the bands they stand for', () => {
+    // Three names in a caption this size is a line of prose, so they are
+    // letters — and the colour is what does the naming.
+    const { tree } = mount(context(), {}, TRAFFIC);
+    const caption = deep(tree).find((n) => n && n.props
+        && String(n.props.className || '').startsWith('sparkline__label')
+        && say(n).includes('Net'));
+    const inked = deep(caption).filter((n) => n && n.props && n.props.style && n.props.style.color);
+    assert.deepStrictEqual(inked.map((n) => say(n).trim()), ['S:', 'A:']);
+    assert.deepStrictEqual(inked.map((n) => n.props.style.color), legendColours(tree).slice(0, 2));
+});
+
+t('a stream that is not running is left out of the caption entirely', () => {
+    // The band spectrum stream exists only while that panel is open. "B: 0"
+    // would read as a stream that has stalled, which is a different and much
+    // more alarming thing than one that is not there — the chart draws it as a
+    // band with no height, which has no such ambiguity.
+    const c = captionFor(mount(context(), {}, TRAFFIC).tree, 'Net');
+    assert.ok(!c.includes('B:'), c);
+});
+
+t('before the first two samples there is a dash and nothing else', () => {
+    // A rate needs two readings. "— B/s ()" would say the sockets are carrying
+    // nothing, when what is true is that nobody has looked yet.
+    const c = captionFor(mount(context(), {}, { ticks: 0 }).tree, 'Net');
+    assert.ok(c.includes('—'), c);
+    assert.ok(!c.includes('('), c);
+    assert.ok(!c.includes('B/s'), c);
 });
 
 t('a counter that has not moved is nought, not a dash', () => {
     // The distinction the cards make — nothing measured yet is a dash — does not
     // apply to a rate that has been measured and came out at zero. A paused
     // socket really is carrying nothing, and that is the reading.
-    assert.ok(captionFor(mount().tree, 'Net').includes('0 B/s'), captionFor(mount().tree, 'Net'));
+    const c = captionFor(mount().tree, 'Net');
+    assert.ok(c.includes('B/s') && /\b0\b/.test(c), c);
+    assert.ok(!c.includes('—'), c);
+});
+
+t('pressing the net chart swaps bytes for bits, and it is a setting', () => {
+    // Both are the same traffic and each answers a different question — bytes
+    // are what an hour costs an allowance, bits are whether the link is fast
+    // enough — so it is remembered rather than asked again every session.
+    const wrote = [];
+    const { tree } = mount(context({ set: (v) => wrote.push(v) }), {}, TRAFFIC);
+    const press = deep(tree).find((n) => n.type === 'button'
+        && String(n.props.className || '').includes('sparkline--press'));
+    assert.ok(press, 'the net chart does not take a press');
+    press.props.onClick();
+    assert.deepStrictEqual(wrote, [{ netBits: true }]);
+});
+
+t('in bits the caption is the same traffic in the other unit', () => {
+    const { tree } = mount(context({ netBits: true }), {}, TRAFFIC);
+    const c = captionFor(tree, 'Net');
+    // 44 kB/s is 360 kbit/s. A press that changed the noun and not the number
+    // would simply be mislabelling the same figure.
+    assert.ok(c.includes('kbit/s'), c);
+    assert.ok(c.includes('360'), c);
+    assert.ok(!c.includes('kB/s'), c);
+});
+
+t('the press says which way it goes, both ways', () => {
+    const bytes = mount(context(), {}, TRAFFIC).tree;
+    const bits = mount(context({ netBits: true }), {}, TRAFFIC).tree;
+    const titleOf = (tree) => deep(tree).find((n) => n.type === 'button'
+        && String(n.props.className || '').includes('sparkline--press')).props.title;
+    assert.ok(titleOf(bytes).includes('Click for bits a second'), titleOf(bytes));
+    assert.ok(titleOf(bits).includes('Click for bytes a second'), titleOf(bits));
 });
 
 // --- the minimal view --------------------------------------------------------
@@ -369,7 +445,7 @@ t('minimal keeps the two charts with a failure in them, and drops the rest', () 
     const { tree } = mount(context(), { minimal: true });
     assert.deepStrictEqual(
         captions(tree).map((c) => c.split(' ')[0]),
-        ['Net', 'Buffer'],
+        ['Net:', 'Buffer:'],
     );
 });
 

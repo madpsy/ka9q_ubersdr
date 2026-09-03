@@ -104,6 +104,63 @@ export function formatThroughput(...streams) {
     return `${parts.map(part).join(' + ')} = ${part(total)} ${unit}`;
 }
 
+/**
+ * The same streams, split out for a caption that names them: "22 kB/s" with
+ * "S: 18  A: 3  B: 1" beside it.
+ *
+ * formatThroughput above is the corner readout's one-line sum, where the parts
+ * are anonymous and the "+" is what says they add up. The Stats panel's chart
+ * has already said which is which — the bands are coloured and there is a key
+ * under them — so what its caption needs is the parts labelled and *not* summed
+ * on screen, the picture being the sum.
+ *
+ * One unit for all of them, picked from the total, as the line version does and
+ * for the same reason: two rates in different units side by side is a caption
+ * that has to be read rather than glanced at.
+ *
+ * `bits` reports the same traffic the way a link is advertised — kbit/s, the
+ * spelling lib/format.js already uses — for anybody comparing this against a
+ * connection speed rather than against a data allowance. It is the same
+ * measurement either way; only the multiplier and the noun change.
+ *
+ * An absent stream (null, or the band spectrum panel being closed) comes back
+ * as null in `values` rather than as a zero, and the caller leaves it out. A
+ * "B: 0" would read as a stream that has stalled, which is a different and much
+ * more alarming thing than one that is not running.
+ *
+ * @param streams  bytes per second, in the order the caller wants them back
+ * @returns { unit, total, values } — values aligned with `streams`
+ */
+export function throughputSplit(streams, bits = false) {
+    const known = streams.filter((v) => Number.isFinite(v) && v >= 0);
+    const totalBytes = known.reduce((a, b) => a + b, 0);
+
+    // Bits are counted in thousands and bytes in 1024s, because that is how each
+    // is quoted: a link is 100 Mbit/s of exactly 10^8, and a data allowance is
+    // gibibytes. Using one base for both would make this disagree with whichever
+    // figure it was being compared against.
+    const scaled = bits ? totalBytes * 8 : totalBytes;
+    const [div, unit] = bits
+        ? (scaled < 1e6 ? [1e3, 'kbit/s'] : [1e6, 'Mbit/s'])
+        : (totalBytes < 1024
+            ? [1, 'B/s']
+            : (totalBytes < 1024 * 1024 ? [1024, 'kB/s'] : [1024 * 1024, 'MB/s']));
+
+    // Whole units, as the line version settled on: mixed widths are what make a
+    // row of figures hard to take in, which is all a caption is for. The one
+    // exception is the top of each scale, where a whole unit has thrown away
+    // the digit that was moving.
+    const one = (v) => {
+        const n = (bits ? v * 8 : v) / div;
+        return div > 1024 * 512 || (bits && div > 1e3) ? n.toFixed(1) : String(Math.round(n));
+    };
+    return {
+        unit,
+        total: known.length ? one(totalBytes) : null,
+        values: streams.map((v) => (Number.isFinite(v) && v >= 0 ? one(v) : null)),
+    };
+}
+
 // Resolution reads better as Hz per bin than as a span: it is what decides
 // whether two carriers 20 Hz apart are one blob or two, which is the thing the
 // zoom is being changed for.

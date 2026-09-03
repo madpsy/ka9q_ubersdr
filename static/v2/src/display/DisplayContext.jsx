@@ -427,6 +427,16 @@ export const DEFAULTS = {
     // or 'snr'. Clicking the meter swaps it. Signal by default because it is
     // the one that answers "is anything there".
     topMeter: 'signal',
+    // The Stats panel's NET chart, in bits rather than bytes. Clicking the chart
+    // swaps it, and it is a display setting like any other so it survives a
+    // reload — the same arrangement as the meters above, and for the same
+    // reason: somebody who reads their connection in Mbit/s reads it that way
+    // every session, not once.
+    //
+    // Bytes by default. The question this chart is usually being asked is what
+    // an hour of listening costs a data allowance, and allowances are in bytes;
+    // bits are for the other question, which is whether the link is fast enough.
+    netBits: false,
     theme: 'dark',
     // The interface's own colours: the accent everything is highlighted in, the
     // text, and the two quieter greys under it — labels, units, the clocks.

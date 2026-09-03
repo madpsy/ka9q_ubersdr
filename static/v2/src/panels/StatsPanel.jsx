@@ -29,7 +29,7 @@ import {
     chartPoints, chartSurface, curveThrough, strokeCurve, trimBefore, SPAN_MS,
 } from '../lib/rollingChart.js';
 import useStatsSample from '../lib/useStatsSample.js';
-import { formatHzPerBin, statsPlace } from '../lib/spectrumStats.js';
+import { formatHzPerBin, statsPlace, throughputSplit } from '../lib/spectrumStats.js';
 
 // A little more than the span is kept, because the chart is drawn slightly
 // behind live and the segment crossing the left edge starts at a point that has
@@ -86,18 +86,10 @@ const SAMPLE_MS = 500;
 // to match — a chart that can still be read by somebody who cannot separate two
 // of the hues.
 const NET_SERIES = [
-    { key: 'spec', label: 'Spectrum', colour: '#7fbfff' },
-    { key: 'audio', label: 'Audio', colour: '#ffa657' },
-    { key: 'band', label: 'Band', colour: '#c9a0ff' },
+    { key: 'spec', letter: 'S', label: 'Spectrum', colour: '#7fbfff' },
+    { key: 'audio', letter: 'A', label: 'Audio', colour: '#ffa657' },
+    { key: 'band', letter: 'B', label: 'Band', colour: '#c9a0ff' },
 ];
-
-// Bytes per second, in whatever unit keeps the number short.
-function formatBytes(v) {
-    if (!(v >= 0)) return '—';
-    if (v < 1024) return `${Math.round(v)} B/s`;
-    if (v < 1024 * 1024) return `${Math.round(v / 1024)} kB/s`;
-    return `${(v / (1024 * 1024)).toFixed(1)} MB/s`;
-}
 
 // One decimal below ten, none above — the corner readout's rule, and for the
 // same reason: "8.3" is a reading and "8" is a rounding, but "23.7" is a digit
@@ -264,12 +256,69 @@ function Chart({ label, value, note, canvasRef, title }) {
         <div className="sparkline" title={title}>
             <canvas ref={canvasRef} />
             <span className="sparkline__label sparkline__label--bottom">
-                {`${label} `}
+                {`${label}: `}
                 <span className="sparkline__value">{value}</span>
                 {note ? ` · ${note}` : ''}
                 {', last 10 s'}
             </span>
         </div>
+    );
+}
+
+// The NET chart, which is the one with a caption of its own and a press on it.
+//
+// The caption names the parts instead of declaring the span: "NET: 22 kB/s
+// (S: 18  A: 3  B: 1)". The other charts spend that room saying "last 10 s",
+// which they have to because a single trace says nothing about its own
+// timebase — but this one has a key under it and three bands to account for,
+// and the panel has already said what ten seconds looks like directly below.
+//
+// Each part is coloured as its band is, so the letters need no decoding. That
+// is also why they are letters: three names in a caption this size is a line of
+// prose, and the colour is doing the naming.
+//
+// A press swaps bytes for bits. Both are the same traffic and each answers a
+// different question — bytes are what an hour costs a data allowance, bits are
+// whether the link is fast enough — and there is no arguing anybody out of the
+// one they think in. A button rather than a div with a handler on it, so it is
+// reachable from a keyboard, which is the same call SignalPanel's meters made.
+function NetChart({ canvasRef, streams, bits, onSwap }) {
+    const split = throughputSplit(streams.map((x) => x.value), bits);
+    // Only the streams that are running, and which of *those* is first — the
+    // separator goes between the parts that are drawn, so a missing spectrum
+    // must not leave the caption opening on a space.
+    const parts = streams
+        .map((x, i) => ({ x, i }))
+        .filter(({ i }) => split.values[i] != null)
+        .map((p, n) => ({ ...p, first: n === 0 }));
+    const hint = bits ? 'Click for bytes a second' : 'Click for bits a second';
+    return (
+        <button
+            type="button"
+            className="sparkline sparkline--press"
+            onClick={onSwap}
+            title={`Every stream this session is running — the main spectrum, the audio, and the band spectrum panel when it is open — stacked, so the height of the whole is what the connection is costing and each band is which part to do something about. ${hint}.`}
+        >
+            <canvas ref={canvasRef} />
+            <span className="sparkline__label sparkline__label--bottom">
+                {'Net: '}
+                <span className="sparkline__value">{split.total == null ? '—' : split.total}</span>
+                {/* A rate needs two samples, so the first half second of a
+                    session has nothing to report. A dash on its own, rather
+                    than a dash with a unit and a pair of empty brackets after
+                    it — "— B/s ()" says the sockets are carrying nothing, when
+                    what is true is that nobody has looked yet. */}
+                {split.total != null && ` ${split.unit} (`}
+                {split.total != null && parts.map(({ x, i, first }) => (
+                    <React.Fragment key={x.key}>
+                        {!first && ' '}
+                        <span style={{ color: x.colour }}>{`${x.letter}:`}</span>
+                        {` ${split.values[i]}`}
+                    </React.Fragment>
+                ))}
+                {split.total != null && ')'}
+            </span>
+        </button>
     );
 }
 
@@ -376,7 +425,14 @@ export default function StatsPanel({ minimal }) {
         setFacts({
             fps: s.fps,
             framesIn: s.framesIn,
-            net: spec + aud + band,
+            // The raw readings, not the coerced ones the chart stacks: the
+            // caption leaves an absent stream out, where the chart draws it as
+            // a band with no height. "B: 0" would read as a stream that has
+            // stalled rather than one that is not running — the same
+            // distinction formatThroughput draws in the corner readout.
+            spec: s.bytesIn,
+            audio: s.audioBytes,
+            band: s.bandBytes,
             binCount: s.binCount,
             binHz: s.binHz,
             divisor: s.divisor,
@@ -440,11 +496,11 @@ export default function StatsPanel({ minimal }) {
 
     return (
         <div className="stack">
-            <Chart
-                label="Net"
-                value={formatBytes(facts.net)}
+            <NetChart
                 canvasRef={netRef}
-                title="Every stream this session is running — the main spectrum, the audio, and the band spectrum panel when it is open — stacked, so the height of the whole is what the connection is costing and each band is which part to do something about."
+                streams={NET_SERIES.map((x) => ({ ...x, value: facts[x.key] }))}
+                bits={!!display.netBits}
+                onSwap={() => display.set({ netBits: !display.netBits })}
             />
             <NetLegend />
 
@@ -480,7 +536,7 @@ export default function StatsPanel({ minimal }) {
                     so the words either side hold still while the number
                     underneath them changes. */}
                 <span className="sparkline__label sparkline__label--bottom">
-                    {'Buffer '}
+                    {'Buffer: '}
                     <span className="sparkline__value">{(m.queuedSec * 1000).toFixed(0)}</span>
                     {' ms'}
                     {m.underruns > 0 && ` · ${m.underruns} drop${m.underruns === 1 ? '' : 's'}`}

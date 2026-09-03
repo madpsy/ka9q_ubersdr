@@ -324,7 +324,6 @@ function NetChart({ canvasRef, streams, bits, onSwap }) {
                             <React.Fragment key={x.key}>
                                 {i > 0 && ' '}
                                 <span style={{ color: x.colour }}>{`${x.letter}:`}</span>
-                                {' '}
                                 <span className="sparkline__n">{split.values[i] == null ? '0' : split.values[i]}</span>
                             </React.Fragment>
                         ))}

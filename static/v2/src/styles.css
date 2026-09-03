@@ -3933,8 +3933,9 @@ a.btn { text-decoration: none; }
    four were enough to make it walk on every sample.
 
    Left-aligned rather than right, so a figure stays beside the letter that
-   names it — "S: 40" with the space after it, not "S:   40". The field is a
-   fixed width either way, so what follows does not move. */
+   names it — "S:40" hard against the colon, not "S:   40" adrift at the far end
+   of its field. The field is a fixed width either way, so what follows does not
+   move. */
 .sparkline__n {
     color: var(--text);
     display: inline-block;

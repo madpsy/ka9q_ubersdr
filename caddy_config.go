@@ -125,6 +125,15 @@ func generateHTTPCaddyfile() string {
 # Generated automatically by UberSDR based on config.yaml
 # To enable HTTPS: set instance_reporting.generate_tls=true, instance.host, instance.tls=true, and admin.email
 
+{
+    # Bound the shutdown grace period. UberSDR keeps long-lived connections
+    # open (/audio/stream, /api/noisefloor/spectrum/stream, /ws/dxcluster,
+    # /api/decoder/stream); with Caddy's default "eternal" grace period those
+    # never drain, so a SIGTERM from docker/caddy-entrypoint.sh closes the
+    # listeners but the process never exits and the container never restarts.
+    grace_period 10s
+}
+
 :80 {
     reverse_proxy ubersdr:8080 {
         # Strip client-supplied proxy headers to prevent IP spoofing.
@@ -250,6 +259,12 @@ func generateHTTPSCaddyfile(host, email string, redirectToHTTPS bool) string {
     auto_https disable_redirects
     # Email for Let's Encrypt certificate notifications
     email %s
+    # Bound the shutdown grace period. UberSDR keeps long-lived connections
+    # open (/audio/stream, /api/noisefloor/spectrum/stream, /ws/dxcluster,
+    # /api/decoder/stream); with Caddy's default "eternal" grace period those
+    # never drain, so a SIGTERM from docker/caddy-entrypoint.sh closes the
+    # listeners but the process never exits and the container never restarts.
+    grace_period 10s
 }
 
 %s

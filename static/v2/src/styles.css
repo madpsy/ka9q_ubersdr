@@ -3844,6 +3844,33 @@ a.btn { text-decoration: none; }
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-faint);
+
+    /* A scrim under the caption, because the caption is written on top of the
+       chart it describes and one of these charts is a filled one.
+
+       The single-trace charts get away without it: a 1.6px line crosses a word
+       and leaves the rest of it on the panel's own background. The NET chart
+       does not — it is three translucent bands stacked from the bottom edge
+       upwards, and the caption is pinned to that same bottom edge, so on a
+       busy session the whole line sits on #7fbfff at 0.45 with --text-faint
+       written across it. That is not a contrast to be won by picking a better
+       grey; the ground underneath is moving and coloured.
+
+       So: the panel's own surface at most of its opacity, which puts the text
+       back on the background it was designed against, plus a blur so the band
+       still reads through as colour rather than being blanked out. Both are on
+       the base class rather than --bottom, so every caption is the same shape
+       whichever corner it is in and a trace wandering under a top-right one is
+       covered too.
+
+       The padding is what makes it a patch rather than a tight outline on the
+       glyphs, and it insets the text a few pixels from the chart's edge, which
+       it wanted anyway. */
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--surface-2) 85%, transparent);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
 }
 
 /* A chart you can press. The NET chart swaps bytes for bits on a click, so it

@@ -1,4 +1,15 @@
-# Latest Stable - 0.1.63
+# Latest Stable - 0.1.64
+
+## Version 0.1.64 - 3rd Sep 2026
+
+### Bug Fixes
+- Fixed **RX888 Firmware Loading** which is a crticial fix and regression since moving to upstream ka9q-radio
+
+### Important information
+The way firmware is loaded onto the RX888 changed in ka9q-radio and this was missed in testing because you're only bitten by it when the RX888 loses power. Mine is plugged into a powered USB hub and so never lost power even after full system reboot and so was never caught.
+
+If you are running 0.1.62 or 0.1.63 and don't update then the RX888 won't start again after power loss unless you upgrade to this release.
+
 
 ## Version 0.1.63 - 1st Sep 2026
 

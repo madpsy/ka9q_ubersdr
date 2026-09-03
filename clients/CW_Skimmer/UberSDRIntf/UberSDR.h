@@ -135,11 +135,19 @@ namespace UberSDRIntf
         // comes out as plausible noise rather than as an error. See the reset
         // in ConnectWebSocket.
         ubersdr::PCMv4StreamDecoder pcmDecoder;
-        
+
+        // Set when a packet fails to decode, which ends the stream rather than
+        // costing one packet: the decoder's filters no longer stand where the
+        // server's do, and nothing in the protocol puts them back. The socket
+        // is closed so the reconnection path can build a new one; the flag is
+        // what keeps the packets still in flight behind it from repeating the
+        // close and the log line. Cleared in ConnectWebSocket beside the reset.
+        bool pcmStreamBroken;
+
         ReceiverInfo() : frequency(14074000), mode("iq192"), active(false),
                         state(DISCONNECTED), wsClient(nullptr), generation(0),
                         needsReconnect(false), reconnectThread(NULL), perReceiverOffset(0),
-                        phaseAccumulator(0.0), phaseIncrement(0.0) {
+                        phaseAccumulator(0.0), phaseIncrement(0.0), pcmStreamBroken(false) {
             InitializeCriticalSection(&lock);
         }
         

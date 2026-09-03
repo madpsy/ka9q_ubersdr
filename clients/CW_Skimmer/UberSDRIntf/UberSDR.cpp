@@ -523,11 +523,6 @@ namespace UberSDRIntf
         receivers[receiverID].frequency = frequency;
         receivers[receiverID].mode = mode;
         receivers[receiverID].active = true;
-        // A reconnect must start the predictor from nothing: its taps carry the
-        // adaptation of the previous socket's samples, and decoding a new
-        // stream against them yields plausible noise rather than an error.
-        receivers[receiverID].pcmDecoder.reset();
-
         receivers[receiverID].state = CONNECTING;
         
         // Connect WebSocket (implementation needed)
@@ -842,7 +837,24 @@ namespace UberSDRIntf
         if (receiverID < 0 || receiverID >= MAX_RX_COUNT) {
             return 1;
         }
-        
+
+        // A new socket is a new stream, and the version 4 predictor is the
+        // stream: its taps hold the adaptation of every sample the PREVIOUS
+        // socket carried, while the server opens the new one with an encoder
+        // whose taps are zero. Decoding against the old ones does not fail --
+        // it returns plausible full-scale noise, for the life of the
+        // connection, because nothing in the protocol ever resynchronises the
+        // predictor. The periodic metadata resync only restores the HEADER
+        // baseline, so not one packet is ever reported as bad.
+        //
+        // The reset belongs here rather than in the callers because every path
+        // that reaches this function opens a socket: StartReceiver, both of
+        // SetFrequency's fallbacks when the tune message throws, and
+        // HandleReconnection -- which is the one that fires in normal running,
+        // and the one that used to miss the reset.
+        receivers[receiverID].pcmDecoder.reset();
+        receivers[receiverID].pcmStreamBroken = false;
+
         std::stringstream ss;
         ss << "Connecting WebSocket for receiver " << receiverID << " to: " << url;
         write_text_to_log_file(ss.str());
@@ -1171,9 +1183,35 @@ namespace UberSDRIntf
             ubersdr::PCMv4Header header;
             std::string err;
             if (!receivers[receiverID].pcmDecoder.decode(wire, wireSize, header, err)) {
-                std::stringstream ss;
-                ss << "PCM v4 decode error (" << wireSize << " bytes): " << err;
-                write_text_to_log_file(ss.str());
+                // Not one lost packet: the end of this stream. The predictor
+                // derives its taps from the samples already decoded, so a
+                // packet that fails to reach it leaves these filters where the
+                // server's no longer are, and every packet after it decodes as
+                // full-scale noise -- silently, because nothing in the protocol
+                // ever resynchronises a predictor. The only recovery is a new
+                // socket, so ask for one the way a dropped connection does: the
+                // close callback spawns the reconnection thread, and
+                // ConnectWebSocket resets the decoder on the way back up.
+                //
+                // close() rather than stop(): stop() joins the very thread this
+                // callback runs on. The flag makes this once per stream, since
+                // the packets already in flight behind this one will fail too.
+                if (!receivers[receiverID].pcmStreamBroken) {
+                    receivers[receiverID].pcmStreamBroken = true;
+
+                    std::stringstream ss;
+                    ss << "PCM v4 decode error on receiver " << receiverID
+                       << " (" << wireSize << " bytes): " << err
+                       << " - closing the socket to resynchronise";
+                    write_text_to_log_file(ss.str());
+
+                    EnterCriticalSection(&receivers[receiverID].lock);
+                    ix::WebSocket* ws = receivers[receiverID].wsClient;
+                    LeaveCriticalSection(&receivers[receiverID].lock);
+                    if (ws != nullptr) {
+                        ws->close(1000, "pcm v4 decode error");
+                    }
+                }
                 return;
             }
 

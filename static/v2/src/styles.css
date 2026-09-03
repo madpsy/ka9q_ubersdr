@@ -3875,7 +3875,7 @@ a.btn { text-decoration: none; }
        it wanted anyway. */
     padding: 1px 4px;
     border-radius: 4px;
-    background: color-mix(in srgb, var(--surface-2) 62%, transparent);
+    background: color-mix(in srgb, var(--surface-2) 35%, transparent);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
 }

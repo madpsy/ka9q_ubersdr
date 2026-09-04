@@ -93,7 +93,7 @@ const (
 	// of what its magnitude would -- NOT what an arithmetic shift of a negative
 	// value gives.
 	predLeakShiftComplex = 14
-	predLeakShiftReal    = 17
+	predLeakShiftReal    = 16
 
 	// predEscapeFlag marks a body carrying verbatim samples.
 	predEscapeFlag = 1 << 7

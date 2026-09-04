@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/binary"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -180,4 +184,106 @@ func TestPredictiveLeakIsSignSymmetric(t *testing.T) {
 			t.Errorf("predLeak(3<<%d, %d) = %d, want %d", shift, shift, got, want)
 		}
 	}
+}
+
+// TestConformanceFixturesExerciseTheLeak is the guard that keeps every other
+// implementation's tests honest.
+//
+// The leak subtracts nothing from a tap smaller than 2^shift, so a fixture
+// whose taps stay small runs the ported decoders down a path where the leak is
+// arithmetically absent -- and a port that omitted it entirely, or wrote the
+// arithmetic shift that rounds a negative tap the wrong way, would pass. That
+// is not hypothetical: built from generated tones rather than captured signal,
+// these fixtures drove the audio cascade to 0.27 where real demodulated audio
+// drives it past 1.7, and the C, C++, Python and JavaScript conformance tests
+// all passed without the real cascade's leak ever running.
+//
+// So this asserts the fixtures still reach into leak territory on both filter
+// forms. It reads them from where the clients read them, because a fixture that
+// was regenerated for the server alone is exactly the failure being guarded
+// against.
+func TestConformanceFixturesExerciseTheLeak(t *testing.T) {
+	for _, c := range []struct {
+		path string
+		// wantComplex and wantReal are the smallest tap that leaks anything,
+		// as a real-valued magnitude: 2^predLeakShiftComplex and
+		// 2^predLeakShiftReal over the Q16 scale.
+		wantComplex, wantReal bool
+	}{
+		{"clients/hpsdr/test/testdata/pcmv4_stream.bin", true, true},
+		{"static/v2/test/pcmv4.sample.bin", true, true},
+	} {
+		t.Run(filepath.Base(c.path), func(t *testing.T) {
+			packets, err := readFixturePackets(c.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dec := NewPCMv4StreamDecoder()
+			var maxComplex, maxReal float64
+			for i, pkt := range packets {
+				if _, _, err := dec.DecodePacket(pkt); err != nil {
+					t.Fatalf("packet %d: %v", i, err)
+				}
+				v := predMaxTap(dec.codec)
+				if len(dec.codec.cx) > 0 {
+					if v > maxComplex {
+						maxComplex = v
+					}
+				} else if v > maxReal {
+					maxReal = v
+				}
+			}
+			floorComplex := float64(int64(1)<<predLeakShiftComplex) / (1 << predTapShift)
+			floorReal := float64(int64(1)<<predLeakShiftReal) / (1 << predTapShift)
+			t.Logf("complex taps reach %.4f (leak starts at %.4f), real %.4f (%.4f)",
+				maxComplex, floorComplex, maxReal, floorReal)
+			if c.wantComplex && maxComplex <= floorComplex {
+				t.Errorf("complex taps only reach %.4f, under the %.4f where the leak "+
+					"starts: this fixture cannot tell a port that omitted it", maxComplex, floorComplex)
+			}
+			if c.wantReal && maxReal <= floorReal {
+				t.Errorf("real taps only reach %.4f, under the %.4f where the leak "+
+					"starts: this fixture cannot tell a port that omitted it", maxReal, floorReal)
+			}
+		})
+	}
+}
+
+// readFixturePackets reads either fixture layout: the native clients' "UV4F"
+// container, and the browser's, which interleaves each packet with the samples
+// it must decode to.
+func readFixturePackets(path string) ([][]byte, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var out [][]byte
+	if len(raw) >= 9 && string(raw[:4]) == "UV4F" {
+		count := int(binary.LittleEndian.Uint32(raw[5:]))
+		off := 9
+		for i := 0; i < count; i++ {
+			if off+4 > len(raw) {
+				return nil, fmt.Errorf("%s: truncated at packet %d", path, i)
+			}
+			n := int(binary.LittleEndian.Uint32(raw[off:]))
+			off += 4
+			if off+n > len(raw) {
+				return nil, fmt.Errorf("%s: truncated packet %d", path, i)
+			}
+			out = append(out, raw[off:off+n])
+			off += n
+		}
+		return out, nil
+	}
+	for off := 0; off+8 <= len(raw); {
+		pktLen := int(binary.LittleEndian.Uint32(raw[off:]))
+		nSamples := int(binary.LittleEndian.Uint32(raw[off+4:]))
+		off += 8
+		if off+pktLen+2*nSamples > len(raw) {
+			return nil, fmt.Errorf("%s: truncated", path)
+		}
+		out = append(out, raw[off:off+pktLen])
+		off += pktLen + 2*nSamples
+	}
+	return out, nil
 }

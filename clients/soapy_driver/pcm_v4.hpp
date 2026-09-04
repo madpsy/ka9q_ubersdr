@@ -117,11 +117,30 @@ static const unsigned kMaxShift = 15;
 static const unsigned kTapShift = 16;
 
 // |tap| is bounded to 2^24, a real magnitude of 256. It caps the prediction sum
-// far below int64 overflow whatever the input does. Adaptation settles around
-// 2^16, so the clamp is insurance that never fires in practice — but it must be
-// applied identically on both sides, because if it ever does fire the two must
-// agree.
+// far below int64 overflow whatever the input does. With the leak below holding
+// the taps near their equilibrium the clamp is insurance that never fires in
+// practice — but it must be applied identically on both sides, because if it
+// ever does fire the two must agree.
 static const int64_t kTapLimit = (int64_t)1 << 24;
+
+// Leakage of the tap update: every adapt subtracts w/2^shift from a tap before
+// adding the gradient step.
+//
+// Without it the taps have no restoring force and walk freely in any direction
+// the input does not excite, which on a band whose energy sits in a few
+// carriers is most of them. On a 909 kHz iq384 stream the server's taps walked
+// until the coded stream was larger than the samples going into it. The two
+// values differ because the complex filter and the real cascade are different
+// filters on different signals; pcm_predictive.go on the server carries the
+// measurements behind both.
+//
+// The arithmetic has to match the server's exactly or the two ends part company
+// within a packet, and the trap here is C++'s >>: on a negative value it rounds
+// towards negative infinity, so a tap of -1 would leak -1 rather than 0 and
+// every negative tap would be dragged upwards. predLeak truncates the
+// MAGNITUDE, which is what the server does.
+static const unsigned kLeakShiftComplex = 14;
+static const unsigned kLeakShiftReal = 16;
 
 // The escape and profile bits as the payload carries them. The version 4 header
 // carries both itself, so the body is handed the flags separately.
@@ -154,6 +173,17 @@ static inline int64_t predRoundShift(int64_t v, unsigned shift) {
         return -(int64_t)((mag + half) >> shift);
     }
     return (int64_t)(((uint64_t)v + half) >> shift);
+}
+
+// The amount the leakage removes from one tap: the magnitude divided by
+// 2^shift, truncated towards zero, so a tap smaller than 2^shift leaks nothing
+// and small taps are not dragged to zero by rounding.
+static inline int64_t predLeak(int64_t w, unsigned shift) {
+    if (w < 0) {
+        const uint64_t mag = (uint64_t)0 - (uint64_t)w; // |w|, no signed overflow
+        return -(int64_t)(mag >> shift);
+    }
+    return (int64_t)((uint64_t)w >> shift);
 }
 
 static inline int64_t predClampTap(int64_t w) {
@@ -276,7 +306,8 @@ private:
         outI = predRoundShift(pi, kTapShift);
     }
 
-    // Nudge each tap by mu in the direction that would have reduced this error.
+    // Leak kLeakShiftComplex off each tap, then nudge it by mu in the direction
+    // that would have reduced this error.
     // The conjugate of the history is used, as the complex LMS gradient
     // requires; here that is the negated sign of the imaginary part.
     //
@@ -293,16 +324,18 @@ private:
             for (int j = 0; j < order; ++j) {
                 const int64_t hrs = _sr[lo + j];
                 const int64_t his = -_si[lo + j];
-                _wr[j] += mr * hrs - mi * his;
-                _wi[j] += mr * his + mi * hrs;
+                _wr[j] += mr * hrs - mi * his - predLeak(_wr[j], kLeakShiftComplex);
+                _wi[j] += mr * his + mi * hrs - predLeak(_wi[j], kLeakShiftComplex);
             }
             return;
         }
         for (int j = 0; j < order; ++j) {
             const int64_t hrs = _sr[lo + j];
             const int64_t his = -_si[lo + j];
-            _wr[j] = predClampTap(_wr[j] + mr * hrs - mi * his);
-            _wi[j] = predClampTap(_wi[j] + mr * his + mi * hrs);
+            _wr[j] = predClampTap(_wr[j] + mr * hrs - mi * his -
+                                  predLeak(_wr[j], kLeakShiftComplex));
+            _wi[j] = predClampTap(_wi[j] + mr * his + mi * hrs -
+                                  predLeak(_wi[j], kLeakShiftComplex));
         }
     }
 
@@ -388,10 +421,12 @@ private:
         const int order = _order;
         const int lo = _idx - order;
         if (_fast) {
-            for (int j = 0; j < order; ++j) _w[j] += m * _s[lo + j];
+            for (int j = 0; j < order; ++j)
+                _w[j] += m * _s[lo + j] - predLeak(_w[j], kLeakShiftReal);
             return;
         }
-        for (int j = 0; j < order; ++j) _w[j] = predClampTap(_w[j] + m * _s[lo + j]);
+        for (int j = 0; j < order; ++j)
+            _w[j] = predClampTap(_w[j] + m * _s[lo + j] - predLeak(_w[j], kLeakShiftReal));
     }
 
     void push(int64_t x) {

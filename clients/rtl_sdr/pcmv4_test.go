@@ -27,7 +27,7 @@ import (
 // sample-rate change, and the interleaved I/Q this bridge actually uses --
 // including the varying packet length that makes the header's sample count
 // necessary, across the five-second periodic resynchronisation.
-const pcmv4ExpectedSHA = "ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c13948f78d1"
+const pcmv4ExpectedSHA = "4875d2185f1ff5a2031386c569cac0c2259e6a827b9e61f813399a19c3b9c903"
 
 // pcmv4ScaledSHA is the same for testdata/pcmv4_scaled.bin, which is the
 // reduced-depth mode -min-margin asks for: profile 2, where a shift byte leads
@@ -40,7 +40,7 @@ const pcmv4ExpectedSHA = "ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c
 // encoder and decoder agreed on. Getting the shift wrong does not fail; it
 // delivers a signal several bits too quiet, which is exactly the kind of thing
 // only a hash notices.
-const pcmv4ScaledSHA = "89e8c2b96ebcd61e17a9a0892dac40d83152c560023b5566931502bfdec6bdd6"
+const pcmv4ScaledSHA = "7315366ceed3e70552c28d31cde690a14dc66f5244b5a8dc34a5e696f5698ccc"
 
 // readV4Fixture returns the packets in testdata/pcmv4_stream.bin.
 //
@@ -90,7 +90,7 @@ func TestPCMv4DecodesServerStream(t *testing.T) {
 	// decoder that lost the carried-forward metadata could still hash correctly
 	// while mislabelling the stream, and the sample rate is what this bridge
 	// reports to its rtl_tcp client.
-	wantParams := [][2]int{{12000, 1}, {24000, 1}, {48000, 2}}
+	wantParams := [][2]int{{12000, 1}, {24000, 1}, {384000, 2}}
 	var gotParams [][2]int
 
 	for i, pkt := range packets {

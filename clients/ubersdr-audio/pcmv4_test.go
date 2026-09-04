@@ -32,7 +32,7 @@ import (
 // sample-rate change, a switch to interleaved I/Q that rebuilds the codec onto
 // the complex profile, and a varying packet length across the five-second
 // periodic resynchronisation.
-const pcmv4ExpectedSHA = "ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c13948f78d1"
+const pcmv4ExpectedSHA = "4875d2185f1ff5a2031386c569cac0c2259e6a827b9e61f813399a19c3b9c903"
 
 // readV4Fixture returns the packets in testdata/pcmv4_stream.bin.
 //
@@ -77,7 +77,7 @@ func TestPCMv4DecodesServerStream(t *testing.T) {
 	// Every distinct (rate, channels) the fixture goes through, in order. A
 	// decoder that lost the carried-forward metadata would still hash correctly
 	// if it only mislabelled the stream, so the labels are checked too.
-	wantParams := [][2]int{{12000, 1}, {24000, 1}, {48000, 2}}
+	wantParams := [][2]int{{12000, 1}, {24000, 1}, {384000, 2}}
 	var gotParams [][2]int
 
 	for i, pkt := range packets {

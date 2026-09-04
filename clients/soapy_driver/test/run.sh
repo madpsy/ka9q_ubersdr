@@ -106,9 +106,9 @@ check() {
 # noise. It appeared roughly once every quarter of a million packets on live IQ,
 # which is often enough to break a receiver in minutes and rare enough that a
 # recorded fixture only holds one by luck.
-PCMV4_SHA256=ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c13948f78d1
-PCMV4_RICE_EDGE_SHA256=83e3d94b509efbf7a212a3e10193b3eb281fe1460cbfeef6aabe474c92a718c7
-PCMV4_SCALED_SHA256=89e8c2b96ebcd61e17a9a0892dac40d83152c560023b5566931502bfdec6bdd6
+PCMV4_SHA256=4875d2185f1ff5a2031386c569cac0c2259e6a827b9e61f813399a19c3b9c903
+PCMV4_RICE_EDGE_SHA256=3413109ff6d06d44fb8fa44c84595b776f5570f05663b762830853ddc0183527
+PCMV4_SCALED_SHA256=7315366ceed3e70552c28d31cde690a14dc66f5244b5a8dc34a5e696f5698ccc
 echo "== cases =="
 got=$("$BUILD/pcmv4_conformance" testdata/pcmv4_stream.bin 2>/dev/null | sha256sum | cut -d" " -f1)
 if [ "$got" = "$PCMV4_SHA256" ]; then

@@ -196,22 +196,26 @@ const (
 	//
 	// The real cascade is a different filter on a different signal: four stages
 	// over a 12 kHz channel about four times oversampled, whose taps legitimately
-	// reach 2. Leaking it as hard as the complex one throws that away. Measured
+	// reach 1.2. Leaking it as hard as the complex one throws that away. Measured
 	// on usb-ft8-14074.bin, payload ratio over the capture against the largest
 	// |tap| after 150 million samples:
 	//
-	//	14   1.671x  0.90      18   1.905x  4.00
+	//	14   1.671x  0.90      17   1.906x  1.99
 	//	16   1.874x  1.57      off  1.905x  5.33
-	//	17   1.906x  1.99
 	//
-	// 17 is where the compression is fully back -- fractionally ahead of no leak
-	// at all, and identical on the other four audio captures -- while the taps
-	// still settle, at 1.99 both after 29 million samples and after 150 million.
+	// 16 and 17 are within 0.14% of each other summed over all five audio
+	// captures -- 17 wins on usb, lsb and cw, 16 wins on am and nfm -- so the
+	// choice between them is not a compression one. 16 is taken because it is
+	// the one that can be TESTED: a tap has to pass 1.0 before it leaks at all,
+	// which every audio capture does within a second, where at 17 nothing leaks
+	// until a stream has run for tens of millions of samples. A port that got
+	// this constant wrong, or left the leak out of its real cascade entirely,
+	// would pass every fixture in the tree at 17 and fails at 16.
 	//
 	// Both are subtracted with the magnitude truncated, so a tap smaller than
 	// 2^shift leaks nothing and small taps are not dragged to zero by rounding.
 	predLeakShiftComplex = 14
-	predLeakShiftReal    = 17
+	predLeakShiftReal    = 16
 
 	// predEscapeFlag marks a body carrying verbatim samples.
 	predEscapeFlag = 1 << 7

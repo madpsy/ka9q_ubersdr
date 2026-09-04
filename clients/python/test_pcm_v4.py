@@ -27,7 +27,7 @@ from pcm_v4 import (
 # The same constant appears in the Go and C++ ports of this decoder, which is
 # what makes it a conformance test rather than a regression test: all four
 # implementations are checked against one stream the server actually emitted.
-EXPECTED_SHA = "ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c13948f78d1"
+EXPECTED_SHA = "4875d2185f1ff5a2031386c569cac0c2259e6a827b9e61f813399a19c3b9c903"
 
 FIXTURE = "testdata/pcmv4_stream.bin"
 
@@ -72,7 +72,7 @@ class TestServerStream(unittest.TestCase):
         # Every distinct (rate, channels) the fixture passes through, in order.
         # A decoder that lost the carried-forward metadata could still hash
         # correctly while mislabelling the stream.
-        want_params = [(12000, 1), (24000, 1), (48000, 2)]
+        want_params = [(12000, 1), (24000, 1), (384000, 2)]
         got_params = []
 
         for i, pkt in enumerate(packets):

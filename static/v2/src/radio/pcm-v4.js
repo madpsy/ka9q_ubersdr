@@ -42,6 +42,32 @@ const PROFILE_MASK = 0x07;
 
 const TAP_SHIFT = 65536; // Q16
 const TAP_LIMIT = 1 << 24;
+
+// Leakage of the tap update: every adaptation subtracts w/LEAK from a tap
+// before adding the gradient step.
+//
+// Without it the taps have no restoring force and walk freely in any direction
+// the input does not excite, which on a band whose energy sits in a few
+// carriers is most of them. On a 909 kHz iq384 stream the server's taps walked
+// until the coded stream was larger than the samples going into it. The two
+// divisors differ because the complex filter and the real cascade are different
+// filters on different signals; pcm_predictive.go on the server carries the
+// measurements behind both.
+//
+// Divisors rather than shifts on purpose. The taps are Float64Array and go well
+// past 2^31, where JavaScript's >> would wrap them to nothing, and >> on a
+// negative value floors rather than truncating -- so a tap of -1 would leak -1
+// rather than 0 and every negative tap would be dragged upwards. leak() below
+// truncates the magnitude, which is what the server does, and the whole
+// calculation stays on integers a double represents exactly.
+const LEAK_COMPLEX = 1 << 14;
+const LEAK_REAL = 1 << 16;
+
+// The amount the leakage removes from one tap. A tap smaller than the divisor
+// leaks nothing, so small taps are not dragged to zero by rounding.
+function leak(w, div) {
+    return w >= 0 ? Math.floor(w / div) : -Math.floor(-w / div);
+}
 const QUALITY_NO_READING = -32768;
 
 // Predictor profiles. The packet declares which one it was coded with, so this
@@ -105,10 +131,16 @@ class Stage {
         let p = 0;
         for (let j = 0; j < order; j++) p += wr[j] * hr[base - j];
         const x = e + rshift16(p);
-        const m = this.mu * sgn(e);
-        for (let j = 0; j < order; j++) {
-            let a = wr[j] + m * sr[base - j];
-            wr[j] = a > TAP_LIMIT ? TAP_LIMIT : a < -TAP_LIMIT ? -TAP_LIMIT : a;
+        // A zero error stops the update entirely, leak included, exactly as the
+        // server's adapt returns early there. Leaking anyway would part the two
+        // ends on the first squelched packet.
+        if (e !== 0) {
+            const m = this.mu * sgn(e);
+            for (let j = 0; j < order; j++) {
+                const u = wr[j];
+                const a = u + m * sr[base - j] - leak(u, LEAK_REAL);
+                wr[j] = a > TAP_LIMIT ? TAP_LIMIT : a < -TAP_LIMIT ? -TAP_LIMIT : a;
+            }
         }
         this._push1(x);
         return x;
@@ -125,14 +157,17 @@ class Stage {
         }
         const xr = er + rshift16(pr);
         const xi = ei + rshift16(pi);
-        const mr = this.mu * sgn(er), mi = this.mu * sgn(ei);
-        for (let j = 0; j < order; j++) {
-            const hrs = sr[base - j];
-            const his = -si[base - j]; // conjugate
-            let a = wr[j] + mr * hrs - mi * his;
-            let b = wi[j] + mr * his + mi * hrs;
-            wr[j] = a > TAP_LIMIT ? TAP_LIMIT : a < -TAP_LIMIT ? -TAP_LIMIT : a;
-            wi[j] = b > TAP_LIMIT ? TAP_LIMIT : b < -TAP_LIMIT ? -TAP_LIMIT : b;
+        if (er !== 0 || ei !== 0) {
+            const mr = this.mu * sgn(er), mi = this.mu * sgn(ei);
+            for (let j = 0; j < order; j++) {
+                const hrs = sr[base - j];
+                const his = -si[base - j]; // conjugate
+                const u = wr[j], v = wi[j];
+                const a = u + mr * hrs - mi * his - leak(u, LEAK_COMPLEX);
+                const b = v + mr * his + mi * hrs - leak(v, LEAK_COMPLEX);
+                wr[j] = a > TAP_LIMIT ? TAP_LIMIT : a < -TAP_LIMIT ? -TAP_LIMIT : a;
+                wi[j] = b > TAP_LIMIT ? TAP_LIMIT : b < -TAP_LIMIT ? -TAP_LIMIT : b;
+            }
         }
         this._push2(xr, xi);
         out[0] = xr;
@@ -148,10 +183,16 @@ class Stage {
         let p = 0;
         for (let j = 0; j < order; j++) p += wr[j] * hr[base - j];
         const e = x - rshift16(p);
-        const m = this.mu * sgn(e);
-        for (let j = 0; j < order; j++) {
-            let a = wr[j] + m * sr[base - j];
-            wr[j] = a > TAP_LIMIT ? TAP_LIMIT : a < -TAP_LIMIT ? -TAP_LIMIT : a;
+        // A zero error stops the update entirely, leak included, exactly as the
+        // server's adapt returns early there. Leaking anyway would part the two
+        // ends on the first squelched packet.
+        if (e !== 0) {
+            const m = this.mu * sgn(e);
+            for (let j = 0; j < order; j++) {
+                const u = wr[j];
+                const a = u + m * sr[base - j] - leak(u, LEAK_REAL);
+                wr[j] = a > TAP_LIMIT ? TAP_LIMIT : a < -TAP_LIMIT ? -TAP_LIMIT : a;
+            }
         }
         this._push1(x);
         return e;
@@ -168,14 +209,17 @@ class Stage {
         }
         const er = xr - rshift16(pr);
         const ei = xi - rshift16(pi);
-        const mr = this.mu * sgn(er), mi = this.mu * sgn(ei);
-        for (let j = 0; j < order; j++) {
-            const hrs = sr[base - j];
-            const his = -si[base - j];
-            let a = wr[j] + mr * hrs - mi * his;
-            let b = wi[j] + mr * his + mi * hrs;
-            wr[j] = a > TAP_LIMIT ? TAP_LIMIT : a < -TAP_LIMIT ? -TAP_LIMIT : a;
-            wi[j] = b > TAP_LIMIT ? TAP_LIMIT : b < -TAP_LIMIT ? -TAP_LIMIT : b;
+        if (er !== 0 || ei !== 0) {
+            const mr = this.mu * sgn(er), mi = this.mu * sgn(ei);
+            for (let j = 0; j < order; j++) {
+                const hrs = sr[base - j];
+                const his = -si[base - j];
+                const u = wr[j], v = wi[j];
+                const a = u + mr * hrs - mi * his - leak(u, LEAK_COMPLEX);
+                const b = v + mr * his + mi * hrs - leak(v, LEAK_COMPLEX);
+                wr[j] = a > TAP_LIMIT ? TAP_LIMIT : a < -TAP_LIMIT ? -TAP_LIMIT : a;
+                wi[j] = b > TAP_LIMIT ? TAP_LIMIT : b < -TAP_LIMIT ? -TAP_LIMIT : b;
+            }
         }
         this._push2(xr, xi);
         out[0] = er;

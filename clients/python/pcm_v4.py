@@ -352,11 +352,30 @@ class _OpusHeaderDecoder:
 _TAP_SHIFT = 16
 _TAP_ROUND = 1 << (_TAP_SHIFT - 1)
 
-#: Bounds |tap| to 2**24, a real magnitude of 256. Normal adaptation settles
-#: around 2**16, so the clamp is insurance that never fires in practice -- but
-#: it must be applied identically on both sides, since if it ever does fire the
-#: two must agree.
+#: Bounds |tap| to 2**24, a real magnitude of 256. With the leak below holding
+#: the taps near their equilibrium the clamp is insurance that never fires in
+#: practice -- but it must be applied identically on both sides, since if it
+#: ever does fire the two must agree.
 _TAP_LIMIT = 1 << 24
+
+#: Leakage of the tap update: every adaptation subtracts w/2**shift from a tap
+#: before adding the gradient step.
+#:
+#: Without it the taps have no restoring force and walk freely in any direction
+#: the input does not excite, which on a band whose energy sits in a few
+#: carriers is most of them. On a 909 kHz iq384 stream the server's taps walked
+#: until the coded stream was larger than the samples going into it. The two
+#: values differ because the complex filter and the real cascade are different
+#: filters on different signals; pcm_predictive.go on the server carries the
+#: measurements behind both.
+#:
+#: The arithmetic has to match the server's exactly or the two ends part company
+#: within a packet, and the trap here is Python's >>: like C's, it floors, so a
+#: tap of -1 would leak -1 rather than 0 and every negative tap would be dragged
+#: upwards. Every site below truncates the MAGNITUDE instead, which is what the
+#: server does, and which leaves a tap smaller than 2**shift leaking nothing.
+_LEAK_SHIFT_COMPLEX = 14
+_LEAK_SHIFT_REAL = 16
 
 #: Marks a body carrying verbatim samples, in the byte Decode is handed.
 _PAYLOAD_ESCAPE = 1 << 7
@@ -496,6 +515,7 @@ class _ComplexStage:
             mi = self.mu * ((ei > 0) - (ei < 0))
             sr = self.sr
             si = self.si
+            sh = _LEAK_SHIFT_COMPLEX
             if self.fast:
                 for j in range(order):
                     k = lo + j
@@ -504,15 +524,19 @@ class _ComplexStage:
                     # requires; here that is the negated sign of the imaginary
                     # part.
                     his = -si[k]
-                    wr[j] += mr * hrs - mi * his
-                    wi[j] += mr * his + mi * hrs
+                    u = wr[j]
+                    v = wi[j]
+                    wr[j] = u + mr * hrs - mi * his - (u >> sh if u >= 0 else -(-u >> sh))
+                    wi[j] = v + mr * his + mi * hrs - (v >> sh if v >= 0 else -(-v >> sh))
             else:
                 for j in range(order):
                     k = lo + j
                     hrs = sr[k]
                     his = -si[k]
-                    a = wr[j] + mr * hrs - mi * his
-                    b = wi[j] + mr * his + mi * hrs
+                    u = wr[j]
+                    v = wi[j]
+                    a = u + mr * hrs - mi * his - (u >> sh if u >= 0 else -(-u >> sh))
+                    b = v + mr * his + mi * hrs - (v >> sh if v >= 0 else -(-v >> sh))
                     wr[j] = _TAP_LIMIT if a > _TAP_LIMIT else (-_TAP_LIMIT if a < -_TAP_LIMIT else a)
                     wi[j] = _TAP_LIMIT if b > _TAP_LIMIT else (-_TAP_LIMIT if b < -_TAP_LIMIT else b)
 
@@ -565,20 +589,25 @@ class _ComplexStage:
             mi = self.mu * ((ei > 0) - (ei < 0))
             sr = self.sr
             si = self.si
+            sh = _LEAK_SHIFT_COMPLEX
             if self.fast:
                 for j in range(order):
                     k = lo + j
                     hrs = sr[k]
                     his = -si[k]
-                    wr[j] += mr * hrs - mi * his
-                    wi[j] += mr * his + mi * hrs
+                    u = wr[j]
+                    v = wi[j]
+                    wr[j] = u + mr * hrs - mi * his - (u >> sh if u >= 0 else -(-u >> sh))
+                    wi[j] = v + mr * his + mi * hrs - (v >> sh if v >= 0 else -(-v >> sh))
             else:
                 for j in range(order):
                     k = lo + j
                     hrs = sr[k]
                     his = -si[k]
-                    a = wr[j] + mr * hrs - mi * his
-                    b = wi[j] + mr * his + mi * hrs
+                    u = wr[j]
+                    v = wi[j]
+                    a = u + mr * hrs - mi * his - (u >> sh if u >= 0 else -(-u >> sh))
+                    b = v + mr * his + mi * hrs - (v >> sh if v >= 0 else -(-v >> sh))
                     wr[j] = _TAP_LIMIT if a > _TAP_LIMIT else (-_TAP_LIMIT if a < -_TAP_LIMIT else a)
                     wi[j] = _TAP_LIMIT if b > _TAP_LIMIT else (-_TAP_LIMIT if b < -_TAP_LIMIT else b)
 
@@ -644,12 +673,15 @@ class _RealStage:
         if e:
             m = self.mu * ((e > 0) - (e < 0))
             s = self.s
+            sh = _LEAK_SHIFT_REAL
             if self.fast:
                 for j in range(order):
-                    w[j] += m * s[lo + j]
+                    u = w[j]
+                    w[j] = u + m * s[lo + j] - (u >> sh if u >= 0 else -(-u >> sh))
             else:
                 for j in range(order):
-                    a = w[j] + m * s[lo + j]
+                    u = w[j]
+                    a = u + m * s[lo + j] - (u >> sh if u >= 0 else -(-u >> sh))
                     w[j] = _TAP_LIMIT if a > _TAP_LIMIT else (-_TAP_LIMIT if a < -_TAP_LIMIT else a)
 
         h[idx] = x

@@ -30,11 +30,30 @@
 #define TAP_SHIFT 16
 
 /* |tap| is bounded to 2^24, a real magnitude of 256, which caps the prediction
- * sum far below int64 overflow whatever the input does. Adaptation settles
- * around 2^16, so this is insurance that never fires in practice — but it must
- * be applied identically on both sides, because if it ever does fire the two
- * must agree. */
+ * sum far below int64 overflow whatever the input does. With the leak below
+ * holding the taps near their equilibrium this is insurance that never fires in
+ * practice — but it must be applied identically on both sides, because if it
+ * ever does fire the two must agree. */
 #define TAP_LIMIT ((int64_t)1 << 24)
+
+/* Leakage of the tap update: every adapt subtracts w/2^shift from a tap before
+ * adding the gradient step.
+ *
+ * Without it the taps have no restoring force and walk freely in any direction
+ * the input does not excite, which on a band whose energy sits in a few
+ * carriers is most of them. On a 909 kHz iq384 stream the server's taps walked
+ * until the coded stream was larger than the samples going into it. The two
+ * values differ because the complex filter and the real cascade are different
+ * filters on different signals; pcm_predictive.go on the server carries the
+ * measurements behind both.
+ *
+ * The arithmetic has to match the server's exactly or the two ends part company
+ * within a packet, and the trap here is C's >>: on a negative value it rounds
+ * towards negative infinity, so a tap of -1 would leak -1 rather than 0 and
+ * every negative tap would be dragged upwards. pred_leak truncates the
+ * MAGNITUDE, which is what the server does. */
+#define LEAK_SHIFT_COMPLEX 14
+#define LEAK_SHIFT_REAL 16
 
 /* The escape and profile bits as the payload carries them. The version 4 header
  * carries both itself, so the body is handed the flags separately. */
@@ -75,6 +94,18 @@ static inline int64_t pred_round_shift(int64_t v, unsigned shift)
         return -(int64_t)((mag + half) >> shift);
     }
     return (int64_t)(((uint64_t)v + half) >> shift);
+}
+
+/* The amount the leakage removes from one tap: the magnitude divided by
+ * 2^shift, truncated towards zero, so a tap smaller than 2^shift leaks nothing
+ * and small taps are not dragged to zero by rounding. */
+static inline int64_t pred_leak(int64_t w, unsigned shift)
+{
+    if (w < 0) {
+        const uint64_t mag = (uint64_t)0 - (uint64_t)w; /* |w|, no signed overflow */
+        return -(int64_t)(mag >> shift);
+    }
+    return (int64_t)((uint64_t)w >> shift);
 }
 
 static inline int64_t pred_clamp_tap(int64_t w)
@@ -192,9 +223,9 @@ static void cstage_predict(const struct pcmv4_cstage *f, int64_t *pr, int64_t *p
  * conjugate of the history is used, as the complex LMS gradient requires; here
  * that is the negated sign of the imaginary part.
  *
- * A zero error is a genuine no-op — both steps are zero and every tap is
- * already inside the clamp — which turns the adapt pass over silence into a
- * return.
+ * A zero error stops the update entirely, leak included, which turns the adapt
+ * pass over silence into a return. The server does the same; a port that leaked
+ * here anyway would part company on the first squelched packet.
  */
 static void cstage_adapt(struct pcmv4_cstage *f, int64_t er, int64_t ei)
 {
@@ -207,16 +238,18 @@ static void cstage_adapt(struct pcmv4_cstage *f, int64_t er, int64_t ei)
         for (int j = 0; j < order; j++) {
             const int64_t hrs = f->sr[lo + j];
             const int64_t his = -f->si[lo + j];
-            f->wr[j] += mr * hrs - mi * his;
-            f->wi[j] += mr * his + mi * hrs;
+            f->wr[j] += mr * hrs - mi * his - pred_leak(f->wr[j], LEAK_SHIFT_COMPLEX);
+            f->wi[j] += mr * his + mi * hrs - pred_leak(f->wi[j], LEAK_SHIFT_COMPLEX);
         }
         return;
     }
     for (int j = 0; j < order; j++) {
         const int64_t hrs = f->sr[lo + j];
         const int64_t his = -f->si[lo + j];
-        f->wr[j] = pred_clamp_tap(f->wr[j] + mr * hrs - mi * his);
-        f->wi[j] = pred_clamp_tap(f->wi[j] + mr * his + mi * hrs);
+        f->wr[j] = pred_clamp_tap(f->wr[j] + mr * hrs - mi * his -
+                                  pred_leak(f->wr[j], LEAK_SHIFT_COMPLEX));
+        f->wi[j] = pred_clamp_tap(f->wi[j] + mr * his + mi * hrs -
+                                  pred_leak(f->wi[j], LEAK_SHIFT_COMPLEX));
     }
 }
 
@@ -315,10 +348,13 @@ static void rstage_adapt(struct pcmv4_rstage *f, int64_t e)
     const int order = f->order;
     const int lo = f->idx - order;
     if (f->fast) {
-        for (int j = 0; j < order; j++) f->w[j] += m * f->s[lo + j];
+        for (int j = 0; j < order; j++)
+            f->w[j] += m * f->s[lo + j] - pred_leak(f->w[j], LEAK_SHIFT_REAL);
         return;
     }
-    for (int j = 0; j < order; j++) f->w[j] = pred_clamp_tap(f->w[j] + m * f->s[lo + j]);
+    for (int j = 0; j < order; j++)
+        f->w[j] = pred_clamp_tap(f->w[j] + m * f->s[lo + j] -
+                                 pred_leak(f->w[j], LEAK_SHIFT_REAL));
 }
 
 static void rstage_push(struct pcmv4_rstage *f, int64_t x)

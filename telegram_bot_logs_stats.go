@@ -120,17 +120,15 @@ func (l *TelegramBotListener) handleStats(chatID int64, args string) (string, st
 	endTime := time.Now().UTC()
 	startTime := endTime.Add(-24 * time.Hour)
 
-	logs, err := ReadActivityLogsFromDB(l.readDB, startTime, endTime)
+	// Only count regular (non-bypassed) sessions, matching the public stats API.
+	records, err := LoadSessionRecords(l.readDB, startTime, endTime, []string{"regular"})
 	if err != nil {
 		msg := fmt.Sprintf("📊 Failed to read activity logs: %s", html.EscapeString(err.Error()))
 		apiResp, apiOK := l.sendMessage(chatID, msg)
 		return msg, apiResp, apiOK
 	}
 
-	// Only count regular (non-bypassed) sessions, matching the public stats API.
-	logs = FilterSessionsByAuthMethod(logs, []string{"regular"})
-	events := convertLogsToEvents(logs)
-	endEvents := filterEventsByType(events, []string{"session_end"})
+	endEvents := filterEventsByType(SessionEventsFromRecords(records), []string{"session_end"})
 
 	// ── Aggregate ─────────────────────────────────────────────────────────────
 	totalSessions := len(endEvents)

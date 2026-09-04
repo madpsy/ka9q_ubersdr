@@ -84,6 +84,7 @@ When the limit is reached, new connections are rejected immediately with a log m
 | `-freq` | `14200000` | Initial frequency in Hz (14.2 MHz) |
 | `-config` | _(none)_ | Frequency routing config file (YAML) |
 | `-max-clients` | `4` | Maximum simultaneous rtl_tcp clients (0 = unlimited) |
+| `-min-margin` | `0` | Reduced-depth IQ: dB of margin under the noise floor (15-60; 0 = lossless) |
 
 ## How It Works
 
@@ -185,6 +186,40 @@ it carries is not zstd:
 - **Requires UberSDR 0.1.63 or later.** Older servers clamp the requested
   version to 1-3 and answer with version 1 rather than refusing; the bridge
   recognises those frames and logs why instead of decoding noise.
+
+## Reduced-depth IQ: `-min-margin DB`
+
+Optional, and off unless asked for. It trades a defined amount of quantisation
+noise on the **upstream** link for bandwidth, and the request is a *margin*, not
+a bit depth: `DB` is how far below the band's own noise floor the quantisation
+floor must stay, and the server works out per packet how many bits that needs.
+
+That is what makes one number mean the same thing on every band. A fixed depth
+does not: ten bits leaves 50 dB of headroom on a dead 6 m band and 9 dB on
+medium wave, so a depth that is safe on the second wastes most of the saving on
+the first.
+
+Measured live at 192 kHz: **4482 kbps lossless against 1781 kbps at
+`-min-margin 20`** — the same samples at the same rate for 60% less traffic. A
+busy band or a lower margin saves less, which is the point: medium wave spends
+the bytes because its carriers genuinely need the depth.
+
+It changes nothing the rtl_tcp client sees. The bridge hands its client the same
+8-bit offset-binary IQ at the same rate either way; the saving is entirely on
+the WebSocket between the bridge and the receiver, which is the leg that crosses
+the internet.
+
+- **15 to 60 dB**, and a value outside that is refused at startup rather than
+  quietly clamped to something else. 15 dB is where the added noise (0.14 dB on
+  the floor) stops being resolvable by a receiver's own readings; past 60 dB the
+  request buys nothing. `0`, the default, is the lossless stream.
+- **Needs UberSDR 0.1.64 or later.** A server that has never heard of
+  `min_margin` ignores it and sends the lossless stream, so nothing breaks.
+- Packets coded this way declare their own profile, and a decoder that does not
+  implement it refuses them rather than playing noise — which is why the mode is
+  reachable only by asking for it. `TestPCMv4DecodesScaledStream` decodes a
+  scaled stream the server's own encoder produced and compares the samples, as
+  `TestPCMv4DecodesServerStream` does for the lossless one.
 
 ## IQ Sample Conversion
 

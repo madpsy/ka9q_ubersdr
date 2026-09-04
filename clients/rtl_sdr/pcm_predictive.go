@@ -116,6 +116,18 @@ const (
 	// PredProfileIQ is a single complex filter of order 16.
 	PredProfileIQ byte = 0
 
+	// PredProfileIQScaled is PredProfileIQ with a reduced-depth front end, and
+	// is what -min-margin asks the server for. The body carries a shift byte in
+	// front of the coded payload and the samples were requantised by that shift
+	// before the predictor saw them; the predictor itself is identical, because
+	// the scaling happens outside it.
+	//
+	// A separate profile id rather than a flag, so that a client which did not
+	// ask for the lossy mode cannot be handed one by accident: an unknown
+	// profile is a hard error here, where an unrecognised flag bit might be
+	// ignored and the samples then delivered several bits too quiet.
+	PredProfileIQScaled byte = 2
+
 	// PredProfileAudio is a four-stage real cascade, orders 8/8/4/2. Depth
 	// matters far more than filter length on demodulated audio, which carries
 	// a ~2.65 kHz passband in a 12 kHz channel and so leaves structure at
@@ -133,6 +145,10 @@ var predProfiles = map[byte]PredictorProfile{
 	PredProfileAudio: {
 		ID: PredProfileAudio, Name: "audio-real-8/8/4/2", Complex: false,
 		Orders: []int{8, 8, 4, 2}, Mus: []int64{16, 16, 32, 32},
+	},
+	PredProfileIQScaled: {
+		ID: PredProfileIQScaled, Name: "iq-complex-o16-scaled", Complex: true,
+		Orders: []int{16}, Mus: []int64{16},
 	},
 }
 

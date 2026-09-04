@@ -159,6 +159,11 @@ export const Icon = {
     // Two links of a chain, for following another listener's dial — v1 uses 🔗 for it.
     Link: (p) => <Svg {...p}><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1" /></Svg>,
     Anchor: (p) => <Svg {...p}><circle cx="12" cy="5" r="2.2" /><path d="M12 7.2V21" /><path d="M8 11h8" /><path d="M4 15a8 8 0 0 0 16 0" /><path d="M4 15h2.5M20 15h-2.5" /></Svg>,
+    // A pushpin, head down. The body is a closed path on purpose: a pinned
+    // panel's button fills it (see .section__pin in styles.css), and an open
+    // path would fill as a sliver of nothing. The bar and the needle are strokes
+    // either way, which is what keeps the filled form reading as the same icon.
+    Pin: (p) => <Svg {...p}><path d="M9 4h6" /><path d="M10 4v5.5L7 14h10l-3-4.5V4z" /><path d="M12 14v6" /></Svg>,
     // Captions: a screen with lines of subtitle across it — speech turned into
     // text. Not the microphone, which FreeDV has: that one means "voice", and
     // this extension's output is the words.

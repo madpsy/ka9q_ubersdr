@@ -65,11 +65,54 @@ func (d *PCMv4StreamDecoder) DecodePacket(pkt []byte) (PCMv4Header, []int16, err
 		return h, make([]int16, h.SampleCount), nil
 	}
 
+	// The shift leads the body on a scaled packet: the header's flags byte is
+	// full, and a silent packet has no body at all, so it costs nothing on a
+	// dead channel. It is read here rather than in the header decoder because
+	// it is part of the payload, exactly as the server writes it.
+	var shift uint
+	if h.Profile == PredProfileIQScaled {
+		if len(pkt) <= off {
+			return h, nil, fmt.Errorf("pcm v4: scaled packet carries no shift")
+		}
+		shift = uint(pkt[off])
+		if shift > lossyMaxShift {
+			return h, nil, fmt.Errorf("pcm v4: shift %d out of range", shift)
+		}
+		off++
+	}
+
 	samples, err := d.codec.DecodeBody(pkt[off:], h.SampleCount, h.Escape)
 	if err != nil {
 		return h, nil, fmt.Errorf("pcm v4: %w", err)
 	}
+	// Undone only on the way out. The predictor above ran on the quantised
+	// values, exactly as the server's did, and an escape carries the quantised
+	// samples too -- so this is the last thing that happens to a packet and no
+	// codec state depends on it.
+	lossyRestore(samples, shift)
 	return h, samples, nil
+}
+
+// lossyMaxShift is the largest shift the wire format allows. Bounded because it
+// comes off the wire like every other length here and is applied to an int16.
+const lossyMaxShift = 15
+
+// lossyRestore undoes the reduced-depth scale, saturating rather than wrapping:
+// a value the shift carries past full scale must not come back with its sign
+// inverted. It matches the server's lossyRestore in pcm_lossy.go.
+func lossyRestore(samples []int16, shift uint) {
+	if shift == 0 {
+		return
+	}
+	for i, v := range samples {
+		r := int32(v) << shift
+		if r > 32767 {
+			r = 32767
+		} else if r < -32768 {
+			r = -32768
+		}
+		samples[i] = int16(r)
+	}
 }
 
 // DecodePacketLE is DecodePacket in the shape the rest of this client works in:

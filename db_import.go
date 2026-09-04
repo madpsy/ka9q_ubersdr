@@ -78,7 +78,6 @@ type DBImporter struct {
 	NoiseFloorDir     string // noise_floor:   <dir>/YYYY/MM/DD/<band>.csv
 	SpotsDir          string // spots:         <dir>/<MODE>/YYYY/MM/DD/<name>.csv
 	CWSpotsDir        string // cw_spots:      <dir>/YYYY/MM/DD/<band>.csv
-	SessionsDir       string // sessions:      <dir>/YYYY/MM/DD/sessions.jsonl
 	SpaceWeatherDir   string // space_weather: <dir>/YYYY/MM/spaceweather-YYYY-MM-DD.csv
 	DecoderMetricsDir string // decoder_metrics: <dir>/YYYY/MM/DD/<MODE>-<BAND>.jsonl
 	CWMetricsDir      string // cw_metrics:    <dir>/YYYY/MM/DD/<BAND>.jsonl
@@ -148,8 +147,6 @@ func dbImportOrder(imp *DBImporter) []tableImport {
 			func() int { return countImportFiles(imp.ChatDir, time.Time{}, matchBase("chat.csv")) }},
 		{"noise_floor", imp.NoiseFloorDir, imp.importNoiseFloor, 5,
 			func() int { return countImportFiles(imp.NoiseFloorDir, time.Time{}, matchSuffix(".csv")) }},
-		{"sessions", imp.SessionsDir, imp.importSessions, 3,
-			func() int { return countImportFiles(imp.SessionsDir, time.Time{}, matchBase("sessions.jsonl")) }},
 		{"space_weather", imp.SpaceWeatherDir, imp.importSpaceWeather, 2,
 			func() int { return countImportFiles(imp.SpaceWeatherDir, time.Time{}, matchSuffix(".csv")) }},
 		{"decoder_metrics", imp.DecoderMetricsDir, imp.importDecoderMetrics, 5,
@@ -873,89 +870,6 @@ func (imp *DBImporter) importCWSpots(ctx context.Context) error {
 		return err
 	}
 	log.Printf("[DB import] cw_spots: inserted %d rows total", total)
-	return nil
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// sessions  ← <SessionsDir>/YYYY/MM/DD/sessions.jsonl
-//
-// Each line is a JSON SessionActivityLog. Denormalised: one DB row per
-// SessionActivityEntry per snapshot.
-// ─────────────────────────────────────────────────────────────────────────────
-
-func (imp *DBImporter) importSessions(ctx context.Context) error {
-	const stmt = `INSERT OR IGNORE INTO sessions
-		(snapshot_ts, event_type, user_session_id, client_ip, source_ip,
-		 auth_method, session_types, bands, modes,
-		 created_at, first_seen, user_agent, country, country_code, protocol)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-
-	tx, err := imp.beginBatch(ctx)
-	if err != nil {
-		return err
-	}
-	count, total := 0, 0
-
-	err = walkJSONLFiles(imp.SessionsDir, "sessions.jsonl", func(path string) error {
-		imp.progFile()
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return readJSONL(path, func(line []byte) error {
-			var logEntry SessionActivityLog
-			if err := json.Unmarshal(line, &logEntry); err != nil {
-				return nil // skip malformed lines
-			}
-			snapshotTS := logEntry.Timestamp.Unix()
-
-			for _, entry := range logEntry.ActiveSessions {
-				sessionTypesJSON, _ := json.Marshal(entry.SessionTypes)
-				bandsJSON, _ := json.Marshal(entry.Bands)
-				modesJSON, _ := json.Marshal(entry.Modes)
-
-				var createdAt, firstSeen int64
-				if !entry.CreatedAt.IsZero() {
-					createdAt = entry.CreatedAt.Unix()
-				}
-				if !entry.FirstSeen.IsZero() {
-					firstSeen = entry.FirstSeen.Unix()
-				}
-
-				// Older JSONL has no protocol field; derive it from the ID prefix.
-				protocol := entry.Protocol
-				if protocol == "" {
-					protocol = protocolFromUserSessionID(entry.UserSessionID)
-				}
-
-				_, err := tx.ExecContext(ctx, stmt,
-					snapshotTS, logEntry.EventType,
-					entry.UserSessionID, entry.ClientIP, entry.SourceIP,
-					entry.AuthMethod,
-					string(sessionTypesJSON), string(bandsJSON), string(modesJSON),
-					createdAt, firstSeen,
-					entry.UserAgent, entry.Country, entry.CountryCode, protocol,
-				)
-				if err != nil {
-					return err
-				}
-				var txErr error
-				tx, txErr = imp.commitAndMaybeBegin(ctx, tx, &count, &total, "sessions")
-				if txErr != nil {
-					return txErr
-				}
-			}
-			return nil
-		})
-	})
-
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	log.Printf("[DB import] sessions: inserted %d rows total", total)
 	return nil
 }
 

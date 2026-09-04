@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -210,13 +211,17 @@ type RTLTCPBridge struct {
 	// initialFreq is used as the starting frequency for each new session
 	initialFreq int64
 
+	// minMargin is the reduced-depth IQ request in dB, or 0 for the lossless
+	// stream every session gets by default. See parseMinMargin.
+	minMargin int
+
 	running bool
 	stopCh  chan struct{}
 }
 
 // NewRTLTCPBridge creates a new bridge instance.
 // maxClients: maximum simultaneous rtl_tcp clients (0 = unlimited).
-func NewRTLTCPBridge(ubersdrURL, password, listenAddr string, initialFreq int64, routingConfig *RoutingConfig, maxClients int) *RTLTCPBridge {
+func NewRTLTCPBridge(ubersdrURL, password, listenAddr string, initialFreq int64, routingConfig *RoutingConfig, maxClients, minMargin int) *RTLTCPBridge {
 	return &RTLTCPBridge{
 		ubersdrURL:    ubersdrURL,
 		password:      password,
@@ -224,6 +229,7 @@ func NewRTLTCPBridge(ubersdrURL, password, listenAddr string, initialFreq int64,
 		routingConfig: routingConfig,
 		maxClients:    maxClients,
 		initialFreq:   initialFreq,
+		minMargin:     minMargin,
 		sessions:      make(map[string]*clientSession),
 		running:       true,
 		stopCh:        make(chan struct{}),
@@ -386,6 +392,13 @@ func (s *clientSession) connectToUberSDR(clientAddr net.Addr) error {
 	query.Set("format", "pcm-zstd")
 	query.Set("version", fmt.Sprintf("%d", pcmProtocolVersion))
 	query.Set("user_session_id", s.userSessionID)
+	// Sent only when it was asked for. An absent min_margin is not the same
+	// thing to the server as a zero one: absent is the lossless path, which is
+	// what a session that has not asked for the reduced-depth mode must keep
+	// getting, and a server too old to know the parameter ignores it.
+	if s.bridge.minMargin > 0 {
+		query.Set("min_margin", fmt.Sprintf("%d", s.bridge.minMargin))
+	}
 	if targetPassword != "" {
 		query.Set("password", targetPassword)
 	}
@@ -913,6 +926,48 @@ func (b *RTLTCPBridge) handleClient(conn net.Conn) {
 	}
 }
 
+// What -min-margin may be set to. These are the server's own limits, from
+// lossyMinMarginDB and lossyMaxMarginDB in pcm_lossy.go, repeated here so a
+// value outside them is refused with a reason at startup rather than silently
+// clamped to a different one halfway through a session.
+//
+// The floor is where the quantisation noise starts to lift the noise floor a
+// client can see: 15 dB down adds 0.14 dB to it, under what a receiver's own
+// readings resolve, where 6 dB down adds a full 1 dB. Above 60 dB the request
+// buys nothing measurable, and a client wanting less than that should leave the
+// flag alone and take the lossless stream rather than have one marked lossy and
+// shifted by zero.
+const (
+	MinMarginMinDB = 15.0
+	MinMarginMaxDB = 60.0
+)
+
+// parseMinMargin validates the -min-margin flag and returns the whole dB the
+// server will be asked for.
+//
+// Strict on purpose. The server clamps whatever it is sent into its own range
+// and rounds it to a whole dB, so a value outside the range would produce a
+// working but different stream and nothing downstream would ever say so. Zero
+// is the one value accepted outside the range: it is how a script says "no
+// reduced-depth mode" without having to build a different command line.
+func parseMinMargin(v float64) (int, error) {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, fmt.Errorf("%v is not a number of dB", v)
+	}
+	if v == 0 {
+		return 0, nil
+	}
+	if v < MinMarginMinDB || v > MinMarginMaxDB {
+		return 0, fmt.Errorf("%g dB is outside %g-%g; the server would not honour it as asked. "+
+			"Leave it at 0 for a lossless stream", v, MinMarginMinDB, MinMarginMaxDB)
+	}
+	dB := int(math.Round(v))
+	if float64(dB) != v {
+		log.Printf("-min-margin: %g dB rounded to %d, which is what the server would have done with it", v, dB)
+	}
+	return dB, nil
+}
+
 // maxClientsStr returns a human-readable representation of the client limit.
 func maxClientsStr(n int) string {
 	if n == 0 {
@@ -1088,6 +1143,7 @@ func main() {
 	configFile := flag.String("config", "", "Frequency routing configuration file (optional, YAML format)")
 	initialFreq := flag.Int64("freq", 14200000, "Initial frequency in Hz (default: 14.2 MHz)")
 	maxClients := flag.Int("max-clients", DefaultMaxClients, "Maximum simultaneous rtl_tcp clients (0 = unlimited)")
+	minMargin := flag.Float64("min-margin", 0, "Reduced-depth IQ: dB of margin under the noise floor (15-60; 0 = lossless)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "UberSDR to rtl_tcp Bridge\n\n")
@@ -1109,7 +1165,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "        Initial frequency in Hz (default 14200000 = 14.2 MHz)\n")
 		fmt.Fprintf(os.Stderr, "  -max-clients int\n")
 		fmt.Fprintf(os.Stderr, "        Maximum simultaneous rtl_tcp clients (default %d; 0 = unlimited)\n", DefaultMaxClients)
-		fmt.Fprintf(os.Stderr, "        Each client gets an independent UberSDR WebSocket session.\n\n")
+		fmt.Fprintf(os.Stderr, "        Each client gets an independent UberSDR WebSocket session.\n")
+		fmt.Fprintf(os.Stderr, "  -min-margin float\n")
+		fmt.Fprintf(os.Stderr, "        Reduced-depth IQ: keep the quantisation floor at least this many dB\n")
+		fmt.Fprintf(os.Stderr, "        below the band's own noise floor (%g-%g; 0, the default, is lossless).\n",
+			MinMarginMinDB, MinMarginMaxDB)
+		fmt.Fprintf(os.Stderr, "        A margin rather than a bit depth, so one number means the same thing\n")
+		fmt.Fprintf(os.Stderr, "        on every band. Saves 15-60%% of the bandwidth depending on the band;\n")
+		fmt.Fprintf(os.Stderr, "        needs UberSDR 0.1.64 or later, and older servers ignore it.\n\n")
 		fmt.Fprintf(os.Stderr, "Examples:\n")
 		fmt.Fprintf(os.Stderr, "  # Connect to UberSDR on local network (default)\n")
 		fmt.Fprintf(os.Stderr, "  %s\n\n", os.Args[0])
@@ -1121,6 +1184,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s --max-clients 8\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Unlimited clients\n")
 		fmt.Fprintf(os.Stderr, "  %s --max-clients 0\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Two thirds of the bandwidth, quantisation noise 20 dB under the band\n")
+		fmt.Fprintf(os.Stderr, "  %s --min-margin 20\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Sample Rate:\n")
 		fmt.Fprintf(os.Stderr, "  Always uses iq384 (384 kHz) from UberSDR, so the real signal spans ±192 kHz\n")
 		fmt.Fprintf(os.Stderr, "  of the tuned frequency. If the client requests a different rate via\n")
@@ -1136,6 +1201,11 @@ func main() {
 	}
 
 	flag.Parse()
+
+	marginDB, err := parseMinMargin(*minMargin)
+	if err != nil {
+		log.Fatalf("-min-margin: %v", err)
+	}
 
 	// Validate URL
 	parsedURL, err := url.Parse(*ubersdrURL)
@@ -1174,7 +1244,7 @@ func main() {
 	}
 
 	// Create bridge
-	bridge := NewRTLTCPBridge(*ubersdrURL, *password, *listenAddr, *initialFreq, routingConfig, *maxClients)
+	bridge := NewRTLTCPBridge(*ubersdrURL, *password, *listenAddr, *initialFreq, routingConfig, *maxClients, marginDB)
 
 	// Setup signal handler
 	sigChan := make(chan os.Signal, 1)
@@ -1206,6 +1276,11 @@ func main() {
 	log.Printf("  Tuning range:   %d Hz - %d Hz (%.3f kHz - %.3f MHz)",
 		rangeLo, rangeHi, float64(rangeLo)/1e3, float64(rangeHi)/1e6)
 	log.Printf("  Max clients:    %s", maxClientsStr(*maxClients))
+	if marginDB > 0 {
+		log.Printf("  Reduced depth:  %d dB of margin under the noise floor", marginDB)
+	} else {
+		log.Printf("  Reduced depth:  off (lossless)")
+	}
 	log.Printf("Press Ctrl+C to stop")
 
 	// Wait for signal

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ua-parser/uap-go/uaparser"
@@ -87,19 +86,25 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 		return
 	}
 
-	// Serve every caller from one shared snapshot. Building these stats walks the
-	// whole retention window, so a page view per visitor -- plus the aux
-	// collector's poll -- must not each pay for a pass.
-	response, err := publicSessionStats.get(r.Context(), func() (map[string]interface{}, error) {
-		return computePublicSessionStats(readDB, geoIPService)
-	})
+	// Aggregate queries over the session tables: milliseconds, and the cost does
+	// not grow with the length of the window. This used to replay every snapshot
+	// row in the retention window on each request, which is what exhausted the
+	// receiver's memory.
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-publicSessionStatsDays * 24 * time.Hour)
+
+	stats, err := PublicSessionStatsFromDB(readDB, startTime, endTime)
 	if err != nil {
-		if r.Context().Err() != nil {
-			return // caller hung up while waiting; nothing useful to write
-		}
-		http.Error(w, "Failed to read activity logs", http.StatusInternalServerError)
-		log.Printf("Error reading activity logs for public stats: %v", err)
+		http.Error(w, "Failed to read session statistics", http.StatusInternalServerError)
+		log.Printf("Error reading session statistics: %v", err)
 		return
+	}
+
+	response := map[string]interface{}{
+		"period_start": startTime.Format(time.RFC3339),
+		"period_end":   endTime.Format(time.RFC3339),
+		"period_days":  publicSessionStatsDays,
+		"stats":        stats,
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -111,61 +116,14 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 const (
 	// publicSessionStatsDays is the reporting window, in days.
 	publicSessionStatsDays = 28
-	// publicSessionStatsTTL is how long one computed snapshot is served for.
-	publicSessionStatsTTL = 15 * time.Minute
 )
 
-// publicSessionStats holds the shared snapshot for /api/session-stats.
-var publicSessionStats = &publicSessionStatsCache{ttl: publicSessionStatsTTL}
-
-// publicSessionStatsCache serves one computed result to every caller for a TTL and
-// collapses concurrent misses into a single computation, so N simultaneous
-// visitors cost one pass over the window rather than N.
-type publicSessionStatsCache struct {
-	mu       sync.Mutex
-	ttl      time.Duration
-	value    map[string]interface{}
-	computed time.Time
-	inflight chan struct{} // non-nil while a computation is running; closed when it ends
-}
-
-func (c *publicSessionStatsCache) get(ctx context.Context, compute func() (map[string]interface{}, error)) (map[string]interface{}, error) {
-	for {
-		c.mu.Lock()
-		if c.value != nil && time.Since(c.computed) < c.ttl {
-			value := c.value
-			c.mu.Unlock()
-			return value, nil
-		}
-		if wait := c.inflight; wait != nil {
-			c.mu.Unlock()
-			select {
-			case <-wait:
-				continue // recheck: it either filled the cache or failed
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-		done := make(chan struct{})
-		c.inflight = done
-		c.mu.Unlock()
-
-		value, err := compute()
-
-		c.mu.Lock()
-		if err == nil {
-			c.value, c.computed = value, time.Now()
-		}
-		c.inflight = nil
-		c.mu.Unlock()
-		close(done)
-		return value, err
-	}
-}
-
-// computePublicSessionStats folds the activity log for the reporting window into
-// the public statistics response without materialising it. The window is millions
-// of rows on a busy receiver, and loading it whole was enough to exhaust the box.
+// computePublicSessionStats folds the legacy snapshot log into the public
+// statistics response.
+//
+// The endpoint no longer uses this: it queries the session tables directly. It is
+// retained as the reference implementation the migration is checked against, and
+// goes away with the legacy table.
 func computePublicSessionStats(readDB *sql.DB, geoIPService *GeoIPService) (map[string]interface{}, error) {
 	endTime := time.Now().UTC()
 	return computePublicSessionStatsForWindow(readDB, geoIPService, endTime.Add(-publicSessionStatsDays*24*time.Hour), endTime)

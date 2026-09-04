@@ -592,26 +592,30 @@ server:
   # One user can have both audio and spectrum sessions simultaneously
   # Logs include: UUID, IP addresses, auth method, session types, timestamps, user agent
   #
-  # Session activity data is stored in the SQLite database (ubersdr.db).
-  # The session_activity_log_dir and session_activity_log_retention_days options
-  # are no longer used. Data retention is managed by the database pruning settings.
+  # Session activity is stored in the SQLite database (ubersdr.db) as one row per
+  # session, updated in place: created when the session starts, refreshed while it
+  # runs, closed when it ends. Bands and modes visited are recorded once each.
+  # The session_activity_log_dir option is no longer used.
   #
-  # Event types recorded:
-  #   - "snapshot": Periodic snapshot of all active sessions (every N seconds)
-  #   - "session_created": Logged when any session (audio/spectrum) is created
-  #   - "session_destroyed": Logged when any session is destroyed
+  # Earlier versions appended a snapshot of every active session on each event,
+  # which meant the table grew as (events x concurrent sessions) and answering
+  # "what happened this month" meant replaying all of it. That table is converted
+  # to the current form once, on the first start after upgrading, and then dropped;
+  # progress is shown in the admin page banner.
   #
   # Enable session activity logging (default: false)
   session_activity_log_enabled: true
 
-  # Interval for periodic snapshots in seconds (default: 300 = 5 minutes)
-  # How often to log a snapshot of all active sessions
-  # Lower values = more frequent snapshots but larger log files
-  # Recommended: 300 (5 minutes) for good time resolution
+  # Interval in seconds between refreshes of the live session rows (default: 300)
+  # This sets how promptly a session's bands, modes and last-seen time are
+  # persisted, and how precisely a session that ended without a clean shutdown can
+  # be dated. It no longer affects how fast the table grows.
   session_activity_log_interval_sec: 300
 
-  # Number of days to retain session activity data in the SQLite database (default: 30)
-  # Rows older than this many days are automatically pruned by the DB retention loop.
+  # Number of days to retain session history in the SQLite database (default: 30)
+  # Sessions that ended more than this many days ago are pruned by the DB retention
+  # loop, taking their band and mode rows with them. Sessions still running are
+  # never pruned.
   # Set to 0 to keep data forever (no automatic pruning).
   session_activity_log_retention_days: 30
 

@@ -55,7 +55,8 @@ int main(int argc, char **argv) {
     // Every distinct (rate, channels) the stream passes through, in order. A
     // decoder that lost the carried-forward metadata could still hash correctly
     // while mislabelling the stream, so the labels are reported too.
-    int lastRate = -1, lastCh = -1;
+    int lastRate = -1, lastCh = -1, lastProfile = -1;
+    int minShift = 256, maxShift = -1;
 
     for (uint32_t i = 0; i < count; ++i) {
         if (off + 4 > raw.size()) {
@@ -83,6 +84,18 @@ int main(int argc, char **argv) {
             lastCh = h.channels;
         }
 
+        // The profile and the reduced-depth shift, reported for the same reason
+        // the rate is: a decoder that hashed correctly while never taking the
+        // scaled path at all would otherwise look exactly like one that did.
+        if ((int)h.profile != lastProfile) {
+            fprintf(stderr, "  packet %-4u profile %d\n", i, h.profile);
+            lastProfile = (int)h.profile;
+        }
+        if (h.profile == ubersdr::kProfileIQScaled && !h.silent) {
+            if ((int)h.shift < minShift) minShift = h.shift;
+            if ((int)h.shift > maxShift) maxShift = h.shift;
+        }
+
         // Little-endian int16, which is what the fixture's hash was taken over.
         const int16_t *s = dec.samples();
         for (int j = 0; j < h.sampleCount; ++j) {
@@ -96,6 +109,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "fixture: %zu trailing bytes\n", raw.size() - off);
         return 1;
     }
+    if (maxShift >= 0) fprintf(stderr, "  shifts %d-%d\n", minShift, maxShift);
     fprintf(stderr, "  %u packets decoded\n", count);
     return 0;
 }

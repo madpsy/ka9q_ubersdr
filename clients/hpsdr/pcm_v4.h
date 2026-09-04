@@ -65,8 +65,25 @@
 #define PCMV4_ZSTD_MAGIC 0xFD2FB528u
 
 /* Profile ids. Part of the wire format; never reassigned. */
-#define PCMV4_PROFILE_IQ    0  /* one complex filter, order 16 */
-#define PCMV4_PROFILE_AUDIO 1  /* four real stages, orders 8/8/4/2 */
+#define PCMV4_PROFILE_IQ        0  /* one complex filter, order 16 */
+#define PCMV4_PROFILE_AUDIO     1  /* four real stages, orders 8/8/4/2 */
+/*
+ * PCMV4_PROFILE_IQ_SCALED is PCMV4_PROFILE_IQ with a reduced-depth front end,
+ * sent only to a client that asked for it with min_margin in the query string.
+ * The predictor is identical, because the requantisation happens outside it:
+ * the encoder shifted the samples right before coding them, and the shift it
+ * used leads the body so this side shifts them back on the way out.
+ *
+ * It is a separate profile id rather than a flag precisely so that a client
+ * that did not ask for the mode cannot be handed one by accident — an unknown
+ * profile is a hard error here, where an unrecognised flag bit might be
+ * ignored and the samples then delivered 3 bits too quiet.
+ */
+#define PCMV4_PROFILE_IQ_SCALED 2
+
+/* The largest shift the wire format allows. Bounded because it is applied to
+ * an int16 on the way out and comes off the wire like everything else here. */
+#define PCMV4_MAX_SHIFT 15
 
 #define PCMV4_MAX_STAGES 4
 
@@ -81,6 +98,8 @@ struct pcmv4_header {
     float    baseband_power;  /* dBFS, or -999 when radiod reported nothing */
     float    noise;           /* dBFS over the demodulator passband, or -999 */
     uint8_t  profile;
+    uint8_t  shift;           /* reduced-depth left shift already applied to
+                               * the samples; 0 on every lossless packet */
     bool     escape;          /* the body holds verbatim samples */
     bool     silent;          /* every sample is zero; no body was transmitted */
 };

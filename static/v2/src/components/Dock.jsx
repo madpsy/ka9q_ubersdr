@@ -12,6 +12,7 @@ import { Icon } from './ui.jsx';
 import { useDragEndReset } from '../lib/useDragEnd.js';
 import { draggingPanel, nearestPanelGap } from '../lib/panelDrag.js';
 import { columnOf, dockCeiling, fitDock } from '../lib/dockSize.js';
+import { pinnedPanel } from '../lib/dockPin.js';
 
 // A panel's share of the bottom dock's width: what the operator dragged it to,
 // otherwise what the panel asks for, otherwise an equal share. Reading the
@@ -130,7 +131,7 @@ const PEEK_CLOSE_MS = 320;
 export default function Dock({ side }) {
     const {
         docks, sections, toggleDock, setDockSize, movePanel, movePanelNear, weights, setWeights,
-        heights,
+        heights, pins,
     } = useLayout();
     const applies = usePanelApplies();
     const dock = docks[side];
@@ -268,6 +269,11 @@ export default function Dock({ side }) {
         // is absent, so it never shows an empty slot or a "not available" note.
         return applies(p);
     });
+
+    // The panel held still while the rest of the dock scrolls under it, if the
+    // operator has asked for one. Worked out from what is actually drawn rather
+    // than from the stored list — see lib/dockPin.js.
+    const pinned = pinnedPanel(pins, side, visible);
 
     const onResizeDown = useCallback((e) => {
         e.preventDefault();
@@ -420,6 +426,7 @@ export default function Dock({ side }) {
                             prev={visible[i - 1]}
                             next={visible[i + 1]}
                             dropEdge={dropAt && dropAt.id === id ? dropAt.edge : null}
+                            pinned={pinned === id}
                             weight={side === 'bottom' ? shareOf(weights, id) : undefined}
                             height={side === 'bottom' ? heights[id] : undefined}
                         />

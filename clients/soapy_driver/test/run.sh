@@ -89,6 +89,15 @@ check() {
 # packets carrying no body, an escape to verbatim samples, a sample-rate change
 # and the interleaved I/Q this driver actually uses.
 #
+# testdata/pcmv4_scaled.bin covers the reduced-depth IQ mode the min_margin
+# device argument asks for: profile 2, where a shift byte leads the body and the
+# samples come back shifted left by it. It runs the paths that exist only there
+# -- a shift that changes with the margin, a silent packet that carries no shift
+# at all, an escape that carries one, and the profile switching to plain IQ and
+# back when the margin goes to lossless -- against samples the server's own
+# encoder and decoder agreed on. Getting the shift wrong does not fail; it hands
+# the host a signal several bits too quiet.
+#
 # testdata/pcmv4_rice_edge.bin covers what a recording of ordinary traffic will
 # not: a Rice codeword whose unary run is exactly 63 bits long and is counted
 # out of a full 64-bit accumulator, so the decoder shifts by 64. Go defines that
@@ -99,6 +108,7 @@ check() {
 # recorded fixture only holds one by luck.
 PCMV4_SHA256=ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c13948f78d1
 PCMV4_RICE_EDGE_SHA256=83e3d94b509efbf7a212a3e10193b3eb281fe1460cbfeef6aabe474c92a718c7
+PCMV4_SCALED_SHA256=89e8c2b96ebcd61e17a9a0892dac40d83152c560023b5566931502bfdec6bdd6
 echo "== cases =="
 got=$("$BUILD/pcmv4_conformance" testdata/pcmv4_stream.bin 2>/dev/null | sha256sum | cut -d" " -f1)
 if [ "$got" = "$PCMV4_SHA256" ]; then
@@ -112,6 +122,13 @@ if [ "$got" = "$PCMV4_RICE_EDGE_SHA256" ]; then
     echo "PASS pcmv4-rice-edge"; pass=$((pass+1))
 else
     echo "FAIL pcmv4-rice-edge: decoded samples hash to $got, want $PCMV4_RICE_EDGE_SHA256"; fail=$((fail+1))
+fi
+
+got=$("$BUILD/pcmv4_conformance" testdata/pcmv4_scaled.bin 2>/dev/null | sha256sum | cut -d" " -f1)
+if [ "$got" = "$PCMV4_SCALED_SHA256" ]; then
+    echo "PASS pcmv4-scaled"; pass=$((pass+1))
+else
+    echo "FAIL pcmv4-scaled: decoded samples hash to $got, want $PCMV4_SCALED_SHA256"; fail=$((fail+1))
 fi
 
 # Unreachable server: nothing is listening on this port at all. The driver must still

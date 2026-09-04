@@ -128,6 +128,13 @@ import (
 //	IQ 12 kHz      50.5 kB/s -> 34.8 kB/s  (31% less)
 //	IQ 384 kHz     1590 kB/s -> 1116 kB/s  (30% less)
 
+var zzLeak uint
+
+func zzLeakOf(w int64) int64 {
+	m := w >> 63
+	return ((((w ^ m) - m) >> zzLeak) ^ m) - m
+}
+
 const (
 	// predTapShift is the fixed-point scale of the filter taps: they are
 	// integers in Q16, so 65536 represents a tap of 1.0.
@@ -394,6 +401,15 @@ func (f *complexStage) adapt(er, ei int64) {
 	si := f.si[lo:f.idx]
 	si = si[:len(wr)]
 	wi := f.wi[:len(wr)]
+	if zzLeak > 0 {
+		for j := range wr {
+			hrs := sr[j]
+			his := -si[j]
+			wr[j] += mr*hrs - mi*his - zzLeakOf(wr[j])
+			wi[j] += mr*his + mi*hrs - zzLeakOf(wi[j])
+		}
+		return
+	}
 	if f.fast {
 		for j := range wr {
 			hrs := sr[j]

@@ -14,6 +14,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { PANELS, PANEL_BY_ID } from '../panels/registry.jsx';
 import { MOBILE_QUERY, TOUCH_QUERY } from '../lib/useMediaQuery.js';
 import { cleanScale } from '../lib/panelScale.js';
+import { PINNABLE } from '../lib/dockPin.js';
 
 const STORAGE_KEY = 'ubersdr.v2.layout';
 const VERSION = 1;
@@ -253,6 +254,10 @@ export function defaultLayout(env = machine()) {
         floatOrder,
         weights: {},
         heights: {},
+        // Nothing pinned to the top of a side dock to begin with — see
+        // lib/dockPin.js. A first run has not been scrolled yet, so there is
+        // nothing to hold still.
+        pins: { left: null, right: null },
     };
 }
 
@@ -393,6 +398,18 @@ export function reconcile(stored, env = machine()) {
     }
     for (const dock of DOCKS) {
         base.docks[dock].panels = base.docks[dock].panels.filter((id) => !floats[id]);
+    }
+    // Which panel is pinned to the top of each side dock — see lib/dockPin.js.
+    //
+    // Checked against the dock it claims to be in, and checked here rather than
+    // at the top of reconcile because the answer depends on where every panel
+    // ended up: a pin on a panel that has since been floated, moved to the other
+    // dock or retired is not a pin at all, and keeping the id would make a
+    // stored layout claim something that is no longer true.
+    base.pins = { left: null, right: null };
+    for (const side of PINNABLE) {
+        const id = stored.pins?.[side];
+        if (typeof id === 'string' && base.docks[side].panels.includes(id)) base.pins[side] = id;
     }
     // Once per stored layout, and recorded by `base` already carrying the flag
     // from defaultLayout.
@@ -810,6 +827,24 @@ export function LayoutProvider({ children }) {
         });
     }, []);
 
+    // Pin the top panel of a side dock, or unpin it.
+    //
+    // One pin per dock, so "which panel" and "whether" are the same fact and a
+    // second pin is not something that can be asked for. Clicking the lit button
+    // is the only thing that clears one: a pin on a panel that has been moved
+    // down simply stops applying — see pinnedPanel — and applies again if it
+    // comes back to the top, which is what makes a reorder reversible rather
+    // than something that quietly forgot the setting.
+    const togglePin = useCallback((side, id) => {
+        setLayout((l) => {
+            if (!PINNABLE.includes(side) || !id) return l;
+            const pins = { left: null, right: null, ...l.pins };
+            const next = pins[side] === id ? null : id;
+            if (pins[side] === next) return l;
+            return { ...l, pins: { ...pins, [side]: next } };
+        });
+    }, []);
+
     const resetLayout = useCallback(() => setLayout(defaultLayout()), []);
 
     const value = useMemo(() => ({
@@ -822,6 +857,8 @@ export function LayoutProvider({ children }) {
         setWeights,
         heights: layout.heights,
         setPanelHeight,
+        pins: layout.pins,
+        togglePin,
         setFloat,
         setFloatMin,
         raiseFloat,
@@ -839,7 +876,7 @@ export function LayoutProvider({ children }) {
         revealPanel,
         resetLayout,
     }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, toggleSectionMinimal, setSectionScale, setSectionHidden, movePanel, movePanelNear,
-        swapPanels, revealPanel, setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, resetLayout]);
+        swapPanels, revealPanel, setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, togglePin, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;
 }

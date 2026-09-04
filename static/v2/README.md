@@ -134,6 +134,25 @@ A general resizable grid was skipped for the same reason plus overlap: floating
 already covers freeform arrangement, at a fraction of a tiling manager's
 complexity.
 
+### Pinning the top panel
+
+The first panel in a side dock can be **pinned** — the pin in its header, second
+from the right — and the rest of the dock then scrolls underneath it. The panel
+you keep coming back to is then never the one that has just gone off the top.
+
+Three rules, all in `lib/dockPin.js`:
+
+* **Only the top panel, and only a side dock.** The bottom dock is a row: there
+  is no "under" for the other panels to go and nothing above them to hold still.
+* **One per dock**, so "which panel" and "whether" are the same stored fact.
+* **Remembered by panel, not by position.** Reorder, and the pin stops applying
+  rather than sliding onto whatever is now first — and applies again if that
+  panel comes back to the top. `reconcile` drops a pin whose panel has since
+  been floated, moved to the other dock or retired.
+
+The behaviour itself is one `position: sticky` rule on `.section.is-pinned`; the
+dock body is already the scroller, so there is no scroll handler.
+
 ### One scroller per dock
 
 Panels never scroll internally — no `overflow` and no `max-height` on a panel
@@ -150,6 +169,12 @@ Two consequences worth knowing when writing a panel:
   own body. Without that they grow with every message and drag the dock with
   them. Same justification as the mobile sheet — a fixed-height container, where
   scrollback is the entire point. Everything else still follows the rule below.
+* **A pinned panel is the other exception**, for the same reason: sticky and
+  taller than the dock is a trap — it would stick with its own bottom off the
+  end of the scrollport, never let go, and the panels under it could not be
+  reached. So a pinned panel is capped at 60% of the dock and its body gives
+  way. Nothing a panel author has to do: the cap applies to whichever panel the
+  operator pins.
 * **Do not let a section shrink.** `.section` sets `flex: none` because the dock
   body is a flex column: without it, sections compress below their content once
   the dock overflows and clip each other instead of the dock scrolling.

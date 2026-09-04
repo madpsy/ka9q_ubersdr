@@ -498,9 +498,15 @@ static bool codec_configure(struct pcmv4_codec *c, uint8_t profile,
     bool ok = true;
     switch (profile) {
     case PCMV4_PROFILE_IQ:
+    case PCMV4_PROFILE_IQ_SCALED:
         /* A single complex filter of order 16. Deeper cascades were measured
          * and rejected for IQ: 8/8/4/2 gave 1.391x against this profile's
-         * 1.396x at roughly double the CPU. */
+         * 1.396x at roughly double the CPU.
+         *
+         * The scaled profile shares this predictor exactly: the requantisation
+         * it names happens before the encoder's filters and after this
+         * decoder's, so nothing inside them differs. Only the extra shift byte
+         * in front of the body and the shift back on the way out do. */
         c->is_complex = true;
         ok = cstage_init(&c->cx[0], 16, 16);
         c->ncx = 1;
@@ -561,6 +567,30 @@ static void codec_forward(struct pcmv4_codec *c, int64_t a, int64_t b)
     for (int i = 0; i < c->nrl; i++) a = rstage_forward(&c->rl[i], a);
 }
 
+/*
+ * Undo the reduced-depth scale, saturating rather than wrapping.
+ *
+ * The predictor ran on the quantised values, exactly as the encoder's did, so
+ * this is the last thing that happens to a packet and no codec state depends
+ * on it. Saturation matches the server's lossyRestore: a value the shift
+ * carries past full scale must not come back with its sign inverted.
+ */
+static void lossy_restore(int16_t *samples, int count, unsigned shift)
+{
+    if (shift == 0) return;
+    /* A multiply rather than a shift: C leaves a left shift of a negative value
+     * undefined, and half of these samples are negative. Multiplying by the
+     * same power of two is exactly the shift, defined for every input, and the
+     * product cannot leave int64 for any int16 and a shift of 15. */
+    const int64_t scale = (int64_t)1 << shift;
+    for (int i = 0; i < count; i++) {
+        int64_t r = (int64_t)samples[i] * scale;
+        if (r > 32767) r = 32767;
+        else if (r < -32768) r = -32768;
+        samples[i] = (int16_t)r;
+    }
+}
+
 /* ------------------------------------------------------------------------- */
 /* Public interface                                                          */
 /* ------------------------------------------------------------------------- */
@@ -616,6 +646,10 @@ bool pcmv4_is_zstd_frame(const uint8_t *pkt, size_t len)
  *
  *   flags: bit 7 escape   bit 6 quality   bit 5 metadata
  *          bit 4 silent   bit 3 count     bits 2-0 profile id
+ *
+ * One byte follows the header and precedes the body on a scaled packet that
+ * carries a body — the reduced-depth shift. It is read in pcmv4_decode rather
+ * than here, because it is part of the payload and not of the header.
  *
  * The metadata bit marks a resynchronisation point, which is also what carries
  * a full timestamp; the two never differ, so there is no separate flag for the
@@ -759,6 +793,24 @@ bool pcmv4_decode(struct pcmv4_stream *s, const uint8_t *pkt, size_t len,
         return true;
     }
 
+    /* A scaled packet puts the shift the encoder used in front of the body:
+     * the header's flags byte is full, and a silent packet has no body at all,
+     * so it costs nothing on a squelched or dead channel. */
+    unsigned shift = 0;
+    if (h->profile == PCMV4_PROFILE_IQ_SCALED) {
+        if (len <= off) {
+            seterr(err, errlen, "pcm v4: scaled packet carries no shift");
+            return false;
+        }
+        shift = pkt[off];
+        if (shift > PCMV4_MAX_SHIFT) {
+            seterr(err, errlen, "pcm v4: shift out of range");
+            return false;
+        }
+        h->shift = (uint8_t)shift;
+        off++;
+    }
+
     const uint8_t *body = pkt + off;
     const size_t body_len = len - off;
 
@@ -780,6 +832,7 @@ bool pcmv4_decode(struct pcmv4_stream *s, const uint8_t *pkt, size_t len,
             const int64_t b = (step == 2) ? out[i + 1] : 0;
             codec_forward(&s->codec, a, b);
         }
+        lossy_restore(out, count, shift);
         return true;
     }
 
@@ -806,6 +859,7 @@ bool pcmv4_decode(struct pcmv4_stream *s, const uint8_t *pkt, size_t len,
             out[i] = (int16_t)a;
             out[i + 1] = (int16_t)b;
         }
+        lossy_restore(out, count, shift);
         return true;
     }
     for (int i = 0; i < count; i++) {

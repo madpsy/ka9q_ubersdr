@@ -19,8 +19,9 @@ nothing.
 ## Wire format
 
 The bridge asks for `format=pcm-zstd&version=4`, the lossless path at the only
-protocol version it reads. `pcm-zstd` is still the server's name for that
-format, but from version 4 what it carries is not zstd:
+protocol version it reads, unless `--min-margin` asks for the reduced-depth mode
+below. `pcm-zstd` is still the server's name for that format, but from version 4
+what it carries is not zstd:
 
 - **Packet**: a `PCM4` magic, a flags byte, then only the fields that changed
   since the last packet — sample rate, channel count, sample count and the two
@@ -41,6 +42,49 @@ format, but from version 4 what it carries is not zstd:
 - **Requires UberSDR 0.1.63 or later.** Older servers clamp the requested version
   to 1-3 and answer with version 1 rather than refusing; the bridge recognises
   those frames and says so.
+
+## Reduced-depth IQ: `--min-margin DB`
+
+Optional, and off unless asked for. It trades a defined amount of quantisation
+noise for bandwidth, and the request is a **margin**, not a bit depth: `DB` is
+how far below the band's own noise floor the quantisation floor must stay, and
+the server works out per packet how many bits that needs.
+
+That is what makes one number mean the same thing on every band. A fixed depth
+does not: ten bits leaves 50 dB of headroom on a dead 6 m band and 9 dB on
+medium wave, so a depth that is safe on the second wastes most of the saving on
+the first.
+
+Measured on this bridge, 20 m at 192 kHz: **4482 kbps lossless against 1781 kbps
+at `--min-margin 20`**, the same samples at the same rate for 60% less traffic.
+A busy band or a lower margin saves less, which is the point — medium wave
+spends the bytes because its carriers genuinely need the depth.
+
+- **15 to 60 dB**, and a value outside that is refused at startup rather than
+  quietly clamped to something else. 15 dB is where the added noise (0.14 dB on
+  the floor) stops being resolvable by a receiver's own readings; past 60 dB the
+  request buys nothing. `0` means the same as leaving the option off.
+- **Needs UberSDR 0.1.64 or later.** A server that has never heard of
+  `min_margin` ignores it and sends the lossless stream, so nothing breaks.
+- Packets coded this way declare their own profile, and a decoder that does not
+  implement it refuses them rather than playing noise — which is why the mode is
+  reachable only by asking for it. `test/run.sh` decodes a scaled stream the
+  server's own encoder produced and compares the samples, as it does for the
+  lossless one.
+
+## Throughput
+
+While a client is streaming, the bridge prints what the IQ stream is costing,
+every five seconds:
+
+```
+IQ: DDC0 1780.5 kbps
+IQ: DDC0 1780.5 kbps  DDC1 563.2 kbps  total 2343.7 kbps
+```
+
+Counted off the WebSocket, not worked out from the sample rate: version 4 codes
+IQ predictively, so a quiet band costs less than a busy one at the same rate,
+and `--min-margin` less again. Nothing is printed while no client is connected.
 
 ## Protocols
 

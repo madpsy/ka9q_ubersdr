@@ -58,7 +58,8 @@ int main(int argc, char **argv)
 
     struct pcmv4_stream s;
     pcmv4_stream_init(&s);
-    int last_rate = -1, last_ch = -1;
+    int last_rate = -1, last_ch = -1, last_profile = -1;
+    int min_shift = 256, max_shift = -1;
     int rc = 0;
 
     for (uint32_t i = 0; i < count; i++) {
@@ -85,6 +86,18 @@ int main(int argc, char **argv)
             last_ch = h.channels;
         }
 
+        /* The profile and the reduced-depth shift, reported for the same reason
+         * the rate is: a decoder that hashed correctly while never taking the
+         * scaled path at all would otherwise look exactly like one that did. */
+        if ((int)h.profile != last_profile) {
+            fprintf(stderr, "  packet %-4u profile %d\n", i, h.profile);
+            last_profile = (int)h.profile;
+        }
+        if (h.profile == PCMV4_PROFILE_IQ_SCALED && !h.silent) {
+            if ((int)h.shift < min_shift) min_shift = h.shift;
+            if ((int)h.shift > max_shift) max_shift = h.shift;
+        }
+
         for (int j = 0; j < h.sample_count; j++) {
             const unsigned char o[2] = {
                 (unsigned char)((uint16_t)samples[j] & 0xff),
@@ -98,7 +111,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "fixture: %zu trailing bytes\n", raw_len - off);
         rc = 1;
     }
-    if (rc == 0) fprintf(stderr, "  %u packets decoded\n", count);
+    if (rc == 0) {
+        if (max_shift >= 0)
+            fprintf(stderr, "  shifts %d-%d\n", min_shift, max_shift);
+        fprintf(stderr, "  %u packets decoded\n", count);
+    }
 
     pcmv4_stream_free(&s);
     free(raw);

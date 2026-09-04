@@ -91,6 +91,14 @@ struct main_cb {
     char ubersdr_url[256];      /* e.g. "http://localhost:8080" */
     char ubersdr_password[64];  /* optional */
 
+    /* Reduced-depth IQ, in dB of margin under the band's own noise floor, or 0
+     * for the lossless stream every client gets by default. Not a bit depth:
+     * the server works out per packet how many bits that margin needs, which is
+     * what makes the same request mean the same thing on a dead 6 m band and on
+     * medium wave. Travels as min_margin in the WebSocket query string; a
+     * server that has never heard of it simply sends the lossless stream. */
+    int min_margin;
+
     struct rcvr_cb {
         int rcvr_num;
         int new_freq;
@@ -123,6 +131,13 @@ struct main_cb {
 
         /* raw receive buffer for WebSocket frames */
         uint8_t ws_rx_buf[WS_RX_BUF_SIZE];
+
+        /* Binary bytes taken off this receiver's WebSocket since the throughput
+         * reporter last looked. Written by the socket's thread and read-and-
+         * cleared by the reporter, so both ends go through the relaxed atomic
+         * builtins: nothing is ordered against it, but a torn 64-bit count read
+         * as a fraction of a second's traffic would report nonsense. */
+        unsigned long long ws_bytes;
 
         int iqSample_offset;
         int iqSamples_remaining;

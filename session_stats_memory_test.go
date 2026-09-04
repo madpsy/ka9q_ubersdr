@@ -34,8 +34,9 @@ var productionScale = sessionStatsFixtureScale{
 // seedActivityWindow writes a synthetic activity window and reports the row count.
 // Sessions turn over on sessionLifetime so the window contains realistic numbers
 // of distinct users, IPs and user agents rather than one long-lived set.
-func seedActivityWindow(t *testing.T, db *sql.DB, scale sessionStatsFixtureScale) (time.Time, time.Time, int) {
+func seedActivityWindow(t testing.TB, db *sql.DB, scale sessionStatsFixtureScale) (time.Time, time.Time, int) {
 	t.Helper()
+	createLegacySessionsTable(t, db)
 
 	endTime := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	startTime := endTime.Add(-scale.window)
@@ -154,7 +155,9 @@ func TestPublicSessionStatsPeakMemory(t *testing.T) {
 		rows, productionScale.window, productionScale.concurrentSessions, productionScale.snapshotInterval)
 
 	var batchStats, streamStats map[string]interface{}
+	var batchElapsed, streamElapsed time.Duration
 
+	batchStart := time.Now()
 	batchPeak := peakHeapDuring(func() {
 		logs, err := ReadActivityLogsFromDB(mgr.ReadDB(), startTime, endTime)
 		if err != nil {
@@ -172,10 +175,12 @@ func TestPublicSessionStatsPeakMemory(t *testing.T) {
 		runtime.KeepAlive(logs)
 		runtime.KeepAlive(endEvents)
 	})
+	batchElapsed = time.Since(batchStart)
 	if t.Failed() {
 		return
 	}
 
+	streamStart := time.Now()
 	streamPeak := peakHeapDuring(func() {
 		response, err := computePublicSessionStatsForWindow(mgr.ReadDB(), nil, startTime, endTime)
 		if err != nil {
@@ -184,6 +189,7 @@ func TestPublicSessionStatsPeakMemory(t *testing.T) {
 		}
 		streamStats, _ = response["stats"].(map[string]interface{})
 	})
+	streamElapsed = time.Since(streamStart)
 	if t.Failed() {
 		return
 	}
@@ -192,6 +198,7 @@ func TestPublicSessionStatsPeakMemory(t *testing.T) {
 	t.Logf("peak heap: batch %d MB, streaming %d MB (%.1fx less)",
 		batchPeak/mb, streamPeak/mb, float64(batchPeak)/float64(streamPeak))
 	t.Logf("total_sessions: batch %v, streaming %v", batchStats["total_sessions"], streamStats["total_sessions"])
+	t.Logf("wall clock: batch %v, streaming %v — the fold still reads every row, so this is unchanged by design", batchElapsed, streamElapsed)
 
 	if got, want := streamStats["total_sessions"], batchStats["total_sessions"]; got != want {
 		t.Errorf("total_sessions = %v, want %v — the two pipelines disagree at scale", got, want)
@@ -239,5 +246,21 @@ func TestStreamingPeakIsIndependentOfWindow(t *testing.T) {
 	if long > 3*short {
 		t.Errorf("peak grew %.1fx for a 4x larger window (%d MB -> %d MB); the fold is still retaining per-row state",
 			float64(long)/float64(short), short/mb, long/mb)
+	}
+}
+
+// BenchmarkPublicSessionStatsFold times one full pass over a production-sized
+// window, with the seeding outside the timer. Run with -cpuprofile to see where
+// the pass actually spends its time.
+func BenchmarkPublicSessionStatsFold(b *testing.B) {
+	mgr := newSessionStatsTestDB(b)
+	startTime, endTime, rows := seedActivityWindow(b, mgr.DB(), productionScale)
+	b.Logf("fixture: %d rows", rows)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := computePublicSessionStatsForWindow(mgr.ReadDB(), nil, startTime, endTime); err != nil {
+			b.Fatalf("computePublicSessionStatsForWindow: %v", err)
+		}
 	}
 }

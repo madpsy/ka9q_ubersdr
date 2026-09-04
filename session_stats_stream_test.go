@@ -20,6 +20,34 @@ import (
 // inferred from its absence from a snapshot, so anything that changes which
 // snapshots are seen changes the durations.
 
+// createLegacySessionsTable recreates the snapshot table that installations
+// predating the session tables have. Fresh databases no longer create it, but
+// the fold that reads it is retained until the legacy table is gone from the
+// field, so its tests still need one to read.
+func createLegacySessionsTable(t testing.TB, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS sessions (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		snapshot_ts     INTEGER NOT NULL,
+		event_type      TEXT    NOT NULL,
+		user_session_id TEXT    NOT NULL,
+		client_ip       TEXT,
+		source_ip       TEXT,
+		auth_method     TEXT,
+		session_types   TEXT,
+		bands           TEXT,
+		modes           TEXT,
+		created_at      INTEGER,
+		first_seen      INTEGER,
+		user_agent      TEXT,
+		country         TEXT,
+		country_code    TEXT,
+		protocol        TEXT
+	)`); err != nil {
+		t.Fatalf("create legacy sessions table: %v", err)
+	}
+}
+
 // insertSessionActivityRow writes one row of the sessions table.
 func insertSessionActivityRow(t *testing.T, db *sql.DB, ts time.Time, eventType string, entry SessionActivityEntry) {
 	t.Helper()
@@ -55,6 +83,7 @@ func insertSessionActivityRow(t *testing.T, db *sql.DB, ts time.Time, eventType 
 // to get right, and returns the window bounds.
 func seedSessionActivityFixture(t *testing.T, db *sql.DB) (time.Time, time.Time) {
 	t.Helper()
+	createLegacySessionsTable(t, db)
 
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	at := func(minutes int) time.Time { return base.Add(time.Duration(minutes) * time.Minute) }
@@ -184,7 +213,7 @@ func statsEntryLabel(entry map[string]interface{}) string {
 	return fmt.Sprint(entry)
 }
 
-func newSessionStatsTestDB(t *testing.T) *DBManager {
+func newSessionStatsTestDB(t testing.TB) *DBManager {
 	t.Helper()
 	mgr, err := NewDBManager(t.TempDir())
 	if err != nil {

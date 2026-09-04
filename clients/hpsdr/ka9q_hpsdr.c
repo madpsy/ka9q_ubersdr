@@ -103,6 +103,7 @@ static pthread_t mic_thread_id = 0;
 static pthread_t wb_thread_id = 0;
 static pthread_t hpstat_thread_id = 0;
 static pthread_t sink_thread_id = 0;
+static pthread_t throughput_thread_id = 0;
 static pthread_t rx_thread_id[MAX_RCVRS] = {0,};
 static void   *highprio_thread(void*);
 static void   *ddc_specific_thread(void*);
@@ -980,6 +981,13 @@ static int ws_callback(struct lws *wsi,
                 break;
             }
 
+            /* Counted before the decode and whatever it makes of the frame,
+             * because this is what the link carried: the reduced-depth mode is
+             * only visible here, where the same 384 kHz stream costs fewer
+             * bytes for the same samples. */
+            __atomic_fetch_add(&rcb->ws_bytes, (unsigned long long)len,
+                               __ATOMIC_RELAXED);
+
             int n_samples = 0, sr = 0, ch = 0;
 
             if (rcb->iqSamples_remaining < 0)
@@ -1250,18 +1258,27 @@ void *ws_thread(void *arg)
              * carries is a predictive codec rather than a zstd wrapper. Named
              * explicitly rather than left to the server's default, so the query
              * says what this bridge actually reads. */
+            /* min_margin is only sent when it was asked for. An empty or
+             * zero-valued parameter is not the same thing to the server as an
+             * absent one -- absent is the lossless path, which is what every
+             * client that has not asked for the reduced-depth mode must keep
+             * getting. */
+            char margin[32] = "";
+            if (mcb.min_margin > 0) {
+                snprintf(margin, sizeof(margin), "&min_margin=%d", mcb.min_margin);
+            }
             if (mcb.ubersdr_password[0]) {
                 snprintf(full_path, sizeof(full_path),
                          "/ws?frequency=%d&mode=iq%d&user_session_id=%s&password=%s"
-                         "&format=pcm-zstd&version=%d",
+                         "&format=pcm-zstd&version=%d%s",
                          rcb->curr_freq, rate_khz, rcb->session_id,
-                         mcb.ubersdr_password, PCMV4_PROTOCOL_VERSION);
+                         mcb.ubersdr_password, PCMV4_PROTOCOL_VERSION, margin);
             } else {
                 snprintf(full_path, sizeof(full_path),
                          "/ws?frequency=%d&mode=iq%d&user_session_id=%s"
-                         "&format=pcm-zstd&version=%d",
+                         "&format=pcm-zstd&version=%d%s",
                          rcb->curr_freq, rate_khz, rcb->session_id,
-                         PCMV4_PROTOCOL_VERSION);
+                         PCMV4_PROTOCOL_VERSION, margin);
             }
         }
 
@@ -1460,6 +1477,151 @@ finishup:
     closedir(dir);
     return name_found;
 }
+
+/* How often the throughput line goes out, in seconds. */
+#define THROUGHPUT_INTERVAL 5.0
+
+/*
+ * What --min-margin may be set to. These are the server's own limits, from
+ * lossyMinMarginDB and lossyMaxMarginDB in pcm_lossy.go, repeated here so a
+ * value outside them is refused with a reason at startup rather than silently
+ * clamped to something else halfway through a session.
+ *
+ * The floor is where the quantisation noise starts to lift the noise floor a
+ * client can see: 15 dB down adds 0.14 dB to it, under what a receiver's own
+ * readings resolve, and 6 dB down adds a full 1 dB. Above 60 dB the request
+ * buys nothing measurable, and a client wanting less than that should leave the
+ * option off and take the lossless stream rather than have one marked lossy and
+ * shifted by zero.
+ */
+#define MIN_MARGIN_MIN_DB 15.0
+#define MIN_MARGIN_MAX_DB 60.0
+
+/*
+ * Parse and validate a --min-margin argument, in dB.
+ *
+ * Strict on purpose. The server clamps whatever it is sent into its own range
+ * and rounds it to a whole dB, so a typo -- "2O", "20dB", "6" -- would produce
+ * a working but different stream, and nothing downstream would ever say so. The
+ * one value accepted outside the range is 0, which is how a script says "no
+ * reduced-depth mode" without having to build a different command line.
+ */
+static bool parse_min_margin(const char *arg, int *out)
+{
+    if (arg == NULL || *arg == '\0') {
+        fprintf(stderr, "--min-margin: expected a value in dB\n");
+        return false;
+    }
+
+    errno = 0;
+    char *end = NULL;
+    const double v = strtod(arg, &end);
+    while (end != NULL && isspace((unsigned char)*end)) end++;
+    if (end == arg || end == NULL || *end != '\0' || errno == ERANGE || !isfinite(v)) {
+        fprintf(stderr, "--min-margin: '%s' is not a number of dB\n", arg);
+        return false;
+    }
+
+    if (v == 0.0) {          /* an explicit "lossless", same as leaving it off */
+        *out = 0;
+        return true;
+    }
+
+    if (v < MIN_MARGIN_MIN_DB || v > MIN_MARGIN_MAX_DB) {
+        fprintf(stderr,
+                "--min-margin: %g dB is outside %g-%g; the server would not "
+                "honour it as asked. Omit the option for a lossless stream\n",
+                v, MIN_MARGIN_MIN_DB, MIN_MARGIN_MAX_DB);
+        return false;
+    }
+
+    /* The server rounds to a whole dB, so the rounding happens here too and the
+     * number this bridge reports is the one the stream was coded to. */
+    const int dB = (int)lround(v);
+    if ((double)dB != v) {
+        t_print("--min-margin: %g dB rounded to %d, which is what the server "
+                "would have done with it\n", v, dB);
+    }
+    *out = dB;
+    return true;
+}
+
+/*
+ * Reports what the IQ stream is actually costing, every five seconds while a
+ * client is streaming.
+ *
+ * Counted off the WebSocket rather than worked out from the sample rate,
+ * because the two are not the same number. Version 4 codes IQ predictively, so
+ * a quiet band costs less than a busy one at the same rate, and the
+ * reduced-depth mode less again -- and none of that is visible anywhere else.
+ *
+ * Nothing is printed while no client is connected. The counters are still
+ * drained on every pass, so the first line after a client arrives covers its
+ * own five seconds rather than everything the bridge ever received.
+ */
+static void *throughput_thread(void *arg)
+{
+    (void)arg;
+    struct timespec last;
+    clock_gettime(CLOCK_MONOTONIC, &last);
+    bool was_running = false;
+
+    while (!do_exit) {
+        usleep(250000);
+
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+
+        /* A client arriving restarts the interval rather than joining whatever
+         * is left of the one in progress. Otherwise the first line after a
+         * client connects divides its traffic by five seconds most of which it
+         * was not there for, and reports a rate it never ran at. */
+        const bool now_running = (running != 0);
+        if (now_running != was_running) {
+            was_running = now_running;
+            for (int i = 0; i < mcb.num_rxs; i++)
+                __atomic_store_n(&mcb.rcb[i].ws_bytes, 0ULL, __ATOMIC_RELAXED);
+            last = now;
+            continue;
+        }
+
+        const double elapsed = (now.tv_sec - last.tv_sec) +
+                               (now.tv_nsec - last.tv_nsec) * 1e-9;
+        if (elapsed < THROUGHPUT_INTERVAL) continue;
+        last = now;
+
+        char line[256];
+        int off = 0, active = 0;
+        double total = 0.0;
+
+        for (int i = 0; i < mcb.num_rxs; i++) {
+            /* Read and cleared in one step, so the next interval starts from
+             * zero and no traffic is counted twice or lost between the two. */
+            const unsigned long long bytes =
+                __atomic_exchange_n(&mcb.rcb[i].ws_bytes, 0ULL, __ATOMIC_RELAXED);
+            if (!running || bytes == 0) continue;
+
+            const double kbps = (double)bytes * 8.0 / 1000.0 / elapsed;
+            total += kbps;
+            active++;
+            if (off >= 0 && off < (int)sizeof(line)) {
+                off += snprintf(line + off, sizeof(line) - (size_t)off,
+                                "%sDDC%d %.1f kbps", off ? "  " : " ", i, kbps);
+            }
+        }
+
+        if (active == 0) continue;
+        if (off < 0 || off >= (int)sizeof(line)) continue;
+
+        if (active > 1) {
+            t_print("IQ:%s  total %.1f kbps\n", line, total);
+        } else {
+            t_print("IQ:%s\n", line);
+        }
+    }
+    return NULL;
+}
+
 int main (int argc, char *argv[])
 {
     struct sockaddr_in addr_udp;
@@ -1501,6 +1663,7 @@ int main (int argc, char *argv[])
         {"receivers",  required_argument, 0, 'n'},
         {"device",     required_argument, 0, 'd'},
         {"wideband",   no_argument,       0, 'w'},
+        {"min-margin", required_argument, 0, 'm'},
         {"debug",      no_argument,       0, 'v'},
         {"discover",   no_argument,       0, 'D'},
         {"callsign",   required_argument, 0, 'c'},
@@ -1509,7 +1672,7 @@ int main (int argc, char *argv[])
     };
 
     int opt_index = 0;
-    while((CmdOption = getopt_long(argc, argv, "u:p:i:n:d:wvDc:h", long_options, &opt_index)) != -1) {
+    while((CmdOption = getopt_long(argc, argv, "u:p:i:n:d:m:wvDc:h", long_options, &opt_index)) != -1) {
         switch(CmdOption) {
         case 'h':
             printf("Usage: %s [options]\n\n", basename(argv[0]));
@@ -1524,6 +1687,13 @@ int main (int argc, char *argv[])
             printf("  --receivers N      Number of receiver slices (default %d, max %d)\n", MAX_RCVRS, MAX_RCVRS);
             printf("  --device N         Device type: 1=Hermes, 6=HermesLite (default 6)\n");
             printf("  --wideband         Enable wideband data (default disabled)\n");
+            printf("  --min-margin DB    Reduced-depth IQ: keep the quantisation floor at\n");
+            printf("                     least DB below the band's own noise floor, %g-%g.\n",
+                   MIN_MARGIN_MIN_DB, MIN_MARGIN_MAX_DB);
+            printf("                     Omitted, the stream is lossless. Saves 15-60%% of\n");
+            printf("                     the bandwidth depending on the band; needs UberSDR\n");
+            printf("                     0.1.64 or later, and older servers ignore it and\n");
+            printf("                     send the lossless stream\n");
             printf("  --debug            Log per-DDC frequency requests from the client\n");
             printf("\n");
             printf("Examples:\n");
@@ -1532,6 +1702,7 @@ int main (int argc, char *argv[])
             printf("  %s --url http://localhost:8080 --device 1 --receivers 4 --interface eth0\n", basename(argv[0]));
             printf("  %s --discover --interface eth0\n", basename(argv[0]));
             printf("  %s --callsign K3GMQ --interface eth0\n", basename(argv[0]));
+            printf("  %s --url http://localhost:8080 --min-margin 20 --interface eth0\n", basename(argv[0]));
             return EXIT_SUCCESS;
             break;
 
@@ -1549,6 +1720,9 @@ int main (int argc, char *argv[])
             break;
         case 'd':
             mcb.device_type = atoi(optarg);
+            break;
+        case 'm':
+            if (!parse_min_margin(optarg, &mcb.min_margin)) return EXIT_FAILURE;
             break;
         case 'w':
             mcb.wideband = 1;
@@ -1578,6 +1752,14 @@ int main (int argc, char *argv[])
      * listener learns that this receiver reaches past 30 MHz, since the HPSDR
      * protocol gives the client no way to be told. */
     fetch_ubersdr_tuning_range(mcb.ubersdr_url);
+
+    /* Said once, because it is the one setting whose effect is invisible from
+     * the HPSDR side: the client sees the same samples at the same rate, and
+     * only the throughput line every five seconds shows what it saved. */
+    if (mcb.min_margin > 0) {
+        t_print("Reduced-depth IQ: asking for %d dB of margin under the noise floor\n",
+                mcb.min_margin);
+    }
 
     int same_int = 0, prgms_found = 0;
     char myproc[MAX_PRGMS][16] = {0,};
@@ -1696,6 +1878,10 @@ int main (int argc, char *argv[])
 
     if (pthread_create(&sink_thread_id, NULL, sink_thread, NULL) < 0) {
         t_perror("***** ERROR: Create sink thread");
+    }
+
+    if (pthread_create(&throughput_thread_id, NULL, throughput_thread, NULL) < 0) {
+        t_perror("***** ERROR: Create throughput thread");
     }
 
     if (mcb.wideband) {

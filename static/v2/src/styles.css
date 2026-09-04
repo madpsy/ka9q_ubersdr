@@ -1087,6 +1087,43 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dock--bottom .section--fill { align-self: stretch; min-height: 0; }
 .dock--bottom .section--fill .section__body { flex: 1; min-height: 0; overflow: hidden; }
 
+/* A pinned panel: the top one in a side dock, held still while the rest scroll
+ * under it. See lib/dockPin.js.
+ *
+ * `position: sticky` on a flex item, and that is the whole mechanism — the dock
+ * body is already the scroller, so there is no scroll handler and nothing to
+ * keep in step with the layout. Two details make it work rather than merely
+ * apply:
+ *
+ *   - the z-index. Every section is `position: relative`, so without it the
+ *     panels *after* this one in the DOM paint over the one that is meant to be
+ *     in front. Their own background is opaque, so the pinned panel would have
+ *     been covered rather than merely out-ranked.
+ *   - `top: 0` rather than the body's 8px of padding. That padding scrolls away
+ *     with the content, so sticking below it would leave an 8px strip of moving
+ *     panel above one that is supposed to be still. At rest the panel is in its
+ *     natural place either way — it only sticks once that padding has gone by.
+ */
+.dock--left .section.is-pinned,
+.dock--right .section.is-pinned {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    /* Taller than the dock and sticky is a trap: the panel would stick with its
+       own bottom off the end of the scrollport, never let go, and the panels
+       under it could not be reached at all. So a pinned panel is capped and its
+       body gives way — the same sanctioned exception the bottom dock's panels
+       have, and for the same reason: the container has a fixed height, so
+       something inside it has to scroll. */
+    max-height: 60%;
+    /* It is in front of the dock rather than part of the column, and at rest —
+       with nothing scrolled under it yet — nothing else would say so. */
+    border-color: var(--border-strong);
+    box-shadow: 0 6px 12px -8px rgba(0, 0, 0, 0.55);
+}
+.dock--left .section.is-pinned .section__body,
+.dock--right .section.is-pinned .section__body { min-height: 0; overflow: auto; }
+
 .dock__empty {
     margin: auto;
     padding: 16px;
@@ -1313,6 +1350,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
    so a cut-down panel never reads as a panel that has lost half its controls. */
 .section__grip[aria-pressed="true"],
 .floatwin__btn[aria-pressed="true"] { color: var(--accent); }
+
+/* A pinned panel's button is filled as well as lit. The colour is the state
+   every toggle in this header shows; the fill is what tells the two pins apart
+   at a glance in a column of otherwise identical outline icons. See Icon.Pin,
+   whose body is a closed path so that there is something to fill. */
+.section__pin[aria-pressed="true"] svg { fill: currentColor; }
 
 /* The reorder arrows. Narrower than the other header buttons and with no gap
    between them — a dock can be 220px wide and the panel's title has the first

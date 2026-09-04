@@ -14,6 +14,14 @@
 # ordinary mono audio, silent packets carrying no body, an escape to verbatim
 # samples, a sample-rate change, and the interleaved I/Q this bridge uses.
 #
+# testdata/pcmv4_scaled.bin covers the reduced-depth IQ mode --min-margin asks
+# for: profile 2, where a shift byte leads the body and the samples come back
+# shifted left by it. It runs the paths that only exist there -- a shift that
+# changes with the margin, a silent packet that carries no shift at all, an
+# escape that carries one, and the profile switching to plain IQ and back when
+# the margin goes to lossless -- against samples the server's own encoder and
+# decoder agreed on.
+#
 # testdata/pcmv4_rice_edge.bin covers what a recording of ordinary traffic will
 # not: a Rice codeword whose unary run is exactly 63 bits long and is counted
 # out of a full 64-bit accumulator, so the decoder shifts by 64. Go defines that
@@ -30,6 +38,7 @@ mkdir -p "$BUILD"
 
 EXPECTED_SHA256=ba368c898ae406c5acc806653d9f2dbbfa40086eca3707fda5d77c13948f78d1
 RICE_EDGE_SHA256=83e3d94b509efbf7a212a3e10193b3eb281fe1460cbfeef6aabe474c92a718c7
+SCALED_SHA256=89e8c2b96ebcd61e17a9a0892dac40d83152c560023b5566931502bfdec6bdd6
 
 pass=0; fail=0
 
@@ -60,6 +69,24 @@ if [ "$got" = "$RICE_EDGE_SHA256" ]; then
     echo "PASS pcmv4-rice-edge"; pass=$((pass+1))
 else
     echo "FAIL pcmv4-rice-edge: samples hash to $got, want $RICE_EDGE_SHA256"; fail=$((fail+1))
+fi
+
+got=$("$BUILD/pcmv4_conformance" testdata/pcmv4_scaled.bin 2>/dev/null | sha256sum | cut -d" " -f1)
+if [ "$got" = "$SCALED_SHA256" ]; then
+    echo "PASS pcmv4-scaled"; pass=$((pass+1))
+else
+    echo "FAIL pcmv4-scaled: samples hash to $got, want $SCALED_SHA256"; fail=$((fail+1))
+fi
+
+# The scaled fixture takes the same profile through both codec rebuilds and both
+# shift extremes, so it is worth a sanitizer pass of its own: the shift comes off
+# the wire and is applied to an int16, which is the shape of a bug the hash would
+# only show as noise.
+if "$BUILD/pcmv4_conformance_asan" testdata/pcmv4_scaled.bin >/dev/null 2>"$BUILD/asan_scaled.log" &&
+   ! grep -q "runtime error\|AddressSanitizer" "$BUILD/asan_scaled.log"; then
+    echo "PASS pcmv4-scaled-sanitizers"; pass=$((pass+1))
+else
+    echo "FAIL pcmv4-scaled-sanitizers"; sed 's/^/    /' "$BUILD/asan_scaled.log" | head -20; fail=$((fail+1))
 fi
 
 # The same fixture under the sanitizers, where the shift itself is the report

@@ -13,6 +13,7 @@ import { haptic } from '../lib/haptics.js';
 import useWakeProps from '../radio/useWake.js';
 import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
 import { useHeaderFits } from '../lib/useHeaderFits.js';
+import { canPin } from '../lib/dockPin.js';
 
 // What the zoom pair costs the header: two 17px buttons and the gap in front of
 // them. Compared against the slack actually left in the bar, so it is the only
@@ -36,10 +37,10 @@ const dockRoom = (body) => {
     return Math.max(90, body.clientHeight - pad * 2);
 };
 
-export default function Section({ panel, dock, index, weight, height, prev, next, dropEdge }) {
+export default function Section({ panel, dock, index, weight, height, prev, next, dropEdge, pinned }) {
     const {
         sections, toggleSection, toggleSectionMinimal, setSectionHidden, movePanel, movePanelNear,
-        swapPanels, weights, setWeights, setPanelHeight,
+        swapPanels, weights, setWeights, setPanelHeight, togglePin,
     } = useLayout();
     const grip = useRef(null);
     // The title button, not the header: the button is `flex: 1` and would have
@@ -74,6 +75,11 @@ export default function Section({ panel, dock, index, weight, height, prev, next
         'section',
         state.open ? 'is-open' : 'is-closed',
         panel.fill && state.open ? 'section--fill' : '',
+        // Sticky at the top of its dock, so the panels below scroll under it.
+        // The class is all this component contributes: the behaviour is one
+        // `position: sticky` rule in styles.css, because the dock body is
+        // already the scroller and there is nothing for JavaScript to do.
+        pinned ? 'is-pinned' : '',
         dropEdge ? `is-drop-${dropEdge}` : '',
     ].filter(Boolean).join(' ');
 
@@ -334,6 +340,31 @@ export default function Section({ panel, dock, index, weight, height, prev, next
                         onClick={() => toggleSectionMinimal(panel.id)}
                     >
                         {minimal ? <Icon.Expand size={13} /> : <Icon.Collapse size={13} />}
+                    </button>
+                )}
+
+                {/* Hold this panel still while the rest of the dock scrolls
+                    under it. Offered on the top panel of a side dock and nowhere
+                    else — see lib/dockPin.js for why only the top one, and why
+                    the pin is remembered by panel rather than by position.
+
+                    Last but the move menu, which is where a state that is
+                    rarely changed belongs: the controls to its left are the ones
+                    reached for while listening.
+
+                    It costs the title bar a button's width, which is felt on a
+                    narrow dock: the zoom pair above measures the room it has
+                    left and drops out first, so nothing here needs a threshold
+                    of its own. */}
+                {canPin(dock, index) && (
+                    <button
+                        type="button"
+                        className="section__grip section__pin"
+                        title={pinned ? 'Unpin from the top' : 'Pin to the top of the dock'}
+                        aria-pressed={!!pinned}
+                        onClick={() => togglePin(dock, panel.id)}
+                    >
+                        <Icon.Pin size={13} />
                     </button>
                 )}
 

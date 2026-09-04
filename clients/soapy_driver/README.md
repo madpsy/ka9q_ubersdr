@@ -158,6 +158,45 @@ rx_sdr -d driver=ubersdr,server=ws://localhost:8080/ws,mode=iq192 \
 | `server` | Yes | WebSocket URL | `server=ws://localhost:8080/ws` |
 | `mode` | No | Wide IQ mode (default: iq96) | `mode=iq192` |
 | `password` | No | Bypass password for wide IQ modes | `password=your-secret-password` |
+| `min_margin` | No | Reduced-depth IQ, in dB of margin under the noise floor (15-60; omit for lossless) | `min_margin=20` |
+
+## Reduced-depth IQ: `min_margin`
+
+Optional, and off unless asked for. It trades a defined amount of quantisation
+noise on the link between the driver and the receiver for bandwidth, and the
+request is a *margin*, not a bit depth: the value is how far below the band's own
+noise floor the quantisation floor must stay, and the server works out per packet
+how many bits that needs.
+
+That is what makes one number mean the same thing on every band. A fixed depth
+does not: ten bits leaves 50 dB of headroom on a dead 6 m band and 9 dB on medium
+wave, so a depth that is safe on the second wastes most of the saving on the
+first.
+
+```bash
+SoapySDRUtil --make="driver=ubersdr,server=wss://sdr.example.com/ws,mode=iq192,min_margin=20"
+```
+
+Measured live at 192 kHz: **4482 kbps lossless against 1781 kbps at
+`min_margin=20`** — the same samples at the same rate for 60% less traffic. A
+busy band or a lower margin saves less, which is the point: medium wave spends
+the bytes because its carriers genuinely need the depth.
+
+Nothing the host sees changes. The same complex samples arrive at the same rate,
+and `getHardwareInfo()` reports which mode the device is in.
+
+- **15 to 60 dB**, and a value outside that fails the `make` with a reason rather
+  than being quietly clamped to something else for the life of the device. 15 dB
+  is where the added noise (0.14 dB on the floor) stops being resolvable by a
+  receiver's own readings; past 60 dB the request buys nothing. `0` means the
+  same as leaving the argument off.
+- **Needs UberSDR 0.1.64 or later.** A server that has never heard of
+  `min_margin` ignores it and sends the lossless stream, so nothing breaks.
+- Packets coded this way declare their own profile, and a decoder that does not
+  implement it refuses them rather than playing noise — which is why the mode is
+  reachable only by asking for it. `test/run.sh` decodes a scaled stream the
+  server's own encoder produced and compares the samples, as it does for the
+  lossless one.
 
 ## Wide IQ Modes
 

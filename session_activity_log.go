@@ -60,9 +60,14 @@ type SessionActivityLog struct {
 // logEvent represents a logging event with optional band/mode data
 type logEvent struct {
 	eventType string
-	bands     map[string]bool // Optional: bands to log (for session_destroyed events)
-	modes     map[string]bool // Optional: modes to log (for session_destroyed events)
-	uuid      string          // Optional: UUID for session_destroyed events
+	// createdUUID names the session a session_created event is about. The legacy
+	// snapshot log re-serialised every active session on each event, which is what
+	// made the table grow as (events x concurrent sessions); the session tables
+	// only need the session that actually changed.
+	createdUUID string
+	bands       map[string]bool // Optional: bands to log (for session_destroyed events)
+	modes       map[string]bool // Optional: modes to log (for session_destroyed events)
+	uuid        string          // Optional: UUID for session_destroyed events
 }
 
 type SessionActivityLogger struct {
@@ -78,11 +83,24 @@ type SessionActivityLogger struct {
 
 	// SQLite write connection (for INSERTs)
 	db *sql.DB
+
+	// history persists sessions as rows updated in place; see session_history.go.
+	history *sessionHistoryWriter
 }
 
-// SetDB wires the SQLite database into the session activity logger for dual-write.
+// SetDB wires the SQLite database into the session activity logger.
 func (sal *SessionActivityLogger) SetDB(db *sql.DB) {
 	sal.db = db
+}
+
+// SetSessionHistory wires the normalised session tables in and closes out any
+// sessions left open by a previous process. Call once at startup.
+func (sal *SessionActivityLogger) SetSessionHistory(db *sql.DB, geoIP *GeoIPService) {
+	if db == nil {
+		return
+	}
+	sal.history = newSessionHistoryWriter(db, geoIP)
+	sal.history.sweepOpenSessions()
 }
 
 // NewSessionActivityLogger creates a new session activity logger
@@ -183,14 +201,14 @@ func (sal *SessionActivityLogger) LogSnapshot() error {
 }
 
 // LogSessionCreated logs when a session is created
-func (sal *SessionActivityLogger) LogSessionCreated() error {
+func (sal *SessionActivityLogger) LogSessionCreated(userSessionID string) error {
 	if !sal.enabled {
 		return nil
 	}
 
 	// Send to async channel (non-blocking)
 	select {
-	case sal.logChan <- logEvent{eventType: "session_created"}:
+	case sal.logChan <- logEvent{eventType: "session_created", createdUUID: userSessionID}:
 	default:
 		log.Printf("Warning: session activity log channel full, dropping session_created event")
 	}
@@ -257,52 +275,84 @@ func (sal *SessionActivityLogger) logActivitySync(event logEvent) error {
 		ActiveSessions: activeSessions,
 	}
 
-	if sal.db == nil {
-		return nil // DB not configured — nothing to write
+	if sal.history == nil {
+		return nil // session tables not configured — nothing to write
 	}
 
-	// Insert one row per SessionActivityEntry into the sessions table.
+	now := logEntry.Timestamp.Unix()
+
+	switch event.eventType {
+	case "session_destroyed":
+		// The destroy event carries the final bands and modes for the session
+		// that ended; nothing else needs touching.
+		if event.uuid != "" {
+			sal.history.closeSession(event.uuid, event.bands, event.modes, now)
+			return nil
+		}
+		// Older callers did not name the session. Fall back to reconciling
+		// against the sessions that are still live.
+		sal.reconcileOpenSessions(logEntry.ActiveSessions, now)
+		return nil
+
+	case "session_created":
+		// Only the session that was just created needs writing. Re-serialising
+		// every active session here is what made the legacy table grow as
+		// (events x concurrent sessions).
+		if event.createdUUID != "" {
+			for _, entry := range logEntry.ActiveSessions {
+				if entry.UserSessionID == event.createdUUID {
+					sal.history.recordActive(entry, now)
+					return nil
+				}
+			}
+		}
+	}
+
+	// Periodic snapshot: one statement refreshes every open session, then each
+	// live session contributes any band or mode it has newly visited. Repeats are
+	// no-ops, so this converges without writing history.
+	sal.history.touchOpenSessions(now)
 	for _, entry := range logEntry.ActiveSessions {
-		sessionTypesJSON, _ := json.Marshal(entry.SessionTypes)
-		bandsJSON, _ := json.Marshal(entry.Bands)
-		modesJSON, _ := json.Marshal(entry.Modes)
-
-		var createdAt, firstSeen int64
-		if !entry.CreatedAt.IsZero() {
-			createdAt = entry.CreatedAt.Unix()
-		}
-		if !entry.FirstSeen.IsZero() {
-			firstSeen = entry.FirstSeen.Unix()
-		}
-
-		_, dbErr := sal.db.Exec(
-			`INSERT INTO sessions
-			 (snapshot_ts, event_type, user_session_id, client_ip, source_ip,
-			  auth_method, session_types, bands, modes,
-			  created_at, first_seen, user_agent, country, country_code, protocol)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			logEntry.Timestamp.Unix(),
-			logEntry.EventType,
-			entry.UserSessionID,
-			entry.ClientIP,
-			entry.SourceIP,
-			entry.AuthMethod,
-			string(sessionTypesJSON),
-			string(bandsJSON),
-			string(modesJSON),
-			createdAt,
-			firstSeen,
-			entry.UserAgent,
-			entry.Country,
-			entry.CountryCode,
-			entry.Protocol,
-		)
-		if dbErr != nil {
-			log.Printf("[DB] sessions insert error: %v", dbErr)
-		}
+		sal.history.recordActive(entry, now)
 	}
+	sal.reconcileOpenSessions(logEntry.ActiveSessions, now)
 
 	return nil
+}
+
+// reconcileOpenSessions closes any session the database still believes is open
+// but which is no longer live. Destroy events normally do this precisely; this
+// catches the ones that were dropped when the log channel was full.
+func (sal *SessionActivityLogger) reconcileOpenSessions(active []SessionActivityEntry, now int64) {
+	if sal.history == nil || sal.db == nil {
+		return
+	}
+
+	live := make(map[string]bool, len(active))
+	for _, entry := range active {
+		live[entry.UserSessionID] = true
+	}
+
+	rows, err := sal.db.Query(`SELECT user_session_id FROM session WHERE ended_at IS NULL`)
+	if err != nil {
+		log.Printf("[session history] reconciling open sessions: %v", err)
+		return
+	}
+	var stale []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			break
+		}
+		if !live[id] {
+			stale = append(stale, id)
+		}
+	}
+	rows.Close()
+
+	for _, id := range stale {
+		sal.history.closeSession(id, nil, nil, now)
+	}
 }
 
 // getActiveSessionEntries extracts unique user sessions from the session manager

@@ -819,7 +819,7 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 
 	// Log session activity if this is a NEW UUID OR if adding audio to existing spectrum-only session
 	if sm.activityLogger != nil && (isNewUUID || !hadAudioBefore) {
-		if err := sm.activityLogger.LogSessionCreated(); err != nil {
+		if err := sm.activityLogger.LogSessionCreated(userSessionID); err != nil {
 			log.Printf("Warning: failed to log session creation: %v", err)
 		}
 	}
@@ -1119,7 +1119,7 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 
 	// Log session activity if this is a NEW UUID OR if adding spectrum to existing audio-only session
 	if sm.activityLogger != nil && (isNewUUID || !hadSpectrumBefore) {
-		if err := sm.activityLogger.LogSessionCreated(); err != nil {
+		if err := sm.activityLogger.LogSessionCreated(userSessionID); err != nil {
 			log.Printf("Warning: failed to log spectrum session creation: %v", err)
 		}
 	}

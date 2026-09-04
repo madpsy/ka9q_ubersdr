@@ -226,25 +226,32 @@ func (m *DBManager) pruneAll(cfg RetentionConfig) {
 	type tableRule struct {
 		table string
 		days  int
+		// tsColumn is the timestamp column retention is measured against. Most
+		// tables call it "ts"; the ones that do not have to say so, or the delete
+		// fails on every run and the table grows without bound.
+		tsColumn string
 	}
 	rules := []tableRule{
-		{"sessions", cfg.SessionsDays},
-		{"spots", cfg.SpotsDays},
-		{"cw_spots", cfg.CWSpotsDays},
-		{"chat_messages", cfg.ChatDays},
-		{"noise_floor", cfg.NoiseFloorDays},
-		{"space_weather", cfg.SpaceWeatherDays},
+		// Sessions still running have no end yet, and "ended_at < cutoff" is
+		// never true for NULL, so they are left alone. Bands and modes go with
+		// the session via ON DELETE CASCADE.
+		{"session", cfg.SessionsDays, "ended_at"},
+		{"spots", cfg.SpotsDays, "ts"},
+		{"cw_spots", cfg.CWSpotsDays, "ts"},
+		{"chat_messages", cfg.ChatDays, "ts"},
+		{"noise_floor", cfg.NoiseFloorDays, "ts"},
+		{"space_weather", cfg.SpaceWeatherDays, "ts"},
 		// Stats tables all carry ts, so each prunes independently.
-		{"wspr_rank_rows", cfg.StatsDays},
-		{"wspr_rank_windows", cfg.StatsDays},
-		{"psk_rank_entries", cfg.StatsDays},
-		{"psk_software", cfg.StatsDays},
-		{"psk_rank_snapshots", cfg.StatsDays},
-		{"rbn_skew", cfg.StatsDays},
-		{"rbn_stats", cfg.StatsDays},
-		{"decoder_metrics_summary", cfg.DecoderMetricsSummaryDays},
-		{"cw_metrics_summary", cfg.CWMetricsSummaryDays},
-		{"notification_log", cfg.NotificationLogDays},
+		{"wspr_rank_rows", cfg.StatsDays, "ts"},
+		{"wspr_rank_windows", cfg.StatsDays, "ts"},
+		{"psk_rank_entries", cfg.StatsDays, "ts"},
+		{"psk_software", cfg.StatsDays, "ts"},
+		{"psk_rank_snapshots", cfg.StatsDays, "ts"},
+		{"rbn_skew", cfg.StatsDays, "ts"},
+		{"rbn_stats", cfg.StatsDays, "ts"},
+		{"decoder_metrics_summary", cfg.DecoderMetricsSummaryDays, "ts"},
+		{"cw_metrics_summary", cfg.CWMetricsSummaryDays, "ts"},
+		{"notification_log", cfg.NotificationLogDays, "ts"},
 	}
 	anyDeleted := false
 	for _, r := range rules {
@@ -252,7 +259,7 @@ func (m *DBManager) pruneAll(cfg RetentionConfig) {
 			continue // 0 = keep forever
 		}
 		cutoff := time.Now().UTC().AddDate(0, 0, -r.days).Unix()
-		if m.pruneTable(r.table, cutoff, r.days) {
+		if m.pruneTable(r.table, r.tsColumn, cutoff, r.days) {
 			anyDeleted = true
 		}
 	}
@@ -273,10 +280,13 @@ const pruneChunkSize = 10_000
 // pruneTable deletes rows with ts < cutoff from the named table in chunks,
 // sleeping 100 ms between batches to yield to concurrent readers/writers.
 // Returns true if any rows were deleted.
-func (m *DBManager) pruneTable(table string, cutoff int64, days int) bool {
+func (m *DBManager) pruneTable(table, tsColumn string, cutoff int64, days int) bool {
+	if tsColumn == "" {
+		tsColumn = "ts"
+	}
 	total := int64(0)
 	query := `DELETE FROM ` + table + ` WHERE id IN (
-		SELECT id FROM ` + table + ` WHERE ts < ? LIMIT ?
+		SELECT id FROM ` + table + ` WHERE ` + tsColumn + ` < ? LIMIT ?
 	)`
 	for {
 		res, err := m.db.Exec(query, cutoff, pruneChunkSize)
@@ -400,45 +410,82 @@ func (m *DBManager) initSchema() error {
 		name string
 		ddl  string
 	}{
+		// The legacy `sessions` snapshot table is deliberately NOT created here.
+		// Receivers record sessions in the tables below; the old table only exists
+		// on installations that predate them, where it is converted once and then
+		// dropped -- see session_history_migration.go.
+
 		// ----------------------------------------------------------------
-		// sessions
+		// session / session_band / session_mode / user_agent
 		//
-		// Replaces: <dataDir>/YYYY/MM/DD/sessions.jsonl
-		// Source structs: SessionActivityLog / SessionActivityEntry
+		// Replaces the `sessions` snapshot log above for everything written
+		// from this version on. That table is an append-only JSONL design
+		// carried over verbatim: every event re-serialises the whole active
+		// set, so a row is written per active session per event and the row
+		// count grows as (events x concurrent sessions). On a real receiver
+		// that is ~50x more rows than there were sessions, and answering
+		// "what happened over the last 28 days" meant replaying all of them
+		// and reconstructing session lifetimes by diffing consecutive
+		// snapshots.
 		//
-		// The JSONL format stores a snapshot envelope (SessionActivityLog)
-		// containing a list of active sessions ([]SessionActivityEntry).
-		// Here each SessionActivityEntry becomes one row; the snapshot
-		// envelope fields (timestamp, event_type) are denormalised onto
-		// every row so queries don't need a join.
+		// A session has an identity (user_session_id), so it gets one row
+		// that is updated in place. Tuning from 20m to 40m is an INSERT OR
+		// IGNORE into session_band, not another copy of the whole session.
+		// Statistics become ordinary aggregate queries over an indexed table
+		// the size of the session count.
 		// ----------------------------------------------------------------
 		{
-			"sessions",
-			`CREATE TABLE IF NOT EXISTS sessions (
-				id              INTEGER PRIMARY KEY AUTOINCREMENT,
-				-- envelope fields (from SessionActivityLog)
-				snapshot_ts     INTEGER NOT NULL,   -- Unix seconds UTC (SessionActivityLog.Timestamp)
-				event_type      TEXT    NOT NULL,   -- "snapshot" | "session_created" | "session_destroyed"
-				-- per-session fields (from SessionActivityEntry)
-				user_session_id TEXT    NOT NULL,
-				client_ip       TEXT,
-				source_ip       TEXT,
-				auth_method     TEXT,               -- "" | "password" | "ip_bypass"
-				session_types   TEXT,               -- JSON array e.g. ["audio","spectrum"]
-				bands           TEXT,               -- JSON array e.g. ["20m","40m"]
-				modes           TEXT,               -- JSON array e.g. ["usb","ft8"]
-				created_at      INTEGER,            -- Unix seconds UTC
-				first_seen      INTEGER,            -- Unix seconds UTC
-				user_agent      TEXT,
-				country         TEXT,
-				country_code    TEXT,               -- ISO 3166-1 alpha-2
-				protocol        TEXT                -- "native" | "kiwi" | "websdr"
+			"user_agent",
+			`CREATE TABLE IF NOT EXISTS user_agent (
+				id      INTEGER PRIMARY KEY AUTOINCREMENT,
+				ua      TEXT NOT NULL UNIQUE,
+				browser TEXT NOT NULL DEFAULT '',   -- parsed once per distinct agent
+				os      TEXT NOT NULL DEFAULT ''
 			)`,
 		},
-		{"sessions_idx_snapshot_ts", `CREATE INDEX IF NOT EXISTS sessions_idx_snapshot_ts ON sessions(snapshot_ts)`},
-		{"sessions_idx_source_ip", `CREATE INDEX IF NOT EXISTS sessions_idx_source_ip   ON sessions(source_ip)`},
-		{"sessions_idx_session_id", `CREATE INDEX IF NOT EXISTS sessions_idx_session_id  ON sessions(user_session_id)`},
-		{"sessions_idx_protocol", `CREATE INDEX IF NOT EXISTS sessions_idx_protocol    ON sessions(protocol, snapshot_ts)`},
+		{
+			"session",
+			`CREATE TABLE IF NOT EXISTS session (
+				id              INTEGER PRIMARY KEY AUTOINCREMENT,
+				user_session_id TEXT    NOT NULL UNIQUE,
+				started_at      INTEGER NOT NULL,   -- Unix seconds UTC
+				ended_at        INTEGER,            -- NULL while the session is live
+				last_seen       INTEGER NOT NULL,   -- heartbeat, so a crash can be swept up
+				client_ip       TEXT,
+				source_ip       TEXT,
+				auth_method     TEXT    NOT NULL DEFAULT '',  -- "" | "password" | "ip_bypass"
+				protocol        TEXT,                          -- "native" | "kiwi" | "websdr"
+				user_agent_id   INTEGER REFERENCES user_agent(id),
+				-- Geo resolved once, at session start, so reads never call GeoIP.
+				country         TEXT,
+				country_code    TEXT,
+				latitude        REAL,
+				longitude       REAL,
+				has_audio       INTEGER NOT NULL DEFAULT 0,
+				has_spectrum    INTEGER NOT NULL DEFAULT 0
+			)`,
+		},
+		{"session_idx_ended", `CREATE INDEX IF NOT EXISTS session_idx_ended   ON session(ended_at)`},
+		{"session_idx_started", `CREATE INDEX IF NOT EXISTS session_idx_started ON session(started_at)`},
+		{"session_idx_open", `CREATE INDEX IF NOT EXISTS session_idx_open    ON session(last_seen) WHERE ended_at IS NULL`},
+		{
+			"session_band",
+			`CREATE TABLE IF NOT EXISTS session_band (
+				session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+				band       TEXT    NOT NULL,
+				PRIMARY KEY (session_id, band)
+			)`,
+		},
+		{"session_band_idx_band", `CREATE INDEX IF NOT EXISTS session_band_idx_band ON session_band(band)`},
+		{
+			"session_mode",
+			`CREATE TABLE IF NOT EXISTS session_mode (
+				session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+				mode       TEXT    NOT NULL,
+				PRIMARY KEY (session_id, mode)
+			)`,
+		},
+		{"session_mode_idx_mode", `CREATE INDEX IF NOT EXISTS session_mode_idx_mode ON session_mode(mode)`},
 
 		// ----------------------------------------------------------------
 		// chat_messages

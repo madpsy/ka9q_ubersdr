@@ -5799,15 +5799,10 @@ func (ah *AdminHandler) HandleSessionActivityLogs(w http.ResponseWriter, r *http
 		}
 	}
 
-	logs, err := ReadActivityLogsFromDB(ah.dbManager.ReadDB(), startTime, endTime)
+	logs, err := ah.loadAdminActivityLogs(startTime, endTime, authMethods)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
 		return
-	}
-
-	// Filter by auth methods if specified
-	if len(authMethods) > 0 {
-		logs = FilterSessionsByAuthMethod(logs, authMethods)
 	}
 
 	// Return logs
@@ -5880,15 +5875,10 @@ func (ah *AdminHandler) HandleSessionActivityMetrics(w http.ResponseWriter, r *h
 		authMethods = strings.Split(authMethodsStr, ",")
 	}
 
-	logs, err := ReadActivityLogsFromDB(ah.dbManager.ReadDB(), startTime, endTime)
+	logs, err := ah.loadAdminActivityLogs(startTime, endTime, authMethods)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
 		return
-	}
-
-	// Filter by auth methods if specified
-	if len(authMethods) > 0 {
-		logs = FilterSessionsByAuthMethod(logs, authMethods)
 	}
 
 	// Calculate metrics
@@ -5981,14 +5971,14 @@ func (ah *AdminHandler) HandleSessionActivityChartData(w http.ResponseWriter, r 
 		bucketMinutes *= 2
 	}
 
-	logs, err := ReadActivityLogsFromDB(ah.dbManager.ReadDB(), startTime, endTime)
+	// Counted straight from session intervals: exact at each bucket boundary, and
+	// linear in buckets plus sessions rather than rebuilding a snapshot per bucket.
+	records, err := LoadSessionRecords(ah.dbManager.ReadDB(), startTime, endTime, nil)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to read session activity: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	// Aggregate into time buckets
-	timeline := aggregateLogsIntoBuckets(logs, startTime, endTime, bucketMinutes)
+	timeline := SessionBucketsFromRecords(records, startTime, endTime, bucketMinutes)
 
 	// Build response
 	response := map[string]interface{}{
@@ -6200,19 +6190,14 @@ func (ah *AdminHandler) HandleSessionActivityEvents(w http.ResponseWriter, r *ht
 		}
 	}
 
-	logs, err := ReadActivityLogsFromDB(ah.dbManager.ReadDB(), startTime, endTime)
+	// Starts and ends are recorded, so the events are exact rather than inferred
+	// from a session's absence from the following snapshot.
+	records, err := LoadSessionRecords(ah.dbManager.ReadDB(), startTime, endTime, authMethods)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to read activity logs: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to read session activity: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	// Convert snapshots to events
-	events := convertLogsToEvents(logs)
-
-	// Filter by auth methods if specified
-	if len(authMethods) > 0 {
-		events = filterEventsByAuthMethod(events, authMethods)
-	}
+	events := SessionEventsFromRecords(records)
 
 	// Filter by event types if specified
 	if len(eventTypes) > 0 {
@@ -6238,6 +6223,22 @@ func (ah *AdminHandler) HandleSessionActivityEvents(w http.ResponseWriter, r *ht
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding session activity events: %v", err)
 	}
+}
+
+// loadAdminActivityLogs reads sessions for a range and presents them in the
+// snapshot shape these endpoints report. The rows themselves are now one per
+// session rather than one per session per event; the snapshots are reconstructed
+// from each session's interval, so the response contract is unchanged.
+func (ah *AdminHandler) loadAdminActivityLogs(startTime, endTime time.Time, authMethods []string) ([]SessionActivityLog, error) {
+	records, err := LoadSessionRecords(ah.dbManager.ReadDB(), startTime, endTime, authMethods)
+	if err != nil {
+		return nil, err
+	}
+	interval := 5 * time.Minute
+	if ah.config != nil && ah.config.Server.SessionActivityLogIntervalSec > 0 {
+		interval = time.Duration(ah.config.Server.SessionActivityLogIntervalSec) * time.Second
+	}
+	return SynthesiseActivityLogs(records, startTime, endTime, interval), nil
 }
 
 // convertLogsToEvents converts activity log snapshots into individual session start/end events

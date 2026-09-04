@@ -158,8 +158,24 @@ Three rules, all in `lib/dockPin.js`:
   panel comes back to the top. `reconcile` drops a pin whose panel has since
   been floated, moved to the other dock or retired.
 
-The behaviour itself is one `position: sticky` rule on `.section.is-pinned`; the
-dock body is already the scroller, so there is no scroll handler.
+The pinned panel is drawn **above `.dock__body`, outside the scroller** — not
+stuck to the top of it. `position: sticky` was the first attempt and was the
+wrong one: a panel sliding under a sticky panel is *covered*, not clipped, and
+the browser draws a sharp line between the two. `IntersectionObserver` answers by
+intersection with the scrollport, which a covered panel is still inside, so
+`lib/useInView.js` and every stream gated on it kept running behind an opaque
+panel — the band spectrum was the one that showed it. Taking the panel out of the
+scroller makes the scrollport genuinely end at its bottom edge, so being out of
+sight and being out of view are the same thing again and the gates need to know
+nothing about pinning. It also removes what sticky had needed to look right: a
+z-index over the panels that follow it, and an opaque ring hiding the body's top
+padding, which scrolls with the content. The body gives that padding up instead
+(`.dock__pinned + .dock__body`).
+
+One consequence worth knowing: a pinned panel is outside the body, so it is not
+a drop target. A panel dragged into the dock lands among the ones that scroll,
+and the way to put something above a pinned panel is the header's up arrow —
+which retires the pin, as moving the pinned panel down does.
 
 ### One scroller per dock
 

@@ -75,10 +75,10 @@ export default function Section({ panel, dock, index, weight, height, prev, next
         'section',
         state.open ? 'is-open' : 'is-closed',
         panel.fill && state.open ? 'section--fill' : '',
-        // Sticky at the top of its dock, so the panels below scroll under it.
-        // The class is all this component contributes: the behaviour is one
-        // `position: sticky` rule in styles.css, because the dock body is
-        // already the scroller and there is nothing for JavaScript to do.
+        // Held at the top of its dock while the rest scroll under it. The
+        // holding is done by the dock, which draws this panel outside its
+        // scroller — see the note in Dock.jsx; all the class carries is the
+        // border and shadow that say the panel is in front of the column.
         pinned ? 'is-pinned' : '',
         dropEdge ? `is-drop-${dropEdge}` : '',
     ].filter(Boolean).join(' ');

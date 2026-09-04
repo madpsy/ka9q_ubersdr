@@ -339,14 +339,21 @@ func (f *refComplexStage) predict() (int64, int64) {
 // error. The conjugate of the history is used, as the complex LMS gradient
 // requires; here that is simply the negated sign of the imaginary part.
 func (f *refComplexStage) adapt(er, ei int64) {
+	// A zero error stops the update entirely, leak included. Without the leak
+	// this was merely an optimisation the optimised copy could take and this
+	// one need not; with it the two would part company on the first silent
+	// packet, so it belongs in both.
+	if er == 0 && ei == 0 {
+		return
+	}
 	mr := f.mu * refPredSign(er)
 	mi := f.mu * refPredSign(ei)
 	base := f.idx - 1
 	for j := 0; j < f.order; j++ {
 		hrs := f.sr[base-j]
 		his := -f.si[base-j]
-		f.wr[j] = refPredClampTap(f.wr[j] + mr*hrs - mi*his)
-		f.wi[j] = refPredClampTap(f.wi[j] + mr*his + mi*hrs)
+		f.wr[j] = refPredClampTap(f.wr[j] + mr*hrs - mi*his - predLeak(f.wr[j], predLeakShiftComplex))
+		f.wi[j] = refPredClampTap(f.wi[j] + mr*his + mi*hrs - predLeak(f.wi[j], predLeakShiftComplex))
 	}
 }
 
@@ -417,10 +424,13 @@ func (f *refRealStage) predict() int64 {
 }
 
 func (f *refRealStage) adapt(e int64) {
+	if e == 0 {
+		return
+	}
 	m := f.mu * refPredSign(e)
 	base := f.idx - 1
 	for j := 0; j < f.order; j++ {
-		f.w[j] = refPredClampTap(f.w[j] + m*f.s[base-j])
+		f.w[j] = refPredClampTap(f.w[j] + m*f.s[base-j] - predLeak(f.w[j], predLeakShiftReal))
 	}
 }
 

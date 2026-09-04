@@ -81,9 +81,13 @@ var predictiveCaptures = []struct {
 }{
 	{"iq384-ft8-14074.bin", PredProfileIQ, 1.41, 1.488},
 	{"iq12k-ft8-14074.bin", PredProfileIQ, 1.33, 1.408},
-	{"iq384-mw-carriers.bin", PredProfileIQ, 1.79, 1.890},
+	// Medium wave is the one capture the leak costs anything on, and only
+	// because half a second is too short to show what it buys: the unleaked
+	// codec reached 1.890x here and then walked itself down to 1.241x over
+	// thirty seconds of the same signal. See TestPredictiveTapsDoNotDrift.
+	{"iq384-mw-carriers.bin", PredProfileIQ, 1.72, 1.810},
 	{"iq384-quiet-band.bin", PredProfileIQ, 1.47, 1.550},
-	{"usb-ft8-14074.bin", PredProfileAudio, 1.81, 1.905},
+	{"usb-ft8-14074.bin", PredProfileAudio, 1.81, 1.906},
 	{"lsb-voice-7150.bin", PredProfileAudio, 2.16, 2.278},
 	{"cw-14025.bin", PredProfileAudio, 4.19, 4.411},
 	{"am-14074.bin", PredProfileAudio, 1.62, 1.706},

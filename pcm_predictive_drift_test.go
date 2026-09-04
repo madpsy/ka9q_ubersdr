@@ -37,9 +37,8 @@ func TestPredictiveTapsDoNotDrift(t *testing.T) {
 		// what the far slower audio cascade needs to show the same thing.
 		samples int
 		// maxTap is the largest |tap| tolerated, as a real-valued magnitude.
-		// The leaked filters settle under 1.0 on all three captures against a
-		// theoretical ceiling of mu*2^predLeakShift = 4.0, where the unleaked
-		// ones reach 256 on the IQ captures and pass 4 on the audio one.
+		// The leaked filters settle under 2 on all three captures, where the
+		// unleaked ones reach 256 on the IQ captures and 5.33 on the audio one.
 		maxTap float64
 	}{
 		{"iq384-mw-carriers.bin", PredProfileIQ, 23_000_000, 4},
@@ -115,7 +114,7 @@ func TestPredictiveTapsDoNotDrift(t *testing.T) {
 
 			if maxTap > c.maxTap {
 				t.Errorf("taps drifted to %.3f after %d samples, limit is %.3f — "+
-					"the filter is walking rather than tracking; see predLeakShift",
+					"the filter is walking rather than tracking; see predLeakShiftComplex",
 					maxTap, total, c.maxTap)
 			}
 
@@ -157,24 +156,28 @@ func predMaxTap(c *PredictiveCodec) float64 {
 }
 
 // TestPredictiveLeakIsSignSymmetric pins the property the ports have to
-// reproduce. A C or C++ decoder writing `w >> predLeakShift` gets an
+// reproduce. A C or C++ decoder writing `w >> shift` gets an
 // arithmetic shift, which rounds towards negative infinity: for a small
 // negative tap that leaks -1 rather than 0, so the taps drift positive and the
 // two ends part company within a packet. JavaScript has neither int64 nor an
 // arithmetic shift past 32 bits and has to truncate explicitly.
 func TestPredictiveLeakIsSignSymmetric(t *testing.T) {
-	for _, w := range []int64{0, 1, 1 << 13, (1 << 14) - 1, 1 << 14, 3 << 14, 1 << 24} {
-		if got, want := predLeak(-w), -predLeak(w); got != want {
-			t.Errorf("predLeak(%d) = %d, want %d — leak is not sign-symmetric", -w, got, want)
+	for _, shift := range []uint{predLeakShiftComplex, predLeakShiftReal} {
+		for _, w := range []int64{0, 1, 1 << 13, (1 << shift) - 1, 1 << shift, 3 << shift, 1 << 24} {
+			if got, want := predLeak(-w, shift), -predLeak(w, shift); got != want {
+				t.Errorf("predLeak(%d, %d) = %d, want %d — leak is not sign-symmetric",
+					-w, shift, got, want)
+			}
 		}
-	}
-	// Truncation towards zero: nothing under 2^predLeakShift leaks at all.
-	for _, w := range []int64{0, 1, (1 << predLeakShift) - 1} {
-		if got := predLeak(w); got != 0 {
-			t.Errorf("predLeak(%d) = %d, want 0 — small taps must not be dragged to zero", w, got)
+		// Truncation towards zero: nothing under 2^shift leaks at all.
+		for _, w := range []int64{0, 1, (1 << shift) - 1} {
+			if got := predLeak(w, shift); got != 0 {
+				t.Errorf("predLeak(%d, %d) = %d, want 0 — small taps must not be dragged to zero",
+					w, shift, got)
+			}
 		}
-	}
-	if got, want := predLeak(3<<predLeakShift), int64(3); got != want {
-		t.Errorf("predLeak(3<<%d) = %d, want %d", predLeakShift, got, want)
+		if got, want := predLeak(3<<shift, shift), int64(3); got != want {
+			t.Errorf("predLeak(3<<%d, %d) = %d, want %d", shift, shift, got, want)
+		}
 	}
 }

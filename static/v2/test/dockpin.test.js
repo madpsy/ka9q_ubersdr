@@ -30,7 +30,7 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 
 const {
     render, reset, walk,
-    Section, canPin, pinnedPanel, PINNABLE,
+    Section, Dock, PANEL_BY_ID, canPin, pinnedPanel, PINNABLE,
     defaultLayout, reconcile, DEFAULTS, Icon,
 } = require('./.build/dockpin.cjs');
 
@@ -285,16 +285,16 @@ t('a panel below the top does not, and neither does one in the bottom dock', () 
     assert.ok(!head({ dock: 'bottom', weight: 1 }).pin, 'the bottom dock lays its panels out in a row');
 });
 
-t('a pinned panel is lit, says how to undo it, and is sticky', () => {
+t('a pinned panel is lit, says how to undo it, and is marked', () => {
     const { pin, section } = head({ pinned: true });
     assert.strictEqual(pin.props['aria-pressed'], true);
     assert.match(pin.props.title, /^Unpin/);
-    // The class is the whole of the behaviour — the sticking itself is one CSS
-    // rule — so a section that does not carry it is a pin that does nothing.
+    // The dock does the holding; the class is what says the panel is in front of
+    // the column rather than part of it.
     assert.ok(section.props.className.includes('is-pinned'), section.props.className);
 });
 
-t('an unpinned panel is not sticky', () => {
+t('an unpinned panel is not marked', () => {
     assert.ok(!head({}).section.props.className.includes('is-pinned'));
 });
 
@@ -327,37 +327,108 @@ const block = (selector) => {
     return css.slice(at, css.indexOf('}', at));
 };
 
-t('a pinned panel covers the dock padding it does not own', () => {
-    // The 8px above a panel and the 8px between it and its neighbour belong to
-    // the dock body, not to the panel: they scroll with the content, so a panel
-    // passing behind a pinned one showed through the strip above it. The ring of
-    // dock colour in the pinned panel's box-shadow is what covers that, and it
-    // only covers it while the three numbers agree.
-    const body = block('.dock__body {');
-    const pad = /padding:\s*(\d+)px/.exec(body);
-    const gap = /gap:\s*(\d+)px/.exec(body);
-    assert.ok(pad && gap, 'the dock body no longer states a padding and a gap');
-
-    const pinned = block('.dock--left .section.is-pinned,');
-    const ring = /0 0 0 (\d+)px var\(--surface\)/.exec(pinned);
-    assert.ok(ring, 'the pinned panel has no ring of dock colour around it');
-    assert.strictEqual(ring[1], pad[1], 'the ring no longer covers the dock body padding');
-    assert.strictEqual(ring[1], gap[1], 'the ring no longer covers the gap to the next panel');
+t('the pinned panel is not in the dock body, and the body starts flush under it', () => {
+    // The two halves of the same fact. The body gives up its top padding because
+    // padding scrolls with the content: an 8px strip of it would be 8px of
+    // moving panel between the pinned one and the clip. The pinned wrapper pays
+    // that padding back, so the strip belongs to the panel standing still.
+    const wrap = block('.dock__pinned {');
+    const pad = /padding:\s*(\d+)px/.exec(wrap);
+    const bodyPad = /padding:\s*(\d+)px/.exec(block('.dock__body {'));
+    assert.ok(pad && bodyPad, 'one of the two no longer states a padding');
+    assert.strictEqual(pad[1], bodyPad[1], 'the pinned panel no longer lines up with the ones below it');
+    assert.match(css, /\.dock__pinned \+ \.dock__body \{[^}]*padding-top:\s*0/);
 });
 
-t('a pinned panel is capped, and scrolls its own body', () => {
-    // Sticky and taller than the dock is a trap: it would stick with its bottom
-    // off the end of the scrollport, never let go, and the panels under it could
-    // not be reached at all. The cap and the inner scroller go together — a cap
-    // with nothing giving way underneath it just clips the panel.
-    const pinned = block('.dock--left .section.is-pinned,');
-    assert.match(pinned, /position:\s*sticky/);
-    assert.match(pinned, /top:\s*0/);
-    // Every section is position: relative, so without a z-index the panels after
-    // this one in the DOM paint over the one that is meant to be in front.
-    assert.match(pinned, /z-index:\s*[1-9]/);
-    assert.match(pinned, /max-height:\s*\d+%/);
-    assert.match(block('.dock--left .section.is-pinned .section__body,'), /overflow:\s*auto/);
+t('the pinned panel is capped, and scrolls its own body', () => {
+    // It cannot be scrolled — that is the point of it — so a panel taller than
+    // the cap would take the whole dock and leave nothing to pin it above. The
+    // cap and the inner scroller go together: a cap with nothing giving way
+    // underneath it just clips the panel.
+    const wrap = block('.dock__pinned {');
+    assert.match(wrap, /max-height:\s*\d+%/);
+    assert.match(wrap, /flex:\s*none/);
+    assert.match(block('.dock__pinned .section__body'), /overflow:\s*auto/);
+});
+
+t('nothing about a pinned panel is sticky any more', () => {
+    // The sticky version covered the panels below it instead of clipping them,
+    // and covered is not clipped: IntersectionObserver reports a covered panel
+    // as on screen, so every stream gated on being visible went on running
+    // behind an opaque panel. If this comes back, so does that bug.
+    assert.ok(!/\.section\.is-pinned[^{]*\{[^}]*position:\s*sticky/.test(css),
+        'the pinned panel is sticky again — see the note in Dock.jsx');
+});
+
+// --- the dock ---------------------------------------------------------------
+
+const DOCK_SIDES = { left: 'left', right: 'right', bottom: 'bottom' };
+
+function dockContext(pins) {
+    const docks = {};
+    for (const side of Object.values(DOCK_SIDES)) {
+        docks[side] = { panels: [], size: 320, collapsed: false, minSize: 220, maxSize: 560 };
+    }
+    docks.left.panels = ['receiver', 'bands'];
+    return context({ docks, pins, sections: {}, heights: {}, toggleDock() {}, setDockCollapsed() {}, setDockSize() {} });
+}
+
+// Every element the dock drew, and the ones that are Sections — which walk()
+// reports as elements whose type is the component itself.
+const drew = (node) => walk(node);
+const sectionsIn = (node) => drew(node).filter((n) => n.props && n.props.panel);
+const findByClass = (node, cls) => drew(node).find((n) => classOf(n).split(' ').includes(cls));
+
+function dock(pins) {
+    reset();
+    const { tree } = render(Dock, { side: 'left' }, dockContext(pins));
+    return tree;
+}
+
+t('a pinned panel is drawn outside the dock body', () => {
+    // The whole of how pinning works, and the reason it is not `position:
+    // sticky`: a panel that has scrolled past a pinned one has to be *clipped*
+    // by the scroller rather than covered by something drawn over it, because
+    // that is the difference IntersectionObserver reports — and so the
+    // difference between a stream that stops when it goes out of sight and one
+    // that keeps running behind an opaque panel. See lib/useInView.js.
+    const tree = dock({ left: 'receiver', right: null });
+    const wrap = findByClass(tree, 'dock__pinned');
+    assert.ok(wrap, 'no pinned panel outside the body');
+    const body = findByClass(tree, 'dock__body');
+    assert.ok(body, 'no dock body');
+
+    assert.deepStrictEqual(sectionsIn(wrap).map((n) => n.props.panel.id), ['receiver']);
+    assert.ok(sectionsIn(wrap)[0].props.pinned, 'the section does not know it is pinned');
+    // ...and it is drawn once, not twice.
+    assert.deepStrictEqual(sectionsIn(body).map((n) => n.props.panel.id), ['bands']);
+});
+
+t('its header still steps down into the panels below it', () => {
+    // The pinned panel is drawn on its own, so its neighbours have to be handed
+    // to it: without them the reorder arrows would vanish from the one panel
+    // whose arrow undoes the pin.
+    const wrap = findByClass(dock({ left: 'receiver', right: null }), 'dock__pinned');
+    assert.strictEqual(sectionsIn(wrap)[0].props.next, 'bands');
+    assert.strictEqual(sectionsIn(wrap)[0].props.index, 0);
+});
+
+t('an unpinned dock draws everything in the body', () => {
+    const tree = dock({ left: null, right: null });
+    assert.ok(!findByClass(tree, 'dock__pinned'), 'a pinned wrapper with nothing pinned');
+    const body = findByClass(tree, 'dock__body');
+    assert.deepStrictEqual(sectionsIn(body).map((n) => n.props.panel.id), ['receiver', 'bands']);
+});
+
+t('a dock holding only a pinned panel still offers somewhere to drop', () => {
+    // The body is empty, and an empty body is where the next panel goes. Counted
+    // from what is left to scroll rather than from the dock's list, which still
+    // has the pinned panel in it.
+    reset();
+    const ctx = dockContext({ left: 'receiver', right: null });
+    ctx.docks.left.panels = ['receiver'];
+    const { tree } = render(Dock, { side: 'left' }, ctx);
+    assert.ok(findByClass(tree, 'dock__empty'), 'no drop target left in the dock');
 });
 
 t('the pin icon has a closed body, so the pinned state can be filled', () => {

@@ -149,56 +149,69 @@ const (
 	// float64 represents integers exactly (2^53), a JavaScript decoder can use
 	// plain numbers and still be bit-exact, with no BigInt.
 	//
-	// With the leak below holding the taps near predLeakShift's equilibrium
+	// With the leak below holding the taps near their equilibrium
 	// the clamp is insurance that never fires in practice. It must nonetheless
 	// be applied identically on both sides, since if it ever does fire the two
 	// must agree.
 	predTapLimit = 1 << 24
 
-	// predLeakShift is the leakage of the tap update: every adapt subtracts
-	// w/2^14 from each tap before adding the gradient step.
+	// predLeakShiftComplex and predLeakShiftReal are the leakage of the tap
+	// update: every adapt subtracts w/2^shift from each tap before adding the
+	// gradient step.
 	//
 	// WHY LEAKAGE IS NOT OPTIONAL
 	// ---------------------------
 	// Sign-sign LMS has no restoring force of its own. The update is
 	// mu*sign(e)*sign(x) whatever the taps already are, so in any direction the
 	// input does not excite -- and a band whose energy sits in a few carriers
-	// leaves most directions unexcited -- the taps are free to walk. On a
-	// medium-wave capture they walk in one direction: measured on a 909 kHz
-	// iq384 stream the mean |tap| grew linearly at about 1.5 per second until
-	// it reached predTapLimit around ninety seconds in.
+	// leaves most directions unexcited -- the taps are free to walk. On medium
+	// wave they walk in one direction: measured on a 909 kHz iq384 stream the
+	// mean |tap| grew linearly at about 1.5 per second until it reached
+	// predTapLimit around ninety seconds in.
 	//
-	// Long before the clamp the prediction is worthless. The same capture cost
-	// 10.65 bits per sample at five seconds, 14.26 at thirty and 15.85 at
-	// ninety, by which point a third of packets were taking the raw escape and
-	// the "compressed" stream was larger than the samples going into it. This
-	// is what a client sees as a bitrate that climbs for minutes on a signal
-	// that is not changing.
+	// Long before the clamp the prediction is worthless. That stream cost 10.65
+	// bits per sample at five seconds, 14.26 at thirty and 15.85 at ninety, by
+	// which point a third of packets were taking the raw escape and the
+	// "compressed" stream was larger than the samples going into it. This is
+	// what a client sees as a bitrate that climbs for minutes on a signal that
+	// is not changing. Every capture in testdata/pcm_predictive is half a second
+	// long, which is why nothing here caught it; TestPredictiveTapsDoNotDrift is
+	// the test that does.
 	//
-	// Subtracting w/2^14 first bounds the walk at roughly mu*2^14, and costs
-	// nothing where the taps were not walking: on two minutes of a 40 m
-	// capture, whose taps stayed under 0.25 throughout, it changes the coded
-	// size by 0.003% -- in its favour. Where they were walking it is decisive:
-	// the same medium-wave stream holds 8.45 bits per sample for as long as it
-	// runs, against the 10.65 the diverging codec reached by five seconds and
-	// the 15.85 it reached by ninety.
+	// Subtracting w/2^shift first bounds the walk at roughly mu*2^shift. Where
+	// the taps were not walking it costs nothing -- on two minutes of a 40 m
+	// capture it changes the coded size by 0.003%, in its favour -- and where
+	// they were it is decisive: the medium-wave stream holds 8.45 bits per
+	// sample for as long as it runs.
 	//
-	// 14 is the measured optimum, on bits per sample over the last five seconds
-	// of that ninety-second stream:
+	// WHY THE TWO PROFILES DIFFER
+	// ---------------------------
+	// The complex filter tracks a 384 kHz baseband where the useful taps are
+	// small, and 14 is its measured optimum -- bits per sample over the last
+	// five seconds of that ninety-second stream:
 	//
 	//	 8   13.35      14    8.45      18   11.19
 	//	10    9.41      16    9.36      off  15.85
 	//	12    8.81
 	//
-	// Stronger leakage gives up prediction the signal was genuinely offering;
-	// weaker leaves the equilibrium high enough that the walk resumes. See
-	// TestPredictiveTapsDoNotDrift.
+	// The real cascade is a different filter on a different signal: four stages
+	// over a 12 kHz channel about four times oversampled, whose taps legitimately
+	// reach 2. Leaking it as hard as the complex one throws that away. Measured
+	// on usb-ft8-14074.bin, payload ratio over the capture against the largest
+	// |tap| after 150 million samples:
 	//
-	// It is subtracted with the magnitude truncated, so a tap smaller than
-	// 2^14 leaks nothing and small taps are not dragged to zero by rounding.
-	predLeakShift = 14
-
-	predLeakShiftReal = 14
+	//	14   1.671x  0.90      18   1.905x  4.00
+	//	16   1.874x  1.57      off  1.905x  5.33
+	//	17   1.906x  1.99
+	//
+	// 17 is where the compression is fully back -- fractionally ahead of no leak
+	// at all, and identical on the other four audio captures -- while the taps
+	// still settle, at 1.99 both after 29 million samples and after 150 million.
+	//
+	// Both are subtracted with the magnitude truncated, so a tap smaller than
+	// 2^shift leaks nothing and small taps are not dragged to zero by rounding.
+	predLeakShiftComplex = 14
+	predLeakShiftReal    = 17
 
 	// predEscapeFlag marks a body carrying verbatim samples.
 	predEscapeFlag = 1 << 7
@@ -341,23 +354,18 @@ func predRoundShift(v int64, shift uint) int64 {
 }
 
 // predLeak is the amount the leakage removes from one tap, the magnitude
-// divided by 2^predLeakShift and truncated towards zero.
+// divided by 2^shift and truncated towards zero.
 //
 // Truncating rather than rounding is what keeps the leak from fighting the
-// gradient at small taps: below 2^predLeakShift it returns zero, so a tap the
+// gradient at small taps: below 2^shift it returns zero, so a tap the
 // signal genuinely wants at a small value stays there instead of being pulled
 // to zero and pushed back every sample.
 //
 // Branchless in the same form as predRoundShift, and for the same reason: it
 // runs once per tap per sample, and the sign of a tap is not predictable.
-func predLeak(w int64) int64 {
+func predLeak(w int64, shift uint) int64 {
 	m := w >> 63
-	return ((((w ^ m) - m) >> predLeakShift) ^ m) - m
-}
-
-func predLeakReal(w int64) int64 {
-	m := w >> 63
-	return ((((w ^ m) - m) >> predLeakShiftReal) ^ m) - m
+	return ((((w ^ m) - m) >> shift) ^ m) - m
 }
 
 // predClampTap applies predTapLimit. See the constant for why.
@@ -446,7 +454,7 @@ func (f *complexStage) predict() (int64, int64) {
 }
 
 // adapt nudges each tap by mu in the direction that would have reduced this
-// error, after leaking predLeakShift off it. The conjugate of the history is
+// error, after leaking predLeakShiftComplex off it. The conjugate of the history is
 // used, as the complex LMS gradient requires; here that is simply the negated
 // sign of the imaginary part.
 //
@@ -480,16 +488,16 @@ func (f *complexStage) adapt(er, ei int64) {
 		for j := range wr {
 			hrs := sr[j]
 			his := -si[j]
-			wr[j] += mr*hrs - mi*his - predLeak(wr[j])
-			wi[j] += mr*his + mi*hrs - predLeak(wi[j])
+			wr[j] += mr*hrs - mi*his - predLeak(wr[j], predLeakShiftComplex)
+			wi[j] += mr*his + mi*hrs - predLeak(wi[j], predLeakShiftComplex)
 		}
 		return
 	}
 	for j := range wr {
 		hrs := sr[j]
 		his := -si[j]
-		wr[j] = predClampTap(wr[j] + mr*hrs - mi*his - predLeak(wr[j]))
-		wi[j] = predClampTap(wi[j] + mr*his + mi*hrs - predLeak(wi[j]))
+		wr[j] = predClampTap(wr[j] + mr*hrs - mi*his - predLeak(wr[j], predLeakShiftComplex))
+		wi[j] = predClampTap(wi[j] + mr*his + mi*hrs - predLeak(wi[j], predLeakShiftComplex))
 	}
 }
 
@@ -603,12 +611,12 @@ func (f *realStage) adapt(e int64) {
 	s = s[:len(w)]
 	if f.fast {
 		for j, sv := range s {
-			w[j] += m*sv - predLeakReal(w[j])
+			w[j] += m*sv - predLeak(w[j], predLeakShiftReal)
 		}
 		return
 	}
 	for j, sv := range s {
-		w[j] = predClampTap(w[j] + m*sv - predLeakReal(w[j]))
+		w[j] = predClampTap(w[j] + m*sv - predLeak(w[j], predLeakShiftReal))
 	}
 }
 

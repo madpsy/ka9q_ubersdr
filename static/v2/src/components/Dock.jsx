@@ -273,7 +273,23 @@ export default function Dock({ side }) {
     // The panel held still while the rest of the dock scrolls under it, if the
     // operator has asked for one. Worked out from what is actually drawn rather
     // than from the stored list — see lib/dockPin.js.
+    //
+    // It is rendered *above* the dock body rather than stuck to the top of it,
+    // and that is the whole of how pinning works. `position: sticky` looked like
+    // the smaller change and was the wrong one: a panel sliding under a sticky
+    // one is covered, not clipped, and the browser draws a sharp line between
+    // those two. Everything that asks whether something is on screen —
+    // IntersectionObserver, and so lib/useInView.js and every stream gated on it
+    // — answers by intersection with the scrollport, which a covered panel is
+    // still inside. The band spectrum went on streaming a picture behind an
+    // opaque panel. Taking the pinned panel out of the scroller makes the
+    // scrollport genuinely end at its bottom edge, so the question is asked of
+    // geometry that matches what you can see, and the gates need to know nothing
+    // about pinning at all.
     const pinned = pinnedPanel(pins, side, visible);
+    // What is left to scroll. The dock is empty when nothing is *in the body* —
+    // a dock holding only a pinned panel still wants somewhere to drop the next.
+    const scrolling = pinned ? visible.length - 1 : visible.length;
 
     const onResizeDown = useCallback((e) => {
         e.preventDefault();
@@ -365,6 +381,23 @@ export default function Dock({ side }) {
                 <span className="dock__collapse">{COLLAPSE_ICON[side].open}</span>
             </button>
 
+            {pinned && (
+                /* Outside .dock__body, so it is not scrolled and does not clip.
+                   The index and neighbours are the ones it has in the dock as a
+                   whole, so its header's reorder arrows still step through the
+                   panels below it — moving it down simply retires the pin, which
+                   is how a pin is meant to come undone. */
+                <div className="dock__pinned">
+                    <Section
+                        panel={PANEL_BY_ID[pinned]}
+                        dock={side}
+                        index={0}
+                        next={visible[1]}
+                        pinned
+                    />
+                </div>
+            )}
+
             <div
                 className={`dock__body${dropping ? ' is-dropping' : ''}`}
                 ref={bodyRef}
@@ -402,7 +435,7 @@ export default function Dock({ side }) {
                     movePanel(id, side, null);
                 }}
             >
-                {visible.map((id, i) => (
+                {visible.map((id, i) => (id === pinned ? null : (
                     <React.Fragment key={id}>
                         {/* Only the bottom dock lays panels out side by side, so
                             only it has anything to split. The side docks size
@@ -426,13 +459,12 @@ export default function Dock({ side }) {
                             prev={visible[i - 1]}
                             next={visible[i + 1]}
                             dropEdge={dropAt && dropAt.id === id ? dropAt.edge : null}
-                            pinned={pinned === id}
                             weight={side === 'bottom' ? shareOf(weights, id) : undefined}
                             height={side === 'bottom' ? heights[id] : undefined}
                         />
                     </React.Fragment>
-                ))}
-                {visible.length === 0 && <div className="dock__empty">Drop a panel here</div>}
+                )))}
+                {scrolling === 0 && <div className="dock__empty">Drop a panel here</div>}
             </div>
 
             <div

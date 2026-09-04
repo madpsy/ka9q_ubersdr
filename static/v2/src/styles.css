@@ -1088,56 +1088,53 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dock--bottom .section--fill .section__body { flex: 1; min-height: 0; overflow: hidden; }
 
 /* A pinned panel: the top one in a side dock, held still while the rest scroll
- * under it. See lib/dockPin.js.
+ * under it. See lib/dockPin.js, and the note in Dock.jsx for why it is rendered
+ * here — above the dock body — rather than stuck to the top of it.
  *
- * `position: sticky` on a flex item, and that is the whole mechanism — the dock
- * body is already the scroller, so there is no scroll handler and nothing to
- * keep in step with the layout. Two details make it work rather than merely
- * apply:
- *
- *   - the z-index. Every section is `position: relative`, so without it the
- *     panels *after* this one in the DOM paint over the one that is meant to be
- *     in front. Their own background is opaque, so the pinned panel would have
- *     been covered rather than merely out-ranked.
- *   - `top: 0` rather than the body's 8px of padding. That padding scrolls away
- *     with the content, so sticking below it would leave an 8px strip of moving
- *     panel above one that is supposed to be still. At rest the panel is in its
- *     natural place either way — it only sticks once that padding has gone by.
+ * Being outside the scroller is what makes this simple. There is no sticky
+ * position to out-rank the panels that follow it, no ring of dock colour to hide
+ * what would otherwise show through the body's top padding, and nothing scrolls
+ * *behind* the panel to be hidden in the first place: the body's clip ends where
+ * this begins, so a panel scrolled past it is genuinely clipped — which is also
+ * the answer IntersectionObserver gives, and so the answer every stream gated on
+ * being on screen gets. See lib/useInView.js.
  */
-.dock--left .section.is-pinned,
-.dock--right .section.is-pinned {
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    /* Taller than the dock and sticky is a trap: the panel would stick with its
-       own bottom off the end of the scrollport, never let go, and the panels
-       under it could not be reached at all. So a pinned panel is capped and its
-       body gives way — the same sanctioned exception the bottom dock's panels
-       have, and for the same reason: the container has a fixed height, so
-       something inside it has to scroll. */
+.dock__pinned {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    /* Half the dock at most. It cannot be scrolled — that is the point of it —
+       so a panel taller than this would take the dock with it and leave nothing
+       to pin it above. Its own body gives way instead: the same sanctioned
+       exception the bottom dock's panels have, and for the same reason, that
+       the container has a fixed height so something inside it has to scroll. */
     max-height: 60%;
-    border-color: var(--border-strong);
-    /* Two shadows, and the first of them is not a shadow at all.
-     *
-     * A panel is 8px in from the edges of the dock body and 8px clear of its
-     * neighbour, and none of that space belongs to the panel: it is the body's
-     * own padding and the flex gap, it scrolls with the content, and a panel
-     * passing behind a pinned one showed through the strip above it. Covering it
-     * is a ring of the dock's own colour — the same 8px, drawn outside the
-     * border box and travelling with the panel, so what goes under the panel is
-     * out of sight rather than merely behind it. It follows the border radius,
-     * so the corners are covered too, and it is invisible against the dock when
-     * there is nothing to hide.
-     *
-     * The second is the real one, listed first so it paints on top of the ring:
-     * the panel is in front of the dock rather than part of the column, and at
-     * rest — with nothing scrolled under it yet — nothing else would say so. */
-    box-shadow:
-        0 8px 12px -8px rgba(0, 0, 0, 0.55),
-        0 0 0 8px var(--surface);
+    /* The dock body's own padding, and the 8px gap to the first panel below —
+       both of which the body gives up in return (see below), so that the strip
+       between the two belongs to the panel that is standing still rather than to
+       the content moving past it. */
+    padding: 8px;
+    /* Positioned, so its shadow falls on the scrolling panels rather than under
+       them: the sections in the body are `position: relative` and later in tree
+       order, and would otherwise paint over it. */
+    position: relative;
+    z-index: 1;
 }
-.dock--left .section.is-pinned .section__body,
-.dock--right .section.is-pinned .section__body { min-height: 0; overflow: auto; }
+.dock__pinned .section { min-height: 0; }
+.dock__pinned .section__body { min-height: 0; overflow: auto; }
+/* No top padding under a pinned panel. Padding scrolls with the content, so an
+   8px strip of it would be 8px of moving panel between the pinned one and the
+   clip — which is exactly what pinning is meant to prevent. The space is not
+   lost: .dock__pinned above pays it back as its own bottom padding. */
+.dock__pinned + .dock__body { padding-top: 0; }
+
+/* It is in front of the dock rather than part of the column, and at rest — with
+   nothing scrolled under it yet — nothing else would say so. */
+.section.is-pinned {
+    border-color: var(--border-strong);
+    box-shadow: 0 6px 12px -8px rgba(0, 0, 0, 0.55);
+}
 
 .dock__empty {
     margin: auto;

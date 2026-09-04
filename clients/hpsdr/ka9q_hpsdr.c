@@ -429,8 +429,18 @@ int p1_host_board_type(void) { return mcb.device_type; }
 bool p1_host_p2_busy(void) { return running && gen_rcvd; }
 
 /* A rate change is a mode change, and the mode is baked into the WebSocket URL,
- * so it is applied the same way the protocol 2 path applies one: set the rate,
- * set the display gain that goes with it, and ask for a reconnect. */
+ * so it is applied the same way the protocol 2 path applies one: set the rate
+ * and ask for a reconnect. The early return keeps a no-op from tearing the
+ * WebSocket down and rebuilding it for nothing.
+ *
+ * The display gain is deliberately NOT set here. It is a function of the
+ * bandwidth and is derived where the samples are scaled, because a stored copy
+ * has to be kept in step with the rate and once was not: the receivers are
+ * seeded at 192 kHz, so a client selecting 192 kHz — the commonest case, and
+ * what p1_start assumes when the client has not said — took this early return
+ * and kept the placeholder gain of 700 rather than that rate's 4000. Fifteen
+ * decibels quiet, at 192 kHz alone, since every other rate differs from the
+ * seed and got past the return. */
 void p1_host_set_rate(int rcvr, int rate_hz)
 {
     if (rcvr < 0 || rcvr >= MAX_RCVRS) return;
@@ -438,7 +448,6 @@ void p1_host_set_rate(int rcvr, int rate_hz)
 
     mcb.rcb[rcvr].output_rate = rate_hz;
     rxrate[rcvr] = rate_hz / 1000;
-    mcb.rcb[rcvr].scale = scale_for_rate(rate_hz / 1000);
     mcb.rcb[rcvr].reconnect_needed = 1;
 }
 
@@ -1017,9 +1026,22 @@ static int ws_callback(struct lws *wsi,
             rcb->last_sample_rate = sr;
             rcb->last_channels    = ch;
 
-            /* Scale in place */
+            /* Scale in place.
+             *
+             * Derived here rather than stored beside the rate. The two are one
+             * fact — the gain is a function of the bandwidth — and keeping a
+             * second copy meant keeping them in step, which is exactly what
+             * failed: a receiver seeded at 192 kHz with a placeholder gain kept
+             * that placeholder for any client that selected 192 kHz, because
+             * the setter returned early on the rate already matching. There is
+             * now nothing to keep in step.
+             *
+             * From the rate the samples ARRIVED at, not the rate the client
+             * asked for, so a session the server serves narrower than requested
+             * is still scaled for what it actually sent. */
+            const float scale = scale_for_rate(sr / 1000);
             for (int i = 0; i < n_samples; i++) {
-                rcb->iqSamples[rcb->iqSamples_remaining + i] *= rcb->scale;
+                rcb->iqSamples[rcb->iqSamples_remaining + i] *= scale;
             }
 
             rcb->iqSamples_remaining += n_samples;
@@ -1908,7 +1930,6 @@ int main (int argc, char *argv[])
         mcb.rcb[i].new_freq = 0;
         mcb.rcb[i].curr_freq = 10000000;
         mcb.rcb[i].output_rate = 192000;
-        mcb.rcb[i].scale = 700.0f;
         mcb.rcb[i].rcvr_num = i;
         mcb.rcb[i].reconnect_needed = 0;
         mcb.rcb[i].rcvr_mask = 1 << i;
@@ -2494,8 +2515,6 @@ void *ddc_specific_thread(void *data)
                 rxrate[i] = rc;
                 mcb.rcb[i].output_rate = (rxrate[i] * 1000);
                 modified = 1;
-
-                mcb.rcb[i].scale = scale_for_rate(rxrate[i]);
 
                 /* Rate change requires WebSocket reconnect (mode is baked into URL) */
                 rcb->reconnect_needed = 1;

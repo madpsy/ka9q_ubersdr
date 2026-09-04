@@ -105,7 +105,6 @@ struct main_cb {
         int curr_freq;
         int output_rate;
         u_int rcvr_mask;
-        float scale;
         int reconnect_needed;   /* set by ws_callback on rate change / error */
         int wsi_closed;         /* set by ws_callback when wsi is fully closed */
         struct main_cb* mcb;

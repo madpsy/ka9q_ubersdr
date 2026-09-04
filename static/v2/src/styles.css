@@ -2414,13 +2414,21 @@ a.btn { text-decoration: none; }
     letter-spacing: 0;
     text-transform: none;
     color: var(--text-dim);
-    /* A hint is a reading and its unit -- "20 dB", "512 ms", "-90 dBFS". The
-       two are one token to a reader and must never be split across lines,
-       which is what an inline field's narrow label column would otherwise do
-       to them. The label beside it shrinks instead; it is a fixed word where
-       this is the part that changes. */
-    white-space: nowrap;
+    /* Wrapped lines stay flush with the right edge the hint already sits on,
+       so a two-line hint reads as one block rather than a ragged step. */
+    text-align: right;
+    min-width: 0;
 }
+/* A hint is usually a reading and its unit -- "20 dB", "512 ms", "-90 dBFS".
+   The two are one token to a reader and must never be split across lines,
+   which is what an inline field's narrow label column would otherwise do to
+   them. The label beside it shrinks instead; it is a fixed word where this is
+   the part that changes.
+
+   Only inline, though. A stacked field's label row is the full panel width and
+   its hint is as often a phrase as a reading -- "audio, metadata and signal
+   log" -- which has to be allowed to wrap or it runs out past the panel. */
+.field--inline .field__hint { white-space: nowrap; }
 
 .slider {
     -webkit-appearance: none;

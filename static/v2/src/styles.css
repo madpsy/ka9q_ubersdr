@@ -1116,10 +1116,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
        have, and for the same reason: the container has a fixed height, so
        something inside it has to scroll. */
     max-height: 60%;
-    /* It is in front of the dock rather than part of the column, and at rest —
-       with nothing scrolled under it yet — nothing else would say so. */
     border-color: var(--border-strong);
-    box-shadow: 0 6px 12px -8px rgba(0, 0, 0, 0.55);
+    /* Two shadows, and the first of them is not a shadow at all.
+     *
+     * A panel is 8px in from the edges of the dock body and 8px clear of its
+     * neighbour, and none of that space belongs to the panel: it is the body's
+     * own padding and the flex gap, it scrolls with the content, and a panel
+     * passing behind a pinned one showed through the strip above it. Covering it
+     * is a ring of the dock's own colour — the same 8px, drawn outside the
+     * border box and travelling with the panel, so what goes under the panel is
+     * out of sight rather than merely behind it. It follows the border radius,
+     * so the corners are covered too, and it is invisible against the dock when
+     * there is nothing to hide.
+     *
+     * The second is the real one, listed first so it paints on top of the ring:
+     * the panel is in front of the dock rather than part of the column, and at
+     * rest — with nothing scrolled under it yet — nothing else would say so. */
+    box-shadow:
+        0 8px 12px -8px rgba(0, 0, 0, 0.55),
+        0 0 0 8px var(--surface);
 }
 .dock--left .section.is-pinned .section__body,
 .dock--right .section.is-pinned .section__body { min-height: 0; overflow: auto; }

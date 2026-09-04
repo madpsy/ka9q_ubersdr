@@ -9,6 +9,8 @@
 // setting being on. See hookStub.js for what "renders" means here.
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 // Before the bundle: the module graph behind a section reaches the display
 // settings and the radio, and both read the browser at import time.
@@ -220,6 +222,51 @@ t('the pin sits second from the right, after the minimal toggle', () => {
     assert.ok(controls.length >= 2, 'the header drew almost nothing');
     assert.strictEqual(controls[controls.length - 2], pin, 'the pin is not second from the right');
     assert.strictEqual(typeof controls[controls.length - 1].type, 'function', 'the move menu is not last');
+});
+
+// --- the sticking itself ----------------------------------------------------
+//
+// One CSS rule does the whole job, so the numbers in it are the implementation
+// and nothing else checks them.
+
+const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+const block = (selector) => {
+    const at = css.indexOf(selector);
+    assert.ok(at >= 0, `no ${selector} rule in styles.css`);
+    return css.slice(at, css.indexOf('}', at));
+};
+
+t('a pinned panel covers the dock padding it does not own', () => {
+    // The 8px above a panel and the 8px between it and its neighbour belong to
+    // the dock body, not to the panel: they scroll with the content, so a panel
+    // passing behind a pinned one showed through the strip above it. The ring of
+    // dock colour in the pinned panel's box-shadow is what covers that, and it
+    // only covers it while the three numbers agree.
+    const body = block('.dock__body {');
+    const pad = /padding:\s*(\d+)px/.exec(body);
+    const gap = /gap:\s*(\d+)px/.exec(body);
+    assert.ok(pad && gap, 'the dock body no longer states a padding and a gap');
+
+    const pinned = block('.dock--left .section.is-pinned,');
+    const ring = /0 0 0 (\d+)px var\(--surface\)/.exec(pinned);
+    assert.ok(ring, 'the pinned panel has no ring of dock colour around it');
+    assert.strictEqual(ring[1], pad[1], 'the ring no longer covers the dock body padding');
+    assert.strictEqual(ring[1], gap[1], 'the ring no longer covers the gap to the next panel');
+});
+
+t('a pinned panel is capped, and scrolls its own body', () => {
+    // Sticky and taller than the dock is a trap: it would stick with its bottom
+    // off the end of the scrollport, never let go, and the panels under it could
+    // not be reached at all. The cap and the inner scroller go together — a cap
+    // with nothing giving way underneath it just clips the panel.
+    const pinned = block('.dock--left .section.is-pinned,');
+    assert.match(pinned, /position:\s*sticky/);
+    assert.match(pinned, /top:\s*0/);
+    // Every section is position: relative, so without a z-index the panels after
+    // this one in the DOM paint over the one that is meant to be in front.
+    assert.match(pinned, /z-index:\s*[1-9]/);
+    assert.match(pinned, /max-height:\s*\d+%/);
+    assert.match(block('.dock--left .section.is-pinned .section__body,'), /overflow:\s*auto/);
 });
 
 t('the pin icon has a closed body, so the pinned state can be filled', () => {

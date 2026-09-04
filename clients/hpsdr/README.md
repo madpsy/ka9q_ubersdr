@@ -128,6 +128,52 @@ in its rate bitmask, so a client may ask for any of them.
 384 kHz needs a bypassed session: the server offers the wide IQ modes only to a
 password- or IP-privileged user, and refuses at `/connection` otherwise.
 
+## The test client: `ubersdr-hpsdr-client`
+
+`hpsdr_client.c` is the other end of the bridge — a protocol 1 client that
+tunes it, demodulates what comes back, and plays or records the audio.
+
+It exists because the bridge used to be testable only by pointing real SDR
+software at it, which answers "does it work" and almost nothing else. When the
+audio is wrong, that software reports a symptom, and "the bridge sent the wrong
+thing" and "the client mishandled the right thing" look identical from outside.
+This prints what actually arrived — delivered sample rate against the rate it
+asked for, lost packets, and the signal level in the 24-bit field — so audio
+coming out wrong here means the bridge.
+
+    make client        # not part of `make all`; see the Makefile
+
+It links no library the bridge does not already need, and no sound library at
+all: audio goes to a player process (`aplay` by default, `--player` for
+another), so it adds nothing to this directory's build dependencies.
+
+    ./build/ubersdr-hpsdr-client_amd64 --discover
+    ./build/ubersdr-hpsdr-client_amd64 --freq 909000 --mode am --play
+    ./build/ubersdr-hpsdr-client_amd64 --freq 7150000 --mode lsb --rate 192 --wav out.wav
+    ./build/ubersdr-hpsdr-client_amd64 --rate 384 --mode iq --iq-wav iq.wav --seconds 10
+
+With no `--host` it sweeps the network — the global broadcast address, each
+interface's own, and loopback — and lists what answered, deduplicated by MAC so
+a radio reachable by several routes is one entry rather than three. One radio is
+used; several are offered as a numbered list to choose from, or `--radio N`
+picks without asking.
+
+**Modes** are `usb`, `lsb`, `am` and `iq`. All four DDC rates work, and the
+audio always comes out at 12 kHz — every rate the protocol offers is a
+power-of-two multiple of it, so the decimation is a chain of halvings and needs
+no resampler.
+
+**`--bandwidth`** sets the audio passband, up to 5000 Hz. SSB runs from `--low`
+(300 Hz by default) to `--low` plus the bandwidth; AM runs from 0 to the
+bandwidth, which is half the RF width its dial would show. The AM filter is
+applied before the envelope detector rather than after, because the envelope of
+a signal plus its neighbour is not the envelope of the signal and no filtering
+afterwards separates them again.
+
+SSB needs no Hilbert transform: the samples are already complex, so with the
+carrier at zero the upper sideband is the positive frequencies and the lower the
+negative ones, and passing one and taking the real part is the whole of it.
+
 ## Tuning range
 
 Read from `/api/description` at startup and printed. The receiver is not always

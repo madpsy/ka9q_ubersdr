@@ -27,7 +27,23 @@ SRCS = ka9q_hpsdr.c pcm_v4.c hpsdr_p1.c
 
 OBJS = $(SRCS:.c=.o)
 
-all: $(TARGET)
+CLIENT = ubersdr-hpsdr-client
+CLIENT_TARGET = $(OUT)/$(CLIENT)_$(ARCH)
+
+# Both binaries are release artefacts, built and published for every
+# architecture, so both are what `all` means. The client links no library the
+# bridge does not already need, and no sound library at all — it writes its
+# audio to a player process — so it costs the build nothing.
+#
+# `make client` still builds only the client, which is what you want while
+# working on it: the bridge is the slow half.
+all: $(TARGET) $(CLIENT_TARGET)
+
+client: $(CLIENT_TARGET)
+
+$(CLIENT_TARGET): hpsdr_client.c
+	@mkdir -p $(OUT)
+	$(CC) $(CFLAGS) hpsdr_client.c -lm -o $(CLIENT_TARGET)
 
 DEPS = $(patsubst %.o,$(DEPENDDIR)/%.d,$(OBJS))
 -include $(DEPS)
@@ -43,6 +59,6 @@ install: $(TARGET)
 	install -m 755 $(TARGET) $(PREFIX)/bin/$(BINARY)
 
 clean:
-	rm -f $(DEPS) $(OBJS) $(TARGET)
+	rm -f $(DEPS) $(OBJS) $(TARGET) $(CLIENT_TARGET)
 
-.PHONY: all clean install
+.PHONY: all client clean install

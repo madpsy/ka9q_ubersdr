@@ -29,7 +29,10 @@ const IQ_CHANNELS = [
 //
 // The range lives in constants.js, mirroring the server's clamp so the control
 // cannot ask for something that will be silently adjusted. The top of the scale
-// is lossless, and is where the slider starts.
+// is lossless, and is where the slider sits outside IQ, where that is what the
+// stream is; IQ brings it down to the stored margin. RadioContext's mode effect
+// owns that, not this component -- the mode changes from six places, and a
+// collapsed panel is unmounted.
 // The margin control, shown when the stream is lossless. It only bites on
 // IQ -- a demodulated channel is already an order of magnitude cheaper, and the
 // server ignores the request there -- so it says so rather than appearing to do

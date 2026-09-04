@@ -67,13 +67,20 @@ TAG="${UBERSDR_TAG:-latest}"
 IMAGE="${UBERSDR_BUILD_IMAGE:-ubuntu:24.04}"
 
 OUT="build"
-BINARY="ubersdr-hpsdr-bridge"
+
+# Every binary this directory publishes, each built for every architecture in
+# TARGETS and each an asset on the release. The bridge is what the directory is
+# for; the client is the instrument for testing it, and is published for the
+# same reason — somebody diagnosing a bridge on a Pi needs the client on that
+# Pi, and building it there is exactly the thing this script exists to avoid.
+BINARIES=(ubersdr-hpsdr-bridge ubersdr-hpsdr-client)
 
 # What the Makefile needs, copied into the container. Named rather than mounting
 # the directory writable, so a container-built .o never lands in the working tree
 # — an aarch64 ka9q_hpsdr.o left behind here would be picked up by the next
 # native `make` and fail the link in a thoroughly confusing way.
-SOURCES=(ka9q_hpsdr.c ka9q_hpsdr.h pcm_v4.c pcm_v4.h hpsdr_p1.c hpsdr_p1.h Makefile)
+SOURCES=(ka9q_hpsdr.c ka9q_hpsdr.h pcm_v4.c pcm_v4.h hpsdr_p1.c hpsdr_p1.h
+         hpsdr_client.c Makefile)
 
 # platform:docker-platform
 TARGETS=(
@@ -192,11 +199,13 @@ publish_release() {
     return
   fi
 
-  local uploads=() target name asset
+  local uploads=() target name asset b
   for target in "${TARGETS[@]}"; do
     name="${target%%:*}"
-    asset="$OUT/${BINARY}_$name"
-    [ -f "$asset" ] && uploads+=("$asset")
+    for b in "${BINARIES[@]}"; do
+      asset="$OUT/${b}_$name"
+      [ -f "$asset" ] && uploads+=("$asset")
+    done
   done
 
   if [ ${#uploads[@]} -eq 0 ]; then
@@ -274,7 +283,7 @@ if ! preflight; then
 fi
 
 echo
-echo -e "${GREEN}Building $BINARY${NC}"
+echo -e "${GREEN}Building ${BINARIES[*]}${NC}"
 mkdir -p "$OUT"
 
 # What runs inside the container, kept in a variable fed by a quoted heredoc
@@ -304,9 +313,7 @@ make
 # The Makefile names its output after the architecture, and under qemu the
 # container's uname is the target's, so what it produced already carries the
 # release asset name.
-built=$(echo build/${BINARY}_*)
-[ -f "$built" ] || { echo "the container build produced no build/${BINARY}_*" >&2; exit 1; }
-
+#
 # Copied to a temporary name and renamed over the target, rather than written
 # straight onto it.
 #
@@ -316,16 +323,18 @@ built=$(echo build/${BINARY}_*)
 # running process keeps the inode it already has and the new file takes the
 # name. chown before the rename, so the file is never briefly root-owned under
 # the name the host is watching.
-cp "$built" "/out/.tmp_${BINARY}_$$"
-chown "$HOST_UID:$HOST_GID" "/out/.tmp_${BINARY}_$$"
-mv -f "/out/.tmp_${BINARY}_$$" "/out/$(basename "$built")"
+for b in $BINARIES; do
+  built=$(echo build/${b}_*)
+  [ -f "$built" ] || { echo "the container build produced no build/${b}_*" >&2; exit 1; }
+  cp "$built" "/out/.tmp_${b}_$$"
+  chown "$HOST_UID:$HOST_GID" "/out/.tmp_${b}_$$"
+  mv -f "/out/.tmp_${b}_$$" "/out/$(basename "$built")"
+done
 SCRIPT
 
 for target in "${TARGETS[@]}"; do
   name="${target%%:*}"
   platform="${target#*:}"
-  asset="$OUT/${BINARY}_$name"
-
   echo -ne "${YELLOW}  $name${NC} … "
 
   # A mark to compare the asset against afterwards. `-nt` is what decides whether
@@ -340,7 +349,7 @@ for target in "${TARGETS[@]}"; do
   # problem and never appear in the working tree. Only build/ is writable.
   if ! docker run --rm --platform "$platform" \
       -v "$PWD:/src:ro" -v "$PWD/$OUT:/out" \
-      -e "SOURCES=${SOURCES[*]}" -e "BINARY=$BINARY" \
+      -e "SOURCES=${SOURCES[*]}" -e "BINARIES=${BINARIES[*]}" \
       -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" \
       "$IMAGE" bash -c "$CONTAINER_SCRIPT" >"$OUT/.$name.log" 2>&1; then
     echo -e "${RED}failed${NC}"
@@ -352,40 +361,50 @@ for target in "${TARGETS[@]}"; do
     exit 1
   fi
 
-  # The container's make already named it: build.sh and the Makefile agree on
-  # ${BINARY}_<arch>, so there is nothing to rename here.
+  # The container's make already named them: build.sh and the Makefile agree on
+  # <binary>_<arch>, so there is nothing to rename here.
   #
-  # Checked for freshness and not merely for existence. A previous run's binary
-  # sits at this path, so `-f` is satisfied by a file this build had nothing to
-  # do with — which is how a container that quietly failed to copy anything out
-  # still looked like a success, and how stale binaries reached the release. The
-  # question worth asking is whether *this* run wrote it.
-  if [ ! -f "$asset" ] || [ ! "$asset" -nt "$stamp" ]; then
-    echo -e "${RED}failed${NC}"
-    if [ -f "$asset" ]; then
-      echo "  the container exited 0 but did not write $asset — what is there is from $(date -r "$asset" '+%Y-%m-%d %H:%M')." >&2
-      echo "  full log: $OUT/.$name.log" >&2
-    else
-      echo "  the build produced no $asset" >&2
+  # Checked for freshness and not merely for existence, and for every binary
+  # rather than the first. A previous run's binary sits at this path, so `-f` is
+  # satisfied by a file this build had nothing to do with — which is how a
+  # container that quietly failed to copy anything out still looked like a
+  # success, and how stale binaries reached the release. The question worth
+  # asking is whether *this* run wrote it, and it is worth asking of each: a
+  # container that built the bridge and fell over on the client would otherwise
+  # publish a fresh bridge beside a stale client.
+  sizes=""
+  for b in "${BINARIES[@]}"; do
+    asset="$OUT/${b}_$name"
+    if [ ! -f "$asset" ] || [ ! "$asset" -nt "$stamp" ]; then
+      echo -e "${RED}failed${NC}"
+      if [ -f "$asset" ]; then
+        echo "  the container exited 0 but did not write $asset — what is there is from $(date -r "$asset" '+%Y-%m-%d %H:%M')." >&2
+        echo "  full log: $OUT/.$name.log" >&2
+      else
+        echo "  the build produced no $asset" >&2
+      fi
+      rm -f "$stamp"
+      exit 1
     fi
-    rm -f "$stamp"
-    exit 1
-  fi
+    sizes="$sizes${sizes:+, }$b $(du -h --apparent-size "$asset" | cut -f1)"
+  done
   rm -f "$OUT/.$name.log" "$stamp"
 
-  echo "$(du -h --apparent-size "$asset" | cut -f1)"
+  echo "$sizes"
 done
 
 echo
 echo -e "${GREEN}Done.${NC} Binaries are in $OUT/:"
 for target in "${TARGETS[@]}"; do
-  asset="$OUT/${BINARY}_${target%%:*}"
+ for b in "${BINARIES[@]}"; do
+  asset="$OUT/${b}_${target%%:*}"
   [ -f "$asset" ] || continue
   # The architecture and the libraries it wants, because that is the thing most
   # worth checking about a dynamically linked release binary and the thing least
   # visible from a filename.
   printf '    %-32s %s\n' "$(basename "$asset")" \
     "$(readelf -h "$asset" | awk -F: '/Machine/{gsub(/^ +/,"",$2); print $2}')"
+ done
 done
 
 if [ "$PUBLISH" -eq 1 ]; then

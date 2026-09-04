@@ -36,10 +36,12 @@ export default function IQConfirm() {
                     you can listen to.
                 </p>
                 <p className="vibe__text">
-                    It is lossless by default, at roughly <strong>6&times; the
-                    bandwidth of Opus</strong>. That cost falls on whoever runs this
-                    receiver, so only switch if you have a reason to &mdash; the Audio
-                    panel&rsquo;s Quality control can bring it down.
+                    Sent whole it is roughly <strong>6&times; the bandwidth of
+                    Opus</strong>, and that cost falls on whoever runs this receiver,
+                    so it starts at the Audio panel&rsquo;s narrowest Quality setting
+                    &mdash; bits below the band&rsquo;s own noise floor are dropped,
+                    for well under half the bytes. Move that control up, or to the top
+                    for lossless, if the capture needs it.
                 </p>
                 <p className="vibe__text">
                     While in IQ the noise blanker, noise reduction, filters and

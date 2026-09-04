@@ -477,14 +477,17 @@ export const MARGIN_STEP_DB = 1;
 // beyond that every packet comes back bit for bit. Lossless is the limit of the
 // control, not an exception to it.
 //
-// It is also the default. "Lossless" has to mean lossless until someone
-// says otherwise, so an untouched slider asks for nothing and the stream is
-// exactly what it was before this mode existed.
+// It is also where the control sits outside IQ, which is the only place the
+// margin does anything: a demodulated stream is lossless whatever is asked, so
+// the disabled slider parks at the position that says so rather than on a
+// number nothing is applying. Entering IQ moves it to MARGIN_MIN_DB, or to
+// whatever the operator last chose -- see RadioContext, which owns that.
 export const MARGIN_LOSSLESS = MARGIN_MAX_DB + MARGIN_STEP_DB;
 
 // 26 dB is the measured transparent setting: every FT8 decode survives it with
-// its reported strength intact, for about half the bytes. Not the default --
-// lossless is -- but the value worth reaching for first.
+// its reported strength intact, for about half the bytes. Not where IQ starts
+// -- MARGIN_MIN_DB is -- but the value worth reaching for first if a capture
+// turns out to need more room.
 export const MARGIN_DEFAULT_DB = 26;
 
 // Slider position to the margin actually requested. The top means lossless,
@@ -512,4 +515,17 @@ export function clampMargin(dB) {
     if (v < MARGIN_MIN_DB) return MARGIN_MIN_DB;
     if (v > MARGIN_MAX_DB) return MARGIN_MAX_DB;
     return Math.round(v);
+}
+
+// The margin a mode should actually be streaming at, given the operator's
+// stored preference.
+//
+// The server only reduces depth on IQ, so everything else is lossless whatever
+// is asked for -- and asking anyway would leave the disabled slider showing a
+// number that is not being applied. IQ takes the preference, which is
+// MARGIN_MIN_DB until somebody moves the control: it is the narrowest margin
+// the server will take and so the largest saving, and IQ is the one mode whose
+// bandwidth is worth defaulting away from.
+export function marginForMode(mode, pref) {
+    return isIQ(mode) ? clampMargin(pref) : 0;
 }

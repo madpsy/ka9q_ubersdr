@@ -9,4 +9,5 @@ module.exports = {
     MARGIN_STEP_DB: c.MARGIN_STEP_DB,
     marginFromSlider: c.marginFromSlider,
     sliderFromMargin: c.sliderFromMargin,
+    marginForMode: c.marginForMode,
 };

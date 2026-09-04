@@ -12,7 +12,7 @@
 
 const assert = require('assert');
 const {
-    clampMargin, marginFromSlider, sliderFromMargin,
+    clampMargin, marginForMode, marginFromSlider, sliderFromMargin,
     MARGIN_MIN_DB, MARGIN_MAX_DB, MARGIN_DEFAULT_DB, MARGIN_LOSSLESS, MARGIN_STEP_DB,
 } = require('./.build/marginclamp.cjs');
 
@@ -121,6 +121,33 @@ t('the recommended value is reachable from the slider', () => {
     assert.strictEqual((MARGIN_DEFAULT_DB - MARGIN_MIN_DB) % MARGIN_STEP_DB, 0,
         `${MARGIN_DEFAULT_DB} dB is not on a slider step`);
     assert.strictEqual(marginFromSlider(MARGIN_DEFAULT_DB), MARGIN_DEFAULT_DB);
+});
+
+// The margin follows the mode, because the server only honours it on IQ.
+// Everything else is lossless whatever is asked, and a request the server
+// ignores would leave the disabled slider showing a number nothing applies.
+t('only IQ carries a margin', () => {
+    for (const mode of ['usb', 'lsb', 'am', 'fm', 'cwu', 'wfm', '', undefined]) {
+        assert.strictEqual(marginForMode(mode, MARGIN_DEFAULT_DB), 0, `mode ${mode}`);
+    }
+    for (const mode of ['iq', 'iq12', 'IQ']) {
+        assert.strictEqual(marginForMode(mode, MARGIN_DEFAULT_DB), MARGIN_DEFAULT_DB,
+            `mode ${mode}`);
+    }
+});
+
+// The narrowest margin, not lossless: IQ is the one mode whose bandwidth is
+// worth defaulting away from, and the floor of the scale is the biggest saving
+// the server will agree to.
+t('IQ starts at the narrowest margin the server takes', () => {
+    assert.strictEqual(marginForMode('iq', MARGIN_MIN_DB), MARGIN_MIN_DB);
+    assert.strictEqual(sliderFromMargin(marginForMode('iq', MARGIN_MIN_DB)), MARGIN_MIN_DB);
+});
+
+// And the way back: leaving IQ parks the control at its top stop, which is the
+// position that reads as lossless.
+t('leaving IQ parks the slider at lossless', () => {
+    assert.strictEqual(sliderFromMargin(marginForMode('usb', MARGIN_MIN_DB)), MARGIN_LOSSLESS);
 });
 
 console.log(`\n${pass} passing`);

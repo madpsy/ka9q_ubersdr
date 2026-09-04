@@ -27,7 +27,8 @@ import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, applyTuningRange, bandwidthLimits, defaultAGC,
     hasAGCSettings,
     isIQ, SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
-    autoSquelchValue, squelchEnabled, squelchThreshold, clampMargin } from './constants.js';
+    autoSquelchValue, squelchEnabled, squelchThreshold, clampMargin,
+    marginForMode, MARGIN_MIN_DB } from './constants.js';
 import { clamp } from '../lib/format.js';
 import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
@@ -126,6 +127,19 @@ export function RadioProvider({ children }) {
     // next start, so it describes the reason there is nothing running now
     // rather than accumulating a history.
     const [lost, setLost] = useState(null);
+    // The quality slider's stored position, worked out once at startup.
+    //
+    // `audioMinMarginFromUser` is what says the operator chose it. The value
+    // alone cannot: every save wrote `audioMinMargin`, so browsers that have
+    // never touched the control still have a 0 stored from before the setting
+    // followed the mode. A stored margin above zero can only have come from
+    // the slider, though, so that counts as a choice too and those settings
+    // survive the change.
+    const [marginPref, marginFromUser] = useMemo(() => {
+        const chosen = saved.audioMinMarginFromUser === true
+            || clampMargin(saved.audioMinMargin) > 0;
+        return [chosen ? clampMargin(saved.audioMinMargin) : MARGIN_MIN_DB, chosen];
+    }, [saved]);
     const [audio, setAudio] = useState({
         volume: saved.volume != null ? saved.volume : 0.7,
         muted: !!saved.muted,
@@ -143,8 +157,19 @@ export function RadioProvider({ children }) {
         // been through the bandwidth warning and chosen otherwise.
         format: saved.audioFormat === 'pcm-zstd' ? 'pcm-zstd' : 'opus',
         // Reduced-depth IQ margin in dB, 0 for lossless. Only IQ streams are
-        // affected; the server ignores it on a demodulated channel.
-        minMargin: clampMargin(saved.audioMinMargin),
+        // affected; the server ignores it on a demodulated channel, so outside
+        // IQ this is held at lossless and the slider sits at its top stop —
+        // the disabled control then reads as what the stream is actually doing
+        // rather than showing a number nothing is honouring.
+        minMargin: marginForMode(start.mode, marginPref),
+        // The margin to return to on the next IQ mode, which is what the
+        // operator last asked for or, until they ask, the narrowest margin the
+        // server will take. Kept apart from `minMargin` so leaving IQ can drop
+        // the stream to lossless without forgetting the choice.
+        marginPref,
+        // Whether that came from this browser. Same rule as bufferFromUser:
+        // the built-in default only applies to someone who has never chosen.
+        marginFromUser,
         // Output device ID, '' being the system default. Device IDs are
         // per-origin and survive a reload, so this is worth restoring — and if
         // the device has gone since, setAudioSink falls back to the default.
@@ -268,6 +293,11 @@ export function RadioProvider({ children }) {
     tuningRef.current = tuning;
     const followRef = useRef(followTuning);
     followRef.current = followTuning;
+    // The margin to restore on the next IQ mode. A ref as well as state so the
+    // mode effect can read it without listing it as a dependency — it must run
+    // when the mode changes and not when the operator drags the slider.
+    const marginPrefRef = useRef(audio.marginPref);
+    marginPrefRef.current = audio.marginPref;
     // Read by applyTuning, which runs from pointer moves that can outrun a
     // render — the same reason tuningRef exists.
     const lockedRef = useRef(locked);
@@ -803,6 +833,22 @@ export function RadioProvider({ children }) {
         m.lastGateOpenAt = performance.now();
     }, [tuning.mode]);
 
+    // The reduced-depth margin follows the mode, because the server only honours
+    // it on IQ. Entering IQ asks for the stored margin — 15 dB, the narrowest
+    // the server takes and so the biggest saving, until the operator moves the
+    // slider; leaving it goes back to lossless, which is what the demodulated
+    // stream is anyway. The slider is disabled outside IQ, so this is also what
+    // parks it at its top stop rather than on a number nothing is applying.
+    //
+    // Here rather than in the Audio panel for the reason the gates above are:
+    // the mode arrives from the top bar, the Multipad, a control surface and
+    // the bridge as well as from a panel, and a collapsed panel is unmounted.
+    useEffect(() => {
+        const next = marginForMode(tuning.mode, marginPrefRef.current);
+        setAudio((a) => (a.minMargin === next ? a : { ...a, minMargin: next }));
+        audioConn.setMinMargin(next);
+    }, [tuning.mode]);   // eslint-disable-line react-hooks/exhaustive-deps
+
     // RM Noise is trained on voice bandwidth; on AM, FM and the rest what comes
     // back is not worth hearing, so it takes itself out of the way. Switched
     // off rather than left running, because a stage that is "on" and doing
@@ -862,7 +908,11 @@ export function RadioProvider({ children }) {
             channel: audio.channel,
             sinkId: audio.sinkId,
             audioFormat: audio.format,
-            audioMinMargin: audio.minMargin,
+            // The preference, not the effective margin: outside IQ the stream is
+            // lossless whatever the operator asked for, and saving that zero would
+            // erase the choice the moment they left the mode.
+            audioMinMargin: audio.marginPref,
+            audioMinMarginFromUser: audio.marginFromUser,
             filters,
             noise,
             squelchValueDb: squelchValue,
@@ -1336,9 +1386,18 @@ export function RadioProvider({ children }) {
             // No reconnect, unlike the format: the shift travels in every packet
             // already, so the server applies a new margin to the next one and
             // the stream never stops.
+            //
+            // Recorded as the operator's choice for IQ as well as applied, so
+            // that leaving IQ — which drops the stream back to lossless — and
+            // coming back returns to this rather than to the built-in 15 dB.
             setAudioMargin(dB) {
                 const next = audioConn.setMinMargin(dB);
-                setAudio((a) => (a.minMargin === next ? a : { ...a, minMargin: next }));
+                marginPrefRef.current = next;
+                setAudio((a) => (
+                    a.minMargin === next && a.marginPref === next && a.marginFromUser
+                        ? a
+                        : { ...a, minMargin: next, marginPref: next, marginFromUser: true }
+                ));
             },
 
             // Which device the audio comes out of; '' is the system default.

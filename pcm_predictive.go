@@ -149,11 +149,56 @@ const (
 	// float64 represents integers exactly (2^53), a JavaScript decoder can use
 	// plain numbers and still be bit-exact, with no BigInt.
 	//
-	// Normal adaptation settles around 2^16, so the clamp is insurance that
-	// never fires in practice: across two hours of live IQ the largest tap
-	// observed was 63 against the limit of 256. It must nonetheless be applied
-	// identically on both sides, since if it ever does fire the two must agree.
+	// With the leak below holding the taps near predLeakShift's equilibrium
+	// the clamp is insurance that never fires in practice. It must nonetheless
+	// be applied identically on both sides, since if it ever does fire the two
+	// must agree.
 	predTapLimit = 1 << 24
+
+	// predLeakShift is the leakage of the tap update: every adapt subtracts
+	// w/2^14 from each tap before adding the gradient step.
+	//
+	// WHY LEAKAGE IS NOT OPTIONAL
+	// ---------------------------
+	// Sign-sign LMS has no restoring force of its own. The update is
+	// mu*sign(e)*sign(x) whatever the taps already are, so in any direction the
+	// input does not excite -- and a band whose energy sits in a few carriers
+	// leaves most directions unexcited -- the taps are free to walk. On a
+	// medium-wave capture they walk in one direction: measured on a 909 kHz
+	// iq384 stream the mean |tap| grew linearly at about 1.5 per second until
+	// it reached predTapLimit around ninety seconds in.
+	//
+	// Long before the clamp the prediction is worthless. The same capture cost
+	// 10.65 bits per sample at five seconds, 14.26 at thirty and 15.85 at
+	// ninety, by which point a third of packets were taking the raw escape and
+	// the "compressed" stream was larger than the samples going into it. This
+	// is what a client sees as a bitrate that climbs for minutes on a signal
+	// that is not changing.
+	//
+	// Subtracting w/2^14 first bounds the walk at roughly mu*2^14, and costs
+	// nothing where the taps were not walking: on two minutes of a 40 m
+	// capture, whose taps stayed under 0.25 throughout, it changes the coded
+	// size by 0.003% -- in its favour. Where they were walking it is decisive:
+	// the same medium-wave stream holds 8.45 bits per sample for as long as it
+	// runs, against the 10.65 the diverging codec reached by five seconds and
+	// the 15.85 it reached by ninety.
+	//
+	// 14 is the measured optimum, on bits per sample over the last five seconds
+	// of that ninety-second stream:
+	//
+	//	 8   13.35      14    8.45      18   11.19
+	//	10    9.41      16    9.36      off  15.85
+	//	12    8.81
+	//
+	// Stronger leakage gives up prediction the signal was genuinely offering;
+	// weaker leaves the equilibrium high enough that the walk resumes. See
+	// TestPredictiveTapsDoNotDrift.
+	//
+	// It is subtracted with the magnitude truncated, so a tap smaller than
+	// 2^14 leaks nothing and small taps are not dragged to zero by rounding.
+	predLeakShift = 14
+
+	predLeakShiftReal = 14
 
 	// predEscapeFlag marks a body carrying verbatim samples.
 	predEscapeFlag = 1 << 7
@@ -295,6 +340,26 @@ func predRoundShift(v int64, shift uint) int64 {
 	return (r ^ m) - m
 }
 
+// predLeak is the amount the leakage removes from one tap, the magnitude
+// divided by 2^predLeakShift and truncated towards zero.
+//
+// Truncating rather than rounding is what keeps the leak from fighting the
+// gradient at small taps: below 2^predLeakShift it returns zero, so a tap the
+// signal genuinely wants at a small value stays there instead of being pulled
+// to zero and pushed back every sample.
+//
+// Branchless in the same form as predRoundShift, and for the same reason: it
+// runs once per tap per sample, and the sign of a tap is not predictable.
+func predLeak(w int64) int64 {
+	m := w >> 63
+	return ((((w ^ m) - m) >> predLeakShift) ^ m) - m
+}
+
+func predLeakReal(w int64) int64 {
+	m := w >> 63
+	return ((((w ^ m) - m) >> predLeakShiftReal) ^ m) - m
+}
+
 // predClampTap applies predTapLimit. See the constant for why.
 func predClampTap(w int64) int64 {
 	if w > predTapLimit {
@@ -381,8 +446,9 @@ func (f *complexStage) predict() (int64, int64) {
 }
 
 // adapt nudges each tap by mu in the direction that would have reduced this
-// error. The conjugate of the history is used, as the complex LMS gradient
-// requires; here that is simply the negated sign of the imaginary part.
+// error, after leaking predLeakShift off it. The conjugate of the history is
+// used, as the complex LMS gradient requires; here that is simply the negated
+// sign of the imaginary part.
 //
 // A zero error is a genuine no-op -- both steps are zero and every tap is
 // already inside the clamp -- so it returns without touching the taps. That
@@ -414,25 +480,25 @@ func (f *complexStage) adapt(er, ei int64) {
 		for j := range wr {
 			hrs := sr[j]
 			his := -si[j]
-			wr[j] += mr*hrs - mi*his
-			wi[j] += mr*his + mi*hrs
+			wr[j] += mr*hrs - mi*his - predLeak(wr[j])
+			wi[j] += mr*his + mi*hrs - predLeak(wi[j])
 		}
 		return
 	}
 	for j := range wr {
 		hrs := sr[j]
 		his := -si[j]
-		wr[j] = predClampTap(wr[j] + mr*hrs - mi*his)
-		wi[j] = predClampTap(wi[j] + mr*his + mi*hrs)
+		wr[j] = predClampTap(wr[j] + mr*hrs - mi*his - predLeak(wr[j]))
+		wi[j] = predClampTap(wi[j] + mr*his + mi*hrs - predLeak(wi[j]))
 	}
 }
 
 // beginPacket decides, once per packet, whether adapt may skip the tap clamp.
 //
 // One complex update moves a tap by at most 2*mu (each of the two sign terms
-// contributes at most mu), so if every tap starts further than 2*mu*steps
-// from the limit, no update in this packet can reach it and the clamp is an
-// identity. Taps settle around 2^16 against a limit of 2^24, so this is the
+// contributes at most mu, and the leak only ever moves a tap towards zero), so
+// if every tap starts further than 2*mu*steps from the limit, no update in this
+// packet can reach it and the clamp is an identity. Taps settle around 2^16 against a limit of 2^24, so this is the
 // path that always runs in practice; the clamped loop remains for the case
 // the scan cannot rule out, and produces identical values when it does run.
 func (f *complexStage) beginPacket(steps int) {
@@ -537,12 +603,12 @@ func (f *realStage) adapt(e int64) {
 	s = s[:len(w)]
 	if f.fast {
 		for j, sv := range s {
-			w[j] += m * sv
+			w[j] += m*sv - predLeakReal(w[j])
 		}
 		return
 	}
 	for j, sv := range s {
-		w[j] = predClampTap(w[j] + m*sv)
+		w[j] = predClampTap(w[j] + m*sv - predLeakReal(w[j]))
 	}
 }
 

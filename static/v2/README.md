@@ -140,6 +140,14 @@ The first panel in a side dock can be **pinned** — the pin in its header, seco
 from the right — and the rest of the dock then scrolls underneath it. The panel
 you keep coming back to is then never the one that has just gone off the top.
 
+**The left dock ships pinned to the Receiver**, in its minimal view — the panel
+you come back to between every other thing you do, holding the room it needs and
+no more (`PIN_DEFAULT`, and `defaultMinimal` on the panel). A feature nobody
+meets is a feature nobody has, and one click on the lit pin undoes it. Layouts
+stored before the pin existed are offered it once, recorded by `pinDefaulted` so
+that unpinning sticks, and only while the Receiver is still the panel at the top
+of that dock — reorder it, hide it or float it and nothing is pinned.
+
 Three rules, all in `lib/dockPin.js`:
 
 * **Only the top panel, and only a side dock.** The bottom dock is a row: there

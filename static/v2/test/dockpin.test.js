@@ -41,6 +41,8 @@ const t = (name, fn) => {
 };
 
 const MOUSE = { phone: false, touch: false };
+const TOUCH = { phone: false, touch: true };
+const PHONE = { phone: true, touch: true };
 
 // --- the rule ---------------------------------------------------------------
 
@@ -88,9 +90,98 @@ t('a missing pins map is not an error', () => {
 
 const stored = (over = {}) => ({ ...defaultLayout(MOUSE), ...over });
 
-t('a first run pins nothing', () => {
+// What a dock will actually draw first — a panel above it in the list that is
+// hidden, or parked, or floating is not the top panel.
+const topOf = (l, side) => l.docks[side].panels.find((id) => !l.sections[id]?.hidden);
+
+t('a first run opens with the Receiver pinned', () => {
+    // The panel the feature is for, on the dock that scrolls. A default nobody
+    // meets is a default nobody has — see PIN_DEFAULT.
+    for (const env of [MOUSE, TOUCH, PHONE]) {
+        const l = defaultLayout(env);
+        assert.strictEqual(l.pins.left, 'receiver');
+        assert.strictEqual(l.pins.right, null);
+    }
+    // And on the machines that draw docks it is the panel that will actually be
+    // drawn first: the Multipad sits above it in the registry, and is hidden on
+    // a mouse-only desktop and floating on a touchscreen one. A default naming a
+    // panel below the top would apply to nothing at all. (A phone draws no docks
+    // — its panels are sheets — so there is nothing there for a pin to do.)
+    assert.strictEqual(topOf(defaultLayout(MOUSE), 'left'), 'receiver');
+    assert.strictEqual(topOf(defaultLayout(TOUCH), 'left'), 'receiver');
+});
+
+t('the Receiver ships in its minimal view', () => {
+    // It is the pinned panel, and a pinned one holds its room whatever else is
+    // scrolling — so what starts pinned is the cut-down version: the dial, the
+    // modes and the filter width. The rest is one click on the header away, and
+    // that click is what gets remembered.
+    assert.strictEqual(defaultLayout(MOUSE).sections.receiver.minimal, true);
+    assert.strictEqual(defaultLayout(TOUCH).sections.receiver.minimal, true);
+});
+
+t('a first run is not offered the default a second time', () => {
+    assert.strictEqual(defaultLayout(MOUSE).pinDefaulted, true);
+});
+
+// --- the default, reaching a layout that already exists ----------------------
+//
+// Everybody who has used v2 before has a stored layout, so a first-run default
+// alone reaches nobody. The one-shot that does is the part that has to be
+// careful: it must add only what this machine has never had an opinion about.
+
+// A layout as it was stored before any of this existed: no pins, and no record
+// of having been offered one.
+const before = (over = {}) => {
     const l = defaultLayout(MOUSE);
-    assert.deepStrictEqual(l.pins, { left: null, right: null });
+    delete l.pins;
+    delete l.pinDefaulted;
+    return { ...l, ...over };
+};
+
+t('an existing layout gets the Receiver pinned, once', () => {
+    const out = reconcile(before(), MOUSE);
+    assert.strictEqual(out.pins.left, 'receiver');
+    assert.strictEqual(out.pinDefaulted, true, 'and is not asked again');
+});
+
+t('unpinning it sticks', () => {
+    // The layout written after that unpin carries the flag, so the one-shot has
+    // to leave it alone — or the pin would come back on every reload, which is
+    // the setting refusing to be turned off.
+    const out = reconcile(before({ pins: { left: null, right: null }, pinDefaulted: true }), MOUSE);
+    assert.strictEqual(out.pins.left, null);
+});
+
+t('a dock somebody has rearranged is left alone', () => {
+    const l = defaultLayout(MOUSE);
+    const panels = l.docks.left.panels.filter((id) => id !== 'receiver');
+    // Past the first panel that is actually drawn, not merely past the first
+    // entry: the Multipad heads the list and is hidden on this machine, so a
+    // Receiver in second place is still the top of the dock.
+    panels.splice(panels.findIndex((id) => !l.sections[id]?.hidden) + 1, 0, 'receiver');
+    const out = reconcile(before({ docks: { ...l.docks, left: { ...l.docks.left, panels } } }), MOUSE);
+    assert.notStrictEqual(topOf(out, 'left'), 'receiver', 'the fixture did not move it');
+    assert.strictEqual(out.pins.left, null, 'a pin on a panel that is not the top one is not the offer');
+    assert.strictEqual(out.pinDefaulted, true, 'and the offer is not held open for ever');
+});
+
+t('a hidden or floating Receiver is not pinned', () => {
+    const hidden = before({ sections: { ...defaultLayout(MOUSE).sections, receiver: { hidden: true } } });
+    assert.strictEqual(reconcile(hidden, MOUSE).pins.left, null);
+
+    const floating = before({
+        floats: { receiver: { x: 10, y: 10, w: 320, h: 320 } },
+        floatOrder: ['receiver'],
+    });
+    assert.strictEqual(reconcile(floating, MOUSE).pins.left, null);
+});
+
+t('a layout already pinning something else keeps it', () => {
+    const l = defaultLayout(MOUSE);
+    const other = l.docks.left.panels.find((id) => id !== 'receiver' && id !== 'multipad');
+    const out = reconcile(before({ pins: { left: other, right: null } }), MOUSE);
+    assert.strictEqual(out.pins.left, other);
 });
 
 t('a pin on a panel still in its dock survives a reload', () => {

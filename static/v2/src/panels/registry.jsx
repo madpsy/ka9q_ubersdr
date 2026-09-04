@@ -198,7 +198,21 @@ const BUILT_IN = [
     // Minimal: the dial, the mode buttons and the filter width — what you tune
     // with. The filter shift, the passband readout and AGC are settings you
     // reach for occasionally.
-    { id: 'receiver', title: 'Receiver', icon: <Icon.Radio />, dock: 'left', minimal: true, Component: ReceiverPanel },
+    //
+    // ...and that is how it ships, because this is also the panel the left dock
+    // opens pinned — see PIN_DEFAULT in layout/LayoutContext.jsx. A pinned panel
+    // holds its room whatever else is scrolling, so the version that starts
+    // pinned is the one that costs the dock the least. The rest of it is one
+    // click on the header away, and that click is remembered.
+    {
+        id: 'receiver',
+        title: 'Receiver',
+        icon: <Icon.Radio />,
+        dock: 'left',
+        minimal: true,
+        defaultMinimal: true,
+        Component: ReceiverPanel,
+    },
     // Directly under the Receiver, because it is the Receiver panel working on
     // its own: the dial stepping through the markers until the squelch opens on
     // one. What it steps between is the same list the Markers panel's prev/next

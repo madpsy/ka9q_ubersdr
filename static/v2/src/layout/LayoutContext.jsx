@@ -80,6 +80,15 @@ const MINIMAL_LATECOMERS = new Set([
 // somewhere to live and the id appears once.
 export const UNHIDEABLE = 'layout';
 
+// The panel each dock opens pinned — see lib/dockPin.js for what that means.
+//
+// The Receiver is the top of the left dock and the panel an operator comes back
+// to between every other thing they do, which is exactly what pinning is for. A
+// feature nobody meets is a feature nobody has, and this one announces itself:
+// the first time the dock is scrolled, the panel that stays put is the one you
+// would have wanted to keep. Unpinning it is one click on a lit button.
+const PIN_DEFAULT = { left: 'receiver', right: null };
+
 const FLOAT_MIN = { w: 220, h: 120 };
 const FLOAT_CASCADE = 26;
 
@@ -254,10 +263,13 @@ export function defaultLayout(env = machine()) {
         floatOrder,
         weights: {},
         heights: {},
-        // Nothing pinned to the top of a side dock to begin with — see
-        // lib/dockPin.js. A first run has not been scrolled yet, so there is
-        // nothing to hold still.
-        pins: { left: null, right: null },
+        pins: { ...PIN_DEFAULT },
+        // ...and having been given it, this layout is not to be offered it a
+        // second time. Its own flag rather than a rev, for the same reason
+        // minimalRepaired has one: the rev migrations are for touchscreen
+        // desktops and skip everything else, and a dock that scrolls is a
+        // desktop concern above all. See pinDefault().
+        pinDefaulted: true,
     };
 }
 
@@ -473,7 +485,7 @@ export function reconcile(stored, env = machine()) {
             scale: cleanScale(s.scale),
         };
     }
-    return migrateRev(base, stored, phone, touch);
+    return pinDefault(migrateRev(base, stored, phone, touch), stored);
 }
 
 /**
@@ -527,6 +539,35 @@ function migrateRev(base, stored, phone, touch) {
         if (float.h < spec.h && outgrown.includes(Math.round(float.h))) {
             base.floats = { ...base.floats, [p.id]: { ...float, h: spec.h } };
         }
+    }
+    return base;
+}
+
+/**
+ * The default pin, offered once to a layout that predates it.
+ *
+ * VERSION is all-or-nothing and the rev migrations are touchscreen-only, so
+ * neither reaches the machine this matters on: an ordinary desktop with a stored
+ * layout, which is nearly everybody. Hence a flag of its own, recorded the first
+ * time it is applied and never asked again — so unpinning sticks, and a layout
+ * that has been through this once is never quietly re-pinned.
+ *
+ * The rule every one-shot here obeys: only add what this machine has never had
+ * an opinion about. So it declines to act unless the panel is still the top one
+ * on screen — reorder the dock, hide the Receiver or float it, and nothing is
+ * pinned, because a pin on a panel somebody has moved is not the offer being
+ * made. Run after migrateRev, which can itself float a panel out of a dock.
+ */
+function pinDefault(base, stored) {
+    if (stored.pinDefaulted) return base;
+    for (const [side, want] of Object.entries(PIN_DEFAULT)) {
+        if (!want || base.pins[side]) continue;
+        // What the dock will actually draw first: a parked id renders as
+        // nothing and a hidden panel is not there, so neither is the top panel.
+        const top = base.docks[side].panels.find(
+            (id) => PANEL_BY_ID[id] && !base.sections[id]?.hidden,
+        );
+        if (top === want) base.pins[side] = want;
     }
     return base;
 }

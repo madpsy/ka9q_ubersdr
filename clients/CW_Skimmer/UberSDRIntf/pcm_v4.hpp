@@ -48,14 +48,16 @@
 // ----------------------------
 // Each packet declares the profile it was coded with. This driver reads the
 // declaration and obeys it; it never infers the predictor from the mode or the
-// channel count. Both profiles are implemented even though a driver that only
-// tunes IQ modes should only ever meet the complex one — the server's choice is
+// channel count. All three profiles are implemented even though a driver that
+// only tunes IQ modes should never meet the real one — the server's choice is
 // policy it may retune per band, and the cost of being ready for that is one
 // small class.
 //
 // An unknown profile id is a hard error rather than a fallback, for the reason
 // above: decoding with the wrong predictor would return noise and call it
-// signal.
+// signal. That is also what makes the reduced-depth profile safe to add: a
+// server sends it only to a client that asked for it by name, and one that did
+// not implement it fails loudly instead of playing noise.
 
 #ifndef UBERSDR_PCM_V4_HPP
 #define UBERSDR_PCM_V4_HPP
@@ -101,6 +103,23 @@ static const int16_t kQualityNoReading = -32768;
 // Profile ids. Part of the version 4 wire format; never reassigned.
 static const uint8_t kProfileIQ = 0;    // one complex filter, order 16
 static const uint8_t kProfileAudio = 1; // four real stages, orders 8/8/4/2
+
+// kProfileIQScaled is kProfileIQ with a reduced-depth front end, sent only to a
+// driver that asked for it with the min_margin query parameter — the min_margin
+// key in UberSDRIntf.ini, which is off by default. The predictor is identical,
+// because the requantisation happens outside it: the server shifted the samples
+// right before coding them, and the shift it used leads the body so this side
+// shifts them back on the way out.
+//
+// A separate profile id rather than a flag, precisely so that a driver which did
+// not ask for the mode cannot be handed one by accident — an unknown profile is
+// a hard error here, where an unrecognised flag bit might be ignored and the
+// samples then delivered several bits too quiet.
+static const uint8_t kProfileIQScaled = 2;
+
+// The largest shift the wire format allows. Bounded because it comes off the
+// wire like every other length here, and is applied to an int16.
+static const unsigned kMaxShift = 15;
 
 // Fixed-point scale of the filter taps: integers in Q16, so 65536 is a tap
 // of 1.0.
@@ -573,12 +592,14 @@ struct PCMv4Header {
     float basebandPower; // dBFS, or -999 when radiod reported nothing
     float noise;         // dBFS over the demodulator passband, or -999
     uint8_t profile;
+    uint8_t shift;   // reduced-depth left shift already applied to the samples,
+                     // and 0 on every lossless packet
     bool escape; // the body holds verbatim samples
     bool silent; // every sample is zero and no body was transmitted
 
     PCMv4Header()
         : timestampNanos(0), sampleRate(0), channels(0), sampleCount(0),
-          basebandPower(-999.0f), noise(-999.0f), profile(0),
+          basebandPower(-999.0f), noise(-999.0f), profile(0), shift(0),
           escape(false), silent(false) {}
 };
 
@@ -748,9 +769,16 @@ public:
         _rl.clear();
         switch (profileID) {
         case kProfileIQ:
+        case kProfileIQScaled:
             // A single complex filter of order 16. Deeper cascades were
             // measured and rejected for IQ: 8/8/4/2 gave 1.391x against this
             // profile's 1.396x at roughly double the CPU.
+            //
+            // The scaled profile shares this predictor exactly: the
+            // requantisation it names happens before the server's filters and
+            // after this decoder's, so nothing inside them differs. Only the
+            // shift byte in front of the body, and the shift back on the way
+            // out, do.
             _complex = true;
             _cx.push_back(ComplexStage(16, 16));
             break;
@@ -952,14 +980,62 @@ public:
             return true;
         }
 
-        return _codec.decodeBody(pkt + off, len - off, h.sampleCount, h.escape,
-                                 &_samples[0], err);
+        // The shift leads the body on a scaled packet: the header's flags byte
+        // is full, and a silent packet has no body at all, so putting it here
+        // costs nothing on a squelched or dead channel. Read here rather than in
+        // the header decoder because it is part of the payload, exactly as the
+        // server writes it.
+        unsigned shift = 0;
+        if (h.profile == kProfileIQScaled) {
+            if (len <= off) {
+                err = "pcm v4: scaled packet carries no shift";
+                return false;
+            }
+            shift = pkt[off];
+            if (shift > kMaxShift) {
+                err = "pcm v4: shift out of range";
+                return false;
+            }
+            h.shift = (uint8_t)shift;
+            ++off;
+        }
+
+        if (!_codec.decodeBody(pkt + off, len - off, h.sampleCount, h.escape,
+                               &_samples[0], err))
+            return false;
+
+        // Undone only on the way out. The predictor ran on the quantised
+        // values, exactly as the server's did — and an escape carries the
+        // quantised samples too — so this is the last thing that happens to a
+        // packet and no codec state depends on it.
+        lossyRestore(&_samples[0], h.sampleCount, shift);
+        return true;
     }
 
     // Valid until the next decode; h.sampleCount says how many.
     const int16_t *samples() const { return _samples.empty() ? 0 : &_samples[0]; }
 
 private:
+    // Undo the reduced-depth scale, saturating rather than wrapping: a value the
+    // shift carries past full scale must not come back with its sign inverted.
+    // Matches the server's lossyRestore in pcm_lossy.go.
+    //
+    // A multiply rather than a shift, because C++ leaves a left shift of a
+    // negative value undefined and half of these samples are negative.
+    // Multiplying by the same power of two is exactly the shift, defined for
+    // every input, and the product cannot leave int64 for any int16 and a shift
+    // of 15.
+    static void lossyRestore(int16_t *samples, int count, unsigned shift) {
+        if (shift == 0) return;
+        const int64_t scale = (int64_t)1 << shift;
+        for (int i = 0; i < count; ++i) {
+            int64_t r = (int64_t)samples[i] * scale;
+            if (r > 32767) r = 32767;
+            else if (r < -32768) r = -32768;
+            samples[i] = (int16_t)r;
+        }
+    }
+
     static uint32_t readMagic(const uint8_t *p) {
         return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
                ((uint32_t)p[3] << 24);

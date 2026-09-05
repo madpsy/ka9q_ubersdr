@@ -15,6 +15,7 @@ The DLL looks for a file named `UberSDRIntf.ini` in the same directory as the DL
 Host=127.0.0.1
 Port=8080
 debug_rec=0
+min_margin=26
 
 [Calibration]
 FrequencyOffset=0
@@ -37,6 +38,38 @@ swap_iq=1
   - Default: `0` (disabled)
   - Values: `0` = disabled, `1` = enabled
   - When enabled, creates a 10-second WAV file named `<frequency>.wav` for each receiver
+
+- **min_margin**: Reduced-depth IQ compression, expressed as a margin in dB
+  - Default: `26` - **on by default**, including for an ini with no `min_margin` line,
+    so upgrading the DLL enables it without the operator's ini changing. Set
+    `min_margin=0` for the bit-exact stream.
+  - Values: `0` to disable, or `15`-`60`
+  - Anything else - out of range, or not a number - is **refused**: the stream stays
+    lossless and the reason is written to the log. It is deliberately not rounded into
+    range, because the server would clamp a bad value into a working but different
+    stream and nothing downstream would report it. This matches `--min-margin` in the
+    HPSDR bridge and the `min_margin` argument in the SoapySDR driver.
+  - The value is *not* a bit depth. It is how far below the band's own noise floor
+    the compression's noise must stay, and the server chooses the depth needed to
+    honour it separately for every packet. That is what makes one setting mean the
+    same thing on a dead band and on crowded medium wave.
+  - Lower values compress harder. At `15` the added noise raises the measured floor
+    by about 0.14 dB; at `30` by under 0.01 dB. Because the added noise is white, the
+    penalty does not grow when Skimmer narrows to a CW passband.
+  - `26` is the default because it is the measured transparent setting, where every
+    FT8 decode survives with its reported strength intact for about half the bytes.
+    It costs roughly 0.01 dB of noise floor.
+  - This driver is the exception in the client tree: the HPSDR bridge and the SoapySDR
+    driver both default to lossless and require the option to be given. It defaults on
+    here because this driver only ever tunes IQ, which is the only mode reduced depth
+    applies to.
+  - The saving depends on the band, not the setting: measured at 20 dB, roughly 60%
+    on a quiet band against 16% on one carrying strong broadcast carriers. Above
+    about 40 there is no useful saving left.
+  - It cannot be undone. Do not enable it for IQ that will be recorded, archived, or
+    used for absolute noise-floor measurement.
+  - Requires UberSDR 0.1.64 or later. An older server ignores the parameter and
+    streams losslessly rather than refusing the connection.
 
 #### [Calibration] Section
 

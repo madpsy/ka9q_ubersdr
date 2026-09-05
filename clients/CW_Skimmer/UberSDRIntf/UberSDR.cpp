@@ -11,6 +11,9 @@
 #include <ws2tcpip.h>
 #include <rpc.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <ctype.h>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -52,6 +55,7 @@ namespace UberSDRIntf
         iqMode = "iq192";
         frequencyOffset = 0;  // Default to no frequency correction
         swapIQ = true;  // Default to true for backward compatibility
+        minMargin = kMinMarginDefaultDB;  // Reduced-depth IQ unless the ini says otherwise
         
         // Initialize WinSock
         wsaInitialized = false;
@@ -183,6 +187,20 @@ namespace UberSDRIntf
         // Read swap_iq from INI file (default: 1 = true for backward compatibility)
         int swapIQInt = GetPrivateProfileIntA("Calibration", "swap_iq", 1, iniPath);
         swapIQ = (swapIQInt != 0);
+
+        // Read min_margin from INI file.
+        //
+        // The default passed here is what an ini with no min_margin line gets,
+        // which is every installation predating the key -- so upgrading the DLL
+        // turns the mode on without the operator's ini changing. That is
+        // deliberate; see kMinMarginDefaultDB. An explicit min_margin=0 turns it
+        // off, and is the only thing that does.
+        char marginDefault[16];
+        sprintf_s(marginDefault, sizeof(marginDefault), "%d", kMinMarginDefaultDB);
+        char marginText[64];
+        GetPrivateProfileStringA("Server", "min_margin", marginDefault, marginText,
+                                 sizeof(marginText), iniPath);
+        minMargin = ParseMinMargin(marginText);
         
         // Validate and apply configuration
         if (isValidHostname(host) && isValidPort(port)) {
@@ -193,7 +211,10 @@ namespace UberSDRIntf
             ss << "Configuration loaded from INI: " << configHost << ":" << configPort
                << ", debug_rec=" << (debugRec ? "true" : "false")
                << ", frequencyOffset=" << frequencyOffset << " Hz"
-               << ", swap_iq=" << (swapIQ ? "true" : "false");
+               << ", swap_iq=" << (swapIQ ? "true" : "false")
+               << ", min_margin=";
+            if (minMargin > 0) ss << minMargin << " dB (reduced-depth IQ)";
+            else               ss << "off (lossless)";
             write_text_to_log_file(ss.str());
             return 0;
         } else {
@@ -204,6 +225,80 @@ namespace UberSDRIntf
         }
     }
     
+    ///////////////////////////////////////////////////////////////////////////////
+    // Parse and validate the min_margin ini key, returning whole dB or 0.
+    //
+    // Strict on purpose, for the reason parse_min_margin in clients/hpsdr and
+    // parseMinMargin in clients/soapy_driver are strict: the server CLAMPS
+    // whatever it is sent into its own range and rounds it to a whole dB, so a
+    // typo -- "2O", "20dB", "6" -- would produce a working but different stream
+    // for the life of the session, and nothing downstream would ever say so.
+    // GetPrivateProfileIntA cannot tell those apart from a number, which is why
+    // the value is read as text and parsed here.
+    //
+    // Where this differs from those two is what a bad value does. They refuse to
+    // start, because a command-line tool can. This is a DLL inside Skimmer
+    // Server, which cannot usefully refuse to load, so a bad value falls back to
+    // the LOSSLESS stream and says why in the log. The principle is the same one
+    // either way: never quietly deliver a stream different from the one asked
+    // for. Falling back the other way -- to the nearest legal margin -- would do
+    // exactly that.
+    int UberSDR::ParseMinMargin(const char* text)
+    {
+        if (text == NULL) return 0;
+
+        // A blank value -- "min_margin=" with nothing after it -- reaches here as
+        // an empty string rather than as the default, because that is what
+        // GetPrivateProfileString does with a key that exists and says nothing.
+        // Read as lossless, which is the same direction every other unusable
+        // value below is read in.
+        const char* p = text;
+        while (*p != '\0' && isspace((unsigned char)*p)) p++;
+        if (*p == '\0') return 0;
+
+        errno = 0;
+        char* end = NULL;
+        const double v = strtod(p, &end);
+        while (end != NULL && isspace((unsigned char)*end)) end++;
+        // v != v is true only for NaN, which strtod returns for "nan" and which
+        // would otherwise slip past the range check below -- every comparison
+        // against a NaN is false, so it is neither too small nor too large.
+        // An infinity needs no special case: it fails the range check.
+        if (end == p || end == NULL || *end != '\0' || errno == ERANGE || v != v) {
+            std::stringstream ss;
+            ss << "min_margin: '" << text << "' is not a number of dB - "
+               << "streaming losslessly rather than at the default "
+               << kMinMarginDefaultDB << " dB";
+            write_text_to_log_file(ss.str());
+            return 0;
+        }
+
+        // An explicit lossless, the same as leaving the key out. Written this way
+        // so a saved ini can say "off" without deleting the line.
+        if (v == 0.0) return 0;
+
+        if (v < kMinMarginMinDB || v > kMinMarginMaxDB) {
+            std::stringstream ss;
+            ss << "min_margin: " << v << " dB is outside " << kMinMarginMinDB
+               << "-" << kMinMarginMaxDB << "; the server would not honour it as "
+               << "asked - streaming losslessly rather than at the default "
+               << kMinMarginDefaultDB << " dB. Use 0 to ask for lossless";
+            write_text_to_log_file(ss.str());
+            return 0;
+        }
+
+        // The server rounds to a whole dB, so the rounding happens here too and
+        // the number logged is the one the stream was coded to.
+        const int dB = (int)(v < 0 ? v - 0.5 : v + 0.5);
+        if ((double)dB != v) {
+            std::stringstream ss;
+            ss << "min_margin: " << v << " dB rounded to " << dB
+               << ", which is what the server would have done with it";
+            write_text_to_log_file(ss.str());
+        }
+        return dB;
+    }
+
     ///////////////////////////////////////////////////////////////////////////////
     // Validate hostname
     bool UberSDR::isValidHostname(const std::string& host)
@@ -476,6 +571,11 @@ namespace UberSDRIntf
         // answers with version 1, which HandleWebSocketMessage recognises and
         // reports.
         url << "&version=" << ubersdr::kPCMProtocolVersion;
+        // Reduced-depth IQ, asked for only when the ini says so. Sending it is
+        // what makes the server code packets as kProfileIQScaled; a server too
+        // old to know the parameter ignores it and streams losslessly, so this
+        // never costs a connection.
+        if (minMargin > 0) url << "&min_margin=" << minMargin;
         url << "&user_session_id=" << uuidString;
         
         return url.str();

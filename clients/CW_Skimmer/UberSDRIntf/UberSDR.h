@@ -286,6 +286,32 @@ namespace UberSDRIntf
         bool debugRec;  // Enable 10-second WAV recording on start
         int frequencyOffset;  // Frequency correction in Hz (can be positive or negative)
         bool swapIQ;  // Swap I and Q channels (default: true for backward compatibility)
+        int minMargin;  // Reduced-depth IQ margin in dB, or 0 for a lossless stream
+
+        // The server's own limits, from lossyMinMarginDB and lossyMaxMarginDB in
+        // pcm_lossy.go, repeated here so a value outside them is refused with a
+        // reason rather than silently clamped to a different one. The same two
+        // numbers appear in clients/hpsdr and clients/soapy_driver.
+        static const int kMinMarginMinDB = 15;
+        static const int kMinMarginMaxDB = 60;
+
+        // What an installation that has not said otherwise streams at, and the
+        // one place this driver differs from the HPSDR bridge and the SoapySDR
+        // driver, which both default to lossless.
+        //
+        // 26 dB is the measured transparent setting -- MARGIN_DEFAULT_DB in
+        // static/v2/src/radio/constants.js -- where every FT8 decode survives
+        // with its reported strength intact for about half the bytes. It costs
+        // about 0.01 dB of noise floor, which is two orders of magnitude below
+        // what a receiver's own readings resolve, and the added noise is white,
+        // so the penalty does not grow when Skimmer narrows to a CW passband.
+        //
+        // On by default because this driver only ever tunes IQ, which is the
+        // only mode the mode applies to, and because halving the traffic of
+        // eight 192 kHz receivers is worth more to a skimmer operator than a
+        // hundredth of a decibel. An operator who is recording or measuring the
+        // IQ sets min_margin=0 and gets the bit-exact stream back.
+        static const int kMinMarginDefaultDB = 26;
         
         // Server connection
         std::string serverHost;
@@ -340,6 +366,7 @@ namespace UberSDRIntf
         int loadConfigFromIni(void);
         bool isValidHostname(const std::string& host);
         bool isValidPort(int port);
+        static int ParseMinMargin(const char* text);
         
         // Mode selection based on sample rate
         std::string selectIQMode(int rateID);

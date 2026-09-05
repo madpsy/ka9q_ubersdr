@@ -6727,13 +6727,48 @@ a.btn { text-decoration: none; }
    The tab bar is squeezed rather than dropped: it only shows when no sheet is
    open, and that is exactly when someone is looking for a panel. */
 .shell--landscape .shell__center { padding: 2px; }
-.shell--landscape .tabbar { padding: 2px 4px calc(2px + env(safe-area-inset-bottom)); }
+/* Sideways is where the corners bite hardest, and the only orientation in which
+   the sides report an inset of their own: the home indicator is 21pt rather than
+   34, so the row sits lower in the arc, and the Island's ear is beside the outer
+   tabs rather than above them. Both halves are wanted, which is why this is not
+   simply the portrait rule with smaller numbers. */
+.shell--landscape .tabbar {
+    padding: 2px calc(var(--tabbar-corner) + env(safe-area-inset-right))
+             calc(5px + env(safe-area-inset-bottom))
+             calc(var(--tabbar-corner) + env(safe-area-inset-left));
+}
 .shell--landscape .tabbar__item { padding: 4px; gap: 2px; }
 
 .tabbar {
     display: flex;
     gap: 2px;
-    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    /*
+     * The phone's own rounded corners, which nothing reports to CSS.
+     *
+     * `env(safe-area-inset-*)` covers the notch, the Dynamic Island and the home
+     * indicator, and in portrait it is exactly zero on the sides — while the
+     * display's corner arc is still around 60pt across. So the one dimension
+     * that clips the outer two tabs is the one dimension the page is never told
+     * about, on either platform: iOS reports no corner radius at all, and
+     * Android's system-bar insets (SystemBars.java) are zero on the sides in
+     * portrait for the same reason. The row therefore keeps a gutter of its own.
+     *
+     * It is a diagonal constraint, so both numbers move a little rather than one
+     * of them a lot. An item's bottom outer corner has to fall inside a circle of
+     * radius R: at 4px in and 38px up on an R=62 phone it misses by a hair, which
+     * is the sliver of the first and last button that was off the glass. Lifting
+     * alone or insetting alone each need roughly twice the gutter that a bit of
+     * both needs, and the width here is not free — seven items share it.
+     *
+     * 14px costs 20px of row across seven tabs, or under 3px each: they land at
+     * 55px on a 412px screen, still clear of a 44pt target. `env()` is added on
+     * top rather than instead, because in landscape it is not zero and the two
+     * are separate problems arriving at the same edge.
+     */
+    --tabbar-corner: 14px;
+    padding: 4px calc(var(--tabbar-corner) + env(safe-area-inset-right))
+             calc(6px + env(safe-area-inset-bottom))
+             calc(var(--tabbar-corner) + env(safe-area-inset-left));
     background: var(--surface);
     border-top: 1px solid var(--border);
     overflow-x: auto;
@@ -6857,7 +6892,13 @@ a.btn { text-decoration: none; }
    there than on an empty screen, because now it is taking height the sheet was using,
    and the labels are what gives: the icons are what a thumb aims at, and the lit one
    says where you are. */
-.tabbar--over { padding-top: 2px; padding-bottom: 2px; }
+/* The shorthand above is what this used to override wholesale, home-indicator
+   inset and all: `padding-bottom: 2px` on the bottom-most row of the screen put
+   the icons under the indicator and a long way into the corner arc — worse than
+   the sliver the gutter above is there for, and only in this mode, which is why
+   it read as intermittent. The labels are what gives here, as the note says; the
+   safe area is not. */
+.tabbar--over { padding-top: 2px; padding-bottom: calc(2px + env(safe-area-inset-bottom)); }
 .tabbar--over .tabbar__item { padding: 5px 4px; }
 .tabbar--over .tabbar__label { display: none; }
 /* Which panel is the one showing. Only means anything while the row stays up: without it,

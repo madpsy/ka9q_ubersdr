@@ -117,17 +117,35 @@ namespace UberSDRIntf
             LeaveCriticalSection(&lock);
         }
 
-        // Build the cushion again from here. Called wherever a socket is
-        // opened: the stream restarts with an empty buffer, and a consumer
-        // that resumes on the first frame to arrive would then underrun on
-        // every gap in the burst pattern, for the life of the connection,
-        // because nothing else ever puts a cushion back.
-        void reprime() {
+        // Throw away what is buffered and build the cushion again. Called
+        // wherever a socket is opened, and both halves matter.
+        //
+        // The cushion, because a consumer that resumes on the first frame to
+        // arrive would underrun on every gap in the burst pattern, for the life
+        // of the connection, since nothing else ever puts a cushion back.
+        //
+        // The discard, because the samples still in the buffer belong to the
+        // socket that just died. This used only to set the flag, on the premise
+        // that a reconnect starts from an empty buffer -- true after an outage,
+        // and false in the case that actually happens: a socket replaced within
+        // a second or two still has most of a second of the OLD stream queued.
+        // The receiver is usually on a new frequency by then, so that is a
+        // second of one band handed to the skimmer as if it were another, and
+        // priming does not hold it back -- the stale samples are themselves
+        // enough to satisfy primeTarget, so the cushion is declared built from
+        // data that should never be played at all.
+        //
+        // Returns how many I/Q frames were dropped, so the caller can say so.
+        size_t reprime() {
             EnterCriticalSection(&lock);
+            const size_t dropped = available();
+            writePos = 0;
+            readPos = 0;
             priming = true;
             primeStall = 0;
             primeLatched = false;
             LeaveCriticalSection(&lock);
+            return dropped;
         }
         
         size_t available() {

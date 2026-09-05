@@ -1019,10 +1019,19 @@ namespace UberSDRIntf
         receivers[receiverID].pcmDecoder.reset();
         receivers[receiverID].pcmStreamBroken = false;
 
-        // The new stream starts with whatever the dead one left in the ring
-        // buffer, which after an outage is nothing. Build the cushion again
-        // before this receiver rejoins the mix, for the reason in reprime().
-        receivers[receiverID].ringBuffer.reprime();
+        // Drop whatever the dead socket left in the ring buffer and build the
+        // cushion again before this receiver rejoins the mix. See reprime():
+        // after a short reconnect the leftovers are a second of the previous
+        // stream, on the frequency this receiver has just moved off.
+        {
+            const size_t dropped = receivers[receiverID].ringBuffer.reprime();
+            if (dropped > 0) {
+                std::stringstream ds;
+                ds << "Discarded " << dropped << " buffered frames from the previous "
+                   << "stream on receiver " << receiverID;
+                write_text_to_log_file(ds.str());
+            }
+        }
 
         std::stringstream ss;
         ss << "Connecting WebSocket for receiver " << receiverID << " to: " << url;

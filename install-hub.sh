@@ -916,11 +916,15 @@ else
 fi
 
 # Update any installed addons. This is best-effort: an addon that fails to
-# update must never fail the hub installation itself.
-echo
-echo "Updating installed addons..."
+# update must never fail the hub installation itself. Skipped on a fresh
+# install - nothing can be installed yet, so there is nothing to update.
 ADDON_MANAGER="$ACTUAL_HOME/ubersdr/manage_addons.sh"
-if [ -f "$ADDON_MANAGER" ]; then
+if [ "$FRESH_INSTALL" -eq 1 ]; then
+    echo
+    echo "Fresh installation - skipping addon update (no addons installed yet)."
+elif [ -f "$ADDON_MANAGER" ]; then
+    echo
+    echo "Updating installed addons..."
     if HOME="$ACTUAL_HOME" bash "$ADDON_MANAGER" --update-all; then
         echo "Addon update finished."
     else
@@ -928,6 +932,7 @@ if [ -f "$ADDON_MANAGER" ]; then
         echo "Run '$ADDON_MANAGER' to update them individually."
     fi
 else
+    echo
     echo "Skipping addon update: $ADDON_MANAGER not found."
 fi
 

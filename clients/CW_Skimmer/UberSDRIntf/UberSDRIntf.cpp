@@ -488,14 +488,10 @@ void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes)
         if (absI > peakI[receiverID]) peakI[receiverID] = absI;
         if (absQ > peakQ[receiverID]) peakQ[receiverID] = absQ;
         
-        // Store in circular buffer for recording (outside critical section)
-        if (gpSharedStatus != NULL) {
-            int32_t writePos = gpSharedStatus->receivers[receiverID].iqBufferWritePos;
-            gpSharedStatus->receivers[receiverID].iqBuffer[writePos] = I;
-            gpSharedStatus->receivers[receiverID].iqBuffer[writePos + 1] = Q;
-            writePos = (writePos + 2) % IQ_BUFFER_SIZE;
-            gpSharedStatus->receivers[receiverID].iqBufferWritePos = writePos;
-        }
+        // The monitor's recording buffer is NOT filled here. It is filled in
+        // ConsumeRingBuffers(), from the samples on their way into the block
+        // that is handed to pIQProc, so that what the monitor records is what
+        // Skimmer Server is given rather than what arrived off the socket.
         
         // Build 32-bit values directly from bytes (like Hermes does)
         // This avoids sign extension issues when shifting int16_t values
@@ -525,28 +521,10 @@ void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes)
             // (Logging removed to reduce log verbosity)
         }
         
-        // Write to WAV file if recording (first 10 seconds)
-        if (gWavFile[receiverID] != NULL && gWavSamplesWritten[receiverID] < (gSampleRate * WAV_RECORD_SECONDS))
-        {
-            // Write as stereo float: I (left), Q (right)
-            // Values are already normalized to ±1.0 range
-            fwrite(&I_float, sizeof(float), 1, gWavFile[receiverID]);
-            fwrite(&Q_float, sizeof(float), 1, gWavFile[receiverID]);
-            gWavSamplesWritten[receiverID]++;
-            
-            // Close file after 10 seconds
-            if (gWavSamplesWritten[receiverID] >= (gSampleRate * WAV_RECORD_SECONDS))
-            {
-                UpdateWavHeader(gWavFile[receiverID], gWavSamplesWritten[receiverID], 2);
-                fclose(gWavFile[receiverID]);
-                gWavFile[receiverID] = NULL;
-                
-                std::stringstream ss;
-                ss << "WAV recording completed for receiver " << receiverID
-                   << " (" << gWavSamplesWritten[receiverID] << " samples)";
-                write_text_to_log_file(ss.str());
-            }
-        }
+        // The debug_rec WAV is NOT written here either -- see the note above.
+        // It used to be written from here AND from ConsumeRingBuffers(), two
+        // threads into one FILE*, which interleaved two copies of the stream
+        // into a single file.
         
         // Update shared memory sample count (for received samples, not processed)
         if (gpSharedStatus != NULL && receiverID < MAX_RX_COUNT) {
@@ -737,13 +715,19 @@ void ConsumeRingBuffers()
             }
             LeaveCriticalSection(&myUberSDR.receivers[receiverID].lock);
             
-            // Write to WAV file if recording (first 10 seconds)
-            // NOTE: WAV file gets ORIGINAL (unshifted) IQ data for debugging
+            // Write to WAV file if recording (first 10 seconds).
+            //
+            // Same samples the monitor's record button captures, from the same
+            // point in the chain: SHIFTED, swapped and negated, i.e. what
+            // Skimmer Server is given. The only difference is the container --
+            // this one is 32-bit float, so it carries the samples without the
+            // quantisation and the clamp that the monitor's 16-bit PCM writer
+            // applies.
             if (gWavFile[receiverID] != NULL && gWavSamplesWritten[receiverID] < (gSampleRate * WAV_RECORD_SECONDS))
             {
                 // Write as stereo float: I (left), Q (right)
-                fwrite(&I_float, sizeof(float), 1, gWavFile[receiverID]);
-                fwrite(&Q_float, sizeof(float), 1, gWavFile[receiverID]);
+                fwrite(&shifted_I, sizeof(float), 1, gWavFile[receiverID]);
+                fwrite(&shifted_Q, sizeof(float), 1, gWavFile[receiverID]);
                 gWavSamplesWritten[receiverID]++;
                 
                 // Close file after 10 seconds
@@ -758,6 +742,36 @@ void ConsumeRingBuffers()
                        << " (" << gWavSamplesWritten[receiverID] << " samples)";
                     write_text_to_log_file(ss.str());
                 }
+            }
+            
+            // Store in the monitor's circular buffer for recording.
+            //
+            // This is the last point at which a sample can be seen before it
+            // becomes part of a block handed to pIQProc, so a recording made
+            // here is a recording of what Skimmer Server actually receives:
+            // past the ring buffer (so an underrun appears as the silence
+            // Skimmer sees, not as a gap that closes up), and with the I/Q
+            // swap, the Im = -Q negation and the software frequency shift all
+            // applied.
+            //
+            // Written as int16 to match the monitor's 16-bit PCM WAV writer.
+            // The floats came from int16 sample values normalised by 2^15, so
+            // scaling back by 32768 is the inverse of that; the frequency
+            // shift can carry a sample a fraction past full scale, hence the
+            // clamp.
+            if (gpSharedStatus != NULL) {
+                float recI = shifted_I * 32768.0f;
+                float recQ = shifted_Q * 32768.0f;
+                if (recI > 32767.0f) recI = 32767.0f;
+                else if (recI < -32768.0f) recI = -32768.0f;
+                if (recQ > 32767.0f) recQ = 32767.0f;
+                else if (recQ < -32768.0f) recQ = -32768.0f;
+                
+                int32_t writePos = gpSharedStatus->receivers[receiverID].iqBufferWritePos;
+                gpSharedStatus->receivers[receiverID].iqBuffer[writePos] = (int16_t)recI;
+                gpSharedStatus->receivers[receiverID].iqBuffer[writePos + 1] = (int16_t)recQ;
+                writePos = (writePos + 2) % IQ_BUFFER_SIZE;
+                gpSharedStatus->receivers[receiverID].iqBufferWritePos = writePos;
             }
             
             // Write SHIFTED samples to processing buffer (Skimmer Server gets shifted IQ)

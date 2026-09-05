@@ -147,6 +147,9 @@ DWORD g_lastReconnectAttempt = 0;
 // Function prototypes
 BOOL InitSharedMemory();
 void CleanupSharedMemory();
+BOOL ConnectToInstance(int instanceIndex);
+void DisconnectFromInstance();
+void UpdateConnectButton();
 void UpdateDisplay();
 void UpdateInstanceList();
 void FormatUptime(int64_t startTime, char* buffer, size_t bufferSize);
@@ -280,6 +283,52 @@ void CleanupSharedMemory()
     }
 }
 
+// Drop the connection to the instance we are attached to.
+//
+// Recordings are stopped first, not left to the timer: ProcessRecording()
+// reads through g_pStatus, so once the view is unmapped an open recording
+// would simply stop growing, and its WAV header would never be finalised --
+// leaving a file on disk that says it holds no samples.
+void DisconnectFromInstance()
+{
+    for (int i = 0; i < MAX_RX_COUNT; i++) {
+        if (g_recording[i].recording) {
+            StopRecording(i);
+        }
+    }
+    
+    CleanupSharedMemory();
+    g_selectedInstance = -1;
+    
+    if (g_hDlg != NULL) {
+        SetDlgItemTextA(g_hDlg, IDC_SERVER_STATUS,
+                        "Disconnected - select an instance from the list above and click Connect");
+    }
+    UpdateConnectButton();
+}
+
+// One button, two jobs: it connects to the selected instance while there is no
+// connection, and disconnects from the current one while there is.
+//
+// The label is only written when the state actually changes. UpdateDisplay()
+// calls this ten times a second, and rewriting the caption at that rate makes
+// the button flicker.
+void UpdateConnectButton()
+{
+    if (g_hDlg == NULL) return;
+    
+    HWND hButton = GetDlgItem(g_hDlg, IDC_CONNECT_BUTTON);
+    if (hButton == NULL) return;
+    
+    static int shownState = -1;  // -1 = not yet written, 0 = connect, 1 = disconnect
+    int wantState = (g_pStatus != NULL) ? 1 : 0;
+    
+    if (wantState == shownState) return;
+    
+    SetWindowTextA(hButton, wantState ? "Disconnect" : "Connect to Selected");
+    shownState = wantState;
+}
+
 // Format uptime string
 void FormatUptime(int64_t startTime, char* buffer, size_t bufferSize)
 {
@@ -372,6 +421,8 @@ void UpdateInstanceList()
 // Update display with current status
 void UpdateDisplay()
 {
+    UpdateConnectButton();
+    
     if (g_pStatus == NULL) {
         // Try to reconnect
         if (!InitSharedMemory()) {
@@ -3426,6 +3477,7 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
                     } else {
                         SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Failed to connect to selected instance");
                     }
+                    UpdateConnectButton();
                 }
                 return TRUE;
             }
@@ -3449,8 +3501,13 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
                 return TRUE;
             }
             
-            // Handle instance Connect button
+            // Handle instance Connect/Disconnect button
             if (wmId == IDC_CONNECT_BUTTON) {
+                if (g_pStatus != NULL) {
+                    DisconnectFromInstance();
+                    return TRUE;
+                }
+                
                 int selectedIndex = (int)SendMessage(g_hInstanceList, LB_GETCURSEL, 0, 0);
                 if (selectedIndex != LB_ERR && selectedIndex < g_instanceCount) {
                     if (ConnectToInstance(selectedIndex)) {
@@ -3460,6 +3517,7 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
                     } else {
                         SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Failed to connect to selected instance");
                     }
+                    UpdateConnectButton();
                 } else {
                     MessageBoxA(hDlg, "Please select an instance from the list", "No Selection", MB_OK | MB_ICONINFORMATION);
                 }

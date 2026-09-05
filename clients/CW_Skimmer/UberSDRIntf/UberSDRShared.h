@@ -75,7 +75,11 @@ struct UberSDRSharedStatus {
         volatile int32_t offsetApplied;        // Set to 1 when offset is applied
         
         // Circular buffer for IQ recording
-        int16_t iqBuffer[IQ_BUFFER_SIZE];  // Interleaved I/Q samples (big-endian)
+        // Interleaved I/Q samples, host-order int16, as handed to Skimmer
+        // Server: filled from the consumer thread at the point the samples go
+        // into the block passed to pIQProc, so the I/Q swap, the Im = -Q
+        // negation and the software frequency shift are already applied.
+        int16_t iqBuffer[IQ_BUFFER_SIZE];
         volatile int32_t iqBufferWritePos;  // Current write position
         volatile int32_t iqBufferReadPos;   // Last read position (for monitor)
 

@@ -48,6 +48,7 @@ namespace UberSDRIntf
         configPort = 8080;
         configFromFilename = false;
         debugRec = false;  // Disable WAV recording by default
+        debugRaw = false;  // Disable raw wire capture by default
         useSSL = false;
         maxReceivers = 8;
         activeReceivers = 0;
@@ -180,6 +181,10 @@ namespace UberSDRIntf
         // Read debug_rec from INI file (0 = false, non-zero = true)
         int debugRecInt = GetPrivateProfileIntA("Server", "debug_rec", 0, iniPath);
         debugRec = (debugRecInt != 0);
+
+        // Read debug_raw from INI file (0 = false, non-zero = true)
+        int debugRawInt = GetPrivateProfileIntA("Server", "debug_raw", 0, iniPath);
+        debugRaw = (debugRawInt != 0);
         
         // Read frequency offset from INI file (can be positive or negative)
         frequencyOffset = GetPrivateProfileIntA("Calibration", "FrequencyOffset", 0, iniPath);
@@ -210,6 +215,7 @@ namespace UberSDRIntf
             ss.str("");
             ss << "Configuration loaded from INI: " << configHost << ":" << configPort
                << ", debug_rec=" << (debugRec ? "true" : "false")
+               << ", debug_raw=" << (debugRaw ? "true" : "false")
                << ", frequencyOffset=" << frequencyOffset << " Hz"
                << ", swap_iq=" << (swapIQ ? "true" : "false")
                << ", min_margin=";
@@ -396,15 +402,67 @@ namespace UberSDRIntf
     // Check if connection is allowed (HTTP POST to /connection)
     bool UberSDR::CheckConnectionAllowed(int receiverID)
     {
-        // Generate a proper UUID using Windows RPC
+        // The session id the server keys this receiver's channel on, so two of
+        // them must never coincide -- not between the receivers of one skimsrv,
+        // and not between two skimsrv instances on one machine.
+        //
+        // It used to be UuidCreate alone, whose return value was discarded into
+        // an uninitialised stack UUID: a call that fails writes nothing, and two
+        // failed calls down the same code path see the same stack and hand back
+        // the SAME id. Two receivers then share a channel on the server, which
+        // is a pair of streams turning to noise together and no error anywhere,
+        // because each side is individually behaving.
+        //
+        // So the identity no longer rests on it. The process id, the receiver
+        // and a counter make the id unique by construction within and between
+        // processes on this machine; the performance counter separates runs of
+        // the same pid; and UuidCreate is still used when it genuinely succeeds,
+        // for uniqueness against other machines. A failure now costs the random
+        // part, not the identity.
+        static volatile LONG sessionCounter = 0;
+        const LONG seq = InterlockedIncrement(&sessionCounter);
+
+        LARGE_INTEGER qpc;
+        QueryPerformanceCounter(&qpc);
+
+        // Random bits from UuidCreate when it works, for uniqueness against
+        // other machines. Zero if it does not: the parts below already
+        // guarantee uniqueness on this one, which is where the collision was.
+        unsigned long long randomTail = 0;
         UUID uuid;
-        UuidCreate(&uuid);
-        
-        RPC_CSTR uuidStr;
-        UuidToStringA(&uuid, &uuidStr);
-        
-        std::string uuidString = (char*)uuidStr;
-        RpcStringFreeA(&uuidStr);
+        memset(&uuid, 0, sizeof(uuid));
+        RPC_STATUS st = UuidCreate(&uuid);
+        if (st == RPC_S_OK || st == RPC_S_UUID_LOCAL_ONLY) {
+            for (int b = 0; b < 6; ++b) {
+                randomTail = (randomTail << 8) | (unsigned long long)uuid.Data4[b + 2];
+            }
+        } else {
+            std::stringstream warn;
+            warn << "UuidCreate failed for receiver " << receiverID << " (status " << st
+                 << ") - the session id stays unique on this machine without it";
+            write_text_to_log_file(warn.str());
+        }
+
+        // The SHAPE is not ours to choose: the server rejects anything that does
+        // not match its RFC-4122 v4 regex (uuidRegex in websocket.go), so the
+        // version nibble must be 4 and the variant nibble one of 8/9/a/b. What
+        // goes in the remaining bits is ours, and it is chosen so that no two
+        // ids can coincide:
+        //
+        //   time-low   the process id       - separates the two skimsrv instances
+        //   time-mid   the receiver         - separates receivers within one
+        //   time-hi    a per-process counter - separates reconnects of one receiver
+        //   node       the performance counter, mixed with UuidCreate's random
+        //              bits - separates runs of the same pid, and machines
+        char idbuf[64];
+        sprintf_s(idbuf, sizeof(idbuf), "%08lx-%04x-4%03x-%c%03x-%012llx",
+                  (unsigned long)GetCurrentProcessId(),
+                  (unsigned)(receiverID & 0xFFFF),
+                  (unsigned)(seq & 0xFFF),
+                  "89ab"[(seq >> 12) & 3],
+                  (unsigned)((unsigned long long)qpc.QuadPart >> 48) & 0xFFF,
+                  ((unsigned long long)qpc.QuadPart ^ randomTail) & 0xFFFFFFFFFFFFULL);
+        std::string uuidString = idbuf;
         
         std::stringstream ss;
         ss << "Generated UUID for receiver " << receiverID << ": " << uuidString;
@@ -1263,6 +1321,85 @@ namespace UberSDRIntf
     // Every frame must reach the decoder even if the result is discarded: the
     // predictor derives its filter taps from the samples already decoded, so a
     // skipped packet desynchronises this side from the server permanently.
+    ///////////////////////////////////////////////////////////////////////////////
+    // Append one packet to rawN.bin, in the container clients read fixtures
+    // from: "UV4F", a format byte, a uint32 packet count, then each packet as a
+    // uint32 length followed by its bytes.
+    //
+    // Written in that layout on purpose -- clients/soapy_driver/test's
+    // conformance harness and the Go decoders read it as it stands, so a
+    // capture goes straight into a decoder that is known to reproduce the
+    // server's own fixtures, with no converter to get wrong in between.
+    //
+    // The count in the header is patched on every append rather than at close,
+    // because there is no close: a stream that has to be caught in the act is
+    // one nobody gets to shut down tidily, and a file whose header says zero is
+    // a file that tells you nothing.
+    void UberSDR::CaptureRawPacket(int receiverID, const uint8_t *wire, size_t wireSize)
+    {
+        if (!debugRaw) return;
+        if (receiverID < 0 || receiverID >= MAX_RX_COUNT) return;
+
+        // One file per receiver, and one open handle per receiver: reopening
+        // per packet would cost a syscall pair at 93.75 packets a second per
+        // stream, and the point of this is to change the timing as little as
+        // possible.
+        static FILE *files[MAX_RX_COUNT] = { NULL };
+        static uint32_t counts[MAX_RX_COUNT] = { 0 };
+        static int64_t written[MAX_RX_COUNT] = { 0 };
+
+        // Enough to hold the moment the stream turns, and bounded so a capture
+        // left on overnight cannot fill the disk: 64 MB is about eleven minutes
+        // of one 192 kHz stream at the rate the screenshot showed.
+        static const int64_t kMaxBytes = 64 * 1024 * 1024;
+
+        if (written[receiverID] >= kMaxBytes) return;
+
+        if (files[receiverID] == NULL) {
+            char name[64];
+            sprintf_s(name, sizeof(name), "raw%d.bin", receiverID);
+            errno_t e = fopen_s(&files[receiverID], name, "wb");
+            if (e != 0 || files[receiverID] == NULL) {
+                files[receiverID] = NULL;
+                return;
+            }
+            const uint8_t hdr[9] = { 'U', 'V', '4', 'F', 0, 0, 0, 0, 0 };
+            fwrite(hdr, 1, sizeof(hdr), files[receiverID]);
+            counts[receiverID] = 0;
+            written[receiverID] = sizeof(hdr);
+
+            std::stringstream ss;
+            ss << "Raw wire capture started for receiver " << receiverID
+               << " -> " << name << " (debug_raw=true)";
+            write_text_to_log_file(ss.str());
+        }
+
+        const uint32_t n = (uint32_t)wireSize;
+        const uint8_t len[4] = { (uint8_t)(n & 0xFF), (uint8_t)((n >> 8) & 0xFF),
+                                 (uint8_t)((n >> 16) & 0xFF), (uint8_t)((n >> 24) & 0xFF) };
+        fwrite(len, 1, sizeof(len), files[receiverID]);
+        fwrite(wire, 1, wireSize, files[receiverID]);
+        counts[receiverID]++;
+        written[receiverID] += 4 + (int64_t)wireSize;
+
+        // Patch the count in place, then return to the end. fflush so a capture
+        // read while the DLL is still running is complete up to this packet.
+        const uint32_t c = counts[receiverID];
+        const uint8_t cb[4] = { (uint8_t)(c & 0xFF), (uint8_t)((c >> 8) & 0xFF),
+                                (uint8_t)((c >> 16) & 0xFF), (uint8_t)((c >> 24) & 0xFF) };
+        fseek(files[receiverID], 5, SEEK_SET);
+        fwrite(cb, 1, sizeof(cb), files[receiverID]);
+        fseek(files[receiverID], 0, SEEK_END);
+        fflush(files[receiverID]);
+
+        if (written[receiverID] >= kMaxBytes) {
+            std::stringstream ss;
+            ss << "Raw wire capture for receiver " << receiverID << " reached its "
+               << (kMaxBytes / (1024 * 1024)) << " MB cap after " << c << " packets - stopping";
+            write_text_to_log_file(ss.str());
+        }
+    }
+
     void UberSDR::HandleWebSocketMessage(int receiverID, const std::string& message)
     {
         try {
@@ -1290,6 +1427,9 @@ namespace UberSDRIntf
                                        "(needs UberSDR 0.1.63 or later) - this DLL reads version 4 only");
                 return;
             }
+
+            // Capture the wire before the decoder, if the ini asked for it.
+            CaptureRawPacket(receiverID, wire, wireSize);
 
             ubersdr::PCMv4Header header;
             std::string err;

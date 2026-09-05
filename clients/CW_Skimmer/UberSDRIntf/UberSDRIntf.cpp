@@ -69,6 +69,20 @@ namespace UberSDRIntf
     // Stop flag
     volatile bool gStopFlag = false;
     
+    // Which run of StartRx the threads below belong to.
+    //
+    // gStopFlag alone cannot stop a thread, because StartRx clears it again on
+    // the way in: any thread that outlived the previous StopRx is simply set
+    // going again by the next StartRx. Two of them then existed at once, which
+    // is not hypothetical -- it is what the log shows, two "consumer falling
+    // behind" lines in the same millisecond, from a warning whose own throttle
+    // makes that impossible for one thread.
+    //
+    // A thread captures this value when it is created and exits as soon as it
+    // no longer matches, so retiring a run is one increment and needs no
+    // handle, no join and no cooperation from a thread that may be wedged.
+    volatile LONG gRunEpoch = 0;
+    
     // Device name buffer
     char display_name[100];
     
@@ -325,17 +339,26 @@ namespace UberSDRIntf
     
     ///////////////////////////////////////////////////////////////////////////////
     // Worker thread for each receiver
+    // The receiver and the run epoch, packed into the single LPVOID a thread
+    // parameter gives us. A heap struct would have to be freed by a thread that
+    // is allowed to be abandoned, which is the thing this is here to survive.
+    #define PACK_THREAD_PARAM(rx, epoch)  ((LPVOID)(INT_PTR)(((INT_PTR)(epoch) << 8) | ((rx) & 0xFF)))
+    #define UNPACK_THREAD_RX(p)           ((int)((INT_PTR)(p) & 0xFF))
+    #define UNPACK_THREAD_EPOCH(p)        ((LONG)((INT_PTR)(p) >> 8))
+    
     DWORD WINAPI Worker(LPVOID lpParameter)
     {
-        int receiverID = (int)(INT_PTR)lpParameter;
+        int receiverID = UNPACK_THREAD_RX(lpParameter);
+        const LONG myEpoch = UNPACK_THREAD_EPOCH(lpParameter);
         
         std::stringstream ss;
-        ss << "Worker thread started for receiver " << receiverID;
+        ss << "Worker thread started for receiver " << receiverID
+           << " (run " << myEpoch << ")";
         write_text_to_log_file(ss.str());
         
         // WebSocket message processing happens in the WebSocket thread
         // This thread manages the receiver state and processes commands
-        while (!gStopFlag && myUberSDR.receivers[receiverID].active)
+        while (!gStopFlag && gRunEpoch == myEpoch && myUberSDR.receivers[receiverID].active)
         {
             // Process commands from monitor every 100ms
             if (receiverID == 0) {  // Only process commands once (from receiver 0's thread)
@@ -345,7 +368,8 @@ namespace UberSDRIntf
         }
         
         ss.str("");
-        ss << "Worker thread stopped for receiver " << receiverID;
+        ss << "Worker thread stopped for receiver " << receiverID
+           << " (run " << myEpoch << ")";
         write_text_to_log_file(ss.str());
         
         return 0;
@@ -538,7 +562,7 @@ void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes)
 // Ring buffer consumer - reads from ring buffers and fills processing buffers
 // This runs in a separate thread to provide consistent timing
 // HIGH-RESOLUTION TIMING: Uses QueryPerformanceCounter for precise sample timing
-void ConsumeRingBuffers()
+void ConsumeRingBuffers(LONG myEpoch)
 {
     using namespace UberSDRIntf;
     
@@ -574,7 +598,7 @@ void ConsumeRingBuffers()
        << frequency.QuadPart << " Hz)";
     write_text_to_log_file(ss.str());
     
-    while (!gStopFlag)
+    while (!gStopFlag && gRunEpoch == myEpoch)
     {
         // Check if we have active receivers
         if (gActiveReceivers == 0) {
@@ -911,7 +935,8 @@ void ConsumeRingBuffers()
             if (now - lastWarning > 1000) {
                 int64_t usBehind = (-ticksRemaining * 1000000) / frequency.QuadPart;
                 std::stringstream ss;
-                ss << "WARNING: Ring buffer consumer falling behind by " << usBehind << " us";
+                ss << "WARNING: Ring buffer consumer falling behind by " << usBehind
+                   << " us (run " << myEpoch << ")";
                 write_text_to_log_file(ss.str());
                 lastWarning = now;
             }
@@ -926,9 +951,17 @@ void ConsumeRingBuffers()
 DWORD WINAPI RingBufferConsumerThread(LPVOID lpParameter)
 {
     using namespace UberSDRIntf;
-    write_text_to_log_file("Ring buffer consumer thread started");
-    ConsumeRingBuffers();
-    write_text_to_log_file("Ring buffer consumer thread stopped");
+    const LONG myEpoch = UNPACK_THREAD_EPOCH(lpParameter);
+    
+    std::stringstream ss;
+    ss << "Ring buffer consumer thread started (run " << myEpoch << ")";
+    write_text_to_log_file(ss.str());
+    
+    ConsumeRingBuffers(myEpoch);
+    
+    ss.str("");
+    ss << "Ring buffer consumer thread stopped (run " << myEpoch << ")";
+    write_text_to_log_file(ss.str());
     return 0;
 }
 
@@ -1108,6 +1141,42 @@ namespace UberSDRIntf
             // Hermes creates its worker thread regardless of RecvCount
             gStopFlag = false;
             
+            // Everything started below belongs to this run.
+            //
+            // Bumping the epoch BEFORE clearing anything else retires threads
+            // left over from a previous run, and there are two ways to have
+            // them. CW Skimmer calls StartRx again when receivers are added,
+            // with no StopRx in between, and the CreateThread below used to
+            // overwrite the handle of a thread that was still running. StopRx
+            // gives up waiting after a timeout and closes the handle anyway,
+            // which loses the only reference to a thread that is still alive.
+            // Either way the gStopFlag = false above would set it going again.
+            //
+            // Two ring buffer consumers is not a slow leak: each one pops a
+            // sample from every receiver's ring, so the rings drain at twice
+            // the rate they fill and run dry, and both write through the same
+            // gInPtr with an unsynchronised gDataSamples, so the block handed
+            // to Skimmer is the two threads' samples interleaved.
+            const LONG runEpoch = InterlockedIncrement(&gRunEpoch);
+            
+            // Reap the handles too, now that the threads they name are on
+            // their way out. Best effort: the epoch has already stopped them,
+            // so a thread that misses the wait still exits, and only the handle
+            // leaks.
+            if (ghRingBufferConsumer != NULL) {
+                write_text_to_log_file("StartRx: a ring buffer consumer from a previous run is still open - retiring it");
+                WaitForSingleObject(ghRingBufferConsumer, 2000);
+                CloseHandle(ghRingBufferConsumer);
+                ghRingBufferConsumer = NULL;
+            }
+            for (int i = 0; i < MAX_RX_COUNT; i++) {
+                if (ghWrk[i] != NULL) {
+                    WaitForSingleObject(ghWrk[i], 500);
+                    CloseHandle(ghWrk[i]);
+                    ghWrk[i] = NULL;
+                }
+            }
+            
             // Only start actual receivers if RecvCount > 0
             if (gSet.RecvCount > 0)
             {
@@ -1184,7 +1253,7 @@ namespace UberSDRIntf
                     }
                     
                     // Start worker thread
-                    ghWrk[i] = CreateThread(NULL, 0, Worker, (LPVOID)(INT_PTR)i, 0, &gidWrk[i]);
+                    ghWrk[i] = CreateThread(NULL, 0, Worker, PACK_THREAD_PARAM(i, runEpoch), 0, &gidWrk[i]);
                     if (ghWrk[i] == NULL)
                     {
                         ss.str("");
@@ -1195,7 +1264,8 @@ namespace UberSDRIntf
                 
                 // Start ring buffer consumer thread
                 write_text_to_log_file("Starting ring buffer consumer thread...");
-                ghRingBufferConsumer = CreateThread(NULL, 0, RingBufferConsumerThread, NULL, 0, &gidRingBufferConsumer);
+                ghRingBufferConsumer = CreateThread(NULL, 0, RingBufferConsumerThread,
+                                                    PACK_THREAD_PARAM(0, runEpoch), 0, &gidRingBufferConsumer);
                 if (ghRingBufferConsumer == NULL)
                 {
                     rt_exception("Failed to start ring buffer consumer thread");
@@ -1224,6 +1294,13 @@ namespace UberSDRIntf
                 // Set stop flag for worker threads
                 gStopFlag = true;
                 
+                // And retire this run. The epoch, not the wait below, is what
+                // guarantees the threads stop: one that outlives the timeout
+                // sees an epoch that is no longer its own and leaves the loop
+                // on its own, so the next StartRx cannot revive it by clearing
+                // gStopFlag.
+                InterlockedIncrement(&gRunEpoch);
+                
                 // Only wait for threads that were actually started (matching Hermes behavior)
                 // Hermes only waits if ghWrk != NULL, we only wait for receivers that were started
                 int receiversToStop = (gSet.RecvCount > 0) ? gSet.RecvCount : 0;
@@ -1236,10 +1313,22 @@ namespace UberSDRIntf
                 if (ghRingBufferConsumer != NULL)
                 {
                     write_text_to_log_file("Stopping ring buffer consumer thread...");
-                    WaitForSingleObject(ghRingBufferConsumer, 1000);
-                    CloseHandle(ghRingBufferConsumer);
-                    ghRingBufferConsumer = NULL;
-                    write_text_to_log_file("Ring buffer consumer thread stopped");
+                    // Generous, because the alternative used to be an orphan:
+                    // the loop tests the epoch once per sample, so a thread
+                    // that is running at all leaves within microseconds, and
+                    // only one wedged inside the pIQProc callback takes longer.
+                    if (WaitForSingleObject(ghRingBufferConsumer, 5000) == WAIT_OBJECT_0) {
+                        CloseHandle(ghRingBufferConsumer);
+                        ghRingBufferConsumer = NULL;
+                        write_text_to_log_file("Ring buffer consumer thread stopped");
+                    } else {
+                        // Leave the handle for the next StartRx to reap. It is
+                        // retired either way -- the epoch saw to that -- and
+                        // holding the handle is what keeps a second one from
+                        // being started beside it.
+                        write_text_to_log_file("WARNING: ring buffer consumer did not stop within 5s "
+                                               "- retired by epoch, handle left for the next StartRx");
+                    }
                 }
                 
                 // Wait for and close worker threads (only up to RecvCount)
@@ -1379,11 +1468,17 @@ namespace UberSDRIntf
         sprintf_s(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d:%02d.%03d",
                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
         
+        // The process id is on every line because the file name is relative:
+        // two skimsrv instances started from one directory append to a single
+        // log, and without this there is nothing to tell their lines apart.
+        // Two entries closer together than a once-per-second throttle allows
+        // then read as one process misbehaving when it is simply two of them.
         FILE* log_file = NULL;
         fopen_s(&log_file, "UberSDRIntf_log_file.txt", "a");
         if (log_file != NULL)
         {
-            fprintf(log_file, "%s: %s\n", buffer, text.c_str());
+            fprintf(log_file, "%s [pid %lu]: %s\n", buffer,
+                    (unsigned long)GetCurrentProcessId(), text.c_str());
             fflush(log_file);  // Force immediate write to disk
             fclose(log_file);
         }

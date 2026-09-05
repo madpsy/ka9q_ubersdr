@@ -284,6 +284,19 @@ namespace UberSDRIntf
         int configPort;
         bool configFromFilename;
         bool debugRec;  // Enable 10-second WAV recording on start
+
+        // Append every packet, exactly as it came off the socket, to
+        // rawN.bin before the decoder is allowed near it.
+        //
+        // The decoder is backward-adaptive, so a stream that turns to noise
+        // cannot be diagnosed from its output: by the time anything looks
+        // wrong the taps have been wrong for thousands of packets and the
+        // cause is long gone. Capturing the wire separates the only two
+        // possibilities left -- bytes that are not what the server sent, or
+        // decoder state corrupted between packets -- because the same bytes
+        // can then be decoded offline, single-threaded, by a decoder known to
+        // reproduce the server's fixtures.
+        bool debugRaw;
         int frequencyOffset;  // Frequency correction in Hz (can be positive or negative)
         bool swapIQ;  // Swap I and Q channels (default: true for backward compatibility)
         int minMargin;  // Reduced-depth IQ margin in dB, or 0 for a lossless stream
@@ -345,6 +358,7 @@ namespace UberSDRIntf
         int ConnectWebSocket(int receiverID, const std::string& url);
         void DisconnectWebSocket(int receiverID);
         void HandleWebSocketMessage(int receiverID, const std::string& message);
+        void CaptureRawPacket(int receiverID, const uint8_t *wire, size_t wireSize);
         void SendKeepalive(int receiverID);
         
         // Reconnection thread

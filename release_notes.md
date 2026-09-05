@@ -1,4 +1,15 @@
-# Latest Stable - 0.1.64
+# Latest Stable - 0.1.65
+
+## Version 0.1.65 - 5th Sep 2026
+
+### New Features
+- Added **HPSDR Protocol 1 Support** compatible with SDR Console etc on local networks (previously only Protocol 2)
+- Added **Pinned Panels** allowing the top most panel in the left and dock always remain when scrolling (v2 UI)
+
+### Bug Fixes
+- Fixed **Connection Draining Issue** in Caddy which meant it sometmes never restarted properly
+- Fixed **Slow Session History** which caused slow lookups on busy instances
+- Fixed **Buttons on mobile** being difficult to press on some devices due to curve at screen corners
 
 ## Version 0.1.64 - 3rd Sep 2026
 

@@ -262,6 +262,14 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         func target(_ command: MPRemoteCommand, page: String, native: String? = nil) {
             guard !haveRemoteCommands else { return }
             command.addTarget { [weak self] _ in
+                // Under the same prefix as the rest of the audio path, so one
+                // predicate catches the whole handover. These are not only
+                // presses: iOS delivers transport commands to the Now Playing
+                // app of its own accord, and whether it does is the difference
+                // between a receiver that comes back and one that comes back
+                // muted — see the pause handler in v2's media controller.
+                NSLog("[UberSDR audio] remote command: %@ -> page=%@ native=%@",
+                      command.description, page, native ?? "-")
                 if let native = native { self?.onTransport?(native) }
                 self?.deliver("action:\(page)")
                 return .success

@@ -370,6 +370,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     @objc private func appWillResignActive() {
+        NSLog("[UberSDR audio] app resigning active (state=%ld)",
+              UIApplication.shared.applicationState.rawValue)
         // Claimed here, on the way out, and not from the background.
         //
         // The session has to be taken back *before* the app stops being active,
@@ -443,6 +445,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     @objc private func appBecameActive() {
+        NSLog("[UberSDR audio] app became active (background stream %@)",
+              backgroundAudio.isRunning ? "running" : "stopped")
         stopBackgroundAudio()
         resumeAudio()
     }
@@ -455,7 +459,13 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// of those can arrive before the page has a session id to hand over and
     /// the second cannot; starting twice does nothing.
     private func startBackgroundAudio() {
-        guard let session = proxy.audioSessionId, !session.isEmpty else { return }
+        guard let session = proxy.audioSessionId, !session.isEmpty else {
+            // The one failure that is silent in every sense: no session id means
+            // nothing to stream, so the handover completes having handed over
+            // nothing and the receiver is simply quiet until you come back.
+            NSLog("[UberSDR audio] background stream not started: no session id")
+            return
+        }
         backgroundAudio.start(origin: proxy.origin, sessionId: session)
     }
 

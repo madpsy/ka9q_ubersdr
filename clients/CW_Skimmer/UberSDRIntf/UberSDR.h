@@ -358,6 +358,7 @@ namespace UberSDRIntf
         int ConnectWebSocket(int receiverID, const std::string& url);
         void DisconnectWebSocket(int receiverID);
         void HandleWebSocketMessage(int receiverID, const std::string& message);
+        void HandleTextMessage(int receiverID, const std::string& message);
         void CaptureRawPacket(int receiverID, const uint8_t *wire, size_t wireSize);
         void SendKeepalive(int receiverID);
         

@@ -1081,6 +1081,16 @@ namespace UberSDRIntf
                     if (!isActive) {
                         return;
                     }
+
+                    // Sample packets are binary. The server also speaks JSON on
+                    // this socket -- it answers a tune with a status message --
+                    // and a text frame handed to the sample decoder is read as a
+                    // corrupt packet, which used to close the socket.
+                    if (!msg->binary) {
+                        HandleTextMessage(receiverID, msg->str);
+                        return;
+                    }
+
                     // Handle incoming message
                     HandleWebSocketMessage(receiverID, msg->str);
                 }
@@ -1400,6 +1410,24 @@ namespace UberSDRIntf
         }
     }
 
+    ///////////////////////////////////////////////////////////////////////////////
+    // A text frame from the server: a tune acknowledgement, or any other status
+    // it chooses to send. None of it is needed to decode the stream, so this
+    // only records it -- and only the first few per receiver, because at eight
+    // receivers an unthrottled log of these is noise of a different kind.
+    void UberSDR::HandleTextMessage(int receiverID, const std::string& message)
+    {
+        if (receiverID < 0 || receiverID >= MAX_RX_COUNT) return;
+
+        static volatile LONG logged[MAX_RX_COUNT] = { 0 };
+        if (InterlockedIncrement(&logged[receiverID]) > 3) return;
+
+        std::stringstream ss;
+        ss << "Text message on receiver " << receiverID << " (" << message.size()
+           << " bytes): " << message.substr(0, 200);
+        write_text_to_log_file(ss.str());
+    }
+
     void UberSDR::HandleWebSocketMessage(int receiverID, const std::string& message)
     {
         try {
@@ -1425,6 +1453,35 @@ namespace UberSDRIntf
             if (ubersdr::PCMv4StreamDecoder::isZstdFrame(wire, wireSize)) {
                 write_text_to_log_file("Server does not support audio protocol version 4 "
                                        "(needs UberSDR 0.1.63 or later) - this DLL reads version 4 only");
+                return;
+            }
+
+            // Not every binary frame has to be a sample packet, and one that is
+            // not has never reached the decoder -- so its taps still stand where
+            // the server's do and there is nothing to resynchronise.
+            //
+            // Closing the socket for one is what turned every tune into a
+            // reconnect: the server answers {"type":"tune",...} with a JSON
+            // status message, that was handed to the decoder, and "bad magic"
+            // was reported as a broken stream. Fourteen receivers across two
+            // instances each lost their socket and came back on a new session,
+            // at startup and again on every band change.
+            //
+            // A failure AFTER the magic matched is the opposite case and still
+            // ends the stream, for the reason in ConnectWebSocket: that one
+            // really has left the predictor where the server's is not.
+            const uint32_t magic = (uint32_t)wire[0] | ((uint32_t)wire[1] << 8) |
+                                   ((uint32_t)wire[2] << 16) | ((uint32_t)wire[3] << 24);
+            if (magic != ubersdr::kPCMv4Magic) {
+                static volatile LONG logged[MAX_RX_COUNT] = { 0 };
+                if (InterlockedIncrement(&logged[receiverID]) <= 3) {
+                    std::stringstream ss;
+                    ss << "Ignoring a binary message on receiver " << receiverID
+                       << " that is not a version 4 packet (" << wireSize
+                       << " bytes, magic 0x" << std::hex << magic << std::dec
+                       << ") - the decoder was not touched";
+                    write_text_to_log_file(ss.str());
+                }
                 return;
             }
 

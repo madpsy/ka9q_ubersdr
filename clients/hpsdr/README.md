@@ -18,10 +18,10 @@ nothing.
 
 ## Wire format
 
-The bridge asks for `format=pcm-zstd&version=4`, the lossless path at the only
-protocol version it reads, unless `--min-margin` asks for the reduced-depth mode
-below. `pcm-zstd` is still the server's name for that format, but from version 4
-what it carries is not zstd:
+The bridge asks for `format=pcm-zstd&version=4`, the only protocol version it
+reads, with the reduced-depth mode below on by default and `--min-margin 0` the
+way back to the lossless path. `pcm-zstd` is still the server's name for that
+format, but from version 4 what it carries is not zstd:
 
 - **Packet**: a `PCM4` magic, a flags byte, then only the fields that changed
   since the last packet — sample rate, channel count, sample count and the two
@@ -45,10 +45,10 @@ what it carries is not zstd:
 
 ## Reduced-depth IQ: `--min-margin DB`
 
-Optional, and off unless asked for. It trades a defined amount of quantisation
-noise for bandwidth, and the request is a **margin**, not a bit depth: `DB` is
-how far below the band's own noise floor the quantisation floor must stay, and
-the server works out per packet how many bits that needs.
+**On by default, at 26 dB.** It trades a defined amount of quantisation noise
+for bandwidth, and the request is a **margin**, not a bit depth: `DB` is how far
+below the band's own noise floor the quantisation floor must stay, and the
+server works out per packet how many bits that needs.
 
 That is what makes one number mean the same thing on every band. A fixed depth
 does not: ten bits leaves 50 dB of headroom on a dead 6 m band and 9 dB on
@@ -60,15 +60,22 @@ at `--min-margin 20`**, the same samples at the same rate for 60% less traffic.
 A busy band or a lower margin saves less, which is the point — medium wave
 spends the bytes because its carriers genuinely need the depth.
 
+- **Default 26 dB**, the same setting the web client defaults to: the measured
+  transparent point, where every FT8 decode survives with its reported strength
+  intact, for about 0.01 dB on the noise floor and roughly half the bytes. This
+  bridge carries nothing but IQ, the one mode reduced depth applies to, so the
+  default is the one that saves the bandwidth rather than the one that spends
+  it. `--min-margin 0` turns it off and takes the lossless stream.
 - **15 to 60 dB**, and a value outside that is refused at startup rather than
   quietly clamped to something else. 15 dB is where the added noise (0.14 dB on
   the floor) stops being resolvable by a receiver's own readings; past 60 dB the
-  request buys nothing. `0` means the same as leaving the option off.
+  request buys nothing.
 - **Needs UberSDR 0.1.64 or later.** A server that has never heard of
-  `min_margin` ignores it and sends the lossless stream, so nothing breaks.
+  `min_margin` ignores it and sends the lossless stream, so an older server
+  still works, it just costs more bandwidth.
 - Packets coded this way declare their own profile, and a decoder that does not
-  implement it refuses them rather than playing noise — which is why the mode is
-  reachable only by asking for it. `test/run.sh` decodes a scaled stream the
+  implement it refuses them rather than playing noise — which is why the server
+  only ever codes this way for a client that asked. `test/run.sh` decodes a scaled stream the
   server's own encoder produced and compares the samples, as it does for the
   lossless one.
 

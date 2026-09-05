@@ -92,7 +92,8 @@ struct main_cb {
     char ubersdr_password[64];  /* optional */
 
     /* Reduced-depth IQ, in dB of margin under the band's own noise floor, or 0
-     * for the lossless stream every client gets by default. Not a bit depth:
+     * for the lossless stream. On by default at MIN_MARGIN_DEFAULT_DB; only
+     * --min-margin 0 turns it off. Not a bit depth:
      * the server works out per packet how many bits that margin needs, which is
      * what makes the same request mean the same thing on a dead 6 m band and on
      * medium wave. Travels as min_margin in the WebSocket query string; a

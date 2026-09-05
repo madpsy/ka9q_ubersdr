@@ -255,8 +255,9 @@ private:
     std::string _currentMode;
 
     // Reduced-depth IQ, in whole dB of margin under the band's own noise floor,
-    // or 0 for the lossless stream every device gets by default. Set once from
-    // the min_margin device argument; see parseMinMargin.
+    // or 0 for the lossless stream. On by default at kMinMarginDefaultDB; only
+    // min_margin=0 turns it off. Set once from the min_margin device argument;
+    // see parseMinMargin.
     int _minMargin;
 
     uint64_t _currentFrequency;
@@ -339,6 +340,14 @@ private:
 static const double kMinMarginMinDB = 15.0;
 static const double kMinMarginMaxDB = 60.0;
 
+// What min_margin is when a device string does not carry it, and it is on:
+// 26 dB, the same MARGIN_DEFAULT_DB the web client uses, the measured
+// transparent setting where every FT8 decode survives with its reported
+// strength intact. It costs about 0.01 dB of noise floor for roughly half the
+// bytes, and this driver carries nothing but IQ -- the one mode reduced depth
+// applies to. min_margin=0 asks for the lossless stream instead.
+static const int kMinMarginDefaultDB = 26;
+
 // Parse and validate the min_margin device argument, returning whole dB.
 //
 // Strict on purpose, and it throws rather than warning. The server clamps
@@ -347,8 +356,8 @@ static const double kMinMarginMaxDB = 60.0;
 // life of the device, and nothing downstream would ever say so. A host reports a
 // failed make; it does not report a stream that is quieter than it asked for.
 //
-// The one value accepted outside the range is 0, which is how a saved device
-// string says "no reduced-depth mode" without having to drop the argument.
+// The one value accepted outside the range is 0, which is how a device string
+// turns the default off and asks for the lossless stream.
 static int parseMinMargin(const std::string &text)
 {
     if (text.empty())
@@ -367,7 +376,7 @@ static int parseMinMargin(const std::string &text)
         char msg[192];
         snprintf(msg, sizeof(msg),
                  "SoapyUberSDR: min_margin: %g dB is outside %g-%g; the server would not "
-                 "honour it as asked. Omit it for a lossless stream",
+                 "honour it as asked. Pass min_margin=0 for a lossless stream",
                  v, kMinMarginMinDB, kMinMarginMaxDB);
         throw std::runtime_error(msg);
     }
@@ -391,7 +400,8 @@ SoapyUberSDR::SoapyUberSDR(const SoapySDR::Kwargs &args)
     _serverURL = args.at("server");
     _password = args.count("password") ? args.at("password") : "";
     _currentMode = args.count("mode") ? args.at("mode") : "iq96";
-    _minMargin = args.count("min_margin") ? parseMinMargin(args.at("min_margin")) : 0;
+    _minMargin = args.count("min_margin") ? parseMinMargin(args.at("min_margin"))
+                                         : kMinMarginDefaultDB;
     _currentFrequency = 14074000;
     _sampleRate = modeToSampleRate(_currentMode);
     _streaming = false;
@@ -419,13 +429,20 @@ SoapyUberSDR::SoapyUberSDR(const SoapySDR::Kwargs &args)
                        _serverURL.c_str(), _currentMode.c_str(), _useTLS ? "TLS" : "Plain");
     }
 
-    // Said once, because its effect is invisible from the host's side: the same
-    // samples arrive at the same rate, and only the link between here and the
-    // receiver carries fewer bytes for them.
+    // Said once either way, because its effect is invisible from the host's
+    // side: the same samples arrive at the same rate, and only the link between
+    // here and the receiver carries fewer bytes for them. Said even when it is
+    // the default, so an operator who did not ask for it can see that it is on
+    // and how to turn it off.
     if (_minMargin > 0) {
         SoapySDR::logf(SOAPY_SDR_INFO,
                        "SoapyUberSDR: Reduced-depth IQ: asking for %d dB of margin under "
-                       "the noise floor", _minMargin);
+                       "the noise floor%s", _minMargin,
+                       _minMargin == kMinMarginDefaultDB
+                           ? " (the default; min_margin=0 for the lossless stream)" : "");
+    } else {
+        SoapySDR::log(SOAPY_SDR_INFO,
+                      "SoapyUberSDR: Reduced-depth IQ off: taking the lossless stream");
     }
 }
 
@@ -1263,11 +1280,10 @@ void SoapyUberSDR::connectWebSocket()
     // quietly sending an older one.
     ss << "&format=pcm-zstd";
     ss << "&version=" << ubersdr::kPCMProtocolVersion;
-    // Sent only when it was asked for. An absent min_margin is not the same
-    // thing to the server as a zero one: absent is the lossless path, which is
-    // what a device that has not asked for the reduced-depth mode must keep
-    // getting, and a server too old to know the parameter ignores it and sends
-    // the lossless stream anyway.
+    // Sent unless min_margin=0 turned it off. An absent min_margin is not the
+    // same thing to the server as a zero one: absent is the lossless path,
+    // which is what asking for 0 has to produce, and a server too old to know
+    // the parameter ignores it and sends the lossless stream anyway.
     if (_minMargin > 0) ss << "&min_margin=" << _minMargin;
     ss << "&user_session_id=" << _userSessionID;
     if (!_password.empty()) {

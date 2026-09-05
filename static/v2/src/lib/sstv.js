@@ -29,10 +29,10 @@ export function sstvAvailable(serverInfo) {
         && addons.some((n) => String(n).toLowerCase() === ADDON_NAME);
 }
 
-// The widget's query, kept exactly: complete pictures only, above an SNR that
-// filters out the noise-only decodes, and without the per-line SNR series,
-// which is a lot of numbers for something nothing here draws.
-const QUERY = 'snr_series=0&complete=1&min_snr=38';
+// The widget's query: complete pictures only, above an SNR that filters out
+// the noise-only decodes, and without the per-line SNR series, which is a lot
+// of numbers for something nothing here draws.
+const QUERY = 'snr_series=0&complete=1&min_snr=3.3';
 
 // How many pictures the panel will show at once. Six because that is a couple
 // of hours of a busy SSTV net, and because a dock column of more than that is

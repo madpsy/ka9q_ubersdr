@@ -1280,11 +1280,10 @@ void *ws_thread(void *arg)
              * carries is a predictive codec rather than a zstd wrapper. Named
              * explicitly rather than left to the server's default, so the query
              * says what this bridge actually reads. */
-            /* min_margin is only sent when it was asked for. An empty or
-             * zero-valued parameter is not the same thing to the server as an
-             * absent one -- absent is the lossless path, which is what every
-             * client that has not asked for the reduced-depth mode must keep
-             * getting. */
+            /* min_margin is sent unless --min-margin 0 turned it off. An
+             * empty or zero-valued parameter is not the same thing to the
+             * server as an absent one -- absent is the lossless path, which is
+             * what asking for 0 has to produce. */
             char margin[32] = "";
             if (mcb.min_margin > 0) {
                 snprintf(margin, sizeof(margin), "&min_margin=%d", mcb.min_margin);
@@ -1520,13 +1519,23 @@ finishup:
 #define MIN_MARGIN_MAX_DB 60.0
 
 /*
+ * What --min-margin is when nobody says otherwise, and it is on: 26 dB, the
+ * same MARGIN_DEFAULT_DB the web client uses, the measured transparent setting
+ * where every FT8 decode survives with its reported strength intact. It costs
+ * about 0.01 dB of noise floor for roughly half the bytes, and it only ever
+ * touches IQ, which is all this bridge carries. --min-margin 0 turns it off and
+ * takes the lossless stream.
+ */
+#define MIN_MARGIN_DEFAULT_DB 26
+
+/*
  * Parse and validate a --min-margin argument, in dB.
  *
  * Strict on purpose. The server clamps whatever it is sent into its own range
  * and rounds it to a whole dB, so a typo -- "2O", "20dB", "6" -- would produce
  * a working but different stream, and nothing downstream would ever say so. The
- * one value accepted outside the range is 0, which is how a script says "no
- * reduced-depth mode" without having to build a different command line.
+ * one value accepted outside the range is 0, which is how a command line turns
+ * the default off and asks for the lossless stream.
  */
 static bool parse_min_margin(const char *arg, int *out)
 {
@@ -1672,6 +1681,7 @@ int main (int argc, char *argv[])
     mcb.num_rxs = MAX_RCVRS;
     mcb.wideband = false;
     mcb.device_type = HERMES_LITE;
+    mcb.min_margin = MIN_MARGIN_DEFAULT_DB;
     strcpy(mcb.ubersdr_url, "http://localhost:8080");
 
     /* --callsign / --discover state */
@@ -1710,12 +1720,13 @@ int main (int argc, char *argv[])
             printf("  --device N         Device type: 1=Hermes, 6=HermesLite (default 6)\n");
             printf("  --wideband         Enable wideband data (default disabled)\n");
             printf("  --min-margin DB    Reduced-depth IQ: keep the quantisation floor at\n");
-            printf("                     least DB below the band's own noise floor, %g-%g.\n",
+            printf("                     least DB below the band's own noise floor, %g-%g\n",
                    MIN_MARGIN_MIN_DB, MIN_MARGIN_MAX_DB);
-            printf("                     Omitted, the stream is lossless. Saves 15-60%% of\n");
-            printf("                     the bandwidth depending on the band; needs UberSDR\n");
-            printf("                     0.1.64 or later, and older servers ignore it and\n");
-            printf("                     send the lossless stream\n");
+            printf("                     (default %d). Saves 15-60%% of the bandwidth\n",
+                   MIN_MARGIN_DEFAULT_DB);
+            printf("                     depending on the band; 0 asks for the lossless\n");
+            printf("                     stream instead. Needs UberSDR 0.1.64 or later, and\n");
+            printf("                     older servers ignore it and send the lossless stream\n");
             printf("  --debug            Log per-DDC frequency requests from the client\n");
             printf("\n");
             printf("Examples:\n");
@@ -1724,7 +1735,7 @@ int main (int argc, char *argv[])
             printf("  %s --url http://localhost:8080 --device 1 --receivers 4 --interface eth0\n", basename(argv[0]));
             printf("  %s --discover --interface eth0\n", basename(argv[0]));
             printf("  %s --callsign K3GMQ --interface eth0\n", basename(argv[0]));
-            printf("  %s --url http://localhost:8080 --min-margin 20 --interface eth0\n", basename(argv[0]));
+            printf("  %s --url http://localhost:8080 --min-margin 0 --interface eth0\n", basename(argv[0]));
             return EXIT_SUCCESS;
             break;
 
@@ -1775,12 +1786,18 @@ int main (int argc, char *argv[])
      * protocol gives the client no way to be told. */
     fetch_ubersdr_tuning_range(mcb.ubersdr_url);
 
-    /* Said once, because it is the one setting whose effect is invisible from
-     * the HPSDR side: the client sees the same samples at the same rate, and
-     * only the throughput line every five seconds shows what it saved. */
+    /* Said once either way, because it is the one setting whose effect is
+     * invisible from the HPSDR side: the client sees the same samples at the
+     * same rate, and only the throughput line every five seconds shows what it
+     * saved. Said even when it is the default, so an operator who did not ask
+     * for it can see that it is on and how to turn it off. */
     if (mcb.min_margin > 0) {
-        t_print("Reduced-depth IQ: asking for %d dB of margin under the noise floor\n",
-                mcb.min_margin);
+        t_print("Reduced-depth IQ: asking for %d dB of margin under the noise floor%s\n",
+                mcb.min_margin,
+                mcb.min_margin == MIN_MARGIN_DEFAULT_DB
+                    ? " (the default; --min-margin 0 for the lossless stream)" : "");
+    } else {
+        t_print("Reduced-depth IQ off: taking the lossless stream\n");
     }
 
     int same_int = 0, prgms_found = 0;

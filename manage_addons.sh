@@ -75,7 +75,11 @@ install_addon() {
     echo "Installing addon '$name' from:"
     echo "  $url"
     echo ""
-    curl -fsSL "$url" | bash
+    if ! curl -fsSL "$url" | bash; then
+        echo ""
+        echo "Error: install script for addon '$name' failed." >&2
+        return 1
+    fi
     echo ""
     echo "Addon '$name' installation complete."
 
@@ -1038,6 +1042,139 @@ edit_compose_menu() {
     echo ""
 }
 
+# Return an addon to the stopped state after an update started it, and disable
+# its proxy so UberSDR doesn't route to a dead backend.
+# Usage: stop_addon_again <name>
+stop_addon_again() {
+    local name="$1"
+    local addon_dir="$HOME/ubersdr/${name}"
+
+    echo ""
+    echo "'$name' was not running before the update — stopping it again..."
+
+    local stop_script="$addon_dir/stop.sh"
+    if [[ -f "$stop_script" ]]; then
+        bash "$stop_script" || echo "Warning: stop.sh failed for '$name'." >&2
+    elif [[ -f "$addon_dir/docker-compose.yml" ]]; then
+        echo "Warning: stop.sh not found at $stop_script — using docker compose directly..." >&2
+        docker compose -f "$addon_dir/docker-compose.yml" stop || \
+            echo "Warning: could not stop '$name'." >&2
+    else
+        echo "Warning: no stop.sh or docker-compose.yml for '$name' — left running." >&2
+        return 0
+    fi
+
+    echo "Disabling addon proxy '$name'..."
+    api_toggle_addon_proxy "$name" false || \
+        echo "Warning: could not disable addon proxy '$name'." >&2
+}
+
+# Update every installed addon by re-running its install script.
+# The install scripts are idempotent, so this is the same action as option 2
+# applied to each addon that has a ~/ubersdr/<name>/docker-compose.yml.
+# Addons that were not running beforehand are stopped again afterwards, so an
+# update never starts an addon the operator had deliberately left down.
+# Usage: update_all_addons [--yes]   (--yes skips the confirmation prompt)
+update_all_addons() {
+    local assume_yes="no"
+    [[ "${1:-}" == "--yes" ]] && assume_yes="yes"
+
+    ADDON_NAMES=()
+    while IFS= read -r name; do
+        if is_addon_installed "$name"; then
+            ADDON_NAMES+=("$name")
+        fi
+    done < <(get_addon_names)
+
+    if [[ ${#ADDON_NAMES[@]} -eq 0 ]]; then
+        echo ""
+        echo "No installed addons found — nothing to update."
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    echo "The following installed addons will be updated:"
+    echo ""
+    local i=1
+    for name in "${ADDON_NAMES[@]}"; do
+        printf "  %-4s  %-20s\n" "$i." "$name"
+        (( i++ )) || true
+    done
+    echo ""
+
+    if [[ "$assume_yes" != "yes" ]]; then
+        read -rp "Update all ${#ADDON_NAMES[@]} installed addon(s)? [y/N]: " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Cancelled."
+            echo ""
+            return 0
+        fi
+    fi
+
+    local updated=() failed=()
+    for name in "${ADDON_NAMES[@]}"; do
+        # An addon that was stopped before the update must be left stopped
+        # afterwards, even though its install script starts the container.
+        local was_running="no"
+        if is_addon_running "$name"; then
+            was_running="yes"
+        fi
+
+        echo ""
+        echo "================================================================================"
+        echo "  Updating '$name' ($(( ${#updated[@]} + ${#failed[@]} + 1 )) of ${#ADDON_NAMES[@]})"
+        if [[ "$was_running" != "yes" ]]; then
+            echo "  (not running — will be stopped again after the update)"
+        fi
+        echo "================================================================================"
+
+        local result="ok"
+        if install_addon "$name"; then
+            :
+        else
+            result="failed"
+            echo "Error: update of '$name' failed — continuing with the remaining addons." >&2
+        fi
+
+        if [[ "$was_running" != "yes" ]]; then
+            stop_addon_again "$name"
+            if [[ "$result" == "ok" ]]; then
+                updated+=("$name (left stopped)")
+            else
+                failed+=("$name (left stopped)")
+            fi
+        else
+            if [[ "$result" == "ok" ]]; then
+                updated+=("$name")
+            else
+                failed+=("$name")
+            fi
+        fi
+    done
+
+    echo ""
+    echo "================================================================================"
+    echo "  Update summary"
+    echo "================================================================================"
+    if [[ ${#updated[@]} -gt 0 ]]; then
+        echo "  Updated (${#updated[@]}):"
+        for name in "${updated[@]}"; do
+            echo "    ✓ $name"
+        done
+    fi
+    if [[ ${#failed[@]} -gt 0 ]]; then
+        echo "  Failed (${#failed[@]}):"
+        for name in "${failed[@]}"; do
+            echo "    ✗ $name"
+        done
+    fi
+    echo "================================================================================"
+    echo ""
+
+    [[ ${#failed[@]} -eq 0 ]]
+}
+
 # Main menu
 main_menu() {
     while true; do
@@ -1047,19 +1184,20 @@ main_menu() {
         echo "==============================="
         echo "  1) List available addons"
         echo "  2) Install/update a specific addon"
-        echo "  3) Show addon details"
-        echo "  4) Show live registered addons"
-        echo "  5) Test addon connectivity"
-        echo "  6) Enable/disable an addon"
-        echo "  7) Control an addon"
-        echo "  8) Show UI password"
-        echo "  9) Show addon logs"
-        echo " 10) Show addon disk space"
-        echo " 11) Delete and destroy an addon"
-        echo " 12) Edit Docker Compose file"
-        echo " 13) Exit"
+        echo "  3) Update all installed addons"
+        echo "  4) Show addon details"
+        echo "  5) Show live registered addons"
+        echo "  6) Test addon connectivity"
+        echo "  7) Enable/disable an addon"
+        echo "  8) Control an addon"
+        echo "  9) Show UI password"
+        echo " 10) Show addon logs"
+        echo " 11) Show addon disk space"
+        echo " 12) Delete and destroy an addon"
+        echo " 13) Edit Docker Compose file"
+        echo " 14) Exit"
         echo ""
-        read -rp "Select an option [1-13]: " opt
+        read -rp "Select an option [1-14]: " opt
         echo ""
 
         case "$opt" in
@@ -1079,48 +1217,89 @@ main_menu() {
                 fi
                 ;;
             3)
+                update_all_addons || true
+                ;;
+            4)
                 SELECTED_ADDON=""
                 if pick_addon "Select addon to view details"; then
                     show_addon_info "$SELECTED_ADDON"
                 fi
                 ;;
-            4)
+            5)
                 show_live_addons
                 ;;
-            5)
+            6)
                 test_addon_connectivity
                 ;;
-            6)
+            7)
                 toggle_addon_menu
                 ;;
-            7)
+            8)
                 control_addon_menu
                 ;;
-            8)
+            9)
                 show_ui_password_menu
                 ;;
-            9)
+            10)
                 show_logs_menu
                 ;;
-            10)
+            11)
                 show_disk_space
                 ;;
-            11)
+            12)
                 delete_addon_menu
                 ;;
-            12)
+            13)
                 edit_compose_menu
                 ;;
-            13)
+            14)
                 echo "Goodbye."
                 exit 0
                 ;;
             *)
-                echo "Invalid option. Please choose 1-13."
+                echo "Invalid option. Please choose 1-14."
                 ;;
         esac
     done
 }
+
+# ---------------------------------------------------------------------------
+# Command line arguments
+# ---------------------------------------------------------------------------
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [option]
+
+With no option an interactive menu is shown.
+
+Options:
+  --update-all   Update every installed addon without prompting, then exit.
+                 Exits non-zero if any addon failed to update.
+  -h, --help     Show this help and exit.
+EOF
+}
+
+case "${1:-}" in
+    "")
+        ;;
+    --update-all)
+        if update_all_addons --yes; then
+            exit 0
+        else
+            exit 1
+        fi
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    *)
+        echo "Error: unknown option '$1'" >&2
+        echo "" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Startup banner

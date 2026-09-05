@@ -915,6 +915,22 @@ else
     echo "Auto-update cron job installed. Updates will be checked every minute."
 fi
 
+# Update any installed addons. This is best-effort: an addon that fails to
+# update must never fail the hub installation itself.
+echo
+echo "Updating installed addons..."
+ADDON_MANAGER="$ACTUAL_HOME/ubersdr/manage_addons.sh"
+if [ -f "$ADDON_MANAGER" ]; then
+    if HOME="$ACTUAL_HOME" bash "$ADDON_MANAGER" --update-all; then
+        echo "Addon update finished."
+    else
+        echo "Warning: one or more addons failed to update. Continuing anyway."
+        echo "Run '$ADDON_MANAGER' to update them individually."
+    fi
+else
+    echo "Skipping addon update: $ADDON_MANAGER not found."
+fi
+
 echo
 echo "=== Installation Complete ==="
 echo

@@ -212,7 +212,8 @@ type RTLTCPBridge struct {
 	initialFreq int64
 
 	// minMargin is the reduced-depth IQ request in dB, or 0 for the lossless
-	// stream every session gets by default. See parseMinMargin.
+	// stream. On by default at MinMarginDefaultDB; only -min-margin 0 turns it
+	// off. See parseMinMargin.
 	minMargin int
 
 	running bool
@@ -392,10 +393,10 @@ func (s *clientSession) connectToUberSDR(clientAddr net.Addr) error {
 	query.Set("format", "pcm-zstd")
 	query.Set("version", fmt.Sprintf("%d", pcmProtocolVersion))
 	query.Set("user_session_id", s.userSessionID)
-	// Sent only when it was asked for. An absent min_margin is not the same
-	// thing to the server as a zero one: absent is the lossless path, which is
-	// what a session that has not asked for the reduced-depth mode must keep
-	// getting, and a server too old to know the parameter ignores it.
+	// Sent unless -min-margin 0 turned it off. An absent min_margin is not the
+	// same thing to the server as a zero one: absent is the lossless path,
+	// which is what asking for 0 has to produce, and a server too old to know
+	// the parameter ignores it.
 	if s.bridge.minMargin > 0 {
 		query.Set("min_margin", fmt.Sprintf("%d", s.bridge.minMargin))
 	}
@@ -942,14 +943,24 @@ const (
 	MinMarginMaxDB = 60.0
 )
 
+// What -min-margin is when nobody says otherwise, and it is on: 26 dB, the same
+// MARGIN_DEFAULT_DB the web client uses, the measured transparent setting where
+// every FT8 decode survives with its reported strength intact. It costs about
+// 0.01 dB of noise floor for roughly half the bytes on the WebSocket, and this
+// bridge carries nothing but IQ -- the one mode reduced depth applies to. The
+// margin is also far under what the client ever sees: rtl_tcp is handed 8-bit
+// samples, so the depth the server drops is depth this bridge was going to
+// throw away anyway. -min-margin 0 asks for the lossless stream instead.
+const MinMarginDefaultDB = 26
+
 // parseMinMargin validates the -min-margin flag and returns the whole dB the
 // server will be asked for.
 //
 // Strict on purpose. The server clamps whatever it is sent into its own range
 // and rounds it to a whole dB, so a value outside the range would produce a
 // working but different stream and nothing downstream would ever say so. Zero
-// is the one value accepted outside the range: it is how a script says "no
-// reduced-depth mode" without having to build a different command line.
+// is the one value accepted outside the range: it is how a command line turns
+// the default off and asks for the lossless stream.
 func parseMinMargin(v float64) (int, error) {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0, fmt.Errorf("%v is not a number of dB", v)
@@ -959,7 +970,7 @@ func parseMinMargin(v float64) (int, error) {
 	}
 	if v < MinMarginMinDB || v > MinMarginMaxDB {
 		return 0, fmt.Errorf("%g dB is outside %g-%g; the server would not honour it as asked. "+
-			"Leave it at 0 for a lossless stream", v, MinMarginMinDB, MinMarginMaxDB)
+			"Pass 0 for a lossless stream", v, MinMarginMinDB, MinMarginMaxDB)
 	}
 	dB := int(math.Round(v))
 	if float64(dB) != v {
@@ -1143,7 +1154,7 @@ func main() {
 	configFile := flag.String("config", "", "Frequency routing configuration file (optional, YAML format)")
 	initialFreq := flag.Int64("freq", 14200000, "Initial frequency in Hz (default: 14.2 MHz)")
 	maxClients := flag.Int("max-clients", DefaultMaxClients, "Maximum simultaneous rtl_tcp clients (0 = unlimited)")
-	minMargin := flag.Float64("min-margin", 0, "Reduced-depth IQ: dB of margin under the noise floor (15-60; 0 = lossless)")
+	minMargin := flag.Float64("min-margin", MinMarginDefaultDB, "Reduced-depth IQ: dB of margin under the noise floor (15-60; 0 = lossless)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "UberSDR to rtl_tcp Bridge\n\n")
@@ -1168,8 +1179,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "        Each client gets an independent UberSDR WebSocket session.\n")
 		fmt.Fprintf(os.Stderr, "  -min-margin float\n")
 		fmt.Fprintf(os.Stderr, "        Reduced-depth IQ: keep the quantisation floor at least this many dB\n")
-		fmt.Fprintf(os.Stderr, "        below the band's own noise floor (%g-%g; 0, the default, is lossless).\n",
-			MinMarginMinDB, MinMarginMaxDB)
+		fmt.Fprintf(os.Stderr, "        below the band's own noise floor (%g-%g, default %d; 0 is lossless).\n",
+			MinMarginMinDB, MinMarginMaxDB, MinMarginDefaultDB)
 		fmt.Fprintf(os.Stderr, "        A margin rather than a bit depth, so one number means the same thing\n")
 		fmt.Fprintf(os.Stderr, "        on every band. Saves 15-60%% of the bandwidth depending on the band;\n")
 		fmt.Fprintf(os.Stderr, "        needs UberSDR 0.1.64 or later, and older servers ignore it.\n\n")
@@ -1184,8 +1195,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s --max-clients 8\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Unlimited clients\n")
 		fmt.Fprintf(os.Stderr, "  %s --max-clients 0\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Two thirds of the bandwidth, quantisation noise 20 dB under the band\n")
-		fmt.Fprintf(os.Stderr, "  %s --min-margin 20\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Take the lossless upstream stream instead of the default %d dB margin\n", MinMarginDefaultDB)
+		fmt.Fprintf(os.Stderr, "  %s --min-margin 0\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Sample Rate:\n")
 		fmt.Fprintf(os.Stderr, "  Always uses iq384 (384 kHz) from UberSDR, so the real signal spans ±192 kHz\n")
 		fmt.Fprintf(os.Stderr, "  of the tuned frequency. If the client requests a different rate via\n")
@@ -1276,7 +1287,10 @@ func main() {
 	log.Printf("  Tuning range:   %d Hz - %d Hz (%.3f kHz - %.3f MHz)",
 		rangeLo, rangeHi, float64(rangeLo)/1e3, float64(rangeHi)/1e6)
 	log.Printf("  Max clients:    %s", maxClientsStr(*maxClients))
-	if marginDB > 0 {
+	if marginDB == MinMarginDefaultDB {
+		log.Printf("  Reduced depth:  %d dB of margin under the noise floor "+
+			"(the default; -min-margin 0 for the lossless stream)", marginDB)
+	} else if marginDB > 0 {
 		log.Printf("  Reduced depth:  %d dB of margin under the noise floor", marginDB)
 	} else {
 		log.Printf("  Reduced depth:  off (lossless)")

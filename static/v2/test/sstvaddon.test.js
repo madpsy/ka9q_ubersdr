@@ -48,7 +48,7 @@ t('the query is the one the addon expects', () => {
     // decodes, and without the per-line SNR series nothing here draws.
     const url = imagesUrl(1);
     assert.ok(url.startsWith('/addon/sstv/api/images?'), url);
-    for (const part of ['limit=1', 'snr_series=0', 'complete=1', 'min_snr=38', 'offset=0']) {
+    for (const part of ['limit=1', 'snr_series=0', 'complete=1', 'min_snr=3.3', 'offset=0']) {
         assert.ok(url.includes(part), `${part} missing from ${url}`);
     }
 });

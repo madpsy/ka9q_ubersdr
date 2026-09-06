@@ -146,8 +146,14 @@
         <div id="data-container" class="data-container" style="display: none;">
             <h2 style="margin-bottom: 15px; font-size: 1.3em;" id="data-title">Decoder Spots</h2>
             
-            <div class="stats-grid" id="stats-grid">
-                <!-- Stats will be inserted here -->
+            <div class="stats-section collapsed" id="stats-section">
+                <button type="button" class="stats-toggle" id="stats-toggle" aria-expanded="false" aria-controls="stats-grid">
+                    <span class="stats-toggle-arrow">▶</span>
+                    <span>📊 Statistics</span>
+                </button>
+                <div class="stats-grid" id="stats-grid">
+                    <!-- Stats will be inserted here -->
+                </div>
             </div>
 
             <!-- Map Section -->

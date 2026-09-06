@@ -121,11 +121,54 @@ h1 {
     margin-bottom: 20px;
 }
 
+.stats-section {
+    margin-bottom: 20px;
+}
+
+.stats-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 15px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: white;
+    font-size: 1em;
+    font-weight: bold;
+    cursor: pointer;
+    text-align: left;
+}
+
+.stats-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.stats-toggle-arrow {
+    display: inline-block;
+    transition: transform 0.2s ease;
+    transform: rotate(90deg);
+}
+
+.stats-section.collapsed .stats-toggle-arrow {
+    transform: rotate(0deg);
+}
+
+.stats-section.collapsed .stats-grid {
+    display: none;
+}
+
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 15px;
     margin-bottom: 20px;
+}
+
+.stats-section .stats-grid {
+    margin-top: 15px;
+    margin-bottom: 0;
 }
 
 .stat-card {

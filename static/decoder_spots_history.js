@@ -355,6 +355,14 @@
         clearFiltersBtn.addEventListener('click', clearFilters);
         downloadBtn.addEventListener('click', downloadCSV);
 
+        // Statistics cards start collapsed; the header toggles them
+        const statsSection = document.getElementById('stats-section');
+        const statsToggle = document.getElementById('stats-toggle');
+        statsToggle.addEventListener('click', () => {
+            const collapsed = statsSection.classList.toggle('collapsed');
+            statsToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        });
+
         // Add client-side filter button event listeners
         document.getElementById('filter-multiple-bands').addEventListener('click', () => {
             applyClientFilter('multiple-bands');

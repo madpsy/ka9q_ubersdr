@@ -92,7 +92,7 @@ export function Field({ label, hint, children, inline }) {
 // inside the thumb's travel, so it lines up with where the thumb would sit.
 export function Slider({
     value, min, max, step = 1, onChange, onCommit, disabled, marker, markerTone, markerTitle,
-    track, level, fillColor, inputRef,
+    track, level, fillColor,
 }) {
     // Percentage drives the filled-track gradient without a second element.
     const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
@@ -114,11 +114,6 @@ export function Slider({
     const input = (
         <input
             type="range"
-            // A live meter in the track is written straight onto the element —
-            // see the volume slider — because a level that moves every frame is
-            // a re-render every frame otherwise, and the props above are then
-            // only what it is drawn as before the first frame arrives.
-            ref={inputRef}
             className={`slider${track ? ' slider--track' : ''}`}
             style={{
                 '--fill': `${fillPct}%`,

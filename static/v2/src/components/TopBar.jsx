@@ -195,10 +195,8 @@ function SpaceWeather() {
 // disabled input.
 //
 // Sampled in its own component so the rest of the bar — the frequency, the
-// clock — does not re-render with it, and fast enough to look like a meter: the
-// fill is a gradient stop, which cannot be transitioned, so the sample rate is
-// all the smoothing there is. That is why it is driven from an animation frame
-// rather than from a React state tick; see the loop below.
+// clock — does not re-render with it, at the rate the RF meter beside it runs
+// at, and drawn the way that one is drawn: see the note on the sample below.
 /**
  * Mute, and how loud.
  *
@@ -210,54 +208,27 @@ function SpaceWeather() {
  * this is a prop here rather than another entry rendered conditionally above.
  */
 function VolumeSlider({ slider }) {
-    const { audio, actions, meters } = useRadio();
-
-    // Every frame, and not through React.
+    const { audio, actions } = useRadio();
+    // Ten a second, the same as the RF meter beside it, and smooth for the same
+    // reason it is.
     //
-    // This was a state tick at ten a second, on the grounds that the question a
-    // VU answers — is anything coming out, and how hard — is answered as well at
-    // 10 Hz as at 24, and that each sample costs a repaint of the fill and so of
-    // the whole strip. The first half of that was wrong: the fill is a gradient
-    // stop and gradient stops cannot be transitioned, so the sample rate is the
-    // only smoothing the bar gets, and ten steps a second reads as a meter that
-    // is stuck rather than as a level that is steady.
+    // Both bars are ten samples a second and neither would be watchable at that
+    // rate on its own — what makes the RF meter look continuous is not its
+    // sampling but the 90 ms transition on its width, which leaves the
+    // compositor interpolating between samples at the display's own rate. This
+    // one could not do that: its fill is a gradient stop rather than a width,
+    // and an unregistered custom property has no type, so there is nothing for
+    // the browser to interpolate. Registering `--fill` as a `<percentage>` gives
+    // it one, and the same transition then applies here — see @property in
+    // styles.css. So the two meters in this bar now move alike because they are
+    // drawn alike, rather than one of them being driven frame by frame from
+    // here.
     //
-    // The repaint is real, so the fix is not a faster state tick — that pays for
-    // the paint *and* re-renders the row on top. The two custom properties go
-    // straight onto the input from an animation frame instead: no render, no
-    // reconciliation, the style change folded into a frame the browser was
-    // already painting, and the whole loop parked by the browser while the tab
-    // is hidden, which a setInterval is not. `meters.current` is the mutable
-    // object the packet path already writes (RadioContext), refreshed from the
-    // player every 25 ms, so a frame always has something new to read.
-    const inputRef = useRef(null);
-    // What was last written, so a real re-render — a drag on the fader, a mute,
-    // the bar reflowing — draws the fill where this loop has it instead of
-    // flashing back to the volume position for a frame.
-    const pctRef = useRef(0);
-    const colourRef = useRef(audioLevelColour(0, false));
-    useEffect(() => {
-        let id = requestAnimationFrame(function tick() {
-            id = requestAnimationFrame(tick);
-            const el = inputRef.current;
-            if (!el) return;
-            const pct = audioLevelPercent(meters.current.outLevel);
-            // Under a fifth of a percent is under a fifth of a pixel on a track
-            // this wide: writing it would invalidate the style and repaint the
-            // strip to change nothing, and audio that is merely quiet rather
-            // than silent never stops moving by that much.
-            if (Math.abs(pct - pctRef.current) >= 0.2) {
-                pctRef.current = pct;
-                el.style.setProperty('--fill', `${pct}%`);
-            }
-            const colour = audioLevelColour(pct, meters.current.clipping);
-            if (colour !== colourRef.current) {
-                colourRef.current = colour;
-                el.style.setProperty('--fill-color', colour);
-            }
-        });
-        return () => cancelAnimationFrame(id);
-    }, []);
+    // The rate was never what made this look wrong. That was the ballistics: a
+    // single average, the same weight rising and falling, that took a third of a
+    // second to answer and a second and a half to empty the bar. Those are in
+    // the player, where the level is measured (VU_ATTACK_MS, VU_RELEASE_MS).
+    const m = useMeters(10);
 
     // Unmuting with no fader on screen turns it up.
     //
@@ -306,18 +277,13 @@ function VolumeSlider({ slider }) {
             {slider && (
                 <span className="topbar__vol-slider" data-optional="volume">
                     <Slider
-                        inputRef={inputRef}
                         value={Math.round(audio.volume * 100)}
                         min={0}
                         max={100}
                         disabled={audio.muted}
                         onChange={(v) => actions.setVolume(v / 100)}
-                        // Reading the refs here is the point: these are what the
-                        // frame loop last put on the element, so a render for
-                        // some other reason reproduces the meter rather than
-                        // resetting it. The loop owns the value from then on.
-                        level={pctRef.current / 100}
-                        fillColor={colourRef.current}
+                        level={audioLevelPercent(m.outLevel) / 100}
+                        fillColor={audioLevelColour(audioLevelPercent(m.outLevel), m.clipping)}
                     />
                 </span>
             )}

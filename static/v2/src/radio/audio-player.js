@@ -38,10 +38,18 @@ const CLIP_HOLD_MS = 1200;
 // noise between them, calm enough to sit still and it trails the audio by a
 // quarter of a second, which is what this had and what made it look like a
 // meter wired to something else. Rising, it is as good as immediate; falling,
-// it eases off slowly enough that a peak is still readable after the transient
-// that made it has gone. This is what a meter with a needle in it does.
+// it eases off rather than dropping out from under the reading.
+//
+// The release reads much slower on screen than its number suggests, which is
+// worth knowing before tuning it. The decay is exponential in amplitude and the
+// bar is drawn in dB (audioLevelPercent, -60..0 dBFS), so what the eye sees is
+// a straight slide down the scale at 8.686/tau dB per second — and the scale is
+// sixty dB tall. At the 220 ms this started on, emptying the bar took a second
+// and a half. 70 ms is 124 dB/s: half a second from full scale to nothing, a
+// fifth of a second to fall the 20 dB that takes it out of the green, which is
+// about as quick as it can go while still being a fall rather than a cut.
 const VU_ATTACK_MS = 12;
-const VU_RELEASE_MS = 220;
+const VU_RELEASE_MS = 70;
 const VU_ATTACK = Math.exp(-CLIP_TICK_MS / VU_ATTACK_MS);
 const VU_RELEASE = Math.exp(-CLIP_TICK_MS / VU_RELEASE_MS);
 

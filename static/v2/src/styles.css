@@ -893,6 +893,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* The fader's own width, which was the box's until the box had to be able to
    lose it. 116 + the 8px gap + the mute button is the 150 this always was. */
 .topbar__vol-slider { display: flex; width: 116px; flex: none; }
+/* The volume slider's fill is a live level, so it is interpolated between
+   samples — 90 ms, the figure .topbar__bar-fill uses, so the two meters in this
+   row settle at the same speed and read as one instrument rather than two.
+   Scoped to this one slider because everywhere else --fill is the control's own
+   position: animating that would leave the fill trailing the thumb through every
+   drag, which looks like lag in the control rather than motion in a meter. */
+.topbar__volume .slider { transition: --fill 90ms linear; }
 /* The volume slider is also the output meter — its fill is the level, not the
    setting — so it needs the same outline as the signal bar for the same reason:
    without one there is nothing to show how far the level has left to go, or
@@ -2440,6 +2447,29 @@ a.btn { text-decoration: none; }
    its hint is as often a phrase as a reading -- "audio, metadata and signal
    log" -- which has to be allowed to wrap or it runs out past the panel. */
 .field--inline .field__hint { white-space: nowrap; }
+
+/* Registering `--fill` is what lets a fill be animated at all.
+   An unregistered custom property is an untyped token stream, so a change to it
+   lands whole and the gradient stop it feeds jumps. That is why the volume
+   slider's fill used to step at its sample rate while the RF meter beside it —
+   whose fill is a `width`, a property the browser has always known how to
+   interpolate — glided between the very same ten samples a second. Given a type
+   here, `--fill` interpolates too, and the two meters can be drawn the same way.
+
+   `inherits: true` is load-bearing. The property is set inline on the <input>
+   and read by its ::-webkit-slider-runnable-track, and a pseudo-element gets it
+   only by inheritance; registered with `false` the track would resolve --fill to
+   the initial value and every slider in the app would come out empty.
+
+   The initial value is the one `var(--fill, 0%)` already fell back to, so
+   nothing that leaves it unset changes. Where @property is unsupported the whole
+   rule is dropped, the transition below has nothing to interpolate, and the fill
+   steps as it used to — degraded, not broken. */
+@property --fill {
+    syntax: '<percentage>';
+    inherits: true;
+    initial-value: 0%;
+}
 
 .slider {
     -webkit-appearance: none;

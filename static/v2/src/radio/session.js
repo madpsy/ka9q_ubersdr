@@ -245,6 +245,12 @@ async function checkConnection() {
             // it comes from the same reply for the same reason max_session_time
             // does: it depends on whether this client is bypassed.
             sessionTimeout: typeof data.session_timeout === 'number' ? data.session_timeout : null,
+            // Whether the server is treating this client as bypassed — an IP in
+            // timeout_bypass_ips, or the password above being the right one.
+            // Only the server can answer it: an accepted password and a listed
+            // IP look identical from here, and the second leaves nothing in the
+            // browser to look at.
+            bypassed: !!data.bypassed,
             status: res.status,
             sessionId: id,
         };
@@ -255,6 +261,11 @@ async function checkConnection() {
             clientIp: '',
             maxSessionTime: null,
             sessionTimeout: null,
+            // Not bypassed, deliberately, where `allowed` above is true: an
+            // unanswered check must not hand out a privilege. The cost of
+            // being wrong is a listener seeing a range marked as blocked that
+            // they can in fact hear, which is the harmless direction.
+            bypassed: false,
             status: 0,
             sessionId: id,
         };

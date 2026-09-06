@@ -1092,11 +1092,17 @@ export default function SpectrumView() {
     // group. Shaded across both pictures so the display says so before you tune
     // there and find out by ear.
     //
+    // Empty for a bypassed listener, who hears those ranges normally: the band
+    // plan is served to everyone alike, so this is the one end that knows the
+    // difference, and marking a range somebody can hear would be a plain lie.
+    // Emptying the list here rather than at each of the two places that read it
+    // means the shade and the cursor readout cannot disagree about it.
+    //
     // Same route as the station block: through the gfx ref, because the draw
     // loop paints it and the band list changes once, at load.
-    const blocked = useMemo(() => (radio.catalog.bands || [])
+    const blocked = useMemo(() => (radio.bypassed ? [] : (radio.catalog.bands || [])
         .filter((b) => String(b.group || '').trim().toLowerCase() === 'blocked')
-        .map((b) => ({ start: b.start, end: b.end })), [radio.catalog.bands]);
+        .map((b) => ({ start: b.start, end: b.end }))), [radio.catalog.bands, radio.bypassed]);
     useEffect(() => {
         gfx.current.blocked = blocked;
         // The waterfall's overlay is cached against a key rather than repainted

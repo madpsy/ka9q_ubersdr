@@ -122,6 +122,15 @@ export function RadioProvider({ children }) {
     // sit inactive before the server reclaims it — what the idle watch counts
     // against. Both come from the one /connection reply, and 0 means neither.
     const [session, setSession] = useState({ maxSec: null, idleSec: null, startedAt: 0 });
+    // Whether the server is treating this client as bypassed — an IP in
+    // timeout_bypass_ips, or the bypass password. From the same /connection
+    // reply, because it is the only thing that knows: a listed IP leaves
+    // nothing in the browser to look at, so `getBypassPassword()` answers only
+    // half the question.
+    //
+    // Starts false so anything reading it errs towards the ordinary listener's
+    // view until the server says otherwise.
+    const [bypassed, setBypassed] = useState(false);
     // Why the last session ended, when it was not the operator who ended it —
     // { kind, message, at }, or null. Set by noteFailure and cleared by the
     // next start, so it describes the reason there is nothing running now
@@ -710,6 +719,21 @@ export function RadioProvider({ children }) {
         return () => clearInterval(t);
     }, []);
 
+    // Asked for early because the band plan it qualifies is fetched here too: a
+    // blocked range is marked on the spectrum for an ordinary listener and left
+    // alone for a bypassed one, and both are decided before anything is running.
+    //
+    // Not an extra request. connectionCheck caches per session id, so this is
+    // the Start overlay's own check under another name — whichever of the two
+    // asks first makes the one POST and the other reads the answer.
+    useEffect(() => {
+        let cancelled = false;
+        connectionCheck().then((r) => {
+            if (!cancelled) setBypassed(!!(r && r.bypassed));
+        }, () => { /* not bypassed, which is the default already */ });
+        return () => { cancelled = true; };
+    }, []);
+
     useEffect(() => {
         let cancelled = false;
         Promise.all([
@@ -1133,6 +1157,10 @@ export function RadioProvider({ children }) {
                         startedAt: Date.now(),
                     });
                 }
+                // Re-read here as well as on mount: startSessionId above makes a
+                // new id, so this is a fresh check, and it is the one that knows
+                // about a password typed into the Start overlay since.
+                if (r) setBypassed(!!r.bypassed);
             }, () => { /* the countdown just stays as it was */ });
             const t = tuningRef.current;
             await audioConn.connect(t);
@@ -1710,7 +1738,7 @@ export function RadioProvider({ children }) {
 
     const value = useMemo(() => ({
         tuning, audioState, spectrumState, view, running, serverInfo, session, lost,
-        audio, squelch, agc, dsp, followTuning, filters, noise, locked,
+        audio, squelch, agc, dsp, followTuning, filters, noise, locked, bypassed,
         // `bookmarks` and `local` are what *propagates* — the marker bar, the
         // ⏮/⏭ neighbours, the lock screen, the Markers panel — so a hidden
         // group disappears from all of them without any of them knowing the
@@ -1727,7 +1755,7 @@ export function RadioProvider({ children }) {
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
         iqPrompt,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, locked, catalog, localMarks, hidden, actions, iqPrompt]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, locked, bypassed, catalog, localMarks, hidden, actions, iqPrompt]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

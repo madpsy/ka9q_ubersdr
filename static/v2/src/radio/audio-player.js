@@ -30,6 +30,30 @@ const CLIP_TICK_MS = 25;
 const CLIP_PEAK = 0.997;
 const CLIP_HOLD_MS = 1200;
 
+// Meter ballistics, as time constants rather than as weights, so they survive a
+// change to the tick above — the weights are worked out from it.
+//
+// Separate rise and fall because a single average has to choose between the two
+// and gets both wrong: quick enough to catch a syllable and it flickers on the
+// noise between them, calm enough to sit still and it trails the audio by a
+// quarter of a second, which is what this had and what made it look like a
+// meter wired to something else. Rising, it is as good as immediate; falling,
+// it eases off slowly enough that a peak is still readable after the transient
+// that made it has gone. This is what a meter with a needle in it does.
+const VU_ATTACK_MS = 12;
+const VU_RELEASE_MS = 220;
+const VU_ATTACK = Math.exp(-CLIP_TICK_MS / VU_ATTACK_MS);
+const VU_RELEASE = Math.exp(-CLIP_TICK_MS / VU_RELEASE_MS);
+
+// How much of the analyser's buffer the VU's RMS is taken over: the most recent
+// 512 samples, ~11 ms at 48 kHz. The buffer itself is as long as the audio
+// scope wants — that panel raises fftSize to 4096 while it is open — and an RMS
+// over all of it would be an 85 ms average, so the meter would go sluggish
+// exactly when somebody opened the scope to watch the audio closely. The clip
+// peak still reads the whole buffer; missing a full-scale sample matters, a
+// slightly older one in the average does not.
+const VU_WINDOW = 512;
+
 // The buffer setting is a *ceiling*, not a target — v1's `maxBufferMs`.
 //
 // v1 primes a fixed cushion and then discards anything that would push the
@@ -923,24 +947,29 @@ export class AudioPlayer extends Emitter {
             a.getFloatTimeDomainData(buf);
 
             let peak = 0;
-            let sum = 0;
             for (let i = 0; i < buf.length; i++) {
                 const s = buf[i];
                 const v = s < 0 ? -s : s;
                 if (v > peak) peak = v;
-                sum += s * s;
             }
             this.peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
 
-            // The output VU, from the buffer already in hand — the sum costs
-            // one multiply per sample on a loop that is walking the array
-            // anyway. Distinct from `level`, which is the RMS of the decoded
-            // packet before the volume control: this one is what is coming out
-            // of the speakers, so it follows the volume slider and falls to
-            // nothing on mute, which is what a meter beside that slider has to
-            // do. Same smoothing weights as `level`, on a tick close enough to
-            // the packet rate that the two meters move alike.
-            this.outLevel = this.outLevel * 0.7 + Math.sqrt(sum / buf.length) * 0.3;
+            // The output VU, from the buffer already in hand. Distinct from
+            // `level`, which is the RMS of the decoded packet before the volume
+            // control: this one is what is coming out of the speakers, so it
+            // follows the volume slider and falls to nothing on mute, which is
+            // what a meter beside that slider has to do.
+            //
+            // Over the newest VU_WINDOW samples, and with the attack and release
+            // above rather than one weight both ways — between them, what the
+            // bar shows is the audio of the last few tens of milliseconds, not
+            // an average of the last quarter second.
+            const from = Math.max(0, buf.length - VU_WINDOW);
+            let sum = 0;
+            for (let i = from; i < buf.length; i++) sum += buf[i] * buf[i];
+            const rms = Math.sqrt(sum / (buf.length - from));
+            const k = rms > this.outLevel ? VU_ATTACK : VU_RELEASE;
+            this.outLevel = this.outLevel * k + rms * (1 - k);
 
             const now = performance.now();
             if (peak >= CLIP_PEAK) this._clipUntil = now + CLIP_HOLD_MS;

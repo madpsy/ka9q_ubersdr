@@ -29,7 +29,10 @@ export default function BandsPanel({ minimal }) {
         if (!bands) return null;
         const q = query.trim().toLowerCase();
         if (!q) return bands;
-        return bands.filter((b) => cleanLabel(b.label).toLowerCase().includes(q));
+        // The group is searched alongside the name, so a receiver that organises
+        // its plan — "HF", "Model Control", "Blocked" — can be asked for a whole
+        // category rather than only for one allocation at a time.
+        return bands.filter((b) => `${cleanLabel(b.label)} ${b.group || ''}`.toLowerCase().includes(q));
     }, [bands, query]);
 
     const activeIndex = useMemo(() => {
@@ -91,6 +94,10 @@ export default function BandsPanel({ minimal }) {
                             <span className="list__title">{b.button_name || cleanLabel(b.label)}</span>
                             <span className="list__meta">
                                 {formatFreqShort(b.start)}–{formatFreqShort(b.end)}
+                                {/* As typed, not upper-cased like the mode: a group is a
+                                    name the operator wrote ("Model Control", "Blocked"),
+                                    not an abbreviation. */}
+                                {b.group && <span className="chip">{b.group}</span>}
                                 {b.mode && <span className="chip">{b.mode.toUpperCase()}</span>}
                             </span>
                         </button>

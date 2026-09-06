@@ -57,6 +57,18 @@ function bandName(b) {
     return String(b.button_name || b.label || '').split('|')[0].replace(/\s+/g, ' ').trim();
 }
 
+// The hover text for a band pill. The group is carried all the way here by
+// layoutBands and was simply never shown, which v1 does (bookmark-manager.js
+// puts a "Group" line in its band tooltip). It is worth having: it is where a
+// receiver says what a range is for, and for some groups — "Blocked", where
+// ordinary listeners are served an announcement rather than the band — it is
+// the only thing on screen that explains what you are about to hear.
+function bandTip(b) {
+    const group = String(b.group || '').trim();
+    return [bandName(b), group, `${formatFreqShort(b.start)}–${formatFreqShort(b.end)}`]
+        .filter(Boolean).join(' · ');
+}
+
 // v1's two bookmark colours, kept identical so the distinction reads the same
 // in both frontends: gold for what the receiver publishes, blue for what you
 // saved in this browser (bookmark-manager.js drawBookmarks).
@@ -945,7 +957,7 @@ export default function MarkerBar({ width }) {
                         ? spotTip(hit.spot)
                         : hit.kind === 'packet'
                             ? packetTip(hit.marker)
-                            : `${bandName(hit.band)} · ${formatFreqShort(hit.band.start)}–${formatFreqShort(hit.band.end)}`,
+                            : bandTip(hit.band),
         });
     }, [locate, serverInfo]);
 

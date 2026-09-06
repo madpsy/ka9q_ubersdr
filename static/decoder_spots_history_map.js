@@ -14,6 +14,8 @@ class DecoderSpotsHistoryMap {
         this.map = null;
         this.markers = new Map();
         this.markerClusterGroup = null; // Leaflet marker cluster group
+        this.plainMarkerGroup = null;   // Ungrouped markers (clustering off)
+        this.clusteringEnabled = false; // Clustering is opt-in, off by default
         this.receiverMarker = null;
         this.receiverLocation = null;
         this.ctyCountryMap = new Map(); // country name -> ISO2 code
@@ -209,7 +211,11 @@ class DecoderSpotsHistoryMap {
             }
         });
 
-        this.map.addLayer(this.markerClusterGroup);
+        this.plainMarkerGroup = L.layerGroup();
+
+        // Clustering is off by default, so only the plain group starts on the map
+        this.map.addLayer(this.plainMarkerGroup);
+        this.addClusteringControl();
 
         // Load receiver location
         await this.loadReceiverLocation();
@@ -277,11 +283,70 @@ class DecoderSpotsHistoryMap {
     clearMarkers() {
         if (!this.map || !this.markerClusterGroup) return;
 
-        // Clear cluster group
+        // Clear both groups — markers only ever live in one, but which one
+        // depends on the clustering toggle
         this.markerClusterGroup.clearLayers();
+        this.plainMarkerGroup.clearLayers();
 
         // Clear the markers map
         this.markers.clear();
+    }
+
+    /**
+     * Group markers are currently added to (cluster group or plain layer group)
+     */
+    activeMarkerGroup() {
+        return this.clusteringEnabled ? this.markerClusterGroup : this.plainMarkerGroup;
+    }
+
+    /**
+     * Add the "Clustering" checkbox overlay to the top right of the map
+     */
+    addClusteringControl() {
+        const control = L.control({ position: 'topright' });
+
+        control.onAdd = () => {
+            const div = L.DomUtil.create('div', 'map-clustering-control');
+            const id = 'map-clustering-toggle';
+            div.innerHTML = `
+                <label for="${id}">
+                    <input type="checkbox" id="${id}"${this.clusteringEnabled ? ' checked' : ''}>
+                    <span>Clustering</span>
+                </label>
+            `;
+
+            // Keep clicks/scrolls on the control from reaching the map
+            L.DomEvent.disableClickPropagation(div);
+            L.DomEvent.disableScrollPropagation(div);
+
+            div.querySelector('input').addEventListener('change', (e) => {
+                this.setClustering(e.target.checked);
+            });
+
+            return div;
+        };
+
+        control.addTo(this.map);
+    }
+
+    /**
+     * Enable or disable marker clustering, moving existing markers across
+     * @param {boolean} enabled
+     */
+    setClustering(enabled) {
+        if (!this.map || this.clusteringEnabled === enabled) return;
+
+        const from = this.activeMarkerGroup();
+        this.clusteringEnabled = enabled;
+        const to = this.activeMarkerGroup();
+
+        // Move the live layers across rather than replaying this.markers — two
+        // spots can share a marker key, and only the last one is kept there
+        const markers = from.getLayers();
+        from.clearLayers();
+        this.map.removeLayer(from);
+        this.map.addLayer(to);
+        markers.forEach(marker => to.addLayer(marker));
     }
 
     /**
@@ -362,8 +427,8 @@ class DecoderSpotsHistoryMap {
                 offset: [0, -10]
             });
 
-            // Add to cluster group instead of directly to map
-            this.markerClusterGroup.addLayer(marker);
+            // Add to the active group (cluster group or plain layer group)
+            this.activeMarkerGroup().addLayer(marker);
 
             // Store marker with spot data
             // Use mode from spot, default to 'CW' if not present
@@ -557,7 +622,7 @@ class DecoderSpotsHistoryMap {
         if (data && data.marker) {
             // Use the marker cluster group's zoomToShowLayer method
             // This will automatically handle unclustering and showing the marker
-            if (this.markerClusterGroup && this.markerClusterGroup.hasLayer(data.marker)) {
+            if (this.clusteringEnabled && this.markerClusterGroup && this.markerClusterGroup.hasLayer(data.marker)) {
                 this.markerClusterGroup.zoomToShowLayer(data.marker, () => {
                     // Callback after zoom completes
                     data.marker.openPopup();

@@ -510,6 +510,29 @@ h1 {
     margin-bottom: 15px;
 }
 
+.map-clustering-control {
+    background: rgba(30, 30, 40, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: white;
+    font-size: 0.9em;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.map-clustering-control label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    margin: 0;
+}
+
+.map-clustering-control input {
+    cursor: pointer;
+    margin: 0;
+}
+
 .map-legend {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 8px;

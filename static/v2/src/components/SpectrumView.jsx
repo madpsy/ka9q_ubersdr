@@ -3616,7 +3616,7 @@ function drawFrame(g, d, ctx) {
 // it and find out by ear — not to hide it. The receiver can still see what is
 // there, the waterfall is how it says so, and blocking is about what gets
 // played, not about what gets shown.
-const BLOCKED_SHADE = 'rgba(150, 156, 168, 0.22)';
+const BLOCKED_SHADE = 'rgba(150, 156, 168, 0.34)';
 
 function drawBlockedShade(c, blocked, pxW, H, cfg) {
     if (!blocked || !blocked.length || !cfg || !cfg.span) return;

@@ -1624,6 +1624,9 @@
                     <div class="alert alert-info" style="margin-bottom: 20px;">
                         ℹ️ <strong>Note:</strong> Band changes take effect immediately and are visible to all users without requiring a server restart.
                     </div>
+                    <div class="alert alert-warning" style="margin-bottom: 20px;">
+                        🔇 <strong>Blocking a range:</strong> set a band's <strong>Group</strong> to <code>Blocked</code>. Ordinary listeners then hear a short recorded announcement instead of that range, and IQ modes are refused there. Bypassed IPs and anyone using the bypass password are unaffected. Needs <code>audio/blocked-12.wav</code> and <code>audio/blocked-24.wav</code> on the server — without them the range plays as normal.
+                    </div>
                     <div id="bandsList" class="loading">
                         <div class="spinner"></div>
                         <p>Loading bands...</p>
@@ -1649,7 +1652,7 @@
                         <div class="config-field">
                             <label>Group (Optional)</label>
                             <input type="text" id="newBandGroup" placeholder="e.g., HF">
-                            <small>Optional group name for organising bands. One name is reserved: <strong>Blocked</strong> closes the range to ordinary listeners — they hear a recorded announcement instead of the band, and IQ modes are refused there. Bypassed IPs and password holders are unaffected. Needs audio/blocked-12.wav and audio/blocked-24.wav on the server.</small>
+                            <small>Optional group name for organising bands. One name is reserved: <strong>Blocked</strong> closes the range to ordinary listeners — see the note at the top of this tab.</small>
                         </div>
                         <div class="config-field">
                             <label>Mode (Optional)</label>

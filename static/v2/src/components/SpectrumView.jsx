@@ -1088,6 +1088,24 @@ export default function SpectrumView() {
         gfx.current.dirty = true;
     }, [station, display.server.stationIdColor]);
 
+    // Ranges this receiver will not play — bands.yaml entries in the "blocked"
+    // group. Shaded across both pictures so the display says so before you tune
+    // there and find out by ear.
+    //
+    // Same route as the station block: through the gfx ref, because the draw
+    // loop paints it and the band list changes once, at load.
+    const blocked = useMemo(() => (radio.catalog.bands || [])
+        .filter((b) => String(b.group || '').trim().toLowerCase() === 'blocked')
+        .map((b) => ({ start: b.start, end: b.end })), [radio.catalog.bands]);
+    useEffect(() => {
+        gfx.current.blocked = blocked;
+        // The waterfall's overlay is cached against a key rather than repainted
+        // every frame, so the shading needs a signature in it or a band added
+        // while running would not appear until something else moved.
+        gfx.current.blockedKey = blocked.map((r) => `${r.start}-${r.end}`).join(',');
+        gfx.current.dirty = true;
+    }, [blocked]);
+
     // The display's frame interval, measured once and kept across restarts of
     // the draw loop below. Why it cannot be measured per start: see the burst.
     const vsyncRef = useRef(0);
@@ -3586,6 +3604,33 @@ function drawFrame(g, d, ctx) {
 }
 
 
+// A range this receiver will not play, shaded across both pictures.
+//
+// A neutral grey rather than a darkening, because the two backgrounds are
+// opposites: the spectrum is near-black, where a dark wash does nothing, and the
+// waterfall runs to near-white, where it would read as a strong signal's
+// absence. Grey lifts one and dulls the other, which is the same "switched off"
+// in both.
+//
+// Deliberately weak. The point is to say a range is closed before you tune into
+// it and find out by ear — not to hide it. The receiver can still see what is
+// there, the waterfall is how it says so, and blocking is about what gets
+// played, not about what gets shown.
+const BLOCKED_SHADE = 'rgba(150, 156, 168, 0.22)';
+
+function drawBlockedShade(c, blocked, pxW, H, cfg) {
+    if (!blocked || !blocked.length || !cfg || !cfg.span) return;
+    const hz0 = cfg.centerFreq - cfg.span / 2;
+    c.save();
+    c.fillStyle = BLOCKED_SHADE;
+    for (const r of blocked) {
+        const x0 = Math.max(0, ((r.start - hz0) / cfg.span) * pxW);
+        const x1 = Math.min(pxW, ((r.end - hz0) / cfg.span) * pxW);
+        if (x1 > x0) c.fillRect(x0, 0, x1 - x0, H);
+    }
+    c.restore();
+}
+
 // A vertical marker, outlined.
 //
 // The outline is the whole trick. Over the spectrum there is a dark background
@@ -4302,12 +4347,18 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
         // leave the band missing until the next flicker of the mouse. The measure
         // tool decides the same thing and is in here for the same reason.
         + `${g.drag ? 'd' : ''}${g.edge ? 'e' : ''}${g.measuring ? 'm' : ''}|`
-        + `${colVfo}|${colEdge}|${colBand}`;
+        + `${colVfo}|${colEdge}|${colBand}|${g.blockedKey || ''}`;
     if (g.marksKey === key) return;
     g.marksKey = key;
 
     const c = marks.getContext('2d');
     c.clearRect(0, 0, pxW, H);
+
+    // First, so everything else sits over it. This is the overlay canvas rather
+    // than the waterfall itself because the waterfall is slid by a transform as
+    // each row arrives, and a shade painted onto it would ride that animation
+    // and leave a gap at the edge.
+    drawBlockedShade(c, g.blocked, pxW, H, cfg);
 
     // Under the hover line, which is what it belongs to.
     drawHoverBand(c, pxW, H, cfg, tuning, hoverBandPx(g, g.dpr), colBand);
@@ -4536,6 +4587,11 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         c.lineWidth = TRACE_WIDTH * dpr;
         c.stroke();
     }
+
+    // Over the trace, under the marks: the signal is what is being dimmed, and
+    // the dial and the passband edges have to stay as legible inside a blocked
+    // range as anywhere else — you can still tune through one.
+    drawBlockedShade(c, g.blocked, pxW, H, cfg);
 
     drawFreqRefMarks(c, pxW, H, cfg, dpr, g.freqRef, REF_EXPECTED_COLOR, REF_ACTUAL_COLOR);
     drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colVfo, colEdge);

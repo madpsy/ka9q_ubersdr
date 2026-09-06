@@ -37,6 +37,11 @@ class DecoderSpotsHistoryMap {
             '6m': '#8A2BE2',    // Violet — matches the 6 m block on channels-map
             'unknown': '#FF0000' // Red for unknown bands
         };
+
+        // Standard band ordering for legends and multi-band markers.
+        // 6 m last: a receiver wide enough to hear it reports it, and without an
+        // entry here it would sort after every named band rather than above 10 m.
+        this.bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
     }
 
     /**
@@ -365,7 +370,12 @@ class DecoderSpotsHistoryMap {
         // Track bounds for auto-zoom
         const bounds = [];
 
-        // Add new markers
+        // Group spots by callsign and position: the position offset is derived
+        // from the callsign alone, so every band/mode for one station lands on
+        // exactly the same point. Drawn one marker per spot they would stack and
+        // only the last band would be visible.
+        const groups = new Map();
+
         spots.forEach(spot => {
             let coords = null;
 
@@ -390,12 +400,6 @@ class DecoderSpotsHistoryMap {
             const adjustedLat = coords.lat + offset.lat;
             const adjustedLon = coords.lon + offset.lon;
 
-            // Add to bounds for auto-zoom
-            bounds.push([adjustedLat, adjustedLon]);
-
-            // Get color for band
-            const color = this.bandColors[spot.band] || '#999';
-
             // Log unknown or unrecognized bands
             if (spot.band === 'unknown' || !this.bandColors[spot.band]) {
                 console.warn('[Unknown/Unrecognized Band]', {
@@ -409,20 +413,25 @@ class DecoderSpotsHistoryMap {
                 });
             }
 
-            // Create custom icon (exactly as in digitalspots_map.js)
-            const icon = L.divIcon({
-                className: 'custom-marker',
-                html: `<div style="width: 12px; height: 12px; background: ${color}; border-radius: 50%;"></div>`,
-                iconSize: [12, 12],
-                iconAnchor: [6, 6]
-            });
+            const groupKey = `${spot.callsign}|${adjustedLat.toFixed(5)}|${adjustedLon.toFixed(5)}`;
+            let group = groups.get(groupKey);
+            if (!group) {
+                group = { coords: [adjustedLat, adjustedLon], spots: [] };
+                groups.set(groupKey, group);
+            }
+            group.spots.push(spot);
+        });
 
-            // Create marker
-            const marker = L.marker([adjustedLat, adjustedLon], { icon });
+        // Add one marker per group
+        groups.forEach(group => {
+            // Add to bounds for auto-zoom
+            bounds.push(group.coords);
+
+            const marker = L.marker(group.coords, { icon: this.createGroupIcon(group.spots) });
 
             // Create popup content
-            marker.bindPopup(this.createPopupContent(spot, true));
-            marker.bindTooltip(this.createPopupContent(spot), {
+            marker.bindPopup(this.createGroupPopupContent(group.spots, true));
+            marker.bindTooltip(this.createGroupPopupContent(group.spots), {
                 direction: 'top',
                 offset: [0, -10]
             });
@@ -430,11 +439,13 @@ class DecoderSpotsHistoryMap {
             // Add to the active group (cluster group or plain layer group)
             this.activeMarkerGroup().addLayer(marker);
 
-            // Store marker with spot data
-            // Use mode from spot, default to 'CW' if not present
-            const mode = spot.mode || 'CW';
-            const key = `${spot.callsign}-${spot.band}-${mode}`;
-            this.markers.set(key, { marker, spot, coords: [adjustedLat, adjustedLon] });
+            // Store the shared marker under every spot's key so table/modal
+            // lookups by callsign-band-mode still resolve
+            group.spots.forEach(spot => {
+                const mode = spot.mode || 'CW';
+                const key = `${spot.callsign}-${spot.band}-${mode}`;
+                this.markers.set(key, { marker, spot, coords: group.coords });
+            });
         });
 
         // Auto-zoom to fit all spots (excluding receiver marker)
@@ -458,6 +469,157 @@ class DecoderSpotsHistoryMap {
 
         // Update legend with active bands
         this.updateLegend();
+    }
+
+    /**
+     * Sort band names into standard order, unknown bands last
+     * @param {Array<string>} bands
+     * @returns {Array<string>}
+     */
+    sortBands(bands) {
+        const rank = (b) => {
+            const i = this.bandOrder.indexOf(b);
+            return i === -1 ? this.bandOrder.length : i;
+        };
+        return bands.slice().sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    }
+
+    /**
+     * Distinct bands a group of co-located spots was heard on, in band order
+     * @param {Array} spots
+     * @returns {Array<string>}
+     */
+    groupBands(spots) {
+        return this.sortBands(Array.from(new Set(spots.map(s => s.band || 'unknown'))));
+    }
+
+    bandColor(band) {
+        return this.bandColors[band] || '#999';
+    }
+
+    /**
+     * Build the marker icon for a group of co-located spots. One band keeps the
+     * plain dot; several bands get a pie split evenly between their colours.
+     * @param {Array} spots
+     * @returns {object} - Leaflet divIcon
+     */
+    createGroupIcon(spots) {
+        const bands = this.groupBands(spots);
+
+        if (bands.length < 2) {
+            return L.divIcon({
+                className: 'custom-marker',
+                html: `<div style="width: 12px; height: 12px; background: ${this.bandColor(bands[0])}; border-radius: 50%;"></div>`,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+        }
+
+        // Even pie segments, one per band, with hard stops between them
+        const step = 360 / bands.length;
+        const stops = bands.map((band, i) => {
+            const from = (i * step).toFixed(3);
+            const to = ((i + 1) * step).toFixed(3);
+            return `${this.bandColor(band)} ${from}deg ${to}deg`;
+        }).join(', ');
+
+        const size = 16;
+        return L.divIcon({
+            className: 'custom-marker',
+            html: `<div title="${bands.join(', ')}" style="width: ${size}px; height: ${size}px; border-radius: 50%; box-sizing: border-box; border: 1px solid rgba(255, 255, 255, 0.85); background: conic-gradient(${stops});"></div>`,
+            iconSize: [size, size],
+            iconAnchor: [size / 2, size / 2]
+        });
+    }
+
+    /**
+     * Popup/tooltip content for a group of co-located spots. A single spot keeps
+     * the full detail view; several get a per-band summary.
+     * @param {Array} spots - Spots sharing one callsign and position
+     * @param {boolean} includeActions - Render the "View decodes" button
+     * @returns {string} - HTML content
+     */
+    createGroupPopupContent(spots, includeActions = false) {
+        if (spots.length === 1) {
+            return this.createPopupContent(spots[0], includeActions);
+        }
+
+        const first = spots[0];
+        const firstWith = (field) => {
+            const found = spots.find(s => s[field] !== undefined && s[field] !== null);
+            return found ? found[field] : null;
+        };
+
+        const viewDecodesBtn = includeActions ? `
+            <button type="button" class="popup-view-decodes"
+                    data-callsign="${first.callsign}"
+                    data-band="${first.band}"
+                    data-mode="${first.mode || 'CW'}"
+                    title="Show all decodes for this callsign">View decodes</button>
+        ` : '';
+
+        const bands = this.groupBands(spots);
+
+        let content = `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Twemoji Flags', ui-monospace, 'Courier New', monospace; font-size: 12px; line-height: 1.4;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <b><a href="https://www.qrz.com/db/${first.callsign}" target="_blank" style="color: #000; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${this.flagForCountry(first.country)}${first.callsign}</a></b>
+                    ${viewDecodesBtn}
+                </div>
+        `;
+
+        if (first.country) {
+            content += `<b>Country:</b> ${first.country}<br>`;
+        }
+
+        if (first.locator) {
+            content += `<b>Grid:</b> ${first.locator}<br>`;
+        } else if (first.latitude !== undefined && first.longitude !== undefined) {
+            content += `<b>Location:</b> ${first.latitude.toFixed(4)}°, ${first.longitude.toFixed(4)}°<br>`;
+        }
+
+        const distance = firstWith('distance_km');
+        if (distance !== null) {
+            content += `<b>Distance:</b> ${Math.round(distance)} km<br>`;
+        }
+
+        const bearing = firstWith('bearing_deg');
+        if (bearing !== null) {
+            content += `<b>Bearing:</b> ${Math.round(bearing)}° (${this.bearingToCardinal(bearing)})<br>`;
+        }
+
+        content += `<b>Bands:</b> ${bands.length}<br>`;
+
+        // One row per spot, grouped by band in standard order
+        const ordered = spots.slice().sort((a, b) =>
+            bands.indexOf(a.band || 'unknown') - bands.indexOf(b.band || 'unknown') ||
+            new Date(a.timestamp) - new Date(b.timestamp)
+        );
+
+        content += `<div style="margin-top: 6px; display: grid; gap: 3px;">`;
+        ordered.forEach(spot => {
+            const time = new Date(spot.timestamp).toLocaleTimeString('en-US', {
+                hour12: false,
+                timeZone: 'UTC'
+            });
+            const freq = spot.frequency ? `${(spot.frequency / 1e6).toFixed(3)} MHz` : '';
+            const snr = (spot.snr !== undefined && spot.snr !== null)
+                ? `${spot.snr >= 0 ? '+' : ''}${spot.snr} dB` : '';
+            const parts = [spot.mode || 'CW', freq, snr, `${time} UTC`].filter(Boolean);
+
+            content += `
+                <div style="display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                    <span style="width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; background: ${this.bandColor(spot.band)};"></span>
+                    <b style="min-width: 38px;">${spot.band}</b>
+                    <span>${parts.join(' · ')}</span>
+                </div>
+            `;
+        });
+        content += `</div>`;
+
+        content += `</div>`;
+
+        return content;
     }
 
     /**
@@ -563,12 +725,7 @@ class DecoderSpotsHistoryMap {
         // Only show legend if we have active bands
         if (activeBands.size > 0) {
             // Sort bands in standard order
-            // 6 m last: a receiver wide enough to hear it reports it, and without an
-            // entry here it would sort after every named band rather than above 10 m.
-            const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
-            const sortedBands = Array.from(activeBands).sort((a, b) => {
-                return bandOrder.indexOf(a) - bandOrder.indexOf(b);
-            });
+            const sortedBands = this.sortBands(Array.from(activeBands));
 
             // Add band legend items
             sortedBands.forEach(band => {

@@ -465,6 +465,57 @@ t('nothing is stored for a panel with no minimal view at all', () => {
     }
 });
 
+// ── The minimal flag on a desktop ────────────────────────────────────────────
+//
+// And the same one flag along: before `defaultMinimal` existed every panel with
+// a minimal view was stored as `false` on a mouse-only desktop, because that is
+// what `!!m.minimal` comes to where the machine has no block. A panel that later
+// says it ships cut down was held open by it. See DEFAULT_MINIMAL_LATECOMERS.
+
+// A layout as one of those builds left it: the flag on every panel, and no
+// record of the default having been applied.
+const storedPreDefault = (over = {}) => {
+    const l = defaultLayout(MOUSE);
+    delete l.minimalDefaulted;
+    for (const s of Object.values(l.sections)) {
+        if (s.minimal !== undefined) s.minimal = false;
+    }
+    return { ...l, ...over };
+};
+
+t('a panel that gained a default minimal view opens cut down on a desktop', () => {
+    const l = reconcile(storedPreDefault(), MOUSE);
+    assert.ok(PANEL_BY_ID.receiver.defaultMinimal, 'the Receiver is one of them');
+    assert.strictEqual(l.sections.receiver.minimal, true);
+    assert.strictEqual(l.sections.scanner.minimal, true);
+    assert.strictEqual(l.minimalDefaulted, true, 'and the layout records that it is done');
+});
+
+t('the default is not applied a second time', () => {
+    const once = reconcile(storedPreDefault(), MOUSE);
+    once.sections.receiver.minimal = false;   // expanded by hand, afterwards
+    assert.strictEqual(reconcile(once, MOUSE).sections.receiver.minimal, false);
+});
+
+t('a panel with no default minimal view keeps the answer somebody gave', () => {
+    // Not a latecomer, so its stored `false` is left exactly as it is — and its
+    // `true` is too.
+    const l = reconcile(storedPreDefault(), MOUSE);
+    assert.ok(!PANEL_BY_ID.bands.defaultMinimal, 'the Bands panel is not one of them');
+    assert.strictEqual(l.sections.bands.minimal, false);
+    assert.strictEqual(reconcile(storedPreDefault({
+        sections: { ...storedPreDefault().sections, bands: { minimal: true } },
+    }), MOUSE).sections.bands.minimal, true);
+});
+
+t('a first run gets the default without any repair', () => {
+    // The flag is written from the start, so nothing is offered to a layout this
+    // build made.
+    const fresh = defaultLayout(MOUSE);
+    assert.strictEqual(fresh.sections.receiver.minimal, true);
+    assert.strictEqual(fresh.minimalDefaulted, true);
+});
+
 
 // --- dock sizes --------------------------------------------------------------
 

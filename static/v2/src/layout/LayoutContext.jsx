@@ -75,6 +75,23 @@ const MINIMAL_LATECOMERS = new Set([
     'notifications', 'packet', 'ranking', 'rotator', 'spectrogram',
     'topfreq', 'vfos', 'voiceskimmer', 'weather', 'wefax',
 ]);
+
+// Panels that declared a `defaultMinimal` after builds had already been writing
+// the desktop `minimal` flag.
+//
+// The same story as MINIMAL_LATECOMERS one flag along. Until `defaultMinimal`
+// existed, firstRun read the machine's block and nothing else — `!!m.minimal` —
+// so on a mouse-only desktop, which has no block, every panel with a minimal
+// view was stored as `false`. Nobody chose that either: it is what `!!undefined`
+// comes to. A panel that later says it ships cut down is then held open by it,
+// which is exactly what the Receiver does — the panel the left dock opens
+// pinned, and so the one where the wasted room shows most.
+//
+// Ignored exactly once, and recorded by `minimalDefaulted`, so expanding the
+// panel afterwards sticks. A list rather than a rule for the reason above: only
+// these two ever met a build that coined the flag without asking, and every
+// other `false` in a stored layout is somebody's click on the header.
+const DEFAULT_MINIMAL_LATECOMERS = new Set(['receiver', 'scanner']);
 // The Layout panel: the one panel that cannot be hidden, because it is the one that
 // brings the others back. Named here rather than tested for inline so the reason has
 // somewhere to live and the id appears once.
@@ -257,6 +274,9 @@ export function defaultLayout(env = machine()) {
         // migrations are for touchscreen desktops and skip phones entirely,
         // which is the one machine this matters on.
         minimalRepaired: true,
+        // Nor anything to default: this layout's sections came from firstRun,
+        // which already read `defaultMinimal`. See DEFAULT_MINIMAL_LATECOMERS.
+        minimalDefaulted: true,
         docks,
         sections,
         floats,
@@ -426,6 +446,9 @@ export function reconcile(stored, env = machine()) {
     // Once per stored layout, and recorded by `base` already carrying the flag
     // from defaultLayout.
     const repairMinimal = !stored.minimalRepaired;
+    // The desktop flag's own one-shot, read the same way and recorded the same
+    // way — see DEFAULT_MINIMAL_LATECOMERS.
+    const defaultMinimal = !stored.minimalDefaulted;
     base.sections = {};
     const { phone, touch } = env;
     for (const p of PANELS) {
@@ -445,7 +468,16 @@ export function reconcile(stored, env = machine()) {
             // rather than leaving the panel stuck showing nothing extra.
             // `?? d.minimal` for the same reason as minimalMobile below: a panel
             // with no stored entry is new here, and takes the default.
-            minimal: p.minimal ? (s?.minimal ?? d.minimal) : undefined,
+            //
+            // A latecomer to `defaultMinimal` has its stored answer dropped
+            // once, for the same reason minimalMobile's is below: on a
+            // mouse-only desktop that `false` is not an answer but the
+            // `!!undefined` older builds wrote for every panel with a minimal
+            // view. See DEFAULT_MINIMAL_LATECOMERS.
+            minimal: p.minimal
+                ? ((defaultMinimal && DEFAULT_MINIMAL_LATECOMERS.has(p.id) ? undefined : s?.minimal)
+                    ?? d.minimal)
+                : undefined,
             // `?? d.minimalMobile` rather than `!!`: absent means a layout
             // stored before this existed, and those should get the default like
             // everybody else, not be pinned to full because the key was missing.

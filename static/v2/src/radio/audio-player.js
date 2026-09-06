@@ -22,7 +22,11 @@ const GATE_TICK_MS = 20;
 // float and can run hot without harm. The hold is what makes a badge useful:
 // clipping happens on transients, and a light that is on for one frame is a
 // light nobody sees.
-const CLIP_TICK_MS = 50;
+//
+// It also carries the output VU (see _runClipWatch), which is why the tick is
+// as fast as it is: 40 a second is a meter, 20 was a series of steps. One read
+// of a 1024-point analyser buffer is nothing next to what it buys.
+const CLIP_TICK_MS = 25;
 const CLIP_PEAK = 0.997;
 const CLIP_HOLD_MS = 1200;
 
@@ -934,7 +938,8 @@ export class AudioPlayer extends Emitter {
             // packet before the volume control: this one is what is coming out
             // of the speakers, so it follows the volume slider and falls to
             // nothing on mute, which is what a meter beside that slider has to
-            // do. Smoothed at the rate `level` is, so the two meters move alike.
+            // do. Same smoothing weights as `level`, on a tick close enough to
+            // the packet rate that the two meters move alike.
             this.outLevel = this.outLevel * 0.7 + Math.sqrt(sum / buf.length) * 0.3;
 
             const now = performance.now();

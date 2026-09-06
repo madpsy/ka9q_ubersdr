@@ -197,7 +197,8 @@ function SpaceWeather() {
 // Sampled in its own component so the rest of the bar — the frequency, the
 // clock — does not re-render with it, and fast enough to look like a meter: the
 // fill is a gradient stop, which cannot be transitioned, so the sample rate is
-// all the smoothing there is.
+// all the smoothing there is. That is why it is driven from an animation frame
+// rather than from a React state tick; see the loop below.
 /**
  * Mute, and how loud.
  *
@@ -209,15 +210,54 @@ function SpaceWeather() {
  * this is a prop here rather than another entry rendered conditionally above.
  */
 function VolumeSlider({ slider }) {
-    const { audio, actions } = useRadio();
-    // Ten a second, not the twenty-four this had.
+    const { audio, actions, meters } = useRadio();
+
+    // Every frame, and not through React.
     //
-    // The fill is an output *level*, not a waveform: it is read as "is anything
-    // coming out, and how hard", and that question is answered as well at 10 Hz
-    // as at 24. What the extra fourteen bought was a repaint — the fill is a
-    // gradient on the track, so every sample is a paint — and a repaint here is
-    // charged against the whole strip. See the note on .topbar.
-    const m = useMeters(10);
+    // This was a state tick at ten a second, on the grounds that the question a
+    // VU answers — is anything coming out, and how hard — is answered as well at
+    // 10 Hz as at 24, and that each sample costs a repaint of the fill and so of
+    // the whole strip. The first half of that was wrong: the fill is a gradient
+    // stop and gradient stops cannot be transitioned, so the sample rate is the
+    // only smoothing the bar gets, and ten steps a second reads as a meter that
+    // is stuck rather than as a level that is steady.
+    //
+    // The repaint is real, so the fix is not a faster state tick — that pays for
+    // the paint *and* re-renders the row on top. The two custom properties go
+    // straight onto the input from an animation frame instead: no render, no
+    // reconciliation, the style change folded into a frame the browser was
+    // already painting, and the whole loop parked by the browser while the tab
+    // is hidden, which a setInterval is not. `meters.current` is the mutable
+    // object the packet path already writes (RadioContext), refreshed from the
+    // player every 25 ms, so a frame always has something new to read.
+    const inputRef = useRef(null);
+    // What was last written, so a real re-render — a drag on the fader, a mute,
+    // the bar reflowing — draws the fill where this loop has it instead of
+    // flashing back to the volume position for a frame.
+    const pctRef = useRef(0);
+    const colourRef = useRef(audioLevelColour(0, false));
+    useEffect(() => {
+        let id = requestAnimationFrame(function tick() {
+            id = requestAnimationFrame(tick);
+            const el = inputRef.current;
+            if (!el) return;
+            const pct = audioLevelPercent(meters.current.outLevel);
+            // Under a fifth of a percent is under a fifth of a pixel on a track
+            // this wide: writing it would invalidate the style and repaint the
+            // strip to change nothing, and audio that is merely quiet rather
+            // than silent never stops moving by that much.
+            if (Math.abs(pct - pctRef.current) >= 0.2) {
+                pctRef.current = pct;
+                el.style.setProperty('--fill', `${pct}%`);
+            }
+            const colour = audioLevelColour(pct, meters.current.clipping);
+            if (colour !== colourRef.current) {
+                colourRef.current = colour;
+                el.style.setProperty('--fill-color', colour);
+            }
+        });
+        return () => cancelAnimationFrame(id);
+    }, []);
 
     // Unmuting with no fader on screen turns it up.
     //
@@ -266,13 +306,18 @@ function VolumeSlider({ slider }) {
             {slider && (
                 <span className="topbar__vol-slider" data-optional="volume">
                     <Slider
+                        inputRef={inputRef}
                         value={Math.round(audio.volume * 100)}
                         min={0}
                         max={100}
                         disabled={audio.muted}
                         onChange={(v) => actions.setVolume(v / 100)}
-                        level={audioLevelPercent(m.outLevel) / 100}
-                        fillColor={audioLevelColour(audioLevelPercent(m.outLevel), m.clipping)}
+                        // Reading the refs here is the point: these are what the
+                        // frame loop last put on the element, so a render for
+                        // some other reason reproduces the meter rather than
+                        // resetting it. The loop owns the value from then on.
+                        level={pctRef.current / 100}
+                        fillColor={colourRef.current}
                     />
                 </span>
             )}

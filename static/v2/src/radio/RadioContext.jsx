@@ -683,8 +683,14 @@ export function RadioProvider({ children }) {
     // the receiver at all. See lib/serverFeeds.js.
     useEffect(() => { setFeedsAllowed(running); }, [running]);
 
-    // Sample player-owned meters on a slow timer; the packet path stays free of
-    // any per-frame bookkeeping.
+    // Sample player-owned meters on a timer; the packet path stays free of any
+    // per-frame bookkeeping.
+    //
+    // Fast enough that a consumer reading this object every animation frame —
+    // the volume slider's fill, which is a meter — gets a fresh figure rather
+    // than the same one four frames running. It is a dozen field copies onto an
+    // object that already exists, so the rate costs nothing; what each consumer
+    // does with the figures is where the cost is, and they choose their own.
     useEffect(() => {
         const t = setInterval(() => {
             const m = meters.current;
@@ -700,7 +706,7 @@ export function RadioProvider({ children }) {
             m.peakDb = player.peakDb;
             m.outLevel = player.outLevel;
             m.frameAgeMs = m.lastFrameAt ? performance.now() - m.lastFrameAt : 0;
-        }, 100);
+        }, 25);
         return () => clearInterval(t);
     }, []);
 

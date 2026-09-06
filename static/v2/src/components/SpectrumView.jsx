@@ -3612,17 +3612,20 @@ function drawFrame(g, d, ctx) {
 // absence. Grey lifts one and dulls the other, which is the same "switched off"
 // in both.
 //
-// Half strength, and no more. The point is to say a range is closed before you
-// tune into it and find out by ear — not to hide it. The receiver can still see
-// what is there, the waterfall is how it says so, and blocking is about what
-// gets played, not about what gets shown.
+// One value has to carry both pictures, and the waterfall is the harder of the
+// two: a flat wash over a flat near-black spectrum reads at a glance, while the
+// same wash over a colourful, textured waterfall mostly desaturates rather than
+// dims. So this is set by what the heat map needs, and looks stronger than it
+// needs to be on the spectrum alone. It was tuned the other way round twice and
+// came out invisible on the waterfall both times.
 //
-// It has to carry over both pictures at one value, and the waterfall is the
-// harder of the two: a flat wash over a flat near-black spectrum reads at a
-// glance, while the same wash over a colourful, textured waterfall mostly
-// desaturates rather than dims. What looks right on the spectrum is invisible
-// on the heat map, so this is set by what the waterfall needs.
-const BLOCKED_SHADE = 'rgba(150, 156, 168, 0.5)';
+// 0.7 is near the ceiling for what this is for. A third of the picture still
+// comes through, which is the whole point: it says a range is closed before you
+// tune into it and find out by ear, rather than hiding what is on it. The
+// receiver can still see the signals there and the waterfall is how it says so
+// — blocking is about what gets played, not about what gets shown. Much past
+// this and the shade stops being an annotation and starts being a redaction.
+const BLOCKED_SHADE = 'rgba(150, 156, 168, 0.7)';
 
 function drawBlockedShade(c, blocked, pxW, H, cfg) {
     if (!blocked || !blocked.length || !cfg || !cfg.span) return;

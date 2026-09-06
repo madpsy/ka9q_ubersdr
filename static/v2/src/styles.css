@@ -1121,7 +1121,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
     position: relative;
     z-index: 1;
 }
-.dock__pinned .section { min-height: 0; }
+/* Shrinkable, which `.section` is not: a docked panel keeps its natural height
+   and lets the dock scroll, so it is `flex: none`. That is right everywhere the
+   dock is the scroller and wrong in here, where the wrapper is capped and there
+   is no scroller at all — a section that refuses to shrink simply overflows the
+   cap and paints over the panels below, which have been laid out under a wrapper
+   that is 60% tall and know nothing about the rest. It shows up whenever a
+   pinned panel grows after it is drawn: switching from CW to USB adds the AGC
+   block to the Receiver, and the dock under it did not move.
+
+   `0 1 auto`, not `1 1 auto` — the natural height until the cap, then give way,
+   rather than always filling 60% of the dock. */
+.dock__pinned .section { min-height: 0; flex: 0 1 auto; }
 .dock__pinned .section__body { min-height: 0; overflow: auto; }
 /* No top padding under a pinned panel. Padding scrolls with the content, so an
    8px strip of it would be 8px of moving panel between the pinned one and the

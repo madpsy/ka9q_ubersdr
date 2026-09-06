@@ -349,6 +349,13 @@ t('the pinned panel is capped, and scrolls its own body', () => {
     assert.match(wrap, /max-height:\s*\d+%/);
     assert.match(wrap, /flex:\s*none/);
     assert.match(block('.dock__pinned .section__body'), /overflow:\s*auto/);
+    // And the section between the two has to give way, or neither matters: a
+    // docked panel is `flex: none` so that the dock scrolls instead of the panel
+    // being squashed, and in here that means it overflows the cap and paints
+    // over the dock body — which was laid out under a wrapper that stopped at
+    // 60%. The panel that grows after it is drawn is the Receiver, which gains
+    // the AGC block when the mode changes to SSB.
+    assert.match(block('.dock__pinned .section {'), /flex:\s*0 1 auto/);
 });
 
 t('nothing about a pinned panel is sticky any more', () => {

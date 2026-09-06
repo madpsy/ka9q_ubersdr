@@ -106,16 +106,30 @@ class DecoderSpotsHistoryMap {
     }
 
     /**
-     * Get consistent offset for a callsign to prevent overlapping markers
+     * Get consistent offset for a callsign to prevent overlapping markers.
+     *
+     * The scatter only exists so two stations reporting the same square do not
+     * land on the same pixel, so it must never push a marker outside the area
+     * the position was actually derived from. That means scaling it to the
+     * precision of that position — a 4-character square is 1° × 2°, but a
+     * 6-character subsquare is only 1/24° × 2/24°, so reusing the square-sized
+     * scatter there throws a station tens of km out of its own subsquare.
+     *
      * @param {string} callsign - Station callsign
+     * @param {string} precision - 'grid4', 'grid6' or 'exact'
      * @returns {object} - {lat, lon} offset in degrees
      */
-    getCallsignOffset(callsign) {
+    getCallsignOffset(callsign, precision = 'grid4') {
+        const spreads = {
+            grid4: { lat: 0.8, lon: 1.6 },       // ±0.4° / ±0.8°, well inside a 1° × 2° square
+            grid6: { lat: 1 / 24, lon: 2 / 24 }, // ±half a subsquare
+            exact: { lat: 0.01, lon: 0.02 }      // known position: just enough to unstack
+        };
+        const spread = spreads[precision] || spreads.grid4;
+
         const hash = this.hashCallsign(callsign);
-        // Maidenhead grid squares are approximately 1° latitude × 2° longitude
-        // Use smaller offsets to keep stations well within their grid square
-        const latOffset = ((hash % 1000) / 1000 - 0.5) * 0.8; // ±0.4 degrees
-        const lonOffset = (((hash / 1000) % 1000) / 1000 - 0.5) * 1.6; // ±0.8 degrees
+        const latOffset = ((hash % 1000) / 1000 - 0.5) * spread.lat;
+        const lonOffset = (((hash / 1000) % 1000) / 1000 - 0.5) * spread.lon;
         return { lat: latOffset, lon: lonOffset };
     }
 
@@ -380,9 +394,11 @@ class DecoderSpotsHistoryMap {
             let coords = null;
 
             // Check if spot has direct lat/lon (CW spots) or locator (digital spots)
+            let precision;
             if (spot.latitude !== undefined && spot.longitude !== undefined) {
                 // Use direct coordinates (CW spots)
                 coords = { lat: spot.latitude, lon: spot.longitude };
+                precision = 'exact';
             } else if (spot.locator) {
                 // Convert grid locator to coordinates (digital spots)
                 coords = this.gridToCoordinates(spot.locator);
@@ -390,13 +406,15 @@ class DecoderSpotsHistoryMap {
                     console.warn('Invalid grid locator:', spot.locator);
                     return;
                 }
+                precision = spot.locator.trim().length >= 6 ? 'grid6' : 'grid4';
             } else {
                 // No location data available
                 return;
             }
 
-            // Apply consistent offset based on callsign
-            const offset = this.getCallsignOffset(spot.callsign);
+            // Apply consistent offset based on callsign, sized to how precisely
+            // the position above is actually known
+            const offset = this.getCallsignOffset(spot.callsign, precision);
             const adjustedLat = coords.lat + offset.lat;
             const adjustedLon = coords.lon + offset.lon;
 

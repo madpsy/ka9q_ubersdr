@@ -3084,6 +3084,12 @@ export default function SpectrumView() {
                             transform: hoverInfo.x > sizes.w - 150 ? 'translateX(-100%)' : undefined,
                         }}
                     >
+                        {/* Above the dial and filter lines, and above the reading
+                            itself: it is the one thing here that changes what
+                            tuning to this frequency will do. */}
+                        {blockedAt(blocked, hoverInfo.freq) && (
+                            <div className="spec-tip__blocked">BLOCKED</div>
+                        )}
                         {hoverInfo.mark && hoverInfo.mark.startsWith('ref-') && (
                             <div className="spec-tip__mark" title={refMarkTitle(radio.serverInfo,
                                 hoverInfo.mark === 'ref-actual' ? 'actual' : 'expected')}>
@@ -3626,6 +3632,14 @@ function drawFrame(g, d, ctx) {
 // — blocking is about what gets played, not about what gets shown. Much past
 // this and the shade stops being an annotation and starts being a redaction.
 const BLOCKED_SHADE = 'rgba(150, 156, 168, 0.7)';
+
+// Whether a frequency falls in a blocked range. Inclusive of both ends, matching
+// the server's own test in audio_blocked.go — the shade and the tooltip must
+// agree with what will actually happen if you tune there.
+function blockedAt(blocked, hz) {
+    if (!blocked || !blocked.length || !(hz > 0)) return false;
+    return blocked.some((r) => hz >= r.start && hz <= r.end);
+}
 
 function drawBlockedShade(c, blocked, pxW, H, cfg) {
     if (!blocked || !blocked.length || !cfg || !cfg.span) return;

@@ -4122,6 +4122,16 @@ a.btn { text-decoration: none; }
    other says where the pointer happens to be. */
 .spec-tip__mark { color: var(--accent); }
 
+/* The cursor is over a range this receiver will not play. Shouted, because it is
+   the one line in the readout that is not a measurement: everything else says
+   what is there, this says what you will get if you tune to it. Warn rather than
+   bad — the range works, it just answers with an announcement. */
+.spec-tip__blocked {
+    color: var(--warn);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
 /* =========================================================================
    Audio filters
    ========================================================================= */

@@ -189,6 +189,21 @@ func (sl *SpotsLogger) Close() error {
 // - minDistanceKm: Minimum distance in km (0 = no filter)
 // - minSNR: Minimum SNR in dB (-999 = no filter)
 func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) ([]SpotRecord, error) {
+	return sl.GetHistoricalSpotsRange(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR, 0, 0, 0)
+}
+
+// GetHistoricalSpotsRange is GetHistoricalSpots with optional absolute bounds.
+//
+// fromTS (inclusive) and toTS (exclusive) are Unix seconds; 0 disables either
+// bound. They narrow the window the date range already selects, which is what a
+// relative period such as "last 3 hours" needs: startTime/endTime alone are a
+// time-of-day filter applied within every day of the range, so they cannot
+// express a window that crosses midnight.
+//
+// limit caps how many spots are returned, keeping the most recent ones; 0
+// returns everything. Deduplication happens before the cap, so the limit counts
+// spots as the caller sees them.
+func (sl *SpotsLogger) GetHistoricalSpotsRange(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int, fromTS, toTS int64, limit int) ([]SpotRecord, error) {
 	if sl.readDB == nil {
 		return nil, fmt.Errorf("spots database is not available")
 	}
@@ -218,6 +233,17 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 	// seconds, matching the old per-day file semantics.
 	startTS := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, time.UTC).Unix()
 	endTS := time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1).Unix()
+
+	// Absolute bounds only ever narrow the date range, never widen it
+	if fromTS > 0 && fromTS > startTS {
+		startTS = fromTS
+	}
+	if toTS > 0 && toTS < endTS {
+		endTS = toTS
+	}
+	if startTS >= endTS {
+		return []SpotRecord{}, nil
+	}
 
 	var conditions []string
 	var args []interface{}
@@ -402,6 +428,11 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 		return allSpots[i].Timestamp > allSpots[j].Timestamp
 	})
 
+	// Keep the most recent spots when the result is capped
+	if limit > 0 && len(allSpots) > limit {
+		allSpots = allSpots[:limit]
+	}
+
 	return allSpots, nil
 }
 
@@ -411,8 +442,20 @@ func (sl *SpotsLogger) GetAvailableDates() ([]string, error) {
 		return nil, fmt.Errorf("spots database is not available")
 	}
 
+	// A plain SELECT DISTINCT ... ORDER BY date DESC has to walk one index entry
+	// per spot to find a few hundred distinct days, so its cost grows with the
+	// table. This recursive form is a loose index scan: it seeks to the newest
+	// day, then repeatedly seeks to the newest day strictly older than the last,
+	// costing one index seek per day returned instead of one per row.
 	rows, err := sl.readDB.Query(
-		`SELECT DISTINCT DATE(ts, 'unixepoch') AS date FROM spots ORDER BY date DESC`)
+		`WITH RECURSIVE d(day) AS (
+		     SELECT MAX(DATE(ts, 'unixepoch')) FROM spots
+		     UNION ALL
+		     SELECT (SELECT MAX(DATE(ts, 'unixepoch')) FROM spots
+		              WHERE DATE(ts, 'unixepoch') < d.day)
+		     FROM d WHERE d.day IS NOT NULL
+		 )
+		 SELECT day FROM d WHERE day IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("spots dates query failed: %w", err)
 	}
@@ -435,8 +478,20 @@ func (sl *SpotsLogger) GetAvailableNames() ([]string, error) {
 		return nil, fmt.Errorf("spots database is not available")
 	}
 
+	// Same loose index scan as GetAvailableDates: a handful of decoder names
+	// should cost a handful of index seeks, not a scan of every spot. Both
+	// conditions are repeated inside so the partial index still matches.
 	rows, err := sl.readDB.Query(
-		`SELECT DISTINCT decoder_name FROM spots WHERE decoder_name IS NOT NULL AND decoder_name != '' ORDER BY decoder_name ASC`)
+		`WITH RECURSIVE n(name) AS (
+		     SELECT MIN(decoder_name) FROM spots
+		      WHERE decoder_name IS NOT NULL AND decoder_name != ''
+		     UNION ALL
+		     SELECT (SELECT MIN(decoder_name) FROM spots
+		              WHERE decoder_name > n.name
+		                AND decoder_name IS NOT NULL AND decoder_name != '')
+		     FROM n WHERE n.name IS NOT NULL
+		 )
+		 SELECT name FROM n WHERE name IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("spots names query failed: %w", err)
 	}
@@ -456,8 +511,15 @@ func (sl *SpotsLogger) GetAvailableNames() ([]string, error) {
 // GetHistoricalCSV returns historical spots data as CSV string
 // Parameters match GetHistoricalSpots for filtering
 func (sl *SpotsLogger) GetHistoricalCSV(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) (string, error) {
+	return sl.GetHistoricalCSVRange(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR, 0, 0, 0)
+}
+
+// GetHistoricalCSVRange is GetHistoricalCSV with the absolute bounds described
+// on GetHistoricalSpotsRange, so a downloaded CSV covers exactly the period the
+// page is showing.
+func (sl *SpotsLogger) GetHistoricalCSVRange(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int, fromTS, toTS int64, limit int) (string, error) {
 	// Get the spots data using existing method
-	spots, err := sl.GetHistoricalSpots(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR)
+	spots, err := sl.GetHistoricalSpotsRange(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR, fromTS, toTS, limit)
 	if err != nil {
 		return "", err
 	}
@@ -1231,4 +1293,153 @@ func formatHourlyDistribution(hourly map[int]int) map[string]int {
 		result[key] = hourly[hour]
 	}
 	return result
+}
+
+// SpotExtreme identifies the spot at one end of a range (closest, furthest,
+// strongest), carrying just enough to name it in a summary line.
+type SpotExtreme struct {
+	Callsign   string   `json:"callsign"`
+	Country    string   `json:"country,omitempty"`
+	Locator    string   `json:"locator,omitempty"`
+	Band       string   `json:"band,omitempty"`
+	Mode       string   `json:"mode,omitempty"`
+	DistanceKm *float64 `json:"distance_km,omitempty"`
+	SNR        int      `json:"snr"`
+	WPM        int      `json:"wpm,omitempty"`
+}
+
+// SpotsSummary is a compact overview of a spots result. It is computed server
+// side, over exactly the rows being returned, so every consumer gets the same
+// figures without walking the list itself.
+type SpotsSummary struct {
+	TotalSpots      int `json:"total_spots"`
+	TotalDecodes    int `json:"total_decodes"` // raw decodes behind the rows (SeenCount)
+	UniqueCallsigns int `json:"unique_callsigns"`
+	Countries       int `json:"countries"`
+	Continents      int `json:"continents"`
+	Locators        int `json:"locators"`
+
+	SpotsPerMode      map[string]int `json:"spots_per_mode"`
+	SpotsPerBand      map[string]int `json:"spots_per_band"`
+	SpotsPerContinent map[string]int `json:"spots_per_continent"`
+
+	Closest  *SpotExtreme `json:"closest,omitempty"`
+	Furthest *SpotExtreme `json:"furthest,omitempty"`
+	BestSNR  *SpotExtreme `json:"best_snr,omitempty"`
+
+	AvgSNR        *float64 `json:"avg_snr,omitempty"`
+	AvgDistanceKm *float64 `json:"avg_distance_km,omitempty"`
+
+	// CW only: speed stands in for the mode breakdown, since every CW spot has
+	// the same mode but a meaningful WPM
+	AvgWPM  *float64     `json:"avg_wpm,omitempty"`
+	Fastest *SpotExtreme `json:"fastest,omitempty"`
+
+	FirstSpot string `json:"first_spot,omitempty"`
+	LastSpot  string `json:"last_spot,omitempty"`
+}
+
+// summariseSpots builds a SpotsSummary from the spots being returned.
+func summariseSpots(spots []SpotRecord) SpotsSummary {
+	summary := SpotsSummary{
+		TotalSpots:        len(spots),
+		SpotsPerMode:      map[string]int{},
+		SpotsPerBand:      map[string]int{},
+		SpotsPerContinent: map[string]int{},
+	}
+	if len(spots) == 0 {
+		return summary
+	}
+
+	callsigns := make(map[string]struct{})
+	countries := make(map[string]struct{})
+	continents := make(map[string]struct{})
+	locators := make(map[string]struct{})
+
+	var snrTotal int
+	var distTotal float64
+	var distCount int
+
+	for i := range spots {
+		spot := &spots[i]
+
+		// SeenCount is 0 on rows that were never deduplicated; each is one decode
+		if spot.SeenCount > 0 {
+			summary.TotalDecodes += spot.SeenCount
+		} else {
+			summary.TotalDecodes++
+		}
+
+		callsigns[spot.Callsign] = struct{}{}
+		if spot.Country != "" {
+			countries[spot.Country] = struct{}{}
+		}
+		if spot.Continent != "" {
+			continents[spot.Continent] = struct{}{}
+			summary.SpotsPerContinent[spot.Continent]++
+		}
+		if spot.Locator != "" {
+			locators[spot.Locator] = struct{}{}
+		}
+		if spot.Mode != "" {
+			summary.SpotsPerMode[spot.Mode]++
+		}
+		if spot.Band != "" {
+			summary.SpotsPerBand[spot.Band]++
+		}
+
+		snrTotal += spot.SNR
+		if summary.BestSNR == nil || spot.SNR > summary.BestSNR.SNR {
+			summary.BestSNR = spotExtreme(spot)
+		}
+
+		if spot.DistanceKm != nil {
+			distTotal += *spot.DistanceKm
+			distCount++
+			if summary.Closest == nil || *spot.DistanceKm < *summary.Closest.DistanceKm {
+				summary.Closest = spotExtreme(spot)
+			}
+			if summary.Furthest == nil || *spot.DistanceKm > *summary.Furthest.DistanceKm {
+				summary.Furthest = spotExtreme(spot)
+			}
+		}
+
+		// Spots arrive newest first, but do not rely on it for the span
+		if summary.FirstSpot == "" || spot.Timestamp < summary.FirstSpot {
+			summary.FirstSpot = spot.Timestamp
+		}
+		if summary.LastSpot == "" || spot.Timestamp > summary.LastSpot {
+			summary.LastSpot = spot.Timestamp
+		}
+	}
+
+	summary.UniqueCallsigns = len(callsigns)
+	summary.Countries = len(countries)
+	summary.Continents = len(continents)
+	summary.Locators = len(locators)
+
+	avgSNR := float64(snrTotal) / float64(len(spots))
+	summary.AvgSNR = &avgSNR
+	if distCount > 0 {
+		avgDist := distTotal / float64(distCount)
+		summary.AvgDistanceKm = &avgDist
+	}
+
+	return summary
+}
+
+func spotExtreme(spot *SpotRecord) *SpotExtreme {
+	e := &SpotExtreme{
+		Callsign: spot.Callsign,
+		Country:  spot.Country,
+		Locator:  spot.Locator,
+		Band:     spot.Band,
+		Mode:     spot.Mode,
+		SNR:      spot.SNR,
+	}
+	if spot.DistanceKm != nil {
+		km := *spot.DistanceKm
+		e.DistanceKm = &km
+	}
+	return e
 }

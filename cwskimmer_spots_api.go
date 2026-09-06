@@ -59,6 +59,22 @@ type CWSpotRecord struct {
 // read-time fallback for those rows — matching the behaviour of the old
 // file-based reader.
 func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsigns map[string]bool, continent, country, direction, fromDate, toDate, startTime, endTime string, deduplicate bool, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) ([]CWSpotRecord, error) {
+	return sl.GetCWHistoricalSpotsRange(band, name, callsigns, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, minDistanceKm, minSNR, ctyDatabase, 0, 0, 0)
+}
+
+// GetCWHistoricalSpotsRange is GetCWHistoricalSpots with optional absolute
+// bounds and a result cap.
+//
+// fromTS (inclusive) and toTS (exclusive) are Unix seconds; 0 disables either
+// bound. They narrow the window the date range already selects, which is what a
+// relative period such as "last 3 hours" needs: startTime/endTime alone are a
+// time-of-day filter applied within every day of the range, so they cannot
+// express a window that crosses midnight.
+//
+// limit caps how many spots are returned, keeping the most recent ones; 0
+// returns everything. Deduplication happens before the cap, so the limit counts
+// spots as the caller sees them.
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpotsRange(band, name string, callsigns map[string]bool, continent, country, direction, fromDate, toDate, startTime, endTime string, deduplicate bool, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase, fromTS, toTS int64, limit int) ([]CWSpotRecord, error) {
 	if sl.readDB == nil {
 		return nil, fmt.Errorf("CW spots database is not available")
 	}
@@ -89,6 +105,17 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsign
 	// the old per-day file semantics.
 	startTS := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, time.UTC).Unix()
 	endTS := time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1).Unix()
+
+	// Absolute bounds only ever narrow the date range, never widen it
+	if fromTS > 0 && fromTS > startTS {
+		startTS = fromTS
+	}
+	if toTS > 0 && toTS < endTS {
+		endTS = toTS
+	}
+	if startTS >= endTS {
+		return []CWSpotRecord{}, nil
+	}
 
 	var conditions []string
 	var args []interface{}
@@ -284,6 +311,12 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name string, callsign
 		})
 	}
 
+	// Keep the most recent spots when the result is capped. Both paths are
+	// newest-first here: the query orders by ts DESC and dedup re-sorts.
+	if limit > 0 && len(allSpots) > limit {
+		allSpots = allSpots[:limit]
+	}
+
 	return allSpots, nil
 }
 
@@ -313,8 +346,17 @@ func (sl *CWSkimmerSpotsLogger) GetCWAvailableDates() ([]string, error) {
 		return nil, fmt.Errorf("CW spots database is not available")
 	}
 
+	// Loose index scan: one index seek per day returned rather than one index
+	// entry per spot. See GetAvailableDates for the reasoning.
 	rows, err := sl.readDB.Query(
-		`SELECT DISTINCT DATE(ts, 'unixepoch') AS date FROM cw_spots ORDER BY date DESC`)
+		`WITH RECURSIVE d(day) AS (
+		     SELECT MAX(DATE(ts, 'unixepoch')) FROM cw_spots
+		     UNION ALL
+		     SELECT (SELECT MAX(DATE(ts, 'unixepoch')) FROM cw_spots
+		              WHERE DATE(ts, 'unixepoch') < d.day)
+		     FROM d WHERE d.day IS NOT NULL
+		 )
+		 SELECT day FROM d WHERE day IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("cw_spots dates query failed: %w", err)
 	}
@@ -338,8 +380,16 @@ func (sl *CWSkimmerSpotsLogger) GetCWAvailableNames() ([]string, error) {
 		return nil, fmt.Errorf("CW spots database is not available")
 	}
 
+	// Same loose index scan as GetCWAvailableDates, over the band index
 	rows, err := sl.readDB.Query(
-		`SELECT DISTINCT band FROM cw_spots WHERE band IS NOT NULL AND band != '' ORDER BY band ASC`)
+		`WITH RECURSIVE n(name) AS (
+		     SELECT MIN(band) FROM cw_spots WHERE band IS NOT NULL AND band != ''
+		     UNION ALL
+		     SELECT (SELECT MIN(band) FROM cw_spots
+		              WHERE band > n.name AND band IS NOT NULL AND band != '')
+		     FROM n WHERE n.name IS NOT NULL
+		 )
+		 SELECT name FROM n WHERE name IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("cw_spots names query failed: %w", err)
 	}
@@ -359,8 +409,15 @@ func (sl *CWSkimmerSpotsLogger) GetCWAvailableNames() ([]string, error) {
 // GetCWHistoricalCSV returns historical CW spots data as CSV string.
 // callsigns is a set of uppercase callsigns to match; an empty map means no filter.
 func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name string, callsigns map[string]bool, continent, country, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) (string, error) {
+	return sl.GetCWHistoricalCSVRange(band, name, callsigns, continent, country, direction, fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase, 0, 0, 0)
+}
+
+// GetCWHistoricalCSVRange is GetCWHistoricalCSV with the absolute bounds and
+// result cap described on GetCWHistoricalSpotsRange, so a downloaded CSV covers
+// exactly the period the page is showing.
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSVRange(band, name string, callsigns map[string]bool, continent, country, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase, fromTS, toTS int64, limit int) (string, error) {
 	// Get the spots data using existing method
-	spots, err := sl.GetCWHistoricalSpots(band, name, callsigns, continent, country, direction, fromDate, toDate, startTime, endTime, true, minDistanceKm, minSNR, ctyDatabase)
+	spots, err := sl.GetCWHistoricalSpotsRange(band, name, callsigns, continent, country, direction, fromDate, toDate, startTime, endTime, true, minDistanceKm, minSNR, ctyDatabase, fromTS, toTS, limit)
 	if err != nil {
 		return "", err
 	}
@@ -528,10 +585,16 @@ func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimm
 		return
 	}
 
+	// Absolute period bounds (Unix seconds), used by the relative "last N"
+	// periods. Fetch one past the cap so an over-long result can be reported
+	// as truncated.
+	fromTS, toTS := parseAbsoluteSpotBounds(r)
+
 	// Get spots
-	spots, err := cwSkimmer.spotsLogger.GetCWHistoricalSpots(
+	spots, err := cwSkimmer.spotsLogger.GetCWHistoricalSpotsRange(
 		band, name, callsigns, continent, country, direction,
 		fromDate, toDate, startTime, endTime, deduplicate, minDistanceKm, minSNR, ctyDatabase,
+		fromTS, toTS, maxSpotResults+1,
 	)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -549,10 +612,19 @@ func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimm
 		return
 	}
 
+	truncated := len(spots) > maxSpotResults
+	if truncated {
+		spots = spots[:maxSpotResults]
+		fmt.Printf("CW spots response capped at %d spots for %s\n", maxSpotResults, clientIP)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"spots": spots,
-		"count": len(spots),
+		"spots":     spots,
+		"count":     len(spots),
+		"truncated": truncated,
+		"limit":     maxSpotResults,
+		"summary":   summariseCWSpots(spots),
 	}); err != nil {
 		fmt.Printf("Error encoding CW spots: %v\n", err)
 	}
@@ -717,10 +789,12 @@ func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSk
 		return
 	}
 
-	// Get CSV data
-	csvData, err := cwSkimmer.spotsLogger.GetCWHistoricalCSV(
+	// Get CSV data, over exactly the period the page is showing
+	fromTS, toTS := parseAbsoluteSpotBounds(r)
+	csvData, err := cwSkimmer.spotsLogger.GetCWHistoricalCSVRange(
 		band, name, callsigns, continent, country, direction,
 		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase,
+		fromTS, toTS, maxSpotResults,
 	)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -749,4 +823,116 @@ func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSk
 	if _, err := w.Write([]byte(csvData)); err != nil {
 		fmt.Printf("Error writing CSV data: %v\n", err)
 	}
+}
+
+// summariseCWSpots builds a SpotsSummary from CW spots. It mirrors
+// summariseSpots, but CW rows carry no mode breakdown (every row is CW) and do
+// carry a speed, so the mode map is left empty and WPM figures are filled in.
+func summariseCWSpots(spots []CWSpotRecord) SpotsSummary {
+	summary := SpotsSummary{
+		TotalSpots:        len(spots),
+		SpotsPerMode:      map[string]int{},
+		SpotsPerBand:      map[string]int{},
+		SpotsPerContinent: map[string]int{},
+	}
+	if len(spots) == 0 {
+		return summary
+	}
+
+	callsigns := make(map[string]struct{})
+	countries := make(map[string]struct{})
+	continents := make(map[string]struct{})
+
+	var snrTotal int
+	var distTotal float64
+	var distCount int
+	var wpmTotal int
+	var wpmCount int
+
+	for i := range spots {
+		spot := &spots[i]
+
+		// SeenCount is 0 on rows that were never deduplicated; each is one spot
+		if spot.SeenCount > 0 {
+			summary.TotalDecodes += spot.SeenCount
+		} else {
+			summary.TotalDecodes++
+		}
+
+		callsigns[spot.Callsign] = struct{}{}
+		if spot.Country != "" {
+			countries[spot.Country] = struct{}{}
+		}
+		if spot.Continent != "" {
+			continents[spot.Continent] = struct{}{}
+			summary.SpotsPerContinent[spot.Continent]++
+		}
+		if spot.Band != "" {
+			summary.SpotsPerBand[spot.Band]++
+		}
+
+		snrTotal += spot.SNR
+		if summary.BestSNR == nil || spot.SNR > summary.BestSNR.SNR {
+			summary.BestSNR = cwSpotExtreme(spot)
+		}
+
+		if spot.WPM > 0 {
+			wpmTotal += spot.WPM
+			wpmCount++
+			if summary.Fastest == nil || spot.WPM > summary.Fastest.WPM {
+				summary.Fastest = cwSpotExtreme(spot)
+			}
+		}
+
+		if spot.DistanceKm != nil {
+			distTotal += *spot.DistanceKm
+			distCount++
+			if summary.Closest == nil || *spot.DistanceKm < *summary.Closest.DistanceKm {
+				summary.Closest = cwSpotExtreme(spot)
+			}
+			if summary.Furthest == nil || *spot.DistanceKm > *summary.Furthest.DistanceKm {
+				summary.Furthest = cwSpotExtreme(spot)
+			}
+		}
+
+		if summary.FirstSpot == "" || spot.Timestamp < summary.FirstSpot {
+			summary.FirstSpot = spot.Timestamp
+		}
+		if summary.LastSpot == "" || spot.Timestamp > summary.LastSpot {
+			summary.LastSpot = spot.Timestamp
+		}
+	}
+
+	summary.UniqueCallsigns = len(callsigns)
+	summary.Countries = len(countries)
+	summary.Continents = len(continents)
+
+	avgSNR := float64(snrTotal) / float64(len(spots))
+	summary.AvgSNR = &avgSNR
+	if distCount > 0 {
+		avgDist := distTotal / float64(distCount)
+		summary.AvgDistanceKm = &avgDist
+	}
+	if wpmCount > 0 {
+		avgWPM := float64(wpmTotal) / float64(wpmCount)
+		summary.AvgWPM = &avgWPM
+	}
+
+	return summary
+}
+
+func cwSpotExtreme(spot *CWSpotRecord) *SpotExtreme {
+	e := &SpotExtreme{
+		Callsign: spot.Callsign,
+		Country:  spot.Country,
+		Band:     spot.Band,
+		Mode:     "CW",
+		SNR:      spot.SNR,
+		WPM:      spot.WPM,
+	}
+	if spot.DistanceKm != nil {
+		km := *spot.DistanceKm
+		e.DistanceKm = &km
+	}
+	return e
 }

@@ -6401,6 +6401,42 @@ func handleSpaceWeatherCSV(w http.ResponseWriter, r *http.Request, swm *SpaceWea
 	}
 }
 
+// maxSpotPeriodSeconds caps the window from_ts/to_ts may request. The relative
+// periods the UI offers top out at 24 hours; anything beyond this is a
+// hand-built URL asking the database for far more than the page can show.
+const maxSpotPeriodSeconds int64 = 48 * 3600
+
+// maxSpotResults caps how many spots either spots endpoint returns, whatever
+// period was asked for. The page cannot usefully render more than this, and an
+// uncapped response for a busy period is large enough to hurt both ends.
+const maxSpotResults = 10000
+
+// parseAbsoluteSpotBounds reads the optional from_ts/to_ts query parameters,
+// Unix seconds bounding the requested period exactly. They exist because
+// start_time/end_time are a time-of-day filter applied within every day of the
+// date range, so a relative window such as "last 3 hours" cannot be expressed
+// with them once it crosses midnight. 0 means the bound is not set.
+//
+// A window longer than maxSpotPeriodSeconds is clamped to its most recent
+// maxSpotPeriodSeconds rather than rejected, so an over-long request still
+// returns useful data.
+func parseAbsoluteSpotBounds(r *http.Request) (fromTS, toTS int64) {
+	parse := func(key string) int64 {
+		if v := r.URL.Query().Get(key); v != "" {
+			if ts, err := strconv.ParseInt(v, 10, 64); err == nil && ts > 0 {
+				return ts
+			}
+		}
+		return 0
+	}
+	fromTS, toTS = parse("from_ts"), parse("to_ts")
+
+	if fromTS > 0 && toTS > 0 && toTS-fromTS > maxSpotPeriodSeconds {
+		fromTS = toTS - maxSpotPeriodSeconds
+	}
+	return fromTS, toTS
+}
+
 // handleDecoderSpots serves historical decoder spots data
 func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
 	// Check if IP is banned
@@ -6433,6 +6469,9 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	endTime := r.URL.Query().Get("end_time")            // End time (HH:MM) - optional
 	minDistanceStr := r.URL.Query().Get("min_distance") // Minimum distance in km
 	minSNRStr := r.URL.Query().Get("min_snr")           // Minimum SNR in dB
+
+	// Absolute period bounds (Unix seconds), used by the relative "last N" periods
+	fromTS, toTS := parseAbsoluteSpotBounds(r)
 
 	// Also support from_date parameter
 	if fd := r.URL.Query().Get("from_date"); fd != "" {
@@ -6502,7 +6541,8 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	}
 
 	// Get historical spots
-	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR)
+	// Fetch one past the cap so an over-long result can be reported as truncated
+	spots, err := md.spotsLogger.GetHistoricalSpotsRange(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR, fromTS, toTS, maxSpotResults+1)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -6519,10 +6559,19 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 		return
 	}
 
+	truncated := len(spots) > maxSpotResults
+	if truncated {
+		spots = spots[:maxSpotResults]
+		log.Printf("Decoder spots response capped at %d spots for %s", maxSpotResults, clientIP)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"spots": spots,
-		"count": len(spots),
+		"spots":     spots,
+		"count":     len(spots),
+		"truncated": truncated,
+		"limit":     maxSpotResults,
+		"summary":   summariseSpots(spots),
 	}); err != nil {
 		log.Printf("Error encoding decoder spots: %v", err)
 	}
@@ -6630,6 +6679,10 @@ func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDeco
 	minDistanceStr := r.URL.Query().Get("min_distance")
 	minSNRStr := r.URL.Query().Get("min_snr")
 
+	// Absolute period bounds (Unix seconds), so the CSV covers exactly the
+	// period the page is showing
+	fromTS, toTS := parseAbsoluteSpotBounds(r)
+
 	// Also support from_date parameter
 	if fd := r.URL.Query().Get("from_date"); fd != "" {
 		fromDate = fd
@@ -6678,7 +6731,7 @@ func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDeco
 	}
 
 	// Get CSV data
-	csvData, err := md.spotsLogger.GetHistoricalCSV(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR)
+	csvData, err := md.spotsLogger.GetHistoricalCSVRange(mode, band, name, callsign, locator, continent, country, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR, fromTS, toTS, maxSpotResults)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		w.Header().Set("Content-Type", "application/json")

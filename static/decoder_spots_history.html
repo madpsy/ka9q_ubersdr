@@ -38,11 +38,27 @@
                 </div>
 
                 <div class="control-group">
+                    <label for="period-select">Period:</label>
+                    <select id="period-select">
+                        <option value="15">Last 15 minutes</option>
+                        <option value="30">Last 30 minutes</option>
+                        <option value="60" selected>Last 1 hour</option>
+                        <option value="180">Last 3 hours</option>
+                        <option value="360">Last 6 hours</option>
+                        <option value="720">Last 12 hours</option>
+                        <option value="1440">Last 1 day</option>
+                        <option value="2880">Last 2 days</option>
+                        <option value="day">Whole day</option>
+                        <option value="custom">Custom range</option>
+                    </select>
+                </div>
+
+                <div class="control-group" id="start-time-group" style="display: none;">
                     <label for="start-time-input">Start Time (UTC):</label>
                     <input type="time" id="start-time-input" placeholder="HH:MM" style="padding: 8px;">
                 </div>
 
-                <div class="control-group">
+                <div class="control-group" id="end-time-group" style="display: none;">
                     <label for="end-time-input">End Time (UTC):</label>
                     <input type="time" id="end-time-input" placeholder="HH:MM" style="padding: 8px;">
                 </div>
@@ -156,6 +172,9 @@
                 </div>
             </div>
 
+            <!-- Compact summary from the API, above the map -->
+            <div id="summary-bar" class="summary-bar" style="display: none;"></div>
+
             <!-- Map Section -->
             <div id="map-section" class="map-section" style="display: none;">
                 <h2 style="margin-bottom: 10px;">📍 Spots Map</h2>
@@ -172,9 +191,9 @@
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <label for="records-per-page">Records per page:</label>
                     <select id="records-per-page" style="padding: 5px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
-                        <option value="25">25</option>
+                        <option value="25" selected>25</option>
                         <option value="50">50</option>
-                        <option value="100" selected>100</option>
+                        <option value="100">100</option>
                         <option value="250">250</option>
                         <option value="500">500</option>
                         <option value="1000">1000</option>

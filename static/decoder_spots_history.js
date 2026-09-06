@@ -12,7 +12,7 @@
     let clientCountryFilter = ''; // Client-side country filter
     let clientCQOnly = false; // Client-side CQ only filter
     let currentPage = 1;
-    let recordsPerPage = 100;
+    let recordsPerPage = 25;
     let sortColumn = 'timestamp';
     let sortDirection = 'desc'; // Start with newest first
     let spotsMap = null; // Map instance
@@ -27,6 +27,7 @@
     let modalSpots = [];
     let modalPage = 1;
     let modalPerPage = 25;
+    let modalSubtitleBase = '';
     let modalRefSpot = null; // spot the modal was opened from (used by "Show on Map")
     let modalRequestId = 0;
     let modalSortColumn = 'timestamp';
@@ -338,6 +339,110 @@
     }
 
 
+    // Relative periods are capped to match the server's 48-hour limit on an
+    // absolute from_ts/to_ts window
+    const MAX_PERIOD_MINUTES = 48 * 60;
+    const DEFAULT_PERIOD = '60';
+
+    function utcDateString(unixSeconds) {
+        return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
+    }
+
+    // Resolve the Period control into everything a spots query needs: the date
+    // range to request, an optional time-of-day filter, and absolute Unix-second
+    // bounds for the relative windows.
+    //
+    // The absolute bounds are what make a relative window work at all: the
+    // server's start_time/end_time are a time-of-day filter applied within every
+    // day of the range, so they cannot express a window crossing midnight.
+    //
+    // A relative window is anchored to now when the selected date is today, and
+    // to the end of the selected date otherwise — so "Last 1 hour" on a past date
+    // means that day's final hour rather than an empty result.
+    function getSelectedPeriod() {
+        const select = document.getElementById('period-select');
+        const value = select ? select.value : DEFAULT_PERIOD;
+        const label = select && select.selectedIndex >= 0
+            ? select.options[select.selectedIndex].textContent
+            : '';
+
+        if (value === 'custom') {
+            return {
+                date: selectedDate,
+                toDate: '',
+                startTime: document.getElementById('start-time-input').value.trim(),
+                endTime: document.getElementById('end-time-input').value.trim(),
+                fromTS: 0,
+                toTS: 0,
+                label: label
+            };
+        }
+
+        if (value === 'day') {
+            return { date: selectedDate, toDate: '', startTime: '', endTime: '', fromTS: 0, toTS: 0, label: label };
+        }
+
+        const minutes = Math.min(parseInt(value, 10) || parseInt(DEFAULT_PERIOD, 10), MAX_PERIOD_MINUTES);
+        const todayUTC = new Date().toISOString().slice(0, 10);
+        const anchorMs = selectedDate === todayUTC
+            ? Date.now()
+            : Date.parse(`${selectedDate}T00:00:00Z`) + 24 * 3600 * 1000;
+
+        const toTS = Math.ceil(anchorMs / 1000);
+        const fromTS = toTS - minutes * 60;
+
+        return {
+            date: utcDateString(fromTS),
+            toDate: utcDateString(toTS - 1), // toTS is an exclusive bound
+            startTime: '',
+            endTime: '',
+            fromTS: fromTS,
+            toTS: toTS,
+            label: label
+        };
+    }
+
+    // Query parameters describing a period, shared by the spots, CSV and
+    // per-callsign requests so all three cover exactly the same window
+    function periodQueryString(period) {
+        let qs = `date=${encodeURIComponent(period.date)}`;
+        if (period.toDate && period.toDate !== period.date) {
+            qs += `&to_date=${encodeURIComponent(period.toDate)}`;
+        }
+        if (period.startTime) qs += `&start_time=${encodeURIComponent(period.startTime)}`;
+        if (period.endTime) qs += `&end_time=${encodeURIComponent(period.endTime)}`;
+        if (period.fromTS) qs += `&from_ts=${period.fromTS}`;
+        if (period.toTS) qs += `&to_ts=${period.toTS}`;
+        return qs;
+    }
+
+    // Human-readable period for titles and the callsign modal subtitle
+    function periodText(period) {
+        if (period.fromTS && period.toTS) {
+            const time = (ts) => new Date(ts * 1000).toISOString().slice(11, 16);
+            return `${period.label} (${period.date} ${time(period.fromTS)} – ${utcDateString(period.toTS - 1)} ${time(period.toTS)} UTC)`;
+        }
+        if (period.startTime || period.endTime) {
+            return `${period.date} ${period.startTime || '00:00'}–${period.endTime || '23:59'} UTC`;
+        }
+        return `${period.date} (full day, UTC)`;
+    }
+
+    // The custom start/end inputs only apply to the Custom range option
+    function updatePeriodControls() {
+        const isCustom = document.getElementById('period-select').value === 'custom';
+        document.getElementById('start-time-group').style.display = isCustom ? '' : 'none';
+        document.getElementById('end-time-group').style.display = isCustom ? '' : 'none';
+    }
+
+    // 'all' means one page holding everything; anything unparseable falls back
+    // to the default page size
+    function parseRecordsPerPage(value) {
+        if (value === 'all') return Infinity;
+        const parsed = parseInt(value, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 25;
+    }
+
     function initializeControls() {
         const loadBtn = document.getElementById('load-btn');
         const clearFiltersBtn = document.getElementById('clear-filters-btn');
@@ -412,7 +517,7 @@
         // Add Enter key handler to all form inputs to trigger load
         const formInputs = [
             modeSelect, bandSelect, nameSelect, callsignInput, locatorInput,
-            startTimeInput, endTimeInput,
+            document.getElementById('period-select'), startTimeInput, endTimeInput,
             document.getElementById('continent-select'),
             document.getElementById('country-select'),
             document.getElementById('min-distance-select'),
@@ -428,10 +533,18 @@
             });
         });
 
+        // Browsers restore the previously selected option across a reload, so
+        // take the page size from the control rather than assuming the default
+        recordsPerPage = parseRecordsPerPage(recordsPerPageSelect.value);
+
+        // Same reason: show or hide the custom time inputs for whatever the
+        // period control actually holds after a reload
+        updatePeriodControls();
+        document.getElementById('period-select').addEventListener('change', updatePeriodControls);
+
         // Handle records per page change
         recordsPerPageSelect.addEventListener('change', function() {
-            const value = this.value;
-            recordsPerPage = value === 'all' ? Infinity : parseInt(value);
+            recordsPerPage = parseRecordsPerPage(this.value);
             currentPage = 1;
             if (currentData) {
                 displaySpots(currentData);
@@ -500,6 +613,8 @@
         document.getElementById('locator-input').value = '';
         document.getElementById('start-time-input').value = '';
         document.getElementById('end-time-input').value = '';
+        document.getElementById('period-select').value = DEFAULT_PERIOD;
+        updatePeriodControls();
         document.getElementById('continent-select').value = '';
         document.getElementById('country-select').value = '';
         document.getElementById('min-distance-select').value = '0';
@@ -731,8 +846,7 @@
         const name = document.getElementById('name-select').value;
         const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
         const locator = document.getElementById('locator-input').value.trim().toUpperCase();
-        const startTime = document.getElementById('start-time-input').value.trim();
-        const endTime = document.getElementById('end-time-input').value.trim();
+        const period = getSelectedPeriod();
         const continent = document.getElementById('continent-select').value;
         const country = document.getElementById('country-select').value;
         const minDistance = document.getElementById('min-distance-select').value;
@@ -758,14 +872,12 @@
         document.getElementById('load-btn').disabled = true;
 
         try {
-            let url = `/api/decoder/spots?date=${selectedDate}`;
+            let url = `/api/decoder/spots?${periodQueryString(period)}`;
             if (mode) url += `&mode=${mode}`;
             if (band) url += `&band=${band}`;
             if (name) url += `&name=${name}`;
             if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
             if (locator) url += `&locator=${encodeURIComponent(locator)}`;
-            if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
-            if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
             if (continent) url += `&continent=${continent}`;
             if (country) url += `&country=${encodeURIComponent(country)}`;
             if (minDistance && parseFloat(minDistance) > 0) {
@@ -776,7 +888,7 @@
             }
 
             // Remember the period so the callsign history modal can reuse it
-            lastQueryPeriod = { date: selectedDate, startTime: startTime, endTime: endTime };
+            lastQueryPeriod = period;
 
             const response = await fetch(url);
 
@@ -813,7 +925,11 @@
             updateFilterButtonStates();
 
             displaySpots(data);
-            showStatus(`Loaded ${data.count} spots`, 'success');
+            if (data.truncated) {
+                showStatus(`Loaded the most recent ${data.count} spots — the period matched more than the ${data.limit} the server returns. Narrow the period or add filters to see the rest.`, 'success');
+            } else {
+                showStatus(`Loaded ${data.count} spots`, 'success');
+            }
         } catch (error) {
             console.error('Error loading spots:', error);
             showStatus(`Error loading spots: ${error.message}`, 'error');
@@ -876,8 +992,11 @@
         let titleParts = [mode];
         if (band !== 'All Bands') titleParts.push(band);
         if (name !== 'All Names') titleParts.push(`(${name})`);
-        titleParts.push(selectedDate);
+        titleParts.push(lastQueryPeriod ? periodText(lastQueryPeriod) : selectedDate);
         title.textContent = `${titleParts.join(' - ')}`;
+
+        // Compact summary above the map, straight from the API
+        renderSummaryBar(data.summary);
 
         // Calculate statistics (always use full dataset for stats)
         const stats = calculateStats(data.spots);
@@ -1295,6 +1414,83 @@
         container.appendChild(btn);
     }
 
+    // Compact summary bar above the map. The figures come from the API's
+    // `summary` object, computed over exactly the rows returned, so they stay
+    // correct when a result was capped.
+    function renderSummaryBar(summary) {
+        const bar = document.getElementById('summary-bar');
+        if (!bar) return;
+
+        if (!summary || !summary.total_spots) {
+            bar.style.display = 'none';
+            bar.innerHTML = '';
+            return;
+        }
+
+        const num = (v) => Number(v || 0).toLocaleString();
+        const item = (value, label) =>
+            `<span class="summary-item"><span class="summary-value">${value}</span><span class="summary-label">${label}</span></span>`;
+        const row = (heading, items) => items.length
+            ? `<div class="summary-row"><span class="summary-heading">${heading}</span>${items.join('')}</div>`
+            : '';
+
+        const totals = [
+            item(num(summary.total_spots), 'spots'),
+            item(num(summary.unique_callsigns), 'callsigns'),
+            item(num(summary.countries), 'countries'),
+            item(num(summary.continents), 'continents')
+        ];
+        if (summary.locators) totals.push(item(num(summary.locators), 'grids'));
+        if (summary.total_decodes > summary.total_spots) {
+            totals.push(item(num(summary.total_decodes), 'decodes'));
+        }
+        if (summary.first_spot && summary.last_spot) {
+            const hhmm = (ts) => new Date(ts).toISOString().slice(11, 16);
+            totals.push(item(`${hhmm(summary.first_spot)}–${hhmm(summary.last_spot)}`, 'UTC'));
+        }
+
+        // Modes, busiest first
+        const modes = Object.entries(summary.spots_per_mode || {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([mode, count]) => item(escapeHtml(mode), num(count)));
+
+        // Bands in standard order, with the map's colour so the bar and the
+        // map legend read as the same thing
+        const bandColors = (spotsMap && spotsMap.bandColors) || {};
+        const bandNames = Object.keys(summary.spots_per_band || {});
+        const orderedBands = (spotsMap && spotsMap.sortBands)
+            ? spotsMap.sortBands(bandNames)
+            : bandNames;
+        const bands = orderedBands.map(band => {
+            const swatch = `<span class="summary-swatch" style="background: ${bandColors[band] || '#999'};"></span>`;
+            return `<span class="summary-item">${swatch}<span class="summary-value">${escapeHtml(band)}</span><span class="summary-label">${num(summary.spots_per_band[band])}</span></span>`;
+        });
+
+        // Extremes
+        const range = [];
+        const withCall = (extreme, text) => `${text} <span class="summary-label">${escapeHtml(extreme.callsign)}</span>`;
+        if (summary.closest && summary.closest.distance_km != null) {
+            range.push(item(withCall(summary.closest, `${num(Math.round(summary.closest.distance_km))} km`), 'closest'));
+        }
+        if (summary.furthest && summary.furthest.distance_km != null) {
+            range.push(item(withCall(summary.furthest, `${num(Math.round(summary.furthest.distance_km))} km`), 'furthest'));
+        }
+        if (summary.avg_distance_km != null) {
+            range.push(item(`${num(Math.round(summary.avg_distance_km))} km`, 'avg distance'));
+        }
+        if (summary.best_snr) {
+            const snr = summary.best_snr.snr;
+            range.push(item(withCall(summary.best_snr, `${snr >= 0 ? '+' : ''}${snr} dB`), 'best SNR'));
+        }
+        if (summary.avg_snr != null) {
+            const avg = summary.avg_snr;
+            range.push(item(`${avg >= 0 ? '+' : ''}${avg.toFixed(1)} dB`, 'avg SNR'));
+        }
+
+        bar.innerHTML = row('Totals', totals) + row('Modes', modes) + row('Bands', bands) + row('Range', range);
+        bar.style.display = 'block';
+    }
+
     function calculateStats(spots) {
         const callsigns = new Set();
         const countries = new Map();
@@ -1467,8 +1663,13 @@
             showSpotOnMap(spot);
         });
 
-        document.getElementById('callsign-records-per-page').addEventListener('change', function() {
-            modalPerPage = this.value === 'all' ? Infinity : parseInt(this.value);
+        const modalPerPageSelect = document.getElementById('callsign-records-per-page');
+
+        // Same reload-restore mismatch as the main table's page size
+        modalPerPage = parseRecordsPerPage(modalPerPageSelect.value);
+
+        modalPerPageSelect.addEventListener('change', function() {
+            modalPerPage = parseRecordsPerPage(this.value);
             modalPage = 1;
             renderCallsignModalTable();
         });
@@ -1700,7 +1901,7 @@
         modalSortDirection = 'desc';
         resetCallsignModalFilters();
 
-        const period = lastQueryPeriod || { date: selectedDate, startTime: '', endTime: '' };
+        const period = lastQueryPeriod || getSelectedPeriod();
         if (!period.date) {
             return;
         }
@@ -1708,14 +1909,8 @@
         document.getElementById('callsignModalTitle').innerHTML =
             `${flagForCountry(spot.country)}${escapeHtml(spot.callsign)}`;
 
-        let periodText = period.date;
-        if (period.startTime || period.endTime) {
-            periodText += ` ${period.startTime || '00:00'}–${period.endTime || '23:59'} UTC`;
-        } else {
-            periodText += ' (full day, UTC)';
-        }
-        document.getElementById('callsignModalSubtitle').textContent =
-            `All spots • ${periodText}`;
+        modalSubtitleBase = `All spots • ${periodText(period)}`;
+        document.getElementById('callsignModalSubtitle').textContent = modalSubtitleBase;
 
         const qrzLink = document.getElementById('callsignModalQrz');
         qrzLink.href = `https://www.qrz.com/db/${encodeURIComponent(spot.callsign)}`;
@@ -1733,11 +1928,9 @@
         const requestId = ++modalRequestId;
 
         try {
-            let url = `/api/decoder/spots?date=${encodeURIComponent(period.date)}` +
+            let url = `/api/decoder/spots?${periodQueryString(period)}` +
                       `&callsign=${encodeURIComponent(spot.callsign)}` +
                       `&deduplicate=false&locators_only=false`;
-            if (period.startTime) url += `&start_time=${encodeURIComponent(period.startTime)}`;
-            if (period.endTime) url += `&end_time=${encodeURIComponent(period.endTime)}`;
 
             const response = await fetch(url);
 
@@ -1765,6 +1958,13 @@
             if (modalSpots.length === 0) {
                 setCallsignModalStatus('No spots found for this callsign in the selected period');
                 return;
+            }
+
+            // An active station over a long period can exceed the server's cap;
+            // say so rather than quietly showing a partial history
+            if (data.truncated) {
+                document.getElementById('callsignModalSubtitle').textContent =
+                    `${modalSubtitleBase} • most recent ${data.limit} decodes only`;
             }
 
             setCallsignModalStatus(null);
@@ -1975,21 +2175,18 @@
         const name = document.getElementById('name-select').value;
         const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
         const locator = document.getElementById('locator-input').value.trim().toUpperCase();
-        const startTime = document.getElementById('start-time-input').value.trim();
-        const endTime = document.getElementById('end-time-input').value.trim();
+        const period = getSelectedPeriod();
         const continent = document.getElementById('continent-select').value;
         const country = document.getElementById('country-select').value;
         const minDistance = document.getElementById('min-distance-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
 
-        let url = `/api/decoder/spots/csv?date=${selectedDate}`;
+        let url = `/api/decoder/spots/csv?${periodQueryString(period)}`;
         if (mode) url += `&mode=${mode}`;
         if (band) url += `&band=${band}`;
         if (name) url += `&name=${name}`;
         if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
         if (locator) url += `&locator=${encodeURIComponent(locator)}`;
-        if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
-        if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
         if (continent) url += `&continent=${continent}`;
         if (country) url += `&country=${encodeURIComponent(country)}`;
         if (minDistance && parseFloat(minDistance) > 0) {

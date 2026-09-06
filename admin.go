@@ -2446,6 +2446,12 @@ func (ah *AdminHandler) reloadBands() error {
 	}
 	ah.config.Bands = bandsConfig.Bands
 	log.Printf("Reloaded %d bands from bands.yaml", len(ah.config.Bands))
+
+	// A band in the "blocked" group is what closes a range to ordinary
+	// listeners, so the blocked set follows the band plan on every edit — that
+	// is what makes blocking take effect without a restart. See
+	// audio_blocked.go.
+	rebuildBlockedRanges(ah.config.Bands)
 	return nil
 }
 

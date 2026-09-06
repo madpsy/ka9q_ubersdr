@@ -1649,7 +1649,7 @@
                         <div class="config-field">
                             <label>Group (Optional)</label>
                             <input type="text" id="newBandGroup" placeholder="e.g., HF">
-                            <small>Optional group name for organising bands</small>
+                            <small>Optional group name for organising bands. One name is reserved: <strong>Blocked</strong> closes the range to ordinary listeners — they hear a recorded announcement instead of the band, and IQ modes are refused there. Bypassed IPs and password holders are unaffected. Needs audio/blocked-12.wav and audio/blocked-24.wav on the server.</small>
                         </div>
                         <div class="config-field">
                             <label>Mode (Optional)</label>
@@ -7772,7 +7772,13 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 row.style.borderBottom = '1px solid #dee2e6';
                 const bandwidth = band.end - band.start;
                 const bandwidthKHz = (bandwidth / 1000).toFixed(0);
-                const groupDisplay = band.group ? `<span style="color: #667eea; font-weight: bold;">${band.group}</span>` : '<em style="color: #999;">—</em>';
+                // The "blocked" group is the one that does something beyond organising the
+                // list — ordinary listeners get a recorded announcement instead of the band —
+                // so it is called out here rather than looking like any other label.
+                const isBlockedGroup = (band.group || '').trim().toLowerCase() === 'blocked';
+                const groupDisplay = band.group
+                    ? `<span style="color: ${isBlockedGroup ? '#dc3545' : '#667eea'}; font-weight: bold;" ${isBlockedGroup ? 'title="Ordinary listeners hear an announcement instead of this range; IQ modes are refused. Bypassed users are unaffected."' : ''}>${band.group}${isBlockedGroup ? ' 🔇' : ''}</span>`
+                    : '<em style="color: #999;">—</em>';
                 const modeDisplay = band.mode ? `<span style="color: #28a745; font-weight: bold;">${band.mode.toUpperCase()}</span>` : '<em style="color: #999;">—</em>';
                 const buttonNameDisplay = band.button_name ? `<span style="color: #e67e22; font-weight: bold;">${band.button_name}</span>` : '<em style="color: #999;">—</em>';
                 // Escape label for use in onclick attribute

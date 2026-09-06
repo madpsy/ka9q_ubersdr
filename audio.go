@@ -252,6 +252,20 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 	dataCopy := make([]byte, len(pcmData))
 	copy(dataCopy, pcmData)
 
+	// Read once and use for both the substitution below and the packet header,
+	// so the announcement can never be chosen for one rate and labelled another.
+	sampleRate := session.SampleRate
+	channels := session.Channels
+
+	// Blocked ranges: an ordinary listener tuned inside one hears an
+	// announcement instead of the band.  Done here rather than in each
+	// streaming loop so that one place covers all of them -- the native
+	// WebSocket, the KiwiSDR and WebSDR emulations, the HTTP stream tap and
+	// audio extensions all read what is written below.  The buffer is
+	// overwritten in place, so packet timing, length and RTP/GPS timestamps are
+	// exactly those of the real audio it replaces.  See audio_blocked.go.
+	session.applyBlockedAudio(dataCopy, sampleRate, channels)
+
 	// Create audio packet with PCM data and timestamps.
 	// Stamp SampleRate and Channels NOW from the session — by the time the
 	// websocket loop dequeues this packet, both may already reflect a new mode,
@@ -262,8 +276,8 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 		PCMData:      dataCopy,
 		RTPTimestamp: rtpTimestamp,
 		GPSTimeNs:    gpsTimeNs,
-		SampleRate:   session.SampleRate,
-		Channels:     session.Channels,
+		SampleRate:   sampleRate,
+		Channels:     channels,
 	}
 
 	// Send audio packet to session's channel.

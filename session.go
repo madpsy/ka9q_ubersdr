@@ -123,6 +123,26 @@ type Session struct {
 	Country        string // Country name from GeoIP lookup (internal use only)
 	CountryCode    string // ISO country code from GeoIP lookup (internal use only)
 
+	// blockExempt is true when this session must never be served the
+	// blocked-range announcement: an internal session (empty ClientIP), or a
+	// listener bypassed by IP or by password.  Both inputs are fixed for the
+	// life of a session -- a different password means a new connection and so a
+	// new session -- so it is decided once here rather than per packet.  See
+	// audio_blocked.go.
+	blockExempt bool
+
+	// blockActive is whether the last packet routed to this session was the
+	// announcement rather than real audio.  Written by routeAudio on the audio
+	// receive goroutine, read by the streaming goroutines, hence atomic: it is
+	// what tells the audio gate not to squelch the announcement and the DSP
+	// insert not to denoise it.
+	blockActive atomic.Bool
+
+	// blockCursor is the read position within the announcement, in bytes.
+	// Touched only by routeAudio, which is single-goroutine, so it needs no
+	// synchronisation of its own.
+	blockCursor int
+
 	// WebSocket connection (for closing when kicked)
 	WSConn interface{} // *wsConn, stored as interface{} to avoid import cycle
 
@@ -569,6 +589,14 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		return nil, err
 	}
 
+	// A blocked range is not served over IQ.  Raw complex baseband is precisely
+	// what the block exists to withhold, and unlike a demodulated channel there
+	// is nothing that can be substituted for it -- see applyBlockedAudio.
+	// Bypassed and internal sessions never reach this: audioBlockedFor says so.
+	if isIQModeName(mode) && sm.audioBlockedFor(frequency, clientIP, password) {
+		return nil, fmt.Errorf("mode '%s' is not available on this frequency", mode)
+	}
+
 	// Check total radiod channel cap. radiod supports a maximum of maxRadiodChannels
 	// channels; reject new user sessions when we are at or near that limit.
 	// Internal sessions (empty clientIP) are exempt — background channels (noisefloor,
@@ -716,6 +744,9 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		BypassPassword:    password, // Store the password in the session
 		VisitedBands:      make(map[string]bool),
 		VisitedModes:      make(map[string]bool),
+		// Internal sessions (noise floor, frequency reference) and bypassed
+		// listeners are never served the blocked-range announcement.
+		blockExempt: clientIP == "" || sm.config.Server.IsIPTimeoutBypassed(clientIP, password),
 	}
 
 	// Track initial band and mode in per-session maps
@@ -1752,6 +1783,25 @@ func (sm *SessionManager) UpdateSessionChannel(sessionID string, frequency uint6
 		return fmt.Errorf("invalid audio frequency %d Hz (must be >= %d Hz)", frequency, minFrequency)
 	}
 
+	// Refuse IQ inside a blocked range, before anything is changed.
+	//
+	// Judged on the requested pair rather than the current one, because both
+	// directions have to be caught: switching to IQ while parked on a blocked
+	// range, and tuning into one while already in IQ.  A zero frequency or an
+	// empty mode means "unchanged", so the session's own value stands in.
+	session.mu.RLock()
+	wantFreq, wantMode := session.Frequency, session.Mode
+	session.mu.RUnlock()
+	if frequency > 0 {
+		wantFreq = frequency
+	}
+	if mode != "" {
+		wantMode = mode
+	}
+	if isIQModeName(wantMode) && sm.audioBlockedFor(wantFreq, session.ClientIP, session.BypassPassword) {
+		return fmt.Errorf("mode '%s' is not available on this frequency", wantMode)
+	}
+
 	// Update session state only for parameters that changed
 	session.mu.Lock()
 	oldFreq := session.Frequency
@@ -1850,7 +1900,25 @@ func (sm *SessionManager) UpdateSessionChannel(sessionID string, frequency uint6
 	// channel's until radiod says otherwise.  Frequency and bandwidth changes
 	// take effect within a block and need no such treatment.
 	modeChanged := currentMode != oldMode
-	if modeChanged {
+
+	// Crossing the edge of a blocked range needs the same window, for the same
+	// reason: radiod takes a block or two to move, so the audio produced from
+	// here on is still the old frequency's.  Leaving a blocked range is the
+	// direction that matters -- without this, those blocks would be served from
+	// inside the range that was just closed.  Entering one is covered already,
+	// since routeAudio substitutes from the moment Frequency changes, but the
+	// window costs nothing there and keeps the two directions symmetrical.
+	//
+	// Inert unless a range is actually blocked and this listener is subject to
+	// it: blockedRangeAt answers false for both frequencies otherwise.
+	blockChanged := false
+	if !session.blockExempt && currentFreq != oldFreq {
+		_, wasBlocked := blockedRangeAt(oldFreq)
+		_, nowBlocked := blockedRangeAt(currentFreq)
+		blockChanged = wasBlocked != nowBlocked
+	}
+
+	if modeChanged || blockChanged {
 		session.beginRetune(time.Now())
 	}
 

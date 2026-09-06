@@ -136,6 +136,13 @@ COPY --from=builder /build/kiwi ./kiwi
 # Copy websdr directory for WebSDR web interface
 COPY --from=builder /build/websdr ./websdr
 
+# Copy the blocked-range announcements (audio/blocked-*.wav), read from the
+# working directory at startup. Not a volume and not under /app/config: they are
+# part of the build like static/ is, and a blocked range with no announcement
+# serves the band normally, so a missing directory here would silently turn the
+# feature off. See audio_blocked.go.
+COPY --from=builder /build/audio ./audio
+
 # Copy example configuration files to /etc/ka9q_ubersdr (not affected by volume mounts)
 COPY --from=builder /build/config/config.yaml.example /etc/ka9q_ubersdr/config.yaml.example
 COPY --from=builder /build/config/bands.yaml.example /etc/ka9q_ubersdr/bands.yaml.example

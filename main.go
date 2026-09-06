@@ -599,6 +599,13 @@ func main() {
 	// silently skipped that.
 	pruneOutOfRangeChannels(config)
 
+	// Blocked ranges are bands.yaml entries in the "blocked" group, so this has
+	// to follow the band load above. The announcement clips are read once here;
+	// the range list is rebuilt again whenever the admin UI edits a band (see
+	// reloadBands). Both are no-ops on a receiver with neither.
+	loadBlockedClips(blockedAudioDir)
+	rebuildBlockedRanges(config.Bands)
+
 	// Start DB retention pruning loop — runs once at startup then daily at midnight UTC.
 	// Uses each subsystem's configured retention period; 0 = keep forever.
 	dbManager.StartRetentionLoop(mainCtx, RetentionConfig{

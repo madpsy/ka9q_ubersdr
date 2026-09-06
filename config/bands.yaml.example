@@ -2,6 +2,29 @@
 # Each band has a label (name), start frequency, and end frequency (in Hz)
 # Optionally, bands can be assigned to a group for organization
 # Based on UK amateur radio band allocations from Ofcom
+#
+# The group is free text and purely for organising the band list, with one
+# exception: "blocked" (any capitalisation) closes the range to ordinary
+# listeners. Instead of demodulated audio they hear a short recording on a
+# loop, and IQ modes are refused there so the raw signal cannot be taken off
+# the receiver instead. Users who bypass session limits — an IP in
+# server.timeout_bypass_ips, or a client supplying server.bypass_password —
+# hear the range normally, as do the decoders and the noise-floor monitor.
+#
+# The recordings are read at startup from audio/blocked-12.wav and
+# audio/blocked-24.wav: 16-bit mono WAV at 12 kHz and 24 kHz, matching the two
+# rates this server demodulates at (12 kHz for SSB/CW, 24 kHz for AM/FM). If a
+# file is missing, the modes at that rate are served normally rather than
+# silenced, and the startup log says so.
+#
+# Blocked ranges are ordinary bands in every other respect: they appear in the
+# band list and on the spectrum like any other entry, and can be added, edited
+# and deleted from the admin Bands tab without a restart. For example:
+#
+#   - label: "Medium wave"
+#     start: 526500          # ITU Region 1 MW broadcast band
+#     end: 1606500           # Region 2 is 525000-1705000
+#     group: "Blocked"
 
 bands:
   # HF Amateur Radio Bands (UK Allocations)

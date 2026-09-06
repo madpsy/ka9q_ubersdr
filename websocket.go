@@ -1857,6 +1857,15 @@ func audioGateAllows(session *Session, basebandPower, noise float32) bool {
 		return false
 	}
 
+	// The blocked-range announcement is not a signal and must not be squelched
+	// like one.  The power and noise figures still describe the band underneath
+	// it, so a listener whose squelch is set would otherwise have the
+	// announcement muted on any quiet frequency -- and hear nothing at all,
+	// which reads as a broken receiver rather than a blocked one.
+	if session.blockActive.Load() {
+		return true
+	}
+
 	session.mu.RLock()
 	minSNR := session.AudioGateMinSNR
 	minPower := session.AudioGateMinPower
@@ -2261,7 +2270,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			session.dspInsertMu.RLock()
 			ins := session.dspInsert
 			session.dspInsertMu.RUnlock()
-			if ins != nil && !isIQMode && (session.SampleRate == 12000 || session.SampleRate == 24000) {
+			// !blockActive: the blocked-range announcement is a recording, not
+			// received signal, so there is no noise in it for the DSP to
+			// remove -- only artefacts for it to add.
+			if ins != nil && !isIQMode && !session.blockActive.Load() &&
+				(session.SampleRate == 12000 || session.SampleRate == 24000) {
 				ins.Send(pcmData) // non-blocking; drops silently if sendChan full (fail-open)
 				// Read back whatever the DSP has already processed — non-blocking.
 				select {

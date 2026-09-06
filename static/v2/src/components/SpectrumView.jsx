@@ -3612,11 +3612,17 @@ function drawFrame(g, d, ctx) {
 // absence. Grey lifts one and dulls the other, which is the same "switched off"
 // in both.
 //
-// Deliberately weak. The point is to say a range is closed before you tune into
-// it and find out by ear — not to hide it. The receiver can still see what is
-// there, the waterfall is how it says so, and blocking is about what gets
-// played, not about what gets shown.
-const BLOCKED_SHADE = 'rgba(150, 156, 168, 0.34)';
+// Half strength, and no more. The point is to say a range is closed before you
+// tune into it and find out by ear — not to hide it. The receiver can still see
+// what is there, the waterfall is how it says so, and blocking is about what
+// gets played, not about what gets shown.
+//
+// It has to carry over both pictures at one value, and the waterfall is the
+// harder of the two: a flat wash over a flat near-black spectrum reads at a
+// glance, while the same wash over a colourful, textured waterfall mostly
+// desaturates rather than dims. What looks right on the spectrum is invisible
+// on the heat map, so this is set by what the waterfall needs.
+const BLOCKED_SHADE = 'rgba(150, 156, 168, 0.5)';
 
 function drawBlockedShade(c, blocked, pxW, H, cfg) {
     if (!blocked || !blocked.length || !cfg || !cfg.span) return;

@@ -25,17 +25,15 @@
 //                         overriding it, so the button never shows rows the
 //                         panel behind it has been told to leave out.
 //
-// `minimal` drops the PAGER and nothing else. That is not the usual answer, and
-// the reason is the phone: every panel starts cut down there, so whatever
-// minimal removes is removed from the default mobile view. The switch decides
-// what the panel is about, and the Show All button is a single line that is the
-// only way to reach the rest of the list once the pager is gone — a cut-down
-// view without them is a panel that can show five active operations and nothing
-// else, on the machine most likely to be looking at it.
+// `minimal` keeps the list and drops everything around it: the count and the
+// Show all switch above it, the pager below it, and the Show All button under
+// that. What is left is five operations on the air now, and nothing else.
 //
-// The pager is the right thing to lose: growing the list in place is exactly
-// what a cut-down view is avoiding, and Show All reaches the same rows in a
-// modal that has room for them.
+// That is the whole of a cut-down view's job. Every control removed here can
+// still be reached — minimal is a per-panel setting, and turning it off puts all
+// four back — so the question is not whether they are available but whether they
+// earn a line in a panel that has been asked to be small. Three rows of chrome
+// around five rows of content does not.
 
 import React, { useEffect, useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
@@ -478,7 +476,12 @@ export default function DXpeditionsPanel({ minimal }) {
 
     return (
         <div className="stack">
-            <div className="dxp-head">
+            {/* The count and the switch. Both go in a cut-down view: the count
+                is a fact about a list you can see, and the switch changes what
+                the panel is about, which is a decision taken once and not one
+                worth a row of a small panel. */}
+            {!minimal && (
+                <div className="dxp-head">
                     <span className="dxp-head__count">
                         {state.loading
                             ? 'Loading…'
@@ -492,7 +495,8 @@ export default function DXpeditionsPanel({ minimal }) {
                             ? 'Showing every announcement, including operations that have not started — click for the ones on the air now'
                             : 'Showing only operations on the air now — click for the whole forward calendar'}
                     />
-            </div>
+                </div>
+            )}
 
             {rows.length === 0 && !state.loading && (
                 <Empty>
@@ -510,7 +514,8 @@ export default function DXpeditionsPanel({ minimal }) {
                 </div>
             )}
 
-            {/* The one thing minimal loses. See the note at the top. */}
+            {/* The pager. Growing the list in place is exactly what a cut-down
+                view is avoiding. */}
             {!minimal && (
                 <ShowMore
                     shown={page.length}
@@ -526,10 +531,11 @@ export default function DXpeditionsPanel({ minimal }) {
             {/* Offered whenever there is anything to open. Not gated on the list
                 being longer than a page: even when the dock is already showing
                 every row, the modal is the room the dock column does not have —
-                wider rows, no paging, and nothing else on screen. The one case
-                it is withheld is an empty list, where it could only ever open an
-                empty dialog. */}
-            {rows.length > 0 && (
+                wider rows, no paging, and nothing else on screen. Withheld in
+                two cases: an empty list, where it could only ever open an empty
+                dialog, and a cut-down view, where it is the last of the three
+                rows of chrome that minimal exists to take away. */}
+            {!minimal && rows.length > 0 && (
                 <div className="row-end">
                     <Button
                         size="sm"

@@ -922,22 +922,35 @@ const jsonOnce = (body, ok = true) => {
         assert.ok(findDetail(out.tree), 'the detail did not open');
     });
 
-    t('minimal keeps everything a phone needs, and loses only the pager', () => {
-        // Every panel starts cut down on a phone, so this IS the default mobile
-        // view. A minimal that dropped the switch and the Show All button would
-        // leave a phone able to see five active operations and nothing else —
-        // the forward calendar unreachable, on the machine most likely to be
-        // looking at it.
+    t('minimal is the list and nothing else', () => {
+        // Three rows of chrome around five rows of content is what a cut-down
+        // view exists to remove: the count and the Show all switch above the
+        // list, the pager below it, and the Show All button under that. Each is
+        // still a toggle away — minimal is per panel — so what is being asserted
+        // is that a small panel is actually small.
         reset();
         const { tree } = mount(DXpeditionsPanel, { minimal: true }, context());
         const nodes = deep(tree);
-        assert.ok(nodes.some((n) => n.props && n.props.role === 'switch'), 'the Show all switch is gone on a phone');
-        assert.ok(showAllButton(tree), 'the Show All button is gone on a phone');
-        assert.ok(nodes.some((n) => n.props && /dxp-row/.test(String(n.props.className || ''))), 'no rows');
-        // The pager is the one thing it loses: growing the list in place is what
-        // a cut-down view is avoiding, and Show All reaches the same rows.
-        assert.ok(!nodes.some((n) => /show-more/.test(String(n.props && n.props.className || ''))),
-            'the pager survived minimal');
+        const cls = (n) => String((n.props && n.props.className) || '');
+
+        assert.ok(nodes.some((n) => /dxp-row/.test(cls(n))), 'no rows');
+
+        assert.ok(!nodes.some((n) => /dxp-head/.test(cls(n))), 'the count row survived minimal');
+        assert.ok(!nodes.some((n) => n.props && n.props.role === 'switch'), 'the Show all switch survived minimal');
+        assert.ok(!nodes.some((n) => /show-more/.test(cls(n))), 'the pager survived minimal');
+        assert.ok(!showAllButton(tree), 'the Show All button survived minimal');
+    });
+
+    t('a full panel still offers all four', () => {
+        // The other half of the test above: minimal is what takes them away, not
+        // a condition that quietly removed them for everybody.
+        reset();
+        const { tree } = mount(DXpeditionsPanel, {}, context());
+        const nodes = deep(tree);
+        const cls = (n) => String((n.props && n.props.className) || '');
+        assert.ok(nodes.some((n) => /dxp-head/.test(cls(n))), 'no count row');
+        assert.ok(nodes.some((n) => n.props && n.props.role === 'switch'), 'no Show all switch');
+        assert.ok(showAllButton(tree), 'no Show All button');
     });
 
     t('mounting and unmounting leaves nothing behind', () => {

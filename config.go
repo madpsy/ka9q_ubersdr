@@ -49,6 +49,7 @@ type Config struct {
 	DRMExtension       DRMExtensionConfig        `yaml:"drm_extension"`
 	SoundModem         SoundModemExtensionConfig `yaml:"soundmodem_extension"`
 	EiBi               EiBiConfig                `yaml:"eibi"`
+	DXpeditions        DXpeditionsConfig         `yaml:"dxpeditions"`
 	NTP                NTPConfig                 `yaml:"ntp"`
 	UI                 UIConfig                  `yaml:"ui"`
 	DSP                DSPConfig                 `yaml:"dsp"`
@@ -1006,6 +1007,18 @@ type SoundModemExtensionConfig struct {
 // EiBiConfig contains settings for the EiBi shortwave broadcast schedule
 type EiBiConfig struct {
 	Enabled bool `yaml:"enabled"` // Enable/disable EiBi schedule fetching (default: false)
+}
+
+// DXpeditionsConfig controls the Announced DX Operations calendar — the
+// six-hourly fetch of NG3K's ADXO feed that backs /api/dxpeditions
+// (see dxpeditions.go).
+//
+// Default true; nil = not set = enabled. It defaults on for the same reason
+// the DRM schedule does: it is one ~20 KB conditional request every six hours,
+// and knowing which DXpeditions are on the air right now is most of the value
+// of a receive-only calendar.
+type DXpeditionsConfig struct {
+	Enabled *bool `yaml:"enabled"`
 }
 
 // UIOptionItem represents a single selectable option for a UI setting

@@ -113,7 +113,8 @@ interface's own panels:
 ```
 Addons · Announcements · Antenna switch · Audio · Audio filters
 Audio scope · Backup · Band plan · Bands · Band Spectrum · Bookmarks
-Callsign lookup · Chat · Display · Doppler · DX cluster · Events
+Callsign lookup · Chat · Display · Doppler · DX cluster · DXpeditions
+Events
 Extensions · HFDL · IF Spectrum · IQ Demod · Layout · Lightning · Listeners
 Local bookmarks · Markers · Measure · Media controls · Mini Games · Most used
 Multipad · NAVTEX · News · Noise reduction · Notifications · Packet

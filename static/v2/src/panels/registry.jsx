@@ -95,9 +95,11 @@ import CallsignPanel from './CallsignPanel.jsx';
 import RadioControlPanel from './RadioControlPanel.jsx';
 import SDRControlPanel from './SDRControlPanel.jsx';
 import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
+import DXpeditionsPanel from './DXpeditionsPanel.jsx';
 import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
 import RankingPanel from './RankingPanel.jsx';
 import { rankingAvailable } from '../lib/ranking.js';
+import { dxpeditionsPresent, onDXpeditions } from '../lib/dxpeditions.js';
 import ExtensionsPanel from './ExtensionsPanel.jsx';
 import BackupPanel from './BackupPanel.jsx';
 import DXClusterPanel, { dxClusterAvailable } from './DXClusterPanel.jsx';
@@ -334,6 +336,37 @@ const BUILT_IN = [
         minimal: true,
         Component: SpotsPanel,
         requires: (serverInfo) => spotTabs(serverInfo).length > 0,
+    },
+    // Announced DX operations: who is on the air from somewhere rare, and who is
+    // about to be. Next to Spots because it answers the same kind of question at
+    // a different timescale — that one is what turned up in the last ten minutes,
+    // this one is what has been announced for the next three months.
+    //
+    // Collapsed by default. It is a thing you look at once and then go tuning,
+    // not while tuning, and the calendar changes on the scale of days.
+    //
+    // Absent entirely when the calendar is empty or its feed cannot be reached,
+    // which is the one gate in this file that asks about DATA rather than about
+    // what the receiver is configured for. That is deliberate and it is the
+    // difference between this and, say, space weather: a receiver either has a
+    // space-weather monitor or it does not, and the panel is worth listing
+    // either way so somebody can see what it would show. A DXpedition calendar
+    // is the same on every receiver in the world, so a panel offering an empty
+    // one is not informative — it is a slot explaining that today is a quiet
+    // day. See lib/dxpeditions.js for what "empty or unreachable" resolves to
+    // and why a failure counts as empty here rather than keeping the last list.
+    //
+    // Minimal: the first five rows, without the Show all switch, the pager or
+    // the Show All button.
+    {
+        id: 'dxpeditions',
+        title: 'DXpeditions',
+        icon: <Icon.Compass />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: DXpeditionsPanel,
+        requires: (serverInfo, env) => !!(env && env.dxpeditions),
     },
     {
         id: 'callsign',
@@ -1180,6 +1213,7 @@ export function usePanelApplies() {
     const { serverInfo } = useRadio();
     const extensions = useExtensions();
     const live = useLivePanelIds();
+    const dxpeditions = useDXpeditionsPresent();
     return useCallback(
         // The host's list first, and it is not a question about this receiver:
         // a client that does not want a panel does not want it whatever the
@@ -1197,9 +1231,21 @@ export function usePanelApplies() {
             // out why a panel is not showing. Loading and failure belong inside
             // the panel, which is already listed and already switchable.
             && (!p.custom || live.has(p.id))
-            && (!p.requires || p.requires(serverInfo, { extensions })),
-        [serverInfo, extensions, live],
+            && (!p.requires || p.requires(serverInfo, { extensions, dxpeditions })),
+        [serverInfo, extensions, live, dxpeditions],
     );
+}
+
+/**
+ * Whether this receiver is publishing a DXpedition calendar with something in
+ * it. Subscribed rather than fetched here, for the reason useLivePanelIds gives:
+ * the store lives for the whole session while whatever watches it may never be
+ * mounted, and the answer is wanted before the panel it gates is ever drawn.
+ */
+function useDXpeditionsPresent() {
+    const [present, setPresent] = useState(dxpeditionsPresent);
+    useEffect(() => onDXpeditions(() => setPresent(dxpeditionsPresent())), []);
+    return present;
 }
 
 /**

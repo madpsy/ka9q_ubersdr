@@ -3,6 +3,7 @@ import App from './App.jsx';
 import { startAppHeight } from './lib/appHeight.js';
 import { startKeyboardReveal } from './lib/keyboardReveal.js';
 import { refreshPanels, startPanelPolling } from './panels/custom/cache.js';
+import { refreshDXpeditions } from './lib/dxpeditions.js';
 import './styles.css';
 
 // Before the first render: the shell reads --app-height, and starting this
@@ -25,6 +26,13 @@ refreshPanels();
 // anybody reloading. Quiet while the tab is hidden, and a 304 when nothing has
 // changed. See panels/custom/cache.js.
 startPanelPolling();
+
+// The DXpedition calendar decides whether its own panel exists at all, so the
+// answer is wanted once per load whether or not anything ever opens it. A
+// one-shot like the bands list and /api/description — not a feed, so not gated
+// on the receiver running; the panel does its own polling while it is mounted.
+// Not awaited, for the same reason as refreshPanels above.
+refreshDXpeditions();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);

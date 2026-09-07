@@ -43,6 +43,7 @@ type CTYDatabase struct {
 	entities   map[string]*CTYEntity // Key is primary prefix
 	prefixes   map[string]*CTYEntry  // Key is prefix (including exact matches)
 	iso2ByName map[string]string     // CTY country name -> ISO 3166-1 alpha-2 code
+	byName     map[string]*CTYEntity // Normalised entity name -> entity (see normaliseEntityName)
 	mu         sync.RWMutex
 }
 
@@ -81,6 +82,7 @@ func InitCTYDatabase(filename string) error {
 		entities:   make(map[string]*CTYEntity),
 		prefixes:   make(map[string]*CTYEntry),
 		iso2ByName: make(map[string]string),
+		byName:     make(map[string]*CTYEntity),
 	}
 
 	// Try to load ISO2 map from same directory as CTY.DAT
@@ -123,6 +125,7 @@ func InitCTYDatabase(filename string) error {
 			}
 			currentEntity = entity
 			db.entities[entity.PrimaryPfx] = entity
+			db.byName[normaliseEntityName(entity.Name)] = entity
 			prefixLine.Reset()
 		} else if currentEntity != nil {
 			// This is a prefix line
@@ -449,4 +452,73 @@ func GetCallsignInfo(callsign string) *CTYLookupResult {
 		return nil
 	}
 	return globalCTY.LookupCallsignFull(callsign)
+}
+
+// entityNameNoise are the tokens that carry no identity and that CTY.DAT and
+// other sources spell differently: "Lord Howe Island" against "Lord Howe I",
+// "Dem. Rep. of the Congo" against "Dem Rep Congo", "Peter 1 Island" against
+// "Peter I". Dropping them makes the two spellings the same key.
+//
+// Dropping "i" and "1" is the one that looks risky and is not: verified against
+// the whole of CTY.DAT, this normalisation maps all 346 entities to 346 distinct
+// keys, so it cannot fold two real entities together. Re-run
+// TestCTYEntityNamesNormaliseUniquely after a CTY update — a collision there is
+// the signal that a token has to come back out of this list.
+var entityNameNoise = map[string]bool{
+	"island": true, "islands": true, "is": true, "i": true, "1": true,
+	"of": true, "the": true, "and": true, "rep": true, "republic": true,
+}
+
+var entityNamePunct = strings.NewReplacer(".", " ", ",", " ", "-", " ", "'", " ", "&", " and ", "/", " ")
+
+// normaliseEntityName folds a DXCC entity name to a comparison key.
+func normaliseEntityName(name string) string {
+	fields := strings.Fields(entityNamePunct.Replace(strings.ToLower(name)))
+	var out []string
+	for _, tok := range fields {
+		if entityNameNoise[tok] {
+			continue
+		}
+		out = append(out, tok)
+	}
+	return strings.Join(out, "")
+}
+
+// LookupEntityByName finds a DXCC entity by NAME rather than by callsign.
+//
+// This exists for sources that say where an operation is in words while the
+// callsign says something else. A DXpedition is the standard case: VK2LHW is a
+// VK2 call operating from Lord Howe, and resolving the call places it 600 km
+// away on the Australian mainland; the announcement's own "Lord Howe I" places
+// it correctly. Prefer this over the callsign ONLY when a source states the
+// entity independently — a callsign remains the better evidence otherwise.
+//
+// Returns nil when the name matches nothing, which is the normal answer for a
+// shorthand the source made up ("Antigua" for "Antigua & Barbuda"); the caller
+// falls back to the callsign.
+func (db *CTYDatabase) LookupEntityByName(name string) *CTYLookupResult {
+	if db == nil {
+		return nil
+	}
+	key := normaliseEntityName(name)
+	if key == "" {
+		return nil
+	}
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	entity, ok := db.byName[key]
+	if !ok {
+		return nil
+	}
+	// No CTYEntry here, and none is wanted: an entity resolved by name has no
+	// particular prefix behind it, so there are no prefix overrides to apply.
+	return buildLookupResult(&CTYEntry{Entity: entity})
+}
+
+// GetEntityInfo resolves a DXCC entity name using the global database.
+func GetEntityInfo(name string) *CTYLookupResult {
+	if globalCTY == nil {
+		return nil
+	}
+	return globalCTY.LookupEntityByName(name)
 }

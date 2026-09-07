@@ -67,6 +67,12 @@ export const GROUPS = [
         // is there — the same question the spots and the space weather are
         // asking, which is "where should I be listening".
         //
+        // DXpeditions sits with the spots and after the cluster, which is the
+        // same reasoning at a longer timescale: the spot feeds are what turned
+        // up in the last ten minutes, and this is what has been announced for
+        // the next three months. Both answer "where should I be listening",
+        // which is what this group is.
+        //
         // Measure is here on the same grounds and is the narrowest case of it:
         // the other panels read a whole band, and this one reads whatever piece
         // of the display you have drawn a box round. It sits with the pictures
@@ -74,7 +80,7 @@ export const GROUPS = [
         // main spectrum — and the tab it lands on is the one somebody is already
         // on when they wonder how wide that signal is.
         panels: [
-            'spots', 'dxcluster', 'voice', 'callsign',
+            'spots', 'dxcluster', 'dxpeditions', 'voice', 'callsign',
             'bandspectrum', 'spectrogram', 'measure', 'bandstats', 'spaceweather', 'lightning',
         ],
     },

@@ -1466,6 +1466,13 @@ func main() {
 	}
 	defer drmSchedule.Stop()
 
+	// Initialize the Announced DX Operations calendar (NG3K ADXO)
+	dxpeditions := NewDXpeditions(config)
+	if err := dxpeditions.Start(); err != nil {
+		log.Printf("Warning: Failed to start DXpedition calendar: %v", err)
+	}
+	defer dxpeditions.Stop()
+
 	// Initialize MCP server if enabled
 	var mcpServer *MCPServer
 	if config.MCP.Enabled {
@@ -2845,6 +2852,9 @@ func main() {
 	http.HandleFunc("/api/drm/schedule", func(w http.ResponseWriter, r *http.Request) {
 		handleDRMSchedule(w, r, config, drmSchedule)
 	})
+	http.HandleFunc("/api/dxpeditions", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleDXpeditions(w, r, dxpeditions)
+	}))
 	http.HandleFunc("/api/ui-config", func(w http.ResponseWriter, r *http.Request) {
 		handleUIConfig(w, r, config, *configDir)
 	})

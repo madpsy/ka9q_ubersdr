@@ -5643,6 +5643,127 @@ a.btn { text-decoration: none; }
    cap, and shrinks into it after. */
 .sheet--fill .sheet__body > .stack { min-height: 0; }
 
+/* ── The spot-archive search ─────────────────────────────────────────────────
+ *
+ * A modal, so it is not bound by the dock the panel is sitting in — which is
+ * the reason it can show a table at all where the transcript beside it has to
+ * wrap every line. Wide enough for a row on one line at a comfortable size, and
+ * never wider than the phone it is on. */
+.dxs {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(94vw, 620px);
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+/* Clear of the close button in the corner. */
+.dxs__head { display: flex; align-items: center; gap: 7px; margin-right: 30px; color: var(--text-dim); }
+.dxs__title { font-size: calc(13px * var(--ui-scale)); font-weight: 600; color: var(--text); }
+
+.dxs__form { display: flex; flex-direction: column; gap: 6px; }
+/* Each filter is a label and its controls on one line, with the label in a
+   fixed column so the four rows line up down their left edge. It drops to its
+   own line on a narrow screen rather than squeezing the chips. */
+.dxs-filter { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dxs-filter__label {
+    flex: none;
+    width: 5.5em;
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.dxs-filter .chip-row { flex: 1 1 12em; min-width: 0; }
+.dxs__call { flex: 1 1 12em; min-width: 0; max-width: 18ch; text-transform: uppercase; }
+
+.dxs__status {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 2px;
+    border-top: 1px solid var(--border);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.dxs__note { margin-left: auto; color: var(--text-faint); }
+.dxs__error { color: var(--warn); }
+
+/* The list scrolls inside the dialog rather than growing it past the viewport —
+   the same rule the DXpeditions "show all" modal follows. */
+.dxs__rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: min(52vh, 460px);
+    overflow-y: auto;
+}
+/* A row is one line of fixed-pitch columns that wraps rather than clipping: a
+   spot scrolled off to the right is a spot you cannot click, which is the same
+   reasoning as .dxc-out__line above. */
+.dxs-row {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    width: 100%;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    text-align: left;
+    cursor: pointer;
+    flex-wrap: wrap;
+}
+.dxs-row:hover { background: var(--surface-hover); }
+.dxs-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* Out of the receiver's range: shown, but not offered as a target. */
+.dxs-row--flat { cursor: default; opacity: 0.55; }
+.dxs-row--flat:hover { background: none; }
+
+.dxs-row__when { flex: none; display: flex; gap: 5px; color: var(--text-faint); }
+.dxs-row__utc { flex: none; }
+/* The date only earns its place on a window wider than a day; below 380px it is
+   the first thing to go, because the time is what distinguishes two rows. */
+.dxs-row__day { flex: none; }
+.dxs-row__call { flex: none; min-width: 8ch; color: var(--text); font-weight: 600; }
+.dxs-row__freq { flex: none; min-width: 7ch; text-align: right; color: var(--accent); }
+.dxs-row__band { flex: none; min-width: 4ch; color: var(--text-faint); }
+.dxs-row__mode { flex: none; color: var(--text-dim); }
+.dxs-row__snr { flex: none; color: var(--text-faint); }
+.dxs-row__where {
+    flex: 1 1 8em;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-faint);
+}
+.dxs-row__flag { margin-right: 4px; }
+/* The comment is the least important thing on the row and the most variable in
+   length, so it takes the whole of a second line rather than pushing the columns
+   about. */
+.dxs-row__note {
+    flex: 1 1 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-left: 5ch;
+    color: var(--text-faint);
+}
+@media (max-width: 420px) {
+    .dxs-row__day, .dxs-row__where { display: none; }
+    .dxs-filter__label { width: 100%; }
+}
+
 /* SSTV: the picture the addon last decoded. */
 /* Tiled to whatever the panel is wide enough for: one column in a narrow left
    dock, two or three once it has been widened or dragged to the bottom. The
@@ -11811,6 +11932,178 @@ a.btn { text-decoration: none; }
    its slot — that overhang is what the smooth scroll slides — and with anything
    drawn above it in the same container, an unclipped slide runs over it. */
 .spectrum__wf-heat { position: absolute; left: 0; right: 0; overflow: hidden; }
+
+/* ── DXpeditions ──────────────────────────────────────────────────────────── */
+
+/* The header: a count that ellipses before the switch beside it gives up any
+   width, on the same reasoning as .lsn-count. */
+.dxp-head { display: flex; align-items: center; gap: 8px; }
+.dxp-head__count {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.dxp-head .switch { flex: none; }
+
+/* Two lines, and each one sizes itself.
+ *
+ * This was a single grid — `auto 1fr` columns, the two lines as its rows — and
+ * that is the bug it is written this way to avoid. A grid column is as wide as
+ * the widest cell in it, and column one held the callsign AND the bands-and-modes
+ * line under it. An operation announcing most of HF made that column wide enough
+ * to squeeze the country and its flag off the end of the line ABOVE it: the flag
+ * disappearing because of the length of a line it is not on.
+ *
+ * A grid cannot give its rows different column widths, so the two lines are flex
+ * rows instead and neither one's content can reach the other. `.list__row` is
+ * already `flex-direction: column`, which is what stacks them.
+ *
+ * min-width: 0 on the lines and on the two cells that ellipse: a flex item's
+ * default min-width is auto, which is its content, so without it the line
+ * overflows the panel instead of the text being cut. */
+.list__row.dxp-row { gap: 1px; width: 100%; }
+.dxp-row__line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+}
+.dxp-row__call {
+    /* Never truncated: it is the row's identity, and every callsign in the feed
+       is short enough that giving it its content width costs nothing. */
+    flex: none;
+    font-family: var(--mono);
+    font-size: calc(12px * var(--ui-scale));
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+/* The prefix marker. Deliberately quiet — it is a caveat on the callsign beside
+   it, not a status of its own, and it sits on two rows in five. */
+.dxp-row__pfx {
+    font-family: var(--font);
+    font-style: normal;
+    font-size: calc(8.5px * var(--ui-scale));
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 3px;
+}
+/* The two that take the slack and give it back as an ellipsis. Each has the
+   whole of its own line to work with, which is the point of the split above. */
+.dxp-row__where {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: right;
+    font-size: calc(11px * var(--ui-scale));
+}
+.dxp-row__detail {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.dxp-row__when {
+    flex: none;
+    white-space: nowrap;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+/* On the air now. `is-active` already tints the row; this is the callsign
+   picking up the accent so a live operation is findable in a list that is
+   mostly forward calendar. */
+.dxp-row.is-active .dxp-row__call { color: var(--accent); }
+
+/* ── the detail modal ── */
+
+.dxp-detail { display: flex; flex-direction: column; gap: 10px; min-width: min(92vw, 460px); }
+/* The all-operations map wants the room a single pin does not. Same widening the
+   spot map's own two views use, and for the same reason: one is a place, the
+   other is a picture of a hemisphere. */
+.dxp-detail--wide { min-width: min(94vw, 860px); }
+.dxp-detail__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dxp-detail__call {
+    font-family: var(--mono);
+    font-size: calc(16px * var(--ui-scale));
+    font-weight: 600;
+}
+.dxp-detail__entity { flex: 1; min-width: 0; font-size: calc(12px * var(--ui-scale)); }
+.dxp-detail__state {
+    font-size: calc(10px * var(--ui-scale));
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+}
+.dxp-detail__state.is-live { color: var(--accent); }
+/* The view swap. It carries the margin the state used to, because it is now the
+   last thing in the row and the modal's close button sits over that corner.
+   
+   42px, because that corner is not 22 wide: .modal__close is a 30px circle
+   inset 6px, so it covers the last 36px of the row and 22 left fourteen of them
+   under it. The extra six is the gap that keeps the two from touching.
+
+   And centred rather than baseline-aligned. The row aligns on the baseline so
+   that the entity and the on-air state sit on the callsign's, which is right for
+   three pieces of text and wrong for a button: its baseline is its own label's,
+   so lining that up with a 16px callsign hangs the whole control — border,
+   padding and icon — below the line it is supposed to be on. */
+.dxp-detail__swap { flex: none; align-self: center; margin-right: 42px; }
+/* The pin's provenance. Small and directly under the map, because it is a
+   qualification of the picture rather than another fact about the operation. */
+.dxp-detail__caveat {
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    margin-top: -4px;
+}
+/* The announcement verbatim. Monospaced and wrapped: it is quoted text, and the
+   semicolons in it are the only structure it has. */
+.dxp-detail__info {
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    line-height: 1.5;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    border-left: 2px solid var(--border);
+    padding-left: 8px;
+}
+.dxp-detail__link { align-self: flex-start; }
+
+.dxp-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; align-items: baseline; }
+.dxp-fact { display: contents; }
+.dxp-fact__label {
+    font-size: calc(10px * var(--ui-scale));
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+.dxp-fact__value { font-size: calc(11.5px * var(--ui-scale)); min-width: 0; }
+
+/* ── the whole-list modal ── */
+
+.dxp-all { display: flex; flex-direction: column; gap: 8px; min-width: min(92vw, 460px); }
+/* Same clearance as the detail modal's row, for the same close button — the
+   count is the last thing here and was sitting under it. */
+.dxp-all__head { display: flex; align-items: baseline; gap: 8px; margin-right: 42px; }
+.dxp-all__title { flex: 1; font-size: calc(13px * var(--ui-scale)); font-weight: 600; }
+.dxp-all__count { font-family: var(--mono); font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
+/* The modal is the room the dock column did not have, so the list scrolls here
+   rather than growing the dialog past the viewport. */
+.dxp-list--all { max-height: min(60vh, 520px); overflow-y: auto; }
 
 /* ── Debug: layer promotions off ──────────────────────────────────────────────
  *

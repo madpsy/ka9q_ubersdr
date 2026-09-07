@@ -44,7 +44,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { freqInRange } from '../lib/format.js';
-import { Button, Empty, Modal } from '../components/ui.jsx';
+import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
 import DockTooNarrow, { useDockRoom } from '../components/DockTooNarrow.jsx';
 import {
@@ -54,6 +54,8 @@ import {
 import {
     dxConnect, dxDisconnect, dxSend, dxSession, onDxSession,
 } from '../lib/dxclusterSession.js';
+import { receiverMode, tuneFreq } from '../lib/dxclusterSearch.js';
+import DXClusterSearch from './DXClusterSearch.jsx';
 
 export const ADDON_NAME = 'dxcluster';
 
@@ -91,6 +93,10 @@ export default function DXClusterPanel({ minimal }) {
     const [flash, setFlash] = useState('');
     // A quick command that needs a callsign before it can be sent.
     const [asking, setAsking] = useState(null);   // { cmd, label, value }
+    // The spot-archive search, which is a modal rather than part of the panel:
+    // it is a different question from the one the transcript answers and it
+    // needs more room than any dock this panel lives in. See DXClusterSearch.
+    const [searching, setSearching] = useState(false);
     const outRef = useRef(null);
     const inputRef = useRef(null);
     const flashRef = useRef(null);
@@ -180,6 +186,18 @@ export default function DXClusterPanel({ minimal }) {
         actions.tuneTo({ frequency: spot.hz, mode: spot.mode });
         actions.ensureVisible(spot.hz);
         say(`Tuned ${spot.khz} ${spot.mode.toUpperCase()}`);
+    };
+
+    // The same thing for a search result, which arrives as the API's own row
+    // rather than as a line of transcript — a frequency and a mode column
+    // instead of eighty columns of text to parse them back out of.
+    const tuneRow = (row) => {
+        const hz = tuneFreq(row);
+        if (!freqInRange(hz)) return;
+        const mode = receiverMode(row);
+        actions.tuneTo({ frequency: hz, mode });
+        actions.ensureVisible(hz);
+        say(`Tuned ${row.callsign} ${Math.round(hz / 100) / 10} ${mode.toUpperCase()}`);
     };
 
     if (cramped) {
@@ -377,6 +395,19 @@ export default function DXClusterPanel({ minimal }) {
                     >
                         Send
                     </Button>
+                    {/* Beside Send because that is where the other way of asking
+                        the cluster a question is. `sh/dx G3ABC` types into the
+                        box on its left and reads the reply as text; this asks
+                        the addon's database the same thing and gets rows back
+                        that tune the receiver. */}
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Icon.Search size={15} />}
+                        title="Search the spot archive — by callsign, band and mode"
+                        aria-label="Search the spot archive"
+                        onClick={() => setSearching(true)}
+                    />
                 </div>
             )}
 
@@ -387,6 +418,10 @@ export default function DXClusterPanel({ minimal }) {
                     <code>help</code>. Any spot in the output is clickable and tunes the
                     receiver to it.
                 </div>
+            )}
+
+            {searching && (
+                <DXClusterSearch onClose={() => setSearching(false)} onTune={tuneRow} />
             )}
 
             {asking && (

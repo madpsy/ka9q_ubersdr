@@ -171,6 +171,21 @@ t('a manifest cannot claim the slot a phone opens on', () => {
     }
 });
 
+t('every built-in panel is named in a group', () => {
+    // The fallback in groups.jsx keeps an unnamed panel reachable — it rides
+    // with the last group — which is right for a CUSTOM panel whose manifest
+    // named nothing this build has. For a built-in it hides a mistake: the panel
+    // is added to the registry, nobody adds it to a list here, and it turns up
+    // on every phone at the bottom of Setup among the things you set once and
+    // leave. It still works, so nothing complains, and the grouping quietly
+    // stops meaning anything.
+    //
+    // This is the check that says so. A new panel fails here until it is placed.
+    const spare = ungrouped(PANELS).filter((p) => !p.custom).map((p) => p.id);
+    assert.deepStrictEqual(spare, [],
+        `built-in panel(s) in no group: ${spare.join(', ')} — add them to GROUPS in panels/groups.jsx`);
+});
+
 t('no panel appears in two groups', () => {
     const seen = new Set();
     for (const g of groupsFor(PANELS)) {

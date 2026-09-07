@@ -164,7 +164,22 @@ export function RadioProvider({ children }) {
         channel: saved.channel || 'both',
         // Audio wire format: 'opus' | 'pcm-zstd'. Opus unless this browser has
         // been through the bandwidth warning and chosen otherwise.
+        //
+        // This is what the socket is actually asking for, which is not always
+        // what was chosen: the recorder set to WAV holds it at lossless, since
+        // a WAV made from an Opus decode is an uncompressed copy of a lossy
+        // signal. `formatPref` below is the choice that comes back afterwards.
         format: saved.audioFormat === 'pcm-zstd' ? 'pcm-zstd' : 'opus',
+        // The operator's standing choice, kept apart from the effective format
+        // for the reason marginPref is kept apart from minMargin: something
+        // else can raise the stream for a while, and it must not erase what to
+        // return to. This, not `format`, is what is saved.
+        formatPref: saved.audioFormat === 'pcm-zstd' ? 'pcm-zstd' : 'opus',
+        // Whether something other than the operator is holding the stream at
+        // lossless. Only the recorder does, and only while WAV is its chosen
+        // format; the Audio panel shows the format as fixed while it is set,
+        // the way it does in IQ.
+        formatHold: false,
         // Reduced-depth IQ margin in dB, 0 for lossless. Only IQ streams are
         // affected; the server ignores it on a demodulated channel, so outside
         // IQ this is held at lossless and the slider sits at its top stop —
@@ -307,6 +322,13 @@ export function RadioProvider({ children }) {
     // when the mode changes and not when the operator drags the slider.
     const marginPrefRef = useRef(audio.marginPref);
     marginPrefRef.current = audio.marginPref;
+    // The format to restore when the recorder's hold lifts, and whether it is
+    // in force. Refs for the same reason: the actions are built once and read
+    // them from closures that must not go stale.
+    const formatPrefRef = useRef(audio.formatPref);
+    formatPrefRef.current = audio.formatPref;
+    const formatHoldRef = useRef(audio.formatHold);
+    formatHoldRef.current = audio.formatHold;
     // Read by applyTuning, which runs from pointer moves that can outrun a
     // render — the same reason tuningRef exists.
     const lockedRef = useRef(locked);
@@ -937,7 +959,10 @@ export function RadioProvider({ children }) {
             bufferSec: audio.bufferSec,
             channel: audio.channel,
             sinkId: audio.sinkId,
-            audioFormat: audio.format,
+            // The standing choice, not what the socket happens to be asking
+            // for: the recorder set to WAV holds the stream at lossless, and
+            // saving that would leave the next visit on it having never chosen.
+            audioFormat: audio.formatPref,
             // The preference, not the effective margin: outside IQ the stream is
             // lossless whatever the operator asked for, and saving that zero would
             // erase the choice the moment they left the mode.
@@ -1018,6 +1043,20 @@ export function RadioProvider({ children }) {
             // was protecting — and only a burst is coalesced, which is exactly
             // the case that needed it.
             sendCenter(want);
+        };
+
+        // What the socket is opened asking for. The server takes the format
+        // from the connect URL and holds it for the life of the socket, so this
+        // is the one audio setting that costs a reconnect — a second or so of
+        // silence, and the tuning, squelch, AGC and DSP are replayed on the way
+        // back up by the 'open' handler.
+        const applyFormat = async (format) => {
+            const before = audioConn.format;
+            const next = audioConn.setFormat(format);
+            setAudio((a) => (a.format === next ? a : { ...a, format: next }));
+            if (next === before || !runningRef.current) return;
+            audioConn.disconnect();
+            await audioConn.connect(tuningRef.current);
         };
 
         // The tuning lock, answered in one place.
@@ -1400,18 +1439,34 @@ export function RadioProvider({ children }) {
                 setAudio((a) => ({ ...a, channel: mode }));
             },
 
-            // Opus or lossless PCM. The server takes the format from the
-            // connect URL and holds it for the life of the socket, so this is
-            // the one audio setting that costs a reconnect — a second or so of
-            // silence, and the tuning, squelch, AGC and DSP are replayed on the
-            // way back up by the 'open' handler.
+            // Opus or lossless PCM, as the operator asked for it.
+            //
+            // Recorded as their standing choice whether or not it can be
+            // applied now: the recorder set to WAV holds the stream at
+            // lossless, and a press of Opus during that hold is the choice to
+            // come back to when it lifts, not something to throw away.
             async setAudioFormat(format) {
-                const before = audioConn.format;
-                const next = audioConn.setFormat(format);
-                setAudio((a) => (a.format === next ? a : { ...a, format: next }));
-                if (next === before || !runningRef.current) return;
-                audioConn.disconnect();
-                await audioConn.connect(tuningRef.current);
+                const pref = format === 'pcm-zstd' ? 'pcm-zstd' : 'opus';
+                formatPrefRef.current = pref;
+                setAudio((a) => (a.formatPref === pref ? a : { ...a, formatPref: pref }));
+                if (formatHoldRef.current) return;
+                await applyFormat(pref);
+            },
+
+            // Hold the stream at lossless while something needs it, and let go
+            // afterwards. The recorder is the one thing that does: a WAV made
+            // from an Opus decode is an uncompressed copy of a lossy signal, so
+            // choosing WAV raises the stream the way choosing IQ does.
+            //
+            // Called from RecorderFormatWatch rather than from the Recorder
+            // panel, because a collapsed dock section is unmounted — the same
+            // reason the mode gates above live here.
+            async setLosslessHold(on) {
+                const want = !!on;
+                if (formatHoldRef.current === want) return;
+                formatHoldRef.current = want;
+                setAudio((a) => (a.formatHold === want ? a : { ...a, formatHold: want }));
+                await applyFormat(want ? 'pcm-zstd' : formatPrefRef.current);
             },
 
             // Reduced-depth IQ: the quantisation floor is held this far under

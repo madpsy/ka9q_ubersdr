@@ -10,6 +10,7 @@
 import React, { useEffect, useReducer, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { Bar, Button, Field, Icon, Segmented } from '../components/ui.jsx';
+import LosslessWarning from '../components/LosslessWarning.jsx';
 import { isIQ } from '../radio/constants.js';
 import {
     MAX_RECORDING_MS, formatElapsed, getRecorder, playbackDuration, wavSupported,
@@ -17,7 +18,12 @@ import {
 
 const FORMATS = [
     { value: 'webm', label: 'Opus', title: 'WebM/Opus — compressed, much smaller files' },
-    { value: 'wav', label: 'WAV', title: 'Uncompressed 16-bit PCM — larger, no second encode' },
+    {
+        value: 'wav',
+        label: 'WAV',
+        title: 'Uncompressed 16-bit PCM — larger, no second encode, and it switches the audio'
+            + ' stream to lossless so there is no first encode either',
+    },
 ];
 
 const DELIVERY = [
@@ -70,6 +76,11 @@ export default function RecorderPanel({ minimal }) {
     const [archive, setArchive] = useState(() => rec.preferArchive !== false);
     const [busyDownload, setBusyDownload] = useState(false);
     const [error, setError] = useState('');
+    // WAV, waiting on the bandwidth warning. Choosing it raises the audio
+    // stream to lossless — see RecorderFormatWatch — so it asks the same
+    // question the Audio panel does before spending somebody else's bandwidth,
+    // out of the same component, and only when the answer can be no.
+    const [confirming, setConfirming] = useState(false);
 
     // Playback of the held recording. The element is the source of truth for
     // whether it is playing — its own events drive the flag, so pausing from
@@ -139,6 +150,15 @@ export default function RecorderPanel({ minimal }) {
             ? { ...f, label: 'WAV', title: 'WAV recording needs a secure context (HTTPS)' }
             : f;
     });
+
+    // The format for the next recording, once it is settled. On the recorder
+    // rather than in state alone because a collapsed panel is unmounted, and it
+    // emits — RecorderFormatWatch follows it to decide what the stream has to
+    // be.
+    const chooseFormat = (v) => {
+        rec.preferredFormat = v;
+        setFormat(v);
+    };
 
     const start = async () => {
         setError('');
@@ -301,12 +321,43 @@ export default function RecorderPanel({ minimal }) {
                                 return;
                             }
                             setError('');
-                            rec.preferredFormat = v;
-                            setFormat(v);
+                            // Only the expensive direction asks, and only when
+                            // it is expensive: an operator already on lossless
+                            // is raising nothing, and going back to Opus costs
+                            // the receiver's owner less rather than more.
+                            if (v === 'wav' && audio.formatPref !== 'pcm-zstd') {
+                                setConfirming(true);
+                                return;
+                            }
+                            chooseFormat(v);
                         }}
                         size="sm"
                     />
                 </Field>
+            )}
+
+            {/* Why the Audio panel's Format control has gone inert, said where
+                the choice that did it was made. The stream is raised rather
+                than merely warned about because the two halves are one setting:
+                an uncompressed file made from an Opus decode is every byte of
+                PCM and none of the fidelity, so WAV off a lossy stream is not a
+                choice worth offering. RecorderFormatWatch holds it, and the
+                usual choice comes back on the way out. */}
+            {!minimal && !iq && effectiveFormat === 'wav' && (
+                <div className="note note--tight">
+                    The audio stream is held at <strong>lossless</strong> while WAV is
+                    chosen, so the capture is of the samples rather than of an Opus
+                    decode.
+                    {/* The cost, and the way out of it — but only where both
+                        still apply. Lossless already chosen means nothing was
+                        raised and nobody is paying more, and a held recording
+                        locks the buttons above, so pointing at them would be
+                        pointing at a control that will not answer. */}
+                    {audio.formatPref !== 'pcm-zstd' && !rec.busy && (
+                        <> That costs the receiver&rsquo;s owner roughly two to three
+                        times the bandwidth; Opus above puts it back.</>
+                    )}
+                </div>
             )}
 
             {recording ? (
@@ -403,6 +454,15 @@ export default function RecorderPanel({ minimal }) {
                     Clear
                 </Button>
             </div>
+
+            {confirming && (
+                <LosslessWarning
+                    why={'WAV is only worth recording off a lossless stream, so choosing'
+                        + ' it switches the audio stream to lossless until you switch back.'}
+                    onCancel={() => setConfirming(false)}
+                    onAccept={() => { setConfirming(false); chooseFormat('wav'); }}
+                />
+            )}
 
             {error && <div className="note note--warn">{error}</div>}
             {!error && rec.notice && <div className="note note--warn">{rec.notice}</div>}

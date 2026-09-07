@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
-import { Button, Field, Icon, Modal, Readout, Segmented, Slider } from '../components/ui.jsx';
+import { Button, Field, Icon, Readout, Segmented, Slider } from '../components/ui.jsx';
+import LosslessWarning from '../components/LosslessWarning.jsx';
 import {
     isIQ, marginFromSlider, MARGIN_LOSSLESS, MARGIN_MIN_DB, MARGIN_STEP_DB,
     sliderFromMargin,
@@ -109,24 +110,37 @@ const FORMATS = [
 // whoever runs the receiver, not on the person making it, so it is put in front
 // of them rather than left to be discovered.
 //
-// Only the expensive direction asks. Going back to Opus costs nothing and
-// stopping to confirm it would be a dialog in the way of the right answer.
-function FormatPicker() {
+// The dialog itself is in components/LosslessWarning.jsx, because the recorder
+// raises the stream the same way and asks the same question before it does.
+//
+// Exported for the tests, like StreamFormat below: the warning is the one thing
+// here nothing else can reach, because a dialog raised by a nested component
+// lives in that component's own hook state.
+export function FormatPicker() {
     const { audio, actions, tuning } = useRadio();
     const [confirming, setConfirming] = useState(false);
-    const saved = audio.format || 'opus';
+    // The standing preference, which is what this control is a picker for.
+    // `audio.format` is what the socket is currently asking for, and the two
+    // part company whenever something else is holding the stream at lossless.
+    const saved = audio.formatPref || 'opus';
     // IQ is always lossless, so the control shows that and stops taking
-    // input — but `audio.format` is deliberately *not* written. It is the
-    // operator's standing preference, and the server restores it by itself the
+    // input — but the preference is deliberately *not* written. It is the
+    // operator's standing choice, and the server restores it by itself the
     // moment the mode is no longer IQ (websocket.go keeps the format the socket
     // connected with and only overrides it per packet). Writing it here would
     // save lossless over the top and leave them on it in every mode
     // afterwards, having never chosen it.
     const iq = isIQ(tuning.mode);
-    const current = iq ? 'pcm-zstd' : saved;
+    // The other way the format is decided for them: the recorder set to WAV,
+    // which is worth nothing off a lossy stream. Same treatment — shown as
+    // lossless, inert, and the preference untouched underneath. See
+    // RecorderFormatWatch.
+    const held = !!audio.formatHold;
+    const fixed = iq || held;
+    const current = fixed ? 'pcm-zstd' : saved;
 
     const choose = (value) => {
-        if (iq || value === current) return;
+        if (fixed || value === current) return;
         if (value === 'pcm-zstd') {
             setConfirming(true);
             return;
@@ -146,7 +160,7 @@ function FormatPicker() {
                     of the two is unavailable is the information, and dropping
                     Opus would read as the receiver not offering it at all. */}
                 <Segmented
-                    options={iq ? FORMATS.map((f) => ({ ...f, disabled: true })) : FORMATS}
+                    options={fixed ? FORMATS.map((f) => ({ ...f, disabled: true })) : FORMATS}
                     value={current}
                     onChange={choose}
                     size="sm"
@@ -161,6 +175,21 @@ function FormatPicker() {
                         (<strong>{saved === 'pcm-zstd' ? 'lossless' : 'Opus'}</strong>)
                         comes back when you leave IQ.
                     </>
+                ) : held ? (
+                    <>
+                        {/* Lower case, and not the panel's name: a
+                            capitalised word in bare JSX prose is
+                            indistinguishable from a component identifier to
+                            test/unresolved.js, which reads Recorder as the
+                            class lib/recorder.js exports. Same trap as the
+                            wording in IQConfirm. */}
+                        The recorder is set to WAV, which is only worth
+                        recording off a lossless stream — an uncompressed file made
+                        from an Opus decode is every byte of PCM and none of the
+                        fidelity. Your usual choice
+                        (<strong>{saved === 'pcm-zstd' ? 'lossless' : 'Opus'}</strong>)
+                        comes back when the recorder goes back to Opus.
+                    </>
                 ) : (
                     <>
                         Opus is lossy; lossless sends the 16-bit samples exactly, at
@@ -171,49 +200,10 @@ function FormatPicker() {
                 )}
             </div>
             {confirming && (
-                <Modal onClose={() => setConfirming(false)} label="High bandwidth warning">
-                    <div className="stack vibe">
-                        <h2 className="vibe__title">High bandwidth warning</h2>
-                        {/* Measured against Opus on a live receiver, both
-                            formats running at once on the same frequency:
-                            1.9x on USB and LSB, 1.3x on CW, 3.1x on a medium
-                            wave broadcast station.
-
-                            The figures were 4x and 8x under protocol version 3,
-                            which wrapped the samples in zstd and so sent them
-                            very slightly LARGER than raw; version 4 predicts
-                            and Rice-codes them, roughly halving every one.
-
-                            What is on the frequency matters as much as the
-                            mode. The same AM measurement against an empty HF
-                            channel came out at 4.5x, because noise is the one
-                            thing a predictor cannot help with — so the range is
-                            given rather than the flattering end of it. CW is
-                            lowest because a narrow tone in a quiet channel is
-                            the easiest case there is. */}
-                        <p className="vibe__text">
-                            Lossless audio uses approximately 2&times; more bandwidth
-                            than Opus on SSB, and around 3&times; on AM, SAM and FM. On CW
-                            it is close to Opus.
-                        </p>
-                        <p className="vibe__text">
-                            An empty channel costs more than a busy one — there is only
-                            noise to send, and noise is what compresses least.
-                        </p>
-                        <p className="vibe__text">
-                            This increases costs for the instance owner. Only switch if you
-                            have a specific reason to do so.
-                        </p>
-                        <div className="vibe__row">
-                            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
-                                Cancel
-                            </Button>
-                            <Button size="sm" variant="primary" onClick={accept}>
-                                Use lossless
-                            </Button>
-                        </div>
-                    </div>
-                </Modal>
+                <LosslessWarning
+                    onCancel={() => setConfirming(false)}
+                    onAccept={accept}
+                />
             )}
         </>
     );

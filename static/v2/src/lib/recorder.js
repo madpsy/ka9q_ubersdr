@@ -53,7 +53,13 @@ export class Recorder extends Emitter {
         // The operator's choice for the *next* recording. It lives here rather
         // than in the panel so it survives the section being collapsed, which
         // unmounts the view.
-        this.preferredFormat = 'webm';
+        //
+        // Behind an accessor rather than a plain field because something
+        // outside the panel now follows it: WAV is only worth recording off a
+        // lossless stream, so RecorderFormatWatch holds the audio format at
+        // lossless for as long as this says 'wav'. A silent assignment would
+        // leave that watch looking at a stale value.
+        this._preferredFormat = 'webm';
         // Whether Download hands over the whole archive or only the audio.
         // Kept here for the same reason and with the same lifetime as the
         // format above: a collapsed panel must not forget it, and it is a
@@ -107,6 +113,17 @@ export class Recorder extends Emitter {
     // format cannot be changed under it in either case.
     get busy() {
         return this.state === 'recording' || this.hasData;
+    }
+
+    get preferredFormat() {
+        return this._preferredFormat;
+    }
+
+    set preferredFormat(v) {
+        const next = v === 'wav' ? 'wav' : 'webm';
+        if (next === this._preferredFormat) return;
+        this._preferredFormat = next;
+        this._changed();
     }
 
     _changed() {

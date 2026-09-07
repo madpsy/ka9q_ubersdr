@@ -497,6 +497,23 @@ function ClipTag() {
 function AudioFormatTag() {
     const { audio, actions } = useRadio();
     if (audio.format !== 'pcm-zstd') return null;
+    // Not always the operator's own choice any more: the recorder set to WAV
+    // holds the stream here, because an uncompressed file made from an Opus
+    // decode is every byte of PCM and none of the fidelity. The badge still
+    // belongs — somebody is still paying for the bandwidth — but the one-press
+    // way back does not, since the setting that would come straight back is not
+    // the one this button changes. So it reports, and names what to change.
+    if (audio.formatHold) {
+        return (
+            <span
+                className="tag tag--bad"
+                data-optional="pcm"
+                title="Audio is lossless because the Recorder panel is set to WAV — set it back to Opus to return to your usual format"
+            >
+                PCM
+            </span>
+        );
+    }
     return (
         <button
             type="button"

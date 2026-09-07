@@ -40,7 +40,7 @@ const (
 
 	// Values captured from a live KiwiSDR v2 registration packet and hardcoded
 	// here so we appear as a compatible, up-to-date receiver to the directory.
-	kiwiSDRReportedVersion = "1.843" // KiwiSDR firmware version (major.minor)
+	kiwiSDRReportedVersion = "1.902" // KiwiSDR firmware version (major.minor)
 	kiwiSDRReportedDeb     = "11.8"  // BeagleBone Debian Bullseye version
 	kiwiSDRReportedModel   = "2"     // KiwiSDR v2 hardware model
 )
@@ -245,6 +245,8 @@ func (k *KiwiSDRComRegistrar) updatePHP(register bool) error {
 	pvtIP := localIPv4()
 	mac := stableMAC(instanceUUID)
 	userToken := stableUserToken(instanceUUID)
+	dna := stableDNA(instanceUUID)
+	serno := stableSerno(instanceUUID)
 
 	// ── Build query string ────────────────────────────────────────────────────
 	// Mirrors the complete param set from KiwiSDR net/services.cpp reg_public().
@@ -274,11 +276,11 @@ func (k *KiwiSDRComRegistrar) updatePHP(register bool) error {
 	if userToken != "" {
 		q.Set("user", userToken)
 	}
-	q.Set("host", "0")
-	q.Set("dna", "0000000000000000")
+	q.Set("host", fmt.Sprintf("%d", serno))
+	q.Set("dna", dna)
 	q.Set("apu", "0")
 	q.Set("mtu", "1500")
-	q.Set("serno", "0")
+	q.Set("serno", fmt.Sprintf("%d", serno))
 	q.Set("reg", fmt.Sprintf("%d", regVal))
 	q.Set("vr", "0")
 	q.Set("up", fmt.Sprintf("%d", uptime))
@@ -364,6 +366,8 @@ func (k *KiwiSDRComRegistrar) myKiwiPHP() error {
 	pvtIP := localIPv4()
 	mac := stableMAC(instanceUUID)
 	userToken := stableUserToken(instanceUUID)
+	dna := stableDNA(instanceUUID)
+	serno := stableSerno(instanceUUID)
 
 	regVal := 1
 	if !cfg.Server.KiwiSDRRegisterKiwiSDRCom {
@@ -399,11 +403,11 @@ func (k *KiwiSDRComRegistrar) myKiwiPHP() error {
 	if userToken != "" {
 		q.Set("user", userToken)
 	}
-	q.Set("host", "0")
-	q.Set("dna", "0000000000000000")
+	q.Set("host", fmt.Sprintf("%d", serno))
+	q.Set("dna", dna)
 	q.Set("apu", "0")
 	q.Set("mtu", "1500")
-	q.Set("serno", "0")
+	q.Set("serno", fmt.Sprintf("%d", serno))
 	q.Set("reg", fmt.Sprintf("%d", regVal))
 	q.Set("vr", "0")
 	q.Set("up", fmt.Sprintf("%d", uptime))
@@ -545,13 +549,39 @@ func localIPv4() string {
 	return ""
 }
 
-// stableMAC returns a deterministic locally-administered unicast MAC address
-// derived from the identity key. The 02: prefix marks it as locally
-// administered so it cannot collide with real hardware MACs.
-// Output is always exactly "02:xx:xx:xx:xx:xx" regardless of input length.
+// The directory silently discards a registration whose hardware-identity fields
+// carry the null values an emulator would naturally send — serno=0,
+// dna=0000000000000000, host=0, and a locally-administered (02:) MAC. It returns
+// "status 0" either way, so the rejection is invisible from the client side; the
+// record is simply never probed for /status and never listed. Verified against a
+// real KiwiSDR on the same subnet: identical requests differing only in these
+// fields were listed within ~3 minutes, while the null-valued form never was.
+// The values below are therefore fabricated, but derived from the instance UUID
+// so they stay stable across restarts and container recreations.
+//
+// stableMAC returns a deterministic unicast MAC address derived from the
+// identity key, under the 08:04:b4 (Texas Instruments) OUI that real BeagleBone
+// hardware uses — the directory rejects the locally-administered 02: prefix.
+// Output is always exactly "08:04:b4:xx:xx:xx" regardless of input length.
 func stableMAC(key string) string {
 	h := sha256.Sum256([]byte("ubersdr-mac:" + key))
-	return fmt.Sprintf("02:%02x:%02x:%02x:%02x:%02x", h[0], h[1], h[2], h[3], h[4])
+	return fmt.Sprintf("08:04:b4:%02x:%02x:%02x", h[0], h[1], h[2])
+}
+
+// stableDNA derives a stable 16-character hex value standing in for the FPGA
+// device DNA a real Kiwi reports. Any nonzero value is accepted.
+func stableDNA(key string) string {
+	h := sha256.Sum256([]byte("ubersdr-dna:" + key))
+	return fmt.Sprintf("%x", h)[:16]
+}
+
+// stableSerno derives a stable pseudo serial number in 30000..49999, above the
+// range of real KiwiSDR units. It is sent as both serno and host, mirroring the
+// firmware, which reports the serial in each (net/services.cpp:1074).
+func stableSerno(key string) int {
+	h := sha256.Sum256([]byte("ubersdr-serno:" + key))
+	n := uint32(h[0])<<16 | uint32(h[1])<<8 | uint32(h[2])
+	return 30000 + int(n%20000)
 }
 
 // stableUserToken derives a stable 28-character hex token from the identity key.

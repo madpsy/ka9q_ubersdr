@@ -113,6 +113,13 @@ RUN apt-get update && apt-get install -y \
     && mkdir -p /opt/ubersdr-drm \
     && wget https://github.com/madpsy/ubersdr-drm/releases/download/1.0.0/ubersdr-drm_${TARGETARCH} -O /opt/ubersdr-drm/ubersdr-drm \
     && chmod +x /opt/ubersdr-drm/ubersdr-drm \
+    # The WWV/WWVH/WWVB time-code decoder. The arch suffix is kept on the
+    # installed name rather than stripped, so the clock extension resolves it
+    # with runtime.GOARCH; it needs no libraries beyond the libstdc++ already
+    # here, and is built against this same ubuntu:24.04.
+    && mkdir -p /opt/ubersdr-clock \
+    && wget https://github.com/madpsy/ubersdr-clock/releases/download/latest/ubersdr-clock_${TARGETARCH} -O /opt/ubersdr-clock/ubersdr-clock_${TARGETARCH} \
+    && chmod +x /opt/ubersdr-clock/ubersdr-clock_${TARGETARCH} \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

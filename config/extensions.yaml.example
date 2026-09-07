@@ -11,6 +11,13 @@ extensions:
   # Uses an IQ session; the v2 interface switches the receiver to IQ for you.
   - drm
 
+  # Time Signal Decoder - WWV/WWVH/WWVB time code, and how far your clock is from it
+  # Requires the ubersdr-clock binary at /opt/ubersdr-clock/.
+  # Tune USB at (carrier - 1 kHz) for WWV/WWVH -- 4.999, 9.999, 14.999, 19.999 MHz --
+  # with a passband reaching 2.2 kHz, or USB at 0.059 MHz for WWVB. The station is
+  # picked from the dial; the panel offers the frequencies.
+  - clock
+
   # FSK/RTTY Decoder - FSK/RTTY decoder supporting ITA2 (Baudot), ASCII, and CCIR476 (SITOR-B) modes
   - fsk
 

@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/clock"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/drm"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/freedv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/fsk"
@@ -1810,6 +1811,35 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: morse v%s", morseInfo["version"].(string))
+
+	// Register Clock extension
+	clockInfo := clock.GetInfo()
+
+	clockFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		clockParams := clock.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}
+
+		clockExt, err := clock.Factory(clockParams, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+
+		return &clockExtensionWrapper{ext: clockExt}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"clock",
+		clockFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        clockInfo["name"].(string),
+			Description: clockInfo["description"].(string),
+			Version:     clockInfo["version"].(string),
+		},
+	)
+	log.Printf("Registered audio extension: clock v%s", clockInfo["version"].(string))
 
 	// Register Whisper extension
 	// Set global config for whisper package to access configuration
@@ -7504,6 +7534,46 @@ func (w *drmExtensionWrapper) GetName() string {
 
 // CrashChan implements CrashReporter — delegates to the inner DRMExtension.
 func (w *drmExtensionWrapper) CrashChan() <-chan error {
+	if cr, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
+		return cr.CrashChan()
+	}
+	return nil
+}
+
+// clockExtensionWrapper wraps a clock.AudioExtension to implement main.AudioExtension
+type clockExtensionWrapper struct {
+	ext clock.AudioExtension
+}
+
+func (w *clockExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	// Convert main.AudioSample to clock.AudioSample
+	clockChan := make(chan clock.AudioSample, cap(audioChan))
+	go func() {
+		defer close(clockChan)
+		for sample := range audioChan {
+			clockChan <- clock.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(clockChan, resultChan)
+}
+
+func (w *clockExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *clockExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// CrashChan implements CrashReporter — delegates to the inner ClockExtension.
+// The manager type-asserts on this wrapper rather than on the extension inside
+// it, so without this a dead ubersdr-clock subprocess would reach the frontend
+// as a decoder that simply stopped saying anything.
+func (w *clockExtensionWrapper) CrashChan() <-chan error {
 	if cr, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
 		return cr.CrashChan()
 	}

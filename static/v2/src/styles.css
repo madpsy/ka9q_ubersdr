@@ -8436,6 +8436,207 @@ a.btn { text-decoration: none; }
 .tp__lamp.is-on { color: var(--good); }
 .tp__lamp.is-on::before { background: var(--good); border-color: var(--good); }
 
+/* ── Time signal (WWV/WWVH/WWVB) ──────────────────────────────────────────── */
+
+.ck { display: flex; flex-direction: column; gap: 8px; padding: 6px; min-height: 0; overflow: auto; }
+.ck--minimal { gap: 6px; }
+
+/* The station tag sits beside the status pill and is read as a pair with it:
+   "Locked / WWV" is the whole answer to what this panel is for. */
+.ck__station {
+    flex: none;
+    padding: 1px 7px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+}
+.ck__quality {
+    flex: none;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(11px * var(--ui-scale));
+}
+
+/* The reading. Deliberately the largest thing in the panel in both views —
+   everything else is the decoder explaining how it got here. */
+.ck__reading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--spec-bg);
+}
+.ck__reading.is-locked { border-color: var(--accent-line); }
+
+/* Two clocks side by side: the browser's zone applied to the radio's instant,
+   and the same instant as UTC. Both tick — a `time` event is one snapshot a
+   minute on WWV, so a display showing it verbatim would sit frozen on a panel
+   whose whole subject is what the time is. When the browser is already on UTC
+   there is only one clock worth drawing and the second is dropped. */
+.ck__clocks { display: flex; align-items: flex-start; gap: 22px; flex-wrap: wrap; justify-content: center; }
+.ck__clock { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.ck__clock-time {
+    font-family: var(--mono);
+    font-size: calc(28px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    line-height: 1.05;
+    color: var(--text-faint);
+}
+.ck__reading.is-locked .ck__clock-time { color: var(--text); }
+/* UTC is the reference, not the reading: same size so they can be compared
+   digit for digit, dimmer so the eye starts on the local one. */
+.ck__reading.is-locked .ck__clock--utc .ck__clock-time { color: var(--text-2); }
+.ck__clock-label {
+    font-size: calc(10px * var(--ui-scale));
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.ck__day {
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+
+.ck__offsets { display: flex; align-items: baseline; gap: 8px; }
+/* Which way the clock is wrong, in words. The sign alone is a convention
+   nobody should have to remember while reading a number off a screen. */
+.ck__sense {
+    color: var(--text-dim);
+    font-size: calc(11px * var(--ui-scale));
+}
+
+.ck__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 6px;
+}
+
+.ck__flags { display: flex; flex-wrap: wrap; gap: 6px; }
+.ck__flag {
+    padding: 1px 7px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    font-size: calc(10.5px * var(--ui-scale));
+}
+.ck__flag--warn { color: var(--warn); border-color: var(--warn); }
+.ck__flag--info { color: var(--text-2); }
+
+.ck__section { display: flex; flex-direction: column; gap: 4px; }
+.ck__section-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ck__section-title {
+    font-size: calc(10.5px * var(--ui-scale));
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+.ck__section-note { color: var(--text-faint); font-size: calc(10.5px * var(--ui-scale)); }
+
+/* The alignment plot. Fixed height and a stretched viewBox: the shape being
+   read is the pulse LENGTH against the template, which is a horizontal
+   comparison, so the vertical scale carries no information worth preserving. */
+.ck__plot {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--spec-bg);
+    overflow: hidden;
+}
+.ck__plot--empty { display: flex; align-items: center; justify-content: center; min-height: 70px; }
+.ck__plot-svg { display: block; width: 100%; height: 90px; }
+.ck__plot-grid { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+.ck__plot-expected { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: 0.55; }
+.ck__plot-envelope { fill: none; stroke: var(--good); stroke-width: 1.5; }
+
+.ck__plot-legend {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 3px 6px;
+    border-top: 1px solid var(--border);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.ck__plot-gap { flex: 1; }
+.ck__plot-key { display: inline-flex; align-items: center; gap: 4px; }
+.ck__plot-key::before { content: ''; width: 10px; height: 2px; border-radius: 1px; }
+.ck__plot-key--envelope::before { background: var(--good); }
+.ck__plot-key--expected::before { background: var(--accent); opacity: 0.55; }
+.ck__plot-shift { font-variant-numeric: tabular-nums; }
+
+/* One minute of classified seconds. A fixed 60 columns rather than a wrap:
+   the pattern being read is a marker every tenth cell, and a grid that reflows
+   destroys the only thing the strip is for. */
+.ck__strip {
+    display: grid;
+    grid-template-columns: repeat(60, 1fr);
+    gap: 1px;
+}
+.ck__cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    min-width: 0;
+    border-radius: 1px;
+    font-family: var(--mono);
+    font-size: calc(8px * var(--ui-scale));
+    line-height: 1;
+    background: var(--surface-3);
+    color: var(--text-faint);
+}
+.ck__cell--none { background: var(--surface-3); opacity: 0.4; }
+.ck__cell--bit { background: rgba(69, 214, 154, 0.22); color: var(--good); }
+.ck__cell--marker { background: var(--accent-soft); color: var(--accent); }
+/* A margin below the voter's own trust floor. Greyed rather than reddened:
+   these are not errors, they are seconds the decoder itself discounts. */
+.ck__cell--weak { background: var(--surface-3); color: var(--text-faint); opacity: 0.6; }
+
+/* The acquisition funnel. Stages in order, and only the first failure is
+   marked — the ones after it are consequences, not separate faults. */
+.ck__funnel { display: flex; flex-direction: column; gap: 4px; }
+.ck__funnel-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.ck__stage {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    flex: 1 1 auto;
+    min-width: 110px;
+    padding: 4px 7px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.ck__stage.is-ok { color: var(--good); border-color: rgba(69, 214, 154, 0.35); }
+.ck__stage.is-first { color: var(--warn); border-color: var(--warn); }
+.ck__stage.is-blocked { opacity: 0.45; }
+.ck__stage-mark { flex: none; font-size: calc(9px * var(--ui-scale)); }
+.ck__stage-label { flex: 1; }
+.ck__stage-detail { flex: none; font-variant-numeric: tabular-nums; color: var(--text-faint); }
+.ck__hint { margin: 0; }
+
+.ck__fix { display: flex; align-items: center; gap: 8px; }
+.ck__fault { margin: 0; }
+
+/* The numbers underneath. Small, wrapping, and last: nobody needs these to use
+   the decoder, and everybody needs them the day it will not lock. */
+.ck__telemetry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding-top: 2px;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+}
+
 /* ── CW ───────────────────────────────────────────────────────────────────── */
 
 /* The decoder's own confidence in each run of characters, which on a noisy band

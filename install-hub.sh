@@ -936,6 +936,42 @@ else
     echo "Skipping addon update: $ADDON_MANAGER not found."
 fi
 
+# Update CW Skimmer, which is installed separately from the addons and so is
+# not covered by the addon manager. Same rules as the addons: skipped on a
+# fresh install, and best-effort - a failed update must never fail the hub
+# installation. Only updated when it is both installed and currently running,
+# so an operator who deliberately stopped it does not get it started again.
+CWSKIMMER_DIR="$ACTUAL_HOME/ubersdr/cwskimmer"
+CWSKIMMER_UPDATER="$CWSKIMMER_DIR/update.sh"
+if [ "$FRESH_INSTALL" -eq 1 ]; then
+    echo
+    echo "Fresh installation - skipping CW Skimmer update (not installed yet)."
+elif [ -f "$CWSKIMMER_UPDATER" ] && [ -f "$CWSKIMMER_DIR/docker-compose.yml" ]; then
+    # Running check mirrors the addon manager: ask compose first, then fall
+    # back to the container name (the compose service sets container_name).
+    CWSKIMMER_RUNNING=$(docker compose -f "$CWSKIMMER_DIR/docker-compose.yml" ps -q --status running 2>/dev/null) || CWSKIMMER_RUNNING=""
+    if [ -z "$CWSKIMMER_RUNNING" ]; then
+        CWSKIMMER_RUNNING=$(docker ps -q --filter "name=^/?cwskimmer\$" 2>/dev/null) || CWSKIMMER_RUNNING=""
+    fi
+
+    if [ -n "$CWSKIMMER_RUNNING" ]; then
+        echo
+        echo "Updating CW Skimmer..."
+        if HOME="$ACTUAL_HOME" bash "$CWSKIMMER_UPDATER"; then
+            echo "CW Skimmer update finished."
+        else
+            echo "Warning: CW Skimmer failed to update. Continuing anyway."
+            echo "Run '$CWSKIMMER_UPDATER' to update it manually."
+        fi
+    else
+        echo
+        echo "Skipping CW Skimmer update: installed but not running."
+    fi
+else
+    echo
+    echo "Skipping CW Skimmer update: not installed."
+fi
+
 echo
 echo "=== Installation Complete ==="
 echo

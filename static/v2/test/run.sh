@@ -72,6 +72,8 @@ esbuild ifpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/ifpanel.cjs --log-level=warning
 esbuild drmpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/drmpanel.cjs --log-level=warning
+esbuild clockpanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/clockpanel.cjs --log-level=warning
 esbuild iqdemod.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/iqdemod.cjs --log-level=warning
 esbuild wavlossless.entry.js --bundle --format=cjs --platform=node \
@@ -627,6 +629,7 @@ node iffit.test.js
 node audiotint.test.js
 node oliviapanel.test.js
 node drmpanel.test.js
+node clockpanel.test.js
 node iqdemod.test.js
 node wavlossless.test.js
 node tuningrange.test.js

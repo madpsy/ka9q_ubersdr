@@ -47,6 +47,7 @@ import DRMExtension from './drm/DRMExtension.jsx';
 import SstvExtension from './sstv/SstvExtension.jsx';
 import SoundModemExtension from './soundmodem/SoundModemExtension.jsx';
 import WhisperExtension from './whisper/WhisperExtension.jsx';
+import ClockExtension from './clock/ClockExtension.jsx';
 
 export const EXTENSIONS = [
     {
@@ -105,6 +106,20 @@ export const EXTENSIONS = [
         float: { w: 700, h: 520 },
         minimal: true,
         Component: MorseExtension,
+    },
+    {
+        id: 'clock',
+        title: 'Time Signal Decoder',
+        icon: <Icon.Clock />,
+        summary: 'WWV, WWVH and WWVB — the broadcast time, and how far your clock is out.',
+        requiresAudio: true,
+        // Taller than the readout needs, because the panel is mostly the
+        // decoder explaining itself: a lock takes minutes, and for all of that
+        // time the alignment plot, the second strip and the acquisition funnel
+        // are the only things with anything to say.
+        float: { w: 760, h: 660 },
+        minimal: true,
+        Component: ClockExtension,
     },
     {
         id: 'wefax',

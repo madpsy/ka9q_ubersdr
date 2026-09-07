@@ -1864,19 +1864,14 @@ button.lsn-dot::after {
 }
 .startmap__hello { font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
 /* Leaflet's own tooltip styling is white-on-white against a dark card. */
-/* Qualified with .leaflet-tooltip so it outranks leaflet.css, which is appended
-   to <head> at runtime and takes every tie: unqualified, this whole block lost
-   to `.leaflet-tooltip`'s own white plate and dark text, and the arrow rule to
-   `.leaflet-tooltip-top:before`. The map tooltips have been Leaflet's default
-   white boxes rather than the theme's since they were written. */
-.leaflet-tooltip.startmap__tip {
+.startmap__tip {
     background: var(--surface-2);
     color: var(--text);
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-sm);
     font-size: calc(11px * var(--ui-scale));
 }
-.leaflet-tooltip.startmap__tip::before { display: none; }
+.startmap__tip::before { display: none; }
 
 /* The VibeSDR / app-link / password dialogs the overlay opens. */
 
@@ -4467,74 +4462,13 @@ a.btn { text-decoration: none; }
     isolation: isolate;
     /* Behind the tiles until they arrive, and behind the gaps at the edges of
        the world. v1 uses a flat #1a1a1a; this follows the theme so the light one
-       does not flash black.
-       Set again below, qualified, because this one loses: leaflet.css arrives
-       after this stylesheet and its own `.leaflet-container { background: #ddd }`
-       takes the tie. */
+       does not flash black. */
     background: var(--surface-3);
     /* The map is a picture, and the panel around it is a document: a drag over
        the tiles is panning, not selecting the labels on them. */
     user-select: none;
     -webkit-user-select: none;
 }
-/* The background both map containers already ask for, said again where it can
-   be heard. leaflet.css is appended to <head> when the first map opens, so it
-   is always after this stylesheet, and `.leaflet-container` beats a bare
-   `.csmap` on source order alone — which is why a light grey #ddd, not the
-   theme's surface, was what showed before the tiles loaded, at the edges of the
-   world, and through every seam between tiles. */
-.leaflet-container.csmap,
-.leaflet-container.startmap__canvas { background: var(--surface-3); }
-
-/* Tiles that overlap by a pixel, because the alternative is a line down the map.
- *
-   Leaflet lays 256px tiles edge to edge and trusts the browser to butt them
-   together. On a retina screen whose map container does not begin on a whole
-   device pixel — a centred modal is the easy way to get one — the rounding can
-   leave neighbouring tiles a device pixel apart, and the container background
-   shows through the gap as a straight vertical line the height of the map. It
-   was three white lines on the iPad before the background above was fixed and
-   three dark ones after, which is the tell: recolouring a gap does not close it.
- *
-   Moving the dark-tile filter off the individual tiles (below) was the first
-   half of this — a filter puts every tile on its own composited layer, each
-   rounding independently — and it was not enough on its own. So the tiles are
-   also drawn a pixel larger than they are placed, which overlaps each edge with
-   its neighbour and leaves nothing to show through. The cost is that tile
-   imagery is scaled by 0.4%, which no map reader can see.
- *
-   The one `!important` in this stylesheet that is not in a reduced-motion
-   block, and it is not laziness: GridLayer._initTile writes width and height
-   as *inline* styles from its own tileSize, and no amount of specificity beats
-   an inline style. Leaflet's tile arithmetic reads options.tileSize rather than
-   the DOM, so this changes how a tile is painted and nothing about where the
-   grid thinks it is.
- *
-   Two pixels, not one, and the tiles are scaled without smoothing. Both of
-   those were learned the hard way on the iPad and are worth writing down.
- *
-   One pixel is not enough because a tile edge landing on half a device pixel is
-   *itself* half covered: two neighbouring half-covered edges leave a quarter of
-   the background still showing, which the filter's contrast(3) then makes as
-   obvious as the gap it replaced. Two pixels puts a whole interior pixel of one
-   tile over the join, and there is nothing left to cover.
- *
-   Smoothing is worse than the disease. Scaling 256 to 258 with interpolation
-   softens every edge into a band of partial alpha, and a filter that inverts
-   and trebles contrast renders partial alpha as a dark line — which draws a
-   box round every tile on the map and gets busier as you zoom in and more
-   tiles fit on screen. `pixelated` duplicates two columns of pixels instead,
-   which is invisible at 0.8% and, crucially, has no soft edge to darken.
-   Stated here rather than left to leaflet.css's own `.leaflet-safari
-   .leaflet-tile { image-rendering: -webkit-optimize-contrast }`, which asks for
-   the same thing but only when Leaflet believes it is on Safari. */
-.leaflet-container.csmap .leaflet-tile,
-.leaflet-container.startmap__canvas .leaflet-tile {
-    width: 258px !important;
-    height: 258px !important;
-    image-rendering: pixelated;
-}
-
 /* The same dark tiles callsign_lookup.html draws, by the same means: OSM serves
    one set of tiles and they are a light map, so v1 filters them to sit in a dark
    interface rather than shipping a second tile source. The filter is copied
@@ -4550,39 +4484,17 @@ a.btn { text-decoration: none; }
    Dropped in the light theme, where the tiles were already right and inverting
    them would produce the one thing this is trying to avoid: a map that does not
    match the interface around it. */
-/* On the pane rather than on each tile, and that is not a tidy-up — it is what
-   stops the map being ruled into columns.
- *
-   A filter makes its element a composited layer of its own. Applied per tile,
-   every tile is snapped to device pixels independently, so a container sitting
-   on a half pixel (a centred modal, a retina screen) leaves the odd 1px gap
-   between neighbours. What shows through the gap is the container's background,
-   which leaflet.css had already turned light grey — hence three white vertical
-   lines the height of the map, on the iPad and nowhere else, since a
-   whole-numbered desktop pixel grid never splits a tile.
- *
-   One filter on the tile pane composites once and the tiles paint into it, so
-   there are no per-tile layers left to disagree about rounding. Leaflet expects
-   this: it ships `.leaflet-tile { filter: inherit }` so a filter above the
-   tiles reaches them. The pane, deliberately, and not .leaflet-tile-container —
-   that IS a tile's parent, so `inherit` would copy the filter down and every
-   tile would apply it a second time. */
-.csmap .leaflet-tile-pane,
-.startmap__canvas .leaflet-tile-pane {
+.csmap .leaflet-tile,
+.startmap__canvas .leaflet-tile {
     filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
 }
-[data-theme="light"] .csmap .leaflet-tile-pane,
-[data-theme="light"] .startmap__canvas .leaflet-tile-pane { filter: none; }
+[data-theme="light"] .csmap .leaflet-tile,
+[data-theme="light"] .startmap__canvas .leaflet-tile { filter: none; }
 
 /* The callsign, pinned to the marker. Leaflet's own tooltip chrome is a white
    box with a border radius that belongs to a different interface, so it is
    restyled to the receiver's — the same treatment StartMap's gives it. */
-/* Qualified with .leaflet-tooltip so it outranks leaflet.css, which is appended
-   to <head> at runtime and takes every tie: unqualified, this whole block lost
-   to `.leaflet-tooltip`'s own white plate and dark text, and the arrow rule to
-   `.leaflet-tooltip-top:before`. The map tooltips have been Leaflet's default
-   white boxes rather than the theme's since they were written. */
-.leaflet-tooltip.csmap__tip {
+.csmap__tip {
     padding: 2px 7px;
     /* The theme's own surface, as .startmap__tip takes: a fixed dark plate is
        right on exactly one of the nine colour schemes and wrong on the rest. */
@@ -4598,22 +4510,7 @@ a.btn { text-decoration: none; }
     letter-spacing: 0.02em;
     white-space: nowrap;
 }
-.leaflet-tooltip.csmap__tip::before { display: none; }
-
-/* The circle that takes a tap on the world map — invisible, and several times
-   the size of the dot it sits under. See TOUCH_SLOP in SpotsWorldMap.
- *
-   `pointer-events: all` says outright what `visiblePainted` already implies for
-   a shape whose fill is a colour at zero opacity, and says it because the
-   implication is the whole mechanism: if a browser ever read fill-opacity as
-   unpainted, the map would quietly stop answering presses on the one kind of
-   device that needs this. Written to outrank leaflet.css, which arrives after
-   this stylesheet (see .csmap__label below) and would otherwise win the tie
-   with its own `pointer-events: auto`. */
-.leaflet-pane > svg path.leaflet-interactive.csmap__hit {
-    pointer-events: all;
-    cursor: default;
-}
+.csmap__tip::before { display: none; }
 
 /* The callsign under a dot on the all-operations map, which is permanent and
    therefore has to behave differently from the tooltip above: there is one of

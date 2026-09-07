@@ -61,23 +61,12 @@ const MAX_POINTS = 1200;
 //
 // 1. **Where the press has to land.** An SVG path is hit-tested by the browser
 //    against the shape itself, so the target is the 9px the dot draws and not
-//    a pixel more. Each dot therefore gets a second circle under it, several
-//    times the size and painted with nothing: `fill` is a colour and
-//    `fill-opacity` is 0, which is invisible and still a target, because
-//    `pointer-events: visiblePainted` — what leaflet.css gives an interactive
-//    path — asks whether `fill` is `none`, not how opaque it is. The handlers
-//    go on both, so the dot answers a press and so does the ring of map around
-//    it.
-//
-//    Leaflet has a `tolerance` option that does this without a second layer,
-//    and it was the first thing tried. It exists only on the canvas renderer —
-//    only there does Leaflet hit-test in JavaScript rather than leaving it to
-//    the browser — so taking it means drawing the dots on a canvas, and on iOS
-//    a canvas the size of the map, transformed as the map pans, tore into
-//    vertical bands across the tiles. Every other platform was fine with it.
-//    Not worth a rendering artifact on the one device the fix is for: SVG
-//    draws the dots, as it always did, and the target is a shape rather than
-//    an option.
+//    a pixel more. Leaflet's `tolerance` — the option that widens it — exists
+//    only on the canvas renderer, because only there does Leaflet do the hit
+//    test itself: `CircleMarker._containsPoint` is `radius + _clickTolerance()`
+//    and `_clickTolerance()` reads the *renderer's* option. So the dots are
+//    drawn on a canvas, which is also how v1's spot maps draw theirs
+//    (digitalspots_map.js, cwskimmer_map.js) and cheaper for a thousand of them.
 //
 // 2. **Whether the press counts as a press at all.** Leaflet begins panning as
 //    soon as a pointer moves 3px (Draggable's own clickTolerance, summed across
@@ -87,11 +76,10 @@ const MAX_POINTS = 1200;
 //    pixel. Raised for a coarse pointer, not removed: past this it really was a
 //    drag.
 //
-// Both only when there is a finger in play. A mouse asks for neither: it can
-// hit 9px, a 36px target under it would make two nearby stations one, and the
-// hit rings would double the number of paths on a map that already draws up to
-// MAX_POINTS of them.
-const TOUCH_SLOP = 18;   // radius of the invisible circle that takes the tap
+// Both only when there is a finger in play. A mouse asks for neither, and a
+// 37px target under a pointer that can hit 9 would make two nearby stations
+// one.
+const TOUCH_SLOP = 14;   // px added to the marker's radius for hit testing
 const TAP_SLOP = 10;     // px of travel still counted as a tap, not a pan
 
 // Is there a fingertip available, wherever the primary pointer is? The same
@@ -116,6 +104,10 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
     const box = useRef(null);
     const map = useRef(null);
     const layer = useRef(null);
+    // The canvas the dots are drawn on, and the reason they can be tapped —
+    // see TOUCH_SLOP. Made with the map and handed to every marker, because a
+    // renderer given per layer is what decides that layer's hit testing.
+    const paper = useRef(null);
     const [failed, setFailed] = useState(false);
     const [ready, setReady] = useState(false);
     const fitted = useRef(false);
@@ -148,8 +140,9 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
             }).setView(rx ? [rx.lat, rx.lon] : [20, 0], rx ? 3 : 2);
             map.current = m;
 
-            // How far a finger may roll before the tap becomes a pan.
             const coarse = coarsePointer();
+            paper.current = L.canvas({ tolerance: coarse ? TOUCH_SLOP : 0 });
+            // ...and how far a finger may roll before the tap becomes a pan.
             // Leaflet offers no map option for it and no accessor either, so it
             // is set on the drag handler's own Draggable. Against a copy of
             // Leaflet that is vendored in this repository (static/leaflet.js,
@@ -191,6 +184,7 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
                 map.current.remove();
                 map.current = null;
                 layer.current = null;
+                paper.current = null;
             }
         };
         // Built once. The receiver cannot move under an open modal, and the
@@ -248,33 +242,12 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
             // about to stop existing.
             dropPath();
             g.clearLayers();
-            const coarse = pick ? coarsePointer() : false;
             for (const p of pts) {
                 const s = p.spot;
-
-                // What a fingertip actually hits — see TOUCH_SLOP. Added before
-                // the dot so the dot lies on top of it, and only where there is
-                // a finger and something for a press to do: on a mouse-driven
-                // map this loop is exactly what it always was.
-                if (coarse) {
-                    const hit = L.circleMarker([p.lat, p.lon], {
-                        radius: TOUCH_SLOP,
-                        stroke: false,
-                        // A fill that is a colour and no opacity at all: this
-                        // has to be painted to be pressed, and invisible to be
-                        // bearable. `csmap__hit` insists on the first of those
-                        // in CSS, where the cascade can be seen.
-                        fillOpacity: 0,
-                        className: 'csmap__hit',
-                    });
-                    hit.on('click', () => { if (pick) pick(s); });
-                    if (rx) {
-                        hit.on('mouseover', () => drawPath(p.lat, p.lon));
-                        hit.on('mouseout', dropPath);
-                    }
-                    hit.addTo(g);
-                }
                 const dot = L.circleMarker([p.lat, p.lon], {
+                    // Canvas, not the default SVG: this is what gives the dot a
+                    // target a finger can hit. See TOUCH_SLOP.
+                    renderer: paper.current,
                     radius: 4,
                     weight: 1,
                     color: 'rgba(255,255,255,0.85)',

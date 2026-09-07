@@ -282,6 +282,15 @@ function Detail({ entry, rows, receiver, now, onClose, onLookup }) {
                         points={points}
                         receiver={receiver}
                         className="csmap--modal csmap--world"
+                        // Every call written under its dot, rather than one at a
+                        // time under the pointer. This map is a calendar of
+                        // announced operations — a few dozen at the outside, and
+                        // the question asked of it is "who is where", which a
+                        // map you have to interrogate station by station answers
+                        // slowly. The spot map does not take this and must not:
+                        // it draws up to 1200 decodes, where the same labels are
+                        // a wall of text with a map somewhere behind it.
+                        labels
                         // Picking one is asking about that operation, which is
                         // the other view's whole job — so it switches, rather
                         // than growing a second way to say the same thing.

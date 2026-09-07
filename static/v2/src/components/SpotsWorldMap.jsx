@@ -29,6 +29,7 @@
 import React, { useEffect, useMemo, useRef, useState } from '../react.js';
 import { loadScript, loadStyle } from '../lib/loadScript.js';
 import { geodesicPoints, maidenheadToLatLon } from '../lib/callsign.js';
+import { TOUCH_QUERY } from '../lib/useMediaQuery.js';
 
 // Tooltip content is HTML to Leaflet, and every part of it — a callsign, a
 // country from a prefix table — arrived over the wire.
@@ -48,6 +49,46 @@ const REDRAW_MS = 600;
 // the store keeps.
 const MAX_POINTS = 1200;
 
+// ── Hitting a dot with a finger ─────────────────────────────────────────────
+//
+// The markers are 4px circles, which is the right size to look at and about a
+// fifth of the size a fingertip can be aimed at. With a mouse that is fine —
+// the pointer is a pixel — so this map worked everywhere it was built and was
+// unusable on the tablet: taps landed on the sea beside the operation rather
+// than on it, and nothing opened. Two separate things in Leaflet cause that,
+// and both are here rather than one, because fixing either alone still leaves
+// a map you cannot press.
+//
+// 1. **Where the press has to land.** An SVG path is hit-tested by the browser
+//    against the shape itself, so the target is the 9px the dot draws and not
+//    a pixel more. Leaflet's `tolerance` — the option that widens it — exists
+//    only on the canvas renderer, because only there does Leaflet do the hit
+//    test itself: `CircleMarker._containsPoint` is `radius + _clickTolerance()`
+//    and `_clickTolerance()` reads the *renderer's* option. So the dots are
+//    drawn on a canvas, which is also how v1's spot maps draw theirs
+//    (digitalspots_map.js, cwskimmer_map.js) and cheaper for a thousand of them.
+//
+// 2. **Whether the press counts as a press at all.** Leaflet begins panning as
+//    soon as a pointer moves 3px (Draggable's own clickTolerance, summed across
+//    both axes), and `Map._draggableMoved` then discards the click that
+//    follows. A finger rolls further than that on the way down almost every
+//    time, so even a tap dead on the dot was being spent panning the map a
+//    pixel. Raised for a coarse pointer, not removed: past this it really was a
+//    drag.
+//
+// Both only when there is a finger in play. A mouse asks for neither, and a
+// 37px target under a pointer that can hit 9 would make two nearby stations
+// one.
+const TOUCH_SLOP = 14;   // px added to the marker's radius for hit testing
+const TAP_SLOP = 10;     // px of travel still counted as a tap, not a pan
+
+// Is there a fingertip available, wherever the primary pointer is? The same
+// question the rest of the interface asks — see TOUCH_QUERY, and note that it
+// is `any-pointer`, so an iPad with a keyboard case still answers yes.
+const coarsePointer = () => {
+    try { return window.matchMedia(TOUCH_QUERY).matches; } catch (e) { return false; }
+};
+
 /** The spots that can be placed at all, with their positions attached. */
 export function placeable(spots, limit = MAX_POINTS) {
     const out = [];
@@ -59,10 +100,14 @@ export function placeable(spots, limit = MAX_POINTS) {
     return out;
 }
 
-export default function SpotsWorldMap({ points, receiver, onPick, className }) {
+export default function SpotsWorldMap({ points, receiver, onPick, labels, className }) {
     const box = useRef(null);
     const map = useRef(null);
     const layer = useRef(null);
+    // The canvas the dots are drawn on, and the reason they can be tapped —
+    // see TOUCH_SLOP. Made with the map and handed to every marker, because a
+    // renderer given per layer is what decides that layer's hit testing.
+    const paper = useRef(null);
     const [failed, setFailed] = useState(false);
     const [ready, setReady] = useState(false);
     const fitted = useRef(false);
@@ -72,8 +117,8 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
     const hover = useRef(null);
     // Read by the redraw without making it a dependency: the timer fires on its
     // own schedule and wants whatever is current when it does.
-    const live = useRef({ points, onPick });
-    live.current = { points, onPick };
+    const live = useRef({ points, onPick, labels });
+    live.current = { points, onPick, labels };
     const lastDrawn = useRef(0);
 
     const rx = receiver && receiver.gps && (receiver.gps.lat || receiver.gps.lon)
@@ -94,6 +139,19 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
                 worldCopyJump: true,
             }).setView(rx ? [rx.lat, rx.lon] : [20, 0], rx ? 3 : 2);
             map.current = m;
+
+            const coarse = coarsePointer();
+            paper.current = L.canvas({ tolerance: coarse ? TOUCH_SLOP : 0 });
+            // ...and how far a finger may roll before the tap becomes a pan.
+            // Leaflet offers no map option for it and no accessor either, so it
+            // is set on the drag handler's own Draggable. Against a copy of
+            // Leaflet that is vendored in this repository (static/leaflet.js,
+            // 1.9.4) rather than one that can move underneath us — and guarded,
+            // so a build with dragging disabled is a map that does not pan
+            // rather than one that does not load.
+            if (coarse && m.dragging && m.dragging._draggable) {
+                m.dragging._draggable.options.clickTolerance = TAP_SLOP;
+            }
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
@@ -126,6 +184,7 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
                 map.current.remove();
                 map.current = null;
                 layer.current = null;
+                paper.current = null;
             }
         };
         // Built once. The receiver cannot move under an open modal, and the
@@ -177,7 +236,7 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
             const m = map.current;
             const g = layer.current;
             if (!L || !m || !g) return;
-            const { points: pts, onPick: pick } = live.current;
+            const { points: pts, onPick: pick, labels: named } = live.current;
 
             // Any path drawn over the old markers belongs to a marker that is
             // about to stop existing.
@@ -186,6 +245,9 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
             for (const p of pts) {
                 const s = p.spot;
                 const dot = L.circleMarker([p.lat, p.lon], {
+                    // Canvas, not the default SVG: this is what gives the dot a
+                    // target a finger can hit. See TOUCH_SLOP.
+                    renderer: paper.current,
                     radius: 4,
                     weight: 1,
                     color: 'rgba(255,255,255,0.85)',
@@ -217,6 +279,38 @@ export default function SpotsWorldMap({ points, receiver, onPick, className }) {
                     dot.on('mouseout', dropPath);
                 }
                 dot.addTo(g);
+
+                // The callsign, written under the dot and left there.
+                //
+                // A separate tooltip layer rather than the dot's own, because a
+                // layer holds one: binding this to the marker would replace the
+                // hover detail above it with a callsign that is already on
+                // screen. Standalone tooltips are a Leaflet layer like any
+                // other (`_source` is optional throughout Tooltip), so this
+                // joins the same group and is cleared with everything else on
+                // the next redraw.
+                //
+                // Below, where the hover tooltip is above: the two never fight
+                // for the same strip of map, and the label cannot cover the
+                // station it belongs to. Nothing to press, either — Leaflet's
+                // own CSS gives a non-interactive tooltip `pointer-events:
+                // none`, so a label lying over a neighbouring dot does not eat
+                // the tap that was meant for it.
+                if (named && s.callsign) {
+                    L.tooltip({
+                        permanent: true,
+                        direction: 'bottom',
+                        // Leaflet's own .leaflet-tooltip-bottom adds 6px of
+                        // margin to this, so 2 puts the label 8px under the
+                        // centre of a 4px dot — clear of it, and close enough
+                        // that a crowd of them stays legible as pairs.
+                        offset: [0, 2],
+                        className: 'csmap__label',
+                    })
+                        .setLatLng([p.lat, p.lon])
+                        .setContent(esc(s.callsign))
+                        .addTo(g);
+                }
             }
 
             // Once, on the first draw that had anything to fit. After that the

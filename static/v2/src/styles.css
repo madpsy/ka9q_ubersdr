@@ -12330,14 +12330,25 @@ a.btn { text-decoration: none; }
  * is always in the same place down the list and a column reads on its own. An
  * unheard band keeps its cell: the gap is the information. */
 .ncdxf-pips { flex: none; display: flex; gap: 2px; align-items: center; }
+/* A band that was not heard is a filled plate, not an outline.
+ *
+ * It began as a 1px border on transparent, which is how an empty cell is drawn
+ * everywhere else in this interface — and at seven pixels square that border is
+ * four short strokes in a colour chosen to separate two large surfaces. Against
+ * the panel it read as nothing at all, so a row of five cells looked like a row
+ * of two, and the gaps that are half the reading were invisible.
+ *
+ * --border-strong as a FILL rather than as an edge: it is the lightest thing in
+ * the palette that is still plainly not a signal, in both themes, and it gives
+ * the eye five solid cells to run down whether or not the beacon was heard on
+ * them. A lit pip is a saturated hue by contrast, so the two states differ in
+ * colour and in weight rather than in whether a hairline can be made out. */
 .ncdxf-pip {
     width: calc(7px * var(--ui-scale));
     height: calc(7px * var(--ui-scale));
     border-radius: 2px;
-    background: transparent;
-    border: 1px solid var(--border);
+    background: var(--border-strong);
 }
-.ncdxf-pip.is-on { border-color: transparent; }
 /* Heard, but not on the band being asked about. Kept visible — it is why the
    beacon is on the map at all — and faded so the pinned band's column is the
    one the eye follows. */

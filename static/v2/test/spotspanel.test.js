@@ -160,25 +160,63 @@ t('the map view is offered on the feeds that have locators, and not on DX', () =
     assert.ok(labels(dig).includes('List'));
 });
 
-t('a stored choice of "map" is what the panel opens as', () => {
-    show('digital', 'map');
+t('digital opens on the map with nothing stored, and CW on its rows', () => {
+    // The split is deliberate: a digital row cannot tune, and a CW row is a
+    // frequency to go to. See VIEW_DEFAULT.
+    show('digital', null);
+    reset();
+    const digital = render(SpotsPanel, {}, context({
+        serverInfo: { ...context().serverInfo, dx_cluster: false, cw_skimmer: false },
+    })).tree;
+    assert.strictEqual(nodes(digital, 'spots__open').length, 1, 'digital did not open on the map');
+
+    show('cw', null);
+    reset();
+    const cw = render(SpotsPanel, {}, context({
+        serverInfo: { ...context().serverInfo, dx_cluster: false, digital_decodes: false },
+    })).tree;
+    assert.strictEqual(nodes(cw, 'spots__open').length, 0, 'CW opened on a map it cannot be tuned from');
+    assert.strictEqual(nodes(cw, 'spots__list').length, 1, 'CW drew no list');
+    // ...and it is still one press away, which is the whole of what makes the
+    // default a default rather than a restriction.
+    const labels = deep(cw)
+        .filter((n) => n.type === 'button' && typeof n.props.title === 'string')
+        .map((n) => n.props.children);
+    assert.ok(labels.includes('Map'), 'CW was not offered the map at all');
+});
+
+t('a stored choice of "list" is honoured over that default', () => {
+    show('digital', 'list');
     reset();
     const info = { ...context().serverInfo, dx_cluster: false, cw_skimmer: false };
+    const { tree } = render(SpotsPanel, {}, context({ serverInfo: info }));
+    assert.strictEqual(nodes(tree, 'spots__open').length, 0, 'the map came back uninvited');
+    assert.strictEqual(nodes(tree, 'spots__list').length, 1, 'no list either');
+});
+
+t('a stored choice of "map" is what the panel opens as', () => {
+    // CW, because that is the tab where the store is overriding the default
+    // rather than agreeing with it.
+    show('cw', 'map');
+    reset();
+    const info = { ...context().serverInfo, dx_cluster: false, digital_decodes: false };
     const { tree } = render(SpotsPanel, {}, context({ serverInfo: info }));
     assert.strictEqual(nodes(tree, 'spots__open').length, 1, 'no map in the map view');
     // ...and the rows are gone with it, rather than both being drawn.
     assert.strictEqual(nodes(tree, 'spots__list').length, 0, 'the list is still there');
 });
 
-t('the DX tab stays a list however the store was seeded', () => {
+t('the DX tab stays a list however the store was seeded — and by default', () => {
     // Nothing writes this key for DX, but a hand-edited store — or a tab that
     // was renamed — must not produce an empty world where the rows were.
-    show('dx', 'map');
-    reset();
-    const { tree } = render(SpotsPanel, {}, context({
-        serverInfo: { ...context().serverInfo, digital_decodes: false, cw_skimmer: false },
-    }));
-    assert.strictEqual(nodes(tree, 'spots__open').length, 0);
+    const dxOnly = { ...context().serverInfo, digital_decodes: false, cw_skimmer: false };
+    for (const seed of ['map', null]) {
+        show('dx', seed);
+        reset();
+        const { tree } = render(SpotsPanel, {}, context({ serverInfo: dxOnly }));
+        assert.strictEqual(nodes(tree, 'spots__open').length, 0, `seeded ${seed}`);
+        assert.strictEqual(nodes(tree, 'spots__list').length, 1, `seeded ${seed}: no list`);
+    }
 });
 
 // --- what the map is given -------------------------------------------------

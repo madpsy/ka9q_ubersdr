@@ -10,7 +10,10 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { Button, Modal } from './ui.jsx';
 import { loadScript } from '../lib/loadScript.js';
 import { connectionCheck, getBypassPassword, setBypassPassword } from '../radio/session.js';
-import { APP_DOWNLOADS, appDownloads, detectDesktopOS, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
+import {
+    APP_DOWNLOADS, appDownloads, detectDesktopOS, IOS_APP_STORE, IOS_APP_STORE_BADGE,
+    ubersdrAppUri, vibesdrUri,
+} from '../lib/appLinks.js';
 
 // v1's QR renderer, loaded on demand. 20 KB that only a phone-facing dialog
 // needs, so it stays out of the bundle and off the critical path — the same
@@ -187,6 +190,58 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
                     <CopyLink uri={uri} />
                 </div>
                 <p className="vibe__note">Desktop and Android apps · instances.ubersdr.org</p>
+            </div>
+        </Modal>
+    );
+}
+
+/**
+ * The same hand-off, on an iPhone or an iPad.
+ *
+ * Everywhere else a device that has the app is simply handed the link and the
+ * dialog never opens (see StartOverlay). iOS is the exception, for two reasons
+ * that only apply there:
+ *
+ *   * Following an unclaimed scheme is silent on every platform, and on iOS
+ *     there is no way back from that silence — no "no app can open this", no
+ *     store prompt, nothing. A tap that does nothing looks like a broken page.
+ *   * The app cannot be side-loaded, so there is no file to offer. The App
+ *     Store page *is* the download, which is why the badge is here rather than
+ *     a `DownloadButton`.
+ *
+ * So both are on screen at once: open it if you have it, get it if you do not.
+ * Neither can be told from the other from inside a browser.
+ */
+export function IosAppModal({ publicUuid, onClose }) {
+    const uri = ubersdrAppUri(publicUuid);
+
+    return (
+        <Modal onClose={onClose} label="Open in the UberSDR app">
+            <div className="stack vibe">
+                <h2 className="vibe__title">Open in the UberSDR app</h2>
+                <p className="vibe__text">
+                    Opens this receiver in the UberSDR app. If it is not installed
+                    yet, get it from the App Store first.
+                </p>
+                <div className="vibe__row">
+                    <a className="btn btn--primary btn--sm" href={uri}>Open in App</a>
+                </div>
+                {/* Apple's badge already says "Download on the App Store", so
+                    the link has no text of its own — `alt` carries it for a
+                    screen reader, and is what shows if the image does not. */}
+                <a
+                    className="vibe__badge"
+                    href={IOS_APP_STORE}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    <img src={IOS_APP_STORE_BADGE} alt="Download UberSDR on the App Store" />
+                </a>
+                <code className="vibe__uri">{uri}</code>
+                <div className="vibe__row">
+                    <CopyLink uri={uri} />
+                </div>
+                <p className="vibe__note">iPhone and iPad · instances.ubersdr.org</p>
             </div>
         </Modal>
     );

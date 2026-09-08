@@ -170,6 +170,56 @@ export function hasMobileApp(nav) {
     return false;
 }
 
+/**
+ * Where the iOS app comes from.
+ *
+ * A store page rather than a release asset, because Apple ships no file anybody
+ * can download: the only way onto an iPhone is the App Store, so the badge is
+ * the download button and this is its link. The `gb` in the path is the store
+ * front the URL names; the App Store redirects a visitor to their own country's
+ * page, so it is not a British-only link.
+ */
+export const IOS_APP_STORE = 'https://apps.apple.com/gb/app/ubersdr/id6801886706';
+
+// Apple's own badge, served by the instance from static/images/ alongside the
+// platform icons. It is artwork with the words "Download on the App Store"
+// already in it, which is why the link around it carries no label of its own.
+export const IOS_APP_STORE_BADGE = '/images/appstore.png';
+
+/**
+ * Whether this is an iPhone or an iPad — the half of `hasMobileApp` that cannot
+ * simply be handed the link.
+ *
+ * Android can: following `ubersdr://` there either opens the app or does
+ * nothing, and Play offers to find it. On iOS a scheme nobody claims is the
+ * same silence with no way back, and the app cannot be side-loaded — so the
+ * store page has to be on screen beside the link rather than behind it.
+ *
+ * The same two disguises as everywhere else in this file: an iPad has said
+ * `Macintosh` since iOS 13, which `maxTouchPoints` is what separates, and a
+ * Mac with a touchscreen does not exist.
+ *
+ * `nav` is a parameter so this can be tested against the strings real devices
+ * send.
+ */
+export function isIOS(nav) {
+    const n = nav || (typeof navigator !== 'undefined' ? navigator : null);
+    if (!n) return false;
+
+    const hints = n.userAgentData || null;
+    const ua = String(n.userAgent || '');
+    const text = `${(hints && hints.platform) || n.platform || ''} ${ua}`;
+
+    // Android says `Linux` and never `Mac`, but it does say `like Mac OS X` in
+    // every iOS UA — so Android is ruled out first rather than trusted not to
+    // match below.
+    if (/Android/i.test(text)) return false;
+    if (/iPhone|iPod|iPad|iOS|iPadOS/i.test(text)) return true;
+    // iPadOS pretending to be a Mac.
+    if (/Mac/i.test(text) && Number(n.maxTouchPoints) > 1) return true;
+    return false;
+}
+
 export function detectDesktopOS(nav) {
     const n = nav || (typeof navigator !== 'undefined' ? navigator : null);
     if (!n) return null;

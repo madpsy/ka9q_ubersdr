@@ -89,19 +89,31 @@ const mapModalWanted = (tab) => {
 //
 // The same shape as the switch above, and per tab for the same reason: the tabs
 // are different feeds asking different questions, and somebody watching FT8
-// propagation on the map is usually still reading the CW skimmer as a list.
+// propagation on the map may still want the CW skimmer as a list.
 //
-// The list is the default everywhere. It is the view that can show every spot —
-// the map can only show the ones that reported a locator — and it is what this
-// panel has always been, so nobody arrives at a receiver to find their spots
-// replaced by a picture.
+// The map is the default on the digital tab. What a decoder feed is actually
+// being asked is where the band is reaching, and that is a shape: a column of
+// callsigns sorted by time cannot show it, and the map can. Its rows cannot tune
+// either — every station in a decoder band sits on the same dial frequency — so
+// the list is the one view there that answers nothing a press can act on.
+//
+// CW keeps the list, for exactly that reason reversed: a skimmer row *is* a
+// frequency to go to, and pressing one tunes the receiver. A map with no rows in
+// it would put a press of List between the operator and the band, every time.
+// The same split the modal switch above makes, and for the same reason.
+//
+// DX is false and could not be anything else — a cluster spot carries no locator
+// at all, so there is nothing there to draw. See `canMap`.
 const VIEW_KEY = 'ubersdr.v2.spotsView';
+const VIEW_DEFAULT = { digital: true, cw: false, dx: false };
 
 const mapViewWanted = (tab) => {
+    const fallback = !!VIEW_DEFAULT[tab];
     try {
-        return localStorage.getItem(`${VIEW_KEY}.${tab}`) === 'map';
+        const v = localStorage.getItem(`${VIEW_KEY}.${tab}`);
+        return v == null ? fallback : v === 'map';
     } catch (e) {
-        return false;
+        return fallback;
     }
 };
 

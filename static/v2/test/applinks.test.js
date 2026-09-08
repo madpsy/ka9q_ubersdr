@@ -12,7 +12,8 @@
 
 const assert = require('assert');
 const {
-    APP_DOWNLOADS, appDownloads, detectDesktopOS, hasMobileApp, ubersdrAppUri, vibesdrUri,
+    APP_DOWNLOADS, appDownloads, detectDesktopOS, hasMobileApp, IOS_APP_STORE,
+    IOS_APP_STORE_BADGE, isIOS, ubersdrAppUri, vibesdrUri,
 } = require('./.build/applinks.cjs');
 
 let pass = 0;
@@ -204,8 +205,6 @@ t('the downloads are the release assets the site links to', () => {
     for (const d of APP_DOWNLOADS) assert.ok(!/\$\{|\bundefined\b/.test(d.url), d.url);
 });
 
-console.log(`\n${pass} passed`);
-
 t('a device with the app is recognised, tablets included', () => {
     // The case this exists for: a tablet has the app and a wide screen, so the
     // width media query that used to answer this sent it to the desktop dialog
@@ -234,3 +233,80 @@ t('a desktop is not offered the app link', () => {
     ];
     for (const ua of cases) assert.strictEqual(hasMobileApp(nav(ua, { maxTouchPoints: 0 })), false, ua);
 });
+
+// --- iOS ---------------------------------------------------------------------
+//
+// The one platform that has the app and cannot simply be handed the link: an
+// unclaimed scheme is silent there with nothing offered in its place, and the
+// app cannot be side-loaded, so the store page has to be shown beside it.
+
+t('an iPhone and an iPad are iOS', () => {
+    const cases = [
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (iPad; CPU OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (iPod touch; CPU iPhone OS 15_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+    ];
+    for (const ua of cases) assert.strictEqual(isIOS(nav(ua)), true, ua);
+});
+
+t('iPadOS claiming to be a Mac is still iOS, and a real Mac is not', () => {
+    const ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15';
+    assert.strictEqual(isIOS(nav(ua, { maxTouchPoints: 5 })), true);
+    assert.strictEqual(isIOS(nav(ua, { maxTouchPoints: 0 })), false);
+});
+
+// Every iOS user agent says "like Mac OS X", so a test for Mac that ran first
+// would be reading the wrong half of the string — and every Android one says
+// "Linux". Android must stay on the direct link: it has a claimed scheme and a
+// Play listing, and the App Store badge would be nonsense there.
+t('Android is not iOS, touchscreen and all', () => {
+    const cases = [
+        'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 14; Pixel Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    ];
+    for (const ua of cases) assert.strictEqual(isIOS(nav(ua, { maxTouchPoints: 5 })), false, ua);
+});
+
+t('desktops and nothing at all are not iOS', () => {
+    for (const ua of [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; CrOS x86_64 14541.0.0)',
+        '',
+    ]) assert.strictEqual(isIOS(nav(ua, { maxTouchPoints: 0 })), false, ua);
+    assert.strictEqual(isIOS({}), false);
+    assert.strictEqual(isIOS(null), false);
+});
+
+// iOS is a subset of the devices that have the app — a device the dialog is
+// shown to that `hasMobileApp` calls a desktop would get the AppImage list.
+t('every iOS device is a device with the app', () => {
+    for (const [ua, extra] of [
+        ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Mobile/15E148', {}],
+        ['Mozilla/5.0 (iPad; CPU OS 18_1 like Mac OS X) Mobile/15E148', {}],
+        ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/18.1 Safari/605.1.15', { maxTouchPoints: 5 }],
+    ]) {
+        assert.ok(!isIOS(nav(ua, extra)) || hasMobileApp(nav(ua, extra)), ua);
+    }
+});
+
+// The store page is the download on iOS, so a wrong id is the same failure as a
+// wrong scheme: a link that goes somewhere real and useless.
+t('the App Store link names the app', () => {
+    const parsed = new URL(IOS_APP_STORE);
+    assert.strictEqual(parsed.protocol, 'https:');
+    assert.strictEqual(parsed.hostname, 'apps.apple.com');
+    assert.strictEqual(parsed.pathname, '/gb/app/ubersdr/id6801886706');
+});
+
+// Served by the instance, like the platform icons: a file never committed is a
+// missing badge in the dialog and nothing anywhere else.
+t('the App Store badge is a file this server actually has', () => {
+    const fs = require('fs');
+    const path = require('path');
+    assert.ok(IOS_APP_STORE_BADGE.startsWith('/images/'), IOS_APP_STORE_BADGE);
+    const file = path.join(__dirname, '..', '..', IOS_APP_STORE_BADGE.replace(/^\//, ''));
+    assert.ok(fs.existsSync(file), `${file} is missing`);
+});
+
+console.log(`\n${pass} passed`);

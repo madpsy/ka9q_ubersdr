@@ -20,8 +20,8 @@ import { shellChoosable, writeShell } from '../lib/shellPref.js';
 import { Button, Icon } from './ui.jsx';
 import { connectionCheck, getBypassPassword, setBypassPassword } from '../radio/session.js';
 import { MOBILE_QUERY, SHELL_ROOM_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
-import { PasswordModal, UberSdrAppModal, VibeSdrModal } from './StartExtras.jsx';
-import { hasMobileApp, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
+import { IosAppModal, PasswordModal, UberSdrAppModal, VibeSdrModal } from './StartExtras.jsx';
+import { hasMobileApp, isIOS, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
 // The same question the top bar's callsign lookup asks, answered in one place.
 // What it is used for here is leaving out the "Open in App" link, which in an
 // app would offer to open the receiver that is open — a QR code to scan with
@@ -58,7 +58,7 @@ export default function StartOverlay() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [started, setStarted] = useState(false);
-    const [dialog, setDialog] = useState(null);   // 'vibesdr' | 'app' | 'password' | null
+    const [dialog, setDialog] = useState(null);   // 'vibesdr' | 'app' | 'ios' | 'password' | null
     const buttonRef = useRef(null);
     const mobile = useMediaQuery(MOBILE_QUERY);
     // What to call the gesture. `any-pointer`, like every other touch decision
@@ -148,6 +148,11 @@ export default function StartOverlay() {
     // right for a phone, wrong for every tablet, which has the app and a wide
     // screen and was being offered a Linux download because of it.
     const appHere = hasMobileApp();
+    // iOS is the one device with the app that is not simply handed the link.
+    // A scheme nobody claims is silent there with nothing offered in its place,
+    // and the app cannot be side-loaded — so the App Store page has to be on
+    // screen beside the link rather than behind it. See IosAppModal.
+    const ios = isIOS();
     // Where the two layouts are both possible: a touchscreen with room for the
     // docks. See the buttons.
     const simpleOffered = shellChoosable({ touch: tapNotClick, roomy });
@@ -158,6 +163,7 @@ export default function StartOverlay() {
     };
 
     const openInApp = () => {
+        if (ios) { setDialog('ios'); return; }
         if (appHere) { window.location.href = ubersdrAppUri(publicUuid); return; }
         setDialog('app');
     };
@@ -306,6 +312,9 @@ export default function StartOverlay() {
             )}
             {dialog === 'app' && (
                 <UberSdrAppModal publicUuid={publicUuid} onClose={() => setDialog(null)} />
+            )}
+            {dialog === 'ios' && (
+                <IosAppModal publicUuid={publicUuid} onClose={() => setDialog(null)} />
             )}
             {dialog === 'password' && (
                 <PasswordModal

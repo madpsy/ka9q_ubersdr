@@ -12,6 +12,7 @@
 - Fixed **KiwiSDR Registration** for users with public access to the KiwiSDR emulation. I'm not entirely convinced it will remain working but does for now
 - Fixed **384 KHz IQ** which allows HPSDR/rtl_tcp etc access to 384 KHz of spectrum - the max was 192 KHz
 - Fixed **Buttons on mobile** were partially obscured with curved screen edges (panel/group buttons at the bottom)
+- Fixed **Listener Stats** which were being slow and using lots of memory on instances with high number of listeners
 
 ## Version 0.1.65 - 5th Sep 2026
 

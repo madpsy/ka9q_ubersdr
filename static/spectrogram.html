@@ -279,7 +279,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   </select>
   <div>
     <label for="tzsel">Times:</label>
-    <select id="tzsel" onchange="onTimeModeChange()">
+    <select id="tzsel" onchange="onTimeModeChange(this.value)">
       <option value="utc" selected>UTC Time</option>
       <option value="receiver">Receiver Time</option>
       <option value="local">Local Time</option>
@@ -466,6 +466,13 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <label for="ts-dsel" style="font-size:.88em;opacity:.85">Date:</label>
     <select id="ts-dsel" onchange="tsOnDateChange()"></select>
     <button onclick="tsReloadAll()">&#x21BB; Reload all</button>
+    <!-- Timestamp display mode — shared with the other tabs -->
+    <label for="ts-tzsel" style="font-size:.88em;opacity:.85">Times:</label>
+    <select id="ts-tzsel" onchange="onTimeModeChange(this.value)">
+      <option value="utc" selected>UTC Time</option>
+      <option value="receiver">Receiver Time</option>
+      <option value="local">Local Time</option>
+    </select>
     <span class="status" id="ts-status"></span>
   </div>
 
@@ -587,6 +594,15 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85em">
       <input type="checkbox" id="tt-show-stars" checked onchange="ttRedraw()"> Show Stars
     </label>
+    <!-- Timestamp display mode — shared with the main spectrogram tab -->
+    <div>
+      <label for="tt-tzsel">Times:</label>
+      <select id="tt-tzsel" onchange="onTimeModeChange(this.value)">
+        <option value="utc" selected>UTC Time</option>
+        <option value="receiver">Receiver Time</option>
+        <option value="local">Local Time</option>
+      </select>
+    </div>
     <span class="status" id="tt-status" style="margin-left:auto"></span>
   </div>
 
@@ -1235,9 +1251,25 @@ function sgRowClock(row){
   return (row&&row.utc_time)||'';
 }
 
-function onTimeModeChange(){
-  var sel=document.getElementById('tzsel');
-  sgTimeMode=(sel&&sel.value)||'utc';
+/* The same "Times:" dropdown appears on the main, Time Slice and Time Travel
+   tabs; all of them drive this one handler and are mirrored so they never
+   disagree. */
+var SG_TIME_SELECTS=['tzsel','tt-tzsel','ts-tzsel'];
+
+function sgSyncTimeModeSelects(){
+  for(var i=0;i<SG_TIME_SELECTS.length;i++){
+    var el=document.getElementById(SG_TIME_SELECTS[i]);
+    if(el&&el.value!==sgTimeMode)el.value=sgTimeMode;
+  }
+}
+
+function onTimeModeChange(mode){
+  if(mode!=='utc'&&mode!=='receiver'&&mode!=='local'){
+    var sel=document.getElementById('tzsel');
+    mode=(sel&&sel.value)||'utc';
+  }
+  sgTimeMode=mode;
+  sgSyncTimeModeSelects();
   savePrefs();
   sgRefreshTimeLabels();
 }
@@ -1633,9 +1665,8 @@ window.sgTzOffsetMin=sgTzOffsetMin;
   /* Apply saved timestamp display mode */
   if(prefs.timeMode==='receiver'||prefs.timeMode==='local'||prefs.timeMode==='utc'){
     sgTimeMode=prefs.timeMode;
-    var tzsel=document.getElementById('tzsel');
-    if(tzsel)tzsel.value=sgTimeMode;
   }
+  sgSyncTimeModeSelects();
 
   /* Pre-select the band from the URL before the list loads */
   var bsel=document.getElementById('bsel');

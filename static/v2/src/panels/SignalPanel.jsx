@@ -596,7 +596,7 @@ export default function SignalPanel({ minimal }) {
 
                     <div className="sparkline">
                         <canvas ref={canvasRef} />
-                        <span className="sparkline__label">SNR, last 10 s</span>
+                        <span className="sparkline__label sparkline__label--bottom sparkline__label--left">SNR, last 10 s</span>
                     </div>
 
                     {!running && <div className="note note--tight">Meters are live once the receiver is started.</div>}

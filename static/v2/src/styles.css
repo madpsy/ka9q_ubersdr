@@ -4023,9 +4023,14 @@ a.btn { text-decoration: none; }
 /* Along the bottom instead, for a chart whose trace lives at the top of its
    box. The buffer is drawn against a fixed ceiling — the queue the operator
    asked for — so a healthy trace sits just under that line, which is exactly
-   where a top-right caption is. The SNR trace is scaled to its own data and
-   wanders, so it keeps the top corner. */
+   where a top-right caption is. */
 .sparkline__label--bottom { top: auto; bottom: 0; }
+
+/* Pinned by its left edge instead. The SNR trace is scaled to its own data, so
+   it fills its box whatever the signal is doing and there is no corner it
+   never visits; the scrim on the base class is what keeps the caption legible
+   wherever it is put. */
+.sparkline__label--left { right: auto; left: 0; }
 
 /* A live number in a caption that is pinned by its right edge. Three figures
    covers any queue worth charting — a second of buffer is 1000 ms and the

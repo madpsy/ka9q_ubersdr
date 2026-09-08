@@ -96,6 +96,7 @@ import RadioControlPanel from './RadioControlPanel.jsx';
 import SDRControlPanel from './SDRControlPanel.jsx';
 import SpotsPanel, { spotTabs } from './SpotsPanel.jsx';
 import DXpeditionsPanel from './DXpeditionsPanel.jsx';
+import NCDXFPanel from './NCDXFPanel.jsx';
 import SpaceWeatherPanel from './SpaceWeatherPanel.jsx';
 import RankingPanel from './RankingPanel.jsx';
 import { rankingAvailable } from '../lib/ranking.js';
@@ -367,6 +368,40 @@ const BUILT_IN = [
         minimal: true,
         Component: DXpeditionsPanel,
         requires: (serverInfo, env) => !!(env && env.dxpeditions),
+    },
+    // What this receiver can actually hear of the NCDXF/IARU beacon network,
+    // which is the most direct propagation reading it can take of itself: the
+    // eighteen beacons are the only signals on HF whose position, power and
+    // schedule are all known in advance, so which of them arrive is a measured
+    // answer to "what is open, and in which direction".
+    //
+    // Below DXpeditions, and the pair reads down the column as the same
+    // question at three timescales — the spot feeds are the last ten minutes,
+    // this is the last hour of the bands themselves, that is the next three
+    // months of announcements.
+    //
+    // Collapsed by default, and that is what makes it free: Section does not
+    // mount a closed body, so a listener who never opens it never fetches
+    // anything at all.
+    //
+    // Gated on the CW skimmer alone, and deliberately NOT on having heard
+    // anything — unlike DXpeditions above, whose calendar is the same on every
+    // receiver in the world and so says nothing when it is empty. An empty
+    // beacon panel is a reading: it means the bands are shut, or that this
+    // skimmer does not cover the five beacon frequencies, and both are worth
+    // being told. See panels/NCDXFPanel.jsx for what it says in each case.
+    //
+    // Minimal: the beacon rows, without the window and band pickers, the band
+    // strip, the figures or the map.
+    {
+        id: 'ncdxf',
+        title: 'NCDXF Beacons',
+        icon: <Icon.Announce />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: NCDXFPanel,
+        requires: (serverInfo) => !!(serverInfo && serverInfo.cw_skimmer),
     },
     {
         id: 'callsign',

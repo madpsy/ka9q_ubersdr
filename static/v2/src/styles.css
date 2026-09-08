@@ -12199,6 +12199,216 @@ a.btn { text-decoration: none; }
    rather than growing the dialog past the viewport. */
 .dxp-list--all { max-height: min(60vh, 520px); overflow-y: auto; }
 
+/* ── NCDXF beacons ────────────────────────────────────────────────────────── */
+
+/* The two pickers and the count, on one line. The count is last and never
+   wraps: it is the shortest thing on the row and the one being read. */
+.ncdxf__filters { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.ncdxf__filter { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ncdxf__filter-label {
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+.ncdxf__filter .select {
+    width: auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: calc(11px * var(--ui-scale));
+    padding: 2px 4px;
+}
+.ncdxf__count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+
+/* ── the band strip ──
+ *
+ * Five equal cells, because they are five readings of the same kind and an eye
+ * running along them is comparing them. Equal width also means the strip does
+ * not reflow as the counts change from one poll to the next. */
+.ncdxf-strip { display: flex; gap: 3px; }
+.ncdxf-strip__cell {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding: 3px 2px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.ncdxf-strip__cell:hover { border-color: var(--accent); }
+/* The pinned band. The border rather than a fill: a filled cell would compete
+   with the bar inside it, which is the reading. */
+.ncdxf-strip__cell.is-active { border-color: var(--accent); color: var(--text); }
+.ncdxf-strip__cell.is-on { color: var(--text); }
+.ncdxf-strip__band {
+    font-size: calc(9.5px * var(--ui-scale));
+    font-family: var(--mono);
+    text-align: center;
+}
+/* How many of the eighteen, as a bar. A closed band draws an empty track rather
+   than nothing, so the row keeps its height and the five cells stay level. */
+.ncdxf-strip__bar {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    overflow: hidden;
+}
+.ncdxf-strip__fill { display: block; height: 100%; border-radius: 2px; }
+.ncdxf-strip__count {
+    font-family: var(--mono);
+    font-size: calc(9.5px * var(--ui-scale));
+    text-align: center;
+}
+
+/* ── a beacon row ──
+ *
+ * Two lines, each its own flex row, on the DXpeditions pattern and for the same
+ * reason: a grid column is as wide as its widest cell, so the figures on the
+ * second line would set the width of the callsign on the first and push the
+ * location off the end of a line it is not even on. */
+.list__row.ncdxf-row { gap: 1px; width: 100%; }
+.ncdxf-row__line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+}
+.ncdxf-row__call {
+    flex: none;
+    font-family: var(--mono);
+    font-size: calc(12px * var(--ui-scale));
+}
+.ncdxf-row__where {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: right;
+    font-size: calc(11px * var(--ui-scale));
+}
+.ncdxf-row__snr {
+    flex: none;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+}
+.ncdxf-row__detail {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.ncdxf-row__age {
+    flex: none;
+    white-space: nowrap;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+/* A row that cannot tune — the receiver is stopped, or the frequency is outside
+   its range — is still worth reading, so it is flattened rather than dressed as
+   a button. */
+.list__row.ncdxf-row.is-flat { cursor: default; }
+
+/* ── the pips ──
+ *
+ * Five cells in fixed positions, one per band in slot order, so the same band
+ * is always in the same place down the list and a column reads on its own. An
+ * unheard band keeps its cell: the gap is the information. */
+.ncdxf-pips { flex: none; display: flex; gap: 2px; align-items: center; }
+.ncdxf-pip {
+    width: calc(7px * var(--ui-scale));
+    height: calc(7px * var(--ui-scale));
+    border-radius: 2px;
+    background: transparent;
+    border: 1px solid var(--border);
+}
+.ncdxf-pip.is-on { border-color: transparent; }
+/* Heard, but not on the band being asked about. Kept visible — it is why the
+   beacon is on the map at all — and faded so the pinned band's column is the
+   one the eye follows. */
+.ncdxf-pip.is-dim { opacity: 0.35; }
+
+/* ── the figures under the list ── */
+.ncdxf-foot { display: flex; flex-direction: column; gap: 1px; }
+.ncdxf-foot__stat, .ncdxf-foot__silent {
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── the map modal ── */
+.ncdxf-modal {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: min(94vw, 860px);
+}
+.ncdxf-modal__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-right: 42px; }
+.ncdxf-modal__title { font-size: calc(13px * var(--ui-scale)); font-weight: 600; }
+.ncdxf-modal__sub { flex: 1; min-width: 0; font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
+.ncdxf-modal__key { font-size: calc(10px * var(--ui-scale)); color: var(--text-faint); }
+/* Taller than the inline maps: this one is the whole reason the modal exists,
+   and the paths it draws are hemisphere-long. */
+.ncdxf-map { height: min(62vh, 520px); width: 100%; border-radius: 6px; }
+
+/* A beacon's detail, on click. The only Leaflet popup in v2, and it is here
+   because eighteen stations with five bands each is more than a label can hold
+   and more than a hover should have to hold still for.
+ *
+   Two classes deep on every rule for the same reason .csmap__label is: Leaflet's
+   own stylesheet is appended to <head> when the first map opens, so it is always
+   after this file and wins every tie. Its untouched plate is white with a black
+   drop shadow, which is the one thing a themed interface cannot have in the
+   middle of it. */
+.leaflet-popup.ncdxf-pop .leaflet-popup-content-wrapper {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+}
+.leaflet-popup.ncdxf-pop .leaflet-popup-content {
+    margin: 6px 9px;
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1.45;
+}
+.leaflet-popup.ncdxf-pop .leaflet-popup-tip {
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    box-shadow: none;
+}
+.ncdxf-pop .bp-call {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: calc(12px * var(--ui-scale));
+}
+.ncdxf-pop .bp-entity { color: var(--text-dim); }
+.ncdxf-pop .bp-detail { color: var(--text-faint); font-size: calc(10px * var(--ui-scale)); }
+/* The per-band figures, which are the reason the popup exists. Mono so the
+   columns of a five-line block line up. */
+.ncdxf-pop .bp-spots {
+    margin-top: 3px;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+}
+
 /* ── Debug: layer promotions off ──────────────────────────────────────────────
  *
  * The Display panel's debug section, which is hidden until it is asked for and

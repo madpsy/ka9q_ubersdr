@@ -74,6 +74,8 @@ esbuild drmpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/drmpanel.cjs --log-level=warning
 esbuild dxpeditions.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxpeditions.cjs --log-level=warning
+esbuild ncdxf.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/ncdxf.cjs --log-level=warning
 esbuild spotspanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/spotspanel.cjs --log-level=warning
 esbuild dxsearch.entry.js --bundle --format=cjs --platform=node \
@@ -638,6 +640,7 @@ node audiotint.test.js
 node oliviapanel.test.js
 node drmpanel.test.js
 node dxpeditions.test.js
+node ncdxf.test.js
 node clockpanel.test.js
 node iqdemod.test.js
 node wavlossless.test.js

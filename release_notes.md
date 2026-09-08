@@ -7,13 +7,14 @@
 - Added **WWV Clock Decoder** extension - supports the major US clock sources - experimental as difficult to test from the UK
 - Added **Automatic Addon Updates** whenever UberSDR updates
 - Added **DXpedition Panel** showing current and upcoming DXpeditions
+- Added **NCDXF Beacon Panel** (v2 UI) showing which of the 18 NCDXF/IARU beacons this receiver has heard, per band, with a world map. Needs the CW skimmer covering 14.100, 18.110, 21.150, 24.930 and 28.200 MHz
 
 ### Bug Fixes
 - Fixed **KiwiSDR Registration** for users with public access to the KiwiSDR emulation. I'm not entirely convinced it will remain working but does for now
 - Fixed **384 KHz IQ** which allows HPSDR/rtl_tcp etc access to 384 KHz of spectrum - the max was 192 KHz
 - Fixed **Buttons on mobile** were partially obscured with curved screen edges (panel/group buttons at the bottom)
 - Fixed **Listener Stats** which were being slow and using lots of memory on instances with high number of listeners
-- Fixed **CartoDB Maps** by removing them as now need an API key - they didn't add any real value
+- Fixed **CartoDB Maps** by removing them as now require an API key - they didn't add any real value
 
 ## Version 0.1.65 - 5th Sep 2026
 

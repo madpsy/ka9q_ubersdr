@@ -80,7 +80,7 @@ export const GROUPS = [
         // main spectrum — and the tab it lands on is the one somebody is already
         // on when they wonder how wide that signal is.
         panels: [
-            'spots', 'dxcluster', 'dxpeditions', 'voice', 'callsign',
+            'spots', 'dxcluster', 'dxpeditions', 'ncdxf', 'voice', 'callsign',
             'bandspectrum', 'spectrogram', 'measure', 'bandstats', 'spaceweather', 'lightning',
         ],
     },

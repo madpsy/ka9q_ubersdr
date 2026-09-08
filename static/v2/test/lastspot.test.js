@@ -509,6 +509,42 @@ ta('a spot this receiver cannot reach is text, not a dead button', async () => {
     drain();
 });
 
+ta('a query that never answers holds nothing up', async () => {
+    // The guarantee this row lives or dies by. The archive is a database on the
+    // other side of an addon proxy: it caps itself at eight concurrent searches
+    // and gives up at fifteen seconds, so "slow" is a state it really has.
+    //
+    // The lookup must not wait for it. Two things make that true, and this pins
+    // the second — the first is structural: the row is a leaf inside the result,
+    // so it is not even mounted until the operator's name, country and grid are
+    // on screen, and its query goes out after that.
+    //
+    // The second is that a pending query renders nothing at all rather than a
+    // spinner or a half-row. Nothing above it moves, and nothing below it is
+    // pushed down until there is an answer to push it with.
+    reset();
+    const was = globalThis.fetch;
+    let settle = null;
+    globalThis.fetch = () => new Promise((r) => { settle = r; });
+
+    const first = mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
+    assert.strictEqual(first.tree, null, 'a pending query drew something');
+    await new Promise((r) => setTimeout(r, 30));
+    const { tree } = mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
+    assert.strictEqual(tree, null, 'a query still in flight drew something');
+    assert.ok(settle, 'no request was made');
+
+    // And when it does finally answer, the row arrives — a slow addon is late,
+    // not broken.
+    settle({ ok: true, json: () => Promise.resolve({ spots: [SPOT] }) });
+    await new Promise((r) => setTimeout(r, 30));
+    const late = mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
+    assert.ok(/21016\.7/.test(words(late.tree)), words(late.tree));
+
+    globalThis.fetch = was;
+    drain();
+});
+
 ta('never heard is said, not left blank', async () => {
     reset();
     answer = { spots: [] };

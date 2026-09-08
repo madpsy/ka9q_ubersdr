@@ -100,7 +100,22 @@ export function placeable(spots, limit = MAX_POINTS) {
     return out;
 }
 
-export default function SpotsWorldMap({ points, receiver, onPick, labels, className }) {
+// `interactive` is the difference between the modal's map and the panel's. The
+// modal's is a chart to work with: pan, zoom, hover a station for the path to it.
+// The panel's is a picture of where the band is reaching, 220 pixels tall and
+// sitting inside a button — every handler off, so a press anywhere on it belongs
+// to that button and opens the full-size map rather than nudging a map too small
+// to navigate.
+//
+// `fitKey` is for that same panel copy. The view is normally fitted once and then
+// left alone, because refitting would move the ground under somebody's pointer —
+// but nobody pans a map with no handlers, and a filter change that left it showing
+// the continent the last filter chose would just be a map of the wrong thing. Pass
+// a value that changes when the question does and the fit happens again; pass
+// nothing and the view is fitted once, as before.
+export default function SpotsWorldMap({
+    points, receiver, onPick, labels, className, interactive = true, fitKey,
+}) {
     const box = useRef(null);
     const map = useRef(null);
     const layer = useRef(null);
@@ -117,8 +132,8 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
     const hover = useRef(null);
     // Read by the redraw without making it a dependency: the timer fires on its
     // own schedule and wants whatever is current when it does.
-    const live = useRef({ points, onPick, labels });
-    live.current = { points, onPick, labels };
+    const live = useRef({ points, onPick, labels, interactive });
+    live.current = { points, onPick, labels, interactive };
     const lastDrawn = useRef(0);
 
     const rx = receiver && receiver.gps && (receiver.gps.lat || receiver.gps.lon)
@@ -134,7 +149,18 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
             if (cancelled || !L || !box.current || map.current) return;
 
             const m = L.map(box.current, {
-                scrollWheelZoom: true,
+                // All of them together, because leaving any one on is a map that
+                // half-responds: a wheel that zooms a picture nobody can pan, or a
+                // double-click that zooms in and swallows the press that was meant to
+                // open the big one. The zoom control goes with them — two buttons that
+                // do nothing, over the North Atlantic.
+                scrollWheelZoom: interactive,
+                dragging: interactive,
+                doubleClickZoom: interactive,
+                touchZoom: interactive,
+                boxZoom: interactive,
+                keyboard: interactive,
+                zoomControl: interactive,
                 attributionControl: false,
                 worldCopyJump: true,
             }).setView(rx ? [rx.lat, rx.lon] : [20, 0], rx ? 3 : 2);
@@ -199,6 +225,20 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
         return `${points.length}|${first}|${last}`;
     }, [points]);
 
+    // A new question wants a new view — see `fitKey`. Nothing happens on mount,
+    // where the fit has not been done yet either way.
+    useEffect(() => { fitted.current = false; }, [fitKey]);
+
+    // Leaflet measures its box once, when it builds. The panel's copy lives in a
+    // dock column that is dragged wider and narrower and a section that opens and
+    // closes, and without this the tiles simply stop at wherever the edge was.
+    useEffect(() => {
+        if (!ready || typeof ResizeObserver === 'undefined' || !box.current) return undefined;
+        const ro = new ResizeObserver(() => { if (map.current) map.current.invalidateSize(); });
+        ro.observe(box.current);
+        return () => ro.disconnect();
+    }, [ready]);
+
     // ---- the markers, throttled ---------------------------------------------
     //
     // Leading edge, then trailing: a filter change or a search keystroke is drawn
@@ -236,7 +276,7 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
             const m = map.current;
             const g = layer.current;
             if (!L || !m || !g) return;
-            const { points: pts, onPick: pick, labels: named } = live.current;
+            const { points: pts, onPick: pick, labels: named, interactive: hot } = live.current;
 
             // Any path drawn over the old markers belongs to a marker that is
             // about to stop existing.
@@ -248,6 +288,10 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
                     // Canvas, not the default SVG: this is what gives the dot a
                     // target a finger can hit. See TOUCH_SLOP.
                     renderer: paper.current,
+                    // Nothing on a picture is pressed. Leaflet's hit testing runs
+                    // whether or not a handler is bound, and a dot that swallowed the
+                    // press would be a hole in the button underneath the map.
+                    interactive: hot,
                     radius: 4,
                     weight: 1,
                     color: 'rgba(255,255,255,0.85)',
@@ -256,7 +300,7 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
                 });
                 // Hover, not permanent: several hundred permanent labels is a
                 // wall of text with a map somewhere behind it.
-                dot.bindTooltip(
+                if (hot) dot.bindTooltip(
                     [
                         `<b>${esc(s.callsign)}</b>`,
                         esc([s.submode ? `${s.mode}/${s.submode}` : s.mode,
@@ -267,14 +311,14 @@ export default function SpotsWorldMap({ points, receiver, onPick, labels, classN
                     ].filter(Boolean).join('<br>'),
                     { direction: 'top', className: 'csmap__tip' },
                 );
-                dot.on('click', () => { if (pick) pick(s); });
+                if (hot) dot.on('click', () => { if (pick) pick(s); });
                 // The great circle to this one, while the pointer is on it. It
                 // is the thing a map of a band is for — not where the stations
                 // are, but which way the signals came — and drawing it on hover
                 // means every station answers that in turn without a single
                 // press. On a touchscreen there is no hover and the path arrives
                 // with the single-spot view instead, which a tap already opens.
-                if (rx) {
+                if (hot && rx) {
                     dot.on('mouseover', () => drawPath(p.lat, p.lon));
                     dot.on('mouseout', dropPath);
                 }

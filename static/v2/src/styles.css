@@ -4616,6 +4616,14 @@ a.btn { text-decoration: none; }
    point and the picture is the world. */
 .spotmap--wide { width: min(900px, 92vw); }
 .csmap--world { height: min(56vh, 460px); }
+/* The panel's own copy, inside the button that opens the one above. Shorter than
+   either of those: it shares a dock column with the tabs, the filters and the link
+   out, and it is a picture of where the band is reaching rather than a chart to
+   work with. Shorter again in the minimal view, which is a panel that has been cut
+   down to fit somewhere small in the first place. */
+.csmap--inline { height: 210px; }
+.csmap--inline.csmap--inline-min { height: 150px; }
+
 /* The two views' switch, at the end of the title row. */
 .spotmap__swap { margin-left: auto; flex: none; }
 
@@ -8069,6 +8077,22 @@ a.btn { text-decoration: none; }
 /* Grows to whatever the rows need; `.spots` above does the scrolling. `flex: 1`
    here would have it absorb the free space and compete with that scroller. */
 .spots__list { flex: none; min-height: 0; }
+
+/* The map is the button, as .hf__open is. No chrome of its own: .csmap inside it
+   already draws the border and the rounded corners, and a second box around them
+   would be a frame around a frame. The hover is on that inner border for the same
+   reason — it is the edge that is actually visible. */
+.spots__open {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+}
+.spots__open .csmap { transition: border-color 0.12s ease; }
+.spots__open:hover .csmap { border-color: var(--accent); }
 
 /* Columns are declared once per tab on the *list*, and inherited by the header
    and every row, so they line up. Each row being its own grid — which is what

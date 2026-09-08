@@ -22,6 +22,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { Button, Empty, Icon, Segmented, ShowMore, Switch } from '../components/ui.jsx';
 import SpotMap from '../components/SpotMap.jsx';
+import SpotsWorldMap, { placeable } from '../components/SpotsWorldMap.jsx';
 import { countryFlag, freqInRange } from '../lib/format.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
@@ -80,6 +81,27 @@ const mapModalWanted = (tab) => {
         return v == null ? fallback : v === 'on';
     } catch (e) {
         return fallback;
+    }
+};
+
+// Whether the panel is showing its rows or its map, remembered per browser and
+// per tab.
+//
+// The same shape as the switch above, and per tab for the same reason: the tabs
+// are different feeds asking different questions, and somebody watching FT8
+// propagation on the map is usually still reading the CW skimmer as a list.
+//
+// The list is the default everywhere. It is the view that can show every spot —
+// the map can only show the ones that reported a locator — and it is what this
+// panel has always been, so nobody arrives at a receiver to find their spots
+// replaced by a picture.
+const VIEW_KEY = 'ubersdr.v2.spotsView';
+
+const mapViewWanted = (tab) => {
+    try {
+        return localStorage.getItem(`${VIEW_KEY}.${tab}`) === 'map';
+    } catch (e) {
+        return false;
     }
 };
 
@@ -325,6 +347,13 @@ export default function SpotsPanel({ minimal }) {
     const [shown, setShown] = useState(PAGE);
     const [now, setNow] = useState(() => Date.now());
     const [state, setState] = useState(dxcluster.state);
+    // Up here with the rest of them, above the early return below: a panel that
+    // lost its last feed while open would otherwise render with fewer hooks than
+    // the render before it, which React treats as an error rather than as an
+    // empty panel. What each of these is for is where it is used.
+    const [, bump] = useState(0);
+    const [mapped, setMapped] = useState(null);
+    const [mapAll, setMapAll] = useState(false);
 
     const hidden = !!(sections.spots && sections.spots.hidden);
     // Subscribing needs a registered session, which only exists once the
@@ -404,19 +433,41 @@ export default function SpotsPanel({ minimal }) {
     // the tab changes under it, so state would have been a copy to keep in step
     // with a thing that is already the truth.
     const modalOnClick = mapModalWanted(active);
-    const [, bumpModal] = useState(0);
     const toggleModal = () => {
         try {
             localStorage.setItem(`${MAP_MODAL_KEY}.${active}`, modalOnClick ? 'off' : 'on');
         } catch (e) { /* private mode */ }
-        bumpModal((n) => n + 1);
+        bump((n) => n + 1);
     };
 
-    // The spot whose map is open, if any. A modal rather than a panel: it is a
-    // detour from a list — you came to read the decodes and stopped to ask about
-    // one — and a detour that rearranged the panel would lose your place in the
-    // thing you were reading.
-    const [mapped, setMapped] = useState(null);
+    // Rows or map, read the same way and for the same reason.
+    //
+    // Not offered on the DX tab at all: a cluster spot carries a callsign, a band
+    // and a country and no locator anywhere — see SpotMap's own note — so the map
+    // there could only ever be an empty world, and a view you can choose and that
+    // then shows nothing teaches that the feature is broken.
+    const canMap = active !== 'dx';
+    const mapView = canMap && mapViewWanted(active);
+    const setMapView = (want) => {
+        try {
+            localStorage.setItem(`${VIEW_KEY}.${active}`, want ? 'map' : 'list');
+        } catch (e) { /* private mode */ }
+        bump((n) => n + 1);
+    };
+
+    // `mapped` is the spot whose map is open, if any; `mapAll` is the same modal
+    // opened on the world instead, which is what pressing the panel's own map
+    // asks for. A modal rather than a panel either way: it is a detour from a
+    // list — you came to read the decodes and stopped to ask about one — and a
+    // detour that rearranged the layout would lose your place in the thing you
+    // were reading. Both are declared with the other hooks above.
+    const closeMap = () => { setMapped(null); setMapAll(false); };
+
+    // What the panel's map draws: the spots the filters left, minus the ones that
+    // never said where they were. Plainly computed rather than memoised — the
+    // panel already re-renders once a second for the age column, and the map
+    // itself only redraws when the set it is given actually changes.
+    const points = mapView ? placeable(matched) : [];
 
     // Whether there is anywhere to send a callsign. The same gate the CW graph's
     // context uses, and the same one the Callsign panel's `requires` uses to
@@ -456,10 +507,18 @@ export default function SpotsPanel({ minimal }) {
 
     return (
         <div className="stack spots">
-            {mapped && (
+            {(mapped || mapAll) && (
                 <SpotMap
                     spot={mapped}
                     kind={active}
+                    // Pressed on the panel's map, this opens on the world; pressed
+                    // on a row, on that row's station.
+                    view={mapped ? 'one' : 'all'}
+                    // And, from the map, showing what the small one was showing:
+                    // it was a picture of one band and the press asked for the same
+                    // picture, larger. Resolved, because 'auto' means the dial and
+                    // the modal has no dial to consult.
+                    filters={mapped ? null : { ...f, band: resolveBandFilter(f.band, dialBand) }}
                     // The whole feed, not the filtered page: the map has its own
                     // filters and asks a different question — "where has this
                     // band been reaching" rather than "what came in just now" —
@@ -468,7 +527,7 @@ export default function SpotsPanel({ minimal }) {
                     spots={list}
                     lookups={lookups}
                     receiver={serverInfo && serverInfo.receiver}
-                    onClose={() => setMapped(null)}
+                    onClose={closeMap}
                 />
             )}
             <div className="spots__head">
@@ -480,10 +539,35 @@ export default function SpotsPanel({ minimal }) {
                         size="sm"
                     />
                 )}
+                {/* Rows or map, beside the feed it applies to. A second segmented
+                    control next to the tabs rather than a button, because these are
+                    two views of one thing and a control that shows which of two you
+                    are in is what a segmented control is for.
+
+                    Kept in the minimal view: a panel cut down to fit a dock is
+                    exactly where one picture beats ten rows, and this is two words
+                    on a row that wraps. */}
+                {canMap && (
+                    <Segmented
+                        options={[
+                            { value: 'list', label: 'List', title: 'The spots as rows' },
+                            { value: 'map', label: 'Map', title: 'The spots on a world map' },
+                        ]}
+                        value={mapView ? 'map' : 'list'}
+                        onChange={(v) => setMapView(v === 'map')}
+                        size="sm"
+                    />
+                )}
                 <span className="spots__count">
-                    {matched.length === list.length
-                        ? `${list.length} spot${list.length === 1 ? '' : 's'}`
-                        : `${matched.length} of ${list.length}`}
+                    {/* On the map the number that matters is how many could be
+                        drawn: the rest reported no locator and are missing from the
+                        picture, which is worth saying rather than leaving as a map
+                        that seems to be short of stations. */}
+                    {mapView
+                        ? `${points.length} of ${matched.length} placed`
+                        : (matched.length === list.length
+                            ? `${list.length} spot${list.length === 1 ? '' : 's'}`
+                            : `${matched.length} of ${list.length}`)}
                 </span>
                 {/* v1 ships this as the CW skimmer extension's "View Spots"
                     button. The page is a chart of the same spots over time,
@@ -526,6 +610,41 @@ export default function SpotsPanel({ minimal }) {
                 <Filters tab={active} filters={f} set={set} countries={countries} dialBand={dialBand} />
             )}
 
+            {/* The map is the button, as the HFDL panel's is: there is nothing else
+                on this copy to press — every Leaflet handler is off — and a separate
+                "expand" control would be a second thing to aim at over a picture
+                that is already one target. */}
+            {mapView && (
+                <button
+                    type="button"
+                    className="spots__open"
+                    title="Open the map full size"
+                    onClick={() => setMapAll(true)}
+                >
+                    <SpotsWorldMap
+                        points={points}
+                        receiver={serverInfo && serverInfo.receiver}
+                        interactive={false}
+                        // Refit when the question changes — see SpotsWorldMap's
+                        // `fitKey`. Nobody pans this one, so the alternative is a map
+                        // still framing the band the last filter chose.
+                        fitKey={`${active}|${JSON.stringify(f)}`}
+                        className={`csmap--inline${minimal ? ' csmap--inline-min' : ''}`}
+                    />
+                </button>
+            )}
+
+            {mapView && !points.length && (
+                <Empty>
+                    {matched.length
+                        ? 'None of these spots reported a locator.'
+                        : (list.length === 0
+                            ? (running ? 'Waiting for spots…' : 'Not connected.')
+                            : 'No spots match these filters.')}
+                </Empty>
+            )}
+
+            {!mapView && (
             <div className={`list spots__list spots__list--${active}${minimal ? ' spots__list--min' : ''}`}>
                 {page.length === 0 && (
                     <Empty>
@@ -560,18 +679,21 @@ export default function SpotsPanel({ minimal }) {
                     />
                 ))}
             </div>
+            )}
 
             {/* The shared control rather than a hand-rolled button, so this list shrinks
                 again like the others do. `count` off: a spot list is a feed, and "412 shown"
                 under it is a number about the filter rather than about the spots. */}
-            <ShowMore
-                shown={page.length}
-                total={matched.length}
-                base={PAGE}
-                count={false}
-                onMore={() => setShown((n) => n + PAGE)}
-                onLess={() => setShown(PAGE)}
-            />
+            {!mapView && (
+                <ShowMore
+                    shown={page.length}
+                    total={matched.length}
+                    base={PAGE}
+                    count={false}
+                    onMore={() => setShown((n) => n + PAGE)}
+                    onLess={() => setShown(PAGE)}
+                />
+            )}
 
             {/* The feed's own live map — v1's page, which plots these spots on a world map
                 with the greyline and a track per station. At the bottom because it is
@@ -598,7 +720,7 @@ export default function SpotsPanel({ minimal }) {
                         answer: a DX row has no locator behind it, so without a
                         lookup service there is nothing for the switch to turn on.
                         The other two always have one source or the other. */}
-                    {(active !== 'dx' || lookups) && (
+                    {!mapView && (active !== 'dx' || lookups) && (
                         <Switch
                             checked={modalOnClick}
                             onChange={toggleModal}

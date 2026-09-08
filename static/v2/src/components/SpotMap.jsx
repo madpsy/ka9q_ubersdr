@@ -218,8 +218,17 @@ function Pick({ label, value, onChange, children }) {
 const toValue = (v) => (v == null ? '' : String(v));
 const fromValue = (v) => (v === '' ? null : Number(v));
 
+/**
+ * `spot` is the row that was pressed, and is null when this was opened from the
+ * panel's own map rather than from a row: there the question was never about one
+ * station, so there is nothing to show on its own until a dot is picked.
+ *
+ * `view` says which of the two it opens on, and `filters` is the panel handing
+ * over what its map was showing — see MAP_FILTERS for why that is not the default.
+ */
 export default function SpotMap({
     spot: opened, spots, kind = 'digital', lookups, receiver, onClose,
+    view: initialView = 'one', filters: initialFilters = null,
 }) {
     const [state, setState] = useState(null);
     // Which spot the single view is showing. Starts as the row that was clicked
@@ -228,17 +237,22 @@ export default function SpotMap({
     const [spot, setSpot] = useState(opened);
     useEffect(() => { setSpot(opened); }, [opened]);
     // 'one' or 'all'. Opens on the spot that was clicked: somebody who pressed a
-    // row asked about that row, and the wider map is one press away.
-    const [view, setView] = useState('one');
-    const [filters, setFilters] = useState(MAP_FILTERS);
+    // row asked about that row, and the wider map is one press away. Opened from
+    // the panel's map there is no such row, and it opens on the world.
+    const [view, setView] = useState(opened ? initialView : 'all');
+    // The panel's filters when it opened this, so the big map starts as the small
+    // one looked: it was a picture of one band and pressing it asked for the same
+    // picture, larger. Otherwise the wide net a row's map wants.
+    const [filters, setFilters] = useState(initialFilters || MAP_FILTERS);
     const [query, setQuery] = useState('');
 
     useEffect(() => {
+        if (!spot) { setState(null); return undefined; }
         let cancelled = false;
         setState(null);
         resolve(spot, lookups).then((r) => { if (!cancelled) setState(r); });
         return () => { cancelled = true; };
-    }, [spot.key, spot.callsign, lookups]);
+    }, [spot && spot.key, spot && spot.callsign, lookups]);
 
     // A clock for the age filter, and only while it is being used. Without it an
     // age window is only re-applied when a spot arrives — right on a busy band
@@ -263,8 +277,8 @@ export default function SpotMap({
     const countries = useMemo(() => countriesIn(all), [all]);
     const set = (patch) => setFilters((prev) => ({ ...prev, ...patch }));
 
-    const call = spot.callsign;
-    const flag = countryFlag(spot.countryCode);
+    const call = spot ? spot.callsign : '';
+    const flag = spot ? countryFlag(spot.countryCode) : '';
 
     // Where the receiver is, when it has said. 0,0 is the config default rather
     // than a position — the Callsign panel's Beam readout rejects it the same
@@ -277,13 +291,13 @@ export default function SpotMap({
     // saying the same thing; computing it is for the fallback, where the
     // position came from a locator the server did not measure against.
     let distance = null;
-    if (spot.distanceKm != null) {
+    if (spot && spot.distanceKm != null) {
         distance = {
             distKm: Math.round(spot.distanceKm),
             bearing: Math.round(spot.bearingDeg || 0),
             fromGrid: false,
         };
-    } else if (rx && state && state.position) {
+    } else if (spot && rx && state && state.position) {
         const db = distanceBearing(rx.lat, rx.lon, state.position.lat, state.position.lon);
         if (db) distance = { ...db, fromGrid: !!state.position.fromGrid };
     }
@@ -294,10 +308,12 @@ export default function SpotMap({
     // view: an "all spots" button that could only ever open an empty map is a
     // button that teaches somebody the feature does not work.
     const canShowAll = kind !== 'dx';
-    const many = canShowAll && view === 'all';
+    // Never the single view without a spot to put in it: opened from the panel's
+    // map, the world is all there is until a dot has been picked.
+    const many = canShowAll && (view === 'all' || !spot);
 
     return (
-        <Modal onClose={onClose} label={many ? 'Digital spots on the map' : `${call} on the map`}>
+        <Modal onClose={onClose} label={many ? 'Spots on the map' : `${call} on the map`}>
             <div className={`spotmap${many ? ' spotmap--wide' : ''}`}>
                 <div className="spotmap__head">
                     <span className="spotmap__call">
@@ -321,7 +337,7 @@ export default function SpotMap({
                         names the other, which is what a toggle is for — and it
                         sits in the title row because it changes what the whole
                         modal is about rather than what is in it. */}
-                    {canShowAll && (
+                    {canShowAll && spot && (
                         <Button
                             size="sm"
                             variant="ghost"

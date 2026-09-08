@@ -74,6 +74,8 @@ esbuild drmpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/drmpanel.cjs --log-level=warning
 esbuild dxpeditions.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxpeditions.cjs --log-level=warning
+esbuild spotspanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/spotspanel.cjs --log-level=warning
 esbuild dxsearch.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxsearch.cjs --log-level=warning
 esbuild clockpanel.entry.js --bundle --format=cjs --platform=node \
@@ -498,6 +500,7 @@ node compat.test.js
 node recorder.test.js
 node controls.test.js
 node spots.test.js
+node spotspanel.test.js
 node extensions.test.js
 node fsk.test.js
 node olivia.test.js

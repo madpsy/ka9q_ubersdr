@@ -80,6 +80,8 @@ esbuild spotspanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/spotspanel.cjs --log-level=warning
 esbuild dxsearch.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxsearch.cjs --log-level=warning
+esbuild lastspot.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/lastspot.cjs --log-level=warning
 esbuild clockpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/clockpanel.cjs --log-level=warning
 esbuild iqdemod.entry.js --bundle --format=cjs --platform=node \
@@ -534,6 +536,7 @@ node sockethealth.test.js
 node dxcluster.test.js
 node dxterminal.test.js
 node dxsearch.test.js
+node lastspot.test.js
 node sstvaddon.test.js
 node games.test.js
 node uicolors.test.js

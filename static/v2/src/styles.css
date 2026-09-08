@@ -4706,6 +4706,12 @@ a.btn { text-decoration: none; }
 .cs-beam { display: inline-flex; align-items: center; gap: 6px; }
 .cs-beam .chip--button { padding: 2px 8px; font-size: calc(10.5px * var(--ui-scale)); }
 
+/* "not heard in 30 days" is a real answer and belongs in the list, but it is
+   the absence of one — dimmer than the readings around it, and in the panel's
+   own face rather than the monospace the numbers use, because there is no
+   number in it to line up. */
+.cs-lastspot--none { font-family: var(--font); color: var(--text-faint); }
+
 .cs-photo {
     display: block;
     margin-top: 8px;

@@ -57,18 +57,16 @@ import {
 import { receiverMode, tuneFreq } from '../lib/dxclusterSearch.js';
 import DXClusterSearch from './DXClusterSearch.jsx';
 
-export const ADDON_NAME = 'dxcluster';
+// The addon's name and the "is it here" test both live in lib/dxclusterSearch.js
+// now: the callsign panel reads the same archive for its last-heard line, and
+// importing this panel to ask whether an addon exists would have dragged the
+// terminal and its socket in behind it. Re-exported because everything that
+// asks — the registry, DXClusterWatch — asks this panel.
+export { ADDON_NAME, dxClusterAvailable } from '../lib/dxclusterSearch.js';
 
 // This panel's registry id. Exported because DXClusterWatch has to ask the layout
 // where the panel is without the panel being mounted.
 export const PANEL_ID = 'dxcluster';
-
-/** Is the addon on this receiver? Same test the widget makes. */
-export function dxClusterAvailable(serverInfo) {
-    const addons = serverInfo && serverInfo.addons;
-    return Array.isArray(addons)
-        && addons.some((n) => String(n).toLowerCase() === ADDON_NAME);
-}
 
 // How near the bottom still counts as following the output.
 const STICK_PX = 40;

@@ -135,7 +135,11 @@ for (const file of files) {
     // count as using it. Bounded by the semicolon: a lazy match up to `from`
     // silently ate the rest of the file, which is why a missing hook import
     // slipped through this check once already.
-    const body = src.replace(/^\s*import\b[^;]*;/gm, ' ');
+    let body = src.replace(/^\s*import\b[^;]*;/gm, ' ');
+    // Same for a re-export — `export { ADDON_NAME } from './lib/x.js';`. It
+    // names an export without ever binding it locally, so counting the names in
+    // it as uses reports every re-exporting module as broken.
+    body = body.replace(/^\s*export\s*\{[^}]*\}\s*from\b[^;]*;/gm, ' ');
     for (const name of exported) {
         if (imported.has(name) || declared.has(name) || ALLOWED.has(name)) continue;
         const used = new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(body);

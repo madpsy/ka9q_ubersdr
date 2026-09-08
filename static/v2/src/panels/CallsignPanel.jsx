@@ -34,6 +34,10 @@ import {
 } from '../lib/callsign.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
 import {
+    LAST_SPOT_DAYS, dayLabel, dxClusterAvailable, fetchLastSpot, khzLabel,
+    modeLabel, spotAge, spotNote, tuneFreq, utcLabel,
+} from '../lib/dxclusterSearch.js';
+import {
     CALL_CW, CALL_OFF, CALL_TTS, TTS_RATES, announceCall, callAnnounceSettings,
     callTtsAvailable, onCallAnnounce, setCallAnnounce,
 } from '../lib/callsignAnnounce.js';
@@ -133,6 +137,98 @@ function Beam({ position, serverInfo }) {
     );
 }
 
+// When this receiver last heard the station, from the DX cluster addon's spot
+// archive.
+//
+// ── Why a lookup panel asks a spot database anything ────────────────────────
+//
+// Everything else in this panel is a fact about the operator: who they are,
+// where they live, what their licence says. All of it comes from QRZ and none
+// of it has anything to do with this radio — the same answer would come back on
+// a receiver in another hemisphere.
+//
+// This one line is the local answer to the same callsign. It is the difference
+// between "M0ABC is in Kent" and "M0ABC is in Kent, and we heard him on 20 m
+// FT8 two hours ago", and on a receiver that runs a skimmer and a decoder it is
+// usually the more interesting half — the spot archive has already been
+// listening on every band all month, which is more than anyone sitting at the
+// dial has.
+//
+// The addon is where the archive lives, so this is silent without it: no row,
+// no request, and no explanation of a feature that does not exist here.
+// dxClusterAvailable is the same test the cluster panel gates itself on.
+//
+// One row, and one line in it. The panel's job is the operator; this is a
+// footnote to it, and a footnote that grew a frequency list would be competing
+// with the search modal in the cluster panel, which is where "every time we
+// heard this station" already lives and can tune the receiver from a click.
+// Exported for test/lastspot.test.js, which mounts it on its own: hookStub
+// expands a nested component in a fresh hook frame and throws its effects away,
+// so a row that only appears once a fetch has resolved is invisible to a test
+// that renders the whole panel.
+export function LastSpot({ call, enabled }) {
+    // `null` before an answer and after a failed one, so the row stays away
+    // until there is something true to put in it. `asked` is what separates the
+    // two nulls that matter: nothing found, which is worth saying, from nothing
+    // yet, which is not.
+    const [spot, setSpot] = useState(null);
+    const [asked, setAsked] = useState(false);
+
+    useEffect(() => {
+        setSpot(null);
+        setAsked(false);
+        if (!enabled || !call) return undefined;
+
+        // A lookup is one callsign at a time and the answers arrive in
+        // milliseconds, but the panel is also driven by clicking down a spots
+        // list — so the query in flight is cancelled rather than left to land
+        // after the callsign it belongs to has gone.
+        const ac = new AbortController();
+        fetchLastSpot(call, undefined, ac.signal).then((s) => {
+            if (ac.signal.aborted) return;
+            setSpot(s);
+            setAsked(true);
+        }).catch(() => {
+            // The addon being unreachable is not this panel's news to break.
+            // The lookup it is a footnote to has already succeeded.
+        });
+        return () => ac.abort();
+    }, [call, enabled]);
+
+    if (!enabled || !asked) return null;
+
+    if (!spot) {
+        return (
+            <div className="kv">
+                <span className="kv__k">Last spot</span>
+                <span className="kv__v cs-lastspot--none">
+                    {`not heard in ${LAST_SPOT_DAYS} days`}
+                </span>
+            </div>
+        );
+    }
+
+    const mode = modeLabel(spot);
+    const khz = khzLabel(tuneFreq(spot));
+    // The whole row, for anyone who wants the rest of it: the moment rather
+    // than the age, the band, and whatever the spotting stream recorded.
+    const full = [
+        `${dayLabel(spot.timestamp)} ${utcLabel(spot.timestamp)}`,
+        spot.band, spotNote(spot),
+    ].filter(Boolean).join(' · ');
+
+    return (
+        <div className="kv">
+            <span className="kv__k">Last spot</span>
+            <span className="kv__v" title={full}>
+                {spotAge(spot.timestamp)}
+                {khz ? ` · ${khz} kHz` : ''}
+                {mode ? ` ${mode}` : ''}
+            </span>
+        </div>
+    );
+}
+
 function Result({ call, data, serverInfo, showPhoto, showMap }) {
     const [photo, setPhoto] = useState(false);
     // Whether there is a picture to show is one decision, made in
@@ -194,6 +290,10 @@ function Result({ call, data, serverInfo, showPhoto, showMap }) {
                         <span className="kv__v">{data.class}</span>
                     </div>
                 )}
+                {/* Last in the list because it is the only line here that is
+                    about this receiver rather than about the operator — the
+                    rows above it would read the same on any radio. */}
+                <LastSpot call={call} enabled={dxClusterAvailable(serverInfo)} />
             </div>
 
             {/* Served through the same origin: the server rewrites the

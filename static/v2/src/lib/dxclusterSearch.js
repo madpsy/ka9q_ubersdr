@@ -33,6 +33,24 @@ import { modeFromSpot } from './dxclusterTerminal.js';
 /** Where the addon lives. Same mount point the terminal socket uses. */
 export const SEARCH_BASE = '/addon/dxcluster';
 
+/**
+ * The addon's name in /api/description's `addons` list.
+ *
+ * Here rather than in DXClusterPanel — where it used to live and from where it
+ * is still re-exported — because the archive now has a second reader: the
+ * callsign panel asks it for a last-heard line, and a panel that has nothing to
+ * do with the terminal should not have to import the terminal to find out
+ * whether the database exists.
+ */
+export const ADDON_NAME = 'dxcluster';
+
+/** Is the addon on this receiver? Same test the widget makes. */
+export function dxClusterAvailable(serverInfo) {
+    const addons = serverInfo && serverInfo.addons;
+    return Array.isArray(addons)
+        && addons.some((n) => String(n).toLowerCase() === ADDON_NAME);
+}
+
 // Rows per request. Fifty fills the modal's scroller about twice over, which is
 // enough to scroll rather than enough to page — and Show more asks for the next
 // fifty by cursor, so a deep read costs the same as a shallow one.
@@ -159,6 +177,87 @@ export async function fetchSearchMeta(base = SEARCH_BASE, signal) {
 export async function fetchSearch(params, base = SEARCH_BASE, signal) {
     const res = await fetch(searchUrl(params, base), { signal });
     return readJSON(res);
+}
+
+// ── The last-heard line ─────────────────────────────────────────────────────
+//
+// The callsign panel asks a different question of the same database: not "where
+// has this station been heard" but "have *we* heard it, and when". One row
+// answers that, so the query below is the search above with everything a list
+// needs taken out.
+//
+// Three differences, and each of them is the reason this is not just
+// fetchSearch({ limit: 1 }):
+//
+//   * `callsign_exact`, not `callsign`. The modal's prefix is right for
+//     somebody typing into a search box — G3ABC there should find G3ABC/P —
+//     and wrong here, where the callsign was not typed but looked up and
+//     normalised. A prefix on a whole callsign also matches the longer ones
+//     that merely start with it, so M0AB would answer with M0ABC's spot and
+//     say it was M0AB's. It is the cheaper query by two orders of magnitude
+//     as well: `callsign = ?` is an index seek where LIKE 'M0AB%' is a scan —
+//     measured at 1 ms against 339 ms on a month of this receiver's archive.
+//   * `count=none`. The row is the answer; the total is what the count costs,
+//     and the addon documents this as the cheapest form.
+//   * 30 days, not the modal's 24 hours. "Never heard" is only worth saying
+//     over the whole window the archive keeps, and a station heard three weeks
+//     ago is exactly the answer that makes this line worth having.
+//
+// The cost of exact matching is that a station worked as G3ABC/P has its
+// portable spots filed under a callsign this will not ask for. That is the
+// right way round: normaliseCallsign has already decided the panel is looking
+// at G3ABC, and a last-heard line that quietly answered for a different
+// callsign would be worse than one that says nothing.
+
+/** How far back the last-heard line looks. The archive's usual retention. */
+export const LAST_SPOT_DAYS = 30;
+
+/** The URL for the one-row last-heard query. */
+export function lastSpotUrl(callsign, base = SEARCH_BASE) {
+    const q = new URLSearchParams();
+    q.set('days', String(LAST_SPOT_DAYS));
+    q.set('callsign_exact', String(callsign || '').trim().toUpperCase());
+    q.set('callsign_exclude', ANON_CALLSIGN);
+    q.set('sort', 'ts');
+    q.set('order', 'desc');
+    q.set('limit', '1');
+    q.set('count', 'none');
+    return `${searchApi(base)}?${q.toString()}`;
+}
+
+/**
+ * The most recent spot of one callsign, or null where there is none.
+ *
+ * Null is an answer — "not heard in the window" — and is returned rather than
+ * thrown for that reason. A failure still throws: the caller shows nothing at
+ * all for that, because an addon that is down and a station that was never
+ * heard must not read the same.
+ */
+export async function fetchLastSpot(callsign, base = SEARCH_BASE, signal) {
+    const call = String(callsign || '').trim().toUpperCase();
+    if (!call) return null;
+    const data = await readJSON(await fetch(lastSpotUrl(call, base), { signal }));
+    const spots = data && Array.isArray(data.spots) ? data.spots : [];
+    return spots.length ? spots[0] : null;
+}
+
+/**
+ * How long ago, in one short phrase.
+ *
+ * The spots panels stop at hours (lib/spots.js ageLabel) because nothing in
+ * them is older than a few; this window is a month, so it carries days too.
+ * Whole units only — "3d" rather than "3d 4h" — since the point of the line is
+ * whether the station was heard this morning or a fortnight ago, and the exact
+ * moment is on the row's tooltip for anyone who wants it.
+ */
+export function spotAge(iso, now = Date.now()) {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return '';
+    const secs = Math.max(0, Math.round((now - t) / 1000));
+    if (secs < 60) return 'just now';
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+    return `${Math.floor(secs / 86400)}d ago`;
 }
 
 /**

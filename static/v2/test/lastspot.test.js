@@ -342,6 +342,61 @@ t('the dots are on by default, and taken away only by a measurement', () => {
     }
 });
 
+t('the rule that removes a dot can actually beat the one that draws it', () => {
+    // The bug this is here for shipped looking exactly like a broken
+    // measurement: the class was on the element, the hook was right about which
+    // parts began a line, and the dot was drawn at the start of every wrapped
+    // line anyway.
+    //
+    // `.dots__part + .dots__part::before` is two classes and a pseudo-element,
+    // (0,2,1). A bare `.dots__part--line::before` is one class and a
+    // pseudo-element, (0,1,1), and loses — so `content: none` never applied.
+    // Nothing in JavaScript can see that, which is why it is checked here.
+    const fs = require('fs');
+    const path = require('path');
+    // Comments out first: the note above the rule below names both selectors,
+    // and a `[^{}]*` reading back from a brace happily swallows it — which
+    // counted the classes in the prose and made a broken rule measure as a
+    // winning one. This check had that bug before the CSS did.
+    const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ');
+
+    // Classes, attribute selectors and pseudo-classes count as one each;
+    // pseudo-elements as an element. The pseudo-elements come out of the
+    // selector first, because `::before` ends in something that reads exactly
+    // like the pseudo-class `:before` and counting it as one was this check's
+    // own version of the bug it is here to catch — it made the two rules tie,
+    // and the tie-break passed.
+    const specificity = (sel) => {
+        const els = (sel.match(/::[\w-]+/g) || []).length;
+        const rest = sel.replace(/::[\w-]+/g, '');
+        const cls = (rest.match(/\.[\w-]+|\[[^\]]*\]|:[\w-]+(?:\([^)]*\))?/g) || []).length;
+        return [cls, els];
+    };
+    const ruleFor = (marker) => {
+        const re = new RegExp(`([^{}]*${marker}[^{}]*)\\{([^}]*)\\}`, 'g');
+        return [...css.matchAll(re)];
+    };
+
+    const draws = ruleFor('dots__part\\s*\\+\\s*\\.dots__part::before')
+        .find((m) => /content:\s*'·'/.test(m[2]));
+    assert.ok(draws, 'the dot is no longer drawn by an adjacent-sibling rule');
+
+    const removes = [...css.matchAll(/([^{}]*dots__part--line[^{}]*)\{([^}]*)\}/g)]
+        .find((m) => /content:\s*none/.test(m[2]));
+    assert.ok(removes, 'nothing takes the dot away from a part that begins a line');
+
+    const [dc, dp] = specificity(draws[1]);
+    const [rc, rp] = specificity(removes[1]);
+    assert.ok(rc > dc || (rc === dc && rp >= dp),
+        `the removing rule (${rc},${rp}) cannot beat the drawing rule (${dc},${dp})`);
+    // A tie is settled by document order, so it has to come second.
+    if (rc === dc && rp === dp) {
+        assert.ok(css.indexOf(removes[0]) > css.indexOf(draws[0]),
+            'the removing rule ties on specificity but is written first, so it loses');
+    }
+});
+
 t('the caller’s class is kept, not replaced', () => {
     // kv__v is what makes it a reading in the list — right-aligned, monospace.
     // Dropping it would leave the row looking like a paragraph.

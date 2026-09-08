@@ -4735,7 +4735,17 @@ a.btn { text-decoration: none; }
     right: calc(100% + 3px);
     color: var(--text-faint);
 }
-.dots__part--line::before { content: none; }
+/* ...and taken away again from a part that begins a line, where it would hang
+   off the left of the wrapped value with nothing before it to separate.
+
+   Written against the adjacent-sibling selector above rather than as a bare
+   `.dots__part--line::before`, and that is the whole of the rule. A single
+   class plus a pseudo-element is (0,1,1) and loses to the (0,2,1) above it, so
+   the dot was drawn on every wrapped line and the class did nothing at all —
+   the sort of failure that looks like the measurement being wrong. Matching the
+   same two classes ties the specificity, and a tie is settled by document
+   order, which this wins by sitting below. */
+.dots__part + .dots__part--line::before { content: none; }
 
 /* The frequency the station was last heard on, which tunes the receiver to it.
    A link rather than a chip: it sits inside a reading, at the end of a

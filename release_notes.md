@@ -1,4 +1,17 @@
-# Latest Stable - 0.1.65
+# Latest Stable - 0.1.66
+
+## Version 0.1.66 - 8th Sep 2026
+
+### New Features
+- Added **Blocked Bands** which provides a way to block audio from certain bands. In Admin -> Bands set the Group name to 'Blocked' for a given band
+- Added **WWV Clock Decoder** extension - supports the major US clock sources - experimental as difficult to test from the UK
+- Added **Automatic Addon Updates** whenever UberSDR updates
+- Added **DXpedition Panel** showins current and upcoming DXpeditions
+
+### Bug Fixes
+- Fixed **KiwiSDR Registration** for users with public access to the KiwiSDR emulation. I'm not entirely convinced it will remain working but does for now
+- Fixed **384 KHz IQ** which allows HPSDR/rtl_tcp etc access to 394 KHz of spectrum - the max was 192 KHz
+- Fixed **Buttons on mobile** were partially obscured with curved screen edges (panel/group buttons at the bottom)
 
 ## Version 0.1.65 - 5th Sep 2026
 

@@ -283,6 +283,31 @@ export default function StartOverlay() {
                     </div>
                 )}
 
+                {/* The app, offered as a button rather than as small print.
+                    It reads as the simple-layout button's sibling — the same
+                    quiet outline under the filled one — because it is the same
+                    kind of thing: another way in, for somebody who would rather
+                    not listen in a tab. The icon is what says it leaves the
+                    page, which is the one way it is not like its neighbour.
+
+                    Outside the allowed/refused branch above, and deliberately:
+                    a receiver that is full in a browser is worth opening in the
+                    app too, and that is the moment somebody most wants the
+                    option. Hidden only when there is no link to give — an
+                    instance the directory does not know — or when this already
+                    *is* the app. */}
+                {publicUuid && !inApp && (
+                    <button
+                        type="button"
+                        className="start__go start__go--alt"
+                        title="Open this receiver in the UberSDR app"
+                        onClick={openInApp}
+                    >
+                        <Icon.External size={20} />
+                        <span>Open in App</span>
+                    </button>
+                )}
+
                 <div className="start__links">
                     <a className="start__link" href={LISTENER_STATS} target="_blank" rel="noopener noreferrer">
                         Statistics
@@ -290,16 +315,6 @@ export default function StartOverlay() {
                     <a className="start__link" href={DIRECTORY} target="_blank" rel="noopener noreferrer">
                         Directory
                     </a>
-                    {publicUuid && !inApp && (
-                        <button
-                            type="button"
-                            className="start__link start__link--btn"
-                            title="Open this receiver in the UberSDR desktop or Android app"
-                            onClick={openInApp}
-                        >
-                            Open in App
-                        </button>
-                    )}
                     {publicUuid && (
                         <button type="button" className="start__link start__link--btn" onClick={vibesdr}>
                             VibeSDR

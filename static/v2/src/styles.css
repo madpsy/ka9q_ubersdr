@@ -4712,6 +4712,31 @@ a.btn { text-decoration: none; }
    number in it to line up. */
 .cs-lastspot--none { font-family: var(--font); color: var(--text-faint); }
 
+/* A row of values with middots between them, where a dot that would fall at a
+   wrap is taken away — see components/ui.jsx DotList.
+
+   The dot hangs in the column gap as a pseudo-element rather than sitting in
+   the flow, so it has no width of its own and dropping one cannot change where
+   the row wraps. That is not a nicety: a separator that changed the wrap it was
+   chosen from would oscillate, and React ends that by blanking the interface.
+   The gap is 11px because the dot is about 4 of them and wants air on both
+   sides. */
+.dots {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-end;
+    column-gap: 11px;
+}
+.dots__part { position: relative; }
+.dots__part + .dots__part::before {
+    content: '·';
+    position: absolute;
+    right: calc(100% + 3px);
+    color: var(--text-faint);
+}
+.dots__part--line::before { content: none; }
+
 /* The frequency the station was last heard on, which tunes the receiver to it.
    A link rather than a chip: it sits inside a reading, at the end of a
    sentence, and a bordered button there would weigh more than the row it is a

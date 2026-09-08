@@ -66,7 +66,7 @@ globalThis.fetch = (url) => {
 
 const {
     deep, render, reset, walk, words,
-    LastSpot, LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, heardHere,
+    LastSpot, DotList, LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, heardHere,
     lastSpotUrl, modeLabel, receiverMode, spotAge,
 } = require('./.build/lastspot.cjs');
 
@@ -304,6 +304,52 @@ t('the label and the dial can never disagree', () => {
             assert.strictEqual(dial, want[i], `${JSON.stringify(spot)} → ${label} but ${dial}`);
         }
     }
+});
+
+// ── The separators ──────────────────────────────────────────────────────────
+//
+// Both rows this panel added wrap in a side dock, and a middot typed between
+// two values ends up at the end of a line with nothing after it to separate.
+// DotList draws them in the gap instead and takes away whichever one lands at a
+// wrap. The measurement is DOM, so what is checked here is the part that is
+// not: which items get drawn, and which of them the CSS will put a dot on.
+
+const parts = (tree) => deep(tree).filter((n) => (
+    n.props && /\bdots__part\b/.test(String(n.props.className || ''))
+));
+
+t('a value the lookup did not carry is left out, not drawn empty', () => {
+    // A country with no CQ or ITU zone would otherwise be three items, and the
+    // CSS puts a dot before every item after the first — so an empty one is a
+    // dot with nothing on either side of it.
+    reset();
+    const { tree } = render(DotList, { parts: ['EU', '', null] });
+    assert.strictEqual(parts(tree).length, 1);
+    assert.strictEqual(words(tree), 'EU');
+});
+
+t('the dots are on by default, and taken away only by a measurement', () => {
+    // The first render has not been laid out — every element measures zero — and
+    // a separator that blinks in on the second frame is worse than one that
+    // blinks out. So nothing is marked as beginning a line until something has
+    // measured that it does.
+    reset();
+    const { tree } = render(DotList, { parts: ['EU', 'CQ 14', 'ITU 27'] });
+    const items = parts(tree);
+    assert.strictEqual(items.length, 3);
+    for (const it of items.slice(1)) {
+        assert.ok(!/dots__part--line/.test(it.props.className), it.props.className);
+    }
+});
+
+t('the caller’s class is kept, not replaced', () => {
+    // kv__v is what makes it a reading in the list — right-aligned, monospace.
+    // Dropping it would leave the row looking like a paragraph.
+    reset();
+    const { tree } = render(DotList, { parts: ['EU'], className: 'kv__v' });
+    const box = deep(tree).find((n) => n.props && /\bdots\b/.test(String(n.props.className || '')));
+    assert.ok(box, 'no dots box');
+    assert.ok(/kv__v/.test(box.props.className), box.props.className);
 });
 
 // ── The fetch ───────────────────────────────────────────────────────────────

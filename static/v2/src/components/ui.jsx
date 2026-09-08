@@ -5,6 +5,7 @@
 import React, { ReactDOM, useEffect, useLayoutEffect, useRef, useState } from '../react.js';
 import Icon from './icons.jsx';
 import { useMediaQuery } from '../lib/useMediaQuery.js';
+import { useSameLine } from '../lib/useSameLine.js';
 
 // `className` is pulled out and merged rather than left in `rest`: spread after
 // className={cls} it would replace the lot — btn, the variant, the size and is-active
@@ -551,6 +552,57 @@ export function MenuItem({ children, onClick, disabled, icon, active }) {
             {icon && <span className="menu__icon">{icon}</span>}
             <span>{children}</span>
         </button>
+    );
+}
+
+/**
+ * A row of values separated by middots, where the dots survive wrapping.
+ *
+ * `EU · CQ 14 · ITU 27` in a wide panel, and in a narrow one:
+ *
+ *     EU · CQ 14
+ *     ITU 27
+ *
+ * rather than the `EU · CQ 14 ·` that a row of plain text gives, where the last
+ * separator sits at the end of a line with nothing after it to separate.
+ *
+ * The dot is a pseudo-element hung in the column gap, so it occupies no width of
+ * its own and dropping one cannot change where the row wraps — which is what
+ * makes the measurement behind this safe. See lib/useSameLine.js.
+ *
+ * `parts` is the list; anything falsy in it is left out, so a caller can write
+ * the optional pieces inline without assembling an array first.
+ */
+export function DotList({ parts, className, title, ...rest }) {
+    const shown = (parts || []).filter((p) => p != null && p !== false && p !== '');
+    const box = useRef(null);
+    const items = useRef([]);
+    // Trim, rather than leave the elements of a row that has lost an item
+    // behind — a stale node measures wherever it last was.
+    items.current.length = shown.length;
+    const starts = useSameLine(box, items, shown.length);
+
+    return (
+        <span ref={box} className={['dots', className].filter(Boolean).join(' ')} title={title} {...rest}>
+            {shown.map((part, i) => (
+                <span
+                    // There is no id in a list of values and no reordering
+                    // either: the parts are written out in a fixed order by the
+                    // caller, so the position is the identity.
+                    // eslint-disable-next-line react/no-array-index-key
+                    key={i}
+                    ref={(el) => { items.current[i] = el; }}
+                    // The dot is drawn by CSS on every part after the
+                    // first; this takes it away again from one that begins a
+                    // line. Unmeasured — the first render, and a browser with
+                    // no ResizeObserver — leaves the dots in, which is the
+                    // ordinary case and the one worth being wrong towards.
+                    className={`dots__part${starts[i] ? ' dots__part--line' : ''}`}
+                >
+                    {part}
+                </span>
+            ))}
+        </span>
     );
 }
 

@@ -24,7 +24,7 @@
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { getSessionId } from '../radio/session.js';
-import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
+import { Button, DotList, Empty, Icon, Modal } from '../components/ui.jsx';
 import CallsignMap from '../components/CallsignMap.jsx';
 import { countryFlag, freqInRange } from '../lib/format.js';
 import { onPhotoShown, photoShown, photoUrl, setPhotoShown } from '../lib/operatorPhoto.js';
@@ -243,26 +243,33 @@ export function LastSpot({ call, enabled }) {
                 different claim from "somebody in France did". The key says
                 which, because it costs a word rather than a line. */}
             <span className="kv__k">{heardHere(spot) ? 'Last heard' : 'Cluster spot'}</span>
-            <span className="kv__v" title={full}>
-                {spotAge(spot.timestamp)}
-                {khz ? ' · ' : ''}
-                {/* Out of this receiver's range, so there is nowhere to send
-                    you. Still shown — that the station was heard is the answer
-                    — but as text rather than as a button that does nothing.
-                    The search modal draws its own rows the same way. */}
-                {khz && (freqInRange(hz) ? (
-                    <button
-                        type="button"
-                        className="cs-lastspot__tune"
-                        title={`Tune to ${khz} kHz ${rxMode.toUpperCase()}`}
-                        onClick={tune}
-                    >
-                        {dial}
-                    </button>
-                ) : (
-                    <span title="Outside this receiver's tuning range">{dial}</span>
-                ))}
-            </span>
+            {/* A DotList rather than a middot typed between the two: in a side
+                dock this row wraps, and a dot left at the end of the first line
+                separates nothing. */}
+            <DotList
+                className="kv__v"
+                title={full}
+                parts={[
+                    spotAge(spot.timestamp),
+                    /* Out of this receiver's range, so there is nowhere to send
+                       you. Still shown — that the station was heard is the
+                       answer — but as text rather than as a button that does
+                       nothing. The search modal draws its own rows the same
+                       way. */
+                    khz && (freqInRange(hz) ? (
+                        <button
+                            type="button"
+                            className="cs-lastspot__tune"
+                            title={`Tune to ${khz} kHz ${rxMode.toUpperCase()}`}
+                            onClick={tune}
+                        >
+                            {dial}
+                        </button>
+                    ) : (
+                        <span title="Outside this receiver's tuning range">{dial}</span>
+                    )),
+                ]}
+            />
         </div>
     );
 }
@@ -313,11 +320,19 @@ function Result({ call, data, serverInfo, showPhoto, showMap }) {
                 {cty.continent && (
                     <div className="kv">
                         <span className="kv__k">Continent</span>
-                        <span className="kv__v">
-                            {cty.continent}
-                            {cty.cq_zone ? ` · CQ ${cty.cq_zone}` : ''}
-                            {cty.itu_zone ? ` · ITU ${cty.itu_zone}` : ''}
-                        </span>
+                        {/* Three values and two dots, in a row that wraps at
+                            either of them in a side dock. Written as parts so
+                            that whichever dot lands at the wrap is dropped —
+                            `EU · CQ 14 ·` with the ITU zone below it was the
+                            reason this stopped being a string. */}
+                        <DotList
+                            className="kv__v"
+                            parts={[
+                                cty.continent,
+                                cty.cq_zone ? `CQ ${cty.cq_zone}` : '',
+                                cty.itu_zone ? `ITU ${cty.itu_zone}` : '',
+                            ]}
+                        />
                     </div>
                 )}
                 <LocalTime tz={data.tz_iana} />

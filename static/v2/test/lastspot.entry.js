@@ -6,6 +6,7 @@
 // dxsearch.entry.js.
 import { deep, render, reset, walk, words } from './hookStub.js';
 import { LastSpot } from '../src/panels/CallsignPanel.jsx';
+import { DotList } from '../src/components/ui.jsx';
 import {
     LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, heardHere, lastSpotUrl,
     modeLabel, receiverMode, spotAge,
@@ -13,7 +14,7 @@ import {
 
 module.exports = {
     deep, render, reset, walk, words,
-    LastSpot,
+    LastSpot, DotList,
     LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, heardHere, lastSpotUrl,
     modeLabel, receiverMode, spotAge,
 };

@@ -203,7 +203,7 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
                     <p key={d.id} className="vibe__note">{d.note}</p>
                 ))}
                 <QrCode text={uri} />
-                <p className="vibe__note">Scan with a phone to open this receiver there.</p>
+                <p className="vibe__note">Scan with phone to open in mobile app</p>
                 <code className="vibe__uri">{uri}</code>
                 <div className="vibe__row">
                     <CopyLink uri={uri} />

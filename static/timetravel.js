@@ -1226,12 +1226,13 @@ function ttRedraw() {
       var tlRowIdx = frontRow - tldi;
       if (tlRowIdx < 0 || tlRowIdx >= totalRows) continue;
 
-      /* Determine the UTC minute of this row and check it falls on a round boundary */
+      /* Determine the minute-of-day of this row (in the page's timestamp display
+         timezone) and check it falls on a round boundary */
       var tlRowM = ttMeta.rows[tlRowIdx];
-      var tlUtcMin; /* total minutes since midnight UTC */
+      var tlUtcMin; /* total minutes since midnight in the display timezone */
       var tlStr;
       if (tlRowM && tlRowM.unix) {
-        var tlDate = new Date(tlRowM.unix * 1000);
+        var tlDate = ttTimeDate(tlRowM.unix);
         tlUtcMin = tlDate.getUTCHours() * 60 + tlDate.getUTCMinutes();
         tlStr = String(tlDate.getUTCHours()).padStart(2, '0') + ':' +
                 String(tlDate.getUTCMinutes()).padStart(2, '0');
@@ -1240,7 +1241,7 @@ function ttRedraw() {
         tlStr = String(Math.floor(tlUtcMin / 60) % 24).padStart(2, '0') + ':' +
                 String(tlUtcMin % 60).padStart(2, '0');
       }
-      /* Only label rows whose UTC minute is exactly divisible by the interval */
+      /* Only label rows whose display minute is exactly divisible by the interval */
       if (tlUtcMin % tlInterval !== 0) continue;
 
       var tld = (tldi + frac) / depthRows;
@@ -1485,29 +1486,40 @@ function ttDrawStars(ctx, W, H) {
   ctx.restore();
 }
 
+/* ── Timestamp display mode ─────────────────────────────────────────────────
+   spectrogram.html owns the "Times:" dropdown and exposes the conversion
+   helpers on window.  These thin wrappers keep Time Travel working standalone
+   (plain UTC) if those helpers are ever absent. */
+function ttTimeDate(unix) {
+  return window.sgTimeDate ? window.sgTimeDate(unix) : new Date(unix * 1000);
+}
+function ttTzLabel(unix) {
+  return window.sgTzLabel ? window.sgTzLabel(unix) : 'UTC';
+}
+
 /* ── HUD update ─────────────────────────────────────────────────────────── */
 function ttUpdateHUD() {
   var hud = document.getElementById('tt-hud');
   var hudDate = document.getElementById('tt-hud-date');
   if (!hud) return;
   if (!ttMeta || !ttMeta.rows || ttMeta.rows.length === 0) {
-    hud.textContent = '--:-- UTC';
+    hud.textContent = '--:-- ' + ttTzLabel();
     return;
   }
   var row = Math.max(0, Math.min(Math.round(ttCurrentRow), ttMeta.row_count - 1));
   var rowMeta = ttMeta.rows[row];
   if (rowMeta && rowMeta.unix) {
-    var d = new Date(rowMeta.unix * 1000);
+    var d = ttTimeDate(rowMeta.unix);
     hud.textContent =
       String(d.getUTCHours()).padStart(2, '0') + ':' +
       String(d.getUTCMinutes()).padStart(2, '0') + ':' +
-      String(d.getUTCSeconds()).padStart(2, '0') + ' UTC';
+      String(d.getUTCSeconds()).padStart(2, '0') + ' ' + ttTzLabel(rowMeta.unix);
     if (hudDate) hudDate.textContent = ttMeta.date || '';
   } else {
     var utcMin = row;
     hud.textContent =
       String(Math.floor(utcMin / 60) % 24).padStart(2, '0') + ':' +
-      String(utcMin % 60).padStart(2, '0') + ':00 UTC';
+      String(utcMin % 60).padStart(2, '0') + ':00 ' + ttTzLabel();
   }
 }
 
@@ -1552,7 +1564,7 @@ function ttDrawScrubber() {
       var lx = lf * W;
       var rowM = ttMeta.rows[lrow];
       if (rowM && rowM.unix) {
-        var ld = new Date(rowM.unix * 1000);
+        var ld = ttTimeDate(rowM.unix);
         var lt = String(ld.getUTCHours()).padStart(2, '0') + ':' + String(ld.getUTCMinutes()).padStart(2, '0');
         ctx.fillText(lt, lx, H - 3);
       }

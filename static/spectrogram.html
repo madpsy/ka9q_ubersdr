@@ -81,7 +81,8 @@ input[type=range].cslider::-moz-range-thumb{width:14px;height:14px;border-radius
 /* Tooltip */
 #tt{position:fixed;background:rgba(8,18,38,.93);color:#fff;border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:8px 12px;font-size:.8em;pointer-events:none;display:none;z-index:200;white-space:nowrap;line-height:1.85;box-shadow:0 4px 18px rgba(0,0,0,.45);min-width:175px}
 .tt-freq{font-size:1.05em;font-weight:600;color:#7df}
-.tt-time{opacity:.82}
+.tt-time{opacity:.82;display:flex;justify-content:space-between;gap:14px;align-items:baseline}
+.tt-ago{opacity:.6;font-size:.9em}
 .tt-sep{border-top:1px solid rgba(255,255,255,.14);margin:4px 0}
 .tt-row{display:flex;justify-content:space-between;gap:14px}
 .tt-lbl{opacity:.65}
@@ -276,6 +277,14 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
     <option value="1000">1000px</option>
     <option value="1200">1200px</option>
   </select>
+  <div>
+    <label for="tzsel">Times:</label>
+    <select id="tzsel" onchange="onTimeModeChange()">
+      <option value="utc" selected>UTC Time</option>
+      <option value="receiver">Receiver Time</option>
+      <option value="local">Local Time</option>
+    </select>
+  </div>
   <span style="font-size:.75em;opacity:.55">Scroll to zoom &middot; drag to pan &middot; double-click to reset</span>
   <span class="status" id="status">Loading&hellip;</span>
 </div>
@@ -285,7 +294,7 @@ details.api-ref td:first-child{white-space:nowrap;opacity:.85}
   <span id="sg-info-text">
     <b>How to read this spectrogram:</b>
     Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image builds top-to-bottom throughout the day and will be fully populated after <b>24 hours</b> (1&nbsp;440 rows).
-    The <b>X-axis</b> shows frequency (0&ndash;30&nbsp;MHz for wideband); the <b>Y-axis</b> shows UTC time, with the most recent data at the bottom.
+    The <b>X-axis</b> shows frequency (0&ndash;30&nbsp;MHz for wideband); the <b>Y-axis</b> shows time, with the most recent data at the bottom.
     Colour indicates signal strength &mdash; from noise floor (cool/dark) to signal peak (warm/bright) &mdash; as shown in the legend below.
     Hover over the image for exact frequency, time, and signal level.
   </span>
@@ -1137,6 +1146,126 @@ function syncSliders(mn,mx){
   document.getElementById('ceil-val').textContent=mx;
 }
 
+/* ── Timestamp display mode ──────────────────────────────────────────────────
+   Every on-screen timestamp is rendered through sgTimeDate()/sgFmtTime() so the
+   "Times:" dropdown can switch the whole page between UTC, the receiver's local
+   time (IANA zone from /api/description) and the browser's local time.
+   Offsets are resolved per-timestamp so DST transitions inside the 24h window
+   render correctly. */
+var sgTimeMode='utc';        /* 'utc' | 'receiver' | 'local' */
+var sgRxTimezone=null;       /* IANA zone name, e.g. 'America/New_York' */
+var sgRxTzOffsetMin=null;    /* fallback fixed offset in minutes east of UTC */
+
+var _sgZoneFmtCache={}, _sgTzLabelCache={};
+
+function _sgPad2(n){return String(n).padStart(2,'0');}
+
+/* Offset of an IANA zone at instant d, in minutes east of UTC (null on failure). */
+function _sgZoneOffsetMin(tz,d){
+  try{
+    var f=_sgZoneFmtCache[tz];
+    if(f===undefined){
+      f=_sgZoneFmtCache[tz]=new Intl.DateTimeFormat('en-GB',{timeZone:tz,hour12:false,
+        year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    }
+    if(!f)return null;
+    var parts=f.formatToParts(d),o={};
+    for(var i=0;i<parts.length;i++)o[parts[i].type]=parts[i].value;
+    var asUTC=Date.UTC(+o.year,+o.month-1,+o.day,(+o.hour)%24,+o.minute,+o.second);
+    return Math.round((asUTC-d.getTime())/60000);
+  }catch(e){_sgZoneFmtCache[tz]=null;return null;}
+}
+
+/* Minutes to add to UTC to reach the active display timezone at `unix`. */
+function sgTzOffsetMin(unix){
+  if(sgTimeMode==='utc')return 0;
+  var d=new Date((unix||Math.floor(Date.now()/1000))*1000);
+  if(sgTimeMode==='local')return -d.getTimezoneOffset();
+  if(sgRxTimezone){
+    var o=_sgZoneOffsetMin(sgRxTimezone,d);
+    if(o!==null)return o;
+  }
+  return sgRxTzOffsetMin||0;
+}
+
+/* A Date shifted so its getUTC* accessors read out the display-timezone clock. */
+function sgTimeDate(unix){
+  return new Date(((unix||0)+sgTzOffsetMin(unix)*60)*1000);
+}
+
+/* 'HH:MM' in the active display timezone. */
+function sgFmtTime(unix){
+  var d=sgTimeDate(unix);
+  return _sgPad2(d.getUTCHours())+':'+_sgPad2(d.getUTCMinutes());
+}
+
+/* Short zone label: 'UTC', 'EDT', 'GMT+1'… falls back to 'UTC+HH:MM'. */
+function sgTzLabel(unix){
+  if(sgTimeMode==='utc')return 'UTC';
+  var off=sgTzOffsetMin(unix);
+  var key=sgTimeMode+'|'+off;
+  if(key in _sgTzLabelCache)return _sgTzLabelCache[key];
+  var out=null;
+  /* Only ask Intl for a name when it can name the right zone: the browser's own
+     for 'local', an explicit IANA zone for 'receiver'.  A receiver known only by
+     a fixed offset gets the UTC±HH:MM form below instead of the browser's name. */
+  if(sgTimeMode==='local'||sgRxTimezone){
+    try{
+      var opt={hour:'2-digit',minute:'2-digit',hour12:false,timeZoneName:'short'};
+      if(sgTimeMode==='receiver')opt.timeZone=sgRxTimezone;
+      var parts=new Intl.DateTimeFormat('en-US',opt)
+        .formatToParts(new Date((unix||Math.floor(Date.now()/1000))*1000));
+      for(var i=0;i<parts.length;i++)if(parts[i].type==='timeZoneName')out=parts[i].value;
+    }catch(e){}
+  }
+  if(!out){
+    var a=Math.abs(off);
+    out='UTC'+(off<0?'-':'+')+_sgPad2(Math.floor(a/60))+(a%60?':'+_sgPad2(a%60):'');
+  }
+  return (_sgTzLabelCache[key]=out);
+}
+
+/* 'HH:MM TZ' — the usual combined form. */
+function sgFmtTimeTz(unix){return sgFmtTime(unix)+' '+sgTzLabel(unix);}
+
+/* Clock string for an API row: prefers the real unix stamp, falls back to the
+   server-supplied UTC string (which is only correct in UTC mode). */
+function sgRowClock(row){
+  if(row&&typeof row.unix==='number'&&row.unix>0)return sgFmtTime(row.unix);
+  return (row&&row.utc_time)||'';
+}
+
+function onTimeModeChange(){
+  var sel=document.getElementById('tzsel');
+  sgTimeMode=(sel&&sel.value)||'utc';
+  savePrefs();
+  sgRefreshTimeLabels();
+}
+
+/* Re-render every on-screen timestamp after the display timezone changes. */
+function sgRefreshTimeLabels(){
+  try{if(meta)buildTimeAxis();}catch(e){}
+  try{sgUpdateStatusLine();}catch(e){}
+  try{sgDrawScrubber();}catch(e){}
+  try{if(window.sgDrawActivityChart)window.sgDrawActivityChart();}catch(e){}
+  try{
+    var lbl=document.getElementById('row-indicator-label');
+    if(lbl&&meta&&meta.row_count>0)lbl.textContent=sgRowTimeStr(sgSelectedRow);
+  }catch(e){}
+  try{if(sgRowData)sgRenderRowSpectrum(sgRowData);}catch(e){}
+  try{
+    if(tsChart&&tsLastResults&&tsLastResults.length>0){
+      tsChart.data.labels=tsLastResults[0].data.rows.map(sgRowClock);
+      if(tsChart.options.scales.x.title)tsChart.options.scales.x.title.text='Time ('+sgTzLabel()+')';
+      tsChart.update();
+    }
+  }catch(e){}
+  /* Time Travel tab (timetravel.js) — only present once that tab has loaded */
+  try{if(window.ttUpdateHUD)window.ttUpdateHUD();}catch(e){}
+  try{if(window.ttDrawScrubber)window.ttDrawScrubber();}catch(e){}
+  try{if(window.ttRedraw)window.ttRedraw();}catch(e){}
+}
+
 /* ── Preferences (localStorage) ─────────────────────────────────────────── */
 /* band, palette, and time-window are persisted to localStorage so they
    survive page reloads and band changes without cluttering the URL.
@@ -1157,7 +1286,8 @@ function savePrefs(){
       showBookmarks:bmCb.checked!==false,
       showAntSw:antswCb.checked!==false,
       squishHeight:squishCb.checked===true,
-      squishHeightPx:(document.getElementById('squish-height-sel')||{}).value||'600'
+      squishHeightPx:(document.getElementById('squish-height-sel')||{}).value||'600',
+      timeMode:sgTimeMode
     };
     localStorage.setItem(PREFS_KEY,JSON.stringify(prefs));
   }catch(e){}
@@ -1452,6 +1582,12 @@ function fmtRangeMHz(startHz,endHz){
   return (startHz/1e6).toFixed(dp)+'\u2013'+(endHz/1e6).toFixed(dp)+' MHz';
 }
 
+/* Exposed for timetravel.js, which shares the page's timestamp display mode. */
+window.sgTimeDate=sgTimeDate;
+window.sgFmtTime=sgFmtTime;
+window.sgTzLabel=sgTzLabel;
+window.sgTzOffsetMin=sgTzOffsetMin;
+
 /* ── Init ───────────────────────────────────────────────────────────────── */
 (function init(){
   /* Load saved preferences — URL params take priority over localStorage */
@@ -1493,6 +1629,13 @@ function fmtRangeMHz(startHz,endHz){
     squishSel.value=prefs.squishHeightPx;
   }
   onSquishHeightChange();
+
+  /* Apply saved timestamp display mode */
+  if(prefs.timeMode==='receiver'||prefs.timeMode==='local'||prefs.timeMode==='utc'){
+    sgTimeMode=prefs.timeMode;
+    var tzsel=document.getElementById('tzsel');
+    if(tzsel)tzsel.value=sgTimeMode;
+  }
 
   /* Pre-select the band from the URL before the list loads */
   var bsel=document.getElementById('bsel');
@@ -1691,20 +1834,7 @@ function load(){
       document.getElementById('view').style.display='block';
       /* Now that #view is visible, #time-axis has a real layout height — draw overlay */
       buildDayNightOverlay();
-      /* Compute UTC time and staleness from the last row's real unix timestamp.
-         meta.rows[last].unix is the actual time the row was recorded — immune to
-         service restarts, gaps, or the service not starting at midnight. */
-      var lastRowTime='';
-      var staleStr='';
-      if(meta.rows&&meta.rows.length>0){
-        var lastRow=meta.rows[meta.rows.length-1];
-        lastRowTime=lastRow.utc_time+' UTC';
-        var staleSeconds=Math.floor(Date.now()/1000)-lastRow.unix;
-        var staleMinutes=Math.floor(staleSeconds/60);
-        staleStr=staleMinutes<=1?'just now':staleMinutes<60?staleMinutes+'m ago':Math.floor(staleMinutes/60)+'h '+String(staleMinutes%60).padStart(2,'0')+'m ago';
-      }
-      var dateLabel=meta.date==='rolling-24h'?'\u27F3 Rolling 24h':meta.date;
-      setStatus(dateLabel+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
+      sgUpdateStatusLine();
       /* Show download button — downloadCanvas() captures the canvas directly */
       document.getElementById('dl-btn').style.display='inline';
       /* Eagerly load allrows data for accurate tooltip values */
@@ -1783,7 +1913,7 @@ function updateInfoBanner(){
     var hfRange=fmtRangeMHz((meta&&meta.start_freq_hz)||1.8e6,(meta&&meta.end_freq_hz)||30e6);
     infoEl.innerHTML='<b>How to read this spectrogram ('+hfRange+' view):</b> Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image covers <b>'+hfRange+'</b>, excluding the AM broadcast band below 1.8 MHz which would otherwise skew the colour scale. The auto-range is computed from the '+hfRange+' data only. Hover over the image for exact frequency, time, and signal level.';
   } else {
-    infoEl.innerHTML='<b>How to read this spectrogram:</b> Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image builds top-to-bottom throughout the day and will be fully populated after <b>24 hours</b> (1&nbsp;440 rows). The <b>X-axis</b> shows frequency; the <b>Y-axis</b> shows UTC time, with the most recent data at the bottom. Colour indicates signal strength &mdash; from noise floor (cool/dark) to signal peak (warm/bright) &mdash; as shown in the legend below. Hover over the image for exact frequency, time, and signal level.';
+    infoEl.innerHTML='<b>How to read this spectrogram:</b> Each <b>horizontal row = 1 minute</b> of RF spectrum data. The image builds top-to-bottom throughout the day and will be fully populated after <b>24 hours</b> (1&nbsp;440 rows). The <b>X-axis</b> shows frequency; the <b>Y-axis</b> shows time, with the most recent data at the bottom. Colour indicates signal strength &mdash; from noise floor (cool/dark) to signal peak (warm/bright) &mdash; as shown in the legend below. Hover over the image for exact frequency, time, and signal level.';
   }
 }
 
@@ -1965,15 +2095,16 @@ function buildTimeAxis(){
   else if(visibleSpanRows<=480)interval=60;
   else if(visibleSpanRows<=960)interval=120;
 
-  /* UTC minute of row 0 — used to snap ticks to clean clock boundaries.
-     Each row is exactly 1 minute, so row N has UTC minute = row0Min + N. */
+  /* Minute-of-day of row 0 in the active display timezone — used to snap ticks
+     to clean clock boundaries.  Each row is exactly 1 minute, so row N has
+     display minute = row0Min + N. */
   var row0Min=0;
   if(meta.rows&&meta.rows[0]&&meta.rows[0].unix){
-    var d0=new Date(meta.rows[0].unix*1000);
+    var d0=sgTimeDate(meta.rows[0].unix);
     row0Min=d0.getUTCHours()*60+d0.getUTCMinutes();
   }
 
-  /* Snap first tick to a multiple of interval in UTC-minute space */
+  /* Snap first tick to a multiple of interval in display-minute space */
   var visTopRow=Math.floor(visTop*canvasRows);
   var visTopUtcMin=row0Min+visTopRow;
   var firstTickUtcMin=Math.ceil(visTopUtcMin/interval)*interval;
@@ -1987,12 +2118,11 @@ function buildTimeAxis(){
     var lbl=document.createElement('span');
     lbl.className='t-label';
     lbl.style.top=(sc*100)+'%';
-    /* Use real UTC time from meta.rows if available; fall back to synthetic */
+    /* Use the real timestamp from meta.rows if available; fall back to synthetic */
     var rowMeta=meta.rows&&meta.rows[row];
     var timeStr;
     if(rowMeta&&rowMeta.unix){
-      var d=new Date(rowMeta.unix*1000);
-      timeStr=String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0');
+      timeStr=sgFmtTime(rowMeta.unix);
     } else {
       var utcMin=row0Min+row;
       timeStr=String(Math.floor(utcMin/60)%24).padStart(2,'0')+':'+String(utcMin%60).padStart(2,'0');
@@ -2103,6 +2233,20 @@ function buildLegend(){
   document.getElementById('lmax').textContent=contrastMax+' dBFS';
 }
 
+/* Relative age of a spectrogram row, e.g. "3h ago" / "12m ago" / "now".
+   Used in the hover tooltip next to the absolute UTC time. */
+function sgAgoStr(unix){
+  var secs=Math.floor(Date.now()/1000)-unix;
+  if(secs<0)secs=0;
+  if(secs<60)return 'now';
+  var mins=Math.floor(secs/60);
+  if(mins<60)return mins+'m ago';
+  var hrs=Math.floor(mins/60), rem=mins%60;
+  if(hrs<24)return rem?hrs+'h '+rem+'m ago':hrs+'h ago';
+  var days=Math.floor(hrs/24), remH=hrs%24;
+  return remH?days+'d '+remH+'h ago':days+'d ago';
+}
+
 /* ── Hover crosshair + tooltip ──────────────────────────────────────────── */
 function setupHover(){
   /* Attach hover to the sg-right container (covers freq-axis + canvas) */
@@ -2168,7 +2312,7 @@ function setupHover(){
        Clamp to meta.row_count-1 so yp=1.0 (bottom edge) maps to the last valid row. */
     var row=Math.min(Math.floor(yp*meta.row_count),meta.row_count-1);
     var nodata=!overCanvas||row<0||row>=meta.row_count;
-    var tstr;
+    var tstr,agoStr='';
     var rowMeta=meta.rows&&meta.rows[row];
     if(rowMeta&&rowMeta.unix){
       var d=new Date(rowMeta.unix*1000);
@@ -2176,9 +2320,10 @@ function setupHover(){
       if(typeof SunCalc!=='undefined'&&sgReceiverLat!==null&&sgReceiverLon!==null){
         _ttDnEmoji=SunCalc.getPosition(d,sgReceiverLat,sgReceiverLon).altitude>0?' \u2600\ufe0f':' \uD83C\uDF19';
       }
-      tstr=String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+' UTC'+_ttDnEmoji;
+      tstr=sgFmtTimeTz(rowMeta.unix)+_ttDnEmoji;
+      agoStr=sgAgoStr(rowMeta.unix);
     } else {
-      tstr=String(Math.floor(row/60)).padStart(2,'0')+':'+String(row%60).padStart(2,'0')+' UTC';
+      tstr=String(Math.floor(row/60)).padStart(2,'0')+':'+String(row%60).padStart(2,'0')+' '+sgTzLabel();
     }
 
     /* Signal level — prefer exact bin data from the allrows cache over
@@ -2199,7 +2344,7 @@ function setupHover(){
 
     /* Build tooltip */
     var h='<div class="tt-freq">'+mhz+' MHz'+(band?' <span style="opacity:.55;font-size:.9em">('+band+')</span>':'')+'</div>';
-    h+='<div class="tt-time">'+tstr+'</div>';
+    h+='<div class="tt-time"><span>'+tstr+'</span>'+(agoStr?'<span class="tt-ago">'+agoStr+'</span>':'')+'</div>';
     if(nodata){
       h+='<div class="tt-sep"></div><div class="tt-nd">no data yet</div>';
     } else {
@@ -2268,6 +2413,26 @@ function setupHover(){
 
 /* ── Helpers ────────────────────────────────────────────────────────────── */
 function setStatus(s){document.getElementById('status').textContent=s;}
+
+/* Status line: date, row count and — when the day is still filling — the time
+   of the last row plus how stale it is.  Split out of load() so a change of
+   timestamp display mode can re-render it without a refetch.
+   meta.rows[last].unix is the actual time the row was recorded — immune to
+   service restarts, gaps, or the service not starting at midnight. */
+function sgUpdateStatusLine(){
+  if(!meta)return;
+  var lastRowTime='';
+  var staleStr='';
+  if(meta.rows&&meta.rows.length>0){
+    var lastRow=meta.rows[meta.rows.length-1];
+    lastRowTime=sgRowClock(lastRow)+' '+sgTzLabel(lastRow.unix);
+    var staleSeconds=Math.floor(Date.now()/1000)-lastRow.unix;
+    var staleMinutes=Math.floor(staleSeconds/60);
+    staleStr=staleMinutes<=1?'just now':staleMinutes<60?staleMinutes+'m ago':Math.floor(staleMinutes/60)+'h '+String(staleMinutes%60).padStart(2,'0')+'m ago';
+  }
+  var dateLabel=meta.date==='rolling-24h'?'\u27F3 Rolling 24h':meta.date;
+  setStatus(dateLabel+' \u00b7 '+meta.row_count+'/'+meta.max_rows+' rows'+(meta.complete?' \u00b7 complete':' \u00b7 last row '+lastRowTime+' ('+staleStr+')'));
+}
 function showErr(s){document.getElementById('err').innerHTML='<div class="error">'+s+'</div>';}
 
 /* Download the spectrogram as a PNG that looks identical to the on-screen display.
@@ -2763,7 +2928,7 @@ function tsReloadAll(){
 
 function renderTimesliceMulti(results){
   /* Use the first result's labels as the shared time axis */
-  var labels=results[0].data.rows.map(function(r){return r.utc_time||'';});
+  var labels=results[0].data.rows.map(sgRowClock);
 
   var datasets=[];
   var hasAnySNR=false;
@@ -2854,7 +3019,7 @@ function renderTimesliceMulti(results){
     x:{
       ticks:{color:'rgba(255,255,255,0.6)',maxRotation:0,autoSkip:true,maxTicksLimit:10},
       grid:{color:'rgba(255,255,255,0.07)'},
-      title:{display:true,text:'Time (UTC)',color:'rgba(255,255,255,0.45)'}
+      title:{display:true,text:'Time ('+sgTzLabel()+')',color:'rgba(255,255,255,0.45)'}
     },
     y:{
       position:'left',
@@ -2892,7 +3057,7 @@ function renderTimesliceMulti(results){
           borderColor:'rgba(255,255,255,0.2)',
           borderWidth:1,
           callbacks:{
-            title:function(items){return items[0].label+' UTC';},
+            title:function(items){return items[0].label+' '+sgTzLabel();},
             label:function(item){
               var suffix=item.dataset.yAxisID==='y1'?' dB':' dBFS';
               return item.dataset.label+': '+item.parsed.y.toFixed(1)+suffix;
@@ -3075,6 +3240,12 @@ function sgDrawAntSwitchOverlay(){
       if(sub){
         if(d&&d.receiver&&d.receiver.name)sub.textContent=d.receiver.name;
         else if(d&&d.callsign)sub.textContent=d.callsign;
+      }
+      /* Receiver timezone for the "Receiver Time" timestamp mode */
+      if(d&&d.receiver){
+        if(typeof d.receiver.timezone==='string'&&d.receiver.timezone)sgRxTimezone=d.receiver.timezone;
+        if(typeof d.receiver.timezone_offset==='number')sgRxTzOffsetMin=d.receiver.timezone_offset;
+        if((sgRxTimezone||sgRxTzOffsetMin!==null)&&sgTimeMode==='receiver')sgRefreshTimeLabels();
       }
       /* Store lat/lon for day/night overlay */
       if(d&&d.receiver&&d.receiver.gps){
@@ -3340,9 +3511,9 @@ function sgFetchRowSpectrum(rowIdx){
     .then(function(data){
       if(data.error){console.warn('rowspectrum:',data.error);return;}
       /* Update the indicator label with the authoritative time from the API */
-      if(data.utc_time){
+      if(data.utc_time||data.unix){
         var label=document.getElementById('row-indicator-label');
-        if(label)label.textContent=data.utc_time;
+        if(label)label.textContent=sgRowClock(data);
       }
       sgRowData=data;
       sgRenderRowSpectrum(data);
@@ -3378,7 +3549,7 @@ function sgRenderRowSpectrum(data){
       var _dnPos=SunCalc.getPosition(_dnDate,sgReceiverLat,sgReceiverLon);
       _dnEmoji=_dnPos.altitude>0?' \u2600\ufe0f':' \uD83C\uDF19';
     }
-    timeEl.textContent=(data.utc_time||'--:--')+' UTC'+_dnEmoji;
+    timeEl.textContent=(sgRowClock(data)||'--:--')+' '+sgTzLabel(data.unix)+_dnEmoji;
   }
   if(metaEl){
     var bwStr=data.bin_width_hz>=1000?(data.bin_width_hz/1000).toFixed(1)+' kHz/bin':data.bin_width_hz.toFixed(0)+' Hz/bin';
@@ -3842,15 +4013,15 @@ function sgDrawRowSpectrumCanvas(data, overrideRange){
   }
 }
 
-/* Get the UTC time string for a row index from meta.rows */
+/* Get the clock string for a row index from meta.rows, in the display timezone */
 function sgRowTimeStr(rowIdx){
   if(!meta)return '';
   var rm=meta.rows&&meta.rows[rowIdx];
-  if(rm&&rm.utc_time)return rm.utc_time;
+  if(rm&&(rm.unix||rm.utc_time))return sgRowClock(rm);
   /* Fallback: synthetic from row0 */
   var row0Min=0;
   if(meta.rows&&meta.rows[0]&&meta.rows[0].unix){
-    var d0=new Date(meta.rows[0].unix*1000);
+    var d0=sgTimeDate(meta.rows[0].unix);
     row0Min=d0.getUTCHours()*60+d0.getUTCMinutes();
   }
   var utcMin=row0Min+rowIdx;
@@ -4132,7 +4303,7 @@ function sgPlayRenderFromCache(rowIdx){
         var _dnPos2=SunCalc.getPosition(_dnDate2,sgReceiverLat,sgReceiverLon);
         _dnEmoji2=_dnPos2.altitude>0?' \u2600\ufe0f':' \uD83C\uDF19';
       }
-      timeEl.textContent=(data.utc_time||'--:--')+' UTC'+_dnEmoji2;
+      timeEl.textContent=(sgRowClock(data)||'--:--')+' '+sgTzLabel(data.unix)+_dnEmoji2;
     }
     if(metaEl){
       var bwStr=data.bin_width_hz>=1000?(data.bin_width_hz/1000).toFixed(1)+' kHz/bin':data.bin_width_hz.toFixed(0)+' Hz/bin';
@@ -4363,10 +4534,7 @@ function sgDrawScrubber() {
       var lx = lf * W;
       var rowM = meta.rows[lrow];
       if (rowM && rowM.unix) {
-        var ld = new Date(rowM.unix * 1000);
-        var lt = String(ld.getUTCHours()).padStart(2, '0') + ':' +
-                 String(ld.getUTCMinutes()).padStart(2, '0');
-        ctx.fillText(lt, lx, H - 3);
+        ctx.fillText(sgFmtTime(rowM.unix), lx, H - 3);
       }
     }
   }
@@ -4581,7 +4749,7 @@ render = function() {
     var notches = []; // { rowIdx, label }
     if (firstUnix > 0) {
       // Minute-of-day for row 0
-      var mod0 = Math.floor(firstUnix / 60) % 1440; // minute of day for row 0
+      var mod0 = Math.floor((firstUnix + sgTzOffsetMin(firstUnix) * 60) / 60) % 1440; // minute of day for row 0
       // First notch minute-of-day >= mod0 that is a multiple of notchIntervalMin
       var firstNotchMod = Math.ceil(mod0 / notchIntervalMin) * notchIntervalMin;
       for (var mod = firstNotchMod; mod < mod0 + spanMinutes; mod += notchIntervalMin) {
@@ -4859,7 +5027,7 @@ render = function() {
         }
       }
       actTip.innerHTML =
-        '<b style="color:#7df">' + (row.utc_time || '') + ' UTC' + _actDnEmoji + '</b><br>' +
+        '<b style="color:#7df">' + sgRowClock(row) + ' ' + sgTzLabel(row.unix) + _actDnEmoji + '</b><br>' +
         '<span style="color:#0ff">Noise floor: ' + (nf !== 0 ? nf.toFixed(1) + ' dBFS' : '—') + '</span><br>' +
         '<span style="color:#f90">Signal peak: ' + (pk !== 0 ? pk.toFixed(1) + ' dBFS' : '—') + '</span><br>' +
         '<span style="opacity:.7">Dynamic range: ' + (dr !== '—' ? dr + ' dB' : '—') + '</span>' +

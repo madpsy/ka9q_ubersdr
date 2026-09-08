@@ -6404,6 +6404,17 @@ a.btn { text-decoration: none; }
     background: var(--surface-3);
     border-radius: var(--radius-sm);
 }
+/* The reserved box. A megabyte image has no intrinsic size until it arrives,
+   so `height: auto` is zero and the modal would open as a collapsed strip that
+   snaps to full size a second later. Holding a plot-sized box while the state
+   is not `ok` means the modal opens once, at the size it keeps, with the
+   "Loading…" line centred in it — and the same box carries the error line. */
+.sgram-zoom__imgwrap--wait {
+    min-width: min(68vw, 640px);
+    min-height: min(58vh, 420px);
+    background: var(--surface-3);
+    border-radius: var(--radius-sm);
+}
 .sgram-zoom__wait {
     position: absolute;
     inset: 0;

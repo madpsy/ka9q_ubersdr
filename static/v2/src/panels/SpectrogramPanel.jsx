@@ -254,8 +254,13 @@ function SpectrogramModal({ band, range, minute, tzOffset, onClose }) {
                         ))}
                     </div>
 
+                    {/* Until the image lands it has no intrinsic size, so the
+                        wrapper holds a plot-sized box while waiting: the modal
+                        opens at the size it will keep, with "Loading…" in the
+                        middle of it, rather than as a collapsed strip that
+                        snaps open a second later. */}
                     <div
-                        className="sgram-zoom__imgwrap"
+                        className={`sgram-zoom__imgwrap${state === 'ok' ? '' : ' sgram-zoom__imgwrap--wait'}`}
                         ref={imgWrapRef}
                         onPointerDown={read}
                         onPointerMove={read}

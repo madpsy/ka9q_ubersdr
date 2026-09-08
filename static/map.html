@@ -148,6 +148,15 @@
             min-height: 0;
         }
 
+        /* The Dark tile option. OSM serves one set of tiles and they are a light
+           map, so this filter is what makes them dark rather than a second tile
+           source being fetched — a recipe rather than a calculation, and the same
+           declaration v2, the desktop chooser and the addons all use. Scoped to
+           the tiles so markers, the terminator and popups keep their own colours. */
+        .map-tiles-dark .leaflet-tile {
+            filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+        }
+
         .leaflet-container {
             background: #1a1a1a;
         }
@@ -499,8 +508,7 @@
                 <option value="osm" selected>OpenStreetMap</option>
                 <option value="topo">Topo (OpenTopoMap)</option>
                 <option value="satellite">Satellite (Esri)</option>
-                <option value="dark">Dark (CartoDB)</option>
-                <option value="light">Light (CartoDB)</option>
+                <option value="dark">Dark</option>
             </select>
         </div>
     </div>
@@ -739,15 +747,16 @@
                 attribution: '© Esri, Maxar, Earthstar Geographics',
                 maxZoom: 19
             },
+            // Dark is the same OSM tiles as above, inverted by the CSS filter on
+            // .map-tiles-dark rather than fetched from a dark tile source. CARTO's
+            // dark_all and light_all used to serve these two entries and now want
+            // an API key; the filter is what v2, the desktop chooser and the
+            // addons already use, so this also makes them all agree.
             dark: {
-                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                attribution: '© OpenStreetMap contributors, © CARTO',
-                maxZoom: 19
-            },
-            light: {
-                url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-                attribution: '© OpenStreetMap contributors, © CARTO',
-                maxZoom: 19
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19,
+                darkFilter: true
             }
         };
 
@@ -776,6 +785,7 @@
                 attribution: cfg.attribution,
                 maxZoom: cfg.maxZoom
             }).addTo(map);
+            map.getContainer().classList.toggle('map-tiles-dark', !!cfg.darkFilter);
         }
 
         // ---- Day/night terminator (greyline) -----------------------------------------

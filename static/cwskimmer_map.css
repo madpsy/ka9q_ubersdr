@@ -34,6 +34,15 @@
             z-index: 1;
         }
 
+        /* The Dark tile option. OSM serves one set of tiles and they are a light
+           map, so this filter is what makes them dark rather than a second tile
+           source being fetched — the same declaration v2, the desktop chooser and
+           the addons all use. Scoped to the tiles so the spot markers, clusters
+           and popups drawn over them keep their own colours. */
+        .map-tiles-dark .leaflet-tile {
+            filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+        }
+
         .header {
             position: absolute;
             top: 0;

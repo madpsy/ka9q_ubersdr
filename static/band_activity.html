@@ -692,6 +692,15 @@ body {
     height: 100%;
     background: #0a0a0f;
 }
+
+/* The Dark tile option. OSM serves one set of tiles and they are a light map, so
+   this filter is what makes them dark rather than a second tile source being
+   fetched — the same declaration v2, the desktop chooser and the addons all use.
+   Scoped to the tiles so markers, the terminator and MUF overlay keep their own
+   colours. */
+.map-tiles-dark .leaflet-tile {
+    filter: brightness(0.7) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
 #floating-map-suninfo {
     flex: none;
     display: flex;
@@ -1597,7 +1606,6 @@ body {
             <option value="osm">OSM</option>
             <option value="topo">Topo</option>
             <option value="satellite">Satellite</option>
-            <option value="light">Light</option>
         </select>
         <button id="floating-map-close" type="button" title="Hide map">✕</button>
     </div>
@@ -4473,10 +4481,16 @@ function _loadLeafletAssets() {
 // Same tile choices offered by the full country map, minus the labelling —
 // this is a small panel, so the dropdown stays a single subtle <select>.
 const _MAP_TILE_LAYERS = {
+    // Dark is the same OSM tiles as the osm entry, inverted by the CSS filter
+    // on .map-tiles-dark rather than fetched from a dark tile source. CARTO's
+    // dark_all and light_all used to serve the dark and light entries and now
+    // want an API key; the filter is what v2, the desktop chooser and the
+    // addons already use.
     dark: {
-        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
-        maxZoom: 19
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19,
+        darkFilter: true
     },
     osm: {
         url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -4493,11 +4507,6 @@ const _MAP_TILE_LAYERS = {
         attribution: '&copy; Esri, Maxar, Earthstar Geographics',
         maxZoom: 19
     },
-    light: {
-        url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-        attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
-        maxZoom: 19
-    }
 };
 const _MAP_TILE_KEY       = 'bandActivity_mapTile';
 const _MAP_TERMINATOR_KEY = 'bandActivity_mapTerminator';
@@ -4515,6 +4524,7 @@ function _applyFloatingMapTile(key) {
         attribution: cfg.attribution,
         maxZoom: cfg.maxZoom
     }).addTo(_leafletMap);
+    _leafletMap.getContainer().classList.toggle('map-tiles-dark', !!cfg.darkFilter);
 }
 
 function _applyTerminatorToggle(enabled) {

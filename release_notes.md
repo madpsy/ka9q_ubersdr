@@ -13,6 +13,7 @@
 - Fixed **384 KHz IQ** which allows HPSDR/rtl_tcp etc access to 384 KHz of spectrum - the max was 192 KHz
 - Fixed **Buttons on mobile** were partially obscured with curved screen edges (panel/group buttons at the bottom)
 - Fixed **Listener Stats** which were being slow and using lots of memory on instances with high number of listeners
+- Fixed **CartoDB Maps** by removing them as now need an API key - they didn't add any real value
 
 ## Version 0.1.65 - 5th Sep 2026
 

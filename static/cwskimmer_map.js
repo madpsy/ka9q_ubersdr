@@ -1376,15 +1376,16 @@ class CWSkimmerMap {
                 attribution: '© Esri, Maxar, Earthstar Geographics',
                 maxZoom: 19
             },
+            // Dark is the same OSM tiles as the 'osm' entry, inverted by the CSS
+            // filter on .map-tiles-dark rather than fetched from a dark tile
+            // source. CARTO's dark_all and light_all used to serve the dark and
+            // light entries and now want an API key; the filter is what v2, the
+            // desktop chooser and the addons already use.
             'dark': {
-                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                attribution: '© OpenStreetMap contributors, © CARTO',
-                maxZoom: 19
-            },
-            'light': {
-                url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-                attribution: '© OpenStreetMap contributors, © CARTO',
-                maxZoom: 19
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19,
+                darkFilter: true
             },
         };
     }
@@ -1393,8 +1394,12 @@ class CWSkimmerMap {
         const select = document.getElementById('map-tile-select');
         if (!select) return;
 
-        // Restore saved tile preference
-        const saved = localStorage.getItem('cwskimmer_mapTile') || 'osm';
+        // Restore saved tile preference. Checked against the table rather than
+        // trusted: a browser that saved 'light' before that option was dropped
+        // would otherwise leave the <select> on a value it no longer has, which
+        // renders as a blank control.
+        const stored = localStorage.getItem('cwskimmer_mapTile');
+        const saved = this.mapTileLayers[stored] ? stored : 'osm';
         select.value = saved;
         if (saved !== 'osm') {
             this._applyMapTile(saved);
@@ -1424,6 +1429,7 @@ class CWSkimmerMap {
             maxZoom: cfg.maxZoom,
             minZoom: 2
         }).addTo(this.map);
+        this.map.getContainer().classList.toggle('map-tiles-dark', !!cfg.darkFilter);
     }
 
     // ─── End Map tile selector ────────────────────────────────────────────────

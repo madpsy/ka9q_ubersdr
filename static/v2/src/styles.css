@@ -4712,6 +4712,21 @@ a.btn { text-decoration: none; }
    number in it to line up. */
 .cs-lastspot--none { font-family: var(--font); color: var(--text-faint); }
 
+/* The frequency the station was last heard on, which tunes the receiver to it.
+   A link rather than a chip: it sits inside a reading, at the end of a
+   sentence, and a bordered button there would weigh more than the row it is a
+   footnote to. The monospace and the size are the kv value's — only the colour
+   says it can be pressed. */
+.cs-lastspot__tune {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--accent);
+    cursor: pointer;
+}
+.cs-lastspot__tune:hover { text-decoration: underline; }
+
 .cs-photo {
     display: block;
     margin-top: 8px;

@@ -26,7 +26,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { getSessionId } from '../radio/session.js';
 import { Button, Empty, Icon, Modal } from '../components/ui.jsx';
 import CallsignMap from '../components/CallsignMap.jsx';
-import { countryFlag } from '../lib/format.js';
+import { countryFlag, freqInRange } from '../lib/format.js';
 import { onPhotoShown, photoShown, photoUrl, setPhotoShown } from '../lib/operatorPhoto.js';
 import {
     displayName, distanceBearing, identified, isValidCallsign, lookupCallsignData,
@@ -34,8 +34,8 @@ import {
 } from '../lib/callsign.js';
 import { openCallsignLookup } from '../compat/legacyBridge.js';
 import {
-    LAST_SPOT_DAYS, dayLabel, dxClusterAvailable, fetchLastSpot, khzLabel,
-    modeLabel, spotAge, spotNote, tuneFreq, utcLabel,
+    LAST_SPOT_DAYS, dayLabel, dxClusterAvailable, fetchLastSpot, heardHere,
+    khzLabel, modeLabel, receiverMode, spotAge, spotNote, tuneFreq, utcLabel,
 } from '../lib/dxclusterSearch.js';
 import {
     CALL_CW, CALL_OFF, CALL_TTS, TTS_RATES, announceCall, callAnnounceSettings,
@@ -173,6 +173,7 @@ export function LastSpot({ call, enabled }) {
     // yet, which is not.
     const [spot, setSpot] = useState(null);
     const [asked, setAsked] = useState(false);
+    const { actions } = useRadio();
 
     useEffect(() => {
         setSpot(null);
@@ -200,7 +201,7 @@ export function LastSpot({ call, enabled }) {
     if (!spot) {
         return (
             <div className="kv">
-                <span className="kv__k">Last spot</span>
+                <span className="kv__k">Last heard</span>
                 <span className="kv__v cs-lastspot--none">
                     {`not heard in ${LAST_SPOT_DAYS} days`}
                 </span>
@@ -208,8 +209,9 @@ export function LastSpot({ call, enabled }) {
         );
     }
 
+    const hz = tuneFreq(spot);
     const mode = modeLabel(spot);
-    const khz = khzLabel(tuneFreq(spot));
+    const khz = khzLabel(hz);
     // The whole row, for anyone who wants the rest of it: the moment rather
     // than the age, the band, and whatever the spotting stream recorded.
     const full = [
@@ -217,13 +219,49 @@ export function LastSpot({ call, enabled }) {
         spot.band, spotNote(spot),
     ].filter(Boolean).join(' · ');
 
+    // Where the dial would go, which is not always what the line says: a spot
+    // reading CW tunes to CW-U or CW-L depending on the band, and one that
+    // named no mode at all still tunes to the sideband its band is worked on.
+    // The line shows what was heard and the tooltip shows where you are being
+    // sent, because those are two different facts.
+    const rxMode = receiverMode(spot);
+    const dial = `${khz} kHz${mode ? ` ${mode}` : ''}`;
+
+    const tune = () => {
+        // Frequency and mode together: separately the receiver passes through
+        // the old mode's passband on the new frequency on the way. Same call
+        // the cluster panel's own rows make.
+        actions.tuneTo({ frequency: hz, mode: rxMode });
+        actions.ensureVisible(hz);
+    };
+
     return (
         <div className="kv">
-            <span className="kv__k">Last spot</span>
+            {/* Whose ear it was. The archive holds this receiver's own decoder,
+                skimmer and voice spots alongside the ones relayed from the
+                worldwide cluster, and "we heard this station an hour ago" is a
+                different claim from "somebody in France did". The key says
+                which, because it costs a word rather than a line. */}
+            <span className="kv__k">{heardHere(spot) ? 'Last heard' : 'Cluster spot'}</span>
             <span className="kv__v" title={full}>
                 {spotAge(spot.timestamp)}
-                {khz ? ` · ${khz} kHz` : ''}
-                {mode ? ` ${mode}` : ''}
+                {khz ? ' · ' : ''}
+                {/* Out of this receiver's range, so there is nowhere to send
+                    you. Still shown — that the station was heard is the answer
+                    — but as text rather than as a button that does nothing.
+                    The search modal draws its own rows the same way. */}
+                {khz && (freqInRange(hz) ? (
+                    <button
+                        type="button"
+                        className="cs-lastspot__tune"
+                        title={`Tune to ${khz} kHz ${rxMode.toUpperCase()}`}
+                        onClick={tune}
+                    >
+                        {dial}
+                    </button>
+                ) : (
+                    <span title="Outside this receiver's tuning range">{dial}</span>
+                ))}
             </span>
         </div>
     );

@@ -66,7 +66,8 @@ globalThis.fetch = (url) => {
 
 const {
     deep, render, reset, walk, words,
-    LastSpot, LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, lastSpotUrl, spotAge,
+    LastSpot, LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, heardHere,
+    lastSpotUrl, modeLabel, receiverMode, spotAge,
 } = require('./.build/lastspot.cjs');
 
 let pass = 0;
@@ -92,6 +93,21 @@ const t = (name, fn) => {
 // The fetch is real time, so the render tests are async.
 const at = [];
 const ta = (name, fn) => at.push([name, fn]);
+
+/** The radio the row tunes, and what it was asked to do. */
+const tuned = [];
+const radioCtx = {
+    actions: {
+        tuneTo: (req) => tuned.push(req),
+        ensureVisible: () => {},
+    },
+};
+
+/** The tune button in a rendered row, if it drew one. */
+const tuneButton = (tree) => deep(tree).find((n) => (
+    n.props && typeof n.props.onClick === 'function'
+    && /cs-lastspot__tune/.test(String(n.props.className || ''))
+));
 
 const query = (call) => new URLSearchParams(lastSpotUrl(call).split('?')[1]);
 
@@ -158,6 +174,138 @@ t('the age carries days, which the spots panels do not', () => {
     assert.strictEqual(spotAge('nonsense', now), '');
 });
 
+// ── The mode ────────────────────────────────────────────────────────────────
+//
+// Half the answer the line exists to give. Three of the five streams record it
+// as a column; the two that do not keep it in free text, or do not have it.
+
+t('a stream with a mode column is quoted, not parsed', () => {
+    assert.strictEqual(modeLabel({ stream: 'decoder', mode: 'FT8' }), 'FT8');
+    assert.strictEqual(modeLabel({ stream: 'cwskimmer', mode: 'CW' }), 'CW');
+    assert.strictEqual(modeLabel({ stream: 'voice', voice_mode: 'LSB' }), 'LSB');
+});
+
+t('an upstream spot’s comment is read for the mode', () => {
+    // The two shapes the worldwide cluster actually sends, measured against a
+    // week of this receiver's archive.
+    assert.strictEqual(modeLabel({ comment: 'FT8 1519Z' }), 'FT8');
+    assert.strictEqual(modeLabel({ comment: 'CW 1512Z' }), 'CW');
+    // Not only as the first word. A quarter of the upstream comments that name
+    // a mode name it in the middle of something else.
+    assert.strictEqual(modeLabel({ comment: '100th PKP SSB 1517Z' }), 'SSB');
+});
+
+t('WPM means CW, whatever else the comment says', () => {
+    // A spot the upstream cluster relayed from somebody else's skimmer: a dB
+    // figure and a speed, and no mode word at all. The dB is written the same
+    // way a digital decode is, so this has to be decided before anything else.
+    assert.strictEqual(modeLabel({ comment: '13 dB 23 WPM CQ' }), 'CW');
+});
+
+t('a local spot is voice, which is what a local spot is', () => {
+    assert.strictEqual(modeLabel({ stream: 'localspot', comment: '[Voice] Paolo' }), 'Voice');
+});
+
+t('a comment with no mode in it stays blank rather than guessing', () => {
+    // receiverMode guesses — it has to, or the search modal grows rows that
+    // cannot be clicked. This does not: a sideband worked out from the
+    // frequency is a decision about the dial, and printing it beside a measured
+    // FT8 would make the two look like the same kind of fact.
+    assert.strictEqual(modeLabel({ comment: '1515Z' }), '');
+    assert.strictEqual(modeLabel({ comment: 'calling dx 1517Z' }), '');
+    assert.strictEqual(modeLabel({ comment: 'EU-015 1518Z' }), '');
+    assert.strictEqual(modeLabel({ comment: 'WWFF FFF-1351' }), '');
+    assert.strictEqual(modeLabel({}), '');
+});
+
+t('a grid square is not a mode', () => {
+    // Why AM and FM are read only as a leading word and never scanned for:
+    // half the Maidenhead field pairs are mode names, and FM15 in an island
+    // reference is the commonest comment on the cluster that would have caught
+    // one.
+    assert.strictEqual(modeLabel({ comment: 'NA-67, Ocracoke Is, NC FM15 1515Z' }), '');
+    assert.strictEqual(modeLabel({ comment: 'FM 145500 1515Z' }), 'FM');
+});
+
+// ── Whose ear ───────────────────────────────────────────────────────────────
+
+t('the receiver’s own streams are told apart from the world’s', () => {
+    // "We heard this station an hour ago" and "somebody in France did" are
+    // different claims, and the row's key is which.
+    assert.ok(heardHere({ stream: 'decoder' }));
+    assert.ok(heardHere({ stream: 'cwskimmer' }));
+    assert.ok(heardHere({ stream: 'voice' }));
+    assert.ok(heardHere({ stream: 'localspot' }));
+    assert.ok(!heardHere({ stream: 'dxcluster' }));
+    assert.ok(!heardHere(null));
+});
+
+// ── Where it tunes ──────────────────────────────────────────────────────────
+//
+// The mode the line shows and the mode the dial is put into are worked out from
+// the same reading, so a row that says CW cannot tune to LSB.
+
+t('CW takes the sideband its band is worked on', () => {
+    assert.strictEqual(receiverMode({ mode: 'CW', freq_hz: 7012700 }), 'cwl');
+    assert.strictEqual(receiverMode({ mode: 'CW', freq_hz: 21016700 }), 'cwu');
+    // And from a comment, which is how the upstream cluster says it. This is
+    // the pair that disagreed while the label and the dial were worked out
+    // separately: the row read CW and the receiver went to LSB.
+    assert.strictEqual(receiverMode({ comment: 'CW 1512Z', freq_hz: 7012700 }), 'cwl');
+    assert.strictEqual(receiverMode({ comment: '13 dB 23 WPM CQ', freq_hz: 21016700 }), 'cwu');
+});
+
+t('a digital mode is upper sideband on every band', () => {
+    // FT8 on 40 m is 7074 USB. The split that is right for CW would put it on
+    // LSB, where it is silent in a way that reads as a broken receiver.
+    assert.strictEqual(receiverMode({ mode: 'FT8', freq_hz: 7074000 }), 'usb');
+    assert.strictEqual(receiverMode({ mode: 'WSPR', freq_hz: 3568600 }), 'usb');
+    assert.strictEqual(receiverMode({ comment: 'FT8 1519Z', freq_hz: 7074000 }), 'usb');
+});
+
+t('an upstream or local spot with no mode is SSB, by the band', () => {
+    // Somebody was talking, so the only question left is which sideband — and
+    // that is a property of the band rather than of the spot.
+    assert.strictEqual(receiverMode({ stream: 'dxcluster', comment: '1515Z', freq_hz: 7143000 }), 'lsb');
+    assert.strictEqual(receiverMode({ stream: 'dxcluster', comment: 'POTA 1512Z', freq_hz: 14200000 }), 'usb');
+    assert.strictEqual(receiverMode({ stream: 'localspot', comment: '[Voice] Paolo', freq_hz: 7157000 }), 'lsb');
+    assert.strictEqual(receiverMode({ stream: 'localspot', comment: '[Voice] Club', freq_hz: 14313000 }), 'usb');
+});
+
+t('a sideband the spotter named is taken as given', () => {
+    assert.strictEqual(receiverMode({ voice_mode: 'LSB', freq_hz: 7150000 }), 'lsb');
+    assert.strictEqual(receiverMode({ voice_mode: 'USB', freq_hz: 14250000 }), 'usb');
+    // Against the split, deliberately: 3615 USB is unusual and is what the
+    // spotter said.
+    assert.strictEqual(receiverMode({ comment: 'USB net 1400Z', freq_hz: 3615000 }), 'usb');
+});
+
+t('the label and the dial can never disagree', () => {
+    // The property this unification exists for, over every comment shape the
+    // archive actually holds.
+    const DIAL = {
+        CW: ['cwl', 'cwu'], USB: ['usb', 'usb'], LSB: ['lsb', 'lsb'],
+        SSB: ['lsb', 'usb'], Voice: ['lsb', 'usb'], AM: ['am', 'am'], FM: ['fm', 'fm'],
+        '': ['lsb', 'usb'],
+    };
+    const rows = [
+        { mode: 'CW' }, { mode: 'FT8' }, { voice_mode: 'USB' },
+        { comment: 'CW 1512Z' }, { comment: '13 dB 23 WPM CQ' }, { comment: 'FT8 1519Z' },
+        { comment: '100th PKP SSB 1517Z' }, { comment: '[Voice] Paolo' },
+        { comment: 'FM 145500' }, { comment: '1515Z' }, { comment: 'POTA' },
+    ];
+    for (const base of rows) {
+        for (const [i, hz] of [7100000, 14200000].entries()) {
+            const spot = { ...base, freq_hz: hz };
+            const label = modeLabel(spot);
+            const dial = receiverMode(spot);
+            const want = DIAL[label] || (label ? ['usb', 'usb'] : null);
+            assert.ok(want, `no expectation for label ${label}`);
+            assert.strictEqual(dial, want[i], `${JSON.stringify(spot)} → ${label} but ${dial}`);
+        }
+    }
+});
+
 // ── The fetch ───────────────────────────────────────────────────────────────
 
 const settle = (ms = 50) => new Promise((r) => setTimeout(r, ms));
@@ -190,7 +338,7 @@ ta('the addon’s own error is a rejection', async () => {
 ta('without the addon there is no row and no request', async () => {
     reset();
     asked.length = 0;
-    const { tree } = mount(LastSpot, { call: 'ZA1RR', enabled: false });
+    const { tree } = mount(LastSpot, { call: 'ZA1RR', enabled: false }, radioCtx);
     await settle();
     assert.strictEqual(tree, null);
     assert.deepStrictEqual(asked, [], asked.join('\n'));
@@ -201,7 +349,7 @@ ta('a spot reads as an age, a frequency and a mode', async () => {
     reset();
     asked.length = 0;
     answer = { spots: [SPOT] };
-    mount(LastSpot, { call: 'ZA1RR', enabled: true });
+    mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
     await settle();
 
     assert.strictEqual(asked.length, 1, asked.join('\n'));
@@ -210,28 +358,62 @@ ta('a spot reads as an age, a frequency and a mode', async () => {
     // A second call with the hook state kept: the promise that resolved above
     // wrote into the same slots, so this render is the one showing the answer.
     // hookStub is not a renderer and does not do this for us.
-    const { tree } = mount(LastSpot, { call: 'ZA1RR', enabled: true });
+    const { tree } = mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
     const text = words(tree);
-    assert.ok(/Last spot/.test(text), text);
+    assert.ok(/Last heard/.test(text), text);
     assert.ok(/ago|just now/.test(text), text);
     assert.ok(/21016\.7/.test(text), text);
     assert.ok(/CW/.test(text), text);
 
     // The rest of the row is on the tooltip rather than in the line — the panel
     // is about the operator and this is a footnote to it.
-    const cell = deep(tree).find((n) => n.props && n.props.title);
+    const cell = deep(tree).find((n) => n.props && /15m/.test(String(n.props.title || '')));
     assert.ok(cell, 'the row carried no tooltip');
-    assert.ok(/15m/.test(cell.props.title), cell.props.title);
     assert.ok(/de MM9PSY/.test(cell.props.title), cell.props.title);
+    drain();
+});
+
+ta('the frequency tunes the receiver to the spot', async () => {
+    reset();
+    tuned.length = 0;
+    answer = { spots: [SPOT] };
+    mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
+    await settle();
+    const { tree } = mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
+
+    const btn = tuneButton(tree);
+    assert.ok(btn, 'the frequency was not a button');
+    // 21016.7 kHz CW is above 10 MHz, so CW-U. The line says CW and the
+    // tooltip says where that puts the dial.
+    assert.ok(/CWU/.test(btn.props.title), btn.props.title);
+
+    btn.props.onClick();
+    assert.deepStrictEqual(tuned, [{ frequency: 21016700, mode: 'cwu' }]);
+    drain();
+});
+
+ta('a spot this receiver cannot reach is text, not a dead button', async () => {
+    // Shown all the same — that the station was heard is the answer — but there
+    // is nowhere to send you, and a button that does nothing is worse than a
+    // reading.
+    reset();
+    tuned.length = 0;
+    answer = { spots: [{ ...SPOT, freq_hz: 144300000, band: '2m' }] };
+    mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
+    await settle();
+    const { tree } = mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
+    assert.ok(/144300\.0/.test(words(tree)), words(tree));
+    assert.ok(!tuneButton(tree), 'an out-of-range spot drew a tune button');
+    answer = { spots: [SPOT] };
     drain();
 });
 
 ta('never heard is said, not left blank', async () => {
     reset();
     answer = { spots: [] };
-    mount(LastSpot, { call: 'ZZ9ZZZ', enabled: true });
+    mount(LastSpot, { call: 'ZZ9ZZZ', enabled: true }, radioCtx);
     await settle();
-    const { tree } = mount(LastSpot, { call: 'ZZ9ZZZ', enabled: true });
+    const { tree } = mount(LastSpot, { call: 'ZZ9ZZZ', enabled: true }, radioCtx);
     const text = words(tree);
     assert.ok(new RegExp(`not heard in ${LAST_SPOT_DAYS} days`).test(text), text);
     answer = { spots: [SPOT] };
@@ -247,9 +429,9 @@ ta('an addon that did not answer says nothing at all', async () => {
     globalThis.fetch = () => Promise.resolve({
         ok: false, status: 503, json: () => Promise.resolve({ error: 'search is busy' }),
     });
-    mount(LastSpot, { call: 'ZA1RR', enabled: true });
+    mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
     await settle();
-    const { tree } = mount(LastSpot, { call: 'ZA1RR', enabled: true });
+    const { tree } = mount(LastSpot, { call: 'ZA1RR', enabled: true }, radioCtx);
     assert.strictEqual(tree, null);
     assert.strictEqual(walk(tree).length, 0);
     globalThis.fetch = was;

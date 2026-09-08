@@ -28,8 +28,6 @@
 // only ordering that means anything for that question and the only one the
 // server can page through at constant cost.
 
-import { modeFromSpot } from './dxclusterTerminal.js';
-
 /** Where the addon lives. Same mount point the terminal socket uses. */
 export const SEARCH_BASE = '/addon/dxcluster';
 
@@ -212,6 +210,24 @@ export async function fetchSearch(params, base = SEARCH_BASE, signal) {
 /** How far back the last-heard line looks. The archive's usual retention. */
 export const LAST_SPOT_DAYS = 30;
 
+// The one stream that is somebody else's ear. `dxcluster` is the spots relayed
+// from the worldwide cluster: the station was heard, but not here and not by
+// this receiver's antenna.
+const UPSTREAM_STREAM = 'dxcluster';
+
+/**
+ * Did this receiver hear it, or did it only read about it?
+ *
+ * Four of the five streams are this radio — the decoder, the CW skimmer, the
+ * voice detector, and the spots people make while listening to it. The fifth is
+ * the world's. The distinction is the difference between "we heard this station
+ * on 20 m" and "somebody in France did", and a line that said the first while
+ * meaning the second would be the one wrong thing this feature could say.
+ */
+export function heardHere(spot) {
+    return !!spot && spot.stream !== UPSTREAM_STREAM;
+}
+
 /** The URL for the one-row last-heard query. */
 export function lastSpotUrl(callsign, base = SEARCH_BASE) {
     const q = new URLSearchParams();
@@ -341,32 +357,103 @@ export function tuneFreq(spot) {
  */
 export function receiverMode(spot) {
     const hz = tuneFreq(spot);
-    const mode = String((spot && (spot.mode || spot.voice_mode)) || '').trim().toUpperCase();
+    // Whatever the row says the mode is — the server's column, or the comment
+    // read the way modeLabel reads it. One source, deliberately: the moment
+    // these two disagree, a row reading CW tunes to LSB, and both halves look
+    // right on their own.
+    const mode = modeLabel(spot).toUpperCase();
 
+    // CW's sideband is a property of the band, not of the spot: lower below
+    // 10 MHz and upper above, the IARU convention.
     if (mode === 'CW') return hz >= SIDEBAND_SPLIT_HZ ? 'cwu' : 'cwl';
     if (mode === 'USB') return 'usb';
     if (mode === 'LSB') return 'lsb';
+    // Only ever from a comment that opened with them, which is a spotter
+    // saying so rather than anything inferred. See SCANNED_MODES.
+    if (mode === 'AM') return 'am';
+    if (mode === 'FM') return 'fm';
+    // A digital mode is upper sideband on every band, 160 m included. FT8 on
+    // 40 m is 7074 USB, not LSB, so this has to beat the split below.
     if (DIGITAL_MODES.has(mode)) return 'usb';
-    if (mode) return hz >= SIDEBAND_SPLIT_HZ ? 'usb' : 'lsb';
 
-    // No mode column: the upstream cluster and the local spots keep it in the
-    // comment, which is the text the transcript's own parser was written for.
-    // Its leading word is checked first, because it is the one place a digital
-    // mode is named and the split below would otherwise put 40 m FT8 on LSB.
-    const note = String((spot && (spot.comment || spot.message)) || '');
-    const lead = note.trim().split(/\s+/)[0];
-    if (lead && DIGITAL_MODES.has(lead.toUpperCase())) return 'usb';
-
-    return modeFromSpot(hz, note) || (hz >= SIDEBAND_SPLIT_HZ ? 'usb' : 'lsb');
+    // What is left is SSB, this receiver's own voice spots, and every upstream
+    // comment that named no mode at all — an island reference, a signal report,
+    // or nothing but the time. All of them are somebody talking, so the answer
+    // is the sideband the band is worked on.
+    return hz >= SIDEBAND_SPLIT_HZ ? 'usb' : 'lsb';
 }
 
-/** What the row calls the mode, which is the server's word and not ours. */
+// Mode names that are safe to look for anywhere in a comment, not just at the
+// front of it. Word-bounded, so FM15 is a grid square rather than FM and
+// PSK31 is not PSK.
+//
+// AM and FM are deliberately absent. `\bFM\b` does not match FM15, but it does
+// match the FM in "NC FM 15" and in half the ways somebody writes a locator by
+// hand, and neither mode appears on an HF cluster often enough to be worth the
+// wrong answers. They are still read as a *leading* word, where a comment that
+// opens with them means the mode.
+const SCANNED_MODES = ['SSB', 'USB', 'LSB', 'CW', ...DIGITAL_MODES];
+
+// The plain modes, for a comment that opens with one. Everything in
+// DIGITAL_MODES already counts; these are the ones a voice or CW spot leads
+// with.
+const LEADING_MODES = new Set(['SSB', 'USB', 'LSB', 'CW', 'AM', 'FM']);
+
+/**
+ * What the row calls the mode — the server's word where there is one.
+ *
+ * ── Why this reads the comment at all ───────────────────────────────────────
+ *
+ * Three of the five streams record a mode as a column and this returns it
+ * unchanged: the decoder says FT8 or WSPR, the CW skimmer says CW, the voice
+ * detector says USB or LSB. Those are observations, and they are most of the
+ * archive.
+ *
+ * The other two have no mode column. The upstream cluster and the local spots
+ * keep whatever the spotter typed, so the mode is in the comment or it is
+ * nowhere:
+ *
+ *   FT8 1519Z                     the mode, as the first word
+ *   13 dB 23 WPM CQ               a relayed skimmer spot: WPM means CW
+ *   [Voice] Radio Amateur Team    this receiver's own voice spot
+ *   100th PKP SSB 1517Z           the mode, four words in
+ *   NA-67, Ocracoke Is, NC 1515Z  an island reference and nothing else
+ *   1515Z                         nothing at all
+ *
+ * Each line above is a rule below, in that order, and the last two are why this
+ * returns '' rather than falling back to the sideband split the way
+ * receiverMode does. That split answers "where would I put the dial", which is
+ * a decision worth guessing at because the alternative is a row you cannot
+ * click. This answers "what was it heard on", which is a fact — and a guessed
+ * fact printed beside a measured one is worse than a blank.
+ *
+ * On this receiver's archive that leaves about one callsign in ten with no mode
+ * on its most recent spot, all of them upstream spots whose comment does not
+ * name one.
+ */
 export function modeLabel(spot) {
     const mode = String((spot && (spot.mode || spot.voice_mode)) || '').trim().toUpperCase();
     if (mode) return mode;
-    // The streams with no mode column say it in the comment, or not at all.
-    const lead = String((spot && (spot.comment || spot.message)) || '').trim().split(/\s+/)[0];
-    return lead && DIGITAL_MODES.has(lead.toUpperCase()) ? lead.toUpperCase() : '';
+
+    const note = String((spot && (spot.comment || spot.message)) || '').trim();
+    if (!note) return '';
+    const up = note.toUpperCase();
+
+    // A relayed skimmer spot carries a speed and a dB figure but no mode word.
+    // First, because it is decisive and because the dB would otherwise look
+    // like the digital decodes that are written the same way.
+    if (/\bWPM\b/.test(up)) return 'CW';
+
+    // This receiver's own voice spots, which is every local spot there is.
+    if (up.startsWith('[VOICE]')) return 'Voice';
+
+    const lead = up.split(/\s+/)[0];
+    if (DIGITAL_MODES.has(lead) || LEADING_MODES.has(lead)) return lead;
+
+    // Somewhere in the rest of it. Word-bounded, and only the names that cannot
+    // be anything else — see SCANNED_MODES.
+    const found = SCANNED_MODES.find((m) => new RegExp(`\\b${m}\\b`).test(up));
+    return found || '';
 }
 
 /** `14095.6` — kHz to one decimal, which is as fine as a spot means. */

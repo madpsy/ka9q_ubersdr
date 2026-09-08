@@ -7,11 +7,13 @@
 import { deep, render, reset, walk, words } from './hookStub.js';
 import { LastSpot } from '../src/panels/CallsignPanel.jsx';
 import {
-    LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, lastSpotUrl, spotAge,
+    LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, heardHere, lastSpotUrl,
+    modeLabel, receiverMode, spotAge,
 } from '../src/lib/dxclusterSearch.js';
 
 module.exports = {
     deep, render, reset, walk, words,
     LastSpot,
-    LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, lastSpotUrl, spotAge,
+    LAST_SPOT_DAYS, dxClusterAvailable, fetchLastSpot, heardHere, lastSpotUrl,
+    modeLabel, receiverMode, spotAge,
 };

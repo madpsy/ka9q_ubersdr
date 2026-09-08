@@ -44,8 +44,8 @@ const {
     deep, render, reset, walk, words,
     NCDXFPanel, BeaconMap, GROUPS, SOLO,
     BEACON_BANDS, BEACON_FREQ, BEACON_MODE, WINDOWS,
-    _resetNcdxf, _seedNcdxf, bandSummary, beaconTarget, cleanRoster, fetchHeard,
-    mergeSpots, ncdxfState, notHeard, receiverAt, refreshNcdxf, resolveBeaconBand,
+    RateLimitedError, _resetNcdxf, _seedNcdxf, bandSummary, beaconTarget, cleanRoster, fetchHeard,
+    mergeSpots, ncdxfState, notHeard, onNcdxf, receiverAt, refreshNcdxf, resolveBeaconBand,
     rowsForBand, savedPrefs, snrLabel, spotsUrl, statsFor, windowLabel,
 } = require('./.build/ncdxf.cjs');
 
@@ -408,6 +408,65 @@ const answer = (status, body) => {
         // another fifteen minutes is the one thing this panel must not do.
         assert.deepStrictEqual(ncdxfState().rows, []);
         assert.ok(/network down/.test(ncdxfState().error));
+    });
+
+    await ta('a rate limit keeps the rows and comes back for more', async () => {
+        _resetNcdxf();
+        answer(200, { spots: [spot()] });
+        await refreshNcdxf(60, true);
+        assert.strictEqual(ncdxfState().rows.length, 1);
+
+        // The API allows one request per two seconds per address per QUERY, and
+        // its key is the filters only — the timestamps that narrow the window
+        // are not in it. So a second tab of this app asking the same question in
+        // the same second is one key, and one of the two is refused.
+        let asked = 0;
+        const limited = () => { asked += 1; return Promise.resolve({ ok: false, status: 429, json: () => Promise.resolve({}) }); };
+        nextFetch = (url) => (String(url).startsWith('/ncdxf_beacons.json')
+            ? Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(ROSTER_DOC) })
+            : limited());
+        // Somebody has to be watching, or the retry is for a panel nobody has
+        // open and is deliberately skipped.
+        const off = onNcdxf(() => {});
+        await refreshNcdxf(60, true);
+
+        // Not a failure: the rows stand and no fault is reported. Blanking the
+        // panel here would be losing a good reading to a collision.
+        assert.strictEqual(ncdxfState().rows.length, 1, 'the rows were thrown away');
+        assert.strictEqual(ncdxfState().error, null, 'a rate limit was reported as a fault');
+        assert.strictEqual(ncdxfState().loading, false);
+
+        // And it comes back — the bucket refills a token in two seconds, so the
+        // panel must not sit on a stale reading until the next poll a quarter of
+        // an hour away.
+        await new Promise((r) => setTimeout(r, 60));
+        answer(200, { spots: [spot(), spot({ callsign: 'ZL6B' })] });
+        await new Promise((r) => setTimeout(r, 2200));
+        assert.ok(asked >= 1, 'the retry never fired');
+        assert.strictEqual(ncdxfState().rows.length, 2, 'the retry did not land');
+        off();
+    });
+
+    await ta('a rate limit is not cached as an answer', async () => {
+        _resetNcdxf();
+        let asked = 0;
+        nextFetch = (url) => {
+            if (String(url).startsWith('/ncdxf_beacons.json')) {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(ROSTER_DOC) });
+            }
+            asked += 1;
+            return Promise.resolve({ ok: false, status: 429, json: () => Promise.resolve({}) });
+        };
+        await refreshNcdxf(60, true);
+        const once = asked;
+        // Reselecting the window, or reopening the panel. The floor is there to
+        // stop one ANSWER being asked for twice; a request that came back with
+        // nothing has not answered anything, and holding the 429 behind the
+        // floor would show it for the full fifteen minutes.
+        await refreshNcdxf(60);
+        assert.ok(asked > once, 'the floor cached the rate limit');
+        // Still no rows, still no fault on screen.
+        assert.strictEqual(ncdxfState().error, null);
     });
 
     await ta('the floor holds, and a new window goes through it', async () => {

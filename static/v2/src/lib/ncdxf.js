@@ -42,6 +42,7 @@
 import { AUTO_BAND } from './bands.js';
 import { distanceBearing } from './callsign.js';
 import { feedInterval } from './serverFeeds.js';
+import { retryDelay } from './backoff.js';
 
 export const ROSTER_URL = '/ncdxf_beacons.json';
 export const SPOTS_URL = '/api/cwskimmer/spots';
@@ -194,16 +195,33 @@ export function spotsUrl(roster, minutes, now = Date.now()) {
 export class SkimmerOffError extends Error {}
 
 /**
+ * Thrown for a 429, which is not a failure at all — it is "not yet".
+ *
+ * The spots API allows one request per two seconds per address per query, and
+ * its rate-limit key is built from the FILTERS only: the band, the callsign
+ * set, the dates and the SNR floor. The from_ts/to_ts that narrow the window
+ * are not in it. So two of these panels asking the same question at the same
+ * moment are one key, not two — a second browser tab, or this panel opening
+ * beside the ncdxf_beacons.html page, and one of them is refused. Both are
+ * ordinary things for one operator to do, which is why this has a type of its
+ * own rather than falling in with the HTTP errors: treated as a failure it
+ * would blank a working panel until the next poll a quarter of an hour later.
+ */
+export class RateLimitedError extends Error {}
+
+/**
  * Fetch and shape one window's decodes.
  *
  * 204 is the API's "nothing matched", which is a perfectly good answer here and
  * the most common one on a quiet band — it resolves to no rows rather than
- * raising. 503 is the receiver saying it does not log CW spots at all, which is
- * a different sentence to put in front of somebody, hence its own error type.
+ * raising. 503 is the receiver saying it does not log CW spots at all, and 429
+ * is it saying "not this second"; each is a different sentence to put in front
+ * of somebody, hence a type each.
  */
 export async function fetchHeard(roster, minutes, now = Date.now()) {
     const res = await fetch(spotsUrl(roster, minutes, now), { cache: 'no-store' });
     if (res.status === 204) return { rows: [], at: now };
+    if (res.status === 429) throw new RateLimitedError('rate limited');
     if (res.status === 503) throw new SkimmerOffError('CW spot logging is not enabled');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
@@ -235,11 +253,26 @@ let state = {
 const listeners = new Set();
 // Stamped on the way OUT, so a burst of opens cannot become a burst of
 // requests — the same rule, for the same reason, as the noise trend's.
+//
+// Cleared again by any failure. The floor exists to stop a question being
+// ASKED twice, and a request that did not come back with an answer has not
+// asked it: leaving the stamp in place after one turns the floor into a cache
+// of the failure, and the panel then shows it for the full fifteen minutes
+// however many times somebody reopens the panel or reselects the window.
 let lastAt = 0;
 // Which request is the current one. A window changed mid-flight leaves an
 // answer to the old question in the air, and without this the slower of the two
 // wins by landing last.
 let seq = 0;
+// The pending retry after a 429, and how many have been tried.
+let retryTimer = null;
+let attempt = 0;
+
+// How many times to come back after a rate limit before saying so on screen.
+// The bucket refills a token in two seconds, so the first retry is nearly
+// always the last — this is for the case where something else is asking on the
+// same schedule and the two keep colliding.
+const RATE_RETRIES = 4;
 
 export function ncdxfState() {
     return state;
@@ -259,6 +292,37 @@ function publish(next) {
 }
 
 /**
+ * Come back after a rate limit.
+ *
+ * Jittered, and that is the whole point rather than a detail: a 429 here means
+ * something else asked the same question within the same two seconds, and the
+ * likeliest something else is another tab of this app running this code. Two
+ * of them retrying on the same curve collide again, and again — the jitter is
+ * what breaks the tie.
+ *
+ * Skipped when nothing is listening any more. The retry outlives the panel that
+ * caused it, because it is a module timer and the panel is unmounted whenever
+ * its section is collapsed, and a request made for a panel nobody has open is
+ * exactly what serverFeeds exists to stop.
+ */
+function retryAfterLimit(minutes) {
+    if (retryTimer) return;
+    const wait = retryDelay(attempt) * (0.75 + Math.random() * 0.5);
+    attempt += 1;
+    retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (listeners.size === 0) return;
+        refreshNcdxf(minutes, true);
+    }, wait);
+}
+
+function clearRetry() {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = null;
+    attempt = 0;
+}
+
+/**
  * Fetch one window, unless the floor says not to.
  *
  * A different window is always fetched: it is a different question, and the
@@ -269,6 +333,12 @@ function publish(next) {
  * claim about the last hour specifically, and going on making it for another
  * fifteen minutes after the receiver stopped answering would be the one thing
  * this panel must not do — quietly show a stale picture of the bands.
+ *
+ * A rate limit is the exception, because it is not a failure: nothing was
+ * learned, so nothing is changed. The rows stay, no fault is reported, and the
+ * question is asked again in a second or so — see retryAfterLimit. Only when
+ * several of those have collided in a row does it become something to say out
+ * loud, and even then the rows already on screen are left alone.
  */
 export function refreshNcdxf(minutes, force = false) {
     const changed = minutes !== state.window;
@@ -278,12 +348,17 @@ export function refreshNcdxf(minutes, force = false) {
     lastAt = Date.now();
     seq += 1;
     const mine = seq;
-    if (changed) publish({ window: minutes, loading: true });
+    // A window being asked for afresh cancels a retry aimed at the old one.
+    if (changed) {
+        clearRetry();
+        publish({ window: minutes, loading: true });
+    }
 
     return loadRoster()
         .then((roster) => fetchHeard(roster, minutes).then((got) => ({ roster, got })))
         .then(({ roster, got }) => {
             if (mine !== seq) return state;
+            clearRetry();
             return publish({
                 roster,
                 rows: got.rows,
@@ -296,6 +371,25 @@ export function refreshNcdxf(minutes, force = false) {
         })
         .catch((err) => {
             if (mine !== seq) return state;
+            // Nothing was answered, so the floor has nothing to hold back.
+            lastAt = 0;
+
+            if (err instanceof RateLimitedError) {
+                if (attempt < RATE_RETRIES) {
+                    retryAfterLimit(minutes);
+                    // Held rows stay held, and a cold start stays on "Loading…"
+                    // rather than claiming for a second and a half that no
+                    // beacons were heard.
+                    return publish({ window: minutes, loading: state.at === 0, error: null });
+                }
+                return publish({
+                    window: minutes,
+                    loading: false,
+                    error: 'too many requests — the receiver is rate limiting this query',
+                });
+            }
+
+            clearRetry();
             return publish({
                 rows: [],
                 window: minutes,
@@ -529,6 +623,7 @@ export function windowLabel(minutes) {
 export function _resetNcdxf() {
     rosterPromise = null;
     listeners.clear();
+    clearRetry();
     lastAt = 0;
     seq += 1;
     state = {

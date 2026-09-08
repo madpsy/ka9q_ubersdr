@@ -10,8 +10,8 @@ import BeaconMap from '../src/components/BeaconMap.jsx';
 import { GROUPS, SOLO } from '../src/panels/groups.jsx';
 import {
     BEACON_BANDS, BEACON_FREQ, BEACON_MODE, WINDOWS,
-    _resetNcdxf, _seedNcdxf, bandSummary, beaconTarget, cleanRoster, fetchHeard,
-    mergeSpots, ncdxfState, notHeard, receiverAt, refreshNcdxf, resolveBeaconBand,
+    RateLimitedError, _resetNcdxf, _seedNcdxf, bandSummary, beaconTarget, cleanRoster, fetchHeard,
+    mergeSpots, ncdxfState, notHeard, onNcdxf, receiverAt, refreshNcdxf, resolveBeaconBand,
     rowsForBand, savedPrefs, snrLabel, spotsUrl, statsFor, windowLabel,
 } from '../src/lib/ncdxf.js';
 
@@ -19,7 +19,7 @@ module.exports = {
     deep, render, reset, walk, words,
     NCDXFPanel, BeaconMap, GROUPS, SOLO,
     BEACON_BANDS, BEACON_FREQ, BEACON_MODE, WINDOWS,
-    _resetNcdxf, _seedNcdxf, bandSummary, beaconTarget, cleanRoster, fetchHeard,
-    mergeSpots, ncdxfState, notHeard, receiverAt, refreshNcdxf, resolveBeaconBand,
+    RateLimitedError, _resetNcdxf, _seedNcdxf, bandSummary, beaconTarget, cleanRoster, fetchHeard,
+    mergeSpots, ncdxfState, notHeard, onNcdxf, receiverAt, refreshNcdxf, resolveBeaconBand,
     rowsForBand, savedPrefs, snrLabel, spotsUrl, statsFor, windowLabel,
 };

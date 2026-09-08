@@ -6,7 +6,7 @@
 - Added **Blocked Bands** which provides a way to block audio from certain bands. In Admin -> Bands set the Group name to 'Blocked' for a given band
 - Added **WWV Clock Decoder** extension - supports the major US clock sources - experimental as difficult to test from the UK
 - Added **Automatic Addon Updates** whenever UberSDR updates
-- Added **DXpedition Panel** showins current and upcoming DXpeditions
+- Added **DXpedition Panel** showing current and upcoming DXpeditions
 
 ### Bug Fixes
 - Fixed **KiwiSDR Registration** for users with public access to the KiwiSDR emulation. I'm not entirely convinced it will remain working but does for now

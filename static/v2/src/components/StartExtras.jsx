@@ -128,25 +128,29 @@ function DownloadButton({ download, label }) {
 }
 
 /**
- * Hand this receiver to the UberSDR desktop client.
+ * Hand this receiver to the UberSDR app, from a desktop.
  *
- * Deliberately not VibeSDR's dialog with a different name on it, because the
- * app it is offering is on *this* machine rather than in a pocket. So there is
- * no QR: the two things somebody at a desktop can do are open the receiver in
- * the client they have, or get the client they do not have, and those are the
- * two buttons.
+ * Three ways out, in the order somebody wants them:
  *
- * Both are needed because neither can be told from the other. A browser cannot
- * ask the operating system whether a scheme is claimed, and following an
- * unclaimed one is silent — so an installed client and a missing one look
- * identical from here, right up until nothing happens. The download beside it is
- * what makes that recoverable without anyone having to guess what went wrong.
+ *   * the link, for the client already on this machine;
+ *   * the QR, for the phone in their pocket — the same `ubersdr://` link, which
+ *     the Android and iOS apps claim, so a camera is the whole of the transfer.
+ *     It is not VibeSDR's QR with a different scheme in it: that one exists
+ *     because VibeSDR is only a phone app, and this one because getting a
+ *     receiver from a desktop to a phone otherwise means typing a UUID;
+ *   * the downloads, for the client they have not got yet.
  *
- * The Android client answers the same link and does not need a QR here to get
- * it: a phone browsing this receiver follows the link directly, without this
- * dialog ever opening (see StartOverlay). The case a QR would have served —
- * getting the URI from this screen onto a phone — is one the phone reaches for
- * itself by opening the receiver.
+ * All three are shown at once because none can be told from the others. A
+ * browser cannot ask the operating system whether a scheme is claimed, and
+ * following an unclaimed one is silent — so an installed client and a missing
+ * one look identical from here, right up until nothing happens. What is on
+ * screen beside the link is what makes that recoverable without anyone having
+ * to guess what went wrong.
+ *
+ * The downloads are on their own row rather than beside the link. They are a
+ * different question — get the app, not open the receiver — and on Linux there
+ * are four of them, which read as a row of alternatives to "Open in App" when
+ * they sit next to it.
  */
 export function UberSdrAppModal({ publicUuid, onClose }) {
     const uri = ubersdrAppUri(publicUuid);
@@ -164,11 +168,16 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
             <div className="stack vibe">
                 <h2 className="vibe__title">Open in the UberSDR app</h2>
                 <p className="vibe__text">
-                    Opens this receiver in the UberSDR desktop client. If it is not
-                    installed yet, download it first.
+                    Opens this receiver in the UberSDR desktop client, or scan the
+                    code to open it in the app on a phone.
                 </p>
                 <div className="vibe__row">
                     <a className="btn btn--primary btn--sm" href={uri}>Open in App</a>
+                </div>
+                <QrCode text={uri} />
+                <p className="vibe__note">Scan with a phone to open this receiver there.</p>
+                <p className="vibe__text">Or download the desktop client:</p>
+                <div className="vibe__row">
                     {downloads.length === 1 ? (
                         <DownloadButton download={offered[0]} label={`Download for ${offered[0].label}`} />
                     ) : (
@@ -176,7 +185,7 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
                         // this recognises — in which case it says what it has
                         // rather than choosing wrongly on somebody's behalf.
                         // Both want the short label: two "Download for …"
-                        // buttons beside "Open in App" is a row of sentences.
+                        // buttons on one row is a row of sentences.
                         offered.map((d) => (
                             <DownloadButton key={d.id} download={d} label={d.label} />
                         ))
@@ -189,7 +198,7 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
                 <div className="vibe__row">
                     <CopyLink uri={uri} />
                 </div>
-                <p className="vibe__note">Desktop and Android apps · instances.ubersdr.org</p>
+                <p className="vibe__note">Desktop, Android and iOS · instances.ubersdr.org</p>
             </div>
         </Modal>
     );

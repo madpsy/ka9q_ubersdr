@@ -57,10 +57,12 @@ export function ubersdrAppUri(publicUuid) {
 // note in clients/electron/package.json) so a link written here does not 404 on
 // the next version bump.
 //
-// `note` is what the operator is actually getting, and is not decoration: the
-// Linux build is x86_64 only and the macOS build is Apple Silicon only, so a
+// `note` is what the operator is actually getting, and is not decoration: a
 // button that said no more than "Download" would be offering an ARM Chromebook
-// an AppImage it cannot run.
+// an AppImage it cannot run. It is deliberately short — which distributions,
+// which architecture, and nothing else. The dialog shows one line per download
+// and there are four for Linux alone, so a note that explained itself turned
+// the card into a page nobody reads.
 //
 // Linux appears twice, which is why `os` is not the identity here and `id` is.
 // The two are not the same download with a different extension:
@@ -100,10 +102,10 @@ export const APP_DOWNLOADS = [
     { id: 'windows', os: 'windows', arch: 'x64', label: 'Windows', note: 'Installer (.exe), x86_64', url: `${RELEASE}/UberSDR.Setup.exe`, icon: `${ICONS}/windows.png` },
     { id: 'macos', os: 'macos', arch: 'arm64', label: 'macOS (Apple Silicon)', note: 'Apple Silicon (.dmg) — M1 and later', url: `${RELEASE}/UberSDR-arm64.dmg`, icon: `${ICONS}/mac.png` },
     { id: 'macos-intel', os: 'macos', arch: 'x64', label: 'macOS (Intel)', note: 'Intel (.dmg) — the pre-Apple-Silicon Macs', url: `${RELEASE}/UberSDR-x64.dmg`, icon: `${ICONS}/mac.png` },
-    { id: 'linux-appimage', os: 'linux', arch: 'x64', label: 'Linux (AppImage, x86_64)', note: 'AppImage — any distribution, no install needed. x86_64', url: `${RELEASE}/UberSDR.AppImage`, icon: `${ICONS}/linux.png` },
-    { id: 'linux-deb', os: 'linux', arch: 'x64', label: 'Linux (.deb, x86_64)', note: '.deb — Debian and Ubuntu: adds a menu entry and opens ubersdr:// links. x86_64', url: `${RELEASE}/UberSDR.deb`, icon: `${ICONS}/linux.png` },
-    { id: 'linux-appimage-arm64', os: 'linux', arch: 'arm64', label: 'Linux (AppImage, ARM64)', note: 'AppImage — any distribution, no install needed. ARM64 (aarch64): Raspberry Pi 5, Asahi, ARM servers', url: `${RELEASE}/UberSDR-arm64.AppImage`, icon: `${ICONS}/linux.png` },
-    { id: 'linux-deb-arm64', os: 'linux', arch: 'arm64', label: 'Linux (.deb, ARM64)', note: '.deb — Debian and Ubuntu: adds a menu entry and opens ubersdr:// links. ARM64 (aarch64): Raspberry Pi 5, Asahi, ARM servers', url: `${RELEASE}/UberSDR-arm64.deb`, icon: `${ICONS}/linux.png` },
+    { id: 'linux-appimage', os: 'linux', arch: 'x64', label: 'Linux (AppImage, x86_64)', note: 'AppImage — any distribution. x86_64', url: `${RELEASE}/UberSDR.AppImage`, icon: `${ICONS}/linux.png` },
+    { id: 'linux-deb', os: 'linux', arch: 'x64', label: 'Linux (.deb, x86_64)', note: '.deb — Debian and Ubuntu. x86_64', url: `${RELEASE}/UberSDR.deb`, icon: `${ICONS}/linux.png` },
+    { id: 'linux-appimage-arm64', os: 'linux', arch: 'arm64', label: 'Linux (AppImage, ARM64)', note: 'AppImage — any distribution. ARM64 (aarch64)', url: `${RELEASE}/UberSDR-arm64.AppImage`, icon: `${ICONS}/linux.png` },
+    { id: 'linux-deb-arm64', os: 'linux', arch: 'arm64', label: 'Linux (.deb, ARM64)', note: '.deb — Debian and Ubuntu. ARM64 (aarch64)', url: `${RELEASE}/UberSDR-arm64.deb`, icon: `${ICONS}/linux.png` },
 ];
 
 /**

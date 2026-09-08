@@ -1933,11 +1933,11 @@ button.lsn-dot::after {
    button's text at any UI scale, and `width: auto` because the three are not
    the same shape — Tux is taller than he is wide, the Windows flag is square. */
 .vibe__os { height: 1.25em; width: auto; flex: none; }
-/* Apple's App Store badge, which is the iOS dialog's download button — there is
-   no file to offer, only the store page. Height is scaled by --ui-scale like
-   everything else in the card, with the width left to the artwork:
-   the badge is a fixed 925x310 and squashing it is a guideline violation as well
-   as ugly. `display: block` because an inline anchor around an image leaves a
+/* The store badges — Apple's on the iOS dialog, Google Play's on the Android
+   one. Height is scaled by --ui-scale like everything else in the card, with
+   the width left to the artwork: both are supplied at a fixed aspect (925x310
+   and 928x313) and squashing either is a guideline violation as well as ugly.
+   `display: block` because an inline anchor around an image leaves a
    descender's worth of gap under it. */
 .vibe__badge { display: block; line-height: 0; }
 .vibe__badge img { height: calc(40px * var(--ui-scale)); width: auto; }

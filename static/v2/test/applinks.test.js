@@ -12,8 +12,9 @@
 
 const assert = require('assert');
 const {
-    APP_DOWNLOADS, appDownloads, detectDesktopOS, hasMobileApp, IOS_APP_STORE,
-    IOS_APP_STORE_BADGE, isIOS, ubersdrAppUri, vibesdrUri,
+    ANDROID_APK, ANDROID_BADGE, APP_DOWNLOADS, appDownloads, detectDesktopOS,
+    hasMobileApp, IOS_APP_STORE, IOS_APP_STORE_BADGE, isAndroid, isIOS,
+    ubersdrAppUri, vibesdrUri,
 } = require('./.build/applinks.cjs');
 
 let pass = 0;
@@ -307,6 +308,76 @@ t('the App Store badge is a file this server actually has', () => {
     assert.ok(IOS_APP_STORE_BADGE.startsWith('/images/'), IOS_APP_STORE_BADGE);
     const file = path.join(__dirname, '..', '..', IOS_APP_STORE_BADGE.replace(/^\//, ''));
     assert.ok(fs.existsSync(file), `${file} is missing`);
+});
+
+// --- Android -----------------------------------------------------------------
+//
+// The other mobile dialog, which differs from iOS only in where the app comes
+// from: a file, because there is no Play listing yet.
+
+t('Android phones and tablets are Android', () => {
+    const cases = [
+        'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 14; Pixel Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0',
+    ];
+    for (const ua of cases) assert.strictEqual(isAndroid(nav(ua)), true, ua);
+    assert.strictEqual(isAndroid(nav('', { userAgentData: { platform: 'Android', mobile: true } })), true);
+});
+
+// The whole point of the split: each platform gets exactly one dialog, and a
+// device answering to both would render the wrong one — an APK offered to an
+// iPhone, or the App Store to a Pixel.
+t('nothing is both iOS and Android', () => {
+    const cases = [
+        ['Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36', {}],
+        ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Mobile/15E148', {}],
+        ['Mozilla/5.0 (iPad; CPU OS 18_1 like Mac OS X) Mobile/15E148', {}],
+        ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/18.1 Safari/605.1.15', { maxTouchPoints: 5 }],
+    ];
+    for (const [ua, extra] of cases) {
+        assert.ok(!(isIOS(nav(ua, extra)) && isAndroid(nav(ua, extra))), ua);
+    }
+});
+
+// Android says `Linux` in every user agent it sends, which is the trap
+// detectDesktopOS exists to avoid — the two must not have drifted apart.
+t('desktops are not Android', () => {
+    for (const ua of [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) Chrome/131.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/18.1 Safari/605.1.15',
+        'Mozilla/5.0 (X11; CrOS x86_64 14541.0.0)',
+        '',
+    ]) assert.strictEqual(isAndroid(nav(ua, { maxTouchPoints: 0 })), false, ua);
+    assert.strictEqual(isAndroid({}), false);
+    assert.strictEqual(isAndroid(null), false);
+});
+
+t('every Android device is a device with the app', () => {
+    const ua = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36';
+    assert.strictEqual(hasMobileApp(nav(ua)), true);
+});
+
+// The APK is a release asset under a fixed name, for the same reason the
+// desktop ones are: a versioned filename would 404 every link already handed
+// out on the next bump. See ARTIFACT in clients/capacitor/build.sh.
+t('the Android download is the release asset, under its fixed name', () => {
+    const RELEASE = 'https://github.com/madpsy/ka9q_ubersdr/releases/download/latest';
+    assert.strictEqual(ANDROID_APK, `${RELEASE}/UberSDR.apk`);
+    assert.ok(!/\$\{|\bundefined\b/.test(ANDROID_APK), ANDROID_APK);
+    // An .aab is not installable — Play splits it server-side — so a link to
+    // one would hand a sideloader a file that cannot be opened.
+    assert.ok(ANDROID_APK.endsWith('.apk'), ANDROID_APK);
+});
+
+t('the Play badge is a file this server actually has', () => {
+    const fs = require('fs');
+    const path = require('path');
+    assert.ok(ANDROID_BADGE.startsWith('/images/'), ANDROID_BADGE);
+    const file = path.join(__dirname, '..', '..', ANDROID_BADGE.replace(/^\//, ''));
+    assert.ok(fs.existsSync(file), `${file} is missing`);
+    assert.notStrictEqual(ANDROID_BADGE, IOS_APP_STORE_BADGE);
 });
 
 console.log(`\n${pass} passed`);

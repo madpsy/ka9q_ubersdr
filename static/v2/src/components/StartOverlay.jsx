@@ -20,8 +20,10 @@ import { shellChoosable, writeShell } from '../lib/shellPref.js';
 import { Button, Icon } from './ui.jsx';
 import { connectionCheck, getBypassPassword, setBypassPassword } from '../radio/session.js';
 import { MOBILE_QUERY, SHELL_ROOM_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
-import { IosAppModal, PasswordModal, UberSdrAppModal, VibeSdrModal } from './StartExtras.jsx';
-import { hasMobileApp, isIOS, ubersdrAppUri, vibesdrUri } from '../lib/appLinks.js';
+import {
+    AndroidAppModal, IosAppModal, PasswordModal, UberSdrAppModal, VibeSdrModal,
+} from './StartExtras.jsx';
+import { hasMobileApp, isAndroid, isIOS, vibesdrUri } from '../lib/appLinks.js';
 // The same question the top bar's callsign lookup asks, answered in one place.
 // What it is used for here is leaving out the "Open in App" link, which in an
 // app would offer to open the receiver that is open — a QR code to scan with
@@ -58,7 +60,7 @@ export default function StartOverlay() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [started, setStarted] = useState(false);
-    const [dialog, setDialog] = useState(null);   // 'vibesdr' | 'app' | 'ios' | 'password' | null
+    const [dialog, setDialog] = useState(null);   // 'vibesdr' | 'app' | 'ios' | 'android' | 'password' | null
     const buttonRef = useRef(null);
     const mobile = useMediaQuery(MOBILE_QUERY);
     // What to call the gesture. `any-pointer`, like every other touch decision
@@ -135,24 +137,26 @@ export default function StartOverlay() {
     const publicUuid = (serverInfo && serverInfo.public_uuid) || '';
     const inApp = insideApp();
 
-    // On a phone the deep link goes straight to the app: the QR dialog exists
-    // to get the URI onto a *different* device, and this is that device.
+    // On a phone the VibeSDR link goes straight to the app: that dialog is a QR
+    // code, which exists to get the URI onto a *different* device, and this is
+    // that device. UberSDR's own button is the one below and no longer works
+    // this way — see openInApp.
     //
-    // Both links work the same way and for the same reason. Nothing is torn
-    // down before leaving, unlike v1's version of this — v1 drops its sockets
-    // on the way out because the receiver is already running by the time the
-    // button exists, and here it has not started: this overlay *is* the thing
-    // standing between the page and its first connection.
+    // Nothing is torn down before leaving, unlike v1's version of this — v1
+    // drops its sockets on the way out because the receiver is already running
+    // by the time the button exists, and here it has not started: this overlay
+    // *is* the thing standing between the page and its first connection.
+    //
     // Whether to follow the link or to offer the dialog is a question about the
     // *device*, not about the width of its screen. `mobile` is a media query —
     // right for a phone, wrong for every tablet, which has the app and a wide
-    // screen and was being offered a Linux download because of it.
+    // screen and was being offered a desktop dialog because of it.
     const appHere = hasMobileApp();
-    // iOS is the one device with the app that is not simply handed the link.
-    // A scheme nobody claims is silent there with nothing offered in its place,
-    // and the app cannot be side-loaded — so the App Store page has to be on
-    // screen beside the link rather than behind it. See IosAppModal.
+    // Which mobile platform, for the two dialogs that differ only in where the
+    // app comes from — the App Store, or the APK. See IosAppModal and
+    // AndroidAppModal.
     const ios = isIOS();
+    const android = isAndroid();
     // Where the two layouts are both possible: a touchscreen with room for the
     // docks. See the buttons.
     const simpleOffered = shellChoosable({ touch: tapNotClick, roomy });
@@ -162,9 +166,19 @@ export default function StartOverlay() {
         setDialog('vibesdr');
     };
 
+    // Every platform gets a dialog rather than the link on its own, and mobile
+    // no longer excepted: following an unclaimed scheme does nothing anywhere,
+    // says nothing anywhere, and a phone has no second window in which to
+    // notice — the tap simply appears not to work. What each dialog adds is the
+    // way to fix that, which is the only thing that differs between them: a
+    // store page, an APK, or an installer.
+    //
+    // It costs a tap on a device that does have the app. That is the trade, and
+    // it is the right way round: the tap is one somebody makes knowing what it
+    // does, where the silence was a dead end nothing on screen explained.
     const openInApp = () => {
         if (ios) { setDialog('ios'); return; }
-        if (appHere) { window.location.href = ubersdrAppUri(publicUuid); return; }
+        if (android) { setDialog('android'); return; }
         setDialog('app');
     };
 
@@ -315,6 +329,9 @@ export default function StartOverlay() {
             )}
             {dialog === 'ios' && (
                 <IosAppModal publicUuid={publicUuid} onClose={() => setDialog(null)} />
+            )}
+            {dialog === 'android' && (
+                <AndroidAppModal publicUuid={publicUuid} onClose={() => setDialog(null)} />
             )}
             {dialog === 'password' && (
                 <PasswordModal

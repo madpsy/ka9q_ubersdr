@@ -11,8 +11,8 @@ import { Button, Modal } from './ui.jsx';
 import { loadScript } from '../lib/loadScript.js';
 import { connectionCheck, getBypassPassword, setBypassPassword } from '../radio/session.js';
 import {
-    APP_DOWNLOADS, appDownloads, detectDesktopOS, IOS_APP_STORE, IOS_APP_STORE_BADGE,
-    ubersdrAppUri, vibesdrUri,
+    ANDROID_APK, ANDROID_BADGE, APP_DOWNLOADS, appDownloads, detectDesktopOS,
+    IOS_APP_STORE, IOS_APP_STORE_BADGE, ubersdrAppUri, vibesdrUri,
 } from '../lib/appLinks.js';
 
 // v1's QR renderer, loaded on demand. 20 KB that only a phone-facing dialog
@@ -242,6 +242,59 @@ export function IosAppModal({ publicUuid, onClose }) {
                     <CopyLink uri={uri} />
                 </div>
                 <p className="vibe__note">iPhone and iPad · instances.ubersdr.org</p>
+            </div>
+        </Modal>
+    );
+}
+
+/**
+ * The same hand-off, on Android.
+ *
+ * IosAppModal's twin and for the same reason — a scheme nobody claims is silent,
+ * and on a phone that is indistinguishable from a broken page — with the one
+ * difference that Android can be handed a file. So the app beside the link is
+ * an APK rather than a store page.
+ *
+ * Which is why the note above the badge is not decoration. A download from a
+ * browser is a sideload: Android asks for an install permission the first time,
+ * and the prompt is alarming if it arrives unannounced. Saying so before the
+ * tap is the difference between an expected step and a warning.
+ */
+export function AndroidAppModal({ publicUuid, onClose }) {
+    const uri = ubersdrAppUri(publicUuid);
+
+    return (
+        <Modal onClose={onClose} label="Open in the UberSDR app">
+            <div className="stack vibe">
+                <h2 className="vibe__title">Open in the UberSDR app</h2>
+                <p className="vibe__text">
+                    Opens this receiver in the UberSDR app. If it is not installed
+                    yet, download it below first.
+                </p>
+                <div className="vibe__row">
+                    <a className="btn btn--primary btn--sm" href={uri}>Open in App</a>
+                </div>
+                <p className="vibe__note">
+                    Not on Google Play yet — this downloads the APK and installs it
+                    directly. Android will ask you to allow installing from your
+                    browser.
+                </p>
+                {/* The badge carries its own wording, so the link has no label —
+                    `alt` is what a screen reader announces and what shows if the
+                    image does not. */}
+                <a
+                    className="vibe__badge"
+                    href={ANDROID_APK}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    <img src={ANDROID_BADGE} alt="Download the UberSDR app for Android" />
+                </a>
+                <code className="vibe__uri">{uri}</code>
+                <div className="vibe__row">
+                    <CopyLink uri={uri} />
+                </div>
+                <p className="vibe__note">Android · instances.ubersdr.org</p>
             </div>
         </Modal>
     );

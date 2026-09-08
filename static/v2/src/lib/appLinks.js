@@ -187,13 +187,14 @@ export const IOS_APP_STORE = 'https://apps.apple.com/gb/app/ubersdr/id6801886706
 export const IOS_APP_STORE_BADGE = '/images/appstore.png';
 
 /**
- * Whether this is an iPhone or an iPad — the half of `hasMobileApp` that cannot
- * simply be handed the link.
+ * Whether this is an iPhone or an iPad — one of the two mobile platforms, each
+ * of which is offered the app beside the link rather than only the link.
  *
- * Android can: following `ubersdr://` there either opens the app or does
- * nothing, and Play offers to find it. On iOS a scheme nobody claims is the
- * same silence with no way back, and the app cannot be side-loaded — so the
- * store page has to be on screen beside the link rather than behind it.
+ * A scheme nobody claims is silent everywhere, and on a phone there is no
+ * second window to notice that in: the tap does nothing and the page looks
+ * broken. What separates the two platforms is only where the app comes from —
+ * the App Store here, an APK on Android — and `isAndroid` below says why that
+ * one is not a store link.
  *
  * The same two disguises as everywhere else in this file: an iPad has said
  * `Macintosh` since iOS 13, which `maxTouchPoints` is what separates, and a
@@ -218,6 +219,53 @@ export function isIOS(nav) {
     // iPadOS pretending to be a Mac.
     if (/Mac/i.test(text) && Number(n.maxTouchPoints) > 1) return true;
     return false;
+}
+
+/**
+ * Where the Android app comes from, for now.
+ *
+ * The APK from the same rolling `latest` release the desktop builds come from,
+ * under the same fixed name (see ARTIFACT in clients/capacitor/build.sh) so a
+ * link written here does not 404 on the next version bump.
+ *
+ * A file rather than a Play listing because there is not one yet, which is why
+ * the dialog says "sideload" rather than letting the badge imply a store: the
+ * install comes from a browser, and Android asks for an explicit permission
+ * first. Somebody not expecting that prompt reads it as the download having
+ * gone wrong.
+ *
+ * Whether this APK is later replaced in place by a Play install or has to be
+ * uninstalled first is not decided here and is not yet decided at all — it
+ * turns on which key signs the delivered app, a choice made once when the
+ * listing is created and never again. See the BUNDLE note in
+ * clients/capacitor/build.sh, which is where that has to be got right.
+ */
+export const ANDROID_APK = `${RELEASE}/UberSDR.apk`;
+
+// Google Play's badge, served by the instance from static/images/ like the App
+// Store's. It carries its own wording, which is why the link around it has no
+// label — see the note in IosAppModal's twin.
+export const ANDROID_BADGE = '/images/playstore.png';
+
+/**
+ * Whether this is an Android phone or tablet.
+ *
+ * `Android` is in every Android user agent and in nothing else — the string
+ * that follows it is `Linux`, which is the trap `detectDesktopOS` is careful
+ * about, and not the other way round. So this is the one platform test in this
+ * file with no disguise to see through.
+ *
+ * `nav` is a parameter for the same reason it is one everywhere else here.
+ */
+export function isAndroid(nav) {
+    const n = nav || (typeof navigator !== 'undefined' ? navigator : null);
+    if (!n) return false;
+
+    const hints = n.userAgentData || null;
+    const ua = String(n.userAgent || '');
+    const text = `${(hints && hints.platform) || n.platform || ''} ${ua}`;
+
+    return /Android/i.test(text);
 }
 
 export function detectDesktopOS(nav) {

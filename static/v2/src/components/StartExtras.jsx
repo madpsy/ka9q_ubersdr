@@ -83,6 +83,27 @@ function CopyLink({ uri }) {
 }
 
 /**
+ * The address of this page, for a QR somebody is going to scan with a phone.
+ *
+ * Origin and path only, and never `location.href`: this page can be opened with
+ * `?password=` (see radio/session.js), and a QR on a desktop screen is
+ * photographed by whoever is in the room. Nothing else in the query string is
+ * worth carrying either — a shared *tuning* is what buildShareUrl is for, and
+ * this is a different question, which receiver rather than which signal.
+ *
+ * Empty when there is no location to read, which callers use to leave the code
+ * out rather than draw one for the string "undefined".
+ */
+function pageUrl() {
+    try {
+        const { origin, pathname } = window.location;
+        return origin ? `${origin}${pathname || '/'}` : '';
+    } catch (e) {
+        return '';
+    }
+}
+
+/**
  * Hand this receiver to the VibeSDR app.
  *
  * On a phone the deep link is followed straight away — v1 skips its own dialog
@@ -140,15 +161,21 @@ function DownloadButton({ download, label }) {
  *
  *   * the link, for the client already on this machine;
  *   * the downloads, for the client they have not got yet;
- *   * the QR, for the phone in their pocket — the same `ubersdr://` link, which
- *     the Android and iOS apps claim, so a camera is the whole of the transfer.
- *     It is not VibeSDR's QR with a different scheme in it: that one exists
- *     because VibeSDR is only a phone app, and this one because getting a
- *     receiver from a desktop to a phone otherwise means typing a UUID.
+ *   * the QR, for the phone in their pocket — this page's own address, so that
+ *     scanning it opens the receiver whatever the phone has installed. It is
+ *     deliberately not the `ubersdr://` link printed beneath it: that one is
+ *     scanned successfully only by a phone that already has the app, and errors
+ *     on every other, which is a dead end with a camera in the way and nothing
+ *     on screen to explain it. The page works on its own and carries its own
+ *     way into the app.
  *
- * The QR sits at the bottom, directly above the link text, because it is that
- * text — the two are one thing said twice, for a camera and for a clipboard,
- * and the pair belongs together under the buttons rather than between them.
+ * That is also why this is not VibeSDR's QR with a different scheme in it. That
+ * dialog has no page to fall back to — VibeSDR is somebody else's app and its
+ * link is the only thing it can be handed.
+ *
+ * The QR sits at the bottom, above the link text, because the two are the same
+ * hand-off aimed at different devices — the code at a phone, the text at this
+ * machine — and the pair belongs under the buttons rather than between them.
  *
  * All three are shown at once because none can be told from the others. A
  * browser cannot ask the operating system whether a scheme is claimed, and
@@ -172,6 +199,20 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
     // offered rather than detected. Empty for a platform this cannot name.
     const [downloads] = useState(() => appDownloads(detectDesktopOS()));
     const offered = downloads.length ? downloads : APP_DOWNLOADS;
+    // The QR is this page's address rather than the `ubersdr://` link beside it,
+    // which is the one thing in this dialog a phone camera would refuse: the
+    // scanners people actually use — the iOS Camera, Google Lens — are built
+    // around http(s), and a custom scheme is at best inconsistently offered and
+    // at worst silently dropped. An https link is scanned by all of them.
+    //
+    // It also fails better. A scheme QR that does open hands the receiver to an
+    // app that may not be installed, and that is the same silence this dialog
+    // exists to avoid — with a camera in the way, so there is nothing on screen
+    // to explain it. The page opens either way, can be listened to in the phone's
+    // browser as it stands, and carries its own "Open in App" button for the app
+    // proper. The direct link is still here for anyone who wants it: it is the
+    // text under the code, and the thing Copy link copies.
+    const [here] = useState(pageUrl);
 
     return (
         <Modal onClose={onClose} label="Open in the UberSDR app">
@@ -202,8 +243,8 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
                 {downloads.map((d) => (
                     <p key={d.id} className="vibe__note">{d.note}</p>
                 ))}
-                <QrCode text={uri} />
-                <p className="vibe__note">Scan with phone to open in mobile app</p>
+                {here && <QrCode text={here} />}
+                {here && <p className="vibe__note">Scan with phone to open this receiver there</p>}
                 <code className="vibe__uri">{uri}</code>
                 <div className="vibe__row">
                     <CopyLink uri={uri} />

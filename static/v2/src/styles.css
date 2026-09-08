@@ -4369,7 +4369,18 @@ a.btn { text-decoration: none; }
     text-transform: uppercase;
     color: var(--text-faint);
 }
-.modal__body { position: relative; max-width: 100%; max-height: 100%; display: flex; }
+/* `align-items: flex-start` is what keeps a dialog taller than the window in one
+   piece. This is a flex container, and a flex item's `min-height: auto` only
+   protects the *main* axis — which here is the width. So with the default
+   `stretch`, a card whose content overflows was given a used height of exactly
+   this box (capped at the viewport by max-height) while its children carried on
+   past it: the background, the border and the rounded corners all stopped at the
+   fold, and everything below it was painted straight onto the backdrop.
+   `flex-start` sizes the card to its content instead, and this box scrolls.
+
+   It changes nothing when the content fits: this box is centred rather than
+   stretched inside .modal, so its height is already the card's. */
+.modal__body { position: relative; max-width: 100%; max-height: 100%; display: flex; align-items: flex-start; }
 .modal__close {
     position: absolute;
     top: 6px;

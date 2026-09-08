@@ -468,11 +468,9 @@ const answer = (status, body) => {
         const { tree } = mount(NCDXFPanel, {}, context());
         const said = words(tree);
         assert.ok(/No beacons heard/.test(said), said);
+        // Which window it is talking about. Without it the panel is claiming
+        // something much stronger than it knows on a 24-hour view.
         assert.ok(/the last hour/.test(said), said);
-        // The receiver may simply not be listening on the beacon frequencies,
-        // which is the most likely reason of all and not one anybody would
-        // guess from an empty list.
-        assert.ok(/14\.100/.test(said), said);
     });
 
     t('an empty band says the other bands have something', () => {

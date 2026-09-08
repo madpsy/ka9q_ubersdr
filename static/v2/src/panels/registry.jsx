@@ -388,8 +388,8 @@ const BUILT_IN = [
     // anything — unlike DXpeditions above, whose calendar is the same on every
     // receiver in the world and so says nothing when it is empty. An empty
     // beacon panel is a reading: it means the bands are shut, or that this
-    // skimmer does not cover the five beacon frequencies, and both are worth
-    // being told. See panels/NCDXFPanel.jsx for what it says in each case.
+    // skimmer is not listening where the beacons transmit, and either is worth
+    // being told.
     //
     // Minimal: the beacon rows, without the window and band pickers, the band
     // strip, the figures or the map.

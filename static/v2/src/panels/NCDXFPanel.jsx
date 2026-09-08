@@ -32,12 +32,12 @@
 //
 // ── Gating and cost ─────────────────────────────────────────────────────────
 //
-// Present whenever the receiver has a CW skimmer, empty state and all: a
-// skimmer that does not cover 14.100 / 18.110 / 21.150 / 24.930 / 28.200 will
-// never hear a beacon, and a panel that says so is more use than one that is
-// silently missing. It costs nothing until it is opened — the panel ships
-// collapsed and Section does not mount a closed body — and once open it is one
-// request every fifteen minutes.
+// Present whenever the receiver has a CW skimmer, empty state and all: an
+// empty list is itself a reading — the bands are shut, or this skimmer is not
+// listening where the beacons transmit — and either is more use than a panel
+// that is silently missing. It costs nothing until it is opened, since the
+// panel ships collapsed and Section does not mount a closed body, and once
+// open it is one request every fifteen minutes.
 //
 // `minimal` is the rows and nothing else: no controls, no band strip, no
 // footer, no map. What survives is the answer, which is which beacons are
@@ -293,17 +293,13 @@ export default function NCDXFPanel({ minimal }) {
     const heardOn = band === 'all' ? '' : ` on ${band}`;
 
     // Why the list is empty, which is the whole of what this panel has to say
-    // on a quiet band and is two quite different sentences. A filter hiding
-    // decodes that exist is the operator's own doing and is fixed by one click;
-    // nothing anywhere is either the bands or — far more likely, and something
-    // nobody would guess from an empty list — a skimmer that is not listening
-    // on the beacon frequencies at all.
+    // on a quiet band. A filter hiding decodes that exist is the operator's own
+    // doing and is fixed by one click, so it is worth saying; nothing anywhere
+    // is just a shut band, and is left as the plain statement it is.
     const emptyNote = state.rows.length > 0
         ? `No beacons heard${heardOn} in ${windowLabel(prefs.window)}.`
             + ' Another band has them — clear the band filter.'
-        : `No beacons heard${heardOn} in ${windowLabel(prefs.window)}.`
-            + ' The bands may be closed, or the skimmer may not cover'
-            + ' 14.100 · 18.110 · 21.150 · 24.930 · 28.200 MHz.';
+        : `No beacons heard${heardOn} in ${windowLabel(prefs.window)}.`;
 
     return (
         <div className="stack">

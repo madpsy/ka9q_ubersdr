@@ -7,7 +7,7 @@
 - Added **WWV Clock Decoder** extension - supports the major US clock sources - experimental as difficult to test from the UK
 - Added **Automatic Addon Updates** whenever UberSDR updates
 - Added **DXpedition Panel** showing current and upcoming DXpeditions
-- Added **NCDXF Beacon Panel** (v2 UI) showing which of the 18 NCDXF/IARU beacons this receiver has heard, per band, with a world map. Needs the CW skimmer covering 14.100, 18.110, 21.150, 24.930 and 28.200 MHz
+- Added **NCDXF Beacon Panel** showing which of the 18 NCDXF/IARU beacons this receiver has heard - needs the CW skimmer
 
 ### Bug Fixes
 - Fixed **KiwiSDR Registration** for users with public access to the KiwiSDR emulation. I'm not entirely convinced it will remain working but does for now

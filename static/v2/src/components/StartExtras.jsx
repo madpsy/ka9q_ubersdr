@@ -20,7 +20,13 @@ import {
 // treatment the Hamlib module gets.
 const QR_SRC = '/qrcode.min.js';
 
-function QrCode({ text, size = 200 }) {
+// 160px, which both dialogs take. The link inside is a fixed 59 characters —
+// scheme, `connect`, and a canonical UUID — so it is always a version-4 code at
+// error level M: 33 modules, and near enough 4.8 physical pixels each at this
+// size. A phone camera wants two or three, so there is room to spare, and the
+// card is short enough that neither dialog has to be scrolled to reach the
+// buttons under it.
+function QrCode({ text, size = 160 }) {
     const box = useRef(null);
     const [failed, setFailed] = useState(false);
 

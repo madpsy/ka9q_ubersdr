@@ -133,12 +133,16 @@ function DownloadButton({ download, label }) {
  * Three ways out, in the order somebody wants them:
  *
  *   * the link, for the client already on this machine;
+ *   * the downloads, for the client they have not got yet;
  *   * the QR, for the phone in their pocket — the same `ubersdr://` link, which
  *     the Android and iOS apps claim, so a camera is the whole of the transfer.
  *     It is not VibeSDR's QR with a different scheme in it: that one exists
  *     because VibeSDR is only a phone app, and this one because getting a
- *     receiver from a desktop to a phone otherwise means typing a UUID;
- *   * the downloads, for the client they have not got yet.
+ *     receiver from a desktop to a phone otherwise means typing a UUID.
+ *
+ * The QR sits at the bottom, directly above the link text, because it is that
+ * text — the two are one thing said twice, for a camera and for a clipboard,
+ * and the pair belongs together under the buttons rather than between them.
  *
  * All three are shown at once because none can be told from the others. A
  * browser cannot ask the operating system whether a scheme is claimed, and
@@ -168,14 +172,12 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
             <div className="stack vibe">
                 <h2 className="vibe__title">Open in the UberSDR app</h2>
                 <p className="vibe__text">
-                    Opens this receiver in the UberSDR desktop client, or scan the
-                    code to open it in the app on a phone.
+                    Opens this receiver in the UberSDR desktop client. If it is not
+                    installed yet, download it below.
                 </p>
                 <div className="vibe__row">
                     <a className="btn btn--primary btn--sm" href={uri}>Open in App</a>
                 </div>
-                <QrCode text={uri} />
-                <p className="vibe__note">Scan with a phone to open this receiver there.</p>
                 <p className="vibe__text">Or download the desktop client:</p>
                 <div className="vibe__row">
                     {downloads.length === 1 ? (
@@ -194,6 +196,8 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
                 {downloads.map((d) => (
                     <p key={d.id} className="vibe__note">{d.note}</p>
                 ))}
+                <QrCode text={uri} />
+                <p className="vibe__note">Scan with a phone to open this receiver there.</p>
                 <code className="vibe__uri">{uri}</code>
                 <div className="vibe__row">
                     <CopyLink uri={uri} />

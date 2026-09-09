@@ -41,39 +41,19 @@ type migratedSession struct {
 	hasSpectrum   bool
 }
 
-// MigrateSessionHistoryIfEmpty backfills `session` and its child tables from the
-// legacy snapshot log if the new tables are empty and the old one has rows.
+// MigrateSessionHistoryIfNeeded backfills `session` and its child tables from
+// the legacy snapshot log, if that log is still present.
 //
 // Must be called during startup, before any live session writer runs: every
 // session in the legacy table belongs to a previous process lifetime and is
 // therefore closed, which is what lets ended_at be set from last_seen.
-func MigrateSessionHistoryIfEmpty(db *sql.DB, readDB *sql.DB, geoIPService *GeoIPService) {
+func MigrateSessionHistoryIfNeeded(db *sql.DB, readDB *sql.DB, geoIPService *GeoIPService) {
 	if db == nil || readDB == nil {
 		return
 	}
 
-	var migrated int
-	if err := readDB.QueryRow(`SELECT EXISTS(SELECT 1 FROM session LIMIT 1)`).Scan(&migrated); err != nil {
-		log.Printf("[session migration] checking session table: %v (skipping)", err)
-		return
-	}
-	if migrated != 0 {
-		return // already populated
-	}
-
-	// The legacy table is not part of the schema any more: it only exists on
-	// installations that predate the session tables, or transiently while the
-	// JSONL importer is reading old files in.
-	var legacyExists int
-	if err := readDB.QueryRow(
-		`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions')`,
-	).Scan(&legacyExists); err != nil || legacyExists == 0 {
-		return
-	}
-
-	var legacyRows int
-	if err := readDB.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&legacyRows); err != nil {
-		log.Printf("[session migration] counting legacy rows: %v (skipping)", err)
+	legacyRows, present := legacySessionRows(readDB)
+	if !present {
 		return
 	}
 	if legacyRows == 0 {
@@ -81,7 +61,7 @@ func MigrateSessionHistoryIfEmpty(db *sql.DB, readDB *sql.DB, geoIPService *GeoI
 		return // nothing to convert
 	}
 
-	log.Printf("[session migration] session table is empty — converting %d legacy snapshot rows", legacyRows)
+	log.Printf("[session migration] converting %d legacy snapshot rows", legacyRows)
 
 	task := bgTasks.Start("session-history-migration", BackgroundTaskOpts{
 		Name: "Session history migration",
@@ -114,6 +94,37 @@ func MigrateSessionHistoryIfEmpty(db *sql.DB, readDB *sql.DB, geoIPService *GeoI
 		task.Complete(fmt.Sprintf("%s sessions recovered from %s snapshot rows",
 			formatCount(len(sessions)), formatCount(legacyRows)))
 	}()
+}
+
+// legacySessionRows reports how many rows the legacy snapshot log holds, and
+// whether the table is there at all. It is not part of the schema any more: it
+// only exists on installations that predate the session tables.
+//
+// Its presence is the whole gate, because it is dropped only once its contents
+// have been converted — so a run that failed part way, or one interrupted by a
+// restart, is retried on the next startup instead of stranding the history. The
+// `session` table cannot serve as the gate: the live writer starts recording the
+// moment the first listener connects, so "not empty" says nothing about whether
+// the legacy log was ever converted. Re-running costs nothing but time: every
+// insert is conditional on the session not already being recorded.
+func legacySessionRows(readDB *sql.DB) (int, bool) {
+	var exists int
+	if err := readDB.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions')`,
+	).Scan(&exists); err != nil {
+		log.Printf("[session migration] looking for the legacy sessions table: %v (skipping)", err)
+		return 0, false
+	}
+	if exists == 0 {
+		return 0, false
+	}
+
+	var rows int
+	if err := readDB.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&rows); err != nil {
+		log.Printf("[session migration] counting legacy rows: %v (skipping)", err)
+		return 0, false
+	}
+	return rows, true
 }
 
 // readLegacySessions folds the snapshot log down to one record per session.
@@ -258,6 +269,14 @@ func writeMigratedSessionBatch(db *sql.DB, sessions []*migratedSession, geoIPSer
 	}
 	defer insertSession.Close()
 
+	// The row id of a session that already exists cannot come from LastInsertId;
+	// see migratedSessionID.
+	selectSessionID, err := tx.Prepare(`SELECT id FROM session WHERE user_session_id = ?`)
+	if err != nil {
+		return err
+	}
+	defer selectSessionID.Close()
+
 	insertBand, err := tx.Prepare(`INSERT OR IGNORE INTO session_band (session_id, band) VALUES (?, ?)`)
 	if err != nil {
 		return err
@@ -307,7 +326,7 @@ func writeMigratedSessionBatch(db *sql.DB, sessions []*migratedSession, geoIPSer
 		if err != nil {
 			return fmt.Errorf("insert session %s: %w", rec.userSessionID, err)
 		}
-		sessionID, err := res.LastInsertId()
+		sessionID, err := migratedSessionID(res, selectSessionID, rec.userSessionID)
 		if err != nil {
 			return err
 		}
@@ -326,6 +345,45 @@ func writeMigratedSessionBatch(db *sql.DB, sessions []*migratedSession, geoIPSer
 	}
 
 	return tx.Commit()
+}
+
+// migratedSessionID returns the row id the band and mode rows must point at.
+//
+// LastInsertId is only meaningful when the statement actually inserted a row.
+// SQLite leaves last_insert_rowid() untouched when ON CONFLICT DO NOTHING fires,
+// and the write handle is a single connection shared by every writer in the
+// process, so what is left over is some other statement's row id — most often
+// the user_agent row interned moments earlier in this same transaction. Handing
+// that to the child inserts either fails their foreign key (787,
+// SQLITE_CONSTRAINT_FOREIGNKEY) or, worse, silently files this session's bands
+// and modes against an unrelated session that happens to hold the same id.
+//
+// A conflict means a live listener is already recorded under this id: the
+// migration runs in the background while the receiver serves, and the kiwi and
+// websdr ids are derived from the client, so one can repeat across a restart.
+// That row describes the live session and must not be rewritten — notably its
+// ended_at, which is still open. Its id is returned so the historical bands and
+// modes merge into it, which is what the live writer does when it meets the same
+// id twice.
+func migratedSessionID(res sql.Result, lookup *sql.Stmt, userSessionID string) (int64, error) {
+	if inserted, err := res.RowsAffected(); err == nil && inserted > 0 {
+		id, err := res.LastInsertId()
+		if err != nil {
+			return 0, fmt.Errorf("row id for session %s: %w", userSessionID, err)
+		}
+		if id > 0 {
+			return id, nil
+		}
+	}
+
+	var id int64
+	if err := lookup.QueryRow(userSessionID).Scan(&id); err != nil {
+		return 0, fmt.Errorf("resolving existing session %s: %w", userSessionID, err)
+	}
+	if id <= 0 {
+		return 0, fmt.Errorf("resolving existing session %s: got row id %d", userSessionID, id)
+	}
+	return id, nil
 }
 
 // userAgentIDTx interns a user agent string, parsing it once per distinct value.

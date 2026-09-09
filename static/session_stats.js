@@ -221,55 +221,54 @@ async function createWorldMap(countries) {
         const featureSessionTotal = new Map(); // feature -> total sessions in that feature
         const countryFeatureMap = new Map(); // country name -> feature (reverse lookup)
         
+        // geoContains is expensive, so precompute each feature's bounding box and use
+        // it to reject the vast majority of point/feature pairs with a few comparisons.
+        // d3.geoBounds returns [[west, south], [east, north]]; west > east means the
+        // feature crosses the antimeridian (Russia, Fiji, ...), so invert that test.
+        const featureBounds = worldCountries.features.map(feature => {
+            const [[west, south], [east, north]] = d3.geoBounds(feature);
+            return { feature, west, south, east, north, wraps: west > east };
+        });
+
+        // Resolve each location to the feature that contains it (once per location)
+        // and accumulate that feature's session total at the same time.
+        const locationFeature = new Map(); // location -> feature (or undefined)
+        allLocations.forEach(loc => {
+            for (const b of featureBounds) {
+                if (loc.lat < b.south || loc.lat > b.north) continue;
+                if (b.wraps ? (loc.lon < b.west && loc.lon > b.east)
+                            : (loc.lon < b.west || loc.lon > b.east)) continue;
+                if (d3.geoContains(b.feature, [loc.lon, loc.lat])) {
+                    locationFeature.set(loc, b.feature);
+                    featureSessionTotal.set(b.feature,
+                        (featureSessionTotal.get(b.feature) || 0) + loc.sessions);
+                    break;
+                }
+            }
+        });
+
         // First pass: Match all named countries (not "Unknown")
-        allLocations.filter(loc => loc.country !== "Unknown").forEach(loc => {
+        allLocations.forEach(loc => {
             // Skip if we already found a feature for this country
-            if (countryFeatureMap.has(loc.country)) {
-                return;
-            }
-            
-            for (const feature of worldCountries.features) {
-                if (d3.geoContains(feature, [loc.lon, loc.lat])) {
-                    // Only set if this feature hasn't been claimed by another country
-                    if (!featureCountryMap.has(feature)) {
-                        featureCountryMap.set(feature, loc.country);
-                        if (loc.code) featureCodeMap.set(feature, loc.code);
-                        countryFeatureMap.set(loc.country, feature);
-                        console.log(`Matched ${loc.country} to feature ${feature.properties.name}`);
-                    }
-                    break;
-                }
+            if (loc.country === "Unknown" || countryFeatureMap.has(loc.country)) return;
+            const feature = locationFeature.get(loc);
+            // Only claim if this feature hasn't been claimed by another country
+            if (feature && !featureCountryMap.has(feature)) {
+                featureCountryMap.set(feature, loc.country);
+                if (loc.code) featureCodeMap.set(feature, loc.code);
+                countryFeatureMap.set(loc.country, feature);
             }
         });
-        
+
         // Second pass: Match "Unknown" locations to any remaining unclaimed features
-        allLocations.filter(loc => loc.country === "Unknown").forEach(loc => {
-            for (const feature of worldCountries.features) {
-                if (d3.geoContains(feature, [loc.lon, loc.lat])) {
-                    // Only set if this feature hasn't been claimed
-                    if (!featureCountryMap.has(feature)) {
-                        featureCountryMap.set(feature, loc.country);
-                        console.log(`Matched Unknown location to feature ${feature.properties.name}`);
-                        break; // Only match one Unknown location per feature
-                    }
-                    break;
-                }
+        allLocations.forEach(loc => {
+            if (loc.country !== "Unknown") return;
+            const feature = locationFeature.get(loc);
+            if (feature && !featureCountryMap.has(feature)) {
+                featureCountryMap.set(feature, loc.country);
             }
         });
-        
-        // Calculate actual session totals per feature by summing locations within each feature
-        worldCountries.features.forEach(feature => {
-            let total = 0;
-            allLocations.forEach(loc => {
-                if (d3.geoContains(feature, [loc.lon, loc.lat])) {
-                    total += loc.sessions;
-                }
-            });
-            if (total > 0) {
-                featureSessionTotal.set(feature, total);
-            }
-        });
-        
+
         console.log('Matched country features:', featureCountryMap.size);
         
         // Draw countries (colored by total sessions)

@@ -818,11 +818,11 @@ func main() {
 	// run before the first session of this one is created.
 	sessionActivityLogger.SetSessionHistory(dbManager.DB(), geoIPService)
 
-	// One-off conversion of the legacy snapshot log into per-session rows. Must
-	// run after the historical CSV/JSONL import (db_import.go), which populates
-	// the legacy table and then restarts the server -- on that restart the
-	// session table is still empty, so this fires exactly once, in order.
-	MigrateSessionHistoryIfEmpty(dbManager.DB(), dbManager.ReadDB(), geoIPService)
+	// One-off conversion of the legacy snapshot log into per-session rows. It
+	// runs while the receiver serves and is gated on the legacy table, which is
+	// dropped only once every row has been converted — so an interrupted run is
+	// picked up again on the next startup.
+	MigrateSessionHistoryIfNeeded(dbManager.DB(), dbManager.ReadDB(), geoIPService)
 
 	// Start version checker to fetch latest version from GitHub
 	// Must be called after sessions is initialized so it can check for active users

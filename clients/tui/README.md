@@ -42,9 +42,14 @@ Audio is the part where that took work, since the obvious libraries all need C:
   takes the PulseAudio path instead.
 
 If the pure-Go Opus decoder ever meets a frame it cannot handle, the frame is
-dropped rather than tearing down the stream. The server also offers a lossless
-format, which needs no codec — though from protocol version 4 it needs a
-predictive decoder instead, so it is no longer the free fallback it was.
+dropped rather than tearing down the stream.
+
+- **Lossless audio** decodes through `pcm_predictive.go`, a byte-for-byte copy
+  of the decoder the other Go clients carry, checked against a stream the
+  server's own encoder produced (`testdata/pcmv4_stream.bin`). It is pure Go
+  and integer throughout — no floating point anywhere in the predictor — which
+  is what makes the lossless claim mean the same thing on this client as in a
+  browser. See [Lossless audio](#lossless-audio).
 
 The terminal layer is [tcell](https://github.com/gdamore/tcell), a from-scratch
 Go implementation of what ncurses does (including terminfo handling), so there
@@ -168,11 +173,13 @@ Or connect directly:
 | --- | --- |
 | `-server` | A receiver name from the public directory, `host:port`, or a full `http(s)://` URL. Empty opens the picker. |
 | `-tls` | Force TLS. Implied by an `https://` URL. |
-| `-password` | Bypass password, if the receiver requires one. |
+| `-password` | Bypass password: lifts the session limit and unlocks the wide IQ modes the receiver keeps for authorised users. Checked at startup — see [Passwords](#passwords). |
 | `-freq` | Initial frequency in kHz (0 = the receiver's own default). |
 | `-mode` | Initial demodulation mode (empty = the receiver's own default). |
 | `-bw` | Filter edges in Hz as `low:high` (empty = the mode's own default). |
 | `-squelch` | Squelch threshold in dB of SNR (0 = off). |
+| `-lossless` | Ask for the lossless format instead of Opus: the demodulator's own samples, bit for bit, for about twice the bandwidth. |
+| `-min-margin` | IQ modes only: dB of quantisation margin under the noise floor (15–60, default 15; 0 asks for a lossless IQ stream). |
 | `-headless` | No display: tune and stream the audio, for scripts and services. |
 | `-span` | Initial span in kHz (0 = server default). |
 | `-view` | `spectrum`, `waterfall` or `split` (default `split`). |
@@ -247,6 +254,42 @@ and works in both modes.
 `SIGINT` and `SIGTERM` shut it down properly rather than killing it, which is
 what finishes a WAV capture's header — so `systemctl stop` and Ctrl-C both leave
 a valid file.
+
+### Passwords
+
+`-password` carries a receiver's bypass password. It buys two things: the
+session time limit is lifted, and the wide IQ modes the operator has not made
+public become available.
+
+```bash
+./ubersdr-tui -server m9psy -password hunter2
+```
+
+It is checked at startup, in the `/connection` handshake, before any socket is
+opened — so a wrong one is a startup error rather than something to discover
+later from a session that will not play. There are three answers, and the client
+distinguishes them because the receiver's own message does not:
+
+| What happened | What you get |
+|---|---|
+| The password matched | The session is bypassed; the client says so |
+| It did not match | Refused at startup, naming `-password` as what needs fixing |
+| The receiver has no bypass password | The session opens as a public one, and the client says `-password` had no effect |
+
+That third case is the one worth having: a receiver with no bypass password
+configured accepts any password and grants nothing, so without the check you
+would be left working out why a session you thought was privileged has session
+limits and no wide IQ. A receiver that *does* have one refuses a password that
+does not match outright, so reaching that state means the password was not
+wrong — there was nothing for it to unlock.
+
+The bypass can also come from the operator putting your address on their list,
+which is indistinguishable from a working password and makes no difference to
+what follows, so it is not reported as a password problem.
+
+The password goes to the spectrum and audio sockets as well as the handshake:
+the server re-checks the bypass at each one, so a password that reached only the
+handshake would open a privileged session that then behaved like a public one.
 
 ## Choosing a receiver
 
@@ -324,6 +367,8 @@ and the **view**, which is what the display shows. They have separate keys.
 | `g` | signal meter: dBFS or SNR |
 | `n` | cycle server-side noise reduction |
 | `t` / `T` | raise / lower the squelch threshold (SNR) |
+| `L` | switch the audio format between Opus and lossless (reconnects the stream) |
+| `M` | cycle the mode, including the IQ modes this session is allowed |
 | `d` | audio settings: outputs, volume, mode, exact filter edges |
 | **Chat** | |
 | `C` | open the chat, on receivers that run one |
@@ -363,10 +408,12 @@ decoding at a different rate changes the sample count but not the duration. If
 you point this client at a receiver predating that fix, expect AM and FM to play
 at half speed after switching from a sideband mode.
 
-The packet header carries the channel's sample rate and channel count. Neither
-affects the playback rate — Opus always reconstructs at 48 kHz — but the channel
-count decides whether a frame is folded to mono, and both are shown in the `d`
-panel.
+The packet header carries the channel's sample rate and channel count. On the
+Opus path neither affects the playback rate — Opus always reconstructs at
+48 kHz — but the channel count decides whether a frame is folded to mono. On the
+lossless path the rate decides everything, since those packets carry the
+channel's own samples. Both are shown in the `d` panel, along with which format
+the packets are actually arriving in.
 
 Protocol version 4 is the only one this client reads, and its header is where
 that shows: a flags byte and then only the fields that changed since the last
@@ -377,6 +424,139 @@ Being variable-length, where the Opus packet starts has to be parsed rather than
 assumed. A receiver older than 0.1.63 cannot serve version 4 — it clamps the
 request to 1–3 and answers with version 1 instead of refusing — and the client
 says so rather than dropping every frame in silence.
+
+### Lossless audio
+
+`-lossless` asks the server for the demodulator's own samples rather than Opus:
+
+```bash
+./ubersdr-tui -server m9psy -lossless
+```
+
+It is also a live control: `L` switches format on a running session, and the
+audio panel's **Format** row does the same thing. Both reconnect the audio
+socket, because the format is negotiated in the query string and there is no
+command for it — but the session UUID is unchanged, so the server keeps the same
+radiod channel and the same seat, and the audio comes back in well under a
+second. Measured against a live receiver: 97 ms from the keypress to the first
+lossless packet playing.
+
+Both formats are decoded whatever is asked for, because the server chooses per
+packet rather than once per session. Asking for Opus and being sent lossless is
+what a receiver built without libopus does, and that plays here now rather than
+dropping the socket; asking for lossless and being sent Opus is possible too.
+The `d` panel shows both: the **Format** row is what has been asked for, the
+**Stream** row below it what is actually arriving. A session that gets something
+other than what it asked for also says so once in the status line.
+
+**What it costs.** About twice the bandwidth. Measured on one receiver over
+eight-second windows, a quiet 40 m LSB channel ran 11.1 kB/s against Opus's 5.5,
+and a busy 20 m one 11.9 against 5.8 — the lossless side varying with the signal
+where Opus spends the same on both, since a predictor's residuals are as large
+as the thing it failed to predict. CPU is not a consideration on either path.
+
+**What it is.** From protocol version 4 the lossless format is a predictive
+codec, not the zstd wrapper the name `pcm-zstd` still carries in the query
+string. Each sample is predicted from those before it by an adaptive filter and
+only the Rice-coded error is sent; the filter is backward adaptive, its taps
+derived from samples already decoded, so no coefficients travel and this side
+recomputes them independently. All of it is integer arithmetic with shifts, so
+the two ends agree bit for bit on every platform. zstd, which versions 1–3 used,
+made this data *larger*: it is an LZ77 matcher over bytes, and a band-limited
+signal has no repeated byte strings, only the sample-to-sample correlation a
+predictor extracts and a byte matcher cannot see.
+
+`pcm_predictive.go` is a byte-for-byte copy of the file the other Go clients
+carry, deliberately: a drift between two implementations of a bit-exact codec is
+invisible until the audio turns to noise. `TestPCMv4DecodesServerStream` decodes
+a stream the server's own encoder produced and hashes the samples that come out,
+so a change that breaks one client breaks all of them at once.
+
+**Rate conversion.** Opus hides a problem that lossless does not: it
+reconstructs at 48 kHz whatever it was fed, so the whole output path — mixer,
+sound device, `-stdout` stream and the WAV header it writes — assumes that one
+rate. Lossless packets carry the channel's own samples instead, at 12 kHz for
+the sideband and CW modes and 24 kHz for AM and FM, so `resample.go` brings them
+up to 48 kHz with a polyphase windowed-sinc interpolator before anything
+downstream sees them.
+
+Converting here rather than following the channel rate downstream is much the
+cheaper answer. The rate changes with *mode*, so following it would mean
+reopening the sound device on every mode change — audible, occasionally slow,
+and able to fail outright when something else has taken the device meanwhile.
+Interpolating costs a few hundred multiplies per packet and cannot fail. Nothing
+about the lossless claim is weakened by it: the samples the server encoded are
+reconstructed exactly, and what follows is the same band-limited signal
+expressed at a higher rate, which is what the sound card would have done to it
+anyway — only with a real filter rather than whatever the device happens to use.
+
+### IQ modes
+
+The receiver will send the quadrature baseband instead of demodulating it, which
+is what feeds a decoder, an external SDR program or a recording you mean to
+process later. There are five, distinguished only by their channel rate:
+
+| Mode | Rate | Widest the stream can be | Availability |
+|---|---|---|---|
+| `iq` | 12 kHz | up to 48 kB/s | always |
+| `iq48` | 48 kHz | up to 192 kB/s | if the receiver offers it |
+| `iq96` | 96 kHz | up to 384 kB/s | if the receiver offers it |
+| `iq192` | 192 kHz | up to 768 kB/s | if the receiver offers it |
+| `iq384` | 384 kHz | up to 1.5 MB/s | if the receiver offers it |
+
+```bash
+# 384 kHz of 20 m, straight into a file another tool can read
+./ubersdr-tui -server m9psy -headless -mode iq384 -freq 14074     -no-device -stdout-wav > 20m.wav
+```
+
+**What the receiver allows.** The four wide modes are gated, and which of them a
+session may use depends on who is asking — a bypassed session (an IP on the
+operator's list, or `-password`) gets all four, everyone else gets only those the
+operator has published. That answer comes back from the `/connection` handshake,
+in `allowed_iq_modes`, and it is the only place it exists: it cannot be read off
+the receiver's description because it is not a property of the receiver. So the
+check happens once the handshake answers, which is after `-mode` has been
+applied — `M` and the audio panel then cycle only through what is on offer, and
+a `-mode` the session cannot have falls back to USB with the reason on the
+status line. Headless says so and stops instead, since it has no display to show
+a fallback on. Plain `iq` is never gated and never appears in that list.
+
+**The filter is fixed.** All five carry the whole quadrature baseband, so there
+is nothing to narrow: the wide modes are never sent a bandwidth at all — the
+server keeps the radiod preset's — and `iq` is sent exactly the preset's own
+±6 kHz, which is what makes selecting it move no filter. The `,` and `.` keys,
+and the audio panel's filter rows, say so rather than appearing to work.
+
+**Always lossless.** There is no Opus encoder for RF, so the receiver serves IQ
+losslessly whatever `-lossless` or `L` says. Those still matter either side of
+an IQ mode, and the audio panel's Stream row shows what is actually arriving.
+
+**Reduced depth (`-min-margin`).** IQ streams are large, and most of that is
+depth nobody can use. The server will requantise each packet before coding it,
+and what you ask for is a *margin* rather than a bit depth: how far under the
+band's own noise floor the quantisation floor must stay. A depth means something
+different on every band — the server's own measurements put ten bits at 50 dB of
+headroom on a dead 6 m band and 9 dB on medium wave — while a margin means the
+same thing wherever the receiver is pointed.
+
+The range is 15 to 60 dB and the default is 15, the floor: below that the added
+floor starts to lift a noise floor a listener can see, and above 60 the request
+buys almost nothing. `0` asks for the lossless stream instead, which keeps an
+archival capture honestly labelled rather than marked lossy and shifted by zero.
+
+Measured on one receiver, `iq384` on 20 m over six-second windows:
+
+| `-min-margin` | Wire rate | Saving |
+|---|---|---|
+| `0` (lossless) | 1110 kB/s | — |
+| `15` (default) | 354 kB/s | 68% |
+| `26` | 522 kB/s | 53% |
+| `60` | 1045 kB/s | 6% |
+
+Changing it needs no reconnect: the depth is chosen per packet and the shift
+travels in the packet, so a new margin takes effect on the next one. The audio
+panel's **IQ margin** row moves it live, and switching into an IQ mode is what
+makes a margin set earlier take effect.
 
 ### Two outputs
 
@@ -413,8 +593,8 @@ you want it:
 
 `-stdout` writes **headerless PCM**. That is what a pipe wants, because the
 reader is told the format on its own command line — but it makes a poor file:
-nothing infers 48 kHz mono S16_LE from an extension, VLC included, so a bare
-`> radio.raw` leaves you with something no player will open.
+nothing infers the rate and channel count from an extension, VLC included, so a
+bare `> radio.raw` leaves you with something no player will open.
 
 `-stdout-wav` puts a 44-byte WAV header in front of the same samples, which is
 what makes a redirected file work everywhere. The length is not knowable while
@@ -437,12 +617,35 @@ ffplay -f s16le -ar 48000 -ac 1 radio.raw
 vlc --demux=rawaud --rawaud-channels=1 --rawaud-samplerate=48000 --rawaud-fourcc=s16l radio.raw
 ```
 
-What goes down the pipe is the demodulated audio exactly as it arrives —
-**48 kHz mono, signed 16-bit little-endian**, header or no header — and deliberately *not* what the
-speakers get: volume, mute and channel routing belong to the sound device, and
-applying them here would quietly ruin a recording, or halve a pipe whenever the
-routing was set to one side. Server-side squelch and noise reduction do apply,
-since those shape the audio before it is ever sent.
+What goes down the pipe is the stream **exactly as the receiver sent it** —
+signed 16-bit little-endian, at the radio channel's own rate and channel count —
+and deliberately *not* what the speakers get: volume, mute and channel routing
+belong to the sound device, and applying them here would quietly ruin a
+recording, or halve a pipe whenever the routing was set to one side. Server-side
+squelch and noise reduction do apply, since those shape the audio before it is
+ever sent.
+
+That format follows the session rather than being fixed at 48 kHz:
+
+| Session | Down the pipe |
+|---|---|
+| Opus (the default) | 48 kHz mono — Opus reconstructs at 48 kHz whatever it was fed |
+| `-lossless`, a demodulated mode | 12 kHz mono (sideband, CW) or 24 kHz (AM, FM) |
+| an IQ mode | 12 to 384 kHz, two interleaved channels |
+
+Passing those through unconverted is the point. A lossless capture interpolated
+to 48 kHz would not be the samples the receiver sent, which is the one thing
+lossless is for; and 384 kHz IQ does not fit down a 48 kHz mono pipe at all. The
+sound device still gets 48 kHz stereo — that conversion belongs to the device,
+not to the pipe — and the audio panel's **Stdout** row names what is actually
+going out, so the `aplay` line above is the one for a default session rather
+than for every session.
+
+The WAV form writes whatever it turns out to be into its header, so a capture
+plays at the right speed with no arguments. A WAV header cannot follow a change
+of stream shape once it is written, so **changing mode mid-capture ends it**
+rather than leaving a file that lies about its own contents; the raw form has no
+header, carries on, and says so on the status line instead.
 
 This works because tcell drives `/dev/tty` rather than stdout, so the display
 and the audio never meet. **The one thing it cannot do is write to a terminal**,
@@ -802,11 +1005,17 @@ to a simulated screen to catch panics. `TestAudioHeaderMatchesServer` reads
 frames in `testdata/` that the **server's** encoder produced and checks the
 parse field by field — the header carries forward what the server stopped
 repeating, so an error there is silent rather than loud.
+`TestPCMv4DecodesServerStream` does the same for the lossless path: it decodes
+a packet stream the server's encoder produced and hashes the samples that come
+back, which is the whole bit-exactness claim in one assertion.
 
 These reach the network and are skipped unless enabled:
 
 ```bash
 UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveServer -v
+UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveLossless -v
+UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveFormatToggle -v
+UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveIQ -v
 UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveTuningRange -v
 UBERSDR_TEST_SERVER=https://example.org go test -run TestLiveModeSwitchSpeed -v
 UBERSDR_TEST_DIRECTORY=1 go test -run TestLivePublicDirectory -v

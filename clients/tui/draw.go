@@ -199,6 +199,23 @@ type UI struct {
 	meterSNR     bool   // meter shows SNR rather than absolute dBFS
 	audioStatus  string
 
+	// allowedIQ is the wide IQ modes this session may use, from the /connection
+	// handshake. Empty until that answers, and empty afterwards on a receiver
+	// that publishes none — which is the common case, since the wide modes cost
+	// the operator up to a megabyte a second each.
+	allowedIQ []string
+
+	// minMargin is the reduced-depth IQ request in dB, 0 for a lossless IQ
+	// stream. It is kept whatever the mode, so switching to an IQ mode and back
+	// does not lose it.
+	minMargin int
+
+	// lossless is the wire format the user has asked for. What is actually
+	// arriving is signal.Lossless, which can differ: the server chooses the
+	// format per packet, and a receiver built without libopus sends lossless
+	// whatever was asked for.
+	lossless bool
+
 	// Server-side DSP insert. dspFilters is what this receiver offers;
 	// dspFilter is the one in use, empty for off, which is the default.
 	dspFilters []string
@@ -315,7 +332,17 @@ func (u *UI) SyncSideband() {
 
 // AdjustBandwidth widens or narrows the filter by moving its outer edge, which
 // is the edge that carries the audio bandwidth in every mode.
+//
+// The IQ modes have no adjustable filter. The wide ones are never sent a
+// bandwidth at all — the server keeps the radiod preset's — and plain iq is
+// sent exactly the preset's own ±6 kHz, which is what makes selecting it move
+// no filter. Narrowing either would put a filter inside the quadrature
+// baseband, so the top and bottom of every capture would come back empty with
+// nothing to say why.
 func (u *UI) AdjustBandwidth(delta int) {
+	if isIQMode(u.audioMode) {
+		return
+	}
 	low, high := u.bwLow, u.bwHigh
 	switch {
 	case low >= 0: // upper sideband style: outer edge is the high one
@@ -964,6 +991,92 @@ func (u *UI) dspLabel() string {
 	}
 }
 
+// modeAvailable reports whether this session may use a mode.
+//
+// Everything but the wide IQ modes always is: the demodulators are open to
+// anyone, and so is plain iq, which is 12 kHz and never appears in the allowed
+// list at all. The wide ones are per session, so before the handshake answers
+// none of them are — which is the safe direction, since asking for one this
+// session cannot have is refused at the socket.
+func (u *UI) modeAvailable(name string) bool {
+	if !isWideIQMode(name) {
+		return true
+	}
+	for _, m := range u.allowedIQ {
+		if m == name {
+			return true
+		}
+	}
+	return false
+}
+
+// describeAllowedIQ says what wide IQ this receiver offers this session, for
+// the message shown when one is refused.
+func (u *UI) describeAllowedIQ() string {
+	if len(u.allowedIQ) == 0 {
+		return "this receiver offers no wide IQ modes without a password"
+	}
+	return "it offers " + strings.Join(upperAll(u.allowedIQ), ", ")
+}
+
+func upperAll(in []string) []string {
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = strings.ToUpper(s)
+	}
+	return out
+}
+
+// StepMinMargin moves the reduced-depth IQ margin, in dB.
+//
+// The scale is 0 for a lossless IQ stream and then 15 to 60: below 15 the
+// quantisation starts to lift a noise floor the listener can see, so there is
+// nothing between "off" and the floor of the range. Stepping down past the
+// floor asks for the lossless stream, which is the same rule the squelch uses.
+func (u *UI) StepMinMargin(delta int) {
+	switch {
+	case u.minMargin <= 0 && delta > 0:
+		u.minMargin = marginMin
+	case u.minMargin <= 0:
+		u.minMargin = 0
+	default:
+		u.minMargin += delta
+		if u.minMargin < marginMin {
+			u.minMargin = 0
+		}
+		if u.minMargin > marginMax {
+			u.minMargin = marginMax
+		}
+	}
+}
+
+// StepMode moves to the next mode this session may use, skipping the wide IQ
+// modes the receiver has not offered it. Skipping rather than refusing is what
+// keeps the key usable: a cycle that stops on a mode nothing can select would
+// simply look broken.
+func (u *UI) StepMode(dir int) {
+	if dir == 0 {
+		dir = 1
+	}
+	idx := modeIndex(u.audioMode)
+	for i := 0; i < len(modes); i++ {
+		idx = (idx + dir + len(modes)) % len(modes)
+		if u.modeAvailable(modes[idx].Name) {
+			u.ApplyMode(modes[idx].Name)
+			return
+		}
+	}
+}
+
+// audioFormat is the wire format the user has asked for, in the form the audio
+// client takes.
+func (u *UI) audioFormat() AudioFormat {
+	if u.lossless {
+		return FormatLossless
+	}
+	return FormatOpus
+}
+
 // audioField summarises the audio channel for the header: mode, filter edges in
 // kHz, mute state and signal level.
 //
@@ -1492,14 +1605,16 @@ var helpLines = []string{
 	"",
 	"Audio",
 	"  m                mute / unmute",
-	"  M                cycle demodulation mode, as clicking it does",
+	"  M                cycle mode, as clicking it does — including the IQ",
+	"                   modes the receiver offers this session",
 	"  A                auto sideband either side of 10 MHz",
 	"  , .              narrow / widen the audio filter",
 	"  x                output channel: both / left / right",
 	"  g                signal meter: dBFS or SNR",
 	"  n                cycle server-side noise reduction",
 	"  t / T            raise / lower the squelch; T past the floor is off",
-	"  d                audio settings: outputs, volume, filter",
+	"  L                audio format: Opus or lossless (reconnects the stream)",
+	"  d                audio settings: outputs, volume, filter, IQ margin",
 	"",
 	"Scaling  (the dB window, not the audio filter)",
 	"  a                auto / manual",

@@ -62,7 +62,7 @@ loop:
 		select {
 		case pcm := <-ac.PCM:
 			frames++
-			samples += len(pcm)
+			samples += pcm.Frames()
 			out.Push(pcm)
 		case lv := <-ac.Level:
 			lastLevel = lv
@@ -102,7 +102,7 @@ drain:
 	for {
 		select {
 		case pcm := <-ac.PCM:
-			after += len(pcm)
+			after += pcm.Frames()
 			out.Push(pcm)
 		case <-tick:
 			break drain

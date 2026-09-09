@@ -115,10 +115,12 @@ func TestAudioHeaderRefusesADeltaWithNoBaseline(t *testing.T) {
 	}
 }
 
-// Lossless frames must be recognised rather than fed to the Opus decoder. This
-// client asks for Opus, but a server built without libopus serves lossless
-// regardless, and one older than 0.1.63 serves the zstd form after clamping the
-// requested version to 1-3.
+// Lossless frames must be recognised rather than fed to the Opus decoder.
+// Either format can arrive whatever was negotiated: the server chooses per
+// packet, so a session that asked for Opus receives lossless from a receiver
+// built without libopus, and one that asked for lossless can be answered with
+// Opus. A server older than 0.1.63 serves the zstd form instead, after clamping
+// the requested version to 1-3.
 func TestLosslessFramesAreRecognised(t *testing.T) {
 	pcm4 := []byte{0x50, 0x43, 0x4D, 0x34, 0x20}
 	zstd := []byte{0x28, 0xB5, 0x2F, 0xFD, 0x00}

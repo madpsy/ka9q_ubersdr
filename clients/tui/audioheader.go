@@ -34,21 +34,23 @@ import (
 // elimination — a lossless magic, else a zstd magic, else Opus — and the first
 // byte of a lossless header is 0x50, which has bit 4 set, while a flags byte
 // here uses only bits 0 and 1 and so never exceeds 0x03. The two cannot collide
-// at all.
+// at all. The lossless header itself is in pcm_v4_header.go.
 const (
 	// audioProtocolVersion is what this client asks for at connect, and the
 	// only version it reads.
 	audioProtocolVersion = 4
 
 	// losslessMagic is "PCM4" little-endian, the first four bytes of a version
-	// 4 lossless packet. This client requests Opus and so should never see one,
-	// but a server built without libopus serves lossless frames regardless of
-	// what was asked for, and saying so beats feeding them to an Opus decoder.
+	// 4 lossless packet. Either format can arrive whatever was negotiated — the
+	// server chooses per packet — so this is what tells the two apart, and both
+	// are decoded.
 	losslessMagic uint32 = 0x344D4350
 
 	// zstdMagic identifies a version 1-3 lossless frame, which means a server
 	// older than 0.1.63: those clamp the requested version to 1-3 and answer
-	// with version 1 rather than refusing it.
+	// with version 1 rather than refusing it. That one is not decoded — the
+	// predictive codec replaced zstd outright — but it is recognised, which is
+	// what turns a dead stream into a reason.
 	zstdMagic uint32 = 0xFD2FB528
 
 	opusFlagQuality  = 1 << 0
@@ -179,8 +181,9 @@ func qualityToFloat(q int16) float32 {
 }
 
 // frameIsLossless reports whether a binary frame carries lossless PCM rather
-// than Opus, in either the version 4 or the older zstd shape. This client
-// decodes neither; recognising them is what turns "no audio" into a reason.
+// than Opus, in either the version 4 or the older zstd shape, returning the
+// magic so the caller can tell which. Version 4 is decoded; the zstd shape is
+// only recognised, which is what turns "no audio" into a reason.
 func frameIsLossless(pkt []byte) (magic uint32, ok bool) {
 	if len(pkt) < 4 {
 		return 0, false

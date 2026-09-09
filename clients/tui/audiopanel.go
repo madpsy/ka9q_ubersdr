@@ -31,10 +31,21 @@ type AudioPanel struct {
 	// with the rest of the audio.
 	stdoutStep int
 
+	// formatChanged marks that the wire format was switched, which the caller
+	// applies: it reconnects the audio socket, and the socket is the caller's.
+	formatChanged bool
+
+	// marginChanged marks that the reduced-depth IQ margin moved, which goes to
+	// the server over the audio socket for the same reason.
+	marginChanged bool
+
 	// stdoutMode and stdoutErr are what the caller last reported about that
-	// output, since the panel cannot see it itself.
+	// output, since the panel cannot see it itself, and stdoutRate/stdoutCh the
+	// format it turned out to be carrying — zero until the first packet.
 	stdoutMode StdoutMode
 	stdoutErr  error
+	stdoutRate int
+	stdoutCh   int
 }
 
 // filterStepHz is how far one keypress moves a filter edge. It matches the
@@ -57,6 +68,8 @@ const (
 	rowBandHigh
 	rowDSP
 	rowSquelch
+	rowFormat
+	rowMargin
 	rowStream
 	rowCount
 )
@@ -137,15 +150,23 @@ func (p *AudioPanel) adjust(u *UI, deviceID string, dir int) (retune, reopen, do
 		return false, false, false
 
 	case rowMode:
-		idx := (modeIndex(u.audioMode) + dir + len(modes)) % len(modes)
-		u.ApplyMode(modes[idx].Name)
+		u.StepMode(dir)
 		return true, false, false
 
 	case rowBandLow:
+		// The IQ modes carry the whole quadrature baseband and their filter is
+		// fixed — the wide ones are never sent a bandwidth at all, and plain iq
+		// is sent the preset's own edges. Refusing is the honest answer.
+		if isIQMode(u.audioMode) {
+			return false, false, false
+		}
 		u.bwLow, u.bwHigh = clampBandwidth(u.audioMode, u.bwLow+dir*filterStepHz, u.bwHigh)
 		return true, false, false
 
 	case rowBandHigh:
+		if isIQMode(u.audioMode) {
+			return false, false, false
+		}
 		u.bwLow, u.bwHigh = clampBandwidth(u.audioMode, u.bwLow, u.bwHigh+dir*filterStepHz)
 		return true, false, false
 
@@ -171,6 +192,18 @@ func (p *AudioPanel) adjust(u *UI, deviceID string, dir int) (retune, reopen, do
 			}
 		}
 		p.squelchChanged = true
+		return false, false, false
+
+	case rowFormat:
+		// Two states, so either direction is the same flip. The caller does the
+		// work, since changing format reconnects the audio socket.
+		u.lossless = !u.lossless
+		p.formatChanged = true
+		return false, false, false
+
+	case rowMargin:
+		u.StepMinMargin(dir)
+		p.marginChanged = true
 		return false, false, false
 	}
 	return false, false, false
@@ -239,6 +272,8 @@ func (p *AudioPanel) Draw(s tcell.Screen, u *UI, deviceID string) {
 		rowBandHigh: {"Filter high", fmt.Sprintf("%+d Hz", u.bwHigh)},
 		rowDSP:      {"Noise reduction", dspValue},
 		rowSquelch:  {"Squelch (SNR)", squelchValue(u)},
+		rowFormat:   {"Format", formatValue(u)},
+		rowMargin:   {"IQ margin", marginValue(u)},
 		rowStream:   {"Stream", streamValue(u)},
 	}
 
@@ -259,6 +294,21 @@ func (p *AudioPanel) Draw(s tcell.Screen, u *UI, deviceID string) {
 	// turns it red: pressing a key that cannot do anything has to look like
 	// something, and the status line is behind this panel.
 	note, noteStyle := fmt.Sprintf(" filter width %.1f kHz", float64(u.bwHigh-u.bwLow)/1000), dim
+	if p.row == rowFormat {
+		note = " reconnects the stream; the row below says what arrives"
+		if isIQMode(u.audioMode) {
+			// The Format row is a choice; on IQ it is a choice about the modes
+			// either side of this one, since there is no Opus encoder for RF.
+			note = " IQ is always lossless — this is for the demodulated modes"
+		}
+	}
+	if p.row == rowMargin {
+		note = " how far the quantisation stays under the band's own noise floor"
+	}
+	if isIQMode(u.audioMode) && (p.row == rowMode || p.row == rowBandLow || p.row == rowBandHigh) {
+		note = fmt.Sprintf(" %d kHz quadrature, %s — the filter is fixed",
+			modeRate(u.audioMode)/1000, modeCost(u.audioMode))
+	}
 	if p.row == rowStdout {
 		note = fmt.Sprintf(" pipe: ubersdr-tui -stdout | aplay -f %s -r %d -c %d",
 			stdoutFormat, stdoutSampleRate, stdoutChannels)
@@ -291,6 +341,10 @@ func (p *AudioPanel) stdoutValue() string {
 	switch {
 	case p.stdoutErr != nil:
 		return "off — " + p.stdoutErr.Error()
+	case p.stdoutMode != StdoutOff && p.stdoutRate > 0:
+		// What is really going out, which follows the receiver rather than the
+		// nominal 48 kHz mono the pipe command assumes.
+		return p.stdoutMode.LabelFor(p.stdoutRate, p.stdoutCh)
 	case p.stdoutMode != StdoutOff:
 		return p.stdoutMode.Label()
 	case stdoutIsTerminal():
@@ -302,9 +356,13 @@ func (p *AudioPanel) stdoutValue() string {
 	}
 }
 
-// streamValue reports the channel's sample rate and the rate actually played.
-// They differ by design: the radio channel runs at 12 or 24 kHz depending on
-// mode, and Opus always reconstructs at 48 kHz.
+// streamValue reports the format, the channel's sample rate and the rate
+// actually played. The last two differ by design: the radio channel runs at 12
+// or 24 kHz depending on mode, and the output path runs at 48 kHz — Opus
+// reconstructing there, the lossless path resampled there.
+//
+// The format comes off the packets rather than from -lossless, because the
+// server chooses it per packet: asking for one is not being given it.
 func streamValue(u *UI) string {
 	if u.signal.SourceRate <= 0 {
 		return "—"
@@ -315,8 +373,51 @@ func streamValue(u *UI) string {
 	} else if u.signal.Channels > 2 {
 		ch = fmt.Sprintf("%d ch", u.signal.Channels)
 	}
-	return fmt.Sprintf("%.1f kHz %s from the radio, played at %.0f kHz",
-		float64(u.signal.SourceRate)/1000, ch, float64(opusOutputRate)/1000)
+	format := "Opus"
+	if u.signal.Lossless {
+		format = "lossless"
+	}
+	// An arrow rather than a sentence: the panel is 62 columns wide, and the
+	// sentence this replaced was truncated before it reached the output rate.
+	return fmt.Sprintf("%s, %.1f kHz %s → %.0f kHz",
+		format, float64(u.signal.SourceRate)/1000, ch, float64(opusOutputRate)/1000)
+}
+
+// formatValue names the format asked for and what it costs. What is actually
+// arriving is on the stream row below it, which is not always the same thing.
+func formatValue(u *UI) string {
+	if u.lossless {
+		return "lossless   — bit-exact, twice the data"
+	}
+	return "Opus   — lossy, half the data"
+}
+
+// marginValue describes the reduced-depth IQ request. It is shown whatever the
+// mode, because it is remembered across mode changes — but it says when it is
+// doing nothing, since on a demodulated mode it is not a setting that applies.
+func marginValue(u *UI) string {
+	if !isIQMode(u.audioMode) {
+		if u.minMargin <= 0 {
+			return "off   — IQ modes only"
+		}
+		return fmt.Sprintf("%d dB   — IQ modes only", u.minMargin)
+	}
+	return marginLabel(u.minMargin)
+}
+
+// marginLabel names a margin on its own.
+func marginLabel(dB int) string {
+	if dB <= 0 {
+		return "off — lossless IQ"
+	}
+	return fmt.Sprintf("%d dB under the noise floor", dB)
+}
+
+// modeRate is the channel sample rate a mode runs at, or zero for one this
+// build does not know.
+func modeRate(name string) int {
+	m, _ := lookupMode(name)
+	return m.Rate
 }
 
 // squelchValue describes the gate for the panel, including whether it is

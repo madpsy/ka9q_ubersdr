@@ -117,7 +117,7 @@ func TestClampBandwidth(t *testing.T) {
 // their filter cannot exceed +/-6 kHz however wide the server would allow.
 func TestClampBandwidthIsPerMode(t *testing.T) {
 	for _, m := range modes {
-		lo, hi := clampBandwidth(m.Name, -99000, 99000)
+		lo, hi := clampBandwidth(m.Name, -10_000_000, 10_000_000)
 		if lo != -m.MaxHz || hi != m.MaxHz {
 			t.Errorf("%s clamped to %d/%d, want +/-%d", m.Name, lo, hi, m.MaxHz)
 		}
@@ -126,9 +126,15 @@ func TestClampBandwidthIsPerMode(t *testing.T) {
 			t.Errorf("%s default %d/%d exceeds its own limit of +/-%d",
 				m.Name, m.Low, m.High, m.MaxHz)
 		}
-		// And inside what the server accepts.
-		if m.MaxHz > maxBandwidthHz {
+		// And inside what the server accepts. The +/-12 kHz cap is on the
+		// demodulator filter; the wide IQ modes are exempt because their
+		// bandwidth is the radiod preset's and this client never sends one.
+		if !isWideIQMode(m.Name) && m.MaxHz > maxBandwidthHz {
 			t.Errorf("%s limit %d exceeds the server cap %d", m.Name, m.MaxHz, maxBandwidthHz)
+		}
+		// The Nyquist of the mode's own channel rate, which is what MaxHz is.
+		if m.Rate/2 != m.MaxHz {
+			t.Errorf("%s limit %d is not the Nyquist of its %d Hz channel", m.Name, m.MaxHz, m.Rate)
 		}
 	}
 
@@ -154,10 +160,12 @@ func TestModeDefaultsMatchWebUI(t *testing.T) {
 		"fm":  {-8000, 8000},
 		"nfm": {-5000, 5000},
 	}
-	if len(modes) != len(want) {
-		t.Errorf("%d modes defined, web UI lists %d", len(modes), len(want))
-	}
+	demods := 0
 	for _, m := range modes {
+		if m.IQ {
+			continue
+		}
+		demods++
 		w, ok := want[m.Name]
 		if !ok {
 			t.Errorf("mode %q is not in the web UI defaults", m.Name)
@@ -165,6 +173,49 @@ func TestModeDefaultsMatchWebUI(t *testing.T) {
 		}
 		if m.Low != w[0] || m.High != w[1] {
 			t.Errorf("%s default = %d/%d, web UI uses %d/%d", m.Name, m.Low, m.High, w[0], w[1])
+		}
+	}
+	if demods != len(want) {
+		t.Errorf("%d demodulation modes defined, web UI lists %d", demods, len(want))
+	}
+}
+
+// The IQ defaults come from the server instead, where defaultBandwidthForMode
+// gives iq the whole 12 kHz baseband. Asking for less puts a filter inside the
+// radiod preset's own passband, which empties the top and bottom kilohertz of
+// every capture with nothing to say why.
+func TestIQModeDefaults(t *testing.T) {
+	iq, ok := lookupMode("iq")
+	if !ok {
+		t.Fatal("iq is not offered")
+	}
+	if iq.Low != -6000 || iq.High != 6000 {
+		t.Errorf("iq default = %d/%d, the server uses -6000/6000", iq.Low, iq.High)
+	}
+
+	// The wide modes are named for their rate in kilohertz, which is the only
+	// thing that distinguishes them.
+	for _, tc := range []struct {
+		name string
+		rate int
+	}{{"iq48", 48000}, {"iq96", 96000}, {"iq192", 192000}, {"iq384", 384000}} {
+		m, ok := lookupMode(tc.name)
+		if !ok {
+			t.Fatalf("%s is not offered", tc.name)
+		}
+		if m.Rate != tc.rate {
+			t.Errorf("%s runs at %d Hz, want %d", tc.name, m.Rate, tc.rate)
+		}
+		if !isWideIQMode(tc.name) {
+			t.Errorf("%s is not treated as a wide IQ mode", tc.name)
+		}
+	}
+	if isWideIQMode("iq") {
+		t.Error("plain iq is treated as a wide IQ mode; it is neither gated nor preset-bandwidth")
+	}
+	for _, name := range []string{"usb", "am", "fm"} {
+		if isIQMode(name) || isWideIQMode(name) {
+			t.Errorf("%s is treated as an IQ mode", name)
 		}
 	}
 }
@@ -300,8 +351,8 @@ func TestMixerBoundsLatency(t *testing.T) {
 		m.push(chunk)
 	}
 	buffered, dropped, _ := m.stats()
-	if buffered > m.maxSamples {
-		t.Errorf("buffered %d samples, cap is %d", buffered, m.maxSamples)
+	if buffered > m.maxFrames {
+		t.Errorf("buffered %d samples, cap is %d", buffered, m.maxFrames)
 	}
 	if dropped == 0 {
 		t.Error("expected the oldest audio to be dropped once the cap was hit")
@@ -1553,15 +1604,15 @@ func TestSilenceDetectionToleratesCodecNoise(t *testing.T) {
 		for len(a.Silence) > 0 {
 			<-a.Silence
 		}
-		// Mirror the check handleAudio performs.
-		silent := true
-		for _, v := range samples {
-			if v > silenceCeiling || v < -silenceCeiling {
-				silent = false
-				break
-			}
+		// The real delivery path, so this cannot drift from what it tests.
+		a.deliver(AudioPacket{Samples: samples, Rate: opusOutputRate, Channels: 1})
+		select {
+		case silent := <-a.Silence:
+			return silent
+		default:
+			t.Fatalf("nothing reported for %v", samples)
+			return false
 		}
-		return silent
 	}
 
 	if !report([]int16{0, 0, 0, 0}) {
@@ -1702,12 +1753,12 @@ func TestMixerPrimesBeforePlaying(t *testing.T) {
 	if !m.priming {
 		t.Fatal("a new mixer should start priming")
 	}
-	if m.targetSamples < opusOutputRate/20 {
-		t.Errorf("target cushion is %d samples, under 50 ms", m.targetSamples)
+	if m.targetFrames < opusOutputRate/20 {
+		t.Errorf("target cushion is %d samples, under 50 ms", m.targetFrames)
 	}
 
 	// Below the target, only silence comes out and nothing is consumed.
-	m.push(make([]int16, m.targetSamples/2))
+	m.push(make([]int16, m.targetFrames/2))
 	before, _, _ := m.stats()
 	out := make([]int16, 200)
 	m.readStereo(out)
@@ -1723,7 +1774,7 @@ func TestMixerPrimesBeforePlaying(t *testing.T) {
 	// Once the cushion is there, it plays. Use a fresh mixer holding only
 	// non-zero samples, so leading silence cannot be mistaken for priming.
 	m2 := newMixer()
-	loud := make([]int16, m2.targetSamples+100)
+	loud := make([]int16, m2.targetFrames+100)
 	for i := range loud {
 		loud[i] = 1000
 	}
@@ -1774,7 +1825,7 @@ func (w *blockingWriter) Write(p []byte) (int, error) {
 func TestPCMWriterEncodesLittleEndian(t *testing.T) {
 	var sink bytes.Buffer
 	p := newPCMWriter(&sink, StdoutRaw)
-	p.push([]int16{0, 1, -1, 32767, -32768})
+	p.push(AudioPacket{Samples: []int16{0, 1, -1, 32767, -32768}, Rate: opusOutputRate, Channels: 1})
 	p.Close()
 
 	want := []byte{
@@ -1801,7 +1852,7 @@ func TestPCMWriterCopiesItsInput(t *testing.T) {
 	p := newPCMWriter(&sink, StdoutRaw)
 
 	packet := []int16{100, 200}
-	p.push(packet)
+	p.push(AudioPacket{Samples: packet, Rate: opusOutputRate, Channels: 1})
 	packet[0], packet[1] = -1, -1
 	p.Close()
 
@@ -1821,7 +1872,7 @@ func TestPCMWriterDropsRatherThanBlocking(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 200; i++ {
-			p.push([]int16{int16(i)})
+			p.push(AudioPacket{Samples: []int16{int16(i)}, Rate: opusOutputRate, Channels: 1})
 		}
 	}()
 
@@ -1845,7 +1896,7 @@ func TestAudioOutputFansOut(t *testing.T) {
 	out := NewAudioOutput()
 
 	// Device only, which is what the pipe being off looks like.
-	out.Push([]int16{1, 2, 3})
+	out.Push(AudioPacket{Samples: []int16{1, 2, 3}, Rate: opusOutputRate, Channels: 1})
 	if buffered, _, _ := out.Stats(); buffered != 3 {
 		t.Errorf("the mixer holds %d samples, want 3", buffered)
 	}
@@ -1861,7 +1912,7 @@ func TestAudioOutputFansOut(t *testing.T) {
 	if !out.StdoutOn() {
 		t.Fatal("the pipe did not come up")
 	}
-	out.Push([]int16{4, 5})
+	out.Push(AudioPacket{Samples: []int16{4, 5}, Rate: opusOutputRate, Channels: 1})
 	if buffered, _, _ := out.Stats(); buffered != 5 {
 		t.Errorf("the mixer holds %d samples, want 5", buffered)
 	}
@@ -2054,7 +2105,7 @@ func TestStdoutWAVHeader(t *testing.T) {
 	// players read to end of file.
 	var pipe bytes.Buffer
 	p := newPCMWriter(&pipe, StdoutWAV)
-	p.push([]int16{1, 2, 3, 4})
+	p.push(AudioPacket{Samples: []int16{1, 2, 3, 4}, Rate: opusOutputRate, Channels: 1})
 	p.Close()
 
 	b := pipe.Bytes()
@@ -2096,7 +2147,7 @@ func TestStdoutWAVPatchesSizesOnAFile(t *testing.T) {
 
 	p := newPCMWriter(f, StdoutWAV)
 	const samples = 480
-	p.push(make([]int16, samples))
+	p.push(AudioPacket{Samples: make([]int16, samples), Rate: opusOutputRate, Channels: 1})
 	p.Close()
 	f.Close()
 

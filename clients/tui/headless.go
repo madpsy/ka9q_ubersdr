@@ -66,6 +66,27 @@ func runHeadless(opts options) error {
 	if err := client.CheckConnection(); err != nil {
 		return fmt.Errorf("refused by %s: %w", host, err)
 	}
+	// Whether -password did anything, said before the stream starts rather than
+	// left to be inferred from a session that quietly behaves like a public one.
+	if note := client.PasswordState().Note(host); note != "" {
+		warnf("%s", note)
+	}
+
+	// Which wide IQ modes a receiver offers depends on who is asking, so this
+	// is the earliest it can be checked — and worth checking rather than
+	// letting the socket refuse it, since headless has no display to show the
+	// server's own message on.
+	if isWideIQMode(mode) {
+		allowed := client.AllowedIQModes()
+		if !containsMode(allowed, mode) {
+			if len(allowed) == 0 {
+				return fmt.Errorf("%s offers no wide IQ modes to this session; "+
+					"a password may be needed (-password), or use -mode iq for the 12 kHz baseband", host)
+			}
+			return fmt.Errorf("%s does not offer %s to this session; it offers %s",
+				host, mode, strings.Join(allowed, ", "))
+		}
+	}
 
 	// Ctrl-C and a service stop both have to shut the outputs down properly:
 	// that is what puts the real sizes into a WAV capture's header.
@@ -98,6 +119,8 @@ func runHeadless(opts options) error {
 	}
 
 	audio := NewAudioClient(host, secure, opts.password, client.sessionID)
+	audio.SetFormat(opts.audioFormat())
+	audio.SetMinMargin(opts.minMargin)
 	audio.SetTuning(freq, mode, low, high)
 	if opts.squelch > 0 {
 		audio.SetSquelch(opts.squelch)
@@ -108,8 +131,23 @@ func runHeadless(opts options) error {
 	if d := client.SessionLimit(); d > 0 {
 		limit = formatCountdown(d)
 	}
-	warnf("%s — %.6f MHz %s, filter %+d/%+d Hz → %s, session %s",
-		host, freq/1e6, strings.ToUpper(mode), low, high, strings.Join(sinks, " + "), limit)
+	// IQ says what it is instead of a filter it does not have, and what the
+	// stream will cost, which for iq384 is worth knowing before it starts.
+	shape := fmt.Sprintf("filter %+d/%+d Hz", low, high)
+	format := opts.audioFormat().String()
+	if m, _ := lookupMode(mode); m.IQ {
+		shape = fmt.Sprintf("%d kHz quadrature, %s", m.Rate/1000, modeCost(mode))
+		// IQ is served losslessly whatever format was asked for — there is no
+		// Opus encoder for RF — unless a margin was asked for, and then it is
+		// not lossless and should not say so.
+		format = "lossless"
+		if opts.minMargin > 0 {
+			format = fmt.Sprintf("reduced depth, %d dB margin", opts.minMargin)
+		}
+	}
+	warnf("%s — %.6f MHz %s, %s, %s → %s, session %s",
+		host, freq/1e6, strings.ToUpper(mode), shape,
+		format, strings.Join(sinks, " + "), limit)
 
 	for {
 		select {
@@ -133,6 +171,16 @@ func runHeadless(opts options) error {
 		case <-audio.DSP:
 		}
 	}
+}
+
+// containsMode reports whether a mode is in a list of them.
+func containsMode(list []string, name string) bool {
+	for _, m := range list {
+		if m == name {
+			return true
+		}
+	}
+	return false
 }
 
 // deviceSuffix names the chosen output in the startup line, so a run with

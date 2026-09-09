@@ -61,7 +61,7 @@ func applyTuningRange(tr TuningRange) {
 func main() {
 	server := flag.String("server", "", "receiver: a public callsign or name, host:port, or a full http(s):// URL (empty opens the receiver picker)")
 	useTLS := flag.Bool("tls", false, "use TLS (wss/https); implied by an https:// URL")
-	password := flag.String("password", "", "optional bypass password")
+	password := flag.String("password", "", "bypass password: lifts the session limit and unlocks the wide IQ modes the receiver keeps for authorised users")
 	freq := flag.Float64("freq", 0, "initial frequency in kHz (0 = the receiver's own default)")
 	span := flag.Float64("span", 0, "initial span in kHz (0 = server default)")
 	bars := flag.Bool("bars", false, "draw block bars instead of the higher-resolution braille spectrum")
@@ -70,6 +70,8 @@ func main() {
 	bandwidth := flag.String("bw", "", "filter edges in Hz as low:high (empty = the mode's own default)")
 	headless := flag.Bool("headless", false, "no display: tune and stream the audio, for scripts and services (needs -server)")
 	squelch := flag.Int("squelch", 0, "squelch threshold in dB of SNR (0 = off)")
+	lossless := flag.Bool("lossless", false, "ask for the lossless audio format instead of Opus: the demodulator's own samples, bit for bit, for about twice the bandwidth")
+	minMargin := flag.Int("min-margin", marginDefault, "IQ modes only: dB of quantisation margin under the noise floor (15-60; 0 asks for a lossless IQ stream)")
 	noAudio := flag.Bool("no-audio", false, "watch the spectrum without opening an audio channel")
 	toStdout := flag.Bool("stdout", false, "write the demodulated audio to stdout as raw PCM (48 kHz mono S16_LE) for piping")
 	toStdoutWAV := flag.Bool("stdout-wav", false, "as -stdout, but with a WAV header, so a redirected file plays anywhere")
@@ -121,6 +123,15 @@ func main() {
 		fatal("-squelch %d is outside %d–%d dB SNR (0 turns it off)", *squelch, squelchMin, squelchMax)
 	}
 
+	// Clamping would be the server's behaviour, but here there is somewhere to
+	// say so: a margin the receiver will not honour as asked is a typo, and
+	// silently getting a different one is how a capture ends up quieter than
+	// the operator believes.
+	if *minMargin != 0 && (*minMargin < marginMin || *minMargin > marginMax) {
+		fatal("-min-margin %d is outside %d–%d dB (0 asks for a lossless IQ stream)",
+			*minMargin, marginMin, marginMax)
+	}
+
 	var bwLow, bwHigh int
 	if *bandwidth != "" {
 		var err error
@@ -160,6 +171,8 @@ func main() {
 		headless:      *headless,
 		deviceID:      deviceID,
 		squelch:       *squelch,
+		lossless:      *lossless,
+		minMargin:     *minMargin,
 		bwLow:         bwLow,
 		bwHigh:        bwHigh,
 		haveBandwidth: *bandwidth != "",
@@ -221,10 +234,24 @@ type options struct {
 	// nothing is refused while there is still a terminal to say so.
 	deviceID string
 	squelch  int
+	// lossless asks the server for the predictive codec rather than Opus.
+	lossless bool
+	// minMargin is the reduced-depth IQ request in dB, 0 for a lossless IQ
+	// stream. It means nothing to the demodulated modes, which the server never
+	// quantises.
+	minMargin int
 	// The filter edges, when the command line named them rather than leaving
 	// the mode's own defaults in place.
 	bwLow, bwHigh int
 	haveBandwidth bool
+}
+
+// audioFormat turns the -lossless flag into the format to ask for.
+func (o options) audioFormat() AudioFormat {
+	if o.lossless {
+		return FormatLossless
+	}
+	return FormatOpus
 }
 
 func parseView(s string) (ViewMode, error) {
@@ -279,6 +306,8 @@ func run(opts options) error {
 	ui.braille = opts.braille
 	ui.mode = opts.mode
 	ui.squelch = opts.squelch
+	ui.lossless = opts.lossless
+	ui.minMargin = opts.minMargin
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -441,6 +470,7 @@ func (e *eventLoop) connectTo(inst Instance) {
 	// Audio and chat ride the same session UUID on their own sockets, so the
 	// server sees one user rather than three.
 	audio := NewAudioClient(inst.Host, inst.TLS, e.opts.password, client.sessionID)
+	audio.SetFormat(e.opts.audioFormat())
 	e.audio = audio
 	chat := NewChatClient(inst.Host, inst.TLS, client.sessionID)
 	e.chat = chat
@@ -469,13 +499,23 @@ func (e *eventLoop) connectTo(inst Instance) {
 		// The server requires this handshake before it will accept a spectrum
 		// socket, and it carries the rejection reason when it declines.
 		if err := client.CheckConnection(); err != nil {
-			client.report("refused: " + err.Error())
+			client.report("refused by " + inst.Host + ": " + err.Error())
 			select {
 			case e.wake <- struct{}{}:
 			default:
 			}
 			return
 		}
+		if note := client.PasswordState().Note(inst.Host); note != "" {
+			client.report(note)
+		}
+		// What the handshake said about wide IQ, applied by the event loop for
+		// the same reason the description is.
+		select {
+		case client.IQModes <- client.AllowedIQModes():
+		default:
+		}
+
 		go client.Run(ctx, initialFreq, initialBinBW)
 		// The band plan and bookmarks come off the HTTP API, so they neither
 		// wait for nor block the spectrum socket.
@@ -492,6 +532,27 @@ func (e *eventLoop) connectTo(inst Instance) {
 		// session costs the server nothing extra.
 		<-ctx.Done()
 	}()
+}
+
+// applyAllowedIQ records which wide IQ modes this session may use, and puts the
+// user back on a mode they are allowed if the one they asked for is not among
+// them.
+//
+// The check can only happen here. Which wide modes a receiver offers depends on
+// the caller's address and password, so it is not known until the /connection
+// handshake has answered — by which time -mode has already been applied.
+func (e *eventLoop) applyAllowedIQ(list []string) {
+	e.ui.allowedIQ = list
+	if e.ui.modeAvailable(e.ui.audioMode) {
+		return
+	}
+	refused := e.ui.audioMode
+	e.ui.ApplyMode("usb")
+	e.ui.status = fmt.Sprintf("%s is not offered to this session — %s",
+		strings.ToUpper(refused), e.ui.describeAllowedIQ())
+	if e.ui.audioOn {
+		e.retune()
+	}
 }
 
 // maybeStartAudio brings audio up as soon as there is a frequency to tune to.
@@ -543,6 +604,8 @@ func (e *eventLoop) startAudio() {
 	e.ui.SyncSideband()
 	e.audio.SetTuning(e.ui.vfo, e.ui.audioMode, e.ui.bwLow, e.ui.bwHigh)
 	e.audio.SetSquelch(e.ui.squelch)
+	e.audio.SetFormat(e.ui.audioFormat())
+	e.audio.SetMinMargin(e.ui.minMargin)
 	e.out.SetChannel(e.ui.channel)
 	e.out.SetVolume(e.ui.volume)
 	e.out.SetMuted(e.ui.muted)
@@ -691,6 +754,34 @@ func (e *eventLoop) applySquelch() {
 	}
 }
 
+// applyMargin pushes the reduced-depth IQ margin to the audio socket.
+//
+// No reconnect, unlike the format: the depth is chosen per packet and the shift
+// travels in the packet, so a new margin takes effect on the next one — and
+// crossing between lossy and lossless only changes which profile the packets
+// declare, which the decoder rebuilds itself.
+func (e *eventLoop) applyMargin() {
+	if e.audio != nil {
+		e.audio.SetMinMargin(e.ui.minMargin)
+	}
+	e.ui.status = "IQ margin: " + marginLabel(e.ui.minMargin)
+	if !isIQMode(e.ui.audioMode) {
+		e.ui.status += " — applies to the IQ modes only"
+	}
+}
+
+// applyFormat pushes the chosen wire format to the audio socket, which
+// reconnects to change it. The stream row in the audio panel then says what is
+// actually arriving, which is not always what was asked for.
+func (e *eventLoop) applyFormat() {
+	if e.audio == nil {
+		e.ui.status = "audio format: " + e.ui.audioFormat().String() + " (applied when audio starts)"
+		return
+	}
+	e.audio.SetFormat(e.ui.audioFormat())
+	e.ui.status = "audio format: " + e.ui.audioFormat().String() + " — reconnecting"
+}
+
 // retune pushes the current VFO, mode and filter to the audio channel.
 func (e *eventLoop) retune() {
 	if e.audio == nil || !e.ui.audioOn {
@@ -725,14 +816,15 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 			markers = e.client.Markers
 		}
 		var info chan Description
+		var iqModes chan []string
 		if e.client != nil {
-			info = e.client.Info
+			info, iqModes = e.client.Info, e.client.IQModes
 		}
 		var chatUpdates chan ChatState
 		if e.chat != nil {
 			chatUpdates = e.chat.Updates
 		}
-		var pcm chan []int16
+		var pcm chan AudioPacket
 		var level chan Signal
 		var audioStatus chan string
 		var dspStatus chan DSPState
@@ -799,6 +891,10 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 			e.applyDescription(desc)
 			dirty = true
 
+		case list := <-iqModes:
+			e.applyAllowedIQ(list)
+			dirty = true
+
 		case m := <-markers:
 			e.ui.bands, e.ui.bookmarks = m.Bands, m.Bookmarks
 			dirty = true
@@ -812,11 +908,11 @@ func (e *eventLoop) run(ctx context.Context, events <-chan tcell.Event) error {
 			e.ui.connected = e.client != nil && e.client.Connected()
 			dirty = true
 
-		case samples := <-pcm:
+		case pkt := <-pcm:
 			// Audio must keep flowing regardless of redraw pacing, so this
 			// path never touches the renderer.
 			if e.out != nil {
-				e.out.Push(samples)
+				e.out.Push(pkt)
 			}
 
 		case sig := <-level:
@@ -1117,11 +1213,22 @@ func (e *eventLoop) handleAudioPanelKey(ev *tcell.EventKey) (quit bool) {
 		e.audioPanel.stdoutStep = 0
 		e.cycleStdout(step)
 	}
+	if e.audioPanel.formatChanged {
+		e.audioPanel.formatChanged = false
+		e.applyFormat()
+	}
+	if e.audioPanel.marginChanged {
+		e.audioPanel.marginChanged = false
+		e.applyMargin()
+	}
 
 	if reopen && e.audioPanel.selectedDevice != e.currentDeviceID() {
 		e.applyDeviceChoice(e.audioPanel.selectedDevice)
 	}
 	e.audioPanel.stdoutMode, e.audioPanel.stdoutErr = e.stdoutState()
+	if e.out != nil {
+		e.audioPanel.stdoutRate, e.audioPanel.stdoutCh, _ = e.out.StdoutFormat()
+	}
 	if e.out != nil {
 		e.out.SetChannel(e.ui.channel)
 		e.out.SetVolume(e.ui.volume)
@@ -1337,12 +1444,18 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 			e.audioPanel = NewAudioPanel(devices, err)
 			e.audioPanel.selectedDevice = e.currentDeviceID()
 			e.audioPanel.stdoutMode, e.audioPanel.stdoutErr = e.stdoutState()
+			if e.out != nil {
+				e.audioPanel.stdoutRate, e.audioPanel.stdoutCh, _ = e.out.StdoutFormat()
+			}
 		case 'n', 'N':
 			e.cycleDSP(+1)
 		case 't':
 			e.adjustSquelch(+1)
 		case 'T':
 			e.adjustSquelch(-1)
+		case 'L':
+			e.ui.lossless = !e.ui.lossless
+			e.applyFormat()
 		case 'g', 'G':
 			ui.meterSNR = !ui.meterSNR
 			ui.status = "meter: " + meterModeName(ui.meterSNR)
@@ -1397,13 +1510,9 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 			// first one did rather than wherever it was left.
 			ui.helpScroll = 0
 		case ',':
-			ui.AdjustBandwidth(-100)
-			ui.status = fmt.Sprintf("filter %+d/%+d Hz", ui.bwLow, ui.bwHigh)
-			e.retune()
+			e.adjustBandwidth(-100)
 		case '.':
-			ui.AdjustBandwidth(+100)
-			ui.status = fmt.Sprintf("filter %+d/%+d Hz", ui.bwLow, ui.bwHigh)
-			e.retune()
+			e.adjustBandwidth(+100)
 		}
 	}
 	return false
@@ -1413,12 +1522,34 @@ func (e *eventLoop) handleKey(ev *tcell.EventKey) (quit bool) {
 // by a click on the mode in the header, so the two cannot drift apart.
 func (e *eventLoop) cycleAudioMode() {
 	ui := e.ui
-	idx := (modeIndex(ui.audioMode) + 1) % len(modes)
-	ui.ApplyMode(modes[idx].Name)
+	ui.StepMode(+1)
 	// Choosing a mode by hand means the 10 MHz convention should stop
 	// overriding it, unless the choice is itself a sideband.
-	ui.status = "mode " + strings.ToUpper(ui.audioMode)
+	ui.status = "mode " + strings.ToUpper(ui.audioMode) + modeCostNote(ui.audioMode)
 	e.retune()
+}
+
+// adjustBandwidth moves the filter and retunes, saying so when the mode has no
+// filter to move rather than silently doing nothing.
+func (e *eventLoop) adjustBandwidth(delta int) {
+	if isIQMode(e.ui.audioMode) {
+		e.ui.status = strings.ToUpper(e.ui.audioMode) + " carries the whole quadrature baseband; its filter is fixed"
+		return
+	}
+	e.ui.AdjustBandwidth(delta)
+	e.ui.status = fmt.Sprintf("filter %+d/%+d Hz", e.ui.bwLow, e.ui.bwHigh)
+	e.retune()
+}
+
+// modeCostNote warns what a wide IQ mode is about to cost. Selecting iq384 is
+// three keystrokes away from any other mode and asks the receiver for better
+// than a megabyte a second, which is worth saying rather than discovering.
+func modeCostNote(name string) string {
+	m, ok := lookupMode(name)
+	if !ok || !isWideIQMode(name) {
+		return ""
+	}
+	return fmt.Sprintf(" — %d kHz quadrature, %s", m.Rate/1000, modeCost(name))
 }
 
 // handleHelpKey drives the help overlay while it is up. Returns whether the

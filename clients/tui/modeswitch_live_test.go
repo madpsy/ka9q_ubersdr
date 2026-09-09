@@ -56,7 +56,7 @@ func TestLiveModeSwitchSpeed(t *testing.T) {
 		for {
 			select {
 			case pcm := <-ac.PCM:
-				samples += len(pcm)
+				samples += pcm.Frames()
 			case s := <-ac.Level:
 				sig = s
 			case <-ac.Silence:

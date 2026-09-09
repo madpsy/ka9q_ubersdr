@@ -66,6 +66,21 @@ type Client struct {
 	sessionLimit time.Duration
 	sessionStart time.Time
 
+	// bypassed is what the receiver said about this session at /connection: the
+	// session limits lifted and the wide IQ modes on offer. It is granted by a
+	// matching password OR by the address being on the operator's list, so it
+	// does not by itself prove a password was used — but a session that gave
+	// one and did NOT get it proves the password did nothing, which is the case
+	// worth reporting.
+	bypassed bool
+
+	// allowedIQ is the wide IQ modes this session may use, also from
+	// /connection. Which ones a receiver offers depends on who is asking — a
+	// bypassed session gets all of them, a public one only those the operator
+	// has published — so it is per session rather than per receiver, and it is
+	// the reason the check cannot live in the mode table.
+	allowedIQ []string
+
 	// Delta-decode state. The server sends one full frame then deltas against
 	// it, so this must be reset on every reconnect or deltas land on stale bins.
 	// The codes the last full frame established, and the scale they decode
@@ -99,6 +114,10 @@ type Client struct {
 	// itself is applied on the UI's own goroutine rather than from the
 	// background fetch.
 	Info chan Description
+	// IQModes carries the wide IQ modes this session may use, once, after the
+	// /connection handshake — which is the only moment they can be known, since
+	// the answer depends on who is asking.
+	IQModes chan []string
 }
 
 // userAgent identifies this client to every receiver it talks to, on every
@@ -128,6 +147,7 @@ func NewClient(host string, useTLS bool, password string) (*Client, error) {
 		Status:  make(chan string, 8),
 		Markers: make(chan Markers, 1),
 		Info:    make(chan Description, 1),
+		IQModes: make(chan []string, 1),
 	}, nil
 }
 
@@ -179,6 +199,12 @@ func (c *Client) CheckConnection() error {
 		// How long this receiver lets a session last, in seconds. Zero means it
 		// does not limit them — which is also what a bypassed connection gets.
 		MaxSessionTime int `json:"max_session_time"`
+		// Whether this session was granted the bypass: no session limit, and
+		// the wide IQ modes the operator has not made public.
+		Bypassed bool `json:"bypassed"`
+		// Which wide IQ modes this session may ask for. Plain iq is never
+		// listed: it is open to everyone and needs no permission.
+		AllowedIQModes []string `json:"allowed_iq_modes"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return fmt.Errorf("bad /connection response (HTTP %d): %w", resp.StatusCode, err)
@@ -188,6 +214,18 @@ func (c *Client) CheckConnection() error {
 		if reason == "" {
 			reason = "connection refused by server"
 		}
+		// A refusal here is the receiver's own words, which are usually enough.
+		// The two password cases are worth naming, because the server's message
+		// alone does not say which side needs fixing: it refuses a wrong
+		// password and a missing one with the same status.
+		if resp.StatusCode == http.StatusForbidden {
+			switch {
+			case c.password != "":
+				return fmt.Errorf("%s — the password given with -password was not accepted", reason)
+			case strings.Contains(strings.ToLower(reason), "password"):
+				return fmt.Errorf("%s — give one with -password", reason)
+			}
+		}
 		return fmt.Errorf("%s", reason)
 	}
 
@@ -196,8 +234,106 @@ func (c *Client) CheckConnection() error {
 	c.mu.Lock()
 	c.sessionLimit = time.Duration(result.MaxSessionTime) * time.Second
 	c.sessionStart = time.Now()
+	c.bypassed = result.Bypassed
+	c.allowedIQ = filterKnownModes(result.AllowedIQModes)
 	c.mu.Unlock()
 	return nil
+}
+
+// Bypassed reports whether the receiver lifted this session's limits: no
+// session timeout, and whatever wide IQ modes the operator keeps for authorised
+// users. Only meaningful once CheckConnection has run.
+func (c *Client) Bypassed() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.bypassed
+}
+
+// PasswordState says what became of a password given on the command line, so a
+// client can tell the user rather than leaving them to infer it from a session
+// that quietly behaves like a public one.
+type PasswordState int
+
+const (
+	// PasswordNone: none was given.
+	PasswordNone PasswordState = iota
+	// PasswordAccepted: one was given and this session is bypassed. The bypass
+	// may also have come from the address being on the operator's list, which
+	// is indistinguishable here and makes no difference to what follows.
+	PasswordAccepted
+	// PasswordIgnored: one was given, the receiver allowed the session, and did
+	// not grant the bypass.
+	//
+	// That can only mean the receiver has no bypass password configured: one
+	// that has refuses a password that does not match outright, which
+	// CheckConnection reports as a refusal rather than reaching here. So the
+	// password was not wrong — there was nothing for it to unlock.
+	PasswordIgnored
+)
+
+// PasswordState reports what became of the password, once CheckConnection has
+// run.
+func (c *Client) PasswordState() PasswordState {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	switch {
+	case c.password == "":
+		return PasswordNone
+	case c.bypassed:
+		return PasswordAccepted
+	default:
+		return PasswordIgnored
+	}
+}
+
+// Note describes what became of the password in one line, or "" when there is
+// nothing worth saying.
+func (s PasswordState) Note(host string) string {
+	switch s {
+	case PasswordAccepted:
+		return "password accepted — this session is bypassed"
+	case PasswordIgnored:
+		return "-password had no effect: " + host + " uses no bypass password"
+	default:
+		return ""
+	}
+}
+
+// AllowedIQModes is the wide IQ modes this session may use, in the order the
+// mode table lists them. Empty means none: the receiver publishes no wide IQ
+// mode to this listener.
+//
+// Only meaningful once CheckConnection has run, which is also the only moment
+// it can be known — the answer depends on the caller's IP and password.
+func (c *Client) AllowedIQModes() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]string(nil), c.allowedIQ...)
+}
+
+// filterKnownModes drops anything the server named that this client has no
+// entry for, and returns what is left in the mode table's own order.
+//
+// Ordering matters because this drives what M cycles through, and a receiver
+// listing its modes in some other order would otherwise make the cycle jump
+// about. Filtering matters because a newer server may name a mode this build
+// does not know, and offering the user a mode it cannot describe is worse than
+// not offering it.
+func filterKnownModes(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	named := make(map[string]bool, len(names))
+	for _, n := range names {
+		named[strings.ToLower(strings.TrimSpace(n))] = true
+	}
+	var out []string
+	for _, m := range modes {
+		if isWideIQMode(m.Name) && named[m.Name] {
+			out = append(out, m.Name)
+		}
+	}
+	return out
 }
 
 // SessionDeadline reports when this session runs out, and whether the receiver
@@ -325,8 +461,14 @@ const defaultStartFrequency = 14_175_000
 //
 // The server applies these same rules before sending, so this is belt and
 // braces against an older or third-party receiver reporting something outside
-// the band or a mode this client cannot demodulate — the Python client
-// re-checks them for the same reason.
+// the band or a mode this client cannot read — the Python client re-checks them
+// for the same reason.
+//
+// A wide IQ mode is refused even though this client can now read one. Opening
+// on iq384 unasked would cost the receiver's operator better than a megabyte a
+// second, and the wide modes are gated per session anyway, so a receiver naming
+// one as its default is offering something the listener may not even be allowed
+// to have. Plain iq is accepted: it is 12 kHz and open to everyone.
 func (d Description) Defaults() (freq float64, mode string) {
 	// This receiver's own range rather than the package-level one, because the
 	// answer is wanted on the goroutine that fetched the description — before
@@ -338,7 +480,7 @@ func (d Description) Defaults() (freq float64, mode string) {
 		freq = defaultStartFrequency
 	}
 	mode = strings.ToLower(strings.TrimSpace(d.DefaultMode))
-	if _, ok := lookupMode(mode); !ok {
+	if _, ok := lookupMode(mode); !ok || isWideIQMode(mode) {
 		mode = "usb"
 	}
 	return freq, mode

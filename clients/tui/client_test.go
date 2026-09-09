@@ -754,8 +754,12 @@ func TestDescriptionDefaults(t *testing.T) {
 			Description{DefaultFrequency: 145_500_000, DefaultMode: "nfm"}, defaultStartFrequency, "nfm"},
 		{"below the receiver's range",
 			Description{DefaultFrequency: 500, DefaultMode: "am"}, defaultStartFrequency, "am"},
-		{"a mode we cannot demodulate",
-			Description{DefaultFrequency: 7_100_000, DefaultMode: "iq48"}, 7_100_000, "usb"},
+		{"a wide IQ default, which is gated and expensive",
+			Description{DefaultFrequency: 7_100_000, DefaultMode: "iq384"}, 7_100_000, "usb"},
+		{"a mode that does not exist",
+			Description{DefaultFrequency: 7_100_000, DefaultMode: "ssb"}, 7_100_000, "usb"},
+		{"plain iq, which is open to everyone",
+			Description{DefaultFrequency: 7_100_000, DefaultMode: "iq"}, 7_100_000, "iq"},
 	} {
 		freq, mode := tc.desc.Defaults()
 		if freq != tc.wantFreq || mode != tc.wantMode {

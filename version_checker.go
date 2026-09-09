@@ -211,3 +211,22 @@ func StartVersionChecker(enabled bool, intervalMinutes int, sessions *SessionMan
 		}
 	}()
 }
+
+// IsNewerVersionAvailable reports whether latestVersionStr is semantically newer
+// than the running Version. Returns false for an empty/unfetched latest version,
+// and false when the running build is ahead of what is published (e.g. during
+// development after bumping version.go but before pushing). Falls back to string
+// inequality only when either version cannot be parsed as a semantic version.
+func IsNewerVersionAvailable(latestVersionStr string) bool {
+	if latestVersionStr == "" {
+		return false
+	}
+
+	currentVer, err1 := version.NewVersion(Version)
+	latestVer, err2 := version.NewVersion(latestVersionStr)
+	if err1 != nil || err2 != nil {
+		return latestVersionStr != Version
+	}
+
+	return latestVer.GreaterThan(currentVer)
+}

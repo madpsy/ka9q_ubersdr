@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-
-	goversion "github.com/hashicorp/go-version"
 )
 
 // VersionHealthStatus represents the health status of the software version check
@@ -41,15 +39,8 @@ func handleVersionHealth(w http.ResponseWriter, r *http.Request, versionCheckEna
 		// Checker is enabled but hasn't fetched a version yet (startup) or all checks failed
 		status.Healthy = true // don't alarm on a transient check failure
 	} else {
-		// Compare semantically
-		currentVer, err1 := goversion.NewVersion(Version)
-		latestVer, err2 := goversion.NewVersion(latestVersion)
-		if err1 == nil && err2 == nil {
-			status.UpdateAvailable = latestVer.GreaterThan(currentVer)
-		} else {
-			// Fall back to string comparison
-			status.UpdateAvailable = latestVersion != Version
-		}
+		// Compare semantically (a build ahead of what is published is not an update)
+		status.UpdateAvailable = IsNewerVersionAvailable(latestVersion)
 		// Healthy = no update pending
 		status.Healthy = !status.UpdateAvailable
 	}

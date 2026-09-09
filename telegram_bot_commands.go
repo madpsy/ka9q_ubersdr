@@ -180,7 +180,7 @@ func (l *TelegramBotListener) handleVersion(chatID int64, args string) (string, 
 		force := argNorm == "update force"
 
 		// Without force, only proceed if an update is actually available.
-		if !force && (latestVersion == "" || latestVersion == currentVersion) {
+		if !force && !IsNewerVersionAvailable(latestVersion) {
 			msg := fmt.Sprintf("🔄 <b>Software Version</b>\n\nCurrent: <code>%s</code>\n\n<i>No update available — already on the latest version.</i>\n\nUse <code>/version update force</code> to force a reinstall.",
 				html.EscapeString(currentVersion))
 			apiResp, apiOK := l.sendMessage(chatID, msg)
@@ -220,13 +220,15 @@ func (l *TelegramBotListener) handleVersion(chatID int64, args string) (string, 
 
 	if latestVersion == "" {
 		sb.WriteString("Latest:  <i>not yet checked</i>\n")
-	} else if latestVersion == currentVersion {
-		fmt.Fprintf(&sb, "Latest:  <code>%s</code>\n\n✅ Up to date", html.EscapeString(latestVersion))
-	} else {
+	} else if IsNewerVersionAvailable(latestVersion) {
 		fmt.Fprintf(&sb, "Latest:  <code>%s</code>\n\n⚠️ Update available!", html.EscapeString(latestVersion))
 		if l.commandWriteEnabled("version") {
 			sb.WriteString(" Use <code>/version update</code> to trigger the update.")
 		}
+	} else if latestVersion != currentVersion {
+		fmt.Fprintf(&sb, "Latest:  <code>%s</code>\n\n✅ Up to date (running newer than published)", html.EscapeString(latestVersion))
+	} else {
+		fmt.Fprintf(&sb, "Latest:  <code>%s</code>\n\n✅ Up to date", html.EscapeString(latestVersion))
 	}
 
 	msg := sb.String()

@@ -138,7 +138,7 @@ func (ah *AdminHandler) buildMonitorHealthItems() []MonitorHealthItem {
 	{
 		latestVersion := GetLatestVersion()
 		checkFailed := ah.config.Admin.VersionCheckEnabled && latestVersion == ""
-		updateAvailable := !checkFailed && latestVersion != "" && latestVersion != Version
+		updateAvailable := !checkFailed && IsNewerVersionAvailable(latestVersion)
 		var issues []string
 		if updateAvailable {
 			issues = append(issues, fmt.Sprintf("Update available: %s → %s", Version, latestVersion))

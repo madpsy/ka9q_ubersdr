@@ -7,8 +7,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	goversion "github.com/hashicorp/go-version"
 )
 
 // DefaultCPUTempThresholdC is the temperature (°C) above which the cpu_temperature
@@ -649,13 +647,7 @@ func BuildSystemHealthProbes(
 				s.CurrentVersion = Version
 				s.LatestVersion = latestVersion
 
-				currentVer, err1 := goversion.NewVersion(Version)
-				latestVer, err2 := goversion.NewVersion(latestVersion)
-				if err1 == nil && err2 == nil {
-					s.UpdateAvailable = latestVer.GreaterThan(currentVer)
-				} else {
-					s.UpdateAvailable = latestVersion != Version
-				}
+				s.UpdateAvailable = IsNewerVersionAvailable(latestVersion)
 				if s.UpdateAvailable {
 					return false, []string{fmt.Sprintf("New version available: %s (current: %s)", latestVersion, Version)}
 				}

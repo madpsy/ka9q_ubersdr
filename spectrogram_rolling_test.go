@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"image/png"
 	"math"
@@ -41,7 +40,7 @@ func newTestRollingRecorder(t *testing.T, now time.Time, todayRows int) *Spectro
 
 	// Yesterday: a complete day on disk, row index == minute-of-day.
 	writeTestDay(t, dir, yesterday.Format("2006-01-02"), yesterdayMidnight, spectrogramMaxRows, binCount,
-		func(m int) float32 { return float32(-m) })
+		func(m, _ int) float32 { return float32(-m) })
 
 	// Today: ring buffer plus the matching JSONL.
 	for m := 0; m < todayRows; m++ {
@@ -57,25 +56,26 @@ func newTestRollingRecorder(t *testing.T, now time.Time, todayRows int) *Spectro
 }
 
 // writeTestDay writes a .bin + .jsonl pair for one complete UTC day.
-func writeTestDay(t testing.TB, dir, date string, midnight time.Time, rowCount, binCount int, value func(m int) float32) {
+//
+// The .bin goes through persistToDisk rather than a hand-rolled header. A fixture
+// that builds the header itself can only ever agree with whichever layout the test
+// author had in mind, so it will happily match a reader that has drifted away from
+// the writer — which is how a four-bin shift in every archived row went unnoticed.
+func writeTestDay(t testing.TB, dir, date string, midnight time.Time, rowCount, binCount int, value func(m, bin int) float32) {
 	t.Helper()
 
-	buf := make([]byte, 24+rowCount*binCount*4)
-	copy(buf[0:4], spectrogramMagic)
-	binary.LittleEndian.PutUint32(buf[4:8], spectrogramVersion)
-	binary.LittleEndian.PutUint32(buf[8:12], uint32(rowCount))
-	binary.LittleEndian.PutUint64(buf[12:20], uint64(midnight.Add(time.Duration(rowCount)*time.Minute).Unix()))
-	binary.LittleEndian.PutUint32(buf[20:24], uint32(binCount))
-	offset := 24
+	w := newSpectrogramRecorderForBand(nil, SpectrogramConfig{DataDir: dir},
+		"wideband", 0, 30_000_000, binCount, func() *BandFFT { return nil })
 	for m := 0; m < rowCount; m++ {
-		for j := 0; j < binCount; j++ {
-			binary.LittleEndian.PutUint32(buf[offset:offset+4], math.Float32bits(value(m)))
-			offset += 4
+		row := make([]float32, binCount)
+		for j := range row {
+			row[j] = value(m, j)
 		}
+		w.rows[m] = row
 	}
-	if err := os.WriteFile(filepath.Join(dir, "spectrogram_"+date+".bin"), buf, 0644); err != nil {
-		t.Fatalf("write .bin: %v", err)
-	}
+	w.rowCount = rowCount
+	w.lastRow = midnight.Add(time.Duration(rowCount) * time.Minute)
+	w.persistToDisk(date)
 
 	f, err := os.Create(filepath.Join(dir, "spectrogram_"+date+".jsonl"))
 	if err != nil {

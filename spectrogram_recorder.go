@@ -627,6 +627,71 @@ func (sr *SpectrogramRecorder) readJSONL(dateStr string) []SpectrogramRowMeta {
 	return rows
 }
 
+// spectrogramBinHeader holds the row geometry read out of a .bin file header.
+type spectrogramBinHeader struct {
+	rowCount int
+	binCount int
+}
+
+// parseSpectrogramBin validates a .bin file's magic, version and geometry.
+//
+// The header size lives here and in the writer, nowhere else. It has grown across
+// versions and decoding rows at the wrong size does not fail loudly: reading a v2
+// file at the old 24-byte offset starts four float32s early, which slides every row
+// four bins up the frequency axis and shows up as a step in the image wherever
+// archived rows meet live ones.
+//
+// ok is false for anything that is not a readable current-version file. v1 files are
+// rejected rather than reinterpreted — they carry no frequency axis, so their rows
+// cannot be placed against the span this recorder covers now (see spectrogramVersion).
+func parseSpectrogramBin(data []byte) (h spectrogramBinHeader, ok bool) {
+	if len(data) < spectrogramHeaderSize || string(data[0:4]) != spectrogramMagic {
+		return h, false
+	}
+	if binary.LittleEndian.Uint32(data[4:8]) != spectrogramVersion {
+		return h, false
+	}
+	h.rowCount = int(binary.LittleEndian.Uint32(data[8:12]))
+	h.binCount = int(binary.LittleEndian.Uint32(data[20:24]))
+	if h.rowCount <= 0 || h.rowCount > spectrogramMaxRows || h.binCount <= 0 {
+		return h, false
+	}
+	return h, true
+}
+
+// spectrogramBinRow decodes row i of a .bin file, or nil if that row is not wholly
+// present (a truncated file).
+func spectrogramBinRow(data []byte, i, binCount int) []float32 {
+	if i < 0 || binCount <= 0 {
+		return nil
+	}
+	offset := spectrogramHeaderSize + i*binCount*4
+	if offset < 0 || offset+binCount*4 > len(data) {
+		return nil
+	}
+	row := make([]float32, binCount)
+	for j := range row {
+		row[j] = math.Float32frombits(binary.LittleEndian.Uint32(data[offset : offset+4]))
+		offset += 4
+	}
+	return row
+}
+
+// spectrogramBinRows decodes every row of a .bin file, or nil if the file is not a
+// usable current-version one. Rows missing from a truncated file are left nil; the
+// render and auto-range helpers skip those.
+func spectrogramBinRows(data []byte) (rows [][]float32, binCount int) {
+	h, ok := parseSpectrogramBin(data)
+	if !ok {
+		return nil, 0
+	}
+	rows = make([][]float32, h.rowCount)
+	for i := range rows {
+		rows[i] = spectrogramBinRow(data, i, h.binCount)
+	}
+	return rows, h.binCount
+}
+
 // loadTodayFromDisk attempts to restore today's data from the .bin file.
 func (sr *SpectrogramRecorder) loadTodayFromDisk() {
 	today := time.Now().UTC().Format("2006-01-02")
@@ -1780,28 +1845,22 @@ func (sr *SpectrogramRecorder) loadYesterdayLocked(date string, cutoff, binCount
 
 	binPath := filepath.Join(sr.config.DataDir, "spectrogram_"+date+".bin")
 	binData, err := os.ReadFile(binPath)
-	if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
+	if err != nil {
 		return // no data for yesterday — the window renders black for that period
 	}
-	fileRowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
-	fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
-	if fileBinCount != binCount {
+	hdr, hdrOK := parseSpectrogramBin(binData)
+	if !hdrOK || hdr.binCount != binCount {
 		return
 	}
 
 	for minuteOfDay := cutoff; minuteOfDay < spectrogramMaxRows; minuteOfDay++ {
 		binRow, ok := binRowByMinute[minuteOfDay]
-		if !ok || binRow < 0 || binRow >= fileRowCount {
+		if !ok || binRow < 0 || binRow >= hdr.rowCount {
 			continue // no data for this minute
 		}
-		offset := 24 + binRow*binCount*4
-		if offset+binCount*4 > len(binData) {
+		row := spectrogramBinRow(binData, binRow, binCount)
+		if row == nil {
 			continue
-		}
-		row := make([]float32, binCount)
-		for j := range row {
-			row[j] = math.Float32frombits(binary.LittleEndian.Uint32(binData[offset : offset+4]))
-			offset += 4
 		}
 		c.yRows[minuteOfDay] = row
 		if c.yMetaOK[minuteOfDay] {
@@ -2229,32 +2288,16 @@ func handleSpectrogram(w http.ResponseWriter, r *http.Request, recorder *Spectro
 		// Re-render archived day from .bin file with requested palette / range
 		binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
 		binData, err := os.ReadFile(binPath)
-		if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
+		if err != nil {
 			// .bin not available — fall through to serve disk PNG (palette/range ignored)
 			rerenderFailed = true
 			goto serveDiskPNG
 		}
-		rowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
-		if rowCount <= 0 || rowCount > spectrogramMaxRows {
+		rows, fileBinCount := spectrogramBinRows(binData)
+		if rows == nil {
+			// unreadable or written by an older version — serve the disk PNG as-is
+			rerenderFailed = true
 			goto serveDiskPNG
-		}
-		fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
-		if fileBinCount <= 0 {
-			fileBinCount = recorder.binCount
-		}
-		rows := make([][]float32, rowCount)
-		for i := 0; i < rowCount; i++ {
-			row := make([]float32, fileBinCount)
-			offset := 24 + i*fileBinCount*4
-			if offset+fileBinCount*4 > len(binData) {
-				break
-			}
-			for j := 0; j < fileBinCount; j++ {
-				bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
-				row[j] = math.Float32frombits(bits)
-				offset += 4
-			}
-			rows[i] = row
 		}
 		if !dbRangeExplicit {
 			// Auto-compute range from actual archived data, restricted to freq_min/freq_max bins
@@ -2710,28 +2753,8 @@ func handleSpectrogramMeta(w http.ResponseWriter, r *http.Request, recorder *Spe
 
 		// Load data rows from .bin for auto-range computation
 		binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
-		if binData, binErr := os.ReadFile(binPath); binErr == nil && len(binData) >= 24 && string(binData[0:4]) == spectrogramMagic {
-			binRowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
-			fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
-			if fileBinCount <= 0 {
-				fileBinCount = recorder.binCount
-			}
-			if binRowCount > 0 && binRowCount <= spectrogramMaxRows {
-				dataRows = make([][]float32, binRowCount)
-				for i := 0; i < binRowCount; i++ {
-					row := make([]float32, fileBinCount)
-					offset := 24 + i*fileBinCount*4
-					if offset+fileBinCount*4 > len(binData) {
-						break
-					}
-					for j := 0; j < fileBinCount; j++ {
-						bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
-						row[j] = math.Float32frombits(bits)
-						offset += 4
-					}
-					dataRows[i] = row
-				}
-			}
+		if binData, binErr := os.ReadFile(binPath); binErr == nil {
+			dataRows, _ = spectrogramBinRows(binData)
 		}
 	}
 
@@ -3164,27 +3187,17 @@ func handleSpectrogramRowSpectrum(w http.ResponseWriter, r *http.Request,
 			safeDateStr := regexp.MustCompile(`[^0-9\-]`).ReplaceAllString(dateStr, "")
 			binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
 			binData, err := os.ReadFile(binPath)
-			if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
+			if err != nil {
 				http.Error(w, `{"error":"no data available for this date"}`, http.StatusNotFound)
 				return
 			}
-			rowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
-			fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
-			if rowCount <= 0 || rowCount > spectrogramMaxRows || fileBinCount != recorder.binCount {
+			decoded, fileBinCount := spectrogramBinRows(binData)
+			if decoded == nil || fileBinCount != recorder.binCount {
 				http.Error(w, `{"error":"incompatible data file"}`, http.StatusInternalServerError)
 				return
 			}
-			rows = make([][]float32, rowCount)
-			for i := 0; i < rowCount; i++ {
-				row := make([]float32, recorder.binCount)
-				offset := 24 + i*recorder.binCount*4
-				for j := 0; j < recorder.binCount; j++ {
-					bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
-					row[j] = math.Float32frombits(bits)
-					offset += 4
-				}
-				rows[i] = row
-			}
+			rows = decoded
+			rowCount := len(rows)
 			// Load meta from JSONL
 			jsonlMap := make(map[int]SpectrogramRowMeta)
 			for _, rm := range recorder.readJSONL(safeDateStr) {
@@ -3356,27 +3369,17 @@ func handleSpectrogramAllRows(w http.ResponseWriter, r *http.Request,
 			safeDateStr := regexp.MustCompile(`[^0-9\-]`).ReplaceAllString(dateStr, "")
 			binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
 			binData, err := os.ReadFile(binPath)
-			if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
+			if err != nil {
 				http.Error(w, `{"error":"no data available for this date"}`, http.StatusNotFound)
 				return
 			}
-			rowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
-			fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
-			if rowCount <= 0 || rowCount > spectrogramMaxRows || fileBinCount != recorder.binCount {
+			decoded, fileBinCount := spectrogramBinRows(binData)
+			if decoded == nil || fileBinCount != recorder.binCount {
 				http.Error(w, `{"error":"incompatible data file"}`, http.StatusInternalServerError)
 				return
 			}
-			rows = make([][]float32, rowCount)
-			for i := 0; i < rowCount; i++ {
-				row := make([]float32, recorder.binCount)
-				offset := 24 + i*recorder.binCount*4
-				for j := 0; j < recorder.binCount; j++ {
-					bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
-					row[j] = math.Float32frombits(bits)
-					offset += 4
-				}
-				rows[i] = row
-			}
+			rows = decoded
+			rowCount := len(rows)
 			jsonlMap := make(map[int]SpectrogramRowMeta)
 			for _, rm := range recorder.readJSONL(safeDateStr) {
 				jsonlMap[rm.Row] = rm
@@ -3614,27 +3617,17 @@ func handleSpectrogramTimeslice(w http.ResponseWriter, r *http.Request,
 			safeDateStr := regexp.MustCompile(`[^0-9\-]`).ReplaceAllString(dateStr, "")
 			binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
 			binData, err := os.ReadFile(binPath)
-			if err != nil || len(binData) < 24 || string(binData[0:4]) != spectrogramMagic {
+			if err != nil {
 				http.Error(w, `{"error":"no data available for this date"}`, http.StatusNotFound)
 				return
 			}
-			rowCount := int(binary.LittleEndian.Uint32(binData[8:12]))
-			fileBinCount := int(binary.LittleEndian.Uint32(binData[20:24]))
-			if rowCount <= 0 || rowCount > spectrogramMaxRows || fileBinCount != recorder.binCount {
+			decoded, fileBinCount := spectrogramBinRows(binData)
+			if decoded == nil || fileBinCount != recorder.binCount {
 				http.Error(w, `{"error":"incompatible data file"}`, http.StatusInternalServerError)
 				return
 			}
-			rows = make([][]float32, rowCount)
-			for i := 0; i < rowCount; i++ {
-				row := make([]float32, recorder.binCount)
-				offset := 24 + i*recorder.binCount*4
-				for j := 0; j < recorder.binCount; j++ {
-					bits := binary.LittleEndian.Uint32(binData[offset : offset+4])
-					row[j] = math.Float32frombits(bits)
-					offset += 4
-				}
-				rows[i] = row
-			}
+			rows = decoded
+			rowCount := len(rows)
 			// Load meta from JSONL
 			jsonlMap := make(map[int]SpectrogramRowMeta)
 			for _, rm := range recorder.readJSONL(safeDateStr) {

@@ -29,6 +29,15 @@ cd "$(dirname "$0")"
 OUT="dist"
 PYDIR="../python"
 
+# The modules the spec pulls in from clients/python. One list, because it is used
+# twice -- the preflight below and the Windows staging copy -- and the two
+# drifting apart is exactly how iq_recorder.exe shipped without tuning_range.py:
+# the preflight passed, the staged ../python was missing the file, PyInstaller
+# recorded a missing-module warning rather than failing, and the exe died on
+# startup with "No module named 'tuning_range'". Anything a python_iq_recorder
+# module imports from ../python belongs here.
+PYDEPS=(radio_client.py pcm_v4.py tuning_range.py)
+
 # The release assets, and the filenames PyInstaller already produces. They are
 # NOT the Go recorder's `iq-recorder_amd64` and `iq-recorder_arm64`: that is a
 # different program in clients/iq-recorder, and the underscore here is the only
@@ -117,10 +126,10 @@ want() { local t; for t in "${TARGETS[@]}"; do [ "$t" = "$1" ] && return 0; done
 # Preflight
 # --------------------------------------------------------------------------
 
-# radio_client.py and pcm_v4.py live in clients/python and are pulled in by the
-# spec. Checked here rather than left to PyInstaller, whose failure for a
-# missing data file is a stack trace three screens long.
-for required in radio_client.py pcm_v4.py; do
+# These live in clients/python and are pulled in by the spec. Checked here rather
+# than left to PyInstaller, whose failure for a missing data file is a stack
+# trace three screens long.
+for required in "${PYDEPS[@]}"; do
   if [ ! -f "$PYDIR/$required" ]; then
     echo -e "${RED}$PYDIR/$required is missing -- the spec needs it.${NC}" >&2
     exit 1
@@ -143,6 +152,48 @@ if [ "$RUN_TESTS" -eq 1 ]; then
 fi
 
 # --------------------------------------------------------------------------
+# Build checks
+# --------------------------------------------------------------------------
+
+# Did PyInstaller actually find the clients/python modules?
+#
+# A module it cannot resolve is a line in its warning report, not an error: the
+# build succeeds, the exe is the right size and the right format, and it dies on
+# startup on the user's machine. That is how iq_recorder.exe shipped without
+# tuning_range.py. So the report is read here, for these modules only -- it lists
+# a few hundred genuinely-absent platform modules (_winapi, msvcrt) that mean
+# nothing.
+#
+# $1 is the directory PyInstaller ran in, which is this one for Linux and the
+# staging copy for Windows.
+check_deps_resolved() {
+  local rundir="$1"
+  local warn="$rundir/build/iq_recorder/warn-iq_recorder.txt"
+  local dep name missing=()
+
+  # No report means PyInstaller's layout changed. Say so rather than passing
+  # silently, which would make this check useless exactly when it is needed.
+  if [ ! -f "$warn" ]; then
+    echo -e "${YELLOW}  no $warn -- cannot confirm the clients/python modules were bundled${NC}" >&2
+    return 0
+  fi
+
+  for dep in "${PYDEPS[@]}"; do
+    name="${dep%.py}"
+    if grep -qE "^missing module named $name( |\$)" "$warn"; then
+      missing+=("$name")
+    fi
+  done
+
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo -e "${RED}  PyInstaller could not resolve: ${missing[*]}${NC}" >&2
+    echo "  The binary would start and immediately fail with ModuleNotFoundError." >&2
+    echo "  Check that $PYDIR has these files and that the build could see them." >&2
+    return 1
+  fi
+}
+
+# --------------------------------------------------------------------------
 # Linux
 # --------------------------------------------------------------------------
 
@@ -163,6 +214,8 @@ build_linux() {
   }
 
   ./venv/bin/python -m PyInstaller --clean --noconfirm iq_recorder.spec
+
+  check_deps_resolved . || return 1
 
   if [ ! -f "$OUT/$LINUX_ASSET" ]; then
     echo -e "${RED}  build produced no $OUT/$LINUX_ASSET${NC}" >&2
@@ -202,7 +255,9 @@ build_windows() {
   mkdir -p "$stage/src/python_iq_recorder" "$stage/src/python"
   tar -cf - --exclude=venv --exclude=build --exclude=dist --exclude=__pycache__ \
       --exclude='*.wav' --exclude='*.pyc' . | tar -xf - -C "$stage/src/python_iq_recorder"
-  cp "$PYDIR/radio_client.py" "$PYDIR/pcm_v4.py" "$stage/src/python/"
+  for dep in "${PYDEPS[@]}"; do
+    cp "$PYDIR/$dep" "$stage/src/python/"
+  done
 
   # One container run: the image is not committed, so a separate install run
   # would be thrown away before PyInstaller ever saw it.
@@ -236,6 +291,8 @@ build_windows() {
     echo -e "${RED}  build produced no $WIN_ASSET${NC}" >&2
     return 1
   fi
+
+  check_deps_resolved "$stage/src/python_iq_recorder" || return 1
 
   mkdir -p "$OUT"
   cp "$stage/src/python_iq_recorder/dist/$WIN_ASSET" "$OUT/$WIN_ASSET"

@@ -69,11 +69,13 @@ def check_environment():
         print(f"✗ Icon not found: {icon_path}")
         print("  (Build will continue without icon)")
     
-    # Check for the clients/python dependencies: radio_client and the protocol
-    # version 4 decoder it imports.
+    # Check for the clients/python dependencies: radio_client, the protocol
+    # version 4 decoder it imports, and the tuning-range helper that both it and
+    # the GUI import. Keep in step with PYDEPS in build.sh and the required-paths
+    # tuple in iq_recorder.spec.
     parent_python_dir = os.path.join(script_dir, '..', 'python')
 
-    for required in ('radio_client.py', 'pcm_v4.py'):
+    for required in ('radio_client.py', 'pcm_v4.py', 'tuning_range.py'):
         required_path = os.path.join(parent_python_dir, required)
         if os.path.exists(required_path):
             print(f"✓ Found {required}: {required_path}")

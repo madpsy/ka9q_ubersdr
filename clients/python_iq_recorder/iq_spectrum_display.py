@@ -4,6 +4,11 @@ IQ Spectrum Display
 Real-time FFT spectrum display for IQ recording streams with audio preview
 """
 
+# Annotations stay unevaluated. AudioChannel is imported under a try below and
+# is undefined when that import fails, so an evaluated `channel: AudioChannel`
+# turned the intended fallback into a NameError at class definition.
+from __future__ import annotations
+
 import tkinter as tk
 from tkinter import Canvas, ttk, messagebox
 import numpy as np

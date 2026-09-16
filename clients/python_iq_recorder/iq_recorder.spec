@@ -20,9 +20,14 @@ radio_client_path = os.path.join(parent_python_dir, 'radio_client.py')
 # dependencies of its own. Bundled by name because radio_client.py is carried as
 # a data file rather than analysed as source, so its imports are not traced.
 pcm_v4_path = os.path.join(parent_python_dir, 'pcm_v4.py')
+# Both radio_client and iq_recorder_gui import this at the top level, so a build
+# without it produces an exe that dies on startup with ModuleNotFoundError
+# rather than failing here. Also pure Python, typing only.
+tuning_range_path = os.path.join(parent_python_dir, 'tuning_range.py')
 
-# Verify the paths exist
-for _required in (radio_client_path, pcm_v4_path):
+# Verify the paths exist. This is the check that catches a staged build -- see
+# build.sh's Windows path -- that copied only some of clients/python across.
+for _required in (radio_client_path, pcm_v4_path, tuning_range_path):
     if not os.path.exists(_required):
         raise FileNotFoundError(f"{os.path.basename(_required)} not found at: {_required}")
 
@@ -39,6 +44,7 @@ a = Analysis(
         # Include radio_client.py and its version 4 decoder from clients/python
         (radio_client_path, '.'),
         (pcm_v4_path, '.'),
+        (tuning_range_path, '.'),
         
         # Include README and documentation
         ('README.md', '.'),
@@ -48,6 +54,7 @@ a = Analysis(
         # Core dependencies from parent directory
         'radio_client',
         'pcm_v4',
+        'tuning_range',
         
         # Standard library modules that might not be auto-detected
         'asyncio',
@@ -63,6 +70,11 @@ a = Analysis(
         'opuslib',
         'zstandard',
         'scipy',
+        # Newer scipy moved its vendored array_api_compat from scipy._lib to
+        # scipy._external, and PyInstaller's scipy hook still names only the old
+        # path. Without this every scipy import fails in the frozen app. Harmless
+        # (a not-found warning) on a scipy that has the old layout.
+        'scipy._external.array_api_compat.numpy.fft',
         'sounddevice',
         'pyaudio',
         'samplerate',

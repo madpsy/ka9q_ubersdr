@@ -48,6 +48,10 @@ const SNR_MAX_DB   = 30;
 const SNR_GREEN_DB = 15;   // at or above: signal stops improving audibly
 const SNR_AMBER_DB = 6;    // at or above: above the noise, worth listening to
 
+// Smart Listen chart ceiling. Taller than the tile meters so strong stations
+// still separate visually; readings outside the axis are clamped onto it.
+const SNR_CHART_MAX_DB = 50;
+
 // How often to refresh the signal meter UI (ms)
 const METER_UPDATE_INTERVAL = 100;
 
@@ -3958,8 +3962,8 @@ function buildSnrHistoryChart() {
                     enabled: true,
                     callbacks: {
                         title: items => `${((items[0].parsed.x - snrHistoryChart.scales.x.max) / 1000).toFixed(1)}s`,
-                        label: item  => item.parsed.y !== null
-                            ? `${item.dataset.label}: ${item.parsed.y.toFixed(1)} dB SNR`
+                        label: item  => item.raw.snr !== null
+                            ? `${item.dataset.label}: ${item.raw.snr.toFixed(1)} dB SNR`
                             : `${item.dataset.label}: No data`
                     }
                 }
@@ -3999,7 +4003,7 @@ function buildSnrHistoryChart() {
                     // every trace pinned below the bottom gridline once
                     // MinimalRadio started reporting a real SNR.
                     min: SNR_MIN_DB,
-                    max: SNR_MAX_DB,
+                    max: SNR_CHART_MAX_DB,
                     title: {
                         display: true,
                         text: 'SNR (dB)',
@@ -4039,7 +4043,11 @@ function buildSnrPoints(id) {
     const pts   = new Array(HISTORY_SAMPLES);
     for (let i = 0; i < HISTORY_SAMPLES; i++) {
         const k = (next + i) % HISTORY_SAMPLES;
-        pts[i] = { x: times ? times[k] : 0, y: buf[k] };
+        const snr = buf[k] ?? null;
+        // Clamp onto the axis so traces ride the edge instead of being cut off;
+        // the tooltip reads the unclamped `snr`.
+        const y = snr === null ? null : Math.max(SNR_MIN_DB, Math.min(SNR_CHART_MAX_DB, snr));
+        pts[i] = { x: times ? times[k] : 0, y, snr };
     }
     return pts;
 }

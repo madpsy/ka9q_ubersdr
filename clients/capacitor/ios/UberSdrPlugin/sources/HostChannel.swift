@@ -241,6 +241,29 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         onStopped?()
     }
 
+    /// The receiver is gone: take its card and its buttons off the lock screen.
+    ///
+    /// Not tidying. `MPRemoteCommandCenter` is process-wide and outlives this
+    /// channel, and a target left on it is a way back into a receiver that has
+    /// closed: a headphone or car play button reaches `onTransport`, which
+    /// claims the audio session and starts the silent engine from the
+    /// background — and that engine is what keeps the process running, with
+    /// nothing playing, until the app is force-closed. `ended` covers the power
+    /// button; this covers every other way a receiver closes.
+    func close() {
+        onTransport = nil
+        onStopped = nil
+        let centre = MPRemoteCommandCenter.shared()
+        for command in [centre.playCommand, centre.pauseCommand, centre.togglePlayPauseCommand,
+                        centre.stopCommand, centre.nextTrackCommand, centre.previousTrackCommand] {
+            command.removeTarget(nil)
+            command.isEnabled = false
+        }
+        haveRemoteCommands = false
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        MPNowPlayingInfoCenter.default().playbackState = .stopped
+    }
+
     /// The lock screen's buttons.
     ///
     /// Two kinds, and they are armed from different places. **Transport** —

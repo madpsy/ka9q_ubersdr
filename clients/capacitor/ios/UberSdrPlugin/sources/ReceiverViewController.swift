@@ -309,6 +309,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// Whether the one-line description of the session has been logged for this
     /// receiver — see PlaybackSession.describe.
     private var describedAudio = false
+    /// Set by close(). See there for why nothing may act on audio afterwards.
+    private var closed = false
 
     /// Shorten the page to whatever the keyboard leaves, and put it back after.
     ///
@@ -370,6 +372,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     @objc private func appWillResignActive() {
+        guard !closed else { return }
         NSLog("[UberSDR audio] app resigning active (state=%ld)",
               UIApplication.shared.applicationState.rawValue)
         // Claimed here, on the way out, and not from the background.
@@ -402,7 +405,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         // second after this claim, and interrupts the app at the one moment the
         // app is no longer allowed to answer.
         releasePageAudio { [weak self] in
-            guard let self = self else { return }
+            // Half a second is long enough for the receiver to have closed.
+            guard let self = self, !self.closed else { return }
             PlaybackSession.begin()
             // Before the stream's node is attached, so a replaced engine costs
             // nothing to reattach.
@@ -445,6 +449,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     @objc private func appBecameActive() {
+        guard !closed else { return }
         NSLog("[UberSDR audio] app became active (background stream %@)",
               backgroundAudio.isRunning ? "running" : "stopped")
         stopBackgroundAudio()
@@ -459,6 +464,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// of those can arrive before the page has a session id to hand over and
     /// the second cannot; starting twice does nothing.
     private func startBackgroundAudio() {
+        guard !closed else { return }
         guard let session = proxy.audioSessionId, !session.isEmpty else {
             // The one failure that is silent in every sense: no session id means
             // nothing to stream, so the handover completes having handed over
@@ -479,7 +485,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// stopped the audio rather than the app being left.
     @objc private func audioInterrupted(_ note: Notification) {
         guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+              let type = AVAudioSession.InterruptionType(rawValue: raw),
+              !closed else { return }
         // `.began` needs nothing, and not for the reason it used to: the
         // thought was that the system has already stopped the audio and what
         // matters is being ready when it ends. What matters is not being
@@ -506,6 +513,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// replaces them cannot be built until the stream's header arrives. A beat
     /// later, because the hand-back unwinds on the stream's own queue.
     @objc private func mediaServicesReset() {
+        guard !closed else { return }
         PlaybackSession.describe("media services reset")
         let wasBackground = backgroundAudio.isRunning
         stopBackgroundAudio()
@@ -529,6 +537,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// nothing to catch up on. Stopping hands the audio back the way coming
     /// into the foreground does, and play asks for it again.
     private func transport(_ action: String) {
+        guard !closed else { return }
         let wantsPlay: Bool
         switch action {
         case "play": wantsPlay = true
@@ -675,6 +684,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// apps never comes back. Stopping and restarting the receiver was the only
     /// way out, which is a poor thing to have to know.
     private func resumeAudio() {
+        guard !closed else { return }
         PlaybackSession.begin()
         // A replaced engine orphans the background stream — see
         // PlaybackSession.recover. Started again rather than reattached: the
@@ -734,7 +744,28 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     }
 
     /// Stop the receiver and take the screen away.
+    ///
+    /// Once, and for good. It is reached twice on the power button — `onStopped`
+    /// closes, and the dismissal it starts arrives at viewDidDisappear — and
+    /// the second must not announce the close again.
+    ///
+    /// For good because closing did not use to free this controller. The
+    /// content controller holds its script message handlers strongly, and this
+    /// is one, so the controller, its web view and its notification observers
+    /// all lived on after the receiver had gone. The observer on
+    /// `willResignActive` then did what it does for a live receiver every time
+    /// the app was left: claimed the audio session and started the silent
+    /// engine. That engine keeps the process running in the background, so
+    /// closing a receiver and then leaving the app from the chooser meant an
+    /// app running for hours with nothing playing, until force-closed.
+    /// Removing the handlers breaks the cycle; `closed` covers whatever is
+    /// already queued when it is broken.
     func close() {
+        guard !closed else { return }
+        closed = true
+        NotificationCenter.default.removeObserver(self)
+        host?.close()
+        webView?.configuration.userContentController.removeAllScriptMessageHandlers()
         UIApplication.shared.isIdleTimerDisabled = false
         audioWatch?.invalidate()
         audioWatch = nil

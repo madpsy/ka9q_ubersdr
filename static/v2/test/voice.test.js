@@ -4,7 +4,7 @@
 // lib/voiceActivity.js, and those are what this covers.
 
 const assert = require('assert');
-const { HAM_BANDS, BAND_NAMES, bandForFrequency, bandOrder, bandsInRange } = require('./.build/bands.cjs');
+const { HAM_BANDS, BAND_NAMES, bandChoices, bandForFrequency, bandOrder, bandsInRange } = require('./.build/bands.cjs');
 const va = require('./.build/voice.cjs');
 
 let pass = 0;
@@ -44,6 +44,23 @@ t('band buttons are offered only for bands the receiver can reach', () => {
 
     // A band only counts when it fits entirely — half a band has no centre to tune to.
     assert.ok(!bandsInRange(10000, 51000000).map(([n]) => n).includes('6m'));
+});
+
+t('band filters offer what the receiver reaches, keeping a remembered pick visible', () => {
+    // The spot lists and the voice skimmer: 6m only once the receiver runs to 60 MHz.
+    assert.ok(!bandChoices(10000, 30000000, 'auto').includes('6m'));
+    assert.deepStrictEqual(bandChoices(10000, 60000000, 'auto'), BAND_NAMES);
+
+    // A 6m pick saved on a 60 MHz receiver stays in the list on a 30 MHz one, in order,
+    // rather than leaving the select showing nothing.
+    const kept = bandChoices(10000, 30000000, '6m');
+    assert.strictEqual(kept.length, 11);
+    assert.strictEqual(kept[10], '6m');
+
+    // 'all', 'auto' and a band in range add nothing.
+    for (const c of ['all', 'auto', '20m', undefined]) {
+        assert.strictEqual(bandChoices(10000, 30000000, c).length, 10, String(c));
+    }
 });
 
 t('a frequency inside a band resolves to it', () => {

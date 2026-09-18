@@ -499,7 +499,7 @@
             const active = _sortCol === col;
             const arrow  = active ? (_sortDir === 'asc' ? ' ▲' : ' ▼') : '';
             const tt     = title ? ` title="${_esc(title)}"` : '';
-            return `<th${tt} data-col="${_esc(col)}" style="padding:7px 8px;white-space:nowrap;cursor:pointer;user-select:none;background:#3f51b5;color:white;${active ? 'text-decoration:underline;' : ''}">${_esc(label)}${arrow}</th>`;
+            return `<th${tt} data-col="${_esc(col)}" style="position:sticky;top:0;z-index:2;padding:7px 8px;white-space:nowrap;cursor:pointer;user-select:none;background:#3f51b5;color:white;${active ? 'text-decoration:underline;' : ''}">${_esc(label)}${arrow}</th>`;
         };
 
         thead.innerHTML = `<tr>

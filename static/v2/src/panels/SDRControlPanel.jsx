@@ -717,8 +717,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
 function MappingRow({ mapKey, mapping, isMidi, dspSchemas, hw, onRelative, onDelete }) {
     const retired = RETIRED[mapping.function];
     const label = functionLabel(mapping.function, dspSchemas, hw);
-    // A mapping that came from a receiver with a rotator, or an antenna past
-    // this switch's count. Kept, named, and marked — deleting it on arrival
+    // A mapping that came from a receiver with a rotator, an antenna past
+    // this switch's count, or a band this receiver cannot reach. Kept, named, and marked — deleting it on arrival
     // would quietly edit a file the operator carries between two receivers.
     const missing = !retired && isUnavailable(mapping.function, dspSchemas, hw);
     // A CC could be either a fader or an endless encoder and one message cannot
@@ -749,7 +749,7 @@ function MappingRow({ mapKey, mapping, isMidi, dspSchemas, hw, onRelative, onDel
                     <span className="tag tag--ghost" title="Rate limited">{mapping.throttleMs}ms</span>
                 )}
                 {missing && (
-                    <span className="tag tag--bad" title="This receiver has no such hardware — the mapping is kept for one that does">
+                    <span className="tag tag--bad" title="This receiver has no such hardware, or cannot tune that band — the mapping is kept for one that can">
                         not here
                     </span>
                 )}

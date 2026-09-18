@@ -25,6 +25,8 @@
 // worth keeping as they are: a QRSS operator recognises a band by its palette,
 // and grayscale is the default because faint streaks read best without hue.
 
+import { optionsInRange } from '../frequencies.js';
+
 export const COLORMAPS = {
     grayscale: [
         [0.00, 0, 0, 0], [1.00, 255, 255, 255],
@@ -466,17 +468,10 @@ export const QRSS_BANDS = [
 ];
 
 /**
- * The groups a receiver can actually reach, with unreachable options dropped and any
- * group left empty removed entirely.
- *
- * Hiding rather than clamping on purpose: a picker entry that silently tunes to the band
- * edge instead of where it says looks like it worked, and QRSS is a mode where you stare
- * at a waterfall for ten minutes before noticing you are in the wrong place.
+ * The groups a receiver can actually reach — see optionsInRange. Hiding matters more
+ * here than anywhere: QRSS is a mode where you stare at a waterfall for ten minutes
+ * before noticing you are in the wrong place.
  */
 export function qrssBandsInRange(minHz, maxHz) {
-    const lo = Number.isFinite(minHz) && minHz > 0 ? minHz : 0;
-    const hi = Number.isFinite(maxHz) && maxHz > 0 ? maxHz : Infinity;
-    return QRSS_BANDS
-        .map((grp) => ({ ...grp, options: grp.options.filter((o) => o.hz >= lo && o.hz <= hi) }))
-        .filter((grp) => grp.options.length > 0);
+    return optionsInRange(QRSS_BANDS, minHz, maxHz);
 }

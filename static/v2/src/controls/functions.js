@@ -22,7 +22,9 @@
 import {
     MODES, MODE_BY_ID, bandwidthLimits, isIQ, maxFilterWidth,
     SQUELCH_MIN, SQUELCH_MAX, SQUELCH_STEP, SQUELCH_DEFAULT_ON, squelchEnabled,
+    MIN_FREQ, MAX_FREQ,
 } from '../radio/constants.js';
+import { bandsInRange } from '../lib/bands.js';
 import { VFO_IDS, getVfos, selectVfo, stepVfo } from '../lib/vfos.js';
 import { announceSettings, setAnnounceSettings } from '../lib/announce.js';
 import { requestFreqEntry } from '../lib/freqEntry.js';
@@ -44,6 +46,8 @@ export const BAND_FREQS = {
     band_15m: 21074000,
     band_12m: 24915000,
     band_10m: 28074000,
+    // Only offered where the receiver reaches it — see bandReachable.
+    band_6m: 50313000,
 };
 
 // Cycled in the order the mode selector shows them, so "next mode" walks the
@@ -182,6 +186,7 @@ function cycleMode(ctx, dir) {
 
 const BAND = group('Band', Object.entries(BAND_FREQS).map(([id, hz]) => ({
     id,
+    band: id.slice(5),
     label: `${id.slice(5)} (${(hz / 1e6).toFixed(3)} MHz)`,
     accepts: PRESS,
     run: (ev, ctx) => ctx.actions.setFrequency(hz),
@@ -580,6 +585,14 @@ export const RETIRED = {
 function hasRotator(hw) { return !!(hw && hw.rotator); }
 function hasAntenna(hw) { return !!(hw && hw.antenna && hw.antenna.count); }
 
+// Whether this receiver can tune a band function's band, by the same test the band
+// buttons use. Read when asked rather than at load: the range arrives with the server
+// description. A 6m button on a 30 MHz receiver would go through setFrequency, which
+// clamps, so it would walk the dial to 30 MHz and look like it worked.
+function bandReachable(f) {
+    return !f.band || bandsInRange(MIN_FREQ, MAX_FREQ).some(([name]) => name === f.band);
+}
+
 /**
  * What can be mapped on this receiver — the list the learn dropdown offers.
  *
@@ -590,7 +603,7 @@ function hasAntenna(hw) { return !!(hw && hw.antenna && hw.antenna.count); }
  */
 export function catalogue(dspSchemas, hw) {
     return [
-        ...FREQUENCY, ...MODE, ...BAND, ...VFO, ...AUDIO, ...SPECTRUM, ...ANNOUNCE,
+        ...FREQUENCY, ...MODE, ...BAND.filter(bandReachable), ...VFO, ...AUDIO, ...SPECTRUM, ...ANNOUNCE,
         ...dspGroup(dspSchemas),
         ...(hasRotator(hw) ? ROTATOR : []),
         ...(hasAntenna(hw) ? antennaGroup(hw) : []),
@@ -602,12 +615,13 @@ export function catalogue(dspSchemas, hw) {
 // A mapping file is carried between receivers — that is what export is for —
 // and a rotator mapping arriving somewhere without a rotator has to read as
 // "Rotate left 15°" on a row that says nothing happened, not as a raw id. Same
-// for the antennas past this switch's count.
+// for the antennas past this switch's count, and for a 6m key made on a receiver
+// that reaches 6m.
 // The receiver's own catalogue comes first so a match there wins: an antenna
 // this switch has resolves to its operator's label, and only the ones past the
 // end fall through to the numbered tail.
 function resolvable(dspSchemas, hw) {
-    return [...catalogue(dspSchemas, hw), ...ROTATOR, ...antennaGroup(null)];
+    return [...catalogue(dspSchemas, hw), ...BAND, ...ROTATOR, ...antennaGroup(null)];
 }
 
 export function findFunction(id, dspSchemas, hw) {
@@ -628,6 +642,7 @@ export function functionLabel(id, dspSchemas, hw) {
 export function isUnavailable(id, dspSchemas, hw) {
     const f = findFunction(id, dspSchemas, hw);
     if (!f) return false;
+    if (f.band) return !bandReachable(f);
     if (f.needs === 'rotator') return !hasRotator(hw);
     if (f.needs === 'antenna') {
         return !hasAntenna(hw)
@@ -668,7 +683,7 @@ export function isEncoderFunction(id, dspSchemas) {
 // the operator wiggling a control that will never do anything.
 export function runFunction(id, ev, ctx) {
     const fn = findFunction(id, ctx.state().dsp.schemas);
-    if (!fn) return false;
+    if (!fn || !bandReachable(fn)) return false;
     // Plenty of pads and switches send a CC rather than a note — 127 down, 0 up
     // — which arrives here as a position. For a function that wants a button
     // and has no use for a position, that is a press, and the zero is the

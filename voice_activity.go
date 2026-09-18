@@ -346,6 +346,9 @@ func getBandSSBStartFreq(band string) uint64 {
 		"15m":  21151000, // 21151 kHz
 		"12m":  24940000, // 24940 kHz
 		"10m":  28320000, // 28320 kHz
+		// 6m: CW and beacons sit below 50.100 in both the IARU and US band plans. Only
+		// reachable on a receiver whose front end runs to 60 MHz.
+		"6m": 50100000, // 50100 kHz
 	}
 
 	if freq, ok := ssbStarts[band]; ok {
@@ -378,6 +381,9 @@ func filterActivitiesByExclusionRange(activities []VoiceActivity, band string) [
 	// Define exclusion ranges for specific bands (in Hz)
 	exclusionRanges := map[string]struct{ start, end uint64 }{
 		"60m": {start: 5354000, end: 5360000}, // Exclude 5.357 MHz ± 3 kHz
+		// 6m's digital strip sits above the SSB start, unlike the HF bands where FT8 is
+		// below it: MSK144 (50.260, 50.280), JT65 (50.310), FT8 (50.313), FT4 (50.318).
+		"6m": {start: 50255000, end: 50330000},
 	}
 
 	exclusion, hasExclusion := exclusionRanges[band]

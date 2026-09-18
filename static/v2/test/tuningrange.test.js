@@ -185,6 +185,31 @@ t('the quick-band keys gain 6 m on a 60 MHz receiver', () => {
     assert.ok(names().includes('20m'), '20 m still there');
 });
 
+t('a 6m band function is offered, and runs, only where the receiver reaches 6m', () => {
+    // Same reason as the band keys: setFrequency clamps, so a mapped 6m button on a
+    // 30 MHz receiver would walk the dial to 30 MHz and look like it worked.
+    const m = require('./.build/tuningrange.cjs');
+    const offered = () => m.catalogue([]).map((f) => f.id).includes('band_6m');
+    const calls = [];
+    const ctx = {
+        state: () => ({ dsp: { schemas: [] } }),
+        actions: { setFrequency: (hz) => calls.push(hz) },
+    };
+
+    m.applyTuningRange({ min_frequency: 10000, max_frequency: 30000000, spectrum_span_hz: 30000000 });
+    assert.ok(!offered(), 'not offered at 30 MHz');
+    assert.ok(m.isUnavailable('band_6m', []), 'a saved 6m mapping reads as unavailable');
+    assert.strictEqual(m.runFunction('band_6m', { kind: 'trigger' }, ctx), false, 'and refuses to run');
+    assert.deepStrictEqual(calls, []);
+    assert.ok(m.runFunction('band_10m', { kind: 'trigger' }, ctx), '10m runs either way');
+
+    m.applyTuningRange({ min_frequency: 10000, max_frequency: 60000000, spectrum_span_hz: 60000000 });
+    assert.ok(offered(), 'offered at 60 MHz');
+    assert.ok(!m.isUnavailable('band_6m', []));
+    assert.ok(m.runFunction('band_6m', { kind: 'trigger' }, ctx));
+    assert.deepStrictEqual(calls, [28074000, 50313000]);
+});
+
 t('the spectrum centre can reach above 30 MHz once the range is applied', () => {
     // The other half of the same symptom: the wide view drew 0-60 MHz because that comes
     // over the websocket, but centring was clamped by MAX_FREQ and snapped back.

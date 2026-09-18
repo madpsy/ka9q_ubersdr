@@ -17,3 +17,6 @@ export { clampCenter } from '../src/lib/zoom.js';
 // Pure — takes the limits as arguments. Here because QuickBandsPanel and MultipadPanel
 // feed it the live bindings, and that pairing is what puts a 6 m key on screen.
 export { bandsInRange } from '../src/lib/bands.js';
+// Read them when asked: a band function is only offered, and only runs, where the
+// receiver reaches its band.
+export { catalogue, isUnavailable, runFunction } from '../src/controls/functions.js';

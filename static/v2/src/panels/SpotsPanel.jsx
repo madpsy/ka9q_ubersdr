@@ -33,11 +33,12 @@ import {
     cwGraphBand, cwGraphCleared, cwGraphFrequency, openCwGraph, setCwGraphContext,
 } from '../compat/cwGraph.js';
 import {
-    AGE_OPTIONS, AUTO_BAND, BANDS, DEFAULT_AGE_MIN, DEFAULT_FILTERS, DIGITAL_MODES,
+    AGE_OPTIONS, AUTO_BAND, DEFAULT_AGE_MIN, DEFAULT_FILTERS, DIGITAL_MODES,
     DISTANCE_OPTIONS, SNR_OPTIONS, WPM_OPTIONS,
     ageLabel, countriesIn, filterSpots, modeForSpot, resolveBandFilter, spotMapUrl,
 } from '../lib/spots.js';
-import { bandForFrequency } from '../lib/bands.js';
+import { bandChoices, bandForFrequency } from '../lib/bands.js';
+import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 
 // Rows rendered before "show more", and how many each press adds. Kept small
 // because this panel is usually a few rows tall in a dock: a page much larger
@@ -157,7 +158,9 @@ function Filters({ tab, filters, set, countries, dialBand }) {
                     {dialBand ? `Auto (${dialBand})` : 'Auto (all bands)'}
                 </option>
                 <option value="all">All bands</option>
-                {BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
+                {/* The receiver's reach, not a fixed HF list: 6m appears once the front end
+                    runs to 60 MHz, and is not offered on a receiver that cannot hear it. */}
+                {bandChoices(MIN_FREQ, MAX_FREQ, filters.band).map((b) => <option key={b} value={b}>{b}</option>)}
             </Select>
 
             {tab === 'digital' && (

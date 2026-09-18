@@ -41,9 +41,11 @@ import {
     displayName, distanceBearing, lookupCallsignData, maidenheadToLatLon, positionOf,
 } from '../lib/callsign.js';
 import {
-    AGE_OPTIONS, BANDS, DIGITAL_MODES, SNR_OPTIONS, WPM_OPTIONS,
+    AGE_OPTIONS, DIGITAL_MODES, SNR_OPTIONS, WPM_OPTIONS,
     countriesIn, filterSpots,
 } from '../lib/spots.js';
+import { bandChoices } from '../lib/bands.js';
+import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 
 // The prefix table the server already serves — the same one behind the country
 // column on the row that opened this. Never fatal: a receiver without it loses
@@ -363,7 +365,7 @@ export default function SpotMap({
                     <div className="spotmap__filters">
                         <Pick label="Band" value={filters.band} onChange={(v) => set({ band: v })}>
                             <option value="all">All bands</option>
-                            {BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
+                            {bandChoices(MIN_FREQ, MAX_FREQ, filters.band).map((b) => <option key={b} value={b}>{b}</option>)}
                         </Pick>
                         {/* One tab's filter each: every CW spot is CW, and no
                             digital spot has a speed. Offering the other would be

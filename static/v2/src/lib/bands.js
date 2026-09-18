@@ -43,6 +43,22 @@ export function bandsInRange(minHz = 10000, maxHz = 30000000) {
     return HAM_BANDS.filter(([, min, max]) => min >= minHz && max <= maxHz);
 }
 
+/**
+ * The band names a band *filter* offers — the spot lists, the voice skimmer — in order.
+ *
+ * bandsInRange's list, for the same reason: a 6m choice on a 30 MHz receiver filters for
+ * spots it can never have. Plus `current` when it is a band the range leaves out, so a
+ * pick remembered from a wider receiver still shows in the picker rather than leaving the
+ * select blank; moving off it drops it from the list.
+ */
+export function bandChoices(minHz, maxHz, current) {
+    const names = bandsInRange(minHz, maxHz).map(([name]) => name);
+    if (BAND_NAMES.includes(current) && !names.includes(current)) {
+        return BAND_NAMES.filter((n) => n === current || names.includes(n));
+    }
+    return names;
+}
+
 // Which band a frequency sits in, or null between bands. Inclusive at both
 // edges, as v1's active-badge test is.
 export function bandForFrequency(hz) {

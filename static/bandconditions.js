@@ -9,6 +9,19 @@ function bcIso2ToFlag(code) {
     );
 }
 
+// Band display order, lowest frequency first. One list for every table, chart and badge
+// row on the page, so a band cannot be in one and missing from another. 6m only has data
+// on a receiver that reaches it (noise floor band, 6m WSPR decoder); elsewhere it simply
+// never appears. Unknown bands sort after these — see bcBandIndex.
+const BC_BAND_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
+
+// Sort key for a band: its place in BC_BAND_ORDER, or after all of them when it is not
+// listed. A bare indexOf would put an unlisted band first, ahead of 160m.
+function bcBandIndex(band) {
+    const i = BC_BAND_ORDER.indexOf(band);
+    return i === -1 ? BC_BAND_ORDER.length : i;
+}
+
 class BandConditionsMonitor {
     constructor() {
         this.bandStateChart = null;
@@ -35,7 +48,8 @@ class BandConditionsMonitor {
             '17m': '#B07AA1',
             '15m': '#FF9DA7',
             '12m': '#9C755F',
-            '10m': '#BAB0AC'
+            '10m': '#BAB0AC',
+            '6m': '#8A2BE2'    // violet, as on the spot maps and channels map
         };
 
         this.init();
@@ -119,7 +133,7 @@ class BandConditionsMonitor {
     }
 
     sortBands(bands) {
-        const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        const bandOrder = BC_BAND_ORDER;
         return bands.sort((a, b) => {
             const indexA = bandOrder.indexOf(a);
             const indexB = bandOrder.indexOf(b);
@@ -220,7 +234,7 @@ class BandConditionsMonitor {
                 return;
             }
 
-            const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+            const bandOrder = BC_BAND_ORDER;
             const sorted = data.predictions.slice().sort((a, b) => {
                 const ia = bandOrder.indexOf(a.band);
                 const ib = bandOrder.indexOf(b.band);
@@ -426,7 +440,7 @@ class BandConditionsMonitor {
 
         // Band conditions in two rows (day and night)
         if (data.band_conditions_day && data.band_conditions_night) {
-            const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+            const bandOrder = BC_BAND_ORDER;
             
             // Determine if it's currently day or night (reuse calculation from above)
             let isDaytime = false;
@@ -769,9 +783,8 @@ class BandConditionsMonitor {
                                     }
                                 });
 
-                                const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
                                 const allPointsAtTime = Array.from(bandMap.entries())
-                                    .sort((a, b) => bandOrder.indexOf(a[0]) - bandOrder.indexOf(b[0]))
+                                    .sort((a, b) => bcBandIndex(a[0]) - bcBandIndex(b[0]))
                                     .map(entry => entry[1].text);
 
                                 return allPointsAtTime;
@@ -838,10 +851,7 @@ class BandConditionsMonitor {
         if (!bandStatusRow) return;
 
         // Sort bands in order
-        const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
-        const bands = Object.keys(data).sort((a, b) => {
-            return bandOrder.indexOf(a) - bandOrder.indexOf(b);
-        });
+        const bands = Object.keys(data).sort((a, b) => bcBandIndex(a) - bcBandIndex(b));
 
         // Clear existing badges
         bandStatusRow.innerHTML = '';

@@ -36,3 +36,19 @@ export function tunedOption(groups, hz, tolerance = 1) {
     }
     return null;
 }
+
+/**
+ * The groups a receiver can actually reach, with unreachable options dropped and any
+ * group left empty removed entirely.
+ *
+ * Hiding rather than clamping on purpose: tuning goes through setFrequency, which clamps,
+ * so an entry above the receiver's range would land on the band edge instead of where it
+ * says — which looks like it worked. A 6m entry on a 30 MHz receiver is the usual case.
+ */
+export function optionsInRange(groups, minHz, maxHz) {
+    const lo = Number.isFinite(minHz) && minHz > 0 ? minHz : 0;
+    const hi = Number.isFinite(maxHz) && maxHz > 0 ? maxHz : Infinity;
+    return (groups || [])
+        .map((grp) => ({ ...grp, options: grp.options.filter((o) => o.hz >= lo && o.hz <= hi) }))
+        .filter((grp) => grp.options.length > 0);
+}

@@ -47,7 +47,7 @@ import {
 } from '../lib/spectrumPause.js';
 import { throttle } from '../lib/throttle.js';
 import { clamp, formatFreqExact, formatHz, formatSpan } from '../lib/format.js';
-import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
+import { MAX_FREQ, MIN_FREQ, RECEIVER_SPAN_HZ } from '../radio/constants.js';
 import {
     SHAPE_BINS, SHAPE_MIN_ROWS, SHAPE_SEC_MAX, SHAPE_SEC_MIN,
     bandBins, clampShapeSec, createShape, formatShape, measureShape, pushShapeRow, resetShape,
@@ -162,7 +162,7 @@ export default function IFSpectrumPanel({ minimal }) {
     const inWindow = binsInWindow(view, win);
     // Whether the frames arriving can answer the question this pane asks — see
     // paneState. Everything still draws when they cannot; the veil goes over it.
-    const state = paneState(view, tuning, running, win, paused);
+    const state = paneState(view, tuning, running, win, paused, RECEIVER_SPAN_HZ);
 
     // Everything the draw loop reads, on a mutable object rather than in state:
     // spectrum frames never reach React (see the note at the top of
@@ -649,7 +649,7 @@ export default function IFSpectrumPanel({ minimal }) {
         // the edge of the new view than the near end. The fit rather than the
         // current window for the reason given at zoomTargetSpan.
         const fit = windowFor(tuning, ZOOM_MIN);
-        actions.setSpectrumView((fit.lo + fit.hi) / 2, zoomTargetSpan(view, tuning));
+        actions.setSpectrumView((fit.lo + fit.hi) / 2, zoomTargetSpan(view, tuning, RECEIVER_SPAN_HZ));
     }, [actions, tuning, view]);
 
     return (

@@ -381,6 +381,7 @@ const app = (() => {
         '15m':   '#f87171', // red
         '12m':   '#34d399', // emerald
         '10m':   '#60a5fa', // blue
+        '6m':    '#a3e635', // lime
     };
     function bandColor(band) { return BAND_COLORS[band] || '#94a3b8'; }
 
@@ -556,7 +557,7 @@ const app = (() => {
 
     // Tooltip for country dot markers (grouped: one entry per country, bands array)
     function onSpotMouseMove(event, cdata) {
-        const bandOrder = ['2200m','630m','160m','80m','60m','40m','30m','20m','17m','15m','12m','10m'];
+        const bandOrder = ['2200m','630m','160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m'];
         const sorted = [...(cdata.bands || [])].sort((a, b) => {
             const ai = bandOrder.indexOf(a.band), bi = bandOrder.indexOf(b.band);
             return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);

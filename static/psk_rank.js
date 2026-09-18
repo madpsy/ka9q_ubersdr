@@ -492,11 +492,11 @@
             const active = _sortCol === col;
             const arrow  = active ? (_sortDir === 'asc' ? ' ▲' : ' ▼') : '';
             const tt     = title ? ` title="${_esc(title)}"` : '';
-            return `<th${tt} data-col="${_esc(col)}" style="padding:7px 8px;white-space:nowrap;cursor:pointer;user-select:none;background:#1b5e20;color:white;${active ? 'text-decoration:underline;' : ''}">${_esc(label)}${arrow}</th>`;
+            return `<th${tt} data-col="${_esc(col)}" style="position:sticky;top:0;z-index:2;padding:7px 8px;white-space:nowrap;cursor:pointer;user-select:none;background:#1b5e20;color:white;${active ? 'text-decoration:underline;' : ''}">${_esc(label)}${arrow}</th>`;
         };
 
         thead.innerHTML = `<tr>
-            <th title="Rank by 24h total" style="padding:7px 8px;white-space:nowrap;cursor:default;user-select:none;background:#1b5e20;color:white;">#</th>
+            <th title="Rank by 24h total" style="position:sticky;top:0;z-index:2;padding:7px 8px;white-space:nowrap;cursor:default;user-select:none;background:#1b5e20;color:white;">#</th>
             ${makeTh('callsign',  'Reporter',    'Receiver callsign')}
             ${makeTh('totalDay',  allDayLabel,   allDayTitle)}
             ${makeTh('totalWeek', allWeekLabel,  allWeekTitle)}

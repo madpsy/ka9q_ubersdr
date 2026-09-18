@@ -26,10 +26,11 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { countryFlag, sinceLabel } from '../lib/format.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
-import { bandForFrequency } from '../lib/bands.js';
+import { bandChoices, bandForFrequency } from '../lib/bands.js';
+import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import useFeedsAllowed from '../lib/useServerFeeds.js';
 import {
-    AUTO_BAND, BAND_NAMES, BAND_SETTLE_MS, COLUMN_ROWS, POLL_MS, SECOND_QUERY_MS, addonUrl,
+    AUTO_BAND, BAND_SETTLE_MS, COLUMN_ROWS, POLL_MS, SECOND_QUERY_MS, addonUrl,
     confirmedUrl, freqLabel, matchedCount, resolveBandFilter, saveBand, savedBand, spotList,
     spottedUrl, tuneTarget, tunedToSpot, voiceSkimmerAvailable,
 } from '../lib/voiceSkimmer.js';
@@ -221,7 +222,8 @@ export default function VoiceSkimmerPanel({ minimal }) {
                             {dialBand ? `Auto (${dialBand})` : 'Auto (all bands)'}
                         </option>
                         <option value="all">All bands</option>
-                        {BAND_NAMES.map((b) => <option key={b} value={b}>{b}</option>)}
+                        {/* Only bands this receiver can reach — see bandChoices. */}
+                        {bandChoices(MIN_FREQ, MAX_FREQ, choice).map((b) => <option key={b} value={b}>{b}</option>)}
                     </select>
                 </Field>
             )}

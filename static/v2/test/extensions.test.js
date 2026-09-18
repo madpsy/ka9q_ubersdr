@@ -36,7 +36,7 @@ const {
     normaliseMessage, statsFrom, addMessage, filterMessages, sortMessages, toCSV, cycleProgress,
 } = require('./.build/ft8messages.cjs');
 const { labelsFor, layoutLabels } = require('./.build/ft8spectrum.cjs');
-const { tunedOption } = require('./.build/extfreq.cjs');
+const { optionsInRange, tunedOption } = require('./.build/extfreq.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -292,6 +292,16 @@ t('the frequency menu says which of its entries the dial is on', () => {
     // claiming the nearest one.
     assert.strictEqual(tunedOption(FT8_FREQUENCIES, 14200000), null);
     assert.strictEqual(tunedOption(FT8_FREQUENCIES, NaN), null);
+});
+
+t('the frequency menu only offers what the receiver reaches', () => {
+    // setFrequency clamps, so a 6m entry on a 30 MHz receiver would tune to 30 MHz.
+    const hz = (min, max) => optionsInRange(FT8_FREQUENCIES, min, max).flatMap((g) => g.options.map((o) => o.hz));
+    assert.ok(!hz(10000, 30000000).includes(50313000), '6m hidden at 30 MHz');
+    assert.ok(hz(10000, 30000000).includes(28074000), '10m still there');
+    assert.ok(hz(10000, 60000000).includes(50313000), '6m offered at 60 MHz');
+    // A group with nothing reachable goes, rather than showing as an empty heading.
+    assert.deepStrictEqual(optionsInRange(FT8_FREQUENCIES, 40e6, 60e6).map((g) => g.group), ['Other FT8 bands']);
 });
 
 // --- spectrum labels -------------------------------------------------------

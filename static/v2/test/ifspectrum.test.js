@@ -457,6 +457,19 @@ t('the pane refuses to draw until the main display is zoomed in', () => {
     }
 });
 
+t('before the server names its default bin width, the step count uses the real span', () => {
+    // A 60 MHz receiver whose first config has no defaultBinBandwidth yet: counted
+    // against 30 MHz, the whole-band view would already read as one step in.
+    const cfg = { binBandwidth: 60e6 / 1024, binCount: 1024 };
+    assert.strictEqual(zoomStepsOf(cfg, 60e6), 0);
+    assert.strictEqual(zoomStepsOf(cfg), 0, 'wider than the 30 MHz default clamps to 0, not negative');
+    const in7 = { binBandwidth: 60e6 / 1024 / 128, binCount: 1024 };
+    assert.ok(Math.abs(zoomStepsOf(in7, 60e6) - MIN_ZOOM_STEPS) < 1e-9);
+    assert.ok(Math.abs(zoomStepsOf(in7) - (MIN_ZOOM_STEPS - 1)) < 1e-9, 'the 30 MHz default is a step short');
+    // The server's own figure still wins when it has one.
+    assert.strictEqual(zoomStepsOf({ ...in7, defaultBinBandwidth: 30e6 / 1024 }, 60e6), MIN_ZOOM_STEPS - 1);
+});
+
 t('the step count is measured, not assumed to be whole', () => {
     assert.strictEqual(zoomStepsOf(at(30e6 / 1024)), 0);
     assert.ok(Math.abs(zoomStepsOf(at(30e6 / 1024 / 128)) - MIN_ZOOM_STEPS) < 1e-9);

@@ -27,7 +27,8 @@ import { openCallsignLookup } from '../../compat/legacyBridge.js';
 import { normaliseCallsign, requestLookup } from '../../lib/callsign.js';
 import { getSessionId } from '../../radio/session.js';
 import { useAudioExtension } from '../useAudioExtension.js';
-import { tunedOption } from '../frequencies.js';
+import { optionsInRange, tunedOption } from '../frequencies.js';
+import { MAX_FREQ, MIN_FREQ } from '../../radio/constants.js';
 import {
     AUTO_CLEAR_KEEP, COLUMNS, CYCLE_SEC, FT8_BANDWIDTH, FT8_FREQUENCIES, FT8_MODE,
     addMessage, cycleProgress, filterMessages, normaliseMessage, sortMessages, statsFrom, toCSV,
@@ -295,7 +296,8 @@ export default function FT8Extension({ minimal }) {
                     title="Tune to an FT8 frequency in USB with a 0-3200 Hz passband, and show which one the receiver is on"
                 >
                     <option value="">Tune to…</option>
-                    {FT8_FREQUENCIES.map((g) => (
+                    {/* Only what this receiver reaches: 6m is offered at 60 MHz, not at 30. */}
+                    {optionsInRange(FT8_FREQUENCIES, MIN_FREQ, MAX_FREQ).map((g) => (
                         <optgroup key={g.group} label={g.group}>
                             {g.options.map((o) => <option key={o.hz} value={o.hz}>{o.label}</option>)}
                         </optgroup>

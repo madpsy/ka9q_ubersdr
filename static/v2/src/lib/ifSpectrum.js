@@ -274,8 +274,8 @@ export function fullBinWidthOf(cfg, spanHz = FULL_SPAN_HZ) {
  * routinely six and a half steps in. Counted rather than rounded, so the
  * "N more steps" the panel offers is never off by one.
  */
-export function zoomStepsOf(cfg) {
-    const full = fullBinWidthOf(cfg);
+export function zoomStepsOf(cfg, spanHz) {
+    const full = fullBinWidthOf(cfg, spanHz);
     if (!(full > 0) || !cfg || !(cfg.binBandwidth > 0)) return 0;
     return Math.max(0, Math.log2(full / cfg.binBandwidth));
 }
@@ -306,8 +306,11 @@ export function dialCovered(cfg, dial) {
  * `paused` is last in the argument list and optional, so the three questions
  * about the *data* stay together at the front. It is the spectrum socket's own
  * flag — see lib/spectrumPause.js — not anything this module can work out.
+ *
+ * `spanHz` is the receiver's full span, for zoomStepsOf before the server has said
+ * what its default bin width is. Omitted, it is the 30 MHz a receiver used to be.
  */
-export function paneState(cfg, tuning, running, win, paused) {
+export function paneState(cfg, tuning, running, win, paused, spanHz) {
     const none = { ok: false, steps: 0, short: 0, cover: 0, canCentre: false };
     if (!running) return { ...none, kind: 'stopped' };
     if (paused) return { ...none, kind: 'paused' };
@@ -327,7 +330,7 @@ export function paneState(cfg, tuning, running, win, paused) {
         };
     }
 
-    const steps = zoomStepsOf(cfg);
+    const steps = zoomStepsOf(cfg, spanHz);
     if (steps < MIN_ZOOM_STEPS - 1e-9) {
         return {
             ...none, kind: 'coarse', steps, short: Math.ceil(MIN_ZOOM_STEPS - steps), cover,
@@ -345,11 +348,11 @@ export function paneState(cfg, tuning, running, win, paused) {
  * looking at, and the fit rather than whatever the pane is currently opened to,
  * which at a wide zoom could be hundreds of kilohertz and would not clear the
  * gate at all. Capped at the span the gate itself opens on, so the button can
- * never land somewhere it does not help.
+ * never land somewhere it does not help. `spanHz` as for paneState.
  */
-export function zoomTargetSpan(cfg, tuning) {
+export function zoomTargetSpan(cfg, tuning, spanHz) {
     const fit = fitWindow(tuning && tuning.bandwidthLow, tuning && tuning.bandwidthHigh);
-    const full = fullBinWidthOf(cfg);
+    const full = fullBinWidthOf(cfg, spanHz);
     const bins = (cfg && cfg.binCount) || 0;
     const atGate = full > 0 && bins > 0 ? bins * (full / 2 ** MIN_ZOOM_STEPS) : Infinity;
     return Math.min(fit.span * 3, atGate);

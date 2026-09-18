@@ -99,7 +99,13 @@ var validWSPRBands = map[string]bool{
 	"15m":   true,
 	"12m":   true,
 	"10m":   true,
+	"6m":    true,
 }
+
+// wsprPredictionBandOrder is the order bands are listed in every prediction response,
+// lowest frequency first. One list rather than a copy per builder, so a band added to
+// validWSPRBands cannot go missing from one view and not another.
+var wsprPredictionBandOrder = []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"}
 
 // validPhonePowers is the whitelist of allowed SSB TX power values in watts
 var validPhonePowers = map[int]bool{
@@ -413,7 +419,7 @@ func computeWSPRSummaryByBand(sl *SpotsLogger, phonePowerW, minutes int) *WSPRSu
 		"marginal": 3, "poor": 4, "not_viable": 5,
 	}
 
-	bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
+	bandOrder := wsprPredictionBandOrder
 	type bandAcc struct {
 		bestPrediction string
 		countries      []WSPRSummaryCountryEntry
@@ -727,7 +733,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 	}
 
 	// ── Build sorted list of available bands ──────────────────────────────────
-	bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
+	bandOrder := wsprPredictionBandOrder
 	bandsAvailable := make([]string, 0, len(bandsSeenSet))
 	for _, b := range bandOrder {
 		if bandsSeenSet[b] {
@@ -945,7 +951,7 @@ func handleWSPRPhonePrediction(w http.ResponseWriter, r *http.Request, md *Multi
 
 		// by=band: one entry per band, all qualifying countries listed sorted by SNR desc.
 		// Use the canonical band order so bands appear in frequency order.
-		bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
+		bandOrder := wsprPredictionBandOrder
 		type bandAcc struct {
 			bestPrediction string
 			countries      []WSPRSummaryCountryEntry
@@ -1076,7 +1082,7 @@ func buildWSPRGridSquaresTyped(groups map[gridBandKey]*gridBandData, phonePowerD
 	}
 	byGrid := make(map[string]*gridAcc)
 
-	bandOrder := []string{"2200m", "630m", "160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"}
+	bandOrder := wsprPredictionBandOrder
 
 	for gk, gg := range groups {
 		if gg.SpotCount == 0 {

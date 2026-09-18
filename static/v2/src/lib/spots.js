@@ -30,8 +30,6 @@ export const AGE_OPTIONS = {
     cw: [1, 5, 10, 15, 30, 60, null],
 };
 
-export const BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
-
 export const SNR_OPTIONS = {
     digital: [null, 20, 15, 10, 5, 0, -5, -10, -15, -20],
     cw: [null, 20, 15, 10, 5, 0, -5, -10],

@@ -1,6 +1,20 @@
 {
   "addons": [
     {
+      "name": "ntp",
+      "status": "Stable",
+      "description": "Stratum-1 NTP server disciplined by WWV, WWVH and WWVB — listens to this receiver on 5, 10 and 15 MHz, decodes the broadcast time code, and combines the receivers by agreement, with an upstream NTP server (time.cloudflare.com) as a measured warm standby and automatic failover. Serves a live status page with the signal path, per-source timing and delay model, event log and history, and publishes to MQTT and Home Assistant. NTP itself is not exposed outside Docker yet.",
+      "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr-ntp/main/install.sh",
+      "host": "ntp",
+      "port": 6099,
+      "enabled": true,
+      "require_admin": false,
+      "strip_prefix": true,
+      "rewrite_origin": false,
+      "rate_limit": 100,
+      "allowed_ips": ["0.0.0.0/0"]
+    },
+    {
       "name": "voiceskimmer",
       "status": "Stable",
       "description": "Voice callsign skimmer — hops around detected SSB voice activity, feeds each frequency to the Whisper speech-to-text extension, extracts phonetically-spelled callsigns from the transcript, validates each one against QRZ, and optionally submits confirmed stations as DX spots. Serves a live dark-themed dashboard with the running transcript, confirmed callsigns per band/frequency, submitted spots, and band activity.",

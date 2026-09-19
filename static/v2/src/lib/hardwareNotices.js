@@ -28,7 +28,7 @@ export const ANTENNA_POLL_MS = 5000;
 
 // ── The rotator ─────────────────────────────────────────────────────────────
 
-const rot = { subs: new Set(), timer: null, latest: null, moving: false, seen: false };
+const rot = { subs: new Set(), timer: null, latest: null, moving: false, seen: false, failedAt: null };
 
 function rotNotify() {
     for (const fn of Array.from(rot.subs)) {
@@ -42,25 +42,44 @@ function rotNotify() {
  * Only after a cycle that was actually moving — v1's guard, and it is the right one. The
  * first status of a page load is a rotator that is not moving, and announcing "stopped"
  * because you opened the panel would be a notification about nothing.
+ *
+ * The server also stops moving when it gives up on a rotator that isn't turning, so a
+ * stop is only an arrival if no new move_error came with it. A move_error_at we had
+ * already seen is an older failure the server keeps until the rotator moves again.
  */
 function rotSaw(status) {
     const moving = !!(status && status.moving);
+    const failedAt = (status && status.move_error_at) || null;
     if (rot.seen && rot.moving && !moving && status && status.connected) {
         const az = status.position && status.position.azimuth != null
             ? `${Math.round(status.position.azimuth)}°` : '';
-        pushNotification({
-            severity: 'good',
-            source: 'rotator',
-            title: az ? `Rotator stopped at ${az}` : 'Rotator stopped',
-            body: az ? 'The beam is where it was asked to go.' : '',
-            // Keyed, so a rotator nudged three times in a minute is one line with a
-            // count rather than three toasts saying the same thing.
-            key: 'rotator-stopped',
-        });
+        if (status.move_error && failedAt !== rot.failedAt) {
+            pushNotification({
+                severity: 'bad',
+                source: 'rotator',
+                title: az ? `Rotator stuck at ${az}` : 'Rotator stuck',
+                body: status.move_error,
+                key: 'rotator-failed',
+            });
+        } else {
+            pushNotification({
+                severity: 'good',
+                source: 'rotator',
+                title: az ? `Rotator stopped at ${az}` : 'Rotator stopped',
+                body: az ? 'The beam is where it was asked to go.' : '',
+                // Keyed, so a rotator nudged three times in a minute is one line with a
+                // count rather than three toasts saying the same thing.
+                key: 'rotator-stopped',
+            });
+        }
     }
     rot.moving = moving;
     rot.seen = true;
+    rot.failedAt = failedAt;
 }
+
+/** Test seam: the path a poll takes, without the fetch. */
+export const _feedRotatorStatus = rotSaw;
 
 function rotLoad() {
     fetch('/api/rotctl/status')
@@ -216,6 +235,7 @@ export function _resetHardwareNotices() {
     }
     rot.moving = false;
     rot.seen = false;
+    rot.failedAt = null;
     ant.sel = null;
     ant.grounded = false;
 }

@@ -260,6 +260,8 @@ func (h *RotctlAPIHandler) HandleGetPosition(w http.ResponseWriter, r *http.Requ
 
 	if state.LastError != nil {
 		response.Error = state.LastError.Error()
+	} else if state.MoveError != nil {
+		response.Error = state.MoveError.Error()
 	}
 
 	json.NewEncoder(w).Encode(response)
@@ -508,6 +510,14 @@ func (h *RotctlAPIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) 
 
 	if state.LastError != nil {
 		status["error"] = state.LastError.Error()
+	} else if state.MoveError != nil {
+		status["error"] = state.MoveError.Error()
+	}
+	// Separate from "error" so clients can tell a move that failed from a
+	// rotctld hiccup, and by the timestamp whether it was their move.
+	if state.MoveError != nil {
+		status["move_error"] = state.MoveError.Error()
+		status["move_error_at"] = state.MoveErrorAt.UnixMilli()
 	}
 
 	json.NewEncoder(w).Encode(status)

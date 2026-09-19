@@ -1294,6 +1294,7 @@ func (l *TelegramBotListener) handleRotator(chatID int64, args string) (string, 
 		l.rotatorMoveMu.Unlock()
 
 		// Send the move command (returns quickly — does not wait for arrival).
+		sentAt := time.Now()
 		if err := l.rotctl.controller.SetAzimuth(az); err != nil {
 			l.rotatorMoveMu.Lock()
 			l.rotatorMovePending = false
@@ -1321,7 +1322,11 @@ func (l *TelegramBotListener) handleRotator(chatID int64, args string) (string, 
 				state := l.rotctl.controller.GetState()
 				if !state.Moving {
 					var confirmMsg string
-					if state.Position != nil {
+					// Moving also drops to false when position verification
+					// gives up, so check this move didn't fail before claiming it arrived.
+					if state.MoveError != nil && state.MoveErrorAt.After(sentAt) {
+						confirmMsg = fmt.Sprintf("⚠️ Rotator %s", html.EscapeString(state.MoveError.Error()))
+					} else if state.Position != nil {
 						reached := int(state.Position.Azimuth + 0.5)
 						confirmMsg = fmt.Sprintf("🔄 Reached <b>%d°</b> ✅", reached)
 					} else {

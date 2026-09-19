@@ -419,6 +419,9 @@ func BuildSystemHealthProbes(
 				if state.LastError != nil {
 					return false, []string{fmt.Sprintf("rotator error: %v", state.LastError)}
 				}
+				if state.MoveError != nil {
+					return false, []string{fmt.Sprintf("rotator error: %v", state.MoveError)}
+				}
 				if !state.UpdatedAt.IsZero() && time.Since(state.UpdatedAt) > 30*time.Second {
 					return false, []string{fmt.Sprintf("rotator state stale (last update %s ago)", formatDuration(time.Since(state.UpdatedAt)))}
 				}

@@ -253,6 +253,8 @@ export default function RotatorPanel({ minimal }) {
 
     const azimuth = status.position && status.position.azimuth != null ? status.position.azimuth : 0;
     const readOnly = !!status.read_only;
+    // The server gave up on the last move and the rotator hasn't moved since.
+    const stuck = !!status.move_error && !status.moving;
 
     // Which countries the beam currently covers — v1 draws these as cone
     // markers around the map edge; here they are a list, nearest bearing first.
@@ -265,12 +267,13 @@ export default function RotatorPanel({ minimal }) {
     return (
         <div className="stack">
             <div className="rot-head">
-                <span className={`dot dot--${status.connected ? (status.moving ? 'warn' : 'good') : 'bad'}`} />
+                <span className={`dot dot--${!status.connected || stuck ? 'bad' : status.moving ? 'warn' : 'good'}`} />
                 <span className="rot-head__az">{Math.round(azimuth)}°</span>
                 <span className="rot-head__state">
-                    {!status.connected ? 'disconnected' : status.moving ? 'moving' : 'idle'}
+                    {!status.connected ? 'disconnected' : status.moving ? 'moving' : stuck ? 'stuck' : 'idle'}
                 </span>
             </div>
+            {stuck && <div className="note note--warn">{status.move_error}</div>}
 
             {mapSize > 0 ? (
                 <div

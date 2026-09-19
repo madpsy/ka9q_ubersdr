@@ -1049,6 +1049,8 @@ func (mp *MQTTPublisher) PublishRotatorStatus(h *RotctlAPIHandler) {
 
 	if state.LastError != nil {
 		payload["error"] = state.LastError.Error()
+	} else if state.MoveError != nil {
+		payload["error"] = state.MoveError.Error()
 	}
 
 	topic := fmt.Sprintf("%s/rotator_status", mp.config.TopicPrefix)

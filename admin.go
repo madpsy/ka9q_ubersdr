@@ -6793,6 +6793,10 @@ func buildRotctlHealthPayload(cfg *Config, h *RotctlAPIHandler, sched *RotatorSc
 	if state.LastError != nil {
 		status["last_error"] = state.LastError.Error()
 	}
+	if state.MoveError != nil {
+		status["move_error"] = state.MoveError.Error()
+		status["issues"] = append(status["issues"].([]string), state.MoveError.Error())
+	}
 	if sched != nil {
 		status["scheduler"] = sched.GetStatus()
 	}

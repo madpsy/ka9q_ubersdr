@@ -1,4 +1,4 @@
-// The two hardware notifications: the rotator stopping, and the antenna changing.
+// The two hardware notifications: the rotator stopping (or getting stuck), and the antenna changing.
 //
 // Both are transition detectors, and both have the same failure available to them:
 // announcing the state a page load happened to find. v1 guarded against it and so does
@@ -122,6 +122,60 @@ t('a name comes from the labels when there is one, and from the number when not'
     assert.strictEqual(hw.antennaName(st, 1), 'Dipole');
     assert.strictEqual(hw.antennaName(st, 2), 'Antenna 2');
     assert.strictEqual(hw.antennaName(null, 3), 'Antenna 3');
+});
+
+// --- the rotator --------------------------------------------------------------------
+//
+// Reached through _feedRotatorStatus, the function each poll calls. The server stops a
+// move both when the rotator arrives and when it gives up on one that isn't turning, so
+// the stop alone can't be announced as an arrival.
+
+const rotAt = (az, extra) => ({ connected: true, position: { azimuth: az }, ...extra });
+
+t('a rotator that arrives is announced as stopped there', () => {
+    hw._feedRotatorStatus(rotAt(90, { moving: true }));
+    hw._feedRotatorStatus(rotAt(180, { moving: false }));
+    const [n] = history();
+    assert.strictEqual(n.severity, 'good');
+    assert.ok(/stopped at 180/.test(n.title), n.title);
+});
+
+t('a rotator the server gave up on is announced as stuck, not arrived', () => {
+    hw._feedRotatorStatus(rotAt(90, { moving: true }));
+    hw._feedRotatorStatus(rotAt(90, {
+        moving: false,
+        move_error: 'failed to reach 180° after 3 retries, stuck at 90°',
+        move_error_at: 1000,
+    }));
+    const [n] = history();
+    assert.strictEqual(history().length, 1);
+    assert.strictEqual(n.severity, 'bad');
+    assert.ok(/stuck at 90/.test(n.title), n.title);
+    assert.ok(/failed to reach 180/.test(n.body), n.body);
+});
+
+t('an older failure the server still reports is not this move failing', () => {
+    // The server keeps a move error until the rotator is seen to move, so a short move
+    // that succeeds can still stop with the previous failure attached.
+    const old = { move_error: 'failed to reach 180°', move_error_at: 1000 };
+    hw._feedRotatorStatus(rotAt(90, { moving: true, ...old }));
+    hw._feedRotatorStatus(rotAt(92, { moving: false, ...old }));
+    const [n] = history();
+    assert.strictEqual(n.severity, 'good');
+});
+
+t('a second failure after an earlier one is still announced', () => {
+    hw._feedRotatorStatus(rotAt(90, { moving: true, move_error: 'first', move_error_at: 1000 }));
+    hw._feedRotatorStatus(rotAt(90, { moving: false, move_error: 'second', move_error_at: 2000 }));
+    const [n] = history();
+    assert.strictEqual(n.severity, 'bad');
+    assert.strictEqual(n.body, 'second');
+});
+
+t('a stuck rotator found on page load is a baseline, not a notification', () => {
+    hw._feedRotatorStatus(rotAt(90, { moving: false, move_error: 'x', move_error_at: 1000 }));
+    hw._feedRotatorStatus(rotAt(90, { moving: false, move_error: 'x', move_error_at: 1000 }));
+    assert.strictEqual(history().length, 0);
 });
 
 // --- muting -------------------------------------------------------------------------

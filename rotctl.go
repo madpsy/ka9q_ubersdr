@@ -549,10 +549,16 @@ func (r *RotctlClient) DumpState() (string, error) {
 
 // RotatorState holds the current state of the rotator for application use
 type RotatorState struct {
-	Position       *Position
-	Moving         bool
-	LastError      error
-	UpdatedAt      time.Time
+	Position  *Position
+	Moving    bool
+	LastError error
+	UpdatedAt time.Time
+	// MoveError is set when position verification gives up on a target. Unlike
+	// LastError (the last rotctld call), a successful position read does not
+	// clear it: only the rotator actually moving does. MoveErrorAt is when it
+	// was set, so callers can tell whether their own command failed.
+	MoveError      error
+	MoveErrorAt    time.Time
 	TargetPosition *Position // nil when no target is set (e.g. after stop or arrival)
 }
 
@@ -591,6 +597,7 @@ type RotatorController struct {
 	stuckThreshold     time.Duration
 	successTolerance   float64
 	closeTolerance     float64
+	moveErrorPos       Position // where the rotator was when MoveError was set
 }
 
 // NewRotatorController creates a new rotator controller
@@ -642,6 +649,19 @@ func (rc *RotatorController) UpdateState() error {
 	rc.state.Position = pos
 	rc.state.LastError = nil
 	rc.state.UpdatedAt = now
+
+	// A failed move stays failed until the rotator is seen to move away from
+	// where it got stuck. Re-sent commands (e.g. sun tracking) or a target it
+	// is already sitting on prove nothing about a broken rotator.
+	if rc.state.MoveError != nil {
+		azMoved := rc.calculateAzimuthDelta(rc.moveErrorPos.Azimuth, pos.Azimuth)
+		elMoved := abs(rc.moveErrorPos.Elevation - pos.Elevation)
+		if azMoved > rc.trendThreshold || elMoved > rc.trendThreshold {
+			log.Printf("Rotator moving again (%.1f° from where it failed), clearing move error", max(azMoved, elMoved))
+			rc.state.MoveError = nil
+			rc.state.MoveErrorAt = time.Time{}
+		}
+	}
 
 	// If position verification is disabled, use simple logic
 	if !rc.verifyPosition {
@@ -730,10 +750,12 @@ func (rc *RotatorController) GetState() RotatorState {
 	defer rc.mu.RUnlock()
 
 	s := RotatorState{
-		Position:  &Position{Azimuth: rc.state.Position.Azimuth, Elevation: rc.state.Position.Elevation},
-		Moving:    rc.state.Moving,
-		LastError: rc.state.LastError,
-		UpdatedAt: rc.state.UpdatedAt,
+		Position:    &Position{Azimuth: rc.state.Position.Azimuth, Elevation: rc.state.Position.Elevation},
+		Moving:      rc.state.Moving,
+		LastError:   rc.state.LastError,
+		UpdatedAt:   rc.state.UpdatedAt,
+		MoveError:   rc.state.MoveError,
+		MoveErrorAt: rc.state.MoveErrorAt,
 	}
 	if rc.targetPos != nil {
 		s.TargetPosition = &Position{Azimuth: rc.targetPos.Azimuth, Elevation: rc.targetPos.Elevation}
@@ -1042,7 +1064,10 @@ func (rc *RotatorController) retryCommand() {
 	if rc.retryCount >= rc.maxRetries {
 		log.Printf("Rotator: Max retries (%d) reached, giving up on target azimuth=%.1f°, elevation=%.1f°",
 			rc.maxRetries, rc.targetPos.Azimuth, rc.targetPos.Elevation)
-		rc.state.LastError = fmt.Errorf("failed to reach target after %d retries", rc.maxRetries)
+		rc.state.MoveError = fmt.Errorf("failed to reach %.0f° after %d retries, stuck at %.0f°",
+			rc.targetPos.Azimuth, rc.maxRetries, rc.state.Position.Azimuth)
+		rc.state.MoveErrorAt = time.Now()
+		rc.moveErrorPos = *rc.state.Position
 		rc.state.Moving = false
 		rc.targetPos = nil
 		rc.retryCount = 0

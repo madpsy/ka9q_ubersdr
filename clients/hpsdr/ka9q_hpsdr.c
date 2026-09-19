@@ -123,6 +123,67 @@ void generate_uuid(char *buf)
 }
 
 /*
+ * The password is whatever the operator typed, so it cannot be dropped into
+ * the /connection body, the curl command line or the /ws query as it is: a
+ * quote ends the JSON string, an apostrophe ends the shell argument, and an
+ * ampersand starts a new query parameter. Each of these escapes for one of
+ * those, and truncates on a whole escape sequence rather than midway through
+ * one.
+ */
+
+/* JSON string contents: quote, backslash and control characters. */
+static void json_escape(const char *src, char *dst, size_t dst_size)
+{
+    size_t n = 0;
+    for (const unsigned char *p = (const unsigned char *)src; *p; p++) {
+        char esc[8];
+        if (*p == '"' || *p == '\\')
+            snprintf(esc, sizeof(esc), "\\%c", *p);
+        else if (*p < 0x20)
+            snprintf(esc, sizeof(esc), "\\u%04x", *p);
+        else
+            snprintf(esc, sizeof(esc), "%c", *p);
+        size_t el = strlen(esc);
+        if (n + el >= dst_size) break;
+        memcpy(dst + n, esc, el);
+        n += el;
+    }
+    dst[n] = '\0';
+}
+
+/* Contents of a single-quoted shell argument: ' becomes '\'' */
+static void shell_sq_escape(const char *src, char *dst, size_t dst_size)
+{
+    size_t n = 0;
+    for (const char *p = src; *p; p++) {
+        const char *esc = (*p == '\'') ? "'\\''" : NULL;
+        size_t el = esc ? 4 : 1;
+        if (n + el >= dst_size) break;
+        if (esc) memcpy(dst + n, esc, el);
+        else     dst[n] = *p;
+        n += el;
+    }
+    dst[n] = '\0';
+}
+
+/* A query parameter value: everything but RFC 3986 unreserved is %XX. */
+static void url_encode(const char *src, char *dst, size_t dst_size)
+{
+    size_t n = 0;
+    for (const unsigned char *p = (const unsigned char *)src; *p; p++) {
+        bool plain = (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+                     (*p >= '0' && *p <= '9') ||
+                     *p == '-' || *p == '.' || *p == '_' || *p == '~';
+        size_t el = plain ? 1 : 3;
+        if (n + el >= dst_size) break;
+        if (plain) dst[n] = *p;
+        else       snprintf(dst + n, 4, "%%%02X", *p);
+        n += el;
+    }
+    dst[n] = '\0';
+}
+
+/*
  * POST to ubersdr /connection endpoint to request permission.
  *
  * url      — base HTTP URL, e.g. "http://host:8080"
@@ -244,20 +305,27 @@ bool check_ubersdr_connection(const char *url)
     snprintf(http_url, sizeof(http_url), "%.*s/connection", (int)ulen, url);
 
     /* Build JSON body — session_id and password come from mcb */
+    char pw_json[sizeof(mcb.ubersdr_password) * 6];
+    json_escape(mcb.ubersdr_password, pw_json, sizeof(pw_json));
+
     char json_body[512];
     snprintf(json_body, sizeof(json_body),
              "{\"user_session_id\":\"%s\",\"password\":\"%s\"}",
              /* We don't have a per-receiver session here; caller passes mcb fields.
               * Use a placeholder — real per-receiver call is done in ws_thread. */
-             "", mcb.ubersdr_password);
+             "", pw_json);
+
+    char body_sh[2048], url_sh[2048];
+    shell_sq_escape(json_body, body_sh, sizeof(body_sh));
+    shell_sq_escape(http_url, url_sh, sizeof(url_sh));
 
     /* Use curl to POST and capture the response body */
-    char cmd[2048];
+    char cmd[4608];
     snprintf(cmd, sizeof(cmd),
              "curl -s --max-time 10 -A 'UberSDR_HPSDR/1.0' "
              "-X POST -H 'Content-Type: application/json' "
              "-d '%s' '%s' 2>/dev/null",
-             json_body, http_url);
+             body_sh, url_sh);
 
     FILE *fp = popen(cmd, "r");
     if (!fp) {
@@ -332,17 +400,24 @@ static bool check_ubersdr_connection_rcb(const char *base_url, struct rcvr_cb *r
     if (ulen > 0 && base_url[ulen-1] == '/') ulen--;
     snprintf(http_url, sizeof(http_url), "%.*s/connection", (int)ulen, base_url);
 
+    char pw_json[sizeof(mcb.ubersdr_password) * 6];
+    json_escape(mcb.ubersdr_password, pw_json, sizeof(pw_json));
+
     char json_body[512];
     snprintf(json_body, sizeof(json_body),
              "{\"user_session_id\":\"%s\",\"password\":\"%s\"}",
-             rcb->session_id, mcb.ubersdr_password);
+             rcb->session_id, pw_json);
 
-    char cmd[2048];
+    char body_sh[2048], url_sh[2048];
+    shell_sq_escape(json_body, body_sh, sizeof(body_sh));
+    shell_sq_escape(http_url, url_sh, sizeof(url_sh));
+
+    char cmd[4608];
     snprintf(cmd, sizeof(cmd),
              "curl -s --max-time 3 -A 'UberSDR_HPSDR/1.0' "
              "-X POST -H 'Content-Type: application/json' "
              "-d '%s' '%s' 2>/dev/null",
-             json_body, http_url);
+             body_sh, url_sh);
 
     FILE *fp = popen(cmd, "r");
     if (!fp) {
@@ -1289,11 +1364,13 @@ void *ws_thread(void *arg)
                 snprintf(margin, sizeof(margin), "&min_margin=%d", mcb.min_margin);
             }
             if (mcb.ubersdr_password[0]) {
+                char pw_q[sizeof(mcb.ubersdr_password) * 3];
+                url_encode(mcb.ubersdr_password, pw_q, sizeof(pw_q));
                 snprintf(full_path, sizeof(full_path),
                          "/ws?frequency=%d&mode=iq%d&user_session_id=%s&password=%s"
                          "&format=pcm-zstd&version=%d%s",
                          rcb->curr_freq, rate_khz, rcb->session_id,
-                         mcb.ubersdr_password, PCMV4_PROTOCOL_VERSION, margin);
+                         pw_q, PCMV4_PROTOCOL_VERSION, margin);
             } else {
                 snprintf(full_path, sizeof(full_path),
                          "/ws?frequency=%d&mode=iq%d&user_session_id=%s"
@@ -1746,6 +1823,12 @@ int main (int argc, char *argv[])
             mcb.num_rxs = atoi(optarg);
             break;
         case 'p':
+            /* A cut-short password is a wrong one: say so rather than fail bypass. */
+            if (strlen(optarg) >= sizeof(mcb.ubersdr_password)) {
+                fprintf(stderr, "--password is longer than %zu characters\n",
+                        sizeof(mcb.ubersdr_password) - 1);
+                exit(1);
+            }
             strncpy(mcb.ubersdr_password, optarg, sizeof(mcb.ubersdr_password) - 1);
             break;
         case 'u':

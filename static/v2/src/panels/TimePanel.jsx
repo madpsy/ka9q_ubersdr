@@ -27,6 +27,11 @@
 // drops the date, the dial, the figures and the link. Those four are the panel — "what time
 // is it, is my clock right, and says who" — and they fit on three lines.
 //
+// The two clocks swap when the big one is clicked: UTC in the big figures with local time
+// under it, or the other way round. It is remembered, it applies wherever the panel is
+// drawn, and where the machine is itself on UTC there is nothing to swap so the click is not
+// offered. The labels are what say which is which, and they are never the same word twice.
+//
 // Two of them are switchable, from the row at the foot of the full view: the milliseconds
 // and the reference. Both are remembered, and both apply wherever the panel is drawn rather
 // than to the view the switch happens to sit in — one switch, one meaning. The switches
@@ -39,8 +44,8 @@ import {
     addSample, addonUrl, bestEstimate, clockAsleep, clockParts, deviceError, deviceLabel,
     deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone, formatDur,
     formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey, referenceOf,
-    sampleFrom, saveShowRef, saveShowMs, savedShowRef, savedShowMs, servingNote, staleStatus,
-    statusUrl, timeUrl, zoneLabel,
+    sampleFrom, saveBigLocal, saveShowRef, saveShowMs, savedBigLocal, savedShowRef, savedShowMs,
+    servingNote, staleStatus, statusUrl, timeUrl, zoneLabel,
 } from '../lib/ntpTime.js';
 import useFeedsAllowed from '../lib/useServerFeeds.js';
 import useInView from '../lib/useInView.js';
@@ -126,14 +131,24 @@ export default function TimePanel({ minimal }) {
     //
     // A failover is not covered by it. See servingNote below.
     const [showRef, setShowRef] = useState(savedShowRef);
+    // Which reading is the big one. Thrown by clicking the clock, remembered, and applying
+    // to both views like the two switches below — see lib/ntpTime.js.
+    const [bigLocal, setBigLocal] = useState(savedBigLocal);
     // Bumped whenever the estimate changes enough to be worth redrawing the slow figures.
     const [, setBeat] = useState(0);
 
-    // The elements the clock is written into. See paint().
-    const utcEl = useRef(null);
+    // Where the machine is itself on UTC the two readings are the same figure, so there is
+    // nothing to swap: the preference is ignored rather than honoured into a clock that
+    // changes nothing when clicked. Everything below reads `swapped`, never `bigLocal`.
+    const localSame = localIsUtc(new Date());
+    const swapped = bigLocal && !localSame;
+
+    // The elements the clock is written into — the big reading and the small one, which is
+    // which being the swap above rather than anything the drawing cares about. See draw().
+    const bigEl = useRef(null);
     const fracEl = useRef(null);
     const dateEl = useRef(null);
-    const localEl = useRef(null);
+    const subEl = useRef(null);
     const dotEl = useRef(null);
 
     // Status bookkeeping, kept out of state because none of it is drawn: which reference the
@@ -168,26 +183,35 @@ export default function TimePanel({ minimal }) {
             // such below. A blank panel would be the one thing worse than an unchecked clock.
             const t = est ? at + est.theta : Date.now();
 
-            const utc = clockParts(t, true);
+            // The big reading and the small one, whichever way round they are at the moment.
+            // The fraction is the same either way: no zone is offset by part of a second.
+            const big = clockParts(t, !swapped);
             // Only when it changes: at 60 Hz this is 59 assignments a second of the string
             // that is already there, each one an attribute write the browser has to consider.
-            if (utcEl.current && shownHms !== utc.hms) {
-                utcEl.current.textContent = utc.hms;
-                shownHms = utc.hms;
+            if (bigEl.current && shownHms !== big.hms) {
+                bigEl.current.textContent = big.hms;
+                shownHms = big.hms;
             }
-            if (showMs && fracEl.current) fracEl.current.textContent = `.${utc.frac}`;
+            if (showMs && fracEl.current) fracEl.current.textContent = `.${big.frac}`;
 
             const sec = Math.floor(t / 1000);
             if (sec === shownSec) return t;
             shownSec = sec;
 
-            // Once a second: the date, the local reading, and the dot. The dot marks the
+            // Once a second: the date, the small reading and the dot. The dot marks the
             // second as *displayed*, which is the corrected one.
             const d = new Date(t);
-            if (localEl.current) localEl.current.textContent = clockParts(t, false).hms;
+            if (subEl.current) subEl.current.textContent = clockParts(t, swapped).hms;
             if (dateEl.current) {
+                // The date belongs to the reading above it: a local clock reading 00:30 is
+                // on tomorrow's date, and a date from the other zone beneath it would be
+                // wrong for half an hour a day rather than merely unhelpful.
                 dateEl.current.textContent = d.toLocaleDateString('en-GB', {
-                    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    ...(swapped ? {} : { timeZone: 'UTC' }),
                 });
             }
             if (dotEl.current) {
@@ -228,7 +252,7 @@ export default function TimePanel({ minimal }) {
             clearTimeout(timer);
             clearTimeout(dotTimer);
         };
-    }, [running, showMs]);
+    }, [running, showMs, swapped]);
 
     // The slow figures, on the clock as well as on the data: "reference age 4s" that reads 4s
     // for ten minutes because nothing new arrived is worse than one that says 10m.
@@ -374,9 +398,27 @@ export default function TimePanel({ minimal }) {
     const ref = referenceOf(time, status);
     const note = servingNote(status);
     const span = dialSpan(device, within);
-    const localSame = localIsUtc(new Date());
 
     const devText = synced ? deviceLabel(device, within) : 'measuring…';
+
+    // The click that swaps them. Offered only where there are two different readings to
+    // swap; a clock that is its own local time is left alone. See lib/ntpTime.js.
+    const swap = () => {
+        const on = !bigLocal;
+        setBigLocal(on);
+        saveBigLocal(on);
+    };
+    const swapProps = localSame ? {} : {
+        role: 'button',
+        tabIndex: 0,
+        onClick: swap,
+        onKeyDown: (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); swap(); }
+        },
+        title: swapped
+            ? 'Local time. Click to put UTC back in the big figures.'
+            : 'UTC. Click to put local time in the big figures instead.',
+    };
 
     return (
         <div className="stack tm" ref={wrap}>
@@ -385,26 +427,31 @@ export default function TimePanel({ minimal }) {
                 check, so it is drawn dimmed and says so rather than passing itself off
                 as the broadcast. */}
             <div className={`tm__clock${synced ? '' : ' is-free'}`}>
-                <div className="tm__now">
-                    <span ref={utcEl} className="tm__hms">--:--:--</span>
+                <div className={`tm__now${localSame ? '' : ' is-swappable'}`} {...swapProps}>
+                    <span ref={bigEl} className="tm__hms">--:--:--</span>
                     {showMs && <span ref={fracEl} className="tm__frac">.000</span>}
                     <span ref={dotEl} className="tm__dot" aria-hidden="true" />
                 </div>
                 {!minimal && (
                     <div className="tm__date">
                         <span ref={dateEl}>&nbsp;</span>
-                        <span className="tm__zone">UTC</span>
+                        <span className="tm__zone">{swapped ? zoneLabel(new Date()) : 'UTC'}</span>
                     </div>
                 )}
             </div>
 
-            {/* Local time, always — a clock that shows only UTC is half a clock in a shack.
-                Where the machine is itself on UTC the two readings agree, and the label says
-                so rather than leaving it looking like the same figure drawn twice. */}
+            {/* The other reading, always — a clock that shows only UTC is half a clock in a
+                shack, and one that shows only local time is no use for logging. Which of the
+                two is down here is the click above; the label is what says which, so it is
+                never the same word twice. Where the machine is itself on UTC the two agree,
+                there is nothing to swap, and the label says that rather than leaving it
+                looking like the same figure drawn twice. */}
             <div className="tm__local">
-                <span ref={localEl} className="tm__local-v">--:--:--</span>
+                <span ref={subEl} className="tm__local-v">--:--:--</span>
                 <span className="tm__local-k">
-                    {localSame ? 'local · this machine is on UTC' : (minimal ? 'local' : zoneLabel(new Date()))}
+                    {localSame
+                        ? 'local · this machine is on UTC'
+                        : (swapped ? 'UTC' : (minimal ? 'local' : zoneLabel(new Date())))}
                 </span>
             </div>
 

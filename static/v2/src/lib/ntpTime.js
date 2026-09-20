@@ -496,6 +496,35 @@ export function saveShowRef(on) {
     try { localStorage.setItem(REF_KEY, on ? '1' : '0'); } catch (err) { /* private browsing */ }
 }
 
+// Which reading is the big one: UTC, or this machine's local time.
+//
+// UTC by default, because that is what the panel is for — the broadcast second is the thing
+// being checked, and a shack logs in UTC. But an operator who has already satisfied himself
+// that the clock is right is mostly reading the time to know what time it is, and for that
+// the local reading is the one he wants in 30px figures with the other one underneath it.
+//
+// So the big clock is a switch, thrown by clicking it: the two readings swap places and
+// nothing else about the panel changes. Remembered for the same reason as the fraction and
+// the reference — it is a preference about this machine, not about this session — and it
+// applies wherever the panel is drawn.
+//
+// It has no effect where local time *is* UTC: swapping then would be swapping a figure with
+// itself, so the panel leaves the reading alone and does not offer the click. See TimePanel.
+const BIG_LOCAL_KEY = 'ubersdr.v2.time.bigLocal';
+
+/** Whether local time is the big reading. Off by default — see above. */
+export function savedBigLocal() {
+    try {
+        return localStorage.getItem(BIG_LOCAL_KEY) === '1';
+    } catch (err) {
+        return false;
+    }
+}
+
+export function saveBigLocal(on) {
+    try { localStorage.setItem(BIG_LOCAL_KEY, on ? '1' : '0'); } catch (err) { /* private browsing */ }
+}
+
 // How long after the boundary the once-a-second redraw aims for. Landing a hair late is
 // right and landing early is not: a redraw that arrives at 11.9997 s paints the second
 // before, and the clock then reads a second slow until the next one.

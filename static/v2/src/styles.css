@@ -6864,6 +6864,26 @@ a.btn { text-decoration: none; }
     justify-content: center;
     gap: 1px;
 }
+/* The big reading is a switch: clicking it swaps UTC and local time. Offered only
+   where the two readings differ — on a machine that is itself on UTC there is
+   nothing to swap, so the class is not applied and it stays an ordinary figure.
+   The padding is there so the hit area is a little larger than the glyphs, and
+   the negative margin keeps it from moving the clock off centre. */
+.tm__now.is-swappable {
+    cursor: pointer;
+    padding: 2px 6px;
+    margin: -2px -6px;
+    border-radius: 6px;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background 120ms ease-out;
+}
+.tm__now.is-swappable:hover { background: var(--surface-2); }
+.tm__now.is-swappable:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 0;
+}
+
 .tm__hms {
     font-family: var(--mono);
     font-size: calc(30px * var(--ui-scale));
@@ -6913,11 +6933,21 @@ a.btn { text-decoration: none; }
 
 .tm__date {
     display: flex;
+    min-width: 0;
     gap: 5px;
     font-size: calc(10px * var(--ui-scale));
     color: var(--text-faint);
 }
-.tm__zone { color: var(--text-dim); }
+/* The zone under the big clock. "UTC" while that is the big reading, and the
+   machine's own zone when they are swapped — which can be a long name, so it is
+   allowed to ellipsis rather than to push the date about. */
+.tm__zone {
+    color: var(--text-dim);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 /* Local time: one line, the reading against the zone it is in. Smaller than the
    UTC clock on purpose — the broadcast is what this panel is for, and the local

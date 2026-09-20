@@ -13,6 +13,11 @@
 
 const assert = require('assert');
 
+// A machine that is not on UTC, fixed rather than inherited: the clock swap only exists
+// where the two readings differ, so a test box that happened to be on UTC would silently
+// assert nothing. Set before the bundle is required, and read by new Date() from then on.
+process.env.TZ = 'Europe/London';
+
 // Before the bundle: the panel reaches the layout and display settings on the way in, and
 // both read the browser at import time.
 const prefs = new Map();
@@ -43,8 +48,8 @@ const {
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
     deviceLabel, deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone,
     formatDur, formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey,
-    referenceOf, sampleFrom, saveShowRef, saveShowMs, savedShowRef, savedShowMs, servingNote,
-    staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
+    referenceOf, sampleFrom, saveBigLocal, saveShowRef, saveShowMs, savedBigLocal, savedShowRef,
+    savedShowMs, servingNote, staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
 } = require('./.build/ntptime.cjs');
 
 let pass = 0;
@@ -570,6 +575,93 @@ t('a failover is spelled out in the full view only, and never behind the source 
     assert.ok(gate, 'the failover note is not where this test can see it');
     assert.ok(!/showRef/.test(gate[1]), 'the failover note has been put behind the source switch');
     assert.ok(/!minimal/.test(gate[1]), 'the failover note is still drawn in the cut-down view');
+});
+
+// ── The clock swap ───────────────────────────────────────────────────────────
+
+t('the big clock is UTC by default, and which one it is is remembered', () => {
+    prefs.clear();
+    assert.strictEqual(savedBigLocal(), false, 'the panel is for the broadcast second');
+    saveBigLocal(true);
+    assert.strictEqual(savedBigLocal(), true);
+    saveBigLocal(false);
+    assert.strictEqual(savedBigLocal(), false);
+    prefs.clear();
+
+    const was = globalThis.localStorage;
+    globalThis.localStorage = {
+        getItem() { throw new Error('denied'); },
+        setItem() { throw new Error('denied'); },
+    };
+    try {
+        assert.strictEqual(savedBigLocal(), false, 'a locked-down embed gets the default');
+        saveBigLocal(true);                  // must not throw out of the panel
+    } finally {
+        globalThis.localStorage = was;
+    }
+});
+
+const nowOf = (tree) => deep(tree).find((n) => ((n.props || {}).className || '').includes('tm__now'));
+const textOf = (tree, cls) => {
+    const n = deep(tree).find((x) => ((x.props || {}).className || '') === cls);
+    return n ? n.props.children : undefined;
+};
+
+t('clicking the big clock swaps the two readings, in both views', () => {
+    for (const props of [{}, { minimal: true }]) {
+        prefs.clear();
+        reset();
+        const where = props.minimal ? 'the cut-down view' : 'the full view';
+
+        const utcBig = render(TimePanel, props);
+        const now = nowOf(utcBig.tree);
+        assert.ok(now, `no clock in ${where}`);
+        assert.strictEqual(now.props.role, 'button', `the clock is not clickable in ${where}`);
+        assert.strictEqual(typeof now.props.onClick, 'function', `nothing happens on a click in ${where}`);
+        assert.ok(now.props.className.includes('is-swappable'), `no affordance in ${where}`);
+        // UTC is big, so the small line is the local one and says which zone.
+        assert.ok(!/^UTC$/.test(String(textOf(utcBig.tree, 'tm__local-k'))), `the small line reads UTC in ${where}`);
+        now.props.onClick();
+        for (const off of utcBig.cleanups) off();
+
+        // The click is remembered, and the next render has them the other way round: the
+        // small line is now the UTC one, and it says so.
+        assert.strictEqual(savedBigLocal(), true, `the swap was not remembered in ${where}`);
+        const localBig = render(TimePanel, props);
+        assert.strictEqual(textOf(localBig.tree, 'tm__local-k'), 'UTC', `the small line is not UTC in ${where}`);
+        if (!props.minimal) {
+            const zone = textOf(localBig.tree, 'tm__zone');
+            assert.ok(zone && zone !== 'UTC', `the date still reads UTC under a local clock in ${where}`);
+        }
+        for (const off of localBig.cleanups) off();
+        prefs.clear();
+    }
+});
+
+t('a machine that is itself on UTC is not offered a swap of a figure with itself', () => {
+    const wasTz = process.env.TZ;
+    process.env.TZ = 'UTC';
+    prefs.clear();
+    // Even with the preference set, because it is the readings that decide, not the store.
+    saveBigLocal(true);
+    try {
+        reset();
+        const { tree, cleanups } = render(TimePanel, {});
+        const now = nowOf(tree);
+        assert.ok(now, 'no clock at all');
+        assert.strictEqual(now.props.role, undefined, 'offered a swap that changes nothing');
+        assert.strictEqual(now.props.onClick, undefined, 'the clock is still clickable');
+        assert.ok(!now.props.className.includes('is-swappable'), 'the affordance is still drawn');
+        assert.strictEqual(textOf(tree, 'tm__zone'), 'UTC', 'the date stopped reading UTC');
+        assert.ok(
+            String(textOf(tree, 'tm__local-k')).includes('this machine is on UTC'),
+            'the small line no longer explains why the two agree',
+        );
+        for (const off of cleanups) off();
+    } finally {
+        process.env.TZ = wasTz;
+        prefs.clear();
+    }
 });
 
 console.log(`\n${pass} passed`);

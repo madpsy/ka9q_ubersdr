@@ -476,7 +476,10 @@ export function saveShowMs(on) {
 // What it deliberately does NOT hide is a failover. "Failed over to ntp" is not a label, it
 // is news — the arrangement is not the one it was set up to be — and a display preference
 // that could quietly suppress it would be the one thing in this panel capable of misleading
-// somebody. See servingNote, which the panel draws whether or not this is on.
+// somebody. See servingNote, which the full view draws whether or not this is on.
+//
+// The cut-down view drops that sentence, because there it is not lost: the pill is already
+// amber and already reads NTP, which is the same fact in the space there is for it.
 //
 // It changes nothing about what is fetched: the reference is known either way.
 const REF_KEY = 'ubersdr.v2.time.showRef';

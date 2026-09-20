@@ -552,23 +552,24 @@ t('turning the source off drops it from both views — one switch, one meaning',
     }
 });
 
-t('a failover is reported whether the source switch is on or off', () => {
-    // "Failed over to ntp" is not a label, it is news. A display preference that could
-    // quietly suppress it would be the one thing in this panel capable of misleading
-    // somebody — so servingNote is deliberately outside the switch.
+t('a failover is spelled out in the full view only, and never behind the source switch', () => {
+    // "Failed over to ntp" is not a label, it is news, so the source switch does not cover
+    // it. The cut-down view drops it all the same and loses nothing: the pill there is
+    // already amber and already reads NTP.
     const note = servingNote({ clock: { serving: 'secondary', secondary: 'ntp' } });
     assert.ok(note, 'the fixture must actually describe a failover');
 
+    // Asserted on the source rather than on a render: the note only appears once
+    // /api/status has been read, which the hook stub has no way to reach. Written to fail
+    // loudly if either gate moves.
     const src = require('fs').readFileSync(
         require('path').join(__dirname, '..', 'src', 'panels', 'TimePanel.jsx'), 'utf8',
     );
-    // The pill is gated; the note is not. Asserted on the source because the note only
-    // appears once /api/status has been read, which a render test has no way to reach.
     assert.ok(/\{showRef && \(/.test(src), 'the reference pill is no longer behind the switch');
-    assert.ok(
-        /\n\s*\{note && <div className=\{`tm__note/.test(src),
-        'the failover note has been put behind the source switch',
-    );
+    const gate = src.match(/\{([^{}]*)&& <div className=\{`tm__note is-\$\{note\.tone\}/);
+    assert.ok(gate, 'the failover note is not where this test can see it');
+    assert.ok(!/showRef/.test(gate[1]), 'the failover note has been put behind the source switch');
+    assert.ok(/!minimal/.test(gate[1]), 'the failover note is still drawn in the cut-down view');
 });
 
 console.log(`\n${pass} passed`);

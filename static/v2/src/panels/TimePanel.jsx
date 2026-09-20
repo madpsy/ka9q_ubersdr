@@ -420,8 +420,13 @@ export default function TimePanel({ minimal }) {
             {/* Not behind the switch above. "Failed over to ntp" is not a label, it is
                 news — the arrangement is not the one it was set up to be — and a display
                 preference that could quietly suppress it would be the one thing in this
-                panel capable of misleading somebody. */}
-            {note && <div className={`tm__note is-${note.tone}`}>{note.text}</div>}
+                panel capable of misleading somebody.
+
+                It is dropped in the cut-down view all the same, and loses nothing: the
+                pill above is already amber and already reads NTP when the time has failed
+                over, so the sentence is the same fact spelled out. Spelling it out is
+                worth a line where there are twenty and not where there are three. */}
+            {!minimal && note && <div className={`tm__note is-${note.tone}`}>{note.text}</div>}
 
             {/* This device. The headline in the minimal view is the sentence; the dial is
                 what makes the sentence mean something, and it is the first thing to go. */}

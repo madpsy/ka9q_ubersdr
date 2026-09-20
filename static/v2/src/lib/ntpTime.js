@@ -434,6 +434,77 @@ export function referenceKey(time) {
 
 const pad = (n, w = 2) => String(n).padStart(w, '0');
 
+// ── The milliseconds, and what they cost ─────────────────────────────────────
+//
+// Showing them is the point of the panel: a clock that ticks on the broadcast second rather
+// than on this machine's is only visibly doing so if the fraction is moving. But a three
+// digit readout has to be repainted every frame, which means an animation frame callback for
+// as long as the panel is on screen — and somebody watching a waterfall does not necessarily
+// want a 60 Hz repaint in the corner for a figure they are not reading.
+//
+// So it is a choice, and turning it off is a real saving rather than a cosmetic one: with
+// the fraction hidden the panel stops using requestAnimationFrame altogether and redraws
+// once a second, on a timer that re-aims itself at each corrected second boundary. See
+// nextSecondDelay, and the paint effect in TimePanel.
+
+const MS_KEY = 'ubersdr.v2.time.showMs';
+
+/** Whether to draw the fraction. On by default — see above. */
+export function savedShowMs() {
+    try {
+        return localStorage.getItem(MS_KEY) !== '0';
+    } catch (err) {
+        return true;
+    }
+}
+
+export function saveShowMs(on) {
+    try { localStorage.setItem(MS_KEY, on ? '1' : '0'); } catch (err) { /* private browsing */ }
+}
+
+// Whether the reference survives into the minimal view.
+//
+// "NTP · time.cloudflare.com", and under it "failed over to ntp" when that is what has
+// happened. On by default, because a time whose source is not stated is worth less than one
+// that is — a clock reading the same to the millisecond means something quite different
+// coming off WWV than coming off a server on the other side of the Atlantic, and the whole
+// argument for a radio clock is about where the time came from rather than what it says.
+//
+// It is a choice because the minimal view is two lines on a phone, and somebody who has
+// checked once that this receiver is serving from the radio may well want those two lines
+// back. It changes nothing about what is fetched: the reference is already known, and the
+// full view goes on showing it either way.
+const REF_KEY = 'ubersdr.v2.time.minRef';
+
+export function savedMinRef() {
+    try {
+        return localStorage.getItem(REF_KEY) !== '0';
+    } catch (err) {
+        return true;
+    }
+}
+
+export function saveMinRef(on) {
+    try { localStorage.setItem(REF_KEY, on ? '1' : '0'); } catch (err) { /* private browsing */ }
+}
+
+// How long after the boundary the once-a-second redraw aims for. Landing a hair late is
+// right and landing early is not: a redraw that arrives at 11.9997 s paints the second
+// before, and the clock then reads a second slow until the next one.
+export const SECOND_MARGIN_MS = 4;
+
+/**
+ * How long until just after `t` crosses its next second boundary.
+ *
+ * Re-aimed from the corrected time on every redraw rather than set once at 1000 ms, because
+ * the corrected second moves whenever the served offset does — which is precisely what is
+ * happening during a failover, the one time somebody is watching.
+ */
+export function nextSecondDelay(t) {
+    const into = ((t % 1000) + 1000) % 1000;
+    return 1000 - into + SECOND_MARGIN_MS;
+}
+
 /** HH:MM:SS and the milliseconds separately, so the fraction can be set smaller. */
 export function clockParts(ms, utc = true) {
     const d = new Date(ms);

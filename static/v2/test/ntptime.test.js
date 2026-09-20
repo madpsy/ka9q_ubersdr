@@ -15,7 +15,12 @@ const assert = require('assert');
 
 // Before the bundle: the panel reaches the layout and display settings on the way in, and
 // both read the browser at import time.
-globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+const prefs = new Map();
+globalThis.localStorage = {
+    getItem: (k) => (prefs.has(k) ? prefs.get(k) : null),
+    setItem: (k, v) => prefs.set(k, String(v)),
+    removeItem: (k) => prefs.delete(k),
+};
 globalThis.document = globalThis.document || {
     documentElement: { dataset: {}, style: { setProperty() {}, removeProperty() {} } },
     createElement: () => ({ getContext: () => null }),
@@ -37,8 +42,9 @@ const {
     DIAL_MIN_MS, MAX_SAMPLE_AGE_MS, STATUS_MAX_MS, STATUS_MIN_MS, STEP_MS, WINDOW,
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
     deviceLabel, deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone,
-    formatDur, formatMs, localIsUtc, newClock, ntpAvailable, referenceKey, referenceOf,
-    sampleFrom, servingNote, staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
+    formatDur, formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey,
+    referenceOf, sampleFrom, saveMinRef, saveShowMs, savedMinRef, savedShowMs, servingNote,
+    staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
 } = require('./.build/ntptime.cjs');
 
 let pass = 0;
@@ -450,6 +456,102 @@ t('the minimal view drops the workbench and keeps the four things', () => {
     assert.ok(!minText.includes('Open Time'), 'the link survived into the minimal view');
     assert.ok(fullClasses.includes('tm__date'), 'no date in the full view');
     assert.ok(!minClasses.includes('tm__date'), 'the date survived into the minimal view');
+});
+
+// ── The two switches ─────────────────────────────────────────────────────────
+
+t('the once-a-second redraw aims just past the boundary, never before it', () => {
+    // Landing early paints the second before, and the clock then reads a second slow until
+    // the next redraw — which is the whole failure this margin exists to prevent.
+    assert.ok(nextSecondDelay(1000.0) > 1000, 'a whole second away');
+    assert.ok(nextSecondDelay(1999.0) > 1, 'a millisecond away, still past it');
+    for (const t0 of [0, 1, 499.5, 999.9, 1500, 123456.7]) {
+        const wait = nextSecondDelay(t0);
+        const landed = t0 + wait;
+        assert.ok(wait > 0, `wait must be positive at ${t0}`);
+        assert.ok(
+            Math.floor(landed / 1000) > Math.floor(t0 / 1000),
+            `redraw at ${t0} landed in the same second`,
+        );
+    }
+});
+
+t('both switches default on and are remembered', () => {
+    prefs.clear();
+    assert.strictEqual(savedShowMs(), true, 'the fraction is the point of the panel');
+    assert.strictEqual(savedMinRef(), true, 'a time whose source is not stated is worth less');
+
+    saveShowMs(false);
+    saveMinRef(false);
+    assert.strictEqual(savedShowMs(), false);
+    assert.strictEqual(savedMinRef(), false);
+    saveShowMs(true);
+    saveMinRef(true);
+    assert.strictEqual(savedShowMs(), true);
+    assert.strictEqual(savedMinRef(), true);
+    prefs.clear();
+});
+
+t('a storage that throws leaves both switches on rather than off', () => {
+    // Private browsing, or a locked-down embed. A panel that quietly lost its milliseconds
+    // because it could not read a preference would look broken.
+    const was = globalThis.localStorage;
+    globalThis.localStorage = {
+        getItem() { throw new Error('denied'); },
+        setItem() { throw new Error('denied'); },
+    };
+    try {
+        assert.strictEqual(savedShowMs(), true);
+        assert.strictEqual(savedMinRef(), true);
+        saveShowMs(false);        // must not throw out of the panel
+        saveMinRef(false);
+    } finally {
+        globalThis.localStorage = was;
+    }
+});
+
+t('the full view carries both switches and the minimal view carries neither', () => {
+    prefs.clear();
+    reset();
+    const full = render(TimePanel, {});
+    const switches = deep(full.tree).filter((n) => n.props && n.props.role === 'switch');
+    for (const off of full.cleanups) off();
+    assert.strictEqual(switches.length, 2, 'wanted the ms and source switches');
+    assert.deepStrictEqual(
+        deep(full.tree).filter((n) => (n.props || {}).className === 'switch__label')
+            .map((n) => n.props.children),
+        ['ms', 'source'],
+    );
+
+    reset();
+    const min = render(TimePanel, { minimal: true });
+    const minSwitches = deep(min.tree).filter((n) => n.props && n.props.role === 'switch');
+    for (const off of min.cleanups) off();
+    assert.strictEqual(minSwitches.length, 0, 'the cut-down view grew a control');
+});
+
+t('turning the source off drops it from the minimal view and from nowhere else', () => {
+    prefs.clear();
+    saveMinRef(false);
+    try {
+        reset();
+        const min = render(TimePanel, { minimal: true });
+        const minClasses = deep(min.tree).map((n) => (n.props && n.props.className) || '').join(' ');
+        for (const off of min.cleanups) off();
+        assert.ok(!minClasses.includes('tm__ref-pill'), 'the reference stayed in the cut-down view');
+        // The three that are not the reference are still there: it is the one of the four
+        // that is optional, not the panel.
+        assert.ok(minClasses.includes('tm__hms'), 'the clock went with it');
+        assert.ok(minClasses.includes('tm__dev-v'), 'this device went with it');
+
+        reset();
+        const full = render(TimePanel, {});
+        const fullClasses = deep(full.tree).map((n) => (n.props && n.props.className) || '').join(' ');
+        for (const off of full.cleanups) off();
+        assert.ok(fullClasses.includes('tm__ref-pill'), 'the full view lost the reference too');
+    } finally {
+        prefs.clear();
+    }
 });
 
 console.log(`\n${pass} passed`);

@@ -12,7 +12,10 @@
 // frame, because a display showing milliseconds has to be; a setState per frame would
 // re-render the panel sixty times a second to change four characters. Everything that moves
 // slowly — the reference, the figures, the dial — is ordinary state and re-renders when it
-// changes, which is rarely. See paint().
+// changes, which is rarely. With the fraction switched off there is nothing on screen that
+// moves faster than once a second, and the animation frame is dropped for a timer that
+// re-aims itself at each corrected second — so that switch is a real saving, not a cosmetic
+// one. See draw() and the two drivers under it.
 //
 // Nothing is fetched unless the panel is on screen. A dock column is taller than the window,
 // so an open panel three screens down was still polling; useInView is the gate for that, and
@@ -22,16 +25,19 @@
 //
 // `minimal` keeps the clock, the local time, this device's error and the reference, and
 // drops the date, the dial, the figures and the link. Those four are the panel — "what time
-// is it, is my clock right, and says who" — and they fit on three lines.
+// is it, is my clock right, and says who" — and they fit on three lines. The reference is
+// the one of the four somebody may not want on a phone, so the full view carries a switch
+// for it; both switches there are preferences about this machine and are remembered.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
-import { Icon } from '../components/ui.jsx';
+import { Icon, Switch } from '../components/ui.jsx';
 import {
     BURST_GAP_MS, FETCH_TIMEOUT_MS, POLL_MS, WINDOW,
     addSample, addonUrl, bestEstimate, clockAsleep, clockParts, deviceError, deviceLabel,
     deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone, formatDur,
-    formatMs, localIsUtc, newClock, ntpAvailable, referenceKey, referenceOf, sampleFrom,
-    servingNote, staleStatus, statusUrl, timeUrl, zoneLabel,
+    formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey, referenceOf,
+    sampleFrom, saveMinRef, saveShowMs, savedMinRef, savedShowMs, servingNote, staleStatus,
+    statusUrl, timeUrl, zoneLabel,
 } from '../lib/ntpTime.js';
 import useFeedsAllowed from '../lib/useServerFeeds.js';
 import useInView from '../lib/useInView.js';
@@ -104,6 +110,17 @@ export default function TimePanel({ minimal }) {
     const [time, setTime] = useState(null);
     const [status, setStatus] = useState(null);
     const [state, setState] = useState('loading');   // loading | ok | error
+    // Whether the fraction is drawn, which is also what decides the paint driver below.
+    // Remembered, because it is a preference about this machine rather than about this
+    // session — see lib/ntpTime.js. It applies wherever the panel is drawn, as the minimal
+    // flag itself does: the switch is only offered in the full view, because that is where
+    // there is room for it, but turning it off there turns it off on the phone as well,
+    // which is where the saving is worth most.
+    const [showMs, setShowMs] = useState(savedShowMs);
+    // Whether the reference survives into the minimal view — see lib/ntpTime.js. Remembered
+    // the same way and for the same reason; the full view shows it either way.
+    const [minRef, setMinRef] = useState(savedMinRef);
+    const showRef = !minimal || minRef;
     // Bumped whenever the estimate changes enough to be worth redrawing the slow figures.
     const [, setBeat] = useState(0);
 
@@ -126,34 +143,37 @@ export default function TimePanel({ minimal }) {
     // the next vsync, roughly one frame after this callback's timestamp, so that is the
     // instant to draw — the addon's own page does the same, and at a millisecond readout it
     // is the difference between a clock that reads right and one that is a frame late.
+    // With the fraction hidden there is nothing on screen that changes faster than once a
+    // second, so the animation frame is dropped for a timer that re-aims itself at each
+    // corrected second boundary — see nextSecondDelay. Both drivers share one draw().
     useEffect(() => {
         if (!running) return undefined;
         let raf = 0;
+        let timer = 0;
         let lastTs = 0;
         let frameMs = 1000 / 60;
+        let shownHms = null;
         let shownSec = null;
         let dotTimer = 0;
 
-        const paint = (ts) => {
-            raf = requestAnimationFrame(paint);
-            if (lastTs) {
-                const dt = ts - lastTs;
-                if (dt > 4 && dt < 50) frameMs += (dt - frameMs) * 0.05;
-            }
-            lastTs = ts;
-            const at = ts + frameMs;
-
+        /** @param at  the instant to draw for, on the page's monotonic clock. */
+        const draw = (at) => {
             const est = bestEstimate(clock.current, at);
             // Until something has answered, this machine's own clock — clearly labelled as
             // such below. A blank panel would be the one thing worse than an unchecked clock.
             const t = est ? at + est.theta : Date.now();
 
             const utc = clockParts(t, true);
-            if (utcEl.current) utcEl.current.textContent = utc.hms;
-            if (fracEl.current) fracEl.current.textContent = `.${utc.frac}`;
+            // Only when it changes: at 60 Hz this is 59 assignments a second of the string
+            // that is already there, each one an attribute write the browser has to consider.
+            if (utcEl.current && shownHms !== utc.hms) {
+                utcEl.current.textContent = utc.hms;
+                shownHms = utc.hms;
+            }
+            if (showMs && fracEl.current) fracEl.current.textContent = `.${utc.frac}`;
 
             const sec = Math.floor(t / 1000);
-            if (sec === shownSec) return;
+            if (sec === shownSec) return t;
             shownSec = sec;
 
             // Once a second: the date, the local reading, and the dot. The dot marks the
@@ -171,14 +191,39 @@ export default function TimePanel({ minimal }) {
                 clearTimeout(dotTimer);
                 dotTimer = setTimeout(() => el.classList.remove('is-on'), DOT_MS);
             }
+            return t;
         };
 
-        raf = requestAnimationFrame(paint);
+        // Per frame, for the fraction. A frame drawn now is on the glass at the next vsync,
+        // roughly one frame interval after this callback's timestamp, so that is the instant
+        // to draw for — at a millisecond readout that is the difference between a clock that
+        // reads right and one that is visibly a frame behind.
+        const perFrame = (ts) => {
+            raf = requestAnimationFrame(perFrame);
+            if (lastTs) {
+                const dt = ts - lastTs;
+                if (dt > 4 && dt < 50) frameMs += (dt - frameMs) * 0.05;
+            }
+            lastTs = ts;
+            draw(ts + frameMs);
+        };
+
+        // Once a second, aimed just past the boundary of the corrected second rather than
+        // set free-running at 1000 ms, so it cannot drift into painting the second before.
+        const perSecond = () => {
+            const t = draw(performance.now());
+            timer = setTimeout(perSecond, nextSecondDelay(t));
+        };
+
+        if (showMs) raf = requestAnimationFrame(perFrame);
+        else perSecond();
+
         return () => {
             cancelAnimationFrame(raf);
+            clearTimeout(timer);
             clearTimeout(dotTimer);
         };
-    }, [running]);
+    }, [running, showMs]);
 
     // The slow figures, on the clock as well as on the data: "reference age 4s" that reads 4s
     // for ten minutes because nothing new arrived is worse than one that says 10m.
@@ -337,7 +382,7 @@ export default function TimePanel({ minimal }) {
             <div className={`tm__clock${synced ? '' : ' is-free'}`}>
                 <div className="tm__now">
                     <span ref={utcEl} className="tm__hms">--:--:--</span>
-                    <span ref={fracEl} className="tm__frac">.000</span>
+                    {showMs && <span ref={fracEl} className="tm__frac">.000</span>}
                     <span ref={dotEl} className="tm__dot" aria-hidden="true" />
                 </div>
                 {!minimal && (
@@ -361,11 +406,13 @@ export default function TimePanel({ minimal }) {
             {/* Where it came from. A pill for the class, and under it the sources that are
                 actually in the answer — which is the question "says who", and the one a
                 radio clock has an interesting answer to. */}
-            <div className="tm__ref" title={ref.detail || undefined}>
-                <span className={`tm__ref-pill is-${ref.kind}`}>{ref.text}</span>
-                <span className="tm__ref-sub">{ref.sub}</span>
-            </div>
-            {note && <div className={`tm__note is-${note.tone}`}>{note.text}</div>}
+            {showRef && (
+                <div className="tm__ref" title={ref.detail || undefined}>
+                    <span className={`tm__ref-pill is-${ref.kind}`}>{ref.text}</span>
+                    <span className="tm__ref-sub">{ref.sub}</span>
+                </div>
+            )}
+            {showRef && note && <div className={`tm__note is-${note.tone}`}>{note.text}</div>}
 
             {/* This device. The headline in the minimal view is the sentence; the dial is
                 what makes the sentence mean something, and it is the first thing to go. */}
@@ -430,7 +477,35 @@ export default function TimePanel({ minimal }) {
                 and the history. Same new tab as the Addons panel and the Lightning panel —
                 these are separate applications with their own interface. */}
             {!minimal && (
-                <div className="row-end">
+                <div className="tm__foot">
+                    <div className="tm__foot-opts">
+                        {/* Turning this off is a real saving and not a cosmetic one: with no
+                            fraction on screen the panel stops repainting per frame and
+                            redraws once a second instead. See the paint effect. */}
+                        <Switch
+                            checked={showMs}
+                            onChange={(on) => { setShowMs(on); saveShowMs(on); }}
+                            label="ms"
+                            title={
+                                'Show milliseconds. They are the proof the clock is ticking with '
+                                + 'the broadcast rather than with this machine — and drawing them '
+                                + 'costs an animation frame a second for as long as the panel is on '
+                                + 'screen, so turning them off drops the panel to one redraw a second.'
+                            }
+                        />
+                        {/* Only about the cut-down view: the reference is always shown here,
+                            where there is room for it. */}
+                        <Switch
+                            checked={minRef}
+                            onChange={(on) => { setMinRef(on); saveMinRef(on); }}
+                            label="source"
+                            title={
+                                'Keep the reference — the station or server the time is coming from, '
+                                + 'and any failover — in the cut-down view. It is always shown here. '
+                                + 'Nothing is fetched either way.'
+                            }
+                        />
+                    </div>
                     <a
                         className="btn btn--ghost btn--sm"
                         href={addonUrl()}

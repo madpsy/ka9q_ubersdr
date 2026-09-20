@@ -7069,6 +7069,24 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 
+/* The two switches and the way out, on one line. They wrap rather than squeeze
+   in a narrow dock: a switch that has lost its label is a control nobody can
+   identify, whereas a second line costs 20 pixels once. */
+.tm__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+}
+.tm__foot-opts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Both switches are about how much of the panel is drawn rather than about the
+   receiver, so they are quieter than a control that changes something. */
+.tm__foot .switch__label {
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+
 /* The four figures, and deliberately the lightning panel's grid: two panels in
    one interface that summarise themselves differently are two things to learn. */
 .tm__stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }

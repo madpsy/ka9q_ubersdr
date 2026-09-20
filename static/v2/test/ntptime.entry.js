@@ -17,7 +17,7 @@ import {
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
     deviceLabel, deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone,
     formatDur, formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey,
-    referenceOf, sampleFrom, saveMinRef, saveShowMs, savedMinRef, savedShowMs, servingNote,
+    referenceOf, sampleFrom, saveShowRef, saveShowMs, savedShowRef, savedShowMs, servingNote,
     staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
 } from '../src/lib/ntpTime.js';
 
@@ -29,6 +29,6 @@ module.exports = {
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
     deviceLabel, deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone,
     formatDur, formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey,
-    referenceOf, sampleFrom, saveMinRef, saveShowMs, savedMinRef, savedShowMs, servingNote,
+    referenceOf, sampleFrom, saveShowRef, saveShowMs, savedShowRef, savedShowMs, servingNote,
     staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
 };

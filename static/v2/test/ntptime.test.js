@@ -43,7 +43,7 @@ const {
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
     deviceLabel, deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone,
     formatDur, formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey,
-    referenceOf, sampleFrom, saveMinRef, saveShowMs, savedMinRef, savedShowMs, servingNote,
+    referenceOf, sampleFrom, saveShowRef, saveShowMs, savedShowRef, savedShowMs, servingNote,
     staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
 } = require('./.build/ntptime.cjs');
 
@@ -479,16 +479,16 @@ t('the once-a-second redraw aims just past the boundary, never before it', () =>
 t('both switches default on and are remembered', () => {
     prefs.clear();
     assert.strictEqual(savedShowMs(), true, 'the fraction is the point of the panel');
-    assert.strictEqual(savedMinRef(), true, 'a time whose source is not stated is worth less');
+    assert.strictEqual(savedShowRef(), true, 'a time whose source is not stated is worth less');
 
     saveShowMs(false);
-    saveMinRef(false);
+    saveShowRef(false);
     assert.strictEqual(savedShowMs(), false);
-    assert.strictEqual(savedMinRef(), false);
+    assert.strictEqual(savedShowRef(), false);
     saveShowMs(true);
-    saveMinRef(true);
+    saveShowRef(true);
     assert.strictEqual(savedShowMs(), true);
-    assert.strictEqual(savedMinRef(), true);
+    assert.strictEqual(savedShowRef(), true);
     prefs.clear();
 });
 
@@ -502,9 +502,9 @@ t('a storage that throws leaves both switches on rather than off', () => {
     };
     try {
         assert.strictEqual(savedShowMs(), true);
-        assert.strictEqual(savedMinRef(), true);
+        assert.strictEqual(savedShowRef(), true);
         saveShowMs(false);        // must not throw out of the panel
-        saveMinRef(false);
+        saveShowRef(false);
     } finally {
         globalThis.localStorage = was;
     }
@@ -530,28 +530,45 @@ t('the full view carries both switches and the minimal view carries neither', ()
     assert.strictEqual(minSwitches.length, 0, 'the cut-down view grew a control');
 });
 
-t('turning the source off drops it from the minimal view and from nowhere else', () => {
-    prefs.clear();
-    saveMinRef(false);
-    try {
-        reset();
-        const min = render(TimePanel, { minimal: true });
-        const minClasses = deep(min.tree).map((n) => (n.props && n.props.className) || '').join(' ');
-        for (const off of min.cleanups) off();
-        assert.ok(!minClasses.includes('tm__ref-pill'), 'the reference stayed in the cut-down view');
-        // The three that are not the reference are still there: it is the one of the four
-        // that is optional, not the panel.
-        assert.ok(minClasses.includes('tm__hms'), 'the clock went with it');
-        assert.ok(minClasses.includes('tm__dev-v'), 'this device went with it');
+const classesOf = (tree) => deep(tree).map((n) => (n.props && n.props.className) || '').join(' ');
 
-        reset();
-        const full = render(TimePanel, {});
-        const fullClasses = deep(full.tree).map((n) => (n.props && n.props.className) || '').join(' ');
-        for (const off of full.cleanups) off();
-        assert.ok(fullClasses.includes('tm__ref-pill'), 'the full view lost the reference too');
+t('turning the source off drops it from both views — one switch, one meaning', () => {
+    prefs.clear();
+    saveShowRef(false);
+    try {
+        for (const props of [{ minimal: true }, {}]) {
+            reset();
+            const r = render(TimePanel, props);
+            const classes = classesOf(r.tree);
+            for (const off of r.cleanups) off();
+            const where = props.minimal ? 'the cut-down view' : 'the full view';
+            assert.ok(!classes.includes('tm__ref-pill'), `the reference stayed in ${where}`);
+            // Everything else stands: it is one of the four that is optional, not the panel.
+            assert.ok(classes.includes('tm__hms'), `the clock went with it in ${where}`);
+            assert.ok(classes.includes('tm__dev-v'), `this device went with it in ${where}`);
+        }
     } finally {
         prefs.clear();
     }
+});
+
+t('a failover is reported whether the source switch is on or off', () => {
+    // "Failed over to ntp" is not a label, it is news. A display preference that could
+    // quietly suppress it would be the one thing in this panel capable of misleading
+    // somebody — so servingNote is deliberately outside the switch.
+    const note = servingNote({ clock: { serving: 'secondary', secondary: 'ntp' } });
+    assert.ok(note, 'the fixture must actually describe a failover');
+
+    const src = require('fs').readFileSync(
+        require('path').join(__dirname, '..', 'src', 'panels', 'TimePanel.jsx'), 'utf8',
+    );
+    // The pill is gated; the note is not. Asserted on the source because the note only
+    // appears once /api/status has been read, which a render test has no way to reach.
+    assert.ok(/\{showRef && \(/.test(src), 'the reference pill is no longer behind the switch');
+    assert.ok(
+        /\n\s*\{note && <div className=\{`tm__note/.test(src),
+        'the failover note has been put behind the source switch',
+    );
 });
 
 console.log(`\n${pass} passed`);

@@ -25,9 +25,12 @@
 //
 // `minimal` keeps the clock, the local time, this device's error and the reference, and
 // drops the date, the dial, the figures and the link. Those four are the panel — "what time
-// is it, is my clock right, and says who" — and they fit on three lines. The reference is
-// the one of the four somebody may not want on a phone, so the full view carries a switch
-// for it; both switches there are preferences about this machine and are remembered.
+// is it, is my clock right, and says who" — and they fit on three lines.
+//
+// Two of them are switchable, from the row at the foot of the full view: the milliseconds
+// and the reference. Both are remembered, and both apply wherever the panel is drawn rather
+// than to the view the switch happens to sit in — one switch, one meaning. The switches
+// themselves are in the full view only, because that is where there is room for them.
 
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Icon, Switch } from '../components/ui.jsx';
@@ -36,7 +39,7 @@ import {
     addSample, addonUrl, bestEstimate, clockAsleep, clockParts, deviceError, deviceLabel,
     deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone, formatDur,
     formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey, referenceOf,
-    sampleFrom, saveMinRef, saveShowMs, savedMinRef, savedShowMs, servingNote, staleStatus,
+    sampleFrom, saveShowRef, saveShowMs, savedShowRef, savedShowMs, servingNote, staleStatus,
     statusUrl, timeUrl, zoneLabel,
 } from '../lib/ntpTime.js';
 import useFeedsAllowed from '../lib/useServerFeeds.js';
@@ -117,10 +120,12 @@ export default function TimePanel({ minimal }) {
     // there is room for it, but turning it off there turns it off on the phone as well,
     // which is where the saving is worth most.
     const [showMs, setShowMs] = useState(savedShowMs);
-    // Whether the reference survives into the minimal view — see lib/ntpTime.js. Remembered
-    // the same way and for the same reason; the full view shows it either way.
-    const [minRef, setMinRef] = useState(savedMinRef);
-    const showRef = !minimal || minRef;
+    // Whether the reference is drawn at all — see lib/ntpTime.js. Remembered the same way as
+    // the fraction and applying to both views for the same reason: it is one switch with one
+    // meaning, and a preference that held in one view and not the other would be two.
+    //
+    // A failover is not covered by it. See servingNote below.
+    const [showRef, setShowRef] = useState(savedShowRef);
     // Bumped whenever the estimate changes enough to be worth redrawing the slow figures.
     const [, setBeat] = useState(0);
 
@@ -412,7 +417,11 @@ export default function TimePanel({ minimal }) {
                     <span className="tm__ref-sub">{ref.sub}</span>
                 </div>
             )}
-            {showRef && note && <div className={`tm__note is-${note.tone}`}>{note.text}</div>}
+            {/* Not behind the switch above. "Failed over to ntp" is not a label, it is
+                news — the arrangement is not the one it was set up to be — and a display
+                preference that could quietly suppress it would be the one thing in this
+                panel capable of misleading somebody. */}
+            {note && <div className={`tm__note is-${note.tone}`}>{note.text}</div>}
 
             {/* This device. The headline in the minimal view is the sentence; the dial is
                 what makes the sentence mean something, and it is the first thing to go. */}
@@ -493,16 +502,15 @@ export default function TimePanel({ minimal }) {
                                 + 'screen, so turning them off drops the panel to one redraw a second.'
                             }
                         />
-                        {/* Only about the cut-down view: the reference is always shown here,
-                            where there is room for it. */}
+                        {/* Applies to both views, as the fraction does. */}
                         <Switch
-                            checked={minRef}
-                            onChange={(on) => { setMinRef(on); saveMinRef(on); }}
+                            checked={showRef}
+                            onChange={(on) => { setShowRef(on); saveShowRef(on); }}
                             label="source"
                             title={
-                                'Keep the reference — the station or server the time is coming from, '
-                                + 'and any failover — in the cut-down view. It is always shown here. '
-                                + 'Nothing is fetched either way.'
+                                'Show where the time is coming from — the station and receivers, or '
+                                + 'the upstream server. A failover is still reported whether this is '
+                                + 'on or off, and nothing is fetched either way.'
                             }
                         />
                     </div>

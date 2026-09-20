@@ -462,21 +462,26 @@ export function saveShowMs(on) {
     try { localStorage.setItem(MS_KEY, on ? '1' : '0'); } catch (err) { /* private browsing */ }
 }
 
-// Whether the reference survives into the minimal view.
+// Whether the reference is drawn: "WWV · local-10", or "NTP · time.cloudflare.com".
 //
-// "NTP · time.cloudflare.com", and under it "failed over to ntp" when that is what has
-// happened. On by default, because a time whose source is not stated is worth less than one
-// that is — a clock reading the same to the millisecond means something quite different
-// coming off WWV than coming off a server on the other side of the Atlantic, and the whole
-// argument for a radio clock is about where the time came from rather than what it says.
+// On by default, because a time whose source is not stated is worth less than one that is —
+// a clock reading the same to the millisecond means something quite different coming off WWV
+// than off a server on the other side of an ocean, and the whole argument for a radio clock
+// is about where the time came from rather than what it says.
 //
-// It is a choice because the minimal view is two lines on a phone, and somebody who has
-// checked once that this receiver is serving from the radio may well want those two lines
-// back. It changes nothing about what is fetched: the reference is already known, and the
-// full view goes on showing it either way.
-const REF_KEY = 'ubersdr.v2.time.minRef';
+// It is a choice because it is a *label*: somebody who has checked once that this receiver
+// is serving from the radio knows what the source is, and on a phone that line is a fifth of
+// the panel. Like the fraction, the answer applies wherever the panel is drawn.
+//
+// What it deliberately does NOT hide is a failover. "Failed over to ntp" is not a label, it
+// is news — the arrangement is not the one it was set up to be — and a display preference
+// that could quietly suppress it would be the one thing in this panel capable of misleading
+// somebody. See servingNote, which the panel draws whether or not this is on.
+//
+// It changes nothing about what is fetched: the reference is known either way.
+const REF_KEY = 'ubersdr.v2.time.showRef';
 
-export function savedMinRef() {
+export function savedShowRef() {
     try {
         return localStorage.getItem(REF_KEY) !== '0';
     } catch (err) {
@@ -484,7 +489,7 @@ export function savedMinRef() {
     }
 }
 
-export function saveMinRef(on) {
+export function saveShowRef(on) {
     try { localStorage.setItem(REF_KEY, on ? '1' : '0'); } catch (err) { /* private browsing */ }
 }
 

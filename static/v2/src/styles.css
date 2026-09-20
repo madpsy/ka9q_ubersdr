@@ -6933,23 +6933,32 @@ a.btn { text-decoration: none; }
     box-shadow: none;
 }
 
+/* The date, and under it whose clock the big figures are. A line each, always:
+   set side by side the two shrink rather than wrap, and the date breaks inside
+   itself — "Sun, 20 / Sept 2026" in a column beside a clipped zone name, which
+   is what a receiver in a named zone did to this line. Stacked, the line under
+   the clock reads the same however long the zone name is, and it is the same
+   arrangement as the smaller clocks below: the figures, then whose they are. */
 .tm__date {
     display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
     min-width: 0;
-    gap: 5px;
+    max-width: 100%;
     font-size: calc(10px * var(--ui-scale));
     color: var(--text-faint);
 }
-/* Whose clock the big figures are, under the date. "UTC" while that is the big
-   reading, and a zone name when it is one of the other two — which can be long,
-   so it is allowed to ellipsis rather than to push the date about. */
-.tm__zone {
-    color: var(--text-dim);
-    min-width: 0;
+.tm__date > span {
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* Whose clock the big figures are. "UTC" while that is the big reading, and a
+   zone name when it is one of the other two. Brighter than the date beside it
+   because it is the part that changes when the clock is clicked. */
+.tm__zone { color: var(--text-dim); }
 
 /* The clocks that are not the big one: the reading with whose it is underneath.
    Smaller than the big clock on purpose — the one being watched is the one that

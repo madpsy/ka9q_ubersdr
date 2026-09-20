@@ -242,6 +242,13 @@ function load() {
     inFlight = true;
     fetch(ENDPOINT)
         .then((r) => {
+            // 204 is the monitor saying it is switched on but has never got a
+            // reading — which is what a receiver with no route to NOAA looks
+            // like. It carries no body, and 204 is inside the ok range, so
+            // without this the next line parses an empty string and the panel
+            // shows the JSON parser's own words. Same answer lib/ncdxf.js gives
+            // the same convention on /api/cwskimmer/spots.
+            if (r.status === 204) throw new Error('the receiver has not managed to fetch one yet');
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             return r.json();
         })

@@ -312,9 +312,18 @@ async function connectInstance(desc) {
         webPreferences: { preload: RECEIVER_PRELOAD },
     });
     win.on('closed', () => {
+        const gone = running.get(entry.id);
+        // The popups go with the window that opened them. Each is a page served
+        // by the proxy that is about to stop, so one left behind is a dead
+        // window on a closed port — and any window at all, dead or not, is a
+        // window the app will not exit while it is open.
+        if (gone) {
+            for (const popup of [...gone.popups]) {
+                if (!popup.isDestroyed()) popup.close();
+            }
+        }
         localOrigins.delete(proxy.localOrigin);
         proxy.stop();
-        const gone = running.get(entry.id);
         if (gone && gone.radio) gone.radio.stop();
         // A listening socket outlives the window that asked for it unless it is
         // closed here, and the next window on the same port then cannot start.
@@ -326,6 +335,8 @@ async function connectInstance(desc) {
     const rec = {
         id: entry.id, proxy, win, links: null, layout: null, menu: null, radio: null,
         surface: null, audioPort: null,
+        // The windows this one has opened — see trackPopup.
+        popups: new Set(),
         // How far this receiver tunes, once asked. Null until then, which every reader
         // treats as "not said" and falls back to 10 kHz - 30 MHz for. Kept per window
         // because two windows can be on two receivers with different spans.
@@ -354,14 +365,17 @@ function isLocalUrl(url) {
 }
 
 // Popups from the v2 UI (legacy callsign lookup, map, CW graph) are
-// same-origin pages and become child windows; anything external goes to the
-// system browser. Applies to every webContents, children included.
+// same-origin pages and open as windows of their own; anything external goes to
+// the system browser. Applies to every webContents, children included.
 app.on('web-contents-created', (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
         if (isLocalUrl(url)) return { action: 'allow' };
         if (/^https?:/.test(url)) shell.openExternal(url);
         return { action: 'deny' };
     });
+    // Remembered against the receiver it was opened from, so it can be closed
+    // with it — see trackPopup.
+    contents.on('did-create-window', (child) => trackPopup(ownerFor(contents), child));
     contents.on('will-navigate', (event, url) => {
         if (isLocalUrl(url) || url.startsWith('file:')) return;
         event.preventDefault();
@@ -933,6 +947,33 @@ function recordFor(contents) {
     return null;
 }
 
+// The popups, and which receiver each one belongs to.
+//
+// `window.open` from the v2 page produces a top-level window with no parent, so
+// Electron does not close it along with the window it was opened from. Left to
+// itself it outlives its receiver — showing a page from a proxy that has since
+// stopped, and keeping the app alive because a window is still open. So each is
+// remembered against the record of the window that opened it, and closed with
+// it. The ownership is kept by webContents id as well, so a popup that opens a
+// popup ends up with the same receiver rather than with nobody.
+const popupOwner = new Map(); // popup webContents id -> record
+
+/** The receiver a webContents belongs to: its own window's, or its opener's. */
+function ownerFor(contents) {
+    return recordFor(contents) || popupOwner.get(contents.id) || null;
+}
+
+function trackPopup(rec, child) {
+    if (!rec || !child || child.isDestroyed()) return;
+    const id = child.webContents.id;
+    rec.popups.add(child);
+    popupOwner.set(id, rec);
+    child.on('closed', () => {
+        rec.popups.delete(child);
+        popupOwner.delete(id);
+    });
+}
+
 // What this app is costing the machine, for the stats readout over the
 // waterfall — see static/v2/src/lib/appStats.js, which defines the shape.
 //
@@ -1336,6 +1377,14 @@ app.whenReady().then(() => {
 });
 
 app.on('activate', () => showChooser());
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-});
+// The last window closing exits the app, macOS included.
+//
+// The convention there is the opposite — an app with no windows stays in the
+// dock, and `activate` opens a new one — and it is the right one for something
+// a document is kept open in all day. This is not that: with no window there is
+// no receiver being listened to and no page for a proxy to serve, so what the
+// convention leaves behind is a process holding ports open for nobody. Closing
+// the last window is how somebody says they have finished listening, on every
+// platform. (`activate` above still opens the chooser while the app is running,
+// and a ubersdr:// link starts it again from cold.)
+app.on('window-all-closed', () => app.quit());

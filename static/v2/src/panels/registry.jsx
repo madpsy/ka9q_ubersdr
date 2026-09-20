@@ -347,16 +347,22 @@ const BUILT_IN = [
     // Collapsed by default. It is a thing you look at once and then go tuning,
     // not while tuning, and the calendar changes on the scale of days.
     //
-    // Absent entirely when the calendar is empty or its feed cannot be reached,
-    // which is the one gate in this file that asks about DATA rather than about
-    // what the receiver is configured for. That is deliberate and it is the
-    // difference between this and, say, space weather: a receiver either has a
-    // space-weather monitor or it does not, and the panel is worth listing
-    // either way so somebody can see what it would show. A DXpedition calendar
-    // is the same on every receiver in the world, so a panel offering an empty
-    // one is not informative — it is a slot explaining that today is a quiet
-    // day. See lib/dxpeditions.js for what "empty or unreachable" resolves to
-    // and why a failure counts as empty here rather than keeping the last list.
+    // Absent entirely when the calendar is empty, which is the one gate in this
+    // file that asks about DATA rather than about what the receiver is
+    // configured for. That is deliberate and it is the difference between this
+    // and, say, space weather: a receiver either has a space-weather monitor or
+    // it does not, and the panel is worth listing either way so somebody can
+    // see what it would show. A DXpedition calendar is the same on every
+    // receiver in the world, so a panel offering an empty one is not
+    // informative — it is a slot explaining that today is a quiet day.
+    //
+    // With one exception, which is the whole of dxpeditionsPresent's second
+    // clause: a calendar that is empty because the receiver could not collect
+    // one. That is not a quiet day and the panel is the only thing that can say
+    // so — without it the slot vanishes out of somebody's dock with no account
+    // of itself, which is the failure this gate was meant to avoid rather than
+    // an instance of it. See lib/dxpeditions.js for both halves, and for why a
+    // failure to reach the RECEIVER still counts as empty.
     //
     // Minimal: the first five rows, without the Show all switch, the pager or
     // the Show All button.

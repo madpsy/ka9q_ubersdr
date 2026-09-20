@@ -64,6 +64,27 @@ self.addEventListener('fetch', (event) => {
   // Addon paths are prefixed with /addon/ and may contain their own streaming
   // API endpoints (SSE, audio) that must not be intercepted.
   const url = new URL(event.request.url);
+
+  // Somebody else's server is somebody else's problem. Everything below is
+  // written about this origin — the shell list is a list of our paths, and the
+  // offline page is a sentence about this receiver — and none of it survives
+  // being applied to a request for an OpenStreetMap tile or the news relay.
+  //
+  // Handling them did two things, one of them every time. A failed
+  // cross-origin GET came back as the offline page: 200, text/html, so
+  // `response.ok` was true and a caller that checked it believed the request
+  // had worked — which is every tile this app asks for and every call to the
+  // news relay, on any receiver without a route out. The second is latent: the
+  // cache test below asks only about the path, so a third-party reply for a
+  // path that happens to be in SHELL_ASSETS — `/` is one — would be written
+  // into the shell cache. Nothing this app fetches has such a path today, and
+  // nothing should have to keep being true for the cache to stay sound.
+  //
+  // Returning without calling respondWith hands the request back to the
+  // browser, which fails it the ordinary way. An <img> then fires error, and
+  // fetch() rejects, which is what every caller in the app is written for.
+  if (url.origin !== self.location.origin) return;
+
   if (
     url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/addon/') ||

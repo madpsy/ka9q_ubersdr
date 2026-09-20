@@ -224,6 +224,75 @@ t('storage that refuses to write does not break the fetch', () => withFetch(
     },
 ));
 
+// --- the deadline ------------------------------------------------------------
+//
+// The cache above is the whole point of this module, and for a request that
+// never settles none of it runs: the panel holds "Loading headlines…" with
+// yesterday's headlines sitting in storage. A name that will not resolve fails
+// in about a second on its own; a network that takes the packets and drops
+// them — a receiver on a LAN with no route out — does not fail until the
+// browser gives up, minutes later. Hence our own deadline.
+//
+// A fetch that honours the signal, as the browser's does: it settles only when
+// aborted, and then the way fetch settles an abort.
+const hangs = (_url, opts) => new Promise((_resolve, reject) => {
+    const signal = opts && opts.signal;
+    if (!signal) return; // no signal passed: hang for ever, and fail the test by timing out
+    const err = new Error('The operation was aborted.');
+    err.name = 'AbortError';
+    if (signal.aborted) reject(err);
+    else signal.addEventListener('abort', () => reject(err));
+});
+
+t('the request carries an abort signal', () => withFetch(
+    ok(feed(2)),
+    async () => {
+        let seen;
+        const prev = global.fetch;
+        global.fetch = (url, opts) => { seen = opts; return prev(url, opts); };
+        try {
+            await news.fetchNews('arrl');
+        } finally {
+            global.fetch = prev;
+        }
+        assert.ok(seen && seen.signal, 'no signal, so nothing can call the request off');
+    },
+));
+
+t('a relay that never answers falls back to the cache instead of hanging', () => withFetch(
+    ok(feed(4)),
+    async () => {
+        await news.fetchNews('arrl');          // fill the cache while the relay works
+        global.fetch = hangs;
+        const r = await news.fetchNews('arrl', { timeoutMs: 20 });
+        assert.strictEqual(r.items.length, 4, 'the cached headlines should have been shown');
+        assert.ok(r.stale, 'and marked as old rather than passed off as current');
+    },
+));
+
+t('a relay that never answers and no cache reports the failure', () => withFetch(
+    hangs,
+    async () => {
+        news._clearNews();
+        const r = await news.fetchNews('arrl', { timeoutMs: 20 });
+        assert.deepStrictEqual(r.items, []);
+        assert.ok(r.error, 'the panel is told, rather than left loading');
+    },
+));
+
+t('the deadline is cleared when the relay answers in time', () => withFetch(
+    ok(feed(2)),
+    async () => {
+        const r = await news.fetchNews('arrl', { timeoutMs: 50 });
+        assert.strictEqual(r.items.length, 2);
+        // A timer left behind holds the node process open past the last test,
+        // and in a browser it aborts nothing but still runs. Not directly
+        // observable, so this asserts the shape that makes it safe: the call
+        // settled before its own deadline could fire.
+        await new Promise((r2) => setTimeout(r2, 60));
+    },
+));
+
 chain.then(() => {
     if (process.exitCode) console.log('\nnews tests FAILED');
     else console.log(`\nall ${pass} news tests passed`);

@@ -44,7 +44,7 @@ import { countryFlag } from '../lib/format.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { requestLookup } from '../lib/callsign.js';
 import {
-    bandLabel, bearingLabel, datesLabel, dxpedKey, dxpeditionState, isActive,
+    bandLabel, bearingLabel, datesLabel, dxpedKey, dxpeditionState, feedNotice, isActive,
     listenFor, onDXpeditions, placedBy, pollDXpeditions, positionOf, runLabel,
     visibleDXpeditions, websiteOf,
 } from '../lib/dxpeditions.js';
@@ -440,6 +440,9 @@ export default function DXpeditionsPanel({ minimal }) {
         () => visibleDXpeditions(entries, { all, now }),
         [entries, all, now],
     );
+    // Recomputed on the same tick as the rows, so the age in it counts up with
+    // everything else on the panel rather than freezing at what it said on mount.
+    const notice = useMemo(() => feedNotice(state, now), [state, now]);
 
     // Minimal is the first page with no way to grow it, so a list left expanded
     // does not stay expanded when the panel is cut down.
@@ -507,7 +510,14 @@ export default function DXpeditionsPanel({ minimal }) {
                 </div>
             )}
 
-            {rows.length === 0 && !state.loading && (
+            {/* Above the list, not instead of it: a stale calendar is still the
+                best answer available and is still worth reading — it just has
+                to say what it is. Shown in a cut-down panel too, as every other
+                panel's failure state is: the glance is the reading that can
+                least afford to be wrong about how old it is. */}
+            {notice && <div className={`note note--${notice.tone}`}>{notice.text}</div>}
+
+            {rows.length === 0 && !state.loading && !notice && (
                 <Empty>
                     {all
                         ? 'No announced operations.'

@@ -542,7 +542,16 @@ func (e *ClockExtension) rewriteOffset(line []byte) ([]byte, bool) {
 		return line, true
 	}
 
-	ev["offset_ms"] = utcMs - hostMs
+	// The binary's own offset already had its corrections folded in — the WWV
+	// decoder's measured edge bias, and any --extra-delay-ms. Replacing the
+	// offset replaces the raw difference only, so those have to be added back
+	// or re-anchoring silently throws them away. The binary reports the total
+	// it applied rather than this hardcoding a constant that lives over there.
+	//
+	// Absent on an older binary, which is the whole reason for the comma-ok:
+	// a missing field means no corrections, not a broken offset.
+	applied, _ := ev["delay_applied_ms"].(float64)
+	ev["offset_ms"] = utcMs - hostMs + applied
 	// So the panel can say which clock the number is against rather than
 	// implying a precision neither of them has.
 	ev["offset_source"] = "packet"

@@ -23,6 +23,7 @@
 // the approximation.
 
 import React, { useEffect, useRef, useState } from '../react.js';
+import { addBaseLayer } from '../lib/leafletBase.js';
 import { loadScript, loadStyle } from '../lib/loadScript.js';
 import { geodesicPoints } from '../lib/callsign.js';
 import { snrColour } from '../lib/format.js';
@@ -73,9 +74,9 @@ export default function BeaconMap({ roster, rows, band, receiver, className }) {
             }).setView(rx ? [rx.lat, rx.lon] : [20, 0], 2);
             map.current = m;
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-            }).addTo(m);
+            // Tiles, with the local outline behind them if they will not
+            // come — see lib/leafletBase.js.
+            addBaseLayer(L, m);
 
             // The receiver, in the green every map in this app marks it with.
             if (rx) {

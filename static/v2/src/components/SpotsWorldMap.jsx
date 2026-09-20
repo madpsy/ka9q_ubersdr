@@ -27,6 +27,7 @@
 // filter change would do it while somebody was typing.
 
 import React, { useEffect, useMemo, useRef, useState } from '../react.js';
+import { addBaseLayer } from '../lib/leafletBase.js';
 import { loadScript, loadStyle } from '../lib/loadScript.js';
 import { geodesicPoints, maidenheadToLatLon } from '../lib/callsign.js';
 import { TOUCH_QUERY } from '../lib/useMediaQuery.js';
@@ -179,9 +180,9 @@ export default function SpotsWorldMap({
                 m.dragging._draggable.options.clickTolerance = TAP_SLOP;
             }
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-            }).addTo(m);
+            // Tiles, with the local outline behind them if they will not
+            // come — see lib/leafletBase.js.
+            addBaseLayer(L, m);
 
             if (rx) {
                 L.marker([rx.lat, rx.lon], {

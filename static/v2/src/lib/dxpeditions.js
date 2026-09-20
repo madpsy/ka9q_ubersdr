@@ -36,7 +36,10 @@ const SEED_KEY = 'ubersdr.v2.dxpeditions';
 // panel open, which is the only thing that changes inside a server refresh.
 export const DXPED_POLL_MS = 15 * 60 * 1000;
 
-let state = { entries: [], loading: true, error: null, at: 0 };
+let state = {
+    entries: [], loading: true, error: null, at: 0,
+    stale: false, lastError: null, loadedAt: null,
+};
 let inFlight = null;
 const listeners = new Set();
 
@@ -58,6 +61,16 @@ let present = seedCount() > 0;
  * Whether this receiver has a calendar worth a panel — what the registry gate
  * asks. True while the seed says the last load found something, then whatever
  * the current fetch found.
+ *
+ * Also true when the calendar is empty *because the server could not collect
+ * one*, which is a different answer from an empty calendar and the reason this
+ * is not simply `entries.length > 0`. The rule the registry states — a panel
+ * offering an empty calendar is a slot explaining that today is a quiet day —
+ * is about a calendar that is genuinely empty. "This receiver cannot reach the
+ * announcement feed" is not that: it is the panel's one chance to say why it
+ * has nothing, and without it the panel simply disappears out of somebody's
+ * dock with no account of itself. A receiver that does not run the feature at
+ * all reports neither entries nor an error and stays hidden, as before.
  */
 export function dxpeditionsPresent() {
     return present;
@@ -73,27 +86,114 @@ export function onDXpeditions(fn) {
     return () => listeners.delete(fn);
 }
 
+/** "4 days", "6 hours", "40 minutes" — the age of the copy, in one unit. */
+function ageLabel(ms) {
+    const mins = Math.max(0, Math.round(ms / 60000));
+    if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'}`;
+    const hours = Math.round(mins / 60);
+    if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'}`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'}`;
+}
+
+/**
+ * The line above the list when the calendar cannot be trusted, or null when it
+ * can. `{ tone, text }` — see the tone split below.
+ *
+ * Three things are being told apart, and the panel showed none of them:
+ *
+ *   the receiver could not be asked        `error` — our own fetch failed
+ *   the receiver could not reach the feed  `lastError`, with nothing held
+ *   the list is real but old               `stale`, with entries still shown
+ *
+ * The third is the one that matters most and looked least like a problem. A
+ * DXpedition calendar that stopped being collected a week ago still lists
+ * operations with dates on them, and the panel drew them exactly as it draws a
+ * current list — so it went on announcing that DX was on the air long after
+ * anybody could know whether it was. An old calendar is worth keeping; an old
+ * calendar that does not say so is not.
+ *
+ * Kept here rather than in the panel because it is a rule about what the state
+ * means, which is the half of this file that is worth testing.
+ */
+export function feedNotice(st = state, now = Date.now()) {
+    if (!st || st.loading) return null;
+
+    // `warn` where there is nothing to show and something is wrong; `tight`
+    // where the list is still worth reading and only needs dating. That is the
+    // same split the DRM schedule makes for the same situation — see the stale
+    // note in DRMExtension.jsx — and the sentences are written to its measure:
+    // the age, an em-dash, and what went wrong. A notice that takes four lines
+    // in a cut-down panel is a notice that has crowded out the thing it is
+    // about.
+    if (st.error) {
+        return { tone: 'warn', text: `The calendar could not be fetched from the receiver (${st.error}).` };
+    }
+    if (!st.entries.length && st.lastError) {
+        return {
+            tone: 'warn',
+            text: 'No calendar could be collected — the receiver cannot reach the'
+                + ' announcement feed. That is not the same as nothing being on.',
+        };
+    }
+    if (st.stale || st.lastError) {
+        const collected = st.loadedAt ? Date.parse(st.loadedAt) : NaN;
+        const age = Number.isFinite(collected) ? ageLabel(now - collected) : '';
+        return {
+            tone: 'tight',
+            text: age
+                ? `This calendar is ${age} old — the receiver has not managed to refresh it.`
+                : 'This calendar may be out of date — the receiver has not managed to refresh it.',
+        };
+    }
+    return null;
+}
+
 function publish(next) {
     state = next;
-    present = next.entries.length > 0;
+    const has = next.entries.length > 0;
+    present = has || !!next.lastError;
     try {
-        if (present) localStorage.setItem(SEED_KEY, String(next.entries.length));
+        // The seed is the entry count and only that. It answers "was there a
+        // calendar here last time", which is what makes the panel appear before
+        // the first fetch lands; a receiver that could not collect one has no
+        // count to remember, and seeding from the error would bring the panel
+        // back on the next page load with nothing behind it.
+        if (has) localStorage.setItem(SEED_KEY, String(next.entries.length));
         else localStorage.removeItem(SEED_KEY);
     } catch (e) { /* private mode */ }
     for (const fn of Array.from(listeners)) fn(state);
     return state;
 }
 
-/** Only the fields the panel reads, and nothing a hostile payload could smuggle. */
+/**
+ * Only the fields the panel reads, and nothing a hostile payload could smuggle.
+ *
+ * The three beside the entries are the server's account of its own last fetch —
+ * see the status block in dxpeditions.go. They are what makes an empty list
+ * readable: a calendar with nothing on it and a calendar that could not be
+ * collected are the same zero rows, and only these tell them apart. Dropping
+ * them is how the panel came to say "No DXpeditions are on the air right now"
+ * about a receiver that had not reached the feed in a week, and how a list held
+ * over from before the connection went was drawn as though it were current.
+ *
+ * `stale` is the server's own judgement, not ours: it knows when it last got a
+ * good copy and how long that is allowed to be.
+ */
 function clean(body) {
     const rows = body && Array.isArray(body.entries) ? body.entries : [];
-    const out = [];
+    const entries = [];
     for (const e of rows) {
         if (!e || typeof e !== 'object') continue;
         if (typeof e.call !== 'string' || !e.call) continue;
-        out.push(e);
+        entries.push(e);
     }
-    return out;
+    return {
+        entries,
+        stale: !!(body && body.stale),
+        lastError: (body && typeof body.last_error === 'string' && body.last_error) || null,
+        loadedAt: (body && typeof body.loaded_at === 'string' && body.loaded_at) || null,
+    };
 }
 
 /**
@@ -114,9 +214,10 @@ export function refreshDXpeditions() {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return clean(await res.json());
         })
-        .then((entries) => publish({ entries, loading: false, error: null, at: Date.now() }))
+        .then((got) => publish({ ...got, loading: false, error: null, at: Date.now() }))
         .catch((err) => publish({
-            entries: [], loading: false, error: err.message || String(err), at: Date.now(),
+            entries: [], stale: false, lastError: null, loadedAt: null,
+            loading: false, error: err.message || String(err), at: Date.now(),
         }))
         .then((s) => { inFlight = null; return s; });
     return inFlight;

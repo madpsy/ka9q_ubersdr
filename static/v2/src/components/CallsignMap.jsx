@@ -13,6 +13,7 @@
 // one has a single point and a callsign.
 
 import React, { useEffect, useRef, useState } from '../react.js';
+import { addBaseLayer } from '../lib/leafletBase.js';
 import { loadScript, loadStyle } from '../lib/loadScript.js';
 import { geodesicPoints } from '../lib/callsign.js';
 
@@ -75,9 +76,9 @@ export default function CallsignMap({ call, position, lines, className, from, zo
             }).setView([lat, lon], fromGrid ? ZOOM_GRID : ZOOM);
             map.current = m;
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-            }).addTo(m);
+            // Tiles, with the local outline behind them if they will not
+            // come — see lib/leafletBase.js.
+            addBaseLayer(L, m);
 
             // v1's marker: a red dot with a white ring, which reads on both the
             // land and the sea colours of the OSM tiles.

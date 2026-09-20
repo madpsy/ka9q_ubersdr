@@ -29,6 +29,10 @@ export const NEWS_PAGE = 5;
 // something to page through without a pathological feed filling storage.
 const MAX_ITEMS = 20;
 
+// How long the relay gets. Generous — this is somebody else's free tier and a
+// slow answer is still an answer — but bounded, which is the part that matters.
+export const FETCH_TIMEOUT_MS = 10000;
+
 const SOURCE_KEY = 'ubersdr.v2.news';
 const cacheKey = (id) => `ubersdr.v2.news.cache.${id}`;
 
@@ -106,12 +110,27 @@ export function formatNewsDate(pubDate) {
  * @returns { items, stale, error } — `stale` means these came from the cache
  *          after the relay failed, which the panel says out loud rather than
  *          passing off as current.
+ *
+ * `timeoutMs` exists for the test, which cannot afford to wait ten seconds to
+ * watch a deadline work. The panel passes nothing.
  */
-export function fetchNews(id) {
+export function fetchNews(id, { timeoutMs = FETCH_TIMEOUT_MS } = {}) {
     const url = newsApiUrl(id);
     if (!url) return Promise.resolve({ items: [], error: 'Unknown news source.' });
 
-    return fetch(url)
+    // The cache below is the whole point of this function, and a request that
+    // never settles never reaches it: the panel sits on "Loading headlines…"
+    // with yesterday's headlines in storage and nothing drawing them.
+    //
+    // A name that does not resolve fails in about a second and needs none of
+    // this. A network that accepts the packets and drops them — a receiver on a
+    // LAN with no route out, which is the case this exists for — fails only
+    // when the browser gives up, minutes later. So: our own deadline, and the
+    // abort lands in the same catch as every other failure.
+    const ctl = new AbortController();
+    const kill = setTimeout(() => ctl.abort(), timeoutMs);
+
+    return fetch(url, { signal: ctl.signal })
         .then((r) => {
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             return r.json();
@@ -126,7 +145,8 @@ export function fetchNews(id) {
             const cached = loadNewsCache(id);
             if (cached) return { items: cached.items, stale: true, at: cached.at };
             return { items: [], error: 'Unable to load news right now.' };
-        });
+        })
+        .finally(() => clearTimeout(kill));
 }
 
 /** Test seam. */

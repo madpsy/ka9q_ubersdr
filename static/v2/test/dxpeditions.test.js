@@ -49,8 +49,8 @@ const {
     deep, render, reset, walk, words,
     DXpeditionsPanel, GROUPS, SOLO, onLookupRequest,
     bandLabel, bearingLabel, dxpedKey, dxpeditionState, dxpeditionsPresent,
-    isActive, listenFor, placedBy, positionOf, refreshDXpeditions, runLabel,
-    visibleDXpeditions, websiteOf,
+    feedNotice, isActive, listenFor, placedBy, positionOf, refreshDXpeditions,
+    runLabel, visibleDXpeditions, websiteOf,
 } = require('./.build/dxpeditions.cjs');
 
 let pass = 0;
@@ -300,6 +300,125 @@ const jsonOnce = (body, ok = true) => {
         assert.deepStrictEqual(dxpeditionState().entries, []);
     });
 
+    // ── What the server says about its own last fetch ───────────────────────
+    //
+    // dxpeditions.go keeps the last good calendar across its own upstream
+    // failures and marks it `stale`, with `last_error` saying why and
+    // `loaded_at` saying when. All three were being dropped on the way in, and
+    // the consequence was not a missing detail: a receiver that had not reached
+    // the announcement feed in a week went on drawing that week-old calendar
+    // exactly as it draws a current one, so the panel kept announcing DX as on
+    // the air long after anybody could know whether it was.
+
+    await ta('the server’s own fetch status is carried through', async () => {
+        jsonOnce({
+            entries: [LIVE],
+            stale: true,
+            last_error: 'dial tcp: lookup www.ng3k.com: no such host',
+            loaded_at: '2026-09-14T06:00:00Z',
+        });
+        await refreshDXpeditions();
+        const st = dxpeditionState();
+        assert.strictEqual(st.stale, true);
+        assert.match(st.lastError, /no such host/);
+        assert.strictEqual(st.loadedAt, '2026-09-14T06:00:00Z');
+    });
+
+    await ta('a healthy calendar says nothing', async () => {
+        jsonOnce({ entries: [LIVE], stale: false, loaded_at: '2026-09-20T06:00:00Z' });
+        await refreshDXpeditions();
+        assert.strictEqual(feedNotice(dxpeditionState(), Date.parse('2026-09-20T07:00:00Z')), null);
+    });
+
+    await ta('a stale calendar is still shown, and says how old it is', async () => {
+        jsonOnce({
+            entries: [LIVE],
+            stale: true,
+            last_error: 'connection refused',
+            loaded_at: '2026-09-16T06:00:00Z',
+        });
+        await refreshDXpeditions();
+        // Still present: an old calendar beats no calendar, which is the whole
+        // reason the server holds one.
+        assert.strictEqual(dxpeditionsPresent(), true);
+        assert.strictEqual(dxpeditionState().entries.length, 1);
+
+        const notice = feedNotice(dxpeditionState(), Date.parse('2026-09-20T06:00:00Z'));
+        assert.ok(notice, 'a stale calendar drawn silently is the bug this fixes');
+        assert.match(notice.text, /4 days old/, notice.text);
+        assert.match(notice.text, /not managed to refresh/, notice.text);
+        // Not a warning: the list is still shown and still worth reading, it
+        // only needs dating. Same call DRMExtension makes about its schedule.
+        assert.strictEqual(notice.tone, 'tight');
+    });
+
+    await ta('an unreachable feed with nothing held says so, not "nothing is on"', async () => {
+        jsonOnce({ entries: [], stale: false, last_error: 'no route to host' });
+        await refreshDXpeditions();
+        const notice = feedNotice(dxpeditionState(), Date.now());
+        assert.match(notice.text, /cannot reach the announcement feed/, notice.text);
+        // The distinction the panel could not draw before: an empty calendar and
+        // a calendar that could not be collected are the same zero rows.
+        assert.match(notice.text, /not the same as nothing being on/, notice.text);
+        // A warning, because there is nothing behind it to read.
+        assert.strictEqual(notice.tone, 'warn');
+        // And the panel stays, because that sentence is the only thing it has
+        // left to say. An empty calendar hides it; a calendar that could not be
+        // collected is a different answer.
+        assert.strictEqual(dxpeditionsPresent(), true);
+        // The seed is the entry count, so nothing is remembered from a failure:
+        // the panel must not come back on the next page load with nothing
+        // behind it.
+        assert.strictEqual(store.has('ubersdr.v2.dxpeditions'), false);
+    });
+
+    await ta('a receiver that simply has no calendar is still hidden', async () => {
+        // No entries and no error: the feature is off, or there is genuinely
+        // nothing announced. Unchanged — this is the case the gate exists for.
+        jsonOnce({ entries: [], enabled: false, loaded: false });
+        await refreshDXpeditions();
+        assert.strictEqual(dxpeditionsPresent(), false);
+        assert.strictEqual(feedNotice(dxpeditionState(), Date.now()), null);
+    });
+
+    await ta('our own failure to reach the receiver reads differently again', async () => {
+        nextFetch = () => Promise.reject(new Error('network down'));
+        await refreshDXpeditions();
+        const notice = feedNotice(dxpeditionState(), Date.now());
+        assert.match(notice.text, /could not be fetched from the receiver/, notice.text);
+        assert.match(notice.text, /network down/, notice.text);
+        // Still hidden. A receiver that cannot be reached at all is not a
+        // receiver making a statement about DXpeditions, and every other panel
+        // in the dock is failing at the same moment for the same reason.
+        assert.strictEqual(dxpeditionsPresent(), false);
+    });
+
+    t('a loading state says nothing yet', () => {
+        assert.strictEqual(feedNotice({ loading: true, entries: [] }, Date.now()), null);
+    });
+
+    t('an age with no loaded_at still warns, without inventing a number', () => {
+        const notice = feedNotice(
+            { loading: false, entries: [LIVE], stale: true, lastError: 'x', loadedAt: null },
+            Date.now(),
+        );
+        assert.ok(notice, 'staleness with no timestamp is still staleness');
+        assert.ok(!/NaN|Invalid/.test(notice.text), notice.text);
+    });
+
+    t('the age reads in the largest unit that fits', () => {
+        const at = (iso) => ({
+            loading: false, entries: [LIVE], stale: true, lastError: 'x', loadedAt: iso,
+        });
+        const now = Date.parse('2026-09-20T12:00:00Z');
+        assert.match(feedNotice(at('2026-09-20T11:30:00Z'), now).text, /30 minutes old/);
+        assert.match(feedNotice(at('2026-09-20T06:00:00Z'), now).text, /6 hours old/);
+        assert.match(feedNotice(at('2026-09-10T12:00:00Z'), now).text, /10 days old/);
+        // Singular, because "1 days old" is the kind of thing that makes a panel
+        // look like nobody read it.
+        assert.match(feedNotice(at('2026-09-20T11:00:00Z'), now).text, /1 hour old/);
+    });
+
     // Leave the store loaded for the render tests below.
     jsonOnce({ entries: [LIVE, SOON, LATER] });
     await refreshDXpeditions();
@@ -463,6 +582,44 @@ const jsonOnce = (body, ok = true) => {
 
         jsonOnce({ entries: [LIVE, SOON, LATER] });
         await refreshDXpeditions();
+    });
+
+    await ta('a stale calendar is labelled on the panel, not just in the store', async () => {
+        // Dates off the real clock rather than off NOW: the panel reads
+        // Date.now() for what is on the air, and this case is about a calendar
+        // that has aged out — every operation in it finished while the receiver
+        // was unable to collect a new one. Pinned fixtures would make that
+        // depend on the day the suite is run.
+        const realDay = (n) => Math.floor(Date.now() / 1000) + n * 86400;
+        const expired = entry({ call: 'Z9OLD', start_unix: realDay(-30), end_unix: realDay(-20) });
+
+        jsonOnce({
+            entries: [expired],
+            stale: true,
+            last_error: 'no route to host',
+            loaded_at: new Date(Date.now() - 5 * 86400_000).toISOString(),
+        });
+        await refreshDXpeditions();
+        reset();
+        const text = words(mount(DXpeditionsPanel, {}, context()).tree);
+
+        assert.match(text, /not managed to refresh/, text);
+        assert.match(text, /5 days old/, text);
+        // The claim it used to make instead, with nothing behind it. Nothing
+        // being on the air and the calendar not having been collected are
+        // different facts, and only one of them is known here.
+        assert.ok(!/No DXpeditions are on the air right now/.test(text), text);
+
+        jsonOnce({ entries: [LIVE, SOON, LATER] });
+        await refreshDXpeditions();
+    });
+
+    await ta('a healthy calendar carries no warning', async () => {
+        jsonOnce({ entries: [LIVE, SOON, LATER], stale: false, loaded_at: new Date().toISOString() });
+        await refreshDXpeditions();
+        reset();
+        const text = words(mount(DXpeditionsPanel, {}, context()).tree);
+        assert.ok(!/not managed to refresh|cannot reach the announcement feed/.test(text), text);
     });
 
     t('the Show all switch changes what the list is', () => {

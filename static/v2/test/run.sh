@@ -172,6 +172,11 @@ esbuild ../src/lib/games/quiz.js --bundle --format=cjs --platform=node \
     --outfile=.build/game-quiz.cjs --log-level=warning
 esbuild ../src/lib/worldMap.js --bundle --format=cjs --platform=node \
     --outfile=.build/worldmap.cjs --log-level=warning
+# One bundle for leafletBase and the worldMap cache it draws from: built
+# separately, the test would reset a second copy of that module and prove
+# nothing. See leafletbase.entry.js.
+esbuild leafletbase.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/leafletbase.cjs --log-level=warning
 esbuild ../src/lib/hfdl.js --bundle --format=cjs --platform=node \
     --outfile=.build/hfdl.cjs --log-level=warning
 # morsecode, not morse: the CW decoder extension's frames.js already builds to
@@ -646,6 +651,7 @@ node audiotint.test.js
 node oliviapanel.test.js
 node drmpanel.test.js
 node dxpeditions.test.js
+node leafletbase.test.js
 node ncdxf.test.js
 node clockpanel.test.js
 node iqdemod.test.js

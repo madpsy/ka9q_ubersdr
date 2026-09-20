@@ -12,6 +12,7 @@
 // position configured never fetches it at all.
 
 import React, { useEffect, useRef, useState } from '../react.js';
+import { addBaseLayer, TILE_ATTRIBUTION } from '../lib/leafletBase.js';
 import { loadScript, loadStyle } from '../lib/loadScript.js';
 import { fetchMyIp, greeting, hasPosition, myipPosition } from '../lib/myip.js';
 
@@ -66,10 +67,10 @@ export default function StartMap({ receiver, handheld }) {
             }).setView([lat, lon], ZOOM);
             map.current = m;
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-                maxZoom: 19,
-            }).addTo(m);
+            // Tiles, with the local outline behind them if they will not come —
+            // see lib/leafletBase.js. This map is the first thing a visitor
+            // sees, and on a receiver with no route out it was a dark box.
+            addBaseLayer(L, m, { attribution: TILE_ATTRIBUTION });
 
             const dot = (size, colour, glow) => L.divIcon({
                 className: '',

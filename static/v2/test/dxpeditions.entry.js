@@ -10,14 +10,14 @@ import { GROUPS, SOLO } from '../src/panels/groups.jsx';
 import { onLookupRequest } from '../src/lib/callsign.js';
 import {
     bandLabel, bearingLabel, dxpedKey, dxpeditionState, dxpeditionsPresent,
-    isActive, listenFor, placedBy, positionOf, refreshDXpeditions, runLabel,
-    visibleDXpeditions, websiteOf,
+    feedNotice, isActive, listenFor, placedBy, positionOf, refreshDXpeditions,
+    runLabel, visibleDXpeditions, websiteOf,
 } from '../src/lib/dxpeditions.js';
 
 module.exports = {
     deep, render, reset, walk, words,
     DXpeditionsPanel, GROUPS, SOLO, onLookupRequest,
     bandLabel, bearingLabel, dxpedKey, dxpeditionState, dxpeditionsPresent,
-    isActive, listenFor, placedBy, positionOf, refreshDXpeditions, runLabel,
-    visibleDXpeditions, websiteOf,
+    feedNotice, isActive, listenFor, placedBy, positionOf, refreshDXpeditions,
+    runLabel, visibleDXpeditions, websiteOf,
 };

@@ -2,6 +2,7 @@ package clock
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 )
@@ -262,6 +263,52 @@ func TestRewriteOffsetPreservesTheRestOfTheEvent(t *testing.T) {
 	}
 	if out["station"] != "wwv" {
 		t.Fatalf("station = %v", out["station"])
+	}
+}
+
+func TestRewriteOffsetKeepsTheDecodersOwnCorrections(t *testing.T) {
+	// The binary folds its measured corrections into offset_ms before sending
+	// it — the WWV decoder reports every second edge 13.645 ms early, and
+	// --extra-delay-ms carries whatever path delay the caller modelled.
+	// Re-anchoring replaces the RAW difference, so those corrections have to be
+	// added back on or the rewrite quietly undoes them and the offset reads
+	// 13.6 ms long for ever. That is a systematic, not noise: it never averages
+	// out and nothing downstream can see it.
+	const edge = 240
+	const utcMs = 1_000_000_000_000
+	// The mark puts the host clock exactly on the decoded time at that sample,
+	// so the raw difference is 0 and whatever comes out IS the correction.
+	e := &ClockExtension{sampleRate: testRate, clock: newSampleClock(testRate)}
+	e.clock.advance(edge, utcMs*int64(1e6))
+
+	for _, tc := range []struct {
+		name    string
+		applied string
+		want    float64
+	}{
+		{"the WWV edge bias", `,"delay_applied_ms":-13.645`, -13.645},
+		{"bias plus a modelled path", `,"delay_applied_ms":11.355`, 11.355},
+		{"WWVB, which needs none", `,"delay_applied_ms":0`, 0},
+		{"an older binary that reports none", "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			line := fmt.Sprintf(
+				`{"type":"time","utc_ms":%d,"offset_ms":999,"last_edge_sample":%d%s}`,
+				utcMs, edge, tc.applied)
+			rewritten, ok := e.rewriteOffset([]byte(line))
+			if !ok {
+				t.Fatal("a valid time event was dropped")
+			}
+			var out map[string]interface{}
+			if err := json.Unmarshal(rewritten, &out); err != nil {
+				t.Fatalf("invalid JSON out: %v", err)
+			}
+			got, _ := out["offset_ms"].(float64)
+			if math.Abs(got-tc.want) > 1e-6 {
+				t.Fatalf("offset_ms = %v, want %v — the decoder's correction was "+
+					"lost in the re-anchoring", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -338,6 +338,62 @@ ta('a failure with nothing cached reports the error and no data', () => withFetc
     },
 ));
 
+// 204 is what the monitor answers when it is enabled but has never got a
+// reading from NOAA — which is what a receiver with no route out looks like,
+// and it is the shipped default, so this is the ordinary offline case rather
+// than an exotic one. It carries no body and it is inside the ok range, so the
+// old code parsed an empty string and put the JSON parser's own words on the
+// panel: "Space weather unavailable: Unexpected end of JSON input".
+//
+// json() throws here exactly as the browser's does, so a regression that puts
+// the parse back reproduces the bug rather than quietly passing.
+const emptyBody = () => Promise.resolve({
+    ok: true,
+    status: 204,
+    json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
+});
+
+ta('a 204 reads as "nothing fetched yet", not as a parser error', () => withFetch(
+    emptyBody,
+    async () => {
+        const seen = [];
+        sw.subscribeSpaceWeather((s) => seen.push(s));
+        await settle();
+        const last = seen[seen.length - 1];
+        assert.strictEqual(last.data, null, 'no reading to show');
+        assert.ok(last.error, 'the panel is told why');
+        assert.ok(
+            !/JSON|SyntaxError|Unexpected/i.test(last.error),
+            `the parser must not be quoted at the operator, got ${last.error}`,
+        );
+        assert.ok(
+            /fetch/i.test(last.error),
+            `expected it to say nothing has been fetched, got ${last.error}`,
+        );
+    },
+));
+
+ta('a 204 after a good reading keeps the reading', () => {
+    let empty = false;
+    return withFetch(
+        () => (empty ? emptyBody() : Promise.resolve({ ok: true, json: () => Promise.resolve(LIVE) })),
+        async () => {
+            const off = sw.subscribeSpaceWeather(() => {});
+            await settle();
+            off();
+
+            empty = true;
+            const seen = [];
+            sw.subscribeSpaceWeather((s) => seen.push(s));
+            await settle();
+
+            const last = seen[seen.length - 1];
+            assert.strictEqual(last.data.solar_flux, 136, 'the previous reading survives the 204');
+            assert.ok(last.error, 'and the panel still knows the refresh failed');
+        },
+    );
+});
+
 chain.then(() => {
     if (process.exitCode) console.log('\nspace weather tests FAILED');
     else console.log(`\nall ${pass} space weather checks passed`);

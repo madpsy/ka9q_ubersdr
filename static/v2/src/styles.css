@@ -6864,12 +6864,14 @@ a.btn { text-decoration: none; }
     justify-content: center;
     gap: 1px;
 }
-/* The big reading is a switch: clicking it swaps UTC and local time. Offered only
-   where the two readings differ — on a machine that is itself on UTC there is
-   nothing to swap, so the class is not applied and it stays an ordinary figure.
-   The padding is there so the hit area is a little larger than the glyphs, and
-   the negative margin keeps it from moving the clock off centre. */
-.tm__now.is-swappable {
+/* The big reading is a control: clicking it cycles UTC, the receiver's time and
+   this device's through the big figures. Offered only where there is more than
+   one distinct reading — on a receiver set to UTC, listened to from a machine on
+   UTC, they all coincide, the class is not applied, and it stays an ordinary
+   figure rather than a control that does nothing. The padding is there so the
+   hit area is a little larger than the glyphs, and the negative margin keeps it
+   from moving the clock off centre. */
+.tm__now.is-cycle {
     cursor: pointer;
     padding: 2px 6px;
     margin: -2px -6px;
@@ -6878,8 +6880,8 @@ a.btn { text-decoration: none; }
     -webkit-user-select: none;
     transition: background 120ms ease-out;
 }
-.tm__now.is-swappable:hover { background: var(--surface-2); }
-.tm__now.is-swappable:focus-visible {
+.tm__now.is-cycle:hover { background: var(--surface-2); }
+.tm__now.is-cycle:focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: 0;
 }
@@ -6938,9 +6940,9 @@ a.btn { text-decoration: none; }
     font-size: calc(10px * var(--ui-scale));
     color: var(--text-faint);
 }
-/* The zone under the big clock. "UTC" while that is the big reading, and the
-   machine's own zone when they are swapped — which can be a long name, so it is
-   allowed to ellipsis rather than to push the date about. */
+/* Whose clock the big figures are, under the date. "UTC" while that is the big
+   reading, and a zone name when it is one of the other two — which can be long,
+   so it is allowed to ellipsis rather than to push the date about. */
 .tm__zone {
     color: var(--text-dim);
     min-width: 0;
@@ -6949,25 +6951,40 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 
-/* Local time: one line, the reading against the zone it is in. Smaller than the
-   UTC clock on purpose — the broadcast is what this panel is for, and the local
-   reading is the translation. */
-.tm__local {
-    display: flex;
-    align-items: baseline;
+/* The clocks that are not the big one: a line each, the reading against whose it
+   is. Smaller than the big clock on purpose — the one being watched is the one
+   that was clicked, and the others are the translation.
+
+   A grid rather than two centred rows, because two rows each centring their own
+   pair would set the figures a few pixels apart from each other and look like a
+   mistake. The rows are `display: contents` so each line's two spans are the
+   grid's own children and share its columns: figures right-aligned in the first,
+   labels left-aligned in the second, the whole block centred under the clock. */
+.tm__others {
+    display: grid;
+    grid-template-columns: auto minmax(0, auto);
     justify-content: center;
-    gap: 6px;
+    align-items: baseline;
+    column-gap: 6px;
+    row-gap: 2px;
     min-width: 0;
 }
+.tm__others .tm__local { display: contents; }
+/* Nothing to translate — all three clocks read the same here, so the line is the
+   label alone saying so, across both columns. */
+.tm__local--note .tm__local-k { grid-column: 1 / -1; justify-self: center; }
 .tm__local-v {
     font-family: var(--mono);
     font-size: calc(14px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
     color: var(--text-dim);
+    justify-self: end;
 }
 .tm__local-k {
     font-size: calc(9.5px * var(--ui-scale));
     color: var(--text-faint);
+    justify-self: start;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

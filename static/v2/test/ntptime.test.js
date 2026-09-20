@@ -47,9 +47,11 @@ const {
     DIAL_MIN_MS, MAX_SAMPLE_AGE_MS, STATUS_MAX_MS, STATUS_MIN_MS, STEP_MS, WINDOW,
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
     deviceLabel, deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone,
-    formatDur, formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey,
-    referenceOf, sampleFrom, saveBigLocal, saveShowRef, saveShowMs, savedBigLocal, savedShowRef,
-    savedShowMs, servingNote, staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
+    CLOCK_KEYS, browserZone, clockFaces, faceDateAt, facePartsAt, faceFor, faceText,
+    formatDur, formatMs, localIsUtc, newClock, nextFaceKey, nextSecondDelay, ntpAvailable,
+    offsetText, receiverOffsetMin, referenceKey, referenceOf, sampleFrom, saveBigClock,
+    saveShowRef, saveShowMs, savedBigClock, savedShowRef, savedShowMs, servingNote,
+    staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText, zoneOffsetMin,
 } = require('./.build/ntptime.cjs');
 
 let pass = 0;
@@ -57,6 +59,16 @@ const t = (name, fn) => {
     try { fn(); console.log('ok    ' + name); pass++; }
     catch (e) { console.log('FAIL  ' + name + '\n      ' + (e.stack || e.message)); process.exitCode = 1; }
 };
+// The panel reaches the radio context for one thing: the receiver's timezone, from
+// /api/description. A receiver in a zone of its own by default, so the three clocks are
+// three and the cycle has somewhere to go; the tests that care pass their own.
+const RX_ZONE = 'America/New_York';
+const context = (receiver) => ({
+    serverInfo: receiver === null ? null : {
+        receiver: receiver || { timezone: RX_ZONE, timezone_offset: -300 },
+    },
+});
+
 const near = (got, want, tol, what) => assert.ok(
     Math.abs(got - want) <= tol,
     `${what || 'value'}: got ${got}, wanted ${want} ±${tol}`,
@@ -422,7 +434,7 @@ t('it renders, and mounting it while the receiver is stopped fetches nothing', (
     const was = globalThis.fetch;
     globalThis.fetch = () => { fetched++; return Promise.reject(new Error('no')); };
     try {
-        const { tree, cleanups } = render(TimePanel, {});
+        const { tree, cleanups } = render(TimePanel, {}, context());
         assert.ok(tree, 'rendered nothing at all');
         const classes = deep(tree).map((n) => (n.props && n.props.className) || '').join(' ');
         assert.ok(classes.includes('tm__hms'), 'no clock in the panel');
@@ -437,13 +449,13 @@ t('it renders, and mounting it while the receiver is stopped fetches nothing', (
 
 t('the minimal view drops the workbench and keeps the four things', () => {
     reset();
-    const full = render(TimePanel, {});
+    const full = render(TimePanel, {}, context());
     const fullText = words(full.tree);
     const fullClasses = deep(full.tree).map((n) => (n.props && n.props.className) || '').join(' ');
     for (const off of full.cleanups) off();
 
     reset();
-    const min = render(TimePanel, { minimal: true });
+    const min = render(TimePanel, { minimal: true }, context());
     const minText = words(min.tree);
     const minClasses = deep(min.tree).map((n) => (n.props && n.props.className) || '').join(' ');
     for (const off of min.cleanups) off();
@@ -518,7 +530,7 @@ t('a storage that throws leaves both switches on rather than off', () => {
 t('the full view carries both switches and the minimal view carries neither', () => {
     prefs.clear();
     reset();
-    const full = render(TimePanel, {});
+    const full = render(TimePanel, {}, context());
     const switches = deep(full.tree).filter((n) => n.props && n.props.role === 'switch');
     for (const off of full.cleanups) off();
     assert.strictEqual(switches.length, 2, 'wanted the ms and source switches');
@@ -529,7 +541,7 @@ t('the full view carries both switches and the minimal view carries neither', ()
     );
 
     reset();
-    const min = render(TimePanel, { minimal: true });
+    const min = render(TimePanel, { minimal: true }, context());
     const minSwitches = deep(min.tree).filter((n) => n.props && n.props.role === 'switch');
     for (const off of min.cleanups) off();
     assert.strictEqual(minSwitches.length, 0, 'the cut-down view grew a control');
@@ -543,7 +555,7 @@ t('turning the source off drops it from both views — one switch, one meaning',
     try {
         for (const props of [{ minimal: true }, {}]) {
             reset();
-            const r = render(TimePanel, props);
+            const r = render(TimePanel, props, context());
             const classes = classesOf(r.tree);
             for (const off of r.cleanups) off();
             const where = props.minimal ? 'the cut-down view' : 'the full view';
@@ -577,15 +589,144 @@ t('a failover is spelled out in the full view only, and never behind the source 
     assert.ok(/!minimal/.test(gate[1]), 'the failover note is still drawn in the cut-down view');
 });
 
-// ── The clock swap ───────────────────────────────────────────────────────────
+// ── The three clocks ─────────────────────────────────────────────────────────
+
+t('a zone resolves to its offset, and a name the engine does not know resolves to null', () => {
+    const jan = Date.UTC(2026, 0, 15, 12, 0, 0);
+    const jul = Date.UTC(2026, 6, 15, 12, 0, 0);
+    assert.strictEqual(zoneOffsetMin('UTC', jan), 0);
+    assert.strictEqual(zoneOffsetMin('Europe/London', jan), 0);
+    // The whole reason the name is preferred to the server's number: it moves on its own.
+    assert.strictEqual(zoneOffsetMin('Europe/London', jul), 60);
+    assert.strictEqual(zoneOffsetMin('America/New_York', jan), -300);
+    assert.strictEqual(zoneOffsetMin('America/New_York', jul), -240);
+    // Not every offset is a whole hour, and one that came back rounded would be wrong by
+    // three quarters of an hour in the places that have one.
+    assert.strictEqual(zoneOffsetMin('Asia/Kathmandu', jan), 345);
+    assert.strictEqual(zoneOffsetMin('Australia/Eucla', jan), 525);
+    // Midnight, which is the hour some engines report as 24 rather than 0.
+    assert.strictEqual(zoneOffsetMin('UTC', Date.UTC(2026, 0, 15, 0, 0, 30)), 0);
+
+    assert.strictEqual(zoneOffsetMin('Mars/Olympus', jan), null);
+    assert.strictEqual(zoneOffsetMin('', jan), null);
+    assert.strictEqual(zoneOffsetMin(undefined, jan), null);
+});
+
+t('the receiver prefers its zone name to the number, and says nothing where it has neither', () => {
+    const jul = Date.UTC(2026, 6, 15, 12, 0, 0);
+    // The number is what /api/description worked out when it answered; the name is what is
+    // true now. A session left open across a summer-time change has a stale number.
+    assert.strictEqual(receiverOffsetMin({ timezone: 'Europe/London', timezone_offset: 0 }, jul), 60);
+    // A server too old to send the name, or an operator who left it unset.
+    assert.strictEqual(receiverOffsetMin({ timezone_offset: -300 }, jul), -300);
+    assert.strictEqual(receiverOffsetMin({ timezone: '', timezone_offset: 90 }, jul), 90);
+    // Nothing at all is not a guess.
+    assert.strictEqual(receiverOffsetMin({}, jul), null);
+    assert.strictEqual(receiverOffsetMin(null, jul), null);
+    assert.strictEqual(receiverOffsetMin({ timezone: 'Mars/Olympus' }, jul), null);
+});
+
+t('an offset reads the way a person writes it, whole hour or not', () => {
+    assert.strictEqual(offsetText(0), 'UTC+00:00');
+    assert.strictEqual(offsetText(60), 'UTC+01:00');
+    assert.strictEqual(offsetText(-330), 'UTC−05:30');
+    assert.strictEqual(offsetText(345), 'UTC+05:45');
+});
+
+t('the three clocks are three, in order, and UTC is always one of them', () => {
+    // The test box is on Europe/London — see the top of this file.
+    const jul = Date.UTC(2026, 6, 15, 12, 0, 0);
+    const faces = clockFaces({ timezone: 'America/New_York' }, jul);
+    assert.deepStrictEqual(faces.map((f) => f.key), ['utc', 'rx', 'me']);
+    assert.deepStrictEqual(faces.map((f) => f.label), ['UTC', 'receiver', 'you']);
+    assert.deepStrictEqual(faces.map((f) => f.offsetMin), [0, -240, 60]);
+    assert.strictEqual(faces[1].zone, 'America/New_York');
+    assert.strictEqual(faces[2].zone, browserZone());
+});
+
+t('clocks that read the same are one clock, and say which they are', () => {
+    const jul = Date.UTC(2026, 6, 15, 12, 0, 0);
+    const jan = Date.UTC(2026, 0, 15, 12, 0, 0);
+
+    // The common case by a long way: the operator has left the receiver on UTC. Showing
+    // the same figure twice looks like a bug, so it is one line that says it is both.
+    const onUtc = clockFaces({ timezone: 'UTC' }, jul);
+    assert.deepStrictEqual(onUtc.map((f) => f.label), ['UTC · receiver', 'you']);
+    assert.deepStrictEqual(onUtc[0].keys, ['utc', 'rx']);
+
+    // Listening to a receiver in your own zone — the owner's case.
+    const athome = clockFaces({ timezone: 'Europe/London' }, jul);
+    assert.deepStrictEqual(athome.map((f) => f.label), ['UTC', 'receiver · you']);
+    assert.deepStrictEqual(athome[1].keys, ['rx', 'me']);
+    assert.strictEqual(athome[1].offsetMin, 60);
+
+    // In winter that same pair is UTC as well, and all three become one.
+    const winter = clockFaces({ timezone: 'Europe/London' }, jan);
+    assert.strictEqual(winter.length, 1, 'three clocks reading the same are one clock');
+    assert.strictEqual(winter[0].label, 'UTC · receiver · you');
+    assert.deepStrictEqual(winter[0].keys, ['utc', 'rx', 'me']);
+
+    // A receiver that has not said leaves two, which is what the panel showed before it
+    // knew about receivers at all.
+    const quiet = clockFaces({}, jul);
+    assert.deepStrictEqual(quiet.map((f) => f.label), ['UTC', 'you']);
+});
+
+t('a face says where it is, and UTC is never elaborated into nonsense', () => {
+    const faces = clockFaces({ timezone: 'America/New_York' }, Date.UTC(2026, 6, 15, 12));
+    const [utc, rx, me] = faces;
+    assert.strictEqual(faceText(utc, true), 'UTC', 'UTC · UTC+00:00 tells nobody anything');
+    assert.strictEqual(faceText(rx, true), 'receiver · America/New_York');
+    assert.strictEqual(faceText(rx, false), 'receiver', 'the cut-down view has no room for it');
+    assert.strictEqual(faceText(me, true), `you · ${browserZone()}`);
+    // A receiver whose name is unknown still says where it is, from the number.
+    const [, byNumber] = clockFaces({ timezone_offset: 330 }, Date.UTC(2026, 6, 15, 12));
+    assert.strictEqual(faceText(byNumber, true), 'receiver · UTC+05:30');
+    assert.strictEqual(faceText(null, true), '');
+});
+
+t('a face reads the time in its own zone, and carries its own date', () => {
+    // 01:30 UTC on the 21st is 21:30 on the 20th in New York — the date belongs to the
+    // reading, or the panel is wrong about the day for five hours out of every twenty-four.
+    const at = Date.UTC(2026, 8, 21, 1, 30, 7, 394);
+    const [utc, rx] = clockFaces({ timezone: 'America/New_York' }, at);
+    assert.deepStrictEqual(facePartsAt(utc, at), { hms: '01:30:07', frac: '394' });
+    assert.deepStrictEqual(facePartsAt(rx, at), { hms: '21:30:07', frac: '394' });
+    assert.ok(faceDateAt(utc, at).includes('21 Sep'), `UTC date: ${faceDateAt(utc, at)}`);
+    assert.ok(faceDateAt(rx, at).includes('20 Sep'), `receiver date: ${faceDateAt(rx, at)}`);
+});
+
+t('the cycle goes round them all and a remembered clock that merged still lands somewhere', () => {
+    const faces = clockFaces({ timezone: 'America/New_York' }, Date.UTC(2026, 6, 15, 12));
+    assert.strictEqual(nextFaceKey(faces, 'utc'), 'rx');
+    assert.strictEqual(nextFaceKey(faces, 'rx'), 'me');
+    assert.strictEqual(nextFaceKey(faces, 'me'), 'utc');
+
+    // The receiver is on UTC, so 'rx' is not a face of its own any more — the one that
+    // stands for it is the merged UTC line, and the cycle carries on from there rather
+    // than dropping somebody back at the start.
+    const merged = clockFaces({ timezone: 'UTC' }, Date.UTC(2026, 6, 15, 12));
+    assert.strictEqual(faceFor(merged, 'rx'), merged[0]);
+    assert.strictEqual(nextFaceKey(merged, 'rx'), 'me');
+    assert.strictEqual(nextFaceKey(merged, 'me'), 'utc');
+
+    // Nothing to cycle through: one face, and it is the answer to every key.
+    const one = clockFaces({ timezone: 'UTC' }, Date.UTC(2026, 0, 15, 12));
+    for (const key of CLOCK_KEYS) assert.strictEqual(faceFor(one, key), one[0]);
+    assert.strictEqual(nextFaceKey(one, 'utc'), 'utc');
+    assert.strictEqual(faceFor([], 'utc'), null);
+});
 
 t('the big clock is UTC by default, and which one it is is remembered', () => {
     prefs.clear();
-    assert.strictEqual(savedBigLocal(), false, 'the panel is for the broadcast second');
-    saveBigLocal(true);
-    assert.strictEqual(savedBigLocal(), true);
-    saveBigLocal(false);
-    assert.strictEqual(savedBigLocal(), false);
+    assert.strictEqual(savedBigClock(), 'utc', 'the panel is for the broadcast second');
+    for (const key of CLOCK_KEYS) {
+        saveBigClock(key);
+        assert.strictEqual(savedBigClock(), key);
+    }
+    // Anything else — an older build's value, or a hand-edited store — is UTC again.
+    saveBigClock('nonsense');
+    assert.strictEqual(savedBigClock(), 'utc');
     prefs.clear();
 
     const was = globalThis.localStorage;
@@ -594,74 +735,145 @@ t('the big clock is UTC by default, and which one it is is remembered', () => {
         setItem() { throw new Error('denied'); },
     };
     try {
-        assert.strictEqual(savedBigLocal(), false, 'a locked-down embed gets the default');
-        saveBigLocal(true);                  // must not throw out of the panel
+        assert.strictEqual(savedBigClock(), 'utc', 'a locked-down embed gets the default');
+        assert.strictEqual(saveBigClock('me'), 'me', 'must not throw out of the panel');
     } finally {
         globalThis.localStorage = was;
     }
 });
 
 const nowOf = (tree) => deep(tree).find((n) => ((n.props || {}).className || '').includes('tm__now'));
-const textOf = (tree, cls) => {
-    const n = deep(tree).find((x) => ((x.props || {}).className || '') === cls);
+const labels = (tree) => deep(tree)
+    .filter((n) => ((n.props || {}).className || '') === 'tm__local-k')
+    .map((n) => n.props.children);
+const zoneOf = (tree) => {
+    const n = deep(tree).find((x) => ((x.props || {}).className || '') === 'tm__zone');
     return n ? n.props.children : undefined;
 };
 
-t('clicking the big clock swaps the two readings, in both views', () => {
+t('the panel draws all three clocks, the big one and the other two', () => {
     for (const props of [{}, { minimal: true }]) {
         prefs.clear();
         reset();
         const where = props.minimal ? 'the cut-down view' : 'the full view';
+        const r = render(TimePanel, props, context());
 
-        const utcBig = render(TimePanel, props);
-        const now = nowOf(utcBig.tree);
-        assert.ok(now, `no clock in ${where}`);
-        assert.strictEqual(now.props.role, 'button', `the clock is not clickable in ${where}`);
-        assert.strictEqual(typeof now.props.onClick, 'function', `nothing happens on a click in ${where}`);
-        assert.ok(now.props.className.includes('is-swappable'), `no affordance in ${where}`);
-        // UTC is big, so the small line is the local one and says which zone.
-        assert.ok(!/^UTC$/.test(String(textOf(utcBig.tree, 'tm__local-k'))), `the small line reads UTC in ${where}`);
-        now.props.onClick();
-        for (const off of utcBig.cleanups) off();
-
-        // The click is remembered, and the next render has them the other way round: the
-        // small line is now the UTC one, and it says so.
-        assert.strictEqual(savedBigLocal(), true, `the swap was not remembered in ${where}`);
-        const localBig = render(TimePanel, props);
-        assert.strictEqual(textOf(localBig.tree, 'tm__local-k'), 'UTC', `the small line is not UTC in ${where}`);
-        if (!props.minimal) {
-            const zone = textOf(localBig.tree, 'tm__zone');
-            assert.ok(zone && zone !== 'UTC', `the date still reads UTC under a local clock in ${where}`);
+        // UTC is big to start with, so the two lines under it are the other two.
+        const rest = labels(r.tree);
+        assert.strictEqual(rest.length, 2, `wanted two clocks under the big one in ${where}`);
+        assert.ok(String(rest[0]).startsWith('receiver'), `no receiver clock in ${where}`);
+        assert.ok(String(rest[1]).startsWith('you'), `no clock for this device in ${where}`);
+        // Each of them has a figure of its own to be written into.
+        const figures = deep(r.tree).filter((n) => ((n.props || {}).className || '') === 'tm__local-v');
+        assert.strictEqual(figures.length, 2, `a clock with nowhere to draw itself in ${where}`);
+        // The zone is spelled out where there is room and not where there is not.
+        if (props.minimal) {
+            assert.deepStrictEqual(rest, ['receiver', 'you'], 'the cut-down view grew zone names');
+        } else {
+            assert.ok(String(rest[0]).includes(RX_ZONE), `the receiver's zone is not named in ${where}`);
+            assert.strictEqual(zoneOf(r.tree), 'UTC', 'the date is not labelled UTC');
         }
-        for (const off of localBig.cleanups) off();
+        for (const off of r.cleanups) off();
         prefs.clear();
     }
 });
 
-t('a machine that is itself on UTC is not offered a swap of a figure with itself', () => {
+t('clicking the big clock cycles the three, and where it stopped is remembered', () => {
+    prefs.clear();
+    reset();
+    const first = render(TimePanel, {}, context());
+    const now = nowOf(first.tree);
+    assert.ok(now, 'no clock in the panel');
+    assert.strictEqual(now.props.role, 'button', 'the clock is not clickable');
+    assert.ok(now.props.className.includes('is-cycle'), 'no affordance on the clock');
+    assert.ok(String(now.props.title).includes('Click for receiver'), `title: ${now.props.title}`);
+    now.props.onClick();
+    for (const off of first.cleanups) off();
+    assert.strictEqual(savedBigClock(), 'rx', 'the click was not remembered');
+
+    // The receiver is big now, so UTC and this device are the two underneath it.
+    const second = render(TimePanel, {}, context());
+    assert.deepStrictEqual(labels(second.tree).map((v) => String(v).split(' · ')[0]), ['UTC', 'you']);
+    assert.ok(String(zoneOf(second.tree)).startsWith('receiver'), `date label: ${zoneOf(second.tree)}`);
+    nowOf(second.tree).props.onClick();
+    for (const off of second.cleanups) off();
+    assert.strictEqual(savedBigClock(), 'me');
+
+    const third = render(TimePanel, {}, context());
+    assert.deepStrictEqual(labels(third.tree).map((v) => String(v).split(' · ')[0]), ['UTC', 'receiver']);
+    nowOf(third.tree).props.onClick();
+    for (const off of third.cleanups) off();
+    assert.strictEqual(savedBigClock(), 'utc', 'the cycle did not come back round');
+    prefs.clear();
+});
+
+t('a receiver on UTC is one line with the rest, not the same figure drawn twice', () => {
+    prefs.clear();
+    reset();
+    const r = render(TimePanel, {}, context({ timezone: 'UTC', timezone_offset: 0 }));
+    const rest = labels(r.tree);
+    assert.strictEqual(rest.length, 1, `wanted one clock under the big one, got ${rest}`);
+    assert.ok(String(rest[0]).startsWith('you'), `the line under the clock reads ${rest[0]}`);
+    assert.strictEqual(zoneOf(r.tree), 'UTC · receiver', 'the merge is not spelled out');
+    // Still worth a click: there are two readings.
+    assert.strictEqual(nowOf(r.tree).props.role, 'button');
+    for (const off of r.cleanups) off();
+    prefs.clear();
+});
+
+t('where all three read the same there is nothing to click and nothing drawn twice', () => {
     const wasTz = process.env.TZ;
     process.env.TZ = 'UTC';
     prefs.clear();
-    // Even with the preference set, because it is the readings that decide, not the store.
-    saveBigLocal(true);
+    // Even with another clock remembered, because it is the readings that decide.
+    saveBigClock('rx');
     try {
         reset();
-        const { tree, cleanups } = render(TimePanel, {});
-        const now = nowOf(tree);
+        const full = render(TimePanel, {}, context({ timezone: 'UTC', timezone_offset: 0 }));
+        const now = nowOf(full.tree);
         assert.ok(now, 'no clock at all');
-        assert.strictEqual(now.props.role, undefined, 'offered a swap that changes nothing');
+        assert.strictEqual(now.props.role, undefined, 'offered a cycle that goes nowhere');
         assert.strictEqual(now.props.onClick, undefined, 'the clock is still clickable');
-        assert.ok(!now.props.className.includes('is-swappable'), 'the affordance is still drawn');
-        assert.strictEqual(textOf(tree, 'tm__zone'), 'UTC', 'the date stopped reading UTC');
-        assert.ok(
-            String(textOf(tree, 'tm__local-k')).includes('this machine is on UTC'),
-            'the small line no longer explains why the two agree',
+        assert.ok(!now.props.className.includes('is-cycle'), 'the affordance is still drawn');
+        assert.strictEqual(
+            deep(full.tree).filter((n) => ((n.props || {}).className || '') === 'tm__local-v').length,
+            0,
+            'the same figure is drawn more than once',
         );
-        for (const off of cleanups) off();
+        // The full view says what that one clock is on the date line, so it needs no
+        // second line to repeat it.
+        assert.strictEqual(zoneOf(full.tree), 'UTC · receiver · you');
+        assert.deepStrictEqual(labels(full.tree), []);
+        for (const off of full.cleanups) off();
+
+        // The cut-down view has no date line, so the label goes on one of its own — this
+        // is where "they are all the same here" would otherwise go unsaid.
+        reset();
+        const min = render(TimePanel, { minimal: true }, context({ timezone: 'UTC' }));
+        assert.deepStrictEqual(labels(min.tree), ['UTC · receiver · you']);
+        for (const off of min.cleanups) off();
     } finally {
         process.env.TZ = wasTz;
         prefs.clear();
     }
+});
+
+t('a receiver that has not said its zone leaves the two clocks there always were', () => {
+    prefs.clear();
+    reset();
+    // An old server, or one whose operator left the zone unset. The browser's own zone
+    // would be a plausible-looking wrong answer, so there is no receiver clock at all.
+    const r = render(TimePanel, {}, context({}));
+    assert.deepStrictEqual(labels(r.tree).map((v) => String(v).split(' · ')[0]), ['you']);
+    assert.strictEqual(nowOf(r.tree).props.role, 'button', 'UTC and this device still swap');
+    for (const off of r.cleanups) off();
+
+    // And before /api/description has answered at all.
+    reset();
+    const early = render(TimePanel, {}, context(null));
+    assert.deepStrictEqual(labels(early.tree).map((v) => String(v).split(' · ')[0]), ['you']);
+    for (const off of early.cleanups) off();
+    prefs.clear();
 });
 
 console.log(`\n${pass} passed`);

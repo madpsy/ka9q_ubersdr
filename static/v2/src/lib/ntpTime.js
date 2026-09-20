@@ -496,33 +496,179 @@ export function saveShowRef(on) {
     try { localStorage.setItem(REF_KEY, on ? '1' : '0'); } catch (err) { /* private browsing */ }
 }
 
-// Which reading is the big one: UTC, or this machine's local time.
+// ── The three clocks, and which of them is the big one ───────────────────────
 //
-// UTC by default, because that is what the panel is for — the broadcast second is the thing
-// being checked, and a shack logs in UTC. But an operator who has already satisfied himself
-// that the clock is right is mostly reading the time to know what time it is, and for that
-// the local reading is the one he wants in 30px figures with the other one underneath it.
+// There are three times worth knowing in front of a remote receiver, and they are all
+// different: UTC, because that is what the radio world is logged and scheduled in; the
+// receiver's own wall clock, because a net at "19:30 local" means local to the aerial and
+// not to the listener; and the listener's, because that is when supper is.
 //
-// So the big clock is a switch, thrown by clicking it: the two readings swap places and
-// nothing else about the panel changes. Remembered for the same reason as the fraction and
-// the reference — it is a preference about this machine, not about this session — and it
-// applies wherever the panel is drawn.
+// So the big figures are a cycle rather than a switch: clicking the clock moves to the next
+// one and the others stay beneath it, small. Which one is big is remembered, because it is
+// about how somebody operates rather than about this minute. Same three-state reasoning as
+// the top bar's clock — see lib/topClock.js — arrived at from the same place.
 //
-// It has no effect where local time *is* UTC: swapping then would be swapping a figure with
-// itself, so the panel leaves the reading alone and does not offer the click. See TimePanel.
-const BIG_LOCAL_KEY = 'ubersdr.v2.time.bigLocal';
+// Two of them coincide more often than not: most receivers are set to UTC, and the ones that
+// are not are quite often in the operator's own zone. Two clocks reading the same figure
+// twice looks like a bug, so faces that land on the same offset are merged into one that
+// says so — "UTC · receiver", "receiver · you" — and the cycle then has two stops, or one.
+// Merging on the offset rather than on the zone name is deliberate: two different zones on
+// the same offset are the same reading for as long as they stay that way, and the panel
+// redraws them every second, so a summer-time boundary splits them apart on its own.
 
-/** Whether local time is the big reading. Off by default — see above. */
-export function savedBigLocal() {
+export const CLOCK_KEYS = ['utc', 'rx', 'me'];
+
+const BIG_KEY = 'ubersdr.v2.time.bigClock';
+
+/** Which clock is in the big figures. UTC by default — it is what the panel is for. */
+export function savedBigClock() {
     try {
-        return localStorage.getItem(BIG_LOCAL_KEY) === '1';
+        const v = localStorage.getItem(BIG_KEY);
+        return CLOCK_KEYS.includes(v) ? v : CLOCK_KEYS[0];
     } catch (err) {
-        return false;
+        return CLOCK_KEYS[0];
     }
 }
 
-export function saveBigLocal(on) {
-    try { localStorage.setItem(BIG_LOCAL_KEY, on ? '1' : '0'); } catch (err) { /* private browsing */ }
+export function saveBigClock(key) {
+    const v = CLOCK_KEYS.includes(key) ? key : CLOCK_KEYS[0];
+    try { localStorage.setItem(BIG_KEY, v); } catch (err) { /* private browsing */ }
+    return v;
+}
+
+// A formatter per zone, because building one is the expensive part and this is asked once a
+// second. A zone the engine does not know throws on construction, and the null is cached
+// too — there is no point finding that out sixty times a minute either.
+const zoneFmt = new Map();
+
+/**
+ * Minutes east of UTC for an IANA zone at `at`, or null if it cannot be resolved.
+ *
+ * Read out of the zone database rather than taken from the server's number, so it is still
+ * right on the far side of a summer-time change in a session that was left open across one —
+ * `receiver.timezone_offset` is computed when /api/description is answered and then never
+ * again. The number is the fallback for a server too old to send the name, or an operator
+ * who left it unset: see receiverOffsetMin.
+ */
+export function zoneOffsetMin(zone, at = Date.now()) {
+    const name = typeof zone === 'string' ? zone.trim() : '';
+    if (!name) return null;
+    let fmt = zoneFmt.get(name);
+    if (fmt === undefined) {
+        try {
+            fmt = new Intl.DateTimeFormat('en-GB', {
+                timeZone: name,
+                hour12: false,
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+            });
+        } catch (err) {
+            fmt = null;                       // not a zone this engine knows
+        }
+        zoneFmt.set(name, fmt);
+    }
+    if (!fmt) return null;
+    try {
+        const part = {};
+        for (const p of fmt.formatToParts(new Date(at))) part[p.type] = p.value;
+        // hour12:false says 24 for midnight on some engines and 0 on others.
+        const hour = Number(part.hour) % 24;
+        const wall = Date.UTC(
+            Number(part.year), Number(part.month) - 1, Number(part.day),
+            hour, Number(part.minute), Number(part.second),
+        );
+        if (!Number.isFinite(wall)) return null;
+        // Against the same instant truncated to the second, which is what the parts are.
+        return Math.round((wall - Math.floor(at / 1000) * 1000) / 60000);
+    } catch (err) {
+        return null;
+    }
+}
+
+/**
+ * The receiver's offset from UTC, or null where the receiver has not said.
+ *
+ * `rx` is `receiver` from /api/description: `timezone` is the IANA name and
+ * `timezone_offset` the DST-adjusted minutes, both from the operator's one `admin.timezone`
+ * setting. The name is preferred because it keeps working — see zoneOffsetMin. Null means
+ * there is no receiver clock to show at all, rather than a guess: the browser's own zone
+ * would be a plausible-looking wrong answer, and this panel is about not doing that.
+ */
+export function receiverOffsetMin(rx, at = Date.now()) {
+    if (!rx) return null;
+    const fromZone = zoneOffsetMin(rx.timezone, at);
+    if (fromZone != null) return fromZone;
+    const n = Number(rx.timezone_offset);
+    return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+/**
+ * The clocks this panel can show, in the order they are offered, with coincidences merged.
+ *
+ * Each face is `{ key, keys, offsetMin, label, zone }`: `key` is what is remembered and
+ * cycled on, `keys` everything the face stands for once merged, and `label` reads as the
+ * merge — "UTC", "receiver · you". There is always at least one, and UTC is always in it.
+ */
+export function clockFaces(rx, at = Date.now()) {
+    const faces = [];
+    const add = (key, offsetMin, label, zone) => {
+        if (offsetMin == null || !Number.isFinite(offsetMin)) return;
+        const same = faces.find((f) => f.offsetMin === offsetMin);
+        if (same) {
+            same.keys.push(key);
+            same.label = `${same.label} · ${label}`;
+            if (!same.zone && zone) same.zone = zone;
+            return;
+        }
+        faces.push({ key, keys: [key], offsetMin, label, zone: zone || '' });
+    };
+    const rxZone = rx && typeof rx.timezone === 'string' ? rx.timezone.trim() : '';
+    add('utc', 0, 'UTC', '');
+    add('rx', receiverOffsetMin(rx, at), 'receiver', rxZone);
+    add('me', -new Date(at).getTimezoneOffset(), 'you', browserZone());
+    return faces;
+}
+
+/** The face a remembered key means now — the one that stands for it, or the first. */
+export function faceFor(faces, key) {
+    const list = faces || [];
+    return list.find((f) => f.keys.includes(key)) || list[0] || null;
+}
+
+/** The next one round the cycle. */
+export function nextFaceKey(faces, key) {
+    const list = faces || [];
+    if (!list.length) return CLOCK_KEYS[0];
+    const at = list.indexOf(faceFor(list, key));
+    return list[(at + 1) % list.length].key;
+}
+
+/**
+ * What a face says it is, beside the figures.
+ *
+ * `long` adds where it is — the zone name where one is known, and the offset where one is
+ * not, which is the case for a receiver on an old server and for a browser with no zone
+ * database. Neither is added where it would only repeat the label: "UTC · UTC+00:00" tells
+ * nobody anything, and a receiver whose zone is literally named UTC has already said so.
+ */
+export function faceText(face, long) {
+    if (!face) return '';
+    if (!long) return face.label;
+    const zone = face.zone && face.zone.toUpperCase() !== 'UTC' ? face.zone : '';
+    const where = zone || (face.offsetMin !== 0 ? offsetText(face.offsetMin) : '');
+    return where ? `${face.label} · ${where}` : face.label;
+}
+
+/** A face's reading at `t`, from the UTC fields of a shifted epoch — as the top bar does. */
+export function facePartsAt(face, t) {
+    return clockParts(t + (face ? face.offsetMin : 0) * 60000, true);
+}
+
+/** The date that belongs to that reading, which is not always UTC's. */
+export function faceDateAt(face, t) {
+    return new Date(t + (face ? face.offsetMin : 0) * 60000).toLocaleDateString('en-GB', {
+        weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+    });
 }
 
 // How long after the boundary the once-a-second redraw aims for. Landing a hair late is
@@ -552,19 +698,30 @@ export function clockParts(ms, utc = true) {
     return { hms: `${pad(h)}:${pad(m)}:${pad(s)}`, frac: pad(f, 3) };
 }
 
-/** This machine's offset from UTC, as a person writes it. */
-export function utcOffsetText(date) {
-    const off = -date.getTimezoneOffset();
+/** An offset in minutes east of UTC, as a person writes it. */
+export function offsetText(min) {
+    const off = Number.isFinite(min) ? Math.round(min) : 0;
     const sign = off >= 0 ? '+' : '−';
     return `UTC${sign}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
 }
 
+/** This machine's offset from UTC, as a person writes it. */
+export function utcOffsetText(date) {
+    return offsetText(-date.getTimezoneOffset());
+}
+
+/** The IANA zone the browser is in, where it will name one. */
+export function browserZone() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch (err) {
+        return '';                            // an engine with no zone database
+    }
+}
+
 /** The IANA zone where the browser will name one, and the offset either way. */
 export function zoneLabel(date) {
-    let zone = '';
-    try {
-        zone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-    } catch (err) { /* an engine with no zone database; the offset still works */ }
+    const zone = browserZone();
     const off = utcOffsetText(date);
     return zone ? `${zone} · ${off}` : off;
 }

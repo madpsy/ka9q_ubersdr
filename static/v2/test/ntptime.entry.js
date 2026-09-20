@@ -16,9 +16,11 @@ import {
     STEP_MS, WINDOW,
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
     deviceLabel, deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone,
-    formatDur, formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey,
-    referenceOf, sampleFrom, saveBigLocal, saveShowRef, saveShowMs, savedBigLocal, savedShowRef,
-    savedShowMs, servingNote, staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
+    CLOCK_KEYS, browserZone, clockFaces, faceDateAt, facePartsAt, faceFor, faceText,
+    formatDur, formatMs, localIsUtc, newClock, nextFaceKey, nextSecondDelay, ntpAvailable,
+    offsetText, receiverOffsetMin, referenceKey, referenceOf, sampleFrom, saveBigClock,
+    saveShowRef, saveShowMs, savedBigClock, savedShowRef, savedShowMs, servingNote,
+    staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText, zoneOffsetMin,
 } from '../src/lib/ntpTime.js';
 
 module.exports = {
@@ -28,7 +30,9 @@ module.exports = {
     STEP_MS, WINDOW,
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
     deviceLabel, deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone,
-    formatDur, formatMs, localIsUtc, newClock, nextSecondDelay, ntpAvailable, referenceKey,
-    referenceOf, sampleFrom, saveBigLocal, saveShowRef, saveShowMs, savedBigLocal, savedShowRef,
-    savedShowMs, servingNote, staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText,
+    CLOCK_KEYS, browserZone, clockFaces, faceDateAt, facePartsAt, faceFor, faceText,
+    formatDur, formatMs, localIsUtc, newClock, nextFaceKey, nextSecondDelay, ntpAvailable,
+    offsetText, receiverOffsetMin, referenceKey, referenceOf, sampleFrom, saveBigClock,
+    saveShowRef, saveShowMs, savedBigClock, savedShowRef, savedShowMs, servingNote,
+    staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText, zoneOffsetMin,
 };

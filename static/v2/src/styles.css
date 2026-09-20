@@ -6849,6 +6849,259 @@ a.btn { text-decoration: none; }
 .wclk__remove:hover { color: var(--bad); border-color: var(--bad); }
 
 /* =========================================================================
+   Time — the NTP addon panel
+   ========================================================================= */
+
+/* The clock itself. Tabular figures and a fixed width for the fraction, because
+   the milliseconds change sixty times a second and proportional digits would
+   make the whole line breathe in and out. Every figure in this panel is mono for
+   the same reason, and the clock is the one it matters most on. */
+.tm__clock { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+.tm__now {
+    position: relative;
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 1px;
+}
+.tm__hms {
+    font-family: var(--mono);
+    font-size: calc(30px * var(--ui-scale));
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+/* Smaller and dimmer: the milliseconds are the proof it is ticking with the
+   broadcast, not a figure anybody reads. At full weight they would be the
+   loudest thing in the panel and the least useful. */
+.tm__frac {
+    font-family: var(--mono);
+    font-size: calc(14px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
+}
+/* Nothing has answered yet, so the figures are this machine's own clock — the
+   one thing this panel exists to check. Dimmed rather than hidden: a blank
+   panel would be worse, and the note underneath says which it is. */
+.tm__clock.is-free .tm__hms,
+.tm__clock.is-free .tm__frac { color: var(--text-dim); }
+
+/* The second, marked as displayed rather than as received — the displayed one is
+   the corrected one. Absolutely placed so it cannot shift the baseline when it
+   lights. */
+.tm__dot {
+    position: absolute;
+    right: calc(-11px * var(--ui-scale));
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    margin-top: -3px;
+    border-radius: 50%;
+    background: var(--surface-3);
+    transition: background 120ms ease-out, box-shadow 120ms ease-out;
+}
+.tm__dot.is-on {
+    background: var(--good);
+    box-shadow: 0 0 6px var(--good);
+}
+.tm__clock.is-free .tm__dot.is-on {
+    background: var(--text-faint);
+    box-shadow: none;
+}
+
+.tm__date {
+    display: flex;
+    gap: 5px;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+}
+.tm__zone { color: var(--text-dim); }
+
+/* Local time: one line, the reading against the zone it is in. Smaller than the
+   UTC clock on purpose — the broadcast is what this panel is for, and the local
+   reading is the translation. */
+.tm__local {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+}
+.tm__local-v {
+    font-family: var(--mono);
+    font-size: calc(14px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+}
+.tm__local-k {
+    font-size: calc(9.5px * var(--ui-scale));
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Where the time came from: a pill for the class and the sources beside it. The
+   pill carries the colour because the class is the part that changes — a panel
+   that has quietly failed over to the network is the one thing here somebody
+   would want to notice without reading. */
+.tm__ref {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.tm__ref-pill {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    font-family: var(--mono);
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+}
+/* Off the air, which is the arrangement working. */
+.tm__ref-pill.is-radio {
+    color: var(--good);
+    border-color: var(--good);
+    background: transparent;
+}
+/* Off the network: correct, useful, and not what this was installed for. Amber
+   rather than red — it is a standby doing its job, not a fault. */
+.tm__ref-pill.is-ntp {
+    color: var(--warn);
+    border-color: var(--warn);
+    background: transparent;
+}
+.tm__ref-pill.is-none { color: var(--bad); border-color: var(--bad); background: transparent; }
+.tm__ref-sub {
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tm__note { font-size: calc(10px * var(--ui-scale)); line-height: 1.35; }
+.tm__note.is-dim { color: var(--text-faint); }
+.tm__note.is-warn { color: var(--warn); }
+.tm__note.is-bad { color: var(--bad); }
+
+/* This device against the broadcast. A label and a verdict on one line, because
+   it is a sentence: "this device — 42 ms fast". */
+.tm__dev {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+}
+.tm__dev-k {
+    font-size: calc(9px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.tm__dev-v {
+    font-family: var(--mono);
+    font-size: calc(12px * var(--ui-scale));
+    font-weight: 650;
+    color: var(--text);
+}
+.tm__dev-v.is-ok { color: var(--good); }
+.tm__dev-v.is-warn { color: var(--warn); }
+.tm__dev-v.is-bad { color: var(--bad); }
+.tm__dev-v.is-dim { color: var(--text-faint); }
+
+/* The same reading, drawn. The band is what the measurement cannot resolve, so a
+   marker inside it is a clock that is right as far as anyone here can tell — and
+   on a slow path the band is wide, which is the honest part. */
+.tm__dial { display: flex; flex-direction: column; gap: 3px; }
+.tm__dial-track {
+    position: relative;
+    height: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--spec-bg);
+    overflow: hidden;
+}
+.tm__dial-band {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--good);
+    opacity: 0.22;
+}
+.tm__dial-zero {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    margin-left: -0.5px;
+    background: var(--text-faint);
+}
+/* The marker is a line rather than a dot: it is a position on a scale, and a dot
+   reads as a value with a size. */
+.tm__dial-mark {
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    width: 3px;
+    margin-left: -1.5px;
+    border-radius: 2px;
+    background: var(--text);
+    transition: left 200ms ease-out;
+}
+.tm__dial-axis {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: calc(9px * var(--ui-scale));
+    color: var(--text-faint);
+}
+
+/* The four figures, and deliberately the lightning panel's grid: two panels in
+   one interface that summarise themselves differently are two things to learn. */
+.tm__stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.tm__stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 4px 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    min-width: 0;
+}
+.tm__stat-k {
+    font-size: calc(9px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.tm__stat-v {
+    font-family: var(--mono);
+    font-size: calc(15px * var(--ui-scale));
+    font-weight: 650;
+    line-height: 1.1;
+    color: var(--text);
+}
+.tm__stat-v.is-ok { color: var(--good); }
+.tm__stat-v.is-warn { color: var(--warn); }
+.tm__stat-v.is-bad { color: var(--bad); }
+.tm__stat-s { font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
+
+/* =========================================================================
    News
    ========================================================================= */
 

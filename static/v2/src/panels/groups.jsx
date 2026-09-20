@@ -127,7 +127,7 @@ export const GROUPS = [
         // chart is about the sound arriving, not about how it is shaped.
         panels: [
             'chat', 'listeners', 'status', 'stats', 'news',
-            'weather', 'clocks', 'ranking', 'games',
+            'weather', 'clocks', 'time', 'ranking', 'games',
         ],
     },
     {

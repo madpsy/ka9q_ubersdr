@@ -151,6 +151,11 @@ export const Icon = {
     // A bolt: the lightning addon. Drawn as an outline rather than the solid glyph,
     // so it sits in a row of stroked icons rather than reading as a filled badge.
     Bolt: (p) => <Svg {...p}><path d="M13 2.5 4.5 13.5H10l-1 8 9.5-11.5H13z" /></Svg>,
+    // A clock with the broadcast coming in: the NTP addon, whose whole point is that the
+    // time arrives off the air rather than off the network. Plain Clock is the World
+    // clocks panel and would be the wrong half of the story here — the arcs are the half
+    // that makes this a radio clock.
+    TimeSignal: (p) => <Svg {...p}><circle cx="9.5" cy="12" r="6.5" /><path d="M9.5 8.2V12l2.7 1.7" /><path d="M18.2 8.4a6 6 0 0 1 0 7.2" /><path d="M20.9 6.1a10 10 0 0 1 0 11.8" /></Svg>,
     // A snail: QRSS is the slow one, and v1's extension used the same emoji.
     Snail: (p) => <Svg {...p}><circle cx="13" cy="13" r="5.5" /><path d="M13 13a2 2 0 0 1 2.6 3" /><path d="M7.5 18.5h9" /><path d="M7.5 18.5a3 3 0 0 1-1-5" /><path d="M5.5 12V8M8.5 12V9" /></Svg>,
     // A fax page: a sheet with a chart drawn on it.

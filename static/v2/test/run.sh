@@ -100,6 +100,8 @@ esbuild ../src/lib/lightning.js --bundle --format=cjs --platform=node \
     --outfile=.build/lightning.cjs --log-level=warning
 esbuild lightningstream.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/lightningstream.cjs --log-level=warning
+esbuild ntptime.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/ntptime.cjs --log-level=warning
 esbuild ../src/lib/packet.js --bundle --format=cjs --platform=node \
     --outfile=.build/packet.cjs --log-level=warning
 esbuild ../src/lib/packetMarkers.js --bundle --format=cjs --platform=node \
@@ -606,6 +608,7 @@ node audiostats.test.js
 node scopepanel.test.js
 node lightning.test.js
 node lightningstream.test.js
+node ntptime.test.js
 node packet.test.js
 node doppler.test.js
 node freqref.test.js

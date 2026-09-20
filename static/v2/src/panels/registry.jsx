@@ -110,6 +110,7 @@ import ClocksPanel from './ClocksPanel.jsx';
 import TopFreqPanel from './TopFreqPanel.jsx';
 import SSTVPanel, { sstvAvailable } from './SSTVPanel.jsx';
 import LightningPanel, { lightningAvailable } from './LightningPanel.jsx';
+import TimePanel, { ntpAvailable } from './TimePanel.jsx';
 import PacketPanel, { packetAvailable } from './PacketPanel.jsx';
 import DopplerPanel, { dopplerAvailable } from './DopplerPanel.jsx';
 import NavtexPanel, { navtexAvailable } from './NavtexPanel.jsx';
@@ -892,6 +893,27 @@ const BUILT_IN = [
         defaultOpen: false,
         minimal: true,
         Component: ClocksPanel,
+    },
+    // Directly under World clocks, which is the panel somebody is already looking
+    // at when they wonder whether the clock they are reading is right. The two are
+    // opposites worth having together: that one shows other people's time from
+    // this machine's clock, and this one shows this machine's clock against a
+    // transmitter — the only reading in the interface that does not trust the
+    // device it is drawn on.
+    //
+    // Minimal: the clock, local time, this device's error and the reference. The
+    // date, the dial, the figures and the link go; those four are the panel.
+    {
+        id: 'time',
+        title: 'Time',
+        icon: <Icon.TimeSignal />,
+        dock: 'right',
+        defaultOpen: false,
+        minimal: true,
+        Component: TimePanel,
+        // The addon decodes WWV/WWVH/WWVB and serves the time; without it there is
+        // nothing to measure against and every request would 404.
+        requires: (serverInfo) => ntpAvailable(serverInfo),
     },
     // Minimal: volume and channel — the two worked at while listening. The
     // device, the buffer and the stream format are set once a session, and

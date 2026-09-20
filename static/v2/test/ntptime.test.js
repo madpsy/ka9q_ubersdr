@@ -672,6 +672,27 @@ t('clocks that read the same are one clock, and say which they are', () => {
     assert.deepStrictEqual(quiet.map((f) => f.label), ['UTC', 'you']);
 });
 
+t('two places on one offset read the same but are not the same place', () => {
+    // Lisbon listening to London: one figure, two countries. Naming either of them puts
+    // the wrong country under somebody's clock, so the merged face is nameless and says
+    // where it is by the offset, which is true of both.
+    const wasTz = process.env.TZ;
+    process.env.TZ = 'Europe/Lisbon';
+    try {
+        const faces = clockFaces({ timezone: 'Europe/London' }, Date.UTC(2026, 6, 15, 12));
+        assert.strictEqual(faces.length, 2);
+        assert.strictEqual(faces[1].label, 'receiver · you');
+        assert.strictEqual(faces[1].zone, '', `named one of them: ${faces[1].zone}`);
+        assert.deepStrictEqual(faces[1].zones, ['Europe/London', 'Europe/Lisbon']);
+        assert.strictEqual(faceText(faces[1], true), 'receiver · you · UTC+01:00');
+    } finally {
+        process.env.TZ = wasTz;
+    }
+    // Agreeing on the name still names it — the common case of listening to your own set.
+    const own = clockFaces({ timezone: 'Europe/London' }, Date.UTC(2026, 6, 15, 12));
+    assert.strictEqual(faceText(own[1], true), 'receiver · you · Europe/London');
+});
+
 t('a face says where it is, and UTC is never elaborated into nonsense', () => {
     const faces = clockFaces({ timezone: 'America/New_York' }, Date.UTC(2026, 6, 15, 12));
     const [utc, rx, me] = faces;

@@ -475,7 +475,10 @@ export default function TimePanel({ minimal }) {
                     <div className="tm__local" key={f.key}>
                         {/* The figures are written here by draw(), never by React: the
                             placeholder is a constant so a re-render cannot paint an
-                            uncorrected time over the corrected one. */}
+                            uncorrected time over the corrected one. Whose clock it is
+                            goes underneath, so the figures stay on the same axis as the
+                            big ones above rather than being pushed off centre by the
+                            length of a zone name. */}
                         <span
                             ref={(el) => { subEls.current[f.key] = el; }}
                             className="tm__local-v"
@@ -486,7 +489,7 @@ export default function TimePanel({ minimal }) {
                     </div>
                 ))}
                 {!others.length && minimal && (
-                    <div className="tm__local tm__local--note">
+                    <div className="tm__local">
                         <span className="tm__local-k">{faceText(big, false)}</span>
                     </div>
                 )}

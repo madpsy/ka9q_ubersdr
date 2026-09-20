@@ -6951,40 +6951,45 @@ a.btn { text-decoration: none; }
     white-space: nowrap;
 }
 
-/* The clocks that are not the big one: a line each, the reading against whose it
-   is. Smaller than the big clock on purpose — the one being watched is the one
-   that was clicked, and the others are the translation.
+/* The clocks that are not the big one: the reading with whose it is underneath.
+   Smaller than the big clock on purpose — the one being watched is the one that
+   was clicked, and the others are the translation.
 
-   A grid rather than two centred rows, because two rows each centring their own
-   pair would set the figures a few pixels apart from each other and look like a
-   mistake. The rows are `display: contents` so each line's two spans are the
-   grid's own children and share its columns: figures right-aligned in the first,
-   labels left-aligned in the second, the whole block centred under the clock. */
+   Whose it is goes on its own line rather than beside the figures. Set beside
+   them, the pair is centred as a pair and the figures are pushed off to the
+   left by however long the zone name happens to be — so the column of clocks
+   stops being a column, and it moves when the label does. Stacked, every
+   reading in the panel is centred on the same axis as the big one above it.
+
+   The rows are the gap between the pairs; inside a pair there is almost none,
+   because the label belongs to the figures above it and not to the next lot. */
 .tm__others {
-    display: grid;
-    grid-template-columns: auto minmax(0, auto);
-    justify-content: center;
-    align-items: baseline;
-    column-gap: 6px;
-    row-gap: 2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
     min-width: 0;
 }
-.tm__others .tm__local { display: contents; }
-/* Nothing to translate — all three clocks read the same here, so the line is the
-   label alone saying so, across both columns. */
-.tm__local--note .tm__local-k { grid-column: 1 / -1; justify-self: center; }
+.tm__local {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    max-width: 100%;
+    min-width: 0;
+}
 .tm__local-v {
     font-family: var(--mono);
     font-size: calc(14px * var(--ui-scale));
     font-variant-numeric: tabular-nums;
+    line-height: 1.15;
     color: var(--text-dim);
-    justify-self: end;
 }
 .tm__local-k {
     font-size: calc(9.5px * var(--ui-scale));
+    line-height: 1.2;
     color: var(--text-faint);
-    justify-self: start;
-    min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

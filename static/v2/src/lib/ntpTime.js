@@ -605,9 +605,17 @@ export function receiverOffsetMin(rx, at = Date.now()) {
 /**
  * The clocks this panel can show, in the order they are offered, with coincidences merged.
  *
- * Each face is `{ key, keys, offsetMin, label, zone }`: `key` is what is remembered and
- * cycled on, `keys` everything the face stands for once merged, and `label` reads as the
+ * Each face is `{ key, keys, offsetMin, label, zone, zones }`: `key` is what is remembered
+ * and cycled on, `keys` everything the face stands for once merged, and `label` reads as the
  * merge — "UTC", "receiver · you". There is always at least one, and UTC is always in it.
+ *
+ * `zone` is the face's place, and only where the merged clocks agree on one. Two zones on
+ * the same offset are the same reading but not the same place — somebody in Lisbon
+ * listening to a receiver in London is reading one figure for two countries — and naming
+ * either of them would put the wrong country under half the people's clocks. So a
+ * disagreement leaves the face nameless and faceText falls back to the offset, which is
+ * true of both. `zones` keeps what was actually offered, in order, for anything that wants
+ * to say more than one line's worth.
  */
 export function clockFaces(rx, at = Date.now()) {
     const faces = [];
@@ -617,10 +625,13 @@ export function clockFaces(rx, at = Date.now()) {
         if (same) {
             same.keys.push(key);
             same.label = `${same.label} · ${label}`;
-            if (!same.zone && zone) same.zone = zone;
+            if (zone && !same.zones.includes(zone)) same.zones.push(zone);
+            same.zone = same.zones.length === 1 ? same.zones[0] : '';
             return;
         }
-        faces.push({ key, keys: [key], offsetMin, label, zone: zone || '' });
+        faces.push({
+            key, keys: [key], offsetMin, label, zone: zone || '', zones: zone ? [zone] : [],
+        });
     };
     const rxZone = rx && typeof rx.timezone === 'string' ? rx.timezone.trim() : '';
     add('utc', 0, 'UTC', '');

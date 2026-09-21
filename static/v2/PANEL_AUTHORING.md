@@ -120,8 +120,8 @@ Local bookmarks · Markers · Measure · Media controls · Mini Games · Most us
 Multipad · NAVTEX · NCDXF Beacons · News · Noise reduction · Notifications
 Packet · Quick bands · Radio control · Ranking · Receiver · Receiver info
 Recorder · Rotator · Scanner · SDR control · Shortcuts · Signal
-Space weather · Spectrogram · Spots · SSTV · Stats · VFOs · Voice activity
-Voice skimmer · Weather · Weather fax · World clocks
+Space weather · Spectrogram · Spots · SSTV · Stats · Time · VFOs
+Voice activity · Voice skimmer · Weather · Weather fax · World clocks
 ```
 
 The authoritative list for this receiver is in `/v2/dist/panel-meta.json` under
@@ -147,9 +147,9 @@ Compass Copy Custom Dice Download Drag Expand External Eye EyeOff Fax
 Gauge Grid Info Keyboard Knob Layers Link List Lock LockScreen Mic Minus
 Moon Morse Mute News Packet Pad Pause Picture Pin Play Plug Plus Podium
 Pointer Power Puzzle Radio Record Reset RotateLeft RotateRight Scan
-Search Share Sliders Snail Span Stop Sun Target Teleprinter Tick Trace Trash
-Unlock Upload Users ViewSpectrum ViewSplit ViewWaterfall Volume Waves
-Wf2D Wf3D WfBoth Wheel Wind ZoomIn ZoomOut
+Search Share Sliders Snail Span Stop Sun Target Teleprinter Tick TimeSignal
+Trace Trash Unlock Upload Users ViewSpectrum ViewSplit ViewWaterfall Volume
+Waves Wf2D Wf3D WfBoth Wheel Wind ZoomIn ZoomOut
 ```
 
 An unknown name gets `Custom`. These names never change — once published, a

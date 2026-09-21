@@ -1482,8 +1482,10 @@ function directoryRow(row) {
     const foot = el('div', 'drow-foot');
     foot.appendChild(bandBadges(row));
     foot.appendChild(el('span', 'spacer'));
-    foot.appendChild(keyButton(row));
-    foot.appendChild(connectButton(row, byId('add-status')));
+    const key = keyButton(row);
+    const connect = connectButton(row, byId('add-status'));
+    foot.appendChild(key);
+    foot.appendChild(connect);
     div.appendChild(foot);
 
     // The row is a target as well as a card, but only where it is not a button:
@@ -1495,20 +1497,27 @@ function directoryRow(row) {
     // ...and a stop for whoever has no pointer at all. Until now the only
     // focusable things in this list were the two buttons at the foot of each
     // row, so arrowing down it skipped everything a row actually says and the
-    // pin on the map never moved. The row is the receiver; make it the stop,
-    // and let enter do what a click on it does.
+    // pin on the map never moved. The row is the receiver; make it the stop.
+    //
+    // Arriving on it picks it, so the map follows the focus down the list the
+    // way it follows a click. Enter on it connects: on a remote the centre
+    // button is the only one there is, and "this one" is what it means once a
+    // row is lit. Space still only picks, as a click on the row does.
     //
     // The guard is `target === div` rather than the click handler's hunt for an
     // enclosing button, and is the stricter of the two on purpose: enter on a
     // focused Connect button raises a keydown that bubbles through here, and
     // only the row being the focused element means the row is what was pressed.
     div.tabIndex = 0;
+    div.addEventListener('focus', () => select(keyOf(row)));
     div.addEventListener('keydown', (event) => {
+        if (listArrow(event, div, [div, key, connect])) return;
         if (event.target !== div) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
         // Space scrolls a page that is not ours to scroll otherwise.
         event.preventDefault();
-        select(keyOf(row));
+        if (event.key === 'Enter' && !connect.disabled) connect.click();
+        else select(keyOf(row));
     });
     // enter/leave rather than over/out: these do not bubble, so crossing the
     // badges and buttons inside the row is not a stream of leaving and arriving
@@ -1516,6 +1525,91 @@ function directoryRow(row) {
     div.addEventListener('mouseenter', () => hoverRow(keyOf(row), true));
     div.addEventListener('mouseleave', () => hoverRow(keyOf(row), false));
     return div;
+}
+
+// ---- the directory by remote control --------------------------------------
+//
+// The arrows are routed by hand here rather than left to the browser, because
+// the browser gets it wrong. A Fire TV's WebView moves focus by geometry
+// (spatial navigation), and it counts anything with a click listener as a
+// place to land — which Leaflet makes the map and every one of its pins. From
+// the sort chips the map is the nearest thing in reach, and the list, a
+// scroller of its own, never was: the D-pad went from the chips straight over
+// it. So inside the directory column every arrow is answered here and none is
+// passed on, and the map is only ever reached by pointing at it.
+
+const nextRow = (row, dir) => {
+    const rows = Array.from(byId('dir-list').children);
+    return rows[rows.indexOf(row) + dir] || null;
+};
+
+// Where the D-pad enters the list: the receiver already picked, if it is in
+// the list as filtered, otherwise the top of it.
+function focusList() {
+    const node = (selected && rowNodes.get(selected)) || byId('dir-list').children[0];
+    if (node) node.focus();
+}
+
+/**
+ * An arrow pressed on a row, or on one of its two buttons.
+ *
+ * Up and down walk the rows, and up off the first one goes back to the sort
+ * chips it came from. Left and right walk the row itself — the row, its key,
+ * its Connect — and stop at either end. Every arrow is taken, even one that
+ * goes nowhere, since one handed back is one the browser sends to the map.
+ * Returns whether it was an arrow, so the caller knows the key is spent.
+ */
+function listArrow(event, div, stops) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+    const at = stops.indexOf(event.target);
+    if (at < 0) return false;
+    let to = null;
+    switch (event.key) {
+    case 'ArrowDown': to = nextRow(div, 1); break;
+    case 'ArrowUp': to = nextRow(div, -1) || byId(`dir-sort-${dirSort}`); break;
+    case 'ArrowRight': to = stops[at + 1] || null; break;
+    case 'ArrowLeft': to = stops[at - 1] || null; break;
+    default: return false;
+    }
+    event.preventDefault();
+    if (to) to.focus();
+    return true;
+}
+
+/**
+ * An arrow pressed on the sort chips, or on the filter above them.
+ *
+ * Down from either is the list, which is the move the browser would not make.
+ * Along the chips, left and right stop at the ends rather than falling off
+ * them: past the Refresh button is the map. Up is left alone — above the chips
+ * is the filter and above that the tabs, and the browser finds both unaided.
+ * In the filter, left and right are the caret's until it reaches an end.
+ */
+function toolbarArrow(event) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const target = event.target;
+    const chips = [...DIR_SORTS.map((name) => byId(`dir-sort-${name}`)), byId('dir-refresh')]
+        .filter((btn) => !btn.disabled || btn === target);
+    const filter = byId('dir-filter');
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        if (target === filter) byId(`dir-sort-${dirSort}`).focus();
+        else focusList();
+        return;
+    }
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    const dir = event.key === 'ArrowRight' ? 1 : -1;
+    if (target === filter) {
+        const caret = filter.selectionStart;
+        const end = dir > 0 ? String(filter.value).length : 0;
+        if (caret == null || caret === end) event.preventDefault();
+        return;
+    }
+    const at = chips.indexOf(target);
+    if (at < 0) return;
+    event.preventDefault();
+    const to = chips[at + dir];
+    if (to) to.focus();
 }
 
 function renderDirectory() {
@@ -1529,6 +1623,11 @@ function renderDirectory() {
     });
     rows.sort(bySort(dirSort, dirDir));
 
+    // A redraw replaces every row, and focus on a row that is gone is focus on
+    // nothing — a remote then has nowhere to move from. So a list that had it
+    // gets it back, on the same receiver if that one is still here.
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    const hadFocus = !!(active && active !== list && list.contains && list.contains(active));
     list.replaceChildren();
     rowNodes.clear();
     for (const row of rows) {
@@ -1536,6 +1635,7 @@ function renderDirectory() {
         rowNodes.set(keyOf(row), node);
         list.appendChild(node);
     }
+    if (hadFocus) focusList();
     status.textContent = `${rows.length}${filter ? ` of ${directoryRows.length}` : ''} receivers`;
     setCount('dir', directoryRows.length);
     // Not awaited: the list is the answer and the map is the illustration, so
@@ -1944,6 +2044,10 @@ byId('dir-refresh').addEventListener('click', refreshDirectory);
 // a pull is the phone's way of asking the question the button asks.
 pullToRefresh(byId('dir-list'), byId('dir-pull'), refreshDirectory);
 byId('dir-filter').addEventListener('input', renderDirectory);
+byId('dir-filter').addEventListener('keydown', toolbarArrow);
+for (const id of [...DIR_SORTS.map((name) => `dir-sort-${name}`), 'dir-refresh']) {
+    byId(id).addEventListener('keydown', toolbarArrow);
+}
 byId('home-set').addEventListener('click', askHome);
 for (const tab of TABS) byId(`tab-${tab}`).addEventListener('click', () => showTab(tab));
 for (const name of DIR_SORTS) {

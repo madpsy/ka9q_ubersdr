@@ -1274,37 +1274,174 @@ ta('a row in the directory is somewhere focus can land', async () => {
     for (const row of rows) assert.strictEqual(row.tabIndex, 0, 'the row is not a focus stop');
 });
 
-ta('and enter on one picks it, exactly as a click does', async () => {
-    const ctx = load(dirApi({ home: async () => HERE }), { leaflet: true });
+ta('and enter on one connects to it', async () => {
+    // The centre button of a remote is the only one it has, and on a lit row it
+    // means "this one". Picking alone left the operator a second trip, into the
+    // row's buttons, to do what they pressed it for.
+    const api = dirApi({ home: async () => HERE });
+    const ctx = load(api, { leaflet: true });
     await settled();
     const [row] = ctx.document.getElementById('dir-list').children;
     row.dispatch('keydown', { key: 'Enter' });
+    await settled();
+    assert.strictEqual(api.calls.filter(([c]) => c === 'connect').length, 1, 'enter did not connect');
+});
+
+ta('arriving on a row picks it, so the map follows the focus', async () => {
+    const ctx = load(dirApi({ home: async () => HERE }), { leaflet: true });
+    await settled();
+    const [row] = ctx.document.getElementById('dir-list').children;
+    row.dispatch('focus');
     assert.ok(row.has('selected'), 'the row was not picked');
     assert.strictEqual(drawn(ctx, 'openPopup').length, 1, 'and the map did not follow it');
 });
 
-ta('space picks it too, and does not also scroll the list', async () => {
-    const ctx = load(dirApi(), { leaflet: true });
+ta('space picks it, and does not also scroll the list', async () => {
+    const api = dirApi();
+    const ctx = load(api, { leaflet: true });
     await settled();
     const [row] = ctx.document.getElementById('dir-list').children;
     let prevented = false;
     row.dispatch('keydown', { key: ' ', preventDefault: () => { prevented = true; } });
     assert.ok(row.has('selected'), 'the row was not picked');
     assert.ok(prevented, 'space is the browser\'s page-down until somebody says otherwise');
+    assert.ok(!api.calls.some(([c]) => c === 'connect'), 'and it connected, which a click does not');
 });
 
-ta('every other key is left alone, the arrows above all', async () => {
-    // The point of the whole block: a row that handled the arrows would be the
-    // trap the map just stopped being.
+// --- the D-pad in the directory ------------------------------------------------
+//
+// On a Fire TV focus moves by geometry, and a click listener counts as a place
+// to land — which Leaflet gives the map and every pin. From the sort chips the
+// map was nearer than the list, so the D-pad jumped straight over it. The
+// directory routes its own arrows now; these hold it to never handing one on.
+
+const press = (node, key, extra = {}) => {
+    let prevented = false;
+    node.dispatch('keydown', { key, preventDefault: () => { prevented = true; }, ...extra });
+    return prevented;
+};
+const DIR_SORT_IDS = ['dir-sort-distance', 'dir-sort-listeners', 'dir-sort-snr', 'dir-sort-name'];
+
+const unfocus = (ctx) => { for (const n of ctx.document.body.all()) n.focused = false; };
+
+ta('down and up walk the rows', async () => {
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const rows = ctx.document.getElementById('dir-list').children;
+    assert.ok(rows.length >= 2, 'need two rows to walk');
+    assert.ok(press(rows[0], 'ArrowDown'), 'down was handed on');
+    assert.ok(rows[1].focused, 'down did not reach the next row');
+    unfocus(ctx);
+    assert.ok(press(rows[1], 'ArrowUp'), 'up was handed on');
+    assert.ok(rows[0].focused, 'up did not reach the row above');
+});
+
+ta('up off the top row goes back to the lit sort chip, not the map', async () => {
     const ctx = load(dirApi(), { leaflet: true });
     await settled();
     const [row] = ctx.document.getElementById('dir-list').children;
-    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Escape', 'a']) {
-        let prevented = false;
-        row.dispatch('keydown', { key, preventDefault: () => { prevented = true; } });
-        assert.ok(!prevented, `${key} was taken by the row`);
+    assert.ok(press(row, 'ArrowUp'));
+    const lit = DIR_SORT_IDS.map((id) => ctx.document.getElementById(id)).find((n) => n.has('active'));
+    assert.ok(lit && lit.focused, 'focus did not go back to the sort chips');
+});
+
+ta('down off the bottom row stays put rather than falling off the list', async () => {
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const rows = ctx.document.getElementById('dir-list').children;
+    const last = rows[rows.length - 1];
+    assert.ok(press(last, 'ArrowDown'), 'an arrow handed on is an arrow sent to the map');
+    assert.ok(!ctx.document.body.all().some((n) => n.focused), 'focus went somewhere');
+});
+
+ta('right and left walk a row: the row, its key, its Connect', async () => {
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const [row] = ctx.document.getElementById('dir-list').children;
+    const key = row.find((n) => n.has('key-btn'));
+    const connect = button(row, 'Connect');
+    assert.ok(press(row, 'ArrowRight') && key.focused, 'right from the row missed the key');
+    unfocus(ctx);
+    assert.ok(press(key, 'ArrowRight') && connect.focused, 'right from the key missed Connect');
+    unfocus(ctx);
+    assert.ok(press(connect, 'ArrowRight'), 'right off the end was handed on — to the map');
+    assert.ok(!connect.focused && !row.focused && !key.focused);
+    assert.ok(press(key, 'ArrowLeft') && row.focused, 'left from the key missed the row');
+    unfocus(ctx);
+    assert.ok(press(row, 'ArrowLeft'), 'left off the row was handed on');
+});
+
+ta('an arrow on a row button still does not press the row', async () => {
+    const api = dirApi();
+    const ctx = load(api, { leaflet: true });
+    await settled();
+    const rows = ctx.document.getElementById('dir-list').children;
+    const connect = button(rows[0], 'Connect');
+    assert.ok(press(connect, 'ArrowDown') && rows[1].focused, 'down from Connect missed the next row');
+    assert.ok(!api.calls.some(([c]) => c === 'connect'));
+});
+
+ta('a modified arrow, and any other key, is left alone', async () => {
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const [row] = ctx.document.getElementById('dir-list').children;
+    for (const mod of ['altKey', 'ctrlKey', 'metaKey', 'shiftKey']) {
+        assert.ok(!press(row, 'ArrowDown', { [mod]: true }), `${mod}+ArrowDown was taken`);
     }
+    for (const key of ['Escape', 'a', 'Tab']) assert.ok(!press(row, key), `${key} was taken`);
     assert.ok(!row.has('selected'), 'and none of them picked it either');
+});
+
+ta('down from a sort chip lands in the list', async () => {
+    // The move the browser would not make: the list is a scroller of its own,
+    // and the map beside it was the nearer target.
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const [first] = ctx.document.getElementById('dir-list').children;
+    for (const id of [...DIR_SORT_IDS, 'dir-refresh']) {
+        unfocus(ctx);
+        assert.ok(press(ctx.document.getElementById(id), 'ArrowDown'), `${id} handed down on`);
+        assert.ok(first.focused, `down from ${id} missed the list`);
+    }
+});
+
+ta('...on the receiver already picked, when there is one', async () => {
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const rows = ctx.document.getElementById('dir-list').children;
+    rows[1].dispatch('click');
+    unfocus(ctx);
+    press(ctx.document.getElementById('dir-sort-name'), 'ArrowDown');
+    assert.ok(rows[1].focused && !rows[0].focused);
+});
+
+ta('the chips stop at their ends, since past Refresh is the map', async () => {
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const refresh = ctx.document.getElementById('dir-refresh');
+    const name = ctx.document.getElementById('dir-sort-name');
+    assert.ok(press(refresh, 'ArrowRight'), 'right off Refresh was handed on');
+    assert.ok(!ctx.document.body.all().some((n) => n.focused));
+    assert.ok(press(refresh, 'ArrowLeft') && name.focused, 'left from Refresh missed Name');
+    // Up is not ours: the filter and the tabs are above, and the browser finds
+    // both without help.
+    assert.ok(!press(name, 'ArrowUp'));
+});
+
+ta('down from the filter is the chips, and its caret keeps left and right', async () => {
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const filter = ctx.document.getElementById('dir-filter');
+    assert.ok(press(filter, 'ArrowDown'));
+    assert.ok(DIR_SORT_IDS.some((id) => {
+        const n = ctx.document.getElementById(id);
+        return n.focused && n.has('active');
+    }), 'down from the filter missed the lit chip');
+    filter.value = 'abc';
+    filter.selectionStart = 1;
+    assert.ok(!press(filter, 'ArrowRight'), 'the caret lost right mid-word');
+    filter.selectionStart = 3;
+    assert.ok(press(filter, 'ArrowRight'), 'right at the end was handed on — to the map');
 });
 
 ta('a press meant for Connect is not also a press on the row', async () => {

@@ -28,7 +28,7 @@
 // grows with it. Which way round is better depends on whether somebody is working
 // across panels or looking at one, so it is a setting rather than a rule.
 
-import React, { useCallback, useRef, useState } from '../react.js';
+import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { PANELS, PANEL_BY_ID, usePanelApplies } from '../panels/registry.jsx';
 import { useLayout } from '../layout/LayoutContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
@@ -42,6 +42,7 @@ import { Icon } from './ui.jsx';
 import useWakeProps from '../radio/useWake.js';
 import PanelZoom, { usePanelScale } from './PanelZoom.jsx';
 import { SOLO, groupsFor } from '../panels/groups.jsx';
+import { FOCUSABLE, focusable, focusAndReveal } from '../lib/focusNav.js';
 
 /**
  * Tap or drag the title bar to cut a sheet down or open it out.
@@ -171,6 +172,81 @@ export default function MobileShell() {
     // over the spectrum would be coming back to a mess.
     const [menuId, setMenuId] = useState(null);
     const menu = menuId ? groups.find((g) => g.id === menuId) || null : null;
+
+    // Where focus goes once the next render has drawn it — for a remote, or a
+    // keyboard, and never for a finger.
+    //
+    // On a television nothing here was reachable by geometry alone: a group's
+    // list opened over the row, but the D-pad could not get into it (for Decode
+    // and Setup it could, for the rest not), and whatever it opened unmounted
+    // the row focus was on and left it nowhere. So the three moves a remote
+    // makes through this shell carry focus with them: into the list a group
+    // opens, into the sheet a list item opens, and back to the group when that
+    // sheet is closed. Keyed on how the press arrived — `detail` is 0 for
+    // Enter and Space and never for a tap — so a phone sees no focus ring
+    // appear on anything it touched.
+    const menuRef = useRef(null);
+    const pendingFocus = useRef(null);
+    useEffect(() => {
+        const want = pendingFocus.current;
+        if (!want) return;
+        pendingFocus.current = null;
+        let el = null;
+        if (want.kind === 'menu' && menuRef.current) {
+            el = menuRef.current.querySelector('.groupmenu__item.is-open')
+                || menuRef.current.querySelector('.groupmenu__item');
+        } else if (want.kind === 'sheet') {
+            const sheet = document.querySelector(`.sheet[data-panel="${want.id}"]`);
+            // The panel's first control, not the sheet's header: the header's
+            // buttons size and close it, and the panel is what was asked for.
+            const body = sheet && sheet.querySelector('.sheet__body');
+            el = (body && [...body.querySelectorAll(FOCUSABLE)].find(focusable))
+                || (sheet && sheet.querySelector('.sheet__close'));
+        } else if (want.kind === 'tab') {
+            el = document.querySelector(`.tabbar [data-tab="${want.tab}"]`);
+        }
+        if (el) focusAndReveal(el);
+    });
+    const tabFor = (panelId) => {
+        if (panelId === SOLO) return SOLO;
+        const g = groups.find((x) => x.items.some((p) => p.id === panelId));
+        return g ? g.id : null;
+    };
+
+    // The arrows inside an open list, handled rather than left to the D-pad's
+    // geometry, which is what could not find its way in. Up and down walk the
+    // entries; down off the last one is back to the row it opened from, which
+    // is where it is drawn. Left and right open the neighbouring group's list,
+    // as a menu bar does, so the whole of the row can be browsed without
+    // leaving it. Escape shuts it.
+    const closeMenuToTab = () => {
+        pendingFocus.current = { kind: 'tab', tab: menuId };
+        setMenuId(null);
+    };
+    const onMenuKey = (e) => {
+        if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !menuRef.current) return;
+        const items = [...menuRef.current.querySelectorAll('.groupmenu__item')];
+        const at = items.indexOf(document.activeElement);
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            e.stopPropagation();
+            const to = at < 0 ? 0 : at + (e.key === 'ArrowUp' ? -1 : 1);
+            if (to >= items.length) closeMenuToTab();
+            else if (to >= 0) focusAndReveal(items[to]);
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            e.stopPropagation();
+            const i = groups.findIndex((g) => g.id === menuId);
+            const next = groups[i + (e.key === 'ArrowLeft' ? -1 : 1)];
+            if (next) {
+                pendingFocus.current = { kind: 'menu' };
+                setMenuId(next.id);
+            }
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closeMenuToTab();
+        }
+    };
     // The extension wins the sheet: opening one is the more recent choice, and
     // it is opened from a panel that would otherwise sit on top of it.
     // Through `visible`, not through PANEL_BY_ID: the row is gated and the sheet
@@ -286,7 +362,16 @@ export default function MobileShell() {
                                     {panelMinimal ? <Icon.Expand size={16} /> : <Icon.Collapse size={16} />}
                                 </button>
                             )}
-                            <button type="button" className="sheet__close" onClick={() => setOpenId(null)} aria-label="Close">
+                            <button
+                                type="button"
+                                className="sheet__close"
+                                onClick={(e) => {
+                                    // Back to the group it came from — see pendingFocus.
+                                    if (e.detail === 0) pendingFocus.current = { kind: 'tab', tab: tabFor(panel.id) };
+                                    setOpenId(null);
+                                }}
+                                aria-label="Close"
+                            >
                                 <Icon.Close size={18} />
                             </button>
                         </div>
@@ -368,7 +453,7 @@ export default function MobileShell() {
                         />
                     )}
                     {menu && (
-                        <nav className="groupmenu" aria-label={menu.title}>
+                        <nav className="groupmenu" aria-label={menu.title} ref={menuRef} onKeyDown={onMenuKey}>
                             <div className="groupmenu__head">{menu.title}</div>
                             {menu.items.map((p) => (
                                 <button
@@ -376,7 +461,11 @@ export default function MobileShell() {
                                     type="button"
                                     className={`groupmenu__item${panel && panel.id === p.id ? ' is-open' : ''}`}
                                     aria-current={panel && panel.id === p.id ? 'true' : undefined}
-                                    onClick={() => { setOpenId(p.id); setMenuId(null); }}
+                                    onClick={(e) => {
+                                        if (e.detail === 0) pendingFocus.current = { kind: 'sheet', id: p.id };
+                                        setOpenId(p.id);
+                                        setMenuId(null);
+                                    }}
                                 >
                                     <span className="groupmenu__icon">{p.icon}</span>
                                     <span className="groupmenu__label">{p.title}</span>
@@ -417,8 +506,10 @@ export default function MobileShell() {
                                 type="button"
                                 className={`tabbar__item${panel && panel.id === solo.id ? ' is-open' : ''}`}
                                 aria-current={panel && panel.id === solo.id ? 'true' : undefined}
-                                onClick={() => {
+                                data-tab={SOLO}
+                                onClick={(e) => {
                                     const shut = !menuId && panel && panel.id === solo.id;
+                                    if (e.detail === 0 && !shut) pendingFocus.current = { kind: 'sheet', id: solo.id };
                                     setMenuId(null);
                                     setOpenId(shut ? null : solo.id);
                                 }}
@@ -438,7 +529,21 @@ export default function MobileShell() {
                                 className={`tabbar__item${openGroup && openGroup.id === g.id ? ' is-open' : ''}${menuId === g.id ? ' is-menu' : ''}`}
                                 aria-expanded={menuId === g.id}
                                 aria-haspopup="menu"
-                                onClick={() => setMenuId((id) => (id === g.id ? null : g.id))}
+                                data-tab={g.id}
+                                onClick={(e) => {
+                                    const opening = menuId !== g.id;
+                                    if (e.detail === 0 && opening) pendingFocus.current = { kind: 'menu' };
+                                    setMenuId(opening ? g.id : null);
+                                }}
+                                /* Up from a group whose list is already open — opened
+                                   by a tap, or come back to with down — goes into it. */
+                                onKeyDown={(e) => {
+                                    if (e.key !== 'ArrowUp' || menuId !== g.id || !menuRef.current) return;
+                                    const items = menuRef.current.querySelectorAll('.groupmenu__item');
+                                    if (!items.length) return;
+                                    e.preventDefault();
+                                    focusAndReveal(items[items.length - 1]);
+                                }}
                             >
                                 <span className="tabbar__icon">{g.icon}</span>
                                 <span className="tabbar__label">{g.title}</span>

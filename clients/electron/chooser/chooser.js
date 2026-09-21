@@ -287,12 +287,18 @@ async function showSettings() {
     auto.setAttribute('role', 'switch');
     auto.checked = state.autoConnect === true;
     auto.addEventListener('change', () => api.setChooser({ autoConnect: auto.checked }));
-    // The receiver layout, where choosing is worth offering: a touchscreen with
-    // room for both. This is v2's own setting, reached through the host — see
+    // The receiver layout, where choosing is worth offering: room for both
+    // layouts, on a machine that cannot comfortably work the docks. This is
+    // v2's own setting, reached through the host — see
     // static/v2/src/lib/shellPref.js, which is also where the same rule about
-    // when to offer it lives. A phone has room for one layout and a
-    // pointer-driven machine is what the docks are for, so on either of those
-    // this row would be a control that changes nothing anybody would see.
+    // when to offer it lives, and these are its queries written out.
+    //
+    // A phone has room for one layout, and a machine with a hovering pointer is
+    // what the docks are *for*, so on either of those this row would be a
+    // control that changes nothing anybody would see. What is left is a
+    // touchscreen — a tablet — and a machine with no pointer at all, which is a
+    // television.
+    //
     // Room for the docks in *some* orientation, not in this one: a tablet
     // crosses the breakpoint every time it is turned over, and a row that came
     // and went with the orientation would be missing exactly when somebody in
@@ -300,7 +306,17 @@ async function showSettings() {
     // SHELL_ROOM_QUERY there.
     const touch = window.matchMedia('(any-pointer: coarse)').matches;
     const roomy = window.matchMedia('(min-width: 901px), (min-height: 901px)').matches;
-    if (api.prefGet && touch && roomy) {
+    const hover = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    // Which way this row *opens* on a machine nobody has answered for — the
+    // default v2 will apply, so that the control says what the next receiver
+    // will actually do rather than "Full" over a receiver drawing the other
+    // one. The pointer query and the Fire TV model token, which is the short
+    // half of v2's isTelevision(); the long half is a list of smart-TV names
+    // this page has no reason to carry, because a television reaching this
+    // dialog at all is one of the apps, and both of those run on a stick.
+    const tv = window.matchMedia('(pointer: none)').matches
+        || /;\s*AFT[A-Z0-9]*[\s;)]/.test(navigator.userAgent);
+    if (api.prefGet && roomy && (touch || !hover)) {
         const stored = await api.prefGet('ubersdr.v2.shell').catch(() => null);
         const layout = el('select');
         for (const [value, label] of [['full', 'Full'], ['minimal', 'Simple']]) {
@@ -308,13 +324,17 @@ async function showSettings() {
             option.value = value;
             layout.appendChild(option);
         }
-        layout.value = stored === 'minimal' ? 'minimal' : 'full';
+        layout.value = stored === 'minimal' || stored === 'full'
+            ? stored
+            : (tv ? 'minimal' : 'full');
         layout.addEventListener('change', () => api.prefSet('ubersdr.v2.shell', layout.value));
         add(settingRow(
             'Receiver layout',
             'Full: panels docked either side of the spectrum. Simple: one panel at a '
-            + 'time over a full-width waterfall, as a phone gets. Takes effect on the '
-            + 'next receiver you open, and can also be changed in its Display panel.',
+            + 'time over a full-width waterfall, as a phone gets — and what a television '
+            + 'opens with, the docks being more than four arrow keys can work. Takes '
+            + 'effect on the next receiver you open, and can also be changed in its '
+            + 'Display panel.',
             layout,
         ));
     }
@@ -965,6 +985,19 @@ async function buildMap() {
         scrollWheelZoom: true,
         attributionControl: false,
         worldCopyJump: true,
+        // Off, and this one is not a nicety. Leaflet's keyboard handler makes
+        // the container a tab stop and then binds the four arrows to panning —
+        // preventDefault and stopPropagation on every one of them. On a desktop
+        // that is survivable, because Tab still leaves; on a remote control it
+        // is a dead end. A Fire TV delivers its D-pad to the WebView as arrow
+        // keys and nothing else, so focus reaching the map was focus staying on
+        // the map until the app was killed.
+        //
+        // Nothing is lost by turning it off: this map is a picker, not a thing
+        // to explore. Choosing a receiver from it is choosing a row, the list
+        // beside it is the keyboard's way in, and select() already drives the
+        // view from there.
+        keyboard: false,
     }).setView([25, 0], 2);
 
     L.tileLayer(TILE_URL, { maxZoom: 19 }).addTo(map);
@@ -1123,7 +1156,13 @@ async function drawMarkers(rows) {
     const placed = rows.filter((row) => row.lat != null && row.lon != null);
     const points = spread(placed);
     placed.forEach((row, i) => {
-        const marker = L.marker(points[i], { icon: pinIcon(L, row) })
+        // keyboard: false for the reason the map itself carries, plus one of
+        // its own. A marker with it on is a tab stop, and there are as many
+        // markers as the directory has receivers with coordinates — several
+        // hundred — so the map would go from swallowing focus to being a field
+        // of identical stops to cross. The rows are the list of receivers;
+        // these are where they are.
+        const marker = L.marker(points[i], { icon: pinIcon(L, row), keyboard: false })
             .addTo(m)
             .bindPopup(cardFor(row, true), { closeButton: true, minWidth: 190 })
             .bindTooltip(cardFor(row, false), {
@@ -1451,6 +1490,24 @@ function directoryRow(row) {
     // a click meant for Connect must not also move the map out from under it.
     div.addEventListener('click', (event) => {
         if (event.target && event.target.closest && event.target.closest('button')) return;
+        select(keyOf(row));
+    });
+    // ...and a stop for whoever has no pointer at all. Until now the only
+    // focusable things in this list were the two buttons at the foot of each
+    // row, so arrowing down it skipped everything a row actually says and the
+    // pin on the map never moved. The row is the receiver; make it the stop,
+    // and let enter do what a click on it does.
+    //
+    // The guard is `target === div` rather than the click handler's hunt for an
+    // enclosing button, and is the stricter of the two on purpose: enter on a
+    // focused Connect button raises a keydown that bubbles through here, and
+    // only the row being the focused element means the row is what was pressed.
+    div.tabIndex = 0;
+    div.addEventListener('keydown', (event) => {
+        if (event.target !== div) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        // Space scrolls a page that is not ours to scroll otherwise.
+        event.preventDefault();
         select(keyOf(row));
     });
     // enter/leave rather than over/out: these do not bubble, so crossing the

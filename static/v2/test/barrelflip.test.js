@@ -96,4 +96,25 @@ t('it mounts and draws a scale, in both directions', () => {
     }
 });
 
+// --- reachable without a pointer ---------------------------------------------
+//
+// The drum answers to arrow keys now (see arrowStep in barrel.test.js), which is
+// worth nothing at all unless focus can get onto it first. That listener is
+// attached natively to a real node behind a ref and cannot be mounted here — but
+// the attribute that makes the node reachable can, and it is the half that
+// silently goes missing.
+
+t('the drum is somewhere focus can land', () => {
+    const [root] = deep(mount({}));
+    assert.strictEqual(root.props.tabIndex, 0, 'the drum is not a focus stop');
+});
+
+t('and a disabled one is skipped rather than entered', () => {
+    // A dead end is worse than an absence: on a remote control, focus that
+    // lands on a drum which will not turn has to be got out of again, and the
+    // only way out is the key the drum is refusing to act on.
+    const [root] = deep(mount({ disabled: true }));
+    assert.strictEqual(root.props.tabIndex, -1);
+});
+
 console.log(`\n${pass} passed`);

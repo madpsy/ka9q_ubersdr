@@ -3,7 +3,7 @@ import { RadioProvider, useRadio } from './radio/RadioContext.jsx';
 import { DisplayProvider } from './display/DisplayContext.jsx';
 import { onShell, readShell, resolveShell } from './lib/shellPref.js';
 import { LayoutProvider, useLayout } from './layout/LayoutContext.jsx';
-import { MOBILE_QUERY, useMediaQuery } from './lib/useMediaQuery.js';
+import { MOBILE_QUERY, useMediaQuery, useTelevision } from './lib/useMediaQuery.js';
 import Dock from './components/Dock.jsx';
 import TopBar from './components/TopBar.jsx';
 import SpectrumView from './components/SpectrumView.jsx';
@@ -187,16 +187,21 @@ function AudioDefaults() {
 // The width still decides on a narrow screen — the docks do not fit and there
 // is nothing to choose between. Above that the operator chooses, from the start
 // overlay, the Display panel, or the apps' own settings page; never having
-// chosen means the docks, as it always did.
+// chosen means the docks, as it always did — on everything but a television,
+// where it means the simple layout.
 //
 // Subscribed rather than read once: the Display panel changes this while the
 // receiver is running, and swapping shell is exactly the sort of change that
 // must not need a reload to appear.
 function Shell() {
     const narrow = useMediaQuery(MOBILE_QUERY);
+    // The third answer, and the only one of the three that is a default rather
+    // than a measurement: a television has room for the docks and no way to
+    // work them. See resolveShell.
+    const tv = useTelevision();
     const [shell, setShell] = React.useState(readShell);
     React.useEffect(() => onShell(setShell), []);
-    return resolveShell(shell, narrow) === 'minimal' ? <MobileShell /> : <DesktopShell />;
+    return resolveShell(shell, narrow, tv) === 'minimal' ? <MobileShell /> : <DesktopShell />;
 }
 
 export default function App() {

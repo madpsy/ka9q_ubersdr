@@ -197,6 +197,9 @@ function fakeLeaflet(log, doc) {
         marker(ll, o) {
             return {
                 icon: o.icon,
+                // What it was built with, kept because one of its options is
+                // load-bearing off the desk: see the remote-control block.
+                opts: o,
                 addTo() { layers.add(this); return this; },
                 bindPopup(c) { this.popup = c; return this; },
                 bindTooltip(c, opts) { this.tooltip = c; this.tooltipOpts = opts; return this; },
@@ -1222,6 +1225,129 @@ ta('no Leaflet is a missing map, not a missing directory', async () => {
     assert.strictEqual(ctx.document.getElementById('dir-map').hidden, true);
     assert.strictEqual(ctx.document.getElementById('map-fallback').hidden, false);
     assert.strictEqual(callsigns(ctx).length, 3, 'and the list is all still there');
+});
+
+// --- a remote control ---------------------------------------------------------------
+//
+// The same page runs on a television: the Android build is sideloaded onto Fire
+// TV sticks, where the only input is a D-pad and the WebView delivers it as the
+// four arrow keys and enter. Nothing else. That turns two ordinary-looking
+// choices into structural ones — nothing on the page may swallow an arrow key,
+// because an arrow key is how you leave anything, and anything worth pressing
+// has to be somewhere focus can actually land.
+//
+// Neither is visible from a stub DOM as *behaviour*, so what is checked is the
+// shape that produces it: the options the map and its pins are built with, and
+// the handlers the rows carry.
+
+ta('the map does not swallow the arrow keys', async () => {
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const [built] = drawn(ctx, 'map');
+    assert.ok(built, 'no map was built');
+    assert.strictEqual(built[2].keyboard, false,
+        "Leaflet's keyboard handler pans on the arrows and calls preventDefault and "
+        + 'stopPropagation on every one — on a remote that is a trap with no way out, '
+        + 'because there is no Tab to leave by and Back closes the app');
+});
+
+ta('and neither does a pin', async () => {
+    // A marker with keyboard on is a tab stop carrying role="button", and there
+    // is one per receiver in the directory. Turning the map's own handler off
+    // and leaving these on trades a trap for a field of several hundred
+    // identical stops to cross.
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const pins = [...ctx.window.L.layers].filter((l) => l.opts);
+    assert.strictEqual(pins.length, DIR.length, 'no pins drawn');
+    for (const pin of pins) assert.strictEqual(pin.opts.keyboard, false);
+});
+
+ta('a row in the directory is somewhere focus can land', async () => {
+    // Before this the only focusable things in the list were the two buttons at
+    // the foot of each row, so arrowing down it skipped everything the row
+    // actually says and the pin on the map never moved.
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const rows = ctx.document.getElementById('dir-list').children;
+    assert.ok(rows.length, 'no rows to land on');
+    for (const row of rows) assert.strictEqual(row.tabIndex, 0, 'the row is not a focus stop');
+});
+
+ta('and enter on one picks it, exactly as a click does', async () => {
+    const ctx = load(dirApi({ home: async () => HERE }), { leaflet: true });
+    await settled();
+    const [row] = ctx.document.getElementById('dir-list').children;
+    row.dispatch('keydown', { key: 'Enter' });
+    assert.ok(row.has('selected'), 'the row was not picked');
+    assert.strictEqual(drawn(ctx, 'openPopup').length, 1, 'and the map did not follow it');
+});
+
+ta('space picks it too, and does not also scroll the list', async () => {
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const [row] = ctx.document.getElementById('dir-list').children;
+    let prevented = false;
+    row.dispatch('keydown', { key: ' ', preventDefault: () => { prevented = true; } });
+    assert.ok(row.has('selected'), 'the row was not picked');
+    assert.ok(prevented, 'space is the browser\'s page-down until somebody says otherwise');
+});
+
+ta('every other key is left alone, the arrows above all', async () => {
+    // The point of the whole block: a row that handled the arrows would be the
+    // trap the map just stopped being.
+    const ctx = load(dirApi(), { leaflet: true });
+    await settled();
+    const [row] = ctx.document.getElementById('dir-list').children;
+    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Escape', 'a']) {
+        let prevented = false;
+        row.dispatch('keydown', { key, preventDefault: () => { prevented = true; } });
+        assert.ok(!prevented, `${key} was taken by the row`);
+    }
+    assert.ok(!row.has('selected'), 'and none of them picked it either');
+});
+
+ta('a press meant for Connect is not also a press on the row', async () => {
+    // keydown bubbles and the button is inside the row, so the row's handler
+    // sees this one. Only the row being the focused element means the row was
+    // what was pressed — which is why the guard is on target rather than on
+    // hunting upwards for an enclosing button the way the click handler does.
+    const ctx = load(dirApi({ home: async () => HERE }), { leaflet: true });
+    await settled();
+    const [row] = ctx.document.getElementById('dir-list').children;
+    const connect = button(row, 'Connect');
+    assert.ok(connect, 'no Connect button on the row');
+    connect.dispatch('keydown', { key: 'Enter' });
+    assert.ok(!row.has('selected'), 'the row was picked by a press meant for the button');
+    assert.strictEqual(drawn(ctx, 'openPopup').length, 0, 'and the map moved for it');
+});
+
+ta('the focus ring is drawn, wherever it lands', async () => {
+    // On a desktop a missing ring is a gap; on a television it is the whole
+    // interface, because the ring *is* the cursor. `:focus-visible` rather than
+    // `:focus` so it stays the keyboard's, and the two inputs are named again
+    // because they set `outline: none` at a specificity a bare pseudo-class
+    // cannot reach — a rule that loses is the same as no rule at all.
+    const css = fs.readFileSync(path.join(__dirname, '..', 'chooser', 'chooser.css'), 'utf8')
+        // Comments out of the way first: they sit between the last `}` and the
+        // selector, so to a rule-shaped regex they *are* part of the selector.
+        .replace(/\/\*[\s\S]*?\*\//g, '');
+    const ringing = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+        .filter(([, , body]) => /outline:\s*\d/.test(body))
+        .flatMap(([, sel]) => sel.split(',').map((x) => x.trim()));
+    assert.ok(ringing.length, 'nothing draws a focus ring');
+    assert.ok(ringing.includes(':focus-visible'), 'no ring for focus in general');
+    for (const kind of ['text', 'password']) {
+        assert.ok(
+            ringing.includes(`input[type="${kind}"]:focus-visible`),
+            `the ${kind} input still answers with outline: none, which wins on specificity`,
+        );
+    }
+    // Not `:focus`, which would leave a ring on every button a mouse has
+    // touched. The inputs keep a `:focus` rule of their own and it is a border
+    // colour, not an outline — which is what the filter above separates them by.
+    assert.ok(!ringing.some((sel) => /:focus\b(?!-visible)/.test(sel)),
+        'a :focus rule draws a ring for the pointer too');
 });
 
 // Printed on the way out, so the async cases above are counted whichever order

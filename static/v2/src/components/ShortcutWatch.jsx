@@ -16,8 +16,9 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import { useControlContext } from '../controls/panel.jsx';
 import { functionRepeats, runFunction } from '../controls/functions.js';
 import {
-    comboFor, isTyping, keysClaimed, onShortcutSettings, shortcutSettings,
+    comboFor, isTyping, keysClaimed, NAVIGATION_KEYS, onShortcutSettings, shortcutSettings,
 } from '../lib/shortcuts.js';
+import { useTelevision } from '../lib/useMediaQuery.js';
 
 // Shortest gap between two firings of a held key.
 //
@@ -36,11 +37,13 @@ export default function ShortcutWatch() {
     const ctx = useControlContext(display.tuneStep || 500);
     const [settings, setSettings] = useState(shortcutSettings);
     useEffect(() => onShortcutSettings(setSettings), []);
+    // Where the D-pad is the only way about — see NAVIGATION_KEYS.
+    const tv = useTelevision();
 
     // Read by the listener, which is registered once: re-registering on every
     // rebind would drop a keystroke landing in the gap.
-    const live = useRef({ settings, ctx });
-    live.current = { settings, ctx };
+    const live = useRef({ settings, ctx, tv });
+    live.current = { settings, ctx, tv };
     // When each function last ran, for the repeat rate limit. Per function
     // rather than per key, so holding one key while tapping another bound to
     // the same thing cannot double the rate.
@@ -48,8 +51,15 @@ export default function ShortcutWatch() {
 
     useEffect(() => {
         const onKey = (e) => {
-            const { settings: s, ctx: c } = live.current;
+            const { settings: s, ctx: c, tv: onTv } = live.current;
             if (!s.enabled) return;
+            // Handed back to the page on a television, whatever they are bound
+            // to: they are how a remote control moves, and a claimed arrow key
+            // there is a page nothing can be reached on. See NAVIGATION_KEYS.
+            // Unmodified only: a remote cannot send Ctrl+Left, so a binding on
+            // one is a keyboard's and keeps working like any letter.
+            if (onTv && NAVIGATION_KEYS.has(e.key)
+                && !(e.ctrlKey || e.altKey || e.metaKey || e.shiftKey)) return;
             // Something on screen is using the keyboard itself — the Morse
             // trainer, typing answers. See claimKeys.
             if (keysClaimed()) return;

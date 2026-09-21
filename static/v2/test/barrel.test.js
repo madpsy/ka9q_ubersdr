@@ -7,7 +7,8 @@
 
 const assert = require('assert');
 const {
-    clampSpeed, decayVelocity, flingVelocity, isTap, settleOffset, spinDistance, takeDetents,
+    arrowStep, clampSpeed, decayVelocity, flingVelocity, isTap, settleOffset, spinDistance,
+    takeDetents,
     FLING_WINDOW_MS, FRICTION, MAX_DT, MAX_SPEED, STOP_SPEED, TAP_MS, TAP_SLOP_PX,
 } = require('./.build/barrel.cjs');
 
@@ -192,6 +193,47 @@ t('a clock that ran backwards is not a tap either', () => {
     // Belt and braces: timeStamp origins have been known to disagree between the
     // event and performance.now(), and a negative elapsed must not read as fast.
     assert.ok(!isTap(0, -5));
+});
+
+// --- a key on the drum -------------------------------------------------------
+//
+// The drum could only ever be dragged, which on a television — a D-pad and
+// nothing else — made the frequency and the zoom the two things on the Multipad
+// that could not be reached at all.
+
+t('right and left turn the drum one detent each way', () => {
+    assert.strictEqual(arrowStep({ key: 'ArrowRight' }), 1);
+    assert.strictEqual(arrowStep({ key: 'ArrowLeft' }), -1);
+});
+
+t('and up and down are left well alone', () => {
+    // The whole point. These are how focus moves on a remote control, and there
+    // is no Tab there to leave by — a drum that took them would be one focus
+    // could enter and never get out of, which is the trap the chooser's map had.
+    assert.strictEqual(arrowStep({ key: 'ArrowUp' }), 0);
+    assert.strictEqual(arrowStep({ key: 'ArrowDown' }), 0);
+});
+
+t('so is the centre button, and every other key', () => {
+    for (const key of ['Enter', ' ', 'Tab', 'Escape', 'a', 'PageUp', 'Home', 'MediaPlayPause']) {
+        assert.strictEqual(arrowStep({ key }), 0, key);
+    }
+});
+
+t('a modified arrow belongs to whatever else wants it', () => {
+    for (const mod of ['altKey', 'ctrlKey', 'metaKey']) {
+        assert.strictEqual(arrowStep({ key: 'ArrowRight', [mod]: true }), 0, mod);
+        assert.strictEqual(arrowStep({ key: 'ArrowLeft', [mod]: true }), 0, mod);
+    }
+    // Shift is not a modifier here: nothing binds it and a drum that ignored a
+    // shifted arrow would just feel broken.
+    assert.strictEqual(arrowStep({ key: 'ArrowRight', shiftKey: true }), 1);
+});
+
+t('and no event at all is not a step', () => {
+    assert.strictEqual(arrowStep(null), 0);
+    assert.strictEqual(arrowStep(undefined), 0);
+    assert.strictEqual(arrowStep({}), 0);
 });
 
 console.log(`\n${pass} passed`);

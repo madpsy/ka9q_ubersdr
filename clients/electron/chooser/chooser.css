@@ -162,6 +162,27 @@ button.ghost:disabled:hover { border-color: var(--border); color: var(--dim); }
 button.danger { background: transparent; border-color: var(--border); color: var(--danger); }
 button.danger:hover { border-color: var(--danger); }
 
+/* Where the focus is.
+ *
+ * Nowhere, before this: a hover colour answered "what is under the pointer" on
+ * every control here and nothing answered "what would enter press". On a
+ * desktop that is a gap. On a television it is the whole interface — a remote
+ * has no pointer, the ring *is* the cursor, and a page that draws no ring is a
+ * page you press buttons on at random.
+ *
+ * `:focus-visible` rather than `:focus`, so this is the keyboard's ring and not
+ * a mark left on every button a mouse has touched. The two inputs are named
+ * again because they set `outline: none` above at a specificity a bare
+ * pseudo-class does not reach — they answer with a border colour, which is
+ * plenty beside a pointer and far too little across a room.
+ */
+:focus-visible,
+input[type="text"]:focus-visible,
+input[type="password"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 .status {
     margin: 10px 18px 0;
     padding: 8px 12px;
@@ -513,6 +534,10 @@ select {
 }
 .drow:hover { background: var(--panel-hover); }
 .drow.selected { border-color: var(--accent-dim); background: var(--panel-hover); }
+/* Focus lands on the row itself, not only on the buttons in its foot — see
+   directoryRow. The same lift hovering gives it, so a row under the ring reads
+   as picked up rather than merely outlined. */
+.drow:focus-visible { background: var(--panel-hover); }
 
 .drow-top { display: flex; align-items: center; gap: 6px; }
 .drow .spacer { flex: 1; }

@@ -64,6 +64,18 @@ public class PlaybackService extends Service {
     private static final String PREVIOUS = "previoustrack";
     private static final String PLAY = "play";
     private static final String PAUSE = "pause";
+    // The other pair, and the one a television remote actually has. A Fire TV
+    // remote carries no skip buttons at all — it has fast-forward and rewind,
+    // which Android delivers to a media session as these — so without them the
+    // two most obvious buttons on the thing did nothing whatsoever.
+    //
+    // v2 has answered to both names since the lock screen was built, and maps
+    // them to the same tuning step next and previous get: see the seekforward
+    // and seekbackward handlers in static/v2/src/radio/media/controller.js,
+    // which explain themselves by way of a car stereo's seek buttons. A remote
+    // control is the same argument from the other end of the room.
+    private static final String FORWARD = "seekforward";
+    private static final String BACKWARD = "seekbackward";
 
     private MediaSessionCompat session;
     private AudioManager audioManager;
@@ -214,6 +226,8 @@ public class PlaybackService extends Service {
         session.setCallback(new MediaSessionCompat.Callback() {
             @Override public void onSkipToNext() { ReceiverActivity.sendAction(NEXT); }
             @Override public void onSkipToPrevious() { ReceiverActivity.sendAction(PREVIOUS); }
+            @Override public void onFastForward() { ReceiverActivity.sendAction(FORWARD); }
+            @Override public void onRewind() { ReceiverActivity.sendAction(BACKWARD); }
             @Override public void onPlay() { ReceiverActivity.sendAction(PLAY); }
             @Override public void onPause() { ReceiverActivity.sendAction(PAUSE); }
             // Not the page's `stop`, which only switches its media session off.
@@ -278,6 +292,11 @@ public class PlaybackService extends Service {
         if (actions.contains(PREVIOUS)) available |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS;
         if (actions.contains(PLAY)) available |= PlaybackStateCompat.ACTION_PLAY;
         if (actions.contains(PAUSE)) available |= PlaybackStateCompat.ACTION_PAUSE;
+        // Advertised, not just handled: a media button only reaches the
+        // callback above if the state says the session takes it, so a remote's
+        // fast-forward key is dropped by the platform without these two.
+        if (actions.contains(FORWARD)) available |= PlaybackStateCompat.ACTION_FAST_FORWARD;
+        if (actions.contains(BACKWARD)) available |= PlaybackStateCompat.ACTION_REWIND;
         session.setPlaybackState(new PlaybackStateCompat.Builder()
                 .setActions(available)
                 // Always playing, never paused: v2's pause is a mute, and the

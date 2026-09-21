@@ -24,7 +24,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef } from '../react.js';
 import {
-    clampSpeed, decayVelocity, flingVelocity, settleOffset, takeDetents,
+    arrowStep, clampSpeed, decayVelocity, flingVelocity, settleOffset, takeDetents,
 } from '../lib/barrel.js';
 import { haptic } from '../lib/haptics.js';
 import { createWheelStep } from '../lib/wheelStep.js';
@@ -215,6 +215,23 @@ export default function Barrel({
     // small ones, and a detent apiece span the drum round under a swipe that
     // meant to nudge it. See lib/wheelStep.js.
     const rootRef = useRef(null);
+
+    // One detent, deliberately: a notch of the wheel and a press of an arrow
+    // are the same event with different hardware behind them, and the drum must
+    // not learn two slightly different ways of moving by one.
+    //
+    // `dir` is +1 for a step *up* the scale. The strip moves the opposite way,
+    // as the dial's digits do — and `move` is where `reverse` is applied, so a
+    // mirrored scale needs nothing said here: right is rightwards along the
+    // scale on screen either way, which is the only thing that has to stay true.
+    const nudge = useCallback((dir) => {
+        stop();
+        const s = state.current;
+        s.vel = 0;
+        s.rest = 0;
+        move(-dir * detentRef.current);
+    }, [move, stop]);
+
     useEffect(() => {
         const el = rootRef.current;
         if (!el || disabled) return undefined;
@@ -223,17 +240,42 @@ export default function Barrel({
             e.preventDefault();
             const dir = step(e);
             if (!dir) return;
-            stop();
-            const s = state.current;
-            s.vel = 0;
-            s.rest = 0;
-            // Scroll up is a step *up* the scale, as the dial's digits are, so
-            // the strip moves the opposite way to the notch.
-            move(-dir * detentRef.current);
+            nudge(dir);
         };
+
+        // The drum, for a remote control — and for a keyboard, which could not
+        // work it before either.
+        //
+        // Left and right only. Up and down are how focus leaves this element on
+        // a television, where the D-pad is the whole of the input and there is
+        // no Tab to escape by, so taking them would strand the operator on the
+        // drum — the same trap the chooser's map had. The axis split is the one
+        // `touchAction: 'pan-y'` already draws below for the same reason:
+        // across the drum is ours, along the page is not.
+        const onKeyDown = (e) => {
+            const dir = arrowStep(e);
+            if (!dir) return;
+            // Both halves, and the second is not optional. The page's one
+            // keyboard listener is on `window` and claims the arrows for
+            // `freq_step_up`/`down` by default (see ShortcutWatch), so without
+            // this a press on a focused frequency drum would tune twice — once
+            // here and once there, by two different step sizes.
+            e.preventDefault();
+            e.stopPropagation();
+            nudge(dir);
+        };
+
+        // Native, and on the element, for the reason the wheel listener is:
+        // React's synthetic stopPropagation does not stop the native event
+        // reaching a listener on `window`, which is exactly the one that has to
+        // be stopped here.
         el.addEventListener('wheel', onWheel, { passive: false });
-        return () => el.removeEventListener('wheel', onWheel);
-    }, [disabled, move, stop]);
+        el.addEventListener('keydown', onKeyDown);
+        return () => {
+            el.removeEventListener('wheel', onWheel);
+            el.removeEventListener('keydown', onKeyDown);
+        };
+    }, [disabled, nudge]);
 
     const onPointerDown = (e) => {
         if (disabled) return;
@@ -300,6 +342,12 @@ export default function Barrel({
             className={`barrel${disabled ? ' is-disabled' : ''}${className ? ` ${className}` : ''}`}
             role="group"
             aria-label={ariaLabel}
+            /* A stop for whoever has no pointer. Until now the drum could only
+               be dragged, which on a television — a D-pad and nothing else —
+               meant the frequency and the zoom were the two things on the pad
+               that could not be reached at all. A disabled drum is skipped
+               rather than focused into a dead end. */
+            tabIndex={disabled ? -1 : 0}
             /* pan-y, not none: a horizontal drag is ours and a vertical one is
                the sheet's, so a barrel near the bottom of a panel does not trap
                the scroll that was trying to get past it. */

@@ -19,7 +19,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { shellChoosable, writeShell } from '../lib/shellPref.js';
 import { Button, Icon } from './ui.jsx';
 import { connectionCheck, getBypassPassword, setBypassPassword } from '../radio/session.js';
-import { MOBILE_QUERY, SHELL_ROOM_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { HOVER_QUERY, MOBILE_QUERY, SHELL_ROOM_QUERY, TOUCH_QUERY, useMediaQuery, useTelevision } from '../lib/useMediaQuery.js';
 import {
     AndroidAppModal, IosAppModal, PasswordModal, UberSdrAppModal, VibeSdrModal,
 } from './StartExtras.jsx';
@@ -71,6 +71,12 @@ export default function StartOverlay() {
     const tapNotClick = useMediaQuery(TOUCH_QUERY);
     // Room for the docks in some orientation — see SHELL_ROOM_QUERY.
     const roomy = useMediaQuery(SHELL_ROOM_QUERY);
+    // Can a pointer be rested on this at all? The question that separates a
+    // desktop from the two machines the docks were not drawn for — see
+    // shellChoosable — and a television answers no to it whatever else it says
+    // about itself.
+    const tv = useTelevision();
+    const hover = useMediaQuery(HOVER_QUERY);
 
     // Up here rather than beside the button it belongs to, because the effect
     // below is a second caller and hooks run before this component's early
@@ -157,9 +163,30 @@ export default function StartOverlay() {
     // AndroidAppModal.
     const ios = isIOS();
     const android = isAndroid();
-    // Where the two layouts are both possible: a touchscreen with room for the
-    // docks. See the buttons.
-    const simpleOffered = shellChoosable({ touch: tapNotClick, roomy });
+    // Where the two layouts are both possible: room for the docks on a machine
+    // that cannot comfortably work them. See the buttons.
+    const bothOffered = shellChoosable({ touch: tapNotClick, roomy, hover });
+
+    // Which layout each of the two buttons starts with.
+    //
+    // Not a constant pair, because the big button is the one somebody presses
+    // without reading it and it has to be the right answer for the machine.
+    // That is the docks everywhere the docks can be worked, and the simple
+    // layout on a television — the same answer resolveShell gives when nobody
+    // has chosen, which is what this button would otherwise silently overrule:
+    // it *writes* what it starts, so on a television a press meant as "begin"
+    // was a press that stored "docks, forever" and there is no undoing a stored
+    // answer by pressing the same button again.
+    const primaryShell = tv ? 'minimal' : 'full';
+    const altShell = tv ? 'full' : 'minimal';
+    const ALT_LABEL = {
+        minimal: 'simple layout',
+        full: 'full layout',
+    };
+    const ALT_TITLE = {
+        minimal: 'Start with the tabbed layout — one panel at a time over a full-width waterfall, as a phone gets',
+        full: 'Start with the docked layout — panels either side of the spectrum, as a desktop gets',
+    };
 
     const vibesdr = () => {
         if (appHere) { window.location.href = vibesdrUri(publicUuid); return; }
@@ -232,7 +259,7 @@ export default function StartOverlay() {
                             type="button"
                             className="start__go"
                             title={tapNotClick ? 'Start listening' : 'Press Return to start'}
-                            onClick={() => start('full')}
+                            onClick={() => start(primaryShell)}
                         >
                             <Icon.Power size={34} />
                             <span>{tapNotClick ? 'Tap to start' : 'Click to start'}</span>
@@ -241,24 +268,32 @@ export default function StartOverlay() {
                             A narrow screen has no room for the docks and gets
                             the simple one whatever anybody presses, so a second
                             button there would be two buttons doing the same
-                            thing. A machine driven by a pointer is the case
-                            this is not for: the docks are what a pointer is
-                            good at, and somebody who wants the simple layout on
-                            one can still say so in the Display panel.
+                            thing. A machine driven by a hovering pointer is the
+                            case this is not for: the docks are what a pointer
+                            is good at, and somebody who wants the simple layout
+                            on one can still say so in the Display panel.
 
-                            So: touch, and wide enough for both. A tablet, in
-                            other words — the one machine where the interface
+                            So: wide enough for both, on a machine that cannot
+                            rest a pointer on them. A tablet, which can be poked
+                            — or a television, which can be neither poked nor
+                            pointed at. Both are machines where the interface
                             genuinely could go either way and the app has been
-                            deciding on its own. */}
-                        {simpleOffered && (
+                            deciding on its own; they simply want opposite
+                            defaults, which is why the two buttons swap round
+                            rather than this one always offering the simple
+                            layout. */}
+                        {bothOffered && (
                             <button
                                 type="button"
                                 className="start__go start__go--alt"
-                                title="Start with the tabbed layout — one panel at a time over a full-width waterfall, as a phone gets"
-                                onClick={() => start('minimal')}
+                                title={ALT_TITLE[altShell]}
+                                onClick={() => start(altShell)}
                             >
                                 <Icon.Power size={22} />
-                                <span>Tap to start — simple layout</span>
+                                <span>
+                                    {tapNotClick ? 'Tap to start' : 'Click to start'}
+                                    {` — ${ALT_LABEL[altShell]}`}
+                                </span>
                             </button>
                         )}
                     </>

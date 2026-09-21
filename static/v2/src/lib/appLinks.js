@@ -270,6 +270,52 @@ export function isAndroid(nav) {
     return /Android/i.test(text);
 }
 
+// A television's model, in the Android build token every such UA carries.
+//
+// Case-sensitive, and that is the whole reason this is separate from the words
+// below: Fire TV names itself by model code — `AFTB`, `AFTMM`, `AFTKA`,
+// `AFTKMST12` — and `AFT` in lower case is the tail of ordinary English words.
+// Anchored on the `; <model> ` Android writes it in, so it cannot be met in
+// prose: `Mozilla/5.0 (Linux; Android 9; AFTKA Build/PS7233.3541N) ...`.
+//
+// Fire *tablets* are `KF...` (KFAUWI and friends), not `AFT`, so they are not
+// caught here — which is right, they are tablets and already answer TOUCH_QUERY.
+const TV_MODEL = /;\s*AFT[A-Z0-9]*[\s;)]/;
+
+// The rest of them, which say so in words.
+//
+// `Web0S` is LG's, spelled with a zero. `CrKey` is a Chromecast. Tizen is
+// Samsung's, and is also on their watches — no matter, a watch is narrow and
+// gets the one layout that fits whatever this answers.
+const TV_WORDS = /\bAndroid ?TV\b|\bGoogle ?TV\b|\bSMART[- ]?TV\b|\bHbbTV\b|\bNetCast\b|\bWeb0S\b|\bTizen\b|\bBRAVIA\b|\bCrKey\b|\bAppleTV\b/i;
+
+/**
+ * Whether this is a television: a screen across the room, worked by a remote.
+ *
+ * The machine neither `TOUCH_QUERY` nor `HOVER_QUERY` describes — there is
+ * nothing to poke it with and nothing to rest on it — and the one the layout
+ * rules had no answer for, so it was taking the desktop's: three docks and a
+ * spectrum, at arm's length, driven by four arrow keys.
+ *
+ * The user agent rather than a media query, because this is the half of the
+ * question a query cannot answer and the answer has to be *positive* to be
+ * worth flipping a default on. `(pointer: none)` is the other half and the
+ * better signal where it holds — see NO_POINTER_QUERY, and useTelevision(),
+ * which is the two of them together and what callers should use.
+ *
+ * `nav` is a parameter for the same reason it is one everywhere else here.
+ */
+export function isTelevision(nav) {
+    const n = nav || (typeof navigator !== 'undefined' ? navigator : null);
+    if (!n) return false;
+
+    const hints = n.userAgentData || null;
+    const ua = String(n.userAgent || '');
+    const text = `${(hints && hints.platform) || n.platform || ''} ${ua}`;
+
+    return TV_MODEL.test(text) || TV_WORDS.test(text);
+}
+
 export function detectDesktopOS(nav) {
     const n = nav || (typeof navigator !== 'undefined' ? navigator : null);
     if (!n) return null;

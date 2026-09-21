@@ -1,4 +1,5 @@
-import { useEffect, useState } from '../react.js';
+import { useEffect, useMemo, useState } from '../react.js';
+import { isTelevision } from './appLinks.js';
 
 export function useMediaQuery(query) {
     const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
@@ -14,6 +15,41 @@ export function useMediaQuery(query) {
 
 // The breakpoint at which side docks stop fitting alongside a usable spectrum.
 export const MOBILE_QUERY = '(max-width: 900px)';
+
+// Nothing to point with at all.
+//
+// `pointer`, not `any-pointer`, and this is the one place in this file where
+// that is not the usual "can this be poked" question: `any-pointer: none` means
+// no pointing device is attached by any route, which a television satisfies and
+// so does a desktop whose mouse is asleep. `pointer: none` is about the primary
+// input mechanism, and a machine whose *primary* way in is not a pointer is a
+// machine driven by something else — a remote control, on everything that
+// reports this honestly.
+export const NO_POINTER_QUERY = '(pointer: none)';
+
+/**
+ * Is this a television?
+ *
+ * Two signals, because neither is enough on its own. `(pointer: none)` is the
+ * structural one and the one that needs no list kept up to date, but it rests
+ * on the platform reporting its inputs honestly and a set-top box is exactly
+ * the sort of thing that reports a phone's media queries by inheritance. The
+ * user agent is the one that names the machine outright — see isTelevision —
+ * and is a list, with everything a list implies.
+ *
+ * Either is enough. This decides a *default*, not what is possible: the layout
+ * can be set by hand wherever both fit, and shellChoosable offers that control
+ * on a machine with no hovering pointer whether or not this answered yes. So
+ * the cost of a false negative here is one trip to the settings, and the cost
+ * of a false positive is one trip the other way.
+ */
+export function useTelevision() {
+    const noPointer = useMediaQuery(NO_POINTER_QUERY);
+    // Constant for the life of the page — the user agent does not change — so
+    // it is read once rather than on every render.
+    const named = useMemo(() => isTelevision(), []);
+    return noPointer || named;
+}
 
 // Is there a finger available, wherever the primary pointer is?
 //

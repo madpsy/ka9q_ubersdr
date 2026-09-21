@@ -6,7 +6,7 @@
 const assert = require('assert');
 const {
     comboFor, comboLabel, comboProblem, isTyping, claimKeys, keysClaimed, _releaseAllKeys,
-    DEFAULT_BINDINGS, DEFAULTS,
+    DEFAULT_BINDINGS, DEFAULTS, NAVIGATION_KEYS,
 } = require('./.build/shortcuts.cjs');
 const { catalogue } = require('./.build/functions.cjs');
 
@@ -200,6 +200,54 @@ t('the count cannot go negative', () => {
     const release = claimKeys();
     assert.strictEqual(keysClaimed(), true);
     release();
+});
+
+// --- a remote control ---------------------------------------------------------
+//
+// On a desktop the arrows are a tuning knob and a volume control, and claiming
+// them costs nothing because Tab still moves the focus. A television has no Tab:
+// its D-pad arrives as those four keys and there is no fifth way to move, so a
+// shortcut that takes them leaves every button, tab, slider and panel on the
+// page permanently out of reach. ShortcutWatch hands these back there — these
+// tests hold the list to the reason for it.
+
+t('the keys a remote moves with are the four arrows and the centre button', () => {
+    assert.deepStrictEqual(
+        [...NAVIGATION_KEYS].sort(),
+        ['ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'Enter'],
+    );
+});
+
+t('every default binding that would strand a remote is one of them', () => {
+    // The test that actually earns its place: the four arrows are bound out of
+    // the box, so the defaults and the hand-back list have to agree. A fifth
+    // navigation key bound later without being added to the set would trap a
+    // television again, and nothing else here would notice.
+    const trapping = Object.keys(DEFAULT_BINDINGS)
+        .filter((combo) => /^(Arrow(Up|Down|Left|Right)|Enter)$/.test(combo));
+    assert.deepStrictEqual(
+        trapping.sort(),
+        ['ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp'],
+        'the arrows are bound by default, which is why this rule exists',
+    );
+    for (const combo of trapping) {
+        assert.ok(NAVIGATION_KEYS.has(combo), `${combo} is bound but never handed back`);
+    }
+});
+
+t('and a modified arrow is not one of them', () => {
+    // The set is keyed on `e.key`, which carries no modifier, and that is the
+    // right grain: Ctrl+Left is not a D-pad press and a remote cannot produce
+    // one, so a binding on it keeps working on a television like any letter.
+    assert.ok(!NAVIGATION_KEYS.has('Ctrl+ArrowLeft'));
+    assert.ok(!NAVIGATION_KEYS.has('Shift+Enter'));
+});
+
+t('the letters are untouched, so a keyboard on a television still works', () => {
+    for (const combo of Object.keys(DEFAULT_BINDINGS)) {
+        if (/^(Arrow(Up|Down|Left|Right)|Enter)$/.test(combo)) continue;
+        assert.ok(!NAVIGATION_KEYS.has(combo), `${combo} was handed back for no reason`);
+    }
 });
 
 if (process.exitCode) console.log('\nshortcut tests FAILED');

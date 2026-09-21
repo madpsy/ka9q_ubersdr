@@ -134,3 +134,32 @@ export const TAP_MS = 500;
 export function isTap(deviationPx, elapsedMs) {
     return deviationPx <= TAP_SLOP_PX && elapsedMs >= 0 && elapsedMs <= TAP_MS;
 }
+
+// --- a key on the drum -------------------------------------------------------
+
+/**
+ * Which way one arrow key turns the drum: +1 up the scale, -1 down, 0 for a key
+ * that is none of this component's business.
+ *
+ * Two keys, and the other two are the point of writing this down. Up and down
+ * belong to whatever moves the focus — on a television that is the whole of the
+ * input, the D-pad arrives as these four keys and there is no Tab to leave by,
+ * so a drum that swallowed the vertical pair would be one focus could enter and
+ * never leave. The horizontal pair is the drum's own axis, which is the same
+ * line `touchAction: 'pan-y'` draws for the thumb: across the drum is ours,
+ * along the page is not.
+ *
+ * Modifiers are not ours either. Ctrl+Left is the browser's, or the window
+ * manager's, and a drum that ate it would be taking a key it was never offered.
+ *
+ * Pure, and here rather than inline in the component, because "which keys does
+ * this take" is the half of it worth holding still: the handler that reads this
+ * lives on a real DOM node behind a ref and cannot be mounted in a test.
+ */
+export function arrowStep(event) {
+    if (!event) return 0;
+    if (event.altKey || event.ctrlKey || event.metaKey) return 0;
+    if (event.key === 'ArrowRight') return 1;
+    if (event.key === 'ArrowLeft') return -1;
+    return 0;
+}

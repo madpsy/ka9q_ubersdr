@@ -49,27 +49,51 @@ export function onShell(fn) {
  * honouring a request to make the receiver unusable. It is a reachable state,
  * too: the apps share one settings blob between a tablet and a phone.
  *
- * Everywhere else the choice decides, and never having chosen means the docks.
+ * Everywhere else the choice decides. Never having chosen means the docks —
+ * except on a television, where it means the simple layout.
+ *
+ * `tv` is a default, not a rule, and the difference is the ordering above: a
+ * stored answer beats it, where `narrow` beats a stored answer. A television is
+ * wide enough for the docks, so both layouts genuinely work and somebody who
+ * wants the docks on one can have them; what they cannot have is a *usable*
+ * dock, because working three of them and a spectrum from four arrow keys at
+ * arm's length is not what any of it was drawn for. So the machine's answer is
+ * the simple layout and the operator is still allowed the other one.
  */
-export function resolveShell(value, narrow) {
+export function resolveShell(value, narrow, tv) {
     if (narrow) return 'minimal';
-    return value === 'minimal' ? 'minimal' : 'full';
+    if (value === 'minimal' || value === 'full') return value;
+    return tv ? 'minimal' : 'full';
 }
 
 /**
  * Is choosing worth offering here?
  *
  * Both layouts have to be possible, and the machine has to be one where the
- * question is real. A machine driven by a pointer is what the docks are *for* —
- * the tabbed layout exists because a fingertip cannot work a dock, not because
- * a screen is small. What is left is a touchscreen with room for both, which is
- * a tablet: the one machine that has been having this decided for it.
+ * question is real. A machine driven by a hovering pointer is what the docks
+ * are *for* — the tabbed layout exists because a fingertip cannot work a dock,
+ * not because a screen is small — so that is the one case this stays out of.
+ *
+ * Which leaves two machines, and they are not the same machine. A touchscreen
+ * with room for both is a tablet: it can be poked, and poking a dock is the
+ * problem. Something with no hovering pointer *and* no touch is a television:
+ * it can be neither poked nor pointed at, only arrowed around.
+ *
+ * Deliberately not keyed on the television test — see useTelevision. That one
+ * names machines and can be wrong about one; this asks only whether a pointer
+ * can be rested on the page, which a set-top box answers no to however it
+ * describes itself. The control appearing is what makes a wrong default
+ * survivable, so it must not rest on the same signal the default does.
  *
  * `roomy` is about the device rather than the moment — see SHELL_ROOM_QUERY.
  * Asking whether the docks fit *right now* made the control vanish whenever a
  * tablet was held in portrait, which is both surprising and the orientation
  * somebody is most likely to be in when they decide the docks are too fiddly.
+ *
+ * `hover` is HOVER_QUERY: a pointer that can be rested on something. Callers
+ * pass all three; an omitted `hover` reads as "cannot hover", which is the
+ * answer every machine this newly covers gives.
  */
-export function shellChoosable({ touch, roomy }) {
-    return !!touch && !!roomy;
+export function shellChoosable({ touch, roomy, hover }) {
+    return !!roomy && (!!touch || !hover);
 }

@@ -255,6 +255,35 @@ export function _releaseAllKeys() {
     claims = 0;
 }
 
+/**
+ * The keys a remote control needs to get anywhere, which a shortcut may not
+ * take on a machine driven by one.
+ *
+ * On a desktop the arrows are a tuning knob and a volume control, and that is
+ * one of the best things about the keyboard here — Tab still moves the focus,
+ * so claiming them costs nothing. A television has no Tab. Its D-pad arrives as
+ * these four keys and there is no fifth way to move, so a shortcut that claims
+ * them and calls preventDefault leaves every button, tab, slider and panel on
+ * the page permanently out of reach: the receiver tunes and does nothing else,
+ * for as long as it is open.
+ *
+ * Enter is here for the other half of the same thought. It is unbound by
+ * default, but it is the D-pad's centre button — the only way to press the
+ * thing focus is finally on — and a binding somebody added on a desktop travels
+ * to the television with the rest of their settings.
+ *
+ * The bindings are not rewritten and nothing is unbound: the same profile is
+ * still theirs on every other machine, and a television with a keyboard plugged
+ * into it keeps every letter. Only these five are handed back, and only there.
+ * What replaces them is the remote's own transport buttons — see the media
+ * session's seekforward/seekbackward handlers, which are the tuning — and the
+ * focused control itself, the frequency drum taking left and right once focus
+ * is on it.
+ */
+export const NAVIGATION_KEYS = new Set([
+    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter',
+]);
+
 export function isTyping(target) {
     if (!target) return false;
     const tag = target.tagName;

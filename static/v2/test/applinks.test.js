@@ -13,7 +13,7 @@
 const assert = require('assert');
 const {
     ANDROID_APK, ANDROID_BADGE, APP_DOWNLOADS, appDownloads, detectDesktopOS,
-    hasMobileApp, IOS_APP_STORE, IOS_APP_STORE_BADGE, isAndroid, isIOS,
+    hasMobileApp, IOS_APP_STORE, IOS_APP_STORE_BADGE, isAndroid, isIOS, isTelevision,
     ubersdrAppUri, vibesdrUri,
 } = require('./.build/applinks.cjs');
 
@@ -71,6 +71,76 @@ t('the links are parseable as URLs, which is how the apps read them', () => {
 // browsers send rather than shapes invented to match the code.
 
 const nav = (userAgent, extra = {}) => ({ userAgent, platform: '', ...extra });
+
+// --- televisions --------------------------------------------------------------------
+//
+// The machine no other test in this file has a case for, and the one whose
+// answer decides a layout rather than a download: see useTelevision, which ORs
+// this with `(pointer: none)`, and resolveShell, which turns the pair into the
+// simple layout on a screen across the room.
+
+t('a Fire TV is recognised by its model code', () => {
+    // Amazon names every one of them `AFT...` in the Android build token. These
+    // are the real strings: a 4K Max stick, an older Stick, a Cube.
+    const cases = [
+        'Mozilla/5.0 (Linux; Android 9; AFTKA Build/PS7233.3541N; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/106.0.5249.185 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 5.1.1; AFTT Build/LVY48F; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/59.0.3071.125 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 9; AFTKMST12 Build/PS7233; wv) AppleWebKit/537.36 Chrome/106 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 7.1.2; AFTB Build/NS6265) AppleWebKit/537.36 Chrome/70 Safari/537.36',
+    ];
+    for (const ua of cases) assert.strictEqual(isTelevision(nav(ua)), true, ua);
+});
+
+t('and the other sets say so in words', () => {
+    const cases = [
+        'Mozilla/5.0 (Linux; Android 10; BRAVIA 4K GB Build/QTG3.200305.006.S342) AppleWebKit/537.36 Chrome/83 Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 9; SHIELD Android TV Build/PPR1.180610.011) AppleWebKit/537.36 Chrome/79 Safari/537.36',
+        'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 Chrome/68 Safari/537.36 WebAppManager',
+        'Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 Chrome/76 TV Safari/537.36',
+        'Mozilla/5.0 (CrKey armv7l 1.5.16041) AppleWebKit/537.36 Chrome/31 Safari/537.36',
+    ];
+    for (const ua of cases) assert.strictEqual(isTelevision(nav(ua)), true, ua);
+});
+
+t('a Fire tablet is not a Fire TV', () => {
+    // The trap the model test is shaped around. Amazon's tablets are `KF...`,
+    // and one caught here would be a tablet handed the layout meant for a
+    // remote control — on a machine that is all touchscreen.
+    const cases = [
+        'Mozilla/5.0 (Linux; Android 9; KFTRWI Build/PS7326.2661N; wv) AppleWebKit/537.36 Chrome/106 Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 11; KFRAWI Build/RS8332) AppleWebKit/537.36 Chrome/111 Safari/537.36',
+    ];
+    for (const ua of cases) assert.strictEqual(isTelevision(nav(ua)), false, ua);
+});
+
+t('and nothing anybody actually browses on is one', () => {
+    const cases = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UQ1A.240205.004) AppleWebKit/537.36 Chrome/121 Mobile Safari/537.36',
+        'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Version/17.4 Mobile/15E148 Safari/604.1',
+    ];
+    for (const ua of cases) assert.strictEqual(isTelevision(nav(ua)), false, ua);
+});
+
+t('lower-case aft in ordinary words is not a model code', () => {
+    // `AFT` is matched case-sensitively and only where Android writes a model,
+    // because the letters are the tail of a good many English words and a
+    // crawler or a proxy can put one in a user agent.
+    for (const ua of [
+        'Mozilla/5.0 (compatible; draft-aftercrawler/1.0; +http://example.org/bot)',
+        'Mozilla/5.0 (X11; Linux x86_64) Aircraft/2.0 Chrome/131 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0) Minecraft/1.20 Chrome/131 Safari/537.36',
+    ]) assert.strictEqual(isTelevision(nav(ua)), false, ua);
+});
+
+t('and no navigator at all is not a television', () => {
+    assert.strictEqual(isTelevision({}), false);
+    assert.strictEqual(isTelevision(null), false);
+});
+
 
 t('the three desktops are recognised from their user agents', () => {
     const cases = [

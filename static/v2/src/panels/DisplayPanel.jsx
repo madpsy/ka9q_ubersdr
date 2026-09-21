@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from '../react.js';
 import { resolveMaxFps, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
-import { onShell, readShell, shellChoosable, writeShell } from '../lib/shellPref.js';
+import { onShell, readShell, resolveShell, shellChoosable, writeShell } from '../lib/shellPref.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { PALETTE_NAMES, paletteGradient } from '../lib/palettes.js';
 import { markColors } from '../display/uiConfig.js';
 import { MAX_SECONDS, MIN_SECONDS } from '../lib/dss.js';
 import { clamp } from '../lib/format.js';
 import { Button, ColorPicker, Field, Icon, Segmented, Slider, Switch } from '../components/ui.jsx';
-import { MOBILE_QUERY, SHELL_ROOM_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
+import { HOVER_QUERY, MOBILE_QUERY, SHELL_ROOM_QUERY, TOUCH_QUERY, useMediaQuery, useTelevision } from '../lib/useMediaQuery.js';
 import {
     PAUSE_CHOICES, PAUSE_MIN_MOBILE, THROTTLE_CHOICES, THROTTLE_MIN_DESKTOP,
     THROTTLE_MIN_MOBILE, pauseMinutes, throttleMinutes,
@@ -48,8 +48,17 @@ export default function DisplayPanel() {
     // Kept in its own key rather than with the display settings, so the apps'
     // settings page can set it too — see lib/shellPref.js.
     const roomy = useMediaQuery(SHELL_ROOM_QUERY);
+    // Whether a pointer can be rested on the page, which is what separates the
+    // machine the docks were drawn for from the two that they were not — a
+    // tablet and a television. See shellChoosable.
+    const hover = useMediaQuery(HOVER_QUERY);
+    const tv = useTelevision();
     const [shell, setShell] = useState(readShell);
     useEffect(() => onShell(setShell), []);
+    // What the control shows: what is in force, not what is stored. Unchosen on
+    // a television is the simple layout, and a segment reading "Full" over a
+    // receiver drawing the other one is the control lying about itself.
+    const shellNow = resolveShell(shell, false, tv);
     // No vibrator, no setting: a switch that provably cannot do anything is
     // worse than none, and every desktop would carry it. See hapticsSupported.
     const canBuzz = hapticsSupported();
@@ -548,17 +557,18 @@ export default function DisplayPanel() {
                 </>
             )}
 
-            {/* Where the choice is real: a touchscreen with room for the docks.
-                A narrow screen only has the one layout and a pointer-driven
-                machine is what the docks are for — but the setting is still
-                honoured on both, so somebody who wants the simple layout on a
-                desktop can have it by other means. Same rule as the start
-                overlay's second button, which is where most people will meet
-                this. */}
-            {shellChoosable({ touch, roomy }) && (
-                <Field label="Layout" hint={shell === 'minimal' ? 'one panel at a time' : 'docks'}>
+            {/* Where the choice is real: room for the docks, on a machine that
+                cannot comfortably work them — a touchscreen, or something with
+                no hovering pointer at all, which is a television. A narrow
+                screen only has the one layout and a pointer-driven machine is
+                what the docks are for, but the setting is still honoured on
+                both, so somebody who wants the simple layout on a desktop can
+                have it by other means. Same rule as the start overlay's second
+                button, which is where most people will meet this. */}
+            {shellChoosable({ touch, roomy, hover }) && (
+                <Field label="Layout" hint={shellNow === 'minimal' ? 'one panel at a time' : 'docks'}>
                     <Segmented
-                        value={shell === 'minimal' ? 'minimal' : 'full'}
+                        value={shellNow}
                         onChange={(v) => { writeShell(v); setShell(v); }}
                         options={[
                             {

@@ -6,6 +6,7 @@ import React, { ReactDOM, useEffect, useLayoutEffect, useRef, useState } from '.
 import Icon from './icons.jsx';
 import { useMediaQuery } from '../lib/useMediaQuery.js';
 import { useSameLine } from '../lib/useSameLine.js';
+import { releaseVerticalArrows } from '../lib/focusNav.js';
 
 // `className` is pulled out and merged rather than left in `rest`: spread after
 // className={cls} it would replace the lot — btn, the variant, the size and is-active
@@ -134,6 +135,12 @@ export function Slider({
             disabled={disabled}
             onChange={(e) => onChange(Number(e.target.value))}
             onPointerUp={onCommit ? () => onCommit() : undefined}
+            /* A range input takes all four arrows, and on a television those
+               are the only way anywhere else: focus the squelch with a remote
+               and it could be turned but never left. Up and down go back to
+               moving focus there; left and right still set the value. See
+               lib/focusNav.js. */
+            onKeyDown={releaseVerticalArrows}
         />
     );
     if (marker == null || !Number.isFinite(marker)) return input;
@@ -213,6 +220,8 @@ export function RangeSlider({
     };
 
     const onKey = (end) => (e) => {
+        // Up and down leave the thumb on a television — see Slider.
+        if (releaseVerticalArrows(e)) return;
         const dir = e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1
             : e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : 0;
         if (!dir) return;

@@ -57,13 +57,32 @@ const RadioContext = createContext(null);
 // does the operator's own default apply, once /api/description arrives; see
 // applyServerDefaults. A link someone was sent, or the frequency they left the
 // receiver on, both outrank it.
+const FALLBACK_FREQ = 7100000;
+const FALLBACK_MODE = 'lsb';
+
+// A saved tuning that is the fallback to the hertz, with the fallback's own
+// filter: what the early save used to write before /api/description answered
+// (see tuningSettled), rather than anything somebody tuned to. Treated as
+// nothing saved, so a device that was stuck there gets the receiver's defaults.
+// The one cost is an operator who parked on exactly 7.100.000 LSB with the
+// default passband being moved to the receiver's own start — once.
+function isStaleFallback(saved) {
+    const def = MODE_BY_ID[FALLBACK_MODE];
+    return saved.frequency === FALLBACK_FREQ && saved.mode === FALLBACK_MODE
+        && (saved.bandwidthLow == null || saved.bandwidthLow === def.low)
+        && (saved.bandwidthHigh == null || saved.bandwidthHigh === def.high);
+}
+
 function initialTuning() {
-    const saved = loadRadioSettings();
+    const stored = loadRadioSettings();
+    const saved = isStaleFallback(stored)
+        ? { ...stored, frequency: undefined, mode: undefined, bandwidthLow: undefined, bandwidthHigh: undefined }
+        : stored;
     // Everything a shared link can say about the radio, already validated and
     // clamped — see lib/share.js, which is also what writes them.
     const link = readShareUrl(location.search);
 
-    const mode = link.mode || (MODE_BY_ID[saved.mode] ? saved.mode : 'lsb');
+    const mode = link.mode || (MODE_BY_ID[saved.mode] ? saved.mode : FALLBACK_MODE);
     const def = MODE_BY_ID[mode];
     const restore = saved.mode === mode;
     // A layout saved before the limits changed can hold a wider passband than
@@ -83,7 +102,7 @@ function initialTuning() {
         // gone. Nothing tunes to this on its own; it is the dial's starting position until
         // Start is pressed, and the description handler clamps it once the real limits are
         // in. Every path that actually tunes clamps for itself.
-        frequency: link.frequency > 0 ? link.frequency : (saved.frequency || 7100000),
+        frequency: link.frequency > 0 ? link.frequency : (saved.frequency || FALLBACK_FREQ),
         mode,
         bandwidthLow: clamp(low, l.min, l.max),
         bandwidthHigh: clamp(high, l.min, l.max),
@@ -104,6 +123,15 @@ export function RadioProvider({ children }) {
         const { chosen, ...t } = start;
         return t;
     });
+    // Whether the tuning may be saved yet. Not until the operator's defaults
+    // have had their chance: the save below runs on mount, and writing the
+    // built-in 7.1 MHz LSB then made it look chosen on the next visit — so a
+    // first load that never heard from /api/description (a slow link, a page
+    // closed early) left that device on 40 m LSB for good, and the receiver's
+    // own default frequency and mode never applied there again. Already true
+    // when both came from a link or a previous visit, since nothing is waiting.
+    const [tuningSettled, setTuningSettled] = useState(
+        () => start.chosen.frequency && start.chosen.mode);
     const [audioState, setAudioState] = useState('idle');
     const [spectrumState, setSpectrumState] = useState('idle');
     const [view, setView] = useState({
@@ -845,7 +873,10 @@ export function RadioProvider({ children }) {
                 tuningRef.current = next;
                 setTuning(next);
             })
-            .catch(() => { /* non-fatal — the UI just shows fewer details */ });
+            .catch(() => { /* non-fatal — the UI just shows fewer details */ })
+            // Answered or not, the defaults have had their go: from here the
+            // tuning on the dial is worth keeping. See tuningSettled.
+            .finally(() => setTuningSettled(true));
     }, []);
 
     // The client NR's noise profile belongs to the frequency it was learned on;
@@ -950,10 +981,15 @@ export function RadioProvider({ children }) {
     // Persist the parts of the session worth restoring.
     useEffect(() => {
         saveRadioSettings({
-            frequency: tuning.frequency,
-            mode: tuning.mode,
-            bandwidthLow: tuning.bandwidthLow,
-            bandwidthHigh: tuning.bandwidthHigh,
+            // Left out, not written as the fallback, until the defaults have
+            // been applied — see tuningSettled. The save merges, so whatever
+            // an earlier visit stored stays put meanwhile.
+            ...(tuningSettled ? {
+                frequency: tuning.frequency,
+                mode: tuning.mode,
+                bandwidthLow: tuning.bandwidthLow,
+                bandwidthHigh: tuning.bandwidthHigh,
+            } : {}),
             volume: audio.volume,
             muted: audio.muted,
             bufferSec: audio.bufferSec,
@@ -994,7 +1030,7 @@ export function RadioProvider({ children }) {
                 }
                 : {}),
         });
-    }, [tuning, audio, squelchValue, dsp, followTuning, filters, noise, view, locked]);
+    }, [tuning, tuningSettled, audio, squelchValue, dsp, followTuning, filters, noise, view, locked]);
 
     // ---- actions --------------------------------------------------------
 

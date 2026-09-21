@@ -368,6 +368,8 @@ esbuild ../src/lib/appHeight.js --bundle --format=cjs --platform=node \
     --outfile=.build/appheight.cjs --log-level=warning
 esbuild ../src/lib/barrel.js --bundle --format=cjs --platform=node \
     --outfile=.build/barrel.cjs --log-level=warning
+esbuild ../src/lib/focusNav.js --bundle --format=cjs --platform=node \
+    --outfile=.build/focusnav.cjs --log-level=warning
 esbuild barrelflip.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/barrelflip.cjs --log-level=warning
 esbuild ../src/lib/paging.js --bundle --format=cjs --platform=node \
@@ -569,6 +571,7 @@ node edgehit.test.js
 node haptics.test.js
 node appheight.test.js
 node barrel.test.js
+node focusnav.test.js
 node barrelflip.test.js
 node paging.test.js
 node localbookmarks.test.js

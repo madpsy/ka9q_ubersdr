@@ -73,7 +73,22 @@ export function pickNeighbour(from, candidates, dir) {
     return best;
 }
 
-const FOCUSABLE = 'button, input, select, textarea, a[href], [tabindex]';
+export const FOCUSABLE = 'button, input, select, textarea, a[href], [tabindex]';
+
+/** Can focus land on this element and be seen doing so? */
+export function focusable(el) {
+    if (el.disabled || el.getAttribute('tabindex') === '-1') return false;
+    if (el.closest('[inert], [aria-hidden="true"]')) return false;
+    const rect = el.getBoundingClientRect();
+    // Not laid out, or out of sight: display:none, a collapsed dock.
+    return !!(rect.width && rect.height);
+}
+
+/** Focus `el` and bring it into view, as the platform's own move would. */
+export function focusAndReveal(el) {
+    el.focus();
+    try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* old engines */ }
+}
 
 /**
  * Focus the nearest focusable element above or below `from`. Returns whether
@@ -86,17 +101,12 @@ export function focusNeighbour(from, dir) {
     const candidates = [];
     for (const el of document.querySelectorAll(FOCUSABLE)) {
         if (el === from || from.contains(el) || el.contains(from)) continue;
-        if (el.disabled || el.getAttribute('tabindex') === '-1') continue;
-        if (el.closest('[inert], [aria-hidden="true"]')) continue;
-        const rect = el.getBoundingClientRect();
-        // Not laid out, or out of sight: display:none, a collapsed dock.
-        if (!rect.width || !rect.height) continue;
-        candidates.push({ el, rect });
+        if (!focusable(el)) continue;
+        candidates.push({ el, rect: el.getBoundingClientRect() });
     }
     const next = pickNeighbour(fromRect, candidates, dir);
     if (!next) return false;
-    next.el.focus();
-    try { next.el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* old engines */ }
+    focusAndReveal(next.el);
     return true;
 }
 

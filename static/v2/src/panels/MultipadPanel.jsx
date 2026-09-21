@@ -30,6 +30,8 @@ import { countryOf, shortMarkerName } from '../lib/markerNav.js';
 import { placeBarrelMarks } from '../lib/barrelMarks.js';
 import useMarkerNav, { stepToMarker, useNavTypes } from '../lib/useMarkerNav.js';
 import useMarkerLookup from '../lib/useMarkerLookup.js';
+import { FOCUSABLE, drivenByRemote, focusable, focusAndReveal, focusNeighbour } from '../lib/focusNav.js';
+import { nextStop, stepInRow } from '../lib/padNav.js';
 import { getRmNoise, rmCredentials } from '../lib/rmnoise.js';
 import useTapThrough from '../lib/useTapThrough.js';
 import useHoldPress from '../lib/useHoldPress.js';
@@ -1026,6 +1028,33 @@ function SquelchRow() {
     );
 }
 
+// The pad's controls in order, for walking it with a remote — see lib/padNav.js.
+//
+// The marker names along the frequency drum are left out: there are as many as
+// fit, they slide past as the drum turns, and a stop per name would put a
+// different number of presses between the frequency and the zoom every time.
+// The drum's two ends step between the same markers and are stops of their own.
+function padItems(root) {
+    const items = [];
+    for (const el of root.querySelectorAll(FOCUSABLE)) {
+        if (el.matches('.barrel__mark-label') || !focusable(el)) continue;
+        const row = el.closest('.segmented, .chip-row');
+        items.push({
+            el,
+            group: row && root.contains(row) ? row : null,
+            active: el.classList.contains('is-active'),
+        });
+    }
+    return items;
+}
+
+// Where the arrows belong to the text, as in the frequency entry.
+function typingInto(el) {
+    if (el.isContentEditable || el.tagName === 'TEXTAREA') return true;
+    if (el.tagName !== 'INPUT') return false;
+    return !['range', 'checkbox', 'radio', 'button', 'submit', 'color'].includes(el.type);
+}
+
 // `minimal` keeps the two barrels, the squelch and the width, and drops the rest.
 //
 // The barrels are the controls a pad is *for* — the ones with no good small form
@@ -1057,8 +1086,51 @@ export default function MultipadPanel({ minimal }) {
     const headRef = useRef(null);
     const wide = useHeaderFits(headRef, '.pad-wheel__digits', BW_W);
 
+    // The D-pad, on a television: up and down walk the pad's controls in order,
+    // and left and right move along a row of buttons. See lib/padNav.js for why
+    // geometry cannot be left to do it here.
+    //
+    // Capture, and stopped here: the drums listen for keys on their own element
+    // and the sliders hand up and down to lib/focusNav.js, and on this pad both
+    // of those must stand aside for the walk. Left and right go on to them
+    // untouched unless the focus is in a row of buttons.
+    const padRef = useRef(null);
+    const onPadKey = useCallback((e) => {
+        if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        const vertical = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+        const across = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+        if (!vertical && !across) return;
+        const root = padRef.current;
+        if (!root || typingInto(e.target) || !drivenByRemote()) return;
+
+        const items = padItems(root);
+        // Focus on something inside a stop — a marker name on the drum, reached
+        // by a pointer — walks from the stop it is in.
+        const cur = items.find((i) => i.el === e.target) || items.find((i) => i.el.contains(e.target));
+        if (!cur) return;
+
+        if (vertical) {
+            e.preventDefault();
+            e.stopPropagation();
+            const next = nextStop(items, cur.el, vertical);
+            // Off either end: to whatever is nearest that way outside the pad,
+            // as the platform would have gone.
+            if (next) focusAndReveal(next);
+            else focusNeighbour(root, vertical < 0 ? 'up' : 'down');
+            return;
+        }
+        if (cur.group == null) return;
+        // Within a row, including at its ends: stepping off the end of the
+        // bands sideways would land wherever geometry says, which is the thing
+        // this is here to stop.
+        e.preventDefault();
+        e.stopPropagation();
+        const next = stepInRow(items, cur.el, across);
+        if (next) focusAndReveal(next);
+    }, []);
+
     return (
-        <div className="stack stack--tight pad">
+        <div className="stack stack--tight pad" ref={padRef} onKeyDownCapture={onPadKey}>
             <FreqWheel headRef={headRef} showBw={wide} minimal={minimal} />
 
             {/* Which markers the drum's ends step to. Directly under the drum it

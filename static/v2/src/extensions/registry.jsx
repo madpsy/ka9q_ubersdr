@@ -22,9 +22,9 @@
 //   needsIQ       true when the extension decodes the raw quadrature stream
 //                 rather than demodulated audio. Every other extension is the
 //                 opposite way round and is unusable in IQ, which is why IQ
-//                 closes and disables them — see ExtensionsContext. One of
-//                 these stays available in IQ, and switches the receiver into
-//                 it when it starts.
+//                 closes and disables them — see ExtensionsContext. These
+//                 stay available in IQ, and switch the receiver into it when
+//                 they start (DRM always; the time-signal decoder for DCF77).
 //   float         initial window size
 //   minimal       true when the extension has a minimal view. The window and
 //                 the mobile sheet then show a toggle, and Component is called
@@ -111,8 +111,12 @@ export const EXTENSIONS = [
         id: 'clock',
         title: 'Time Signal Decoder',
         icon: <Icon.Clock />,
-        summary: 'WWV, WWVH and WWVB — the broadcast time, and how far your clock is out.',
+        summary: 'WWV, WWVH, WWVB and DCF77 — the broadcast time, and how far your clock is out.',
         requiresAudio: true,
+        // DCF77 is decoded from IQ, and the panel switches the receiver into
+        // it on Start — so the extension has to survive the very mode change
+        // that closes the audio-only ones. WWV/WWVH/WWVB stay on USB.
+        needsIQ: true,
         // Taller than the readout needs, because the panel is mostly the
         // decoder explaining itself: a lock takes minutes, and for all of that
         // time the alignment plot, the second strip and the acquisition funnel

@@ -37,10 +37,10 @@ globalThis.TextDecoder = globalThis.TextDecoder || require('util').TextDecoder;
 
 const {
     render, reset, walk, words, ClockExtension, EXTENSION_BY_ID,
-    CLOCK_FREQUENCIES, STRIP_LENGTH, WWVB_CEILING_HZ,
+    CLOCK_FREQUENCIES, DCF77_CARRIER_HZ, DCF77_WINDOW_HZ, STRIP_LENGTH, WWVB_CEILING_HZ,
     alignmentSeries, appendSecond, correctedNowMs, decodeFrame, formatClock, formatDate,
-    formatDay, formatDut1, formatOffset, frameFlags, funnelStages, localIsUtc, offsetSense,
-    offsetTone, polylinePoints, stateLabel, stateTone, stationFor, stationLabel, symbolTone,
+    formatDay, formatDut1, formatOffset, frameFlags, funnelStages, localIsUtc, modeFor,
+    offsetSense, offsetTone, polylinePoints, stateLabel, stateTone, stationFor, stationLabel, symbolTone,
     tunedClockOption, zoneLabel,
 } = require('./.build/clockpanel.cjs');
 
@@ -61,7 +61,8 @@ function context(over) {
         actions: {
             tuneTo: (a) => calls.push(['tuneTo', a]),
             ensureVisible: (hz) => calls.push(['ensureVisible', hz]),
-            setMode() {}, nudge() {},
+            setMode: (m) => calls.push(['setMode', m]),
+            nudge() {},
         },
         server: {},
         set() {},
@@ -100,9 +101,9 @@ t('it is in the registry with a minimal view', () => {
     assert.ok(entry, 'clock is not in the extension registry');
     assert.strictEqual(entry.minimal, true);
     assert.strictEqual(entry.requiresAudio, true);
-    // Not an IQ extension: the decoder takes demodulated USB audio, and
-    // needsIQ would keep it open in a mode that carries nothing it can read.
-    assert.ok(!entry.needsIQ);
+    // An IQ extension, for DCF77: the panel switches the receiver into IQ on
+    // Start, and without needsIQ that very switch would close it.
+    assert.strictEqual(entry.needsIQ, true);
 });
 
 // The narrow-filter warning is the whole reason the panel bothers to look at
@@ -158,6 +159,72 @@ t('the wrong mode is called out', () => {
         tuning: { frequency: 9_999_000, mode: 'am', bandwidthLow: -5000, bandwidthHigh: 5000 },
     }));
     assert.ok(words(tree).includes('received in USB'));
+});
+
+const DCF77_USB = { frequency: 77_500, mode: 'usb', bandwidthLow: 0, bandwidthHigh: 3000 };
+const DCF77_IQ = { frequency: 77_500, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 };
+const startButton = (tree) => walk(tree).find((n) => n && n.props && n.props.children === 'Start');
+
+t('Start on a DCF77 dial switches the receiver to IQ', () => {
+    reset();
+    const ctx = context({ tuning: DCF77_USB });
+    const { tree } = render(ClockExtension, {}, ctx);
+    startButton(tree).props.onClick();
+    assert.deepStrictEqual(ctx.calls.filter((c) => c[0] === 'setMode'), [['setMode', 'iq']]);
+});
+
+t('Start leaves the mode alone on DCF77 in IQ, and on WWV', () => {
+    for (const tuning of [DCF77_IQ, undefined]) {
+        reset();
+        const ctx = context(tuning ? { tuning } : {});
+        const { tree } = render(ClockExtension, {}, ctx);
+        startButton(tree).props.onClick();
+        assert.deepStrictEqual(ctx.calls.filter((c) => c[0] === 'setMode'), [],
+            `${tuning ? 'DCF77 in IQ' : 'WWV in USB'} should not change mode`);
+    }
+});
+
+t('DCF77 out of IQ says Start will switch, rather than calling it a mistake', () => {
+    reset();
+    const { tree } = render(ClockExtension, {}, context({ tuning: DCF77_USB }));
+    const text = words(tree);
+    assert.ok(text.includes('Start switches the receiver to IQ'), 'expected the IQ note');
+    assert.ok(!text.includes('Pick a frequency above'), 'DCF77 in USB is not a wrong mode');
+});
+
+t('DCF77 in IQ is not warned about anything', () => {
+    reset();
+    const { tree } = render(ClockExtension, {}, context({ tuning: DCF77_IQ }));
+    const text = words(tree);
+    assert.ok(!text.includes('Start switches the receiver to IQ'));
+    assert.ok(!text.includes('Pick a frequency above'));
+    assert.ok(!text.includes('2000 Hz image'), 'DCF77 has no tick image to clip');
+    assert.ok(!text.includes('MSF'), '77.5 kHz is not shared with MSF');
+});
+
+t('WWV in IQ is the wrong mode, and the note says DCF77 is the exception', () => {
+    reset();
+    const { tree } = render(ClockExtension, {}, context({
+        tuning: { frequency: 9_999_000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 },
+    }));
+    const text = words(tree);
+    assert.ok(text.includes('received in USB'));
+    assert.ok(text.includes('DCF77 is the exception'));
+});
+
+t('the menu tunes DCF77 on its carrier and does not force IQ while stopped', () => {
+    reset();
+    const ctx = context();
+    const { tree } = render(ClockExtension, {}, ctx);
+    const select = walk(tree).find((n) => n && n.props && n.props.className === 'select');
+    select.props.onChange({ target: { value: '77500' } });
+    const tuned = ctx.calls.find((c) => c[0] === 'tuneTo');
+    assert.ok(tuned, 'selecting 77.5 kHz should tune');
+    assert.strictEqual(tuned[1].frequency, 77_500);
+    // As DRM: raw baseband with nothing decoding it is a nasty surprise, so the
+    // switch waits for Start. No passband either — IQ has its own.
+    assert.strictEqual(tuned[1].mode, 'usb');
+    assert.strictEqual(tuned[1].bandwidthHigh, undefined);
 });
 
 t('the tune menu retunes to the offset dial, not the carrier', () => {
@@ -224,13 +291,29 @@ t('the station comes from the dial the same way the server picks it', () => {
     assert.strictEqual(stationFor(9_999_000), 'wwv');
     assert.strictEqual(stationFor(WWVB_CEILING_HZ - 1), 'wwvb');
     assert.strictEqual(stationFor(WWVB_CEILING_HZ), 'wwv');
+    // DCF77 is under the WWVB ceiling too, so it is checked first. The window
+    // matches dcf77WindowHz in extension.go.
+    assert.strictEqual(stationFor(DCF77_CARRIER_HZ), 'dcf77');
+    assert.strictEqual(stationFor(DCF77_CARRIER_HZ - DCF77_WINDOW_HZ), 'dcf77');
+    assert.strictEqual(stationFor(DCF77_CARRIER_HZ + DCF77_WINDOW_HZ), 'dcf77');
+    assert.strictEqual(stationFor(DCF77_CARRIER_HZ - DCF77_WINDOW_HZ - 1), 'wwvb');
+    assert.strictEqual(stationFor(DCF77_CARRIER_HZ + DCF77_WINDOW_HZ + 1), 'wwvb');
+    assert.strictEqual(stationFor(0), 'wwv');
 });
 
-t('every listed frequency is 1 kHz below its carrier', () => {
+t('every USB frequency is 1 kHz below its carrier, and IQ ones are on it', () => {
     for (const g of CLOCK_FREQUENCIES) {
         for (const o of g.options) {
-            assert.strictEqual(o.carrier - o.hz, 1000,
-                `${o.label} is not offset 1 kHz below its carrier`);
+            if (o.mode === 'iq') {
+                // IQ puts the carrier at 0 Hz of the baseband, so the dial is
+                // the carrier itself.
+                assert.strictEqual(o.hz, o.carrier, `${o.label} is not tuned to its carrier`);
+            } else {
+                assert.strictEqual(o.carrier - o.hz, 1000,
+                    `${o.label} is not offset 1 kHz below its carrier`);
+            }
+            assert.strictEqual(modeFor(stationFor(o.hz)), o.mode || 'usb',
+                `${o.label}'s mode is not the one its station is decoded in`);
         }
     }
 });
@@ -245,6 +328,7 @@ t('the menu offers the frequencies these stations actually transmit on', () => {
         assert.ok(carriers[mhz * 1e6], `${mhz} MHz is missing from the menu`);
     }
     assert.ok(carriers[60_000], 'WWVB 60 kHz is missing');
+    assert.strictEqual(carriers[77_500], 'DCF77', 'DCF77 77.5 kHz is missing');
 });
 
 t('20 and 25 MHz are not offered as WWVH, because WWVH is not there', () => {
@@ -266,6 +350,7 @@ t('20 and 25 MHz are not offered as WWVH, because WWVH is not there', () => {
 });
 
 t('the tune menu knows when the dial is already on an entry', () => {
+    assert.strictEqual(tunedClockOption(77_500).label, '77.5 kHz');
     assert.strictEqual(tunedClockOption(9_999_000).label, '10 MHz');
     assert.strictEqual(tunedClockOption(9_999_120).label, '10 MHz');  // a little off
     assert.strictEqual(tunedClockOption(9_990_000), null);
@@ -460,6 +545,20 @@ t('WWVB is told to check its own carrier, not a tick it does not have', () => {
     assert.ok(stages[0].hint.includes('0.059 MHz'));
 });
 
+t('DCF77 is told to check its 77.5 kHz carrier, and which demodulator times it', () => {
+    const cold = funnelStages({ tone_detected: false }, 'dcf77');
+    assert.strictEqual(cold[0].label, 'Carrier');
+    assert.ok(cold[0].hint.includes('0.0775 MHz'));
+    const warm = funnelStages({ tone_detected: true, phase_locked: true, timing_from: 'pm' }, 'dcf77');
+    assert.strictEqual(warm[1].detail, 'phase code');
+    const am = funnelStages({ tone_detected: true, phase_locked: true, timing_from: 'am' }, 'dcf77');
+    assert.strictEqual(am[1].detail, 'carrier cut');
+});
+
+t('DCF77 is named once found', () => {
+    assert.strictEqual(stationLabel('dcf77'), 'DCF77');
+});
+
 t('no diagnostics yet means no funnel rather than a red one', () => {
     assert.deepStrictEqual(funnelStages(null, 'wwv'), []);
 });
@@ -488,6 +587,14 @@ t('the DST pair reads as a schedule, not a state', () => {
     assert.strictEqual(frameFlags({ dst1: false, dst2: true })[0].label, 'US DST starts today');
     assert.strictEqual(frameFlags({ dst1: true, dst2: false })[0].label, 'US DST ends today');
     assert.deepStrictEqual(frameFlags({ dst1: false, dst2: false }), []);
+});
+
+t('DCF77 summer time is CEST, not US DST', () => {
+    // The decoder carries CEST in both DST fields; read as WWV's pair it would
+    // say "US DST in effect" about a German transmitter.
+    const flags = frameFlags({ station: 'dcf77', dst1: true, dst2: true, cest: true });
+    assert.deepStrictEqual(flags.map((f) => f.label), ['German summer time (CEST)']);
+    assert.deepStrictEqual(frameFlags({ station: 'dcf77', dst1: false, dst2: false, cest: false }), []);
 });
 
 t('a pending leap second is a warning and a leap year is not', () => {

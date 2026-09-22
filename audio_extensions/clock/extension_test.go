@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
+	"time"
 )
 
 // The sample<->host mapping and the offset rewritten from it are the only
@@ -315,10 +317,11 @@ func TestRewriteOffsetKeepsTheDecodersOwnCorrections(t *testing.T) {
 // --- station selection ---------------------------------------------------
 
 func TestStationComesFromTheDial(t *testing.T) {
-	// The two stations need genuinely different decoders, and the choice is
-	// made before the subprocess starts — so it has to come from the dial, and
-	// it has to agree with what the panel says it did (stationFor in
+	// The stations need genuinely different decoders, and the choice is made
+	// before the subprocess starts — so it has to come from the dial, and it
+	// has to agree with what the panel says it did (stationFor in
 	// static/v2/src/extensions/clock/frames.js).
+	fakeBinary(t, "cat >/dev/null")
 	cases := []struct {
 		dial uint64
 		want string
@@ -328,18 +331,112 @@ func TestStationComesFromTheDial(t *testing.T) {
 		{wwvbCeilingHz, "wwv"},
 		{9_999_000, "wwv"},
 		{0, "wwv"}, // unknown dial: WWV is the safe default, WWVB is the special case
+		// DCF77 sits below the WWVB ceiling, so it has to be checked first.
+		{dcf77CarrierHz, "dcf77"},
+		{dcf77CarrierHz - dcf77WindowHz, "dcf77"},
+		{dcf77CarrierHz + dcf77WindowHz, "dcf77"},
+		{dcf77CarrierHz - dcf77WindowHz - 1, "wwvb"},
+		{dcf77CarrierHz + dcf77WindowHz + 1, "wwvb"},
 	}
 
 	for _, tc := range cases {
-		ext, err := NewClockExtension(12000, map[string]interface{}{
+		if got := stationForDial(tc.dial); got != tc.want {
+			t.Fatalf("dial %d Hz selected %q, want %q", tc.dial, got, tc.want)
+		}
+		ext, err := NewClockExtension(12000, channelsFor(tc.want), map[string]interface{}{
 			"tuned_frequency_hz": float64(tc.dial),
 		})
 		if err != nil {
-			t.Skipf("ubersdr-clock not installed: %v", err)
+			t.Fatalf("dial %d Hz: %v", tc.dial, err)
 		}
 		if ext.station != tc.want {
-			t.Fatalf("dial %d Hz selected %q, want %q", tc.dial, ext.station, tc.want)
+			t.Fatalf("dial %d Hz built %q, want %q", tc.dial, ext.station, tc.want)
 		}
+	}
+}
+
+func TestChannelsMustMatchTheStation(t *testing.T) {
+	// The mode can change under an attached extension without it being
+	// rebuilt, so the attach is the one point a decoder can be refused the
+	// wrong kind of samples: mono read as I/Q pairs, or I/Q read as audio,
+	// acquires for ever with nothing to say why.
+	fakeBinary(t, "cat >/dev/null")
+	cases := []struct {
+		dial     uint64
+		channels int
+		ok       bool
+		mention  string
+	}{
+		{dcf77CarrierHz, 2, true, ""},
+		{dcf77CarrierHz, 1, false, "IQ"},
+		{9_999_000, 1, true, ""},
+		{9_999_000, 2, false, "USB"},
+		{59_000, 2, false, "USB"},
+	}
+	for _, tc := range cases {
+		_, err := NewClockExtension(12000, tc.channels, map[string]interface{}{
+			"tuned_frequency_hz": float64(tc.dial),
+		})
+		if tc.ok && err != nil {
+			t.Fatalf("dial %d Hz, %d ch: refused: %v", tc.dial, tc.channels, err)
+		}
+		if !tc.ok {
+			if err == nil {
+				t.Fatalf("dial %d Hz, %d ch: accepted", tc.dial, tc.channels)
+			}
+			if !strings.Contains(err.Error(), tc.mention) {
+				t.Fatalf("dial %d Hz, %d ch: %q does not say which mode to use (%s)",
+					tc.dial, tc.channels, err, tc.mention)
+			}
+		}
+	}
+}
+
+func TestDcf77PassesTheCarrierOffsetAndCountsFrames(t *testing.T) {
+	// The binary is told where the carrier sits in the baseband, and the
+	// sample clock counts I/Q frames rather than int16 values — the binary's
+	// edge_sample counts frames, so counting values would put every offset
+	// out by half the elapsed time.
+	fakeBinary(t, `printf '{"type":"args","v":"%s"}\n' "$*"; cat >/dev/null`)
+	ext, err := NewClockExtension(12000, 2, map[string]interface{}{
+		"tuned_frequency_hz": float64(78_000),
+	})
+	if err != nil {
+		t.Fatalf("constructor: %v", err)
+	}
+	audioChan := make(chan AudioSample, 4)
+	resultChan := make(chan []byte, 4)
+	if err := ext.Start(audioChan, resultChan); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer ext.Stop()
+
+	select {
+	case line := <-resultChan:
+		var ev struct{ V string }
+		if err := json.Unmarshal(line, &ev); err != nil {
+			t.Fatalf("args line %q: %v", line, err)
+		}
+		if !strings.Contains(ev.V, "--station dcf77") || !strings.Contains(ev.V, "--carrier-offset-hz -500") {
+			t.Fatalf("binary started with %q", ev.V)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the fake binary never reported its arguments")
+	}
+
+	audioChan <- AudioSample{PCMData: make([]int16, 480), GPSTimeNs: time.Now().UnixNano()}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		ext.clock.mu.Lock()
+		total := ext.clock.total
+		ext.clock.mu.Unlock()
+		if total == 240 {
+			break
+		}
+		if total != 0 || time.Now().After(deadline) {
+			t.Fatalf("480 int16s of I/Q counted as %d samples, want 240 frames", total)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -347,7 +444,7 @@ func TestUnevenSampleRateIsRefused(t *testing.T) {
 	// 200 Hz is the WWV series rate; a rate that is not a multiple of it
 	// decimates unevenly and drifts. Every UberSDR mode rate clears this, so
 	// this is about failing loudly if one ever does not.
-	if _, err := NewClockExtension(12345, nil); err == nil {
+	if _, err := NewClockExtension(12345, 1, nil); err == nil {
 		t.Fatal("an indivisible sample rate was accepted")
 	}
 }

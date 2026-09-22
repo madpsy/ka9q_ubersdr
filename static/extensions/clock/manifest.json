@@ -1,14 +1,14 @@
 {
   "name": "clock",
   "displayName": "Time Signal Decoder",
-  "version": "1.0.0",
-  "description": "WWV/WWVH/WWVB time-code decoder — decodes the NIST broadcast time code from the audio and reports how far your clock is from it, with the per-second alignment and the acquisition funnel. Requires the ubersdr-clock binary at /opt/ubersdr-clock/. The panel is part of the V2 interface.",
+  "version": "1.1.0",
+  "description": "WWV/WWVH/WWVB/DCF77 time-code decoder — decodes the NIST or PTB broadcast time code (from USB audio, or from IQ for DCF77) and reports how far your clock is from it, with the per-second alignment and the acquisition funnel. The panel is part of the V2 interface.",
   "author": "UberSDR",
   "type": "decoder",
   "icon": "🕐",
   "category": "decoder",
   "requiresAudio": true,
-  "requiresMode": "usb",
+  "requiresMode": null,
   "files": {},
   "settings": {}
 }

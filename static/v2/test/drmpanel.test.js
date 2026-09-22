@@ -235,11 +235,12 @@ t('the threshold sits inside the bar, not at an end', () => {
 // that wants the quadrature stream — so it has to survive the very mode change
 // that kills the rest, and the launcher has to keep offering it.
 
-t('DRM is the extension flagged as wanting IQ', () => {
+t('DRM and the time-signal decoder are the extensions flagged as wanting IQ', () => {
     assert.strictEqual(EXTENSION_BY_ID.drm.needsIQ, true);
-    const others = EXTENSIONS.filter((e) => e.id !== 'drm' && e.needsIQ);
-    assert.deepStrictEqual(others.map((e) => e.id), [],
-        'only DRM should claim needsIQ; the rest decode demodulated audio');
+    // The clock reads IQ for DCF77 and switches into it on Start, as DRM does.
+    const iq = EXTENSIONS.filter((e) => e.needsIQ).map((e) => e.id).sort();
+    assert.deepStrictEqual(iq, ['clock', 'drm'],
+        'only DRM and the clock should claim needsIQ; the rest decode demodulated audio');
 });
 
 function launcher(mode) {
@@ -277,10 +278,12 @@ t('in IQ the launcher disables the audio decoders but not DRM', () => {
     assert.strictEqual(drm.disabled, false, 'DRM must stay usable in IQ');
     assert.strictEqual(ft8.disabled, true, 'FT8 cannot decode IQ');
 
-    // And it is the only one: if another extension ever claims needsIQ without
-    // actually reading quadrature, this catches it.
-    const live = rows.filter((r) => !r.disabled);
-    assert.strictEqual(live.length, 1, `expected only DRM live in IQ, got ${live.length}`);
+    // And they are the only ones — DRM, and the time-signal decoder for DCF77:
+    // if another extension ever claims needsIQ without actually reading
+    // quadrature, this catches it.
+    const live = rows.filter((r) => !r.disabled).map((r) => r.text);
+    assert.strictEqual(live.length, 2, `expected DRM and the clock live in IQ, got ${live.join(', ')}`);
+    assert.ok(live.some((t) => t.startsWith('Time Signal Decoder')), 'the clock must stay usable in IQ');
 });
 
 t('outside IQ every enabled extension is offered, DRM included', () => {

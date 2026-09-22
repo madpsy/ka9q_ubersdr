@@ -1,11 +1,12 @@
 package clock
 
 /*
- * WWV/WWVH/WWVB time-code decoder extension.
+ * WWV/WWVH/WWVB/DCF77 time-code decoder extension.
  *
  * Spawns /opt/ubersdr-clock/ubersdr-clock_<goarch> as a subprocess. The binary
- * reads mono int16 little-endian PCM from stdin at the session sample rate and
- * writes newline-delimited JSON to stdout, one object per event:
+ * reads int16 little-endian PCM from stdin at the session sample rate — mono
+ * audio for WWV/WWVH/WWVB, interleaved I/Q for DCF77 — and writes
+ * newline-delimited JSON to stdout, one object per event:
  *
  *   {"type":"state","state":"locked","station":"wwv"}
  *   {"type":"time","utc":"...","quality":100,"offset_ms":-341.2,...}
@@ -23,8 +24,10 @@ package clock
  *
  * Tuning is the operator's job and the panel says so: WWV/WWVH wants USB at
  * (carrier - 1 kHz) with a passband reaching 2.2 kHz, WWVB wants USB at
- * 0.059 MHz. The station argument is derived from the session's tuned
- * frequency rather than asked for.
+ * 0.059 MHz, and DCF77 wants IQ at 0.0775 MHz — its decoder reads the carrier's
+ * phase as well as its amplitude, and USB audio carries no phase. The station
+ * argument is derived from the session's tuned frequency rather than asked
+ * for, and the session's channel count has to match it.
  *
  * Multiple instances may run concurrently (one per user session). All shared
  * state is protected by e.mu or accessed atomically.
@@ -41,6 +44,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -75,6 +79,39 @@ const stopTimeout = 2 * time.Second
 // different decoders (a 100 Hz BCD subcarrier against PWM on the carrier's own
 // amplitude), so this has to be decided before the subprocess starts.
 const wwvbCeilingHz = 1_000_000
+
+// DCF77 is taken to be the station when the dial is within dcf77WindowHz of its
+// 77.5 kHz carrier, which is checked before the WWVB ceiling — both are below
+// it. The window is what an IQ session's ±6 kHz baseband can hold with room
+// for the binary's own margin (it refuses a carrier within 200 Hz of the
+// edge); the carrier's place in it is handed over as --carrier-offset-hz, so a
+// dial anywhere in the window decodes. Matches DCF77_WINDOW_HZ in
+// static/v2/src/extensions/clock/frames.js.
+const (
+	dcf77CarrierHz = 77_500
+	dcf77WindowHz  = 5_000
+)
+
+// stationForDial is the decoder a dial frequency implies: dcf77, wwvb or wwv
+// (which also covers WWVH — that decoder tags the station itself).
+func stationForDial(hz uint64) string {
+	if hz+dcf77WindowHz >= dcf77CarrierHz && hz <= dcf77CarrierHz+dcf77WindowHz {
+		return "dcf77"
+	}
+	if hz > 0 && hz < wwvbCeilingHz {
+		return "wwvb"
+	}
+	return "wwv"
+}
+
+// channelsFor is the session channel count a station's decoder reads: DCF77
+// is complex baseband, the rest demodulated audio.
+func channelsFor(station string) int {
+	if station == "dcf77" {
+		return 2
+	}
+	return 1
+}
 
 // AudioSample contains PCM audio data with timing information.
 type AudioSample struct {
@@ -129,6 +166,8 @@ func newSampleClock(rate int) *sampleClock {
 }
 
 // advance records that n samples ending at host time hostNs have been written.
+// A sample here is a frame — one int16 of mono audio, or an I and a Q — since
+// that is what the binary's sample indices count.
 func (c *sampleClock) advance(n int, hostNs int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -190,7 +229,8 @@ func (c *sampleClock) hostMsAt(sample int64) (float64, bool) {
 // ClockExtension wraps the ubersdr-clock subprocess.
 type ClockExtension struct {
 	sampleRate int
-	station    string // "wwv" or "wwvb"
+	channels   int    // 1, or 2 for DCF77's interleaved I/Q
+	station    string // "wwv", "wwvb" or "dcf77"
 	tunedHz    uint64
 
 	clock *sampleClock
@@ -209,16 +249,17 @@ type ClockExtension struct {
 	wg        sync.WaitGroup
 }
 
-// NewClockExtension creates a new clock extension instance.
+// NewClockExtension creates a new clock extension instance for a session with
+// the given sample rate and channel count (1 for audio, 2 for IQ).
 // Returns an error immediately if the binary is not found.
-func NewClockExtension(sampleRate int, extensionParams map[string]interface{}) (*ClockExtension, error) {
+func NewClockExtension(sampleRate, channels int, extensionParams map[string]interface{}) (*ClockExtension, error) {
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("ubersdr-clock binary not found at %s — "+
 			"install it from https://github.com/madpsy/ubersdr-clock", binaryPath)
 	}
 
 	// The decoders decimate to a fixed series rate — 200 Hz for WWV/WWVH,
-	// 100 Hz for WWVB — so a rate that is not a multiple of it decimates
+	// 100 Hz for WWVB and DCF77 — so a rate that is not a multiple of it decimates
 	// unevenly and drifts. Every UberSDR mode rate clears this (12000 and
 	// 24000 both divide by 200), but a refused attach naming the reason beats
 	// a decoder that silently never locks.
@@ -232,7 +273,7 @@ func NewClockExtension(sampleRate int, extensionParams map[string]interface{}) (
 	}
 
 	// Station from the dial, not from the user: the manager injects the tuned
-	// frequency into every attach, and the two stations are different decoders
+	// frequency into every attach, and the stations are different decoders
 	// rather than a setting.
 	var tunedHz uint64
 	switch v := extensionParams["tuned_frequency_hz"].(type) {
@@ -246,26 +287,40 @@ func NewClockExtension(sampleRate int, extensionParams map[string]interface{}) (
 		tunedHz = uint64(v)
 	}
 
-	station := "wwv"
-	if tunedHz > 0 && tunedHz < wwvbCeilingHz {
-		station = "wwvb"
-	}
+	station := stationForDial(tunedHz)
 	// An explicit override, for a receiver whose dial the server cannot see
-	// the way the panel does. Not exposed in the UI.
+	// the way the panel does. The panel sends the one it derived from the dial
+	// — the same answer, by the same rule — so that moving between decoders
+	// changes its attach parameters and re-attaches.
 	if s, ok := extensionParams["station"].(string); ok {
 		switch s {
-		case "wwv", "wwvh", "wwvb":
+		case "wwv", "wwvh", "wwvb", "dcf77":
 			station = s
 		default:
-			return nil, fmt.Errorf("clock: unknown station %q (expected wwv, wwvh or wwvb)", s)
+			return nil, fmt.Errorf("clock: unknown station %q (expected wwv, wwvh, wwvb or dcf77)", s)
 		}
 	}
 
-	log.Printf("[Clock] Created: %d Hz, station=%s, dial=%.6f MHz",
-		sampleRate, station, float64(tunedHz)/1e6)
+	// The session has to be delivering what that decoder reads. The mode can
+	// change under an attached extension without it being rebuilt, so this is
+	// the one place a mismatch can be caught before it becomes a decoder
+	// fed samples it cannot interpret: mono read as I/Q pairs, or I/Q read as
+	// audio, either of which acquires for ever with nothing to say why.
+	if want := channelsFor(station); channels != want {
+		if want == 2 {
+			return nil, fmt.Errorf("clock: DCF77 is decoded from IQ (got %d-channel audio) — "+
+				"switch the receiver to IQ mode", channels)
+		}
+		return nil, fmt.Errorf("clock: %s is decoded from USB audio (got %d-channel IQ) — "+
+			"switch the receiver to USB", strings.ToUpper(station), channels)
+	}
+
+	log.Printf("[Clock] Created: %d Hz, %d ch, station=%s, dial=%.6f MHz",
+		sampleRate, channels, station, float64(tunedHz)/1e6)
 
 	return &ClockExtension{
 		sampleRate: sampleRate,
+		channels:   channels,
 		station:    station,
 		tunedHz:    tunedHz,
 		clock:      newSampleClock(sampleRate),
@@ -306,6 +361,12 @@ func (e *ClockExtension) Start(audioChan <-chan AudioSample, resultChan chan<- [
 		// The panel is the only consumer and it renders diagnostics live, so
 		// the default 10 s interval is too coarse to watch an acquisition.
 		"--diag-seconds", "2",
+	}
+	if e.station == "dcf77" {
+		// Where the carrier sits in the baseband: 0 on a 77.5 kHz dial.
+		// Signed arithmetic — the dial may be either side of it.
+		offset := dcf77CarrierHz - int64(e.tunedHz)
+		args = append(args, "--carrier-offset-hz", strconv.FormatInt(offset, 10))
 	}
 
 	cmd := exec.Command(binaryPath, args...)
@@ -442,7 +503,9 @@ func (e *ClockExtension) writeLoop(audioChan <-chan AudioSample) {
 				continue
 			}
 
-			e.clock.advance(len(sample.PCMData), sample.GPSTimeNs)
+			// Frames, not int16 values: an IQ frame is an I and a Q, and the
+			// binary's sample indices count frames.
+			e.clock.advance(len(sample.PCMData)/e.channels, sample.GPSTimeNs)
 
 			// Cast []int16 → []byte in place. Safe on little-endian platforms
 			// (amd64, arm64 — the only two this ships for), and it is what the

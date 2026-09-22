@@ -20,6 +20,12 @@
 // and the seconds tick at its 2000 Hz (WWV) / 2200 Hz (WWVH) image. WWVB's
 // 60 kHz carrier lands at ~1000 Hz from a 0.059 MHz dial.
 //
+// DCF77 is the exception. Its decoder reads the carrier's PHASE — a 512-chip
+// pseudo-random phase code that times the second to tens of microseconds —
+// as well as the amplitude cuts, and USB audio carries no phase. So it is
+// received in IQ with the dial ON the carrier, which puts it at 0 Hz of the
+// complex baseband, and the entry says so with `mode: 'iq'`.
+//
 // The dial frequency is what is stored, so these are already offset — there is
 // no arithmetic at tune time and nothing to get the sign of wrong.
 export const CARRIER_OFFSET_HZ = 1000;
@@ -56,6 +62,12 @@ export const CLOCK_FREQUENCIES = [
             { hz: 59_000, label: '60 kHz', carrier: 60_000 },
         ],
     },
+    {
+        group: 'DCF77',
+        options: [
+            { hz: 77_500, label: '77.5 kHz', carrier: 77_500, mode: 'iq' },
+        ],
+    },
 ];
 
 // The passband has to reach 2.2 kHz or the WWV/WWVH tick image is cut off, and
@@ -65,14 +77,33 @@ export const CLOCK_FREQUENCIES = [
 export const CLOCK_MODE = 'usb';
 export const CLOCK_BANDWIDTH = { low: 0, high: 3000 };
 
+// DCF77's mode. Plain `iq` rather than a wide variant: 12 kHz of baseband holds
+// the carrier with kilohertz to spare, and the wide ones need operator
+// authorisation. The same choice the DRM decoder makes.
+export const DCF77_MODE = 'iq';
+
+/** The mode a station's decoder reads: IQ for DCF77, USB for the rest. */
+export function modeFor(station) {
+    return station === 'dcf77' ? DCF77_MODE : CLOCK_MODE;
+}
+
 // Below this the dial is taken to be on WWVB. Matches wwvbCeilingHz in
 // audio_extensions/clock/extension.go, which decides which decoder to spawn —
 // the panel must agree with it or it will label a station the server is not
 // decoding.
 export const WWVB_CEILING_HZ = 1_000_000;
 
+// A dial within this of 77.5 kHz is taken to be on DCF77 — checked before the
+// WWVB ceiling, which it is also under. Matches dcf77CarrierHz/dcf77WindowHz in
+// extension.go: the server hands the carrier's place in the baseband to the
+// decoder, so anywhere in the window decodes.
+export const DCF77_CARRIER_HZ = 77_500;
+export const DCF77_WINDOW_HZ = 5_000;
+
 export function stationFor(dialHz) {
-    return Number.isFinite(dialHz) && dialHz > 0 && dialHz < WWVB_CEILING_HZ ? 'wwvb' : 'wwv';
+    if (!Number.isFinite(dialHz) || dialHz <= 0) return 'wwv';
+    if (Math.abs(dialHz - DCF77_CARRIER_HZ) <= DCF77_WINDOW_HZ) return 'dcf77';
+    return dialHz < WWVB_CEILING_HZ ? 'wwvb' : 'wwv';
 }
 
 /** The menu entry the receiver is on, or null. Tolerant of a few Hz of drift. */
@@ -128,7 +159,7 @@ export const STATE_LABELS = {
 export const STATE_TONES = { nosignal: 'off', acquiring: 'wait', locked: 'on' };
 
 export const STATION_LABELS = {
-    wwv: 'WWV', wwvh: 'WWVH', wwvb: 'WWVB', unknown: 'Unknown',
+    wwv: 'WWV', wwvh: 'WWVH', wwvb: 'WWVB', dcf77: 'DCF77', unknown: 'Unknown',
 };
 
 export function stateLabel(state) { return STATE_LABELS[state] || 'Stopped'; }
@@ -339,34 +370,62 @@ export function symbolTone(cell) {
 export function funnelStages(diag, station) {
     if (!diag) return [];
     const wwvb = station === 'wwvb';
+    const dcf77 = station === 'dcf77';
+
+    const carrier = dcf77
+        ? {
+            label: 'Carrier',
+            hint: 'No 77.5 kHz carrier in the IQ. Tune IQ to 0.0775 MHz. DCF77 '
+                + 'transmits from Mainflingen, near Frankfurt, and is strong across '
+                + 'Europe but faint beyond about 2000 km.',
+        }
+        : wwvb
+            ? { label: 'Carrier tone', hint: 'No 60 kHz carrier in the audio. Tune USB to 0.059 MHz.' }
+            : {
+                label: 'Second tick',
+                hint: 'No seconds tick. The tick is recovered from its 2000 Hz (WWV) or '
+                    + '2200 Hz (WWVH) image, so the passband has to reach 2.2 kHz — a '
+                    + 'narrow SSB filter cuts it off and nothing downstream can start.',
+            };
+
+    // DCF77 times the second from whichever of its two demodulators is
+    // tracking — the phase code when it can, the carrier cut otherwise — and
+    // that is the detail worth showing, where the others show their filter
+    // delay estimate.
+    const timingDetail = dcf77
+        ? (diag.timing_from === 'pm' ? 'phase code' : (diag.timing_from === 'am' ? 'carrier cut' : null))
+        : (Number.isFinite(diag.delay_est_ms) ? `${diag.delay_est_ms.toFixed(1)} ms` : null);
 
     const stages = [
         {
             id: 'carrier',
-            label: wwvb ? 'Carrier tone' : 'Second tick',
+            label: carrier.label,
             ok: !!diag.tone_detected,
             detail: Number.isFinite(diag.tone_snr_db) ? `${diag.tone_snr_db.toFixed(1)} dB` : null,
-            hint: wwvb
-                ? 'No 60 kHz carrier in the audio. Tune USB to 0.059 MHz.'
-                : 'No seconds tick. The tick is recovered from its 2000 Hz (WWV) or '
-                  + '2200 Hz (WWVH) image, so the passband has to reach 2.2 kHz — a '
-                  + 'narrow SSB filter cuts it off and nothing downstream can start.',
+            hint: carrier.hint,
         },
         {
             id: 'timing',
             label: 'Second edge',
             ok: !!diag.phase_locked,
-            detail: Number.isFinite(diag.delay_est_ms) ? `${diag.delay_est_ms.toFixed(1)} ms` : null,
-            hint: 'The tick is there but its phase has not settled. Usually fading; '
-                + 'give it a minute, or try another frequency.',
+            detail: timingDetail,
+            hint: dcf77
+                ? 'The carrier is there but the second has not been found in it. '
+                  + 'Usually fading, or interference near 77.5 kHz; give it a minute.'
+                : 'The tick is there but its phase has not settled. Usually fading; '
+                  + 'give it a minute, or try another frequency.',
         },
         {
             id: 'frame',
             label: 'Frame sync',
             ok: !!diag.anchored,
             detail: diag.bad_frame_streak > 0 ? `${diag.bad_frame_streak} bad` : null,
-            hint: 'Seconds are being classified but the minute has not been located. '
-                + 'This needs about two clean minutes.',
+            hint: dcf77
+                ? 'Seconds are being classified but the minute has not been located. '
+                  + 'DCF77 marks it by leaving second 59 uncut, so this needs about '
+                  + 'two clean minutes.'
+                : 'Seconds are being classified but the minute has not been located. '
+                  + 'This needs about two clean minutes.',
         },
         {
             id: 'vote',
@@ -504,6 +563,11 @@ export function formatDate(doy, year2) {
  * Returned as a list rather than a set of booleans because that is how it is
  * drawn — a row of chips, only the ones that are set — and because leap_year is
  * WWVB-only and simply does not exist on a WWV frame.
+ *
+ * DCF77 sends German civil time and says which zone it is counting in, so its
+ * one zone flag is CEST. The decoder has already converted the minute to UTC;
+ * the chip only says what the transmitter was sending. It is not US DST,
+ * whatever field it also arrives in.
  */
 export function frameFlags(frame) {
     if (!frame) return [];
@@ -512,7 +576,9 @@ export function frameFlags(frame) {
         out.push({ id: 'leap', label: 'Leap second pending', tone: 'warn' });
     }
     if (frame.leap_year) out.push({ id: 'leapyear', label: 'Leap year', tone: 'info' });
-    if (frame.dst1 || frame.dst2) {
+    if (frame.station === 'dcf77') {
+        if (frame.cest) out.push({ id: 'dst', label: 'German summer time (CEST)', tone: 'info' });
+    } else if (frame.dst1 || frame.dst2) {
         // The two bits are a schedule, not a state: DST1 is the status at 00:00Z
         // today and DST2 at 24:00Z, so the pair says whether a change happens
         // during today and which way round.

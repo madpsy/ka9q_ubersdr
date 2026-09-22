@@ -36,7 +36,7 @@ func fakeBinary(t *testing.T, script string) {
 
 func startExt(t *testing.T) (*ClockExtension, chan AudioSample, chan []byte) {
 	t.Helper()
-	ext, err := NewClockExtension(12000, map[string]interface{}{
+	ext, err := NewClockExtension(12000, 1, map[string]interface{}{
 		"tuned_frequency_hz": float64(9_999_000),
 	})
 	if err != nil {
@@ -61,7 +61,7 @@ func TestMissingBinaryIsRefusedAtAttach(t *testing.T) {
 	binaryPath = filepath.Join(t.TempDir(), "definitely-not-here")
 	defer func() { binaryPath = saved }()
 
-	_, err := NewClockExtension(12000, nil)
+	_, err := NewClockExtension(12000, 1, nil)
 	if err == nil {
 		t.Fatal("a missing binary was accepted; the attach must fail so the user is told")
 	}
@@ -80,7 +80,7 @@ func TestUnstartableBinaryFailsStartRatherThanPanicking(t *testing.T) {
 	binaryPath = path
 	defer func() { binaryPath = saved }()
 
-	ext, err := NewClockExtension(12000, nil)
+	ext, err := NewClockExtension(12000, 1, nil)
 	if err != nil {
 		t.Fatalf("the constructor only stats the file, so it should succeed: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestStopIsIdempotentAndConcurrencySafe(t *testing.T) {
 
 func TestStopWithoutStartIsSafe(t *testing.T) {
 	fakeBinary(t, `cat > /dev/null`)
-	ext, err := NewClockExtension(12000, nil)
+	ext, err := NewClockExtension(12000, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,8 +357,8 @@ func TestHostileExtensionParamsAreRefusedNotPanicked(t *testing.T) {
 			}()
 			// Either outcome is fine; only a panic is not. An unusable value
 			// must never reach the command line as an argument.
-			if ext, err := NewClockExtension(12000, params); err == nil {
-				if ext.station != "wwv" && ext.station != "wwvh" && ext.station != "wwvb" {
+			if ext, err := NewClockExtension(12000, 1, params); err == nil {
+				if ext.station != "wwv" && ext.station != "wwvh" && ext.station != "wwvb" && ext.station != "dcf77" {
 					t.Fatalf("case %d produced station %q, which would be passed to the binary",
 						i, ext.station)
 				}
@@ -373,13 +373,13 @@ func TestSampleRatesEveryModeCanProduce(t *testing.T) {
 	// accepted, because the user picks the mode and the decoder simply gets
 	// whatever the session is on.
 	for _, rate := range []int{12000, 24000} {
-		if _, err := NewClockExtension(rate, nil); err != nil {
+		if _, err := NewClockExtension(rate, 1, nil); err != nil {
 			t.Fatalf("%d Hz is a real UberSDR mode rate and was refused: %v", rate, err)
 		}
 	}
 	// And a few that are not, which must be refused rather than decoded wrongly.
 	for _, rate := range []int{0, -1, 1, 12345, 11999} {
-		if _, err := NewClockExtension(rate, nil); err == nil {
+		if _, err := NewClockExtension(rate, 1, nil); err == nil {
 			t.Fatalf("%d Hz was accepted but cannot be decimated evenly", rate)
 		}
 	}
@@ -391,7 +391,7 @@ func TestResultChannelBackpressureDropsRatherThanBlocks(t *testing.T) {
 	// the right failure and blocking would be the wrong one.
 	fakeBinary(t, fmt.Sprintf(`i=0; while [ $i -lt 500 ]; do echo '{"type":"diag","n":'$i'}'; i=$((i+1)); done; sleep 5`))
 
-	ext, err := NewClockExtension(12000, nil)
+	ext, err := NewClockExtension(12000, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

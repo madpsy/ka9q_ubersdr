@@ -7,7 +7,7 @@ import (
 // AudioExtensionParams contains audio stream parameters (from session, not user-configurable)
 type AudioExtensionParams struct {
 	SampleRate    int // Hz (e.g., 12000)
-	Channels      int // Always 1 (mono) for this extension
+	Channels      int // 1 (mono audio) for WWV/WWVH/WWVB, 2 (IQ) for DCF77
 	BitsPerSample int // Always 16
 }
 
@@ -23,29 +23,28 @@ type AudioExtensionFactory func(audioParams AudioExtensionParams, extensionParam
 
 // Factory creates a new clock extension instance
 func Factory(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
-	if audioParams.Channels != 1 {
-		return nil, fmt.Errorf("clock decoder requires mono audio (got %d channels) — "+
-			"tune a voice mode, not IQ", audioParams.Channels)
-	}
+	// Which channel count is right depends on the station, so that check is
+	// NewClockExtension's.
 	if audioParams.BitsPerSample != 16 {
 		return nil, fmt.Errorf("clock decoder requires 16-bit audio (got %d bits)", audioParams.BitsPerSample)
 	}
 
-	return NewClockExtension(audioParams.SampleRate, extensionParams)
+	return NewClockExtension(audioParams.SampleRate, audioParams.Channels, extensionParams)
 }
 
 // GetInfo returns extension metadata
 func GetInfo() map[string]interface{} {
 	return map[string]interface{}{
 		"name":        "clock",
-		"description": "WWV/WWVH/WWVB time-code decoder — decodes the NIST broadcast time code and reports the offset against your clock",
-		"version":     "1.0.0",
+		"description": "WWV/WWVH/WWVB/DCF77 time-code decoder — decodes the NIST or PTB broadcast time code and reports the offset against your clock",
+		"version":     "1.1.0",
 		"parameters": map[string]interface{}{
 			"station": map[string]interface{}{
 				"type": "string",
-				"description": "wwv, wwvh or wwvb. Normally omitted: the station is " +
-					"derived from the session's tuned frequency, since WWV/WWVH and " +
-					"WWVB need genuinely different decoders and the dial says which",
+				"description": "wwv, wwvh, wwvb or dcf77. Normally omitted: the station is " +
+					"derived from the session's tuned frequency, since WWV/WWVH, WWVB " +
+					"and DCF77 need genuinely different decoders and the dial says which. " +
+					"DCF77 needs an IQ session; the others need USB audio",
 				"default": "(from the tuned frequency)",
 			},
 		},
@@ -56,7 +55,7 @@ func GetInfo() map[string]interface{} {
 			"events": map[string]interface{}{
 				"state": map[string]interface{}{
 					"description": "Lock state changed",
-					"fields":      "state (nosignal|acquiring|locked), station (unknown|wwv|wwvh|wwvb)",
+					"fields":      "state (nosignal|acquiring|locked), station (unknown|wwv|wwvh|wwvb|dcf77)",
 				},
 				"time": map[string]interface{}{
 					"description": "A voted timestamp, while locked",
@@ -65,8 +64,9 @@ func GetInfo() map[string]interface{} {
 				},
 				"frame": map[string]interface{}{
 					"description": "One raw frame decode, before voting",
-					"fields": "minute, hour, doy, year2, dut1_tenths, dst1, dst2, " +
-						"leap_pending, leap_year, confidence, frame_start_sample, station",
+					"fields": "minute, hour, doy, year2, dut1_tenths (not DCF77), dst1, dst2, " +
+						"cest (DCF77 only), leap_pending, leap_year, confidence, " +
+						"frame_start_sample, station",
 				},
 				"second": map[string]interface{}{
 					"description": "One classified second, with the 1 s alignment arrays",
@@ -77,7 +77,9 @@ func GetInfo() map[string]interface{} {
 					"description": "Acquisition telemetry — which stage of the funnel is failing",
 					"fields": "state, station, tone_snr_db, pwm_contrast, tone_detected, " +
 						"phase_locked, delay_est_ms, anchored, bad_frame_streak, " +
-						"frames_in_window, window_size, vote_quality, refusal, samples_consumed",
+						"frames_in_window, window_size, vote_quality, refusal, samples_consumed; " +
+						"DCF77 adds pm_locked, pm_snr_db, timing_from (am|pm), am_minus_pm_ms, " +
+						"carrier_offset_hz, last_frame_from, pm_refused_locks, pm_interference",
 				},
 			},
 		},

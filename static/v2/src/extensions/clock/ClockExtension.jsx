@@ -1,4 +1,4 @@
-// Time signal decoder — WWV, WWVH and WWVB.
+// Time signal decoder — WWV, WWVH, WWVB and DCF77.
 //
 // The decoding is the server's: this attaches the `clock` audio extension to
 // the session's audio (see ../useAudioExtension.js) and reads the JSON events
@@ -35,17 +35,23 @@
 // the best reference in the chain; the browser's own clock is shown next to it
 // in the expanded view, clearly separated, because it is a different clock and
 // is measured through a websocket rather than a decoder.
+//
+// DCF77 is the one station decoded from IQ rather than USB: its decoder reads
+// the carrier's phase code as well as its amplitude cuts, and demodulated audio
+// has no phase. So on a DCF77 dial Start switches the receiver into IQ and Stop
+// puts the mode back, exactly as the DRM decoder does — see the mode section.
 
-import React, { memo, useEffect, useMemo, useState } from '../../react.js';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '../../react.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
+import { isIQ, modeConfirmed } from '../../radio/constants.js';
 import { Button, Empty, Icon, Readout } from '../../components/ui.jsx';
 import { useAudioExtension } from '../useAudioExtension.js';
 import {
-    CLOCK_BANDWIDTH, CLOCK_FREQUENCIES, CLOCK_MODE, STRIP_LENGTH, SYMBOL_LABELS, SYMBOL_NAMES,
-    alignmentSeries, appendSecond, correctedNowMs, decodeFrame, formatClock, formatDate,
+    CLOCK_BANDWIDTH, CLOCK_FREQUENCIES, CLOCK_MODE, DCF77_MODE, STRIP_LENGTH, SYMBOL_LABELS,
+    SYMBOL_NAMES, alignmentSeries, appendSecond, correctedNowMs, decodeFrame, formatClock, formatDate,
     formatDay, formatDut1, formatOffset, frameFlags, funnelStages, localIsUtc, offsetSense,
-    offsetTone, polylinePoints, stateLabel, stateTone, stationFor, stationLabel, symbolTone,
-    tunedClockOption, zoneLabel,
+    modeFor, offsetTone, polylinePoints, stateLabel, stateTone, stationFor, stationLabel,
+    symbolTone, tunedClockOption, zoneLabel,
 } from './frames.js';
 
 // The alignment plot, in the SVG's own coordinates.
@@ -187,7 +193,7 @@ function Funnel({ diag, station }) {
 // ── the panel ───────────────────────────────────────────────────────────────
 
 export default function ClockExtension({ minimal }) {
-    const { running, audioState, tuning, actions } = useRadio();
+    const { running, audioState, tuning, actions, iqPrompt, audioChannels } = useRadio();
     // Attaching needs the audio session, not merely the power switch — the
     // server looks the session up by the UUID the socket was opened with.
     const live = running && audioState === 'open';
@@ -234,17 +240,98 @@ export default function ClockExtension({ minimal }) {
         }
     };
 
-    // No parameters: the server takes the sample rate from the session and the
-    // station from the dial, so there is nothing here whose change should tear
-    // the decoder down — which matters more here than anywhere else, since a
-    // re-attach costs four minutes of acquisition.
+    // The station is the one parameter, and it is the decoder FAMILY the dial
+    // implies — wwv (which covers WWVH), wwvb or dcf77 — by the same rule the
+    // server uses. They are different decoders chosen when the subprocess
+    // starts, so moving between them has to re-attach; moving within one (10
+    // to 15 MHz) must not, since a re-attach costs four minutes of acquisition.
+    const dialStation = stationFor(tuning.frequency);
+    const wantMode = modeFor(dialStation);
+    const iq = isIQ(tuning.mode);
+    // The session has to be delivering what that decoder reads — IQ for DCF77,
+    // audio for the rest — or the server refuses the attach. Held back until
+    // it is rather than sent to be refused: on Start the switch into IQ goes
+    // through a confirmation first, and the decoder waits for it.
+    //
+    // Both ends have to agree. The local mode changes the moment it is picked,
+    // but the tune goes out throttled on the audio socket and the attach on
+    // the control socket, so an attach on the local mode alone could reach the
+    // server first and be refused. audioChannels is the server's own account,
+    // from the status it sends after every tune it applies.
+    const localOk = dialStation === 'dcf77' ? iq : !iq;
+    const inputOk = localOk && modeConfirmed(tuning.mode, audioChannels);
+    const params = useMemo(() => ({ station: dialStation }), [dialStation]);
+
     const { state: attachState, error } = useAudioExtension({
         name: 'clock',
-        params: undefined,
-        active: decoding && live,
+        params,
+        active: decoding && live && inputOk,
         parse: decodeFrame,
         onResult,
     });
+
+    // ── mode ────────────────────────────────────────────────────────────────
+    //
+    // As DRMExtension. The mode to put back when the decoder stops, or null if
+    // the receiver was already in IQ and there is nothing to restore.
+    const restoreMode = useRef(null);
+    // Start asked for IQ and the confirmation is still open. Cancelling it
+    // leaves the receiver where it was, and the decoder with nothing to read.
+    const awaitingIQ = useRef(false);
+
+    const start = useCallback(() => {
+        restoreMode.current = null;
+        awaitingIQ.current = false;
+        if (dialStation === 'dcf77' && !iq) {
+            // Remember where the operator was so stopping does not strand them
+            // in a mode that plays raw baseband.
+            restoreMode.current = tuning.mode;
+            awaitingIQ.current = true;
+            actions.setMode(DCF77_MODE);
+        }
+        setDecoding(true);
+    }, [dialStation, iq, tuning.mode, actions]);
+
+    const stop = useCallback(() => {
+        setDecoding(false);
+        awaitingIQ.current = false;
+        // Only if the receiver is still where we put it. If the operator has
+        // since chosen a mode themselves, that is the one they want.
+        if (restoreMode.current && iq) actions.setMode(restoreMode.current);
+        restoreMode.current = null;
+    }, [iq, actions]);
+
+    // The confirmation closed without IQ: cancelled, or the tuning is locked.
+    // On a DCF77 dial that is a decoder that can never start, so it stops
+    // rather than sitting on "Starting…" for ever. Elsewhere it was a tune to
+    // DCF77 that was declined, and the decoder carries on where it was.
+    useEffect(() => {
+        if (!awaitingIQ.current) return;
+        if (iq) { awaitingIQ.current = false; return; }
+        if (iqPrompt) return;
+        awaitingIQ.current = false;
+        restoreMode.current = null;
+        if (decoding && dialStation === 'dcf77') setDecoding(false);
+    }, [iq, iqPrompt, decoding, dialStation]);
+
+    // Leaving IQ by hand on a DCF77 dial stops the decoder: it cannot lock on
+    // demodulated audio. The mode is not put back — the operator picked it.
+    // A transition, not a state: on Start the receiver is not in IQ YET.
+    const wasIQ = useRef(iq);
+    useEffect(() => {
+        const left = wasIQ.current && !iq;
+        wasIQ.current = iq;
+        if (left && decoding && dialStation === 'dcf77') {
+            restoreMode.current = null;
+            setDecoding(false);
+        }
+    }, [iq, decoding, dialStation]);
+
+    // Tuned off DCF77 — by the menu, which also puts USB back, or by hand —
+    // leaves nothing of ours to restore.
+    useEffect(() => {
+        if (dialStation !== 'dcf77' && !awaitingIQ.current) restoreMode.current = null;
+    }, [dialStation]);
 
     // Powering the receiver off takes the audio session with it. An audio
     // *reconnect* is not that: the hook re-attaches and decoding stays on.
@@ -275,26 +362,41 @@ export default function ClockExtension({ minimal }) {
     const stale = !!time && now - time.at > STALE_MS;
     const locked = state === 'locked' && !!time && !stale;
 
-    const dialStation = stationFor(tuning.frequency);
     const tuned = tunedClockOption(tuning.frequency);
-    const wrongMode = tuning.mode !== CLOCK_MODE;
+    // DCF77 out of IQ is not a mistake to fix by hand: Start makes the switch.
+    // It gets its own note, not this one.
+    const needsIQ = dialStation === 'dcf77' && !iq;
+    const wrongMode = dialStation !== 'dcf77' && tuning.mode !== wantMode;
     // The one setup mistake that produces silence with no other symptom.
-    const narrow = !wrongMode && tuning.bandwidthHigh < 2400 && dialStation !== 'wwvb';
+    const narrow = !wrongMode && dialStation === 'wwv' && tuning.bandwidthHigh < 2400;
 
     const tuneTo = (option) => {
-        actions.tuneTo({
-            frequency: option.hz,
-            mode: CLOCK_MODE,
-            bandwidthLow: CLOCK_BANDWIDTH.low,
-            bandwidthHigh: CLOCK_BANDWIDTH.high,
-        });
+        if (option.mode === DCF77_MODE) {
+            // As DRM's schedule rows: IQ only when the decoder is already
+            // running. Otherwise a look at the menu would leave the receiver
+            // playing raw baseband with nothing decoding it; Start switches.
+            // IQ carries its own fixed passband, so none is sent.
+            if (decoding && !iq) {
+                restoreMode.current = tuning.mode;
+                awaitingIQ.current = true;
+            }
+            actions.tuneTo({ frequency: option.hz, mode: decoding ? DCF77_MODE : tuning.mode });
+        } else {
+            actions.tuneTo({
+                frequency: option.hz,
+                mode: CLOCK_MODE,
+                bandwidthLow: CLOCK_BANDWIDTH.low,
+                bandwidthHigh: CLOCK_BANDWIDTH.high,
+            });
+        }
         actions.ensureVisible(option.hz);
     };
 
     const statusLabel = !decoding
         ? 'Stopped'
         : (attachState === 'error' ? 'Error'
-            : (attachState !== 'running' ? 'Starting…' : stateLabel(state)));
+            : (!inputOk ? (dialStation === 'dcf77' ? 'Waiting for IQ…' : (localOk ? 'Starting…' : 'Wrong mode'))
+                : (attachState !== 'running' ? 'Starting…' : stateLabel(state))));
     const statusTone = !decoding
         ? 'off'
         : (attachState === 'error' ? 'bad'
@@ -307,7 +409,7 @@ export default function ClockExtension({ minimal }) {
         ? (
             <Button
                 size="sm"
-                onClick={() => setDecoding(false)}
+                onClick={stop}
                 icon={<Icon.Stop size={13} />}
                 title="Stop decoding and release the decoder on the server"
             >
@@ -318,7 +420,7 @@ export default function ClockExtension({ minimal }) {
             <Button
                 size="sm"
                 variant="primary"
-                onClick={() => setDecoding(true)}
+                onClick={start}
                 disabled={!live}
                 icon={<Icon.Power size={13} />}
                 title={live
@@ -417,15 +519,17 @@ export default function ClockExtension({ minimal }) {
                 </span>
                 <span
                     className="ck__station"
-                    title={station === 'unknown'
-                        ? 'WWV and WWVH share one decoder and are told apart by which tick band folds to an impulse — that takes a few seconds of clean signal'
-                        : 'Identified by the decoder from the seconds tick'}
+                    title={station === 'dcf77'
+                        ? 'The only transmitter on 77.5 kHz, named once its carrier is found'
+                        : (station === 'unknown'
+                            ? 'WWV and WWVH share one decoder and are told apart by which tick band folds to an impulse — that takes a few seconds of clean signal'
+                            : 'Identified by the decoder from the seconds tick')}
                 >
                     {stationLabel(station)}
                 </span>
                 <span className="tp__bar-gap" />
 
-                <label className="tp__field tp__field--inline" title="Tune to a time-signal frequency. These are already offset 1 kHz below the carrier, which is how the decoder needs them">
+                <label className="tp__field tp__field--inline" title="Tune to a time-signal frequency. The USB ones are already offset 1 kHz below the carrier, which is how the decoder needs them; DCF77 is tuned to its carrier and decoded from IQ">
                     <span className="tp__field-label">Tune</span>
                     <select
                         className="select"
@@ -456,8 +560,16 @@ export default function ClockExtension({ minimal }) {
 
             {wrongMode && (
                 <div className="note note--warn ck__fix">
-                    The time code is received in USB — 1 kHz below the carrier, which puts
-                    the carrier itself at 1000 Hz of audio. Pick a frequency above.
+                    WWV, WWVH and WWVB are received in USB — 1 kHz below the carrier, which
+                    puts the carrier itself at 1000 Hz of audio. DCF77 is the exception: it
+                    is decoded from IQ, tuned to the carrier. Pick a frequency above.
+                </div>
+            )}
+            {needsIQ && (
+                <div className="note note--tight">
+                    DCF77 is decoded from IQ, not USB — its phase code carries the timing,
+                    and demodulated audio has no phase. Start switches the receiver to IQ,
+                    and Stop puts the mode back.
                 </div>
             )}
             {narrow && (
@@ -485,6 +597,11 @@ export default function ClockExtension({ minimal }) {
                 <div className="note note--tight">
                     Press Start. A lock needs about four minutes of readable signal — two to
                     find the minute and two more before the vote will certify a time.
+                </div>
+            )}
+            {decoding && !inputOk && dialStation === 'dcf77' && (
+                <div className="note note--tight">
+                    Waiting for the receiver to switch to IQ.
                 </div>
             )}
             {error && <div className="note note--warn ck__fault">{error}</div>}
@@ -542,7 +659,9 @@ export default function ClockExtension({ minimal }) {
                         <div className="ck__section-head">
                             <span className="ck__section-title">Last minute</span>
                             <span className="ck__section-note">
-                                markers fall on every tenth second once the frame is found
+                                {station === 'dcf77'
+                                    ? 'the minute is marked by second 59, the one second with no carrier cut'
+                                    : 'markers fall on every tenth second once the frame is found'}
                             </span>
                         </div>
                         <Strip strip={strip} />
@@ -558,12 +677,26 @@ export default function ClockExtension({ minimal }) {
 
                     {diag && (
                         <div className="ck__telemetry">
-                            <span title="Folded tick-band peak-to-mean (WWV/WWVH), or the tone search peak over median (WWVB)">
-                                tick {Number.isFinite(diag.tone_snr_db) ? `${diag.tone_snr_db.toFixed(1)} dB` : '—'}
+                            <span title="Folded tick-band peak-to-mean (WWV/WWVH), or the carrier search peak over median (WWVB, DCF77)">
+                                {station === 'dcf77' || station === 'wwvb' ? 'carrier' : 'tick'} {Number.isFinite(diag.tone_snr_db) ? `${diag.tone_snr_db.toFixed(1)} dB` : '—'}
                             </span>
-                            <span title="The decoder's tracked matched-filter delay — the filter chain's own group delay plus any sample-clock drift it is absorbing">
-                                delay {Number.isFinite(diag.delay_est_ms) ? `${diag.delay_est_ms.toFixed(1)} ms` : '—'}
-                            </span>
+                            {station === 'dcf77' ? (
+                                <>
+                                    <span title="The phase-code correlator: a 793 ms spread-spectrum correlation that times the second to tens of microseconds and holds through noise that buries the carrier cut. Its SNR is the last second's correlation peak">
+                                        phase code {diag.pm_locked ? 'locked' : 'searching'}{Number.isFinite(diag.pm_snr_db) ? ` ${diag.pm_snr_db.toFixed(1)} dB` : ''}
+                                    </span>
+                                    <span title="The carrier cut's second edge minus the phase code's, smoothed. Near zero on a healthy path — the one cross-check the two timings have">
+                                        cut − code {Number.isFinite(diag.am_minus_pm_ms) ? `${diag.am_minus_pm_ms.toFixed(2)} ms` : '—'}
+                                    </span>
+                                    <span title="Where the carrier was found against where it should be. A receiver clock tens of ppm out moves a 77.5 kHz carrier a few hertz">
+                                        carrier {Number.isFinite(diag.carrier_offset_hz) ? `${diag.carrier_offset_hz >= 0 ? '+' : '−'}${Math.abs(diag.carrier_offset_hz).toFixed(2)} Hz` : '—'}
+                                    </span>
+                                </>
+                            ) : (
+                                <span title="The decoder's tracked matched-filter delay — the filter chain's own group delay plus any sample-clock drift it is absorbing">
+                                    delay {Number.isFinite(diag.delay_est_ms) ? `${diag.delay_est_ms.toFixed(1)} ms` : '—'}
+                                </span>
+                            )}
                             <span title="Frames in the voter's sliding window">
                                 window {diag.frames_in_window ?? '—'}/{diag.window_size ?? '—'}
                             </span>

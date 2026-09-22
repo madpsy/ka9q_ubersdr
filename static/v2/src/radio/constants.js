@@ -113,6 +113,18 @@ export function isIQ(mode) {
     return String(mode || '').toLowerCase().startsWith('iq');
 }
 
+// Whether the server has caught up with a mode: its session delivers the
+// channel count that mode implies — 2 for IQ, 1 for audio. `audioChannels` is
+// the server's own figure from its last status (see RadioContext); null means
+// not known yet, which is never confirmation.
+//
+// For anything that must not act on a mode change until the server has made
+// it. A decoder attach is the case: it travels on a different socket from the
+// tune, so on the local mode alone it can arrive first and be refused.
+export function modeConfirmed(mode, audioChannels) {
+    return audioChannels === (isIQ(mode) ? 2 : 1);
+}
+
 // Whether the transmitter puts a carrier at the dial. True for everything the
 // receiver demodulates except the suppressed-carrier modes; IQ is not
 // demodulated at all and answers false.

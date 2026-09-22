@@ -111,6 +111,55 @@ t('Start switches a non-IQ receiver to iq', () => {
         'Start should put the receiver into iq');
 });
 
+// The switch into IQ goes through a confirmation, so for as long as it is on
+// screen the decoder is on and the receiver is still in USB. That used to read
+// as the operator leaving IQ: the decoder stopped on the render it started, and
+// confirming left the receiver in IQ with nothing decoding. audioChannels stays
+// unset throughout, so nothing here ever attaches — the stub harness cannot
+// wind an attached decoder down.
+const USB = { frequency: 6_055_000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 };
+const IQ = { frequency: 6_055_000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 };
+const buttonLabel = (tree) => {
+    const b = walk(tree).find((n) => n && n.props && (n.props.children === 'Start' || n.props.children === 'Stop'));
+    return b && b.props.children;
+};
+// Twice per step: the stub runs effects after a render, and what they set is
+// only visible on the next one.
+const settle = (ctx) => { render(DRMExtension, {}, ctx); return render(DRMExtension, {}, ctx).tree; };
+
+t('Start survives the IQ confirmation and is still running once it is answered', () => {
+    reset();
+    const first = render(DRMExtension, {}, context({ tuning: USB }));
+    walk(first.tree).find((n) => n && n.props && n.props.children === 'Start').props.onClick();
+
+    // The dialog is up; the receiver has not moved.
+    assert.strictEqual(buttonLabel(settle(context({ tuning: USB, iqPrompt: { mode: 'iq' } }))), 'Stop',
+        'the decoder stopped while the IQ confirmation was still open');
+    // Confirmed.
+    assert.strictEqual(buttonLabel(settle(context({ tuning: IQ }))), 'Stop',
+        'confirming IQ left the decoder stopped');
+});
+
+t('cancelling the IQ confirmation stops the decoder it was for', () => {
+    reset();
+    const first = render(DRMExtension, {}, context({ tuning: USB }));
+    walk(first.tree).find((n) => n && n.props && n.props.children === 'Start').props.onClick();
+    settle(context({ tuning: USB, iqPrompt: { mode: 'iq' } }));
+    // Dismissed, still in USB: nothing to decode, so not left on "Starting…".
+    assert.strictEqual(buttonLabel(settle(context({ tuning: USB }))), 'Start');
+});
+
+t('leaving IQ by hand while decoding still stops it', () => {
+    reset();
+    const first = render(DRMExtension, {}, context({ tuning: IQ }));
+    walk(first.tree).find((n) => n && n.props && n.props.children === 'Start').props.onClick();
+    assert.strictEqual(buttonLabel(settle(context({ tuning: IQ }))), 'Stop');
+    const ctx = context({ tuning: USB });
+    assert.strictEqual(buttonLabel(settle(ctx)), 'Start');
+    // The operator picked that mode, so it is not put back.
+    assert.deepStrictEqual(ctx.calls.filter((c) => c[0] === 'setMode'), []);
+});
+
 t('Start does not touch the mode when already in IQ', () => {
     reset();
     const ctx = context();

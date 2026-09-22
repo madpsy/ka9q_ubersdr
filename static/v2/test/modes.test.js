@@ -12,7 +12,7 @@ const assert = require('assert');
 const {
     FILTER_WIDTH_MIN, MODES, MODE_BY_ID, bandwidthLimits, defaultEdges, defaultFilterShift,
     defaultFilterWidth, edgesForEdgeDrag, edgesForShift, edgesForWidth, filterShift,
-    maxFilterWidth,
+    maxFilterWidth, modeConfirmed,
 } = require('./.build/constants.cjs');
 
 let pass = 0;
@@ -386,6 +386,22 @@ t('the shift the panel reads back is the shift it set', () => {
             }
         }
     }
+});
+
+// A decoder attach and the tune travel on different sockets, and the tune is
+// throttled, so a decoder that attached on the local mode could reach the
+// server before the mode did. modeConfirmed is what they wait on instead.
+t('a mode is confirmed only by the channel count the server reports for it', () => {
+    assert.strictEqual(modeConfirmed('iq', 2), true);
+    assert.strictEqual(modeConfirmed('iq48', 2), true);
+    assert.strictEqual(modeConfirmed('usb', 1), true);
+    // Picked locally, not yet applied: the window the gate exists for.
+    assert.strictEqual(modeConfirmed('iq', 1), false);
+    assert.strictEqual(modeConfirmed('usb', 2), false);
+    // No status yet — a socket that has just opened — is not confirmation.
+    assert.strictEqual(modeConfirmed('iq', null), false);
+    assert.strictEqual(modeConfirmed('usb', null), false);
+    assert.strictEqual(modeConfirmed('usb', undefined), false);
 });
 
 console.log(`\nall ${pass} mode passband tests passed`);

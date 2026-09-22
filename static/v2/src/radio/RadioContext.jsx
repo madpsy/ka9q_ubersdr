@@ -391,6 +391,15 @@ export function RadioProvider({ children }) {
     // state beside it exists only to put the dialog on screen.
     const pendingIQ = useRef(null);
     const [iqPrompt, setIqPrompt] = useState(null);
+    // The channel count the SERVER says the audio session has — 2 for IQ, 1
+    // otherwise — from its last `status`, or null when not known (no socket,
+    // or one that has not answered yet). Not tuning.mode, which changes the
+    // moment a mode is picked: the tune goes out throttled on the audio socket
+    // and a decoder attach goes out on another, so a decoder that attached on
+    // the local mode could reach the server before the mode did and be refused
+    // for the mode it was about to be in. The server sends a status after
+    // every tune it applies, so once this reads 2 the session is IQ.
+    const [audioChannels, setAudioChannels] = useState(null);
     // Whether the current mode is IQ, for the packet handlers — they subscribe
     // once and cannot see the tuning state.
     const iqRef = useRef(false);
@@ -562,6 +571,11 @@ export function RadioProvider({ children }) {
         }));
         offs.push(audioConn.on('message', (msg) => {
             if (msg.type === 'status') {
+                // Ahead of the echo guard below: that one protects the dial
+                // from a lagging frequency, and this is the server's own
+                // account of the session, which is what the guard would hide.
+                // The field is omitempty, so a missing one is not a zero.
+                if (Number.isFinite(msg.channels) && msg.channels > 0) setAudioChannels(msg.channels);
                 if (Date.now() - lastLocalTune.current < 1500) return;
                 setTuning((t) => {
                     const next = {
@@ -627,11 +641,19 @@ export function RadioProvider({ children }) {
         // cases: 1000 is somebody closing deliberately, 1006 is the connection
         // being torn out from under us, and the difference is the difference
         // between "the receiver ended this" and "the network did".
-        offs.push(audioConn.on('close', (ev) => pushLog(
-            'warn', `Audio stream closed${ev && ev.code ? ` (${ev.code})` : ''}`
-                + why(ev),
-        )));
+        offs.push(audioConn.on('close', (ev) => {
+            // A new socket is a new session; nothing is known of it until it
+            // answers the get_status sent on open.
+            setAudioChannels(null);
+            pushLog(
+                'warn', `Audio stream closed${ev && ev.code ? ` (${ev.code})` : ''}`
+                    + why(ev),
+            );
+        }));
         offs.push(audioConn.on('open', () => {
+            // As on close, and here too because a deliberate disconnect need
+            // not emit one: the last session's count says nothing of this one.
+            setAudioChannels(null);
             pushLog('info', 'Audio stream connected');
             // Anything tuned while the socket was still opening commanded
             // nothing: send() drops into a socket that is not open yet, and the
@@ -1846,7 +1868,8 @@ export function RadioProvider({ children }) {
         actions, meters, spectrumConn, audioConn, player,
         modes: MODES,
         iqPrompt,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, locked, bypassed, catalog, localMarks, hidden, actions, iqPrompt]);
+        audioChannels,
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, locked, bypassed, catalog, localMarks, hidden, actions, iqPrompt, audioChannels]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

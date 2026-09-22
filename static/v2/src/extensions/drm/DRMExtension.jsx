@@ -33,7 +33,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from '../../
 import { useRadio } from '../../radio/RadioContext.jsx';
 import { Button, Icon } from '../../components/ui.jsx';
 import { getOpusDecoderClass } from '../../radio/audio-player.js';
-import { isIQ } from '../../radio/constants.js';
+import { isIQ, modeConfirmed } from '../../radio/constants.js';
 import { countryFlag, formatHz } from '../../lib/format.js';
 import { useAudioExtension } from '../useAudioExtension.js';
 import {
@@ -55,7 +55,7 @@ const LEAD_IN_SEC = 0.02;
 const REQUIRED_MODE = 'iq';
 
 export default function DRMExtension({ minimal }) {
-    const { running, audioState, tuning, actions, player, audio } = useRadio();
+    const { running, audioState, tuning, actions, player, audio, audioChannels, iqPrompt } = useRadio();
     const live = running && audioState === 'open';
 
     const [decoding, setDecoding] = useState(false);
@@ -83,35 +83,65 @@ export default function DRMExtension({ minimal }) {
     // The mode to put back when the decoder stops, or null if it was already in
     // IQ when we started and there is nothing to restore.
     const restoreMode = useRef(null);
+    // Start asked for IQ and the confirmation is still open. The switch into
+    // IQ always goes through that dialog, so for the whole time it is on
+    // screen the decoder is on and the receiver is not yet in IQ — which is
+    // not the operator leaving IQ, and must not be taken for it.
+    const awaitingIQ = useRef(false);
 
     // ── mode ────────────────────────────────────────────────────────────────
+
+    const iq = isIQ(tuning.mode);
 
     const start = useCallback(() => {
         setFailure(null);
         // Remember where the operator was so stopping does not strand them in a
         // mode that plays broadband noise.
-        restoreMode.current = isIQ(tuning.mode) ? null : tuning.mode;
-        if (!isIQ(tuning.mode)) actions.setMode(REQUIRED_MODE);
+        restoreMode.current = iq ? null : tuning.mode;
+        awaitingIQ.current = !iq;
+        if (!iq) actions.setMode(REQUIRED_MODE);
         setDecoding(true);
-    }, [tuning.mode, actions]);
+    }, [iq, tuning.mode, actions]);
 
     const stop = useCallback(() => {
         setDecoding(false);
+        awaitingIQ.current = false;
         // Only if the receiver is still where we put it. If the operator has
         // since chosen a mode themselves, that is the one they want.
-        if (restoreMode.current && isIQ(tuning.mode)) actions.setMode(restoreMode.current);
+        if (restoreMode.current && iq) actions.setMode(restoreMode.current);
         restoreMode.current = null;
-    }, [tuning.mode, actions]);
+    }, [iq, actions]);
+
+    // The confirmation closed. Into IQ: the wait is over. Without it —
+    // cancelled, or the tuning is locked — the decoder has nothing to read and
+    // stops, rather than sitting on "Starting…" for ever; there is no mode of
+    // ours to put back, since the switch never happened.
+    useEffect(() => {
+        if (!awaitingIQ.current) return;
+        if (iq) { awaitingIQ.current = false; return; }
+        if (iqPrompt) return;
+        awaitingIQ.current = false;
+        restoreMode.current = null;
+        setDecoding(false);
+    }, [iq, iqPrompt]);
 
     // Changing mode by hand stops the decoder: it cannot lock on demodulated
     // audio, and a panel that sat there searching forever would be a bug report.
     // The mode is not put back — the operator picked it.
+    //
+    // A transition out of IQ, not the state of being outside it. It used to be
+    // the state, and Start — which is outside IQ until the confirmation is
+    // answered — stopped the decoder on the very render it started it, so
+    // confirming left the receiver in IQ with nothing decoding.
+    const wasIQ = useRef(iq);
     useEffect(() => {
-        if (decoding && !isIQ(tuning.mode)) {
+        const left = wasIQ.current && !iq;
+        wasIQ.current = iq;
+        if (left && decoding) {
             restoreMode.current = null;
             setDecoding(false);
         }
-    }, [decoding, tuning.mode]);
+    }, [iq, decoding]);
 
     useEffect(() => { if (!running && decoding) setDecoding(false); }, [running, decoding]);
 
@@ -199,11 +229,16 @@ export default function DRMExtension({ minimal }) {
 
     // The decoder takes no parameters: the server reads everything it needs
     // from the session. Attaching is gated on the mode as well as the audio —
-    // the server rejects a non-IQ session anyway, and retrying that would be a
-    // pointless round trip.
+    // the server rejects a non-IQ session, and that refusal is not retried.
+    //
+    // On the SERVER's mode, not only the local one. Start switches to IQ and
+    // the attach follows at once, but the tune goes out throttled on the audio
+    // socket and the attach on the control socket, so the attach could arrive
+    // first and be refused for a mode the session was about to be in.
+    // audioChannels is what the server last said the session is.
     const { state: attachState, error } = useAudioExtension({
         name: 'drm',
-        active: decoding && live && isIQ(tuning.mode),
+        active: decoding && live && isIQ(tuning.mode) && modeConfirmed(tuning.mode, audioChannels),
         parse: decodeFrame,
         onResult,
     });

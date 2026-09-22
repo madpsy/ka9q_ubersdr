@@ -149,6 +149,13 @@ const ta = async (name, fn) => {
 const NOW = Date.UTC(2026, 8, 7, 12, 0, 0); // 2026-09-07T12:00:00Z
 const day = (n) => Math.floor(NOW / 1000) + n * 86400;
 
+// The panel reads Date.now() for what is on the air, and the fixtures below are
+// dated off NOW — so the clock is pinned to it. Left real, the render tests
+// pass on the day they were written and fail once LIVE's run has ended and
+// SOON's has begun: on 2026-09-22 the panel listed P29YY as on the air and
+// V51WH nowhere, and fifteen tests failed with nothing wrong in the panel.
+Date.now = () => NOW;
+
 // Shaped exactly as /api/dxpeditions serves them.
 const entry = (over) => ({
     call: 'V51WH',
@@ -585,11 +592,10 @@ const jsonOnce = (body, ok = true) => {
     });
 
     await ta('a stale calendar is labelled on the panel, not just in the store', async () => {
-        // Dates off the real clock rather than off NOW: the panel reads
-        // Date.now() for what is on the air, and this case is about a calendar
-        // that has aged out — every operation in it finished while the receiver
-        // was unable to collect a new one. Pinned fixtures would make that
-        // depend on the day the suite is run.
+        // Dates off Date.now() — pinned to NOW above — because the panel reads
+        // it for what is on the air, and this case is about a calendar that
+        // has aged out: every operation in it finished while the receiver was
+        // unable to collect a new one.
         const realDay = (n) => Math.floor(Date.now() / 1000) + n * 86400;
         const expired = entry({ call: 'Z9OLD', start_unix: realDay(-30), end_unix: realDay(-20) });
 
@@ -615,7 +621,7 @@ const jsonOnce = (body, ok = true) => {
     });
 
     await ta('a healthy calendar carries no warning', async () => {
-        jsonOnce({ entries: [LIVE, SOON, LATER], stale: false, loaded_at: new Date().toISOString() });
+        jsonOnce({ entries: [LIVE, SOON, LATER], stale: false, loaded_at: new Date(Date.now()).toISOString() });
         await refreshDXpeditions();
         reset();
         const text = words(mount(DXpeditionsPanel, {}, context()).tree);

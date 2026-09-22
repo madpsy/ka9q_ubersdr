@@ -1,7 +1,7 @@
 // The NTP addon: the time, off the air, as this receiver hears it.
 //
-// ubersdr-ntp tunes a receiver to WWV, WWVH or WWVB, decodes the broadcast time code and
-// serves it as NTP on port 123 — a stratum-1 radio clock whose reference is a shortwave
+// ubersdr-ntp tunes a receiver to WWV, WWVH, WWVB or DCF77, decodes the broadcast time code
+// and serves it as NTP on port 123 — a stratum-1 radio clock whose reference is a time-signal
 // transmitter rather than another server. Beside the radio it keeps a second, deliberately
 // different class of source: ordinary upstream NTP servers, measured all the time and used
 // when the band dies, which it does every night.
@@ -303,7 +303,7 @@ export function dialEdge(span) {
 
 // ── Where the time is coming from ────────────────────────────────────────────
 
-export const STATION_LABEL = { wwv: 'WWV', wwvh: 'WWVH', wwvb: 'WWVB' };
+export const STATION_LABEL = { wwv: 'WWV', wwvh: 'WWVH', wwvb: 'WWVB', dcf77: 'DCF77' };
 
 /**
  * Which stations are in the answer, commonest first.

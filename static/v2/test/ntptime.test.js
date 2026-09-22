@@ -288,6 +288,13 @@ t('the station mix is what is true, not the refid', () => {
     assert.strictEqual(mix.detail, '2 × WWV, 1 × WWVH');
 });
 
+t('DCF77 is named as itself, beside the NIST stations', () => {
+    // ubersdr-ntp reports a 77.5 kHz source as station "dcf77", with refid "DCF".
+    const mix = stationMix([radioSource('dcf77'), radioSource('dcf77'), radioSource('wwvb')]);
+    assert.strictEqual(mix.text, 'DCF77 + WWVB');
+    assert.strictEqual(mix.detail, '2 × DCF77, 1 × WWVB');
+});
+
 t('only sources actually in the answer count towards the mix', () => {
     assert.strictEqual(stationMix([radioSource('wwv', false)]), null);
     assert.strictEqual(stationMix([{ kind: 'ntp', in_use: true }]), null);

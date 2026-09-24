@@ -1179,6 +1179,8 @@ func (rc *RadiodController) markTerminated(ssrc uint32) {
 		rc.frontendTracker.mu.Lock()
 		delete(rc.frontendTracker.channelStatus, ssrc)
 		delete(rc.frontendTracker.frontendStatus, ssrc)
+		delete(rc.frontendTracker.captureRefs, ssrc)
+		delete(rc.frontendTracker.captureRefAt, ssrc)
 		rc.frontendTracker.mu.Unlock()
 	}
 }
@@ -1482,6 +1484,23 @@ func (rc *RadiodController) GetAllFrontendStatus() map[uint32]*FrontendStatus {
 		return make(map[uint32]*FrontendStatus)
 	}
 	return rc.frontendTracker.GetAllFrontendStatus()
+}
+
+// CaptureRef returns the latest capture reference for an SSRC; see capture_time.go.
+func (rc *RadiodController) CaptureRef(ssrc uint32) (captureRef, bool) {
+	if rc.frontendTracker == nil {
+		return captureRef{}, false
+	}
+	return rc.frontendTracker.CaptureRef(ssrc)
+}
+
+// CaptureRefInfo returns the stored capture reference for an SSRC with its
+// state, for display; see FrontendStatusTracker.CaptureRefInfo.
+func (rc *RadiodController) CaptureRefInfo(ssrc uint32) (captureRef, time.Time, bool, int, bool) {
+	if rc.frontendTracker == nil {
+		return captureRef{}, time.Time{}, false, 0, false
+	}
+	return rc.frontendTracker.CaptureRefInfo(ssrc)
 }
 
 // GetChannelStatus returns the channel status for a given SSRC

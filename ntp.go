@@ -217,6 +217,9 @@ func (r *NtpResponse) ReferenceString() string {
 // Validate checks if the response is valid for time synchronization.
 func (r *NtpResponse) Validate() error {
 	if r.Stratum == 0 {
+		if r.KissCode != "" {
+			return fmt.Errorf("%w (%s)", ntpErrKissOfDeath, r.KissCode)
+		}
 		return ntpErrKissOfDeath
 	}
 	if r.Stratum >= ntpMaxStratum {
@@ -298,7 +301,12 @@ func ntpGetTime(address string, opt *NtpQueryOptions) (*ntpHeader, ntpTime, erro
 	xmitHdr.setMode(ntpModeClient)
 	xmitHdr.setVersion(opt.Version)
 	xmitHdr.setLeap(NtpLeapNoWarning)
-	xmitHdr.Precision = 0x20
+	// Advertise the interval we actually poll at (2^6 = 64 s) and a
+	// plausible precision (2^-20 s). Poll 0 claims a client polling every
+	// second, which a rate-limiting server has no reason to believe is
+	// well-behaved.
+	xmitHdr.Poll = 6
+	xmitHdr.Precision = -20
 
 	bits := make([]byte, 8)
 	if _, err = rand.Read(bits); err != nil {

@@ -48,6 +48,17 @@ type InstanceReporter struct {
 	mu                  sync.RWMutex // Protects the above fields
 }
 
+// applyStationCountry fills the country/continent fields from the lookup done
+// at startup; they stay empty (and are omitted) when it failed.
+func (r *InstanceReport) applyStationCountry() {
+	if c := StationCountry(); c != nil {
+		r.Country = c.Country
+		r.CountryCode = c.ISOA2
+		r.Continent = c.Continent
+		r.ContinentCode = c.ContinentCode
+	}
+}
+
 // InstanceReport represents the data sent to the central server
 type InstanceReport struct {
 	UUID                       string                   `json:"uuid"`
@@ -57,8 +68,12 @@ type InstanceReport struct {
 	Location                   string                   `json:"location"`
 	Latitude                   float64                  `json:"latitude"`
 	Longitude                  float64                  `json:"longitude"`
-	GPSEnabled                 bool                     `json:"gps_enabled"`  // Whether GPS time synchronization is enabled
-	TDOAEnabled                bool                     `json:"tdoa_enabled"` // Whether TDOA calculations are enabled
+	GPSEnabled                 bool                     `json:"gps_enabled"`              // Whether GPS time synchronization is enabled
+	TDOAEnabled                bool                     `json:"tdoa_enabled"`             // Whether TDOA calculations are enabled
+	Country                    string                   `json:"country,omitempty"`        // Country of latitude/longitude (Natural Earth), resolved at startup
+	CountryCode                string                   `json:"country_code,omitempty"`   // ISO 3166-1 alpha-2
+	Continent                  string                   `json:"continent,omitempty"`      // e.g. "Europe"
+	ContinentCode              string                   `json:"continent_code,omitempty"` // e.g. "EU"
 	Altitude                   int                      `json:"altitude"`
 	PublicURL                  string                   `json:"public_url"`
 	Version                    string                   `json:"version"`
@@ -774,6 +789,7 @@ func (ir *InstanceReporter) sendReport() error {
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
 		Timezone:                   ir.config.Admin.Timezone,
 	}
+	report.applyStationCountry()
 	if ssbResult := ir.getSSBPredictions(); ssbResult != nil {
 		report.SSBPredictions = ssbResult.Predictions
 		report.SSBGridSquares = ssbResult.GridSquares
@@ -1171,6 +1187,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		NotifyInstanceStartup:      ir.config.InstanceReporting.NotifyInstanceStartup,
 		Timezone:                   ir.config.Admin.Timezone,
 	}
+	report.applyStationCountry()
 	if ssbResult := ir.getSSBPredictions(); ssbResult != nil {
 		report.SSBPredictions = ssbResult.Predictions
 		report.SSBGridSquares = ssbResult.GridSquares
@@ -1587,6 +1604,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			Frontend:                   buildStartupFrontendInfo(frontendHistory),
 			Timezone:                   config.Admin.Timezone,
 		}
+		report.applyStationCountry()
 
 		jsonData, err := json.Marshal(report)
 		if err != nil {

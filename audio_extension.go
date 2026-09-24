@@ -16,7 +16,7 @@ type AudioExtensionParams struct {
 type AudioSample struct {
 	PCMData      []int16 // PCM audio samples (int16); stereo IQ = interleaved [I0,Q0,I1,Q1,...]
 	RTPTimestamp uint32  // RTP timestamp from radiod (for jitter/loss detection)
-	GPSTimeNs    int64   // GPS-synchronized Unix time in nanoseconds (packet arrival time)
+	GPSTimeNs    int64   // Unix ns at which the first sample was captured, or 0 if unknown; see capture_time.go
 }
 
 // AudioExtension interface for extensible audio processors

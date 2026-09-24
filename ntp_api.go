@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -112,6 +113,12 @@ const ntpPollInterval = 64 * time.Second
 // one unresponsive pool IP therefore will not mark NTP unhealthy on its own.
 const ntpMaxAttempts = 3
 
+// ntpRetryGap separates retries within one poll. ntpd and ntpsec treat a
+// client that sends again within 2 s as rate-limited, answer with a
+// Kiss-o'-Death and then drop it, so an immediate retry after a bad reply
+// is guaranteed to fail and keeps the client's rate score high.
+const ntpRetryGap = 3 * time.Second
+
 // ntpState holds the most recently cached NTP query result.
 type ntpState struct {
 	mu       sync.RWMutex
@@ -158,6 +165,9 @@ func pollNTP(cfg *Config) {
 	// attempt fails, so a single dropped UDP packet or one dead pool IP is
 	// tolerated transparently.
 	for attempt := 1; attempt <= ntpMaxAttempts; attempt++ {
+		if attempt > 1 {
+			time.Sleep(ntpRetryGap)
+		}
 		resp, queryErr = NtpQuery(srv)
 		if queryErr == nil {
 			if err := resp.Validate(); err != nil {
@@ -165,6 +175,12 @@ func pollNTP(cfg *Config) {
 					srv, attempt, ntpMaxAttempts, err)
 				queryErr = err
 				resp = nil
+				// A Kiss-o'-Death tells us to back off (RATE) or go away
+				// (DENY, RSTR). Retrying now only digs the hole deeper, so
+				// report it and leave the next query to the next poll.
+				if errors.Is(err, ntpErrKissOfDeath) {
+					break
+				}
 			}
 		} else {
 			log.Printf("NTP: query to %s failed (attempt %d/%d): %v",

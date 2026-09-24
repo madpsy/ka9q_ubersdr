@@ -630,6 +630,7 @@
         /* Offset anchor targets so the sticky monitor nav doesn't obscure section headers */
         #frontendStatusSection,
         #dspHealthSection,
+        #audioLatencySection,
         #frequencyReferenceSection,
         #systemLoadHistorySection,
         #lookupStatsSection,
@@ -2031,6 +2032,43 @@
                         <div id="dspHealthDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
                             <div class="spinner" style="margin: 20px auto;"></div>
                             <p style="text-align: center; color: #666;">Loading DSP status...</p>
+                        </div>
+                    </div>
+
+                    <!-- Audio Latency Section: RX888 capture to WebSocket send -->
+                    <div id="audioLatencySection" class="config-section" style="display: none;">
+                        <h3>⏱️ Audio Latency</h3>
+                        <div class="alert alert-info" style="margin-bottom: 15px;">
+                            ℹ️ Time from the RX888 capturing a packet's first sample to its encoded frame being handed to the WebSocket: radiod's 20 ms block fill and processing, the multicast hop, then queueing, audio gate and Opus / PCM v4 encoding here. The network send to the listener is not included. Packets without a capture time (the first blocks of a channel, or just after a rate change) are not counted.
+                        </div>
+                        <div style="display: flex; gap: 6px; margin-bottom: 12px;" id="audioLatencyWindowButtons">
+                            <button type="button" class="btn btn-secondary" data-window="5m" onclick="setAudioLatencyWindow('5m')" style="padding: 4px 12px; font-size: 13px; margin-left: 0;">5 min</button>
+                            <button type="button" class="btn btn-secondary" data-window="1h" onclick="setAudioLatencyWindow('1h')" style="padding: 4px 12px; font-size: 13px; margin-left: 0;">1 hour</button>
+                            <button type="button" class="btn btn-secondary" data-window="24h" onclick="setAudioLatencyWindow('24h')" style="padding: 4px 12px; font-size: 13px; margin-left: 0;">24 hours</button>
+                        </div>
+                        <div id="audioLatencyDisplay" style="padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <div class="spinner" style="margin: 20px auto;"></div>
+                            <p style="text-align: center; color: #666;">Loading latency metrics...</p>
+                        </div>
+
+                        <!-- Per-minute chart - last 60 minutes -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                p95 Latency — Last 60 Minutes (Per Minute)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="audioLatencyMinuteCanvas"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Hourly chart - last 24 hours -->
+                        <div style="background: #fff; padding: 10px; border-radius: 5px; border: 1px solid #dee2e6; margin-top: 15px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px; text-align: center;">
+                                p95 Latency — Last 24 Hours (Per Hour)
+                            </div>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="audioLatencyHourlyCanvas"></canvas>
+                            </div>
                         </div>
                     </div>
 
@@ -22016,6 +22054,257 @@ const tooltipLine2 = timeStr;
             ];
         }
 
+        let audioLatencyWindow = '1h';
+        let audioLatencyData = null;
+        let audioLatencyMinuteChart = null;
+        let audioLatencyHourlyChart = null;
+
+        function setAudioLatencyWindow(win) {
+            audioLatencyWindow = win;
+            renderAudioLatency();
+        }
+
+        async function loadAudioLatency() {
+            const section = document.getElementById('audioLatencySection');
+            if (!section) return;
+            try {
+                const response = await authenticatedFetch('/admin/audio-latency');
+                if (!response || !response.ok) {
+                    section.style.display = 'none';
+                    return;
+                }
+                audioLatencyData = await response.json();
+                section.style.display = 'block';
+                renderAudioLatency();
+                renderAudioLatencyCharts();
+            } catch (error) {
+                console.error('Error loading audio latency:', error);
+            }
+        }
+
+        // Latency values arrive in microseconds; show µs below 1 ms.
+        function formatLatencyUs(us) {
+            if (us < 1000) return `${Math.round(us)} µs`;
+            if (us < 10000) return `${(us / 1000).toFixed(2)} ms`;
+            if (us < 1000000) return `${(us / 1000).toFixed(1)} ms`;
+            return `${(us / 1000000).toFixed(2)} s`;
+        }
+
+        // Measured from the RX888, the 20 ms block fill alone puts a floor of
+        // about 20 ms under every packet, so the bands start well above it.
+        function latencyColor(us) {
+            if (us >= 100000) return '#dc3545';
+            if (us >= 50000) return '#ff8c00';
+            return '#667eea';
+        }
+
+        // One line per format: the p95 of each minute or hour. A period with
+        // no packets is a gap, not a zero, since zero cannot sit on a log axis
+        // and would read as "instant" rather than "idle".
+        function buildAudioLatencyDatasets(points) {
+            const formats = [
+                { key: 'opus',  label: 'Opus',   color: '#667eea' },
+                { key: 'pcmv4', label: 'PCM v4', color: '#28a745' }
+            ];
+            return formats.map(f => ({
+                label: f.label,
+                data: points.map(p => {
+                    const st = p[f.key] || {};
+                    return st.count > 0 ? st.p95_us : null;
+                }),
+                stats: points.map(p => p[f.key] || {}),
+                borderColor: f.color,
+                backgroundColor: f.color,
+                borderWidth: 2,
+                pointRadius: 2,
+                tension: 0.2,
+                spanGaps: false
+            }));
+        }
+
+        function audioLatencyChartOptions(unit, tooltipFormat) {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                plugins: {
+                    legend: { display: true, position: 'top' },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: ctx => {
+                                if (ctx.parsed.y === null) return `${ctx.dataset.label}: no packets`;
+                                const st = ctx.dataset.stats[ctx.dataIndex] || {};
+                                return `${ctx.dataset.label}: p95 ${formatLatencyUs(ctx.parsed.y)} ` +
+                                    `(mean ${formatLatencyUs(st.mean_us || 0)}, max ${formatLatencyUs(st.max_us || 0)}, ` +
+                                    `${(st.count || 0).toLocaleString()} packets)`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: { unit, displayFormats: { [unit]: 'HH:mm' }, tooltipFormat },
+                        bounds: 'data',
+                        title: { display: true, text: 'Time' }
+                    },
+                    y: {
+                        type: 'logarithmic',
+                        title: { display: true, text: 'p95 latency' },
+                        ticks: {
+                            // Label only the 1-2-5 steps so a log axis stays readable.
+                            callback: v => {
+                                const m = v / Math.pow(10, Math.floor(Math.log10(v)));
+                                if (![1, 2, 5].includes(Math.round(m * 1000) / 1000)) return '';
+                                return formatLatencyUs(v).replace(/\.0+(?= )/, ''); // "1.00 ms" -> "1 ms"
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        function renderAudioLatencyCharts() {
+            if (!audioLatencyData || typeof Chart === 'undefined') return;
+            const charts = [
+                { points: audioLatencyData.minutes || [], canvas: 'audioLatencyMinuteCanvas', unit: 'minute', tooltip: 'HH:mm',
+                  get: () => audioLatencyMinuteChart, set: c => { audioLatencyMinuteChart = c; } },
+                { points: audioLatencyData.hours || [], canvas: 'audioLatencyHourlyCanvas', unit: 'hour', tooltip: 'MMM d, HH:mm',
+                  get: () => audioLatencyHourlyChart, set: c => { audioLatencyHourlyChart = c; } }
+            ];
+            charts.forEach(c => {
+                const canvas = document.getElementById(c.canvas);
+                if (!canvas || c.points.length === 0) return;
+                const labels = c.points.map(p => new Date(p.start_ms));
+                const datasets = buildAudioLatencyDatasets(c.points);
+                const chart = c.get();
+                if (!chart) {
+                    c.set(new Chart(canvas.getContext('2d'), {
+                        type: 'line',
+                        data: { labels, datasets },
+                        options: audioLatencyChartOptions(c.unit, c.tooltip)
+                    }));
+                } else {
+                    chart.data.labels = labels;
+                    chart.data.datasets = datasets;
+                    chart.update('none');
+                }
+            });
+        }
+
+        function renderAudioLatency() {
+            const display = document.getElementById('audioLatencyDisplay');
+            if (!display || !audioLatencyData) return;
+
+            document.querySelectorAll('#audioLatencyWindowButtons button').forEach(btn => {
+                const active = btn.dataset.window === audioLatencyWindow;
+                btn.className = active ? 'btn' : 'btn btn-secondary';
+            });
+
+            const lower = audioLatencyData.bucket_lower_us || [];
+            const win = (audioLatencyData.windows || {})[audioLatencyWindow] || {};
+            const formats = [
+                { key: 'opus',  label: 'Opus' },
+                { key: 'pcmv4', label: 'PCM v4' }
+            ];
+
+            // The server keeps ~40 fixed half-octave buckets. Show only the
+            // span that holds data, on one axis shared by both formats so they
+            // compare directly, merged down to about ten bars.
+            let first = -1, last = -1;
+            formats.forEach(f => {
+                const b = (win[f.key] && win[f.key].buckets) || [];
+                b.forEach((c, i) => {
+                    if (c > 0) {
+                        if (first < 0 || i < first) first = i;
+                        if (i > last) last = i;
+                    }
+                });
+            });
+
+            if (first < 0) {
+                display.innerHTML = '<p style="text-align: center; color: #666; margin: 10px 0;">No Opus or PCM v4 audio sent in this window.</p>';
+                return;
+            }
+
+            const maxBars = 10;
+            const group = Math.max(1, Math.ceil((last - first + 1) / maxBars));
+            const ranges = [];
+            for (let start = first; start <= last; start += group) {
+                const end = Math.min(start + group - 1, last);
+                const lo = lower[start];
+                const hi = end + 1 < lower.length ? lower[end + 1] : null;
+                ranges.push({ start, end, lo, hi });
+            }
+            const rangeLabel = r => r.hi === null
+                ? `≥ ${formatLatencyUs(r.lo)}`
+                : `${formatLatencyUs(r.lo)} – ${formatLatencyUs(r.hi)}`;
+
+            const cards = formats.map(f => {
+                const st = win[f.key] || { count: 0, buckets: [] };
+                if (!st.count) {
+                    return `
+                    <div style="flex: 1 1 320px; background: #fff; border: 1px solid #dee2e6; border-radius: 5px; padding: 12px;">
+                        <div style="font-weight: bold; margin-bottom: 8px;">${f.label}</div>
+                        <div style="color: #666; font-size: 13px;">No packets in this window.</div>
+                    </div>`;
+                }
+
+                const counts = ranges.map(r => {
+                    let n = 0;
+                    for (let i = r.start; i <= r.end; i++) n += st.buckets[i] || 0;
+                    return n;
+                });
+                const peak = Math.max(...counts, 1);
+
+                const stat = (label, us) => `
+                    <div style="text-align: center;">
+                        <div style="font-size: 18px; font-weight: bold; color: ${latencyColor(us)};">${formatLatencyUs(us)}</div>
+                        <div style="font-size: 11px; color: #666;">${label}</div>
+                    </div>`;
+
+                const bars = ranges.map((r, i) => {
+                    const pct = counts[i] / st.count * 100;
+                    const width = counts[i] / peak * 100;
+                    return `
+                    <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 2px 0;">
+                        <div style="flex: 0 0 130px; text-align: right; color: #555; white-space: nowrap;">${rangeLabel(r)}</div>
+                        <div style="flex: 1; background: #f1f3f5; border-radius: 3px; height: 14px; overflow: hidden;">
+                            <div style="width: ${width}%; height: 100%; background: ${latencyColor(r.lo)};"></div>
+                        </div>
+                        <div style="flex: 0 0 52px; text-align: right; color: #666;">${pct >= 0.1 || counts[i] === 0 ? pct.toFixed(1) : '<0.1'}%</div>
+                    </div>`;
+                }).join('');
+
+                return `
+                    <div style="flex: 1 1 320px; background: #fff; border: 1px solid #dee2e6; border-radius: 5px; padding: 12px; min-width: 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px;">
+                            <div style="font-weight: bold;">${f.label}</div>
+                            <div style="font-size: 12px; color: #666;">${st.count.toLocaleString()} packets</div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 12px;">
+                            ${stat('Mean', st.mean_us)}
+                            ${stat('p50', st.p50_us)}
+                            ${stat('p95', st.p95_us)}
+                            ${stat('p99', st.p99_us)}
+                            ${stat('Max', st.max_us)}
+                        </div>
+                        ${bars}
+                    </div>`;
+            }).join('');
+
+            display.innerHTML = `
+                <div style="display: flex; flex-wrap: wrap; gap: 12px;">${cards}</div>
+                <div style="font-size: 11px; color: #888; margin-top: 10px;">
+                    Percentiles are estimated from the buckets. Bars:
+                    <span style="color: #667eea;">■</span> under 50 ms,
+                    <span style="color: #ff8c00;">■</span> 50–100 ms,
+                    <span style="color: #dc3545;">■</span> 100 ms or more.
+                </div>`;
+        }
+
         async function loadLookupStats() {
             try {
                 const response = await authenticatedFetch('/admin/lookup/stats');
@@ -23061,6 +23350,9 @@ const tooltipLine2 = timeStr;
                 // hides itself if lookups are not enabled)
                 await loadLookupStats();
 
+                // Audio processing latency (arrival from radiod to WebSocket send)
+                await loadAudioLatency();
+
                 // Fetch system load, tunnel status, instance reporter, noise floor, space weather, frequency reference, decoder, CW Skimmer, MQTT, rotctl, NTP, GPSDO, ant-switch, DSP, version and notifications health
                 const fetchPromises = [
                     authenticatedFetch('/admin/system-load'),
@@ -24078,6 +24370,7 @@ const tooltipLine2 = timeStr;
             const sections = [
                 { id: 'frontendStatusSection',     label: 'SDR Frontend' },
                 { id: 'dspHealthSection',          label: 'DSP' },
+                { id: 'audioLatencySection',       label: 'Latency' },
                 { id: 'frequencyReferenceSection', label: 'Freq Reference' },
                 { id: 'systemLoadHistorySection',  label: 'System Load' },
                 { id: 'gpuStatsSection',           label: 'GPU' },
@@ -27901,6 +28194,39 @@ const tooltipLine2 = timeStr;
                 html += `<tr><td style="padding: 6px;">Output Samples</td><td style="padding: 6px; text-align: right;">${ch.output_samples ? ch.output_samples.toLocaleString() : '<em style="color: #999;">N/A</em>'}</td></tr>`;
                 html += `<tr><td style="padding: 6px;">RTP Packets Sent</td><td style="padding: 6px; text-align: right;">${ch.output_data_packets ? ch.output_data_packets.toLocaleString() : '<em style="color: #999;">N/A</em>'}</td></tr>`;
                 html += '</table>';
+
+                // Capture timestamp pair: radiod's reference tying one RTP timestamp to
+                // the moment the RX888 captured that frame. Every packet's capture time
+                // is worked out from the latest one.
+                const cap = ch.capture || { available: false };
+                const na = '<em style="color: #999;">N/A</em>';
+                const row = (label, value) => `<tr><td style="padding: 6px;">${label}</td><td style="padding: 6px; text-align: right;">${value}</td></tr>`;
+                let capState;
+                if (!cap.available) {
+                    capState = '<strong style="color: #6c757d;">Not received</strong>';
+                } else if (cap.usable) {
+                    capState = '<strong style="color: #28a745;">In use</strong>';
+                } else {
+                    capState = `<strong style="color: #ff8c00;">Withheld: made at ${(cap.rate / 1000).toFixed(1)} kHz, stream now ${cap.current_rate ? (cap.current_rate / 1000).toFixed(1) + ' kHz' : 'unknown'}; packets carry no timestamp</strong>`;
+                }
+                html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">⏱️ Capture Timestamp Pair</h3>';
+                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                html += row('State', capState);
+                if (cap.available) {
+                    html += row('RTP Timestamp', `<strong>${cap.ts_ref}</strong>`);
+                    html += row('Captured At (UTC)', `<strong>${cap.time_utc}</strong>`);
+                    html += row('Captured At (ns)', `<strong>${cap.time_ns}</strong>`);
+                    html += row('RTP Clock Rate', `<strong>${(cap.rate / 1000).toFixed(1)} kHz</strong>`);
+                    html += row('Anchor Generation', `<strong>${cap.generation}</strong>`);
+                    html += row('Pair Received', cap.age_seconds !== undefined ? `<strong>${cap.age_seconds.toFixed(1)} s ago</strong>` : na);
+                }
+                html += row('Last Packet Latency', cap.last_latency_us !== undefined
+                    ? `<strong>${formatLatencyUs(cap.last_latency_us)}</strong>`
+                    : na);
+                html += '</table>';
+                if (!cap.available) {
+                    html += '<div style="font-size: 11px; color: #888; margin: -12px 0 20px;">radiod has no valid pair for this channel right now: it is new, its rate has just changed, or radiod is rebuilding its anchor after a lost USB transfer. Until one arrives, packets carry no timestamp (0).</div>';
+                }
 
                 // Signal Quality
                 html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📊 Signal Quality</h3>';

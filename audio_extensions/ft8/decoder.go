@@ -214,8 +214,14 @@ func (d *FT8Decoder) processSample(sample AudioSample, resultChan chan<- []byte)
 	}
 }
 
-// syncToSlot synchronizes to the start of a time slot using GPS time
+// syncToSlot synchronizes to the start of a time slot using the capture time
+// of the packet's first sample.  Zero means UberSDR has no capture time for the
+// packet yet (radiod has not sent a usable reference), and slotting against it
+// would align to 1970, so the packet is skipped instead.
 func (d *FT8Decoder) syncToSlot(gpsTimeNs int64) bool {
+	if gpsTimeNs <= 0 {
+		return false
+	}
 	// Convert GPS nanoseconds to seconds
 	timeSec := float64(gpsTimeNs) / 1e9
 

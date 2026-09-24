@@ -8,6 +8,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/pion/rtp"
 	"golang.org/x/net/ipv4"
@@ -18,7 +19,8 @@ import (
 type AudioPacket struct {
 	PCMData      []byte
 	RTPTimestamp uint32 // RTP timestamp from radiod (kept for reference)
-	GPSTimeNs    int64  // GPS-synchronized Unix time in nanoseconds
+	GPSTimeNs    int64  // Unix ns at which the first sample was captured, or 0 if unknown; see capture_time.go
+	RxTimeNs     int64  // Unix ns at which the kernel received the packet (system clock)
 	SampleRate   int    // sample rate at which this PCM was encoded by radiod
 	Channels     int    // 1 = mono, 2 = interleaved stereo (IQ modes)
 }
@@ -33,6 +35,16 @@ type AudioReceiver struct {
 	mu               sync.RWMutex
 	unknownSSRCCount map[uint32]int // Track unknown SSRC counts for debug logging
 	sentPacketCount  map[string]int // Track sent packet counts per session for debug logging
+
+	// capture supplies radiod's capture references, which turn each packet's
+	// RTP timestamp into the time its samples were captured.  Nil means packets
+	// carry their arrival time.  Set before Start.
+	capture captureSource
+}
+
+// SetCaptureSource gives the receiver radiod's capture references.  Call before Start.
+func (ar *AudioReceiver) SetCaptureSource(src captureSource) {
+	ar.capture = src
 }
 
 // NewAudioReceiver creates a new audio receiver
@@ -74,6 +86,13 @@ func setupDataSocket(addr *net.UDPAddr, iface *net.Interface) (*net.UDPConn, err
 				if err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil {
 					sockErr = fmt.Errorf("failed to set SO_REUSEADDR: %w", err)
 					return
+				}
+
+				// Have the kernel stamp each datagram as it enters the stack, so
+				// packet time excludes the socket queue and goroutine scheduling.
+				// Not fatal: receiveLoop falls back to the time of the read.
+				if err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_TIMESTAMPNS, 1); err != nil {
+					log.Printf("Warning: failed to set SO_TIMESTAMPNS, audio timestamps will use read time: %v", err)
 				}
 			})
 			if err != nil {
@@ -180,10 +199,58 @@ func (ar *AudioReceiver) Stop() {
 	log.Println("Audio receiver stopped")
 }
 
+// kernelRxTimeNs returns the SO_TIMESTAMPNS receive time carried in a
+// datagram's control messages. It walks the headers in place rather than
+// using ParseSocketControlMessage, which allocates on every packet.
+func kernelRxTimeNs(oob []byte) (int64, bool) {
+	for len(oob) > 0 {
+		hdr, data, rest, err := unix.ParseOneSocketControlMessage(oob)
+		if err != nil {
+			return 0, false
+		}
+		if hdr.Level == unix.SOL_SOCKET && hdr.Type == unix.SCM_TIMESTAMPNS &&
+			len(data) >= int(unsafe.Sizeof(unix.Timespec{})) {
+			ts := (*unix.Timespec)(unsafe.Pointer(&data[0]))
+			return ts.Nano(), true
+		}
+		oob = rest
+	}
+	return 0, false
+}
+
+// throttledLog prints at most one line per interval and reports how many
+// were suppressed in between, so a persistent fault in a per-packet path
+// cannot flood the log. Not safe for concurrent use.
+type throttledLog struct {
+	interval   time.Duration
+	last       time.Time
+	suppressed int
+}
+
+func (t *throttledLog) Printf(format string, args ...any) {
+	now := time.Now()
+	if !t.last.IsZero() && now.Sub(t.last) < t.interval {
+		t.suppressed++
+		return
+	}
+	if t.suppressed > 0 {
+		format += fmt.Sprintf(" (%d similar suppressed)", t.suppressed)
+	}
+	log.Printf(format, args...)
+	t.last = now
+	t.suppressed = 0
+}
+
 // receiveLoop continuously receives and processes audio packets
 func (ar *AudioReceiver) receiveLoop() {
 	buffer := make([]byte, 65536)
+	// Room for the timestamp message with headroom for any other the kernel
+	// adds; a truncated control area just means falling back to read time.
+	oob := make([]byte, 128)
 	packetCount := 0
+	fallbackLogged := false
+	readErrLog := throttledLog{interval: 10 * time.Second}
+	parseErrLog := throttledLog{interval: 10 * time.Second}
 
 	for {
 		ar.mu.RLock()
@@ -195,18 +262,27 @@ func (ar *AudioReceiver) receiveLoop() {
 		}
 
 		// Read packet
-		n, _, err := ar.conn.ReadFromUDP(buffer)
+		n, oobn, _, _, err := ar.conn.ReadMsgUDP(buffer, oob)
 		if err != nil {
 			if !ar.running {
 				break
 			}
-			log.Printf("Error reading UDP packet: %v", err)
+			readErrLog.Printf("Error reading UDP packet: %v", err)
 			continue
 		}
 
-		// Capture GPS-synchronized timestamp immediately after packet arrival
-		// This is done once per packet regardless of client count for efficiency
-		gpsTimeNs := time.Now().UnixNano()
+		// Arrival time is when the kernel received the packet, taken once per
+		// packet regardless of client count.  routeAudio turns it, with radiod's
+		// capture reference, into the capture time every consumer downstream --
+		// WebSocket, KiwiSDR, WebSDR, HTTP stream, extensions -- carries.
+		rxTimeNs, ok := kernelRxTimeNs(oob[:oobn])
+		if !ok {
+			if !fallbackLogged {
+				log.Printf("Warning: audio packet arrived without a kernel receive timestamp; using read time where one is missing")
+				fallbackLogged = true
+			}
+			rxTimeNs = time.Now().UnixNano()
+		}
 
 		if n < 12 {
 			// Too small to be valid RTP
@@ -220,7 +296,7 @@ func (ar *AudioReceiver) receiveLoop() {
 		packet := &rtp.Packet{}
 		if err := packet.Unmarshal(buffer[:n]); err != nil {
 			if ar.running {
-				log.Printf("Error parsing RTP packet: %v", err)
+				parseErrLog.Printf("Error parsing RTP packet: %v", err)
 			}
 			continue
 		}
@@ -229,7 +305,7 @@ func (ar *AudioReceiver) receiveLoop() {
 
 		// Route to appropriate session using SSRC from RTP header
 		// Pass payload, RTP timestamp, and GPS timestamp
-		ar.routeAudio(packet.SSRC, packet.Payload, packet.Timestamp, gpsTimeNs)
+		ar.routeAudio(packet.SSRC, packet.Payload, packet.Timestamp, rxTimeNs)
 	}
 
 	if DebugMode {
@@ -237,9 +313,9 @@ func (ar *AudioReceiver) receiveLoop() {
 	}
 }
 
-// routeAudio routes audio data to the appropriate session based on RTP SSRC
-// The GPS timestamp represents when the packet arrived at ubersdr (GPS-synchronized)
-func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp uint32, gpsTimeNs int64) {
+// routeAudio routes audio data to the appropriate session based on RTP SSRC.
+// rxTimeNs is when the kernel received the packet (system clock).
+func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp uint32, rxTimeNs int64) {
 	// Look up session by SSRC
 	session, ok := ar.sessions.GetSessionBySSRC(ssrc)
 	if !ok {
@@ -256,6 +332,15 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 	// so the announcement can never be chosen for one rate and labelled another.
 	sampleRate := session.SampleRate
 	channels := session.Channels
+
+	// When the samples were captured, from radiod's reference for this channel.
+	// Only this goroutine touches session.captureStamp.
+	var ref captureRef
+	var haveRef bool
+	if ar.capture != nil {
+		ref, haveRef = ar.capture.CaptureRef(ssrc)
+	}
+	gpsTimeNs := session.captureStamp.stamp(ref, haveRef, rtpTimestamp, rxTimeNs)
 
 	// Blocked ranges: an ordinary listener tuned inside one hears an
 	// announcement instead of the band.  Done here rather than in each
@@ -276,6 +361,7 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 		PCMData:      dataCopy,
 		RTPTimestamp: rtpTimestamp,
 		GPSTimeNs:    gpsTimeNs,
+		RxTimeNs:     rxTimeNs,
 		SampleRate:   sampleRate,
 		Channels:     channels,
 	}

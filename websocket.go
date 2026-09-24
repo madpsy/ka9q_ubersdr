@@ -397,6 +397,7 @@ type ServerMessage struct {
 	Info        interface{}            `json:"info,omitempty"`
 	AudioFormat string                 `json:"audioFormat,omitempty"` // "pcm" or "opus"
 	AGC         map[string]interface{} `json:"agc,omitempty"`         // Current AGC parameter values
+	ClockID     string                 `json:"clockId,omitempty"`     // host clock the audio timestamps are on; see hostClockID
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -2486,6 +2487,10 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				// at full rate.
 				lastAudioTime = time.Now()
 
+				// Capture-to-send latency, taken before the write so a slow
+				// client's backpressure is not counted as server time.
+				globalAudioLatency.Record(audioLatencyOpus, audioPacket.GPSTimeNs, lastAudioTime)
+
 				// Send as binary WebSocket message
 				conn.writeMu.Lock()
 				conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -2588,6 +2593,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				// header of every silence frame, so the ticker is redundant when silence flows
 				// at full rate.
 				lastAudioTime = time.Now()
+
+				// Capture-to-send latency; only PCM v4 is tracked.
+				if version >= 4 {
+					globalAudioLatency.Record(audioLatencyPCMv4, audioPacket.GPSTimeNs, lastAudioTime)
+				}
 
 				// Send as binary WebSocket message
 				conn.writeMu.Lock()
@@ -2703,6 +2713,7 @@ func (wsh *WebSocketHandler) sendStatus(conn *wsConn, session *Session) error {
 		Channels:   session.Channels,
 		Info:       session.GetInfo(),
 		AGC:        agcStateInfo(session, wsh.config),
+		ClockID:    hostClockID(),
 	}
 	return wsh.sendMessage(conn, msg)
 }

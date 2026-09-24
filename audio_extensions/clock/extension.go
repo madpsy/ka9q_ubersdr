@@ -130,19 +130,16 @@ type AudioSample struct {
 // it — and which absorbs every scheduling delay between here and there, then
 // keeps that error for the life of the process.
 //
-// Here we can do better: every AudioSample carries the time its RTP packet
-// arrived, so the mapping is re-anchored continuously rather than once.
+// Here we can do better: every AudioSample carries the time the RX888 captured
+// its first sample, which audio.go works out from radiod's capture reference
+// (see capture_time.go), so the mapping is re-anchored continuously rather
+// than once, against the capture itself.  radiod's buffering and processing,
+// the multicast hop and our own scheduling are all outside it; what remains is
+// the RX888's fixed transfer latency, tens to hundreds of microseconds.  The
+// time is on the host clock, so the offset is against the host clock.
 //
-// It is NOT a hardware timestamp, whatever the AudioSample field name says:
-// audio.go takes it as time.Now().UnixNano() when the packet arrives from
-// radiod. So the residual error is radiod's own buffering plus the multicast
-// hop — a fixed bias of some tens of milliseconds, not a drift. Good enough to
-// say a browser clock is 3 seconds out; not good enough to discipline an NTP
-// server with, and the panel does not offer to.
-//
-// A packet's arrival is taken as the time of its LAST sample: its audio was
-// captured before it was sent, so the end of the block is the closer of the
-// two edges to the moment it landed here.
+// A block with no capture time (GPSTimeNs 0: radiod has not yet sent a usable
+// reference for the channel) still advances the sample count but is not a mark.
 type sampleClock struct {
 	mu     sync.Mutex
 	rate   int
@@ -153,8 +150,8 @@ type sampleClock struct {
 }
 
 type clockMark struct {
-	sample int64 // decoder sample index of the end of a block
-	hostNs int64
+	sample int64 // decoder sample index of the first sample of a block
+	hostNs int64 // when that sample was captured
 }
 
 // A few minutes of marks at ~50 packets/s, which is more than the decoder's
@@ -165,17 +162,18 @@ func newSampleClock(rate int) *sampleClock {
 	return &sampleClock{rate: rate, marks: make([]clockMark, clockMarkCap)}
 }
 
-// advance records that n samples ending at host time hostNs have been written.
-// A sample here is a frame — one int16 of mono audio, or an I and a Q — since
-// that is what the binary's sample indices count.
+// advance records that n samples have been written, the first of them captured
+// at host time hostNs.  A sample here is a frame — one int16 of mono audio, or
+// an I and a Q — since that is what the binary's sample indices count.
 func (c *sampleClock) advance(n int, hostNs int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	first := c.total
 	c.total += int64(n)
 	if hostNs <= 0 {
 		return // nothing useful to anchor to; leave the ring alone
 	}
-	c.marks[c.cursor] = clockMark{sample: c.total, hostNs: hostNs}
+	c.marks[c.cursor] = clockMark{sample: first, hostNs: hostNs}
 	c.cursor++
 	if c.cursor == len(c.marks) {
 		c.cursor = 0
@@ -574,8 +572,8 @@ func (e *ClockExtension) readLoop(resultChan chan<- []byte, crashChan chan error
 }
 
 // rewriteOffset parses one line of the binary's output, replacing the offset
-// on a `time` event with one measured against RTP packet arrival — see the
-// sampleClock comment.
+// on a `time` event with one measured against the RX888 capture time of the
+// samples — see the sampleClock comment.
 //
 // Returns ok=false for anything that is not a JSON object, which is how the
 // read loop drops noise. Every other event is returned exactly as it arrived:
@@ -617,7 +615,7 @@ func (e *ClockExtension) rewriteOffset(line []byte) ([]byte, bool) {
 	ev["offset_ms"] = utcMs - hostMs + applied
 	// So the panel can say which clock the number is against rather than
 	// implying a precision neither of them has.
-	ev["offset_source"] = "packet"
+	ev["offset_source"] = "capture"
 
 	out, err := json.Marshal(ev)
 	if err != nil {

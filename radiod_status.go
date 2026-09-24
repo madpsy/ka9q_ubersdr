@@ -274,6 +274,13 @@ type ChannelStatus struct {
 	// Test points
 	Tp1 float32 // Test point 1
 	Tp2 float32 // Test point 2
+
+	// Capture reference, from a radiod carrying the capture-time patch; see
+	// capture_time.go.  HasCapture is false on packets without one.
+	HasCapture        bool
+	CaptureTsRef      uint32 // RTP timestamp of the reference frame
+	CaptureTimeNs     int64  // Unix ns at which that frame was captured
+	CaptureGeneration uint32 // bumped whenever radiod re-establishes the reference
 }
 
 // SignalUnavailable is radiod's "no channel status" sentinel, as it travels over
@@ -327,6 +334,14 @@ type FrontendStatusTracker struct {
 	mu             sync.RWMutex
 	frontendStatus map[uint32]*FrontendStatus // Map of SSRC -> FrontendStatus
 	channelStatus  map[uint32]*ChannelStatus  // Map of SSRC -> ChannelStatus
+	// captureRefs holds the capture reference per SSRC from the channel's
+	// latest status packet.  radiod sends one in every status packet while it
+	// has a valid one, and none when it does not (the anchor is being rebuilt,
+	// the demod restarted, the rate changed, the channel went idle) -- and it
+	// sends status promptly on each of those -- so a packet without one clears
+	// it: packets then get no timestamp rather than a wrong one.
+	captureRefs    map[uint32]captureRef
+	captureRefAt   map[uint32]time.Time // when each reference arrived
 	statusListener *net.UDPConn
 	stopListener   chan struct{}
 	debugLogged    map[uint32]bool // Track which SSRCs we've logged debug info for
@@ -341,6 +356,8 @@ func NewFrontendStatusTracker() *FrontendStatusTracker {
 	fst := &FrontendStatusTracker{
 		frontendStatus: make(map[uint32]*FrontendStatus),
 		channelStatus:  make(map[uint32]*ChannelStatus),
+		captureRefs:    make(map[uint32]captureRef),
+		captureRefAt:   make(map[uint32]time.Time),
 		stopListener:   make(chan struct{}),
 		debugLogged:    make(map[uint32]bool),
 	}
@@ -378,6 +395,8 @@ func (fst *FrontendStatusTracker) cleanupStaleEntries() {
 			for ssrc, status := range fst.channelStatus {
 				if now.Sub(status.LastUpdate) > staleThreshold {
 					delete(fst.channelStatus, ssrc)
+					delete(fst.captureRefs, ssrc)
+					delete(fst.captureRefAt, ssrc)
 				}
 			}
 
@@ -489,6 +508,8 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 	channelStatus := &ChannelStatus{
 		LastUpdate: time.Now(),
 	}
+
+	var haveCaptureTs, haveCaptureTime bool
 
 	offset := 0
 	for offset < len(data) {
@@ -711,6 +732,16 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 			channelStatus.Tp1 = decodeFloat(value)
 		case tagTp2:
 			channelStatus.Tp2 = decodeFloat(value)
+
+		// Capture reference
+		case tagCaptureTsRef:
+			channelStatus.CaptureTsRef = decodeInt32(value)
+			haveCaptureTs = true
+		case tagCaptureTimeRef:
+			channelStatus.CaptureTimeNs = decodeInt64(value)
+			haveCaptureTime = true
+		case tagCaptureGeneration:
+			channelStatus.CaptureGeneration = decodeInt32(value)
 		}
 
 		offset += length
@@ -731,11 +762,62 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 		if fst.suppressed != nil && fst.suppressed(frontendStatus.SSRC) {
 			return
 		}
+		channelStatus.HasCapture = haveCaptureTs && haveCaptureTime
+		rate := rtpRateFor(channelStatus.OutputSamprate, channelStatus.OutputEncoding)
+
 		fst.mu.Lock()
 		fst.frontendStatus[frontendStatus.SSRC] = frontendStatus
 		fst.channelStatus[channelStatus.SSRC] = channelStatus
+		if channelStatus.HasCapture && rate > 0 {
+			fst.captureRefs[channelStatus.SSRC] = captureRef{
+				TsRef:      channelStatus.CaptureTsRef,
+				TimeNs:     channelStatus.CaptureTimeNs,
+				Generation: channelStatus.CaptureGeneration,
+				Rate:       rate,
+			}
+			fst.captureRefAt[channelStatus.SSRC] = channelStatus.LastUpdate
+		} else {
+			delete(fst.captureRefs, channelStatus.SSRC)
+			delete(fst.captureRefAt, channelStatus.SSRC)
+		}
 		fst.mu.Unlock()
 	}
+}
+
+// CaptureRef returns the latest capture reference radiod has sent for ssrc,
+// provided the channel's RTP clock still runs at the rate the reference was
+// taken at.  After a mode change radiod reports the new rate before it sends a
+// reference for it, and until then the old one describes timestamps that no
+// longer exist.
+func (fst *FrontendStatusTracker) CaptureRef(ssrc uint32) (captureRef, bool) {
+	fst.mu.RLock()
+	defer fst.mu.RUnlock()
+	ref, ok := fst.captureRefs[ssrc]
+	if !ok {
+		return captureRef{}, false
+	}
+	cs, ok := fst.channelStatus[ssrc]
+	if !ok || rtpRateFor(cs.OutputSamprate, cs.OutputEncoding) != ref.Rate {
+		return captureRef{}, false
+	}
+	return ref, true
+}
+
+// CaptureRefInfo is the latest capture reference for an SSRC as stored, with
+// when it arrived, whether CaptureRef would hand it out, and the RTP rate the
+// channel is reported at now -- for display, where a withheld reference is as
+// informative as a usable one.
+func (fst *FrontendStatusTracker) CaptureRefInfo(ssrc uint32) (ref captureRef, at time.Time, usable bool, currentRate int, ok bool) {
+	fst.mu.RLock()
+	defer fst.mu.RUnlock()
+	if cs, found := fst.channelStatus[ssrc]; found {
+		currentRate = rtpRateFor(cs.OutputSamprate, cs.OutputEncoding)
+	}
+	ref, ok = fst.captureRefs[ssrc]
+	if !ok {
+		return captureRef{}, time.Time{}, false, currentRate, false
+	}
+	return ref, fst.captureRefAt[ssrc], currentRate == ref.Rate, currentRate, true
 }
 
 // GetFrontendStatus returns the frontend status for a given SSRC

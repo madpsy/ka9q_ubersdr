@@ -3105,12 +3105,49 @@ func (ah *AdminHandler) HandleChannelStatus(w http.ResponseWriter, r *http.Reque
 		"peak_deviation": sanitizeFloat32(channelStatus.PeakDeviation),
 		"pl_tone":        sanitizeFloat32(channelStatus.PlTone),
 		"thresh_extend":  channelStatus.ThreshExtend,
+
+		"capture": ah.captureStatus(ssrc),
 	}
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding channel status: %v", err)
 	}
+}
+
+// captureStatus describes the capture-time reference radiod last sent for a
+// channel (see capture_time.go), for the admin channel status.  Nanosecond
+// times go out as strings: at ~1.8e18 they are past what a JavaScript number
+// holds exactly.
+func (ah *AdminHandler) captureStatus(ssrc uint32) map[string]interface{} {
+	out := map[string]interface{}{"available": false}
+	src, ok := ah.sessions.radiod.(interface {
+		CaptureRefInfo(uint32) (captureRef, time.Time, bool, int, bool)
+	})
+	if !ok {
+		return out
+	}
+	ref, at, usable, currentRate, found := src.CaptureRefInfo(ssrc)
+	out["current_rate"] = currentRate
+	if found {
+		out["available"] = true
+		out["usable"] = usable
+		out["ts_ref"] = ref.TsRef
+		out["time_ns"] = strconv.FormatInt(ref.TimeNs, 10)
+		out["time_utc"] = time.Unix(0, ref.TimeNs).UTC().Format("2006-01-02T15:04:05.000000000Z")
+		out["generation"] = ref.Generation
+		out["rate"] = ref.Rate
+		if !at.IsZero() {
+			out["received"] = at.UTC().Format(time.RFC3339Nano)
+			out["age_seconds"] = time.Since(at).Seconds()
+		}
+	}
+	if session, ok := ah.sessions.GetSessionBySSRC(ssrc); ok {
+		if ns, have := session.captureStamp.LastLatencyNs(); have {
+			out["last_latency_us"] = float64(ns) / 1e3
+		}
+	}
+	return out
 }
 
 // HandleSystemLoad returns system load averages from /proc/loadavg, CPU core count,

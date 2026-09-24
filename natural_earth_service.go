@@ -1169,6 +1169,32 @@ func GetCountryForLatLonOpt(lat, lon float64, nearestLand bool) (*MaidenheadCoun
 	return globalNaturalEarth.lookupLatLon(lat, lon, nearestLand)
 }
 
+// stationCountry is the country of the receiver's own configured position,
+// resolved once at startup by InitStationCountry.  nil when the dataset isn't
+// loaded or no country could be found.  Read-only after startup.
+var stationCountry *MaidenheadCountryResult
+
+// InitStationCountry resolves the receiver's position to a country, attributing
+// a coastal point that lands just offshore to the nearest land.  Must run after
+// InitNaturalEarthService.
+func InitStationCountry(lat, lon float64) {
+	if !NaturalEarthEnabled() {
+		return
+	}
+	result, err := GetCountryForLatLon(lat, lon)
+	if err != nil || result.Country == "" {
+		log.Printf("Station country: no country found for %.4f, %.4f", lat, lon)
+		return
+	}
+	stationCountry = result
+	log.Printf("Station country: %s (%s), %s", result.Country, result.ISOA2, result.Continent)
+}
+
+// StationCountry returns the country resolved at startup, or nil.
+func StationCountry() *MaidenheadCountryResult {
+	return stationCountry
+}
+
 // NaturalEarthEnabled returns true if the service has been successfully loaded.
 func NaturalEarthEnabled() bool {
 	return globalNaturalEarth != nil && globalNaturalEarth.loaded

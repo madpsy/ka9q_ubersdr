@@ -2621,7 +2621,7 @@ ntp:
   # NTP server to query. Uses DNS-based load balancing so each query may
   # reach a different physical server in the pool.
   # Default: ntp.ubuntu.com
-  server: ntp.ubuntu.com
+  server: time.cloudflare.com
   # Maximum acceptable clock offset in milliseconds before reporting out-of-sync.
   # Default: 200 ms
   sync_tolerance_ms: 200

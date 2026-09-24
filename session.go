@@ -110,6 +110,10 @@ type Session struct {
 	CreatedAt     time.Time
 	LastActive    time.Time
 	AudioChan     chan AudioPacket
+
+	// captureStamp turns RTP timestamps into capture times; touched only by
+	// the audio receive goroutine.  See capture_time.go.
+	captureStamp captureStamp
 	Done          chan struct{}
 	mu            sync.RWMutex
 

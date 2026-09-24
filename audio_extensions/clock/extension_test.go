@@ -25,32 +25,31 @@ func TestSampleClockNoMarksYet(t *testing.T) {
 	}
 }
 
-func TestSampleClockMapsABlockEndToItsArrival(t *testing.T) {
+func TestSampleClockMapsABlockStartToItsCapture(t *testing.T) {
 	c := newSampleClock(testRate)
-	// One 20 ms block of 240 samples, arriving at t = 1_000_000 ms.
-	const arrivalMs = 1_000_000
-	c.advance(240, arrivalMs*int64(1e6))
+	// One 20 ms block of 240 samples, the first captured at t = 1_000_000 ms.
+	const captureMs = 1_000_000
+	c.advance(240, captureMs*int64(1e6))
 
-	// A packet's arrival is taken as the time of its LAST sample: the audio was
-	// captured before it was sent, so the end of the block is the closer edge.
-	got, ok := c.hostMsAt(240)
+	// The timestamp is the capture time of the block's FIRST sample.
+	got, ok := c.hostMsAt(0)
 	if !ok {
 		t.Fatal("no anchor after a block was recorded")
 	}
-	if math.Abs(got-arrivalMs) > 1e-6 {
-		t.Fatalf("end of block: got %.3f ms, want %d ms", got, arrivalMs)
+	if math.Abs(got-captureMs) > 1e-6 {
+		t.Fatalf("start of block: got %.3f ms, want %d ms", got, captureMs)
 	}
 
-	// Half a block earlier is 10 ms earlier at 12 kHz.
+	// Half a block later is 10 ms later at 12 kHz.
 	got, _ = c.hostMsAt(120)
-	if math.Abs(got-(arrivalMs-10)) > 1e-6 {
-		t.Fatalf("mid block: got %.3f ms, want %d ms", got, arrivalMs-10)
+	if math.Abs(got-(captureMs+10)) > 1e-6 {
+		t.Fatalf("mid block: got %.3f ms, want %d ms", got, captureMs+10)
 	}
 
-	// And extrapolating forward past the last mark works the same way.
+	// And extrapolating past the end of the block works the same way.
 	got, _ = c.hostMsAt(360)
-	if math.Abs(got-(arrivalMs+10)) > 1e-6 {
-		t.Fatalf("past the last mark: got %.3f ms, want %d ms", got, arrivalMs+10)
+	if math.Abs(got-(captureMs+30)) > 1e-6 {
+		t.Fatalf("past the block: got %.3f ms, want %d ms", got, captureMs+30)
 	}
 }
 
@@ -67,8 +66,8 @@ func TestSampleClockUsesTheNearestMark(t *testing.T) {
 	}
 	c.advance(240, (base+200+500)*int64(1e6))
 
-	// Sample 2400 is the end of the tenth block, whose mark is exact.
-	got, ok := c.hostMsAt(2400)
+	// Sample 2160 is the start of the tenth block, whose mark is exact.
+	got, ok := c.hostMsAt(2160)
 	if !ok {
 		t.Fatal("no anchor")
 	}
@@ -90,7 +89,7 @@ func TestSampleClockRingWrapsWithoutLosingTheRecentPast(t *testing.T) {
 		c.advance(240, (base+int64(i)*20)*int64(1e6))
 	}
 
-	last := int64(total) * 240
+	last := int64(total-1) * 240 // start of the last block
 	got, ok := c.hostMsAt(last)
 	if !ok {
 		t.Fatal("no anchor after the ring wrapped")
@@ -113,7 +112,7 @@ func TestSampleClockIgnoresUnstampedBlocks(t *testing.T) {
 	}
 
 	c.advance(240, 1_000_000*int64(1e6))
-	got, ok := c.hostMsAt(480)
+	got, ok := c.hostMsAt(240) // the second block's first sample
 	if !ok {
 		t.Fatal("no anchor after a stamped block")
 	}
@@ -201,13 +200,13 @@ func TestRewriteOffsetSign(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &ClockExtension{sampleRate: testRate, clock: newSampleClock(testRate)}
-			// One block ending at sample 240, arriving at the host time.
+			// One block whose first sample, 0, was captured at the host time.
 			e.clock.advance(240, tc.hostMs*int64(1e6))
 
 			in, err := json.Marshal(map[string]interface{}{
 				"type":             "time",
 				"utc_ms":           tc.broadcastMs,
-				"last_edge_sample": 240,
+				"last_edge_sample": 0,
 				"offset_ms":        99999.0, // the binary's own, to be replaced
 			})
 			if err != nil {
@@ -230,8 +229,8 @@ func TestRewriteOffsetSign(t *testing.T) {
 			if math.Abs(got-tc.wantOffset) > 1e-6 {
 				t.Fatalf("offset_ms = %.3f, want %.3f", got, tc.wantOffset)
 			}
-			if out["offset_source"] != "packet" {
-				t.Fatalf("offset_source = %v, want packet — the panel uses this to "+
+			if out["offset_source"] != "capture" {
+				t.Fatalf("offset_source = %v, want capture — the panel uses this to "+
 					"say which clock the number is against", out["offset_source"])
 			}
 			// Everything else must survive the round trip.
@@ -276,12 +275,12 @@ func TestRewriteOffsetKeepsTheDecodersOwnCorrections(t *testing.T) {
 	// added back on or the rewrite quietly undoes them and the offset reads
 	// 13.6 ms long for ever. That is a systematic, not noise: it never averages
 	// out and nothing downstream can see it.
-	const edge = 240
+	const edge = 0
 	const utcMs = 1_000_000_000_000
 	// The mark puts the host clock exactly on the decoded time at that sample,
 	// so the raw difference is 0 and whatever comes out IS the correction.
 	e := &ClockExtension{sampleRate: testRate, clock: newSampleClock(testRate)}
-	e.clock.advance(edge, utcMs*int64(1e6))
+	e.clock.advance(240, utcMs*int64(1e6))
 
 	for _, tc := range []struct {
 		name    string

@@ -695,6 +695,11 @@ func main() {
 		log.Printf("/api/maidenhead/country results will omit the timezone field")
 	}
 
+	// Resolve the station's own country/continent once, for /api/description.
+	// Needs the Natural Earth dataset above; the GPS position only changes via
+	// an admin save, which restarts the server.
+	InitStationCountry(config.Admin.GPS.Lat, config.Admin.GPS.Lon)
+
 	log.Printf("Starting ka9q_ubersdr server...")
 	log.Printf("Radiod status: %s", config.Radiod.StatusGroup)
 	log.Printf("Radiod data: %s", config.Radiod.DataGroup)
@@ -867,6 +872,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize audio receiver: %v", err)
 	}
+	audioReceiver.SetCaptureSource(radiod)
 	audioReceiver.Start()
 	defer audioReceiver.Stop()
 
@@ -3295,6 +3301,7 @@ func main() {
 		handleVersionHealth(w, r, config.Admin.VersionCheckEnabled)
 	}))
 	http.HandleFunc("/admin/dsp-health", adminHandler.AuthMiddleware(adminHandler.HandleDSPHealth))
+	http.HandleFunc("/admin/audio-latency", adminHandler.AuthMiddleware(adminHandler.HandleAudioLatency))
 	http.HandleFunc("/admin/db-query", adminHandler.AuthMiddleware(adminHandler.HandleDBQuery))
 	http.HandleFunc("/admin/db-tables", adminHandler.AuthMiddleware(adminHandler.HandleDBTables))
 	http.HandleFunc("/admin/cwskimmer-health", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerHealth))
@@ -4954,6 +4961,22 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	// Calculate Maidenhead grid locator from GPS coordinates
 	maidenhead := latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon)
 
+	gpsInfo := map[string]interface{}{
+		"lat":          config.Admin.GPS.Lat,
+		"lon":          config.Admin.GPS.Lon,
+		"maidenhead":   maidenhead,
+		"gps_enabled":  config.Admin.GPS.GPSEnabled,
+		"tdoa_enabled": config.Admin.GPS.TDOAEnabled,
+	}
+	// Country and continent from the Natural Earth dataset; omitted entirely when
+	// the dataset isn't loaded or the position can't be resolved.
+	if c := StationCountry(); c != nil {
+		gpsInfo["country"] = c.Country
+		gpsInfo["country_code"] = c.ISOA2
+		gpsInfo["continent"] = c.Continent
+		gpsInfo["continent_code"] = c.ContinentCode
+	}
+
 	// Resolve and sanitise default frequency (must be inside the receiver's range)
 	effectiveDefaultFreq := config.Admin.DefaultFrequency
 	if effectiveDefaultFreq < config.Receiver.MinFreq() || effectiveDefaultFreq > config.Receiver.MaxFreq() {
@@ -5020,16 +5043,10 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		// with clients built against a server that predates this field.
 		"tuning_range": config.Receiver.TuningRange(),
 		"receiver": map[string]interface{}{
-			"name":       config.Admin.Name,
-			"callsign":   config.Admin.Callsign,
-			"public_url": publicURL,
-			"gps": map[string]interface{}{
-				"lat":          config.Admin.GPS.Lat,
-				"lon":          config.Admin.GPS.Lon,
-				"maidenhead":   maidenhead,
-				"gps_enabled":  config.Admin.GPS.GPSEnabled,
-				"tdoa_enabled": config.Admin.GPS.TDOAEnabled,
-			},
+			"name":            config.Admin.Name,
+			"callsign":        config.Admin.Callsign,
+			"public_url":      publicURL,
+			"gps":             gpsInfo,
 			"asl":             config.Admin.ASL,
 			"location":        config.Admin.Location,
 			"timezone_offset": config.Admin.TimezoneOffsetMinutes(), // DST-adjusted current offset in minutes

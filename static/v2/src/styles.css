@@ -7130,6 +7130,47 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 
+/* The same reading over the last ten minutes, under the dial. The SVG is stretched
+   to the column, so its strokes are non-scaling and its labels are HTML on top. */
+.tm__hist { display: flex; flex-direction: column; gap: 3px; }
+.tm__hist-plot {
+    position: relative;
+    height: 56px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--spec-bg);
+    overflow: hidden;
+}
+.tm__hist-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.tm__hist-zone { fill: var(--good); opacity: 0.22; }
+.tm__hist-zero { stroke: var(--text-faint); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.tm__hist-band { fill: var(--accent); opacity: 0.18; }
+.tm__hist-line {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+}
+.tm__hist-dot {
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    margin: -2.5px 0 0 -2.5px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+.tm__hist-y {
+    position: absolute;
+    left: 3px;
+    font-family: var(--mono);
+    font-size: calc(9px * var(--ui-scale));
+    color: var(--text-faint);
+    pointer-events: none;
+}
+.tm__hist-y.is-hi { top: 1px; }
+.tm__hist-y.is-lo { bottom: 1px; }
+
 /* The two switches and the way out, on one line. They wrap rather than squeeze
    in a narrow dock: a switch that has lost its label is a control nobody can
    identify, whereas a second line costs 20 pixels once. */

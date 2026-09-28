@@ -26,6 +26,12 @@
 // received in IQ with the dial ON the carrier, which puts it at 0 Hz of the
 // complex baseband, and the entry says so with `mode: 'iq'`.
 //
+// MSF (NPL, Anthorn, 60 kHz) and Allouis (ALS162, France, 162 kHz) are the
+// same: IQ with the dial on the carrier. MSF is on-off keyed and is timed on
+// the carrier's coherent amplitude; Allouis is phase modulation only. MSF
+// shares 60 kHz with WWVB, and the tuning tells them apart — WWVB is USB at
+// 59 kHz, MSF is IQ on the carrier.
+//
 // The dial frequency is what is stored, so these are already offset — there is
 // no arithmetic at tune time and nothing to get the sign of wrong.
 export const CARRIER_OFFSET_HZ = 1000;
@@ -68,6 +74,18 @@ export const CLOCK_FREQUENCIES = [
             { hz: 77_500, label: '77.5 kHz', carrier: 77_500, mode: 'iq' },
         ],
     },
+    {
+        group: 'MSF',
+        options: [
+            { hz: 60_000, label: '60 kHz', carrier: 60_000, mode: 'iq' },
+        ],
+    },
+    {
+        group: 'Allouis',
+        options: [
+            { hz: 162_000, label: '162 kHz', carrier: 162_000, mode: 'iq' },
+        ],
+    },
 ];
 
 // The passband has to reach 2.2 kHz or the WWV/WWVH tick image is cut off, and
@@ -77,14 +95,23 @@ export const CLOCK_FREQUENCIES = [
 export const CLOCK_MODE = 'usb';
 export const CLOCK_BANDWIDTH = { low: 0, high: 3000 };
 
-// DCF77's mode. Plain `iq` rather than a wide variant: 12 kHz of baseband holds
-// the carrier with kilohertz to spare, and the wide ones need operator
-// authorisation. The same choice the DRM decoder makes.
+// The IQ stations' mode (DCF77, MSF, Allouis). Plain `iq` rather than a wide
+// variant: 12 kHz of baseband holds the carrier with kilohertz to spare, and
+// the wide ones need operator authorisation. The same choice the DRM decoder
+// makes. Named for DCF77, the first of them.
 export const DCF77_MODE = 'iq';
 
-/** The mode a station's decoder reads: IQ for DCF77, USB for the rest. */
+// The stations whose decoders read complex baseband.
+export const IQ_STATIONS = ['dcf77', 'msf', 'allouis'];
+
+/** Whether a station's decoder reads IQ rather than USB audio. */
+export function isIqStation(station) {
+    return IQ_STATIONS.includes(station);
+}
+
+/** The mode a station's decoder reads: IQ for DCF77, MSF and Allouis, USB for the rest. */
 export function modeFor(station) {
-    return station === 'dcf77' ? DCF77_MODE : CLOCK_MODE;
+    return isIqStation(station) ? DCF77_MODE : CLOCK_MODE;
 }
 
 // Below this the dial is taken to be on WWVB. Matches wwvbCeilingHz in
@@ -100,9 +127,26 @@ export const WWVB_CEILING_HZ = 1_000_000;
 export const DCF77_CARRIER_HZ = 77_500;
 export const DCF77_WINDOW_HZ = 5_000;
 
-export function stationFor(dialHz) {
+// MSF and Allouis, as extension.go has them (msfCarrierHz, allouisCarrierHz,
+// lfWindowHz, msfOnCarrierHz). At 60 kHz a dial on the carrier is MSF whatever
+// the mode — Start switches it into IQ, as for DCF77 — and so is an IQ session
+// anywhere in the window; WWVB is USB at 59 kHz.
+export const MSF_CARRIER_HZ = 60_000;
+export const ALLOUIS_CARRIER_HZ = 162_000;
+export const LF_WINDOW_HZ = 5_000;
+export const MSF_ON_CARRIER_HZ = 500;
+
+/**
+ * The decoder a dial implies, by the server's own rule (stationFor in
+ * extension.go). `iq` is whether the session is in IQ, which only matters at
+ * 60 kHz.
+ */
+export function stationFor(dialHz, iq = false) {
     if (!Number.isFinite(dialHz) || dialHz <= 0) return 'wwv';
     if (Math.abs(dialHz - DCF77_CARRIER_HZ) <= DCF77_WINDOW_HZ) return 'dcf77';
+    if (Math.abs(dialHz - ALLOUIS_CARRIER_HZ) <= LF_WINDOW_HZ) return 'allouis';
+    const fromMsf = Math.abs(dialHz - MSF_CARRIER_HZ);
+    if (fromMsf <= MSF_ON_CARRIER_HZ || (iq && fromMsf <= LF_WINDOW_HZ)) return 'msf';
     return dialHz < WWVB_CEILING_HZ ? 'wwvb' : 'wwv';
 }
 
@@ -159,7 +203,8 @@ export const STATE_LABELS = {
 export const STATE_TONES = { nosignal: 'off', acquiring: 'wait', locked: 'on' };
 
 export const STATION_LABELS = {
-    wwv: 'WWV', wwvh: 'WWVH', wwvb: 'WWVB', dcf77: 'DCF77', unknown: 'Unknown',
+    wwv: 'WWV', wwvh: 'WWVH', wwvb: 'WWVB', dcf77: 'DCF77', msf: 'MSF', allouis: 'Allouis',
+    unknown: 'Unknown',
 };
 
 export function stateLabel(state) { return STATE_LABELS[state] || 'Stopped'; }
@@ -371,6 +416,8 @@ export function funnelStages(diag, station) {
     if (!diag) return [];
     const wwvb = station === 'wwvb';
     const dcf77 = station === 'dcf77';
+    const msf = station === 'msf';
+    const allouis = station === 'allouis';
 
     const carrier = dcf77
         ? {
@@ -378,6 +425,18 @@ export function funnelStages(diag, station) {
             hint: 'No 77.5 kHz carrier in the IQ. Tune IQ to 0.0775 MHz. DCF77 '
                 + 'transmits from Mainflingen, near Frankfurt, and is strong across '
                 + 'Europe but faint beyond about 2000 km.',
+        }
+        : msf ? {
+            label: 'Carrier',
+            hint: 'No 60 kHz carrier in the IQ. Tune IQ to 0.060 MHz. MSF transmits '
+                + 'from Anthorn in Cumbria and covers the UK and much of northern and '
+                + 'western Europe.',
+        }
+        : allouis ? {
+            label: 'Carrier',
+            hint: 'No 162 kHz carrier in the IQ. Tune IQ to 0.162 MHz. Allouis '
+                + 'transmits from near Vierzon in France, and is off air every Tuesday '
+                + '08:00–12:00 French time for maintenance.',
         }
         : wwvb
             ? { label: 'Carrier tone', hint: 'No 60 kHz carrier in the audio. Tune USB to 0.059 MHz.' }
@@ -392,9 +451,15 @@ export function funnelStages(diag, station) {
     // tracking — the phase code when it can, the carrier cut otherwise — and
     // that is the detail worth showing, where the others show their filter
     // delay estimate.
+    // Allouis times it by a correlation of the whole second's phase, and its
+    // SNR is the detail; MSF by the carrier's fall, which has no filter delay
+    // to report.
     const timingDetail = dcf77
         ? (diag.timing_from === 'pm' ? 'phase code' : (diag.timing_from === 'am' ? 'carrier cut' : null))
-        : (Number.isFinite(diag.delay_est_ms) ? `${diag.delay_est_ms.toFixed(1)} ms` : null);
+        : allouis
+            ? (Number.isFinite(diag.timing_snr_db) ? `phase ${diag.timing_snr_db.toFixed(1)} dB` : null)
+            : msf ? null
+                : (Number.isFinite(diag.delay_est_ms) ? `${diag.delay_est_ms.toFixed(1)} ms` : null);
 
     const stages = [
         {
@@ -409,9 +474,9 @@ export function funnelStages(diag, station) {
             label: 'Second edge',
             ok: !!diag.phase_locked,
             detail: timingDetail,
-            hint: dcf77
+            hint: dcf77 || msf || allouis
                 ? 'The carrier is there but the second has not been found in it. '
-                  + 'Usually fading, or interference near 77.5 kHz; give it a minute.'
+                  + 'Usually fading, or interference near the carrier; give it a minute.'
                 : 'The tick is there but its phase has not settled. Usually fading; '
                   + 'give it a minute, or try another frequency.',
         },
@@ -424,8 +489,16 @@ export function funnelStages(diag, station) {
                 ? 'Seconds are being classified but the minute has not been located. '
                   + 'DCF77 marks it by leaving second 59 uncut, so this needs about '
                   + 'two clean minutes.'
-                : 'Seconds are being classified but the minute has not been located. '
-                  + 'This needs about two clean minutes.',
+                : msf
+                    ? 'Seconds are being classified but the minute has not been located. '
+                      + 'MSF marks it with 500 ms of carrier off, and the 01111110 '
+                      + 'identifier just before; this needs about a clean minute.'
+                    : allouis
+                        ? 'The second is found but not yet named. Every Allouis second '
+                          + 'carries its own position code, so this normally takes only a '
+                          + 'few clean seconds.'
+                        : 'Seconds are being classified but the minute has not been located. '
+                          + 'This needs about two clean minutes.',
         },
         {
             id: 'vote',
@@ -565,9 +638,10 @@ export function formatDate(doy, year2) {
  * WWVB-only and simply does not exist on a WWV frame.
  *
  * DCF77 sends German civil time and says which zone it is counting in, so its
- * one zone flag is CEST. The decoder has already converted the minute to UTC;
- * the chip only says what the transmitter was sending. It is not US DST,
- * whatever field it also arrives in.
+ * one zone flag is CEST; Allouis likewise, in French legal time; MSF sends UK
+ * clock time, flagged BST. The decoder has already converted the minute to
+ * UTC; the chip only says what the transmitter was sending. None of them is
+ * US DST, whatever field it also arrives in.
  */
 export function frameFlags(frame) {
     if (!frame) return [];
@@ -578,6 +652,11 @@ export function frameFlags(frame) {
     if (frame.leap_year) out.push({ id: 'leapyear', label: 'Leap year', tone: 'info' });
     if (frame.station === 'dcf77') {
         if (frame.cest) out.push({ id: 'dst', label: 'German summer time (CEST)', tone: 'info' });
+    } else if (frame.station === 'allouis') {
+        if (frame.cest) out.push({ id: 'dst', label: 'French summer time (CEST)', tone: 'info' });
+    } else if (frame.station === 'msf') {
+        // UK clock time; the decoder has already converted the minute to UTC.
+        if (frame.bst) out.push({ id: 'dst', label: 'UK summer time (BST)', tone: 'info' });
     } else if (frame.dst1 || frame.dst2) {
         // The two bits are a schedule, not a state: DST1 is the status at 00:00Z
         // today and DST2 at 24:00Z, so the pair says whether a change happens

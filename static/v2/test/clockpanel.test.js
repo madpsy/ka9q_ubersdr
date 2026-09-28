@@ -37,7 +37,8 @@ globalThis.TextDecoder = globalThis.TextDecoder || require('util').TextDecoder;
 
 const {
     render, reset, walk, words, ClockExtension, EXTENSION_BY_ID,
-    CLOCK_FREQUENCIES, DCF77_CARRIER_HZ, DCF77_WINDOW_HZ, STRIP_LENGTH, WWVB_CEILING_HZ,
+    ALLOUIS_CARRIER_HZ, CLOCK_FREQUENCIES, DCF77_CARRIER_HZ, DCF77_WINDOW_HZ, LF_WINDOW_HZ,
+    MSF_CARRIER_HZ, MSF_ON_CARRIER_HZ, STRIP_LENGTH, WWVB_CEILING_HZ, isIqStation,
     alignmentSeries, appendSecond, correctedNowMs, decodeFrame, formatClock, formatDate,
     formatDay, formatDut1, formatOffset, frameFlags, funnelStages, localIsUtc, modeFor,
     offsetSense, offsetTone, polylinePoints, stateLabel, stateTone, stationFor, stationLabel, symbolTone,
@@ -126,9 +127,10 @@ t('a too-narrow passband is called out, and a wide one is not', () => {
         'a 3 kHz passband should not be warned about');
 });
 
-// 60 kHz is shared with MSF (Anthorn), whose time code this decoder cannot
-// read. Without the note, a European user gets a strong carrier, a funnel whose
-// first stage passes, and no explanation at all.
+// 60 kHz is shared with MSF (Anthorn). The WWVB tuning (USB, 59 kHz) runs the
+// WWVB decoder, which cannot read MSF's time code, so without the note a
+// European user gets a strong carrier, a funnel whose first stage passes, and
+// no explanation at all. The note says where MSF's own tuning is.
 t('tuning WWVB warns that 60 kHz is shared with MSF', () => {
     reset();
     const { tree } = render(ClockExtension, {}, context({
@@ -202,14 +204,14 @@ t('DCF77 in IQ is not warned about anything', () => {
     assert.ok(!text.includes('MSF'), '77.5 kHz is not shared with MSF');
 });
 
-t('WWV in IQ is the wrong mode, and the note says DCF77 is the exception', () => {
+t('WWV in IQ is the wrong mode, and the note names the IQ exceptions', () => {
     reset();
     const { tree } = render(ClockExtension, {}, context({
         tuning: { frequency: 9_999_000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 },
     }));
     const text = words(tree);
     assert.ok(text.includes('received in USB'));
-    assert.ok(text.includes('DCF77 is the exception'));
+    assert.ok(text.includes('DCF77, MSF and Allouis are'));
 });
 
 t('the menu tunes DCF77 on its carrier and does not force IQ while stopped', () => {
@@ -316,6 +318,80 @@ t('every USB frequency is 1 kHz below its carrier, and IQ ones are on it', () =>
                 `${o.label}'s mode is not the one its station is decoded in`);
         }
     }
+});
+
+t('MSF and WWVB share 60 kHz, and the tuning says which', () => {
+    // WWVB is USB 1 kHz below; MSF is IQ on the carrier. A dial on the carrier
+    // is MSF whatever the mode, because Start switches it into IQ, as for DCF77.
+    assert.strictEqual(stationFor(59_000), 'wwvb');
+    assert.strictEqual(stationFor(59_000, true), 'msf');
+    assert.strictEqual(stationFor(MSF_CARRIER_HZ), 'msf');
+    assert.strictEqual(stationFor(MSF_CARRIER_HZ, true), 'msf');
+    assert.strictEqual(stationFor(MSF_CARRIER_HZ + MSF_ON_CARRIER_HZ + 1), 'wwvb');
+    assert.strictEqual(stationFor(MSF_CARRIER_HZ + LF_WINDOW_HZ, true), 'msf');
+    assert.strictEqual(stationFor(MSF_CARRIER_HZ + LF_WINDOW_HZ + 1, true), 'wwvb');
+});
+
+t('Allouis is its carrier, whatever the mode', () => {
+    assert.strictEqual(stationFor(ALLOUIS_CARRIER_HZ), 'allouis');
+    assert.strictEqual(stationFor(ALLOUIS_CARRIER_HZ - LF_WINDOW_HZ), 'allouis');
+    assert.strictEqual(stationFor(ALLOUIS_CARRIER_HZ + LF_WINDOW_HZ, true), 'allouis');
+    assert.strictEqual(stationFor(ALLOUIS_CARRIER_HZ + LF_WINDOW_HZ + 1), 'wwvb');
+});
+
+t('DCF77, MSF and Allouis are decoded from IQ; the others from USB', () => {
+    for (const st of ['dcf77', 'msf', 'allouis']) {
+        assert.ok(isIqStation(st), `${st} should be IQ`);
+        assert.strictEqual(modeFor(st), 'iq');
+    }
+    for (const st of ['wwv', 'wwvh', 'wwvb']) {
+        assert.ok(!isIqStation(st), `${st} should be USB`);
+        assert.strictEqual(modeFor(st), 'usb');
+    }
+    assert.strictEqual(stationLabel('msf'), 'MSF');
+    assert.strictEqual(stationLabel('allouis'), 'Allouis');
+});
+
+t('Start on an MSF or Allouis dial switches the receiver to IQ', () => {
+    for (const frequency of [MSF_CARRIER_HZ, ALLOUIS_CARRIER_HZ]) {
+        reset();
+        const ctx = context({ tuning: { frequency, mode: 'usb', bandwidthLow: 0, bandwidthHigh: 3000 } });
+        const { tree } = render(ClockExtension, {}, ctx);
+        const text = words(tree);
+        assert.ok(text.includes('Start switches the receiver to IQ'), `${frequency} Hz: no IQ note`);
+        assert.ok(!text.includes('Pick a frequency above'), `${frequency} Hz in USB is not a wrong mode`);
+        const startBtn = walk(tree).find((n) => n && n.props && typeof n.props.onClick === 'function'
+            && /Start/.test(words(n)));
+        assert.ok(startBtn, 'no Start button');
+        startBtn.props.onClick();
+        assert.ok(ctx.calls.some((c) => c[0] === 'setMode' && c[1] === 'iq'),
+            `${frequency} Hz: Start should switch to IQ`);
+    }
+});
+
+t('the menu offers MSF and Allouis, tuned on their carriers in IQ', () => {
+    const byGroup = {};
+    for (const g of CLOCK_FREQUENCIES) byGroup[g.group] = g.options;
+    assert.deepStrictEqual(byGroup.MSF.map((o) => [o.hz, o.mode]), [[60_000, 'iq']]);
+    assert.deepStrictEqual(byGroup.Allouis.map((o) => [o.hz, o.mode]), [[162_000, 'iq']]);
+    // Still WWVB's own USB tuning alongside.
+    assert.deepStrictEqual(byGroup.WWVB.map((o) => [o.hz, o.mode]), [[59_000, undefined]]);
+});
+
+t('each station\'s summer time is its own, and never called US DST', () => {
+    const labels = (f) => frameFlags(f).map((x) => x.label);
+    assert.deepStrictEqual(labels({ station: 'msf', bst: true, dst1: true, dst2: true }), ['UK summer time (BST)']);
+    assert.deepStrictEqual(labels({ station: 'allouis', cest: true, dst1: true, dst2: true }), ['French summer time (CEST)']);
+    assert.deepStrictEqual(labels({ station: 'msf', bst: false, dst1: false, dst2: false }), []);
+});
+
+t('the carrier stage says where each station is and how to tune it', () => {
+    const diag = { tone_detected: false };
+    assert.ok(funnelStages(diag, 'msf')[0].hint.includes('0.060 MHz'));
+    assert.ok(funnelStages(diag, 'allouis')[0].hint.includes('0.162 MHz'));
+    assert.ok(funnelStages(diag, 'allouis')[0].hint.includes('Tuesday'));
+    const timing = funnelStages({ tone_detected: true, phase_locked: true, timing_snr_db: 57 }, 'allouis')[1];
+    assert.strictEqual(timing.detail, 'phase 57.0 dB');
 });
 
 t('the menu offers the frequencies these stations actually transmit on', () => {

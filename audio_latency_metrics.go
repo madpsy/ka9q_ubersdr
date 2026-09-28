@@ -171,12 +171,15 @@ type AudioLatencyPoint struct {
 	MaxUs  float64 `json:"max_us"`
 }
 
-// series returns one point per period for the last n periods, oldest first,
-// each starting at start_ms. Periods with no packets have a zero count.
+// series returns one point per period for the last n completed periods,
+// oldest first, each starting at start_ms. Periods with no packets have a zero
+// count. The period in progress is left out: a few seconds of packets make a
+// noisy p95, since one brief stall is a large share of them, and the point
+// would spike and then fall as the period filled. The windows cover "now".
 func (r *audioLatencyRing) series(nowSec int64, n int) []map[string]interface{} {
 	cur := nowSec / r.periodSec
 	out := make([]map[string]interface{}, 0, n)
-	for tag := cur - int64(n) + 1; tag <= cur; tag++ {
+	for tag := cur - int64(n); tag < cur; tag++ {
 		point := map[string]interface{}{"start_ms": tag * r.periodSec * 1000}
 		s := &r.slots[tag%int64(len(r.slots))]
 		live := s.tag.Load() == tag
@@ -200,10 +203,12 @@ type AudioLatencyMetrics struct {
 	hours   *audioLatencyRing
 }
 
+// Each ring holds one slot beyond its window, so the series can show a full
+// window of completed periods alongside the one in progress.
 func newAudioLatencyMetrics() *AudioLatencyMetrics {
 	return &AudioLatencyMetrics{
-		minutes: newAudioLatencyRing(60, audioLatencyMinutes),
-		hours:   newAudioLatencyRing(3600, audioLatencyHours),
+		minutes: newAudioLatencyRing(60, audioLatencyMinutes+1),
+		hours:   newAudioLatencyRing(3600, audioLatencyHours+1),
 	}
 }
 

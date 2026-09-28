@@ -21,7 +21,8 @@ import { marginFromSlider } from './constants.js';
 import { Emitter } from './emitter.js';
 import { failureKind } from '../lib/connectFailure.js';
 import { PCMStreamDecoder, isZstdFrame } from './pcm-stream.js';
-import { PCMv4StreamDecoder, OpusV4HeaderDecoder, isV4Frame } from './pcm-v4.js';
+import { PCMv4StreamDecoder, OpusV4HeaderDecoder, isV4Frame, opusDurationSec } from './pcm-v4.js';
+import { addServerTimeSample } from './serverClock.js';
 import {
     HANDSHAKE_TIMEOUT_MS, abandon, checkSocket, reviveOnWake,
 } from './socket-health.js';
@@ -108,6 +109,17 @@ export class AudioConnection extends Emitter {
         // reader only has to take deltas — see the Receiver info panel, which
         // is the only thing that looks at it.
         this.bytesIn = 0;
+        // performance.now() of every ping not yet answered, oldest first. The
+        // socket is ordered and a pong answers nothing but a ping, so the next
+        // pong is the oldest ping's -- no id has to travel. Per socket, since a
+        // ping on a socket that died is never answered.
+        this.pingsOut = [];
+        // How far behind capture the audio is arriving, as performance.now()
+        // at arrival less the capture time of the packet's last sample. Not an
+        // age until radio/serverClock.js says how the two clocks line up; kept
+        // in this form so that is one addition when read rather than a clock
+        // estimate per packet. Averaged over whole seconds -- see _noteArrival.
+        this.arrival = { start: 0, sum: 0, n: 0, lag: null };
         // How the server last refused us, held only from the error message to
         // the close that follows it — see _onMessage and _onClose.
         this.lastFailure = null;
@@ -229,6 +241,8 @@ export class AudioConnection extends Emitter {
         }
         ws.binaryType = 'arraybuffer';
         this.ws = ws;
+        this.pingsOut = [];
+        this.arrival = { start: 0, sum: 0, n: 0, lag: null };
         this.opened = false;
         this.openedAt = Date.now();
         this.lastRxAt = this.openedAt;
@@ -308,8 +322,46 @@ export class AudioConnection extends Emitter {
 
     // Keepalive, sent when the operator does something rather than on a timer —
     // see radio/idle.js for why that distinction is the whole point.
+    //
+    // The pong carries the server's clock, which is the only way this page
+    // measures its own against it -- see radio/serverClock.js. That rides on
+    // pings sent for their own reason and never adds one.
     ping() {
-        return this.send({ type: 'ping' });
+        const sent = performance.now();
+        if (!this.send({ type: 'ping' })) return false;
+        this.pingsOut.push(sent);
+        // Bounded, in case a server that never answers is followed by one that
+        // does: a stale entry would pair every later pong with the wrong ping.
+        if (this.pingsOut.length > 8) this.pingsOut.shift();
+        return true;
+    }
+
+    // The last second's average arrival lag, in ms on performance.now() --
+    // add serverClock()'s theta for an age. Null before a second of timed
+    // packets, and once they have stopped: a figure from before the stream
+    // stopped is not one about the stream now.
+    get arrivalLag() {
+        const a = this.arrival;
+        if (a.lag == null || performance.now() - a.start > 3000) return null;
+        return a.lag;
+    }
+
+    // Arrival lag per packet, averaged over a second and published a second at
+    // a time. Per packet it jitters by however bursty the delivery is -- radiod
+    // sends in bursts, and the network adds its own -- and a readout sampling
+    // one packet a second would print that jitter as the figure.
+    _noteArrival(captureMs, durSec) {
+        if (captureMs == null) return;
+        const now = performance.now();
+        const a = this.arrival;
+        a.sum += now - (captureMs + durSec * 1000);
+        a.n += 1;
+        if (now - a.start >= 1000) {
+            a.lag = a.sum / a.n;
+            a.start = now;
+            a.sum = 0;
+            a.n = 0;
+        }
     }
 
     send(msg) {
@@ -441,7 +493,14 @@ export class AudioConnection extends Emitter {
             });
             return;
         }
-        if (msg.type === 'pong') return;
+        if (msg.type === 'pong') {
+            const sent = this.pingsOut.shift();
+            // An older server sends a bare pong; the ping is still spent.
+            if (sent != null && msg.serverTimeNs > 0) {
+                addServerTimeSample(sent, performance.now(), msg.serverTimeNs / 1e6);
+            }
+            return;
+        }
         // The server's own id for this session. Nothing here needs it, but
         // /stats does — see setServerSessionId.
         if (msg.type === 'status' && msg.sessionId) setServerSessionId(msg.sessionId);
@@ -497,10 +556,13 @@ export class AudioConnection extends Emitter {
             const h = this.opusV4.decode(buffer);
             if (!h) return;
             this.emit('quality', h.signal);
+            const data = new Uint8Array(buffer, h.bodyOffset);
+            this._noteArrival(h.captureMs, opusDurationSec(data));
             this.emit('opus', {
-                data: new Uint8Array(buffer, h.bodyOffset),
+                data,
                 sampleRate: h.sampleRate,
                 channels: h.channels,
+                captureMs: h.captureMs,
             });
             return;
         }
@@ -536,10 +598,13 @@ export class AudioConnection extends Emitter {
         if (!frame) return;
         if (frame.signal) this.emit('quality', frame.signal);
         this.attempts = 0;
+        const frames = frame.planes.length ? frame.planes[0].length : 0;
+        this._noteArrival(frame.captureMs, frame.sampleRate ? frames / frame.sampleRate : 0);
         this.emit('pcm', {
             planes: frame.planes,
             sampleRate: frame.sampleRate,
             channels: frame.channels,
+            captureMs: frame.captureMs,
         });
     }
 

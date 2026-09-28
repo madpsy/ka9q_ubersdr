@@ -452,6 +452,9 @@ export default function StatsPanel({ minimal }) {
             streamRate: s.streamRate,
             streamChannels: s.streamChannels,
             outLatSec: s.outLatSec,
+            heardAgeMs: s.heardAgeMs,
+            arrivalAgeMs: s.arrivalAgeMs,
+            ageErrMs: s.ageErrMs,
             listeners: s.listeners,
             chatUsers: s.chatUsers,
             ip: s.ip,
@@ -612,6 +615,27 @@ export default function StatsPanel({ minimal }) {
                     which the corner readout leaves out for want of space. Here
                     there is room, and a card that appeared only when something
                     was wrong would move everything under it when it did. */}
+                {/* From the capture time on every packet, against the
+                    receiver's clock as measured over the ping — see
+                    radio/serverClock.js. Signal age is capture to speaker;
+                    arrival age the part of it before this client's queue, so
+                    the gap between the two is the queue and the output
+                    device. A dash until the first measurement, and for a
+                    stream without capture times. */}
+                {/* Two cards, not three: the error bar belongs to both and
+                    rides on the first, which keeps the grid in pairs. */}
+                <Readout
+                    label="Signal age"
+                    value={Number.isFinite(facts.heardAgeMs)
+                        ? `${Math.round(facts.heardAgeMs)}${Number.isFinite(facts.ageErrMs) ? ` ±${Math.max(1, Math.ceil(facts.ageErrMs))}` : ''}`
+                        : '—'}
+                    unit="ms"
+                />
+                <Readout
+                    label="Arrival age"
+                    value={Number.isFinite(facts.arrivalAgeMs) ? Math.round(facts.arrivalAgeMs) : '—'}
+                    unit="ms"
+                />
                 <Readout label="Poll" value={facts.divisor > 0 ? `1/${Math.round(facts.divisor)}` : '—'} />
                 {/* Full width: an IPv6 address is longer than half a dock
                     column and would wrap inside its card. */}

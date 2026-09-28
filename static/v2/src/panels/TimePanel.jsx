@@ -43,8 +43,8 @@ import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Icon, Switch } from '../components/ui.jsx';
 import {
     BURST_GAP_MS, FETCH_TIMEOUT_MS, POLL_MS, WINDOW,
-    addSample, addonUrl, bestEstimate, clockAsleep, clockFaces, deviceError, deviceLabel,
-    deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone, faceDateAt,
+    addSample, addonUrl, bestEstimate, clockAsleep, clockFaces, deviceError, deviceHistoryAdd,
+    deviceLabel, deviceSeries, deviceTone, deviceVerdict, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone, faceDateAt,
     facePartsAt, faceFor, faceText, formatDur, formatMs, newClock, nextFaceKey,
     nextSecondDelay, ntpAvailable, offsetText, referenceKey, referenceOf, sampleFrom,
     saveBigClock, saveShowRef, saveShowMs, savedBigClock, savedShowRef, savedShowMs,
@@ -107,6 +107,89 @@ function Dial({ device, within, span }) {
     );
 }
 
+/**
+ * This device's clock against the broadcast over the last ten minutes, or since the panel
+ * came on screen if that is less — see deviceSeries. The same band as the dial's, per
+ * moment, so it shows whether the line has been inside it rather than only whether it is
+ * now. Drawn stretched to the column: the lines keep their width and the labels are HTML,
+ * so nothing is distorted.
+ */
+function DeviceChart({ series }) {
+    const { x0, x1, width, span, points } = series;
+    const W = 300;
+    const H = 56;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const p of points) {
+        lo = Math.min(lo, p[2], -p[4]);
+        hi = Math.max(hi, p[3], p[4]);
+    }
+    if (!(hi > lo)) { lo = -0.5; hi = 0.5; }
+    if (hi - lo < 1) { const m = (hi + lo) / 2; lo = m - 0.5; hi = m + 0.5; }
+    const pad = (hi - lo) * 0.1;
+    lo -= pad;
+    hi += pad;
+    const X = (t) => ((t - x0) / (x1 - x0)) * W;
+    const Y = (v) => (1 - (v - lo) / (hi - lo)) * H;
+    const xy = (t, v) => `${X(t).toFixed(1)},${Y(v).toFixed(1)}`;
+    const mid = (p) => p[0] + width / 2;
+
+    // A gap longer than one and a half buckets — the panel off screen, the tab hidden —
+    // breaks the line rather than drawing across a time nothing was measured.
+    const segs = [];
+    for (const p of points) {
+        const cur = segs[segs.length - 1];
+        if (cur && p[0] - cur[cur.length - 1][0] <= width * 1.5) cur.push(p);
+        else segs.push([p]);
+    }
+    const signed = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${formatMs(Math.abs(v))}`;
+    const last = points[points.length - 1];
+
+    return (
+        <div className="tm__hist">
+            <div className="tm__hist-plot">
+                <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+                    {segs.map((seg, i) => (
+                        <polygon
+                            key={`z${i}`}
+                            className="tm__hist-zone"
+                            points={seg.map((p) => `${xy(p[0], p[4])} ${xy(p[0] + width, p[4])}`)
+                                .concat(seg.slice().reverse()
+                                    .map((p) => `${xy(p[0] + width, -p[4])} ${xy(p[0], -p[4])}`))
+                                .join(' ')}
+                        />
+                    ))}
+                    <line className="tm__hist-zero" x1="0" x2={W} y1={Y(0)} y2={Y(0)} />
+                    {segs.map((seg, i) => (seg.length > 1 ? (
+                        <g key={`s${i}`}>
+                            <polygon
+                                className="tm__hist-band"
+                                points={seg.map((p) => xy(mid(p), p[3]))
+                                    .concat(seg.slice().reverse().map((p) => xy(mid(p), p[2])))
+                                    .join(' ')}
+                            />
+                            <polyline className="tm__hist-line" points={seg.map((p) => xy(mid(p), p[1])).join(' ')} />
+                        </g>
+                    ) : null))}
+                </svg>
+                <span className="tm__hist-y is-hi">{signed(hi)} ms</span>
+                <span className="tm__hist-y is-lo">{signed(lo)} ms</span>
+                {last && (
+                    <i
+                        className="tm__hist-dot"
+                        style={{ left: `${(X(mid(last)) / W) * 100}%`, top: `${(Y(last[1]) / H) * 100}%` }}
+                    />
+                )}
+            </div>
+            <div className="tm__dial-axis">
+                <span>−{formatDur(span)}</span>
+                <span>fast +, slow −</span>
+                <span>now</span>
+            </div>
+        </div>
+    );
+}
+
 export default function TimePanel({ minimal }) {
     const wrap = useRef(null);
     // Only for the receiver's timezone — `receiver.timezone` and `receiver.timezone_offset`
@@ -144,6 +227,17 @@ export default function TimePanel({ minimal }) {
     const [bigKey, setBigKey] = useState(savedBigClock);
     // Bumped whenever the estimate changes enough to be worth redrawing the slow figures.
     const [, setBeat] = useState(0);
+
+    // This device's error, which is drawn once a second but read on every frame: Date.now()
+    // is whole milliseconds, so one reading is ±0.5 ms on its own, and the frames between
+    // two beats are averaged. What the beat made of them — the figure, the verdict with its
+    // hold, and the chart's history — is kept here rather than in state, because the beat
+    // is already the re-render. See deviceVerdict and deviceSeries.
+    const devAcc = useRef({ sum: 0, n: 0 });
+    const devShown = useRef(null);
+    const devVerdict = useRef(null);
+    const devHist = useRef([]);
+    const devSec = useRef(0);
 
     // The three clocks — UTC, the receiver's and this device's — with any that coincide
     // merged into one. Rebuilt on each render, which is once a second while the panel is
@@ -195,6 +289,10 @@ export default function TimePanel({ minimal }) {
         /** @param at  the instant to draw for, on the page's monotonic clock. */
         const draw = (at) => {
             const est = bestEstimate(clock.current, at);
+            if (est) {
+                devAcc.current.sum += deviceError(est, Date.now(), performance.now());
+                devAcc.current.n += 1;
+            }
             // Until something has answered, this machine's own clock — clearly labelled as
             // such below. A blank panel would be the one thing worse than an unchecked clock.
             const t = est ? at + est.theta : Date.now();
@@ -274,7 +372,21 @@ export default function TimePanel({ minimal }) {
     // for ten minutes because nothing new arrived is worse than one that says 10m.
     useEffect(() => {
         if (!running) return undefined;
-        const id = setInterval(() => setBeat((n) => n + 1), TICK_MS);
+        const id = setInterval(() => {
+            const now = performance.now();
+            const est = bestEstimate(clock.current, now);
+            const acc = devAcc.current;
+            const device = !est ? null : acc.n ? acc.sum / acc.n : deviceError(est, Date.now(), now);
+            devAcc.current = { sum: 0, n: 0 };
+            const within = deviceWithin(est);
+            devVerdict.current = deviceVerdict(devVerdict.current, device, within);
+            devShown.current = device == null ? null : { device, within };
+            if (device != null) {
+                devSec.current = Math.floor((now + est.theta) / 1000);
+                devHist.current = deviceHistoryAdd(devHist.current, devSec.current, device, within);
+            }
+            setBeat((n) => n + 1);
+        }, TICK_MS);
         return () => clearInterval(id);
     }, [running]);
 
@@ -364,6 +476,8 @@ export default function TimePanel({ minimal }) {
             const now = Date.now() - performance.now();
             if (clockAsleep(now, wallMinusPerf)) {
                 clock.current = newClock();
+                devAcc.current = { sum: 0, n: 0 };
+                devVerdict.current = null;
                 burst = WINDOW - 1;
             }
             wallMinusPerf = now;
@@ -408,14 +522,17 @@ export default function TimePanel({ minimal }) {
     // ── What is drawn ────────────────────────────────────────────────────────
     const est = bestEstimate(clock.current, performance.now());
     const synced = !!est;
-    const device = deviceError(est, Date.now(), performance.now());
-    const within = deviceWithin(est);
+    // The beat's figures where it has made any, and a single reading until then.
+    const shownDev = devShown.current;
+    const device = shownDev ? shownDev.device : deviceError(est, Date.now(), performance.now());
+    const within = shownDev ? shownDev.within : deviceWithin(est);
+    const inside = devVerdict.current ? devVerdict.current.inside : undefined;
     const tone = deviceTone(device, within);
     const ref = referenceOf(time, status);
     const note = servingNote(status);
     const span = dialSpan(device, within);
 
-    const devText = synced ? deviceLabel(device, within) : 'measuring…';
+    const devText = synced ? deviceLabel(device, within, inside) : 'measuring…';
 
     // ── The cycle ────────────────────────────────────────────────────────────
     //
@@ -531,6 +648,9 @@ export default function TimePanel({ minimal }) {
                 <span className={`tm__dev-v is-${tone}`}>{devText}</span>
             </div>
             {!minimal && synced && <Dial device={device} within={within} span={span} />}
+            {!minimal && devHist.current.length > 0 && (
+                <DeviceChart series={deviceSeries(devHist.current, devSec.current)} />
+            )}
 
             {!minimal && (
                 <div className="tm__stats">

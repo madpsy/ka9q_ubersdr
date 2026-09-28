@@ -23,9 +23,12 @@
 // approximately right. The clamp exists on the server for int64 overflow
 // headroom; it is what makes this port clean.
 //
-// The 64-bit GPS timestamp is the one field that would need BigInt. It is read
-// and discarded: nothing in this interface uses it, and version 3's decoder
-// does not expose it either.
+// The 64-bit capture timestamp is the one field that would need BigInt to hold
+// exactly, and it does not need to be exact. It is Unix nanoseconds, which a
+// float64 carries to within 256 ns until the 2250s -- far finer than an age in
+// milliseconds wants. What must not happen is the rounding accumulating, so the
+// deltas are summed as an exact integer on top of the last absolute value
+// rather than added into it one packet at a time: see Timestamp.
 
 // "PCM4" little-endian. Four bytes rather than two because Opus frames share
 // the socket and begin with a timestamp, so the magic width is a false
@@ -332,6 +335,69 @@ function riceDecode(body, count, out) {
 const OPUS_FLAG_QUALITY = 1 << 0;
 const OPUS_FLAG_METADATA = 1 << 1;
 
+// The capture time of a packet's first sample, tracked across the header's
+// absolute values and deltas.
+//
+// `base` is the last absolute value as a float64, rounded once; `delta` is the
+// sum of every delta since, which stays an exact integer because a resync comes
+// at least every five seconds and five seconds of nanoseconds is nowhere near
+// 2^53. Adding them per packet would round per packet instead.
+//
+// Zero is the server's "no timestamp": radiod had no capture reference yet. The
+// server resynchronises on either side of such a run, so zero only ever arrives
+// as an absolute value and the deltas after it are zero too.
+class Timestamp {
+    constructor() { this.reset(); }
+
+    reset() {
+        this.base = 0;
+        this.delta = 0;
+    }
+
+    // Reads the field at off. Returns the offset past it, or -1 if truncated.
+    read(u8, view, off, absolute) {
+        if (absolute) {
+            if (off + 8 > u8.length) return -1;
+            this.base = view.getUint32(off, true) + view.getUint32(off + 4, true) * 4294967296;
+            this.delta = 0;
+            return off + 8;
+        }
+        const r = uvarint(u8, off);
+        if (!r) return -1;
+        // Go's PutVarint: zigzag, low bit is the sign. Arithmetic rather than
+        // bit operations, which would truncate to 32 bits.
+        const u = r[0];
+        this.delta += (u % 2 === 1) ? -(u + 1) / 2 : u / 2;
+        return r[1];
+    }
+
+    // Unix milliseconds, or null when the server had none to send.
+    get ms() {
+        return this.base ? (this.base + this.delta) / 1e6 : null;
+    }
+}
+
+// How much audio an Opus packet holds, from its TOC byte (RFC 6716 section 3.1),
+// in seconds. The header has no sample count to say, and the age of the end of
+// a packet needs its length. Zero for a packet too short to say.
+export function opusDurationSec(data) {
+    if (!data || data.length < 1) return 0;
+    const toc = data[0];
+    const config = toc >> 3;
+    let frameMs;
+    if (config < 12) frameMs = [10, 20, 40, 60][config & 3];        // SILK
+    else if (config < 16) frameMs = (config & 1) ? 20 : 10;          // hybrid
+    else frameMs = [2.5, 5, 10, 20][config & 3];                     // CELT
+    const code = toc & 3;
+    let frames = 1;
+    if (code === 1 || code === 2) frames = 2;
+    else if (code === 3) {
+        if (data.length < 2) return 0;
+        frames = data[1] & 0x3f;
+    }
+    return frames * frameMs / 1000;
+}
+
 export class OpusV4HeaderDecoder {
     constructor() { this.reset(); }
 
@@ -341,9 +407,10 @@ export class OpusV4HeaderDecoder {
         this.channels = 1;
         this.power = QUALITY_NO_READING;
         this.noise = QUALITY_NO_READING;
+        this.ts = new Timestamp();
     }
 
-    // Returns { bodyOffset, sampleRate, channels, signal } or null for a frame
+    // Returns { bodyOffset, sampleRate, channels, signal, captureMs } or null for a frame
     // that cannot be read -- including one that arrives before any
     // resynchronisation point, which is what a mid-stream join looks like.
     decode(buffer) {
@@ -356,15 +423,9 @@ export class OpusV4HeaderDecoder {
 
         // The metadata bit marks a resynchronisation, which is also what
         // carries a full timestamp; the two never differ.
-        if (flags & OPUS_FLAG_METADATA) {
-            if (off + 8 > u8.length) return null;
-            off += 8; // the timestamp is not used by this interface
-        } else {
-            if (!this.haveMetadata) return null;
-            const n = varintLen(u8, off);
-            if (n < 0) return null;
-            off += n;
-        }
+        if (!(flags & OPUS_FLAG_METADATA) && !this.haveMetadata) return null;
+        off = this.ts.read(u8, view, off, (flags & OPUS_FLAG_METADATA) !== 0);
+        if (off < 0) return null;
 
         if (flags & OPUS_FLAG_METADATA) {
             const r = uvarint(u8, off);
@@ -394,6 +455,7 @@ export class OpusV4HeaderDecoder {
                 basebandPower: quality(this.power),
                 noisePower: quality(this.noise),
             },
+            captureMs: this.ts.ms,
         };
     }
 }
@@ -425,6 +487,7 @@ export class PCMv4StreamDecoder {
         this.power = QUALITY_NO_READING;
         this.noise = QUALITY_NO_READING;
         this.haveMetadata = false;
+        this.ts = new Timestamp();
         this.residuals = null;
         this.pair = new Float64Array(2);
     }
@@ -444,6 +507,7 @@ export class PCMv4StreamDecoder {
     }
 
     // Returns { planes, sampleRate, channels, signal } like PCMStreamDecoder,
+    // plus captureMs -- the Unix time its first sample was captured, or null --
     // or null for a frame that cannot be read.
     decode(buffer) {
         const u8 = new Uint8Array(buffer);
@@ -457,17 +521,12 @@ export class PCMv4StreamDecoder {
         if (escape && silent) return null;
         if (!this._useProfile(flags & PROFILE_MASK)) return null;
 
-        // The timestamp is read only to step over it. A resynchronisation
-        // carries the full 64 bits; every other packet carries a delta.
-        if (flags & FLAG_METADATA) {
-            if (off + 8 > u8.length) return null;
-            off += 8;
-        } else {
-            if (!this.haveMetadata) return null; // joined mid-stream, wait for a resync
-            const n = varintLen(u8, off);
-            if (n < 0) return null;
-            off += n;
-        }
+        // A resynchronisation carries the full 64 bits; every other packet
+        // carries a delta, which means nothing to a decoder that joined
+        // mid-stream until the next resync.
+        if (!(flags & FLAG_METADATA) && !this.haveMetadata) return null;
+        off = this.ts.read(u8, view, off, (flags & FLAG_METADATA) !== 0);
+        if (off < 0) return null;
 
         if (flags & FLAG_COUNT) {
             const r = uvarint(u8, off);
@@ -572,6 +631,7 @@ export class PCMv4StreamDecoder {
                 basebandPower: quality(this.power),
                 noisePower: quality(this.noise),
             },
+            captureMs: this.ts.ms,
         };
     }
 
@@ -641,13 +701,4 @@ function uvarint(u8, off) {
         s += 7;
     }
     return null;
-}
-
-// Length of the varint at off, without decoding it — used to step over the
-// timestamp delta, which this interface does not need.
-function varintLen(u8, off) {
-    for (let i = off; i < u8.length && i < off + 10; i++) {
-        if (u8[i] < 0x80) return i - off + 1;
-    }
-    return -1;
 }

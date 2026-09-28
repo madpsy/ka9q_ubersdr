@@ -22154,8 +22154,14 @@ const tooltipLine2 = timeStr;
                         type: 'logarithmic',
                         title: { display: true, text: 'p95 latency' },
                         ticks: {
-                            // Label only the 1-2-5 steps so a log axis stays readable.
-                            callback: v => {
+                            // Across a decade or more, label only the 1-2-5 steps so a
+                            // log axis stays readable. Latency usually sits in a narrow
+                            // band above the 20 ms floor, where Chart.js places ticks at
+                            // fine steps (21.3, 21.4 ms...) and none is a 1-2-5 value,
+                            // so there every tick is labelled and auto-skip thins them.
+                            callback: (v, i, ticks) => {
+                                const lo = ticks[0].value, hi = ticks[ticks.length - 1].value;
+                                if (hi / lo < 10) return formatLatencyUs(v).replace(/\.0+(?= )/, '');
                                 const m = v / Math.pow(10, Math.floor(Math.log10(v)));
                                 if (![1, 2, 5].includes(Math.round(m * 1000) / 1000)) return '';
                                 return formatLatencyUs(v).replace(/\.0+(?= )/, ''); // "1.00 ms" -> "1 ms"

@@ -165,6 +165,12 @@ export class AudioPlayer extends Emitter {
         this.sampleRate = 0;        // rate the context actually runs at
         this.requestedRate = 0;     // rate we asked for, which may differ
         this.nextPlayTime = 0;
+        // When the last sample queued was captured, Unix ms on the receiver's
+        // clock, or null when the stream carries no capture times. Kept with
+        // the queue rather than taken from the socket, because the two part
+        // company whenever a packet is dropped at the ceiling -- see
+        // captureHead.
+        this.queueEndCaptureMs = null;
         this.bufferSec = DEFAULT_BUFFER_SEC;
         this.dropped = 0;
         this.volume = 0.7;
@@ -258,23 +264,26 @@ export class AudioPlayer extends Emitter {
     }
 
     // Feeds one Opus packet. Decoding is serialised so packets keep their order.
-    pushOpus(data, sampleRate, channels) {
+    //
+    // `captureMs`, on this and pushPCM, is when the packet's first sample was
+    // captured, from the version 4 header; null when there is none.
+    pushOpus(data, sampleRate, channels, captureMs = null) {
         if (!this.started) return;
         this._noteStream(sampleRate, channels);
         // Copy: `data` is a view onto the WebSocket frame, which the decoder
         // may see after the next frame has overwritten it.
         const bytes = new Uint8Array(data);
         this._decodeChain = this._decodeChain
-            .then(() => this._decodeAndPlay(bytes, sampleRate, channels))
+            .then(() => this._decodeAndPlay(bytes, sampleRate, channels, captureMs))
             .catch((err) => console.error('audio decode failed', err));
     }
 
     // Lossless and JSON-PCM path: already-decoded planar float samples.
-    pushPCM(planes, sampleRate, channels) {
+    pushPCM(planes, sampleRate, channels, captureMs = null) {
         if (!this.started || !planes.length) return;
         this._noteStream(sampleRate, channels);
         this._ensureContext(sampleRate);
-        this._schedule(planes, planes[0].length, sampleRate);
+        this._schedule(planes, planes[0].length, sampleRate, captureMs);
     }
 
     /**
@@ -305,7 +314,7 @@ export class AudioPlayer extends Emitter {
         this.streamChannels = 0;
     }
 
-    async _decodeAndPlay(bytes, sampleRate, channels) {
+    async _decodeAndPlay(bytes, sampleRate, channels, captureMs) {
         if (!this.decoder || this.decoderRate !== sampleRate || this.decoderChannels !== channels) {
             const Decoder = getOpusDecoderClass();
             if (!Decoder) throw new Error('opus-decoder library not loaded');
@@ -322,7 +331,7 @@ export class AudioPlayer extends Emitter {
         if (!decoded || !decoded.samplesDecoded) return;
 
         this._ensureContext(sampleRate);
-        this._schedule(decoded.channelData, decoded.samplesDecoded, sampleRate);
+        this._schedule(decoded.channelData, decoded.samplesDecoded, sampleRate, captureMs);
     }
 
     _ensureContext(sampleRate) {
@@ -476,6 +485,7 @@ export class AudioPlayer extends Emitter {
         // that audio is really playing has to be told again.
         this._flowed = false;
         this.nextPlayTime = this.ctx.currentTime + this._primeSec();
+        this.queueEndCaptureMs = null;
     }
 
     // Nothing else notices a context that has stopped running.
@@ -1063,7 +1073,7 @@ export class AudioPlayer extends Emitter {
         this.rightGain.gain.setTargetAtTime(m === 'left' ? 0 : 1, t, 0.01);
     }
 
-    _schedule(planes, frames, sampleRate) {
+    _schedule(planes, frames, sampleRate, captureMs = null) {
         // Anything listening for the raw audio gets it here, before the graph
         // below and therefore before volume, mute and ducking.
         //
@@ -1116,6 +1126,9 @@ export class AudioPlayer extends Emitter {
         src.connect(this.head);
         src.start(this.nextPlayTime);
         this.nextPlayTime += buffer.duration;
+        // The buffer's own duration is the stream's, since it is built at the
+        // stream rate whatever the context runs at.
+        this.queueEndCaptureMs = captureMs == null ? null : captureMs + buffer.duration * 1000;
 
         // Emitted from here rather than from start() or the socket, because
         // this is the first moment the browser has actually been handed audio
@@ -1146,6 +1159,30 @@ export class AudioPlayer extends Emitter {
     get queuedSec() {
         if (!this.ctx) return 0;
         return Math.max(0, this.nextPlayTime - this.ctx.currentTime);
+    }
+
+    // The capture time of the audio the context is playing right now, Unix ms
+    // on the receiver's clock -- or null when that is not known, or when
+    // nothing is queued and so nothing is playing.
+    //
+    // Counted back from the end of the queue: the last sample queued plays in
+    // queuedSec, so the queue is running that far behind it. Strictly that is
+    // the delay the last sample will have rather than the one playing, and the
+    // two differ only across a gap -- the silence re-primed after an underrun,
+    // which delays everything behind it by exactly the gap, so it is the right
+    // figure to report there too. Everything from here on plays at this delay
+    // until the next underrun or drop.
+    //
+    // Which is why the end is tracked at scheduling and not taken off the
+    // socket: a packet dropped for arriving above the ceiling never reaches the
+    // queue, and counting it would be out by a packet every time.
+    //
+    // Read against performance.now() at the same moment, since it advances in
+    // real time.
+    get captureHead() {
+        const q = this.queuedSec;
+        if (this.queueEndCaptureMs == null || !(q > 0)) return null;
+        return this.queueEndCaptureMs - q * 1000;
     }
 
     // What the audio hardware adds after that, in seconds.

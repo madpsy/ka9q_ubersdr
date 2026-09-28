@@ -398,6 +398,11 @@ type ServerMessage struct {
 	AudioFormat string                 `json:"audioFormat,omitempty"` // "pcm" or "opus"
 	AGC         map[string]interface{} `json:"agc,omitempty"`         // Current AGC parameter values
 	ClockID     string                 `json:"clockId,omitempty"`     // host clock the audio timestamps are on; see hostClockID
+	// ServerTimeNs is this host's clock (Unix ns) when a ping was answered --
+	// the clock the audio capture times are on. A client that timed the ping
+	// has one round trip's worth of offset from it, which is what turns a
+	// packet's capture time into an age. Pong only.
+	ServerTimeNs int64 `json:"serverTimeNs,omitempty"`
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -1102,8 +1107,11 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			}
 
 		case "ping":
-			// Keepalive - just touch the session
-			wsh.sendMessage(conn, ServerMessage{Type: "pong"})
+			// Keepalive - just touch the session. The time rides along so a
+			// client can measure its clock against ours without a message of
+			// its own: another message would touch the session too, and a
+			// client timing it on a schedule could then never go idle.
+			wsh.sendMessage(conn, ServerMessage{Type: "pong", ServerTimeNs: time.Now().UnixNano()})
 
 		case "get_status":
 			wsh.sendStatus(conn, currentSession)

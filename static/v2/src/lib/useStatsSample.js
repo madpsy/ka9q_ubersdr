@@ -28,6 +28,7 @@ import { frameTicks } from './frameTicks.js';
 import { subscribeListeners } from './listeners.js';
 import { fetchMyIp, peekMyIp } from './myip.js';
 import { perSecond } from './spectrumStats.js';
+import { serverClock } from '../radio/serverClock.js';
 
 // How often the host is asked to measure itself, however often we sample.
 const APP_MS = 1000;
@@ -125,6 +126,12 @@ export default function useStatsSample(intervalMs, onSample) {
                 }
                 return app.current.value;
             };
+            // Lags are on this page's clock; the estimate is what turns them into
+            // ages on the receiver's. No estimate, no age: without one the
+            // subtraction is between two different clocks, and the figure would
+            // be out by however far out this device happens to be.
+            const clk = serverClock(now);
+            const lag = audioConn && audioConn.arrivalLag;
             cb.current({
                 fps: perSecond(at.ticks - was.ticks, ms),
                 framesIn: perSecond(at.frames - was.frames, ms),
@@ -142,6 +149,16 @@ export default function useStatsSample(intervalMs, onSample) {
                 streamChannels: m.channels,
                 queuedSec: m.queuedSec,
                 outLatSec: m.outLatencySec,
+                // What you are hearing: capture to the speaker, the output
+                // device included, since that is where the operator hears it.
+                heardAgeMs: clk && m.playLag != null
+                    ? m.playLag + clk.theta + (m.outLatencySec || 0) * 1000
+                    : null,
+                // Capture to arrival here, before any of this client's queue.
+                arrivalAgeMs: clk && lag != null ? lag + clk.theta : null,
+                // How far out either could be: half the best round trip, grown
+                // by how long ago that was.
+                ageErrMs: clk ? clk.err : null,
                 underruns: m.underruns,
                 listeners: listeners.current,
                 chatUsers: chatRef.current,

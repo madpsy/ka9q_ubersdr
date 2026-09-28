@@ -6,6 +6,8 @@ import { Button, Icon, Slider } from './ui.jsx';
 import LinksMenu from './LinksMenu.jsx';
 import ShareMenu from './ShareMenu.jsx';
 import { clockHint, nextClockMode, saveClockMode, savedClockMode } from '../lib/topClock.js';
+import { nextSecondDelay } from '../lib/ntpTime.js';
+import { serverNowMs } from '../radio/serverClock.js';
 import ColoursMenu from './ColoursMenu.jsx';
 import {
     audioLevelColour, audioLevelPercent, clamp, formatFilterWidth, hzPlaces, sMeterColour,
@@ -71,17 +73,34 @@ function hzCells(hz) {
 // DST-adjusted offset in minutes, so shifting the UTC epoch by it and reading
 // the UTC fields back gives the operator's time wherever you are listening
 // from. Until /api/description answers we fall back to the browser clock.
-function Clock({ tzOffset, tzName }) {
-    const [now, setNow] = useState(() => Date.now());
+//
+// The instant is the receiver's, not this device's, once the page has measured
+// the one against the other (radio/serverClock.js) -- a phone a few seconds out
+// otherwise shows a UTC that is a few seconds wrong, on a radio where that is
+// the difference between catching a timed transmission and missing it. Only
+// when the receiver says its own clock is NTP-synced, though: an unsynced
+// server is no better a reference than the device, and may be worse.
+function Clock({ tzOffset, tzName, synced }) {
+    const read = () => (synced && serverNowMs()) || Date.now();
+    const [now, setNow] = useState(read);
     // Both, UTC alone, or local alone — see lib/topClock.js for why three. Remembered,
     // because which clock somebody wants is about how they operate rather than what they
     // are doing this minute.
     const [mode, setMode] = useState(savedClockMode);
 
+    // Re-aimed at just past each second boundary rather than ticking every
+    // 1000 ms from wherever it started: a steady interval shows each second up
+    // to a second late, which is more than the correction above is worth.
     useEffect(() => {
-        const id = setInterval(() => setNow(Date.now()), 1000);
-        return () => clearInterval(id);
-    }, []);
+        let id = 0;
+        const tick = () => {
+            const t = read();
+            setNow(t);
+            id = setTimeout(tick, nextSecondDelay(t));
+        };
+        tick();
+        return () => clearTimeout(id);
+    }, [synced]);
 
     const utc = new Date(now).toISOString().slice(11, 19);
     const local = typeof tzOffset === 'number'
@@ -616,6 +635,7 @@ export default function TopBar({ compact }) {
                        unless it is running a server from before the name was
                        published, which clockHint handles by saying nothing. */
                     tzName={serverInfo?.receiver?.timezone}
+                    synced={serverInfo?.server_time_sync === true}
                 />
             )}
 

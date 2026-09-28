@@ -1,4 +1,4 @@
-// Time signal decoder — WWV, WWVH, WWVB and DCF77.
+// Time signal decoder — WWV, WWVH, WWVB, DCF77, MSF and Allouis.
 //
 // The decoding is the server's: this attaches the `clock` audio extension to
 // the session's audio (see ../useAudioExtension.js) and reads the JSON events
@@ -36,10 +36,12 @@
 // in the expanded view, clearly separated, because it is a different clock and
 // is measured through a websocket rather than a decoder.
 //
-// DCF77 is the one station decoded from IQ rather than USB: its decoder reads
-// the carrier's phase code as well as its amplitude cuts, and demodulated audio
-// has no phase. So on a DCF77 dial Start switches the receiver into IQ and Stop
-// puts the mode back, exactly as the DRM decoder does — see the mode section.
+// DCF77, MSF and Allouis are decoded from IQ rather than USB: DCF77's decoder
+// reads the carrier's phase code as well as its amplitude cuts, Allouis is
+// phase modulation only, and MSF is timed on the carrier's coherent amplitude —
+// and demodulated audio has no phase. So on one of their dials Start switches
+// the receiver into IQ and Stop puts the mode back, exactly as the DRM decoder
+// does — see the mode section.
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '../../react.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
@@ -48,7 +50,7 @@ import { Button, Empty, Icon, Readout } from '../../components/ui.jsx';
 import { useAudioExtension } from '../useAudioExtension.js';
 import {
     CLOCK_BANDWIDTH, CLOCK_FREQUENCIES, CLOCK_MODE, DCF77_MODE, STRIP_LENGTH, SYMBOL_LABELS,
-    SYMBOL_NAMES, alignmentSeries, appendSecond, correctedNowMs, decodeFrame, formatClock, formatDate,
+    SYMBOL_NAMES, alignmentSeries, appendSecond, correctedNowMs, decodeFrame, formatClock, formatDate, isIqStation,
     formatDay, formatDut1, formatOffset, frameFlags, funnelStages, localIsUtc, offsetSense,
     modeFor, offsetTone, polylinePoints, stateLabel, stateTone, stationFor, stationLabel,
     symbolTone, tunedClockOption, zoneLabel,
@@ -241,14 +243,16 @@ export default function ClockExtension({ minimal }) {
     };
 
     // The station is the one parameter, and it is the decoder FAMILY the dial
-    // implies — wwv (which covers WWVH), wwvb or dcf77 — by the same rule the
+    // implies — wwv (which covers WWVH), wwvb, dcf77, msf or allouis — by the same rule the
     // server uses. They are different decoders chosen when the subprocess
     // starts, so moving between them has to re-attach; moving within one (10
     // to 15 MHz) must not, since a re-attach costs four minutes of acquisition.
-    const dialStation = stationFor(tuning.frequency);
-    const wantMode = modeFor(dialStation);
     const iq = isIQ(tuning.mode);
-    // The session has to be delivering what that decoder reads — IQ for DCF77,
+    // The mode only matters at 60 kHz, where WWVB (USB, 59 kHz) and MSF (IQ,
+    // on the carrier) share the carrier.
+    const dialStation = stationFor(tuning.frequency, iq);
+    const wantMode = modeFor(dialStation);
+    // The session has to be delivering what that decoder reads — IQ for DCF77, MSF and Allouis,
     // audio for the rest — or the server refuses the attach. Held back until
     // it is rather than sent to be refused: on Start the switch into IQ goes
     // through a confirmation first, and the decoder waits for it.
@@ -258,7 +262,7 @@ export default function ClockExtension({ minimal }) {
     // the control socket, so an attach on the local mode alone could reach the
     // server first and be refused. audioChannels is the server's own account,
     // from the status it sends after every tune it applies.
-    const localOk = dialStation === 'dcf77' ? iq : !iq;
+    const localOk = isIqStation(dialStation) ? iq : !iq;
     const inputOk = localOk && modeConfirmed(tuning.mode, audioChannels);
     const params = useMemo(() => ({ station: dialStation }), [dialStation]);
 
@@ -282,7 +286,7 @@ export default function ClockExtension({ minimal }) {
     const start = useCallback(() => {
         restoreMode.current = null;
         awaitingIQ.current = false;
-        if (dialStation === 'dcf77' && !iq) {
+        if (isIqStation(dialStation) && !iq) {
             // Remember where the operator was so stopping does not strand them
             // in a mode that plays raw baseband.
             restoreMode.current = tuning.mode;
@@ -302,35 +306,35 @@ export default function ClockExtension({ minimal }) {
     }, [iq, actions]);
 
     // The confirmation closed without IQ: cancelled, or the tuning is locked.
-    // On a DCF77 dial that is a decoder that can never start, so it stops
-    // rather than sitting on "Starting…" for ever. Elsewhere it was a tune to
-    // DCF77 that was declined, and the decoder carries on where it was.
+    // On an IQ station's dial that is a decoder that can never start, so it
+    // stops rather than sitting on "Starting…" for ever. Elsewhere it was a
+    // tune to one that was declined, and the decoder carries on where it was.
     useEffect(() => {
         if (!awaitingIQ.current) return;
         if (iq) { awaitingIQ.current = false; return; }
         if (iqPrompt) return;
         awaitingIQ.current = false;
         restoreMode.current = null;
-        if (decoding && dialStation === 'dcf77') setDecoding(false);
+        if (decoding && isIqStation(dialStation)) setDecoding(false);
     }, [iq, iqPrompt, decoding, dialStation]);
 
-    // Leaving IQ by hand on a DCF77 dial stops the decoder: it cannot lock on
+    // Leaving IQ by hand on an IQ station's dial stops the decoder: it cannot lock on
     // demodulated audio. The mode is not put back — the operator picked it.
     // A transition, not a state: on Start the receiver is not in IQ YET.
     const wasIQ = useRef(iq);
     useEffect(() => {
         const left = wasIQ.current && !iq;
         wasIQ.current = iq;
-        if (left && decoding && dialStation === 'dcf77') {
+        if (left && decoding && isIqStation(dialStation)) {
             restoreMode.current = null;
             setDecoding(false);
         }
     }, [iq, decoding, dialStation]);
 
-    // Tuned off DCF77 — by the menu, which also puts USB back, or by hand —
+    // Tuned off an IQ station — by the menu, which also puts USB back, or by hand —
     // leaves nothing of ours to restore.
     useEffect(() => {
-        if (dialStation !== 'dcf77' && !awaitingIQ.current) restoreMode.current = null;
+        if (!isIqStation(dialStation) && !awaitingIQ.current) restoreMode.current = null;
     }, [dialStation]);
 
     // Powering the receiver off takes the audio session with it. An audio
@@ -363,10 +367,10 @@ export default function ClockExtension({ minimal }) {
     const locked = state === 'locked' && !!time && !stale;
 
     const tuned = tunedClockOption(tuning.frequency);
-    // DCF77 out of IQ is not a mistake to fix by hand: Start makes the switch.
-    // It gets its own note, not this one.
-    const needsIQ = dialStation === 'dcf77' && !iq;
-    const wrongMode = dialStation !== 'dcf77' && tuning.mode !== wantMode;
+    // An IQ station out of IQ is not a mistake to fix by hand: Start makes the
+    // switch. It gets its own note, not this one.
+    const needsIQ = isIqStation(dialStation) && !iq;
+    const wrongMode = !isIqStation(dialStation) && tuning.mode !== wantMode;
     // The one setup mistake that produces silence with no other symptom.
     const narrow = !wrongMode && dialStation === 'wwv' && tuning.bandwidthHigh < 2400;
 
@@ -395,7 +399,7 @@ export default function ClockExtension({ minimal }) {
     const statusLabel = !decoding
         ? 'Stopped'
         : (attachState === 'error' ? 'Error'
-            : (!inputOk ? (dialStation === 'dcf77' ? 'Waiting for IQ…' : (localOk ? 'Starting…' : 'Wrong mode'))
+            : (!inputOk ? (isIqStation(dialStation) ? 'Waiting for IQ…' : (localOk ? 'Starting…' : 'Wrong mode'))
                 : (attachState !== 'running' ? 'Starting…' : stateLabel(state))));
     const statusTone = !decoding
         ? 'off'
@@ -521,7 +525,11 @@ export default function ClockExtension({ minimal }) {
                     className="ck__station"
                     title={station === 'dcf77'
                         ? 'The only transmitter on 77.5 kHz, named once its carrier is found'
-                        : (station === 'unknown'
+                        : station === 'allouis'
+                            ? 'The only transmitter on 162 kHz, named once its carrier is found'
+                            : station === 'msf'
+                                ? 'MSF from Anthorn, named once its carrier is found: 60 kHz in IQ on the carrier (WWVB is the 59 kHz USB tuning)'
+                                : (station === 'unknown'
                             ? 'WWV and WWVH share one decoder and are told apart by which tick band folds to an impulse — that takes a few seconds of clean signal'
                             : 'Identified by the decoder from the seconds tick')}
                 >
@@ -529,7 +537,7 @@ export default function ClockExtension({ minimal }) {
                 </span>
                 <span className="tp__bar-gap" />
 
-                <label className="tp__field tp__field--inline" title="Tune to a time-signal frequency. The USB ones are already offset 1 kHz below the carrier, which is how the decoder needs them; DCF77 is tuned to its carrier and decoded from IQ">
+                <label className="tp__field tp__field--inline" title="Tune to a time-signal frequency. The USB ones are already offset 1 kHz below the carrier, which is how the decoder needs them; DCF77, MSF and Allouis are tuned to their carriers and decoded from IQ">
                     <span className="tp__field-label">Tune</span>
                     <select
                         className="select"
@@ -561,15 +569,17 @@ export default function ClockExtension({ minimal }) {
             {wrongMode && (
                 <div className="note note--warn ck__fix">
                     WWV, WWVH and WWVB are received in USB — 1 kHz below the carrier, which
-                    puts the carrier itself at 1000 Hz of audio. DCF77 is the exception: it
-                    is decoded from IQ, tuned to the carrier. Pick a frequency above.
+                    puts the carrier itself at 1000 Hz of audio. DCF77, MSF and Allouis are
+                    the exceptions: they are decoded from IQ, tuned to the carrier. Pick a
+                    frequency above.
                 </div>
             )}
             {needsIQ && (
                 <div className="note note--tight">
-                    DCF77 is decoded from IQ, not USB — its phase code carries the timing,
-                    and demodulated audio has no phase. Start switches the receiver to IQ,
-                    and Stop puts the mode back.
+                    {dialStation === 'dcf77' && 'DCF77 is decoded from IQ, not USB — its phase code carries the timing, and demodulated audio has no phase.'}
+                    {dialStation === 'allouis' && 'Allouis is decoded from IQ, not USB — it carries its time entirely in phase modulation, and demodulated audio has no phase.'}
+                    {dialStation === 'msf' && 'MSF is decoded from IQ, not USB — its second is timed on the carrier itself, with no audio filter in the way.'}
+                    {' '}Start switches the receiver to IQ, and Stop puts the mode back.
                 </div>
             )}
             {narrow && (
@@ -581,16 +591,15 @@ export default function ClockExtension({ minimal }) {
                 </div>
             )}
             {/* 60 kHz is not WWVB's alone: MSF transmits from Anthorn on the
-                same frequency, and in Europe it is the one you will hear. Its
-                time code is a different format entirely, so the decoder gets a
-                strong clean carrier it cannot read — the carrier stage of the
-                funnel passes, everything after it never does, and nothing else
-                on screen would explain why. */}
+                same frequency, and in Europe it is the one you will hear. The
+                tuning decides which decoder runs — WWVB is USB at 59 kHz, MSF
+                is IQ on the carrier — so on the WWVB tuning in Europe the
+                decoder gets a strong clean carrier it cannot read. Say so, and
+                say where MSF is. */}
             {dialStation === 'wwvb' && (
                 <div className="note note--tight">
-                    60 kHz carries WWVB from Colorado and MSF from Anthorn in the UK. Only
-                    WWVB is decoded here; on MSF the carrier is found and the time code
-                    never resolves.
+                    60 kHz carries WWVB from Colorado and MSF from Anthorn in the UK. This is
+                    the WWVB tuning; for MSF, pick MSF 60 kHz, which is decoded from IQ.
                 </div>
             )}
             {live && !decoding && !wrongMode && !narrow && (
@@ -599,7 +608,7 @@ export default function ClockExtension({ minimal }) {
                     find the minute and two more before the vote will certify a time.
                 </div>
             )}
-            {decoding && !inputOk && dialStation === 'dcf77' && (
+            {decoding && !inputOk && isIqStation(dialStation) && (
                 <div className="note note--tight">
                     Waiting for the receiver to switch to IQ.
                 </div>
@@ -661,7 +670,11 @@ export default function ClockExtension({ minimal }) {
                             <span className="ck__section-note">
                                 {station === 'dcf77'
                                     ? 'the minute is marked by second 59, the one second with no carrier cut'
-                                    : 'markers fall on every tenth second once the frame is found'}
+                                    : station === 'msf'
+                                        ? 'the minute is marked by second 00, 500 ms of carrier off'
+                                        : station === 'allouis'
+                                            ? 'the minute is marked by second 59, the one second with no phase modulation'
+                                            : 'markers fall on every tenth second once the frame is found'}
                             </span>
                         </div>
                         <Strip strip={strip} />
@@ -677,10 +690,23 @@ export default function ClockExtension({ minimal }) {
 
                     {diag && (
                         <div className="ck__telemetry">
-                            <span title="Folded tick-band peak-to-mean (WWV/WWVH), or the carrier search peak over median (WWVB, DCF77)">
-                                {station === 'dcf77' || station === 'wwvb' ? 'carrier' : 'tick'} {Number.isFinite(diag.tone_snr_db) ? `${diag.tone_snr_db.toFixed(1)} dB` : '—'}
+                            <span title="Folded tick-band peak-to-mean (WWV/WWVH), or the carrier search peak over median (WWVB, DCF77, MSF, Allouis)">
+                                {station === 'wwv' || station === 'wwvh' || station === 'unknown' ? 'tick' : 'carrier'} {Number.isFinite(diag.tone_snr_db) ? `${diag.tone_snr_db.toFixed(1)} dB` : '—'}
                             </span>
-                            {station === 'dcf77' ? (
+                            {station === 'allouis' ? (
+                                <>
+                                    <span title="The phase correlation: each second's whole expected phase — the data excursions and that second's position code — correlated against the received phase. It times the second to microseconds; its SNR is the last second's peak">
+                                        phase {diag.timing_locked ? 'tracking' : 'searching'}{Number.isFinite(diag.timing_snr_db) ? ` ${diag.timing_snr_db.toFixed(1)} dB` : ''}
+                                    </span>
+                                    <span title="Where the carrier was found against where it should be. A receiver clock tens of ppm out moves a 162 kHz carrier a few hertz">
+                                        carrier {Number.isFinite(diag.carrier_offset_hz) ? `${diag.carrier_offset_hz >= 0 ? '+' : '−'}${Math.abs(diag.carrier_offset_hz).toFixed(2)} Hz` : '—'}
+                                    </span>
+                                </>
+                            ) : station === 'msf' ? (
+                                <span title="Where the carrier was found against where it should be. A receiver clock tens of ppm out moves a 60 kHz carrier a few hertz">
+                                    carrier {Number.isFinite(diag.carrier_offset_hz) ? `${diag.carrier_offset_hz >= 0 ? '+' : '−'}${Math.abs(diag.carrier_offset_hz).toFixed(2)} Hz` : '—'}
+                                </span>
+                            ) : station === 'dcf77' ? (
                                 <>
                                     <span title="The phase-code correlator: a 793 ms spread-spectrum correlation that times the second to tens of microseconds and holds through noise that buries the carrier cut. Its SNR is the last second's correlation peak">
                                         phase code {diag.pm_locked ? 'locked' : 'searching'}{Number.isFinite(diag.pm_snr_db) ? ` ${diag.pm_snr_db.toFixed(1)} dB` : ''}

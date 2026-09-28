@@ -115,6 +115,27 @@ t('reset() makes a reconnect a clean start', () => {
     }
 });
 
+t('the capture time is carried exactly, across deltas and resyncs', () => {
+    // writeBrowserFixture starts its clock at 1.7e18 ns and advances it by each
+    // packet's duration in whole nanoseconds, so the expected time of every
+    // packet follows from the ones before it. Kept as BigInt here, the one
+    // place that can hold it exactly, to check the float the decoder returns
+    // has not drifted: the deltas are summed as an exact integer on top of
+    // the last absolute value precisely so rounding cannot accumulate.
+    const dec = new PCMv4StreamDecoder();
+    let want = 1700000000000000000n;
+    let worst = 0;
+    all.forEach((p, n) => {
+        const frame = dec.decode(p.packet);
+        assert.ok(frame, `packet ${n} was rejected`);
+        const err = Math.abs(frame.captureMs - Number(want) / 1e6);
+        worst = Math.max(worst, err);
+        assert.ok(err < 0.001, `packet ${n}: capture ${frame.captureMs} ms, want ${want} ns`);
+        want += BigInt(frame.planes[0].length) * 1000000000n / BigInt(frame.sampleRate);
+    });
+    console.log(`      worst error ${(worst * 1e6).toFixed(0)} ns over ${all.length} packets`);
+});
+
 t('signal quality survives, including the no-reading sentinel', () => {
     const dec = new PCMv4StreamDecoder();
     let readings = 0, sentinels = 0;

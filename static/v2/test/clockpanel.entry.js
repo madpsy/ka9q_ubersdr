@@ -8,7 +8,8 @@ import { deep, render, reset, walk, words } from './hookStub.js';
 import ClockExtension from '../src/extensions/clock/ClockExtension.jsx';
 import { EXTENSIONS, EXTENSION_BY_ID } from '../src/extensions/registry.jsx';
 import {
-    CLOCK_FREQUENCIES, DCF77_CARRIER_HZ, DCF77_WINDOW_HZ, STRIP_LENGTH, WWVB_CEILING_HZ,
+    ALLOUIS_CARRIER_HZ, CLOCK_FREQUENCIES, DCF77_CARRIER_HZ, DCF77_WINDOW_HZ, LF_WINDOW_HZ,
+    MSF_CARRIER_HZ, MSF_ON_CARRIER_HZ, STRIP_LENGTH, WWVB_CEILING_HZ, isIqStation,
     alignmentSeries, appendSecond, correctedNowMs, decodeFrame, formatClock, formatDate,
     formatDay, formatDut1, formatOffset, frameFlags, funnelStages, localIsUtc, modeFor,
     offsetSense, offsetTone, polylinePoints, stateLabel, stateTone, stationFor, stationLabel, symbolTone,
@@ -18,7 +19,8 @@ import {
 module.exports = {
     deep, render, reset, walk, words,
     ClockExtension, EXTENSIONS, EXTENSION_BY_ID,
-    CLOCK_FREQUENCIES, DCF77_CARRIER_HZ, DCF77_WINDOW_HZ, STRIP_LENGTH, WWVB_CEILING_HZ,
+    ALLOUIS_CARRIER_HZ, CLOCK_FREQUENCIES, DCF77_CARRIER_HZ, DCF77_WINDOW_HZ, LF_WINDOW_HZ,
+    MSF_CARRIER_HZ, MSF_ON_CARRIER_HZ, STRIP_LENGTH, WWVB_CEILING_HZ, isIqStation,
     alignmentSeries, appendSecond, correctedNowMs, decodeFrame, formatClock, formatDate,
     formatDay, formatDut1, formatOffset, frameFlags, funnelStages, localIsUtc, modeFor,
     offsetSense, offsetTone, polylinePoints, stateLabel, stateTone, stationFor, stationLabel, symbolTone,

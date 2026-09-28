@@ -195,6 +195,9 @@ export function formatHzPerBin(hz) {
  * @param s.outLatSec  what the hardware adds after that
  * @param s.streamRate audio sample rate as it arrives, Hz — shown beside it
  * @param s.streamChannels audio channels as they arrive — 2 only in IQ
+ * @param s.heardAgeMs   capture to speaker, ms, when the stream has capture times
+ * @param s.arrivalAgeMs capture to arrival at this client, ms
+ * @param s.ageErrMs     how far out both could be, ms
  * @param s.underruns  dropouts since the session started
  * @param s.listeners  sessions on this receiver, this one included
  * @param s.chatUsers  how many of them are in chat, if chat is connected
@@ -243,6 +246,19 @@ function formatStreamShort(rate, channels) {
     if (rate > 0) parts.push(`${(rate / 1000).toFixed(rate % 1000 ? 1 : 0)}K`);
     if (channels > 0) parts.push(`${Math.round(channels)}ch`);
     return parts.length ? parts.join(' ') : null;
+}
+
+// "312 ms (140) ±8", with the bracket left out before the first second of
+// arrivals and the whole line left out without a heard age.
+//
+// The error rounds up, and to whole milliseconds: an error bar that understates
+// itself is the one kind that is worse than none.
+export function formatAge(heardMs, arrivalMs, errMs) {
+    if (!Number.isFinite(heardMs)) return null;
+    let out = `${Math.round(heardMs)} ms`;
+    if (Number.isFinite(arrivalMs)) out += ` (${Math.round(arrivalMs)})`;
+    if (Number.isFinite(errMs)) out += ` ±${Math.max(1, Math.ceil(errMs))}`;
+    return out;
 }
 
 export function statLines(s = {}) {
@@ -324,6 +340,14 @@ export function statLines(s = {}) {
     add('app', 'APP', appLoad(s.app), 'What this app is costing the machine it is running on: processor time as a share of one core, and real memory. Only the Android, iOS and desktop clients can measure this — a browser tab has no way to ask.');
 
     add('audio', 'AUDIO', audio, 'The audio stream: how far behind live you are — what is queued ahead of the playback clock plus what the output device adds — then its sample rate and channel count, both set by the mode, and how many dropouts there have been.');
+
+    // How old the signal is by the time you hear it, from the capture time the
+    // receiver stamps on every packet -- the AUDIO line's latency is only the
+    // part after arrival, and this is the whole of it. Arrival age in brackets,
+    // which is the part before: radiod, the server and the network. The error
+    // bar belongs to both, and is the reason neither is shown to a millisecond
+    // it cannot vouch for when the round trip was long.
+    add('age', 'AGE', formatAge(s.heardAgeMs, s.arrivalAgeMs, s.ageErrMs), 'How long ago the audio you are hearing left the antenna: capture at the receiver to your speaker. In brackets, how old it was on arriving here, before this client queued it. Measured against the receiver\'s clock rather than this device\'s, to within the ± shown.');
 
     return out;
 }

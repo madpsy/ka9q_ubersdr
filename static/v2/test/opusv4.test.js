@@ -17,7 +17,10 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { OpusV4HeaderDecoder, isV4Frame } = require('./.build/opusv4.cjs');
+const {
+    OpusV4HeaderDecoder, isV4Frame, opusDurationSec,
+    addServerTimeSample, serverClock, resetServerClock,
+} = require('./.build/opusv4.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -98,6 +101,55 @@ t('the no-reading sentinel arrives as null, not as a number', () => {
     }
     assert.ok(sentinels > 0, 'the sample was meant to contain sentinel readings');
     console.log(`      ${sentinels} packets marked "no reading"`);
+});
+
+t('the capture time is carried across deltas and resyncs', () => {
+    // The fixture's clock starts at 1.7e18 ns and advances 20 ms a frame.
+    const dec = new OpusV4HeaderDecoder();
+    all.forEach((p, n) => {
+        const h = dec.decode(p.packet);
+        assert.ok(h, `packet ${n} was rejected`);
+        const want = 1700000000000 + 20 * n;
+        assert.ok(Math.abs(h.captureMs - want) < 0.001, `packet ${n}: capture ${h.captureMs} ms, want ${want}`);
+    });
+});
+
+t('an Opus packet says how long it is from its TOC byte', () => {
+    // RFC 6716 3.1: config in the top five bits, frame count code in the low two.
+    assert.strictEqual(opusDurationSec(new Uint8Array([(31 << 3) | 0])), 0.02);   // CELT 20 ms, one frame
+    assert.strictEqual(opusDurationSec(new Uint8Array([(28 << 3) | 0])), 0.0025); // CELT 2.5 ms
+    assert.strictEqual(opusDurationSec(new Uint8Array([(1 << 3) | 1])), 0.04);    // SILK 20 ms, two frames
+    assert.strictEqual(opusDurationSec(new Uint8Array([(3 << 3) | 2])), 0.12);    // SILK 60 ms, two frames
+    assert.strictEqual(opusDurationSec(new Uint8Array([(13 << 3) | 0])), 0.02);   // hybrid 20 ms
+    assert.strictEqual(opusDurationSec(new Uint8Array([(31 << 3) | 3, 3])), 0.06); // code 3: count in byte 1
+    assert.strictEqual(opusDurationSec(new Uint8Array([(31 << 3) | 3])), 0);       // code 3, truncated
+    assert.strictEqual(opusDurationSec(new Uint8Array([])), 0);
+});
+
+t('the server clock: the least-delayed round trip wins, to within half of it', () => {
+    resetServerClock();
+    assert.strictEqual(serverClock(0), null);
+    // True offset 1e12 ms. A slow round trip whose stamp sits off-centre, then a
+    // fast one: the fast one decides, and its error bound is half its trip.
+    const TRUE = 1e12;
+    addServerTimeSample(1000, 1200, TRUE + 1150);   // 200 ms trip, stamp 50 ms late
+    let c = serverClock(1200);
+    assert.ok(Math.abs(c.theta - TRUE) <= c.err, `theta ${c.theta - TRUE} outside ±${c.err}`);
+    addServerTimeSample(2000, 2020, TRUE + 2012);   // 20 ms trip
+    c = serverClock(2020);
+    assert.ok(Math.abs(c.err - 10) < 1e-9, `err ${c.err}`);
+    assert.ok(Math.abs(c.theta - TRUE) <= c.err);
+    // And it degrades with time rather than staying falsely sharp.
+    assert.ok(serverClock(2020 + 3600e3).err > c.err);
+    resetServerClock();
+});
+
+t('the server clock refuses a sample that cannot be one', () => {
+    resetServerClock();
+    addServerTimeSample(10, 5, 1e12);        // reply before request
+    addServerTimeSample(0, 10, 0);           // no server time
+    addServerTimeSample(0, 10, NaN);
+    assert.strictEqual(serverClock(10), null);
 });
 
 t('an Opus header is never mistaken for a lossless frame', () => {

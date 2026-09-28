@@ -43,9 +43,10 @@ func TestAudioLatencyWindowsAndPercentiles(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		m.minutes.record(base, audioLatencyOpus, audioLatencyBucket(10_000), 10_000_000)
 	}
-	// 61 minutes old: in a neighbouring slot but outside the 60-minute window.
-	// (Exactly 60 would reuse this minute's slot and reset it.)
-	m.minutes.record(base-3660, audioLatencyOpus, audioLatencyBucket(50), 50_000)
+	// 62 minutes old: in a neighbouring slot but outside the 60-minute window.
+	// (The ring has 61 slots, so exactly 61 would reuse this minute's slot and
+	// reset it.)
+	m.minutes.record(base-3720, audioLatencyOpus, audioLatencyBucket(50), 50_000)
 
 	a := m.minutes.sum(base, audioLatencyMinutes, audioLatencyOpus)
 	if a.count != 105 {
@@ -124,34 +125,47 @@ func TestAudioLatencyConcurrentRecord(t *testing.T) {
 	}
 }
 
-// The chart series has one point per period, oldest first, and a period with
-// no packets reads as zero rather than borrowing a stale slot's data.
+// The chart series has one point per completed period, oldest first, leaves
+// out the period in progress, and a period with no packets reads as zero rather
+// than borrowing a stale slot's data.
 func TestAudioLatencySeries(t *testing.T) {
 	m := newAudioLatencyMetrics()
 	now := time.Now()
 	sec := now.Unix()
-	m.minutes.record(sec, audioLatencyOpus, audioLatencyBucket(100), 100_000)
+	// Too old: 62 minutes back shares a slot with 1 minute back, so it goes in
+	// first, as it would have in real time, and that minute's record replaces it.
+	m.minutes.record(sec-3720, audioLatencyOpus, audioLatencyBucket(9), 9_000)
+	m.minutes.record(sec, audioLatencyOpus, audioLatencyBucket(7), 7_000) // in progress
+	m.minutes.record(sec-60, audioLatencyOpus, audioLatencyBucket(100), 100_000)
 	m.minutes.record(sec-120, audioLatencyPCMv4, audioLatencyBucket(40), 40_000)
-	m.minutes.record(sec-3660, audioLatencyOpus, audioLatencyBucket(9), 9_000) // too old
+	m.minutes.record(sec-3600, audioLatencyOpus, audioLatencyBucket(8), 8_000) // oldest shown
 
 	pts := m.minutes.series(sec, audioLatencyMinutes)
 	if len(pts) != audioLatencyMinutes {
 		t.Fatalf("%d points, want %d", len(pts), audioLatencyMinutes)
 	}
-	if want := (sec / 60) * 60 * 1000; pts[59]["start_ms"] != want {
-		t.Fatalf("last point starts at %v, want %d", pts[59]["start_ms"], want)
+	if want := (sec/60 - 1) * 60 * 1000; pts[59]["start_ms"] != want {
+		t.Fatalf("last point starts at %v, want %d (the last completed minute)", pts[59]["start_ms"], want)
 	}
 	if p := pts[59]["opus"].(AudioLatencyPoint); p.Count != 1 || p.MaxUs != 100 {
-		t.Fatalf("current minute opus = %+v", p)
+		t.Fatalf("last completed minute opus = %+v", p)
 	}
-	if p := pts[57]["pcmv4"].(AudioLatencyPoint); p.Count != 1 {
+	if p := pts[58]["pcmv4"].(AudioLatencyPoint); p.Count != 1 {
 		t.Fatalf("two minutes ago pcmv4 = %+v", p)
+	}
+	if p := pts[0]["opus"].(AudioLatencyPoint); p.Count != 1 || p.MaxUs != 8 {
+		t.Fatalf("sixty minutes ago opus = %+v", p)
 	}
 	var total uint64
 	for _, pt := range pts {
 		total += pt["opus"].(AudioLatencyPoint).Count + pt["pcmv4"].(AudioLatencyPoint).Count
 	}
-	if total != 2 {
-		t.Fatalf("series holds %d packets, want 2 (a stale slot leaked in)", total)
+	if total != 3 {
+		t.Fatalf("series holds %d packets, want 3 (the minute in progress or a stale slot leaked in)", total)
+	}
+
+	// The windows still include the minute in progress.
+	if a := m.minutes.sum(sec, 5, audioLatencyOpus); a.count != 2 {
+		t.Fatalf("5m window opus count = %d, want 2", a.count)
 	}
 }

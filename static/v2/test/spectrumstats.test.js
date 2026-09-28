@@ -9,7 +9,7 @@
 const assert = require('assert');
 const {
     STATS_DEFAULT_DESKTOP, STATS_DEFAULT_MOBILE, STATS_PLACES,
-    formatThroughput, perSecond, statLines, statsPlace, throughputSplit,
+    formatAge, formatThroughput, perSecond, statLines, statsPlace, throughputSplit,
 } = require('./.build/spectrumstats.cjs');
 
 let pass = 0;
@@ -387,6 +387,19 @@ t('the top of a scale keeps the digit that is moving', () => {
     // figures hard to take in — but a megabyte-scale reading rounded whole has
     // thrown away everything that changes.
     assert.strictEqual(throughputSplit([1.4 * 1024 * 1024]).total, '1.4');
+});
+
+// --- signal age ---------------------------------------------------------------
+
+t('the age line: heard, arrival in brackets, and an error bar rounded up', () => {
+    assert.strictEqual(formatAge(312.4, 140.6, 7.2), '312 ms (141) ±8');
+    assert.strictEqual(formatAge(312.4, null, 7.2), '312 ms ±8');
+    assert.strictEqual(formatAge(312.4, 140, 0.1), '312 ms (140) ±1');
+    assert.strictEqual(formatAge(null, 140, 5), null);
+    assert.strictEqual(value(statLines({ heardAgeMs: 250, arrivalAgeMs: 90, ageErrMs: 4 }), 'age'), '250 ms (90) ±4');
+    // Unknown is left out, not shown as nought -- a stream without capture
+    // times, or a page that has not measured the clock yet.
+    assert.strictEqual(find(statLines({ queuedSec: 0.2 }), 'age'), undefined);
 });
 
 console.log(`\n${pass} ok`);

@@ -1,6 +1,6 @@
 // The NTP addon: the time, off the air, as this receiver hears it.
 //
-// ubersdr-ntp tunes a receiver to WWV, WWVH, WWVB or DCF77, decodes the broadcast time code
+// ubersdr-ntp tunes a receiver to WWV, WWVH, WWVB, DCF77, MSF or Allouis (ALS162), decodes the broadcast time code
 // and serves it as NTP on port 123 — a stratum-1 radio clock whose reference is a time-signal
 // transmitter rather than another server. Beside the radio it keeps a second, deliberately
 // different class of source: ordinary upstream NTP servers, measured all the time and used
@@ -227,14 +227,46 @@ export function deviceWithin(est) {
     return 0.5 + (likely == null ? est.err : likely);
 }
 
+// How long a change of verdict — "within" to "slow", or back — has to stand before it is
+// shown. An error sitting near the line otherwise flips every second or two: the reading is
+// noisy, and the line itself wanders by a millisecond or more over tens of seconds as the
+// chosen sample and the scatter about it change. A device clock does not drift a millisecond
+// in half a minute, so the hold hides nothing real.
+export const DEVICE_HOLD_S = 30;
+
+/**
+ * Whether the device's error is called "within", given what was called last second.
+ *
+ * Leaving "within" takes a margin past the line — half a millisecond or half the line,
+ * whichever is more — and coming back takes getting inside it. Either change has to stand
+ * for DEVICE_HOLD_S readings running, except an error far outside the line, which is a
+ * real fault and is shown at once, and the first verdict, which has nothing to hold against.
+ *
+ * @param prev  the last verdict, {inside, held}, or null
+ * @returns {{inside:boolean, held:number}|null}
+ */
+export function deviceVerdict(prev, device, within) {
+    if (device == null || within == null) return null;
+    const a = Math.abs(device);
+    const inside = prev ? prev.inside : null;
+    const want = a <= within + (inside ? Math.max(0.5, within * 0.5) : 0);
+    if (inside == null || want === inside) return { inside: want, held: 0 };
+    const held = prev.held + 1;
+    if (held >= DEVICE_HOLD_S || a > 2 * within + 5) return { inside: want, held: 0 };
+    return { inside, held };
+}
+
 /**
  * The device's error as a person reads it. Inside the measurement's own uncertainty it is
  * not called fast or slow, because at that point the measurement cannot tell.
+ *
+ * @param inside  the verdict from deviceVerdict, where there is one; otherwise the error is
+ *                simply compared with the line.
  */
-export function deviceLabel(device, within) {
+export function deviceLabel(device, within, inside) {
     if (device == null) return 'measuring…';
     const a = Math.abs(device);
-    if (within != null && a <= within) return `within ±${within.toFixed(within < 1 ? 1 : 0)} ms`;
+    if (within != null && (inside != null ? inside : a <= within)) return `within ±${within.toFixed(within < 1 ? 1 : 0)} ms`;
     const mag = a < 1000 ? `${a.toFixed(0)} ms`
         : a < 60000 ? `${(a / 1000).toFixed(1)} s`
             : formatDur(a / 1000);
@@ -260,6 +292,47 @@ export function deviceTone(device, within) {
 export function dispersionTone(ms) {
     if (ms == null || !Number.isFinite(ms)) return 'dim';
     return ms < 50 ? 'ok' : ms < 250 ? 'warn' : 'bad';
+}
+
+// ── The device's history ─────────────────────────────────────────────────────
+//
+// The server keeps no history of this device — it is the viewer's machine, measured here —
+// so the chart under the dial is built from the page's own readings, one a second while the
+// panel is running. The window starts at the first reading and widens with each one until
+// it is DEVICE_WINDOW_S wide, then rolls: always full, never mostly empty.
+
+export const DEVICE_WINDOW_S = 600;
+
+// Never narrower than this, or the first few readings would be spread across the whole width.
+export const DEVICE_MIN_WINDOW_S = 60;
+
+/** The history with one more reading, [unix second, device ms, within ms], trimmed to the window. */
+export function deviceHistoryAdd(hist, sec, device, within) {
+    const out = hist.filter((h) => h[0] > sec - DEVICE_WINDOW_S && h[0] < sec);
+    out.push([sec, device, within]);
+    return out;
+}
+
+/**
+ * The history as the chart draws it: the window, and buckets of [start, mean, min, max,
+ * mean within]. About a hundred buckets whatever the width — a second each at first, five
+ * once the window is full.
+ */
+export function deviceSeries(hist, sec) {
+    const x1 = sec + 1;
+    const x0 = Math.min(hist.length ? hist[0][0] : x1, x1 - DEVICE_MIN_WINDOW_S);
+    const span = x1 - x0;
+    const width = span <= 120 ? 1 : span <= 240 ? 2 : 5;
+    const byStart = new Map();
+    for (const [t, v, w] of hist) {
+        const b = Math.floor(t / width) * width;
+        let p = byStart.get(b);
+        if (!p) byStart.set(b, p = { b, sum: 0, lo: Infinity, hi: -Infinity, w: 0, n: 0 });
+        p.sum += v; p.w += w; p.n += 1;
+        p.lo = Math.min(p.lo, v); p.hi = Math.max(p.hi, v);
+    }
+    const points = [...byStart.values()].map((p) => [p.b, p.sum / p.n, p.lo, p.hi, p.w / p.n]);
+    return { x0, x1, width, span, points };
 }
 
 // ── The dial ─────────────────────────────────────────────────────────────────
@@ -303,7 +376,12 @@ export function dialEdge(span) {
 
 // ── Where the time is coming from ────────────────────────────────────────────
 
-export const STATION_LABEL = { wwv: 'WWV', wwvh: 'WWVH', wwvb: 'WWVB', dcf77: 'DCF77' };
+// The station tags ubersdr-ntp reports, as each station is written. Allouis's refid on the
+// wire is RFC 5905's "TDF", from when it was TéléDiffusion de France; the panel names it by
+// the transmitter, which is what it is called now.
+export const STATION_LABEL = {
+    wwv: 'WWV', wwvh: 'WWVH', wwvb: 'WWVB', dcf77: 'DCF77', msf: 'MSF', allouis: 'Allouis',
+};
 
 /**
  * Which stations are in the answer, commonest first.

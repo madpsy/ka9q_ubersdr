@@ -43,6 +43,7 @@ import { setFeedsAllowed } from '../lib/serverFeeds.js';
 import { announceLock, refusedByLock } from '../lib/tuneLock.js';
 import { failureMessage } from '../lib/connectFailure.js';
 import { clearEventLog, logEvent } from '../lib/eventLog.js';
+import { addServerTimeSample } from './serverClock.js';
 import {
     CHECK_MS as SAM_CHECK_MS, createWatch as createSamWatch, notePower as noteSamPower,
     resetWatch as resetSamWatch, shouldFallBack as samShouldFallBack,
@@ -309,6 +310,11 @@ export function RadioProvider({ children }) {
         outLevel: 0,            // smoothed RMS after the volume control, 0..1
         queuedSec: 0,
         outLatencySec: 0,       // what the audio hardware adds after the queue
+        // How far behind capture the audio now playing is, in ms on this page's
+        // performance.now() -- not yet an age, since that clock is not the
+        // receiver's: add radio/serverClock.js's theta. Null when the stream
+        // carries no capture times or nothing is queued.
+        playLag: null,
         underruns: 0,
         frameAgeMs: 0,
         lastFrameAt: 0,
@@ -513,13 +519,13 @@ export function RadioProvider({ children }) {
         };
 
         offs.push(audioConn.on('state', setAudioState));
-        offs.push(audioConn.on('opus', ({ data, sampleRate, channels }) => {
-            player.pushOpus(data, sampleRate, channels);
+        offs.push(audioConn.on('opus', ({ data, sampleRate, channels, captureMs }) => {
+            player.pushOpus(data, sampleRate, channels, captureMs);
         }));
-        offs.push(audioConn.on('pcm', ({ planes, sampleRate, channels }) => {
+        offs.push(audioConn.on('pcm', ({ planes, sampleRate, channels, captureMs }) => {
             // `channels` is the count the *header* declared, which is not the
             // same question as how many planes came back — see _noteStream.
-            player.pushPCM(planes, sampleRate, channels);
+            player.pushPCM(planes, sampleRate, channels, captureMs);
         }));
         offs.push(audioConn.on('quality', ({ basebandPower, noisePower }) => {
             // Taken in every mode, IQ included. radiod measures an IQ channel
@@ -778,6 +784,9 @@ export function RadioProvider({ children }) {
             m.level = player.level;
             m.queuedSec = player.queuedSec;
             m.outLatencySec = player.outputLatencySec;
+            // Read against the same instant, since the head advances in real time.
+            const head = player.captureHead;
+            m.playLag = head == null ? null : performance.now() - head;
             m.underruns = player.underruns;
             m.channels = player.streamChannels;
             m.streamRate = player.streamRate;
@@ -855,9 +864,16 @@ export function RadioProvider({ children }) {
     // than a retune: the dial simply reads differently by the time you press
     // Start.
     useEffect(() => {
+        // Timed, because its server_time is the first measurement of this
+        // page's clock against the receiver's -- see radio/serverClock.js. The
+        // reply is timed to its headers, not its body: server_time is stamped
+        // before any of it is written, so the round trip ends there.
+        const sent = performance.now();
+        let got = 0;
         fetch('/api/description')
-            .then((r) => r.json())
+            .then((r) => { got = performance.now(); return r.json(); })
             .then((d) => {
+                if (d && d.server_time) addServerTimeSample(sent, got, Date.parse(d.server_time));
                 // Before setServerInfo, and that order is the whole mechanism. The range
                 // lives in live module bindings (see applyTuningRange), which re-render
                 // nobody on their own; this setState does, and by then it is already the

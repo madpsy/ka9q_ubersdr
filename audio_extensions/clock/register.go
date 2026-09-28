@@ -7,7 +7,7 @@ import (
 // AudioExtensionParams contains audio stream parameters (from session, not user-configurable)
 type AudioExtensionParams struct {
 	SampleRate    int // Hz (e.g., 12000)
-	Channels      int // 1 (mono audio) for WWV/WWVH/WWVB, 2 (IQ) for DCF77
+	Channels      int // 1 (mono audio) for WWV/WWVH/WWVB, 2 (IQ) for DCF77, MSF and Allouis
 	BitsPerSample int // Always 16
 }
 
@@ -36,15 +36,16 @@ func Factory(audioParams AudioExtensionParams, extensionParams map[string]interf
 func GetInfo() map[string]interface{} {
 	return map[string]interface{}{
 		"name":        "clock",
-		"description": "WWV/WWVH/WWVB/DCF77 time-code decoder — decodes the NIST or PTB broadcast time code and reports the offset against your clock",
-		"version":     "1.1.0",
+		"description": "WWV/WWVH/WWVB/DCF77/MSF/Allouis time-code decoder — decodes the NIST, PTB, NPL or ANFR broadcast time code and reports the offset against your clock",
+		"version":     "1.2.0",
 		"parameters": map[string]interface{}{
 			"station": map[string]interface{}{
 				"type": "string",
-				"description": "wwv, wwvh, wwvb or dcf77. Normally omitted: the station is " +
-					"derived from the session's tuned frequency, since WWV/WWVH, WWVB " +
-					"and DCF77 need genuinely different decoders and the dial says which. " +
-					"DCF77 needs an IQ session; the others need USB audio",
+				"description": "wwv, wwvh, wwvb, dcf77, msf or allouis. Normally omitted: the " +
+					"station is derived from the session's tuned frequency and mode, since " +
+					"each needs a genuinely different decoder and the tuning says which. " +
+					"DCF77 (0.0775 MHz), MSF (0.060 MHz) and Allouis (0.162 MHz) need an " +
+					"IQ session; WWV/WWVH and WWVB (USB at 0.059 MHz) need USB audio",
 				"default": "(from the tuned frequency)",
 			},
 		},
@@ -55,7 +56,7 @@ func GetInfo() map[string]interface{} {
 			"events": map[string]interface{}{
 				"state": map[string]interface{}{
 					"description": "Lock state changed",
-					"fields":      "state (nosignal|acquiring|locked), station (unknown|wwv|wwvh|wwvb|dcf77)",
+					"fields":      "state (nosignal|acquiring|locked), station (unknown|wwv|wwvh|wwvb|dcf77|msf|allouis)",
 				},
 				"time": map[string]interface{}{
 					"description": "A voted timestamp, while locked",

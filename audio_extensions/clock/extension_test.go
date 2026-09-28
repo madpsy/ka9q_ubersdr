@@ -336,10 +336,15 @@ func TestStationComesFromTheDial(t *testing.T) {
 		{dcf77CarrierHz + dcf77WindowHz, "dcf77"},
 		{dcf77CarrierHz - dcf77WindowHz - 1, "wwvb"},
 		{dcf77CarrierHz + dcf77WindowHz + 1, "wwvb"},
+		// Allouis is a carrier of its own: the dial decides, whatever the mode.
+		{allouisCarrierHz, "allouis"},
+		{allouisCarrierHz - lfWindowHz, "allouis"},
+		{allouisCarrierHz + lfWindowHz, "allouis"},
+		{allouisCarrierHz + lfWindowHz + 1, "wwvb"},
 	}
 
 	for _, tc := range cases {
-		if got := stationForDial(tc.dial); got != tc.want {
+		if got := stationFor(tc.dial, channelsFor(tc.want)); got != tc.want {
 			t.Fatalf("dial %d Hz selected %q, want %q", tc.dial, got, tc.want)
 		}
 		ext, err := NewClockExtension(12000, channelsFor(tc.want), map[string]interface{}{
@@ -370,7 +375,12 @@ func TestChannelsMustMatchTheStation(t *testing.T) {
 		{dcf77CarrierHz, 1, false, "IQ"},
 		{9_999_000, 1, true, ""},
 		{9_999_000, 2, false, "USB"},
-		{59_000, 2, false, "USB"},
+		// 60 kHz is WWVB over USB and MSF over IQ: the mode decides, so
+		// neither channel count is refused there.
+		{59_000, 1, true, ""},
+		{59_000, 2, true, ""},
+		{allouisCarrierHz, 2, true, ""},
+		{allouisCarrierHz, 1, false, "IQ"},
 	}
 	for _, tc := range cases {
 		_, err := NewClockExtension(12000, tc.channels, map[string]interface{}{
@@ -445,5 +455,80 @@ func TestUnevenSampleRateIsRefused(t *testing.T) {
 	// this is about failing loudly if one ever does not.
 	if _, err := NewClockExtension(12345, 1, nil); err == nil {
 		t.Fatal("an indivisible sample rate was accepted")
+	}
+}
+
+func TestSixtyKilohertzIsMsfOverIqAndWwvbOverUsb(t *testing.T) {
+	// MSF and WWVB share 60 kHz. WWVB's decoder reads USB audio (dial 59
+	// kHz), MSF's the complex baseband (dial on the carrier), so the session's
+	// mode is what tells them apart -- the same rule as the panel's.
+	fakeBinary(t, "cat >/dev/null")
+	cases := []struct {
+		dial     uint64
+		channels int
+		want     string
+	}{
+		{59_000, 1, "wwvb"},
+		// On the carrier it is MSF whatever the mode (Start switches to IQ),
+		// and a USB session there is then refused with "IQ".
+		{msfCarrierHz, 1, "msf"},
+		{msfCarrierHz + msfOnCarrierHz + 1, 1, "wwvb"},
+		{msfCarrierHz, 2, "msf"},
+		{59_000, 2, "msf"}, // an IQ dial 1 kHz below the carrier still holds it
+		{msfCarrierHz + lfWindowHz, 2, "msf"},
+		{msfCarrierHz + lfWindowHz + 1, 2, "wwvb"},
+	}
+	for _, tc := range cases {
+		if got := stationFor(tc.dial, tc.channels); got != tc.want {
+			t.Fatalf("dial %d Hz, %d ch selected %q, want %q", tc.dial, tc.channels, got, tc.want)
+		}
+	}
+	ext, err := NewClockExtension(12000, 2, map[string]interface{}{"tuned_frequency_hz": float64(msfCarrierHz)})
+	if err != nil || ext.station != "msf" {
+		t.Fatalf("IQ at 60 kHz: station %v, err %v; want msf", ext, err)
+	}
+}
+
+func TestIqStationsGetTheirCarrierOffset(t *testing.T) {
+	// Each IQ decoder is told where its carrier sits in the baseband: its own
+	// carrier minus the dial, 0 on a dial on the carrier.
+	for station, carrier := range map[string]int64{"dcf77": dcf77CarrierHz, "msf": msfCarrierHz, "allouis": allouisCarrierHz} {
+		if carrierFor(station) != carrier {
+			t.Fatalf("%s: carrier %d, want %d", station, carrierFor(station), carrier)
+		}
+		if channelsFor(station) != 2 {
+			t.Fatalf("%s is not read as IQ", station)
+		}
+	}
+	for _, station := range []string{"wwv", "wwvh", "wwvb"} {
+		if carrierFor(station) != 0 || channelsFor(station) != 1 {
+			t.Fatalf("%s should be USB audio with no carrier offset", station)
+		}
+	}
+}
+
+func TestUnroundedEdgeIsUsedForTheOffset(t *testing.T) {
+	// MSF and Allouis time the second to microseconds; a whole sample is 83 us
+	// at 12 kHz. With last_edge_sample_exact the offset is re-timed at that
+	// resolution; without it, at the whole sample, as before.
+	e := &ClockExtension{sampleRate: 12000, clock: newSampleClock(12000)}
+	e.clock.advance(240, 1_000_000_000_000) // 240 samples end at t = 1e12 ns
+	whole := `{"type":"time","utc_ms":1000000,"last_edge_sample":120}`
+	exact := `{"type":"time","utc_ms":1000000,"last_edge_sample":120,"last_edge_sample_exact":120.6}`
+	offsetOf := func(line string) float64 {
+		out, ok := e.rewriteOffset([]byte(line))
+		if !ok {
+			t.Fatalf("rewrite refused %s", line)
+		}
+		var ev map[string]interface{}
+		if err := json.Unmarshal(out, &ev); err != nil {
+			t.Fatal(err)
+		}
+		return ev["offset_ms"].(float64)
+	}
+	d := offsetOf(whole) - offsetOf(exact)
+	// 0.6 samples later is 0.05 ms later, so the offset is 0.05 ms smaller.
+	if math.Abs(d-0.05) > 1e-6 {
+		t.Fatalf("unrounded edge moved the offset by %.6f ms, want 0.05", d)
 	}
 }

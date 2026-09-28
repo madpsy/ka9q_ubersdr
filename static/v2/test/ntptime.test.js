@@ -46,7 +46,8 @@ const {
     TimePanel, PANELS, PANEL_BY_ID, GROUPS,
     DIAL_MIN_MS, MAX_SAMPLE_AGE_MS, STATUS_MAX_MS, STATUS_MIN_MS, STEP_MS, WINDOW,
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
-    deviceLabel, deviceTone, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone,
+    deviceHistoryAdd, deviceLabel, deviceSeries, deviceTone, deviceVerdict, deviceWithin,
+    DEVICE_HOLD_S, DEVICE_WINDOW_S, dialEdge, dialPos, dialSpan, dispersionTone,
     CLOCK_KEYS, browserZone, clockFaces, faceDateAt, facePartsAt, faceFor, faceText,
     formatDur, formatMs, localIsUtc, newClock, nextFaceKey, nextSecondDelay, ntpAvailable,
     offsetText, receiverOffsetMin, referenceKey, referenceOf, sampleFrom, saveBigClock,
@@ -243,6 +244,71 @@ t('a clock outside it is called by how far and which way', () => {
     assert.strictEqual(deviceLabel(120000, 3), '2m fast');
 });
 
+t('the verdict on the device holds rather than flipping at the line', () => {
+    // The first reading is called as it stands.
+    let v = deviceVerdict(null, 1.2, 1.0);
+    assert.strictEqual(v.inside, false, 'first verdict, outside');
+    v = deviceVerdict(null, 0.8, 1.0);
+    assert.strictEqual(v.inside, true, 'first verdict, inside');
+    // Inside, a reading a little past the line is not yet outside: the margin is 0.5 ms.
+    v = deviceVerdict(v, 1.4, 1.0);
+    assert.strictEqual(v.inside, true, 'inside the margin');
+    assert.strictEqual(v.held, 0);
+    // Past the margin, it must stand for the hold before the verdict changes.
+    for (let i = 1; i < DEVICE_HOLD_S; i++) {
+        v = deviceVerdict(v, 1.8, 1.0);
+        assert.strictEqual(v.inside, true, `held at ${i}`);
+    }
+    v = deviceVerdict(v, 1.8, 1.0);
+    assert.strictEqual(v.inside, false, 'changed once it has stood');
+    // One reading back inside does not change it back, and a relapse restarts the count.
+    v = deviceVerdict(v, 0.9, 1.0);
+    assert.strictEqual(v.inside, false);
+    assert.strictEqual(v.held, 1);
+    v = deviceVerdict(v, 1.8, 1.0);
+    assert.strictEqual(v.held, 0, 'the count restarts');
+});
+
+t('an error far outside the line is shown at once', () => {
+    let v = deviceVerdict(null, 0.5, 1.0);
+    v = deviceVerdict(v, 300, 1.0);
+    assert.strictEqual(v.inside, false, 'a stepped clock is not held back');
+    assert.strictEqual(deviceVerdict(null, null, 1.0), null, 'nothing measured');
+});
+
+t('the label follows the verdict where there is one', () => {
+    assert.strictEqual(deviceLabel(1.4, 1.0, true), 'within ±1 ms', 'held inside');
+    assert.strictEqual(deviceLabel(0.9, 1.0, false), '1 ms fast', 'held outside');
+    assert.strictEqual(deviceLabel(1.4, 1.0), '1 ms fast', 'no verdict: the line alone');
+});
+
+t('the device history rolls at ten minutes', () => {
+    let h = [];
+    for (let s = 1000; s < 1000 + DEVICE_WINDOW_S + 50; s++) h = deviceHistoryAdd(h, s, -1, 1);
+    assert.strictEqual(h.length, DEVICE_WINDOW_S);
+    assert.strictEqual(h[0][0], 1000 + 50);
+    // A repeated second replaces rather than doubles.
+    h = deviceHistoryAdd(h, h[h.length - 1][0], 5, 1);
+    assert.strictEqual(h.length, DEVICE_WINDOW_S);
+});
+
+t('the chart starts narrow and widens to the window', () => {
+    let h = [];
+    for (let s = 1000; s < 1010; s++) h = deviceHistoryAdd(h, s, s - 1000, 2);
+    let d = deviceSeries(h, 1009);
+    assert.strictEqual(d.span, 60, 'never narrower than a minute');
+    assert.strictEqual(d.width, 1);
+    assert.strictEqual(d.points.length, 10);
+    for (let s = 1010; s < 1300; s++) h = deviceHistoryAdd(h, s, 0, 2);
+    d = deviceSeries(h, 1299);
+    assert.strictEqual(d.x0, 1000, 'starts at the first reading');
+    assert.strictEqual(d.span, 300);
+    assert.strictEqual(d.width, 5);
+    // A bucket's mean, extremes and line.
+    const b = deviceSeries(deviceHistoryAdd(deviceHistoryAdd([], 2000, 1, 2), 2001, 3, 4), 2001).points;
+    assert.deepStrictEqual(b.map((p) => p.slice(1)), [[1, 1, 1, 2], [3, 3, 3, 4]]);
+});
+
 t('20 ms is the floor on a clock being fine, whatever the measurement claims', () => {
     // Below that the error is smaller than the jitter of the path it was measured over.
     assert.strictEqual(deviceTone(15, 1), 'ok');
@@ -293,6 +359,27 @@ t('DCF77 is named as itself, beside the NIST stations', () => {
     const mix = stationMix([radioSource('dcf77'), radioSource('dcf77'), radioSource('wwvb')]);
     assert.strictEqual(mix.text, 'DCF77 + WWVB');
     assert.strictEqual(mix.detail, '2 × DCF77, 1 × WWVB');
+});
+
+t('MSF and Allouis are named as themselves, beside DCF77', () => {
+    // ubersdr-ntp reports 60 kHz as "msf" (or "wwvb", by where the receiver is) and 162 kHz
+    // as "allouis"; their refids on the wire are "MSF" and "TDF". Three longwave stations on
+    // one receiver, one source each, sort alphabetically.
+    const mix = stationMix([radioSource('dcf77'), radioSource('msf'), radioSource('allouis')]);
+    assert.strictEqual(mix.text, 'Allouis + DCF77 + MSF');
+    assert.strictEqual(mix.detail, '1 × Allouis, 1 × DCF77, 1 × MSF');
+});
+
+t('the refid on the wire stays in the detail, whichever station it names', () => {
+    const status = {
+        served: { used_names: ['dcf77', 'msf', 'allouis'] },
+        sources: [radioSource('dcf77'), radioSource('msf'), radioSource('allouis')],
+    };
+    const ref = referenceOf({ synchronised: true, stratum: 1, refid: 'TDF' }, status);
+    assert.strictEqual(ref.kind, 'radio');
+    assert.strictEqual(ref.text, 'Allouis + DCF77 + MSF');
+    assert.strictEqual(ref.sub, 'dcf77, msf, allouis');
+    assert.ok(ref.detail.endsWith('refid TDF'), ref.detail);
 });
 
 t('only sources actually in the answer count towards the mix', () => {

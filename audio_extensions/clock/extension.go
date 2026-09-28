@@ -1,11 +1,11 @@
 package clock
 
 /*
- * WWV/WWVH/WWVB/DCF77 time-code decoder extension.
+ * WWV/WWVH/WWVB/DCF77/MSF/Allouis time-code decoder extension.
  *
  * Spawns /opt/ubersdr-clock/ubersdr-clock_<goarch> as a subprocess. The binary
  * reads int16 little-endian PCM from stdin at the session sample rate — mono
- * audio for WWV/WWVH/WWVB, interleaved I/Q for DCF77 — and writes
+ * audio for WWV/WWVH/WWVB, interleaved I/Q for DCF77, MSF and Allouis — and writes
  * newline-delimited JSON to stdout, one object per event:
  *
  *   {"type":"state","state":"locked","station":"wwv"}
@@ -25,7 +25,10 @@ package clock
  * Tuning is the operator's job and the panel says so: WWV/WWVH wants USB at
  * (carrier - 1 kHz) with a passband reaching 2.2 kHz, WWVB wants USB at
  * 0.059 MHz, and DCF77 wants IQ at 0.0775 MHz — its decoder reads the carrier's
- * phase as well as its amplitude, and USB audio carries no phase. The station
+ * phase as well as its amplitude, and USB audio carries no phase. MSF wants IQ
+ * at 0.060 MHz (timed on the carrier's coherent amplitude) and Allouis IQ at
+ * 0.162 MHz (phase modulation only). WWVB and MSF share 60 kHz; the mode tells
+ * them apart — USB at 59 kHz is WWVB, IQ at 60 kHz is MSF. The station
  * argument is derived from the session's tuned frequency rather than asked
  * for, and the session's channel count has to match it.
  *
@@ -39,6 +42,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,11 +96,40 @@ const (
 	dcf77WindowHz  = 5_000
 )
 
-// stationForDial is the decoder a dial frequency implies: dcf77, wwvb or wwv
-// (which also covers WWVH — that decoder tags the station itself).
-func stationForDial(hz uint64) string {
-	if hz+dcf77WindowHz >= dcf77CarrierHz && hz <= dcf77CarrierHz+dcf77WindowHz {
+// MSF (Anthorn, 60 kHz) and Allouis (ALS162, 162 kHz), both taken as IQ with
+// the same window as DCF77. MSF shares 60 kHz with WWVB, so it is chosen only
+// when the session is IQ: WWVB's decoder reads USB audio (0.059 MHz), MSF's
+// the complex baseband. Match MSF_CARRIER_HZ, ALLOUIS_CARRIER_HZ and
+// LF_WINDOW_HZ in static/v2/src/extensions/clock/frames.js.
+const (
+	msfCarrierHz     = 60_000
+	allouisCarrierHz = 162_000
+	lfWindowHz       = 5_000
+	// A dial this close to 60 kHz is on MSF's carrier whatever the mode: the
+	// panel tunes the MSF preset first and switches into IQ on Start, as it
+	// does for DCF77. WWVB's dial is 59 kHz, well outside it.
+	msfOnCarrierHz = 500
+)
+
+func near(hz, carrier, window uint64) bool {
+	return hz+window >= carrier && hz <= carrier+window
+}
+
+// stationFor is the decoder a dial frequency and the session's channel count
+// imply: dcf77, allouis, msf, wwvb or wwv (which also covers WWVH — that
+// decoder tags the station itself). At 60 kHz, where MSF (IQ, dial on the
+// carrier) and WWVB (USB, dial at 59 kHz) share the carrier, a dial on the
+// carrier or an IQ session is MSF; everywhere else the dial alone says, and a
+// wrong mode is refused with the reason (NewClockExtension).
+func stationFor(hz uint64, channels int) string {
+	if near(hz, dcf77CarrierHz, dcf77WindowHz) {
 		return "dcf77"
+	}
+	if near(hz, allouisCarrierHz, lfWindowHz) {
+		return "allouis"
+	}
+	if near(hz, msfCarrierHz, msfOnCarrierHz) || (channels == 2 && near(hz, msfCarrierHz, lfWindowHz)) {
+		return "msf"
 	}
 	if hz > 0 && hz < wwvbCeilingHz {
 		return "wwvb"
@@ -104,13 +137,42 @@ func stationForDial(hz uint64) string {
 	return "wwv"
 }
 
-// channelsFor is the session channel count a station's decoder reads: DCF77
-// is complex baseband, the rest demodulated audio.
+// stationForDial is stationFor for a USB session: the dial alone.
+func stationForDial(hz uint64) string { return stationFor(hz, 1) }
+
+// channelsFor is the session channel count a station's decoder reads: the LF
+// stations tuned on their carriers are complex baseband, the rest demodulated
+// audio.
 func channelsFor(station string) int {
-	if station == "dcf77" {
+	switch station {
+	case "dcf77", "msf", "allouis":
 		return 2
 	}
 	return 1
+}
+
+// stationLabel is a station as it is written, for messages.
+func stationLabel(station string) string {
+	switch station {
+	case "allouis":
+		return "Allouis"
+	case "msf":
+		return "MSF"
+	}
+	return strings.ToUpper(station)
+}
+
+// carrierFor is an IQ station's carrier, for --carrier-offset-hz.
+func carrierFor(station string) int64 {
+	switch station {
+	case "dcf77":
+		return dcf77CarrierHz
+	case "msf":
+		return msfCarrierHz
+	case "allouis":
+		return allouisCarrierHz
+	}
+	return 0
 }
 
 // AudioSample contains PCM audio data with timing information.
@@ -285,17 +347,17 @@ func NewClockExtension(sampleRate, channels int, extensionParams map[string]inte
 		tunedHz = uint64(v)
 	}
 
-	station := stationForDial(tunedHz)
+	station := stationFor(tunedHz, channels)
 	// An explicit override, for a receiver whose dial the server cannot see
 	// the way the panel does. The panel sends the one it derived from the dial
 	// — the same answer, by the same rule — so that moving between decoders
 	// changes its attach parameters and re-attaches.
 	if s, ok := extensionParams["station"].(string); ok {
 		switch s {
-		case "wwv", "wwvh", "wwvb", "dcf77":
+		case "wwv", "wwvh", "wwvb", "dcf77", "msf", "allouis":
 			station = s
 		default:
-			return nil, fmt.Errorf("clock: unknown station %q (expected wwv, wwvh, wwvb or dcf77)", s)
+			return nil, fmt.Errorf("clock: unknown station %q (expected wwv, wwvh, wwvb, dcf77, msf or allouis)", s)
 		}
 	}
 
@@ -306,8 +368,8 @@ func NewClockExtension(sampleRate, channels int, extensionParams map[string]inte
 	// audio, either of which acquires for ever with nothing to say why.
 	if want := channelsFor(station); channels != want {
 		if want == 2 {
-			return nil, fmt.Errorf("clock: DCF77 is decoded from IQ (got %d-channel audio) — "+
-				"switch the receiver to IQ mode", channels)
+			return nil, fmt.Errorf("clock: %s is decoded from IQ (got %d-channel audio) — "+
+				"switch the receiver to IQ mode", stationLabel(station), channels)
 		}
 		return nil, fmt.Errorf("clock: %s is decoded from USB audio (got %d-channel IQ) — "+
 			"switch the receiver to USB", strings.ToUpper(station), channels)
@@ -360,10 +422,10 @@ func (e *ClockExtension) Start(audioChan <-chan AudioSample, resultChan chan<- [
 		// the default 10 s interval is too coarse to watch an acquisition.
 		"--diag-seconds", "2",
 	}
-	if e.station == "dcf77" {
-		// Where the carrier sits in the baseband: 0 on a 77.5 kHz dial.
+	if carrier := carrierFor(e.station); carrier != 0 {
+		// Where the carrier sits in the baseband: 0 on a dial on the carrier.
 		// Signed arithmetic — the dial may be either side of it.
-		offset := dcf77CarrierHz - int64(e.tunedHz)
+		offset := carrier - int64(e.tunedHz)
 		args = append(args, "--carrier-offset-hz", strconv.FormatInt(offset, 10))
 	}
 
@@ -594,8 +656,19 @@ func (e *ClockExtension) rewriteOffset(line []byte) ([]byte, bool) {
 	if !ok1 || !ok2 {
 		return line, true
 	}
+	// The unrounded edge where the decoder resolves one (DCF77, MSF and
+	// Allouis time the second to microseconds; a whole sample is 83 us at
+	// 12 kHz). Null, or absent on an older binary, means the whole sample.
+	frac := 0.0
+	if exact, ok := ev["last_edge_sample_exact"].(float64); ok {
+		whole := math.Floor(exact)
+		edge, frac = whole, exact-whole
+	}
 
 	hostMs, ok := e.clock.hostMsAt(int64(edge))
+	if ok {
+		hostMs += frac * 1000.0 / float64(e.sampleRate)
+	}
 	if !ok {
 		// No anchor yet — the binary's own offset is the best there is, and
 		// leaving it alone is better than reporting one measured against

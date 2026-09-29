@@ -140,6 +140,14 @@ void CwDecoder::decodeLoop()
 
         const auto& stats = m_ggmorse->getStatistics();
 
+        // ggmorse appends to thresholdF on every frame (it is plotting data)
+        // and only empties it when taken. Nothing here plots it, but left
+        // alone it grows ~11 MB a day for as long as the decoder runs.
+        GGMorse::ThresholdF thresholdF;
+        m_ggmorse->takeThresholdF(thresholdF);
+        GGMorse::SignalF signalF;
+        m_ggmorse->takeSignalF(signalF);
+
         GGMorse::TxRx rxData;
         if (m_ggmorse->takeRxData(rxData) > 0 && stats.costFunction < 1.0f) {
             std::string text(reinterpret_cast<const char*>(rxData.data()), rxData.size());

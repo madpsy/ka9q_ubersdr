@@ -117,6 +117,7 @@ import NavtexPanel, { navtexAvailable } from './NavtexPanel.jsx';
 import WefaxPanel, { wefaxAvailable } from './WefaxPanel.jsx';
 import VoiceSkimmerPanel, { voiceSkimmerAvailable } from './VoiceSkimmerPanel.jsx';
 import HFDLPanel, { hfdlAvailable } from './HFDLPanel.jsx';
+import NDBPanel, { ndbAvailable } from './NDBPanel.jsx';
 import SpectrogramPanel, { spectrogramEnabled } from './SpectrogramPanel.jsx';
 import BandSpectrumPanel from './BandSpectrumPanel.jsx';
 import IFSpectrumPanel from './IFSpectrumPanel.jsx';
@@ -552,6 +553,23 @@ const BUILT_IN = [
         minimal: true,
         Component: HFDLPanel,
         requires: (serverInfo) => hfdlAvailable(serverInfo),
+    },
+    // Aviation beacons heard on LF, from the NDB addon: the beacons being received as a
+    // list, a page at a time, and a modal with them on a map framed on this receiver,
+    // with range rings and the list beside it. The spectrum, every carrier, the live
+    // Morse copy and the heard log stay on the addon's own dashboard, which both the
+    // panel and the modal link to. Directly after HFDL: the other aviation addon.
+    //
+    // Minimal: the first five beacons, without the header or the pager.
+    {
+        id: 'ndb',
+        title: 'NDB',
+        icon: <Icon.Morse />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Component: NDBPanel,
+        requires: (serverInfo) => ndbAvailable(serverInfo),
     },
     // The last 24 hours of wherever the dial is, as a picture. Next to SSTV
     // because it belongs to the same kind of panel: something you glance at

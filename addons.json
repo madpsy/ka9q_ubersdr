@@ -2,8 +2,8 @@
   "addons": [
     {
       "name": "ndb",
-      "status": "Unstable - Testing",
-      "description": "Multi-beacon NDB decoder — requests one or more wideband IQ streams (default iq96 centred at 368 kHz, covering ~325–411 kHz), finds every non-directional beacon carrier in the passband, and decodes each beacon's Morse ident in parallel with ggmorse. Idents are matched against the OurAirports navaid database and located relative to the receiver. Serves a live dark-themed web UI with per-stream spectrum, beacon table, live copy, a persistent heard log, and a map with range rings and great-circle paths.",
+      "status": "Stable",
+      "description": "Multi-beacon NDB decoder — requests one or more wideband IQ streams (default iq192 centred at 356 kHz, covering ~270–442 kHz), finds every non-directional beacon carrier in the passband, and decodes each beacon's Morse ident in parallel with ggmorse. Idents are matched against the OurAirports navaid database and located relative to the receiver. Serves a live dark-themed web UI with per-stream spectrum, beacon table, live copy, a persistent heard log, and a map with range rings and great-circle paths.",
       "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr_ndb/main/install.sh",
       "host": "ndb",
       "port": 6100,

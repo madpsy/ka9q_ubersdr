@@ -9,3 +9,8 @@ cw-decoder
 
 *.o
 *.a
+
+# Output of ./build.sh
+dist/
+build-docker/
+build_*.log

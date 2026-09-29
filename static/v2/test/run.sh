@@ -179,6 +179,8 @@ esbuild leafletbase.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/leafletbase.cjs --log-level=warning
 esbuild ../src/lib/hfdl.js --bundle --format=cjs --platform=node \
     --outfile=.build/hfdl.cjs --log-level=warning
+esbuild ../src/lib/ndb.js --bundle --format=cjs --platform=node \
+    --outfile=.build/ndb.cjs --log-level=warning
 # morsecode, not morse: the CW decoder extension's frames.js already builds to
 # .build/morse.cjs, and one of the two would have silently overwritten the other.
 esbuild ../src/lib/morse.js --bundle --format=cjs --platform=node \
@@ -628,6 +630,7 @@ node wefaxaddon.test.js
 node voiceskimmer.test.js
 node dxsession.test.js
 node hfdl.test.js
+node ndb.test.js
 node dockfocus.test.js
 node freqentry.test.js
 node topclock.test.js

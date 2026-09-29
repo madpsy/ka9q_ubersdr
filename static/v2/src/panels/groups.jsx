@@ -97,7 +97,7 @@ export const GROUPS = [
         // answered for voice and CW instead of for data.
         panels: [
             'extensions', 'iqdemod', 'sstv', 'navtex', 'wefax',
-            'packet', 'hfdl', 'voiceskimmer', 'addons',
+            'packet', 'hfdl', 'ndb', 'voiceskimmer', 'addons',
         ],
     },
     {

@@ -225,12 +225,12 @@ GGMorse::GGMorse(const Parameters & parameters)
         parameters.samplesPerFrame,
     })) {
 
+    // No per-slot reserve: 100 Intervals in each of these 100x100 slots was
+    // ~28 MB per decoder, and the speed/threshold search only ever touches
+    // ~85 of the slots. The ones used grow on demand and keep their capacity.
     m_impl->intervalsAll.resize(100);
     for (auto & intervals : m_impl->intervalsAll) {
         intervals.resize(100);
-        for (auto & x : intervals) {
-            x.reserve(100);
-        }
     }
 
     m_impl->rxData.reserve(1024);

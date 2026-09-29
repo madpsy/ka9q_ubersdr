@@ -12008,6 +12008,83 @@ a.btn { text-decoration: none; }
 .hf__table tbody tr.is-picked td { background: var(--accent-soft); color: var(--text); }
 .hf__table tbody tr.is-stale td { opacity: 0.6; }
 
+/* =========================================================================
+   NDB addon panel
+   ========================================================================= */
+
+/* The NDB panel is the HFDL panel's shape and uses its classes for everything the two
+   share — the map button, the modal columns, the stage, tip and zoom, the card and the
+   table (see NDBPanel.jsx). What is its own is the beacon mark: green while it is being
+   received, faint once it has dropped out, the same two states the map draws. */
+.nd__dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 5px;
+    border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 0 1.5px var(--surface-2), 0 0 0 2.5px var(--good);
+    vertical-align: middle;
+}
+.nd__dot--old { background: var(--text-faint); box-shadow: 0 0 0 1.5px var(--surface-2), 0 0 0 2.5px var(--text-faint); opacity: 0.7; }
+
+/* The panel: a count and the Map button over a list, as the Listeners panel has. */
+.nd-head { display: flex; align-items: center; gap: 8px; }
+.nd-count {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.nd-count b { color: var(--text); font-size: calc(12px * var(--ui-scale)); }
+.nd-count i { font-style: normal; color: var(--text-faint); }
+
+/* Two lines per beacon: ident, frequency and signal, then name and distance. The
+   signal (or, once it has dropped out, how long ago) is pinned right so the column of
+   them reads down the list. `.list__row.nd-row` for the reason `.list__row.lsn-row`
+   is: `.list__row` is a flex column further down this file and would otherwise win. */
+.list__row.nd-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+        "id    khz   sig"
+        "where where where";
+    column-gap: 8px;
+    align-items: baseline;
+    width: 100%;
+}
+.nd-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.nd-row__id {
+    grid-area: id;
+    font-family: var(--mono);
+    font-weight: 650;
+    font-size: calc(12.5px * var(--ui-scale));
+    color: var(--text);
+    letter-spacing: 0.03em;
+}
+.nd-row__khz {
+    grid-area: khz;
+    font-family: var(--mono);
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.nd-row__sig {
+    grid-area: sig;
+    font-family: var(--mono);
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--good);
+}
+.nd-row__where { grid-area: where; font-size: calc(11px * var(--ui-scale)); color: var(--text-faint); }
+/* Dropped out: still worth reading, so dimmed rather than greyed to nothing, and the
+   right-hand column is an age rather than a signal. */
+.nd-row.is-old .nd-row__id, .nd-row.is-quiet .nd-row__id { color: var(--text-dim); }
+.nd-row.is-old .nd-row__sig, .nd-row.is-quiet .nd-row__sig { color: var(--text-faint); }
+.nd-row.is-quiet { opacity: 0.7; }
+
 /* The callsign box under the top bar's lookup button. Narrow: a callsign is six
    characters, and a box sized for a sentence invites one. */
 .callpop { display: flex; flex-direction: column; gap: 5px; min-width: calc(190px * var(--ui-scale)); }

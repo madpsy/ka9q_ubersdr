@@ -117,7 +117,7 @@ Callsign lookup · Chat · Display · Doppler · DX cluster · DXpeditions
 Events
 Extensions · HFDL · IF Spectrum · IQ Demod · Layout · Lightning · Listeners
 Local bookmarks · Markers · Measure · Media controls · Mini Games · Most used
-Multipad · NAVTEX · NCDXF Beacons · News · Noise reduction · Notifications
+Multipad · NAVTEX · NCDXF Beacons · NDB · News · Noise reduction · Notifications
 Packet · Quick bands · Radio control · Ranking · Receiver · Receiver info
 Recorder · Rotator · Scanner · SDR control · Shortcuts · Signal
 Space weather · Spectrogram · Spots · SSTV · Stats · Time · VFOs

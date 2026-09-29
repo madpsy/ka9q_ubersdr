@@ -249,6 +249,7 @@
                 <select id="device-select" class="flex-select"></select>
                 <button id="refresh-devices-btn" class="btn btn-icon" title="Refresh devices">🔄</button>
               </div>
+              <div id="audio-warning" class="audio-warning" hidden></div>
             </div>
             <div class="form-row">
               <label>Format</label>
@@ -260,6 +261,16 @@
                   <input type="radio" name="format" value="pcm-zstd"> Uncompressed
                 </label>
               </div>
+            </div>
+            <!-- Reduced-depth IQ: shown only in IQ modes, the only ones the
+                 server reduces. The top stop (61) is lossless. -->
+            <div class="form-row" id="margin-row" hidden>
+              <label for="margin-slider">IQ quality</label>
+              <div class="input-row">
+                <input type="range" id="margin-slider" class="slider flex-slider" min="15" max="61" step="1" value="15">
+                <span id="margin-value" class="margin-value">15 dB</span>
+              </div>
+              <div class="margin-note">Drops bits below the band's noise floor: lower saves more bandwidth, Lossless sends every bit.</div>
             </div>
             <div class="volume-row">
               <button id="mute-btn" class="btn btn-icon mute-btn" title="Mute">🔊</button>

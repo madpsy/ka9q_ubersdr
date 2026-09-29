@@ -602,6 +602,28 @@ input:disabled, select:disabled, button:disabled {
   color: var(--orange);
 }
 
+/* The output is losing part of the stream, or cannot play it. */
+.audio-warning {
+  font-size: 0.75rem;
+  color: var(--orange);
+  margin-top: 4px;
+}
+.audio-warning[hidden] { display: none; }
+
+/* Reduced-depth IQ margin; the row only exists in IQ modes. */
+#margin-row[hidden] { display: none; }
+.margin-value {
+  min-width: 4.5em;
+  text-align: right;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.margin-note {
+  font-size: 0.7rem;
+  color: var(--text);
+  margin-top: 3px;
+}
+
 /* ── Signal Meters ────────────────────────────────────────────────────────── */
 .meters {
   display: flex;

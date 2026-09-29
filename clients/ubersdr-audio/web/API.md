@@ -91,7 +91,9 @@ authoritative source of truth for any polling client.
     "channel": "both",
     "format": "opus",
     "device_id": "",
-    "device_name": "Default Device"
+    "device_name": "Default Device",
+    "warning": "",
+    "min_margin": 15
   },
   "agc": {
     "hang_time_s": 1.1,
@@ -450,9 +452,22 @@ immediately (same as the GUI).
   "channel": "both",
   "format": "opus",
   "device_id": "",
-  "device_name": "Default Device"
+  "device_name": "Default Device",
+  "warning": "",
+  "min_margin": 15
 }
 ```
+
+`min_margin` is the reduced-depth IQ margin in dB: how far below the band's own
+noise floor the quantisation floor is held, so the server can drop the bits
+beneath it. `0` is lossless. It only applies in IQ modes — demodulated audio
+is always sent whole — but is kept outside them for the next IQ mode. The
+default is 15, the server's minimum, as in the v2 web UI.
+
+`warning` is empty unless the output is losing part of the stream or cannot
+play it — on Linux, when the sound server resamples a stream down to a slower
+sink (a wide IQ mode through a 48 kHz PipeWire sink keeps only ±24 kHz), or
+when a direct device refuses the stream's rate.
 
 ---
 
@@ -467,7 +482,8 @@ Set any combination of audio settings.  All fields optional.
   "muted": false,
   "channel": "both",
   "format": "opus",
-  "device_id": ""
+  "device_id": "",
+  "min_margin": 15
 }
 ```
 
@@ -478,6 +494,7 @@ Set any combination of audio settings.  All fields optional.
 | `channel` | string | `"both"`, `"left"`, `"right"` | |
 | `format` | string | `"opus"`, `"pcm-zstd"` | Triggers reconnect if changed while connected |
 | `device_id` | string | must be a valid ID from `/audio/devices`, or `""` | `""` = system default |
+| `min_margin` | int | `0`, or [15, 60] — **clamped** | IQ modes only; `0` = lossless. Applied live, no reconnect |
 
 **Constraints:**
 - `format: "opus"` is rejected (`409`) when the current mode is any IQ variant
@@ -510,6 +527,13 @@ List available audio output devices.
 ```
 
 The first entry is always `{"id": "", "name": "Default Device"}`.
+
+On Linux the list also carries every ALSA playback device as a direct output,
+with an id of the form `alsa:plughw:CARD=<card>,DEV=<n>` and a name ending in
+`(direct)`. A direct device bypasses the sound server and runs at the stream's
+own rate or refuses it — the way to get a wide IQ mode to an interface at full
+width. A card the sound server is using at that moment can refuse with
+"Device or resource busy".
 
 ---
 

@@ -1,7 +1,8 @@
 package main
 
-// audio_output.go — shared ring-reader used by both the Windows WASAPI
-// backend (audio_output_windows.go) and the oto fallback (audio_output_other.go).
+// audio_output.go — shared ring-reader used by the Windows WASAPI
+// backend (audio_output_windows.go), the ALSA backend (audio_output_linux.go)
+// and the oto fallback (audio_output_other.go).
 
 import (
 	"sync"
@@ -101,6 +102,31 @@ func (r *pcmRingReader) Read(buf []byte) (int, error) {
 		r.pos += n
 	}
 	return written, nil
+}
+
+// pop returns the next queued chunk if one is waiting, without waiting. The
+// WASAPI render loop takes whatever has arrived each time it wakes.
+func (r *pcmRingReader) pop() ([]byte, bool) {
+	select {
+	case chunk, ok := <-r.ch:
+		return chunk, ok
+	default:
+		return nil, false
+	}
+}
+
+// next waits up to timeout for the next queued chunk. Unlike Read it never
+// makes up silence: the ALSA writer would rather let the device drain what it
+// already holds than pad a late chunk's slot with zeros.
+func (r *pcmRingReader) next(timeout time.Duration) ([]byte, bool) {
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case chunk, ok := <-r.ch:
+		return chunk, ok
+	case <-t.C:
+		return nil, false
+	}
 }
 
 func (r *pcmRingReader) Close() {

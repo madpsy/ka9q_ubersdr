@@ -34,13 +34,31 @@ import (
 // periodic resynchronisation.
 const pcmv4ExpectedSHA = "4875d2185f1ff5a2031386c569cac0c2259e6a827b9e61f813399a19c3b9c903"
 
+// pcmv4ScaledSHA is the same for testdata/pcmv4_scaled.bin, the reduced-depth
+// IQ stream a min_margin request asks for: profile 2, where a shift byte leads
+// the body and the samples come back shifted left by it.
+//
+// It covers the paths that exist only there -- a shift that changes as the
+// margin does, a silent packet that carries no shift at all, an escape that
+// carries one, and the profile switching to plain IQ and back when the margin
+// goes to lossless. Getting the shift wrong does not fail; it delivers a signal
+// several bits too quiet, which is exactly the kind of thing only a hash
+// notices.
+const pcmv4ScaledSHA = "7315366ceed3e70552c28d31cde690a14dc66f5244b5a8dc34a5e696f5698ccc"
+
 // readV4Fixture returns the packets in testdata/pcmv4_stream.bin.
+func readV4Fixture(t *testing.T) [][]byte {
+	t.Helper()
+	return readV4FixtureFile(t, "testdata/pcmv4_stream.bin")
+}
+
+// readV4FixtureFile returns the packets in a fixture file.
 //
 // Layout: "UV4F", a format byte, a uint32 packet count, then each packet as a
 // uint32 length and that many bytes.
-func readV4Fixture(t *testing.T) [][]byte {
+func readV4FixtureFile(t *testing.T, path string) [][]byte {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/pcmv4_stream.bin")
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("fixture: %v", err)
 	}
@@ -290,5 +308,60 @@ func TestLegacyServerIsReported(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "protocol version 4") {
 		t.Fatalf("unhelpful error %q", err)
+	}
+}
+
+// The reduced-depth IQ stream decodes to exactly what the server decoded, and
+// takes the profile through both rebuilds on the way.
+func TestPCMv4DecodesScaledStream(t *testing.T) {
+	packets := readV4FixtureFile(t, "testdata/pcmv4_scaled.bin")
+	dec := NewPCMv4StreamDecoder()
+	h := sha256.New()
+
+	profiles := map[byte]int{}
+	var buf [2]byte
+	for i, pkt := range packets {
+		hdr, samples, err := dec.DecodePacket(pkt)
+		if err != nil {
+			t.Fatalf("packet %d: %v", i, err)
+		}
+		profiles[hdr.Profile]++
+		if hdr.Channels != 2 {
+			t.Fatalf("packet %d: %d channels, want interleaved I/Q", i, hdr.Channels)
+		}
+		for _, s := range samples {
+			binary.LittleEndian.PutUint16(buf[:], uint16(s))
+			h.Write(buf[:])
+		}
+	}
+
+	if got := hex.EncodeToString(h.Sum(nil)); got != pcmv4ScaledSHA {
+		t.Fatalf("decoded samples differ from what the server encoded\n got %s\nwant %s", got, pcmv4ScaledSHA)
+	}
+	// Both profiles must have been exercised, or the fixture stopped covering
+	// the switch between them and this test quietly became the lossless one.
+	if profiles[PredProfileIQScaled] == 0 || profiles[PredProfileIQ] == 0 {
+		t.Fatalf("fixture no longer covers both profiles: %v", profiles)
+	}
+}
+
+// A scaled packet whose shift byte is missing must be refused rather than read
+// as the first byte of the body, which would decode as noise.
+func TestPCMv4ScaledRejectsMissingShift(t *testing.T) {
+	packets := readV4FixtureFile(t, "testdata/pcmv4_scaled.bin")
+
+	hdr, _, err := NewPCMv4StreamDecoder().DecodePacket(packets[0])
+	if err != nil {
+		t.Fatalf("packet 0: %v", err)
+	}
+	if hdr.Profile != PredProfileIQScaled {
+		t.Skip("fixture no longer opens with a scaled packet")
+	}
+	_, off, err := NewPCMv4HeaderDecoder().Decode(packets[0])
+	if err != nil {
+		t.Fatalf("header: %v", err)
+	}
+	if _, _, err := NewPCMv4StreamDecoder().DecodePacket(packets[0][:off]); err == nil {
+		t.Fatal("a scaled packet with no shift byte was accepted")
 	}
 }

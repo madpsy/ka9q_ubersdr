@@ -1,9 +1,10 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package main
 
-// audio_output_other.go — oto v3 fallback for non-Windows platforms.
-// On Windows the real WASAPI implementation in audio_output_windows.go is used.
+// audio_output_other.go — oto v3 fallback for platforms with no output of
+// their own. Windows uses WASAPI (audio_output_windows.go) and Linux uses ALSA
+// directly (audio_output_linux.go), which can open at each stream's own rate.
 //
 // oto only allows ONE context for the lifetime of the process.  We therefore
 // keep a package-level singleton context that is created on the first
@@ -23,9 +24,6 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
-	"os"
-	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
@@ -73,98 +71,6 @@ func getOrCreateOtoContext(sampleRate, channels int, bufferDuration time.Duratio
 		otoCh = outChannels
 	})
 	return otoCtx, otoInitErr
-}
-
-// ── Device enumeration ────────────────────────────────────────────────────────
-
-// EnumerateAudioDevices returns the list of available audio output sinks.
-// On Linux it queries PulseAudio/PipeWire via `pactl list short sinks`.
-// Falls back to a single "Default Device" entry if pactl is unavailable.
-func EnumerateAudioDevices() ([]AudioDevice, error) {
-	devices := []AudioDevice{{ID: "", Name: "Default Device"}}
-
-	out, err := exec.Command("pactl", "list", "short", "sinks").Output()
-	if err != nil {
-		// pactl not available or failed — return just the default
-		return devices, nil
-	}
-
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		// pactl list short sinks output format:
-		//   <index>\t<name>\t<module>\t<sample-spec>\t<state>
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		name := fields[1] // sink name, e.g. "alsa_output.pci-0000_00_1f.3.analog-stereo"
-
-		// Build a friendlier display name.
-		display := name
-		for _, prefix := range []string{"alsa_output.", "bluez_sink.", "bluez_output."} {
-			if strings.HasPrefix(display, prefix) {
-				display = strings.TrimPrefix(display, prefix)
-				break
-			}
-		}
-		display = strings.NewReplacer(".", " ", "_", " ").Replace(display)
-		if len(display) > 0 {
-			display = strings.ToUpper(display[:1]) + display[1:]
-		}
-		devices = append(devices, AudioDevice{ID: name, Name: display})
-	}
-
-	return devices, nil
-}
-
-// moveSinkInput uses `pactl move-sink-input` to redirect this process's audio
-// stream(s) to the named sink at runtime, without recreating the oto context.
-// sinkName="" moves to the default sink (@DEFAULT_SINK@).
-func moveSinkInput(sinkName string) {
-	target := sinkName
-	if target == "" {
-		target = "@DEFAULT_SINK@"
-	}
-
-	pid := fmt.Sprintf("%d", os.Getpid())
-
-	// Use verbose `pactl list sink-inputs` to find sink-input indices that
-	// belong to this process, then move each one.
-	verboseOut, err := exec.Command("pactl", "list", "sink-inputs").Output()
-	if err != nil {
-		// Fallback: move all sink-inputs (may affect other apps, but better
-		// than nothing when verbose listing fails).
-		shortOut, err2 := exec.Command("pactl", "list", "short", "sink-inputs").Output()
-		if err2 != nil {
-			return
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(shortOut)), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) >= 1 {
-				exec.Command("pactl", "move-sink-input", fields[0], target).Run() //nolint:errcheck
-			}
-		}
-		return
-	}
-
-	// Parse verbose output blocks:
-	//   Sink Input #42
-	//       ...
-	//       application.process.id = "1234"
-	currentIdx := ""
-	for _, line := range strings.Split(string(verboseOut), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "Sink Input #") {
-			currentIdx = strings.TrimPrefix(trimmed, "Sink Input #")
-		} else if currentIdx != "" &&
-			strings.Contains(trimmed, "application.process.id") &&
-			strings.Contains(trimmed, `"`+pid+`"`) {
-			exec.Command("pactl", "move-sink-input", currentIdx, target).Run() //nolint:errcheck
-			currentIdx = ""                                                    // reset so we don't move it twice
-		}
-	}
 }
 
 // ── AudioOutput ───────────────────────────────────────────────────────────────
@@ -357,3 +263,9 @@ func (a *AudioOutput) Close() {
 		a.reader = nil
 	}
 }
+
+// alsaDirectDevices lists no direct devices: only the Linux output opens ALSA.
+func alsaDirectDevices() []AudioDevice { return nil }
+
+// outputPathWarning has nothing to report here; see audio_output_linux.go.
+func outputPathWarning(out *AudioOutput, deviceID string, rate int) string { return "" }

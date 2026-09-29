@@ -50,6 +50,8 @@ func (s *APIServer) getAudio(w http.ResponseWriter, _ *http.Request) {
 		"format":      format,
 		"device_id":   devID,
 		"device_name": devName,
+		"warning":     s.client.AudioWarning(),
+		"min_margin":  s.client.MinMargin(),
 	})
 }
 
@@ -60,6 +62,9 @@ func (s *APIServer) putAudio(w http.ResponseWriter, r *http.Request) {
 		Channel  *string  `json:"channel"`
 		Format   *string  `json:"format"`
 		DeviceID *string  `json:"device_id"`
+		// MinMargin is the reduced-depth IQ margin in dB, 0 for lossless;
+		// clamped to [15, 60] as the server clamps it. See iq_margin.go.
+		MinMargin *int `json:"min_margin"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -156,6 +161,20 @@ func (s *APIServer) putAudio(w http.ResponseWriter, r *http.Request) {
 	s.state.Format = format
 	s.state.DeviceID = devID
 	s.state.Mu.Unlock()
+
+	// ── IQ margin ─────────────────────────────────────────────────────────────
+	// Applied live, with no reconnect: the server takes it on the next packet.
+	// Accepted outside IQ too, and kept for the next IQ mode, as the slider is.
+	if body.MinMargin != nil {
+		m := s.client.SetMinMargin(*body.MinMargin)
+		s.prefs.SetInt(prefKeyMargin, m)
+		s.state.Mu.Lock()
+		s.state.MinMargin = m
+		s.state.Mu.Unlock()
+		if s.state.MarginSlider != nil {
+			s.state.MarginSlider.SetValue(sliderFromMargin(m))
+		}
+	}
 
 	// ── Apply to client ───────────────────────────────────────────────────────
 	if muted {
@@ -264,6 +283,8 @@ func (s *APIServer) putAudio(w http.ResponseWriter, r *http.Request) {
 		"format":      format,
 		"device_id":   devID,
 		"device_name": devName,
+		"warning":     s.client.AudioWarning(),
+		"min_margin":  s.client.MinMargin(),
 	})
 }
 

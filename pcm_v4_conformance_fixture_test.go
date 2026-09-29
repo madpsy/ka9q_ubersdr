@@ -31,7 +31,8 @@ import (
 //	clients/hpsdr/test/run.sh        EXPECTED_SHA256, RICE_EDGE_SHA256, SCALED_SHA256
 //	clients/soapy_driver/test/run.sh PCMV4_SHA256, PCMV4_RICE_EDGE_SHA256, PCMV4_SCALED_SHA256
 //	clients/rtl_sdr/pcmv4_test.go    pcmv4ExpectedSHA, pcmv4ScaledSHA
-//	clients/iq-recorder/pcmv4_test.go, clients/ubersdr-audio/pcmv4_test.go  pcmv4ExpectedSHA
+//	clients/ubersdr-audio/pcmv4_test.go  pcmv4ExpectedSHA, pcmv4ScaledSHA
+//	clients/iq-recorder/pcmv4_test.go    pcmv4ExpectedSHA
 //	clients/python/test_pcm_v4.py    EXPECTED_SHA
 //
 // The fixtures are committed rather than generated at test time on purpose: the
@@ -84,6 +85,7 @@ var fixtureDests = map[string][]string{
 		"clients/hpsdr/test/testdata",
 		"clients/soapy_driver/test/testdata",
 		"clients/rtl_sdr/testdata",
+		"clients/ubersdr-audio/testdata",
 	},
 	"pcmv4_rice_edge.bin": {
 		"clients/hpsdr/test/testdata",

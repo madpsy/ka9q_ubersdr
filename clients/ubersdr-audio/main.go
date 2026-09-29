@@ -37,6 +37,10 @@ const (
 	prefKeyBrowserAutoConnectMain = "browser_auto_connect"
 )
 
+// prefKeyMargin is the reduced-depth IQ margin in dB, 0 = lossless. Package
+// level because PUT /audio saves it as well as the slider.
+const prefKeyMargin = "iq_min_margin"
+
 //go:embed ubersdr.ico
 var appIcon []byte
 
@@ -942,6 +946,54 @@ func main() {
 
 	refreshDevicesBtn := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), nil)
 
+	// ── IQ quality (reduced-depth margin) ─────────────────────────────────────
+	// Shown only in IQ modes, the only ones the server reduces; everything else
+	// is sent whole. The top stop is lossless. See iq_margin.go.
+	savedMargin := clampMargin(prefs.IntWithFallback(prefKeyMargin, marginDefaultDB))
+	client.SetMinMargin(savedMargin)
+	appState.MinMargin = savedMargin
+	marginValueLabel := widget.NewLabel(marginLabel(savedMargin))
+	marginSlider := widget.NewSlider(marginMinDB, marginSliderLossless)
+	marginSlider.Step = 1
+	marginSlider.Value = sliderFromMargin(savedMargin)
+	marginSlider.OnChanged = func(v float64) {
+		marginValueLabel.SetText(marginLabel(marginFromSlider(v)))
+	}
+	// Committed on release, so a drag sends one message rather than one per
+	// step; the server applies it to the next packet, with no reconnect.
+	marginSlider.OnChangeEnded = func(v float64) {
+		m := client.SetMinMargin(marginFromSlider(v))
+		prefs.SetInt(prefKeyMargin, m)
+		appState.Mu.Lock()
+		appState.MinMargin = m
+		appState.Mu.Unlock()
+	}
+	marginNote := widget.NewLabel("Drops bits below the band's noise floor: lower saves more bandwidth, Lossless sends every bit.")
+	marginNote.Wrapping = fyne.TextWrapWord
+	marginSection := container.NewVBox(
+		container.NewBorder(nil, nil, widget.NewLabel("IQ quality"), marginValueLabel, marginSlider),
+		marginNote,
+	)
+	marginSection.Hide()
+	appState.MarginSlider = marginSlider
+	appState.MarginValueLabel = marginValueLabel
+
+	// Says when the output is losing part of the stream — a wide IQ mode
+	// through a sink the sound server runs at 48 kHz — or cannot play it.
+	// Hidden while there is nothing to say.
+	audioWarningLabel := widget.NewLabel("")
+	audioWarningLabel.Wrapping = fyne.TextWrapWord
+	audioWarningLabel.Importance = widget.WarningImportance
+	audioWarningLabel.Hide()
+	client.OnAudioWarning = func(msg string) {
+		if msg == "" {
+			audioWarningLabel.Hide()
+			return
+		}
+		audioWarningLabel.SetText(msg)
+		audioWarningLabel.Show()
+	}
+
 	populateDevices := func() {
 		devices, err := EnumerateAudioDevices()
 		if err != nil || len(devices) == 0 {
@@ -1075,7 +1127,9 @@ func main() {
 				appState.RecordFormatGroup.SetSelected("PCM (WAV)")
 				appState.RecordFormatGroup.Disable()
 			}
+			marginSection.Show()
 		} else {
+			marginSection.Hide()
 			formatGroup.Enable()
 			channelSelect.Enable()
 			// Re-enable the recording format selector when leaving IQ mode.
@@ -2960,6 +3014,8 @@ func main() {
 			widget.NewLabel("Output Device"), deviceRow,
 			widget.NewLabel("Format"), formatGroup,
 		),
+		marginSection,
+		audioWarningLabel,
 		container.NewBorder(nil, nil, muteBtn, channelSelect, volumeSlider),
 		signalBar,
 		audioBar,

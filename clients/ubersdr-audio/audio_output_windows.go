@@ -4,20 +4,36 @@ package main
 
 // audio_output_windows.go — WASAPI audio output with device selection.
 //
-// Strategy: always use the device's native mix format (GetMixFormat) and
-// convert our int16 PCM stream to float32 on the fly.  This avoids the
-// WAVEFORMATEXTENSIBLE negotiation that causes Initialize to fail when the
-// device is in float32 shared mode (which is the default on most Windows
-// systems).
+// A stream reaches the device at its own rate or not at all, as on Linux; see
+// wasapi_format.go for the rule and the format handling. Concretely:
+//
+//   - A stream at or below the endpoint's mix rate — every demodulated mode,
+//     and IQ that fits — opens in shared mode in its own format, and Windows
+//     converts it to the mix rate with its own filtered resampler
+//     (AUTOCONVERTPCM | SRC_DEFAULT_QUALITY). Going up in rate loses nothing.
+//   - A stream faster than the mix rate — a wide IQ mode into a 48 kHz
+//     endpoint — opens in exclusive mode at its own rate, in whichever sample
+//     format the driver accepts. If the driver refuses, or Windows does not
+//     allow exclusive use, the open fails and says why: filtering the stream
+//     down to the mix rate would throw most of the span away.
+//
+// This replaces a render loop that always used the mix format and converted
+// to it by nearest-neighbour, which folded a wide IQ mode's whole span back
+// into the mix rate's passband.
+//
+// The open happens in NewAudioOutput's call, not after it: the render
+// goroutine initialises the stream and reports back before NewAudioOutput
+// returns, so a device that cannot play the stream is an error the client
+// shows, not a render loop that dies in the background on every packet.
 //
 // COM is initialised as COINIT_MULTITHREADED in every goroutine that touches
 // WASAPI objects.  Apartment-threaded mode requires a Windows message pump
 // which Go goroutines do not provide.
 
 import (
-	"encoding/binary"
 	"fmt"
 	"log"
+	"runtime"
 	"sync"
 	"time"
 	"unsafe"
@@ -34,9 +50,14 @@ type AudioOutput struct {
 	channelMode   int // ChannelModeBoth / Left / Right
 	srcRate       int
 	srcCh         int
-	stopCh        chan struct{}
-	doneCh        chan struct{}
-	mu            sync.Mutex
+	// exclusive is whether the stream holds the device in exclusive mode.
+	// Written by the render goroutine before it reports ready, so it is
+	// settled by the time NewAudioOutput returns.
+	exclusive bool
+	stopCh    chan struct{}
+	doneCh    chan struct{}
+	closeOnce sync.Once
+	mu        sync.Mutex
 }
 
 // DoneC returns a channel that is closed when the WASAPI render loop exits.
@@ -50,6 +71,12 @@ func (a *AudioOutput) DoneC() <-chan struct{} {
 func coInit() bool {
 	err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED)
 	if err == nil {
+		return true
+	}
+	// S_FALSE: this thread already has COM in the same mode. go-ole reports it
+	// as an error ("Invalid function"), but it is a success, and one that must
+	// still be balanced by CoUninitialize.
+	if oleErr, ok := err.(*ole.OleError); ok && oleErr.Code() == 1 {
 		return true
 	}
 	// 0x80010106 = RPC_E_CHANGED_MODE — already initialised in a different
@@ -124,13 +151,42 @@ func EnumerateAudioDevices() ([]AudioDevice, error) {
 	return devices, nil
 }
 
-// NewAudioOutput creates a WASAPI audio output for the given device.
-// deviceID="" uses the system default device.
-func NewAudioOutput(sampleRate, channels int, bufferDuration time.Duration, deviceID string) (*AudioOutput, error) {
-	reader := newPCMRingReader(32)
+// The AUDCLNT_E_* results the open reports in words. go-wca's constants are
+// the low bits only; the HRESULT carries the facility too.
+const (
+	hrUnsupportedFormat    = 0x88890008
+	hrDeviceInUse          = 0x8889000A
+	hrExclusiveNotAllowed  = 0x8889000E
+	hrBufferSizeNotAligned = 0x88890019
+)
 
+func hresult(err error) uintptr {
+	if e, ok := err.(*ole.OleError); ok {
+		return e.Code()
+	}
+	return 0
+}
+
+// wasapiStream is one initialised stream, ready to start.
+type wasapiStream struct {
+	ac        *wca.IAudioClient
+	arc       *wca.IAudioRenderClient
+	bufFrames uint32
+	channels  int
+	kind      sampleKind
+	exclusive bool
+	mixRate   int
+}
+
+// NewAudioOutput opens deviceID for a stream at sampleRate, in shared or
+// exclusive mode as the rate requires, and starts playing. deviceID="" uses
+// the system default device.
+func NewAudioOutput(sampleRate, channels int, bufferDuration time.Duration, deviceID string) (*AudioOutput, error) {
+	if channels < 1 {
+		channels = 1
+	}
 	out := &AudioOutput{
-		reader:  reader,
+		reader:  newPCMRingReader(32),
 		volume:  1.0,
 		srcRate: sampleRate,
 		srcCh:   channels,
@@ -138,9 +194,20 @@ func NewAudioOutput(sampleRate, channels int, bufferDuration time.Duration, devi
 		doneCh:  make(chan struct{}),
 	}
 
-	go out.renderLoop(deviceID, bufferDuration)
-
-	return out, nil
+	ready := make(chan error, 1)
+	go out.renderLoop(deviceID, bufferDuration, ready)
+	select {
+	case err := <-ready:
+		if err != nil {
+			<-out.doneCh
+			out.reader.Close()
+			return nil, err
+		}
+		return out, nil
+	case <-time.After(5 * time.Second):
+		out.Close()
+		return nil, fmt.Errorf("the audio device did not start within 5 s")
+	}
 }
 
 // SetOnChunkPlayed registers a callback that fires (in a goroutine) at
@@ -196,12 +263,18 @@ func getDevice(mmde *wca.IMMDeviceEnumerator, deviceID string) (*wca.IMMDevice, 
 	return mmd, nil
 }
 
-// renderLoop runs in its own goroutine and feeds PCM to WASAPI.
-func (a *AudioOutput) renderLoop(deviceID string, bufferDuration time.Duration) {
-	defer close(a.doneCh)
-
-	if uninit := coInit(); uninit {
-		defer ole.CoUninitialize()
+// openStream activates the device and initialises a render stream for rate and
+// srcCh channels. The returned release frees what it holds, newest first.
+func openStream(deviceID string, rate, srcCh int, bufferDuration time.Duration) (*wasapiStream, func(), error) {
+	var releases []func()
+	release := func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}
+	fail := func(err error) (*wasapiStream, func(), error) {
+		release()
+		return nil, nil, err
 	}
 
 	var mmde *wca.IMMDeviceEnumerator
@@ -210,80 +283,182 @@ func (a *AudioOutput) renderLoop(deviceID string, bufferDuration time.Duration) 
 		wca.CLSCTX_ALL, wca.IID_IMMDeviceEnumerator,
 		&mmde,
 	); err != nil {
-		log.Printf("WASAPI: CoCreateInstance IMMDeviceEnumerator: %v", err)
-		return
+		return fail(fmt.Errorf("CoCreateInstance IMMDeviceEnumerator: %w", err))
 	}
-	defer mmde.Release()
+	releases = append(releases, func() { mmde.Release() })
 
 	mmd, err := getDevice(mmde, deviceID)
 	if err != nil {
-		log.Printf("WASAPI: getDevice: %v", err)
-		return
+		return fail(err)
 	}
-	defer mmd.Release()
+	releases = append(releases, func() { mmd.Release() })
 
 	var ac *wca.IAudioClient
-	if err := mmd.Activate(wca.IID_IAudioClient, wca.CLSCTX_ALL, nil, &ac); err != nil {
-		log.Printf("WASAPI: Activate IAudioClient: %v", err)
-		return
+	activate := func() error {
+		if err := mmd.Activate(wca.IID_IAudioClient, wca.CLSCTX_ALL, nil, &ac); err != nil {
+			ac = nil
+			return fmt.Errorf("Activate IAudioClient: %w", err)
+		}
+		return nil
 	}
-	defer ac.Release()
-
-	// Always use the device's native mix format.
-	// Most Windows devices use float32 at 44100 or 48000 Hz.
-	var mixFmt *wca.WAVEFORMATEX
-	if err := ac.GetMixFormat(&mixFmt); err != nil {
-		log.Printf("WASAPI: GetMixFormat: %v", err)
-		return
+	if err := activate(); err != nil {
+		return fail(err)
 	}
-	log.Printf("WASAPI: mix format: %d ch, %d Hz, %d bits/sample, tag=%d",
-		mixFmt.NChannels, mixFmt.NSamplesPerSec, mixFmt.WBitsPerSample, mixFmt.WFormatTag)
+	// Released through the variable, which the exclusive path below may
+	// replace with a fresh client.
+	releases = append(releases, func() {
+		if ac != nil {
+			ac.Release()
+		}
+	})
 
+	var mix *wca.WAVEFORMATEX
+	if err := ac.GetMixFormat(&mix); err != nil {
+		return fail(fmt.Errorf("GetMixFormat: %w", err))
+	}
+	mixRate, mixCh := int(mix.NSamplesPerSec), int(mix.NChannels)
+	var mixMask uint32
+	if mix.WFormatTag == waveFormatExtensibleTag {
+		mixMask = (*waveFormatExtensible)(unsafe.Pointer(mix)).ChannelMask
+	}
+	ole.CoTaskMemFree(uintptr(unsafe.Pointer(mix)))
+
+	// At least two channels, so L or R can be muted on its own.
+	outCh := srcCh
+	if outCh < 2 {
+		outCh = 2
+	}
+	st := &wasapiStream{mixRate: mixRate}
 	bufRT := wca.REFERENCE_TIME(bufferDuration.Nanoseconds() / 100)
 
-	if err := ac.Initialize(
-		wca.AUDCLNT_SHAREMODE_SHARED,
-		0,
-		bufRT,
-		0,
-		mixFmt,
-		nil,
-	); err != nil {
-		log.Printf("WASAPI: Initialize: %v", err)
+	if !needsExclusive(rate, mixRate) {
+		// Our own format; Windows converts it to the mix rate, upwards.
+		f := newWaveFormat(samplePCM16, outCh, rate, 0)
+		flags := uint32(wca.AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | wca.AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY)
+		if err := ac.Initialize(wca.AUDCLNT_SHAREMODE_SHARED, flags, bufRT, 0,
+			(*wca.WAVEFORMATEX)(unsafe.Pointer(&f)), nil); err != nil {
+			return fail(fmt.Errorf("shared mode at %s: %w", formatKHz(rate), err))
+		}
+		st.channels, st.kind = outCh, samplePCM16
+	} else {
+		// The first format the driver takes at the stream's own rate: our
+		// channel count, then the device's own, each in every sample width.
+		var chosen *waveFormatExtensible
+		chans := []int{outCh}
+		if mixCh != outCh {
+			chans = append(chans, mixCh)
+		}
+	search:
+		for _, ch := range chans {
+			for _, k := range exclusiveKinds {
+				var mask uint32
+				if ch == mixCh && ch > 2 {
+					mask = mixMask
+				}
+				f := newWaveFormat(k, ch, rate, mask)
+				if ac.IsFormatSupported(wca.AUDCLNT_SHAREMODE_EXCLUSIVE,
+					(*wca.WAVEFORMATEX)(unsafe.Pointer(&f)), nil) == nil {
+					chosen = &f
+					st.channels, st.kind = ch, k
+					break search
+				}
+			}
+		}
+		if chosen == nil {
+			return fail(fmt.Errorf("the device does not accept %s in exclusive mode, and Windows mixes it at %s, "+
+				"which would lose all but ±%s", formatKHz(rate), formatKHz(mixRate), formatKHz(mixRate/2)))
+		}
+
+		initExclusive := func() error {
+			return ac.Initialize(wca.AUDCLNT_SHAREMODE_EXCLUSIVE, 0, bufRT, 0,
+				(*wca.WAVEFORMATEX)(unsafe.Pointer(chosen)), nil)
+		}
+		err := initExclusive()
+		if hresult(err) == hrBufferSizeNotAligned {
+			// The documented recovery: take the buffer size the device
+			// would have used, and retry with exactly that duration on a
+			// fresh client.
+			var frames uint32
+			if e := ac.GetBufferSize(&frames); e != nil {
+				return fail(fmt.Errorf("GetBufferSize: %w", e))
+			}
+			bufRT = wca.REFERENCE_TIME(float64(frames)*1e7/float64(rate) + 0.5)
+			ac.Release()
+			if e := activate(); e != nil {
+				return fail(e)
+			}
+			err = initExclusive()
+		}
+		if err != nil {
+			switch hresult(err) {
+			case hrExclusiveNotAllowed:
+				err = fmt.Errorf("Windows does not allow exclusive use of this device; turn on " +
+					"\"Allow applications to take exclusive control of this device\" in its Sound properties, Advanced tab")
+			case hrDeviceInUse:
+				err = fmt.Errorf("another program is using this device; %s needs it exclusively", formatKHz(rate))
+			case hrUnsupportedFormat:
+				err = fmt.Errorf("the device does not accept %s %s in %d channels", formatKHz(rate), st.kind, st.channels)
+			default:
+				err = fmt.Errorf("exclusive mode at %s: %w", formatKHz(rate), err)
+			}
+			return fail(err)
+		}
+		st.exclusive = true
+	}
+
+	if err := ac.GetBufferSize(&st.bufFrames); err != nil {
+		return fail(fmt.Errorf("GetBufferSize: %w", err))
+	}
+	if err := ac.GetService(wca.IID_IAudioRenderClient, &st.arc); err != nil {
+		return fail(fmt.Errorf("GetService IAudioRenderClient: %w", err))
+	}
+	releases = append(releases, func() { st.arc.Release() })
+	st.ac = ac
+	return st, release, nil
+}
+
+// renderLoop opens the stream, reports the outcome on ready, and then feeds
+// the device until Close.
+func (a *AudioOutput) renderLoop(deviceID string, bufferDuration time.Duration, ready chan<- error) {
+	defer close(a.doneCh)
+
+	// COM is per OS thread, and a goroutine is not: pin this one so the
+	// CoInitializeEx, every call on the stream and the CoUninitialize all
+	// happen on the same thread.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	if uninit := coInit(); uninit {
+		defer ole.CoUninitialize()
+	}
+
+	st, release, err := openStream(deviceID, a.srcRate, a.srcCh, bufferDuration)
+	if err != nil {
+		log.Printf("WASAPI: %v", err)
+		ready <- err
 		return
 	}
-
-	var bufFrames uint32
-	if err := ac.GetBufferSize(&bufFrames); err != nil {
-		log.Printf("WASAPI: GetBufferSize: %v", err)
+	defer release()
+	if err := st.ac.Start(); err != nil {
+		ready <- fmt.Errorf("WASAPI Start: %w", err)
 		return
 	}
-	log.Printf("WASAPI: buffer frames=%d", bufFrames)
+	defer st.ac.Stop()
 
-	var arc *wca.IAudioRenderClient
-	if err := ac.GetService(wca.IID_IAudioRenderClient, &arc); err != nil {
-		log.Printf("WASAPI: GetService IAudioRenderClient: %v", err)
-		return
+	mode := "shared, converted by Windows to " + formatKHz(st.mixRate)
+	if st.exclusive {
+		mode = "exclusive"
 	}
-	defer arc.Release()
+	log.Printf("WASAPI: %s x%d -> %s %s x%d, buffer %d frames",
+		formatKHz(a.srcRate), a.srcCh, mode, st.kind, st.channels, st.bufFrames)
+	a.exclusive = st.exclusive
+	ready <- nil
 
-	if err := ac.Start(); err != nil {
-		log.Printf("WASAPI: Start: %v", err)
-		return
-	}
-	defer ac.Stop()
-
-	log.Printf("WASAPI: render loop started (src %d Hz %dch → dev %d Hz %dch)",
-		a.srcRate, a.srcCh, mixFmt.NSamplesPerSec, mixFmt.NChannels)
-
-	devChannels := int(mixFmt.NChannels)
-	devRate := int(mixFmt.NSamplesPerSec)
-	isFloat := mixFmt.WFormatTag == 3 // WAVE_FORMAT_IEEE_FLOAT = 3
-	// Also check for WAVEFORMATEXTENSIBLE (tag=0xFFFE) — treat as float32
-	// since that's what Windows uses for its mix format.
-	if mixFmt.WFormatTag == 0xFFFE {
-		isFloat = true
-	}
+	srcFrame := a.srcCh * 2
+	devFrame := st.channels * st.kind.bytes()
+	// pending holds source bytes taken from the ring but not yet written: a
+	// chunk rarely matches the room the device has.
+	var pending []byte
 
 	ticker := time.NewTicker(bufferDuration / 2)
 	defer ticker.Stop()
@@ -291,123 +466,51 @@ func (a *AudioOutput) renderLoop(deviceID string, bufferDuration time.Duration) 
 	for {
 		select {
 		case <-a.stopCh:
-			log.Printf("WASAPI: render loop stopped")
 			return
 		case <-ticker.C:
 		}
 
 		var padding uint32
-		if err := ac.GetCurrentPadding(&padding); err != nil {
+		if err := st.ac.GetCurrentPadding(&padding); err != nil {
 			log.Printf("WASAPI: GetCurrentPadding: %v", err)
 			return
 		}
-		available := bufFrames - padding
-		if available == 0 {
+		room := int(st.bufFrames - padding)
+		if room == 0 {
+			continue
+		}
+		for len(pending)/srcFrame < room {
+			chunk, ok := a.reader.pop()
+			if !ok {
+				break
+			}
+			pending = append(pending, chunk...)
+		}
+		// Only what has arrived is written. Padding a late chunk's slot with
+		// silence would sit in the buffer and add to the latency for good;
+		// a device that truly runs dry glitches once and carries on.
+		n := len(pending) / srcFrame
+		if n > room {
+			n = room
+		}
+		if n == 0 {
 			continue
 		}
 
 		var pData *byte
-		if err := arc.GetBuffer(available, &pData); err != nil {
+		if err := st.arc.GetBuffer(uint32(n), &pData); err != nil {
 			log.Printf("WASAPI: GetBuffer: %v", err)
 			return
 		}
-
 		a.mu.Lock()
-		vol := a.volume
-		chMode := a.channelMode
+		vol, chMode := a.volume, a.channelMode
 		a.mu.Unlock()
-
-		// How many source frames do we need?
-		// If device rate != source rate, we need to resample.
-		// Simple nearest-neighbour resampling for now.
-		srcFramesNeeded := int(available)
-		if devRate != a.srcRate && a.srcRate > 0 {
-			srcFramesNeeded = int(float64(available) * float64(a.srcRate) / float64(devRate))
-			if srcFramesNeeded < 1 {
-				srcFramesNeeded = 1
-			}
-		}
-
-		srcBytes := srcFramesNeeded * a.srcCh * 2
-		srcBuf := make([]byte, srcBytes)
-		_, _ = a.reader.Read(srcBuf)
-
-		// Convert source int16 frames → device format
-		if isFloat {
-			// float32 output
-			devSamples := int(available) * devChannels
-			dstF := unsafe.Slice((*float32)(unsafe.Pointer(pData)), devSamples)
-			for devFrame := 0; devFrame < int(available); devFrame++ {
-				// Map device frame → source frame (nearest neighbour)
-				srcFrame := devFrame
-				if devRate != a.srcRate && a.srcRate > 0 {
-					srcFrame = int(float64(devFrame) * float64(a.srcRate) / float64(devRate))
-				}
-				if srcFrame >= srcFramesNeeded {
-					srcFrame = srcFramesNeeded - 1
-				}
-				for ch := 0; ch < devChannels; ch++ {
-					mute := (chMode == ChannelModeLeft && ch != 0) ||
-						(chMode == ChannelModeRight && ch != 1)
-					var f float32
-					if !mute {
-						srcCh := ch
-						if srcCh >= a.srcCh {
-							srcCh = a.srcCh - 1
-						}
-						byteIdx := (srcFrame*a.srcCh + srcCh) * 2
-						var s int16
-						if byteIdx+1 < len(srcBuf) {
-							s = int16(binary.LittleEndian.Uint16(srcBuf[byteIdx:]))
-						}
-						f = float32(s) / 32768.0
-						if vol != 1.0 {
-							f *= float32(vol)
-						}
-					}
-					dstF[devFrame*devChannels+ch] = f
-				}
-			}
-		} else {
-			// int16 output
-			devFrameSize := devChannels * 2
-			devBytes := int(available) * devFrameSize
-			dst := unsafe.Slice(pData, devBytes)
-			for devFrame := 0; devFrame < int(available); devFrame++ {
-				srcFrame := devFrame
-				if devRate != a.srcRate && a.srcRate > 0 {
-					srcFrame = int(float64(devFrame) * float64(a.srcRate) / float64(devRate))
-				}
-				if srcFrame >= srcFramesNeeded {
-					srcFrame = srcFramesNeeded - 1
-				}
-				for ch := 0; ch < devChannels; ch++ {
-					mute := (chMode == ChannelModeLeft && ch != 0) ||
-						(chMode == ChannelModeRight && ch != 1)
-					var s int16
-					if !mute {
-						srcCh := ch
-						if srcCh >= a.srcCh {
-							srcCh = a.srcCh - 1
-						}
-						byteIdx := (srcFrame*a.srcCh + srcCh) * 2
-						if byteIdx+1 < len(srcBuf) {
-							s = int16(binary.LittleEndian.Uint16(srcBuf[byteIdx:]))
-						}
-						if vol != 1.0 {
-							s = int16(float64(s) * vol)
-						}
-					}
-					dstOff := (devFrame*devChannels + ch) * 2
-					binary.LittleEndian.PutUint16(dst[dstOff:], uint16(s))
-				}
-			}
-		}
-
-		if err := arc.ReleaseBuffer(available, 0); err != nil {
+		encodeFrames(unsafe.Slice(pData, n*devFrame), pending[:n*srcFrame], a.srcCh, st.channels, st.kind, vol, chMode)
+		if err := st.arc.ReleaseBuffer(uint32(n), 0); err != nil {
 			log.Printf("WASAPI: ReleaseBuffer: %v", err)
 			return
 		}
+		pending = append(pending[:0], pending[n*srcFrame:]...)
 	}
 }
 
@@ -423,7 +526,7 @@ func (a *AudioOutput) Push(pcmLE []byte, meta ChunkMeta) {
 	a.reader.Push(cp)
 
 	// Delay the callback by the time it will take for this chunk to reach
-	// the hardware: (chunks ahead × 20 ms) + hardware buffer (40 ms).
+	// the hardware: (chunks ahead × 20 ms) + hardware buffer.
 	a.mu.Lock()
 	fn := a.onChunkPlayed
 	a.mu.Unlock()
@@ -456,17 +559,24 @@ func (a *AudioOutput) SetChannelMode(mode int) {
 // Close stops playback and releases resources.
 // Uses a timeout so a stuck renderLoop doesn't block the caller forever.
 func (a *AudioOutput) Close() {
-	select {
-	case <-a.stopCh:
-		// already closed
-	default:
+	a.closeOnce.Do(func() {
 		close(a.stopCh)
+		select {
+		case <-a.doneCh:
+		case <-time.After(2 * time.Second):
+			log.Printf("WASAPI: Close timed out waiting for renderLoop")
+		}
+		a.reader.Close()
+	})
+}
+
+// outputPathWarning says when the stream holds the device exclusively. Nothing
+// is lost — that is why it does — but every other program on the device goes
+// silent until the mode or device changes, which is worth saying.
+func outputPathWarning(out *AudioOutput, deviceID string, rate int) string {
+	if out == nil || !out.exclusive {
+		return ""
 	}
-	// Wait for renderLoop to exit, but don't block forever
-	select {
-	case <-a.doneCh:
-	case <-time.After(2 * time.Second):
-		log.Printf("WASAPI: Close timed out waiting for renderLoop")
-	}
-	a.reader.Close()
+	return fmt.Sprintf("Playing the %s stream in exclusive mode, so no other program can use this device "+
+		"until you change mode or device.", formatKHz(rate))
 }

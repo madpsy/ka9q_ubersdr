@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -283,6 +284,10 @@ type RadioClient struct {
 	volume             float64 // current volume (0.0–1.0); applied to new AudioOutput on creation
 	channelMode        int     // ChannelModeBoth/Left/Right; applied to new AudioOutput on creation
 	audioOut           *AudioOutput
+	audioOpenFailed    audioOpenFailure // the stream an output last failed to open for; see deliverAudio
+	audioWarning       string           // see AudioWarning
+	minMargin          int              // reduced-depth IQ margin in dB, 0 = lossless; see iq_margin.go
+	sentMargin         int              // the margin the server holds for this socket, 0 = lossless
 	cancelFn           context.CancelFunc
 	connMaxSessionTime int      // MaxSessionTime from last /connection response (0 = unlimited)
 	connBypassed       bool     // Bypassed flag from last /connection response
@@ -291,6 +296,7 @@ type RadioClient struct {
 	// Callbacks (called from the receive goroutine; Fyne Set* methods are goroutine-safe)
 	OnStateChange   func(ConnectionState, string)             // state, optional message
 	OnAudioInfo     func(sampleRate, channels int)            // called when audio params are known
+	OnAudioWarning  func(msg string)                          // the output is losing part of the stream, or cannot play it; "" when resolved
 	OnSignalQuality func(basebandPower, noiseDensity float32) // called each full-header packet; -999 = no data
 	OnAudioLevel    func(dBFS float32)                        // called each audio frame with RMS level in dBFS
 	OnDSPFilters    func(DSPFiltersResponse)                  // called when server responds to get_dsp_filters
@@ -370,6 +376,7 @@ func NewRadioClient() *RadioClient {
 		BandwidthHigh: 2400,
 		Format:        FormatOpus, // default to Compressed (Opus)
 		volume:        1.0,
+		minMargin:     marginDefaultDB,
 	}
 }
 
@@ -571,8 +578,56 @@ func (c *RadioClient) buildWSURL() (string, error) {
 	if c.Password != "" {
 		q.Set("password", c.Password)
 	}
+	// Reduced-depth IQ. Absent means the lossless path, which is what every
+	// demodulated mode gets and what an IQ session asking for 0 gets. What the
+	// URL carries is what the server holds, so nothing is re-sent until the
+	// margin moves.
+	c.mu.Lock()
+	wire := marginToWire(c.Mode, c.minMargin)
+	c.sentMargin = wire
+	c.mu.Unlock()
+	if wire > 0 {
+		q.Set("min_margin", fmt.Sprintf("%d", wire))
+	}
 	u.RawQuery = q.Encode()
 	return u.String(), nil
+}
+
+// MinMargin is the reduced-depth IQ margin in dB, or 0 for lossless.
+func (c *RadioClient) MinMargin() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.minMargin
+}
+
+// SetMinMargin sets the reduced-depth IQ margin in dB (0 = lossless), clamped
+// to what the server honours, and returns what was set.
+//
+// No reconnect: the depth is chosen per packet and the shift travels in each
+// one, so the server applies a new margin to the next packet. Outside IQ it is
+// only remembered -- the server never reduces a demodulated stream, and every
+// move into IQ reconnects with it on the URL.
+func (c *RadioClient) SetMinMargin(dB int) int {
+	dB = clampMargin(dB)
+	c.mu.Lock()
+	c.minMargin = dB
+	want := marginToWire(c.Mode, dB)
+	conn := c.conn
+	send := conn != nil && c.state == StateConnected && want != c.sentMargin
+	if send {
+		c.sentMargin = want
+	}
+	c.mu.Unlock()
+
+	if send {
+		if err := conn.WriteJSON(map[string]interface{}{
+			"type":       "set_min_margin",
+			"min_margin": want,
+		}); err != nil {
+			log.Printf("audio: set_min_margin: %v", err)
+		}
+	}
+	return dB
 }
 
 // checkConnectionAllowed calls POST /connection and returns the full server
@@ -667,7 +722,15 @@ func (c *RadioClient) ReconnectWS() {
 	gen := c.generation
 	c.cancelFn = cancel
 	c.state = StateDisconnected
+	old := c.conn
 	c.mu.Unlock()
+
+	// Close the old socket now, as Disconnect does. Cancelling alone leaves
+	// its read loop blocked in ReadMessage and still delivering the old mode's
+	// audio next to the new one, until the server drops it.
+	if old != nil {
+		old.Close()
+	}
 
 	go c.runLoopWS(ctx, gen)
 }
@@ -955,10 +1018,10 @@ func (c *RadioClient) connectAndStream(ctx context.Context, gen uint64) {
 			// Distinguish intentional disconnect from unexpected error.
 			select {
 			case <-ctx.Done():
-				c.cleanup()
+				c.cleanup(conn, opusDecodeCh, pcmDeliverCh)
 				c.setState(gen, StateDisconnected, "")
 			default:
-				c.cleanup()
+				c.cleanup(conn, opusDecodeCh, pcmDeliverCh)
 				c.setState(gen, StateError, fmt.Sprintf("read: %v", err))
 			}
 			return
@@ -1273,10 +1336,35 @@ func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, baseb
 			oldOut.Close()
 		}
 
-		newOut, err := NewAudioOutput(sampleRate, channels, 40*time.Millisecond, deviceID)
-		if err != nil {
+		// A device that refused this stream a moment ago will refuse it again:
+		// the output now opens at the stream's own rate, and one that cannot
+		// run at it is an error rather than a narrower stream. Retry only once
+		// a second, and log it once, not fifty times.
+		key := audioOpenFailure{rate: sampleRate, channels: channels, device: deviceID}
+		c.mu.RLock()
+		last := c.audioOpenFailed
+		c.mu.RUnlock()
+		if last.same(key) && time.Since(last.at) < time.Second {
 			return
 		}
+
+		newOut, err := NewAudioOutput(sampleRate, channels, 40*time.Millisecond, deviceID)
+		if err != nil {
+			if !last.same(key) {
+				log.Printf("audio: cannot open output for %d Hz, %d channels: %v", sampleRate, channels, err)
+				c.setAudioWarning(fmt.Sprintf("This device cannot play the %s stream: %v", formatKHz(sampleRate), err))
+			}
+			key.at = time.Now()
+			c.mu.Lock()
+			c.audioOpenFailed = key
+			c.mu.Unlock()
+			return
+		}
+		c.mu.Lock()
+		c.audioOpenFailed = audioOpenFailure{}
+		c.mu.Unlock()
+		c.setAudioWarning("")
+		go c.checkOutputPath(newOut, deviceID, sampleRate)
 		// Apply the current volume and channel mode immediately so there's no
 		// silent gap and the routing is correct from the very first frame.
 		if initialVolume != 1.0 {
@@ -1333,14 +1421,66 @@ func (c *RadioClient) deliverAudio(pcmLE []byte, sampleRate, channels int, baseb
 	out.Push(pcmLE, meta)
 }
 
-// cleanup closes the WebSocket and audio output.
-func (c *RadioClient) cleanup() {
+// AudioWarning is what the output is currently losing, or why it cannot play
+// at all; "" when the stream reaches the device whole.
+func (c *RadioClient) AudioWarning() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.audioWarning
+}
+
+func (c *RadioClient) setAudioWarning(msg string) {
 	c.mu.Lock()
-	conn := c.conn
+	changed := c.audioWarning != msg
+	c.audioWarning = msg
+	fn := c.OnAudioWarning
+	c.mu.Unlock()
+	if changed && fn != nil {
+		fn(msg)
+	}
+}
+
+// checkOutputPath asks, once the new output has settled, whether the sound
+// server is narrowing it. Settled means the stream is listed, has been moved to
+// its sink, and the sink has had the chance to switch rate if it is allowed to.
+func (c *RadioClient) checkOutputPath(out *AudioOutput, deviceID string, rate int) {
+	time.Sleep(time.Second)
+	c.mu.RLock()
+	current := c.audioOut == out
+	c.mu.RUnlock()
+	if !current {
+		return
+	}
+	msg := outputPathWarning(out, deviceID, rate)
+	c.mu.RLock()
+	current = c.audioOut == out
+	c.mu.RUnlock()
+	if current {
+		c.setAudioWarning(msg)
+	}
+}
+
+// cleanup closes one connection's socket and workers, and — if that connection
+// is still the current one — the shared state and audio output with them.
+//
+// A connection replaced by ReconnectWS ends after its successor has started,
+// and must not take the successor with it: closing c.conn from here once
+// closed the NEW socket, which failed with "use of closed network connection"
+// and left the client in the error state after an IQ mode change.
+func (c *RadioClient) cleanup(own *websocket.Conn, ownDecodeCh chan opusWireFrame, ownPCMCh chan pcmDecodedPacket) {
+	c.mu.Lock()
+	if c.conn != own && c.conn != nil {
+		c.mu.Unlock()
+		own.Close()
+		close(ownDecodeCh)
+		close(ownPCMCh)
+		return
+	}
+	conn := own
 	out := c.audioOut
 	opusDec := c.opusDec
-	decodeCh := c.opusDecodeCh
-	pcmCh := c.pcmDeliverCh
+	decodeCh := ownDecodeCh
+	pcmCh := ownPCMCh
 	c.conn = nil
 	c.audioOut = nil
 	// Dropped rather than reset: a decoder's predictor and header state is only
@@ -1372,4 +1512,25 @@ func (c *RadioClient) cleanup() {
 	if opusDec != nil {
 		opusDec.Close()
 	}
+	// Whatever the output was losing, there is no output now.
+	c.setAudioWarning("")
+}
+
+// formatKHz renders a rate the way the mode names do: 384000 → "384 kHz".
+func formatKHz(hz int) string {
+	if hz%1000 == 0 {
+		return fmt.Sprintf("%d kHz", hz/1000)
+	}
+	return fmt.Sprintf("%.1f kHz", float64(hz)/1000)
+}
+
+// audioOpenFailure is the stream an output last failed to open for, and when.
+type audioOpenFailure struct {
+	rate, channels int
+	device         string
+	at             time.Time
+}
+
+func (f audioOpenFailure) same(g audioOpenFailure) bool {
+	return f.rate == g.rate && f.channels == g.channels && f.device == g.device
 }

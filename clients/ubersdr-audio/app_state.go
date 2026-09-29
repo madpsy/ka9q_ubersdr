@@ -41,6 +41,7 @@ type AppState struct {
 	ChannelMode string  // "both", "left", "right"
 	Format      string  // "opus" or "pcm-zstd"
 	DeviceID    string  // "" = system default
+	MinMargin   int     // reduced-depth IQ margin in dB; 0 = lossless (see iq_margin.go)
 
 	// ── AGC ───────────────────────────────────────────────────────────────────
 	AGCHangTime     float64 // seconds [0.0, 10.0]
@@ -108,6 +109,8 @@ type AppState struct {
 	MuteBtn               *widget.Button
 	ChannelSelect         *widget.Select
 	FormatGroup           *widget.RadioGroup
+	MarginSlider          *widget.Slider
+	MarginValueLabel      *widget.Label
 	DeviceSelect          *widget.Select
 	AGCHangSlider         *widget.Slider
 	AGCHangLabel          *widget.Label

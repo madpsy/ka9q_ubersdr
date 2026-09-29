@@ -152,6 +152,8 @@ func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"format":      format,
 			"device_id":   devID,
 			"device_name": devName,
+			"warning":     s.client.AudioWarning(),
+			"min_margin":  s.client.MinMargin(),
 		},
 		"agc": map[string]any{
 			"hang_time_s":        agcHang,

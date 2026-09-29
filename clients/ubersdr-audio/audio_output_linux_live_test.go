@@ -114,17 +114,6 @@ func ourSinkInputRates(t *testing.T) []int {
 	return rates
 }
 
-func waitFor(t *testing.T, d time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(d)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
 // TestLiveAudioWarning checks what the output says about itself, against a
 // real receiver: a wide IQ mode into a sound-server sink slower than the
 // stream is flagged, a direct device at the stream's rate is not, and a direct

@@ -288,6 +288,7 @@ type RadioClient struct {
 	audioWarning       string           // see AudioWarning
 	minMargin          int              // reduced-depth IQ margin in dB, 0 = lossless; see iq_margin.go
 	sentMargin         int              // the margin the server holds for this socket, 0 = lossless
+	serverFreq         int              // the frequency the server last confirmed in a status message
 	cancelFn           context.CancelFunc
 	connMaxSessionTime int      // MaxSessionTime from last /connection response (0 = unlimited)
 	connBypassed       bool     // Bypassed flag from last /connection response
@@ -297,6 +298,7 @@ type RadioClient struct {
 	OnStateChange   func(ConnectionState, string)             // state, optional message
 	OnAudioInfo     func(sampleRate, channels int)            // called when audio params are known
 	OnAudioWarning  func(msg string)                          // the output is losing part of the stream, or cannot play it; "" when resolved
+	OnServerError   func(msg string)                          // the server refused a request; the session carries on
 	OnSignalQuality func(basebandPower, noiseDensity float32) // called each full-header packet; -999 = no data
 	OnAudioLevel    func(dBFS float32)                        // called each audio frame with RMS level in dBFS
 	OnDSPFilters    func(DSPFiltersResponse)                  // called when server responds to get_dsp_filters
@@ -593,6 +595,13 @@ func (c *RadioClient) buildWSURL() (string, error) {
 	return u.String(), nil
 }
 
+// ServerFrequency is the frequency the server last confirmed applying, in Hz.
+func (c *RadioClient) ServerFrequency() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.serverFreq
+}
+
 // MinMargin is the reduced-depth IQ margin in dB, or 0 for lossless.
 func (c *RadioClient) MinMargin() int {
 	c.mu.RLock()
@@ -868,13 +877,18 @@ func (c *RadioClient) Tune(frequency int, mode string, bwLow, bwHigh int) error 
 		return fmt.Errorf("not connected")
 	}
 
-	lo, hi := bwLow, bwHigh
 	msg := TuneRequest{
-		Type:          "tune",
-		Frequency:     frequency,
-		Mode:          mode,
-		BandwidthLow:  &lo,
-		BandwidthHigh: &hi,
+		Type:      "tune",
+		Frequency: frequency,
+		Mode:      mode,
+	}
+	// The wide IQ modes run at the radiod preset's bandwidth, and the server
+	// refuses the WHOLE tune -- frequency included -- if it carries any edges
+	// for one, even 0,0. So they are left off, and a retune in iq48..iq384
+	// moves the frequency alone.
+	if !isWideIQMode(mode) {
+		lo, hi := bwLow, bwHigh
+		msg.BandwidthLow, msg.BandwidthHigh = &lo, &hi
 	}
 	return conn.WriteJSON(msg)
 }
@@ -1055,9 +1069,28 @@ func (c *RadioClient) handleJSON(data []byte) {
 		// Keepalive response — nothing to do.
 	case "status":
 		// Server sends this after tune commands to confirm the applied state.
-		// Currently informational only; the client trusts its own sent values.
+		// The client trusts its own sent values; the frequency is kept only so
+		// what the server actually applied can be checked.
+		var st struct {
+			Frequency int `json:"frequency"`
+		}
+		if json.Unmarshal(data, &st) == nil && st.Frequency > 0 {
+			c.mu.Lock()
+			c.serverFreq = st.Frequency
+			c.mu.Unlock()
+		}
 	case "error":
-		// Server-side error message — logged via dbg above; no action needed.
+		// A request the server refused, e.g. a tune it would not apply. The
+		// session carries on, so this is the only sign the request went
+		// nowhere: log it rather than dropping it.
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(data, &e)
+		log.Printf("server refused a request: %s", e.Error)
+		if fn := c.OnServerError; fn != nil {
+			fn(e.Error)
+		}
 	case "dsp_filters":
 		// The server wraps the payload in an "info" field:
 		// {"type":"dsp_filters","info":{"available":true,"filters":[...]}}

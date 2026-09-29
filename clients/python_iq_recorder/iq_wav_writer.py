@@ -33,7 +33,8 @@ class IQWavWriter:
                  frequency_hz: Optional[int] = None, iq_mode: Optional[str] = None,
                  timestamp: Optional[datetime] = None, callsign: Optional[str] = None,
                  description: Optional[str] = None,
-                 error_callback: Optional[Callable[[str, Exception], None]] = None):
+                 error_callback: Optional[Callable[[str, Exception], None]] = None,
+                 min_margin: int = 0):
         """
         Initialize WAV writer with metadata.
         
@@ -48,6 +49,7 @@ class IQWavWriter:
             callsign: Station callsign (for metadata)
             description: Station description (for metadata)
             error_callback: Optional callback for error notifications: callback(error_type, exception)
+            min_margin: Reduced-depth IQ margin in dB the stream was requested at, 0 = lossless
         """
         self.filename = filename
         self.channels = channels
@@ -55,6 +57,9 @@ class IQWavWriter:
         self.framerate = framerate
         self.frequency_hz = frequency_hz
         self.iq_mode = iq_mode
+        # Recorded in the comment so a reduced-depth file can never be taken
+        # for a bit-exact one.
+        self.min_margin = min_margin
         self.timestamp = timestamp or datetime.now()
         self.callsign = callsign
         self.description = description
@@ -234,6 +239,10 @@ class IQWavWriter:
         
         # Comment with Nyquist bandwidth
         comment = f"Frequency: {self.frequency_hz} Hz, Mode: {self.iq_mode}, Bandwidth: ±{bandwidth_khz/2:.0f} kHz"
+        if self.min_margin:
+            comment += f", Depth: reduced, quantisation >= {self.min_margin} dB below noise floor"
+        else:
+            comment += ", Depth: lossless"
         
         # Build INFO chunk data
         info_data = bytearray()

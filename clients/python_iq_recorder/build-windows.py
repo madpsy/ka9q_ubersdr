@@ -75,7 +75,10 @@ def check_environment():
     # tuple in iq_recorder.spec.
     parent_python_dir = os.path.join(script_dir, '..', 'python')
 
-    for required in ('radio_client.py', 'pcm_v4.py', 'tuning_range.py'):
+    # pcm_v4_native.dll is the version 4 decoder in C; build.sh cross-compiles
+    # it with mingw, or on Windows: gcc -O2 -shared -static-libgcc
+    # -o pcm_v4_native.dll pcm_v4_native.c (in clients/python).
+    for required in ('radio_client.py', 'pcm_v4.py', 'tuning_range.py', 'pcm_v4_native.dll'):
         required_path = os.path.join(parent_python_dir, required)
         if os.path.exists(required_path):
             print(f"✓ Found {required}: {required_path}")

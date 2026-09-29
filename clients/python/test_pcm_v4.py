@@ -32,13 +32,24 @@ EXPECTED_SHA = "4875d2185f1ff5a2031386c569cac0c2259e6a827b9e61f813399a19c3b9c903
 FIXTURE = "testdata/pcmv4_stream.bin"
 
 
-def read_fixture():
+# The same two fixtures and hashes as clients/soapy_driver/test/run.sh, which
+# says what each one covers. SCALED is the reduced-depth IQ mode min_margin asks
+# for: getting its shift wrong does not fail, it hands back a signal several
+# bits too quiet. RICE_EDGE holds a 63-bit unary run, the case where a C
+# decoder shifts a 64-bit accumulator by 64.
+SCALED_FIXTURE = "testdata/pcmv4_scaled.bin"
+SCALED_SHA = "7315366ceed3e70552c28d31cde690a14dc66f5244b5a8dc34a5e696f5698ccc"
+RICE_EDGE_FIXTURE = "testdata/pcmv4_rice_edge.bin"
+RICE_EDGE_SHA = "3413109ff6d06d44fb8fa44c84595b776f5570f05663b762830853ddc0183527"
+
+
+def read_fixture(path=None):
     """Packets from the fixture.
 
     Layout: "UV4F", a format byte, a uint32 packet count, then each packet as a
     uint32 length and that many bytes.
     """
-    with open(FIXTURE, 'rb') as fh:
+    with open(path or FIXTURE, 'rb') as fh:
         raw = fh.read()
     if len(raw) < 9 or raw[:4] != b'UV4F':
         raise AssertionError('fixture: bad header')
@@ -177,6 +188,42 @@ class TestHeaderErrors(unittest.TestCase):
         """
         with self.assertRaises(PCMv4Error):
             PredictiveCodec(6)
+
+
+class TestServerFixtures(unittest.TestCase):
+    """The reduced-depth and Rice edge-case streams, through both decode calls.
+
+    decode_packet_le is what the client uses; decode_packet is checked too
+    because the two restore the shift by different routes.
+    """
+
+    def _hash(self, path, le):
+        dec = PCMv4Decoder()
+        digest = hashlib.sha256()
+        shifts = set()
+        for pkt in read_fixture(path):
+            if le:
+                pcm, h = dec.decode_packet_le(pkt)
+            else:
+                h, samples = dec.decode_packet(pkt)
+                pcm = struct.pack('<%dh' % len(samples), *samples)
+            digest.update(pcm)
+            shifts.add((h.profile, h.shift))
+        return digest.hexdigest(), shifts
+
+    def test_scaled_stream_bit_exactly(self):
+        for le in (True, False):
+            got, shifts = self._hash(SCALED_FIXTURE, le)
+            self.assertEqual(got, SCALED_SHA)
+            # A decoder that never took the scaled path could not hash
+            # correctly, but say which paths ran rather than infer it.
+            self.assertIn((pcm_v4.PROFILE_IQ, 0), shifts)
+            self.assertTrue(any(p == pcm_v4.PROFILE_IQ_SCALED and sh > 0 for p, sh in shifts))
+
+    def test_rice_edge_stream_bit_exactly(self):
+        for le in (True, False):
+            got, _ = self._hash(RICE_EDGE_FIXTURE, le)
+            self.assertEqual(got, RICE_EDGE_SHA)
 
 
 class TestQuality(unittest.TestCase):

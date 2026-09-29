@@ -33,6 +33,14 @@ import os
 import argparse
 import warnings
 
+# One BLAS thread, set before anything imports numpy. OpenBLAS otherwise starts
+# a worker per core that spins after each call, and with numpy called hundreds
+# of times a second per stream those spinning workers cost more CPU than the
+# work itself -- ~4 s of 11 in a 17 s iq192 spectrum-and-audio run. Nothing
+# here multiplies matrices large enough to gain from them.
+for _var in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
+    os.environ.setdefault(_var, '1')
+
 # Suppress warnings before any imports that might trigger them
 warnings.filterwarnings('ignore', message='Unable to find acceptable character detection dependency')
 try:

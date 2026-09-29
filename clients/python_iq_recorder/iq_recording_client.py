@@ -28,6 +28,7 @@ class IQRecordingClient(RadioClient):
                  metadata_callsign: Optional[str] = None,
                  metadata_description: Optional[str] = None,
                  error_callback: Optional[Callable[[str, Exception], None]] = None,
+                 min_margin: int = 0,
                  **kwargs):
         """
         Initialize IQ recording client
@@ -39,6 +40,7 @@ class IQRecordingClient(RadioClient):
             metadata_callsign: Station callsign for metadata
             metadata_description: Station description for metadata
             error_callback: Callback for I/O errors: callback(error_type, exception)
+            min_margin: Reduced-depth IQ margin in dB (15-60), or 0 for lossless
             *args, **kwargs: Passed to RadioClient
         """
         super().__init__(*args, **kwargs)
@@ -49,6 +51,21 @@ class IQRecordingClient(RadioClient):
         self.metadata_callsign = metadata_callsign
         self.metadata_description = metadata_description
         self.error_callback = error_callback
+        self.min_margin = min_margin
+
+    def build_websocket_url(self) -> str:
+        """RadioClient's URL, plus the reduced-depth request when one is set.
+
+        Only ever sent for an IQ mode: the server never requantises demodulated
+        audio. Asking changes the packets' profile to PROFILE_IQ_SCALED, which
+        pcm_v4 decodes back to full-scale int16, so nothing downstream -- the
+        WAV writer, the spectrum, the audio preview -- sees a difference in
+        format, only in the depth of the samples.
+        """
+        url = super().build_websocket_url()
+        if self.min_margin and self.mode.startswith('iq'):
+            url += f"&min_margin={int(self.min_margin)}"
+        return url
     
     def setup_wav_writer(self):
         """Override to use custom IQWavWriter with metadata and disk space checking."""
@@ -104,7 +121,8 @@ class IQRecordingClient(RadioClient):
                 timestamp=datetime.now(),
                 callsign=self.metadata_callsign,
                 description=self.metadata_description,
-                error_callback=self.error_callback
+                error_callback=self.error_callback,
+                min_margin=self.min_margin
             )
             self.wav_writer.open()
             print(f"Recording to WAV file with metadata: {self.wav_file} ({self.channels} channel(s))", file=sys.stderr)

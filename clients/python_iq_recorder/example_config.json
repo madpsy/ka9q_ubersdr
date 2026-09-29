@@ -23,7 +23,8 @@
       "frequency": 21074000,
       "iq_mode": "iq48",
       "filename_template": "default",
-      "recording_enabled": true
+      "recording_enabled": true,
+      "min_margin": 26
     }
   ],
   "schedules": [

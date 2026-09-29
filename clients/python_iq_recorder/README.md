@@ -77,6 +77,27 @@ Start the GUI application:
 python iq_recorder.py
 ```
 
+### Min Quality (reduced-depth IQ)
+
+Each stream can ask the server for reduced-depth IQ instead of the default
+lossless stream: **Min Quality** in the Add/Edit Stream dialog, or
+`"min_margin"` in a stream's config entry.
+
+The setting is a margin, not a bit depth. It is how far below the band's own
+noise floor, in dB, the server's quantisation noise must stay. The server picks
+the shallowest depth that honours it for each packet, so a quiet band gives up
+a lot of data (around 60% in the server's measurements) while medium wave,
+whose carriers need the depth, keeps most of it (around 15%).
+
+- `0` (the default) is lossless: the recording is bit-exact.
+- `15`-`60` dB is the range the server accepts, the same as the TUI and
+  rtl_sdr clients. At 15 dB the noise floor rises by 0.14 dB, below what a
+  receiver's meter resolves; switching the option on starts at 26 dB.
+
+The WAV comment records which it was (`Depth: lossless` or
+`Depth: reduced, quantisation >= N dB below noise floor`), so a reduced-depth
+file cannot be taken for a bit-exact one.
+
 ### CLI Mode (Headless/Scheduled)
 
 For automated scheduled recordings without a GUI (perfect for cron jobs or systemd services):

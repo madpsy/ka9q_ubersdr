@@ -40,7 +40,10 @@ is why every frame must be decoded even when the result is then discarded.
 
 from __future__ import annotations
 
+import ctypes
+import os
 import struct
+import sys
 from typing import List, NamedTuple, Optional, Tuple
 
 # --------------------------------------------------------------------------
@@ -134,6 +137,10 @@ class PCMv4Header(NamedTuple):
     #: Every sample is zero and no body was transmitted. Mutually exclusive
     #: with escape.
     silent: bool
+    #: The reduced-depth shift of a PROFILE_IQ_SCALED packet: the server
+    #: shifted the samples right by this many bits before coding them, and
+    #: they have been shifted back. 0 on every other packet.
+    shift: int = 0
 
 
 def _read_uvarint(buf: bytes, off: int) -> Tuple[int, int]:
@@ -389,14 +396,40 @@ PROFILE_IQ = 0
 #: matters far more than filter length there.
 PROFILE_AUDIO = 1
 
+#: PROFILE_IQ with a reduced-depth front end, sent only to a client that asked
+#: for it with the ``min_margin`` connect parameter (see pcm_lossy.go on the
+#: server). The predictor is identical: the server shifted the samples right
+#: before coding them, the shift leads the body, and this side shifts them back
+#: on the way out. A separate profile rather than a flag, so a client that did
+#: not ask can never be handed one by accident -- an unknown profile is a hard
+#: error, where an ignored flag would deliver samples several bits too quiet.
+PROFILE_IQ_SCALED = 2
+
+#: The largest shift the wire format allows. Bounded because it comes off the
+#: wire, and is applied to an int16.
+_MAX_SHIFT = 15
+
 #: The registry the wire format refers to; it must match the server's table
 #: entry for entry. (complex, orders, mus)
 _PROFILES = {
     PROFILE_IQ: (True, (16,), (16,)),
     PROFILE_AUDIO: (False, (8, 8, 4, 2), (16, 16, 32, 32)),
+    PROFILE_IQ_SCALED: (True, (16,), (16,)),
 }
 
-_PROFILE_NAMES = {PROFILE_IQ: 'iq-complex-o16', PROFILE_AUDIO: 'audio-real-8/8/4/2'}
+_PROFILE_NAMES = {PROFILE_IQ: 'iq-complex-o16', PROFILE_AUDIO: 'audio-real-8/8/4/2',
+                  PROFILE_IQ_SCALED: 'iq-complex-o16-scaled'}
+
+
+def _lossy_restore(samples: List[int], shift: int) -> List[int]:
+    """Undo the reduced-depth scale, saturating rather than wrapping: a value
+    the shift carries past full scale must not come back with its sign
+    inverted. Matches the server's lossyRestore in pcm_lossy.go."""
+    if not shift:
+        return samples
+    scale = 1 << shift
+    return [32767 if v * scale > 32767 else (-32768 if v * scale < -32768 else v * scale)
+            for v in samples]
 
 
 def _round_shift(v: int) -> int:
@@ -746,6 +779,77 @@ def _rice_decode(src: bytes, count: int) -> List[int]:
     return out
 
 
+# --------------------------------------------------------------------------
+# Native codec
+# --------------------------------------------------------------------------
+#
+# pcm_v4_native.c is the payload codec below in C, and when its shared library
+# sits next to this file (or in a PyInstaller bundle) PredictiveCodec hands the
+# work to it. See the Cost note at the end of this file for why: the pure
+# Python path cannot keep up with iq96 and above, and holds the GIL while it
+# tries. ctypes releases the GIL for the length of each call, so a GUI in the
+# same process keeps running while a packet decodes.
+#
+# The pure Python path stays as the fallback, and as the reference the native
+# one is tested against. UBERSDR_PCMV4_PURE=1 forces it.
+
+_NATIVE_ABI = 2
+
+_NATIVE_ERRORS = {
+    -1: 'predictive codec: bad sample count for profile',
+    -2: 'predictive codec: escape payload truncated',
+    -3: 'rice: empty bitstream',
+    -4: 'rice: invalid k',
+    -5: 'rice: truncated bitstream',
+    -6: 'rice: truncated remainder',
+    -7: 'predictive codec: out of memory',
+}
+
+
+def _load_native():
+    if os.environ.get('UBERSDR_PCMV4_PURE'):
+        return None
+    name = 'pcm_v4_native.dll' if sys.platform == 'win32' else 'pcm_v4_native.so'
+    dirs = [os.path.dirname(os.path.abspath(__file__))]
+    bundle = getattr(sys, '_MEIPASS', None)
+    if bundle:
+        dirs.insert(0, bundle)
+    for d in dirs:
+        path = os.path.join(d, name)
+        if not os.path.exists(path):
+            continue
+        try:
+            lib = ctypes.CDLL(path)
+            lib.pcmv4_native_abi.restype = ctypes.c_int
+            lib.pcmv4_native_abi.argtypes = []
+            if lib.pcmv4_native_abi() != _NATIVE_ABI:
+                print('pcm_v4: ignoring %s: ABI %d, expected %d'
+                      % (path, lib.pcmv4_native_abi(), _NATIVE_ABI), file=sys.stderr)
+                continue
+            lib.pcmv4_codec_new.restype = ctypes.c_void_p
+            lib.pcmv4_codec_new.argtypes = [ctypes.c_int]
+            lib.pcmv4_codec_free.restype = None
+            lib.pcmv4_codec_free.argtypes = [ctypes.c_void_p]
+            lib.pcmv4_codec_advance_silence.restype = ctypes.c_int
+            lib.pcmv4_codec_advance_silence.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            lib.pcmv4_lossy_restore.restype = None
+            lib.pcmv4_lossy_restore.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+            lib.pcmv4_codec_decode_body.restype = ctypes.c_int
+            lib.pcmv4_codec_decode_body.argtypes = [
+                ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t,
+                ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+            return lib
+        except (OSError, AttributeError) as e:
+            print('pcm_v4: cannot load %s: %s' % (path, e), file=sys.stderr)
+    return None
+
+
+_native = _load_native()
+
+#: True when payloads decode in C rather than at interpreter speed.
+NATIVE_AVAILABLE = _native is not None
+
+
 class PredictiveCodec:
     """Decodes one stream.
 
@@ -753,7 +857,7 @@ class PredictiveCodec:
     connection ends.
     """
 
-    __slots__ = ('profile_id', 'complex', 'stages')
+    __slots__ = ('profile_id', 'complex', 'stages', '_native')
 
     def __init__(self, profile_id: int) -> None:
         """Build a codec for the given profile id, rejecting one it does not
@@ -770,10 +874,23 @@ class PredictiveCodec:
         is_complex, orders, mus = spec
         self.profile_id = profile_id
         self.complex = is_complex
-        if is_complex:
+        self._native = _native.pcmv4_codec_new(profile_id) if _native else None
+        if self._native:
+            self.stages = []
+        elif is_complex:
             self.stages = [_ComplexStage(o, m) for o, m in zip(orders, mus)]
         else:
             self.stages = [_RealStage(o, m) for o, m in zip(orders, mus)]
+
+    def __del__(self) -> None:
+        h = getattr(self, '_native', None)
+        if h and _native is not None:
+            _native.pcmv4_codec_free(h)
+            self._native = None
+
+    @property
+    def is_native(self) -> bool:
+        return bool(self._native)
 
     @property
     def profile_name(self) -> str:
@@ -809,6 +926,11 @@ class PredictiveCodec:
         encoder's did over the same zeros, or every packet after this one
         decodes wrongly.
         """
+        if self._native:
+            rc = _native.pcmv4_codec_advance_silence(self._native, count)
+            if rc:
+                raise PCMv4Error(_NATIVE_ERRORS.get(rc, 'predictive codec: error %d' % rc))
+            return
         step = self._samples_per_step()
         if count <= 0:
             raise PCMv4Error('predictive codec: empty packet')
@@ -826,6 +948,8 @@ class PredictiveCodec:
         where they are needed anyway to tell a v4 packet from an Opus frame;
         repeating them in the body would waste a byte on every packet.
         """
+        if self._native:
+            return list(struct.unpack('<%dh' % count, self.decode_body_le(body, count, escape)))
         step = self._samples_per_step()
         if count <= 0 or count % step:
             raise PCMv4Error('predictive codec: bad sample count %d for %d-channel profile'
@@ -873,6 +997,26 @@ class PredictiveCodec:
             out[i] = _to_int16(a)
         return out
 
+    def decode_body_le(self, body: bytes, count: int, escape: bool) -> bytes:
+        """decode_body as little-endian int16 bytes.
+
+        On the native path the samples never become Python ints at all, which
+        at 384 k frames/s is most of what is left to save.
+        """
+        if not self._native:
+            samples = self.decode_body(body, count, escape)
+            return struct.pack('<%dh' % len(samples), *samples)
+        step = self._samples_per_step()
+        if count <= 0 or count % step:
+            raise PCMv4Error('predictive codec: bad sample count %d for %d-channel profile'
+                             % (count, step))
+        out = ctypes.create_string_buffer(count * 2)
+        rc = _native.pcmv4_codec_decode_body(self._native, bytes(body), len(body),
+                                             count, 1 if escape else 0, out)
+        if rc:
+            raise PCMv4Error(_NATIVE_ERRORS.get(rc, 'predictive codec: error %d' % rc))
+        return out.raw
+
 
 # --------------------------------------------------------------------------
 # Stream decoder
@@ -912,6 +1056,15 @@ class PCMv4Decoder:
         The packet is self-contained: the header carries the sample count, so
         nothing has to be told out of band how long the body is.
         """
+        h, off = self._prepare(pkt)
+        if h.silent:
+            return h, [0] * h.sample_count
+        samples = self._codec.decode_body(pkt[off:], h.sample_count, h.escape)
+        return h, _lossy_restore(samples, h.shift)
+
+    def _prepare(self, pkt: bytes) -> Tuple[PCMv4Header, int]:
+        """Decode the header, pick the codec and advance it over a silent
+        packet; the body, if any, starts at the returned offset."""
         h, off = self._header.decode(pkt)
 
         # The packet declares its own profile; nothing here infers it from the
@@ -925,9 +1078,19 @@ class PCMv4Decoder:
             if len(pkt) != off:
                 raise PCMv4Error('pcm v4: silent packet carries %d bytes of body' % (len(pkt) - off))
             self._codec.advance_silence(h.sample_count)
-            return h, [0] * h.sample_count
+            return h, off
 
-        return h, self._codec.decode_body(pkt[off:], h.sample_count, h.escape)
+        # The shift leads the body on a scaled packet. A silent packet has no
+        # body and so carries none: its samples are zero at any scale.
+        if h.profile == PROFILE_IQ_SCALED:
+            if len(pkt) <= off:
+                raise PCMv4Error('pcm v4: scaled packet carries no shift')
+            shift = pkt[off]
+            if shift > _MAX_SHIFT:
+                raise PCMv4Error('pcm v4: shift %d out of range' % shift)
+            h = h._replace(shift=shift)
+            off += 1
+        return h, off
 
     def decode_packet_le(self, pkt: bytes) -> Tuple[bytes, PCMv4Header]:
         """decode_packet in the shape the rest of the client works in:
@@ -937,29 +1100,46 @@ class PCMv4Decoder:
         the codec already produces -- unlike the versions 1-3 path, whose samples
         arrived big-endian and had to be reversed on every packet.
         """
-        h, samples = self.decode_packet(pkt)
-        return struct.pack('<%dh' % len(samples), *samples), h
+        h, off = self._prepare(pkt)
+        if h.silent:
+            return bytes(2 * h.sample_count), h
+        body = self._codec.decode_body_le(pkt[off:], h.sample_count, h.escape)
+        if h.shift:
+            # Undone only on the way out: the predictor ran on the quantised
+            # values, exactly as the server's did, so no codec state depends
+            # on this.
+            if _native is not None:
+                buf = ctypes.create_string_buffer(body, len(body))
+                _native.pcmv4_lossy_restore(buf, h.sample_count, h.shift)
+                body = buf.raw
+            else:
+                samples = _lossy_restore(list(struct.unpack('<%dh' % h.sample_count, body)), h.shift)
+                body = struct.pack('<%dh' % len(samples), *samples)
+        return body, h
 
 
 # --------------------------------------------------------------------------
 # Cost
 # --------------------------------------------------------------------------
 #
-# This decoder is pure Python and the predictor is strictly sequential: every
-# sample depends on the ones before it and the taps adapt per sample, so it
-# cannot be vectorised with numpy and cannot be handed to a C library the way
-# zstd was. It runs at interpreter speed.
+# The pure Python path in this file is strictly sequential: every sample depends on the
+# ones before it and the taps adapt per sample, so it cannot be vectorised with
+# numpy. It runs at interpreter speed.
 #
 # Measured against this repository's fixture, CPython 3.12 on an x86-64 desktop:
 #
 #     IQ (profile 0, one complex order-16 filter):   ~70-85 k frames/s
 #     audio (profile 1, real cascade 8/8/4/2):      ~125 k samples/s
 #
-# Demodulated audio and iq48 decode in real time with room to spare. iq96 and
-# above do not -- they arrive faster than this can consume them, and the socket
-# backs up. Inlining the round-shift and walking the history with zip rather
-# than indices measured 1.02x, so no ordinary Python optimisation closes that
-# gap; it would take a C extension.
+# Demodulated audio and iq48 decode in real time. iq96 and above do not -- live
+# against a server, iq96 came in at 46 k frames/s -- and the socket backs up.
+# Worse, the decode thread holds the GIL nearly continuously while it tries, so
+# every other thread in the process stalls with it: 274 ms at a time at iq96,
+# which is what froze the IQ recorder's spectrum window and chopped its audio.
+#
+# Hence pcm_v4_native.c (see "Native codec" above). Through it the fixture
+# decodes about 80x faster, iq384 keeps up with the server, and the longest
+# GIL stall measured at iq96 was 3 ms.
 #
 # Recorded here because it is a property of the interpreter rather than a bug,
 # and because someone seeing a high-rate IQ stream fall behind should find the

@@ -25,9 +25,16 @@ pcm_v4_path = os.path.join(parent_python_dir, 'pcm_v4.py')
 # rather than failing here. Also pure Python, typing only.
 tuning_range_path = os.path.join(parent_python_dir, 'tuning_range.py')
 
+# The version 4 payload codec in C, built by build.sh. Required: without it
+# pcm_v4.py falls back to pure Python, which cannot decode iq96 in real time and
+# starves the GUI of the GIL while it tries.
+pcm_v4_native_path = os.path.join(
+    parent_python_dir,
+    'pcm_v4_native.dll' if sys.platform == 'win32' else 'pcm_v4_native.so')
+
 # Verify the paths exist. This is the check that catches a staged build -- see
 # build.sh's Windows path -- that copied only some of clients/python across.
-for _required in (radio_client_path, pcm_v4_path, tuning_range_path):
+for _required in (radio_client_path, pcm_v4_path, tuning_range_path, pcm_v4_native_path):
     if not os.path.exists(_required):
         raise FileNotFoundError(f"{os.path.basename(_required)} not found at: {_required}")
 
@@ -39,7 +46,7 @@ a = Analysis(
         SPECPATH,
         parent_python_dir,  # Add parent python directory to search path
     ],
-    binaries=[],
+    binaries=[(pcm_v4_native_path, '.')],
     datas=[
         # Include radio_client.py and its version 4 decoder from clients/python
         (radio_client_path, '.'),

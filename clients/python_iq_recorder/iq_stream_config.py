@@ -44,18 +44,49 @@ class IQMode(Enum):
         return self.mode_name
 
 
+# Reduced-depth IQ, requested per stream as `min_margin`: how far below the
+# band's own noise floor, in dB, the server's quantisation floor must stay. The
+# server requantises each packet to the shallowest depth that honours it, which
+# saved 15% on medium wave and ~60% on a quiet band in its own measurements.
+#
+# The range is the server's lossyMinMarginDB..lossyMaxMarginDB (pcm_lossy.go),
+# the same one clients/tui and clients/rtl_sdr offer. 0 asks for nothing and
+# gets the lossless stream, which is the default: a recording is an archive.
+MIN_MARGIN_MIN_DB = 15
+MIN_MARGIN_MAX_DB = 60
+# What the setting starts at when it is switched on; rtl_sdr's default.
+MIN_MARGIN_DEFAULT_DB = 26
+
+
+def clamp_min_margin(value) -> int:
+    """0 for lossless, else a whole dB within the server's range.
+
+    Anything that is not a positive number means lossless. Out of range is
+    clamped rather than refused, as the server itself does.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if not v > 0:  # also rejects NaN
+        return 0
+    return int(min(max(round(v), MIN_MARGIN_MIN_DB), MIN_MARGIN_MAX_DB))
+
+
 class StreamConfig:
     """Configuration for a single IQ recording stream"""
     
     def __init__(self, stream_id: int, frequency: int, iq_mode: IQMode,
                  filename_template: str = "default",
-                 recording_enabled: bool = True):
+                 recording_enabled: bool = True,
+                 min_margin: int = 0):
         self.stream_id = stream_id
         self.frequency = frequency  # Hz
         self.iq_mode = iq_mode
         self.filename_template = filename_template  # Template name, not actual filename
         self.output_file = None  # Generated when recording starts
         self.recording_enabled = recording_enabled  # Whether to write to disk
+        self.min_margin = clamp_min_margin(min_margin)  # dB, 0 = lossless
         
         # Runtime state
         self.status = StreamStatus.IDLE
@@ -72,6 +103,10 @@ class StreamConfig:
         """Get frequency in MHz"""
         return self.frequency / 1_000_000.0
     
+    def format_quality(self) -> str:
+        """The depth setting as the stream list shows it."""
+        return f"≥{self.min_margin} dB" if self.min_margin else "Lossless"
+
     @property
     def duration(self) -> float:
         """Get recording duration in seconds"""
@@ -121,7 +156,8 @@ class StreamConfig:
             'frequency': self.frequency,
             'iq_mode': self.iq_mode.mode_name,
             'filename_template': self.filename_template,
-            'recording_enabled': self.recording_enabled
+            'recording_enabled': self.recording_enabled,
+            'min_margin': self.min_margin
         }
     
     @classmethod
@@ -133,7 +169,8 @@ class StreamConfig:
             frequency=data['frequency'],
             iq_mode=iq_mode,
             filename_template=data.get('filename_template', 'default'),
-            recording_enabled=data.get('recording_enabled', True)
+            recording_enabled=data.get('recording_enabled', True),
+            min_margin=data.get('min_margin', 0)
         )
     
     def __repr__(self):

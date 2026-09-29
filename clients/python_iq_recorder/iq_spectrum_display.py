@@ -66,6 +66,12 @@ FT8_BANDS = [
 
 class IQSpectrumDisplay:
     """Real-time spectrum display for IQ data with audio preview"""
+
+    # 20 frames a second. The trace is averaged over five frames anyway, so
+    # 30 looked no different and cost half as much again in Tk drawing.
+    FRAME_MS = 50
+
+    AUDIO_BLOCK_SECONDS = 0.02
     
     def __init__(self, parent: tk.Widget, width: int = 960, height: int = 400,
                  sample_rate: int = 96000, center_freq: int = 14175000,
@@ -101,7 +107,20 @@ class IQSpectrumDisplay:
         self.window = np.hanning(self.fft_size)
         
         # Spectrum data buffer
-        self.iq_buffer = deque(maxlen=self.fft_size * 10)
+        # The newest fft_size samples, as a numpy array. A deque of Python
+        # complex objects cost one allocation per sample in the receive thread,
+        # 384 k a second at iq384, all of it holding the GIL.
+        self.iq_buffer = np.zeros(self.fft_size, dtype=np.complex64)
+        self.iq_buffer_fill = 0
+        # Blocks received so far, so a frame with nothing new can be skipped.
+        self.iq_blocks = 0
+        self._drawn_blocks = -1
+
+        # Packets waiting to make up an audio block; see add_iq_samples.
+        self._audio_block = max(int(sample_rate * self.AUDIO_BLOCK_SECONDS), 1)
+        self._pending_i = []
+        self._pending_q = []
+        self._pending_n = 0
         self.spectrum_data = np.zeros(self.fft_size)
         self.spectrum_lock = threading.Lock()
         
@@ -1036,17 +1055,43 @@ class IQSpectrumDisplay:
     def add_iq_samples(self, i_samples: np.ndarray, q_samples: np.ndarray):
         """
         Add IQ samples to the buffer
-        
+
+        Packets are collected into blocks of AUDIO_BLOCK_SECONDS before anything
+        is done with them. A packet is only 360 frames, so at iq192 the audio
+        chain would otherwise run ~550 times a second, and at that size its
+        per-call overhead costs far more than the arithmetic. The audio output's
+        jitter buffer is ten times this deep, so the batching is inaudible.
+
         Args:
             i_samples: I (in-phase) samples
             q_samples: Q (quadrature) samples
         """
-        # Combine I and Q into complex samples
-        complex_samples = i_samples + 1j * q_samples
-        
+        self._pending_i.append(i_samples)
+        self._pending_q.append(q_samples)
+        self._pending_n += len(i_samples)
+        if self._pending_n < self._audio_block:
+            return
+
+        i_block = np.concatenate(self._pending_i)
+        q_block = np.concatenate(self._pending_q)
+        self._pending_i = []
+        self._pending_q = []
+        self._pending_n = 0
+
+        complex_samples = np.empty(len(i_block), dtype=np.complex64)
+        complex_samples.real = i_block
+        complex_samples.imag = q_block
+
         with self.spectrum_lock:
-            self.iq_buffer.extend(complex_samples)
-        
+            n = len(complex_samples)
+            if n >= self.fft_size:
+                self.iq_buffer[:] = complex_samples[-self.fft_size:]
+            else:
+                self.iq_buffer[:-n] = self.iq_buffer[n:]
+                self.iq_buffer[-n:] = complex_samples
+            self.iq_buffer_fill = min(self.fft_size, self.iq_buffer_fill + n)
+            self.iq_blocks += 1
+
         # Process for audio preview if enabled
         if self.audio_mixer:
             # Multi-channel mode - process through mixer
@@ -1060,15 +1105,15 @@ class IQSpectrumDisplay:
                 self.audio_preview.process_iq_samples(complex_samples)
             except Exception as e:
                 print(f"Audio preview error: {e}")
-    
+
     def compute_spectrum(self):
         """Compute FFT spectrum from IQ buffer"""
         with self.spectrum_lock:
-            if len(self.iq_buffer) < self.fft_size:
+            if self.iq_buffer_fill < self.fft_size:
                 return
-            
+
             # Get samples for FFT
-            samples = np.array(list(self.iq_buffer)[-self.fft_size:])
+            samples = self.iq_buffer.copy()
         
         # Apply window
         windowed = samples * self.window
@@ -1113,9 +1158,6 @@ class IQSpectrumDisplay:
     
     def draw_grid(self):
         """Draw frequency and amplitude grid with auto-scaling"""
-        # Clear canvas
-        self.canvas.delete("grid")
-        
         # Get auto-scaled dB range
         min_db = np.floor(self.smoothed_min_db / 10.0) * 10.0
         max_db = np.ceil(self.smoothed_max_db / 10.0) * 10.0
@@ -1131,6 +1173,18 @@ class IQSpectrumDisplay:
         self.db_min = min_db
         self.db_max = max_db
         db_range = max_db - min_db
+
+        # The grid only moves when its range, the view or the window does, and
+        # rebuilding it -- labels, lines and the stippled FT8 band -- cost about
+        # half of each 33 ms frame. The statistics change every frame and are
+        # redrawn separately.
+        grid_key = (min_db, max_db, self.zoom_factor, self.pan_offset,
+                    self.width, self.height, self.center_freq, self.sample_rate)
+        self.draw_spectrum_stats()
+        if grid_key == getattr(self, '_grid_key', None):
+            return
+        self._grid_key = grid_key
+        self.canvas.delete("grid")
         
         # Determine step size based on range
         if db_range <= 20:
@@ -1202,11 +1256,11 @@ class IQSpectrumDisplay:
                                   fill='#FFFFFF', font=('Arial', 10, 'bold'),
                                   anchor=tk.W, tags="grid")
         
-        # Show spectrum statistics in top right
-        self.draw_spectrum_stats()
-        
         # Draw FT8 frequency highlights
         self.draw_ft8_highlights()
+
+        # Everything else is drawn over the grid.
+        self.canvas.tag_lower("grid")
     
     def draw_ft8_highlights(self):
         """Draw FT8 frequency highlights (like CW Skimmer Monitor)"""
@@ -1261,6 +1315,7 @@ class IQSpectrumDisplay:
     
     def draw_spectrum_stats(self):
         """Draw spectrum statistics in top right corner"""
+        self.canvas.delete("stats")
         stats_lines = []
         
         # Pointer frequency (always show if we have hover position)
@@ -1293,7 +1348,7 @@ class IQSpectrumDisplay:
                         fill='#AAAAAA',
                         font=('Arial', 9),
                         anchor=tk.NE,
-                        tags="grid"
+                        tags="stats"
                     )
                 
                 # Draw SNR with color
@@ -1303,7 +1358,7 @@ class IQSpectrumDisplay:
                     fill=snr_color,
                     font=('Arial', 9, 'bold'),
                     anchor=tk.NE,
-                    tags="grid"
+                    tags="stats"
                 )
                 return  # Already drew everything
         
@@ -1316,17 +1371,15 @@ class IQSpectrumDisplay:
                 fill='#AAAAAA',
                 font=('Arial', 9),
                 anchor=tk.NE,
-                tags="grid"
+                tags="stats"
             )
     
     def draw_spectrum(self):
         """Draw the spectrum on canvas"""
-        # Delete old spectrum
-        self.canvas.delete("spectrum")
-        
         if len(self.spectrum_data) == 0:
+            self.canvas.delete("spectrum")
             return
-        
+
         # Calculate visible frequency range (with zoom)
         if self.zoom_factor > 1.0:
             visible_span = self.sample_rate / self.zoom_factor
@@ -1335,53 +1388,61 @@ class IQSpectrumDisplay:
         else:
             freq_min = self.center_freq - self.sample_rate / 2
             freq_max = self.center_freq + self.sample_rate / 2
-        
-        # Full spectrum range
+
         full_freq_min = self.center_freq - self.sample_rate / 2
-        full_freq_max = self.center_freq + self.sample_rate / 2
-        
-        # Create points for line
-        points = []
         db_range = self.db_max - self.db_min
-        
         if db_range <= 0:
             return
-        
-        # Map FFT bins to screen coordinates based on zoom
-        for i, db_value in enumerate(self.spectrum_data):
-            # Calculate frequency for this FFT bin
-            bin_freq = full_freq_min + (i / len(self.spectrum_data)) * self.sample_rate
-            
-            # Check if this bin is in the visible range
-            if bin_freq < freq_min or bin_freq > freq_max:
-                continue
-            
-            # Map frequency to screen X coordinate
-            x = ((bin_freq - freq_min) / (freq_max - freq_min)) * self.width
-            
-            # Clamp to display range
-            db_clamped = np.clip(db_value, self.db_min, self.db_max)
-            y = self.height - ((db_clamped - self.db_min) / db_range) * self.height
-            
-            points.append(x)
-            points.append(y)
-        
-        # Draw as a line (like CW Skimmer Monitor)
-        if len(points) >= 4:
+
+        # Map FFT bins to screen coordinates based on zoom, in numpy: the
+        # per-bin Python loop this replaces cost ~15 ms a frame.
+        n = len(self.spectrum_data)
+        bin_freq = full_freq_min + np.arange(n) * (self.sample_rate / n)
+        visible = (bin_freq >= freq_min) & (bin_freq <= freq_max)
+        xs = (bin_freq[visible] - freq_min) / (freq_max - freq_min) * self.width
+        db = np.clip(self.spectrum_data[visible], self.db_min, self.db_max)
+        ys = self.height - (db - self.db_min) / db_range * self.height
+
+        # More bins than pixel columns: keep each column's min and max, so a
+        # one-bin carrier still reaches its peak rather than being averaged or
+        # skipped away.
+        cols = max(int(self.width), 1)
+        if len(xs) > 2 * cols:
+            col = np.minimum((xs * cols / self.width).astype(np.int64), cols - 1)
+            starts = np.flatnonzero(np.r_[True, col[1:] != col[:-1]])
+            y_top = np.minimum.reduceat(ys, starts)
+            y_bot = np.maximum.reduceat(ys, starts)
+            x_col = xs[starts]
+            xs = np.repeat(x_col, 2)
+            ys = np.column_stack([y_top, y_bot]).ravel()
+
+        if len(xs) < 2:
+            self.canvas.delete("spectrum")
+            return
+        points = np.column_stack([xs, ys]).ravel().tolist()
+
+        # Draw as a line (like CW Skimmer Monitor), moving the one line item
+        # rather than deleting and recreating it every frame.
+        line = self.canvas.find_withtag("spectrum")
+        if line:
+            self.canvas.coords(line[0], points)
+        else:
             self.canvas.create_line(points, fill='#00FF00', width=1, tags="spectrum", smooth=False)
-    
+
     def update_display(self):
         """Update display loop"""
         if not self.running:
             return
         
-        # Compute and draw spectrum
-        self.compute_spectrum()
-        self.draw_grid()  # Redraw grid with auto-scaled range
-        self.draw_spectrum()
-        
-        # Schedule next update (30 FPS)
-        self.parent.after(33, self.update_display)
+        # Compute and draw spectrum, unless no IQ has arrived since the last
+        # frame -- a stalled or stopped stream then costs nothing.
+        if self.iq_blocks != self._drawn_blocks:
+            self._drawn_blocks = self.iq_blocks
+            self.compute_spectrum()
+            self.draw_grid()  # Redraw grid with auto-scaled range
+            self.draw_spectrum()
+
+        self.parent.after(self.FRAME_MS, self.update_display)
     
     def stop(self):
         """Stop the display"""

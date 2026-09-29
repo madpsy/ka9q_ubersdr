@@ -147,9 +147,48 @@ fi
 # that is worse than shipping nothing.
 if [ "$RUN_TESTS" -eq 1 ]; then
   echo -e "${GREEN}Testing${NC}"
-  (cd "$PYDIR" && python3 -m unittest test_pcm_v4 -q)
+  # Twice: once through the native codec, once through the pure Python one it
+  # falls back to. Both must match the server's stream bit for bit.
+  if [ -f "$PYDIR/pcm_v4_native.so" ]; then
+    (cd "$PYDIR" && python3 -m unittest test_pcm_v4 -q)
+  fi
+  (cd "$PYDIR" && UBERSDR_PCMV4_PURE=1 python3 -m unittest test_pcm_v4 -q)
   echo
 fi
+
+# --------------------------------------------------------------------------
+# Native protocol decoder
+# --------------------------------------------------------------------------
+
+# pcm_v4_native.c is the version 4 payload codec in C. pcm_v4.py falls back to
+# pure Python without it, but that fallback decodes iq96 at half real time and
+# holds the GIL while it tries, which freezes the spectrum window and chops the
+# audio preview -- so a build that cannot compile it fails rather than shipping
+# the slow path. Compiled on the host for both targets: the Windows image has a
+# Python but no C compiler, and mingw cross-compiles a DLL that needs nothing
+# beyond what Windows ships.
+NATIVE_SRC="$PYDIR/pcm_v4_native.c"
+
+build_native() {
+  local target="$1"
+  case "$target" in
+    linux)
+      command -v gcc >/dev/null 2>&1 || { echo -e "${RED}gcc is needed to build pcm_v4_native.so${NC}" >&2; return 1; }
+      gcc -O2 -shared -fPIC -o "$PYDIR/pcm_v4_native.so" "$NATIVE_SRC"
+      ;;
+    windows)
+      command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || {
+        echo -e "${RED}x86_64-w64-mingw32-gcc is needed to build pcm_v4_native.dll (apt install gcc-mingw-w64-x86-64)${NC}" >&2
+        return 1
+      }
+      x86_64-w64-mingw32-gcc -O2 -shared -static-libgcc -o "$PYDIR/pcm_v4_native.dll" "$NATIVE_SRC"
+      ;;
+  esac
+}
+
+for t in "${TARGETS[@]}"; do
+  build_native "$t" || exit 1
+done
 
 # --------------------------------------------------------------------------
 # Build checks
@@ -258,6 +297,7 @@ build_windows() {
   for dep in "${PYDEPS[@]}"; do
     cp "$PYDIR/$dep" "$stage/src/python/"
   done
+  cp "$PYDIR/pcm_v4_native.dll" "$stage/src/python/"
 
   # One container run: the image is not committed, so a separate install run
   # would be thrown away before PyInstaller ever saw it.

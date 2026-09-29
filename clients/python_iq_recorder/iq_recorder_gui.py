@@ -6,6 +6,7 @@ Multi-stream IQ recording application with graphical interface
 
 import sys
 import os
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
@@ -26,7 +27,8 @@ except ImportError:
     RADIO_CLIENT_AVAILABLE = False
     print("Warning: radio_client not available. Please ensure it's in the python path.")
 
-from iq_stream_config import StreamConfig, StreamStatus, IQMode
+from iq_stream_config import (StreamConfig, StreamStatus, IQMode, clamp_min_margin,
+                              MIN_MARGIN_MIN_DB, MIN_MARGIN_MAX_DB, MIN_MARGIN_DEFAULT_DB)
 from tuning_range import tuning_range_from
 from iq_file_manager import IQFileManager
 from iq_spectrum_display import IQSpectrumDisplay
@@ -39,7 +41,7 @@ from config_manager import ConfigManager
 class AddStreamDialog:
     """Dialog for adding a new IQ stream, or editing an existing one.
 
-    Add and edit ask for exactly the same four things, so they are one dialog
+    Add and edit ask for exactly the same things, so they are one dialog
     rather than two that would have to be kept in step. Pass `stream` to edit
     it: the fields start from its current values, the example filename is
     generated against its own id rather than the next free one, and the button
@@ -72,7 +74,8 @@ class AddStreamDialog:
         # gained a fourth with iq384, after which the content asks for 445 and
         # the buttons at the bottom went under the edge on a receiver offering
         # every mode. Measured rather than guessed -- 440 was still 5px short.
-        self.dialog.geometry("750x460")
+        # +90 for the depth checkbox, slider and note.
+        self.dialog.geometry("750x550")
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -197,10 +200,40 @@ class AddStreamDialog:
         
         ttk.Label(main_frame, text="(Uncheck to preview spectrum without recording)",
                  font=('Arial', 8, 'italic')).grid(row=8, column=1, sticky=tk.W, pady=(0, 10))
-        
+
+        # Reduced-depth IQ: unticked is the lossless stream. Ticking it starts
+        # the slider at MIN_MARGIN_DEFAULT_DB; a stream already set keeps its value.
+        ttk.Label(main_frame, text="Min Quality:").grid(row=9, column=0, sticky=tk.W, pady=5)
+        margin = self.stream.min_margin if self.editing else 0
+        self.reduced_depth_var = tk.BooleanVar(value=margin > 0)
+        ttk.Checkbutton(main_frame, text="Reduce depth (less data; no longer bit-exact)",
+                        variable=self.reduced_depth_var,
+                        command=self._on_depth_toggled).grid(row=9, column=1, sticky=tk.W, pady=5)
+
+        slider_frame = ttk.Frame(main_frame)
+        slider_frame.grid(row=10, column=1, sticky=tk.W)
+        self.margin_var = tk.IntVar(value=margin or MIN_MARGIN_DEFAULT_DB)
+        ttk.Label(slider_frame, text=f"{MIN_MARGIN_MIN_DB} dB").pack(side=tk.LEFT)
+        # ttk.Scale moves in floats; snap it to whole dB, which is all the
+        # server honours.
+        self.margin_scale = ttk.Scale(slider_frame, from_=MIN_MARGIN_MIN_DB, to=MIN_MARGIN_MAX_DB,
+                                      orient=tk.HORIZONTAL, length=300,
+                                      command=lambda v: self.margin_var.set(int(round(float(v)))))
+        self.margin_scale.set(self.margin_var.get())
+        self.margin_scale.pack(side=tk.LEFT, padx=5)
+        ttk.Label(slider_frame, text=f"{MIN_MARGIN_MAX_DB} dB").pack(side=tk.LEFT)
+        self.margin_label = ttk.Label(slider_frame, width=26)
+        self.margin_label.pack(side=tk.LEFT, padx=(10, 0))
+        self.margin_var.trace_add('write', lambda *args: self._update_margin_label())
+        ttk.Label(main_frame,
+                  text="(Quantisation noise kept at least this far below the band's noise floor. "
+                       "Lower = less data.)",
+                  font=('Arial', 8, 'italic')).grid(row=11, column=1, sticky=tk.W, pady=(0, 10))
+        self._update_depth_state()
+
         # Buttons
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=9, column=0, columnspan=2, pady=20)
+        button_frame.grid(row=12, column=0, columnspan=2, pady=20)
         
         ttk.Button(button_frame, text="Save Changes" if self.editing else "Add Stream",
                    command=self.add_stream).pack(side=tk.LEFT, padx=5)
@@ -209,6 +242,23 @@ class AddStreamDialog:
         # Generate initial displays
         self.update_displays()
     
+    def _on_depth_toggled(self):
+        if self.reduced_depth_var.get():
+            self.margin_var.set(MIN_MARGIN_DEFAULT_DB)
+            self.margin_scale.set(MIN_MARGIN_DEFAULT_DB)
+        self._update_depth_state()
+
+    def _update_depth_state(self):
+        on = self.reduced_depth_var.get()
+        self.margin_scale.state(['!disabled'] if on else ['disabled'])
+        self._update_margin_label()
+
+    def _update_margin_label(self):
+        if self.reduced_depth_var.get():
+            self.margin_label.config(text=f"{self.margin_var.get()} dB below noise floor")
+        else:
+            self.margin_label.config(text="Lossless")
+
     def update_displays(self):
         """Update frequency range and example filename based on current settings"""
         try:
@@ -290,13 +340,18 @@ class AddStreamDialog:
             # Get template and recording enabled
             template = self.template_var.get()
             recording_enabled = self.recording_enabled_var.get()
+
+            # The slider cannot leave the range, so there is nothing to refuse.
+            min_margin = (clamp_min_margin(self.margin_var.get())
+                          if self.reduced_depth_var.get() else 0)
             
             # Create result
             self.result = {
                 'frequency': freq_hz,
                 'iq_mode': mode,
                 'filename_template': template,
-                'recording_enabled': recording_enabled
+                'recording_enabled': recording_enabled,
+                'min_margin': min_margin
             }
             
             self.dialog.destroy()
@@ -307,6 +362,23 @@ class AddStreamDialog:
 
 class IQRecorderGUI:
     """Main GUI application for IQ stream recording"""
+
+    # 1090 rather than 1000: the Min Quality column added 90px to the stream
+    # list, whose columns now total 990px.
+    MIN_WIDTH = 1090
+    DEFAULT_GEOMETRY = "1090x600"
+
+    @classmethod
+    def _widen_geometry(cls, geometry: str) -> str:
+        """A saved "WxH+X+Y" widened to MIN_WIDTH if narrower.
+
+        A window saved before the Min Quality column existed would otherwise
+        keep cutting off the Spectrum column. Height and position are kept.
+        """
+        m = re.match(r'^(\d+)x(\d+)(.*)$', geometry)
+        if not m or int(m.group(1)) >= cls.MIN_WIDTH:
+            return geometry
+        return f"{cls.MIN_WIDTH}x{m.group(2)}{m.group(3)}"
     
     def __init__(self, root):
         self.root = root
@@ -372,11 +444,11 @@ class IQRecorderGUI:
         saved_geometry = self.config_manager.get_window_geometry()
         if saved_geometry:
             try:
-                self.root.geometry(saved_geometry)
+                self.root.geometry(self._widen_geometry(saved_geometry))
             except:
-                self.root.geometry("1000x600")
+                self.root.geometry(self.DEFAULT_GEOMETRY)
         else:
-            self.root.geometry("1000x600")
+            self.root.geometry(self.DEFAULT_GEOMETRY)
         
         # Start update loop
         self.schedule_update()
@@ -439,13 +511,16 @@ class IQRecorderGUI:
         streams_frame.columnconfigure(0, weight=1)
         
         # Stream list (Treeview)
-        columns = ('id', 'frequency', 'mode', 'file', 'recording', 'status', 'duration', 'size', 'spectrum')
+        columns = ('id', 'frequency', 'mode', 'quality', 'file', 'recording', 'status', 'duration', 'size', 'spectrum')
+        # identify_column names columns by position, "#1" upwards.
+        self._spectrum_column = '#%d' % (columns.index('spectrum') + 1)
         self.stream_tree = ttk.Treeview(streams_frame, columns=columns, show='headings', height=15)
         
         # Column headings
         self.stream_tree.heading('id', text='#')
         self.stream_tree.heading('frequency', text='Frequency')
         self.stream_tree.heading('mode', text='Mode')
+        self.stream_tree.heading('quality', text='Min Quality')
         self.stream_tree.heading('file', text='Template/File')
         self.stream_tree.heading('recording', text='Recording')
         self.stream_tree.heading('status', text='Status')
@@ -457,6 +532,7 @@ class IQRecorderGUI:
         self.stream_tree.column('id', width=40)
         self.stream_tree.column('frequency', width=120)
         self.stream_tree.column('mode', width=80)
+        self.stream_tree.column('quality', width=90)
         self.stream_tree.column('file', width=200)
         self.stream_tree.column('recording', width=80)
         self.stream_tree.column('status', width=100)
@@ -906,7 +982,8 @@ class IQRecorderGUI:
                 frequency=dialog.result['frequency'],
                 iq_mode=dialog.result['iq_mode'],
                 filename_template=dialog.result['filename_template'],
-                recording_enabled=dialog.result.get('recording_enabled', True)
+                recording_enabled=dialog.result.get('recording_enabled', True),
+                min_margin=dialog.result.get('min_margin', 0)
             )
             
             self.streams.append(stream)
@@ -918,7 +995,7 @@ class IQRecorderGUI:
             self._save_streams_to_config()
     
     def edit_selected_stream(self):
-        """Edit the selected stream's frequency, mode, template and recording flag.
+        """Edit the selected stream's frequency, mode, template, recording flag and depth.
 
         Reached from the stream list's right-click menu. Double-click is not
         used: it already starts the stream, and a gesture that either starts a
@@ -960,6 +1037,7 @@ class IQRecorderGUI:
         stream.iq_mode = dialog.result['iq_mode']
         stream.filename_template = dialog.result['filename_template']
         stream.recording_enabled = dialog.result.get('recording_enabled', True)
+        stream.min_margin = dialog.result.get('min_margin', 0)
 
         # The old name was generated for the old frequency and mode, and is
         # regenerated when recording next starts; leaving it would show a stale
@@ -1150,7 +1228,8 @@ class IQRecorderGUI:
                 metadata_mode=stream.iq_mode.mode_name,
                 metadata_callsign=callsign,
                 metadata_description=description,
-                error_callback=error_callback
+                error_callback=error_callback,
+                min_margin=stream.min_margin
             )
 
             # Override sample rate with the correct IQ mode sample rate
@@ -1227,7 +1306,7 @@ class IQRecorderGUI:
         """Handle single-click on tree item"""
         # Check if clicked on spectrum column
         column = self.stream_tree.identify_column(event.x)
-        if column == '#9':  # Spectrum column (0-indexed, so #9 is the 9th column)
+        if column == self._spectrum_column:
             # Select the row first
             item = self.stream_tree.identify_row(event.y)
             if item:
@@ -1238,7 +1317,7 @@ class IQRecorderGUI:
         """Handle double-click on tree item"""
         # Check if clicked on spectrum column
         column = self.stream_tree.identify_column(event.x)
-        if column == '#9':  # Spectrum column - ignore double-click, single-click handles it
+        if column == self._spectrum_column:  # ignore double-click, single-click handles it
             return
         else:
             self.start_selected_stream()
@@ -1400,6 +1479,7 @@ class IQRecorderGUI:
                 stream.stream_id,
                 f"{stream.frequency_mhz:.3f} MHz",
                 stream.iq_mode.mode_name.upper(),
+                stream.format_quality(),
                 file_display,
                 recording_status,
                 status_display,

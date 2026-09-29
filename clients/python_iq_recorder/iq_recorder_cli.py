@@ -247,7 +247,8 @@ class CLIStreamManager:
                 iq_callback=None,  # No spectrum display in CLI mode
                 metadata_frequency=stream.frequency,
                 metadata_mode=stream.iq_mode.mode_name,
-                error_callback=error_callback
+                error_callback=error_callback,
+                min_margin=stream.min_margin
             )
 
             # Override sample rate with the correct IQ mode sample rate

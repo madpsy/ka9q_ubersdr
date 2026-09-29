@@ -1,0 +1,8 @@
+# Release binaries and notarisation markers from build.sh / notarise-mac.sh
+build/
+
+# Test binaries
+*.test
+*.out
+
+.DS_Store

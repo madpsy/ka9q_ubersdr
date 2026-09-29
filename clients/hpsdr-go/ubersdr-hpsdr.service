@@ -1,0 +1,43 @@
+[Unit]
+Description=UberSDR HPSDR bridge (protocol 1 and 2, Go)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+ExecStart=/usr/local/bin/ubersdr-hpsdr --headless --url http://localhost:8080
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# Network capabilities
+# UDP 1024-1029 and 1035-1044; above 1023, so the capability is belt and braces
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ubersdr-hpsdr
+
+[Install]
+WantedBy=multi-user.target

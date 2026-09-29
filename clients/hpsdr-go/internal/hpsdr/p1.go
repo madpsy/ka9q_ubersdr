@@ -304,11 +304,18 @@ func (p *P1) start(conn packetWriter, from net.Addr) {
 		// starts at.
 		p.rateHz = 192000
 	}
-	rate := p.rateHz
+	rate, freq := p.rateHz, p.freqHz
 	p.mu.Unlock()
 	if !was {
 		p.host.logf("P1: client %s started the stream", from)
 		p.host.p1SetRate(0, rate)
+		// The frequency too. A stop clears the receiver, while the dedupe here
+		// remembers what the client last sent -- so a client that stops and
+		// starts on the same frequency repeats an EP2 that looks like no change,
+		// and without this the receiver would sit at 0 Hz and never connect.
+		if freq != 0 {
+			p.host.p1SetFreq(0, freq)
+		}
 		p.host.p1Enable(0, true)
 	}
 }

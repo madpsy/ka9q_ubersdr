@@ -478,3 +478,176 @@ func keepAlive(t *testing.T, c *hpClient) {
 		}
 	}()
 }
+
+// ---- disconnect and reconnect ---------------------------------------------
+
+func p1Run(c *hpClient, on bool) {
+	run := make([]byte, 64)
+	run[0], run[1], run[2] = 0xEF, 0xFE, 0x04
+	if on {
+		run[3] = 0x01
+	}
+	c.send(PortDiscovery, run)
+}
+
+// A protocol 1 client that stops and starts again on the same frequency must
+// stream again. EP2 repeats the frequency it sent before, which must not be
+// taken for "nothing changed".
+func TestP1StopStartSameFrequency(t *testing.T) {
+	f := newFakeServer(t)
+	b, _ := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	cfg := func() {
+		c.send(PortDiscovery, ep2([5]byte{0x00, 0x02}))                   // 192 kHz
+		c.send(PortDiscovery, ep2([5]byte{0x04, 0x00, 0x6C, 0x2C, 0x70})) // 7,089,264 Hz
+	}
+	for round := 0; round < 3; round++ {
+		cfg()
+		p1Run(c, true)
+		ws := f.nextConn(t, wait)
+		if ws.query.Get("frequency") != "7089264" || ws.query.Get("mode") != "iq192" {
+			t.Fatalf("round %d: socket %v", round, ws.query)
+		}
+		if p := c.recv(PortDiscovery, wait); p[3] != 0x06 {
+			t.Fatalf("round %d: no EP6", round)
+		}
+		p1Run(c, false)
+		select {
+		case <-ws.closed:
+		case <-time.After(wait):
+			t.Fatalf("round %d: stop did not close the socket", round)
+		}
+		c.quiet(PortDiscovery, 100*time.Millisecond)
+	}
+}
+
+// The same, when the client configures only after the run command.
+func TestP1StopStartConfigAfterRun(t *testing.T) {
+	f := newFakeServer(t)
+	b, _ := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	for round := 0; round < 3; round++ {
+		p1Run(c, true)
+		c.send(PortDiscovery, ep2([5]byte{0x04, 0x00, 0x6C, 0x2C, 0x70}))
+		ws := f.nextConn(t, wait)
+		if ws.query.Get("frequency") != "7089264" {
+			t.Fatalf("round %d: socket %v", round, ws.query)
+		}
+		p1Run(c, false)
+		<-ws.closed
+	}
+}
+
+// A protocol 1 client that dies (the watchdog stops it) and comes back from a
+// new port streams to the new port.
+func TestP1ClientRestartsAfterWatchdog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the 3 s protocol 1 watchdog")
+	}
+	f := newFakeServer(t)
+	b, _ := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	c.send(PortDiscovery, ep2([5]byte{0x04, 0x00, 0x6C, 0x2C, 0x70}))
+	p1Run(c, true)
+	ws := f.nextConn(t, wait)
+	<-ws.closed // silent client: the watchdog stops it
+	c2 := newClient(t, b.cfg.BasePort)
+	c2.send(PortDiscovery, ep2([5]byte{0x04, 0x00, 0x6C, 0x2C, 0x70}))
+	p1Run(c2, true)
+	f.nextConn(t, wait)
+	if p := c2.recv(PortDiscovery, wait); p[3] != 0x06 {
+		t.Fatal("restarted client got no EP6")
+	}
+}
+
+// A protocol 2 client that stops and starts again with identical packets --
+// what Thetis does on power off / power on -- streams again.
+func TestP2StopStart(t *testing.T) {
+	f := newFakeServer(t)
+	b, _ := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	for round := 0; round < 3; round++ {
+		startP2(t, c, 0, map[int]int{0: 192}, 7_000_000)
+		ws := f.nextConn(t, wait)
+		c.recv(PortDDC0, wait)
+		c.send(PortHighPrio, highPrio(1, false, 7_000_000))
+		select {
+		case <-ws.closed:
+		case <-time.After(wait):
+			t.Fatalf("round %d: stop did not close the socket", round)
+		}
+		c.quiet(PortDDC0, 100*time.Millisecond)
+	}
+}
+
+// Stop, then run again with only a high priority packet: the DDC config the
+// client sent before the stop is what a real radio still has.
+func TestP2RunAgainWithoutResendingDDCConfig(t *testing.T) {
+	f := newFakeServer(t)
+	b, _ := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	startP2(t, c, 0, map[int]int{0: 192}, 7_000_000)
+	ws := f.nextConn(t, wait)
+	c.send(PortHighPrio, highPrio(1, false, 7_000_000))
+	<-ws.closed
+	c.send(PortHighPrio, highPrio(2, true, 7_000_000))
+	f.nextConn(t, wait)
+	c.recv(PortDDC0, wait)
+}
+
+// A protocol 2 client that dies and restarts from a new port, inside the
+// watchdog, gets the stream at its new address.
+func TestP2ClientRestartsFromNewPort(t *testing.T) {
+	f := newFakeServer(t)
+	b, _ := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	startP2(t, c, 0, map[int]int{0: 192}, 7_000_000)
+	f.nextConn(t, wait)
+	c.recv(PortDDC0, wait)
+	c.conn.Close() // dies without a stop
+	c2 := newClient(t, b.cfg.BasePort)
+	startP2(t, c2, 0, map[int]int{0: 192}, 7_000_000)
+	if p := c2.recv(PortDDC0, wait); len(p) != 1444 {
+		t.Fatal("restarted client got no IQ")
+	}
+}
+
+// And one that dies and restarts after the watchdog has stopped it.
+func TestP2ClientRestartsAfterWatchdog(t *testing.T) {
+	f := newFakeServer(t)
+	b, _ := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	startP2(t, c, 0, map[int]int{0: 192}, 7_000_000)
+	ws := f.nextConn(t, wait)
+	<-ws.closed
+	waitStatus(t, b, "stopped", func(s Status) bool { return !s.Running })
+	c2 := newClient(t, b.cfg.BasePort)
+	startP2(t, c2, 0, map[int]int{0: 192}, 7_000_000)
+	f.nextConn(t, wait)
+	c2.recv(PortDDC0, wait)
+}
+
+// A protocol 1 client after a protocol 2 one: the configuration protocol 2 left
+// on its other DDCs must not come up alongside protocol 1's one receiver.
+func TestP1AfterP2LeavesOtherDDCsDown(t *testing.T) {
+	f := newFakeServer(t)
+	b, _ := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	startP2(t, c, 0, map[int]int{0: 192, 1: 48}, 7_000_000, 14_000_000)
+	w1, w2 := f.nextConn(t, wait), f.nextConn(t, wait)
+	c.send(PortHighPrio, highPrio(1, false))
+	<-w1.closed
+	<-w2.closed
+
+	c.send(PortDiscovery, ep2([5]byte{0x04, 0x00, 0x6C, 0x2C, 0x70}))
+	p1Run(c, true)
+	ws := f.nextConn(t, wait)
+	if ws.query.Get("frequency") != "7089264" {
+		t.Fatalf("P1 socket %v", ws.query)
+	}
+	f.noConn(t, 300*time.Millisecond)
+	st := b.Status()
+	if st.Receivers[1].State != RxIdle {
+		t.Fatalf("DDC1 %v under protocol 1", st.Receivers[1].State)
+	}
+}

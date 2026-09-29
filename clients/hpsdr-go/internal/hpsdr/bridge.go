@@ -497,12 +497,15 @@ func (b *Bridge) applyHighPriority(hp HighPriority) {
 		b.rx[i].freq = f
 		changed = append(changed, i)
 	}
+	// A stop leaves the DDC configuration alone, as a real radio's registers
+	// are: a client that runs again after a stop, without resending its DDC
+	// packets, must get what it configured. (The C bridge cleared it here and
+	// got away with it because it did not read DDC packets while stopped, so
+	// they queued up and were applied on the next run. This one applies them as
+	// they arrive, which makes clearing here lose them.)
 	runChanged := hp.Run != b.running
 	if runChanged {
 		b.running = hp.Run
-		if !hp.Run {
-			b.clearDDCs()
-		}
 	}
 	b.mu.Unlock()
 
@@ -689,9 +692,9 @@ func (b *Bridge) watchdogLoop() {
 		since := time.Since(b.lastAct)
 		expired := b.running && !b.lastAct.IsZero() && since > b.cfg.Watchdog
 		if expired {
+			// Stopped, configuration kept, for the same reason as a stop.
 			b.running = false
 			b.lastAct = time.Time{}
-			b.clearDDCs()
 		}
 		b.mu.Unlock()
 		if expired {
@@ -779,6 +782,15 @@ func (b *Bridge) p1Enable(rx int, on bool) {
 		return
 	}
 	b.mu.Lock()
+	if on {
+		// Protocol 1 takes the receivers over: whatever a protocol 2 client
+		// left configured on the others must not come up alongside it.
+		for i := range b.rx {
+			if i != rx {
+				b.rx[i] = ddcState{}
+			}
+		}
+	}
 	b.rx[rx].enable = on
 	b.running = on
 	if !on {

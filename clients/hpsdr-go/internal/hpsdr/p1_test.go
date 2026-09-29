@@ -368,3 +368,27 @@ func TestP1Watchdog(t *testing.T) {
 		t.Fatal("EP6 built after stopping")
 	}
 }
+
+// Start re-applies the remembered frequency: the bridge clears its receiver on
+// stop, and a client restarting on the same frequency sends an EP2 the dedupe
+// calls unchanged.
+func TestP1StartReappliesFrequency(t *testing.T) {
+	h := newStub()
+	p := newP1(h)
+	run := make([]byte, 64)
+	run[0], run[1], run[2], run[3] = 0xEF, 0xFE, 0x04, 0x01
+	stop := append([]byte(nil), run...)
+	stop[3] = 0
+	p.HandleDatagram(nil, ep2([5]byte{0x04, 0x00, 0x8F, 0x0D, 0x18}), testFrom)
+	p.HandleDatagram(nil, run, testFrom)
+	p.HandleDatagram(nil, stop, testFrom)
+	h.freqHz = -1
+	p.HandleDatagram(nil, ep2([5]byte{0x04, 0x00, 0x8F, 0x0D, 0x18}), testFrom)
+	if h.freqHz != -1 {
+		t.Fatal("the dedupe no longer applies; this test needs rethinking")
+	}
+	p.HandleDatagram(nil, run, testFrom)
+	if h.freqHz != 0x008F0D18 {
+		t.Fatalf("start did not re-apply the frequency: %d", h.freqHz)
+	}
+}

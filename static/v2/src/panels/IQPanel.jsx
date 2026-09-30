@@ -776,6 +776,24 @@ export function ecssReport(ecss, vfo, dialHz) {
     }
 }
 
+// How far the carrier has to move from the figure on screen before the figure
+// changes. Three quarters of a hertz: a carrier sitting on a half cannot flip
+// the last digit back and forth, and a real move of a hertz still shows.
+export const READING_HYSTERESIS_HZ = 0.75;
+
+/**
+ * The whole-hertz reading to show for `hz`, given what is on screen already.
+ *
+ * Kept while the measurement stays within the hysteresis of it, so the
+ * reading changes when the carrier moves and not when the measurement
+ * wobbles. Null in, null out: no carrier is no reading.
+ */
+export function holdReading(shown, hz, hysteresis = READING_HYSTERESIS_HZ) {
+    if (hz == null || !Number.isFinite(hz)) return null;
+    if (shown != null && Math.abs(hz - shown) < hysteresis) return shown;
+    return Math.round(hz);
+}
+
 /**
  * ECSS's own controls: which sideband, how far to look for the carrier, and
  * what the tracker has found.
@@ -787,6 +805,8 @@ export function ecssReport(ecss, vfo, dialHz) {
  */
 function EcssControls({ vfo, ecss, dialHz, minimal, set }) {
     const report = ecssReport(ecss, vfo, dialHz);
+    const shown = useRef(null);
+    shown.current = holdReading(shown.current, report.carrier);
     return (
         <>
             <Field
@@ -805,7 +825,7 @@ function EcssControls({ vfo, ecss, dialHz, minimal, set }) {
                 <Readout label="Carrier" value={report.text} tone={report.tone} />
                 <Readout
                     label="Carrier at"
-                    value={report.carrier == null ? '—' : formatFreqExact(Math.round(report.carrier))}
+                    value={shown.current == null ? '—' : formatFreqExact(shown.current)}
                 />
             </div>
             {!minimal && (

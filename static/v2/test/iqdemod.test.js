@@ -38,7 +38,7 @@ const {
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
     squelchLineDb,
-    IQPanel, ListeningCard, VFO_FALLBACK, ecssReport, vfoSummary, PANEL_BY_ID, GROUPS,
+    IQPanel, ListeningCard, VFO_FALLBACK, ecssReport, holdReading, vfoSummary, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
     TRACK_DEFAULT, TRACK_MAX, TRACK_MIN, clampTrack,
     VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
@@ -691,6 +691,41 @@ t('the ECSS report says what the tracker is doing', () => {
     const searching = ecssReport({ state: 'search', locked: false, carrierHz: null, side: 'usb' }, vfo, 7_100_000);
     assert.strictEqual(searching.text, 'Searching');
     assert.strictEqual(searching.carrier, null);
+});
+
+t('the carrier reading does not flicker on a half-hertz boundary', () => {
+    // What was reported: a carrier near 881 999.5 Hz reading 881.999 and
+    // 882.000 in turn. The measurement wobbling by a tenth either side of the
+    // half must leave one figure on screen.
+    let shown = null;
+    const seen = new Set();
+    for (let i = 0; i < 200; i++) {
+        shown = holdReading(shown, 881_999.5 + 0.1 * Math.sin(i));
+        seen.add(shown);
+    }
+    assert.strictEqual(seen.size, 1, `the reading flickered between ${[...seen].join(' and ')}`);
+    // A real move still shows, and no carrier is no reading.
+    assert.strictEqual(holdReading(882_000, 882_001.2), 882_001);
+    assert.strictEqual(holdReading(882_000, null), null);
+
+    // And the tracker's own figure is steady to well under the hysteresis
+    // once locked, so the reading only moves when the carrier does.
+    const { chain } = runEcss(ecssPlan(), station({ carrierHz: 137.5, noise: 0.003 }), 1);
+    const readings = [];
+    const I = new Float32Array(240);
+    const Q = new Float32Array(240);
+    const sig = station({ carrierHz: 137.5, noise: 0.003 });
+    for (let at = RATE; at < 4 * RATE; at += 240) {
+        for (let i = 0; i < 240; i++) {
+            const s = sig((at + i) / RATE);
+            I[i] = s.i;
+            Q[i] = s.q;
+        }
+        chain.process(I, Q, 240, { agc: false, gain: 1 });
+        if (at > 2 * RATE) readings.push(chain.ecssStatus.carrierHz);
+    }
+    const spread = Math.max(...readings) - Math.min(...readings);
+    assert.ok(spread < 0.2, `the smoothed carrier wandered over ${spread.toFixed(3)} Hz`);
 });
 
 t('ECSS offers its sideband, and its window only outside minimal', () => {

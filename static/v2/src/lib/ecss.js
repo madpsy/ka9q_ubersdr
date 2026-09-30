@@ -123,6 +123,13 @@ const FADE_RATIO = 0.1;
 // A fade longer than this is not a fade, it is the carrier gone.
 const FADE_GIVE_UP_SEC = 3;
 
+// The carrier frequency as read out, averaged over this long. The loop's own
+// estimate wanders by a fraction of a hertz from one packet to the next —
+// that is the loop doing its job — and a readout to the hertz that reflected
+// it would flicker whenever the carrier sat near a half. Double-exponential, so
+// a drifting carrier is read where it is rather than a time constant behind.
+const READOUT_SMOOTH_SEC = 1;
+
 // ── the search ───────────────────────────────────────────────────────────────
 
 // Resolution of the carrier search, in hertz per bin. Six hertz is 170 ms of
@@ -300,6 +307,9 @@ export class EcssTracker {
         this.clock = 0;
         this.rejects = [];
         this.candidate = 0;
+        this.smoothHz = null;
+        this.smooth1 = 0;
+        this.smooth2 = 0;
         this.searchFill = 0;
         this.lastPeak = null;
         this.usb.reset();
@@ -324,6 +334,14 @@ export class EcssTracker {
     /** Where the carrier is, in hertz from the offset. */
     get carrierHz() {
         return (this.freq * this.rate) / TWO_PI;
+    }
+
+    /**
+     * The same, steadied for reading: averaged over a second while locked, and
+     * the loop's own figure otherwise.
+     */
+    get readoutHz() {
+        return this.smoothHz != null ? this.smoothHz : this.carrierHz;
     }
 
     get locked() {
@@ -351,6 +369,12 @@ export class EcssTracker {
                 this.freq -= moved;
             }
             this.candidate -= plan.centreHz - this.centreHz;
+            if (this.smoothHz != null) {
+                const d = plan.centreHz - this.centreHz;
+                this.smoothHz -= d;
+                this.smooth1 -= d;
+                this.smooth2 -= d;
+            }
             for (const r of this.rejects) r.hz -= plan.centreHz - this.centreHz;
         }
         this.rate = rate;
@@ -661,6 +685,21 @@ export class EcssTracker {
         U.phase = uPh % TWO_PI;
         L.phase = lPh % TWO_PI;
         this.freq = freq;
+        if (this.locked) {
+            const hz = this.carrierHz;
+            const a = 1 - Math.exp(-frames / (rate * READOUT_SMOOTH_SEC));
+            if (this.smoothHz == null) {
+                this.smooth1 = hz;
+                this.smooth2 = hz;
+            } else {
+                this.smooth1 += a * (hz - this.smooth1);
+                this.smooth2 += a * (this.smooth1 - this.smooth2);
+            }
+            this.smoothHz = 2 * this.smooth1 - this.smooth2;
+        } else if (this.state === ECSS_SEARCH) {
+            // The next lock may be a different carrier.
+            this.smoothHz = null;
+        }
         this.c1i = c1i; this.c1q = c1q;
         this.c2i = c2i; this.c2q = c2q;
         this.lockRe = lockRe;

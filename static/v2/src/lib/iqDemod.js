@@ -625,7 +625,7 @@ export class DemodChain {
         return {
             state: e.state,
             locked: e.locked,
-            carrierHz: e.locked || e.state === 'acquire' ? e.carrierHz : null,
+            carrierHz: e.locked ? e.readoutHz : e.state === 'acquire' ? e.carrierHz : null,
             side: e.side,
         };
     }

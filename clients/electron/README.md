@@ -352,6 +352,19 @@ one where no receiver window ever appears.
   and without the cable having to be on this machine. Its protocol is a raw
   TCP socket (`rigctl.js`), which no page can open at all, so like flrig it
   lives in the main process.
+- **OmniRig** (Windows only): the Radio Control panel gains an **OmniRig**
+  connection, with a Rig (1 or 2, OmniRig's two slots) and a VFO (A, B, or
+  blank for whichever the radio is receiving on). OmniRig is a COM server, not
+  a socket, so the main process runs `omnirig-helper.exe` — a small C++ program
+  in `omnirig/`, cross-built with mingw in Docker by `omnirig/build.sh` — and
+  talks to it over stdin and stdout (`omnirig.js`). The helper uses IDispatch
+  alone, so this 64-bit client reaches the 32-bit OmniRig without needing its
+  type library registered for 64-bit. Problems are said in the panel in words:
+  OmniRig missing, the rig not set up in it, the port busy, the radio silent.
+  Tests: `omnirig/test/run.sh` (the helper's logic, natively),
+  `test/omnirig.test.js` (the link, on a fake helper), and
+  `omnirig/test/wine_test.sh` (the real exe under wine, against a stand-in
+  OmniRig). Not yet tried against a real OmniRig, which needs Windows.
 - **flrig**: the Radio Control panel gains an **FLRig** connection beside
   Serial, with its own host and port. flrig speaks XML-RPC and sends no CORS
   headers, so no page can reach it — the requests are made from the main
@@ -412,6 +425,8 @@ store.js      saved instances (JSON in userData), stable local ports, the
 prefs.js      the shared-settings snapshot (JSON in userData)
 flrig.js      flrig over XML-RPC, for the Radio Control panel's FLRig option
 rigctl.js     rigctld over its TCP protocol, likewise
+omnirig.js    OmniRig (Windows), through omnirig/omnirig-helper.exe
+omnirig/      that helper: C++, IDispatch, JSON lines; its build and tests
 tci.js        the TCI protocol over a WebSocket — browser code, bundled into
               receiver-preload.js and run in the window
 wsserver.js   a WebSocket server, RFC 6455, for the TCI server to listen on

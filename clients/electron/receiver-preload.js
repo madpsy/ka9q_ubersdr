@@ -105,7 +105,7 @@ function start(pushNow) {
 // Both are things a page cannot reach on its own — flrig answers XML-RPC with
 // no CORS headers, rigctld is a raw socket — which is the whole reason this
 // client has anything to offer here. The protocols live in the main process
-// (flrig.js, rigctl.js); this end only names them.
+// (flrig.js, rigctl.js, omnirig.js); this end only names them.
 const PROVIDERS = [
     {
         id: 'flrig',
@@ -137,8 +137,41 @@ const PROVIDERS = [
         ],
         capabilities: ['frequency', 'mode', 'ptt'],
     },
+    // OmniRig is Windows-only, a COM server rather than a socket, and shared by
+    // every program on the machine that wants the radio — which is its point.
+    // No host or port: OmniRig has two rig slots, set up in its own window,
+    // and this picks one. The protocol is omnirig.js and its helper process.
+    ...(process.platform === 'win32' ? [{
+        id: 'omnirig',
+        label: 'OmniRig',
+        fields: [
+            { key: 'rig', label: 'Rig (1 or 2)', type: 'number', default: 1 },
+            // Blank follows whichever VFO the radio is receiving on, which is
+            // the one that keeps up with the A/B button on the front panel.
+            { key: 'vfo', label: 'VFO', type: 'text', default: '', placeholder: 'A, B, or blank for current' },
+        ],
+        capabilities: ['frequency', 'mode', 'ptt'],
+    }] : []),
 ];
 const PROVIDER_IDS = PROVIDERS.map((p) => p.id);
+
+/**
+ * A transport's settings as the link is started with them: each of its fields,
+ * from the panel or else the field's default.
+ *
+ * Anything missing, empty or zero takes the default, as the host and port always
+ * have — a cleared host is 127.0.0.1, and the panel's number input sends 0 for a
+ * cleared box. Built in field order, so the same settings always make the same
+ * string for the comparison below.
+ */
+function linkSettings(spec, config) {
+    const out = {};
+    for (const f of spec.fields) {
+        const v = config ? config[f.key] : undefined;
+        out[f.key] = f.type === 'number' ? (Number(v) || f.default) : String(v || f.default).trim();
+    }
+    return out;
+}
 
 // The panel's settings as they last arrived, and the rig as flrig last reported
 // it. Both are needed on every event: a tune has to know which way the sync is
@@ -202,12 +235,9 @@ function onRadioControl(next) {
     // transport and come back, which is not a thing anyone should have to
     // discover.
     const spec = PROVIDERS.find((p) => p.id === selected);
-    const nextTarget = shouldRun ? JSON.stringify({
-        kind: selected,
-        host: String(next.config.host || '127.0.0.1'),
-        port: Number(next.config.port)
-            || spec.fields.find((f) => f.key === 'port').default,
-    }) : null;
+    const nextTarget = shouldRun
+        ? JSON.stringify({ kind: selected, ...linkSettings(spec, next.config) })
+        : null;
     if (nextTarget === target) { onSettingsOnly(); return; }
     const wasRunning = target !== null;
     target = nextTarget;
@@ -239,12 +269,13 @@ function onRadioControl(next) {
 // nothing below this point knows the difference.
 let tci = null;
 
-function startLink({ kind, host, port }) {
+function startLink({ kind, ...settings }) {
     stopLink();
     if (kind !== 'tci') {
-        ipcRenderer.send('radio:start', { kind, host, port });
+        ipcRenderer.send('radio:start', { kind, ...settings });
         return;
     }
+    const { host, port } = settings;
     tci = new TciLink({ host, port, onState: onRigState });
     tci.start();
 }

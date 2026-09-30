@@ -14,6 +14,7 @@
   "//artifactName": "The three per-target artifactName settings in build.appImage/nsis/dmg drop the version from the filenames, because the client's download links are constants. Every release hangs off the rolling `latest` tag, so the URL a running client opens (updates.js) is fixed — electron-builder's default ${productName}-${version}.${ext} would move the file on every bump and 404 every client already in the field. They are set per target rather than on build.win, because a Linux --package builds the Windows zip too and a name under build.win would apply to both, calling the zip 'Setup'. One template cannot serve two architectures, though, and Linux ships for two: the bare AppImage and .deb names here are x86_64's, and build.sh's build_linux passes -c.appImage.artifactName / -c.deb.artifactName for the arm64 run instead. Deliberately that way round — those bare URLs are what every installed client fetches to update, so they can never gain an -x64. (Out here with the note below because electron-builder validates the `build` object and rejects keys it does not know.)",
   "//buildFiles": "build.files is an allowlist, not a filter: anything not named there is left out of app.asar. A new top-level module therefore works under `npm start` and throws 'Cannot find module' only once packaged — so add it to build.files in the same commit that creates it. (This note lives out here because electron-builder validates the `build` object against a schema and rejects keys it does not know.)",
   "//debDepends": "build.deb.depends replaces electron-builder's default list rather than extending it, so the nine defaults are repeated verbatim and only the last two are ours. libasound2 and libgbm1 are hard DT_NEEDED entries of the Electron binary that nothing else in the closure pulls in — without them a minimal install fails at exec with a loader error, and libasound in particular is the only backend Chromium's Web MIDI has on Linux. Everything else the binary needs arrives transitively (libcups2, the X libs and libxkbcommon0 via libgtk-3-0, libdbus-1-3 via libatspi2.0-0, libnspr4 via libnss3). libasound2 is correct on Ubuntu 24.04 too, where libasound2t64 Provides it. libpulse0 is only dlopened — absent, Chromium falls back to raw ALSA and the output-device list gets much less useful — so it belongs in recommends, next to the speech-dispatcher pair that libspeechd.so.2 needs. (Note out here because electron-builder validates the `build` object and rejects keys it does not know.)",
+  "//omnirig": "build.win.extraResources puts omnirig-helper.exe beside app.asar rather than in it, because Windows cannot run an executable from inside an archive. omnirig/build.sh makes it and build.sh runs that before any Windows packaging; with no helper in omnirig/dist the filter matches nothing and the package simply has no OmniRig support, which omnirig.js reports in words when somebody picks it. (Out here because electron-builder rejects keys it does not know inside `build`.)",
   "scripts": {
     "start": "electron ."
   },
@@ -47,6 +48,7 @@
       "prefs.js",
       "flrig.js",
       "rigctl.js",
+      "omnirig.js",
       "tci.js",
       "tciserver.js",
       "wsserver.js",
@@ -70,7 +72,14 @@
       "syncDesktopName": true
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "extraResources": [
+        {
+          "from": "omnirig/dist",
+          "to": ".",
+          "filter": ["omnirig-helper.exe"]
+        }
+      ]
     },
     "mac": {
       "target": "dmg",

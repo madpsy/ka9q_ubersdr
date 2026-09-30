@@ -190,6 +190,20 @@ build_linux() {
         -c.deb.artifactName="$ARM64_ARTIFACT"
 }
 
+# OmniRig's helper, which only the Windows packages carry (build.win.extraResources
+# in package.json). A cross-build in Docker like the installer's, and skipped
+# the same way when there is no Docker: a Windows package without it is complete
+# but for OmniRig, and says so when somebody chooses it.
+build_omnirig_helper() {
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+        omnirig/build.sh
+    elif [[ -f omnirig/dist/omnirig-helper.exe ]]; then
+        echo "no docker — packaging the OmniRig helper already in omnirig/dist/" >&2
+    else
+        echo "no docker — the Windows packages will have no OmniRig support" >&2
+    fi
+}
+
 # What the dmg about to be built will and will not be, said before it is built.
 #
 # A signed-and-notarised dmg and an unsigned one are the same file to look at,
@@ -617,7 +631,8 @@ if [[ "$PACKAGE" -eq 1 ]]; then
             # behind a flag somebody has to know about.
             # An `[[ ]] && x` here would be the last command of the branch, and
             # under `set -e` a false test would end the script.
-            Linux)  build_linux --win zip
+            Linux)  build_omnirig_helper
+                    build_linux --win zip
                     if [[ "$WIN_INSTALLER" -eq 0 ]]; then WIN_INSTALLER=1; fi ;;
             # Said before the build rather than after: notarisation adds
             # several minutes of uploading and waiting to it, and finding out
@@ -627,7 +642,11 @@ if [[ "$PACKAGE" -eq 1 ]]; then
                     ./node_modules/.bin/electron-builder --mac ;;
             # Already on Windows: NSIS builds natively, and Docker would be a
             # detour through a Linux VM to reach the toolchain already present.
-            *)      ./node_modules/.bin/electron-builder --win nsis
+            # The OmniRig helper is cross-built in Docker, so here it is
+            # whatever omnirig/dist already holds.
+            *)      [[ -f omnirig/dist/omnirig-helper.exe ]] \
+                        || echo "omnirig/dist/omnirig-helper.exe is missing — this build will have no OmniRig support" >&2
+                    ./node_modules/.bin/electron-builder --win nsis
                     WIN_INSTALLER=0 ;;
         esac
     fi

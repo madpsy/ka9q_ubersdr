@@ -21,6 +21,7 @@ const { InstanceStore } = require('./store');
 const { SharedPrefs } = require('./prefs');
 const { FlrigLink } = require('./flrig');
 const { RigctlLink } = require('./rigctl');
+const { OmniRigLink } = require('./omnirig');
 const { TciServer } = require('./tciserver');
 const discovery = require('./discovery');
 const deeplink = require('./deeplink');
@@ -1033,16 +1034,26 @@ function setupIpc() {
     //
     // One at a time: the panel offers a single connection, so a second would be
     // a link nothing is reading.
-    const LINKS = { flrig: FlrigLink, rigctld: RigctlLink };
+    //
+    // OmniRig only on Windows, where it exists; the preload only offers it
+    // there too. It is a COM server rather than a socket, reached through a
+    // helper process — see omnirig.js.
+    const LINKS = {
+        flrig: FlrigLink,
+        rigctld: RigctlLink,
+        ...(process.platform === 'win32' ? { omnirig: OmniRigLink } : {}),
+    };
 
-    ipcMain.on('radio:start', (event, { kind, host, port }) => {
+    // The rest of the settings are the transport's own fields, as the panel
+    // collected them: host and port for the sockets, rig and VFO for OmniRig.
+    ipcMain.on('radio:start', (event, { kind, host, ...settings }) => {
         const rec = recordFor(event.sender);
         const Link = LINKS[kind];
         if (!rec || !Link) return;
         if (rec.radio) rec.radio.stop();
         rec.radio = new Link({
+            ...settings,
             host: String(host || '127.0.0.1'),
-            port,
             onState: (state) => {
                 if (!rec.win.isDestroyed()) rec.win.webContents.send('radio:state', state);
             },

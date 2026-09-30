@@ -8,7 +8,8 @@
 
 const assert = require('assert');
 const {
-    FIELD_TYPES, getProvider, listProviders, normaliseConfigure, normaliseProvider, onProviders,
+    FIELD_TYPES, INPUT_FIELD_TYPES, choiceValue, getProvider, listProviders, normaliseConfigure,
+    normaliseProvider, onProviders,
     providerStatus, registerProvider, resetProviders, setProviderStatus, unregisterProvider,
 } = require('./.build/radioproviders.cjs');
 
@@ -97,6 +98,78 @@ t('an unknown field type falls back to text rather than rendering nothing', () =
     assert.ok(FIELD_TYPES.includes('text'));
 });
 
+// --- choice fields ---------------------------------------------------------
+
+const omnirig = () => ({
+    id: 'omnirig',
+    label: 'OmniRig',
+    fields: [
+        { key: 'rig', label: 'Rig', type: 'choice', default: 1,
+            options: [{ value: 1, label: 'Rig 1' }, { value: 2, label: 'Rig 2' }] },
+        { key: 'vfo', label: 'VFO', type: 'choice', default: 'current',
+            options: [{ value: 'current', label: 'Current' }, { value: 'A' }, { value: 'B' }] },
+    ],
+});
+
+t('a choice field keeps its options, with the value as the label by default', () => {
+    const p = normaliseProvider(omnirig());
+    assert.strictEqual(p.fields[0].type, 'choice');
+    assert.deepStrictEqual(p.fields[0].options, [{ value: 1, label: 'Rig 1' }, { value: 2, label: 'Rig 2' }]);
+    assert.deepStrictEqual(p.fields[1].options.map((o) => o.label), ['Current', 'A', 'B']);
+    assert.strictEqual(p.fields[0].default, 1);
+    assert.ok(FIELD_TYPES.includes('choice'));
+    // Matched by text, answered as the option's own value: a '2' saved from a
+    // text box is Rig 2, typed as the provider declared it, so its button lights.
+    assert.strictEqual(choiceValue(p.fields[0], 1), 1);
+    assert.strictEqual(choiceValue(p.fields[0], '2'), 2);
+    assert.strictEqual(choiceValue(p.fields[0], ' 2 '), 2);
+    assert.strictEqual(choiceValue(p.fields[0], 3), undefined);
+    assert.strictEqual(choiceValue(p.fields[0], undefined), undefined);
+    assert.strictEqual(choiceValue(p.fields[1], ''), undefined);
+});
+
+t('a choice default that is not an option becomes the first option', () => {
+    const raw = omnirig();
+    raw.fields[0].default = 3;
+    assert.strictEqual(normaliseProvider(raw).fields[0].default, 1);
+    delete raw.fields[0].default;
+    assert.strictEqual(normaliseProvider(raw).fields[0].default, 1);
+});
+
+t('a choice with too few, too many or malformed options is refused', () => {
+    const withOptions = (options) => ({ id: 'x', fields: [{ key: 'k', type: 'choice', options }] });
+    assert.throws(() => normaliseProvider(withOptions(undefined)), /needs options/);
+    assert.throws(() => normaliseProvider(withOptions([{ value: 1 }])), /2 to 6/);
+    // A duplicate does not count twice.
+    assert.throws(() => normaliseProvider(withOptions([{ value: 1 }, { value: 1 }])), /2 to 6/);
+    assert.throws(() => normaliseProvider(withOptions(
+        Array.from({ length: 7 }, (_, i) => ({ value: i })))), /2 to 6/);
+    assert.throws(() => normaliseProvider(withOptions([{ value: 1 }, { value: {} }])), /without a value/);
+    assert.throws(() => normaliseProvider(withOptions([{ value: 1 }, 'B'])), /without a value/);
+});
+
+t('option labels are bounded', () => {
+    const p = normaliseProvider({ id: 'x', fields: [{ key: 'k', type: 'choice',
+        options: [{ value: 'a', label: 'y'.repeat(50) }, { value: 'b' }] }] });
+    assert.strictEqual(p.fields[0].options[0].label.length, 20);
+});
+
+t('configure takes a choice only as one of its options', () => {
+    registerProvider(omnirig());
+    assert.deepStrictEqual(normaliseConfigure('omnirig', { config: { rig: 2, vfo: 'B' } }).config,
+        { rig: 2, vfo: 'B' });
+    assert.throws(() => normaliseConfigure('omnirig', { config: { rig: 3, vfo: 'C' } }), /nothing to configure/);
+    // Stored as the option's own value, whatever form it arrived in.
+    assert.deepStrictEqual(normaliseConfigure('omnirig', { config: { rig: '2', vfo: 'A' } }).config,
+        { rig: 2, vfo: 'A' });
+    assert.deepStrictEqual(normaliseConfigure('omnirig', { config: { rig: 3, vfo: 'B' } }).config,
+        { vfo: 'B' });
+});
+
+t('surfaces keep to the typed-in types', () => {
+    assert.deepStrictEqual(INPUT_FIELD_TYPES, ['text', 'number', 'password']);
+});
+
 t('labels and field counts are bounded', () => {
     const many = Array.from({ length: 20 }, (_, i) => ({ key: `f${i}` }));
     const p = normaliseProvider({ ...flrig(), label: 'x'.repeat(200), fields: many });
@@ -122,6 +195,7 @@ t('status merges, so a poll reporting only a frequency keeps the rest', () => {
     setProviderStatus('flrig', { frequency: 14074000 });
     assert.deepStrictEqual(providerStatus('flrig'), {
         connected: true, busy: false, frequency: 14074000, mode: 'USB', tx: false, error: null,
+        rig: null, details: null,
     });
 });
 
@@ -131,6 +205,61 @@ t('an error can be set and then cleared', () => {
     assert.strictEqual(providerStatus('flrig').error, 'ECONNREFUSED');
     setProviderStatus('flrig', { error: null });
     assert.strictEqual(providerStatus('flrig').error, null);
+});
+
+t('the rig name is kept, trimmed and cut to fit, and cleared by null', () => {
+    registerProvider(flrig());
+    setProviderStatus('flrig', { rig: '  IC-7300 ' });
+    assert.strictEqual(providerStatus('flrig').rig, 'IC-7300');
+    // A later poll without it keeps it.
+    setProviderStatus('flrig', { frequency: 7074000 });
+    assert.strictEqual(providerStatus('flrig').rig, 'IC-7300');
+    setProviderStatus('flrig', { rig: 'x'.repeat(100) });
+    assert.strictEqual(providerStatus('flrig').rig.length, 60);
+    setProviderStatus('flrig', { rig: '' });
+    assert.strictEqual(providerStatus('flrig').rig, null);
+    setProviderStatus('flrig', { rig: 'IC-705' });
+    setProviderStatus('flrig', { rig: null });
+    assert.strictEqual(providerStatus('flrig').rig, null);
+});
+
+t('details are label/value text, in order, and what is not a pair is dropped', () => {
+    registerProvider(flrig());
+    setProviderStatus('flrig', { details: [
+        { label: 'VFO', value: 'A' },
+        { label: 'Split', value: false },
+        null,
+        'loose text',
+        { value: 'no label' },
+        { label: '   ', value: 'blank label' },
+        { label: 'OmniRig', value: 1.2 },
+        { label: 'Empty' },
+    ] });
+    assert.deepStrictEqual(providerStatus('flrig').details, [
+        { label: 'VFO', value: 'A' },
+        { label: 'Split', value: 'false' },
+        { label: 'OmniRig', value: '1.2' },
+        { label: 'Empty', value: '' },
+    ]);
+});
+
+t('details are capped in number and length, and cleared by null or empty', () => {
+    registerProvider(flrig());
+    const many = Array.from({ length: 20 }, (_, i) => ({ label: `L${i}`.padEnd(50, 'x'), value: 'v'.repeat(200) }));
+    setProviderStatus('flrig', { details: many });
+    const d = providerStatus('flrig').details;
+    assert.strictEqual(d.length, 12);
+    assert.strictEqual(d[0].label.length, 30);
+    assert.strictEqual(d[0].value.length, 80);
+    setProviderStatus('flrig', { connected: true });
+    assert.strictEqual(providerStatus('flrig').details.length, 12, 'kept across a status without them');
+    setProviderStatus('flrig', { details: [] });
+    assert.strictEqual(providerStatus('flrig').details, null);
+    setProviderStatus('flrig', { details: [{ label: 'a', value: 'b' }] });
+    setProviderStatus('flrig', { details: null });
+    assert.strictEqual(providerStatus('flrig').details, null);
+    setProviderStatus('flrig', { details: 'not a list' });
+    assert.strictEqual(providerStatus('flrig').details, null);
 });
 
 t('status for a provider nobody registered is refused', () => {

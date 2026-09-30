@@ -35,11 +35,14 @@ t('the two event names are the published ones', () => {
     // `markers` and `spots` topics, the `spectrumdata` and `notice` commands,
     // and the demand hook that keeps the spot feeds unacquired until something
     // asks for them; 1.7 the `lock` command and `tuning.locked`, so a client can
-    // see the tuning lock rather than watching its own commands do nothing.
+    // see the tuning lock rather than watching its own commands do nothing;
+    // 1.8 `rig` and `details` in a radio provider's status, so the panel can
+    // name the radio and say more about the link, and `choice` fields, so a
+    // setting with two values is two buttons rather than a text box.
     // The envelope never changed, so PROTOCOL stays 1 and a 1.0 client keeps
     // working — which is what the major number is for, and why only the minor
     // has ever moved.
-    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 7 });
+    assert.deepStrictEqual(API_VERSION, { major: 1, minor: 8 });
 });
 
 t('the topic lists are what a client is promised', () => {

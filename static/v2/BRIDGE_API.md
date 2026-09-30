@@ -10,7 +10,7 @@ client library), `BridgeHost.jsx` (the wiring). Tests: `test/bridge.test.js`,
 specification — if one has to change, the change is a breaking one.
 
 - Protocol (envelope) version: **1**
-- API version: **1.7**
+- API version: **1.8**
 
 ---
 
@@ -410,7 +410,22 @@ await client.command('radio', { action: 'register', provider: {
 ```
 
 `type` is `text`, `number` or `password`; anything else renders as text. Up to
-eight fields. `capabilities` says what you can keep in step — leave `ptt` out and
+eight fields.
+
+*(Since 1.8)* `choice` is a pick from a few fixed values, shown as buttons —
+for a setting nobody should have to type, like which of two slots to use:
+
+```js
+{ key: 'rig', label: 'Rig', type: 'choice', default: 1,
+  options: [{ value: 1, label: 'Rig 1' }, { value: 2, label: 'Rig 2' }] }
+```
+
+Two to six `options`, each a string or number `value` and an optional `label`
+(the value, if left out). A choice with fewer, more, or an option with no plain
+value is refused at registration; a `default` that is not an option becomes
+the first. Values are matched by text, so a `'2'` saved or configured for the
+field above is `2`, and it reaches you typed as you declared it. A page older
+than 1.8 renders a choice as a text box — accept the same values typed in. `capabilities` says what you can keep in step — leave `ptt` out and
 the panel stops offering "mute while the radio transmits", rather than showing a
 switch that does nothing.
 
@@ -424,6 +439,26 @@ client.command('radio', { action: 'status', id: 'flrig',
 Status merges, so a poll that only learned a frequency need only send that. Set
 `error` to say why a connection failed; the panel shows it and clears it when
 you send `null`.
+
+*(Since 1.8)* Two more status fields, both optional and both only ever displayed:
+
+```js
+client.command('radio', { action: 'status', id: 'omnirig',
+    rig: 'IC-7300',
+    details: [
+        { label: 'VFO', value: 'A' },
+        { label: 'Split', value: 'Off' },
+        { label: 'OmniRig', value: '1.20' },
+    ] });
+```
+
+`rig` names the radio — its model, as your end knows it — and is shown with the
+readout in both the full and the minimal panel. `details` is a list of
+label/value pairs shown under the readout in the full panel only: what the
+operator might want to know about the link without it crowding the readout. Up
+to twelve pairs, labels to 30 characters and values to 80, `rig` to 60; longer
+is cut, not refused. Send `null` to clear either. A page older than 1.8 ignores
+both.
 
 If your transport is also configurable somewhere else — an extension popup, a
 desktop preferences window — write the settings back when they change there, so

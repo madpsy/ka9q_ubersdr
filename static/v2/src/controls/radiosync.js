@@ -256,6 +256,10 @@ export class RadioSync extends Emitter {
         this.connected = true;
         this.failures = 0;
         this.busy = false;
+        // The model, for the readout: what a provider reports as `rig`, so the
+        // panel names the radio the same way whichever transport reached it.
+        // Every disconnect path replaces this.rig whole, which takes it away.
+        this.rig = { ...this.rig, name: `${rig.mfg} ${rig.name}` };
         this.emit('message', { text: `Connected to ${rig.mfg} ${rig.name}`, tone: 'good' });
         this.emit('state', this.snapshot());
 

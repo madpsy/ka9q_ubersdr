@@ -17,7 +17,7 @@ import React, { useEffect, useState } from '../react.js';
 import { Button, Field, Segmented, Switch } from '../components/ui.jsx';
 import { serialAvailable } from '../controls/radiosync.js';
 import { getSync } from '../controls/sources.js';
-import { listProviders, onProviders } from '../controls/radioProviders.js';
+import { choiceValue, listProviders, onProviders } from '../controls/radioProviders.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import { MessageLog, useControlState, useMessages } from '../controls/panel.jsx';
 
@@ -30,7 +30,24 @@ const DIRECTIONS = [
 // hold the top rate reliably.
 const BAUD_RATES = [0, 4800, 9600, 19200, 38400, 57600, 115200];
 
-// One of a transport's own settings — an address, a port, a password.
+// One of a transport's own settings, as the kind of control its type asks for.
+function ConfigField({ field, value, onCommit }) {
+    // A pick from a few fixed values: buttons, committed on the press, since
+    // there is nothing half-typed to wait for.
+    if (field.type === 'choice') {
+        return (
+            <Segmented
+                options={field.options}
+                value={value}
+                onChange={(v) => { if (v !== value) onCommit(v); }}
+                size="sm"
+            />
+        );
+    }
+    return <TextField field={field} value={value} onCommit={onCommit} />;
+}
+
+// A typed-in setting — an address, a port, a password.
 //
 // Committed when the edit is finished rather than on every keystroke. The value
 // is what the transport connects to, and a provider that reconnects when it
@@ -41,7 +58,7 @@ const BAUD_RATES = [0, 4800, 9600, 19200, 38400, 57600, 115200];
 // is exactly how somebody moves it, and both providers treat a new address as
 // "go there instead"; disabling the field meant the only way to correct a port
 // was to disconnect first, which is not something the panel ever said.
-function ConfigField({ field, value, onCommit }) {
+function TextField({ field, value, onCommit }) {
     const [draft, setDraft] = useState(() => String(value));
     // Follow the setting when it changes from anywhere else — another window
     // sharing these settings, or the transport being switched.
@@ -72,7 +89,11 @@ function ConfigField({ field, value, onCommit }) {
 // The rig readout, whichever transport produced it. One shape from two sources:
 // the serial link reports through the sync singleton, a provider through the
 // `radio` command, and the panel should look the same either way.
-function RigReadout({ frequency, mode, tx, connected }) {
+//
+// `name` is the radio's model where the transport knows it — the Hamlib model
+// chosen for Serial, whatever a provider reports as `rig`. On the mode row, at
+// the far end, so it names the radio without costing the minimal view a line.
+function RigReadout({ frequency, mode, tx, connected, name }) {
     const freqText = frequency ? `${(frequency / 1e6).toFixed(6)}` : '--.------';
     return (
         <div className="rc-rig">
@@ -82,7 +103,24 @@ function RigReadout({ frequency, mode, tx, connected }) {
                 <span className={`rc-rig__tx${tx ? ' is-tx' : ''}`}>
                     {connected ? (tx ? 'TX' : 'RX') : '--'}
                 </span>
+                {name && <span className="rc-rig__name" title={name}>{name}</span>}
             </div>
+        </div>
+    );
+}
+
+// What a provider has to say about its link beyond the readout — the full
+// panel only, since the minimal one is there to be glanced at.
+function RigDetails({ details }) {
+    if (!details || !details.length) return null;
+    return (
+        <div className="kv-list rc-rig__details">
+            {details.map((d, i) => (
+                <div className="kv" key={`${i}:${d.label}`}>
+                    <span className="kv__k">{d.label}</span>
+                    <span className="kv__v">{d.value}</span>
+                </div>
+            ))}
         </div>
     );
 }
@@ -153,6 +191,7 @@ export default function RadioControlPanel({ minimal }) {
     const missing = transport !== 'serial' && !provider;
 
     const rig = provider ? provider.status : status.rig;
+    const rigName = provider ? provider.status.rig : status.rig.name;
     const connected = provider ? !!provider.status.connected : status.connected;
     const busy = provider ? !!provider.status.busy : status.busy;
 
@@ -174,7 +213,9 @@ export default function RadioControlPanel({ minimal }) {
                 mode={rig.mode}
                 tx={rig.tx}
                 connected={connected}
+                name={rigName}
             />
+            {!minimal && provider && <RigDetails details={provider.status.details} />}
             {outOfRange && (
                 <div className="note note--warn note--tight">
                     The radio is outside this receiver&rsquo;s range
@@ -299,7 +340,14 @@ export default function RadioControlPanel({ minimal }) {
         // connection is being refused, and the controls below follow the ask.
         const wantsConnect = !!cfg.radiosync.connect;
         const values = (cfg.radiosync.providers || {})[provider.id] || {};
-        const valueOf = (f) => (values[f.key] === undefined ? f.default : values[f.key]);
+        // A choice is shown as the option its saved value names — '2' from when
+        // it was a text box is Rig 2 — and as its default when it names none,
+        // rather than with no button lit.
+        const valueOf = (f) => {
+            const v = values[f.key];
+            if (f.type === 'choice') return choiceValue(f, v) ?? f.default;
+            return v === undefined ? f.default : v;
+        };
         const setField = (f, value) => setSync({
             providers: {
                 ...(cfg.radiosync.providers || {}),

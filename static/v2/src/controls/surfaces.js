@@ -11,7 +11,8 @@
 // fields it asks for, and the values travel back over the `sdrcontrol` topic.
 // Nothing here knows what TCI is.
 
-import { FIELD_TYPES } from './radioProviders.js';
+// Only the typed-in field types: the SDR Control panel renders nothing else.
+import { INPUT_FIELD_TYPES } from './radioProviders.js';
 
 // The key a handed-over audio port is tagged with. Named here so the page and
 // whatever is listening for it agree without either hard-coding a string.
@@ -69,7 +70,7 @@ export function normaliseSurface(raw) {
     const fields = (Array.isArray(raw.fields) ? raw.fields : []).slice(0, 8).map((f) => {
         const key = String((f && f.key) || '').trim();
         if (!/^[a-z][a-z0-9_]{0,31}$/i.test(key)) throw new Error(`bad field key "${key}"`);
-        const type = FIELD_TYPES.includes(f.type) ? f.type : 'text';
+        const type = INPUT_FIELD_TYPES.includes(f.type) ? f.type : 'text';
         return {
             key,
             label: String(f.label || key).slice(0, 40),

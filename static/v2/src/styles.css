@@ -8474,6 +8474,18 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 .rc-rig__tx.is-tx { background: rgba(242, 100, 106, 0.16); color: var(--bad); }
+/* The model, pushed to the far end of the mode row and cut short rather than
+   wrapped: the readout is sized for the frequency, not for a long name. */
+.rc-rig__name {
+    margin-left: auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.rc-rig__details { padding: 0 2px; }
 
 .rc-log__clear {
     border: 0;

@@ -11,9 +11,14 @@
  * rather than inferred from a receiver's behaviour two layers away.
  */
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #include "../ka9q_hpsdr.h"
 #include "../hpsdr_p1.h"
@@ -47,6 +52,9 @@ void t_print(const char *fmt, ...)
     (void)vfprintf(stderr, fmt, ap);
     va_end(ap);
 }
+
+/* The watchdog's length in hpsdr_p1.c, which keeps it private. */
+#define P1_TEST_WATCHDOG_S 3
 
 /* ---- harness ------------------------------------------------------------ */
 
@@ -109,15 +117,6 @@ int main(void)
         ep2_with(bank, pkt);
         feed(pkt, sizeof(pkt));
         ok(stub_freq_hz == 0x008F0D18, "ep2-rx1-frequency-is-big-endian-at-c0-0x04");
-    }
-
-    /* A bank at the unshifted address must NOT be read as a frequency. */
-    {
-        unsigned char bank[5] = {0x02, 0x00, 0x8F, 0x0D, 0x18};
-        stub_freq_hz = -1;
-        ep2_with(bank, pkt);
-        feed(pkt, sizeof(pkt));
-        ok(stub_freq_hz == -1, "ep2-register-0x01-is-not-the-rx1-frequency");
     }
 
     /*
@@ -187,6 +186,121 @@ int main(void)
         ok(!p1_active() && stub_enabled == -1,
            "run-refused-while-a-protocol-2-client-streams");
         stub_p2_busy = false;
+    }
+
+    /*
+     * With duplex clear (C4 bit 2 of the config register) RX1 follows the TX
+     * frequency, register 0x01 at C0 0x02, as on the hardware. A client may
+     * tune that way and never write the RX1 register at all. Every config bank
+     * above had duplex clear, but no TX frequency had been sent, so RX1's own
+     * register was the one in use until now.
+     */
+    {
+        unsigned char tx[5] = {0x02, 0x00, 0x6B, 0x6C, 0x20};   /* 7040032 Hz */
+        stub_freq_hz = -1;
+        ep2_with(tx, pkt);
+        feed(pkt, sizeof(pkt));
+        ok(stub_freq_hz == 7040032, "duplex-off-rx1-follows-the-tx-frequency");
+
+        unsigned char rx1[5] = {0x04, 0x00, 0xD6, 0xD8, 0x00};  /* 14080000 Hz */
+        stub_freq_hz = -1;
+        ep2_with(rx1, pkt);
+        feed(pkt, sizeof(pkt));
+        ok(stub_freq_hz == -1, "duplex-off-rx1-register-does-not-retune");
+
+        unsigned char cfg[5] = {0x00, 0x01, 0x00, 0x00, 0x04};  /* duplex on */
+        ep2_with(cfg, pkt);
+        feed(pkt, sizeof(pkt));
+        ok(stub_freq_hz == 14080000, "duplex-on-hands-rx1-its-own-register");
+
+        stub_freq_hz = -1;
+        ep2_with(tx, pkt);
+        feed(pkt, sizeof(pkt));
+        ok(stub_freq_hz == -1, "duplex-on-tx-frequency-does-not-retune");
+
+        cfg[4] = 0x00;                                          /* duplex off */
+        ep2_with(cfg, pkt);
+        feed(pkt, sizeof(pkt));
+        ok(stub_freq_hz == 7040032, "duplex-off-again-returns-to-tx");
+    }
+
+    /* Start re-applies the remembered frequency: the bridge clears its receiver
+     * on stop, and a client restarting on the same frequency sends an EP2 the
+     * dedupe calls unchanged. */
+    {
+        unsigned char run[64] = {0xEF, 0xFE, 0x04, 0x01};
+        unsigned char stop[64] = {0xEF, 0xFE, 0x04, 0x00};
+        feed(run, sizeof(run));
+        feed(stop, sizeof(stop));
+        stub_freq_hz = -1;
+        feed(run, sizeof(run));
+        ok(stub_freq_hz == 7040032, "start-reapplies-the-frequency");
+        feed(stop, sizeof(stop));
+    }
+
+    /*
+     * The watchdog. A client that starts with bit 7 of the run byte set has
+     * turned it off, as on the hardware, and may send EP2 only when something
+     * changes; a plain start leaves it on. p1_check_watchdog counts whole
+     * seconds on the monotonic clock, so this waits the real three.
+     */
+    {
+        unsigned char run_nowd[64] = {0xEF, 0xFE, 0x04, 0x81};
+        unsigned char run[64] = {0xEF, 0xFE, 0x04, 0x01};
+        unsigned char stop[64] = {0xEF, 0xFE, 0x04, 0x00};
+        feed(run_nowd, sizeof(run_nowd));
+        usleep((P1_TEST_WATCHDOG_S * 1000 + 100) * 1000);
+        p1_check_watchdog();
+        ok(p1_active(), "watchdog-off-client-survives-silence");
+        feed(stop, sizeof(stop));
+
+        feed(run, sizeof(run));
+        usleep((P1_TEST_WATCHDOG_S * 1000 + 100) * 1000);
+        p1_check_watchdog();
+        ok(!p1_active(), "plain-start-restores-the-watchdog");
+    }
+
+    /*
+     * A watchdog-off client is taken to show samples uncalibrated, so its EP6
+     * carries them 40 dB up; a plain start does not. Sent over loopback to
+     * this test's own socket, so these are the bytes on the wire.
+     */
+    {
+        static struct rcvr_cb rcb;
+        rcb.iqSample_offset = 0;
+        rcb.iqSamples[0] = 1000.0f - 500.0f * I;
+
+        int s = socket(AF_INET, SOCK_DGRAM, 0);
+        struct sockaddr_in me;
+        memset(&me, 0, sizeof(me));
+        me.sin_family = AF_INET;
+        me.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        socklen_t mlen = sizeof(me);
+        const int bound = s >= 0 &&
+            bind(s, (struct sockaddr *)&me, sizeof(me)) == 0 &&
+            getsockname(s, (struct sockaddr *)&me, &mlen) == 0;
+        ok(bound, "loopback-socket-for-ep6");
+        struct timeval tv = {1, 0};
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        /* The first I slot: UberSDR's imaginary part, 24-bit big-endian. */
+        const unsigned char runs[2] = {0x01, 0x81};
+        const int want[2] = {-500, -50000};
+        const char *names[2] = {"plain-start-ep6-is-unscaled",
+                                "watchdog-off-ep6-is-40-db-up"};
+        for (int k = 0; k < 2 && bound; k++) {
+            unsigned char run[64] = {0xEF, 0xFE, 0x04, runs[k]};
+            unsigned char stop[64] = {0xEF, 0xFE, 0x04, 0x00};
+            p1_handle_datagram(s, run, sizeof(run), &me);
+            p1_send_packet(&rcb);
+            unsigned char ep6[1032];
+            const ssize_t n = recv(s, ep6, sizeof(ep6), 0);
+            int v = n == 1032 ? (ep6[16] << 16) | (ep6[17] << 8) | ep6[18] : 0;
+            if (v & 0x800000) v -= 0x1000000;
+            ok(n == 1032 && v == want[k], names[k]);
+            feed(stop, sizeof(stop));
+        }
+        if (s >= 0) close(s);
     }
 
     /* Protocol 2 datagrams must fall through untouched: a 60-byte packet of

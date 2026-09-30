@@ -34,7 +34,16 @@
 #define P1_C0_ADDR_MASK 0xFE
 #define P1_C0_MOX       0x01
 #define P1_C0_CONFIG    0x00   /* register 0x00: sample rate, receiver count */
+#define P1_C0_TX_FREQ   0x02   /* register 0x01: TX NCO frequency, Hz BE32 */
 #define P1_C0_RX1_FREQ  0x04   /* register 0x02: RX1 NCO frequency, Hz BE32 */
+
+/* C4 bit 2 of the config register. Clear, and RX1 follows the TX frequency, as
+ * on the hardware; a client may tune that way and never write RX1 at all. */
+#define P1_C4_DUPLEX    0x04
+
+/* The run command: bit 0 streams EP6, bit 7 turns the radio's watchdog off. */
+#define P1_RUN_IQ       0x01
+#define P1_RUN_NO_WD    0x80
 
 /*
  * Phase 1 advertises one receiver, and a conforming client clamps itself to
@@ -57,6 +66,17 @@
  */
 #define P1_WATCHDOG_SECONDS 3
 
+/*
+ * A client that starts with the watchdog off is exempt from it, as on the
+ * hardware: such a client may send EP2 only when something changes. It also
+ * gets its samples 40 dB up, taken as the mark of a client that shows them
+ * uncalibrated. The display gain is set by ear against clients that calibrate
+ * their meters, and puts a real band's peaks near -76 dBFS; a client showing
+ * dBFS as it is, with a 65536-bin FFT, measured the 20 m noise floor at
+ * -162 dB. Even a full-scale int16 at 48 kHz stays near -20 dBFS after this.
+ */
+#define P1_RAW_GAIN 100.0f
+
 /* ------------------------------------------------------------------------ */
 /* State                                                                    */
 /* ------------------------------------------------------------------------ */
@@ -74,10 +94,33 @@ static struct sockaddr_in p1_client;  /* where EP6 goes: the run command's sourc
 static unsigned int p1_tx_seq = 0;    /* EP6 sequence, 32-bit BE, per packet */
 static unsigned char p1_raddr = 0;    /* free-running telemetry address, 0..4 */
 static struct timespec p1_last_rx;    /* last packet from the client */
+static bool p1_no_wd = false;         /* the client turned the watchdog off */
+static float p1_gain = 1.0f;          /* P1_RAW_GAIN for such a client */
 
 /* What the client last asked for, so a repeat is not treated as a change. */
 static int p1_rate_hz = 0;
-static long p1_freq_hz = 0;
+static long p1_freq_hz = 0;           /* what RX1 was last tuned to */
+
+/* The registers RX1's frequency comes from; which one is the duplex bit. */
+static long p1_rx1_hz = 0;
+static long p1_txf_hz = 0;
+static bool p1_duplex = false;
+
+/*
+ * Tune RX1 from whichever register now drives it. With duplex clear that is
+ * the TX frequency, as on the hardware -- but only once one has been sent, so a
+ * client that writes RX1 and never TX is not left at 0 Hz.
+ */
+static void p1_retune(void)
+{
+    long hz = p1_rx1_hz;
+    if (!p1_duplex && p1_txf_hz != 0)
+        hz = p1_txf_hz;
+    if (hz != 0 && hz != p1_freq_hz) {
+        p1_freq_hz = hz;
+        p1_host_set_freq(0, hz);
+    }
+}
 
 static void p1_touch(void)
 {
@@ -190,15 +233,21 @@ static void p1_apply_cc(const unsigned char *cc)
             t_print("P1: client asked for %d receivers; this bridge offers %d\n",
                     want_rx, P1_NUM_RX);
         }
+        p1_duplex = (cc[4] & P1_C4_DUPLEX) != 0;
+        p1_retune();
         break;
     }
-    case P1_C0_RX1_FREQ: {
+    case P1_C0_RX1_FREQ:
+    case P1_C0_TX_FREQ: {
         const long hz = ((long)cc[1] << 24) | ((long)cc[2] << 16) |
                         ((long)cc[3] << 8)  |  (long)cc[4];
-        if (hz != 0 && hz != p1_freq_hz) {
-            p1_freq_hz = hz;
-            p1_host_set_freq(0, hz);
-        }
+        if (hz == 0)
+            break;
+        if ((c0 & P1_C0_ADDR_MASK) == P1_C0_RX1_FREQ)
+            p1_rx1_hz = hz;
+        else
+            p1_txf_hz = hz;
+        p1_retune();
         break;
     }
     default:
@@ -225,7 +274,7 @@ static void p1_handle_ep2(const unsigned char *buf, int len)
 /* Run and stop                                                             */
 /* ------------------------------------------------------------------------ */
 
-static void p1_start(int sock, const struct sockaddr_in *from)
+static void p1_start(int sock, const struct sockaddr_in *from, bool no_wd)
 {
     /*
      * A protocol 2 client already has the receivers. Both protocols drive the
@@ -253,6 +302,9 @@ static void p1_start(int sock, const struct sockaddr_in *from)
     p1_client = *from;
     p1_tx_seq = 0;
     p1_raddr = 0;
+    const bool said_wd = no_wd && !p1_no_wd;
+    p1_no_wd = no_wd;
+    p1_gain = no_wd ? P1_RAW_GAIN : 1.0f;
     pthread_mutex_unlock(&p1_lock);
     p1_touch();
 
@@ -263,8 +315,16 @@ static void p1_start(int sock, const struct sockaddr_in *from)
         if (p1_rate_hz == 0)
             p1_rate_hz = 192000;
         p1_host_set_rate(0, p1_rate_hz);
+        /* The frequency too. A stop clears the receiver, while the dedupe
+         * remembers what the client last sent -- so a client that stops and
+         * starts on the same frequency repeats an EP2 that looks like no
+         * change, and without this the receiver would sit at 0 Hz. */
+        if (p1_freq_hz != 0)
+            p1_host_set_freq(0, p1_freq_hz);
         p1_host_enable(0, true);
     }
+    if (said_wd)
+        t_print("P1: client disabled the watchdog; streaming until it stops, samples +40 dB\n");
 }
 
 static void p1_stop(void)
@@ -272,6 +332,7 @@ static void p1_stop(void)
     pthread_mutex_lock(&p1_lock);
     const bool was = p1_running;
     p1_running = false;
+    p1_no_wd = false;
     pthread_mutex_unlock(&p1_lock);
 
     if (was) {
@@ -283,7 +344,10 @@ static void p1_stop(void)
 
 void p1_check_watchdog(void)
 {
-    if (!p1_active())
+    pthread_mutex_lock(&p1_lock);
+    const bool exempt = !p1_running || p1_no_wd;
+    pthread_mutex_unlock(&p1_lock);
+    if (exempt)
         return;
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -312,11 +376,11 @@ bool p1_handle_datagram(int sock, const unsigned char *buf, int len,
         return true;
 
     case 0x04:
-        /* Run command. Bit 0 streams EP6; the other bits select the bandscope
-         * and disable the radio's own watchdog, neither of which applies here. */
+        /* Run command. Bit 0 streams EP6 and bit 7 disables the watchdog.
+         * Bit 1, the bandscope, does not apply here. */
         if (len >= 4) {
-            if (buf[3] & 0x01)
-                p1_start(sock, from);
+            if (buf[3] & P1_RUN_IQ)
+                p1_start(sock, from, (buf[3] & P1_RUN_NO_WD) != 0);
             else
                 p1_stop();
         }
@@ -383,6 +447,7 @@ void p1_send_packet(struct rcvr_cb *rcb)
     const int sock = p1_sock;
     const struct sockaddr_in to = p1_client;
     const unsigned int seq = p1_tx_seq++;
+    const float gain = p1_gain;
     pthread_mutex_unlock(&p1_lock);
 
     const float complex *iq = &rcb->iqSamples[rcb->iqSample_offset];
@@ -412,8 +477,8 @@ void p1_send_packet(struct rcvr_cb *rcb)
              * wire is a conjugation, which un-mirrors the spectrum. Exactly
              * what load_packet does for protocol 2, and confirmed there on air.
              */
-            p1_put24(round,     (int)cimagf(iq[sample]));
-            p1_put24(round + 3, (int)crealf(iq[sample]));
+            p1_put24(round,     (int)(cimagf(iq[sample]) * gain));
+            p1_put24(round + 3, (int)(crealf(iq[sample]) * gain));
             round[6] = 0;   /* mic / VNA word, silent on a receive-only bridge */
             round[7] = 0;
             round += P1_ROUND_BYTES;

@@ -640,6 +640,25 @@ t('ECSS blocking does not change the output', () => {
     assert.ok(worst < 1e-4, `blocking changed the output by ${worst}`);
 });
 
+t('a wide ECSS sideband stops at the stream\'s edge, wherever the carrier is found', () => {
+    // 6 kHz of USB on a carrier found 250 Hz above the offset would reach
+    // +6.25 kHz, and in a complex stream +6.2 kHz *is* -5.8 kHz: a tone at the
+    // far edge would come out as a 5.95 kHz whistle. The filter has to be
+    // trimmed to the room there actually is.
+    const tone1k = (tSec) => 0.5 * Math.cos(2 * Math.PI * 1000 * tSec);
+    const farEdge = (tSec) => phasor(0.2, 2 * Math.PI * -5800 * tSec);
+    const plan = ecssPlan({ sideband: 'usb', widthHz: 6000 });
+    const { out, log } = runEcss(plan, station({ carrierHz: 250, modulation: tone1k, plus: farEdge }), 3);
+    assert.ok(LOCKED(log[log.length - 1]), 'did not lock');
+    const tail = tailOf(out, 1.5);
+    assert.ok(amplitudeAt(tail, 1000) > 0.07, 'the programme was lost');
+    assert.ok(amplitudeAt(tail, 5950) < 2e-3,
+        `the far edge wrapped into the audio at ${amplitudeAt(tail, 5950).toFixed(4)}`);
+
+    // And 6 kHz is on offer, since it is the whole of one side of the stream.
+    assert.ok(DEMOD_MODES.find((m) => m.id === 'ecss').widths.includes(6000), 'no 6 kHz preset');
+});
+
 t('ECSS settings: sideband, window and offset limits', () => {
     fresh({ mode: 'ecss' });
     assert.strictEqual(vfo0().sideband, 'auto', 'Auto is the default');

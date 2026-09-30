@@ -61,6 +61,16 @@ export const ECSS_LOW_EDGE = 100;
 // point, and a 400 Hz skirt would let the first 200 Hz of it through.
 export const ECSS_TRANSITION = 150;
 
+// How far inside the stream's edge a sideband filter's nominal edge must stop,
+// so its skirt does too. Half the transition: the skirt runs that far past the
+// nominal edge.
+const EDGE_GUARD = ECSS_TRANSITION / 2;
+// Effective widths are rounded down to this, so a carrier drifting by a hertz
+// does not redesign a filter every packet.
+const WIDTH_QUANTUM = 25;
+// And never trimmed below this, however near the edge the carrier sits.
+const WIDTH_FLOOR = 300;
+
 // The tracking window: how far from the offset the carrier may be found, and
 // followed. The default suits a click on the picture at the usual zoom; the
 // ceiling is below half the tightest broadcast spacing (9 kHz) by a wide margin,
@@ -193,20 +203,44 @@ class SidebandFilter {
         this.bufI = null;
         this.bufQ = null;
         this.pos = 0;
+        this.taps = null;
+        this.widthHz = 0;
+        this.rate = 0;
+        this.step = 0;
+        this.phase = 0;
+        this.dc = 1;
+        this.ds = 0;
     }
 
-    size(n) {
-        if (n === this.n) return;
-        this.n = n;
-        this.bufI = new Float32Array(n * 2);
-        this.bufQ = new Float32Array(n * 2);
-        this.pos = 0;
+    /**
+     * Shape the filter for a sideband `widthHz` wide. Redesigned only when the
+     * width or rate actually change. The delay line survives, since the tap
+     * count depends on the fixed transition alone.
+     */
+    fit(widthHz, rate, design) {
+        if (widthHz === this.widthHz && rate === this.rate && this.taps) return;
+        this.widthHz = widthHz;
+        this.rate = rate;
+        this.taps = design((widthHz - ECSS_LOW_EDGE) / 2, ECSS_TRANSITION);
+        const n = this.taps.length;
+        if (n !== this.n) {
+            this.n = n;
+            this.bufI = new Float32Array(n * 2);
+            this.bufQ = new Float32Array(n * 2);
+            this.pos = 0;
+        }
+        // The centre, and the constant that undoes the filter's delay.
+        this.step = (TWO_PI * ((ECSS_LOW_EDGE + widthHz) / 2)) / rate;
+        const delay = (n - 1) / 2;
+        this.dc = Math.cos(this.step * delay);
+        this.ds = Math.sin(this.step * delay);
     }
 
     reset() {
         if (this.bufI) this.bufI.fill(0);
         if (this.bufQ) this.bufQ.fill(0);
         this.pos = 0;
+        this.phase = 0;
     }
 }
 
@@ -222,7 +256,7 @@ export class EcssTracker {
         this.rate = 0;
         this.centreHz = null;
         this.plan = null;
-        this.taps = null;
+        this.design = null;
         this.usb = new SidebandFilter();
         this.lsb = new SidebandFilter();
         this.searchN = 0;
@@ -268,7 +302,6 @@ export class EcssTracker {
         this.candidate = 0;
         this.searchFill = 0;
         this.lastPeak = null;
-        this.bandPhase = 0;
         this.usb.reset();
         this.lsb.reset();
         this.side = 'usb';
@@ -298,14 +331,16 @@ export class EcssTracker {
     }
 
     /**
-     * Point the tracker at a plan, with the sideband filters the chain designed.
+     * Point the tracker at a plan. `design(cutoffHz, transitionHz)` is the
+     * chain's low-pass designer, so both sidebands' filters are built the same
+     * way every other mode's is.
      *
      * The carrier is held in absolute terms across an offset change: moving the
      * offset by Δ moves the loop's correction by -Δ, so a drag across a station
      * keeps it locked until the station has left the tracking window — which is
      * what tuning near a carrier should feel like.
      */
-    configure(plan, rate, taps) {
+    configure(plan, rate, design) {
         const rateChanged = this.rate !== rate;
         if (!rateChanged && this.centreHz != null && plan.centreHz !== this.centreHz) {
             const moved = (TWO_PI * (plan.centreHz - this.centreHz)) / rate;
@@ -321,9 +356,8 @@ export class EcssTracker {
         this.rate = rate;
         this.centreHz = plan.centreHz;
         this.plan = plan;
-        this.taps = taps;
-        this.usb.size(taps.length);
-        this.lsb.size(taps.length);
+        this.design = design;
+        this._fit();
         const n = 2 ** Math.max(8, Math.round(Math.log2(rate / SEARCH_RES_HZ)));
         if (n !== this.searchN) {
             this.searchN = n;
@@ -343,6 +377,30 @@ export class EcssTracker {
             this._search();
             this.freq = this.commit;
         }
+    }
+
+    /**
+     * Trim each sideband to the room the stream has for it.
+     *
+     * The filters hang off the carrier the tracker found, not off the offset,
+     * so a wide sideband above a carrier found high in the window can run past
+     * the top of the stream. What lies past the edge of a complex stream is not
+     * nothing: it is the *other* edge, wrapped round, so the top of the audio
+     * would be whatever is sitting at the far side of the twelve kilohertz.
+     * Each side is given the width asked for or the room there is, whichever is
+     * less.
+     */
+    _fit() {
+        const rate = this.rate;
+        const ref = this.locked ? this.freq : this.commit;
+        const at = this.centreHz + (ref * rate) / TWO_PI;
+        const room = (side) => {
+            const free = rate / 2 - EDGE_GUARD - side * at;
+            const w = Math.min(this.plan.widthHz, free);
+            return Math.max(WIDTH_FLOOR, Math.floor(w / WIDTH_QUANTUM) * WIDTH_QUANTUM);
+        };
+        this.usb.fit(room(1), rate, this.design);
+        this.lsb.fit(room(-1), rate, this.design);
     }
 
     _range() {
@@ -365,8 +423,7 @@ export class EcssTracker {
      */
     process(planeI, planeQ, frames, out, pow) {
         const rate = this.rate;
-        const taps = this.taps;
-        const n = taps.length;
+        this._fit();
         const w0 = (TWO_PI * this.centreHz) / rate;
         const range = this._range();
         const maxFreq = (TWO_PI * range * 1.2) / rate;
@@ -383,22 +440,17 @@ export class EcssTracker {
         const lossConfirm = Math.round(rate * LOSS_CONFIRM_SEC);
         const fadeGiveUp = Math.round(rate * FADE_GIVE_UP_SEC);
 
-        // The sideband filters' centre and the constant that undoes their delay.
-        const edge = ECSS_LOW_EDGE;
-        const bandHz = (edge + this.plan.widthHz) / 2;
-        const bandStep = (TWO_PI * bandHz) / rate;
-        const delay = (n - 1) / 2;
-        const dc = Math.cos(bandStep * delay);
-        const ds = Math.sin(bandStep * delay);
-
         const auto = this.plan.sideband !== 'usb' && this.plan.sideband !== 'lsb';
         const U = this.usb;
         const L = this.lsb;
-        const uI = U.bufI; const uQ = U.bufQ;
-        const lI = L.bufI; const lQ = L.bufQ;
+        const uI = U.bufI; const uQ = U.bufQ; const uT = U.taps;
+        const lI = L.bufI; const lQ = L.bufQ; const lT = L.taps;
+        const n = U.n;
+        let uPh = U.phase;
+        let lPh = L.phase;
 
         let { phase, freq, c1i, c1q, c2i, c2q, lockRe, lockMag, fast, slow } = this;
-        let { timer, fading, acqAge, bandPhase, sideMix, audioPhase, commit } = this;
+        let { timer, fading, acqAge, sideMix, audioPhase, commit } = this;
         let pos = U.pos;
         // Back to searching, with the loop put back on the last good carrier
         // (or the offset, if there has not been one) — `keep` leaves it where
@@ -525,51 +577,54 @@ export class EcssTracker {
                 audioPhase += w0 + commit;
             }
 
-            // 4 — the two sidebands. Each is rotated to DC, low-passed and
-            // rotated back.
-            const bc = Math.cos(bandPhase);
-            const bs = Math.sin(bandPhase);
-            bandPhase += bandStep;
-            // Rotated back by the phase the sample went in with: e^(±jθ(k-D)).
-            const oc = bc * dc + bs * ds;
-            const os = bs * dc - bc * ds;
-
+            // 4 — the two sidebands. Each is rotated so its centre sits at DC,
+            // low-passed, and rotated back by the phase the sample went in with.
             // Both delay lines are always fed, so either can be switched to
             // without a filter refilling; only the audible one is convolved.
-            const wantU = sideMix < 1;
-            const wantL = sideMix > 0;
+            const uc = Math.cos(uPh);
+            const us = Math.sin(uPh);
+            uPh += U.step;
+            const lc = Math.cos(lPh);
+            const ls = Math.sin(lPh);
+            lPh += L.step;
 
             // USB: a · e^(-jθ) in, · e^(+jθ) out.
-            const ui = ai * bc + aq * bs;
-            const uq = aq * bc - ai * bs;
+            const ui = ai * uc + aq * us;
+            const uq = aq * uc - ai * us;
             uI[pos] = ui; uI[pos + n] = ui;
             uQ[pos] = uq; uQ[pos + n] = uq;
             // LSB: a · e^(+jθ) in, · e^(-jθ) out.
-            const li = ai * bc - aq * bs;
-            const lq = aq * bc + ai * bs;
+            const li = ai * lc - aq * ls;
+            const lq = aq * lc + ai * ls;
             lI[pos] = li; lI[pos + n] = li;
             lQ[pos] = lq; lQ[pos + n] = lq;
             pos = pos + 1 === n ? 0 : pos + 1;
 
             let yU = 0; let pU = 0;
             let yL = 0; let pL = 0;
-            if (wantU) {
+            if (sideMix < 1) {
                 let fi = 0; let fq = 0;
                 for (let t = 0; t < n; t++) {
-                    const h = taps[t];
+                    const h = uT[t];
                     fi += h * uI[pos + t];
                     fq += h * uQ[pos + t];
                 }
+                // e^(+jθ(k-D)).
+                const oc = uc * U.dc + us * U.ds;
+                const os = us * U.dc - uc * U.ds;
                 yU = fi * oc - fq * os;
                 pU = fi * fi + fq * fq;
             }
-            if (wantL) {
+            if (sideMix > 0) {
                 let fi = 0; let fq = 0;
                 for (let t = 0; t < n; t++) {
-                    const h = taps[t];
+                    const h = lT[t];
                     fi += h * lI[pos + t];
                     fq += h * lQ[pos + t];
                 }
+                // e^(-jθ(k-D)).
+                const oc = lc * L.dc + ls * L.ds;
+                const os = ls * L.dc - lc * L.ds;
                 yL = fi * oc + fq * os;
                 pL = fi * fi + fq * fq;
             }
@@ -603,7 +658,8 @@ export class EcssTracker {
         this.commit = commit;
         this.clock += frames;
         if (this.rejects.length) this.rejects = this.rejects.filter((r) => r.until > this.clock);
-        this.bandPhase = bandPhase % TWO_PI;
+        U.phase = uPh % TWO_PI;
+        L.phase = lPh % TWO_PI;
         this.freq = freq;
         this.c1i = c1i; this.c1q = c1q;
         this.c2i = c2i; this.c2q = c2q;
@@ -680,7 +736,9 @@ export class EcssTracker {
         const den = a - 2 * b + c;
         const frac = den < 0 ? clamp((0.5 * (a - c)) / den, -0.5, 0.5) : 0;
         const hz = here + (bestK + frac) * bin;
-        return Math.abs(hz) <= range ? hz : null;
+        // Half a bin of grace: a carrier on the very edge of the window is
+        // interpolated to a hair either side of it.
+        return Math.abs(hz) <= range + bin / 2 ? hz : null;
     }
 
     /** One block of sideband statistics, and the decision they feed. */
@@ -698,7 +756,10 @@ export class EcssTracker {
         const blockSec = N / this.rate;
         const a = 1 - Math.exp(-blockSec / SIDE_AVERAGE_SEC);
         const k0 = Math.max(1, Math.ceil((ECSS_LOW_EDGE + ECSS_TRANSITION) / bin));
-        const k1 = Math.min(N / 2 - 1, Math.floor(this.plan.widthHz / bin));
+        // Over the width both sidebands actually have, so a side trimmed at
+        // the stream's edge is not read as having lost its top to a fade.
+        const shared = Math.min(this.usb.widthHz, this.lsb.widthHz);
+        const k1 = Math.min(N / 2 - 1, Math.floor(shared / bin));
         let exU = 0;
         let exL = 0;
         let common = 0;

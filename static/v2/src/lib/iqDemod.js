@@ -135,8 +135,9 @@ export const DEMOD_MODES = [
         id: 'ecss',
         label: 'ECSS',
         summary: 'Exalted-carrier SSB — AM tracked by its carrier, heard on one sideband.',
-        // Per sideband, so 4.5 kHz is the audio a broadcast actually carries.
-        widths: [2700, 3500, 4500, 5000],
+        // Per sideband, so 4.5 kHz is the audio a broadcast actually carries
+        // and 6 kHz the whole of one side of the stream.
+        widths: [2700, 3500, 4500, 5000, 6000],
         min: 1000,
         max: 6000,
         fallback: 4500,
@@ -572,7 +573,7 @@ export class DemodChain {
             // fresh search, not the tail of a carrier found some time ago.
             if (!this.ecss) this.ecss = new EcssTracker();
             if (entering) this.ecss.reset();
-            this.ecss.configure(plan, rate, this.taps);
+            this.ecss.configure(plan, rate, (cutoffHz, transitionHz) => designLowpass(cutoffHz, rate, transitionHz));
             return;
         }
         const n = this.taps.length;

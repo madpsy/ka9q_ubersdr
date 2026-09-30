@@ -45,8 +45,8 @@ namespace {
 
     // Reduced-depth choices, lossless first. The index is what the menu keeps.
     const int kMargins[] = { 0, 60, 50, 40, 30, 26, 20, 15, 10 };
-    const char* kMarginText = "Lossless\0" "60 dB (near lossless)\0" "50 dB\0" "40 dB\0" "30 dB\0"
-                              "26 dB\0" "20 dB\0" "15 dB\0" "10 dB (default)\0";
+    const char* kMarginText = "Lossless\0" "60 dB\0" "50 dB\0" "40 dB\0" "30 dB\0"
+                              "26 dB (near lossless)\0" "20 dB\0" "15 dB\0" "10 dB (default)\0";
     const int kMarginCount = sizeof(kMargins) / sizeof(kMargins[0]);
 
     int marginIndex(int db) {
@@ -563,6 +563,9 @@ private:
             marginDB = kMargins[std::clamp(mi, 0, kMarginCount - 1)];
             saveServerPrefs();
             if (running) { session.setMinMargin(marginDB); }
+        }
+        if (marginDB == 0 || marginDB > 26) {
+            SmGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "Above 26 dB is likely a waste of bandwidth");
         }
 
         drawStatus();

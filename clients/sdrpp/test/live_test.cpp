@@ -68,10 +68,14 @@ int main(int argc, char** argv) {
     dsp::stream<dsp::complex_t> stream;
     std::atomic<long long> samples{ 0 };
     std::atomic<double> sumsq{ 0 };
+    // LIVE_DUMP=<file> writes the samples as SDR++ receives them (interleaved
+    // float32 I/Q) for offline analysis.
+    FILE* dump = getenv("LIVE_DUMP") ? fopen(getenv("LIVE_DUMP"), "wb") : NULL;
     std::thread reader([&] {
         for (;;) {
             int n = stream.read();
             if (n < 0) { break; }
+            if (dump) { fwrite(stream.readBuf, sizeof(dsp::complex_t), n, dump); }
             double s = 0;
             for (int i = 0; i < n; i++) { s += stream.readBuf[i].re * stream.readBuf[i].re + stream.readBuf[i].im * stream.readBuf[i].im; }
             sumsq = sumsq + s;
@@ -86,7 +90,7 @@ int main(int argc, char** argv) {
     p.password = password;
     p.sessionId = newSessionId();
     p.mode = mode;
-    p.frequency = 7074000;
+    p.frequency = getenv("LIVE_FREQ") ? atof(getenv("LIVE_FREQ")) : 7074000;
     p.minFreq = info.minFreq;
     p.maxFreq = info.maxFreq;
     p.minMarginDB = margin;
@@ -98,8 +102,8 @@ int main(int argc, char** argv) {
     auto t0 = std::chrono::steady_clock::now();
     for (int i = 0; i < seconds; i++) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
-        if (i == seconds / 3) { session.tune(14074000); }
-        if (i == (2 * seconds) / 3) { session.setMinMargin(margin == 0 ? 26 : 0); }
+        if (!dump && i == seconds / 3) { session.tune(14074000); }
+        if (!dump && i == (2 * seconds) / 3) { session.setMinMargin(margin == 0 ? 26 : 0); }
         auto st = session.status();
         printf("t=%d state=%d %.0f kB/s shift=%d %s\n", i, (int)st.state, st.kbytesPerSec, st.shift, st.message.c_str());
     }
@@ -109,6 +113,7 @@ int main(int argc, char** argv) {
     session.stop();
     stream.stopReader();
     reader.join();
+    if (dump) { fclose(dump); }
 
     const IQMode* m = findIQMode(mode);
     double want = m ? m->sampleRate : 0;

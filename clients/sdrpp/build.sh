@@ -270,9 +270,9 @@ test_linux() {
     root="$(mktemp -d)"
     echo "  -- $f"
     rc=0
-    LD_LIBRARY_PATH="$lib" timeout 90 "$tb/host_test" "$OUT/linux-x86_64/ubersdr_source.so" "$root" \
+    HOST_TEST_CLICK=1 LD_LIBRARY_PATH="$lib" timeout 120 "$tb/host_test" "$OUT/linux-x86_64/ubersdr_source.so" "$root" \
         "$TEST_SERVER" "$TEST_MODE" 5 > "$root/log.txt" 2>&1 || rc=$?
-    grep -E "registering|fft frames|PASS|FAIL|teardown" "$root/log.txt" | sed 's/^/    /'
+    grep -E "registering|click sweep|Assert|fft frames|PASS|FAIL|teardown" "$root/log.txt" | sed 's/^/    /'
     [ "$rc" = 0 ] || fail "linux $f host test (exit $rc)"
     rm -rf "$root"
   done
@@ -302,9 +302,9 @@ test_windows() {
     cp "$OUT/windows/ubersdr_source.dll" "$out/host_test.exe" "$run/"
     echo "  -- $f"
     rc=0
-    ( cd "$run" && timeout 120 wine host_test.exe "Z:$(echo "$run/ubersdr_source.dll" | tr / '\\')" \
+    ( cd "$run" && HOST_TEST_CLICK=1 timeout 180 wine host_test.exe "Z:$(echo "$run/ubersdr_source.dll" | tr / '\\')" \
         "Z:$(echo "$run/root" | tr / '\\')" "$TEST_SERVER" "$TEST_MODE" 5 > log.txt 2>&1 ) || rc=$?
-    grep -E "registering|fft frames|PASS|FAIL|teardown" "$run/log.txt" | sed 's/^/    /'
+    grep -E "registering|click sweep|Assert|fft frames|PASS|FAIL|teardown" "$run/log.txt" | sed 's/^/    /'
     [ "$rc" = 0 ] || fail "windows $f host test (exit $rc)"
   done
 }
@@ -332,8 +332,8 @@ test_mac() {
         && \$C --build build-test-$f --target host_test -j8 >/dev/null 2>&1 \
         && rm -rf q && mkdir -p q/root && cp build/ubersdr_source.dylib q/ \
         && xattr -w com.apple.quarantine '0083;00000000;Safari;' q/ubersdr_source.dylib \
-        && DYLD_LIBRARY_PATH=\$F ./build-test-$f/host_test \$PWD/q/ubersdr_source.dylib \$PWD/q/root '$TEST_SERVER' '$TEST_MODE' 5 2>&1 \
-           | grep -E 'registering|fft frames|PASS|FAIL|teardown|rror'" \
+        && HOST_TEST_CLICK=1 DYLD_LIBRARY_PATH=\$F ./build-test-$f/host_test \$PWD/q/ubersdr_source.dylib \$PWD/q/root '$TEST_SERVER' '$TEST_MODE' 5 2>&1 \
+           | grep -E 'registering|click sweep|Assert|fft frames|PASS|FAIL|teardown|rror'" \
       || fail "macos $f host test"
   done
 }

@@ -439,7 +439,13 @@ private:
 
         // Everything that picks the receiver or how to reach it is fixed while
         // streaming; quality stays live.
-        if (running) { SmGui::BeginDisabled(); }
+        //
+        // Each Begin/EndDisabled pair tests a copy taken once, never the live
+        // flag: the widgets between them can change it (Connect sets probeBusy),
+        // and a pair that disagrees pops ImGui's item-flag stack past its base,
+        // which aborts SDR++.
+        const bool locked = running;
+        if (locked) { SmGui::BeginDisabled(); }
 
         SmGui::LeftLabel("Receivers");
         SmGui::FillWidth();
@@ -521,11 +527,12 @@ private:
 
         SmGui::FillWidth();
         SmGui::ForceSync();
-        if (probeBusy) { SmGui::BeginDisabled(); }
-        if (SmGui::Button(CONCAT(probeBusy ? "Connecting...##_ubersdr_probe_" : "Connect##_ubersdr_probe_", name))) {
+        const bool probing = probeBusy;
+        if (probing) { SmGui::BeginDisabled(); }
+        if (SmGui::Button(CONCAT(probing ? "Connecting...##_ubersdr_probe_" : "Connect##_ubersdr_probe_", name))) {
             probe();
         }
-        if (probeBusy) { SmGui::EndDisabled(); }
+        if (probing) { SmGui::EndDisabled(); }
 
         SmGui::LeftLabel("Samplerate");
         SmGui::FillWidth();
@@ -537,7 +544,7 @@ private:
             }
         }
 
-        if (running) { SmGui::EndDisabled(); }
+        if (locked) { SmGui::EndDisabled(); }
 
         SmGui::LeftLabel("Quality");
         SmGui::FillWidth();

@@ -39,8 +39,15 @@ static void releaseFFT(void*) {
     fftFrames++;
 }
 
-static void drawMenuFrame() {
+// The menu is drawn in a fixed window so that simulated clicks land on it.
+static void drawMenuFrame(float mx = -1, float my = -1, bool down = false) {
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.MousePos = ImVec2(mx, my);
+    io.MouseDown[0] = down;
     ImGui::NewFrame();
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(400, 700));
     ImGui::Begin("source");
     sigpath::sourceManager.showSelectedMenu();
     ImGui::End();
@@ -55,9 +62,13 @@ int main(int argc, char** argv) {
     std::string modPath = argv[1], root = argv[2], url = argv[3], mode = argv[4];
     int seconds = argc > 5 ? atoi(argv[5]) : 5;
 
+    // HOST_TEST_DIRECTORY=1 picks the receiver from the public directory
+    // instead of typing it, which is what exercises the directory menu.
+    bool fromDirectory = getenv("HOST_TEST_DIRECTORY") != NULL;
     {
         std::ofstream cfg(root + "/ubersdr_source_config.json");
-        cfg << "{\"source\":2,\"manualUrl\":\"" << url << "\",\"selectedUrl\":\"\",\"verifyTls\":true,"
+        cfg << "{\"source\":" << (fromDirectory ? 0 : 2) << ",\"manualUrl\":\"" << (fromDirectory ? "" : url)
+            << "\",\"selectedUrl\":\"" << (fromDirectory ? url : "") << "\",\"verifyTls\":true,"
             << "\"servers\":{\"" << url << "\":{\"mode\":\"" << mode << "\",\"minMargin\":10,\"password\":\"\"}}}";
     }
 
@@ -96,7 +107,37 @@ int main(int argc, char** argv) {
     if (!found) { return 1; }
 
     sigpath::sourceManager.selectSource("UberSDR");
-    for (int i = 0; i < 3; i++) { drawMenuFrame(); }
+    // Draw for a while before starting, as a person would: the directory
+    // loads in the background and the menu must survive every state of it.
+    for (int i = 0; i < (fromDirectory ? 60 : 3); i++) {
+        drawMenuFrame();
+        if (fromDirectory) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    }
+
+    // Click everywhere in the menu, a press and a release per point, the way a
+    // person pokes at it: every button (Connect, Refresh), combo and checkbox
+    // gets hit, and a Begin/EndDisabled pair that a click can unbalance aborts
+    // the core's ImGui right here. Then close whatever popup is left open.
+    bool clickOk = true;
+    if (getenv("HOST_TEST_CLICK")) {
+        for (float y = 5; y < 400; y += 9) {
+            for (float x = 30; x < 400; x += 120) {
+                drawMenuFrame(x, y, true);
+                drawMenuFrame(x, y, false);
+            }
+        }
+        drawMenuFrame(390, 690, true);
+        drawMenuFrame(390, 690, false);
+        for (int i = 0; i < 100; i++) {
+            drawMenuFrame();
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        std::ifstream cfg(root + "/ubersdr_source_config.json");
+        std::string all((std::istreambuf_iterator<char>(cfg)), std::istreambuf_iterator<char>());
+        bool connected = all.find("\"servers\": {}") == std::string::npos && all.find("\"servers\":{}") == std::string::npos;
+        printf("click sweep: survived, Connect %s\n", connected ? "answered" : "never answered");
+        clickOk = connected;
+    }
 
     sigpath::iqFrontEnd.start();
     sigpath::sourceManager.tune(7074000);
@@ -113,7 +154,7 @@ int main(int argc, char** argv) {
     sigpath::iqFrontEnd.stop();
 
     printf("fft frames: %d in %ds, peak %.1f dB\n", frames, seconds, peak);
-    bool ok = frames >= seconds * 10 && peak > -200;
+    bool ok = frames >= seconds * 10 && peak > -200 && clickOk;
     printf("%s\n", ok ? "PASS" : "FAIL");
     fflush(stdout);
 

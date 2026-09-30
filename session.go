@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -193,6 +194,16 @@ type Session struct {
 	// Audio extension tap (for streaming audio to background processors)
 	audioExtensionChan chan AudioSample
 	audioExtensionMu   sync.RWMutex
+
+	// retuneFollower, when set, is told this session's new dial frequency
+	// after every retune that moves it. An audio extension with a private
+	// channel of its own uses it to keep that channel on the frequency the
+	// listener is tuned to; see private_iq_channel.go. retuneFollowerGen
+	// identifies the installation, so that clearing never has to compare
+	// interface values (which panics for a non-comparable dynamic type).
+	// Both protected by mu.
+	retuneFollower    retuneFollower
+	retuneFollowerGen uint64
 
 	// DSP noise-reduction insert.
 	// Non-nil when the client has enabled the DSP insert for this session.
@@ -556,6 +567,22 @@ func (sm *SessionManager) checkSessionCreateRate(kind, userSessionID, clientIP, 
 	return fmt.Errorf("too many session attempts; please wait a moment before reconnecting")
 }
 
+// radiodChannelCapReachedLocked reports how many radiod channels are in use,
+// and whether that is at maxRadiodChannels. The shared default spectrum channel
+// counts as 1 radiod channel now, but each subscriber could create a private
+// channel the moment they zoom/pan, so (sharedSubscribers - 1) is added to
+// reserve capacity for that worst-case expansion. Caller holds sm.mu.
+func (sm *SessionManager) radiodChannelCapReachedLocked() (int, bool) {
+	currentChannels := len(sm.radiod.GetAllChannelStatus())
+	if sm.sharedDefaultChan != nil && sm.sharedDefaultChan.active {
+		extra := len(sm.sharedDefaultChan.subscribers) - 1
+		if extra > 0 {
+			currentChannels += extra
+		}
+	}
+	return currentChannels, currentChannels >= maxRadiodChannels
+}
+
 // CreateSession creates a new session with a unique channel (default bandwidth)
 func (sm *SessionManager) CreateSession(frequency uint64, mode string) (*Session, error) {
 	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, "", "", "") // Default 3000 Hz bandwidth
@@ -611,14 +638,7 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	// add (sharedSubscribers - 1) to the current count to reserve capacity for that
 	// worst-case expansion.
 	if clientIP != "" {
-		currentChannels := len(sm.radiod.GetAllChannelStatus())
-		if sm.sharedDefaultChan != nil && sm.sharedDefaultChan.active {
-			extra := len(sm.sharedDefaultChan.subscribers) - 1
-			if extra > 0 {
-				currentChannels += extra
-			}
-		}
-		if currentChannels >= maxRadiodChannels {
+		if currentChannels, full := sm.radiodChannelCapReachedLocked(); full {
 			return nil, fmt.Errorf("radiod channel limit reached (%d/%d); try again later",
 				currentChannels, maxRadiodChannels)
 		}
@@ -936,14 +956,7 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	// add (sharedSubscribers - 1) to the current count to reserve capacity for that
 	// worst-case expansion.
 	if clientIP != "" {
-		currentChannels := len(sm.radiod.GetAllChannelStatus())
-		if sm.sharedDefaultChan != nil && sm.sharedDefaultChan.active {
-			extra := len(sm.sharedDefaultChan.subscribers) - 1
-			if extra > 0 {
-				currentChannels += extra
-			}
-		}
-		if currentChannels >= maxRadiodChannels {
+		if currentChannels, full := sm.radiodChannelCapReachedLocked(); full {
 			return nil, fmt.Errorf("radiod channel limit reached (%d/%d); try again later",
 				currentChannels, maxRadiodChannels)
 		}
@@ -1942,7 +1955,58 @@ func (sm *SessionManager) UpdateSessionChannel(sessionID string, frequency uint6
 		return fmt.Errorf("failed to update radiod channel: %w", err)
 	}
 
+	// Every audio retune, from every client, comes through here, so this is
+	// the one place a follower has to be told.
+	if currentFreq != oldFreq {
+		session.mu.RLock()
+		follower := session.retuneFollower
+		session.mu.RUnlock()
+		if follower != nil {
+			notifyRetuneFollower(follower, currentFreq)
+		}
+	}
+
 	return nil
+}
+
+// notifyRetuneFollower calls the follower on the retuning goroutine -- a
+// listener's socket loop -- so whatever the follower does wrong must end here
+// rather than take that goroutine, or the server, with it.
+func notifyRetuneFollower(follower retuneFollower, frequency uint64) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Retune follower panicked (recovered): %v\n%s", r, debug.Stack())
+		}
+	}()
+	follower.followRetune(frequency)
+}
+
+// retuneFollower tracks a session's dial frequency. followRetune is called
+// after each retune that moves the session, from whichever goroutine made it,
+// so it must not block.
+type retuneFollower interface {
+	followRetune(frequency uint64)
+}
+
+// setRetuneFollower installs f to be told of this session's retunes, replacing
+// any other, and returns the generation to clear it by.
+func (s *Session) setRetuneFollower(f retuneFollower) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retuneFollowerGen++
+	s.retuneFollower = f
+	return s.retuneFollowerGen
+}
+
+// clearRetuneFollower removes the follower installed as generation gen, if it
+// is still the one installed. A follower that has since been replaced is left
+// alone.
+func (s *Session) clearRetuneFollower(gen uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if gen != 0 && s.retuneFollowerGen == gen {
+		s.retuneFollower = nil
+	}
 }
 
 // UpdateAGC updates AGC parameters for an existing session.

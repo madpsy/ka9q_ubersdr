@@ -5,7 +5,7 @@
 // code, so it has to be in place before anything that leads there. Same rule as
 // drmpanel.entry.js.
 import { deep, render, reset, walk, words } from './hookStub.js';
-import IQPanel, { ListeningCard, VFO_FALLBACK, vfoSummary } from '../src/panels/IQPanel.jsx';
+import IQPanel, { ListeningCard, VFO_FALLBACK, ecssReport, vfoSummary } from '../src/panels/IQPanel.jsx';
 import { PANEL_BY_ID } from '../src/panels/registry.jsx';
 import { GROUPS } from '../src/panels/groups.jsx';
 import {
@@ -15,6 +15,7 @@ import {
 } from '../src/lib/iqSpectrum.js';
 import {
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
+    TRACK_DEFAULT, TRACK_MAX, TRACK_MIN, clampTrack,
     VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
     designLowpass, expandActiveVfo, getIQDemod, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
@@ -27,8 +28,9 @@ module.exports = {
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
     squelchLineDb,
-    IQPanel, ListeningCard, VFO_FALLBACK, vfoSummary, PANEL_BY_ID, GROUPS,
+    IQPanel, ListeningCard, VFO_FALLBACK, ecssReport, vfoSummary, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
+    TRACK_DEFAULT, TRACK_MAX, TRACK_MIN, clampTrack,
     VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
     designLowpass, expandActiveVfo, getIQDemod, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 // AudioExtensionParams contains audio stream parameters (from session, not user-configurable)
@@ -44,6 +45,20 @@ type CrashReporter interface {
 	CrashChan() <-chan error
 }
 
+// AudioExtensionRetuner is an optional interface for extensions with a private
+// channel (AudioExtensionInfo.PrivateIQ). Retune is called each time that
+// channel has followed the listener to a new frequency and settled there, so
+// an extension holding state about the old one — a decoder locked to a
+// station — can drop it. Audio from the new frequency follows the call.
+//
+// It is called on the channel's own goroutine and must not block for long. It
+// can race with Stop, so it must be safe to call on a stopped extension (a
+// write to a closed pipe that fails and is ignored, say), and it must never
+// call back into the manager to detach.
+type AudioExtensionRetuner interface {
+	Retune(frequencyHz uint64)
+}
+
 // AudioExtensionFactory is a function that creates a new extension instance
 type AudioExtensionFactory func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error)
 
@@ -52,6 +67,27 @@ type AudioExtensionInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Version     string `json:"version"`
+
+	// PrivateIQ, when set, is an IQ mode ("iq", "iq48", "iq96", ...) the
+	// extension is given a radiod channel of its own in, on the listener's
+	// frequency and following their retunes, instead of the listener's audio.
+	// The listener is not sent that IQ and needs no permission for the mode.
+	// Empty means the usual tap on the listener's own audio. See
+	// private_iq_channel.go.
+	PrivateIQ string `json:"private_iq,omitempty"`
+
+	// DisplayName is how errors about the extension name it to a listener,
+	// e.g. "HD Radio". Name is used when it is empty.
+	DisplayName string `json:"display_name,omitempty"`
+
+	// RestartCooldown, when set, is the least time between a listener
+	// stopping the extension and starting it again. Enforced by the manager
+	// before anything is created -- a private channel included -- and started
+	// only by stops the listener made (detach, re-attach, closing the socket),
+	// never by ones the server made: after an audio reconnect the client
+	// re-attaches within 1.5 s and must not be refused. FreeDV and Sound
+	// Modem enforce the same inside their own constructors.
+	RestartCooldown time.Duration `json:"-"`
 }
 
 // AudioExtensionRegistry manages available audio extension types
@@ -89,6 +125,14 @@ func (aer *AudioExtensionRegistry) Create(name string, audioParams AudioExtensio
 	}
 
 	return factory(audioParams, extensionParams)
+}
+
+// Info returns the metadata an extension was registered with.
+func (aer *AudioExtensionRegistry) Info(name string) (AudioExtensionInfo, bool) {
+	aer.mu.RLock()
+	defer aer.mu.RUnlock()
+	info, ok := aer.info[name]
+	return info, ok
 }
 
 // List returns information about all registered audio extensions

@@ -2423,7 +2423,8 @@ freedv_extension:
 # Requires the binary at /opt/ubersdr-drm/ubersdr-drm.
 drm_extension:
   # Maximum concurrent users of the DRM extension (default: 5)
-  # Set to 0 for unlimited users (not recommended for public instances).
+  # 0 or unset uses the default; a negative value removes the limit (not
+  # recommended for public instances).
   max_users: 5
 
   # Fetch the DRM broadcast schedule (default: true)
@@ -2446,6 +2447,19 @@ drm_extension:
   #
   # Sources: https://www.drmrx.org  ·  https://drm.kiwisdr.com
   schedule_enabled: true
+
+# ==============================================================================
+# HD Radio Extension Configuration
+# ==============================================================================
+# Controls the HD Radio (NRSC-5) AM decoder. Each user who starts it spawns a
+# dedicated ubersdr-hdradio subprocess and gets a private iq48 radiod channel
+# of its own on their frequency (they are not sent that IQ, and stay in their
+# own mode). Requires the binary at /opt/ubersdr-hdradio/.
+hdradio_extension:
+  # Maximum concurrent users of the HD Radio extension (default: 10)
+  # 0 or unset uses the default; a negative value removes the limit (not
+  # recommended for public instances).
+  max_users: 10
 
 # ==============================================================================
 # Sound Modem Extension Configuration

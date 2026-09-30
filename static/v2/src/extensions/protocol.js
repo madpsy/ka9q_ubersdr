@@ -29,6 +29,9 @@ export const STATUS = 'audio_extension_status';
 export const ATTACHED = 'audio_extension_attached';
 export const DETACHED = 'audio_extension_detached';
 export const ERROR = 'audio_extension_error';
+// An extension with a private channel (hdradio) has followed the listener to a
+// new frequency and settled there; see private_iq_channel.go on the server.
+export const RETUNED = 'audio_extension_retuned';
 
 export function attachMessage(name, params) {
     const msg = { type: ATTACH, extension_name: name };
@@ -97,7 +100,7 @@ export function isTransientAttachError(message) {
 /**
  * Normalise a control reply into { kind, name, error }.
  *
- * `kind` is one of 'attached' | 'detached' | 'error' | 'status', or null for a
+ * `kind` is one of 'attached' | 'detached' | 'error' | 'status' | 'retuned', or null for a
  * message this client does not act on. The server spells failures two ways —
  * an `audio_extension_error`, or a status with `active: false` — and both mean
  * the same thing to a panel, so they are flattened here rather than in the hook.
@@ -116,6 +119,16 @@ export function extensionEvent(msg) {
                 kind: 'status',
                 name: msg.extension_name || '',
                 active: !!msg.active,
+                error: null,
+            };
+        case RETUNED:
+            // Passed through the hook to the panel's onEvent untouched: the
+            // attachment is unchanged, only what it is listening to.
+            return {
+                kind: 'retuned',
+                name: msg.extension_name || '',
+                frequency: Number(msg.frequency) || 0,
+                blocked: !!msg.blocked,
                 error: null,
             };
         default:

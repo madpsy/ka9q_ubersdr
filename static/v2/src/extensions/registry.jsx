@@ -44,6 +44,7 @@ import WefaxExtension from './wefax/WefaxExtension.jsx';
 import QrssExtension from './qrss/QrssExtension.jsx';
 import FreeDVExtension from './freedv/FreeDVExtension.jsx';
 import DRMExtension from './drm/DRMExtension.jsx';
+import HDRadioExtension from './hdradio/HDRadioExtension.jsx';
 import SstvExtension from './sstv/SstvExtension.jsx';
 import SoundModemExtension from './soundmodem/SoundModemExtension.jsx';
 import WhisperExtension from './whisper/WhisperExtension.jsx';
@@ -175,6 +176,18 @@ export const EXTENSIONS = [
         float: { w: 760, h: 560 },
         minimal: true,
         Component: DRMExtension,
+    },
+    {
+        id: 'hdradio',
+        title: 'HD Radio',
+        icon: <Icon.Antenna />,
+        summary: 'HD Radio on AM — digital audio, programs, now playing, album art and alerts.',
+        requiresAudio: true,
+        // Not needsIQ: the server gives it a private IQ channel of its own, so
+        // it runs in whatever mode the receiver is in, AM usually.
+        float: { w: 640, h: 620 },
+        minimal: true,
+        Component: HDRadioExtension,
     },
     {
         id: 'sstv',

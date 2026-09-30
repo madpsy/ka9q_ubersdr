@@ -35,6 +35,7 @@ import (
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/freedv"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/fsk"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/ft8"
+	"github.com/cwsl/ka9q_ubersdr/audio_extensions/hdradio"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/morse"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/navtex"
 	"github.com/cwsl/ka9q_ubersdr/audio_extensions/olivia"
@@ -2046,6 +2047,44 @@ func main() {
 		},
 	)
 	log.Printf("Registered audio extension: drm v%s", drmInfo["version"].(string))
+
+	// Register HD Radio extension. It is given a private iq48 channel of its
+	// own on the listener's frequency (PrivateIQ), so the listener stays in
+	// their own mode and is never sent the IQ; see private_iq_channel.go.
+	hdradioMaxUsers := config.HDRadioExtension.MaxUsers
+	if hdradioMaxUsers == 0 {
+		hdradioMaxUsers = 10 // default: nrsc5 on AM is light
+	}
+	hdradio.GlobalConfig = &hdradio.GlobalConfigProvider{MaxUsers: hdradioMaxUsers}
+	hdradioInfo := hdradio.GetInfo()
+
+	hdradioFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {
+		ext, err := hdradio.Factory(hdradio.AudioExtensionParams{
+			SampleRate:    audioParams.SampleRate,
+			Channels:      audioParams.Channels,
+			BitsPerSample: audioParams.BitsPerSample,
+		}, extensionParams)
+		if err != nil {
+			return nil, err
+		}
+		return &hdradioExtensionWrapper{ext: ext}, nil
+	}
+
+	audioExtensionRegistry.Register(
+		"hdradio",
+		hdradioFactoryWrapper,
+		AudioExtensionInfo{
+			Name:        hdradioInfo["name"].(string),
+			Description: hdradioInfo["description"].(string),
+			Version:     hdradioInfo["version"].(string),
+			PrivateIQ:   "iq48",
+			DisplayName: "HD Radio",
+			// As FreeDV's: a listener restarting it in a loop would start a
+			// subprocess and a radiod channel each time.
+			RestartCooldown: 2 * time.Second,
+		},
+	)
+	log.Printf("Registered audio extension: hdradio v%s", hdradioInfo["version"].(string))
 
 	// Create audio extension manager (pass receiver locator and CTY database for enrichment)
 	audioExtensionManager := NewAudioExtensionManager(dxClusterWsHandler, sessions, audioExtensionRegistry, receiverLocator, globalCTY)
@@ -7565,6 +7604,66 @@ func (w *drmExtensionWrapper) CrashChan() <-chan error {
 		return cr.CrashChan()
 	}
 	return nil
+}
+
+// hdradioExtensionWrapper wraps an hdradio.AudioExtension to implement
+// main.AudioExtension. Beyond the conversion it forwards the optional
+// interfaces the manager asks the wrapper for -- CrashReporter,
+// AudioExtensionRetuner and SetProgram -- since the manager only ever sees
+// this type, and a method not forwarded here is silently never called.
+type hdradioExtensionWrapper struct {
+	ext hdradio.AudioExtension
+}
+
+func (w *hdradioExtensionWrapper) Start(audioChan <-chan AudioSample, resultChan chan<- []byte) error {
+	inner := make(chan hdradio.AudioSample, cap(audioChan))
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[HD Radio] panic in sample conversion recovered: %v", r)
+			}
+		}()
+		defer close(inner)
+		for sample := range audioChan {
+			inner <- hdradio.AudioSample{
+				PCMData:      sample.PCMData,
+				RTPTimestamp: sample.RTPTimestamp,
+				GPSTimeNs:    sample.GPSTimeNs,
+			}
+		}
+	}()
+	return w.ext.Start(inner, resultChan)
+}
+
+func (w *hdradioExtensionWrapper) Stop() error {
+	return w.ext.Stop()
+}
+
+func (w *hdradioExtensionWrapper) GetName() string {
+	return w.ext.GetName()
+}
+
+// CrashChan implements CrashReporter.
+func (w *hdradioExtensionWrapper) CrashChan() <-chan error {
+	if cr, ok := w.ext.(interface{ CrashChan() <-chan error }); ok {
+		return cr.CrashChan()
+	}
+	return nil
+}
+
+// Retune implements AudioExtensionRetuner.
+func (w *hdradioExtensionWrapper) Retune(frequencyHz uint64) {
+	if r, ok := w.ext.(interface{ Retune(uint64) }); ok {
+		r.Retune(frequencyHz)
+	}
+}
+
+// SetProgram switches program without restarting the decoder.
+func (w *hdradioExtensionWrapper) SetProgram(program int) error {
+	if p, ok := w.ext.(interface{ SetProgram(int) error }); ok {
+		return p.SetProgram(program)
+	}
+	return fmt.Errorf("hdradio extension has an unexpected type %T", w.ext)
 }
 
 // clockExtensionWrapper wraps a clock.AudioExtension to implement main.AudioExtension

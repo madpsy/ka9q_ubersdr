@@ -76,8 +76,8 @@ import {
     newAim, offsetFraction, squelchLineDb,
 } from '../lib/iqSpectrum.js';
 import {
-    DEMOD_MODES, MAX_VFOS, PANS, PITCH_MAX, PITCH_MIN, SQUELCH_MAX, SQUELCH_OFF, VFO_LABELS,
-    addVfo, collapseVfos, demodMode, expandActiveVfo, getIQDemod, offsetLimits, onDemodSettings,
+    DEMOD_MODES, MAX_VFOS, PANS, PITCH_MAX, PITCH_MIN, SIDEBAND_OPTIONS, SQUELCH_MAX, SQUELCH_OFF,
+    TRACK_MAX, TRACK_MIN, VFO_LABELS, addVfo, collapseVfos, demodMode, expandActiveVfo, getIQDemod, offsetLimits, onDemodSettings,
     planForVfo, removeVfo, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo, vfoPassband,
     vfoWidth,
 } from '../lib/iqDemod.js';
@@ -427,7 +427,7 @@ function useIQFrames(player, live, iq, maxFps) {
  * — see the note there about why a complex transform can show the two sides of
  * the dial apart when the audio analyser behind the Audio scope cannot.
  */
-function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, marks }) {
+function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, marks, carriers }) {
     const ref = useRef(null);
     const st = useRef({
         levels: createLevels(),
@@ -441,6 +441,7 @@ function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, ma
     st.current.vfos = vfos;
     st.current.active = active;
     st.current.rate = source.spec.rate;
+    st.current.carriers = carriers || [];
 
     useEffect(() => {
         st.current.levels = createLevels();
@@ -682,6 +683,15 @@ function draw(canvas, s, bins, dt, marks) {
         c.fillText(label, bx + pad, bh / 2);
     };
 
+    // Where each ECSS tracker has actually found its carrier — dashed, in the
+    // demodulator's colour, because it is a measurement rather than a setting
+    // and is usually a few tens of hertz from the marker that was set.
+    const carriers = s.carriers || [];
+    for (let i = 0; i < vfos.length; i++) {
+        if (carriers[i] == null) continue;
+        line(carriers[i], colours[i % colours.length], [2, 2], 1);
+    }
+
     const order = vfos.map((v, i) => i).sort((a, b) => (a === s.active ? 1 : b === s.active ? -1 : 0));
     for (const i of order) {
         const x = xOf(vfos[i].offsetHz);
@@ -744,6 +754,76 @@ export function ListeningCard({ listening, dialHz, limits, onTune }) {
 }
 
 /**
+ * What the ECSS tracker is doing, in words.
+ *
+ * The mode is meant to need no attention, so this is a report rather than a
+ * control: whether there is a carrier, where it is, and which sideband is being
+ * heard — which in Auto is the one thing the operator did not choose and may
+ * want to know.
+ */
+export function ecssReport(ecss, vfo, dialHz) {
+    if (!ecss) return { text: '—', tone: undefined, carrier: null, side: null };
+    const side = ecss.side === 'lsb' ? 'LSB' : 'USB';
+    const carrier = ecss.carrierHz == null ? null : dialHz + vfo.offsetHz + ecss.carrierHz;
+    switch (ecss.state) {
+        case 'locked': return { text: 'Locked', tone: 'good', carrier, side };
+        // Still locked in every sense the audio cares about: the carrier has
+        // faded and the loop is coasting on the frequency it had.
+        case 'hold': return { text: 'Holding', tone: 'ok', carrier, side };
+        case 'acquire': return { text: 'Locking', tone: 'weak', carrier, side };
+        // Plain sideband at the offset until a carrier turns up.
+        default: return { text: 'Searching', tone: 'weak', carrier: null, side };
+    }
+}
+
+/**
+ * ECSS's own controls: which sideband, how far to look for the carrier, and
+ * what the tracker has found.
+ *
+ * Both controls have defaults that are right for a broadcast — Auto, and a
+ * window a click on the picture lands inside — so on arrival the mode works
+ * without either being touched. The window is the one set-once control and
+ * goes in the minimal view with the gain.
+ */
+function EcssControls({ vfo, ecss, dialHz, minimal, set }) {
+    const report = ecssReport(ecss, vfo, dialHz);
+    return (
+        <>
+            <Field
+                label="Sideband"
+                hint={report.side ? `hearing ${report.side}` : undefined}
+            >
+                <Segmented
+                    options={SIDEBAND_OPTIONS}
+                    value={vfo.sideband}
+                    onChange={(sideband) => set({ sideband })}
+                    size="sm"
+                    columns={SIDEBAND_OPTIONS.length}
+                />
+            </Field>
+            <div className="readout-grid">
+                <Readout label="Carrier" value={report.text} tone={report.tone} />
+                <Readout
+                    label="Carrier at"
+                    value={report.carrier == null ? '—' : formatFreqExact(Math.round(report.carrier))}
+                />
+            </div>
+            {!minimal && (
+                <Field label="Tracking range" hint={`±${vfo.trackHz} Hz of the offset`}>
+                    <Slider
+                        value={vfo.trackHz}
+                        min={TRACK_MIN}
+                        max={TRACK_MAX}
+                        step={10}
+                        onChange={(trackHz) => set({ trackHz })}
+                    />
+                </Field>
+            )}
+        </>
+    );
+}
+
+/**
  * One demodulator: its row, and its controls when it is open.
  *
  * The head is a glance and two controls; the body is everything else. Pan and
@@ -758,10 +838,11 @@ export function ListeningCard({ listening, dialHz, limits, onTune }) {
  */
 function VfoRow({
     index, vfo, active, level, signalDb, gateOpen, taps, dialHz, minimal, canRemove, source, armed,
+    ecss,
 }) {
     const mode = demodMode(vfo.mode);
     const width = vfoWidth(vfo);
-    const limits = offsetLimits(vfo.mode, width);
+    const limits = offsetLimits(vfo.mode, width, vfo.sideband);
     const band = vfoPassband(vfo);
     const set = (patch) => updateVfo(index, patch);
     const open = vfo.open !== false;
@@ -990,7 +1071,7 @@ function VfoRow({
                             value={vfo.mode}
                             onChange={(m) => set({ mode: m })}
                             size="sm"
-                            columns={5}
+                            columns={MODE_OPTIONS.length}
                         />
                     </Field>
 
@@ -1024,6 +1105,10 @@ function VfoRow({
                                 onChange={(pitchHz) => set({ pitchHz })}
                             />
                         </Field>
+                    )}
+
+                    {vfo.mode === 'ecss' && (
+                        <EcssControls vfo={vfo} ecss={ecss} dialHz={dialHz} minimal={minimal} set={set} />
                     )}
 
                     {/* Per demodulator, and it has to be: the whole point of
@@ -1225,6 +1310,10 @@ export default function IQPanel({ minimal }) {
                     onOffset={(index, offsetHz) => updateVfo(index, { offsetHz })}
                     onPick={selectVfo}
                     marks={marks}
+                    carriers={vfos.map((v, i) => {
+                        const e = hearing ? demod.ecssOf(i) : null;
+                        return e && e.locked ? v.offsetHz + e.carrierHz : null;
+                    })}
                 />
             )}
 
@@ -1238,7 +1327,8 @@ export default function IQPanel({ minimal }) {
                         level={hearing ? demod.levelOf(i) : 0}
                         signalDb={hearing ? demod.signalDbOf(i) : null}
                         gateOpen={hearing ? demod.gateOpenOf(i) : true}
-                        taps={tapsFor(planForVfo(vfo).cutoffHz, demod.rate || 12000)}
+                        taps={tapsFor(planForVfo(vfo).cutoffHz, demod.rate || 12000, planForVfo(vfo).transitionHz)}
+                        ecss={hearing ? demod.ecssOf(i) : null}
                         dialHz={tuning.frequency}
                         minimal={minimal}
                         canRemove={vfos.length > 1}

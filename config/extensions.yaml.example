@@ -11,6 +11,11 @@ extensions:
   # Uses an IQ session; the v2 interface switches the receiver to IQ for you.
   - drm
 
+  # HD Radio - HD Radio (NRSC-5) AM decoder: station, programs, now playing, album art, alerts
+  # Requires the ubersdr-hdradio binary at /opt/ubersdr-hdradio/.
+  # Tune to the station's carrier in any mode; it runs on a private IQ channel of its own.
+  - hdradio
+
   # Time Signal Decoder - WWV/WWVH/WWVB time code, and how far your clock is from it
   # Requires the ubersdr-clock binary at /opt/ubersdr-clock/.
   # Tune USB at (carrier - 1 kHz) for WWV/WWVH -- 4.999, 9.999, 14.999, 19.999 MHz --

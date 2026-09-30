@@ -72,6 +72,8 @@ esbuild ifpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/ifpanel.cjs --log-level=warning
 esbuild drmpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/drmpanel.cjs --log-level=warning
+esbuild hdradiopanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/hdradiopanel.cjs --log-level=warning
 esbuild dxpeditions.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dxpeditions.cjs --log-level=warning
 esbuild ncdxf.entry.js --bundle --format=cjs --platform=node \
@@ -659,6 +661,7 @@ node iffit.test.js
 node audiotint.test.js
 node oliviapanel.test.js
 node drmpanel.test.js
+node hdradiopanel.test.js
 node dxpeditions.test.js
 node leafletbase.test.js
 node ncdxf.test.js

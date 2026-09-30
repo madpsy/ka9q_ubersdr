@@ -38,8 +38,9 @@ const {
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
     squelchLineDb,
-    IQPanel, ListeningCard, VFO_FALLBACK, vfoSummary, PANEL_BY_ID, GROUPS,
+    IQPanel, ListeningCard, VFO_FALLBACK, ecssReport, vfoSummary, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
+    TRACK_DEFAULT, TRACK_MAX, TRACK_MIN, clampTrack,
     VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
     designLowpass, expandActiveVfo, getIQDemod, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
@@ -311,6 +312,398 @@ t('a packet boundary is not audible', () => {
     assert.ok(worst < 1e-4, `blocking changed the output by ${worst}`);
 });
 
+// ── ECSS ────────────────────────────────────────────────────────────────────
+//
+// The one mode with state that decides things — where the carrier is, whether
+// it is still there, which sideband to use — and so the one where a test has to
+// run long enough for those decisions to be made. Each signal below is built
+// from a carrier and a real programme so the carrier can be faded, moved or
+// taken away on its own, which is what the tracker exists to cope with.
+
+/**
+ * Run ECSS for a while, a packet at a time, logging what the tracker said at
+ * the end of each packet. `planAt(t)` may return a new plan, which is how an
+ * offset being dragged is simulated.
+ */
+function runEcss(plan, gen, secs, { block = 240, planAt } = {}) {
+    const chain = new DemodChain();
+    chain.configure(plan, RATE);
+    const total = Math.round(secs * RATE);
+    const out = new Float32Array(total);
+    const log = [];
+    const I = new Float32Array(block);
+    const Q = new Float32Array(block);
+    for (let at = 0; at < total; at += block) {
+        if (planAt) {
+            const p = planAt(at / RATE);
+            if (p) chain.configure(p, RATE);
+        }
+        const len = Math.min(block, total - at);
+        for (let i = 0; i < len; i++) {
+            const s = gen((at + i) / RATE);
+            I[i] = s.i;
+            Q[i] = s.q;
+        }
+        const o = chain.process(I.subarray(0, len), Q.subarray(0, len), len, { agc: false, gain: 1 });
+        out.set(o.subarray(0, len), at);
+        const st = chain.ecssStatus;
+        log.push({ t: at / RATE, state: st.state, hz: st.carrierHz, side: st.side });
+    }
+    return { out, log, chain };
+}
+
+/** The log from `fromSec` on. */
+const after = (log, fromSec) => log.filter((l) => l.t >= fromSec);
+/** The samples from `fromSec` on. */
+const tailOf = (out, fromSec) => Array.from(out.subarray(Math.round(fromSec * RATE)));
+
+// A deterministic noise source, so a failure reproduces.
+let noiseSeed = 1;
+function gaussian() {
+    noiseSeed = (noiseSeed * 1103515245 + 12345) & 0x7fffffff;
+    const u = (noiseSeed / 0x7fffffff) || 1e-9;
+    noiseSeed = (noiseSeed * 1103515245 + 12345) & 0x7fffffff;
+    const v = noiseSeed / 0x7fffffff;
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// A programme with some breadth to it: many tones across a broadcast's audio
+// band, each swelling and fading, so there is no single line for a search to
+// mistake for a carrier and the sidebands have content everywhere.
+const PROGRAMME = [];
+{
+    let seed = 7;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let i = 0; i < 40; i++) PROGRAMME.push([150 + rnd() * 4200, rnd() * 2 * Math.PI, 0.03 * (0.5 + rnd())]);
+}
+const programme = (tSec) => {
+    let v = 0;
+    for (const [f, p, a] of PROGRAMME) {
+        v += a * Math.cos(2 * Math.PI * f * tSec + p) * (0.6 + 0.4 * Math.sin(2 * Math.PI * 0.7 * tSec + p));
+    }
+    return v;
+};
+
+/** A phasor of magnitude `m` at angle `ph`. */
+const phasor = (m, ph) => ({ i: m * Math.cos(ph), q: m * Math.sin(ph) });
+
+/**
+ * An AM station: carrier at `carrierHz` from the dial, drifting at `driftHz`
+ * a second, with the carrier's own strength `carrierGain(t)` so it can fade
+ * independently of the sidebands. `modulation(t)` defaults to the programme.
+ */
+function station({
+    carrierHz = 0, amp = 0.3, driftHz = 0, carrierGain = () => 1,
+    modulation = programme, plus, noise = 0,
+} = {}) {
+    return (tSec) => {
+        const ph = 2 * Math.PI * (carrierHz * tSec + 0.5 * driftHz * tSec * tSec) + 0.7;
+        const c = phasor(amp * carrierGain(tSec), ph);
+        const m = phasor(amp * modulation(tSec), ph);
+        let i = c.i + m.i;
+        let q = c.q + m.q;
+        if (plus) {
+            const e = plus(tSec);
+            i += e.i;
+            q += e.q;
+        }
+        if (noise) {
+            i += noise * gaussian();
+            q += noise * gaussian();
+        }
+        return { i, q };
+    };
+}
+
+/**
+ * One sideband of somebody else's programme, carrier-free and band-limited,
+ * landing on ours: `sign` +1 puts it on our upper sideband, -1 on our lower.
+ * What a neighbour's splatter looks like once radiod's filter has cut the rest
+ * of that station off.
+ */
+const splatter = (sign, amp = 0.25) => (tSec) => {
+    let i = 0;
+    let q = 0;
+    for (const [f, p, a] of PROGRAMME) {
+        const g = amp * a * (0.6 + 0.4 * Math.sin(2 * Math.PI * 0.7 * tSec + p));
+        const ph = sign * 2 * Math.PI * (5500 - f) * tSec + p;
+        i += g * Math.cos(ph);
+        q += g * Math.sin(ph);
+    }
+    return { i, q };
+};
+
+const ecssPlan = (over = {}) => planFor({
+    mode: 'ecss', offsetHz: 0, widthHz: 4500, sideband: 'auto', trackHz: 300, ...over,
+});
+
+const LOCKED = (l) => l.state === 'locked' || l.state === 'hold';
+
+t('ECSS finds a carrier off the offset and hears the programme at its true pitch', () => {
+    // The whole reason for the mode. A carrier 137 Hz from where the operator
+    // clicked: plain USB puts a 1 kHz tone at 1137 Hz, ECSS at 1000.
+    const tone1k = (tSec) => 0.5 * Math.cos(2 * Math.PI * 1000 * tSec);
+    const signal = station({ carrierHz: 1137, modulation: tone1k });
+    for (const sideband of ['usb', 'lsb', 'auto']) {
+        const { out, log } = runEcss(ecssPlan({ offsetHz: 1000, sideband }), signal, 3);
+        const first = log.find(LOCKED);
+        assert.ok(first && first.t < 1, `${sideband}: no lock within a second (${first && first.t})`);
+        assert.ok(after(log, 1).every(LOCKED), `${sideband}: the lock did not hold`);
+        const last = log[log.length - 1];
+        assert.ok(Math.abs(last.hz - 137) < 0.5, `${sideband}: carrier read as ${last.hz} Hz`);
+        const tail = tailOf(out, 1.5);
+        // 0.3 of carrier at 50% depth is 0.075 of each sideband tone.
+        assert.ok(amplitudeAt(tail, 1000) > 0.07,
+            `${sideband}: the tone came out at ${amplitudeAt(tail, 1000).toFixed(4)}, not at 1 kHz`);
+        assert.ok(amplitudeAt(tail, 1137) < 1e-3 && amplitudeAt(tail, 863) < 1e-3,
+            `${sideband}: the tone is still offset by the mistuning`);
+    }
+    const usb = demodulate(planFor({ mode: 'usb', offsetHz: 1000, widthHz: 4500 }), signal);
+    assert.ok(amplitudeAt(usb, 1137) > 0.05, 'control: plain USB should hear the mistuning');
+});
+
+t('ECSS keeps its carrier out of the audio', () => {
+    const { out } = runEcss(ecssPlan({ sideband: 'usb' }), station({ carrierHz: 60 }), 3);
+    const tail = tailOf(out, 1.5);
+    const mean = tail.reduce((a, b) => a + b, 0) / tail.length;
+    assert.ok(Math.abs(mean) < 1e-3, `the carrier survived as ${mean.toFixed(4)} of DC`);
+    for (const f of [20, 60, 120]) {
+        assert.ok(amplitudeAt(tail, f) < 2e-3, `energy at ${f} Hz: ${amplitudeAt(tail, f).toFixed(4)}`);
+    }
+});
+
+t('a fixed sideband throws the other one away, heterodyne and all', () => {
+    // A whistle 1.5 kHz into the lower sideband, louder than the programme.
+    const het = (tSec) => phasor(0.1, 2 * Math.PI * (60 - 1500) * tSec);
+    const { out } = runEcss(ecssPlan({ sideband: 'usb' }), station({ carrierHz: 60, plus: het }), 3);
+    const tail = tailOf(out, 1.5);
+    assert.ok(amplitudeAt(tail, 1500) < 1e-3,
+        `the lower-sideband heterodyne reached the audio at ${amplitudeAt(tail, 1500).toFixed(4)}`);
+});
+
+t('Auto moves off a sideband with interference on it, and not off a clean one', () => {
+    // Splatter on the upper sideband: Auto starts there and has to leave.
+    const onUpper = runEcss(ecssPlan(), station({ plus: splatter(+1) }), 8);
+    assert.strictEqual(onUpper.log[onUpper.log.length - 1].side, 'lsb',
+        'Auto stayed on the sideband with the splatter on it');
+    const switchedAt = onUpper.log.find((l) => l.side === 'lsb').t;
+    assert.ok(switchedAt < 5, `took ${switchedAt} s to move`);
+
+    // The same splatter on the lower sideband: nothing to do.
+    const onLower = runEcss(ecssPlan(), station({ plus: splatter(-1) }), 8);
+    assert.ok(onLower.log.every((l) => l.side === 'usb'), 'Auto moved onto the splattered sideband');
+
+    // And a heterodyne, which is the other shape interference takes.
+    const het = (tSec) => phasor(0.1, 2 * Math.PI * (60 + 1500) * tSec);
+    const whistle = runEcss(ecssPlan(), station({ carrierHz: 60, plus: het }), 8);
+    assert.strictEqual(whistle.log[whistle.log.length - 1].side, 'lsb', 'Auto kept the whistle');
+    assert.ok(amplitudeAt(tailOf(whistle.out, 6), 1500) < 1e-3, 'the whistle is still in the audio');
+});
+
+t('Auto does not flap on noise, and does not chase selective fading', () => {
+    // Noise the same on both sides.
+    const noisy = runEcss(ecssPlan(), station({ carrierHz: -120, amp: 0.1, noise: 0.01 }), 20);
+    assert.ok(noisy.log.every((l) => l.side === 'usb'), 'Auto switched on symmetric noise');
+
+    // Two-path propagation: a second ray a millisecond late, nine tenths as
+    // strong, its phase turning at 0.3 Hz. That sweeps notches through both
+    // sidebands in turn and takes the carrier down every few seconds — the
+    // textbook case ECSS is for, and exactly the asymmetry that is *not*
+    // interference.
+    const s = station({ carrierHz: 80 });
+    const multipath = (tSec) => {
+        const a = s(tSec);
+        const b = s(tSec - 0.001);
+        const ps = 2 * Math.PI * 0.3 * tSec;
+        const c = Math.cos(ps);
+        const d = Math.sin(ps);
+        return {
+            i: a.i + 0.9 * (b.i * c - b.q * d) + 0.003 * gaussian(),
+            q: a.q + 0.9 * (b.i * d + b.q * c) + 0.003 * gaussian(),
+        };
+    };
+    const faded = runEcss(ecssPlan(), multipath, 30);
+    assert.ok(faded.log.every((l) => l.side === 'usb'), 'Auto switched on fading');
+    assert.ok(after(faded.log, 1).every(LOCKED), 'the fading cost the lock');
+    assert.ok(faded.log.some((l) => l.state === 'hold'), 'the carrier fades should have been ridden in hold');
+});
+
+t('a carrier fade is ridden on the frequency the loop had', () => {
+    // 25 dB down for 400 ms every two seconds; the sidebands untouched.
+    const gain = (tSec) => ((tSec % 2) > 1 && (tSec % 2) < 1.4 ? 0.056 : 1);
+    const { log } = runEcss(ecssPlan({ sideband: 'usb' }), station({ carrierHz: -45, carrierGain: gain }), 8);
+    const later = after(log, 1);
+    assert.ok(later.every(LOCKED), 'a fade cost the lock');
+    assert.ok(later.some((l) => l.state === 'hold'), 'the fades were never noticed');
+    for (const l of later) {
+        assert.ok(Math.abs(l.hz - -45) < 1, `the carrier wandered to ${l.hz.toFixed(2)} Hz at ${l.t}s`);
+    }
+});
+
+t('a drifting carrier is followed', () => {
+    const { log } = runEcss(ecssPlan(), station({ carrierHz: 100, driftHz: 3 }), 15);
+    assert.ok(after(log, 1).every(LOCKED), 'the drift cost the lock');
+    const last = log[log.length - 1];
+    assert.ok(Math.abs(last.hz - (100 + 3 * last.t)) < 1,
+        `at ${last.t.toFixed(2)} s the carrier read ${last.hz.toFixed(1)}, not ${(100 + 3 * last.t).toFixed(1)}`);
+});
+
+t('a weak carrier in noise still locks', () => {
+    // -3 dB carrier to noise across the whole 12 kHz.
+    const { log } = runEcss(ecssPlan({ sideband: 'usb' }),
+        station({ carrierHz: -200, amp: 0.01, noise: 0.01 }), 8);
+    assert.ok(after(log, 2).every(LOCKED), 'lost a weak carrier');
+    assert.ok(Math.abs(log[log.length - 1].hz - -200) < 2, 'locked somewhere other than the carrier');
+});
+
+t('noise alone never locks', () => {
+    const { log } = runEcss(ecssPlan(), () => ({ i: 0.01 * gaussian(), q: 0.01 * gaussian() }), 10);
+    assert.ok(log.every((l) => l.state === 'search'), 'something was locked to in pure noise');
+});
+
+t('only a carrier inside the tracking window is taken', () => {
+    const outside = runEcss(ecssPlan(), station({ carrierHz: 450 }), 5);
+    assert.ok(!outside.log.some(LOCKED), 'a carrier 450 Hz off was taken with a 300 Hz window');
+    const wider = runEcss(ecssPlan({ trackHz: 600 }), station({ carrierHz: 450 }), 3);
+    assert.ok(LOCKED(wider.log[wider.log.length - 1]), 'a 600 Hz window should reach it');
+
+    // And with two carriers about, the one in the window.
+    const two = runEcss(ecssPlan(), station({ carrierHz: 250, plus: (tSec) => phasor(0.3, 2 * Math.PI * 700 * tSec) }), 3);
+    assert.ok(Math.abs(two.log[two.log.length - 1].hz - 250) < 1, 'locked to the wrong carrier');
+});
+
+t('without a carrier it is plain sideband at the offset, and the pitch never slides', () => {
+    // An SSB station: no carrier to find, and steady tones for the search to be
+    // tempted by. The audio has to stay put throughout — a failed acquisition
+    // must never be heard as the pitch wandering.
+    const ssb = (tSec) => {
+        let i = 0;
+        let q = 0;
+        for (const [f, a] of [[400, 0.2], [1000, 0.1], [2300, 0.05]]) {
+            const e = phasor(a, 2 * Math.PI * f * tSec);
+            i += e.i;
+            q += e.q;
+        }
+        return { i, q };
+    };
+    const { out, log } = runEcss(ecssPlan({ sideband: 'usb' }), ssb, 6);
+    assert.ok(!log.some(LOCKED), 'an SSB tone was taken for a carrier');
+    for (let from = 0.5; from < 5.5; from += 0.5) {
+        const chunk = Array.from(out.subarray(Math.round(from * RATE), Math.round((from + 0.5) * RATE)));
+        assert.ok(amplitudeAt(chunk, 400) > 0.18, `at ${from}s the 400 Hz tone was ${amplitudeAt(chunk, 400).toFixed(3)}`);
+    }
+});
+
+t('a drag keeps the station until it leaves the window', () => {
+    // Offset walked 0 -> 200 Hz over two seconds, carrier at +50: the carrier
+    // stays put in absolute terms, so relative to the offset it runs to -150.
+    const slow = runEcss(ecssPlan(), station({ carrierHz: 50 }), 6, {
+        planAt: (tSec) => (tSec > 2 && tSec < 4 ? ecssPlan({ offsetHz: Math.round((tSec - 2) * 100) }) : null),
+    });
+    assert.ok(after(slow.log, 1).every(LOCKED), 'a slow drag lost the lock');
+    const end = slow.log[slow.log.length - 1];
+    assert.ok(Math.abs(end.hz - (50 - 198)) < 3, `ended at ${end.hz.toFixed(1)}`);
+
+    // Dragged well away, it lets go.
+    const far = runEcss(ecssPlan(), station({ carrierHz: 50 }), 6, {
+        planAt: (tSec) => (tSec > 2 && tSec < 4 ? ecssPlan({ offsetHz: Math.round((tSec - 2) * 750) }) : null),
+    });
+    assert.ok(!LOCKED(far.log[far.log.length - 1]), 'held a carrier 1.5 kHz outside a 300 Hz window');
+});
+
+t('a carrier that goes away is held, then let go', () => {
+    // The station goes off the air at 3 s, leaving the band's noise. (Not the
+    // carrier alone: this programme is steady tones, and a steady tone with no
+    // carrier beside it is, to any tracker, a carrier.)
+    const on = station({ carrierHz: 20 });
+    const { log } = runEcss(ecssPlan(), (tSec) => {
+        const n = { i: 0.003 * gaussian(), q: 0.003 * gaussian() };
+        if (tSec >= 3) return n;
+        const s = on(tSec);
+        return { i: s.i + n.i, q: s.q + n.q };
+    }, 10);
+    const locks = log.filter((l) => l.t > 3 && LOCKED(l));
+    assert.ok(locks.some((l) => l.state === 'hold'), 'the loss was not ridden as a fade first');
+    for (const l of locks) {
+        assert.ok(Math.abs(l.hz - 20) < 2, `claimed a carrier at ${l.hz.toFixed(1)} Hz after it went`);
+    }
+    assert.strictEqual(log[log.length - 1].state, 'search', 'still claiming a carrier that is gone');
+});
+
+t('ECSS blocking does not change the output', () => {
+    const plan = ecssPlan();
+    const sig = station({ carrierHz: 90, plus: splatter(+1) });
+    const a = runEcss(plan, sig, 5, { block: 240 }).out;
+    const b = runEcss(plan, sig, 5, { block: 97 }).out;
+    let worst = 0;
+    for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]));
+    assert.ok(worst < 1e-4, `blocking changed the output by ${worst}`);
+});
+
+t('ECSS settings: sideband, window and offset limits', () => {
+    fresh({ mode: 'ecss' });
+    assert.strictEqual(vfo0().sideband, 'auto', 'Auto is the default');
+    assert.strictEqual(vfo0().trackHz, TRACK_DEFAULT);
+    updateVfo(0, { sideband: 'nonsense', trackHz: 99999 });
+    assert.strictEqual(vfo0().sideband, 'auto');
+    assert.strictEqual(vfo0().trackHz, TRACK_MAX);
+    assert.strictEqual(clampTrack(1), TRACK_MIN);
+
+    // Auto needs both sidebands inside the stream; a fixed one only its own.
+    const auto = offsetLimits('ecss', 4500, 'auto');
+    assert.deepStrictEqual([auto.min, auto.max], [-IQ_HALF_SPAN + 4500, IQ_HALF_SPAN - 4500]);
+    const usb = offsetLimits('ecss', 4500, 'usb');
+    assert.deepStrictEqual([usb.min, usb.max], [-IQ_HALF_SPAN, IQ_HALF_SPAN - 4500]);
+    assert.deepStrictEqual(passbandFor('ecss', 100, 4500, 'lsb'), { lo: -4400, hi: 100 });
+
+    // Every mode has a width preset per its own table, ECSS included.
+    const ecss = DEMOD_MODES.find((m) => m.id === 'ecss');
+    assert.ok(ecss && ecss.widths.includes(ecss.fallback), 'ECSS needs a default width among its presets');
+    fresh();
+});
+
+t('the ECSS report says what the tracker is doing', () => {
+    const vfo = { offsetHz: 1000 };
+    assert.strictEqual(ecssReport(null, vfo, 7_100_000).text, '—');
+    const locked = ecssReport({ state: 'locked', locked: true, carrierHz: 37, side: 'lsb' }, vfo, 7_100_000);
+    assert.strictEqual(locked.text, 'Locked');
+    assert.strictEqual(locked.side, 'LSB');
+    assert.strictEqual(locked.carrier, 7_101_037);
+    const searching = ecssReport({ state: 'search', locked: false, carrierHz: null, side: 'usb' }, vfo, 7_100_000);
+    assert.strictEqual(searching.text, 'Searching');
+    assert.strictEqual(searching.carrier, null);
+});
+
+t('ECSS offers its sideband, and its window only outside minimal', () => {
+    fresh({ mode: 'ecss' });
+    reset();
+    const full = render(IQPanel, {}, context());
+    const text = deepWords(full.tree);
+    for (const w of ['Sideband', 'Auto', 'Carrier', 'Tracking range']) {
+        assert.ok(text.includes(w), `the ECSS row is missing "${w}"`);
+    }
+    for (const off of full.cleanups) off();
+
+    reset();
+    const min = render(IQPanel, { minimal: true }, context());
+    // Minimal shuts the rows; open the one to look inside it.
+    expandActiveVfo();
+    reset();
+    const again = render(IQPanel, { minimal: true }, context());
+    const minText = deepWords(again.tree);
+    assert.ok(minText.includes('Sideband'), 'the sideband is operated while listening');
+    assert.ok(!minText.includes('Tracking range'), 'the window is set once and belongs out of minimal');
+    for (const off of min.cleanups) off();
+    for (const off of again.cleanups) off();
+
+    fresh({ mode: 'usb' });
+    reset();
+    const usb = render(IQPanel, {}, context());
+    assert.ok(!deepWords(usb.tree).includes('Tracking range'), 'only ECSS has a tracking window');
+    for (const off of usb.cleanups) off();
+    fresh();
+});
+
 // ── the squelch ─────────────────────────────────────────────────────────────
 //
 // The one part of the chain whose failure is silence, which is the failure an
@@ -378,8 +771,10 @@ t('one threshold means the same thing in every mode', () => {
     // The reason the measurement is taken before the mode's own step. An AM
     // envelope of a steady carrier is a constant, and an FM discriminator is
     // loudest with no carrier at all — so a squelch reading either mode's
-    // *output* would be backwards. Read in the passband, all five agree.
-    const inBand = { usb: 1000, lsb: -1000, cw: 0, am: 0, nfm: 0 };
+    // *output* would be backwards. Read in the passband, every mode agrees.
+    // ECSS's passband is the sideband, with the carrier at the offset outside
+    // its filter, so its in-band signal is a tone up in the (default) USB.
+    const inBand = { usb: 1000, lsb: -1000, cw: 0, am: 0, nfm: 0, ecss: 1000 };
     for (const m of DEMOD_MODES) {
         const plan = planFor({ mode: m.id, offsetHz: 0, widthHz: m.fallback, pitchHz: 700 });
         const heard = withSquelch(plan, tone(inBand[m.id], 0.5), -20);

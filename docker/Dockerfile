@@ -120,6 +120,11 @@ RUN apt-get update && apt-get install -y \
     && mkdir -p /opt/ubersdr-clock \
     && wget https://github.com/madpsy/ubersdr-clock/releases/download/latest/ubersdr-clock_${TARGETARCH} -O /opt/ubersdr-clock/ubersdr-clock_${TARGETARCH} \
     && chmod +x /opt/ubersdr-clock/ubersdr-clock_${TARGETARCH} \
+    # The HD Radio (NRSC-5) AM decoder. Arch suffix kept, as for the clock;
+    # nrsc5, FAAD2 and FFTW are linked in, so it needs only libc and libm.
+    && mkdir -p /opt/ubersdr-hdradio \
+    && wget https://github.com/madpsy/ubersdr-hdradio/releases/download/latest/ubersdr-hdradio_${TARGETARCH} -O /opt/ubersdr-hdradio/ubersdr-hdradio_${TARGETARCH} \
+    && chmod +x /opt/ubersdr-hdradio/ubersdr-hdradio_${TARGETARCH} \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

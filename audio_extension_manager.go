@@ -30,6 +30,36 @@ type AudioExtensionManager struct {
 	// Receiver location and CTY database for enrichment
 	receiverLocator string
 	ctyDatabase     *CTYDatabase
+
+	// When each listener last stopped each extension that has a
+	// RestartCooldown, keyed "name|sessionID". See recordStop.
+	lastStops   map[string]time.Time
+	lastStopsMu sync.Mutex
+
+	// Per-listener attach budgets; see allowAttach.
+	attachLimits   map[string]*attachLimit
+	attachLimitsMu sync.Mutex
+}
+
+// Attaching is the expensive message: for most extensions it starts a
+// subprocess, and for some a radiod channel. Each listener may attach
+// attachBurst times back to back, then one every 1/attachRefillPerSec
+// seconds. The burst clears a start plus the client's six reconnect retries
+// (1.5 s apart) with room to spare; a flood is held to one start every two
+// seconds. Keyed by the listener, not the socket, so opening more sockets
+// buys nothing, and kept when a socket closes, so reconnecting does not
+// reset it. Variables so tests can shorten them.
+var (
+	attachBurst        = 8.0
+	attachRefillPerSec = 0.5
+	// attachLimitIdle is how long an unused budget is kept before it is
+	// forgotten (by which time it would be full again anyway).
+	attachLimitIdle = 10 * time.Minute
+)
+
+type attachLimit struct {
+	bucket   *RateLimiter
+	lastUsed time.Time
 }
 
 // ActiveAudioExtension represents a running audio extension instance for a user
@@ -57,6 +87,12 @@ type ActiveAudioExtension struct {
 	// a disconnect can reach the same record concurrently; without this the
 	// second one closes channels the first already closed.
 	stopOnce sync.Once
+
+	// The extension's own radiod channel, for one registered with PrivateIQ;
+	// nil otherwise. Session is then that channel's session, and Owner the
+	// listener's. See private_iq_channel.go.
+	private *privateIQChannel
+	Owner   *Session
 }
 
 // NewAudioExtensionManager creates a new audio extension manager
@@ -68,7 +104,76 @@ func NewAudioExtensionManager(wsHandler *DXClusterWebSocketHandler, sessionManag
 		registry:         registry,
 		receiverLocator:  receiverLocator,
 		ctyDatabase:      ctyDatabase,
+		lastStops:        make(map[string]time.Time),
+		attachLimits:     make(map[string]*attachLimit),
 	}
+}
+
+// allowAttach spends one of the listener's attach tokens, and reports false
+// when there are none left.
+func (aem *AudioExtensionManager) allowAttach(sessionID string) bool {
+	aem.attachLimitsMu.Lock()
+	defer aem.attachLimitsMu.Unlock()
+	now := time.Now()
+	for id, l := range aem.attachLimits {
+		if now.Sub(l.lastUsed) > attachLimitIdle {
+			delete(aem.attachLimits, id)
+		}
+	}
+	l, ok := aem.attachLimits[sessionID]
+	if !ok {
+		l = &attachLimit{bucket: &RateLimiter{
+			tokens:     attachBurst,
+			maxTokens:  attachBurst,
+			refillRate: attachRefillPerSec,
+			lastRefill: now,
+		}}
+		aem.attachLimits[sessionID] = l
+	}
+	l.lastUsed = now
+	return l.bucket.Allow()
+}
+
+// recordStop notes that the listener stopped this extension, for its
+// RestartCooldown. Called only for stops the listener made.
+func (aem *AudioExtensionManager) recordStop(activeExtension *ActiveAudioExtension) {
+	info, ok := aem.registry.Info(activeExtension.ExtensionName)
+	if !ok || info.RestartCooldown <= 0 {
+		return
+	}
+	aem.lastStopsMu.Lock()
+	defer aem.lastStopsMu.Unlock()
+	now := time.Now()
+	for k, t := range aem.lastStops {
+		if now.Sub(t) > time.Minute {
+			delete(aem.lastStops, k)
+		}
+	}
+	aem.lastStops[activeExtension.ExtensionName+"|"+activeExtension.SessionID] = now
+}
+
+// restartCooldownError is the refusal for starting an extension again too
+// soon after the listener stopped it, or nil.
+func (aem *AudioExtensionManager) restartCooldownError(extensionName, sessionID string) error {
+	info, ok := aem.registry.Info(extensionName)
+	if !ok || info.RestartCooldown <= 0 {
+		return nil
+	}
+	aem.lastStopsMu.Lock()
+	last := aem.lastStops[extensionName+"|"+sessionID]
+	aem.lastStopsMu.Unlock()
+	if last.IsZero() {
+		return nil
+	}
+	remaining := info.RestartCooldown - time.Since(last)
+	if remaining <= 0 {
+		return nil
+	}
+	name := info.DisplayName
+	if name == "" {
+		name = extensionName
+	}
+	return fmt.Errorf("%s restarted too quickly — please wait %.1f more second(s)", name, remaining.Seconds())
 }
 
 // HandleExtensionMessage processes audio extension control messages from clients
@@ -116,6 +221,27 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 
 	log.Printf("AudioExtension: Attach request - User: %s, Extension: %s, Params: %+v", sessionID, extensionName, extensionParams)
 
+	// Find user's audio session by UserSessionID. First, so an attach with no
+	// session behind it -- which is what the client's reconnect retries meet
+	// -- is refused before it spends anything below.
+	session := aem.findAudioSessionByUserID(sessionID)
+	if session == nil {
+		return aem.sendErrorSafe(nil, conn, "no active audio session found")
+	}
+
+	// Attaching starts a subprocess for most extensions: a listener may not
+	// do it without limit. Bypassed listeners (IP list or password) are
+	// exempt, as they are from the connection limits. Checked before the
+	// running extension is torn down, so a refused attach changes nothing.
+	if !aem.sessionManager.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) &&
+		!aem.allowAttach(sessionID) {
+		log.Printf("AudioExtension: Attach rate limit exceeded for %s (%s)", sessionID, extensionName)
+		return aem.sendErrorSafe(nil, conn, "Rate limit exceeded. Please slow down.")
+	}
+	if err := aem.restartCooldownError(extensionName, sessionID); err != nil {
+		return aem.sendErrorSafe(nil, conn, err.Error())
+	}
+
 	// Tear down existing extension if any (user can only have one at a time)
 	aem.activeExtensionsMu.Lock()
 	if existing, exists := aem.activeExtensions[sessionID]; exists {
@@ -123,23 +249,34 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 			existing.ExtensionName, sessionID, extensionName)
 		aem.activeExtensionsMu.Unlock()
 		aem.stopExtension(existing)
+		aem.recordStop(existing)
 		aem.activeExtensionsMu.Lock()
 	}
 	aem.activeExtensionsMu.Unlock()
 
-	// Find user's audio session by UserSessionID
-	session := aem.findAudioSessionByUserID(sessionID)
-	if session == nil {
-		return aem.sendErrorSafe(nil, conn, "no active audio session found")
+	// An extension registered with PrivateIQ gets a radiod channel of its own
+	// on the listener's frequency, and is fed from that instead of from what
+	// the listener hears. tapSession is whichever session the tap goes on.
+	owner := session
+	tapSession := session
+	var private *privateIQChannel
+	if info, ok := aem.registry.Info(extensionName); ok && info.PrivateIQ != "" {
+		p, err := aem.sessionManager.newPrivateIQChannel(owner, extensionName, info.PrivateIQ)
+		if err != nil {
+			return aem.sendErrorSafe(nil, conn, fmt.Sprintf("failed to create extension channel: %v", err))
+		}
+		private = p
+		tapSession = p.session
+		extensionParams["private_iq_mode"] = info.PrivateIQ
 	}
 
-	// Get audio parameters from session.
+	// Get audio parameters from the session the extension is fed from.
 	// Channels is 1 for mono modes (USB, LSB, AM, FM, etc.) and 2 for IQ modes
 	// (iq48, iq96, iq192, iq384) where the audio tap delivers stereo interleaved I/Q.
 	audioParams := AudioExtensionParams{
-		SampleRate:    session.GetSampleRate(),
-		Channels:      session.Channels, // 1 = mono, 2 = stereo IQ
-		BitsPerSample: 16,               // Always 16-bit
+		SampleRate:    tapSession.GetSampleRate(),
+		Channels:      tapSession.Channels, // 1 = mono, 2 = stereo IQ
+		BitsPerSample: 16,                  // Always 16-bit
 	}
 
 	// Add receiver locator and CTY database to extension params
@@ -168,6 +305,9 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	// Create extension instance
 	extension, err := aem.registry.Create(extensionName, audioParams, extensionParams)
 	if err != nil {
+		if private != nil {
+			private.close()
+		}
 		return aem.sendErrorSafe(nil, conn, fmt.Sprintf("failed to create extension: %v", err))
 	}
 
@@ -187,15 +327,36 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 		Conn:          conn,
 		Running:       true,
 		StartedAt:     time.Now(),
-		Session:       session,
+		Session:       tapSession,
+		private:       private,
+		Owner:         owner,
 	}
 
 	// Attach audio tap to session
-	session.AttachAudioExtensionTap(audioChan)
+	tapSession.AttachAudioExtensionTap(audioChan)
+
+	// With a private channel the extension reads through the relay, which
+	// holds its audio back while the channel is moving; the tap itself stays
+	// audioChan, so teardown below and in stopExtension is unchanged.
+	extensionInput := audioChan
+	if private != nil {
+		extensionInput = make(chan AudioSample, cap(audioChan))
+		go private.relay(audioChan, extensionInput)
+		private.start(func(frequency uint64, blocked bool) {
+			aem.privateChannelSettled(activeExtension, frequency, blocked)
+		})
+	}
 
 	// Start extension
-	if err := extension.Start(audioChan, resultChan); err != nil {
-		session.DetachAudioExtensionTap()
+	if err := extension.Start(extensionInput, resultChan); err != nil {
+		if private != nil {
+			// The relay is reading the tap, so it has to be closed rather than
+			// just detached, or the relay never ends; closing in one step with
+			// the detach is what makes that safe (see CloseAudioExtensionTap).
+			tapSession.CloseAudioExtensionTap(audioChan)
+		} else {
+			tapSession.DetachAudioExtensionTap()
+		}
 		// The constructor succeeded, so this extension may be holding a
 		// max_users slot, a port from a pool, or a subprocess — none of which
 		// the record below will ever be around to release, since it is not
@@ -207,6 +368,9 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 		if stopErr := extension.Stop(); stopErr != nil {
 			log.Printf("AudioExtension: cleanup after failed start of '%s' returned: %v", extensionName, stopErr)
 		}
+		if private != nil {
+			private.close()
+		}
 		return aem.sendErrorSafe(activeExtension, conn, fmt.Sprintf("failed to start extension: %v", err))
 	}
 
@@ -214,6 +378,14 @@ func (aem *AudioExtensionManager) handleAttach(sessionID string, conn *websocket
 	aem.activeExtensionsMu.Lock()
 	aem.activeExtensions[sessionID] = activeExtension
 	aem.activeExtensionsMu.Unlock()
+
+	// A private channel lives only as long as the listener's own session. The
+	// extension otherwise outlives it -- it is attached over the DX cluster
+	// socket, not the audio one -- and a listener kicked, timed out or
+	// reconnected would leave a radiod channel and a decoder running.
+	if private != nil {
+		go aem.watchOwner(activeExtension)
+	}
 
 	// Start result forwarding goroutine
 	go aem.forwardResults(activeExtension)
@@ -245,6 +417,7 @@ func (aem *AudioExtensionManager) handleDetach(sessionID string, conn *websocket
 
 	// Stop extension
 	aem.stopExtension(activeExtension)
+	aem.recordStop(activeExtension)
 
 	log.Printf("AudioExtension: Detached '%s' from session %s", activeExtension.ExtensionName, sessionID)
 
@@ -411,6 +584,27 @@ func (aem *AudioExtensionManager) handleControl(sessionID string, conn *websocke
 			"sync_threshold": applied,
 		})
 
+	case "set_program":
+		// Switch the HD Radio program without restarting the decoder, which
+		// would cost the listener several seconds of re-acquisition.
+		// Expected message: { "type": "audio_extension_control", "control_type": "set_program", "program": 1 }
+		program, ok := msg["program"].(float64)
+		if !ok || program != float64(int(program)) {
+			return aem.sendErrorSafe(activeExtension, conn, "program is required for set_program (0 = HD1 .. 7 = HD8)")
+		}
+		setter, ok := activeExtension.Extension.(interface{ SetProgram(int) error })
+		if !ok {
+			return aem.sendErrorSafe(activeExtension, conn, "set_program is only supported for the hdradio extension")
+		}
+		if err := setter.SetProgram(int(program)); err != nil {
+			return aem.sendErrorSafe(activeExtension, conn, fmt.Sprintf("set_program failed: %v", err))
+		}
+		return aem.sendTextMessageSafe(activeExtension, map[string]interface{}{
+			"type":         "audio_extension_control_ack",
+			"control_type": "set_program",
+			"program":      int(program),
+		})
+
 	default:
 		log.Printf("AudioExtension: Unknown control type: %s", controlType)
 		return aem.sendErrorSafe(activeExtension, conn, fmt.Sprintf("unknown control_type: %s", controlType))
@@ -455,6 +649,11 @@ func (aem *AudioExtensionManager) forwardResults(activeExtension *ActiveAudioExt
 				errMsg = fmt.Sprintf("%s subprocess crashed: %v", activeExtension.ExtensionName, crashErr)
 			}
 			log.Printf("AudioExtension: Crash detected for session %s: %s", activeExtension.SessionID, errMsg)
+			// A private channel has nothing left to feed; give it back to
+			// radiod now rather than when the client next detaches.
+			if activeExtension.private != nil {
+				activeExtension.private.close()
+			}
 			// Notify the frontend
 			_ = aem.sendErrorSafe(activeExtension, activeExtension.Conn, errMsg)
 			return
@@ -488,7 +687,65 @@ func (aem *AudioExtensionManager) stopExtension(activeExtension *ActiveAudioExte
 			close(activeExtension.AudioChan)
 		}
 
+		if activeExtension.private != nil {
+			activeExtension.private.close()
+		}
+
 		close(activeExtension.ResultChan)
+	})
+}
+
+// watchOwner ends an extension with a private channel when the listener's own
+// audio session ends, however it ends. Returns when the extension stops first.
+func (aem *AudioExtensionManager) watchOwner(activeExtension *ActiveAudioExtension) {
+	defer recoverPrivateIQ("owner watch")
+	select {
+	case <-activeExtension.StopChan:
+		return
+	case <-activeExtension.Owner.Done:
+	}
+
+	// Only the record this watcher belongs to: by now the client may have
+	// attached a new one under the same session ID.
+	aem.activeExtensionsMu.Lock()
+	current, exists := aem.activeExtensions[activeExtension.SessionID]
+	if exists && current == activeExtension {
+		delete(aem.activeExtensions, activeExtension.SessionID)
+	}
+	aem.activeExtensionsMu.Unlock()
+
+	log.Printf("AudioExtension: '%s' for session %s stopped: the listener's audio session ended",
+		activeExtension.ExtensionName, activeExtension.SessionID)
+	aem.stopExtension(activeExtension)
+	// Worded so the client's attach hook treats it as transient and attaches
+	// again: after a reconnect the listener has a new audio session and the
+	// retry succeeds; after a kick there is none, and it gives up cleanly.
+	_ = aem.sendErrorSafe(activeExtension, activeExtension.Conn, "no active audio session (the listener's audio session ended)")
+}
+
+// privateChannelSettled is called when an extension's private channel has
+// followed the listener to a new frequency and settled there. The extension is
+// told first, so it has dropped the old station before the new one's audio
+// reaches it, then the client, so its display can follow.
+func (aem *AudioExtensionManager) privateChannelSettled(activeExtension *ActiveAudioExtension, frequency uint64, blocked bool) {
+	// Not for an extension already being stopped: it may have torn down
+	// whatever Retune would touch. (Retune must still tolerate the narrow
+	// race this leaves; see AudioExtensionRetuner.)
+	select {
+	case <-activeExtension.StopChan:
+		return
+	default:
+	}
+	if retuner, ok := activeExtension.Extension.(AudioExtensionRetuner); ok {
+		retuner.Retune(frequency)
+	}
+	_ = aem.sendTextMessageSafe(activeExtension, map[string]interface{}{
+		"type":           "audio_extension_retuned",
+		"extension_name": activeExtension.ExtensionName,
+		"frequency":      frequency,
+		// The listener may not be served this frequency: the channel is
+		// passing the extension silence until they tune away.
+		"blocked": blocked,
 	})
 }
 
@@ -504,6 +761,8 @@ func (aem *AudioExtensionManager) RemoveSession(sessionID string) {
 	if exists {
 		log.Printf("AudioExtension: Removing extension for disconnected session %s", sessionID)
 		aem.stopExtension(activeExtension)
+		// Closing the socket is the listener's doing, like a detach.
+		aem.recordStop(activeExtension)
 	}
 }
 
@@ -525,6 +784,9 @@ func (aem *AudioExtensionManager) findAudioSessionByUserID(userSessionID string)
 // This is used when we don't have an activeExtension yet (e.g., during initial attach errors)
 // Note: This should only be used when the connection is not yet shared/stored in activeExtension
 func (aem *AudioExtensionManager) sendTextMessageWithConn(conn *websocket.Conn, message map[string]interface{}) error {
+	if conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
 	messageJSON, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %v", err)

@@ -39,6 +39,11 @@
 // it, and how far to translate what comes out — and planFor() is the whole of
 // the difference between them. See there for the derivation of each.
 //
+// ECSS is the exception, because its oscillator is not a setting: it is steered
+// onto the carrier by a phase-locked loop. It has its own front end in
+// lib/ecss.js, which hands audio and passband power back to the same squelch,
+// DC block and AGC every other mode ends in.
+//
 // The cost is small enough not to need a worklet: 12 000 complex samples a
 // second through a few hundred taps is a handful of megaflops, and it runs in
 // the same tap callback the recorder uses (AudioPlayer.onAudio), which delivers
@@ -55,6 +60,9 @@
 // mode and the volume, and it is mounted in App.jsx for the same reason.
 
 import { Emitter } from '../radio/emitter.js';
+import {
+    ECSS_LOW_EDGE, ECSS_TRANSITION, EcssTracker, SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN,
+} from './ecss.js';
 
 // The plain `iq` preset is 12 kHz wide, centred on the dial: radiod's samprate
 // is 12k and the passband is -6k..+6k (see MODES in radio/constants.js, which
@@ -123,7 +131,28 @@ export const DEMOD_MODES = [
         max: 12000,
         fallback: 8000,
     },
+    {
+        id: 'ecss',
+        label: 'ECSS',
+        summary: 'Exalted-carrier SSB — AM tracked by its carrier, heard on one sideband.',
+        // Per sideband, so 4.5 kHz is the audio a broadcast actually carries.
+        widths: [2700, 3500, 4500, 5000],
+        min: 1000,
+        max: 6000,
+        fallback: 4500,
+    },
 ];
+
+export { SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN };
+
+/** The sideband choices, as the panel offers them. */
+export const SIDEBAND_OPTIONS = [
+    { value: 'auto', label: 'Auto', title: 'Use whichever sideband has less interference on it' },
+    { value: 'usb', label: 'USB', title: 'Upper sideband only' },
+    { value: 'lsb', label: 'LSB', title: 'Lower sideband only' },
+];
+
+const sidebandOf = (v) => (SIDEBANDS.includes(v) ? v : 'auto');
 
 export const DEMOD_BY_ID = Object.fromEntries(DEMOD_MODES.map((m) => [m.id, m]));
 
@@ -131,6 +160,12 @@ export const PITCH_MIN = 300;
 export const PITCH_MAX = 1200;
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+/** A tracking window the tracker will accept, for a stored or typed figure. */
+export function clampTrack(hz) {
+    const v = Number(hz);
+    return Number.isFinite(v) ? clamp(Math.round(v), TRACK_MIN, TRACK_MAX) : TRACK_DEFAULT;
+}
 
 /** The mode record, falling back to USB rather than throwing on a stale setting. */
 export function demodMode(id) {
@@ -153,12 +188,20 @@ export function clampWidth(modeId, widthHz) {
  * draws and what the offset limits below are derived from, so the two cannot
  * disagree about where the filter is.
  */
-export function passbandFor(modeId, offsetHz, widthHz) {
+export function passbandFor(modeId, offsetHz, widthHz, sideband) {
     const w = clampWidth(modeId, widthHz);
     const off = Number(offsetHz) || 0;
     switch (demodMode(modeId).id) {
         case 'usb': return { lo: off, hi: off + w };
         case 'lsb': return { lo: off - w, hi: off };
+        // ECSS in a fixed sideband is that sideband; Auto may use either, so
+        // both have to be inside the stream for it to have a choice.
+        case 'ecss':
+            switch (sidebandOf(sideband)) {
+                case 'usb': return { lo: off, hi: off + w };
+                case 'lsb': return { lo: off - w, hi: off };
+                default: return { lo: off - w, hi: off + w };
+            }
         default: return { lo: off - w / 2, hi: off + w / 2 };
     }
 }
@@ -173,15 +216,13 @@ export function passbandFor(modeId, offsetHz, widthHz) {
  * not receiving. A width too wide for the span at any offset collapses this to a
  * single point at the centre, which is the honest answer.
  */
-export function offsetLimits(modeId, widthHz) {
+export function offsetLimits(modeId, widthHz, sideband) {
     const w = clampWidth(modeId, widthHz);
-    let min;
-    let max;
-    switch (demodMode(modeId).id) {
-        case 'usb': min = -IQ_HALF_SPAN; max = IQ_HALF_SPAN - w; break;
-        case 'lsb': min = -IQ_HALF_SPAN + w; max = IQ_HALF_SPAN; break;
-        default: min = -IQ_HALF_SPAN + w / 2; max = IQ_HALF_SPAN - w / 2; break;
-    }
+    // Derived from the passband rather than restated per mode, so the two
+    // cannot disagree.
+    const band = passbandFor(modeId, 0, w, sideband);
+    let min = -IQ_HALF_SPAN - band.lo;
+    let max = IQ_HALF_SPAN - band.hi;
     if (min > max) {
         const mid = (min + max) / 2;
         return { min: mid, max: mid };
@@ -189,8 +230,8 @@ export function offsetLimits(modeId, widthHz) {
     return { min, max };
 }
 
-export function clampOffset(modeId, offsetHz, widthHz) {
-    const { min, max } = offsetLimits(modeId, widthHz);
+export function clampOffset(modeId, offsetHz, widthHz, sideband) {
+    const { min, max } = offsetLimits(modeId, widthHz, sideband);
     const off = Number(offsetHz);
     return clamp(Number.isFinite(off) ? Math.round(off) : 0, Math.round(min), Math.round(max));
 }
@@ -223,11 +264,16 @@ export function clampOffset(modeId, offsetHz, widthHz) {
  *   AM   c = off, envelope. No translation: |z| is already real and already at
  *        baseband, and the DC block downstream is what removes the carrier.
  *   NFM  c = off, phase difference. Likewise.
+ *   ECSS c = off is the *nominal carrier*, not a filter centre: the tracker in
+ *        lib/ecss.js moves its own oscillator from there onto the carrier it
+ *        finds, and hangs its sideband filters off that. The cutoff is carried
+ *        for the tap readout; the filter runs from ECSS_LOW_EDGE to w either
+ *        side of the carrier.
  */
-export function planFor({ mode, offsetHz, widthHz, pitchHz }) {
+export function planFor({ mode, offsetHz, widthHz, pitchHz, sideband, trackHz }) {
     const m = demodMode(mode);
     const w = clampWidth(m.id, widthHz);
-    const off = clampOffset(m.id, offsetHz, w);
+    const off = clampOffset(m.id, offsetHz, w, sideband);
     const half = w / 2;
     switch (m.id) {
         case 'usb':
@@ -243,6 +289,17 @@ export function planFor({ mode, offsetHz, widthHz, pitchHz }) {
             };
         case 'am':
             return { kind: 'am', centreHz: off, cutoffHz: half, shiftHz: 0 };
+        case 'ecss':
+            return {
+                kind: 'ecss',
+                centreHz: off,
+                widthHz: w,
+                cutoffHz: (w - ECSS_LOW_EDGE) / 2,
+                transitionHz: ECSS_TRANSITION,
+                shiftHz: 0,
+                sideband: sidebandOf(sideband),
+                trackHz: clampTrack(trackHz),
+            };
         default:
             return { kind: 'fm', centreHz: off, cutoffHz: half, shiftHz: 0 };
     }
@@ -269,9 +326,16 @@ const TRANSITION_FRACTION = 0.2;
 const TRANSITION_MIN = 80;
 const TRANSITION_MAX = 400;
 
-/** How many taps a cutoff needs at this rate — odd, so the filter is symmetric. */
-export function tapsFor(cutoffHz, rateHz) {
-    const transition = clamp(Math.abs(cutoffHz) * TRANSITION_FRACTION, TRANSITION_MIN, TRANSITION_MAX);
+/**
+ * How many taps a cutoff needs at this rate — odd, so the filter is symmetric.
+ *
+ * `transitionHz` overrides the proportional skirt, for a mode that needs a
+ * particular one (ECSS, whose rejected sideband starts right at the carrier).
+ */
+export function tapsFor(cutoffHz, rateHz, transitionHz) {
+    const transition = transitionHz > 0
+        ? Math.max(TRANSITION_MIN, transitionHz)
+        : clamp(Math.abs(cutoffHz) * TRANSITION_FRACTION, TRANSITION_MIN, TRANSITION_MAX);
     // The usual Blackman-window estimate: about 5.5 periods of the transition,
     // rounded here to 3.3 because the stopband this needs is the -74 dB the
     // window gives rather than anything tighter.
@@ -288,8 +352,8 @@ export function tapsFor(cutoffHz, rateHz) {
  * it looks — without it the passband gain moves with the tap count, so changing
  * the filter width would change the volume.
  */
-export function designLowpass(cutoffHz, rateHz) {
-    const n = tapsFor(cutoffHz, rateHz);
+export function designLowpass(cutoffHz, rateHz, transitionHz) {
+    const n = tapsFor(cutoffHz, rateHz, transitionHz);
     const taps = new Float32Array(n);
     const mid = (n - 1) / 2;
     // Never past Nyquist: a "cutoff" above it describes no filter at all, and
@@ -476,6 +540,12 @@ export class DemodChain {
         // as the state of the row.
         this.sigDb = SQUELCH_SILENT_DB;
         this.gateOpen = true;
+        // The ECSS tracker, built the first time the mode is chosen, and the
+        // two per-sample arrays it hands back to the common back end.
+        this.ecss = null;
+        this.ecssY = new Float32Array(0);
+        this.ecssP = new Float32Array(0);
+        this.tapsKey = '';
     }
 
     /**
@@ -489,13 +559,22 @@ export class DemodChain {
      */
     configure(plan, rateHz) {
         const rate = rateHz > 0 ? rateHz : 12000;
-        const same = this.plan
-            && this.rate === rate
-            && this.plan.cutoffHz === plan.cutoffHz;
+        const entering = plan.kind === 'ecss' && !(this.plan && this.plan.kind === 'ecss');
         this.plan = plan;
         this.rate = rate;
-        if (same && this.taps) return;
-        this.taps = designLowpass(plan.cutoffHz, rate);
+        const key = `${plan.cutoffHz}/${plan.transitionHz || 0}/${rate}`;
+        if (key !== this.tapsKey || !this.taps) {
+            this.tapsKey = key;
+            this.taps = designLowpass(plan.cutoffHz, rate, plan.transitionHz);
+        }
+        if (plan.kind === 'ecss') {
+            // The tracker keeps its own delay lines; arriving in the mode is a
+            // fresh search, not the tail of a carrier found some time ago.
+            if (!this.ecss) this.ecss = new EcssTracker();
+            if (entering) this.ecss.reset();
+            this.ecss.configure(plan, rate, this.taps);
+            return;
+        }
         const n = this.taps.length;
         if (n !== this.n) {
             this.n = n;
@@ -532,6 +611,22 @@ export class DemodChain {
         this.hang = 0;
         this.sigDb = SQUELCH_SILENT_DB;
         this.gateOpen = true;
+        if (this.ecss) this.ecss.reset();
+    }
+
+    /**
+     * What the ECSS tracker is doing, for the panel's readout; null in every
+     * other mode.
+     */
+    get ecssStatus() {
+        const e = this.ecss;
+        if (!e || !this.plan || this.plan.kind !== 'ecss') return null;
+        return {
+            state: e.state,
+            locked: e.locked,
+            carrierHz: e.locked || e.state === 'acquire' ? e.carrierHz : null,
+            side: e.side,
+        };
     }
 
     /**
@@ -552,6 +647,20 @@ export class DemodChain {
         const taps = this.taps;
         const bufI = this.bufI;
         const bufQ = this.bufQ;
+
+        // ECSS runs its own front end — carrier tracking and the sideband
+        // filters — and hands back audio and passband power per sample, which
+        // then go through the same squelch, DC block and AGC as everything else.
+        const ecss = kind === 'ecss';
+        if (ecss) {
+            if (this.ecssY.length < frames) {
+                this.ecssY = new Float32Array(frames);
+                this.ecssP = new Float32Array(frames);
+            }
+            this.ecss.process(planeI, planeQ, frames, this.ecssY, this.ecssP);
+        }
+        const ey = this.ecssY;
+        const ep = this.ecssP;
 
         const mixStep = (-2 * Math.PI * centreHz) / rate;
         const shiftStep = (2 * Math.PI * shiftHz) / rate;
@@ -580,35 +689,65 @@ export class DemodChain {
         let sumSq = 0;
 
         for (let k = 0; k < frames; k++) {
-            // 1 — slide the wanted piece of spectrum down to zero.
-            const mc = Math.cos(mixPhase);
-            const ms = Math.sin(mixPhase);
-            mixPhase += mixStep;
-            const rawI = planeI[k];
-            const rawQ = planeQ[k];
-            const mi = rawI * mc - rawQ * ms;
-            const mq = rawI * ms + rawQ * mc;
+            let y;
+            let sigNow;
+            if (ecss) {
+                y = ey[k];
+                sigNow = ep[k];
+            } else {
+                // 1 — slide the wanted piece of spectrum down to zero.
+                const mc = Math.cos(mixPhase);
+                const ms = Math.sin(mixPhase);
+                mixPhase += mixStep;
+                const rawI = planeI[k];
+                const rawQ = planeQ[k];
+                const mi = rawI * mc - rawQ * ms;
+                const mq = rawI * ms + rawQ * mc;
 
-            // 2 — the complex band-pass, as two real convolutions.
-            bufI[pos] = mi;
-            bufI[pos + n] = mi;
-            bufQ[pos] = mq;
-            bufQ[pos + n] = mq;
-            pos = pos + 1 === n ? 0 : pos + 1;
-            let fi = 0;
-            let fq = 0;
-            for (let t = 0; t < n; t++) {
-                const h = taps[t];
-                fi += h * bufI[pos + t];
-                fq += h * bufQ[pos + t];
+                // 2 — the complex band-pass, as two real convolutions.
+                bufI[pos] = mi;
+                bufI[pos + n] = mi;
+                bufQ[pos] = mq;
+                bufQ[pos + n] = mq;
+                pos = pos + 1 === n ? 0 : pos + 1;
+                let fi = 0;
+                let fq = 0;
+                for (let t = 0; t < n; t++) {
+                    const h = taps[t];
+                    fi += h * bufI[pos + t];
+                    fq += h * bufQ[pos + t];
+                }
+
+                // The squelch's measurement, taken here because this is the only
+                // point in the chain where the number means "how much is in the
+                // passband" rather than "how loud the mode made it". Power rather
+                // than magnitude: the comparison is against a squared threshold, so
+                // the square root belongs once per block and not once per sample.
+                sigNow = fi * fi + fq * fq;
+
+                // 3 — the mode's own step.
+                if (kind === 'ssb') {
+                    const sc = Math.cos(shiftPhase);
+                    const ss = Math.sin(shiftPhase);
+                    shiftPhase += shiftStep;
+                    y = fi * sc - fq * ss;
+                } else if (kind === 'am') {
+                    y = Math.sqrt(fi * fi + fq * fq);
+                } else {
+                    // z[k] * conj(z[k-1]): the argument is the phase advanced in one
+                    // sample, which is the instantaneous frequency. atan2 rather
+                    // than the small-angle shortcut because at 12 kHz a 3 kHz
+                    // deviation is a radian and a half per sample, where the
+                    // approximation is not small and not an approximation.
+                    const re = fi * lastI + fq * lastQ;
+                    const im = fq * lastI - fi * lastQ;
+                    lastI = fi;
+                    lastQ = fq;
+                    y = (re === 0 && im === 0) ? 0 : Math.atan2(im, re) * fmScale;
+                }
             }
 
-            // The squelch's measurement, taken here because this is the only
-            // point in the chain where the number means "how much is in the
-            // passband" rather than "how loud the mode made it". Power rather
-            // than magnitude: the comparison is against a squared threshold, so
-            // the square root belongs once per block and not once per sample.
-            const sigNow = fi * fi + fq * fq;
+            // The squelch, on the passband power whichever front end measured it.
             sigPow += (sigNow > sigPow ? sigAtk : sigDec) * (sigNow - sigPow);
             if (squelching) {
                 if (sigPow >= openPow) {
@@ -626,28 +765,6 @@ export class DemodChain {
             }
             const want = squelching ? (gateOn ? 1 : 0) : 1;
             gateGain += (want > gateGain ? gateUp : gateDown) * (want - gateGain);
-
-            // 3 — the mode's own step.
-            let y;
-            if (kind === 'ssb') {
-                const sc = Math.cos(shiftPhase);
-                const ss = Math.sin(shiftPhase);
-                shiftPhase += shiftStep;
-                y = fi * sc - fq * ss;
-            } else if (kind === 'am') {
-                y = Math.sqrt(fi * fi + fq * fq);
-            } else {
-                // z[k] * conj(z[k-1]): the argument is the phase advanced in one
-                // sample, which is the instantaneous frequency. atan2 rather
-                // than the small-angle shortcut because at 12 kHz a 3 kHz
-                // deviation is a radian and a half per sample, where the
-                // approximation is not small and not an approximation.
-                const re = fi * lastI + fq * lastQ;
-                const im = fq * lastI - fi * lastQ;
-                lastI = fi;
-                lastQ = fq;
-                y = (re === 0 && im === 0) ? 0 : Math.atan2(im, re) * fmScale;
-            }
 
             // DC block. On AM this is what strips the carrier; on FM it is what
             // centres the discriminator, so a few hundred hertz of mistuning
@@ -766,6 +883,10 @@ const VFO_DEFAULTS = {
     // the new mode's default would throw away a choice that was deliberate.
     widths: {},
     pitchHz: 700,
+    // ECSS only. Auto and the window a click on the picture needs, so the mode
+    // works on arrival and neither has to be touched.
+    sideband: 'auto',
+    trackHz: TRACK_DEFAULT,
     agc: true,
     gain: 1,
     // Off, and deliberately: a squelch is a thing you reach for on a quiet
@@ -821,11 +942,14 @@ function sanitiseVfo(raw) {
     }
     const gain = Number(src.gain);
     const squelchDb = Number(src.squelchDb);
+    const sideband = sidebandOf(src.sideband);
     return {
         mode,
         widths,
-        offsetHz: clampOffset(mode, src.offsetHz, widths[mode]),
+        offsetHz: clampOffset(mode, src.offsetHz, widths[mode], sideband),
         pitchHz: clamp(Math.round(Number(src.pitchHz) || VFO_DEFAULTS.pitchHz), PITCH_MIN, PITCH_MAX),
+        sideband,
+        trackHz: src.trackHz === undefined ? TRACK_DEFAULT : clampTrack(src.trackHz),
         agc: src.agc !== false,
         gain: Number.isFinite(gain) ? clamp(gain, 0, 4) : 1,
         squelchDb: Number.isFinite(squelchDb)
@@ -996,8 +1120,8 @@ export function addVfo() {
     // Above if there is room, below if there is not — at the top of the stream
     // there is nowhere further up to go, and stacking it back on the original
     // would look like the button had done nothing.
-    let offsetHz = clampOffset(from.mode, from.offsetHz + w, w);
-    if (offsetHz === from.offsetHz) offsetHz = clampOffset(from.mode, from.offsetHz - w, w);
+    let offsetHz = clampOffset(from.mode, from.offsetHz + w, w, from.sideband);
+    if (offsetHz === from.offsetHz) offsetHz = clampOffset(from.mode, from.offsetHz - w, w, from.sideband);
     const vfos = [...before.vfos, {
         ...from, widths: { ...from.widths }, offsetHz, open: true,
     }];
@@ -1028,12 +1152,14 @@ export function planForVfo(vfo) {
         offsetHz: vfo.offsetHz,
         widthHz: vfoWidth(vfo),
         pitchHz: vfo.pitchHz,
+        sideband: vfo.sideband,
+        trackHz: vfo.trackHz,
     });
 }
 
 /** Where a demodulator's passband lands, as offsets from the dial. */
 export function vfoPassband(vfo) {
-    return passbandFor(vfo.mode, vfo.offsetHz, vfoWidth(vfo));
+    return passbandFor(vfo.mode, vfo.offsetHz, vfoWidth(vfo), vfo.sideband);
 }
 
 /** Testing seam: forget the cached copy so the next read goes to storage. */
@@ -1165,6 +1291,12 @@ export class IQDemod extends Emitter {
     signalDbOf(index) {
         const chain = this.chains[index];
         return this.active && this._quad && chain ? chain.sigDb : null;
+    }
+
+    /** What one demodulator's ECSS tracker is doing, or null. */
+    ecssOf(index) {
+        const chain = this.chains[index];
+        return this.active && this._quad && chain ? chain.ecssStatus : null;
     }
 
     /** Whether a demodulator's squelch is letting anything through. */

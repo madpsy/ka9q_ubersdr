@@ -47,6 +47,7 @@ type Config struct {
 	Whisper            WhisperConfig             `yaml:"whisper"`
 	FreeDVExtension    FreeDVExtensionConfig     `yaml:"freedv_extension"`
 	DRMExtension       DRMExtensionConfig        `yaml:"drm_extension"`
+	HDRadioExtension   HDRadioExtensionConfig    `yaml:"hdradio_extension"`
 	SoundModem         SoundModemExtensionConfig `yaml:"soundmodem_extension"`
 	EiBi               EiBiConfig                `yaml:"eibi"`
 	DXpeditions        DXpeditionsConfig         `yaml:"dxpeditions"`
@@ -980,12 +981,13 @@ type WhisperConfig struct {
 
 // FreeDVExtensionConfig contains settings for the FreeDV audio extension
 type FreeDVExtensionConfig struct {
-	MaxUsers int `yaml:"max_users"` // Maximum concurrent users of the FreeDV extension (0 = unlimited, default: 10)
+	MaxUsers int `yaml:"max_users"` // Maximum concurrent users of the FreeDV extension (unset or 0 = default of 10, negative = unlimited)
 }
 
 // DRMExtensionConfig contains DRM decoder extension settings.
 type DRMExtensionConfig struct {
-	// MaxUsers is the maximum number of concurrent DRM decoders (0 = unlimited).
+	// MaxUsers is the maximum number of concurrent DRM decoders. Unset or 0
+	// means the default of 5; a negative value means no limit.
 	// Each one is a Dream OFDM demodulator plus an AAC decode and an Opus
 	// encode, so this is markedly heavier per user than most extensions.
 	MaxUsers int `yaml:"max_users"`
@@ -996,6 +998,14 @@ type DRMExtensionConfig struct {
 	// the DRM panel is much less use without it, since knowing which of the
 	// eleven DRM stations is on air right now is most of the job of finding one.
 	ScheduleEnabled *bool `yaml:"schedule_enabled"`
+}
+
+// HDRadioExtensionConfig contains HD Radio (NRSC-5) decoder extension settings.
+type HDRadioExtensionConfig struct {
+	// MaxUsers is the maximum number of concurrent HD Radio decoders. Unset or
+	// 0 means the default of 10; a negative value means no limit. Each one is
+	// an nrsc5 decode plus an Opus encode, and a private iq48 radiod channel.
+	MaxUsers int `yaml:"max_users"`
 }
 
 // SoundModemExtensionConfig contains settings for the Sound Modem audio extension

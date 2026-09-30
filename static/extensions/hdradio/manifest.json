@@ -1,0 +1,14 @@
+{
+  "name": "hdradio",
+  "displayName": "HD Radio",
+  "version": "1.0.0",
+  "description": "HD Radio (NRSC-5) AM decoder — decodes a hybrid or all-digital AM station and plays it, with the station name, programs, now playing, album art, alerts and the station's location",
+  "author": "UberSDR",
+  "type": "decoder",
+  "icon": "📻",
+  "category": "decoder",
+  "requiresAudio": true,
+  "defaultEnabled": true,
+  "files": {},
+  "settings": {}
+}

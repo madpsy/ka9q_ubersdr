@@ -148,12 +148,13 @@ export { SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN };
 
 /** The sideband choices, as the panel offers them. */
 export const SIDEBAND_OPTIONS = [
+    { value: 'both', label: 'Both', title: 'Both sidebands, weighted frequency by frequency by how clean each is' },
     { value: 'auto', label: 'Auto', title: 'Use whichever sideband has less interference on it' },
     { value: 'usb', label: 'USB', title: 'Upper sideband only' },
     { value: 'lsb', label: 'LSB', title: 'Lower sideband only' },
 ];
 
-const sidebandOf = (v) => (SIDEBANDS.includes(v) ? v : 'auto');
+const sidebandOf = (v) => (SIDEBANDS.includes(v) ? v : 'both');
 
 export const DEMOD_BY_ID = Object.fromEntries(DEMOD_MODES.map((m) => [m.id, m]));
 
@@ -195,8 +196,8 @@ export function passbandFor(modeId, offsetHz, widthHz, sideband) {
     switch (demodMode(modeId).id) {
         case 'usb': return { lo: off, hi: off + w };
         case 'lsb': return { lo: off - w, hi: off };
-        // ECSS in a fixed sideband is that sideband; Auto may use either, so
-        // both have to be inside the stream for it to have a choice.
+        // ECSS in a fixed sideband is that sideband; Both and Auto use either,
+        // so both have to be inside the stream.
         case 'ecss':
             switch (sidebandOf(sideband)) {
                 case 'usb': return { lo: off, hi: off + w };
@@ -387,6 +388,12 @@ const AGC_ATTACK_SEC = 0.005;
 const AGC_DECAY_SEC = 0.6;
 // A ceiling on the gain, so silence does not wind up to full-scale hiss.
 const AGC_MAX_GAIN = 300;
+// ECSS's carrier-referred level: one sideband of a 100% modulated tone comes
+// out at half the carrier's amplitude, so at this gain full modulation peaks
+// at 0.75 — louder than the audio AGC's target on typical programme, which
+// sits well under full modulation, and still short of the clip.
+const ECSS_CARRIER_LEVEL = 1.5;
+const ECSS_GAIN_SMOOTH_SEC = 0.02;
 
 // DC blocker corner. Removes the receiver's own centre offset from SSB, the
 // carrier from AM, and the tuning error from FM — where it is not a nicety but
@@ -546,6 +553,10 @@ export class DemodChain {
         this.ecss = null;
         this.ecssY = new Float32Array(0);
         this.ecssP = new Float32Array(0);
+        this.ecssR = new Float32Array(0);
+        // ECSS levels against the carrier, and its gain is smoothed so moving
+        // between that and the audio AGC (a lock gained or lost) is not a step.
+        this.ecssGain = 0;
         this.tapsKey = '';
     }
 
@@ -613,6 +624,7 @@ export class DemodChain {
         this.sigDb = SQUELCH_SILENT_DB;
         this.gateOpen = true;
         if (this.ecss) this.ecss.reset();
+        this.ecssGain = 0;
     }
 
     /**
@@ -626,7 +638,7 @@ export class DemodChain {
             state: e.state,
             locked: e.locked,
             carrierHz: e.locked ? e.readoutHz : e.state === 'acquire' ? e.carrierHz : null,
-            side: e.side,
+            side: this.plan.sideband === 'both' ? 'both' : e.side,
         };
     }
 
@@ -657,11 +669,15 @@ export class DemodChain {
             if (this.ecssY.length < frames) {
                 this.ecssY = new Float32Array(frames);
                 this.ecssP = new Float32Array(frames);
+                this.ecssR = new Float32Array(frames);
             }
-            this.ecss.process(planeI, planeQ, frames, this.ecssY, this.ecssP);
+            this.ecss.process(planeI, planeQ, frames, this.ecssY, this.ecssP, this.ecssR);
         }
         const ey = this.ecssY;
         const ep = this.ecssP;
+        const er = this.ecssR;
+        const egA = 1 - Math.exp(-1 / (rate * ECSS_GAIN_SMOOTH_SEC));
+        let ecssGain = this.ecssGain;
 
         const mixStep = (-2 * Math.PI * centreHz) / rate;
         const shiftStep = (2 * Math.PI * shiftHz) / rate;
@@ -781,7 +797,15 @@ export class DemodChain {
 
             const mag = y < 0 ? -y : y;
             env += (mag > env ? atk : dec) * (mag - env);
-            if (agc) {
+            if (agc && ecss) {
+                // Against the carrier while there is one to trust, against the
+                // audio otherwise — see CARRIER_LEVEL_SEC in lib/ecss.js.
+                const want = er[k] > 0
+                    ? Math.min(AGC_MAX_GAIN, ECSS_CARRIER_LEVEL / er[k])
+                    : (env > 0 ? Math.min(AGC_MAX_GAIN, AGC_TARGET / env) : 0);
+                ecssGain += egA * (want - ecssGain);
+                y *= ecssGain;
+            } else if (agc) {
                 const g = env > 0 ? Math.min(AGC_MAX_GAIN, AGC_TARGET / env) : 0;
                 y *= g;
             }
@@ -797,6 +821,7 @@ export class DemodChain {
         }
 
         this.pos = pos;
+        this.ecssGain = ecssGain;
         // Wrapped once per block rather than per sample: unbounded phase loses
         // precision after an hour or two of listening, and Math.cos of a number
         // that large is no longer the cosine of the angle meant.
@@ -884,9 +909,9 @@ const VFO_DEFAULTS = {
     // the new mode's default would throw away a choice that was deliberate.
     widths: {},
     pitchHz: 700,
-    // ECSS only. Auto and the window a click on the picture needs, so the mode
-    // works on arrival and neither has to be touched.
-    sideband: 'auto',
+    // ECSS only. Both sidebands and the window a click on the picture needs,
+    // so the mode works on arrival and neither has to be touched.
+    sideband: 'both',
     trackHz: TRACK_DEFAULT,
     agc: true,
     gain: 1,

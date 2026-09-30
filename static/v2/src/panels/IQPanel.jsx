@@ -763,7 +763,7 @@ export function ListeningCard({ listening, dialHz, limits, onTune }) {
  */
 export function ecssReport(ecss, vfo, dialHz) {
     if (!ecss) return { text: '—', tone: undefined, carrier: null, side: null };
-    const side = ecss.side === 'lsb' ? 'LSB' : 'USB';
+    const side = ecss.side === 'both' ? 'both' : ecss.side === 'lsb' ? 'LSB' : 'USB';
     const carrier = ecss.carrierHz == null ? null : dialHz + vfo.offsetHz + ecss.carrierHz;
     switch (ecss.state) {
         case 'locked': return { text: 'Locked', tone: 'good', carrier, side };

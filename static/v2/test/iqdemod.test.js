@@ -325,7 +325,7 @@ t('a packet boundary is not audible', () => {
  * the end of each packet. `planAt(t)` may return a new plan, which is how an
  * offset being dragged is simulated.
  */
-function runEcss(plan, gen, secs, { block = 240, planAt } = {}) {
+function runEcss(plan, gen, secs, { block = 240, planAt, agc = false } = {}) {
     const chain = new DemodChain();
     chain.configure(plan, RATE);
     const total = Math.round(secs * RATE);
@@ -344,7 +344,7 @@ function runEcss(plan, gen, secs, { block = 240, planAt } = {}) {
             I[i] = s.i;
             Q[i] = s.q;
         }
-        const o = chain.process(I.subarray(0, len), Q.subarray(0, len), len, { agc: false, gain: 1 });
+        const o = chain.process(I.subarray(0, len), Q.subarray(0, len), len, { agc, gain: 1 });
         out.set(o.subarray(0, len), at);
         const st = chain.ecssStatus;
         log.push({ t: at / RATE, state: st.state, hz: st.carrierHz, side: st.side });
@@ -659,18 +659,211 @@ t('a wide ECSS sideband stops at the stream\'s edge, wherever the carrier is fou
     assert.ok(DEMOD_MODES.find((m) => m.id === 'ecss').widths.includes(6000), 'no 6 kHz preset');
 });
 
+// ── both sidebands, and the carrier's level ─────────────────────────────────
+//
+// Measured the way they were tuned: per-tone SNR (every programme tone's power
+// over the noise floor between the tones, in half-second windows, averaged in
+// dB) for the diversity gain, because it charges a fade exactly what it costs a
+// listener and an echo nothing; and what is left once the programme's tones are
+// taken out, for interference.
+
+// A programme of steady tones on a grid, with room between them for a floor.
+const GRID = [];
+{
+    let seed = 11;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let i = 0; i < 24; i++) GRID.push([300 + i * 170 + (rnd() * 20 - 10), rnd() * 2 * Math.PI]);
+}
+const grid = (tSec) => {
+    let v = 0;
+    for (const [f, p] of GRID) v += 0.04 * Math.cos(2 * Math.PI * f * tSec + p);
+    return v;
+};
+
+/** Per-tone SNR of an output, from `fromSec` on. */
+function toneSnrDb(out, fromSec) {
+    const W = 8192;
+    const bin = RATE / W;
+    const win = hannWindow(W);
+    const isTone = (k) => GRID.some(([f]) => Math.abs(k * bin - f) < 12);
+    let sum = 0;
+    let count = 0;
+    for (let at = Math.round(fromSec * RATE); at + W <= out.length; at += W / 2) {
+        const re = new Float64Array(W);
+        const im = new Float64Array(W);
+        for (let i = 0; i < W; i++) re[i] = out[at + i] * win[i];
+        fftInPlace(re, im);
+        const P = (k) => re[k] * re[k] + im[k] * im[k];
+        let floor = 0;
+        let n = 0;
+        for (let k = Math.round(300 / bin); k < Math.round(4300 / bin); k++) {
+            if (!isTone(k)) { floor += P(k); n++; }
+        }
+        floor /= n;
+        for (const [f] of GRID) {
+            const k0 = Math.round(f / bin);
+            let p = 0;
+            for (let k = k0 - 3; k <= k0 + 3; k++) p += P(k);
+            sum += 10 * Math.log10(p / (7 * floor) + 1e-12);
+            count++;
+        }
+    }
+    return sum / count;
+}
+
+/** The grid programme on a carrier, through an optional two-ray channel, in noise. */
+function gridStation({ cnrDb, echo = null, seed = 3 }) {
+    const A = 0.1;
+    const sigma = Math.sqrt((A * A) / (2 * 10 ** (cnrDb / 10)));
+    noiseSeed = seed;
+    const s = (tSec) => phasor(A * (1 + grid(tSec)), 2 * Math.PI * 40 * tSec);
+    return (tSec) => {
+        let x = s(tSec);
+        if (echo) {
+            const y = s(tSec - echo.delay);
+            const e = phasor(echo.gain, 2 * Math.PI * echo.doppler * tSec);
+            x = { i: x.i + y.i * e.i - y.q * e.q, q: x.q + y.i * e.q + y.q * e.i };
+        }
+        return { i: x.i + sigma * gaussian(), q: x.q + sigma * gaussian() };
+    };
+}
+
+t('Both sidebands gain about 3 dB over one, and more through fading', () => {
+    const one = ecssPlan({ sideband: 'usb' });
+    const two = ecssPlan({ sideband: 'both' });
+    const flat = gridStation({ cnrDb: 20 });
+    const a = toneSnrDb(runEcss(one, flat, 10).out, 4);
+    const b = toneSnrDb(runEcss(two, gridStation({ cnrDb: 20 }), 10).out, 4);
+    // Theory is 3 dB: the programme adds in amplitude, the noise in power.
+    assert.ok(b - a > 2.5, `flat: one sideband ${a.toFixed(2)} dB, both ${b.toFixed(2)} dB`);
+
+    const echo = { delay: 0.001, gain: 0.9, doppler: 0.3 };
+    const c = toneSnrDb(runEcss(one, gridStation({ cnrDb: 20, echo }), 12).out, 4);
+    const d = toneSnrDb(runEcss(two, gridStation({ cnrDb: 20, echo }), 12).out, 4);
+    assert.ok(d - c > 3, `multipath: one sideband ${c.toFixed(2)} dB, both ${d.toFixed(2)} dB`);
+});
+
+/** Programme over interference, in dB, once the grid's tones are taken out. */
+function programmeOverRest(out, fromSec) {
+    const tail = Array.from(out.subarray(Math.round(fromSec * RATE)));
+    let prog = 0;
+    for (const [f] of GRID) prog += amplitudeAt(tail, f) ** 2 / 2;
+    let total = 0;
+    for (const v of tail) total += v * v;
+    total /= tail.length;
+    return 10 * Math.log10(prog / Math.max(total - prog, 1e-15));
+}
+
+t('Both takes interference off one side as completely as Auto does', () => {
+    const A = 0.1;
+    const carrierOnly = (tSec) => phasor(A * (1 + grid(tSec)), 0);
+    const plus = (extra) => (tSec) => {
+        const s = carrierOnly(tSec);
+        const e = extra(tSec);
+        return { i: s.i + e.i, q: s.q + e.q };
+    };
+    // A heterodyne as loud as the carrier, on the upper side; and a
+    // neighbour's splatter, band-limited, across the top of it.
+    let seed = 5;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const lines = [];
+    for (let i = 0; i < 60; i++) lines.push([2000 + rnd() * 2500, rnd() * 2 * Math.PI]);
+    const cases = {
+        heterodyne: plus((tSec) => phasor(A, 2 * Math.PI * 1537 * tSec)),
+        splatter: plus((tSec) => {
+            let i = 0;
+            let q = 0;
+            for (const [f, p] of lines) {
+                i += 0.01 * Math.cos(2 * Math.PI * f * tSec + p);
+                q += 0.01 * Math.sin(2 * Math.PI * f * tSec + p);
+            }
+            return { i, q };
+        }),
+    };
+    for (const [name, sig] of Object.entries(cases)) {
+        const usb = programmeOverRest(runEcss(ecssPlan({ sideband: 'usb' }), sig, 10).out, 6);
+        const both = programmeOverRest(runEcss(ecssPlan({ sideband: 'both' }), sig, 10).out, 6);
+        assert.ok(usb < 0, `${name}: control — the upper sideband should be swamped (${usb.toFixed(1)} dB)`);
+        assert.ok(both > 60, `${name}: Both left the programme only ${both.toFixed(1)} dB above it`);
+    }
+});
+
+t('the carrier sets the level: no pumping, and a quiet programme stays quiet', () => {
+    // Speech-like: the programme gated on and off. An AGC that follows the
+    // audio rides up in every gap and down on every burst; one that follows
+    // the carrier does neither.
+    const gated = (depth) => (tSec) => {
+        const on = ((tSec * 1.3) % 1) < 0.6 ? 1 : 0.05;
+        return phasor(0.1 * (1 + depth * grid(tSec) * on), 2 * Math.PI * 40 * tSec);
+    };
+    const plan = ecssPlan({ sideband: 'usb' });
+    const clean = runEcss(plan, gated(3), 10).out;
+    const levelled = runEcss(plan, gated(3), 10, { agc: true }).out;
+    // How much of the levelled output is *not* a scaled copy of the clean one.
+    let lc = 0;
+    let cc = 0;
+    for (let i = 4 * RATE; i < clean.length; i++) { lc += levelled[i] * clean[i]; cc += clean[i] * clean[i]; }
+    const g = lc / cc;
+    let err = 0;
+    for (let i = 4 * RATE; i < clean.length; i++) err += (levelled[i] - g * clean[i]) ** 2;
+    const fidelity = 10 * Math.log10((g * g * cc) / err);
+    assert.ok(fidelity > 35, `the gain rode the programme: only ${fidelity.toFixed(1)} dB clean`);
+
+    // And the level says how modulated the station is, as it should: a
+    // quarter of the modulation is a quarter of the audio.
+    const rms = (x) => Math.sqrt(x.slice(4 * RATE).reduce((a, v) => a + v * v, 0) / (x.length - 4 * RATE));
+    const loud = rms(Array.from(runEcss(plan, gated(4), 8, { agc: true }).out));
+    const quiet = rms(Array.from(runEcss(plan, gated(1), 8, { agc: true }).out));
+    assert.ok(Math.abs(loud / quiet - 4) < 0.4, `level ratio ${(loud / quiet).toFixed(2)}, want 4`);
+});
+
+t('the level holds through a carrier fade', () => {
+    // The carrier alone 20 dB down for 400 ms: the level must not be taken
+    // from it while it is gone, or the programme would jump by 20 dB.
+    const sig = station({
+        carrierHz: 30, carrierGain: (tSec) => (tSec > 5 && tSec < 5.4 ? 0.1 : 1),
+        modulation: (tSec) => 0.5 * Math.cos(2 * Math.PI * 1000 * tSec),
+    });
+    const { out } = runEcss(ecssPlan({ sideband: 'usb' }), sig, 7, { agc: true });
+    const level = (a, b) => amplitudeAt(Array.from(out.subarray(Math.round(a * RATE), Math.round(b * RATE))), 1000);
+    const before = level(4, 4.9);
+    const during = level(5.1, 5.35);
+    assert.ok(Math.abs(20 * Math.log10(during / before)) < 1,
+        `the programme moved ${(20 * Math.log10(during / before)).toFixed(1)} dB through the fade`);
+});
+
+t('Both: blocking does not change the output, and no carrier is sideband at the offset', () => {
+    const plan = ecssPlan({ sideband: 'both' });
+    const sig = station({ carrierHz: 90, noise: 0.003 });
+    noiseSeed = 1;
+    const a = runEcss(plan, sig, 5, { block: 240 }).out;
+    noiseSeed = 1;
+    const b = runEcss(plan, sig, 5, { block: 97 }).out;
+    let worst = 0;
+    for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]));
+    assert.ok(worst < 1e-4, `blocking changed the output by ${worst}`);
+
+    const ssb = (tSec) => phasor(0.2, 2 * Math.PI * 400 * tSec);
+    const { out, log } = runEcss(plan, ssb, 4);
+    assert.ok(!log.some(LOCKED), 'a lone tone was taken for a carrier');
+    assert.ok(amplitudeAt(tailOf(out, 1), 400) > 0.18, 'no carrier should mean upper sideband at the offset');
+});
+
 t('ECSS settings: sideband, window and offset limits', () => {
     fresh({ mode: 'ecss' });
-    assert.strictEqual(vfo0().sideband, 'auto', 'Auto is the default');
+    assert.strictEqual(vfo0().sideband, 'both', 'Both sidebands is the default');
     assert.strictEqual(vfo0().trackHz, TRACK_DEFAULT);
     updateVfo(0, { sideband: 'nonsense', trackHz: 99999 });
-    assert.strictEqual(vfo0().sideband, 'auto');
+    assert.strictEqual(vfo0().sideband, 'both');
     assert.strictEqual(vfo0().trackHz, TRACK_MAX);
     assert.strictEqual(clampTrack(1), TRACK_MIN);
 
-    // Auto needs both sidebands inside the stream; a fixed one only its own.
-    const auto = offsetLimits('ecss', 4500, 'auto');
-    assert.deepStrictEqual([auto.min, auto.max], [-IQ_HALF_SPAN + 4500, IQ_HALF_SPAN - 4500]);
+    // Both and Auto need both sidebands inside the stream; a fixed one only
+    // its own.
+    for (const sb of ['both', 'auto']) {
+        const lim = offsetLimits('ecss', 4500, sb);
+        assert.deepStrictEqual([lim.min, lim.max], [-IQ_HALF_SPAN + 4500, IQ_HALF_SPAN - 4500], sb);
+    }
     const usb = offsetLimits('ecss', 4500, 'usb');
     assert.deepStrictEqual([usb.min, usb.max], [-IQ_HALF_SPAN, IQ_HALF_SPAN - 4500]);
     assert.deepStrictEqual(passbandFor('ecss', 100, 4500, 'lsb'), { lo: -4400, hi: 100 });

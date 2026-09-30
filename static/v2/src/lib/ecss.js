@@ -79,7 +79,7 @@ export const TRACK_MIN = 50;
 export const TRACK_MAX = 1000;
 export const TRACK_DEFAULT = 300;
 
-export const SIDEBANDS = ['auto', 'usb', 'lsb'];
+export const SIDEBANDS = ['both', 'auto', 'usb', 'lsb'];
 
 // Where the tracker is. Published for the panel's readout.
 export const ECSS_SEARCH = 'search';
@@ -175,6 +175,73 @@ const SIDE_MIN_SHARE = 0.05;
 // The changeover between the two sidebands' audio.
 const SIDE_FADE_SEC = 0.03;
 
+// ── both sidebands ───────────────────────────────────────────────────────────
+//
+// Throwing a sideband away costs 3 dB: both carry the programme, and added in
+// phase the programme doubles in amplitude while their independent noise only
+// doubles in power. Selective fading costs more, and in a way no single choice
+// of sideband can answer: a notch sweeping through takes out one frequency on
+// one side while the same frequency on the other side is fine.
+//
+// So Both combines them frequency by frequency. A short-time transform splits
+// each sideband into bins, and in each bin each side is weighted by
+// maximal-ratio combining — its own signal amplitude over its own noise power:
+//
+//   noise        what the side has beyond what the two share, averaged over
+//                seconds: the band's noise, plus interference that side alone
+//                carries. The same measure Auto switches on, per bin.
+//   signal       what the side has right now beyond that noise, over a tenth
+//                of a second: which is what a sweeping fade takes away.
+//
+// Clean on both sides, the weights are equal and the full 3 dB is had. A
+// heterodyne or splatter on one side makes that side's noise large there and
+// its weight small; a fade does the same through the signal term — per bin,
+// and only for as long as it lasts.
+const COMBINE_FFT_SIZE = 512;
+const COMBINE_SHORT_SEC = 0.25;
+const COMBINE_LONG_SEC = 4;
+// Until the long average has something in it, the two sides are averaged.
+const COMBINE_WARMUP_SEC = 1.5;
+// Shrinkage, for the bins where the estimates are mostly noise. Both sides'
+// signal estimates get the same small allowance, this fraction (as power) of
+// the two noises' geometric mean, so a bin too weak to judge falls back to
+// weighting each side by the inverse of its noise: equal on a clean channel,
+// and on a bin with interference on one side and nothing on either, that side
+// all but shut — which weighting by amplitude alone would only half do.
+const COMBINE_NOISE_SHARE = 0.01;
+// Interference, per bin. The weights above are only as good as each side's
+// noise estimate, and a strong interferer corrupts the *clean* side's: its
+// beat against the programme leaves a residue in the shared term that the long
+// average does not fully remove, so the clean side looks noisier than it is
+// and the dirty side keeps weight it should not have. So, as Auto does for the
+// whole band, a side with clearly more unshared power than the other is taken
+// to have interference in that bin and is faded out — from this ratio (in dB)
+// up to full at the second. Measured: at 2..6 dB splatter and heterodynes are
+// removed as completely as Auto removes them, for 0.4 dB of the diversity gain
+// on the slowest fading tried; at 6..12 dB splatter leaked through at -36 dB.
+const COMBINE_INTERFERENCE_DB = [2, 6];
+// And the short-term estimates are shared with this many bins either side.
+// The two sidebands' difference moves smoothly across frequency — a millisecond
+// of echo turns it once a kilohertz, a few degrees across the neighbourhood —
+// so the neighbours are measuring nearly the same thing, and five of them
+// average the noise out of it five times faster than time alone could.
+const COMBINE_SPREAD_BINS = 2;
+
+// ── the level ────────────────────────────────────────────────────────────────
+//
+// The carrier is the one thing in an AM signal whose level does not depend on
+// the programme, so it is what the gain is set from: steady volume through
+// loud passages and quiet ones, no pumping, and no noise wound up in the
+// pauses. Averaged slowly enough that the bass the carrier low-pass lets
+// through does not modulate it, fast enough to follow a flat fade. Frozen
+// while the carrier alone has faded, which is exactly when it stops being a
+// measure of the signal.
+const CARRIER_LEVEL_SEC = 0.15;
+// And how far back the level is wound when a fade is declared. The fade
+// detector takes a couple of tens of milliseconds to be sure, and by then the
+// level has begun to follow the carrier down; this is the value it had before.
+const CARRIER_LEVEL_REWIND_SEC = 0.04;
+
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const coeff = (rate, sec) => 1 - Math.exp(-1 / (rate * sec));
 const TWO_PI = 2 * Math.PI;
@@ -252,6 +319,183 @@ class SidebandFilter {
 }
 
 /**
+ * Both sidebands, combined per frequency. See "both sidebands" above.
+ *
+ * Streaming weighted overlap-add: square-root Hann in and out at half overlap,
+ * which reconstructs exactly when nothing is changed. Fed the two sidebands as
+ * analytic signals with their programme at positive frequencies — the lower
+ * one conjugated to get it there — and returns the combined audio, a
+ * transform's length late.
+ */
+class SidebandCombiner {
+    constructor(size = COMBINE_FFT_SIZE) {
+        const N = size;
+        this.N = N;
+        this.hop = N / 2;
+        this.win = new Float64Array(N);
+        for (let i = 0; i < N; i++) this.win[i] = Math.sqrt(0.5 - 0.5 * Math.cos((TWO_PI * i) / N));
+        this.uR = new Float64Array(N); this.uI = new Float64Array(N);
+        this.vR = new Float64Array(N); this.vI = new Float64Array(N);
+        this.acc = new Float64Array(N);
+        this.fifo = new Float64Array(N * 2);
+        this.fr = { ur: new Float64Array(N), ui: new Float64Array(N), vr: new Float64Array(N), vi: new Float64Array(N) };
+        this.su = new Float64Array(N); this.sv = new Float64Array(N);
+        this.scr = new Float64Array(N); this.sci = new Float64Array(N);
+        this.pu = new Float64Array(N); this.pv = new Float64Array(N);
+        this.cr = new Float64Array(N); this.ci = new Float64Array(N);
+        this.reset();
+    }
+
+    reset() {
+        this.uR.fill(0); this.uI.fill(0); this.vR.fill(0); this.vI.fill(0);
+        this.acc.fill(0);
+        this.fifo.fill(0);
+        // Primed so every push has an output: the transform's length, less one.
+        this.rd = 0;
+        this.wr = this.N - 1;
+        this.fill = 0;
+        this.resetStats();
+    }
+
+    resetStats() {
+        this.su.fill(0); this.sv.fill(0); this.scr.fill(0); this.sci.fill(0);
+        this.pu.fill(0); this.pv.fill(0); this.cr.fill(0); this.ci.fill(0);
+        this.age = 0;
+    }
+
+    /**
+     * One sample of each sideband in, one of audio out. `locked` says whether
+     * the two are referred to a real carrier; without one they are not the same
+     * programme, and only `side` is used.
+     */
+    push(ur, ui, vr, vi, rate, locked, side) {
+        const f = this.fill;
+        this.uR[f] = ur; this.uI[f] = ui;
+        this.vR[f] = vr; this.vI[f] = vi;
+        if (++this.fill === this.N) this._frame(rate, locked, side);
+        const len = this.fifo.length;
+        const y = this.fifo[this.rd];
+        this.rd = (this.rd + 1) % len;
+        return y;
+    }
+
+    _frame(rate, locked, side) {
+        const { N, hop, win, fr } = this;
+        for (let i = 0; i < N; i++) {
+            fr.ur[i] = this.uR[i] * win[i]; fr.ui[i] = this.uI[i] * win[i];
+            fr.vr[i] = this.vR[i] * win[i]; fr.vi[i] = this.vI[i] * win[i];
+        }
+        fftInPlace(fr.ur, fr.ui);
+        fftInPlace(fr.vr, fr.vi);
+
+        const dt = hop / rate;
+        const aS = 1 - Math.exp(-dt / COMBINE_SHORT_SEC);
+        const aL = 1 - Math.exp(-dt / COMBINE_LONG_SEC);
+        const warm = this.age >= COMBINE_WARMUP_SEC;
+        if (locked) this.age += dt;
+        const lsbOnly = side === 'lsb';
+
+        // First the statistics, for every bin, so the second pass can read its
+        // neighbours'.
+        if (locked) {
+            for (let k = 0; k < N; k++) {
+                const Ur = fr.ur[k]; const Ui = fr.ui[k];
+                const Vr = fr.vr[k]; const Vi = fr.vi[k];
+                const pU = Ur * Ur + Ui * Ui;
+                const pV = Vr * Vr + Vi * Vi;
+                // U · conj(V): the two sides' agreement, magnitude and phase.
+                const xr = Ur * Vr + Ui * Vi;
+                const xi = Ui * Vr - Ur * Vi;
+                this.su[k] += aS * (pU - this.su[k]);
+                this.sv[k] += aS * (pV - this.sv[k]);
+                this.scr[k] += aS * (xr - this.scr[k]);
+                this.sci[k] += aS * (xi - this.sci[k]);
+                this.pu[k] += aL * (pU - this.pu[k]);
+                this.pv[k] += aL * (pV - this.pv[k]);
+                this.cr[k] += aL * (xr - this.cr[k]);
+                this.ci[k] += aL * (xi - this.ci[k]);
+            }
+        }
+
+        // The combined spectrum is written over the USB frame.
+        const spread = COMBINE_SPREAD_BINS;
+        const [iLo, iHi] = COMBINE_INTERFERENCE_DB;
+        for (let k = 0; k < N; k++) {
+            const Ur = fr.ur[k]; const Ui = fr.ui[k];
+            const Vr = fr.vr[k]; const Vi = fr.vi[k];
+            if (!locked) {
+                if (lsbOnly) { fr.ur[k] = Vr; fr.ui[k] = Vi; }
+                continue;
+            }
+            let wU = 1;
+            let wV = 1;
+            let turn = 0;
+            if (warm) {
+                // The neighbourhood's short-term figures, and this bin's own
+                // long-term ones.
+                let su = 0; let sv = 0; let xr = 0; let xi = 0; let cnt = 0;
+                for (let j = k - spread; j <= k + spread; j++) {
+                    if (j < 0 || j >= N) continue;
+                    su += this.su[j]; sv += this.sv[j];
+                    xr += this.scr[j]; xi += this.sci[j];
+                    cnt++;
+                }
+                su /= cnt; sv /= cnt;
+                const common = Math.hypot(this.cr[k], this.ci[k]);
+                // Each side's noise floored against its own power, never the
+                // pair's: in a bin with a heterodyne on one side, a shared
+                // floor would credit the clean side with noise at the
+                // heterodyne's level and cap how far the whistle is turned down.
+                const nU = Math.max(this.pu[k] - common, 1e-6 * this.pu[k] + 1e-30);
+                const nV = Math.max(this.pv[k] - common, 1e-6 * this.pv[k] + 1e-30);
+                const sU = Math.max(su - nU, 0);
+                const sV = Math.max(sv - nV, 0);
+                const allowance = COMBINE_NOISE_SHARE * Math.sqrt(nU * nV);
+                wU = Math.sqrt(sU + allowance) / nU;
+                wV = Math.sqrt(sV + allowance) / nV;
+                const lean = 10 * Math.log10(nU / nV);
+                if (lean > iLo) wU *= Math.max(0, (iHi - lean) / (iHi - iLo));
+                else if (-lean > iLo) wV *= Math.max(0, (iHi + lean) / (iHi - iLo));
+                // The angle between the two sides, by the neighbourhood's
+                // agreement: a fade moves their phases as well as their levels.
+                if (xr !== 0 || xi !== 0) turn = Math.atan2(xi, xr);
+            }
+            // Each side is turned towards the other in proportion to the
+            // other's weight, so the two meet in phase and the one carrying the
+            // weight keeps its own. Turning V all the way onto U instead would
+            // hand the programme U's phase even where U is the side with the
+            // interference — a phase set by the whistle, not the station.
+            const share = wU / (wU + wV);
+            const tU = -turn * (1 - share);
+            const tV = turn * share;
+            const cU = Math.cos(tU); const sU2 = Math.sin(tU);
+            const cV = Math.cos(tV); const sV2 = Math.sin(tV);
+            fr.ur[k] = share * (Ur * cU - Ui * sU2) + (1 - share) * (Vr * cV - Vi * sV2);
+            fr.ui[k] = share * (Ur * sU2 + Ui * cU) + (1 - share) * (Vr * sV2 + Vi * cV);
+        }
+
+        // Back to time: the inverse transform by conjugation, and its real part
+        // is the audio, since what was combined is the programme's analytic
+        // signal.
+        for (let k = 0; k < N; k++) fr.ui[k] = -fr.ui[k];
+        fftInPlace(fr.ur, fr.ui);
+        const acc = this.acc;
+        for (let i = 0; i < N; i++) acc[i] += (fr.ur[i] / N) * win[i];
+
+        const len = this.fifo.length;
+        for (let i = 0; i < hop; i++) {
+            this.fifo[this.wr] = acc[i];
+            this.wr = (this.wr + 1) % len;
+        }
+        acc.copyWithin(0, hop);
+        acc.fill(0, N - hop);
+        this.uR.copyWithin(0, hop); this.uI.copyWithin(0, hop);
+        this.vR.copyWithin(0, hop); this.vI.copyWithin(0, hop);
+        this.fill = N - hop;
+    }
+}
+
+/**
  * The carrier tracker and sideband detector.
  *
  * Fed the raw quadrature and the plan; produces audio and the passband power
@@ -266,6 +510,7 @@ export class EcssTracker {
         this.design = null;
         this.usb = new SidebandFilter();
         this.lsb = new SidebandFilter();
+        this.combiner = new SidebandCombiner();
         this.searchN = 0;
         this.searchI = null;
         this.searchQ = null;
@@ -314,12 +559,17 @@ export class EcssTracker {
         this.lastPeak = null;
         this.usb.reset();
         this.lsb.reset();
+        this.combiner.reset();
+        this.level = 0;
+        this.levelHistory = null;
+        this.levelAt = 0;
         this.side = 'usb';
         this.sideMix = 0; // 0 all USB, 1 all LSB
         this._resetSideStats();
     }
 
     _resetSideStats() {
+        if (this.combiner) this.combiner.resetStats();
         this.sideFill = 0;
         this.sideAge = 0;
         this.sideDwell = 0;
@@ -442,10 +692,11 @@ export class EcssTracker {
     }
 
     /**
-     * Run a block. Writes audio into `out` and the passband power into `pow`,
-     * both `frames` long.
+     * Run a block. Writes audio into `out`, the passband power into `pow`, and
+     * into `ref` the carrier's amplitude for the AGC to level against — zero
+     * where there is no carrier to trust — all `frames` long.
      */
-    process(planeI, planeQ, frames, out, pow) {
+    process(planeI, planeQ, frames, out, pow, ref) {
         const rate = this.rate;
         this._fit();
         const w0 = (TWO_PI * this.centreHz) / rate;
@@ -464,7 +715,18 @@ export class EcssTracker {
         const lossConfirm = Math.round(rate * LOSS_CONFIRM_SEC);
         const fadeGiveUp = Math.round(rate * FADE_GIVE_UP_SEC);
 
-        const auto = this.plan.sideband !== 'usb' && this.plan.sideband !== 'lsb';
+        const auto = this.plan.sideband === 'auto';
+        const both = this.plan.sideband === 'both';
+        const levelA = coeff(rate, CARRIER_LEVEL_SEC);
+        let level = this.level;
+        const rewind = Math.max(1, Math.round(rate * CARRIER_LEVEL_REWIND_SEC));
+        if (!this.levelHistory || this.levelHistory.length !== rewind) {
+            this.levelHistory = new Float32Array(rewind);
+            this.levelAt = 0;
+        }
+        const history = this.levelHistory;
+        let levelAt = this.levelAt;
+        const combiner = this.combiner;
         const U = this.usb;
         const L = this.lsb;
         const uI = U.bufI; const uQ = U.bufQ; const uT = U.taps;
@@ -519,7 +781,12 @@ export class EcssTracker {
                 const mag = Math.sqrt(cp);
                 lockRe += lockA * (c2i - lockRe);
                 lockMag += lockA * (mag - lockMag);
+                if (this.state === ECSS_LOCKED) level += levelA * (c2i - level);
             }
+            // The oldest entry is the level `rewind` samples ago.
+            const past = history[levelAt];
+            history[levelAt] = level;
+            levelAt = levelAt + 1 === rewind ? 0 : levelAt + 1;
             // Offset plus correction, and the proportional kick: a carrier
             // ahead of the oscillator (err > 0) pulls it forward.
             phase += w0 + freq + err;
@@ -564,7 +831,10 @@ export class EcssTracker {
                 }
                 lose(false);
             } else if (fade) {
-                if (this.state === ECSS_LOCKED) this.state = ECSS_HOLD;
+                if (this.state === ECSS_LOCKED) {
+                    this.state = ECSS_HOLD;
+                    if (past > 0) level = past;
+                }
                 if (++fading > fadeGiveUp) lose(false);
             } else {
                 fading = 0;
@@ -575,6 +845,10 @@ export class EcssTracker {
                     if (timer >= lockConfirm) {
                         this.state = ECSS_LOCKED;
                         timer = 0;
+                        // The level starts where the carrier is, not at zero,
+                        // or the first moments of a lock are at full gain.
+                        level = lockRe;
+                        history.fill(level);
                         this._resetSideStats();
                     }
                 } else {
@@ -626,7 +900,8 @@ export class EcssTracker {
 
             let yU = 0; let pU = 0;
             let yL = 0; let pL = 0;
-            if (sideMix < 1) {
+            let uaI = 0; let laI = 0;
+            if (both || sideMix < 1) {
                 let fi = 0; let fq = 0;
                 for (let t = 0; t < n; t++) {
                     const h = uT[t];
@@ -637,9 +912,10 @@ export class EcssTracker {
                 const oc = uc * U.dc + us * U.ds;
                 const os = us * U.dc - uc * U.ds;
                 yU = fi * oc - fq * os;
+                uaI = fi * os + fq * oc;
                 pU = fi * fi + fq * fq;
             }
-            if (sideMix > 0) {
+            if (both || sideMix > 0) {
                 let fi = 0; let fq = 0;
                 for (let t = 0; t < n; t++) {
                     const h = lT[t];
@@ -650,18 +926,29 @@ export class EcssTracker {
                 const oc = lc * L.dc + ls * L.ds;
                 const os = ls * L.dc - lc * L.ds;
                 yL = fi * oc + fq * os;
+                laI = fq * oc - fi * os;
                 pL = fi * fi + fq * fq;
             }
 
-            const target = this.side === 'lsb' ? 1 : 0;
-            sideMix += sideA * (target - sideMix);
-            if (Math.abs(target - sideMix) < 1e-4) sideMix = target;
-            out[k] = yU * (1 - sideMix) + yL * sideMix;
-            // The carrier counts as signal. It is outside the sideband filter
-            // by design, but it is the steadiest measure of whether a station
-            // is there: a squelch or meter reading only the programme would
-            // close in every pause between words.
-            pow[k] = pU * (1 - sideMix) + pL * sideMix + cp;
+            const locked = this.state === ECSS_LOCKED || this.state === ECSS_HOLD;
+            if (both) {
+                // The lower sideband conjugated, so its programme is at
+                // positive frequencies like the upper one's.
+                out[k] = combiner.push(yU, uaI, yL, -laI, rate, locked, this.side);
+                // Both sidebands are the passband, as the whole of both is in AM.
+                pow[k] = pU + pL + cp;
+            } else {
+                const target = this.side === 'lsb' ? 1 : 0;
+                sideMix += sideA * (target - sideMix);
+                if (Math.abs(target - sideMix) < 1e-4) sideMix = target;
+                out[k] = yU * (1 - sideMix) + yL * sideMix;
+                // The carrier counts as signal. It is outside the sideband
+                // filter by design, but it is the steadiest measure of whether
+                // a station is there: a squelch or meter reading only the
+                // programme would close in every pause between words.
+                pow[k] = pU * (1 - sideMix) + pL * sideMix + cp;
+            }
+            ref[k] = locked && level > 0 ? level : 0;
 
             // 5 — the sideband statistics, only while there is a carrier for
             // "the same on both sides" to be measured against.
@@ -710,6 +997,8 @@ export class EcssTracker {
         this.fading = fading;
         this.acqAge = acqAge;
         this.sideMix = sideMix;
+        this.level = level;
+        this.levelAt = levelAt;
     }
 
     /**

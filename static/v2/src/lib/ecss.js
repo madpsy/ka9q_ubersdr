@@ -135,6 +135,37 @@ const FADE_RATIO = 0.1;
 // A fade longer than this is not a fade, it is the carrier gone.
 const FADE_GIVE_UP_SEC = 3;
 
+// ── holding through a fade ───────────────────────────────────────────────────
+//
+// Coasting on the last frequency keeps the pitch right, which is all a single
+// sideband needs. SAM needs the phase as well — its output is the programme
+// times the cosine of the phase error — and a transmitter drifting a tenth of
+// a hertz a second has turned a 2.5 s coast into 117 degrees of it: the
+// programme inverted and 7 dB down.
+//
+// Two things keep the phase through a fade.
+//
+//   The sidebands. A double-sideband signal carries its carrier's phase in the
+//   programme as well as in the carrier: if z = m·e^(jφ) with m real, then
+//   z² = m²·e^(2jφ) whatever m is doing, so half the angle of z², averaged,
+//   is φ — the Costas loop's detector. Its half-cycle ambiguity does not arise
+//   here: the loop comes into a hold already locked, and turning by half a
+//   cycle would take far more error than a hold accumulates.
+//
+//   The drift. Silence in the programme during a fade leaves the sidebands
+//   nothing to say, so the loop also carries on at the rate its frequency was
+//   changing before the fade, not merely at the frequency.
+const COSTAS_LP_HZ = 3000;
+const COSTAS_SMOOTH_SEC = 0.03;
+// How consistent z² must be — |E[z²]| / E[|z|²], 1 for pure double sideband
+// and 0 for noise — before it is allowed to steer.
+const COSTAS_MIN_CONFIDENCE = 0.3;
+const LOOP_BN_HOLD = 4;
+// The drift, averaged over this long while locked, and never believed beyond
+// the ceiling: no broadcast transmitter drifts faster.
+const DRIFT_SMOOTH_SEC = 2;
+const DRIFT_MAX_HZ_PER_SEC = 5;
+
 // The carrier frequency as read out, averaged over this long. The loop's own
 // estimate wanders by a fraction of a hertz from one packet to the next —
 // that is the loop doing its job — and a readout to the hertz that reflected
@@ -552,6 +583,9 @@ export class EcssTracker {
     reset() {
         this.phase = 0;
         this.freq = 0; // the loop's correction, radians per sample
+        this.drift = 0; // its rate of change, radians per sample per sample
+        this.k1i = 0; this.k1q = 0; this.k2i = 0; this.k2q = 0;
+        this.z2r = 0; this.z2i = 0; this.zp = 0;
         this.c1i = 0; this.c1q = 0;
         this.c2i = 0; this.c2q = 0;
         this.lockRe = 0;
@@ -741,6 +775,10 @@ export class EcssTracker {
         const sideA = coeff(rate, SIDE_FADE_SEC);
         const acq = loopGains(LOOP_BN_ACQUIRE, rate);
         const trk = loopGains(LOOP_BN_LOCKED, rate);
+        const hold = loopGains(LOOP_BN_HOLD, rate);
+        const kA = coeff(rate, 1 / (TWO_PI * COSTAS_LP_HZ));
+        const zA = coeff(rate, COSTAS_SMOOTH_SEC);
+        const driftMax = (TWO_PI * DRIFT_MAX_HZ_PER_SEC) / (rate * rate);
         const lockConfirm = Math.round(rate * LOCK_CONFIRM_SEC);
         const acqTimeout = Math.round(rate * ACQUIRE_TIMEOUT_SEC);
         const lossConfirm = Math.round(rate * LOSS_CONFIRM_SEC);
@@ -771,6 +809,9 @@ export class EcssTracker {
         let lPh = L.phase;
 
         let { phase, freq, c1i, c1q, c2i, c2q, lockRe, lockMag, fast, slow } = this;
+        let { drift, k1i, k1q, k2i, k2q, z2r, z2i, zp } = this;
+        const freqAtStart = freq;
+        const lockedAtStart = this.state === ECSS_LOCKED;
         let { timer, fading, acqAge, sideMix, audioPhase, commit } = this;
         let pos = U.pos;
         // Back to searching, with the loop put back on the last good carrier
@@ -805,9 +846,40 @@ export class EcssTracker {
             slow += slowA * (cp - slow);
             const fade = this.state !== ECSS_SEARCH && fast < FADE_RATIO * slow;
 
+            // The Costas arm: the programme, lightly low-passed, and the
+            // running average of its square.
+            k1i += kA * (di - k1i);
+            k1q += kA * (dq - k1q);
+            k2i += kA * (k1i - k2i);
+            k2q += kA * (k1q - k2q);
+            z2r += zA * (k2i * k2i - k2q * k2q - z2r);
+            z2i += zA * (2 * k2i * k2q - z2i);
+            zp += zA * (k2i * k2i + k2q * k2q - zp);
+
             let err = 0;
-            if (this.state !== ECSS_SEARCH && !fade && cp > 0) {
+            if (fade && (this.state === ECSS_LOCKED || this.state === ECSS_HOLD)) {
+                // Holding: carry on along the drift, and steer by the
+                // sidebands wherever they are saying something.
+                freq += drift;
+                const m = Math.hypot(z2r, z2i);
+                if (zp > 0 && m / zp > COSTAS_MIN_CONFIDENCE) {
+                    err = 0.5 * Math.atan2(z2i, z2r);
+                    freq += hold.ki * err;
+                    err *= hold.kp;
+                }
+                if (freq > maxFreq) freq = maxFreq;
+                else if (freq < -maxFreq) freq = -maxFreq;
+            } else if (this.state !== ECSS_SEARCH && !fade && cp > 0) {
                 err = Math.atan2(c2q, c2i);
+                // Trusted less once the carrier has collapsed. The fade
+                // detector takes a couple of tens of milliseconds to be sure,
+                // and a carrier falling into the programme's bass steers the
+                // loop wherever that bass points in the meantime: 14 degrees
+                // of it, measured, before the hold could take over. Only below
+                // a tenth of the carrier's usual power, though — the ordinary
+                // swings of multipath are the carrier, and damping the loop
+                // through those cost Both a few tenths of a decibel.
+                if (this.state === ECSS_LOCKED && cp < 0.1 * slow) err *= cp / (0.1 * slow);
                 const g = this.state === ECSS_ACQUIRE ? acq : trk;
                 freq += g.ki * err;
                 if (freq > maxFreq) freq = maxFreq;
@@ -1032,6 +1104,20 @@ export class EcssTracker {
         U.phase = uPh % TWO_PI;
         L.phase = lPh % TWO_PI;
         this.freq = freq;
+        // The drift, from how far the locked frequency moved over the block —
+        // only across a block that was locked throughout, so neither a hold
+        // nor an acquisition is taken for a transmitter drifting.
+        if (lockedAtStart && this.state === ECSS_LOCKED) {
+            const a = 1 - Math.exp(-frames / (rate * DRIFT_SMOOTH_SEC));
+            drift += a * ((freq - freqAtStart) / frames - drift);
+            if (drift > driftMax) drift = driftMax;
+            else if (drift < -driftMax) drift = -driftMax;
+        } else if (this.state === ECSS_SEARCH || this.state === ECSS_ACQUIRE) {
+            drift = 0;
+        }
+        this.drift = drift;
+        this.k1i = k1i; this.k1q = k1q; this.k2i = k2i; this.k2q = k2q;
+        this.z2r = z2r; this.z2i = z2i; this.zp = zp;
         if (this.locked) {
             const hz = this.carrierHz;
             const a = 1 - Math.exp(-frames / (rate * READOUT_SMOOTH_SEC));

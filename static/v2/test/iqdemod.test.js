@@ -911,6 +911,34 @@ t('without a lock SAM is envelope AM, and a lock arriving is not a jump', () => 
         `the level moved ${(20 * Math.log10(afterLock / before)).toFixed(2)} dB at the lock`);
 });
 
+t('SAM keeps its phase through a long carrier fade on a drifting transmitter', () => {
+    // SAM's output is the programme times the cosine of the phase error, so a
+    // hold that only kept the frequency let a 0.1 Hz/s drift turn a 2.5 s fade
+    // into 117 degrees: the programme inverted and 7 dB down. The sidebands
+    // (a Costas detector) and the drift carry the phase now. Once with the
+    // programme going on through the fade, and once with it silent, when only
+    // the drift has anything to go on.
+    const tone1k = (tSec) => 0.5 * Math.cos(2 * Math.PI * 1000 * tSec);
+    for (const silent of [false, true]) {
+        const inFade = (tSec) => tSec > 4 && tSec < 6.5;
+        const sig = station({
+            carrierHz: 60, driftHz: 0.1,
+            carrierGain: (tSec) => (inFade(tSec) ? 0.03 : 1),
+            modulation: (tSec) => (silent && inFade(tSec) ? 0 : tone1k(tSec)),
+        });
+        const { out, log } = runEcss(samPlan(), sig, 7.5);
+        assert.ok(log.some((l) => l.state === 'hold'), 'the fade was not ridden as a hold');
+        assert.ok(after(log, 1).every(LOCKED), 'the fade cost the lock');
+        const level = (a, b) => amplitudeAt(Array.from(out.subarray(Math.round(a * RATE), Math.round(b * RATE))), 1000);
+        const before = level(3, 3.9);
+        // At the end of the fade if the programme was there, and just after
+        // it if not — where a phase lost in the hold would show.
+        const late = silent ? level(6.52, 6.8) : level(6, 6.45);
+        const db = 20 * Math.log10(late / before);
+        assert.ok(Math.abs(db) < 0.5, `${silent ? 'silent' : 'speaking'}: the programme moved ${db.toFixed(2)} dB`);
+    }
+});
+
 t('SAM gains the same 3 dB as Both on a clean channel', () => {
     const one = toneSnrDb(runEcss(ecssPlan({ sideband: 'usb' }), gridStation({ cnrDb: 20 }), 10).out, 4);
     const sam = toneSnrDb(runEcss(samPlan({ widthHz: 9000 }), gridStation({ cnrDb: 20 }), 10).out, 4);

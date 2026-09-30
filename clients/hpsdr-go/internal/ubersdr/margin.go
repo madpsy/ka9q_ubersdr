@@ -16,14 +16,15 @@ import (
 // 0.3 dB as delivered since the server holds the real margin 2 to 5 dB above the
 // request; past 60 dB the request buys nothing.
 //
-// MinMarginDefaultDB is the web client's default: the measured transparent
-// point, where every FT8 decode survives with its reported strength intact, for
-// about 0.01 dB of noise floor and roughly half the bytes. Zero asks for the
-// lossless stream.
+// MinMarginDefaultDB is the floor, for the bandwidth: measured on live captures
+// it saves 65-74% against lossless where 26 dB saves about half, lifts the noise
+// floor by 0.14-0.25 dB, and loses no FT8 decode that 15 dB keeps. 26 dB is the
+// transparent point, for a client that wants the reported strengths intact too.
+// Zero asks for the lossless stream.
 const (
 	MinMarginMinDB     = 10
 	MinMarginMaxDB     = 60
-	MinMarginDefaultDB = 26
+	MinMarginDefaultDB = 10
 )
 
 // ParseMinMargin parses a margin in dB. Strict on purpose: the server clamps

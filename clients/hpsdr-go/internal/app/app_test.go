@@ -13,7 +13,7 @@ import (
 func TestSaveLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "settings.json")
 	s, err := Load(path)
-	if err != nil || s.URL != Defaults().URL || s.Receivers != 10 || s.MinMargin != 26 {
+	if err != nil || s.URL != Defaults().URL || s.Receivers != 10 || s.MinMargin != 10 {
 		t.Fatalf("defaults %+v %v", s, err)
 	}
 	s.URL, s.Password, s.Rates, s.Interface = "https://rx", "pw", []int{48, 96}, "eth0"

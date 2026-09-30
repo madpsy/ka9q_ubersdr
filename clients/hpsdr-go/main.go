@@ -193,7 +193,7 @@ HPSDR emulation:
       --rates LIST       IQ rates to offer in kHz, e.g. 48,96,192
                          (default: every rate the receiver allows this session)
   -m, --min-margin DB    reduced-depth IQ: keep the quantisation floor DB below
-                         the band's noise floor, 10-60 (default 26); 0 asks for
+                         the band's noise floor, 10-60 (default 10); 0 asks for
                          the lossless stream. Needs UberSDR 0.1.64 or later
   -w, --wideband         send wideband data from --wideband-file
                          (default %[2]s)

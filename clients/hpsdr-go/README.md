@@ -56,7 +56,7 @@ many lines it held back. The status screen shows every attempt either way.
 | Band receivers | Off by default. See [Band receivers](#band-receivers). |
 | Receivers | DDCs to emulate, 1-10. |
 | Present as | Hermes Lite 2 (device 6) or Hermes (device 1). |
-| IQ margin dB | Reduced-depth IQ, 10-60 dB below the band's noise floor, default 26; 0 takes the lossless stream. See the C bridge's README for the measurements. |
+| IQ margin dB | Reduced-depth IQ, 10-60 dB below the band's noise floor, default 10; 0 takes the lossless stream. See the C bridge's README for the measurements. |
 | Offer N kHz | The rates offered to clients. After **Check**, any rate the receiver doesn't allow this session is marked `[-] not allowed`. |
 | Network interface | Auto answers clients on every network, like the C bridge. Choosing an interface answers only clients on that interface's subnet (plus loopback, for a client on the same machine) and uses its MAC. |
 

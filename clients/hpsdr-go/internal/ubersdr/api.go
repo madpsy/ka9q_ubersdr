@@ -265,6 +265,11 @@ func (r ConnResult) AllowsKHz(khz int) bool {
 	return false
 }
 
+// RateLimited reports a refusal for opening too many sessions too quickly: the
+// server allows an address about ten prechecks a minute unless its session is
+// bypassed. It passes; nothing about the request needs changing.
+func (r ConnResult) RateLimited() bool { return r.Status == http.StatusTooManyRequests }
+
 // Refusal words a refused precheck for the operator. The server refuses a wrong
 // password and a missing one with the same status, so which side needs fixing
 // is worth naming.

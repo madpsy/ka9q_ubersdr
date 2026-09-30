@@ -23,6 +23,12 @@ import (
 // a stream of bad magic hundreds of times a second.
 var ErrLegacyServer = errors.New("server does not support protocol version 4 (needs UberSDR 0.1.63 or later)")
 
+// ErrRateLimited is the server refusing a connection because this address has
+// opened too many lately. It lifts on its own, and a bypassed session is never
+// limited. The /connection precheck reports the same thing as a result with
+// RateLimited set, since it answers in the body as well.
+var ErrRateLimited = errors.New("rate limited by the server")
+
 // IQURL is the socket URL for one IQ session.
 //
 // "pcm-zstd" is still the server's name for the lossless format; from version
@@ -58,6 +64,10 @@ type IQConn struct {
 	ws  *websocket.Conn
 	dec *pcmv4.PCMv4StreamDecoder
 	wmu sync.Mutex
+
+	// deadlineAt is when the read deadline was last pushed on; see ReadIdle.
+	deadlineAt time.Time
+	deadlineOn bool
 }
 
 // DialIQ opens an IQ socket. The session must already have passed Check.
@@ -73,6 +83,9 @@ func (s *Server) DialIQ(ctx context.Context, sessionID string, freqHz int64, khz
 	ws, resp, err := d.DialContext(ctx, s.IQURL(sessionID, freqHz, khz, minMargin), h)
 	if err != nil {
 		if resp != nil {
+			if resp.StatusCode == http.StatusTooManyRequests {
+				return nil, fmt.Errorf("websocket: %w", ErrRateLimited)
+			}
 			return nil, fmt.Errorf("websocket: %w (HTTP %d)", err, resp.StatusCode)
 		}
 		return nil, fmt.Errorf("websocket: %w", err)
@@ -125,12 +138,24 @@ func (c *IQConn) Read() (Message, error) { return c.ReadIdle(0) }
 // arrives many times a second, so a socket that has said nothing for seconds is
 // half-open -- the far end gone without a close -- and would otherwise block
 // forever. Zero waits indefinitely.
+//
+// The deadline is pushed on only once a quarter of idle has passed, not on
+// every read: at 384 kHz the server sends about a thousand frames a second, and
+// each push is a runtime timer update. A silent server is noticed after between
+// three quarters of idle and idle. Not safe for concurrent reads, which a
+// WebSocket does not allow anyway.
 func (c *IQConn) ReadIdle(idle time.Duration) (Message, error) {
-	var deadline time.Time
-	if idle > 0 {
-		deadline = time.Now().Add(idle)
+	switch {
+	case idle > 0:
+		now := time.Now()
+		if !c.deadlineOn || now.Sub(c.deadlineAt) >= idle/4 {
+			_ = c.ws.SetReadDeadline(now.Add(idle))
+			c.deadlineAt, c.deadlineOn = now, true
+		}
+	case c.deadlineOn:
+		_ = c.ws.SetReadDeadline(time.Time{})
+		c.deadlineOn = false
 	}
-	_ = c.ws.SetReadDeadline(deadline)
 	typ, data, err := c.ws.ReadMessage()
 	if err != nil {
 		return Message{}, err

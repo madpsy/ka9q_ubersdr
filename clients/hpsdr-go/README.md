@@ -26,10 +26,26 @@ differences:
 ./ubersdr-hpsdr                        # setup screen
 ./ubersdr-hpsdr --url https://rx.example.org --password secret   # pre-filled
 ./ubersdr-hpsdr --headless --callsign M9PSY                       # as a service
+./ubersdr-hpsdr --headless --url https://rx1 --route 40m,20m=https://rx2   # two receivers
 ```
 
 With no terminal (systemd, a pipe) or with `--headless`, it runs as the C bridge
 did and logs to stdout with the same timestamps. `--help` lists every option.
+
+Headless starts from the settings the setup screen saved, as the screen does,
+and any option on the command line overrides just that setting: set things up
+on the screen, then `./ubersdr-hpsdr --headless` runs them. It logs which
+settings file it read, or that there is none. The bundled systemd unit runs as
+`nobody`, which has no settings file, so it goes by its command line; run it as
+your own user to use what you saved.
+
+The log says what changes -- clients, connections, band moves, refusals -- and
+not what repeats: a client's repeated discovery is logged once per address
+(then at most every 10 minutes), lost or malformed packets at most once a
+minute with a count, and a receiver that keeps failing logs its first three
+attempts, then retries quietly until it has streamed for 10 s, and says how
+many lines it held back. The status screen shows every attempt either way.
+`--debug` adds the IQ throughput every 5 s and every DDC frequency request.
 
 ### The setup screen
 
@@ -37,6 +53,7 @@ did and logs to stdout with the same timestamps. `--help` lists every option.
 |---|---|
 | Receiver URL | `host:port`, `http(s)://…`. **Browse** lists the public directory and receivers found on the LAN by mDNS; type to filter, Enter picks. |
 | Password | Sent to `/connection` and on the socket. **Check** says whether it was accepted (session bypassed), refused, or had no effect (the receiver has no bypass password). |
+| Band receivers | Off by default. See [Band receivers](#band-receivers). |
 | Receivers | DDCs to emulate, 1-10. |
 | Present as | Hermes Lite 2 (device 6) or Hermes (device 1). |
 | IQ margin dB | Reduced-depth IQ, 15-60 dB below the band's noise floor, default 26; 0 takes the lossless stream. See the C bridge's README for the measurements. |
@@ -48,9 +65,58 @@ Settings are saved on Start to the platform's config directory
 `%AppData%\ubersdr-hpsdr`). The password is only saved if you tick "Remember
 password", and the file is created owner-only.
 
-The status screen shows the client, each DDC's socket state, rate, frequency,
-throughput and packet count, and the log. `s` stops and goes back to setup; `q`
-quits.
+The status screen shows the client, and for each DDC its socket state, rate,
+frequency, the callsign of the receiver it is on with a one-letter reason (see
+below), throughput and packet count, then the log. The mouse wheel scrolls the
+log, the receiver list and the band tables. `s` stops and goes back to setup;
+`q` quits.
+
+### Band receivers
+
+By default one receiver takes every DDC. Band receivers send the DDCs tuned to
+some bands to other UberSDR instances instead, say 40m and 20m to one with a
+better antenna for them, while the receiver on the setup screen takes
+everything else. Choose **Band receivers** on the setup screen to add them;
+each gets a URL, a password and a set of bands. Only bands the receiver's
+tuning range reaches can be ticked, and a band belongs to one receiver at a
+time. Each receiver's range is what its `/api/description` publishes.
+
+The bands are 2200m to 6m, each at the widest allocation any country has (80m
+is 3.5-4.0 MHz, as in the Americas). A DDC goes to:
+
+| Key | Receiver |
+|---|---|
+| B | the one its band is assigned to |
+| A | otherwise the main receiver, which takes all other frequencies |
+| R | otherwise the only receiver whose range reaches it (general coverage above the main receiver's range, say) |
+| O | no receiver tunes it: nothing is opened, the DDC shows `out of range` and stays silent until the client tunes back |
+
+The DDC table shows the letter and the receiver's callsign, and under it the
+keys and which callsign has which bands.
+
+It follows the dial. A DDC is routed by its **centre frequency**: a client that
+moves its VFO inside a wide panadapter without retuning the DDC stays where it
+is until the centre moves. Retuned into another receiver's band, the DDC has to
+stay there 300 ms (a sweep across the dial opens nothing on the way), then its
+socket closes and one opens on the other receiver. Until then it follows the
+dial on the receiver it is on; after it, the client sees a short gap in that
+DDC's stream, never a restart. Within 500 Hz of a band edge a DDC creeping
+across keeps its receiver, so tuning back and forth over 7.000 MHz does not
+reconnect every step.
+
+**Rates.** An HPSDR client picks a rate before it tunes and cannot be told a
+band has other limits, so only rates every receiver allows are offered; the
+setup screen says which receiver rules each one out.
+
+**Rate limits.** Each band change is a new session, and UberSDR lets an address
+open about ten a minute unless the session is bypassed by a password. When a
+receiver says "too many", every DDC headed there waits together: 6 s, doubling
+to 60 s, with one trying first when it lifts. The DDC shows `rate limited` and
+a countdown, the header counts the DDCs held on that receiver, and the log says
+once that a password lifts the limit. Nothing is held open to avoid it.
+
+`--route BANDS=URL` does the same headless, repeatable, with a password as the
+URL's userinfo: `--route 40m,20m=https://:secret@rx2.example.org`.
 
 ### Platform notes
 
@@ -96,7 +162,7 @@ OS), `windows_amd64`, `windows_arm64`, `darwin_amd64`, `darwin_arm64`, named
 |---|---|---|
 | `internal/pcmv4` | Version 4 decoder (from `clients/rtl_sdr`), plus a bound on the sample count a packet may claim. | The three server-produced fixtures and hashes the C bridge's `test/run.sh` uses, truncation, a missing shift byte, fuzzed garbage, and round trips through `v4enc`. |
 | `internal/pcmv4/v4enc` | The **server's** encoder, copied verbatim, for tests only. | — |
-| `internal/hpsdr` | Protocol 1 and 2 codecs, the bridge, a WebSocket session per DDC. | Every byte offset both protocols use; the C `p1_framing` cases one-for-one; end to end against a fake UberSDR server that enforces `/connection` like the real one and encodes with the real encoder: discovery, tune, reconnect on rate change, phase words, two DDCs, refusals, disallowed rates, server rate changes, closes, legacy servers, watchdogs, protocol 1/2 exclusion. |
+| `internal/hpsdr` | Protocol 1 and 2 codecs, the bridge, a WebSocket session per DDC, band routing. | Every byte offset both protocols use; the C `p1_framing` cases one-for-one; end to end against a fake UberSDR server that enforces `/connection` like the real one and encodes with the real encoder: discovery, tune, reconnect on rate change, phase words, two DDCs, refusals, disallowed rates, server rate changes, closes, legacy servers, watchdogs, protocol 1/2 exclusion; with two fake servers, moving between receivers as the dial moves, a sweep opening nothing, shared rate-limit waits. |
 | `internal/ubersdr` | `/connection`, `/api/description`, the directory, mDNS, the IQ socket. | URL normalisation, password escaping into JSON and the query string, mode filtering, tuning-range fallbacks, directory parsing and sorting, the min-margin parser. |
 | `internal/app` | Settings, probe, offered-rate logic, building a bridge. | Save/load (password handling, file mode), validation, rate intersection, probe summaries. |
 | `internal/ui` | tview setup, picker and status screens. | Driven on a simulated 80x25 screen with real key events: checking a receiver, greying out rates, masking, stale checks, focus, start/stop, the picker. |
@@ -109,4 +175,5 @@ UBERSDR_LIVE_URL=https://m9psy-1.instance.ubersdr.org go test -run Live -v ./int
 
 The live test runs a protocol 2 client with DDCs at 384 and 48 kHz against a
 real receiver and checks each DDC's delivered rate, sequence continuity and
-signal.
+signal. `UBERSDR_LIVE_BAND_URL` as well runs `TestLiveRouted`, which tunes
+one DDC 20m, 40m, 20m with 40m on the second receiver.

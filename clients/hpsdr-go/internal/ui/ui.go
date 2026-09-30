@@ -32,7 +32,7 @@ type bridgeHandle interface {
 // for the network, the sockets and the settings file.
 type deps struct {
 	probe      func(ctx context.Context, url, password string) (*app.Probe, error)
-	build      func(app.Settings, *app.Probe, func(string)) (bridgeHandle, []string, error)
+	build      func(app.Settings, []*app.Probe, func(string)) (bridgeHandle, []string, error)
 	directory  func(ctx context.Context) ([]ubersdr.Instance, error)
 	local      func(ctx context.Context) *ubersdr.LocalDiscovery
 	interfaces func() ([]hpsdr.Iface, error)
@@ -43,7 +43,7 @@ type deps struct {
 func realDeps(settingsPath string) deps {
 	return deps{
 		probe: app.RunProbe,
-		build: func(s app.Settings, p *app.Probe, logf func(string)) (bridgeHandle, []string, error) {
+		build: func(s app.Settings, p []*app.Probe, logf func(string)) (bridgeHandle, []string, error) {
 			b, notes, err := app.Build(s, p, logf)
 			if err != nil {
 				return nil, notes, err
@@ -108,6 +108,8 @@ type UI struct {
 	probeKey string
 	probing  bool
 
+	bands bandState
+
 	// picker
 	picker     *tview.Flex
 	filter     *tview.InputField
@@ -117,22 +119,32 @@ type UI struct {
 	dirErr     error
 	dirLoading bool
 	local      *ubersdr.LocalDiscovery
+	// pickTarget takes the receiver picked, and pickBack and pickFocus are
+	// where Esc or a pick returns to: the setup screen or a band receiver.
+	pickTarget func(ubersdr.Instance)
+	pickBack   string
+	pickFocus  tview.Primitive
 
 	// running
 	bridge   bridgeHandle
 	running  *tview.Flex
 	header   *tview.TextView
 	table    *tview.Table
+	ddcBox   *tview.Flex
+	legend   *tview.TextView
 	logView  *tview.TextView
 	logMu    sync.Mutex
 	logQueue []string
 	tick     chan struct{}
 	started  time.Time
 	server   string
+	proc     procStats
 }
 
 func newUI(s app.Settings, d deps, version string) *UI {
 	u := &UI{app: tview.NewApplication(), d: d, version: version, base: s}
+	u.bands.probes = map[string]*app.Probe{}
+	u.bands.list = append([]app.BandInstance(nil), s.BandInstances...)
 	u.ctx, u.cancel = context.WithCancel(context.Background())
 	if d.local != nil {
 		u.local = d.local(u.ctx)
@@ -141,6 +153,8 @@ func newUI(s app.Settings, d deps, version string) *UI {
 	u.pages = tview.NewPages()
 	u.pages.AddPage("setup", u.buildSetup(s), true, true)
 	u.pages.AddPage("picker", u.buildPicker(), true, false)
+	u.pages.AddPage("bands", u.buildBands(), true, false)
+	u.pages.AddPage("bandedit", u.buildBandEdit(), true, false)
 	u.pages.AddPage("running", u.buildRunning(), true, false)
 	u.app.SetRoot(u.pages, true).EnableMouse(true)
 	u.app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
@@ -216,7 +230,10 @@ func (u *UI) buildSetup(s app.Settings) tview.Primitive {
 	u.iface = tview.NewDropDown().SetLabel("Network interface")
 	u.loadInterfaces(s.Interface)
 
-	u.form.AddFormItem(u.url).AddFormItem(u.password).AddFormItem(u.remember).
+	u.bands.field = newLinkField("Band receivers", u.showBands)
+	u.refreshBandsField()
+
+	u.form.AddFormItem(u.url).AddFormItem(u.password).AddFormItem(u.remember).AddFormItem(u.bands.field).
 		AddFormItem(u.rx).AddFormItem(u.device).AddFormItem(u.margin)
 	for _, c := range u.rate {
 		u.form.AddFormItem(c)
@@ -305,6 +322,10 @@ func (u *UI) settings() (app.Settings, error) {
 	if all {
 		s.Rates = nil // every rate the receiver allows
 	}
+	s.BandInstances = nil
+	if len(u.bands.list) > 0 {
+		s.BandInstances = append([]app.BandInstance(nil), u.bands.list...)
+	}
 	if n, _ := u.iface.GetCurrentOption(); n > 0 && n-1 < len(u.ifaces) {
 		s.Interface = u.ifaces[n-1].Name
 	} else {
@@ -346,9 +367,9 @@ func (u *UI) probeThen(next func()) {
 				return
 			}
 			u.probe, u.probeKey = p, key
-			u.info.SetText(renderProbe(p))
+			u.info.SetText(u.renderSetupInfo())
 			if p.Reached && p.Conn.Allowed {
-				u.applyAllowed(p.AllowedKHz())
+				u.refreshAllowed()
 			} else {
 				u.applyAllowed(nil)
 			}
@@ -425,16 +446,21 @@ func (u *UI) start() {
 		u.probeThen(u.start)
 		return
 	}
+	if stale := u.staleBands(); len(stale) > 0 {
+		u.probeBands(stale, u.start)
+		return
+	}
+	probes := u.allProbes()
 	u.logMu.Lock()
 	u.logQueue = nil
 	u.logMu.Unlock()
 	u.logView.Clear()
-	b, notes, err := u.d.build(s, u.probe, u.logf)
+	b, notes, err := u.d.build(s, probes, u.logf)
 	for _, n := range notes {
 		u.logf(n)
 	}
 	if err != nil {
-		u.info.SetText("[red]Could not start: " + tview.Escape(err.Error()) + "[-]\n\n" + renderProbe(u.probe))
+		u.info.SetText("[red]Could not start: " + tview.Escape(err.Error()) + "[-]\n\n" + u.renderSetupInfo())
 		return
 	}
 	if u.d.save != nil {
@@ -446,13 +472,16 @@ func (u *UI) start() {
 	u.bridge = b
 	u.server = u.probe.Server.Base
 	u.started = time.Now()
+	u.proc = procStats{}
+	u.proc.sample(u.started)
 	b.Start()
 	// Every DDC visible: header, borders and one row each; the log gets the rest.
-	u.running.ResizeItem(u.table, s.Receivers+3, 0)
+	u.running.ResizeItem(u.ddcBox, s.Receivers+3+legendLines(s), 0)
+	u.logView.ScrollToEnd()
 	u.pages.SwitchToPage("running")
 	u.app.SetFocus(u.table)
 	u.tick = make(chan struct{})
-	go u.ticker(u.tick)
+	go u.ticker(u.tick, b)
 	u.refresh()
 }
 
@@ -462,6 +491,7 @@ func (u *UI) buildPicker() tview.Primitive {
 	u.filter = tview.NewInputField().SetLabel("Filter ").SetFieldWidth(30)
 	u.filter.SetChangedFunc(func(string) { u.fillList() })
 	u.list = tview.NewList().ShowSecondaryText(true)
+	wheelList(u.list)
 	u.list.SetBorder(true).SetTitle(" Receivers ").SetTitleAlign(tview.AlignLeft)
 	u.list.SetSelectedFunc(func(i int, _, _ string, _ rune) { u.pick(i) })
 	help := tview.NewTextView().SetDynamicColors(true).
@@ -498,7 +528,17 @@ func (u *UI) buildPicker() tview.Primitive {
 	return u.picker
 }
 
+// showPicker picks the setup screen's receiver.
 func (u *UI) showPicker() {
+	u.showPickerFor(func(inst ubersdr.Instance) {
+		u.url.SetText(inst.URL())
+		u.runProbe()
+	}, "setup", u.form)
+}
+
+// showPickerFor picks a receiver for target, returning to page and focus.
+func (u *UI) showPickerFor(target func(ubersdr.Instance), page string, focus tview.Primitive) {
+	u.pickTarget, u.pickBack, u.pickFocus = target, page, focus
 	u.pages.SwitchToPage("picker")
 	u.app.SetFocus(u.filter)
 	u.fillList()
@@ -519,8 +559,11 @@ func (u *UI) showPicker() {
 }
 
 func (u *UI) hidePicker() {
-	u.pages.SwitchToPage("setup")
-	u.app.SetFocus(u.form)
+	if u.pickBack == "" {
+		u.pickBack, u.pickFocus = "setup", u.form
+	}
+	u.pages.SwitchToPage(u.pickBack)
+	u.app.SetFocus(u.pickFocus)
 }
 
 // watchLocal refreshes the list as LAN receivers are found.
@@ -537,6 +580,12 @@ func (u *UI) watchLocal() {
 
 func (u *UI) fillList() {
 	f := u.filter.GetText()
+	// Rebuilt whenever a LAN receiver turns up, which must not throw away
+	// the operator's place in the list.
+	keep := ""
+	if cur := u.list.GetCurrentItem(); cur >= 0 && cur < len(u.listed) {
+		keep = u.listed[cur].URL()
+	}
 	u.list.Clear()
 	u.listed = nil
 	add := func(i ubersdr.Instance) {
@@ -568,6 +617,12 @@ func (u *UI) fillList() {
 	for _, i := range u.directory {
 		add(i)
 	}
+	for i, inst := range u.listed {
+		if keep != "" && inst.URL() == keep {
+			u.list.SetCurrentItem(i)
+			break
+		}
+	}
 	title := fmt.Sprintf(" Receivers (%d) ", len(u.listed))
 	switch {
 	case u.dirLoading:
@@ -582,9 +637,11 @@ func (u *UI) pick(i int) {
 	if i < 0 || i >= len(u.listed) {
 		return
 	}
-	u.url.SetText(u.listed[i].URL())
+	target := u.pickTarget
 	u.hidePicker()
-	u.runProbe()
+	if target != nil {
+		target(u.listed[i])
+	}
 }
 
 // ---- running screen ------------------------------------------------------------
@@ -592,7 +649,11 @@ func (u *UI) pick(i int) {
 func (u *UI) buildRunning() tview.Primitive {
 	u.header = tview.NewTextView().SetDynamicColors(true)
 	u.table = tview.NewTable().SetFixed(1, 0).SetSelectable(false, false)
-	u.table.SetBorder(true).SetTitle(" Receivers ").SetTitleAlign(tview.AlignLeft)
+	u.legend = tview.NewTextView().SetDynamicColors(true).SetWrap(true).SetWordWrap(true)
+	u.ddcBox = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(u.table, 0, 1, true).
+		AddItem(u.legend, 1, 0, false)
+	u.ddcBox.SetBorder(true).SetTitle(" Receivers ").SetTitleAlign(tview.AlignLeft)
 	u.logView = tview.NewTextView().SetDynamicColors(false).SetMaxLines(2000).
 		SetChangedFunc(func() {})
 	u.logView.SetBorder(true).SetTitle(" Log ").SetTitleAlign(tview.AlignLeft)
@@ -600,7 +661,7 @@ func (u *UI) buildRunning() tview.Primitive {
 		SetText("[gray]s/Esc stop and return to setup · q quit · ↑↓ scroll the log[-]")
 	u.running = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(u.header, 3, 0, false).
-		AddItem(u.table, 0, 1, true).
+		AddItem(u.ddcBox, 0, 1, true).
 		AddItem(u.logView, 0, 1, false).
 		AddItem(foot, 1, 0, false)
 	u.running.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
@@ -628,9 +689,15 @@ func (u *UI) logf(line string) {
 	u.logMu.Unlock()
 }
 
-func (u *UI) ticker(stop chan struct{}) {
+// ticker redraws the running screen, but only when something on it has
+// changed: redrawing a screen that had not changed four times a second was
+// nearly all the CPU the bridge used with no client. Idle, the uptime still
+// changes once a second, so it redraws once a second; streaming, the counters
+// change every time and it redraws every tick.
+func (u *UI) ticker(stop chan struct{}, b bridgeHandle) {
 	t := time.NewTicker(250 * time.Millisecond)
 	defer t.Stop()
+	last := ""
 	for {
 		select {
 		case <-stop:
@@ -638,8 +705,16 @@ func (u *UI) ticker(stop chan struct{}) {
 		case <-u.ctx.Done():
 			return
 		case <-t.C:
-			u.app.QueueUpdateDraw(u.refresh)
 		}
+		u.logMu.Lock()
+		logs := len(u.logQueue) > 0
+		u.logMu.Unlock()
+		sig := fmt.Sprintf("%v|%d", b.Status(), time.Since(u.started)/time.Second)
+		if sig == last && !logs {
+			continue
+		}
+		last = sig
+		u.app.QueueUpdateDraw(u.refresh)
 	}
 }
 
@@ -657,7 +732,7 @@ func (u *UI) stop() {
 	u.pages.SwitchToPage("setup")
 	u.app.SetFocus(u.form)
 	if u.probe != nil {
-		u.info.SetText(renderProbe(u.probe) + "\n\n[gray]Bridge stopped.[-]")
+		u.info.SetText(u.renderSetupInfo() + "\n\n[gray]Bridge stopped.[-]")
 	}
 }
 
@@ -669,15 +744,9 @@ func (u *UI) flushLog() {
 	if len(q) == 0 {
 		return
 	}
-	atEnd := true
-	if row, _ := u.logView.GetScrollOffset(); row > 0 {
-		_, _, _, h := u.logView.GetInnerRect()
-		atEnd = row+h >= strings.Count(u.logView.GetText(false), "\n")
-	}
+	// The view follows the end by itself until the operator scrolls up, and
+	// again once they scroll back down; a new line must not move them.
 	_, _ = u.logView.Write([]byte(strings.Join(q, "\n") + "\n"))
-	if atEnd {
-		u.logView.ScrollToEnd()
-	}
 }
 
 // refresh redraws the running screen from the bridge's status.
@@ -687,6 +756,7 @@ func (u *UI) refresh() {
 		return
 	}
 	st := u.bridge.Status()
+	now := time.Now()
 	client := "[yellow]waiting for an HPSDR client (discovery on UDP 1024)[-]"
 	switch st.Protocol {
 	case 1:
@@ -695,13 +765,45 @@ func (u *UI) refresh() {
 		client = "[green]protocol 2 client " + tview.Escape(st.Client) + "[-]"
 	}
 	up := time.Since(u.started).Truncate(time.Second)
-	u.header.SetText(fmt.Sprintf(" [::b]%s[::-]  up %s  version %s\n %s\n IQ %.0f kbps",
-		tview.Escape(u.server), up, tview.Escape(u.version), client, st.TotalKbps))
+	server := tview.Escape(u.server)
+	if n := len(st.Routes) - 1; n > 0 {
+		server += fmt.Sprintf(" + %d band receiver", n)
+		if n > 1 {
+			server += "s"
+		}
+	}
+	u.proc.sample(now)
+	from := "UberSDR"
+	if len(st.Routes) > 1 {
+		from = "instances"
+	}
+	head := fmt.Sprintf(" [::b]%s[::-]  up %s  version %s\n %s\n IQ from %s %s · to client %s   %s",
+		server, up, tview.Escape(u.version), client, from, rate(st.TotalKbps), rate(st.TotalOutKbps), u.proc.String())
+	// An instance holding DDCs back gets a line of its own: several DDCs
+	// waiting on one instance are one problem, not several.
+	headLines := 3
+	for _, r := range st.Routes {
+		if r.LimitedUntil.IsZero() {
+			continue
+		}
+		waiting := 0
+		for _, rx := range st.Receivers {
+			if rx.State == hpsdr.RxRateLimited && rx.Instance == r.Name {
+				waiting++
+			}
+		}
+		head += fmt.Sprintf("\n [yellow]%s: rate limited, %d DDC(s) waiting, retry in %s[-]",
+			tview.Escape(routeLabel(r.Callsign, r.Name)), waiting, secondsUntil(now, r.LimitedUntil))
+		headLines++
+	}
+	u.header.SetText(head)
+	u.running.ResizeItem(u.header, headLines, 0)
 
-	heads := []string{"DDC", "Socket", "Rate", "Frequency", "Serving", "kbps", "Packets", "Detail"}
+	const detailCol = 8
+	heads := []string{"DDC", "Socket", "Rate", "Frequency", "Instance", "Why", "In kbps", "Packets", "Detail"}
 	u.table.Clear()
 	for c, h := range heads {
-		u.table.SetCell(0, c, tview.NewTableCell(h).SetAttributes(tcell.AttrBold).SetSelectable(false).SetExpansion(boolInt(c == 7)))
+		u.table.SetCell(0, c, tview.NewTableCell(h).SetAttributes(tcell.AttrBold).SetSelectable(false).SetExpansion(boolInt(c == detailCol)))
 	}
 	for r, rx := range st.Receivers {
 		row := r + 1
@@ -709,9 +811,9 @@ func (u *UI) refresh() {
 		switch rx.State {
 		case hpsdr.RxStreaming:
 			color = tcell.ColorGreen
-		case hpsdr.RxConnecting:
+		case hpsdr.RxConnecting, hpsdr.RxSwitching, hpsdr.RxRateLimited:
 			color = tcell.ColorYellow
-		case hpsdr.RxRefused, hpsdr.RxNotOffered, hpsdr.RxError:
+		case hpsdr.RxRefused, hpsdr.RxNotOffered, hpsdr.RxError, hpsdr.RxOutOfRange:
 			color = tcell.ColorRed
 		}
 		rate, freq := "", ""
@@ -725,19 +827,139 @@ func (u *UI) refresh() {
 		if rx.Kbps > 0 {
 			kbps = fmt.Sprintf("%.0f", rx.Kbps)
 		}
-		cells := []string{fmt.Sprint(rx.Index), rx.State.String(), rate, freq, rx.ServerMode, kbps,
-			fmt.Sprint(rx.Packets), rx.Detail}
-		for c, v := range cells {
-			cell := tview.NewTableCell(tview.Escape(v)).SetExpansion(boolInt(c == 7))
-			if c == 1 {
-				cell.SetTextColor(color)
+		inst, why := "", ""
+		if rx.State == hpsdr.RxOutOfRange {
+			why = string(rune(hpsdr.WhyOut))
+		} else if rx.State != hpsdr.RxIdle && rx.State != hpsdr.RxNotOffered {
+			inst = routeLabel(rx.Callsign, rx.Instance)
+			if rx.Why != hpsdr.WhyNone {
+				why = string(rune(rx.Why))
 			}
-			if c >= 5 && c <= 6 {
+		}
+		detail := rx.Detail
+		if !rx.RetryAt.IsZero() {
+			// The Instance column already says who; the countdown is the news.
+			detail = "retry in " + secondsUntil(now, rx.RetryAt)
+		}
+		cells := []string{fmt.Sprint(rx.Index), rx.State.String(), rate, freq, inst, why, kbps,
+			count(rx.Packets), detail}
+		for c, v := range cells {
+			cell := tview.NewTableCell(tview.Escape(v)).SetExpansion(boolInt(c == detailCol))
+			switch c {
+			case 1:
+				cell.SetTextColor(color)
+			case 4:
+				cell.SetMaxWidth(10)
+			case 5:
+				cell.SetAlign(tview.AlignCenter)
+			case 6, 7:
 				cell.SetAlign(tview.AlignRight)
 			}
 			u.table.SetCell(row, c, cell)
 		}
 	}
+
+	_, _, width, _ := u.ddcBox.GetInnerRect()
+	lines := legend(st, width)
+	u.legend.SetText(strings.Join(lines, "\n"))
+	u.ddcBox.ResizeItem(u.legend, len(lines), 0)
+	u.running.ResizeItem(u.ddcBox, len(st.Receivers)+3+len(lines), 0)
+}
+
+// legend explains the Why letters and, with band receivers, which callsign
+// takes which bands, packed into lines of at most width.
+func legend(st hpsdr.Status, width int) []string {
+	if width < 20 {
+		width = 78
+	}
+	var keys []string
+	for _, k := range hpsdr.WhyKeys {
+		keys = append(keys, fmt.Sprintf("%c %s", k.Why, k.Text))
+	}
+	lines := pack("[gray]Why: ", keys, width)
+	if len(st.Routes) > 1 {
+		var who []string
+		for _, r := range st.Routes {
+			bands := "everything else"
+			if !r.CatchAll {
+				bands = strings.Join(r.Bands, " ")
+			}
+			who = append(who, routeLabel(r.Callsign, r.Name)+": "+bands)
+		}
+		lines = append(lines, pack("[gray]", who, width)...)
+	}
+	for i := range lines {
+		lines[i] += "[-]"
+	}
+	return lines
+}
+
+// pack joins parts with " · " into lines no wider than width, the first
+// starting with prefix (a colour tag, so it takes no width beyond its text).
+func pack(prefix string, parts []string, width int) []string {
+	var lines []string
+	line := prefix
+	for i, p := range parts {
+		sep := ""
+		if i > 0 {
+			sep = " · "
+		}
+		p = tview.Escape(p)
+		if tview.TaggedStringWidth(line+sep+p) > width && tview.TaggedStringWidth(line) > 0 {
+			lines = append(lines, line)
+			line, sep = "[gray]", ""
+		}
+		line += sep + p
+	}
+	return append(lines, line)
+}
+
+// routeLabel is an instance's callsign, or its host if it has none.
+func routeLabel(callsign, host string) string {
+	if callsign != "" {
+		return callsign
+	}
+	return host
+}
+
+// legendLines is the legend's height before the first status arrives.
+func legendLines(s app.Settings) int {
+	if len(s.BandInstances) > 0 {
+		return 2
+	}
+	return 1
+}
+
+// count is a packet count short enough for its column: exact to 9999, then
+// with a unit and two decimals. 384 kHz is 1600 packets a second, so an
+// evening's session runs to tens of millions.
+func count(n uint64) string {
+	switch {
+	case n < 10_000:
+		return fmt.Sprint(n)
+	case n < 999_995: // above rounds to 1000.00k: say 1.00M instead
+		return fmt.Sprintf("%.2fk", float64(n)/1e3)
+	case n < 999_995_000:
+		return fmt.Sprintf("%.2fM", float64(n)/1e6)
+	}
+	return fmt.Sprintf("%.2fG", float64(n)/1e9)
+}
+
+// rate is a bit rate in kbps, switching to Mbps where kbps gets long: the IQ
+// sent to a client is 18 Mbps per 384 kHz DDC.
+func rate(kbps float64) string {
+	if kbps >= 10_000 {
+		return fmt.Sprintf("%.1f Mbps", kbps/1000)
+	}
+	return fmt.Sprintf("%.0f kbps", kbps)
+}
+
+func secondsUntil(now, t time.Time) string {
+	d := t.Sub(now)
+	if d < 0 {
+		d = 0
+	}
+	return fmt.Sprintf("%ds", int((d+time.Second-1)/time.Second))
 }
 
 func boolInt(b bool) int {

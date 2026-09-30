@@ -62,7 +62,7 @@ func (f *fakes) deps() deps {
 				Desc: ubersdr.Description{Callsign: "M9PSY", Name: "Test RX", MinHz: 10_000, MaxHz: 30_000_000}}
 			return p, nil
 		},
-		build: func(s app.Settings, p *app.Probe, logf func(string)) (bridgeHandle, []string, error) {
+		build: func(s app.Settings, p []*app.Probe, logf func(string)) (bridgeHandle, []string, error) {
 			f.mu.Lock()
 			f.built = append(f.built, s)
 			f.mu.Unlock()
@@ -402,4 +402,333 @@ func TestProbeKeepsFocus(t *testing.T) {
 			t.Errorf("focus moved to %T", h.u.app.GetFocus())
 		}
 	})
+}
+
+// ---- band receivers ---------------------------------------------------------
+
+// The DDC table names each DDC's instance by callsign with a one-letter reason,
+// explains the letters and who takes which bands underneath, and puts a rate
+// limited instance in the header with a countdown.
+func TestRunningShowsInstances(t *testing.T) {
+	now := time.Now()
+	fb := &fakeBridge{status: hpsdr.Status{Protocol: 2, Client: "192.168.1.50:50000", Running: true,
+		Routes: []hpsdr.RouteStatus{
+			{Name: "main.example:8073", Callsign: "G0ABC", CatchAll: true},
+			{Name: "forty.example", Callsign: "M9PSY", Bands: []string{"40m", "20m"},
+				LimitedUntil: now.Add(9 * time.Second), Backoff: 6 * time.Second},
+		},
+		Receivers: []hpsdr.RxStatus{
+			{Index: 0, Enabled: true, RateKHz: 192, FreqHz: 3_573_000, State: hpsdr.RxStreaming,
+				Instance: "main.example:8073", Callsign: "G0ABC", Why: hpsdr.WhyAll},
+			{Index: 1, Enabled: true, RateKHz: 192, FreqHz: 7_074_000, State: hpsdr.RxRateLimited,
+				Instance: "forty.example", Callsign: "M9PSY", Why: hpsdr.WhyBand,
+				RetryAt: now.Add(9 * time.Second), Detail: "rate limited by forty.example"},
+		}}}
+	f := &fakes{allowed: []string{"iq48", "iq96", "iq192"}, bridge: fb}
+	s := app.Defaults()
+	s.Receivers = 2
+	s.BandInstances = []app.BandInstance{{URL: "forty.example", Bands: []string{"40m", "20m"}}}
+	h := run(t, s, f)
+	h.do(h.u.start)
+	h.waitScreen("Instance Why")
+	h.waitScreen("G0ABC     A")
+	h.waitScreen("M9PSY     B")
+	h.waitScreen("M9PSY     B")
+	h.waitScreen(" 0 retry in")
+	h.waitScreen("Why: B band assigned · A all others · R only one in range · O out of range")
+	h.waitScreen("G0ABC: everything else · M9PSY: 40m 20m")
+	h.waitScreen("+ 1 band receiver")
+	h.waitScreen("M9PSY: rate limited, 1 DDC(s) waiting, retry in")
+	if testing.Verbose() {
+		t.Log("\n" + h.screen())
+	}
+	// Start checked the band receiver too, and built with both.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.probes) != 2 || f.probes[1] != "forty.example|" || len(f.built) != 1 || len(f.built[0].BandInstances) != 1 {
+		t.Fatalf("probes %v built %+v", f.probes, f.built)
+	}
+}
+
+// One receiver, the default: the letter key is there, the band list is not.
+func TestRunningOneInstance(t *testing.T) {
+	fb := &fakeBridge{status: hpsdr.Status{Protocol: 2, Running: true,
+		Routes: []hpsdr.RouteStatus{{Name: "rx", Callsign: "G0ABC", CatchAll: true}},
+		Receivers: []hpsdr.RxStatus{{Index: 0, Enabled: true, RateKHz: 96, FreqHz: 7_074_000,
+			State: hpsdr.RxStreaming, Instance: "rx", Callsign: "G0ABC", Why: hpsdr.WhyAll}}}}
+	f := &fakes{allowed: []string{"iq96"}, bridge: fb}
+	s := app.Defaults()
+	s.Receivers = 1
+	h := run(t, s, f)
+	h.do(h.u.start)
+	h.waitScreen("G0ABC     A")
+	scr := h.screen()
+	if strings.Contains(scr, "everything else") || strings.Contains(scr, "band receiver") {
+		t.Fatalf("band receivers shown with none:\n%s", scr)
+	}
+}
+
+// Adding a band receiver: open the page from the setup form, add, check, tick
+// a band, save; the setup line and the settings carry it, and bands out of the
+// receiver's range or set for another cannot be ticked.
+func TestBandReceiverPages(t *testing.T) {
+	f := &fakes{allowed: []string{"iq48", "iq96"}}
+	h := run(t, app.Defaults(), f)
+	h.waitScreen("Band receivers    none: one receiver for all")
+
+	h.do(func() { h.u.app.SetFocus(h.u.bands.field) })
+	h.key(tcell.KeyEnter, 0)
+	h.waitScreen("the receiver on the setup screen")
+	h.do(func() { h.u.editBand(-1) })
+	h.waitScreen("tuning range decides which")
+	h.typeInto(h.u.bands.editURL, "forty.example:8073")
+	h.do(h.u.checkEdit)
+	h.waitScreen("Receiver: M9PSY Test RX")
+	// The fake receiver tunes to 30 MHz: 6m cannot be ticked.
+	h.waitScreen("6m    50.000-54.000 MHz out of range")
+	h.do(func() {
+		h.u.app.SetFocus(h.u.bands.editTable)
+		h.u.bands.editTable.Select(13, 0)
+	})
+	h.key(tcell.KeyRune, ' ')
+	h.waitScreen("6m is outside this")
+	// 40m is row 6.
+	h.do(func() { h.u.bands.editTable.Select(6, 0) })
+	h.key(tcell.KeyRune, ' ')
+	h.waitScreen("[x] 40m")
+	h.do(h.u.saveEdit)
+	h.waitScreen("forty.example:8073")
+	h.key(tcell.KeyEscape, 0)
+	h.waitScreen("Band receivers    1: 40m")
+	h.do(func() {
+		s, err := h.u.settings()
+		if err != nil || len(s.BandInstances) != 1 || s.BandInstances[0].URL != "forty.example:8073" ||
+			strings.Join(s.BandInstances[0].Bands, " ") != "40m" {
+			t.Errorf("%+v %v", s.BandInstances, err)
+		}
+	})
+
+	// A second band receiver sees 40m as taken.
+	h.do(func() { h.u.editBand(-1) })
+	h.waitScreen("40m   7.000-7.300 MHz   on M9PSY")
+	h.do(func() {
+		h.u.app.SetFocus(h.u.bands.editTable)
+		h.u.bands.editTable.Select(6, 0)
+	})
+	h.key(tcell.KeyEnter, 0)
+	h.waitScreen("40m is already set for")
+	h.do(h.u.cancelEdit)
+	h.waitScreen("Band receivers ")
+}
+
+// ---- the mouse wheel ----------------------------------------------------------
+
+func (h *harness) wheel(x, y int, dir tcell.ButtonMask) {
+	h.sim.InjectMouse(x, y, dir, tcell.ModNone)
+	h.sim.InjectMouse(x, y, tcell.ButtonNone, tcell.ModNone)
+	time.Sleep(10 * time.Millisecond)
+}
+
+// The wheel moves the picker's selection, and a LAN receiver turning up does
+// not throw the place away.
+func TestPickerWheel(t *testing.T) {
+	f := &fakes{}
+	h := run(t, app.Defaults(), f)
+	h.do(h.u.showPicker)
+	h.waitScreen("Receivers (2)")
+	cur := func() (i int) { h.do(func() { i = h.u.list.GetCurrentItem() }); return }
+	h.wheel(10, 5, tcell.WheelDown)
+	deadline := time.Now().Add(wait)
+	for cur() != 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("wheel left the selection at %d", cur())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	h.do(h.u.fillList)
+	if cur() != 1 {
+		t.Fatal("refilling the list lost the selection")
+	}
+	h.wheel(10, 5, tcell.WheelUp)
+	for cur() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("wheel up left the selection at %d", cur())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The wheel moves the band table's selection.
+func TestBandTableWheel(t *testing.T) {
+	h := run(t, app.Defaults(), &fakes{})
+	h.do(func() { h.u.editBand(-1) })
+	h.waitScreen("2200m")
+	row := func() (r int) { h.do(func() { r, _ = h.u.bands.editTable.GetSelection() }); return }
+	if row() != 1 {
+		t.Fatalf("starts at %d", row())
+	}
+	for i := 0; i < 3; i++ {
+		h.wheel(10, 12, tcell.WheelDown)
+	}
+	deadline := time.Now().Add(wait)
+	for row() != 4 {
+		if time.Now().After(deadline) {
+			t.Fatalf("row %d after three notches", row())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Scrolled up in the log, new lines do not pull the operator back down.
+func TestLogStaysScrolled(t *testing.T) {
+	fb := &fakeBridge{status: hpsdr.Status{}}
+	h := run(t, app.Defaults(), &fakes{allowed: []string{"iq48"}, bridge: fb})
+	h.do(h.u.start)
+	h.waitScreen("bridge log line")
+	for i := 0; i < 60; i++ {
+		h.u.logf("filler line")
+	}
+	h.do(h.u.refresh)
+	var x, y int
+	h.do(func() { x, y, _, _ = h.u.logView.GetInnerRect() })
+	for i := 0; i < 80; i++ {
+		h.wheel(x+2, y+1, tcell.WheelUp)
+	}
+	offset := func() (r int) { h.do(func() { r, _ = h.u.logView.GetScrollOffset() }); return }
+	deadline := time.Now().Add(wait)
+	for offset() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("wheel up left the log at %d", offset())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	h.u.logf("a new line")
+	h.do(h.u.refresh)
+	h.do(func() {})
+	if o := offset(); o != 0 {
+		t.Fatalf("a new line moved the log to %d", o)
+	}
+}
+
+const wait = 3 * time.Second
+
+// The highlighted band is drawn readably, not in swapped terminal-default
+// colours (which came out black), and a double-click ticks and unticks it.
+func TestBandTableSelectionAndDoubleClick(t *testing.T) {
+	h := run(t, app.Defaults(), &fakes{})
+	h.do(func() { h.u.editBand(-1); h.u.app.SetFocus(h.u.bands.editTable) })
+	h.waitScreen("2200m")
+
+	// Find the 40m row on screen.
+	var x, y int
+	h.do(func() {
+		h.u.app.ForceDraw()
+		cells, w, _ := h.sim.GetContents()
+		for i := range cells {
+			if i+3 <= len(cells) && len(cells[i].Runes) > 0 && cells[i].Runes[0] == '4' &&
+				len(cells[i+1].Runes) > 0 && cells[i+1].Runes[0] == '0' && cells[i+2].Runes[0] == 'm' {
+				x, y = i%w, i/w
+				break
+			}
+		}
+	})
+	if y == 0 {
+		t.Fatal("40m not on screen")
+	}
+
+	h.do(func() { h.u.bands.editTable.Select(6, 0) })
+	h.do(func() {
+		h.u.app.ForceDraw()
+		cells, w, _ := h.sim.GetContents()
+		fg, bg, _ := cells[y*w+x].Style.Decompose()
+		if fg != tview.Styles.PrimaryTextColor || bg != tview.Styles.ContrastBackgroundColor {
+			t.Errorf("selected band drawn %v on %v", fg, bg)
+		}
+	})
+
+	click := func() {
+		h.sim.InjectMouse(x, y, tcell.Button1, tcell.ModNone)
+		h.sim.InjectMouse(x, y, tcell.ButtonNone, tcell.ModNone)
+	}
+	ticked := func() (on bool) { h.do(func() { on = h.u.bands.editBands["40m"] }); return }
+
+	// One click selects without ticking.
+	h.do(func() { h.u.bands.editTable.Select(1, 0) })
+	click()
+	time.Sleep(600 * time.Millisecond) // past tview's double-click interval
+	h.do(func() {})
+	if ticked() {
+		t.Fatal("a single click ticked the band")
+	}
+	if r, _ := h.u.bands.editTable.GetSelection(); r != 6 {
+		t.Fatalf("a click selected row %d", r)
+	}
+	click()
+	click()
+	h.waitScreen("[x] 40m")
+	if !ticked() {
+		t.Fatal("double-click did not tick 40m")
+	}
+	time.Sleep(600 * time.Millisecond)
+	click()
+	click()
+	h.waitScreen("[ ] 40m")
+}
+
+// The header says which IQ rate is which, and shows the bridge's CPU and memory.
+func TestHeaderRatesAndProcess(t *testing.T) {
+	fb := &fakeBridge{status: hpsdr.Status{Protocol: 2, Running: true, TotalKbps: 2386, TotalOutKbps: 18600,
+		Routes: []hpsdr.RouteStatus{{Name: "rx", CatchAll: true}}}}
+	h := run(t, app.Defaults(), &fakes{allowed: []string{"iq48"}, bridge: fb})
+	h.do(h.u.start)
+	h.waitScreen("IQ from UberSDR 2386 kbps · to client 18.6 Mbps")
+	h.waitScreen("mem ")
+	// CPU needs a second of history before it is a number.
+	h.waitScreen("CPU -")
+	deadline := time.Now().Add(3 * time.Second)
+	for strings.Contains(h.screen(), "CPU -") {
+		if time.Now().After(deadline) {
+			t.Fatalf("CPU never measured:\n%s", h.screen())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	fb.mu.Lock()
+	fb.status.Routes = append(fb.status.Routes, hpsdr.RouteStatus{Name: "b", Bands: []string{"40m"}})
+	fb.mu.Unlock()
+	h.waitScreen("IQ from instances 2386 kbps")
+}
+
+func TestProcStats(t *testing.T) {
+	if _, ok := cpuTime(); !ok {
+		t.Skip("no CPU time on this platform")
+	}
+	var p procStats
+	t0 := time.Now()
+	p.sample(t0)
+	if p.have || !strings.HasPrefix(p.String(), "CPU -") {
+		t.Fatal(p.String())
+	}
+	// Burn most of a core for a little over the window.
+	x := 0
+	for time.Since(t0) < procWindow+100*time.Millisecond {
+		x++
+	}
+	p.sample(time.Now())
+	if !p.have || p.pct < 30 || p.pct > 400 || x == 0 {
+		t.Fatalf("%.0f%% after a busy second", p.pct)
+	}
+	if memBytes() < 1<<20 {
+		t.Fatalf("memory %d", memBytes())
+	}
+}
+
+func TestCount(t *testing.T) {
+	for n, want := range map[uint64]string{
+		0: "0", 1234: "1234", 9999: "9999", 10_000: "10.00k", 12_345: "12.35k", 999_994: "999.99k",
+		999_995: "1.00M", 1_000_000: "1.00M", 999_994_999: "999.99M", 999_995_000: "1.00G", 23_456_789: "23.46M", 4_560_000_000: "4.56G",
+	} {
+		if got := count(n); got != want {
+			t.Errorf("count(%d) = %q, want %q", n, got, want)
+		}
+	}
 }

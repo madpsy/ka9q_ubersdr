@@ -1,6 +1,7 @@
 package hpsdr
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -16,7 +17,14 @@ import (
 
 // Config is everything a bridge needs to run.
 type Config struct {
+	// Server is the UberSDR instance every DDC is sent to, when Routes is
+	// empty.
 	Server *ubersdr.Server
+
+	// Routes, when set, are several instances, each taking the DDCs tuned to
+	// its bands, and exactly one taking everything else. Server, MinHz and MaxHz
+	// are then unused: each route has its own range.
+	Routes []*Route
 
 	// NumRx is how many DDCs to emulate, 1..MaxReceivers.
 	NumRx int
@@ -69,6 +77,9 @@ type Config struct {
 	RetryDelay     time.Duration // after a failed connect (2 s)
 	RefusedDelay   time.Duration // after /connection refuses (5 s)
 	IdleTimeout    time.Duration // no frame from the server for this long reconnects (15 s)
+	RouteDelay     time.Duration // a DDC tuned to another instance's frequency must stay this long before it moves (300 ms)
+	RateLimitDelay time.Duration // the first wait after an instance rate limits, doubling (6 s, the server's refill)
+	RateLimitMax   time.Duration // the longest that wait gets (60 s)
 }
 
 const (
@@ -77,6 +88,9 @@ const (
 	defaultRetryDelay     = 2 * time.Second
 	defaultRefusedDelay   = 5 * time.Second
 	defaultIdleTimeout    = 15 * time.Second
+	defaultRouteDelay     = 300 * time.Millisecond
+	defaultRateLimitDelay = 6 * time.Second
+	defaultRateLimitMax   = 60 * time.Second
 
 	// ThroughputInterval is how often the IQ line is logged while streaming.
 	ThroughputInterval = 5 * time.Second
@@ -86,7 +100,7 @@ const (
 const DefaultWidebandFile = "/dev/shm/rx888wb.bin"
 
 func (c *Config) setDefaults() error {
-	if c.Server == nil {
+	if c.Server == nil && len(c.Routes) == 0 {
 		return errors.New("no server configured")
 	}
 	if c.NumRx < 1 || c.NumRx > MaxReceivers {
@@ -106,6 +120,9 @@ func (c *Config) setDefaults() error {
 	if c.MinHz == 0 && c.MaxHz == 0 {
 		c.MinHz, c.MaxHz = ubersdr.DefaultMinHz, ubersdr.DefaultMaxHz
 	}
+	if len(c.Routes) == 0 {
+		c.Routes = []*Route{{Server: c.Server, MinHz: c.MinHz, MaxHz: c.MaxHz}}
+	}
 	if c.BasePort == 0 {
 		c.BasePort = 1024
 	}
@@ -122,6 +139,9 @@ func (c *Config) setDefaults() error {
 	def(&c.RetryDelay, defaultRetryDelay)
 	def(&c.RefusedDelay, defaultRefusedDelay)
 	def(&c.IdleTimeout, defaultIdleTimeout)
+	def(&c.RouteDelay, defaultRouteDelay)
+	def(&c.RateLimitDelay, defaultRateLimitDelay)
+	def(&c.RateLimitMax, defaultRateLimitMax)
 	return nil
 }
 
@@ -134,8 +154,9 @@ type ddcState struct {
 
 // Bridge is one emulated radio.
 type Bridge struct {
-	cfg Config
-	p1  *P1
+	cfg    Config
+	p1     *P1
+	router *router
 
 	disc, ddcSpec, mic, hp, audio, txiq *net.UDPConn
 	ddc                                 []*net.UDPConn
@@ -152,12 +173,23 @@ type Bridge struct {
 	wb       General
 	rx       [MaxReceivers]ddcState
 	iqSeq    [MaxReceivers]uint32
-	lastAct  time.Time
+	// iqBuf is each DDC's packet, reused: only that DDC's socket reader sends
+	// on it, and one socket's reader is gone before the next one starts.
+	iqBuf   [MaxReceivers][]byte
+	lastAct time.Time
+
+	// lastHP is the last high priority packet, kept so a general packet that
+	// changes how its frequencies read can read them again (see handleGeneral).
+	lastHP []byte
 
 	hpSeq, gpSeq, ddcSeq uint32
 	hpCount              int
 	hpRateStart          time.Time
 	warned               map[string]bool
+	throttled            map[string]*throttle
+	// outRange is whether each DDC's frequency was out of range when last
+	// set, so the warning is given on the way out, not on every step there.
+	outRange [MaxReceivers]bool
 
 	receivers []*receiver
 
@@ -172,7 +204,11 @@ func New(cfg Config) (*Bridge, error) {
 	if err := cfg.setDefaults(); err != nil {
 		return nil, err
 	}
-	b := &Bridge{cfg: cfg, freqMode: -1, warned: map[string]bool{}, stop: make(chan struct{})}
+	rt, err := newRouter(cfg.Routes)
+	if err != nil {
+		return nil, err
+	}
+	b := &Bridge{cfg: cfg, router: rt, freqMode: -1, warned: map[string]bool{}, throttled: map[string]*throttle{}, stop: make(chan struct{})}
 	b.p1 = newP1(b)
 
 	open := func(off int) (*net.UDPConn, error) {
@@ -183,7 +219,6 @@ func New(cfg Config) (*Bridge, error) {
 		}
 		return c, nil
 	}
-	var err error
 	all := []struct {
 		dst **net.UDPConn
 		off int
@@ -222,10 +257,25 @@ func (b *Bridge) closeSockets() {
 	}
 }
 
+// idlePoll is how often the loops that only matter while a client streams --
+// status, mic, watchdog -- look for one. They ran at 20 Hz regardless, which
+// with nobody connected was most of what the bridge did; a client waits at
+// most this long for its first status and mic packets, which none minds.
+const idlePoll = 250 * time.Millisecond
+
 // Start runs the bridge until Close.
 func (b *Bridge) Start() {
 	b.logf("Listening for HPSDR clients on UDP %d (protocol 1 and 2), %d receivers, rates %s kHz",
 		b.cfg.BasePort, b.cfg.NumRx, joinInts(b.cfg.RatesKHz))
+	if b.multi() {
+		for _, r := range b.router.routes {
+			bands := "everything else"
+			if !r.CatchAll() {
+				bands = strings.Join(r.Bands, " ")
+			}
+			b.logf("Instance %s: %s (tunes %.3f kHz - %.3f MHz)", r.Name, bands, float64(r.MinHz)/1e3, float64(r.MaxHz)/1e6)
+		}
+	}
 	loops := []func(){
 		b.discoveryLoop, b.ddcSpecificLoop, b.highPriorityLoop,
 		b.statusLoop, b.micLoop, b.watchdogLoop, b.throughputLoop,
@@ -282,6 +332,39 @@ func (b *Bridge) logf(format string, args ...any) {
 	}
 }
 
+// throttle is one key's state for every.
+type throttle struct {
+	last time.Time
+	held int
+}
+
+// every logs a message at most once per interval for its key, saying how many
+// were held back since the last. For things a client or the network can
+// repeat without end -- a discovery every second, a lost packet -- where the
+// first says what is happening and the rest would only bury the log.
+func (b *Bridge) every(key string, interval time.Duration, format string, args ...any) {
+	now := time.Now()
+	b.mu.Lock()
+	t := b.throttled[key]
+	if t == nil {
+		t = &throttle{}
+		b.throttled[key] = t
+	}
+	if !t.last.IsZero() && now.Sub(t.last) < interval {
+		t.held++
+		b.mu.Unlock()
+		return
+	}
+	held := t.held
+	t.last, t.held = now, 0
+	b.mu.Unlock()
+	msg := fmt.Sprintf(format, args...)
+	if held > 0 {
+		msg += fmt.Sprintf(" (%d more since the last)", held)
+	}
+	b.logf("%s", msg)
+}
+
 // once logs a message the first time its key is seen.
 func (b *Bridge) once(key, format string, args ...any) {
 	b.mu.Lock()
@@ -328,14 +411,39 @@ func (b *Bridge) offers(khz int) bool {
 	return false
 }
 
-func (b *Bridge) inRange(hz int64) bool {
-	return hz == 0 || (hz >= b.cfg.MinHz && hz <= b.cfg.MaxHz)
-}
+func (b *Bridge) inRange(hz int64) bool { return b.router.anyCovers(hz) }
 
 func (b *Bridge) warnRange(label string, ddc int, hz int64) {
+	if b.multi() {
+		b.logf("%s: WARNING DDC%d tuned to %.3f MHz, which no instance tunes", label, ddc, float64(hz)/1e6)
+		return
+	}
+	r := b.router.catchAll
 	b.logf("%s: WARNING DDC%d tuned to %.3f MHz, outside the receiver's %.3f kHz - %.3f MHz",
-		label, ddc, float64(hz)/1e6, float64(b.cfg.MinHz)/1e3, float64(b.cfg.MaxHz)/1e6)
+		label, ddc, float64(hz)/1e6, float64(r.MinHz)/1e3, float64(r.MaxHz)/1e6)
 }
+
+// rangeText says what can be tuned, for a DDC tuned elsewhere.
+func (b *Bridge) rangeText() string {
+	if !b.multi() {
+		r := b.router.catchAll
+		return fmt.Sprintf("the receiver tunes %.3f kHz - %.3f MHz", float64(r.MinHz)/1e3, float64(r.MaxHz)/1e6)
+	}
+	return "no instance tunes it"
+}
+
+// leftRange records whether a DDC is out of range and reports whether it has
+// just gone out: warned once on the way out, not on every step of a client
+// tuning about up there. Called with b.mu held.
+func (b *Bridge) leftRange(i int, hz int64) bool {
+	out := !b.inRange(hz)
+	was := b.outRange[i]
+	b.outRange[i] = out
+	return out && !was
+}
+
+// multi reports whether DDCs are routed between instances.
+func (b *Bridge) multi() bool { return len(b.router.routes) > 1 }
 
 // readLoop reads a socket until it is closed. Other errors are logged once and
 // survived: a stray datagram or an ICMP error surfaced on a read must not kill
@@ -381,7 +489,9 @@ func (b *Bridge) discoveryLoop() {
 			if busy {
 				status = 3
 			}
-			b.logf("Protocol 2 discovery from %s (status %d)", from.IP, status)
+			// Clients repeat discovery every second or so while they look.
+			b.every(fmt.Sprintf("disc-%s-%d", from.IP, status), 10*time.Minute,
+				"Protocol 2 discovery from %s (status %d)", from.IP, status)
 			reply := P2DiscoveryReply(busy, b.cfg.MAC, b.cfg.Device, b.cfg.NumRx, RateMask(b.cfg.RatesKHz))
 			_, _ = b.disc.WriteToUDP(reply, from)
 		case IsP2General(pkt):
@@ -403,11 +513,16 @@ func (b *Bridge) handleGeneral(pkt []byte, from *net.UDPAddr) {
 	newClient := b.client == nil || !b.client.IP.Equal(from.IP) || b.client.Port != from.Port
 	b.client = &net.UDPAddr{IP: append(net.IP(nil), from.IP...), Port: from.Port}
 	b.genRcvd = true
+	var seqErr string
 	if g.Seq != 0 && b.gpSeq != 0 && g.Seq != b.gpSeq+1 {
-		logs = append(logs, fmt.Sprintf("GP: SEQ ERROR, old=%d new=%d", b.gpSeq, g.Seq))
+		seqErr = fmt.Sprintf("GP: SEQ ERROR, old=%d new=%d", b.gpSeq, g.Seq)
 	}
 	b.gpSeq = g.Seq
+	var reread []byte
 	if int(g.FreqMode) != b.freqMode {
+		// A high priority packet that overtook this one was read in the old
+		// mode: phase words taken for Hz put 3.5 MHz at 125 MHz. Read it again.
+		reread = b.lastHP
 		b.freqMode = int(g.FreqMode)
 		mode := "raw Hz"
 		if g.PhaseWord() {
@@ -419,11 +534,25 @@ func (b *Bridge) handleGeneral(pkt []byte, from *net.UDPAddr) {
 	b.wb = g
 	b.mu.Unlock()
 
+	if seqErr != "" {
+		b.every("seq-gp", time.Minute, "%s", seqErr)
+	}
 	if newClient {
 		b.logf("Protocol 2 client %s", from)
 	}
 	for _, l := range logs {
 		b.logf("%s", l)
+	}
+	if reread != nil {
+		if hp, err := ParseHighPriority(reread, b.cfg.NumRx, g.PhaseWord()); err == nil {
+			// Its frequencies only. The run bit and sequence were acted on
+			// when it arrived; replayed, they would log a false sequence error
+			// or restart a client that has since stopped.
+			b.mu.Lock()
+			hp.Run, hp.Seq = b.running, 0
+			b.mu.Unlock()
+			b.applyHighPriority(hp)
+		}
 	}
 	if g.PortOverride {
 		b.once("gp-ports", "GP: WARNING client requests non-default UDP ports (general packet bytes 5-22); not supported, using defaults")
@@ -447,10 +576,11 @@ func (b *Bridge) highPriorityLoop() {
 		b.countHP()
 		b.mu.Lock()
 		phase := b.freqMode >= 0 && b.freqMode&0x08 != 0
+		b.lastHP = append(b.lastHP[:0], pkt...)
 		b.mu.Unlock()
 		hp, err := ParseHighPriority(pkt, b.cfg.NumRx, phase)
 		if err != nil {
-			b.logf("HP: %v (ignored)", err)
+			b.every("hp-bad", time.Minute, "HP: %v (ignored)", err)
 			return
 		}
 		b.applyHighPriority(hp)
@@ -485,10 +615,12 @@ func (b *Bridge) applyHighPriority(hp HighPriority) {
 	if !b.running {
 		b.hpSeq = 0
 	}
+	var seqErr string
 	if hp.Seq != 0 && b.hpSeq != 0 && hp.Seq != b.hpSeq+1 {
-		logs = append(logs, fmt.Sprintf("HP: SEQ ERROR, old=%d new=%d", b.hpSeq, hp.Seq))
+		seqErr = fmt.Sprintf("HP: SEQ ERROR, old=%d new=%d", b.hpSeq, hp.Seq)
 	}
 	b.hpSeq = hp.Seq
+	var warn []int
 	for i := 0; i < b.cfg.NumRx; i++ {
 		f := hp.Freq[i]
 		if f == b.rx[i].freq {
@@ -496,6 +628,9 @@ func (b *Bridge) applyHighPriority(hp HighPriority) {
 		}
 		b.rx[i].freq = f
 		changed = append(changed, i)
+		if b.leftRange(i, f) {
+			warn = append(warn, i)
+		}
 	}
 	// A stop leaves the DDC configuration alone, as a real radio's registers
 	// are: a client that runs again after a stop, without resending its DDC
@@ -509,13 +644,16 @@ func (b *Bridge) applyHighPriority(hp HighPriority) {
 	}
 	b.mu.Unlock()
 
+	if seqErr != "" {
+		b.every("seq-hp", time.Minute, "%s", seqErr)
+	}
 	for _, l := range logs {
 		b.logf("%s", l)
 	}
+	for _, i := range warn {
+		b.warnRange("RX", i, hp.Freq[i])
+	}
 	for _, i := range changed {
-		if !b.inRange(hp.Freq[i]) {
-			b.warnRange("RX", i, hp.Freq[i])
-		}
 		if b.cfg.Debug {
 			b.logf("HP: DDC%d freq: %d", i, hp.Freq[i])
 		}
@@ -535,7 +673,7 @@ func (b *Bridge) ddcSpecificLoop() {
 		b.touch()
 		d, err := ParseDDCSpecific(pkt, b.cfg.NumRx)
 		if err != nil {
-			b.logf("RXspec: %v (ignored)", err)
+			b.every("rx-bad", time.Minute, "RXspec: %v (ignored)", err)
 			return
 		}
 		b.applyDDCSpecific(d)
@@ -556,8 +694,9 @@ func (b *Bridge) applyDDCSpecific(d DDCSpecific) {
 	if !b.running {
 		b.ddcSeq = 0
 	}
+	var seqErr string
 	if d.Seq != 0 && b.ddcSeq != 0 && d.Seq != b.ddcSeq+1 {
-		logs = append(logs, fmt.Sprintf("RXspec: SEQ ERROR, old=%d new=%d", b.ddcSeq, d.Seq))
+		seqErr = fmt.Sprintf("RXspec: SEQ ERROR, old=%d new=%d", b.ddcSeq, d.Seq)
 	}
 	b.ddcSeq = d.Seq
 	for i := 0; i < b.cfg.NumRx; i++ {
@@ -577,6 +716,9 @@ func (b *Bridge) applyDDCSpecific(d DDCSpecific) {
 		}
 	}
 	b.mu.Unlock()
+	if seqErr != "" {
+		b.every("seq-rx", time.Minute, "%s", seqErr)
+	}
 	for _, l := range logs {
 		b.logf("%s", l)
 	}
@@ -611,18 +753,17 @@ func (b *Bridge) p2Target() *net.UDPAddr {
 // 1025 as the protocol requires.
 func (b *Bridge) statusLoop() {
 	var seq uint32
-	t := time.NewTicker(50 * time.Millisecond)
-	defer t.Stop()
 	for {
-		select {
-		case <-b.stop:
-			return
-		case <-t.C:
-		}
 		to := b.p2Target()
 		if to == nil {
 			seq = 0
+			if !b.sleep(idlePoll) {
+				return
+			}
 			continue
+		}
+		if !b.sleep(50 * time.Millisecond) {
+			return
 		}
 		if _, err := b.ddcSpec.WriteToUDP(BuildP2Status(seq), to); err != nil && !b.stopped() {
 			b.once("status-send", "HP status: %v", err)
@@ -632,39 +773,48 @@ func (b *Bridge) statusLoop() {
 }
 
 // micLoop sends a silent mic packet every 1.333 ms while a protocol 2 client
-// streams. Paced against an absolute schedule so timer granularity -- coarse on
-// Windows -- costs jitter but never rate; a stall longer than 100 ms resets the
-// schedule rather than bursting to catch up.
+// streams: nothing uses the samples, but some clients time themselves by the
+// stream. Paced against an absolute schedule so the rate is exact whatever the
+// timer granularity, and sent in bursts of micBurst: waking 750 times a second
+// for one packet cost more CPU than a whole DDC's sending did, and a client
+// receiving 10 ms of mic at a time sees what coarse timers (Windows) always
+// gave it. A stall longer than 100 ms resets the schedule rather than bursting
+// to catch up.
 func (b *Bridge) micLoop() {
+	const micBurst = 8
 	var seq uint32
 	next := time.Now()
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
+	pkt := make([]byte, p2MicLen)
 	for {
 		to := b.p2Target()
 		if to == nil {
 			seq = 0
-			if !b.sleep(50 * time.Millisecond) {
+			if !b.sleep(idlePoll) {
 				return
 			}
 			next = time.Now()
 			continue
 		}
-		next = next.Add(MicInterval)
-		if d := time.Until(next); d > 0 {
-			timer.Reset(d)
-			select {
-			case <-b.stop:
-				return
-			case <-timer.C:
+		now := time.Now()
+		if now.Sub(next) > 100*time.Millisecond {
+			next = now
+		}
+		for !next.After(now) {
+			binary.BigEndian.PutUint32(pkt, seq)
+			if _, err := b.mic.WriteToUDP(pkt, to); err != nil && !b.stopped() {
+				b.once("mic-send", "Mic: %v", err)
 			}
-		} else if d < -100*time.Millisecond {
-			next = time.Now()
+			seq++
+			next = next.Add(MicInterval)
 		}
-		if _, err := b.mic.WriteToUDP(BuildP2Mic(seq), to); err != nil && !b.stopped() {
-			b.once("mic-send", "Mic: %v", err)
+		timer.Reset(time.Until(next.Add((micBurst - 1) * MicInterval)))
+		select {
+		case <-b.stop:
+			return
+		case <-timer.C:
 		}
-		seq++
 	}
 }
 
@@ -676,13 +826,19 @@ func (b *Bridge) watchdogLoop() {
 	if period > 50*time.Millisecond {
 		period = 50 * time.Millisecond
 	}
-	t := time.NewTicker(period)
-	defer t.Stop()
 	for {
-		select {
-		case <-b.stop:
+		// Checked closely only while there is a client to lose.
+		wait := idlePoll
+		b.mu.Lock()
+		if b.running {
+			wait = period
+		}
+		b.mu.Unlock()
+		if b.p1.Active() {
+			wait = period
+		}
+		if !b.sleep(wait) {
 			return
-		case <-t.C:
 		}
 		b.p1.CheckWatchdog()
 		if b.p1.Active() {
@@ -695,6 +851,7 @@ func (b *Bridge) watchdogLoop() {
 			// Stopped, configuration kept, for the same reason as a stop.
 			b.running = false
 			b.lastAct = time.Time{}
+			b.lastHP = nil
 		}
 		b.mu.Unlock()
 		if expired {
@@ -765,12 +922,13 @@ func (b *Bridge) p1SetFreq(rx int, hz int64) {
 	if rx < 0 || rx >= b.cfg.NumRx {
 		return
 	}
-	if !b.inRange(hz) {
-		b.warnRange("P1", rx, hz)
-	}
 	b.mu.Lock()
 	b.rx[rx].freq = hz
+	warn := b.leftRange(rx, hz)
 	b.mu.Unlock()
+	if warn {
+		b.warnRange("P1", rx, hz)
+	}
 	if b.cfg.Debug {
 		b.logf("P1: DDC%d tuned to %d Hz", rx, hz)
 	}
@@ -844,10 +1002,11 @@ func (b *Bridge) emit(i int, iq []float32) bool {
 		if pkt == nil {
 			return false
 		}
-		_, err := conn.WriteTo(pkt, to)
+		n, err := conn.WriteTo(pkt, to)
 		if err != nil && !b.stopped() {
 			b.once("ep6-send", "P1: %v", err)
 		}
+		b.receivers[0].sent(n)
 		return err == nil
 	}
 	b.mu.Lock()
@@ -864,9 +1023,15 @@ func (b *Bridge) emit(i int, iq []float32) bool {
 	if !ok {
 		return false
 	}
-	buf := make([]byte, p2IQLen)
+	buf := b.iqBuf[i]
+	if buf == nil {
+		buf = make([]byte, p2IQLen)
+		b.iqBuf[i] = buf
+	}
 	BuildP2IQ(buf, seq, iq)
-	if _, err := b.ddc[i].WriteToUDP(buf, to); err != nil {
+	n, err := b.ddc[i].WriteToUDP(buf, to)
+	b.receivers[i].sent(n)
+	if err != nil {
 		if !b.stopped() {
 			b.once(fmt.Sprintf("ddc%d-send", i), "RX: DDC%d send: %v", i, err)
 		}
@@ -897,6 +1062,7 @@ func (b *Bridge) throughputLoop() {
 		if el := now.Sub(lastUI); el >= time.Second {
 			for _, r := range b.receivers {
 				r.kbps.Store(uint64(float64(r.uiBytes.Swap(0)) * 8 / el.Seconds()))
+				r.outKbps.Store(uint64(float64(r.outUIBytes.Swap(0)) * 8 / el.Seconds()))
 			}
 			lastUI = now
 		}
@@ -911,19 +1077,23 @@ func (b *Bridge) throughputLoop() {
 			wasRunning = running
 			for _, r := range b.receivers {
 				r.logBytes.Store(0)
+				r.outLogBytes.Store(0)
 			}
 			last = now
 			continue
 		}
 		el := now.Sub(last)
-		if el < ThroughputInterval {
+		if el < ThroughputInterval || !b.cfg.Debug {
+			// Every five seconds for as long as a client streams: the status
+			// screen shows the same, so the log has it only when asked.
 			continue
 		}
 		last = now
 		var parts []string
-		total := 0.0
+		total, out := 0.0, 0.0
 		for _, r := range b.receivers {
 			bytes := r.logBytes.Swap(0)
+			out += float64(r.outLogBytes.Swap(0)) * 8 / 1000 / el.Seconds()
 			if !running || bytes == 0 {
 				continue
 			}
@@ -931,11 +1101,12 @@ func (b *Bridge) throughputLoop() {
 			total += kbps
 			parts = append(parts, fmt.Sprintf("DDC%d %.1f kbps", r.idx, kbps))
 		}
+		toClient := fmt.Sprintf("; to client %.1f kbps", out)
 		switch {
 		case len(parts) > 1:
-			b.logf("IQ: %s  total %.1f kbps", strings.Join(parts, "  "), total)
+			b.logf("IQ from UberSDR: %s  total %.1f kbps%s", strings.Join(parts, "  "), total, toClient)
 		case len(parts) == 1:
-			b.logf("IQ: %s", parts[0])
+			b.logf("IQ from UberSDR: %s%s", parts[0], toClient)
 		}
 	}
 }
@@ -947,7 +1118,25 @@ type Status struct {
 	Client    string
 	Running   bool
 	Receivers []RxStatus
-	TotalKbps float64
+	// TotalKbps is the IQ arriving from the UberSDR instances, compressed;
+	// TotalOutKbps what is sent to the HPSDR client.
+	TotalKbps    float64
+	TotalOutKbps float64
+	// Routes are the instances, in the order configured; one when DDCs are
+	// not routed between instances.
+	Routes []RouteStatus
+}
+
+// RouteStatus is one instance.
+type RouteStatus struct {
+	Name     string
+	Callsign string
+	Bands    []string // empty for the catch-all
+	CatchAll bool
+	// LimitedUntil is when a rate limit on this instance lifts, zero when it
+	// has none; Backoff is the wait it doubles from.
+	LimitedUntil time.Time
+	Backoff      time.Duration
 }
 
 // RxStatus is one DDC.
@@ -961,8 +1150,16 @@ type RxStatus struct {
 	Detail string
 	// ServerMode is what the server says it is serving.
 	ServerMode string
-	Kbps       float64
+	Kbps       float64 // from the instance
+	OutKbps    float64 // to the client
 	Packets    uint64
+	// Instance names the instance the DDC is on or waiting for (the host),
+	// Callsign is that receiver's callsign, and Why is why it is there.
+	Instance string
+	Callsign string
+	Why      Why
+	// RetryAt is when a waiting DDC tries again, zero when it is not waiting.
+	RetryAt time.Time
 }
 
 // Status returns a snapshot.
@@ -986,14 +1183,28 @@ func (b *Bridge) Status() Status {
 	}
 	rx := b.rx
 	b.mu.Unlock()
+	now := time.Now()
 	for _, r := range b.receivers {
-		st, detail, mode := r.state()
+		v := r.view()
 		k := float64(r.kbps.Load()) / 1000
+		ko := float64(r.outKbps.Load()) / 1000
 		s.TotalKbps += k
-		s.Receivers = append(s.Receivers, RxStatus{
-			Index: r.idx, Enabled: rx[r.idx].enable, RateKHz: rx[r.idx].rateKHz, FreqHz: rx[r.idx].freq,
-			State: st, Detail: detail, ServerMode: mode, Kbps: k, Packets: r.packets.Load(),
-		})
+		s.TotalOutKbps += ko
+		freq := rx[r.idx].freq
+		rs := RxStatus{
+			Index: r.idx, Enabled: rx[r.idx].enable, RateKHz: rx[r.idx].rateKHz, FreqHz: freq,
+			State: v.st, Detail: v.detail, ServerMode: v.mode, Kbps: k, OutKbps: ko, Packets: r.packets.Load(),
+			Why: v.why, RetryAt: v.retryAt,
+		}
+		if v.route != nil {
+			rs.Instance, rs.Callsign = v.route.Name, v.route.Callsign
+		}
+		s.Receivers = append(s.Receivers, rs)
+	}
+	for _, r := range b.router.routes {
+		until, backoff := r.gate.state(now)
+		s.Routes = append(s.Routes, RouteStatus{Name: r.Name, Callsign: r.Callsign, Bands: append([]string(nil), r.Bands...),
+			CatchAll: r.CatchAll(), LimitedUntil: until, Backoff: backoff})
 	}
 	return s
 }
@@ -1027,9 +1238,24 @@ func joinInts(v []int) string {
 }
 
 // counters shared with receiver.go
+// rxCounters are one DDC's traffic. "In" is the IQ from the UberSDR instance
+// as the WebSocket carried it, compressed; "out" is the IQ sent to the HPSDR
+// client, 24-bit and uncompressed, so several times larger.
 type rxCounters struct {
 	logBytes atomic.Uint64
 	uiBytes  atomic.Uint64
-	kbps     atomic.Uint64 // bits per second over the last second
+	kbps     atomic.Uint64 // in: bits per second over the last second
 	packets  atomic.Uint64
+
+	outLogBytes atomic.Uint64
+	outUIBytes  atomic.Uint64
+	outKbps     atomic.Uint64 // out: bits per second over the last second
+}
+
+// sent counts bytes sent to the client.
+func (c *rxCounters) sent(n int) {
+	if n > 0 {
+		c.outLogBytes.Add(uint64(n))
+		c.outUIBytes.Add(uint64(n))
+	}
 }

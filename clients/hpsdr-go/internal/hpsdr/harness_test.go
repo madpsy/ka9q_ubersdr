@@ -53,10 +53,13 @@ type fakeServer struct {
 
 	// serveKHz, when set, is the rate served whatever was asked, and
 	// switchKHzAfter switches to switchKHz after that many packets.
-	serveKHz       int
-	switchKHz      int
-	switchAfter    int
-	legacy         bool
+	serveKHz    int
+	switchKHz   int
+	switchAfter int
+	legacy      bool
+	// wsStatus, when set, refuses the socket with that HTTP status before
+	// the upgrade, as the server's connection rate limit does.
+	wsStatus       int
 	packetSamples  int
 	packetInterval time.Duration
 
@@ -114,6 +117,13 @@ func (f *fakeServer) connection(w http.ResponseWriter, r *http.Request) {
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
 func (f *fakeServer) ws(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	refuse := f.wsStatus
+	f.mu.Unlock()
+	if refuse != 0 {
+		http.Error(w, "Too Many Requests - Connection rate limit exceeded", refuse)
+		return
+	}
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -457,6 +467,13 @@ func waitStatus(t *testing.T, b *Bridge, what string, cond func(Status) bool) St
 	}
 	t.Fatalf("status never became %s: %+v", what, b.Status())
 	return Status{}
+}
+
+// checkCount is how many prechecks the server has answered.
+func (f *fakeServer) checkCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.checks)
 }
 
 func mustServer(t *testing.T, u string) *ubersdr.Server {

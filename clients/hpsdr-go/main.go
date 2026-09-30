@@ -14,9 +14,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,15 +43,16 @@ func main() {
 func run() int {
 	s := app.Defaults()
 	var (
-		marginArg  string
-		ratesArg   string
-		discover   bool
-		callsign   string
-		headless   bool
-		showVer    bool
-		deviceArg  int
-		numRx      int
-		setFlags   = map[string]bool{}
+		marginArg string
+		ratesArg  string
+		discover  bool
+		callsign  string
+		headless  bool
+		showVer   bool
+		cpuProf   string
+		deviceArg int
+		numRx     int
+		setFlags  = map[string]bool{}
 	)
 	fs := flag.NewFlagSet("ubersdr-hpsdr", flag.ContinueOnError)
 	str := func(p *string, def, usage string, names ...string) {
@@ -69,6 +72,13 @@ func run() int {
 	}
 	str(&s.URL, s.URL, "UberSDR server URL", "url", "u")
 	str(&s.Password, "", "UberSDR password (optional)", "password", "p")
+	fs.Func("route", "send some bands to another receiver: BANDS=URL, e.g. 40m,20m=https://rx2 (repeatable)", func(v string) error {
+		bi, err := parseRoute(v)
+		if err == nil {
+			s.BandInstances = append(s.BandInstances, bi)
+		}
+		return err
+	})
 	boolean(&discover, "pick a public instance from the directory", "discover", "D")
 	str(&callsign, "", "select a public instance by callsign (implies --discover)", "callsign", "c")
 	str(&s.Interface, "", "network interface to answer on (default: the default route's)", "interface", "i")
@@ -81,6 +91,7 @@ func run() int {
 	boolean(&s.Debug, "log every DDC frequency request", "debug", "v")
 	boolean(&headless, "run without the TUI, as the C bridge did", "headless")
 	boolean(&showVer, "print the version and exit", "version")
+	str(&cpuProf, "", "write a CPU profile to FILE until exit, for go tool pprof", "cpuprofile")
 	fs.Usage = func() { usage(fs) }
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -96,6 +107,14 @@ func run() int {
 	if showVer {
 		fmt.Println("ubersdr-hpsdr", version)
 		return 0
+	}
+	if cpuProf != "" {
+		stop, err := startCPUProfile(cpuProf)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		defer stop()
 	}
 	s.Receivers, s.Device = numRx, deviceArg
 	dB, note, err := ubersdr.ParseMinMargin(marginArg)
@@ -122,6 +141,15 @@ func run() int {
 	logf := newLogger()
 	if note != "" {
 		logf(note)
+	}
+	s, path, found, err := withSaved(s, setFlags)
+	switch {
+	case err != nil:
+		logf("Settings file " + path + " could not be read, using the defaults and the command line: " + err.Error())
+	case found:
+		logf("Settings file: " + path + " (options on the command line override it)")
+	case path != "":
+		logf("Settings file: " + path + " (none yet: the setup screen saves one; using the defaults and the command line)")
 	}
 	if err := s.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -151,6 +179,11 @@ UberSDR connection:
   -p, --password PASS    server password, for bypassed sessions and wide IQ
   -D, --discover         pick a public instance from the directory
   -c, --callsign CALL    select a public instance by callsign
+      --route BANDS=URL  send the DDCs tuned to BANDS to another receiver,
+                         e.g. --route 40m,20m=https://rx2.example.org; the
+                         receiver above takes everything else. Repeatable.
+                         A password goes in the URL: https://:PASS@host
+                         Bands: %[3]s
 
 HPSDR emulation:
   -i, --interface IFACE  answer only clients on this interface's network
@@ -163,17 +196,75 @@ HPSDR emulation:
                          the band's noise floor, 15-60 (default 26); 0 asks for
                          the lossless stream. Needs UberSDR 0.1.64 or later
   -w, --wideband         send wideband data from --wideband-file
-                         (default %s)
-  -v, --debug            log every DDC frequency request
+                         (default %[2]s)
+  -v, --debug            log every DDC frequency request, and the IQ
+                         throughput every 5 s
 
-      --headless         no TUI, log to stdout (automatic without a terminal)
+      --cpuprofile FILE  profile CPU use until exit, for go tool pprof
+      --headless         no TUI, log to stdout (automatic without a terminal).
+                         Starts from the settings the setup screen saved;
+                         options given here override them
       --version          print the version
 
 Examples:
   %[1]s
   %[1]s --headless --url https://sdr.example.com --password mypass
   %[1]s --headless --callsign M9PSY --receivers 4 --rates 48,96
-`, name, hpsdr.DefaultWidebandFile)
+  %[1]s --headless --url https://rx1 --route 40m,20m=https://rx2
+`, name, hpsdr.DefaultWidebandFile, hpsdr.BandNames())
+}
+
+// parseRoute reads BANDS=URL. The password, if any, is the URL's userinfo:
+// the one place in a URL that means "credentials", so it needs no new syntax
+// and escapes as URLs do.
+func parseRoute(v string) (app.BandInstance, error) {
+	bands, raw, ok := strings.Cut(v, "=")
+	if !ok || strings.TrimSpace(raw) == "" {
+		return app.BandInstance{}, fmt.Errorf("want BANDS=URL, e.g. 40m,20m=https://rx2.example.org")
+	}
+	var bi app.BandInstance
+	for _, b := range strings.Split(bands, ",") {
+		if b = strings.TrimSpace(b); b != "" {
+			bi.Bands = append(bi.Bands, b)
+		}
+	}
+	raw = strings.TrimSpace(raw)
+	withScheme := raw
+	if !strings.Contains(raw, "://") {
+		withScheme = "http://" + raw
+	}
+	if u, err := url.Parse(withScheme); err == nil && u.User != nil {
+		if pw, set := u.User.Password(); set {
+			bi.Password = pw
+		} else {
+			bi.Password = u.User.Username()
+		}
+		u.User = nil
+		raw = u.String()
+	}
+	bi.URL = raw
+	if err := app.ValidateBandInstances("", []app.BandInstance{bi}); err != nil {
+		return app.BandInstance{}, err
+	}
+	return bi, nil
+}
+
+// startCPUProfile profiles until the returned stop is called. Written on a clean
+// exit only -- q in the TUI, Ctrl-C or SIGTERM headless -- which is how a
+// profile of the bridge under real load is taken.
+func startCPUProfile(path string) (func(), error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, fmt.Errorf("--cpuprofile: %w", err)
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("--cpuprofile: %w", err)
+	}
+	return func() {
+		pprof.StopCPUProfile()
+		f.Close()
+	}, nil
 }
 
 func parseRates(arg string) ([]int, error) {
@@ -201,12 +292,12 @@ func newLogger() func(string) {
 }
 
 func runHeadless(s app.Settings, logf func(string)) int {
-	p, err := app.RunProbe(context.Background(), s.URL, s.Password)
+	probes, err := app.RunProbes(context.Background(), s)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	b, notes, err := app.Build(s, p, logf)
+	b, notes, err := app.Build(s, probes, logf)
 	for _, n := range notes {
 		logf(n)
 	}
@@ -273,18 +364,36 @@ func clip(s string, n int) string {
 }
 
 func runTUI(flags app.Settings, set map[string]bool) int {
-	path, _ := app.SettingsPath()
-	s, err := app.Load(path)
+	s, path, _, err := withSaved(flags, set)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "settings:", err)
 	}
-	// What was given on the command line wins over what was saved.
+	if err := ui.Run(s, path, version); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+// withSaved is the saved settings with every option given on the command line
+// laid over them. The setup screen and headless mode both start here, so a
+// receiver set up on the screen runs headless as it was saved, and a flag
+// changes only what it names. found is false when there is no settings file;
+// err is a file that could not be read, in which case the defaults stand in.
+func withSaved(flags app.Settings, set map[string]bool) (s app.Settings, path string, found bool, err error) {
+	path, _ = app.SettingsPath()
+	if path != "" {
+		_, statErr := os.Stat(path)
+		found = statErr == nil
+	}
+	s, err = app.Load(path)
 	merge := map[string]func(){
 		"url": func() { s.URL = flags.URL }, "password": func() { s.Password = flags.Password },
 		"interface": func() { s.Interface = flags.Interface }, "receivers": func() { s.Receivers = flags.Receivers },
 		"device": func() { s.Device = flags.Device }, "min-margin": func() { s.MinMargin = flags.MinMargin },
 		"rates": func() { s.Rates = flags.Rates }, "wideband": func() { s.Wideband = flags.Wideband },
 		"wideband-file": func() { s.WidebandFile = flags.WidebandFile }, "debug": func() { s.Debug = flags.Debug },
+		"route": func() { s.BandInstances = flags.BandInstances },
 	}
 	aliases := map[string]string{"u": "url", "p": "password", "i": "interface", "n": "receivers", "d": "device",
 		"m": "min-margin", "w": "wideband", "v": "debug"}
@@ -296,9 +405,5 @@ func runTUI(flags app.Settings, set map[string]bool) int {
 			f()
 		}
 	}
-	if err := ui.Run(s, path, version); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	return 0
+	return s, path, found, err
 }

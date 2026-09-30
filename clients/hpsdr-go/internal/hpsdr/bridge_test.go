@@ -3,6 +3,7 @@ package hpsdr
 import (
 	"encoding/binary"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -650,4 +651,148 @@ func TestP1AfterP2LeavesOtherDDCsDown(t *testing.T) {
 	if st.Receivers[1].State != RxIdle {
 		t.Fatalf("DDC1 %v under protocol 1", st.Receivers[1].State)
 	}
+}
+
+// The mic stream goes out in bursts but at exactly 750 packets a second, with
+// no gap in its sequence.
+func TestP2MicRate(t *testing.T) {
+	f := newFakeServer(t)
+	b, _ := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	keepAlive(t, c)
+	startP2(t, c, 0, map[int]int{0: 48}, 7_074_000)
+	c.recv(PortMic, wait)
+	c.drain(PortMic)
+	var first, last uint32
+	n := 0
+	end := time.Now().Add(2 * time.Second)
+	for time.Now().Before(end) {
+		select {
+		case p := <-c.ch(c.base + PortMic):
+			seq := binary.BigEndian.Uint32(p)
+			if n == 0 {
+				first = seq
+			} else if seq != last+1 {
+				t.Fatalf("mic sequence %d after %d", seq, last)
+			}
+			last = seq
+			n++
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if rate := float64(n) / 2; rate < 712 || rate > 788 {
+		t.Fatalf("%.0f mic packets a second (%d from %d)", rate, n, first)
+	}
+}
+
+// Traffic is counted both ways: compressed IQ in from UberSDR, and the larger
+// 24-bit IQ out to the client, in the status and the log.
+func TestThroughputBothWays(t *testing.T) {
+	f := newFakeServer(t)
+	// The log line every five seconds is for --debug only.
+	b, logs := startBridge(t, f, "", func(c *Config) { c.Debug = true })
+	c := newClient(t, b.cfg.BasePort)
+	keepAlive(t, c)
+	startP2(t, c, 0, map[int]int{0: 192}, 7_074_000)
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		s := b.Status()
+		r := s.Receivers[0]
+		if r.Kbps > 0 && r.OutKbps > 0 {
+			if r.OutKbps <= r.Kbps || s.TotalOutKbps != r.OutKbps+s.Receivers[1].OutKbps {
+				t.Fatalf("in %.0f out %.0f total out %.0f", r.Kbps, r.OutKbps, s.TotalOutKbps)
+			}
+			// The fake sends 128k samples a second: 538 packets of 1444 bytes.
+			if r.OutKbps < 5000 || r.OutKbps > 7500 {
+				t.Fatalf("out %.0f kbps", r.OutKbps)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no rates: %+v", r)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	logs.waitFor(t, "; to client ", ThroughputInterval+2*time.Second)
+	logs.waitFor(t, "IQ from UberSDR: DDC0 ", time.Second)
+}
+
+func (l *logBuf) count(sub string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, s := range l.lines {
+		if strings.Contains(s, sub) {
+			n++
+		}
+	}
+	return n
+}
+
+// What a client or the network can repeat without end is logged once, not
+// every time: discovery while a client searches, and tuning about out of range.
+func TestLogDoesNotRepeat(t *testing.T) {
+	f := newFakeServer(t)
+	b, logs := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	d := make([]byte, 60)
+	d[4] = 0x02
+	for i := 0; i < 20; i++ {
+		c.send(PortDiscovery, d)
+		c.recv(PortDiscovery, wait)
+	}
+	if n := logs.count("Protocol 2 discovery"); n != 1 {
+		t.Fatalf("%d discovery lines for 20 discoveries", n)
+	}
+
+	keepAlive(t, c)
+	startP2(t, c, 0, map[int]int{0: 48}, 64_000_000)
+	logs.waitFor(t, "tuned to 64.000 MHz", wait)
+	for i := uint32(1); i <= 10; i++ {
+		c.send(PortHighPrio, highPrio(i, true, 64_000_000+i*1000))
+	}
+	waitStatus(t, b, "tuned about", func(s Status) bool { return s.Receivers[0].FreqHz == 64_010_000 })
+	if n := logs.count("WARNING DDC0 tuned to"); n != 1 {
+		t.Fatalf("%d range warnings while tuning about out of range", n)
+	}
+	// Back in range and out again is a new warning.
+	c.send(PortHighPrio, highPrio(11, true, 7_074_000))
+	f.nextConn(t, wait)
+	c.send(PortHighPrio, highPrio(12, true, 65_000_000))
+	logs.waitFor(t, "tuned to 65.000 MHz", wait)
+	if logs.count("SEQ ERROR") != 0 {
+		t.Fatal("sequence errors in a clean run")
+	}
+	if logs.has("IQ from UberSDR") {
+		t.Fatal("throughput logged without --debug")
+	}
+}
+
+// A receiver refused over and over says so a few times, then once that it is
+// going quiet, then nothing until it streams, when it says how much it held.
+func TestFailingReceiverGoesQuiet(t *testing.T) {
+	old := quietRecover
+	quietRecover = 200 * time.Millisecond
+	t.Cleanup(func() { quietRecover = old })
+	f := newFakeServer(t)
+	f.set(func(f *fakeServer) { f.allow, f.status, f.reason = false, 403, "Password required" })
+	b, logs := startBridge(t, f, "", nil)
+	c := newClient(t, b.cfg.BasePort)
+	keepAlive(t, c)
+	startP2(t, c, 0, map[int]int{0: 48}, 7_074_000)
+	logs.waitFor(t, "still failing after 3 attempts", wait)
+	time.Sleep(600 * time.Millisecond) // ten more refusals at 60 ms
+	if n := logs.count("connection refused"); n != quietAfter {
+		t.Fatalf("%d refusal lines", n)
+	}
+	if f.checkCount() < 8 {
+		t.Fatalf("only %d attempts; it should keep retrying while quiet", f.checkCount())
+	}
+	f.set(func(f *fakeServer) { f.allow, f.status, f.reason = true, 200, "" })
+	logs.waitFor(t, "streaming again (", 2*wait)
+	// And from then on it logs normally.
+	if logs.count("still failing") != 1 {
+		t.Fatal("went quiet twice")
+	}
+	_ = b
 }

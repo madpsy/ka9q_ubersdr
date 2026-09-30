@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ka9q/ubersdr/clients/hpsdr-go/internal/hpsdr"
@@ -36,6 +37,18 @@ type Settings struct {
 	Wideband     bool   `json:"wideband,omitempty"`
 	WidebandFile string `json:"wideband_file,omitempty"`
 	Debug        bool   `json:"debug,omitempty"`
+
+	// BandInstances are further receivers, each taking the DDCs tuned to its
+	// bands, while URL takes everything else. None, the default, sends every
+	// band to URL.
+	BandInstances []BandInstance `json:"band_instances,omitempty"`
+}
+
+// BandInstance is a receiver for some bands.
+type BandInstance struct {
+	URL      string   `json:"url"`
+	Password string   `json:"password,omitempty"`
+	Bands    []string `json:"bands"`
 }
 
 // Defaults are what the C bridge started with, except the URL: it defaulted to
@@ -67,6 +80,39 @@ func (s Settings) Validate() error {
 	for _, r := range s.Rates {
 		if hpsdr.RateMask([]int{r}) == 0 {
 			return fmt.Errorf("%d kHz is not an HPSDR rate (48, 96, 192, 384)", r)
+		}
+	}
+	return ValidateBandInstances(s.URL, s.BandInstances)
+}
+
+// ValidateBandInstances checks band receivers against each other and the main
+// one: each is a distinct receiver with at least one band, and no band is set
+// for two.
+func ValidateBandInstances(mainURL string, list []BandInstance) error {
+	main, _ := ubersdr.NormalizeURL(mainURL)
+	seen := map[string]bool{main: true}
+	claimed := map[string]string{}
+	for _, bi := range list {
+		base, err := ubersdr.NormalizeURL(bi.URL)
+		if err != nil {
+			return fmt.Errorf("band receiver: %w", err)
+		}
+		if seen[base] {
+			return fmt.Errorf("%s is listed twice; one receiver can have several bands", base)
+		}
+		seen[base] = true
+		if len(bi.Bands) == 0 {
+			return fmt.Errorf("%s has no bands", base)
+		}
+		for _, n := range bi.Bands {
+			b, ok := hpsdr.BandNamed(n)
+			if !ok {
+				return fmt.Errorf("%s: %q is not a band (%s)", base, n, hpsdr.BandNames())
+			}
+			if other, dup := claimed[b.Name]; dup {
+				return fmt.Errorf("%s is set for both %s and %s", b.Name, other, base)
+			}
+			claimed[b.Name] = base
 		}
 	}
 	return nil
@@ -105,6 +151,15 @@ func Load(path string) (Settings, error) {
 func Save(path string, s Settings) error {
 	if !s.RememberPassword {
 		s.Password = ""
+		// A copy: the caller's slice is still in use.
+		bis := make([]BandInstance, len(s.BandInstances))
+		for i, bi := range s.BandInstances {
+			bi.Password = ""
+			bis[i] = bi
+		}
+		if len(bis) > 0 {
+			s.BandInstances = bis
+		}
 	}
 	raw, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -150,6 +205,33 @@ func RunProbe(ctx context.Context, rawURL, password string) (*Probe, error) {
 	p.Reached = p.Err == nil
 	p.Desc, p.DescErr = srv.Describe(ctx)
 	return p, nil
+}
+
+// RunProbes checks the main receiver and every band receiver at once. The
+// result is in that order.
+func RunProbes(ctx context.Context, s Settings) ([]*Probe, error) {
+	type target struct{ url, password string }
+	targets := []target{{s.URL, s.Password}}
+	for _, bi := range s.BandInstances {
+		targets = append(targets, target{bi.URL, bi.Password})
+	}
+	out := make([]*Probe, len(targets))
+	errs := make([]error, len(targets))
+	var wg sync.WaitGroup
+	for i, t := range targets {
+		wg.Add(1)
+		go func(i int, t target) {
+			defer wg.Done()
+			out[i], errs[i] = RunProbe(ctx, t.url, t.password)
+		}(i, t)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // AllowedKHz is the rates the session may use, in order; all four when the
@@ -238,20 +320,39 @@ func ResolveInterface(name string) (hpsdr.Iface, error) {
 	return hpsdr.FindInterface(name)
 }
 
-// Build makes a bridge from settings and a probe. The notes are worth showing
-// the operator once, before the bridge starts logging.
-func Build(s Settings, p *Probe, logf func(string)) (*hpsdr.Bridge, []string, error) {
+// Build makes a bridge from settings and the probes RunProbes returns for them.
+// The notes are worth showing the operator once, before the bridge starts
+// logging.
+func Build(s Settings, probes []*Probe, logf func(string)) (*hpsdr.Bridge, []string, error) {
 	if err := s.Validate(); err != nil {
 		return nil, nil, err
 	}
+	if len(probes) != 1+len(s.BandInstances) {
+		return nil, nil, fmt.Errorf("%d receivers checked, %d configured", len(probes), 1+len(s.BandInstances))
+	}
+	p := probes[0]
 	var notes []string
 	notes = append(notes, p.Summary()...)
+	for i, bp := range probes[1:] {
+		lines := bp.Summary()
+		lines[0] = strings.Replace(lines[0], "Receiver:", "Receiver for "+strings.Join(s.BandInstances[i].Bands, " ")+":", 1)
+		notes = append(notes, lines...)
+	}
 
-	offered, ok := OfferedKHz(s.Rates, p.AllowedKHz())
+	allowed, blocked := IntersectAllowed(probes)
+	offered, ok := OfferedKHz(s.Rates, allowed)
 	if !ok {
 		notes = append(notes, fmt.Sprintf("WARNING none of the chosen rates (%s kHz) is open to this session; offering them anyway",
 			joinKHz(offered)))
 	}
+	if len(probes) > 1 {
+		for _, k := range wantedKHz(s.Rates) {
+			if by := blocked[k]; len(by) > 0 {
+				notes = append(notes, fmt.Sprintf("%d kHz not offered: %s does not allow it, and every receiver must", k, strings.Join(by, ", ")))
+			}
+		}
+	}
+	notes = append(notes, CoverageNotes(s, probes)...)
 
 	ifc, err := ResolveInterface(s.Interface)
 	if err != nil {
@@ -275,8 +376,16 @@ func Build(s Settings, p *Probe, logf func(string)) (*hpsdr.Bridge, []string, er
 		notes = append(notes, "Reduced-depth IQ off: taking the lossless stream")
 	}
 
+	// One route even for one receiver, so the status can name its callsign.
+	routes := []*hpsdr.Route{{Server: p.Server, Callsign: p.Desc.Callsign, MinHz: p.Desc.MinHz, MaxHz: p.Desc.MaxHz}}
+	for i, bp := range probes[1:] {
+		routes = append(routes, &hpsdr.Route{Server: bp.Server, Callsign: bp.Desc.Callsign,
+			Bands: append([]string(nil), s.BandInstances[i].Bands...), MinHz: bp.Desc.MinHz, MaxHz: bp.Desc.MaxHz})
+	}
+
 	b, err := hpsdr.New(hpsdr.Config{
 		Server:       p.Server,
+		Routes:       routes,
 		NumRx:        s.Receivers,
 		Device:       byte(s.Device),
 		MinMargin:    s.MinMargin,
@@ -291,6 +400,84 @@ func Build(s Settings, p *Probe, logf func(string)) (*hpsdr.Bridge, []string, er
 		Logf:         logf,
 	})
 	return b, notes, err
+}
+
+// IntersectAllowed is the rates every receiver allows, and for each rate one
+// does not, which receivers refuse it.
+func IntersectAllowed(probes []*Probe) (allowed []int, blocked map[int][]string) {
+	blocked = map[int][]string{}
+	for _, k := range wantedKHz(nil) {
+		for _, p := range probes {
+			if !contains(p.AllowedKHz(), k) {
+				blocked[k] = append(blocked[k], p.Server.Host())
+			}
+		}
+		if len(blocked[k]) == 0 {
+			allowed = append(allowed, k)
+		}
+	}
+	return allowed, blocked
+}
+
+// CoverageNotes warns about bands set for a receiver that cannot tune them,
+// and about 6m behind a device most clients will not tune there.
+func CoverageNotes(s Settings, probes []*Probe) []string {
+	var notes []string
+	for i, bi := range s.BandInstances {
+		if i+1 >= len(probes) {
+			break
+		}
+		d := probes[i+1].Desc
+		host := probes[i+1].Server.Host()
+		for _, n := range bi.Bands {
+			b, ok := hpsdr.BandNamed(n)
+			if !ok {
+				continue
+			}
+			switch any, all := b.Covers(d.MinHz, d.MaxHz); {
+			case !any:
+				notes = append(notes, fmt.Sprintf("WARNING %s is set for %s, which tunes %s; it goes to a receiver that tunes it",
+					b.Name, host, rangeText(d.MinHz, d.MaxHz)))
+			case !all:
+				notes = append(notes, fmt.Sprintf("%s is set for %s, which tunes only %s; the rest goes to a receiver that tunes it",
+					b.Name, host, rangeText(d.MinHz, d.MaxHz)))
+			}
+		}
+	}
+	if s.Device == hpsdr.DeviceHermesLite {
+		for _, p := range probes {
+			if p.Desc.MaxHz > HL2MaxHz {
+				notes = append(notes, fmt.Sprintf("%s tunes to %.0f MHz, but most HPSDR clients stop a Hermes Lite 2 at 38.4 MHz; "+
+					"present as Hermes to tune above that", p.Server.Host(), float64(p.Desc.MaxHz)/1e6))
+				break
+			}
+		}
+	}
+	return notes
+}
+
+// HL2MaxHz is where HPSDR clients stop tuning a Hermes Lite 2: half its 76.8
+// MHz sample clock.
+const HL2MaxHz = 38_400_000
+
+func rangeText(lo, hi int64) string {
+	return fmt.Sprintf("%.3f kHz - %.3f MHz", float64(lo)/1e3, float64(hi)/1e6)
+}
+
+func wantedKHz(rates []int) []int {
+	if len(rates) == 0 {
+		return []int{48, 96, 192, 384}
+	}
+	return rates
+}
+
+func contains(v []int, x int) bool {
+	for _, y := range v {
+		if y == x {
+			return true
+		}
+	}
+	return false
 }
 
 func joinKHz(v []int) string {

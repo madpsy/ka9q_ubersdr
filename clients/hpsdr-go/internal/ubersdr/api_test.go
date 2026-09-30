@@ -99,8 +99,15 @@ func TestConnResult(t *testing.T) {
 		t.Fatal(r.Refusal(false))
 	}
 	r, _ = parseConnResult([]byte(`{"allowed":false}`), 429)
-	if r.Refusal(false) != "connection refused by server" {
+	if r.Refusal(false) != "connection refused by server" || !r.RateLimited() {
 		t.Fatal(r.Refusal(false))
+	}
+	r, _ = parseConnResult([]byte(`{"allowed":false,"reason":"Rate limit exceeded. Please wait before trying again."}`), 429)
+	if !r.RateLimited() {
+		t.Fatal("429 not read as a rate limit")
+	}
+	if r, _ := parseConnResult([]byte(`{"allowed":false}`), 403); r.RateLimited() {
+		t.Fatal("403 read as a rate limit")
 	}
 	if _, err := parseConnResult([]byte(`<html>`), 502); err == nil {
 		t.Fatal("HTML accepted as a /connection answer")

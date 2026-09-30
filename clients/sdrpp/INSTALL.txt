@@ -1,0 +1,57 @@
+UberSDR source for SDR++
+========================
+
+Streams IQ from any UberSDR receiver into SDR++, which then shows its own
+spectrum and waterfall and demodulates locally. Works in SDR++ and in SDR++
+Community Edition. Receivers can be picked from the public directory, found on
+your local network, or entered by address.
+
+
+1. Put the module where SDR++ looks for modules
+-----------------------------------------------
+
+Windows
+    Copy ubersdr_source.dll into the "modules" folder inside the SDR++ folder
+    (next to sdrpp.exe).
+
+Linux
+    sudo cp ubersdr_source.so /usr/lib/sdrpp/plugins/
+    (If SDR++ was built from source into /usr/local, use /usr/local/lib/sdrpp/plugins/.)
+
+macOS
+    Keep ubersdr_source.dylib somewhere permanent, e.g. ~/Library/Application Support/sdrpp/,
+    then quit SDR++ and add its full path to the "modules" list in
+        ~/Library/Application Support/sdrpp/config.json
+    for example:
+        "modules": ["/Users/you/Library/Application Support/sdrpp/ubersdr_source.dylib"],
+    (Copying it into SDR++.app would break the app's signature.)
+
+    The same "modules" list works on every platform, if you would rather not
+    copy files into the SDR++ install.
+
+
+2. Create the source
+--------------------
+
+Start SDR++, open "Module Manager" in the side menu, type a name (e.g. UberSDR),
+pick "ubersdr_source" from the list and press "+". It stays there from then on.
+
+
+3. Use it
+---------
+
+Pick "UberSDR" under Source, then choose a receiver:
+
+    Public directory   receivers listed at instances.ubersdr.org
+    Local network      receivers on your LAN, found automatically
+    Manual             type an address, e.g. https://example.tunnel.ubersdr.org
+                       or 192.168.1.50:8080
+
+Press Connect to see what the receiver allows you. A 12 kHz stream is open on
+every receiver; wider ones (48 to 384 kHz) are either public on that receiver or
+unlocked by its password. Enter the password before pressing Connect.
+
+"Quality" sets how much data the stream uses; "Lossless" uses the most. The
+default is 10 dB. It can be changed while streaming.
+
+The status line shows the connection's live throughput.

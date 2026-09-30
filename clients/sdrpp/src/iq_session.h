@@ -11,6 +11,7 @@
 #include <dsp/types.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -44,8 +45,14 @@ namespace ubersdr {
             State state = State::Idle;
             std::string message;       // why it failed, or the last server notice
             double kbytesPerSec = 0;   // on the wire
-            int shift = 0;             // reduced-depth bits dropped, 0 = lossless
-            float basebandPower = -999, noise = -999;
+
+            // This session's limits, from the /connection it made, and how long
+            // it has been streaming: the server times a session from its first
+            // stream, and each start is a new session.
+            bool haveLimits = false;
+            int maxSessionTime = 0;       // seconds, 0 = unlimited
+            long long dailyRemaining = -1; // seconds at connect, -1 = unlimited
+            double streamingSecs = 0;
         };
 
         explicit IQSession(dsp::stream<dsp::complex_t>* out);
@@ -76,5 +83,6 @@ namespace ubersdr {
 
         std::mutex statusMtx;
         Status st;
+        std::chrono::steady_clock::time_point streamStart;
     };
 }

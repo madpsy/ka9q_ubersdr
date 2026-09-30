@@ -37,7 +37,11 @@ namespace ubersdr {
 
     IQSession::Status IQSession::status() {
         std::lock_guard<std::mutex> lck(statusMtx);
-        return st;
+        Status s = st;
+        if (s.state == State::Streaming) {
+            s.streamingSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - streamStart).count();
+        }
+        return s;
     }
 
     void IQSession::start(const Params& p) {
@@ -82,6 +86,12 @@ namespace ubersdr {
                                          " is not available to this client on this receiver");
             }
             if (stopping) { return; }
+            {
+                std::lock_guard<std::mutex> lck(statusMtx);
+                st.haveLimits = true;
+                st.maxSessionTime = info.maxSessionTime;
+                st.dailyRemaining = info.dailyRemaining;
+            }
 
             double f = std::clamp(p.frequency, p.minFreq, p.maxFreq);
             std::string q = "/ws?frequency=" + std::to_string((long long)std::llround(f));
@@ -101,6 +111,10 @@ namespace ubersdr {
                 live = ws.get();
             }
             if (stopping) { throw NetError("stopped"); }
+            {
+                std::lock_guard<std::mutex> lck(statusMtx);
+                streamStart = std::chrono::steady_clock::now();
+            }
             setState(State::Streaming);
             flog::info("UberSDR: streaming {0} from {1}", p.mode, p.url.str());
 
@@ -188,9 +202,6 @@ namespace ubersdr {
 
                 auto el = std::chrono::duration<double>(now - rateStart).count();
                 std::lock_guard<std::mutex> lck(statusMtx);
-                st.shift = h.shift;
-                st.basebandPower = h.basebandPower;
-                st.noise = h.noise;
                 if (el >= 1.0) {
                     st.kbytesPerSec = rateBytes / el / 1000.0;
                     rateBytes = 0;
@@ -201,6 +212,29 @@ namespace ubersdr {
         catch (const std::exception& e) {
             if (!stopping) {
                 std::string why = serverError.empty() ? std::string(e.what()) : serverError;
+
+                // The server ends a session at its time limit by closing the
+                // connection, without saying why. A close that lands on the
+                // limit is that, and is worth saying plainly.
+                const double kLimitSlackSecs = 10;
+                double streamed = 0;
+                int maxSession;
+                long long daily;
+                {
+                    std::lock_guard<std::mutex> lck(statusMtx);
+                    if (st.state == State::Streaming) {
+                        streamed = std::chrono::duration<double>(std::chrono::steady_clock::now() - streamStart).count();
+                    }
+                    maxSession = st.maxSessionTime;
+                    daily = st.dailyRemaining;
+                }
+                if (streamed > 0 && maxSession > 0 && streamed >= maxSession - kLimitSlackSecs) {
+                    why = "Session time limit reached. Press Stop, then Play to start a new session.";
+                }
+                else if (streamed > 0 && daily >= 0 && streamed >= daily - kLimitSlackSecs) {
+                    why = "Daily time on this receiver is used up.";
+                }
+
                 flog::error("UberSDR: {0}", why);
                 setState(State::Failed, why);
             }

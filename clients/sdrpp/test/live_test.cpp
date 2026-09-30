@@ -105,7 +105,8 @@ int main(int argc, char** argv) {
         if (!dump && i == seconds / 3) { session.tune(14074000); }
         if (!dump && i == (2 * seconds) / 3) { session.setMinMargin(margin == 0 ? 26 : 0); }
         auto st = session.status();
-        printf("t=%d state=%d %.0f kB/s shift=%d %s\n", i, (int)st.state, st.kbytesPerSec, st.shift, st.message.c_str());
+        printf("t=%d state=%d %.0f kB/s session %.0fs of %ds %s\n", i, (int)st.state, st.kbytesPerSec, st.streamingSecs,
+               st.maxSessionTime, st.message.c_str());
     }
     double el = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     double rate = (samples - s0) / el;

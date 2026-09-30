@@ -74,6 +74,16 @@ namespace {
         else { snprintf(buf, sizeof(buf), "%lldm", secs / 60); }
         return buf;
     }
+
+    // A running countdown, to the second.
+    std::string formatClock(long long secs) {
+        if (secs < 0) { secs = 0; }
+        char buf[32];
+        if (secs >= 3600) { snprintf(buf, sizeof(buf), "%lldh %02lldm %02llds", secs / 3600, (secs % 3600) / 60, secs % 60); }
+        else if (secs >= 60) { snprintf(buf, sizeof(buf), "%lldm %02llds", secs / 60, secs % 60); }
+        else { snprintf(buf, sizeof(buf), "%llds", secs); }
+        return buf;
+    }
 }
 
 class UberSDRSourceModule : public ModuleManager::Instance {
@@ -559,6 +569,9 @@ private:
     }
 
     void drawStatus() {
+        IQSession::Status s = session.status();
+        const bool streaming = s.state == IQSession::State::Streaming;
+
         if (haveInfo) {
             std::string who = info.callsign;
             if (!info.name.empty()) { who += (who.empty() ? "" : " - ") + info.name; }
@@ -566,14 +579,52 @@ private:
             if (!info.location.empty()) { SmGui::Text(info.location.c_str()); }
             std::string access = info.bypassed ? "Full access (password or allowed IP)" : "Public access";
             SmGui::Text(access.c_str());
-            if (info.maxSessionTime > 0) { SmGui::Text(("Session limit: " + formatDuration(info.maxSessionTime)).c_str()); }
-            if (info.dailyRemaining >= 0) { SmGui::Text(("Time left today: " + formatDuration(info.dailyRemaining)).c_str()); }
+        }
+
+        // Limits: while streaming, this session's own, counting down; before
+        // that, what Connect was told.
+        bool haveLimits = streaming ? s.haveLimits : haveInfo;
+        if (haveLimits) {
+            int maxSession = streaming ? s.maxSessionTime : info.maxSessionTime;
+            long long daily = streaming ? s.dailyRemaining : info.dailyRemaining;
+            long long elapsed = streaming ? (long long)s.streamingSecs : 0;
+            // A countdown turns red in its last two minutes.
+            const long long kWarnSecs = 120;
+            const ImVec4 red(1.0f, 0.4f, 0.4f, 1.0f);
+            std::string line;
+            if (maxSession <= 0) {
+                SmGui::Text("Session time: unlimited");
+            }
+            else if (streaming) {
+                long long left = maxSession - elapsed;
+                line = "Session time left: " + formatClock(left);
+                if (left <= kWarnSecs) { SmGui::TextColored(red, line.c_str()); }
+                else { SmGui::Text(line.c_str()); }
+            }
+            else {
+                line = "Session time: " + formatDuration(maxSession);
+                SmGui::Text(line.c_str());
+            }
+            if (daily >= 0) {
+                if (streaming) {
+                    long long left = daily - elapsed;
+                    line = "Time left today: " + formatClock(left);
+                    if (left <= kWarnSecs) { SmGui::TextColored(red, line.c_str()); }
+                    else { SmGui::Text(line.c_str()); }
+                }
+                else {
+                    line = "Time left today: " + formatDuration(daily);
+                    SmGui::Text(line.c_str());
+                }
+            }
         }
         if (!probeError.empty()) {
             SmGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), probeError.c_str());
         }
+        if (haveInfo && !running) {
+            SmGui::Text("Press the Play button to start streaming");
+        }
 
-        IQSession::Status s = session.status();
         char buf[256];
         switch (s.state) {
         case IQSession::State::Idle:
@@ -582,15 +633,11 @@ private:
         case IQSession::State::Connecting:
             SmGui::Text("Status: connecting...");
             break;
-        case IQSession::State::Streaming: {
-            std::string depth = s.shift == 0 ? "lossless" : "reduced depth (" + std::to_string(s.shift) + " bits)";
+        case IQSession::State::Streaming:
             snprintf(buf, sizeof(buf), "Streaming, %.0f kB/s (%.2f Mbit/s)", s.kbytesPerSec, s.kbytesPerSec * 8.0 / 1000.0);
-            SmGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), buf);
-            snprintf(buf, sizeof(buf), "Samples: %s", depth.c_str());
             SmGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), buf);
             if (!s.message.empty()) { SmGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), s.message.c_str()); }
             break;
-        }
         case IQSession::State::Failed:
             SmGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), ("Stopped: " + s.message).c_str());
             break;

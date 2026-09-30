@@ -47,11 +47,13 @@ Pick "UberSDR" under Source, then choose a receiver:
     Manual             type an address, e.g. https://example.tunnel.ubersdr.org
                        or 192.168.1.50:8080
 
-Press Connect to see what the receiver allows you. A 12 kHz stream is open on
+Press Connect to see what the receiver allows you, then press SDR++'s Play
+button to start streaming. A 12 kHz stream is open on
 every receiver; wider ones (48 to 384 kHz) are either public on that receiver or
 unlocked by its password. Enter the password before pressing Connect.
 
 "Quality" sets how much data the stream uses; "Lossless" uses the most. The
 default is 10 dB. It can be changed while streaming.
 
-The status line shows the connection's live throughput.
+The status lines show the connection's live throughput, and while streaming,
+how much of the receiver's session time is left.

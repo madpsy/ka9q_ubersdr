@@ -179,7 +179,7 @@ Or connect directly:
 | `-bw` | Filter edges in Hz as `low:high` (empty = the mode's own default). |
 | `-squelch` | Squelch threshold in dB of SNR (0 = off). |
 | `-lossless` | Ask for the lossless format instead of Opus: the demodulator's own samples, bit for bit, for about twice the bandwidth. |
-| `-min-margin` | IQ modes only: dB of quantisation margin under the noise floor (15–60, default 15; 0 asks for a lossless IQ stream). |
+| `-min-margin` | IQ modes only: dB of quantisation margin under the noise floor (10–60, default 15; 0 asks for a lossless IQ stream). |
 | `-headless` | No display: tune and stream the audio, for scripts and services. |
 | `-span` | Initial span in kHz (0 = server default). |
 | `-view` | `spectrum`, `waterfall` or `split` (default `split`). |
@@ -539,9 +539,11 @@ different on every band — the server's own measurements put ten bits at 50 dB 
 headroom on a dead 6 m band and 9 dB on medium wave — while a margin means the
 same thing wherever the receiver is pointed.
 
-The range is 15 to 60 dB and the default is 15, the floor: below that the added
-floor starts to lift a noise floor a listener can see, and above 60 the request
-buys almost nothing. `0` asks for the lossless stream instead, which keeps an
+The range is 10 to 60 dB and the default is 15. At 15 dB the added floor stays
+at about what the receiver's own readings resolve (0.14 dB); 10 dB trades a
+small visible lift (0.41 dB on paper, 0.2 to 0.3 dB as delivered) for fewer
+bytes, and below that it becomes audible. Above 60 the request buys almost
+nothing. `0` asks for the lossless stream instead, which keeps an
 archival capture honestly labelled rather than marked lossy and shifted by zero.
 
 Measured on one receiver, `iq384` on 20 m over six-second windows:

@@ -84,7 +84,7 @@ func run() int {
 	str(&s.Interface, "", "network interface to answer on (default: the default route's)", "interface", "i")
 	integer(&numRx, s.Receivers, "number of receivers (DDCs), 1-10", "receivers", "n")
 	integer(&deviceArg, s.Device, "device type: 1=Hermes, 6=Hermes Lite", "device", "d")
-	str(&marginArg, strconv.Itoa(s.MinMargin), "reduced-depth IQ margin in dB, 15-60, or 0 for lossless", "min-margin", "m")
+	str(&marginArg, strconv.Itoa(s.MinMargin), "reduced-depth IQ margin in dB, 10-60, or 0 for lossless", "min-margin", "m")
 	str(&ratesArg, "", "IQ rates to offer in kHz, e.g. 48,96,192 (default: all the receiver allows)", "rates")
 	boolean(&s.Wideband, "enable wideband data (bandscope) from --wideband-file", "wideband", "w")
 	str(&s.WidebandFile, hpsdr.DefaultWidebandFile, "wideband sweep file", "wideband-file")
@@ -193,7 +193,7 @@ HPSDR emulation:
       --rates LIST       IQ rates to offer in kHz, e.g. 48,96,192
                          (default: every rate the receiver allows this session)
   -m, --min-margin DB    reduced-depth IQ: keep the quantisation floor DB below
-                         the band's noise floor, 15-60 (default 26); 0 asks for
+                         the band's noise floor, 10-60 (default 26); 0 asks for
                          the lossless stream. Needs UberSDR 0.1.64 or later
   -w, --wideband         send wideband data from --wideband-file
                          (default %[2]s)

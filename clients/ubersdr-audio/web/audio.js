@@ -17,8 +17,10 @@ const Audio = (() => {
   const marginValue     = () => document.getElementById('margin-value');
 
   // Reduced-depth IQ margin, as in the v2 UI and the server's pcm_lossy.go:
-  // 15-60 dB, and the slider's top stop, one past 60, means lossless (0).
-  const MARGIN_MIN = 15;
+  // 10-60 dB, and the slider's top stop, one past 60, means lossless (0). IQ
+  // starts at 15 dB until the operator moves it, as in v2.
+  const MARGIN_MIN = 10;
+  const MARGIN_START = 15;
   const MARGIN_MAX = 60;
   const MARGIN_LOSSLESS = MARGIN_MAX + 1;
 
@@ -27,7 +29,7 @@ const Audio = (() => {
   let _channel  = 'both';
   let _format   = 'opus';
   let _deviceId = '';
-  let _margin   = MARGIN_MIN;
+  let _margin   = MARGIN_START;
   let _marginDragging = false;
   let _premuteVol = 80;
   let _sendTimer  = null;

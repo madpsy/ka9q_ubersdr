@@ -1029,9 +1029,9 @@ func upperAll(in []string) []string {
 
 // StepMinMargin moves the reduced-depth IQ margin, in dB.
 //
-// The scale is 0 for a lossless IQ stream and then 15 to 60: below 15 the
-// quantisation starts to lift a noise floor the listener can see, so there is
-// nothing between "off" and the floor of the range. Stepping down past the
+// The scale is 0 for a lossless IQ stream and then 10 to 60: below 10 the
+// quantisation lifts the noise floor enough to hear, so there is nothing
+// between "off" and the floor of the range. Stepping down past the
 // floor asks for the lossless stream, which is the same rule the squelch uses.
 func (u *UI) StepMinMargin(delta int) {
 	switch {

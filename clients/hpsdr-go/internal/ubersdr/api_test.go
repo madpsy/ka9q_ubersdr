@@ -270,7 +270,7 @@ func TestUnescapeDNSName(t *testing.T) {
 }
 
 func TestParseMinMargin(t *testing.T) {
-	for in, want := range map[string]int{"0": 0, "15": 15, "60": 60, "26": 26, " 20 ": 20, "20.4": 20, "20.5": 21} {
+	for in, want := range map[string]int{"0": 0, "10": 10, "15": 15, "60": 60, "26": 26, " 20 ": 20, "20.4": 20, "20.5": 21} {
 		got, _, err := ParseMinMargin(in)
 		if err != nil || got != want {
 			t.Errorf("ParseMinMargin(%q) = %d, %v; want %d", in, got, err, want)
@@ -279,7 +279,7 @@ func TestParseMinMargin(t *testing.T) {
 	if _, note, _ := ParseMinMargin("20.4"); note == "" {
 		t.Error("rounding not noted")
 	}
-	for _, bad := range []string{"", "2O", "20dB", "6", "14.9", "60.1", "-20", "NaN", "Inf"} {
+	for _, bad := range []string{"", "2O", "20dB", "6", "9.4", "60.1", "-20", "NaN", "Inf"} {
 		if _, _, err := ParseMinMargin(bad); err == nil {
 			t.Errorf("ParseMinMargin(%q) accepted", bad)
 		}

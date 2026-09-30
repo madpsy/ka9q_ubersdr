@@ -158,7 +158,7 @@ rx_sdr -d driver=ubersdr,server=ws://localhost:8080/ws,mode=iq192 \
 | `server` | Yes | WebSocket URL | `server=ws://localhost:8080/ws` |
 | `mode` | No | Wide IQ mode (default: iq96) | `mode=iq192` |
 | `password` | No | Bypass password for wide IQ modes | `password=your-secret-password` |
-| `min_margin` | No | Reduced-depth IQ, in dB of margin under the noise floor (15-60, default 26; 0 for lossless) | `min_margin=0` |
+| `min_margin` | No | Reduced-depth IQ, in dB of margin under the noise floor (10-60, default 26; 0 for lossless) | `min_margin=0` |
 
 ## Reduced-depth IQ: `min_margin`
 
@@ -192,10 +192,11 @@ and `getHardwareInfo()` reports which mode the device is in.
   driver carries nothing but IQ, the one mode reduced depth applies to, so the
   default is the one that saves the bandwidth rather than the one that spends
   it. `min_margin=0` takes the lossless stream.
-- **15 to 60 dB**, and a value outside that fails the `make` with a reason rather
-  than being quietly clamped to something else for the life of the device. 15 dB
-  is where the added noise (0.14 dB on the floor) stops being resolvable by a
-  receiver's own readings; past 60 dB the request buys nothing.
+- **10 to 60 dB**, and a value outside that fails the `make` with a reason rather
+  than being quietly clamped to something else for the life of the device. At
+  10 dB the added noise lifts the floor by 0.41 dB on paper, nearer 0.2-0.3 dB
+  once the server's calibration headroom is counted; past 60 dB the request buys
+  nothing. A server older than the 10 dB floor raises anything under 15 to 15.
 - **Needs UberSDR 0.1.64 or later.** A server that has never heard of
   `min_margin` ignores it and sends the lossless stream, so an older server
   still works, it just costs more bandwidth.

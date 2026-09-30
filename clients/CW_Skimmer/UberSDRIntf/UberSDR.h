@@ -323,7 +323,7 @@ namespace UberSDRIntf
         // pcm_lossy.go, repeated here so a value outside them is refused with a
         // reason rather than silently clamped to a different one. The same two
         // numbers appear in clients/hpsdr and clients/soapy_driver.
-        static const int kMinMarginMinDB = 15;
+        static const int kMinMarginMinDB = 10;
         static const int kMinMarginMaxDB = 60;
 
         // What an installation that has not said otherwise streams at, and the

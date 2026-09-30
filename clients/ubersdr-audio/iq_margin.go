@@ -19,14 +19,14 @@ import "fmt"
 // These mirror the server's clamp in pcm_lossy.go and the v2 UI's constants in
 // static/v2/src/radio/constants.js; iq_margin_test.go pins them.
 const (
-	marginMinDB = 15
+	marginMinDB = 10
 	marginMaxDB = 60
 
 	// marginDefaultDB is what an IQ session asks for until the operator moves
-	// the control. The floor of the range, as in v2 and the TUI: the narrowest
-	// margin the server takes, and so the biggest saving, while the added
-	// quantisation noise still lifts the noise floor by less than a meter
-	// resolves (0.14 dB).
+	// the control, as in v2: not the floor of the range but 15 dB, where the
+	// added quantisation noise lifts the noise floor by about what a meter
+	// resolves (0.14 dB). The floor, 10 dB, is there for an operator who
+	// chooses to trade a visible 0.4 dB for the bandwidth.
 	marginDefaultDB = 15
 
 	// marginSliderLossless is the slider's top stop, one step past the widest

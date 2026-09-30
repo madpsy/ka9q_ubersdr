@@ -39,9 +39,10 @@ func TestMarginConstantsMatchServerAndV2(t *testing.T) {
 			t.Errorf("%s: this client has %d, the source says %d", tc.name, tc.got, tc.want)
 		}
 	}
-	// v2 starts IQ at its minimum, as this client does.
-	if marginDefaultDB != marginMinDB {
-		t.Errorf("default %d dB, v2 starts IQ at its minimum %d", marginDefaultDB, marginMinDB)
+	// v2 starts IQ at its own start value rather than its minimum, as this
+	// client does.
+	if v2 := read("../../static/v2/src/radio/constants.js", `MARGIN_IQ_START_DB = (\d+)`); marginDefaultDB != v2 {
+		t.Errorf("default %d dB, v2 starts IQ at %d", marginDefaultDB, v2)
 	}
 }
 
@@ -54,7 +55,8 @@ func TestMarginToWire(t *testing.T) {
 		{"iq384", 15, 15},
 		{"iq96", 26, 26},
 		{"iq", 40, 40},    // the narrow IQ mode is reduced too
-		{"iq48", 5, 15},   // clamped up to what the server takes
+		{"iq48", 5, 10},   // clamped up to what the server takes
+		{"iq", 10, 10},    // the floor itself is honoured
 		{"iq192", 90, 60}, // and down
 		{"iq384", 0, 0},   // lossless: nothing sent
 		{"usb", 15, 0},    // demodulated audio is always whole

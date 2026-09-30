@@ -704,18 +704,21 @@ func squelchToWire(threshold int) float64 {
 // headroom on a dead 6 m band and 9 dB on medium wave — so a margin is what
 // lets one number mean the same thing wherever the receiver is pointed.
 //
-// Below 15 dB the added floor starts to lift the noise floor a listener can
-// actually see; above 60 dB the request buys almost nothing, and anyone wanting
+// At 10 dB the added floor lifts the noise floor by 0.41 dB on paper, and by
+// 0.2 to 0.3 dB as delivered, since the server holds the real margin 2 to 5 dB
+// above the request; much below that it becomes a change a listener hears.
+// Above 60 dB the request buys almost nothing, and anyone wanting
 // less than that wants the lossless stream instead, which is what 0 asks for.
 // The server clamps rather than refusing, but asking for something it will not
 // honour is still worth refusing here, where there is somewhere to say so.
 const (
-	marginMin = 15
+	marginMin = 10
 	marginMax = 60
 
 	// marginDefault is what an IQ session asks for when nobody says otherwise.
-	// The floor of the range: the cheapest stream whose quantisation stays
-	// under what the receiver's own readings can resolve.
+	// Not the floor of the range but 15 dB, the cheapest stream whose
+	// quantisation stays at about what the receiver's own readings can resolve.
+	// The web client starts IQ at the same value.
 	marginDefault = 15
 )
 

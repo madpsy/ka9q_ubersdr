@@ -84,17 +84,20 @@ const (
 	// the total by 10*log10(1 + 10**(-m/10)):
 	//
 	//	20 dB   0.04 dB   invisible
-	//	15 dB   0.14 dB   below the 0.1 dB a meter resolves
+	//	15 dB   0.14 dB   about the 0.1 dB a meter resolves
 	//	10 dB   0.41 dB
 	//	 6 dB   0.97 dB   an audible, measurable change
 	//
-	// 15 dB is the last step that stays under what a receiver's own readings can
-	// resolve, so it is the floor. Above 60 dB the request buys nothing --
+	// 10 dB is the floor: a client that asks for it trades a visible but small
+	// lift for the bandwidth, and lossyCalibrationDB leaves the delivered margin
+	// 2 to 5 dB above the request, so the lift actually seen is nearer 0.2 to
+	// 0.3 dB. Below that the table heads for a change a listener hears. Above
+	// 60 dB the request buys nothing --
 	// measured, 60 dB leaves under 8% on every capture -- and a client wanting
 	// less than that should omit the parameter and get the lossless path, which
 	// keeps archival streams honestly labelled rather than marked lossy and
 	// shifted by zero.
-	lossyMinMarginDB = 15.0
+	lossyMinMarginDB = 10.0
 	lossyMaxMarginDB = 60.0
 
 	// lossyCalibrationDB is the constant in the margin model above, fitted to

@@ -332,12 +332,14 @@ private:
 // rather than silently clamped to a different one for the whole session.
 //
 // The floor is where the quantisation noise starts to lift the noise floor a
-// host can see: 15 dB down adds 0.14 dB to it, under what a receiver's own
-// readings resolve, where 6 dB down adds a full 1 dB. Above 60 dB the request
+// host can see: 10 dB down adds 0.41 dB to it on paper, nearer 0.2 to 0.3 dB
+// once the server's 2 to 5 dB of calibration headroom is counted, where 6 dB
+// down adds a full 1 dB. A server older than the 10 dB floor raises anything
+// under 15 dB to 15. Above 60 dB the request
 // buys nothing measurable, and a device wanting less than that should leave the
 // argument off and take the lossless stream rather than have one marked lossy
 // and shifted by zero.
-static const double kMinMarginMinDB = 15.0;
+static const double kMinMarginMinDB = 10.0;
 static const double kMinMarginMaxDB = 60.0;
 
 // What min_margin is when a device string does not carry it, and it is on:

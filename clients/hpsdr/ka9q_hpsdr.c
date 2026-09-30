@@ -1586,13 +1586,15 @@ finishup:
  * clamped to something else halfway through a session.
  *
  * The floor is where the quantisation noise starts to lift the noise floor a
- * client can see: 15 dB down adds 0.14 dB to it, under what a receiver's own
- * readings resolve, and 6 dB down adds a full 1 dB. Above 60 dB the request
+ * client can see: 10 dB down adds 0.41 dB to it on paper, nearer 0.2 to 0.3 dB
+ * once the server's 2 to 5 dB of calibration headroom is counted, and 6 dB down
+ * adds a full 1 dB. A server older than the 10 dB floor raises anything under
+ * 15 dB to 15. Above 60 dB the request
  * buys nothing measurable, and a client wanting less than that should leave the
  * option off and take the lossless stream rather than have one marked lossy and
  * shifted by zero.
  */
-#define MIN_MARGIN_MIN_DB 15.0
+#define MIN_MARGIN_MIN_DB 10.0
 #define MIN_MARGIN_MAX_DB 60.0
 
 /*
@@ -1630,7 +1632,7 @@ static bool parse_min_margin(const char *arg, int *out)
         return false;
     }
 
-    if (v == 0.0) {          /* an explicit "lossless", same as leaving it off */
+    if (v == 0.0) {          /* lossless; leaving the option off gives the default */
         *out = 0;
         return true;
     }
@@ -1638,7 +1640,7 @@ static bool parse_min_margin(const char *arg, int *out)
     if (v < MIN_MARGIN_MIN_DB || v > MIN_MARGIN_MAX_DB) {
         fprintf(stderr,
                 "--min-margin: %g dB is outside %g-%g; the server would not "
-                "honour it as asked. Omit the option for a lossless stream\n",
+                "honour it as asked. Use --min-margin 0 for a lossless stream\n",
                 v, MIN_MARGIN_MIN_DB, MIN_MARGIN_MAX_DB);
         return false;
     }

@@ -14,6 +14,7 @@ const assert = require('assert');
 const {
     clampMargin, marginForMode, marginFromSlider, sliderFromMargin,
     MARGIN_MIN_DB, MARGIN_MAX_DB, MARGIN_DEFAULT_DB, MARGIN_LOSSLESS, MARGIN_STEP_DB,
+    MARGIN_IQ_START_DB,
 } = require('./.build/marginclamp.cjs');
 
 let pass = 0;
@@ -23,7 +24,7 @@ const t = (name, fn) => {
 };
 
 t('the range matches the server clamp in pcm_lossy.go', () => {
-    assert.strictEqual(MARGIN_MIN_DB, 15, 'lossyMinMarginDB is 15');
+    assert.strictEqual(MARGIN_MIN_DB, 10, 'lossyMinMarginDB is 10');
     assert.strictEqual(MARGIN_MAX_DB, 60, 'lossyMaxMarginDB is 60');
 });
 
@@ -43,7 +44,8 @@ t('anything unusable becomes lossless rather than the default', () => {
 
 t('a value below the range is raised, not rejected', () => {
     assert.strictEqual(clampMargin(1), MARGIN_MIN_DB);
-    assert.strictEqual(clampMargin(14.9), MARGIN_MIN_DB);
+    assert.strictEqual(clampMargin(9.9), MARGIN_MIN_DB);
+    assert.strictEqual(clampMargin(5), MARGIN_MIN_DB);
 });
 
 t('a value above the range is capped', () => {
@@ -52,6 +54,8 @@ t('a value above the range is capped', () => {
 });
 
 t('a value inside the range survives, as an integer', () => {
+    assert.strictEqual(clampMargin(10), 10);
+    assert.strictEqual(clampMargin(14.9), 15);
     assert.strictEqual(clampMargin(20), 20);
     assert.strictEqual(clampMargin(26), 26);
     assert.strictEqual(clampMargin(60), 60);
@@ -136,18 +140,29 @@ t('only IQ carries a margin', () => {
     }
 });
 
-// The narrowest margin, not lossless: IQ is the one mode whose bandwidth is
-// worth defaulting away from, and the floor of the scale is the biggest saving
-// the server will agree to.
-t('IQ starts at the narrowest margin the server takes', () => {
+// A reduced margin, not lossless: IQ is the one mode whose bandwidth is worth
+// defaulting away from. But 15 dB rather than the floor -- the floor lifts the
+// noise floor visibly, which is the operator's trade to make, not ours.
+t('IQ starts at 15 dB, above the floor', () => {
+    assert.strictEqual(MARGIN_IQ_START_DB, 15);
+    assert.ok(MARGIN_IQ_START_DB > MARGIN_MIN_DB && MARGIN_IQ_START_DB <= MARGIN_MAX_DB);
+    assert.strictEqual(marginForMode('iq', MARGIN_IQ_START_DB), MARGIN_IQ_START_DB);
+    assert.strictEqual(sliderFromMargin(marginForMode('iq', MARGIN_IQ_START_DB)), MARGIN_IQ_START_DB);
+    assert.strictEqual((MARGIN_IQ_START_DB - MARGIN_MIN_DB) % MARGIN_STEP_DB, 0,
+        `${MARGIN_IQ_START_DB} dB is not on a slider step`);
+});
+
+// A saved choice below the start value is kept, not raised to it.
+t('an operator can still choose the floor', () => {
     assert.strictEqual(marginForMode('iq', MARGIN_MIN_DB), MARGIN_MIN_DB);
-    assert.strictEqual(sliderFromMargin(marginForMode('iq', MARGIN_MIN_DB)), MARGIN_MIN_DB);
+    assert.strictEqual(sliderFromMargin(MARGIN_MIN_DB), MARGIN_MIN_DB);
+    assert.strictEqual(marginFromSlider(12), 12);
 });
 
 // And the way back: leaving IQ parks the control at its top stop, which is the
 // position that reads as lossless.
 t('leaving IQ parks the slider at lossless', () => {
-    assert.strictEqual(sliderFromMargin(marginForMode('usb', MARGIN_MIN_DB)), MARGIN_LOSSLESS);
+    assert.strictEqual(sliderFromMargin(marginForMode('usb', MARGIN_IQ_START_DB)), MARGIN_LOSSLESS);
 });
 
 console.log(`\n${pass} passing`);

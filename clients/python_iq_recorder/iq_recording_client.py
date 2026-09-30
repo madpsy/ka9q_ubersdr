@@ -40,7 +40,7 @@ class IQRecordingClient(RadioClient):
             metadata_callsign: Station callsign for metadata
             metadata_description: Station description for metadata
             error_callback: Callback for I/O errors: callback(error_type, exception)
-            min_margin: Reduced-depth IQ margin in dB (15-60), or 0 for lossless
+            min_margin: Reduced-depth IQ margin in dB (10-60), or 0 for lossless
             *args, **kwargs: Passed to RadioClient
         """
         super().__init__(*args, **kwargs)

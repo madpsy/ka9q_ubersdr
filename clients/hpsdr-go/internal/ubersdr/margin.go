@@ -12,15 +12,16 @@ import (
 // MinMarginMinDB and MinMarginMaxDB are the server's own limits (lossyMinMarginDB
 // and lossyMaxMarginDB in pcm_lossy.go), repeated so a value outside them is
 // refused with a reason rather than silently clamped by the server halfway
-// through a session. 15 dB adds 0.14 dB to the noise floor, under what a
-// receiver's readings resolve; past 60 dB the request buys nothing.
+// through a session. 10 dB adds 0.41 dB to the noise floor on paper, and 0.2 to
+// 0.3 dB as delivered since the server holds the real margin 2 to 5 dB above the
+// request; past 60 dB the request buys nothing.
 //
 // MinMarginDefaultDB is the web client's default: the measured transparent
 // point, where every FT8 decode survives with its reported strength intact, for
 // about 0.01 dB of noise floor and roughly half the bytes. Zero asks for the
 // lossless stream.
 const (
-	MinMarginMinDB     = 15
+	MinMarginMinDB     = 10
 	MinMarginMaxDB     = 60
 	MinMarginDefaultDB = 26
 )

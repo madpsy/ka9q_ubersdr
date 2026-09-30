@@ -462,7 +462,7 @@ immediately (same as the GUI).
 noise floor the quantisation floor is held, so the server can drop the bits
 beneath it. `0` is lossless. It only applies in IQ modes — demodulated audio
 is always sent whole — but is kept outside them for the next IQ mode. The
-default is 15, the server's minimum, as in the v2 web UI.
+default is 15, as in the v2 web UI; the server's minimum is 10.
 
 `warning` is empty unless the output is losing part of the stream or cannot
 play it — on Linux, when the sound server resamples a stream down to a slower
@@ -494,7 +494,7 @@ Set any combination of audio settings.  All fields optional.
 | `channel` | string | `"both"`, `"left"`, `"right"` | |
 | `format` | string | `"opus"`, `"pcm-zstd"` | Triggers reconnect if changed while connected |
 | `device_id` | string | must be a valid ID from `/audio/devices`, or `""` | `""` = system default |
-| `min_margin` | int | `0`, or [15, 60] — **clamped** | IQ modes only; `0` = lossless. Applied live, no reconnect |
+| `min_margin` | int | `0`, or [10, 60] — **clamped** | IQ modes only; `0` = lossless. Applied live, no reconnect |
 
 **Constraints:**
 - `format: "opus"` is rejected (`409`) when the current mode is any IQ variant

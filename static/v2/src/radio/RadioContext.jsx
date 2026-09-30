@@ -28,7 +28,7 @@ import {
     hasAGCSettings,
     isIQ, SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
     autoSquelchValue, squelchEnabled, squelchThreshold, clampMargin,
-    marginForMode, MARGIN_MIN_DB } from './constants.js';
+    marginForMode, MARGIN_IQ_START_DB } from './constants.js';
 import { clamp } from '../lib/format.js';
 import { defaultParams, toWire } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
@@ -176,7 +176,7 @@ export function RadioProvider({ children }) {
     const [marginPref, marginFromUser] = useMemo(() => {
         const chosen = saved.audioMinMarginFromUser === true
             || clampMargin(saved.audioMinMargin) > 0;
-        return [chosen ? clampMargin(saved.audioMinMargin) : MARGIN_MIN_DB, chosen];
+        return [chosen ? clampMargin(saved.audioMinMargin) : MARGIN_IQ_START_DB, chosen];
     }, [saved]);
     const [audio, setAudio] = useState({
         volume: saved.volume != null ? saved.volume : 0.7,
@@ -955,9 +955,9 @@ export function RadioProvider({ children }) {
     }, [tuning.mode]);
 
     // The reduced-depth margin follows the mode, because the server only honours
-    // it on IQ. Entering IQ asks for the stored margin — 15 dB, the narrowest
-    // the server takes and so the biggest saving, until the operator moves the
-    // slider; leaving it goes back to lossless, which is what the demodulated
+    // it on IQ. Entering IQ asks for the stored margin — 15 dB, under what a
+    // meter resolves, until the operator moves the slider, which goes down to
+    // the server's 10 dB floor; leaving it goes back to lossless, which is what the demodulated
     // stream is anyway. The slider is disabled outside IQ, so this is also what
     // parks it at its top stop rather than on a number nothing is applying.
     //

@@ -195,11 +195,12 @@ func TestMinMarginIsSentForIQOnly(t *testing.T) {
 		want   string
 	}{
 		{"iq", 15, "15"},
+		{"iq", 10, "10"}, // the floor
 		{"iq384", 26, "26"},
 		{"iq384", 0, ""},  // 0 asks for the lossless IQ stream
 		{"usb", 26, ""},   // nothing to quantise
 		{"iq", 200, "60"}, // clamped to what the server honours
-		{"iq", 3, ""},     // under the floor is off, as the panel's step is
+		{"iq", 9, ""},     // under the floor is off, as the panel's step is
 	} {
 		q := connectQuery(t, func(a *AudioClient) {
 			a.SetTuning(7_100_000, tc.mode, -6000, 6000)

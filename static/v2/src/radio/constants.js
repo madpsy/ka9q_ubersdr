@@ -471,8 +471,14 @@ export function autoSquelchValue(snrHistory) {
 //
 // 0 means lossless, which is what the server does for anything that does not
 // ask.
-export const MARGIN_MIN_DB = 15;
+export const MARGIN_MIN_DB = 10;
 export const MARGIN_MAX_DB = 60;
+
+// Where IQ starts until the operator moves the slider. Not the floor: 15 dB
+// lifts the noise floor by about what a meter resolves (0.14 dB), where the
+// floor's 10 dB lifts it by 0.4 dB, a trade worth offering but not worth
+// making for someone who has never touched the control.
+export const MARGIN_IQ_START_DB = 15;
 
 // One decibel, which is the resolution the protocol actually has -- the server
 // rounds every request to a whole dB -- and it has to divide the distance to
@@ -492,13 +498,13 @@ export const MARGIN_STEP_DB = 1;
 // It is also where the control sits outside IQ, which is the only place the
 // margin does anything: a demodulated stream is lossless whatever is asked, so
 // the disabled slider parks at the position that says so rather than on a
-// number nothing is applying. Entering IQ moves it to MARGIN_MIN_DB, or to
+// number nothing is applying. Entering IQ moves it to MARGIN_IQ_START_DB, or to
 // whatever the operator last chose -- see RadioContext, which owns that.
 export const MARGIN_LOSSLESS = MARGIN_MAX_DB + MARGIN_STEP_DB;
 
 // 26 dB is the measured transparent setting: every FT8 decode survives it with
 // its reported strength intact, for about half the bytes. Not where IQ starts
-// -- MARGIN_MIN_DB is -- but the value worth reaching for first if a capture
+// -- MARGIN_IQ_START_DB is -- but the value worth reaching for first if a capture
 // turns out to need more room.
 export const MARGIN_DEFAULT_DB = 26;
 
@@ -535,9 +541,10 @@ export function clampMargin(dB) {
 // The server only reduces depth on IQ, so everything else is lossless whatever
 // is asked for -- and asking anyway would leave the disabled slider showing a
 // number that is not being applied. IQ takes the preference, which is
-// MARGIN_MIN_DB until somebody moves the control: it is the narrowest margin
-// the server will take and so the largest saving, and IQ is the one mode whose
-// bandwidth is worth defaulting away from.
+// MARGIN_IQ_START_DB until somebody moves the control: a real saving while
+// still under what a meter resolves, and IQ is the one mode whose bandwidth is
+// worth defaulting away from. The narrower margins down to MARGIN_MIN_DB are
+// there for an operator who chooses them.
 export function marginForMode(mode, pref) {
     return isIQ(mode) ? clampMargin(pref) : 0;
 }

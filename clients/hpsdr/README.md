@@ -66,10 +66,11 @@ spends the bytes because its carriers genuinely need the depth.
   bridge carries nothing but IQ, the one mode reduced depth applies to, so the
   default is the one that saves the bandwidth rather than the one that spends
   it. `--min-margin 0` turns it off and takes the lossless stream.
-- **15 to 60 dB**, and a value outside that is refused at startup rather than
-  quietly clamped to something else. 15 dB is where the added noise (0.14 dB on
-  the floor) stops being resolvable by a receiver's own readings; past 60 dB the
-  request buys nothing.
+- **10 to 60 dB**, and a value outside that is refused at startup rather than
+  quietly clamped to something else. At 10 dB the added noise lifts the floor by
+  0.41 dB on paper, nearer 0.2-0.3 dB once the server's calibration headroom is
+  counted; past 60 dB the request buys nothing. A server older than the 10 dB
+  floor raises anything under 15 to 15.
 - **Needs UberSDR 0.1.64 or later.** A server that has never heard of
   `min_margin` ignores it and sends the lossless stream, so an older server
   still works, it just costs more bandwidth.

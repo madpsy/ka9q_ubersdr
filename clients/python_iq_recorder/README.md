@@ -90,9 +90,10 @@ a lot of data (around 60% in the server's measurements) while medium wave,
 whose carriers need the depth, keeps most of it (around 15%).
 
 - `0` (the default) is lossless: the recording is bit-exact.
-- `15`-`60` dB is the range the server accepts, the same as the TUI and
-  rtl_sdr clients. At 15 dB the noise floor rises by 0.14 dB, below what a
-  receiver's meter resolves; switching the option on starts at 26 dB.
+- `10`-`60` dB is the range the server accepts, the same as the TUI and
+  rtl_sdr clients. At 10 dB the noise floor rises by about 0.4 dB on paper,
+  nearer 0.2-0.3 dB in practice because the server keeps the delivered margin
+  a few dB above the request; switching the option on starts at 26 dB.
 
 The WAV comment records which it was (`Depth: lossless` or
 `Depth: reduced, quantisation >= N dB below noise floor`), so a reduced-depth

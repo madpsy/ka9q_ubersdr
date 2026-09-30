@@ -249,7 +249,7 @@ func (u *UI) buildSetup(s app.Settings) tview.Primitive {
 	u.info.SetText("[gray]Enter a receiver's URL and choose Check, or Browse the public and local receivers.[-]")
 
 	u.hint = tview.NewTextView().SetDynamicColors(true)
-	u.hint.SetText("[gray]Tab moves · Enter selects · IQ margin: 0 lossless, 15-60 dB · Ctrl-C quits[-]")
+	u.hint.SetText("[gray]Tab moves · Enter selects · IQ margin: 0 lossless, 10-60 dB · Ctrl-C quits[-]")
 
 	// The form is a fixed width so it fits an 80-column terminal beside the
 	// receiver panel; the panel takes whatever is left.

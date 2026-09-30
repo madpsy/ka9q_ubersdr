@@ -63,7 +63,7 @@ func (s *APIServer) putAudio(w http.ResponseWriter, r *http.Request) {
 		Format   *string  `json:"format"`
 		DeviceID *string  `json:"device_id"`
 		// MinMargin is the reduced-depth IQ margin in dB, 0 for lossless;
-		// clamped to [15, 60] as the server clamps it. See iq_margin.go.
+		// clamped to [10, 60] as the server clamps it. See iq_margin.go.
 		MinMargin *int `json:"min_margin"`
 	}
 	if !decodeBody(w, r, &body) {

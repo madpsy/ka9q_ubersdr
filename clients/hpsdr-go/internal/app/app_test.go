@@ -58,7 +58,7 @@ func TestValidate(t *testing.T) {
 		"url":    func(s *Settings) { s.URL = "" },
 		"rx":     func(s *Settings) { s.Receivers = 11 },
 		"device": func(s *Settings) { s.Device = 2 },
-		"margin": func(s *Settings) { s.MinMargin = 10 },
+		"margin": func(s *Settings) { s.MinMargin = 9 },
 		"rate":   func(s *Settings) { s.Rates = []int{12} },
 	} {
 		s := Defaults()

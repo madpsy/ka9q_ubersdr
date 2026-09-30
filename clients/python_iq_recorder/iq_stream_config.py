@@ -52,7 +52,7 @@ class IQMode(Enum):
 # The range is the server's lossyMinMarginDB..lossyMaxMarginDB (pcm_lossy.go),
 # the same one clients/tui and clients/rtl_sdr offer. 0 asks for nothing and
 # gets the lossless stream, which is the default: a recording is an archive.
-MIN_MARGIN_MIN_DB = 15
+MIN_MARGIN_MIN_DB = 10
 MIN_MARGIN_MAX_DB = 60
 # What the setting starts at when it is switched on; rtl_sdr's default.
 MIN_MARGIN_DEFAULT_DB = 26

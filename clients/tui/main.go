@@ -71,7 +71,7 @@ func main() {
 	headless := flag.Bool("headless", false, "no display: tune and stream the audio, for scripts and services (needs -server)")
 	squelch := flag.Int("squelch", 0, "squelch threshold in dB of SNR (0 = off)")
 	lossless := flag.Bool("lossless", false, "ask for the lossless audio format instead of Opus: the demodulator's own samples, bit for bit, for about twice the bandwidth")
-	minMargin := flag.Int("min-margin", marginDefault, "IQ modes only: dB of quantisation margin under the noise floor (15-60; 0 asks for a lossless IQ stream)")
+	minMargin := flag.Int("min-margin", marginDefault, "IQ modes only: dB of quantisation margin under the noise floor (10-60; 0 asks for a lossless IQ stream)")
 	noAudio := flag.Bool("no-audio", false, "watch the spectrum without opening an audio channel")
 	toStdout := flag.Bool("stdout", false, "write the demodulated audio to stdout as raw PCM (48 kHz mono S16_LE) for piping")
 	toStdoutWAV := flag.Bool("stdout-wav", false, "as -stdout, but with a WAV header, so a redirected file plays anywhere")

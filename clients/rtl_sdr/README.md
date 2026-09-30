@@ -84,7 +84,7 @@ When the limit is reached, new connections are rejected immediately with a log m
 | `-freq` | `14200000` | Initial frequency in Hz (14.2 MHz) |
 | `-config` | _(none)_ | Frequency routing config file (YAML) |
 | `-max-clients` | `4` | Maximum simultaneous rtl_tcp clients (0 = unlimited) |
-| `-min-margin` | `26` | Reduced-depth IQ: dB of margin under the noise floor (15-60; 0 = lossless) |
+| `-min-margin` | `26` | Reduced-depth IQ: dB of margin under the noise floor (10-60; 0 = lossless) |
 
 ## How It Works
 
@@ -215,9 +215,10 @@ the internet.
   further under what this bridge's own client can see than that suggests —
   rtl_tcp is handed 8-bit samples, so the depth the server drops is depth the
   bridge was going to throw away. `-min-margin 0` takes the lossless stream.
-- **15 to 60 dB**, and a value outside that is refused at startup rather than
-  quietly clamped to something else. 15 dB is where the added noise (0.14 dB on
-  the floor) stops being resolvable by a receiver's own readings; past 60 dB the
+- **10 to 60 dB**, and a value outside that is refused at startup rather than
+  quietly clamped to something else. 10 dB adds 0.41 dB to the floor on paper,
+  and 0.2 to 0.3 dB as delivered since the server holds the real margin 2 to
+  5 dB above the request; below that the change becomes audible. Past 60 dB the
   request buys nothing.
 - **Needs UberSDR 0.1.64 or later.** A server that has never heard of
   `min_margin` ignores it and sends the lossless stream, so an older server

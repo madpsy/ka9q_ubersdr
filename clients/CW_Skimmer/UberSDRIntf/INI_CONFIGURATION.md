@@ -43,7 +43,7 @@ swap_iq=1
   - Default: `26` - **on by default**, including for an ini with no `min_margin` line,
     so upgrading the DLL enables it without the operator's ini changing. Set
     `min_margin=0` for the bit-exact stream.
-  - Values: `0` to disable, or `15`-`60`
+  - Values: `0` to disable, or `10`-`60`
   - Anything else - out of range, or not a number - is **refused**: the stream stays
     lossless and the reason is written to the log. It is deliberately not rounded into
     range, because the server would clamp a bad value into a working but different
@@ -53,8 +53,10 @@ swap_iq=1
     the compression's noise must stay, and the server chooses the depth needed to
     honour it separately for every packet. That is what makes one setting mean the
     same thing on a dead band and on crowded medium wave.
-  - Lower values compress harder. At `15` the added noise raises the measured floor
-    by about 0.14 dB; at `30` by under 0.01 dB. Because the added noise is white, the
+  - Lower values compress harder. At `10` the added noise raises the measured floor
+    by at most 0.41 dB (nearer 0.2-0.3 dB in practice); at `15` by about 0.14 dB; at
+    `30` by under 0.01 dB. A server older than the 10 dB floor raises anything under
+    `15` to `15`. Because the added noise is white, the
     penalty does not grow when Skimmer narrows to a CW passband.
   - `26` is the default because it is the measured transparent setting, where every
     FT8 decode survives with its reported strength intact for about half the bytes.

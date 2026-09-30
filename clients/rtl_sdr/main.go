@@ -933,13 +933,14 @@ func (b *RTLTCPBridge) handleClient(conn net.Conn) {
 // clamped to a different one halfway through a session.
 //
 // The floor is where the quantisation noise starts to lift the noise floor a
-// client can see: 15 dB down adds 0.14 dB to it, under what a receiver's own
-// readings resolve, where 6 dB down adds a full 1 dB. Above 60 dB the request
+// client can see: 10 dB down adds 0.41 dB to it on paper, and 0.2 to 0.3 dB as
+// delivered since the server holds the real margin 2 to 5 dB above the request,
+// where 6 dB down adds a full 1 dB. Above 60 dB the request
 // buys nothing measurable, and a client wanting less than that should leave the
 // flag alone and take the lossless stream rather than have one marked lossy and
 // shifted by zero.
 const (
-	MinMarginMinDB = 15.0
+	MinMarginMinDB = 10.0
 	MinMarginMaxDB = 60.0
 )
 
@@ -1154,7 +1155,7 @@ func main() {
 	configFile := flag.String("config", "", "Frequency routing configuration file (optional, YAML format)")
 	initialFreq := flag.Int64("freq", 14200000, "Initial frequency in Hz (default: 14.2 MHz)")
 	maxClients := flag.Int("max-clients", DefaultMaxClients, "Maximum simultaneous rtl_tcp clients (0 = unlimited)")
-	minMargin := flag.Float64("min-margin", MinMarginDefaultDB, "Reduced-depth IQ: dB of margin under the noise floor (15-60; 0 = lossless)")
+	minMargin := flag.Float64("min-margin", MinMarginDefaultDB, "Reduced-depth IQ: dB of margin under the noise floor (10-60; 0 = lossless)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "UberSDR to rtl_tcp Bridge\n\n")

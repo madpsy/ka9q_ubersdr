@@ -13,8 +13,9 @@ Vfo parseVfo(const std::string &s) {
 }
 
 bool Snapshot::operator==(const Snapshot &o) const {
-    return status == o.status && statusText == o.statusText && freq == o.freq && mode == o.mode &&
-           tx == o.tx && vfo == o.vfo && readable == o.readable && writeable == o.writeable;
+    return status == o.status && statusText == o.statusText && rigType == o.rigType && freq == o.freq &&
+           mode == o.mode && tx == o.tx && vfo == o.vfo && split == o.split && readable == o.readable &&
+           writeable == o.writeable;
 }
 
 // Whether the rig is receiving on B. Vfo reports the pair as RX then TX (PM_VFOBA
@@ -47,6 +48,7 @@ bool Session::poll(std::string &line) {
     // asked of it.
     if (!rig_.get("Status", s.status)) return false;
     if (!rig_.getText("StatusStr", s.statusText)) return false;
+    if (!rig_.getText("RigType", s.rigType)) return false;
     // Everything else only means something while the rig is on line. Offline,
     // OmniRig goes on answering with whatever it last had, which would be shown
     // as a rig sitting on a frequency it may have left an hour ago.
@@ -59,6 +61,7 @@ bool Session::poll(std::string &line) {
         }
         if (!rig_.get("Mode", s.mode)) return false;
         if (!rig_.get("Tx", s.tx)) return false;
+        if (!rig_.get("Split", s.split)) return false;
     }
     if (reported_ && s == last_) return true;
     last_ = s;
@@ -152,9 +155,10 @@ std::string jsonString(const std::string &s) {
 // into a static link, and were most of the helper's size.
 std::string stateLine(const Snapshot &s) {
     return "{\"type\":\"state\",\"status\":" + std::to_string(s.status) +
-           ",\"statusText\":" + jsonString(s.statusText) + ",\"freq\":" + std::to_string(s.freq) +
-           ",\"mode\":" + std::to_string(s.mode) + ",\"tx\":" + std::to_string(s.tx) +
-           ",\"vfo\":" + std::to_string(s.vfo) + ",\"readable\":" + std::to_string(s.readable) +
+           ",\"statusText\":" + jsonString(s.statusText) + ",\"rigType\":" + jsonString(s.rigType) +
+           ",\"freq\":" + std::to_string(s.freq) + ",\"mode\":" + std::to_string(s.mode) +
+           ",\"tx\":" + std::to_string(s.tx) + ",\"vfo\":" + std::to_string(s.vfo) +
+           ",\"split\":" + std::to_string(s.split) + ",\"readable\":" + std::to_string(s.readable) +
            ",\"writeable\":" + std::to_string(s.writeable) + "}";
 }
 

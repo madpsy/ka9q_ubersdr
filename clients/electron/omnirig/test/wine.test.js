@@ -38,7 +38,18 @@ t('reads Rig1 through IDispatch', async () => {
     await until(() => states.length, 30000, 'a state');
     assert.deepStrictEqual(last(), {
         connected: true, error: null, frequency: 14074000, mode: 'USB', sdrMode: 'usb', tx: false,
-        pttAvailable: true,
+        pttAvailable: true, rig: 'IC-7300',
+        // RigType and Split are read as text and a number through IDispatch
+        // too; the version is the fake's SoftwareVersion, 0x10014.
+        details: [
+            { label: 'OmniRig slot', value: 'Rig 1' },
+            { label: 'VFO', value: 'A' },
+            { label: 'Following', value: 'the VFO it receives on' },
+            { label: 'Split', value: 'Off' },
+            { label: 'Can read', value: 'frequency, mode, TX' },
+            { label: 'Can set', value: 'frequency, mode' },
+            { label: 'OmniRig version', value: '1.20' },
+        ],
     });
 
     // A property put, with its argument named DISPID_PROPERTYPUT, or the fake refuses it.
@@ -75,6 +86,8 @@ t('Rig2, not configured, is said in words', async () => {
     l.stop();
     assert.strictEqual(states[0].connected, false);
     assert.match(states[0].error, /^Rig 2 is not set up in OmniRig/);
+    // Nothing chosen in that slot, so nothing to name.
+    assert.strictEqual(states[0].rig, null);
 });
 
 (async () => {

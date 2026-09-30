@@ -47,7 +47,7 @@ struct Register {
 class FakeRig : public Rig {
 public:
     std::map<std::string, long> props;
-    std::string statusText = "On-line";
+    std::map<std::string, std::string> texts = {{"StatusStr", "On-line"}, {"RigType", "IC-7300"}};
     std::vector<std::pair<std::string, long>> writes;
     bool dead = false;
     int reads = 0;
@@ -62,6 +62,7 @@ public:
         props["FreqB"] = 7074000;
         props["Mode"] = PM_SSB_U;
         props["Tx"] = PM_RX;
+        props["Split"] = PM_SPLITOFF;
     }
     bool get(const char *name, long &out) override {
         if (dead) return false;
@@ -70,9 +71,10 @@ public:
         out = it == props.end() ? 0 : it->second;
         return true;
     }
-    bool getText(const char *, std::string &out) override {
+    bool getText(const char *name, std::string &out) override {
         if (dead) return false;
-        out = statusText;
+        auto it = texts.find(name);
+        out = it == texts.end() ? "" : it->second;
         return true;
     }
     bool put(const char *name, long value) override {
@@ -95,8 +97,9 @@ TEST(first_poll_reports_the_whole_state) {
     Session s(rig, Vfo::Current);
     std::string line;
     CHECK(s.poll(line));
-    CHECK(line == "{\"type\":\"state\",\"status\":4,\"statusText\":\"On-line\",\"freq\":14074000,"
-                  "\"mode\":33554432,\"tx\":2097152,\"vfo\":128,\"readable\":2145386510,\"writeable\":2139095054}");
+    CHECK(line == "{\"type\":\"state\",\"status\":4,\"statusText\":\"On-line\",\"rigType\":\"IC-7300\","
+                  "\"freq\":14074000,\"mode\":33554432,\"tx\":2097152,\"vfo\":128,\"split\":65536,"
+                  "\"readable\":2145386510,\"writeable\":2139095054}");
     return ok;
 }
 
@@ -126,6 +129,13 @@ TEST(any_change_is_reported) {
     rig.props["Mode"] = PM_CW_U;
     s.poll(line);
     CHECK(contains(line, "\"mode\":8388608"));
+    rig.props["Split"] = PM_SPLITON;
+    s.poll(line);
+    CHECK(contains(line, "\"split\":32768"));
+    // Another radio chosen in OmniRig's settings.
+    rig.texts["RigType"] = "FT-991";
+    s.poll(line);
+    CHECK(contains(line, "\"rigType\":\"FT-991\""));
     return ok;
 }
 
@@ -133,12 +143,15 @@ TEST(offline_reports_status_but_not_stale_values) {
     bool ok = true;
     FakeRig rig;
     rig.props["Status"] = ST_NOTRESPONDING;
-    rig.statusText = "Rig is not responding";
+    rig.texts["StatusStr"] = "Rig is not responding";
     Session s(rig, Vfo::Current);
     std::string line;
     CHECK(s.poll(line));
     CHECK(contains(line, "\"status\":3"));
     CHECK(contains(line, "\"statusText\":\"Rig is not responding\""));
+    // Named even off line: the radio is configured, just not answering.
+    CHECK(contains(line, "\"rigType\":\"IC-7300\""));
+    CHECK(contains(line, "\"split\":0"));
     CHECK(contains(line, "\"freq\":0"));
     CHECK(contains(line, "\"mode\":0"));
     // Status alone of the numeric properties; StatusStr is text.

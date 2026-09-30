@@ -6,7 +6,7 @@
 //   node fake-omnirig-helper.js <scenario> <log> <rig> <vfo>
 //
 // Scenarios:
-//   online         Rig on line on 14.074 MHz USB; freq and mode commands stick
+//   online         an IC-7300 on line on 14.074 MHz USB; freq and mode commands stick
 //   offline        status 3 (not responding) and nothing else
 //   not-installed  the error the real helper gives without OmniRig, then exit 2
 //   gone           on line, then OmniRig "goes away" after 100 ms: exit 3
@@ -27,8 +27,8 @@ const PM_RX = 0x00200000;
 const PM_TX = 0x00400000;
 const MODES = 0x7f800000;
 const state = {
-    type: 'state', status: 4, statusText: 'On-line', freq: 14074000, mode: 0x02000000,
-    tx: PM_RX, vfo: 0x80, readable: 0x2 | PM_RX | PM_TX | MODES, writeable: 0x2 | MODES,
+    type: 'state', status: 4, statusText: 'On-line', rigType: 'IC-7300', freq: 14074000, mode: 0x02000000,
+    tx: PM_RX, vfo: 0x80, split: 0x10000, readable: 0x2 | PM_RX | PM_TX | MODES, writeable: 0x2 | MODES,
 };
 
 if (scenario === 'not-installed') {

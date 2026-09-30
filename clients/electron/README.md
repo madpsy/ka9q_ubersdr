@@ -353,14 +353,19 @@ one where no receiver window ever appears.
   TCP socket (`rigctl.js`), which no page can open at all, so like flrig it
   lives in the main process.
 - **OmniRig** (Windows only): the Radio Control panel gains an **OmniRig**
-  connection, with a Rig (1 or 2, OmniRig's two slots) and a VFO (A, B, or
-  blank for whichever the radio is receiving on). OmniRig is a COM server, not
+  connection, with buttons for the Rig (Rig 1 or Rig 2, OmniRig's two slots)
+  and the VFO (Current — whichever the radio is receiving on — A or B). OmniRig
+  is a COM server, not
   a socket, so the main process runs `omnirig-helper.exe` — a small C++ program
   in `omnirig/`, cross-built with mingw in Docker by `omnirig/build.sh` — and
   talks to it over stdin and stdout (`omnirig.js`). The helper uses IDispatch
   alone, so this 64-bit client reaches the 32-bit OmniRig without needing its
   type library registered for 64-bit. Problems are said in the panel in words:
   OmniRig missing, the rig not set up in it, the port busy, the radio silent.
+  The radio's model (OmniRig's `RigType`) is shown beside the readout, minimal
+  panel included; the full panel adds the slot, the VFO in use and the one
+  being followed, split, what the rig's description can read and set, and the
+  OmniRig version — the `rig` and `details` of page API 1.8.
   Tests: `omnirig/test/run.sh` (the helper's logic, natively),
   `test/omnirig.test.js` (the link, on a fake helper), and
   `omnirig/test/wine_test.sh` (the real exe under wine, against a stand-in

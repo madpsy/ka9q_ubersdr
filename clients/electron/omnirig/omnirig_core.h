@@ -32,6 +32,8 @@ enum : long {
     PM_VFOBB = 0x00000400,
     PM_VFOA = 0x00000800,
     PM_VFOB = 0x00001000,
+    PM_SPLITON = 0x00008000,
+    PM_SPLITOFF = 0x00010000,
     PM_RX = 0x00200000,
     PM_TX = 0x00400000,
     PM_CW_U = 0x00800000,
@@ -75,10 +77,15 @@ Vfo parseVfo(const std::string &s);
 struct Snapshot {
     long status = -1;
     std::string statusText;
+    // The radio chosen in OmniRig's settings for this slot, by the name of its
+    // rig description (IC-7300, FT-991…). Read whether or not the rig is on
+    // line: an off-line radio is still worth naming.
+    std::string rigType;
     long freq = 0;
     long mode = 0;
     long tx = 0;
     long vfo = 0;
+    long split = 0;
     long readable = 0;
     long writeable = 0;
     bool operator==(const Snapshot &o) const;

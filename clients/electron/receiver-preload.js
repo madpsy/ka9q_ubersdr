@@ -144,11 +144,21 @@ const PROVIDERS = [
     ...(process.platform === 'win32' ? [{
         id: 'omnirig',
         label: 'OmniRig',
+        // Choices rather than typed in (page API 1.8): there are two slots and
+        // three VFO settings, and nothing else means anything. A page older
+        // than 1.8 renders them as text boxes holding the same values, which
+        // omnirig.js reads the same way.
         fields: [
-            { key: 'rig', label: 'Rig (1 or 2)', type: 'number', default: 1 },
-            // Blank follows whichever VFO the radio is receiving on, which is
-            // the one that keeps up with the A/B button on the front panel.
-            { key: 'vfo', label: 'VFO', type: 'text', default: '', placeholder: 'A, B, or blank for current' },
+            {
+                key: 'rig', label: 'Rig', type: 'choice', default: 1,
+                options: [{ value: 1, label: 'Rig 1' }, { value: 2, label: 'Rig 2' }],
+            },
+            {
+                // Current follows whichever VFO the radio is receiving on, which
+                // is the one that keeps up with the A/B button on the front panel.
+                key: 'vfo', label: 'VFO', type: 'choice', default: 'current',
+                options: [{ value: 'current', label: 'Current' }, { value: 'A' }, { value: 'B' }],
+            },
         ],
         capabilities: ['frequency', 'mode', 'ptt'],
     }] : []),
@@ -161,14 +171,23 @@ const PROVIDER_IDS = PROVIDERS.map((p) => p.id);
  *
  * Anything missing, empty or zero takes the default, as the host and port always
  * have — a cleared host is 127.0.0.1, and the panel's number input sends 0 for a
- * cleared box. Built in field order, so the same settings always make the same
- * string for the comparison below.
+ * cleared box. A choice takes one of its own values or its default; a value
+ * saved while it was still a text box ('2' for Rig 2) is matched by its text,
+ * so a setting made before the buttons existed is kept. Built in field order,
+ * so the same settings always make the same string for the comparison below.
  */
 function linkSettings(spec, config) {
     const out = {};
     for (const f of spec.fields) {
         const v = config ? config[f.key] : undefined;
-        out[f.key] = f.type === 'number' ? (Number(v) || f.default) : String(v || f.default).trim();
+        if (f.type === 'choice') {
+            const o = f.options.find((opt) => String(opt.value) === String(v ?? '').trim());
+            out[f.key] = o ? o.value : f.default;
+        } else if (f.type === 'number') {
+            out[f.key] = Number(v) || f.default;
+        } else {
+            out[f.key] = String(v || f.default).trim();
+        }
     }
     return out;
 }
@@ -254,10 +273,15 @@ function onRadioControl(next) {
         lastSentToRig = { frequency: null, mode: null };
         lastPushedToSdr = { frequency: null, mode: null };
         if (ducked) { ducked = false; command('duck', { ducked: false }); }
-        report({ connected: false, busy: false, frequency: null, mode: null, tx: false, error: null });
+        report({
+            connected: false, busy: false, frequency: null, mode: null, tx: false, error: null,
+            rig: null, details: null,
+        });
         return;
     }
-    report({ busy: true, error: null });
+    // The last radio's name goes with it: moving from Rig 1 to Rig 2 would
+    // otherwise show Rig 1's model until Rig 2 first answered.
+    report({ busy: true, error: null, rig: null, details: null });
     startLink(JSON.parse(target));
 }
 
@@ -369,6 +393,10 @@ function onRigState(state) {
         mode: state.mode || null,
         tx: !!state.tx,
         error: state.error || null,
+        // The model and the lines of detail (page API 1.8). Only OmniRig knows
+        // them so far; null from the others clears whatever it last said.
+        rig: state.rig || null,
+        details: state.details || null,
     });
     if (!state.connected) return;
 

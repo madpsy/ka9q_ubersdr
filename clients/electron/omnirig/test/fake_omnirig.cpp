@@ -7,7 +7,8 @@
 // RigParamX values, and it is strict where OmniRig is: a property put must name
 // its argument DISPID_PROPERTYPUT, and a write the rig cannot take is refused.
 //
-// Rig1 is on line on 14.074 MHz USB, VFO A; Rig2 is not configured. Writes stick,
+// Rig1 is an IC-7300, on line on 14.074 MHz USB, VFO A, split off; Rig2 is not
+// configured. Writes stick,
 // so the test sees its own commands come back in the next poll.
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -102,10 +103,11 @@ protected:
 class FakeRigX : public Dispatchable {
 public:
     long status, readable, writeable, vfo = PM_VFOAA, freqA = 14074000, freqB = 7074000, mode = PM_SSB_U,
-                                      tx = PM_RX;
+                                      tx = PM_RX, split = PM_SPLITOFF;
     const wchar_t *statusText;
+    const wchar_t *rigType;
 
-    FakeRigX(long st, const wchar_t *text) : status(st), statusText(text) {
+    FakeRigX(long st, const wchar_t *text, const wchar_t *type) : status(st), statusText(text), rigType(type) {
         readable = PM_FREQ | PM_FREQA | PM_FREQB | PM_VFOAA | PM_VFOBB | PM_RX | PM_TX | MODE_MASK;
         // No AM or FM to write, so the test can see a refusal.
         writeable = PM_FREQ | PM_FREQA | PM_FREQB | (MODE_MASK & ~(PM_AM | PM_FM));
@@ -115,18 +117,20 @@ protected:
     const wchar_t *const *names_() const override {
         static const wchar_t *const n[] = {L"Status", L"StatusStr", L"ReadableParams", L"WriteableParams",
                                            L"Vfo",    L"Freq",      L"FreqA",          L"FreqB",
-                                           L"Mode",   L"Tx",        nullptr};
+                                           L"Mode",   L"Tx",        L"RigType",        L"Split",
+                                           nullptr};
         return n;
     }
 
     bool onB() const { return vfo == PM_VFOB || vfo == PM_VFOBA || vfo == PM_VFOBB; }
 
     HRESULT get(const wchar_t *n, VARIANT &out) override {
-        if (!wcscmp(n, L"StatusStr")) {
+        if (!wcscmp(n, L"StatusStr") || !wcscmp(n, L"RigType")) {
             out.vt = VT_BSTR;
-            out.bstrVal = SysAllocString(statusText);
+            out.bstrVal = SysAllocString(!wcscmp(n, L"StatusStr") ? statusText : rigType);
             return S_OK;
         }
+        if (!wcscmp(n, L"Split")) return longValue(out, split);
         if (!wcscmp(n, L"Status")) return longValue(out, status);
         if (!wcscmp(n, L"ReadableParams")) return longValue(out, readable);
         if (!wcscmp(n, L"WriteableParams")) return longValue(out, writeable);
@@ -162,8 +166,8 @@ protected:
 
 class FakeOmniRigX : public Dispatchable {
 public:
-    FakeRigX rig1{ST_ONLINE, L"On-line"};
-    FakeRigX rig2{ST_NOTCONFIGURED, L"Rig is not configured"};
+    FakeRigX rig1{ST_ONLINE, L"On-line", L"IC-7300"};
+    FakeRigX rig2{ST_NOTCONFIGURED, L"Rig is not configured", L""};
 
 protected:
     const wchar_t *const *names_() const override {

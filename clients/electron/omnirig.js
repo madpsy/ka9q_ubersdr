@@ -26,6 +26,14 @@ const PM = {
     FREQ: 0x00000002,
     FREQA: 0x00000004,
     FREQB: 0x00000008,
+    VFOAA: 0x00000080,
+    VFOAB: 0x00000100,
+    VFOBA: 0x00000200,
+    VFOBB: 0x00000400,
+    VFOA: 0x00000800,
+    VFOB: 0x00001000,
+    SPLITON: 0x00008000,
+    SPLITOFF: 0x00010000,
     RX: 0x00200000,
     TX: 0x00400000,
     CW_U: 0x00800000,
@@ -49,7 +57,7 @@ const STATUS_TEXT = {
     0: (rig) => `Rig ${rig} is not set up in OmniRig — choose the radio and its port in OmniRig's settings`,
     1: (rig) => `Rig ${rig} is disabled in OmniRig`,
     2: () => 'OmniRig cannot open the radio\'s serial port — another program may be using it',
-    3: () => 'The radio is not answering OmniRig — check it is on, and the port and baud rate in OmniRig',
+    3: (rig, name) => `${name ? `The ${name}` : 'The radio'} is not answering OmniRig — check it is on, and the port and baud rate in OmniRig`,
 };
 // The helper's fatal errors, by the code it gives (omnirig_helper.cpp).
 const HELPER_ERRORS = {
@@ -109,20 +117,87 @@ function helperErrorText({ code, message }, rig) {
     return say ? say(rig) : `OmniRig: ${message || code || 'unknown error'}`;
 }
 
-/** A to A, B to B, anything else to the VFO the rig is receiving on. */
+/**
+ * A to A, B to B, anything else — the panel's 'current', or a blank typed into
+ * a page too old for buttons — to the VFO the rig is receiving on.
+ */
 function normaliseVfo(vfo) {
     const v = String(vfo || '').trim().toUpperCase();
     return v === 'A' || v === 'B' ? v : '-';
 }
 
-/** A state line from the helper, as the state object every link reports. */
-function stateFrom(msg, rig) {
+// Vfo, as the receive VFO and, where it differs, the transmit one.
+const VFO_TEXT = {
+    [PM.VFOA]: 'A', [PM.VFOAA]: 'A',
+    [PM.VFOB]: 'B', [PM.VFOBB]: 'B',
+    [PM.VFOAB]: 'A, transmitting on B',
+    [PM.VFOBA]: 'B, transmitting on A',
+};
+
+/** OmniRig packs its version as major in the high word, minor in the low. */
+function versionText(v) {
+    if (!(v > 0)) return null;
+    return `${Math.floor(v / 0x10000)}.${String(v % 0x10000).padStart(2, '0')}`;
+}
+
+/** What a readable or writeable mask covers, in the terms the panel syncs. */
+function abilities(mask, withTx) {
+    const out = [];
+    if (mask & (PM.FREQ | PM.FREQA | PM.FREQB)) out.push('frequency');
+    if (mask & (PM.CW_U | PM.CW_L | PM.SSB_U | PM.SSB_L | PM.DIG_U | PM.DIG_L | PM.AM | PM.FM)) out.push('mode');
+    if (withTx && (mask & (PM.RX | PM.TX))) out.push('TX');
+    return out.length ? out.join(', ') : 'nothing';
+}
+
+/**
+ * The model name. A slot with no radio chosen reports an empty RigType, which
+ * is not a name.
+ */
+function rigName(msg) {
+    const s = String(msg.rigType || '').trim();
+    return s && s.toUpperCase() !== 'NONE' ? s : null;
+}
+
+/**
+ * The lines under the readout in the full panel. Things the operator set up in
+ * OmniRig and cannot see from here — which slot, which VFO is being followed,
+ * what this rig's description lets it read and set — plus the live ones the
+ * readout has no room for.
+ */
+function detailsFrom(msg, ctx) {
+    const d = [{ label: 'OmniRig slot', value: `Rig ${ctx.rig}` }];
+    if (msg.status === ST_ONLINE) {
+        if (VFO_TEXT[msg.vfo]) d.push({ label: 'VFO', value: VFO_TEXT[msg.vfo] });
+        d.push({
+            label: 'Following',
+            value: ctx.vfo === '-' ? 'the VFO it receives on' : `VFO ${ctx.vfo}`,
+        });
+        if (msg.split === PM.SPLITON) d.push({ label: 'Split', value: 'On' });
+        else if (msg.split === PM.SPLITOFF) d.push({ label: 'Split', value: 'Off' });
+        d.push({ label: 'Can read', value: abilities(msg.readable, true) });
+        d.push({ label: 'Can set', value: abilities(msg.writeable, false) });
+    }
+    const version = versionText(ctx.softwareVersion);
+    if (version) d.push({ label: 'OmniRig version', value: version });
+    return d;
+}
+
+/**
+ * A state line from the helper, as the state object every link reports.
+ *
+ * `ctx` is what the link knows that the line does not: the slot, the VFO
+ * setting, and OmniRig's version from the helper's ready line.
+ */
+function stateFrom(msg, ctx) {
+    const name = rigName(msg);
+    const extra = { rig: name, details: detailsFrom(msg, ctx) };
     if (msg.status !== ST_ONLINE) {
         const say = STATUS_TEXT[msg.status];
         return {
             connected: false,
             tx: false,
-            error: say ? say(rig) : `OmniRig: ${msg.statusText || `status ${msg.status}`}`,
+            error: say ? say(ctx.rig, name) : `OmniRig: ${msg.statusText || `status ${msg.status}`}`,
+            ...extra,
         };
     }
     return {
@@ -135,6 +210,7 @@ function stateFrom(msg, rig) {
         // A rig description with no TX status is a rig the panel should not
         // offer mute-on-transmit for — see rigctl.js.
         pttAvailable: (msg.readable & (PM.RX | PM.TX)) !== 0,
+        ...extra,
     };
 }
 
@@ -156,6 +232,7 @@ class OmniRigLink {
         this.restartMs = restartMs;
         this.child = null;
         this.ready = false;
+        this.softwareVersion = 0;
         this.stopped = false;
         this.timer = null;
         // The last error reported, so one that persists is said once rather
@@ -260,9 +337,10 @@ class OmniRigLink {
         switch (msg.type) {
         case 'ready':
             this.ready = true;
+            this.softwareVersion = Number(msg.softwareVersion) || 0;
             break;
         case 'state':
-            this.report(stateFrom(msg, this.rig));
+            this.report(stateFrom(msg, { rig: this.rig, vfo: this.vfo, softwareVersion: this.softwareVersion }));
             break;
         case 'error':
             // Fatal to the helper, which exits next; kept for that report.
@@ -309,6 +387,6 @@ class OmniRigLink {
 }
 
 module.exports = {
-    OmniRigLink, PM, OMNIRIG_TO_SDR, SDR_TO_OMNIRIG, MODE_NAME, stateFrom, helperErrorText, normaliseVfo,
-    defaultHelper,
+    OmniRigLink, PM, OMNIRIG_TO_SDR, SDR_TO_OMNIRIG, MODE_NAME, stateFrom, detailsFrom, helperErrorText,
+    normaliseVfo, versionText, defaultHelper,
 };

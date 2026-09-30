@@ -39,8 +39,8 @@
 // it, and how far to translate what comes out — and planFor() is the whole of
 // the difference between them. See there for the derivation of each.
 //
-// ECSS is the exception, because its oscillator is not a setting: it is steered
-// onto the carrier by a phase-locked loop. It has its own front end in
+// SAM and ECSS are the exception, because their oscillator is not a setting: it
+// is steered onto the carrier by a phase-locked loop. They share a front end in
 // lib/ecss.js, which hands audio and passband power back to the same squelch,
 // DC block and AGC every other mode ends in.
 //
@@ -87,15 +87,6 @@ export const IQ_SPAN = IQ_HALF_SPAN * 2;
  */
 export const DEMOD_MODES = [
     {
-        id: 'usb',
-        label: 'USB',
-        summary: 'Upper sideband — the passband sits above the offset.',
-        widths: [1800, 2400, 2700, 3200, 4000],
-        min: 300,
-        max: 6000,
-        fallback: 2700,
-    },
-    {
         id: 'lsb',
         label: 'LSB',
         summary: 'Lower sideband — the passband sits below the offset.',
@@ -105,9 +96,27 @@ export const DEMOD_MODES = [
         fallback: 2700,
     },
     {
-        id: 'cw',
-        label: 'CW',
-        summary: 'Narrow filter on the carrier, heard as a tone at the pitch you set.',
+        id: 'usb',
+        label: 'USB',
+        summary: 'Upper sideband — the passband sits above the offset.',
+        widths: [1800, 2400, 2700, 3200, 4000],
+        min: 300,
+        max: 6000,
+        fallback: 2700,
+    },
+    {
+        id: 'cwl',
+        label: 'CW-L',
+        summary: 'CW, heard at the pitch you set; a signal above the carrier sounds lower.',
+        widths: [100, 250, 500, 1000],
+        min: 50,
+        max: 2000,
+        fallback: 500,
+    },
+    {
+        id: 'cwu',
+        label: 'CW-U',
+        summary: 'CW, heard at the pitch you set; a signal above the carrier sounds higher.',
         widths: [100, 250, 500, 1000],
         min: 50,
         max: 2000,
@@ -123,13 +132,13 @@ export const DEMOD_MODES = [
         fallback: 6000,
     },
     {
-        id: 'nfm',
-        label: 'NFM',
-        summary: 'Narrowband FM discriminator, with 750 µs de-emphasis.',
-        widths: [6000, 8000, 10000, 12000],
-        min: 2000,
+        id: 'sam',
+        label: 'SAM',
+        summary: 'Synchronous AM — both sidebands, detected against the tracked carrier.',
+        widths: [4000, 6000, 8000, 10000],
+        min: 1000,
         max: 12000,
-        fallback: 8000,
+        fallback: 6000,
     },
     {
         id: 'ecss',
@@ -142,6 +151,15 @@ export const DEMOD_MODES = [
         max: 6000,
         fallback: 4500,
     },
+    {
+        id: 'nfm',
+        label: 'NFM',
+        summary: 'Narrowband FM discriminator, with 750 µs de-emphasis.',
+        widths: [6000, 8000, 10000, 12000],
+        min: 2000,
+        max: 12000,
+        fallback: 8000,
+    },
 ];
 
 export { SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN };
@@ -150,8 +168,8 @@ export { SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN };
 export const SIDEBAND_OPTIONS = [
     { value: 'both', label: 'Both', title: 'Both sidebands, weighted frequency by frequency by how clean each is' },
     { value: 'auto', label: 'Auto', title: 'Use whichever sideband has less interference on it' },
-    { value: 'usb', label: 'USB', title: 'Upper sideband only' },
     { value: 'lsb', label: 'LSB', title: 'Lower sideband only' },
+    { value: 'usb', label: 'USB', title: 'Upper sideband only' },
 ];
 
 const sidebandOf = (v) => (SIDEBANDS.includes(v) ? v : 'both');
@@ -163,6 +181,9 @@ export const PITCH_MAX = 1200;
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+/** Whether a plan runs through the carrier tracker: SAM and ECSS. */
+const isTracked = (plan) => !!plan && (plan.kind === 'ecss' || plan.kind === 'sam');
+
 /** A tracking window the tracker will accept, for a stored or typed figure. */
 export function clampTrack(hz) {
     const v = Number(hz);
@@ -171,8 +192,15 @@ export function clampTrack(hz) {
 
 /** The mode record, falling back to USB rather than throwing on a stale setting. */
 export function demodMode(id) {
-    return DEMOD_BY_ID[id] || DEMOD_BY_ID.usb;
+    return DEMOD_BY_ID[LEGACY_MODES[id] || id] || DEMOD_BY_ID.usb;
 }
+
+// Modes that have since been renamed, read as what they became. Plain CW was
+// always CW-U by the definition below — the pitch rose with the signal — so a
+// stored `cw` keeps sounding exactly as it did.
+const LEGACY_MODES = { cw: 'cwu' };
+// And where their filter widths went: plain CW's to both of its halves.
+const LEGACY_WIDTHS = { cwl: 'cw', cwu: 'cw' };
 
 /** The width this mode will accept, for a stored or typed figure. */
 export function clampWidth(modeId, widthHz) {
@@ -255,17 +283,22 @@ export function clampOffset(modeId, offsetHz, widthHz, sideband) {
  *   LSB  passband [off-w, off]. Same c-and-s pair with s negated: the sign of
  *        the third-stage exponential is what mirrors the spectrum, so a real
  *        conjugation is never needed — Re{conj(z)*e^(jt)} == Re{z*e^(-jt)}.
- *   CW   c = off, s = +pitch. The filter is centred on the carrier and the
- *        carrier comes out at exactly the pitch. Note the consequence, which is
- *        real and deliberate: a symmetric filter passes both sides of the
- *        carrier, so a signal `d` below the offset is heard at pitch-d just as
- *        one `d` above is heard at pitch+d. That is what a direct-conversion CW
- *        receiver does and what a 500 Hz filter means; single-signal reception
- *        would need the filter hung off one side, which trades the image for
- *        putting the carrier on the filter's own skirt.
+ *   CW-U c = off, s = +pitch. The filter is centred on the carrier and the
+ *        carrier comes out at exactly the pitch; a signal `d` above it is heard
+ *        at pitch+d and one `d` below at pitch-d. That is not an image: the
+ *        filter is complex, so the two sides are different places and land on
+ *        different pitches, and nothing folds over until |d| passes the pitch —
+ *        which a filter narrower than twice the pitch never lets it.
+ *   CW-L c = off, s = -pitch. Re{z·e^(-jpt)} puts `d` at pitch-d: the same
+ *        tone for the carrier, the pitch running the other way. What that is
+ *        for is an interferer inside the filter — flipping moves it to the
+ *        other side of the wanted tone, which is sometimes further from it.
  *   AM   c = off, envelope. No translation: |z| is already real and already at
  *        baseband, and the DC block downstream is what removes the carrier.
  *   NFM  c = off, phase difference. Likewise.
+ *   SAM  c = off is the nominal carrier, as for ECSS below; the tracker's
+ *        own filter straddles the carrier it finds, and the chain's DC block
+ *        takes the carrier off what comes out.
  *   ECSS c = off is the *nominal carrier*, not a filter centre: the tracker in
  *        lib/ecss.js moves its own oscillator from there onto the carrier it
  *        finds, and hangs its sideband filters off that. The cutoff is carried
@@ -282,15 +315,26 @@ export function planFor({ mode, offsetHz, widthHz, pitchHz, sideband, trackHz })
             return { kind: 'ssb', centreHz: off + half, cutoffHz: half, shiftHz: half };
         case 'lsb':
             return { kind: 'ssb', centreHz: off - half, cutoffHz: half, shiftHz: -half };
-        case 'cw':
+        case 'cwl':
+        case 'cwu':
             return {
                 kind: 'ssb',
                 centreHz: off,
                 cutoffHz: half,
-                shiftHz: clamp(Math.round(Number(pitchHz) || 0), PITCH_MIN, PITCH_MAX),
+                shiftHz: (m.id === 'cwl' ? -1 : 1)
+                    * clamp(Math.round(Number(pitchHz) || 0), PITCH_MIN, PITCH_MAX),
             };
         case 'am':
             return { kind: 'am', centreHz: off, cutoffHz: half, shiftHz: 0 };
+        case 'sam':
+            return {
+                kind: 'sam',
+                centreHz: off,
+                widthHz: w,
+                cutoffHz: half,
+                shiftHz: 0,
+                trackHz: clampTrack(trackHz),
+            };
         case 'ecss':
             return {
                 kind: 'ecss',
@@ -571,7 +615,9 @@ export class DemodChain {
      */
     configure(plan, rateHz) {
         const rate = rateHz > 0 ? rateHz : 12000;
-        const entering = plan.kind === 'ecss' && !(this.plan && this.plan.kind === 'ecss');
+        // SAM and ECSS share the tracker, and moving between them keeps the
+        // carrier: it is the same carrier either way.
+        const entering = isTracked(plan) && !isTracked(this.plan);
         this.plan = plan;
         this.rate = rate;
         const key = `${plan.cutoffHz}/${plan.transitionHz || 0}/${rate}`;
@@ -579,7 +625,7 @@ export class DemodChain {
             this.tapsKey = key;
             this.taps = designLowpass(plan.cutoffHz, rate, plan.transitionHz);
         }
-        if (plan.kind === 'ecss') {
+        if (isTracked(plan)) {
             // The tracker keeps its own delay lines; arriving in the mode is a
             // fresh search, not the tail of a carrier found some time ago.
             if (!this.ecss) this.ecss = new EcssTracker();
@@ -633,12 +679,14 @@ export class DemodChain {
      */
     get ecssStatus() {
         const e = this.ecss;
-        if (!e || !this.plan || this.plan.kind !== 'ecss') return null;
+        if (!e || !isTracked(this.plan)) return null;
         return {
             state: e.state,
             locked: e.locked,
             carrierHz: e.locked ? e.readoutHz : e.state === 'acquire' ? e.carrierHz : null,
-            side: this.plan.sideband === 'both' ? 'both' : e.side,
+            // SAM has no sideband to report: it always hears both, equally.
+            side: this.plan.kind === 'sam' ? null
+                : this.plan.sideband === 'both' ? 'both' : e.side,
         };
     }
 
@@ -664,7 +712,7 @@ export class DemodChain {
         // ECSS runs its own front end — carrier tracking and the sideband
         // filters — and hands back audio and passband power per sample, which
         // then go through the same squelch, DC block and AGC as everything else.
-        const ecss = kind === 'ecss';
+        const ecss = isTracked(this.plan);
         if (ecss) {
             if (this.ecssY.length < frames) {
                 this.ecssY = new Float32Array(frames);
@@ -963,7 +1011,9 @@ function sanitiseVfo(raw) {
     const mode = demodMode(src.mode).id;
     const widths = {};
     for (const m of DEMOD_MODES) {
-        const stored = src.widths && src.widths[m.id];
+        const saved = src.widths || {};
+        // A width stored under a mode's old name serves each mode it became.
+        const stored = saved[m.id] !== undefined ? saved[m.id] : saved[LEGACY_WIDTHS[m.id]];
         widths[m.id] = Number.isFinite(Number(stored)) ? clampWidth(m.id, stored) : m.fallback;
     }
     const gain = Number(src.gain);

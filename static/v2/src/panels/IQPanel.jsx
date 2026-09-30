@@ -798,10 +798,13 @@ export function holdReading(shown, hz, hysteresis = READING_HYSTERESIS_HZ) {
  * ECSS's own controls: which sideband, how far to look for the carrier, and
  * what the tracker has found.
  *
- * Both controls have defaults that are right for a broadcast — Auto, and a
+ * Both controls have defaults that are right for a broadcast — Both, and a
  * window a click on the picture lands inside — so on arrival the mode works
  * without either being touched. The window is the one set-once control and
  * goes in the minimal view with the gain.
+ *
+ * SAM shares the tracker and so the readouts and the window, but not the
+ * sideband: it always hears both, equally.
  */
 function EcssControls({ vfo, ecss, dialHz, minimal, set }) {
     const report = ecssReport(ecss, vfo, dialHz);
@@ -809,18 +812,20 @@ function EcssControls({ vfo, ecss, dialHz, minimal, set }) {
     shown.current = holdReading(shown.current, report.carrier);
     return (
         <>
-            <Field
-                label="Sideband"
-                hint={report.side ? `hearing ${report.side}` : undefined}
-            >
-                <Segmented
-                    options={SIDEBAND_OPTIONS}
-                    value={vfo.sideband}
-                    onChange={(sideband) => set({ sideband })}
-                    size="sm"
-                    columns={SIDEBAND_OPTIONS.length}
-                />
-            </Field>
+            {vfo.mode === 'ecss' && (
+                <Field
+                    label="Sideband"
+                    hint={report.side ? `hearing ${report.side}` : undefined}
+                >
+                    <Segmented
+                        options={SIDEBAND_OPTIONS}
+                        value={vfo.sideband}
+                        onChange={(sideband) => set({ sideband })}
+                        size="sm"
+                        columns={SIDEBAND_OPTIONS.length}
+                    />
+                </Field>
+            )}
             <div className="readout-grid">
                 <Readout label="Carrier" value={report.text} tone={report.tone} />
                 <Readout
@@ -1091,7 +1096,10 @@ function VfoRow({
                             value={vfo.mode}
                             onChange={(m) => set({ mode: m })}
                             size="sm"
-                            columns={MODE_OPTIONS.length}
+                            // Wraps as the receiver's own mode row does: seven
+                            // abreast when there is room, two rows in a narrow
+                            // dock rather than seven cramped labels.
+                            minItemWidth={54}
                         />
                     </Field>
 
@@ -1115,7 +1123,7 @@ function VfoRow({
                         onChange={(w) => set({ widths: { [vfo.mode]: w } })}
                     />
 
-                    {vfo.mode === 'cw' && (
+                    {(vfo.mode === 'cwl' || vfo.mode === 'cwu') && (
                         <Field label="CW pitch" hint={`${vfo.pitchHz} Hz`}>
                             <Slider
                                 value={vfo.pitchHz}
@@ -1127,7 +1135,7 @@ function VfoRow({
                         </Field>
                     )}
 
-                    {vfo.mode === 'ecss' && (
+                    {(vfo.mode === 'ecss' || vfo.mode === 'sam') && (
                         <EcssControls vfo={vfo} ecss={ecss} dialHz={dialHz} minimal={minimal} set={set} />
                     )}
 

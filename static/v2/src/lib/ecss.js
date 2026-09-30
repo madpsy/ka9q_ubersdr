@@ -31,6 +31,18 @@
 // keeps searching and the audio is plain SSB against the offset, so the worst
 // case is the mode USB or LSB would have given anyway.
 //
+// ── SAM ──────────────────────────────────────────────────────────────────────
+//
+// Synchronous AM is the same tracker with a simpler ending: one filter
+// straddling the recovered carrier, and the in-phase part of what comes out,
+// which is the whole double-sideband programme with the carrier as DC for the
+// chain's DC block to take off. That is ECSS's Both with the two sidebands
+// always weighted equally — the same 3 dB on a clean channel, none of the
+// per-frequency defence against fading or interference — for a tenth of the
+// latency, a third of the cost, and the bass the sideband filters' low edge
+// cuts. Unlocked, it is envelope AM, as a SAM receiver's fallback always is,
+// crossfaded so a lock gained or lost is not a click.
+//
 // ── The signal path ──────────────────────────────────────────────────────────
 //
 //   x ─► × e^(-jφ) ─► d ─┬─► carrier low-pass ─► phase detector ─► loop ─► φ
@@ -227,6 +239,12 @@ const COMBINE_INTERFERENCE_DB = [2, 6];
 // average the noise out of it five times faster than time alone could.
 const COMBINE_SPREAD_BINS = 2;
 
+// SAM's filter, like AM's, has a skirt proportional to its width, up to 400 Hz;
+// this keeps the whole skirt inside the stream wherever the carrier is found.
+const SAM_EDGE_GUARD = 200;
+// The changeover between envelope and synchronous detection.
+const SAM_FADE_SEC = 0.03;
+
 // ── the level ────────────────────────────────────────────────────────────────
 //
 // The carrier is the one thing in an AM signal whose level does not depend on
@@ -291,11 +309,15 @@ class SidebandFilter {
      * width or rate actually change. The delay line survives, since the tap
      * count depends on the fixed transition alone.
      */
-    fit(widthHz, rate, design) {
+    fit(widthHz, rate, design, centred = false) {
         if (widthHz === this.widthHz && rate === this.rate && this.taps) return;
         this.widthHz = widthHz;
         this.rate = rate;
-        this.taps = design((widthHz - ECSS_LOW_EDGE) / 2, ECSS_TRANSITION);
+        // Centred is SAM's: straddling the carrier, with AM's proportional
+        // skirt, and no rotation either side of it.
+        this.taps = centred
+            ? design(widthHz / 2)
+            : design((widthHz - ECSS_LOW_EDGE) / 2, ECSS_TRANSITION);
         const n = this.taps.length;
         if (n !== this.n) {
             this.n = n;
@@ -304,7 +326,7 @@ class SidebandFilter {
             this.pos = 0;
         }
         // The centre, and the constant that undoes the filter's delay.
-        this.step = (TWO_PI * ((ECSS_LOW_EDGE + widthHz) / 2)) / rate;
+        this.step = centred ? 0 : (TWO_PI * ((ECSS_LOW_EDGE + widthHz) / 2)) / rate;
         const delay = (n - 1) / 2;
         this.dc = Math.cos(this.step * delay);
         this.ds = Math.sin(this.step * delay);
@@ -510,6 +532,7 @@ export class EcssTracker {
         this.design = null;
         this.usb = new SidebandFilter();
         this.lsb = new SidebandFilter();
+        this.dsb = new SidebandFilter();
         this.combiner = new SidebandCombiner();
         this.searchN = 0;
         this.searchI = null;
@@ -559,6 +582,8 @@ export class EcssTracker {
         this.lastPeak = null;
         this.usb.reset();
         this.lsb.reset();
+        this.dsb.reset();
+        this.syncMix = 0; // SAM: 0 envelope, 1 synchronous
         this.combiner.reset();
         this.level = 0;
         this.levelHistory = null;
@@ -675,6 +700,12 @@ export class EcssTracker {
         };
         this.usb.fit(room(1), rate, this.design);
         this.lsb.fit(room(-1), rate, this.design);
+        if (this.plan.kind === 'sam') {
+            // Both sides at once, so the room is the nearer edge's.
+            const free = 2 * (rate / 2 - SAM_EDGE_GUARD - Math.abs(at));
+            const w = Math.min(this.plan.widthHz, free);
+            this.dsb.fit(Math.max(WIDTH_FLOOR, Math.floor(w / WIDTH_QUANTUM) * WIDTH_QUANTUM), rate, this.design, true);
+        }
     }
 
     _range() {
@@ -715,8 +746,12 @@ export class EcssTracker {
         const lossConfirm = Math.round(rate * LOSS_CONFIRM_SEC);
         const fadeGiveUp = Math.round(rate * FADE_GIVE_UP_SEC);
 
-        const auto = this.plan.sideband === 'auto';
-        const both = this.plan.sideband === 'both';
+        const sam = this.plan.kind === 'sam';
+        const auto = !sam && this.plan.sideband === 'auto';
+        const both = !sam && this.plan.sideband === 'both';
+        const D = this.dsb;
+        const syncA = coeff(rate, SAM_FADE_SEC);
+        let syncMix = this.syncMix;
         const levelA = coeff(rate, CARRIER_LEVEL_SEC);
         let level = this.level;
         const rewind = Math.max(1, Math.round(rate * CARRIER_LEVEL_REWIND_SEC));
@@ -901,7 +936,7 @@ export class EcssTracker {
             let yU = 0; let pU = 0;
             let yL = 0; let pL = 0;
             let uaI = 0; let laI = 0;
-            if (both || sideMix < 1) {
+            if (!sam && (both || sideMix < 1)) {
                 let fi = 0; let fq = 0;
                 for (let t = 0; t < n; t++) {
                     const h = uT[t];
@@ -915,7 +950,7 @@ export class EcssTracker {
                 uaI = fi * os + fq * oc;
                 pU = fi * fi + fq * fq;
             }
-            if (both || sideMix > 0) {
+            if (!sam && (both || sideMix > 0)) {
                 let fi = 0; let fq = 0;
                 for (let t = 0; t < n; t++) {
                     const h = lT[t];
@@ -931,7 +966,29 @@ export class EcssTracker {
             }
 
             const locked = this.state === ECSS_LOCKED || this.state === ECSS_HOLD;
-            if (both) {
+            if (sam) {
+                // One filter straddling the carrier, at DC once locked.
+                const dn = D.n;
+                const dI = D.bufI; const dQ = D.bufQ; const dT = D.taps;
+                let dp = D.pos;
+                dI[dp] = ai; dI[dp + dn] = ai;
+                dQ[dp] = aq; dQ[dp + dn] = aq;
+                dp = dp + 1 === dn ? 0 : dp + 1;
+                D.pos = dp;
+                let fi = 0; let fq = 0;
+                for (let t = 0; t < dn; t++) {
+                    const h = dT[t];
+                    fi += h * dI[dp + t];
+                    fq += h * dQ[dp + t];
+                }
+                const envelope = Math.sqrt(fi * fi + fq * fq);
+                syncMix += syncA * ((locked ? 1 : 0) - syncMix);
+                // Locked, the in-phase part is the carrier plus the programme
+                // from both sidebands; the envelope is the same thing, less
+                // well, so the two can be crossfaded without a step.
+                out[k] = syncMix * fi + (1 - syncMix) * envelope;
+                pow[k] = fi * fi + fq * fq;
+            } else if (both) {
                 // The lower sideband conjugated, so its programme is at
                 // positive frequencies like the upper one's.
                 out[k] = combiner.push(yU, uaI, yL, -laI, rate, locked, this.side);
@@ -948,7 +1005,10 @@ export class EcssTracker {
                 // programme would close in every pause between words.
                 pow[k] = pU * (1 - sideMix) + pL * sideMix + cp;
             }
-            ref[k] = locked && level > 0 ? level : 0;
+            // SAM hears both sidebands in phase, so twice one sideband's
+            // amplitude for the same carrier: referred as twice the carrier,
+            // it comes out at the same loudness as ECSS.
+            ref[k] = locked && level > 0 ? (sam ? 2 * level : level) : 0;
 
             // 5 — the sideband statistics, only while there is a carrier for
             // "the same on both sides" to be measured against.
@@ -997,6 +1057,7 @@ export class EcssTracker {
         this.fading = fading;
         this.acqAge = acqAge;
         this.sideMix = sideMix;
+        this.syncMix = syncMix;
         this.level = level;
         this.levelAt = levelAt;
     }

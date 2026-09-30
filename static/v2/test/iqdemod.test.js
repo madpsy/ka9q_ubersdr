@@ -229,7 +229,7 @@ t('LSB puts a signal below the offset at its distance, spectrum inverted', () =>
 
 t('CW puts the carrier at the pitch, and moves with it', () => {
     for (const pitch of [400, 700, 1000]) {
-        const plan = planFor({ mode: 'cw', offsetHz: 1500, widthHz: 500, pitchHz: pitch });
+        const plan = planFor({ mode: 'cwu', offsetHz: 1500, widthHz: 500, pitchHz: pitch });
         const out = demodulate(plan, tone(1500));
         assert.ok(amplitudeAt(out, pitch) > 0.8,
             `pitch ${pitch}: got ${amplitudeAt(out, pitch).toFixed(3)}`);
@@ -238,8 +238,36 @@ t('CW puts the carrier at the pitch, and moves with it', () => {
     }
 });
 
+t('CW-L runs the pitch the other way, and is not an image', () => {
+    // The carrier is at the pitch in both; a signal 200 Hz above it is 200 Hz
+    // higher in CW-U and 200 Hz lower in CW-L.
+    for (const [mode, above] of [['cwu', 900], ['cwl', 500]]) {
+        const plan = planFor({ mode, offsetHz: 1000, widthHz: 500, pitchHz: 700 });
+        const carrier = demodulate(plan, tone(1000));
+        assert.ok(amplitudeAt(carrier, 700) > 0.8, `${mode}: the carrier is not at the pitch`);
+        const up = demodulate(plan, tone(1200));
+        assert.ok(amplitudeAt(up, above) > 0.8, `${mode}: 200 Hz up should be heard at ${above} Hz`);
+        // And the other side lands somewhere else entirely: two signals, two
+        // tones, nothing folded onto anything.
+        const down = demodulate(plan, tone(800));
+        assert.ok(amplitudeAt(down, above) < 0.02, `${mode}: 200 Hz down landed on 200 Hz up`);
+    }
+});
+
+t('a demodulator saved in the old CW comes back as CW-U, widths and all', () => {
+    delete store['ubersdr.v2.iqdemod'];
+    store['ubersdr.v2.iqdemod'] = JSON.stringify({ vfos: [{ mode: 'cw', widths: { cw: 250 }, pitchHz: 650 }] });
+    resetDemodSettings();
+    const v = demodSettings().vfos[0];
+    assert.strictEqual(v.mode, 'cwu', 'plain CW was CW-U by definition');
+    assert.strictEqual(v.widths.cwu, 250);
+    assert.strictEqual(v.widths.cwl, 250, 'the width should carry to both halves');
+    assert.strictEqual(v.pitchHz, 650);
+    fresh();
+});
+
 t('CW at 500 Hz rejects a signal a kilohertz off', () => {
-    const plan = planFor({ mode: 'cw', offsetHz: 0, widthHz: 500, pitchHz: 700 });
+    const plan = planFor({ mode: 'cwu', offsetHz: 0, widthHz: 500, pitchHz: 700 });
     const out = demodulate(plan, tone(1000));
     let peak = 0;
     for (let f = 100; f <= 2000; f += 50) peak = Math.max(peak, amplitudeAt(out, f));
@@ -849,6 +877,83 @@ t('Both: blocking does not change the output, and no carrier is sideband at the 
     assert.ok(amplitudeAt(tailOf(out, 1), 400) > 0.18, 'no carrier should mean upper sideband at the offset');
 });
 
+// ── SAM ─────────────────────────────────────────────────────────────────────
+
+const samPlan = (over = {}) => planFor({ mode: 'sam', offsetHz: 0, widthHz: 6000, trackHz: 300, ...over });
+
+t('SAM hears both sidebands at the true pitch, whatever the mistuning', () => {
+    const tone1k = (tSec) => 0.5 * Math.cos(2 * Math.PI * 1000 * tSec);
+    const { out, log } = runEcss(samPlan({ offsetHz: 1000 }), station({ carrierHz: 1137, modulation: tone1k }), 3);
+    assert.ok(after(log, 1).every(LOCKED), 'SAM did not hold a lock');
+    const tail = tailOf(out, 1.5);
+    // Both sidebands in phase: 0.3 of carrier at 50% is 0.15, twice ECSS's.
+    assert.ok(Math.abs(amplitudeAt(tail, 1000) - 0.15) < 0.005,
+        `the tone came out at ${amplitudeAt(tail, 1000).toFixed(4)}, want 0.15`);
+    assert.ok(amplitudeAt(tail, 1137) < 1e-3, 'the mistuning is still in the audio');
+    assert.ok(amplitudeAt(tail, 137) < 1e-3, 'the carrier beat is in the audio');
+});
+
+t('without a lock SAM is envelope AM, and a lock arriving is not a jump', () => {
+    // Out of the window: never locked, so it is AM's envelope throughout.
+    const tone1k = (tSec) => 0.5 * Math.cos(2 * Math.PI * 1000 * tSec);
+    const far = runEcss(samPlan(), station({ carrierHz: 450, modulation: tone1k }), 3);
+    assert.ok(!far.log.some(LOCKED), 'locked to a carrier outside the window');
+    assert.ok(Math.abs(amplitudeAt(tailOf(far.out, 1.5), 1000) - 0.15) < 0.005, 'the envelope lost the programme');
+
+    // And locking part-way through changes nothing a listener would hear: the
+    // envelope and the synchronous detector agree on a clean signal.
+    const near = runEcss(samPlan(), station({ carrierHz: 40, modulation: tone1k }), 2);
+    const lockAt = near.log.find(LOCKED).t;
+    const level = (a, b) => amplitudeAt(Array.from(near.out.subarray(Math.round(a * RATE), Math.round(b * RATE))), 1000);
+    const before = level(lockAt - 0.2, lockAt);
+    const afterLock = level(lockAt + 0.1, lockAt + 0.3);
+    assert.ok(Math.abs(20 * Math.log10(afterLock / before)) < 0.5,
+        `the level moved ${(20 * Math.log10(afterLock / before)).toFixed(2)} dB at the lock`);
+});
+
+t('SAM gains the same 3 dB as Both on a clean channel', () => {
+    const one = toneSnrDb(runEcss(ecssPlan({ sideband: 'usb' }), gridStation({ cnrDb: 20 }), 10).out, 4);
+    const sam = toneSnrDb(runEcss(samPlan({ widthHz: 9000 }), gridStation({ cnrDb: 20 }), 10).out, 4);
+    assert.ok(sam - one > 2.5, `one sideband ${one.toFixed(2)} dB, SAM ${sam.toFixed(2)} dB`);
+});
+
+t('SAM and ECSS share the carrier: moving between them keeps the lock', () => {
+    const sig = station({ carrierHz: 70 });
+    const { chain } = runEcss(ecssPlan(), sig, 2);
+    assert.ok(LOCKED(chain.ecssStatus), 'ECSS did not lock');
+    chain.configure(samPlan(), RATE);
+    const I = new Float32Array(240);
+    const Q = new Float32Array(240);
+    for (let i = 0; i < 240; i++) {
+        const s = sig(2 + i / RATE);
+        I[i] = s.i;
+        Q[i] = s.q;
+    }
+    chain.process(I, Q, 240, { agc: false, gain: 1 });
+    assert.ok(LOCKED(chain.ecssStatus), 'switching to SAM dropped the carrier');
+    assert.ok(Math.abs(chain.ecssStatus.carrierHz - 70) < 1, 'switching to SAM moved the carrier');
+    assert.strictEqual(chain.ecssStatus.side, null, 'SAM has no sideband to report');
+});
+
+t('the modes are in the order asked for, and the row can wrap', () => {
+    assert.deepStrictEqual(DEMOD_MODES.map((m) => m.id), ['lsb', 'usb', 'cwl', 'cwu', 'am', 'sam', 'ecss', 'nfm']);
+    fresh({ mode: 'sam' });
+    reset();
+    const { tree, cleanups } = render(IQPanel, {}, context());
+    // The rendered row: a segmented group holding SAM, laid out to auto-fit —
+    // which is what lets it wrap — rather than a fixed seven columns.
+    const rows = deep(tree).filter((n) => cls(n).split(' ').includes('segmented')
+        && words(n).includes('SAM') && words(n).includes('ECSS'));
+    assert.strictEqual(rows.length, 1, 'expected one mode row');
+    const cols = (rows[0].props.style || {}).gridTemplateColumns || '';
+    assert.ok(cols.includes('auto-fit'), `the mode row does not wrap: ${cols}`);
+    const text = deepWords(tree);
+    assert.ok(text.includes('Carrier') && text.includes('Tracking range'), 'SAM shows the tracker');
+    assert.ok(!text.includes('Sideband'), 'SAM has no sideband to choose');
+    for (const off of cleanups) off();
+    fresh();
+});
+
 t('ECSS settings: sideband, window and offset limits', () => {
     fresh({ mode: 'ecss' });
     assert.strictEqual(vfo0().sideband, 'both', 'Both sidebands is the default');
@@ -1021,7 +1126,7 @@ t('one threshold means the same thing in every mode', () => {
     // *output* would be backwards. Read in the passband, every mode agrees.
     // ECSS's passband is the sideband, with the carrier at the offset outside
     // its filter, so its in-band signal is a tone up in the (default) USB.
-    const inBand = { usb: 1000, lsb: -1000, cw: 0, am: 0, nfm: 0, ecss: 1000 };
+    const inBand = { usb: 1000, lsb: -1000, cwl: 0, cwu: 0, am: 0, sam: 0, nfm: 0, ecss: 1000 };
     for (const m of DEMOD_MODES) {
         const plan = planFor({ mode: m.id, offsetHz: 0, widthHz: m.fallback, pitchHz: 700 });
         const heard = withSquelch(plan, tone(inBand[m.id], 0.5), -20);
@@ -1186,7 +1291,7 @@ t('the passband hangs off the offset the way each mode says', () => {
     assert.deepStrictEqual(passbandFor('usb', 1000, 2700), { lo: 1000, hi: 3700 });
     assert.deepStrictEqual(passbandFor('lsb', 1000, 2700), { lo: -1700, hi: 1000 });
     assert.deepStrictEqual(passbandFor('am', 1000, 6000), { lo: -2000, hi: 4000 });
-    assert.deepStrictEqual(passbandFor('cw', -500, 500), { lo: -750, hi: -250 });
+    assert.deepStrictEqual(passbandFor('cwu', -500, 500), { lo: -750, hi: -250 });
 });
 
 t('the offset cannot push the passband off the end of the stream', () => {
@@ -1218,20 +1323,20 @@ t('a width too wide for the span leaves the offset with nowhere to go', () => {
 t('each mode keeps its own width', () => {
     fresh();
     updateVfo(0, { mode: 'usb', widths: { usb: 2400 } });
-    updateVfo(0, { mode: 'cw', widths: { cw: 250 } });
+    updateVfo(0, { mode: 'cwu', widths: { cwu: 250 } });
     // Going back to USB must not find CW's 250 Hz filter — a single shared
     // figure would be wrong on one side of every mode change.
     updateVfo(0, { mode: 'usb' });
     assert.strictEqual(vfoWidth(vfo0()), 2400);
-    assert.strictEqual(vfo0().widths.cw, 250);
-    updateVfo(0, { mode: 'cw' });
+    assert.strictEqual(vfo0().widths.cwu, 250);
+    updateVfo(0, { mode: 'cwu' });
     assert.strictEqual(vfoWidth(vfo0()), 250);
 });
 
 t('a stored width the mode will not take is brought into range', () => {
     // CW tops out well below a voice filter, so a settings file written by hand
     // or by an older build cannot ask for one.
-    assert.strictEqual(clampWidth('cw', 6000), 2000);
+    assert.strictEqual(clampWidth('cwu', 6000), 2000);
     assert.strictEqual(clampWidth('usb', 10), 300);
     assert.strictEqual(clampWidth('usb', 'nonsense'), 2700);
 });
@@ -1457,19 +1562,19 @@ t('one can be removed, but never the last', () => {
 t('changing one leaves the others alone', () => {
     fresh({ mode: 'usb' });
     addVfo();
-    updateVfo(1, { mode: 'cw', pan: 'right', muted: true, gain: 2 });
+    updateVfo(1, { mode: 'cwu', pan: 'right', muted: true, gain: 2 });
     const [a, b] = demodSettings().vfos;
     assert.strictEqual(a.mode, 'usb');
     assert.strictEqual(a.pan, 'center');
     assert.strictEqual(a.muted, false);
-    assert.strictEqual(b.mode, 'cw');
+    assert.strictEqual(b.mode, 'cwu');
     assert.strictEqual(b.pan, 'right');
     assert.strictEqual(b.muted, true);
     assert.strictEqual(b.gain, 2);
     // ...including the per-mode widths, which are a nested merge.
-    updateVfo(1, { widths: { cw: 250 } });
+    updateVfo(1, { widths: { cwu: 250 } });
     assert.strictEqual(demodSettings().vfos[1].widths.usb, a.widths.usb);
-    assert.strictEqual(demodSettings().vfos[1].widths.cw, 250);
+    assert.strictEqual(demodSettings().vfos[1].widths.cwu, 250);
 });
 
 t('selecting picks a row without disturbing anything', () => {
@@ -1491,14 +1596,14 @@ t('settings written before there was more than one are read as the first', () =>
     delete store['ubersdr.v2.iqdemod'];
     resetDemodSettings();
     store['ubersdr.v2.iqdemod'] = JSON.stringify({
-        mode: 'cw', offsetHz: -1500, widths: { cw: 250, usb: 2400 }, pitchHz: 600,
+        mode: 'cwu', offsetHz: -1500, widths: { cwu: 250, usb: 2400 }, pitchHz: 600,
         agc: false, gain: 1.5,
     });
     const st = demodSettings();
     assert.strictEqual(st.vfos.length, 1);
-    assert.strictEqual(st.vfos[0].mode, 'cw');
+    assert.strictEqual(st.vfos[0].mode, 'cwu');
     assert.strictEqual(st.vfos[0].offsetHz, -1500);
-    assert.strictEqual(st.vfos[0].widths.cw, 250);
+    assert.strictEqual(st.vfos[0].widths.cwu, 250);
     assert.strictEqual(st.vfos[0].pitchHz, 600);
     assert.strictEqual(st.vfos[0].agc, false);
     // And the fields that did not exist then get their defaults rather than
@@ -1523,8 +1628,8 @@ t('a row always says what it is and how wide', () => {
     // is always there, so it is the part that has to stand on its own.
     fresh({ mode: 'usb', offsetHz: 1200, widths: { usb: 2700 } });
     assert.strictEqual(vfoSummary(vfo0()), 'USB 2.7k');
-    updateVfo(0, { mode: 'cw', offsetHz: -3400, widths: { cw: 500 } });
-    assert.strictEqual(vfoSummary(vfo0()), 'CW 500');
+    updateVfo(0, { mode: 'cwu', offsetHz: -3400, widths: { cwu: 500 } });
+    assert.strictEqual(vfoSummary(vfo0()), 'CW-U 500');
 });
 
 t('the header gives things up in keep order, and a shut row gives up more', () => {
@@ -1644,7 +1749,7 @@ t('whether a row is open survives being read back', () => {
     resetDemodSettings();
     store['ubersdr.v2.iqdemod'] = JSON.stringify({
         active: 1,
-        vfos: [{ mode: 'usb', open: false }, { mode: 'cw', open: true }],
+        vfos: [{ mode: 'usb', open: false }, { mode: 'cwu', open: true }],
     });
     const back = demodSettings();
     assert.strictEqual(back.vfos.length, 2);
@@ -1870,7 +1975,7 @@ t('it renders every demodulator', () => {
     }
     // CW is the one with a control of its own, so it is the one that can render
     // differently from the rest without anything above noticing.
-    fresh({ mode: 'cw' });
+    fresh({ mode: 'cwu' });
     reset();
     const { tree, cleanups } = render(IQPanel, {}, context());
     assert.ok(deepWords(tree).includes('CW pitch'), 'CW should offer a pitch control');
@@ -2129,7 +2234,7 @@ t('deleting from a row removes that row, open or not', () => {
     // are there.
     fresh({ mode: 'usb' });
     addVfo();
-    updateVfo(1, { mode: 'cw' });
+    updateVfo(1, { mode: 'cwu' });
     addVfo();
     updateVfo(2, { mode: 'am' });
     selectVfo(2);
@@ -2142,7 +2247,7 @@ t('deleting from a row removes that row, open or not', () => {
     dels[0].props.onClick();
     const st = demodSettings();
     assert.strictEqual(st.vfos.length, 2);
-    assert.deepStrictEqual(st.vfos.map((v) => v.mode), ['cw', 'am'], 'it removed the wrong one');
+    assert.deepStrictEqual(st.vfos.map((v) => v.mode), ['cwu', 'am'], 'it removed the wrong one');
     for (const off of cleanups) off();
 });
 
@@ -2286,13 +2391,13 @@ t('a panel that mounts minimal leaves the rows as they were', () => {
 });
 
 t('collapsing the rows leaves everything else alone', () => {
-    fresh({ mode: 'cw', squelchDb: -30 });
+    fresh({ mode: 'cwu', squelchDb: -30 });
     addVfo();
     selectVfo(1);
     const after = collapseVfos();
     assert.ok(after.vfos.every((v) => v.open === false), 'a row was left open');
     assert.strictEqual(after.active, 1, 'collapsing changed which row is selected');
-    assert.strictEqual(after.vfos[0].mode, 'cw');
+    assert.strictEqual(after.vfos[0].mode, 'cwu');
     assert.strictEqual(after.vfos[0].squelchDb, -30);
     // Idempotent, so a second minimal press is not a second write.
     assert.strictEqual(collapseVfos(), after);

@@ -93,13 +93,8 @@ func TestP1FrequencyRegister(t *testing.T) {
 	if h.freqHz != 0x008F0D18 {
 		t.Fatalf("frequency %d, want %d", h.freqHz, 0x008F0D18)
 	}
-	// The unshifted address is not the frequency.
-	h.freqHz = -1
-	p.HandleDatagram(nil, ep2([5]byte{0x02, 0x00, 0x8F, 0x0D, 0x18}), testFrom)
-	if h.freqHz != -1 {
-		t.Fatalf("a bank at C0 0x02 was read as the RX1 frequency")
-	}
 	// Zero is not a tune.
+	h.freqHz = -1
 	p.HandleDatagram(nil, ep2([5]byte{0x04, 0, 0, 0, 0}), testFrom)
 	if h.freqHz != -1 {
 		t.Fatalf("a zero frequency was passed down")
@@ -390,5 +385,89 @@ func TestP1StartReappliesFrequency(t *testing.T) {
 	p.HandleDatagram(nil, run, testFrom)
 	if h.freqHz != 0x008F0D18 {
 		t.Fatalf("start did not re-apply the frequency: %d", h.freqHz)
+	}
+}
+
+// With duplex clear RX1 follows the TX frequency (C0 0x02), as on the
+// hardware, for a client that tunes this way and never writes RX1.
+func TestP1DuplexSelectsFrequency(t *testing.T) {
+	h := newStub()
+	p := newP1(h)
+	p.HandleDatagram(nil, ep2([5]byte{0x00, 0x02, 0, 0, 0}), testFrom)
+	p.HandleDatagram(nil, ep2([5]byte{0x02, 0x00, 0x6B, 0x6C, 0x20}), testFrom)
+	if h.freqHz != 7040032 {
+		t.Fatalf("duplex off: TX frequency not followed: %d", h.freqHz)
+	}
+	// RX1 is not the one that drives the receiver while duplex is off.
+	h.freqHz = -1
+	p.HandleDatagram(nil, ep2([5]byte{0x04, 0x00, 0xD6, 0xD8, 0x00}), testFrom)
+	if h.freqHz != -1 {
+		t.Fatalf("duplex off: RX1 register retuned: %d", h.freqHz)
+	}
+	// Duplex on hands RX1 to its own register at once.
+	p.HandleDatagram(nil, ep2([5]byte{0x00, 0x02, 0, 0, p1C4Duplex}), testFrom)
+	if h.freqHz != 0x00D6D800 {
+		t.Fatalf("duplex on: RX1 register not used: %d", h.freqHz)
+	}
+	h.freqHz = -1
+	p.HandleDatagram(nil, ep2([5]byte{0x02, 0x00, 0x11, 0x22, 0x33}), testFrom)
+	if h.freqHz != -1 {
+		t.Fatalf("duplex on: TX frequency retuned RX1: %d", h.freqHz)
+	}
+}
+
+// A watchdog-off client's start order: run first, then rate, then the TX frequency, and no
+// EP2 after that until the user touches something. The start byte disables
+// the watchdog, so silence must not stop it; a later plain start restores it.
+func TestP1WatchdogDisabled(t *testing.T) {
+	h := newStub()
+	p := newP1(h)
+	now := time.Unix(1000, 0)
+	p.now = func() time.Time { return now }
+	run := make([]byte, 64)
+	run[0], run[1], run[2], run[3] = 0xEF, 0xFE, 0x04, 0x81
+	p.HandleDatagram(nil, run, testFrom)
+	p.HandleDatagram(nil, ep2([5]byte{0x00, 0x02, 0, 0, 0}), testFrom)
+	p.HandleDatagram(nil, ep2([5]byte{0x02, 0x00, 0x6B, 0x6C, 0x20}), testFrom)
+	if h.freqHz != 7040032 || h.enabled != 1 {
+		t.Fatalf("watchdog-off start: freq %d enabled %d", h.freqHz, h.enabled)
+	}
+	now = now.Add(10 * P1Watchdog)
+	p.CheckWatchdog()
+	if !p.Active() {
+		t.Fatal("stopped a client that disabled the watchdog")
+	}
+	stop := append([]byte(nil), run...)
+	stop[3] = 0
+	p.HandleDatagram(nil, stop, testFrom)
+	run[3] = 0x01
+	p.HandleDatagram(nil, run, testFrom)
+	now = now.Add(P1Watchdog)
+	p.CheckWatchdog()
+	if p.Active() {
+		t.Fatal("the watchdog stayed off after a restart that did not disable it")
+	}
+}
+
+// A client that starts with the watchdog off is taken to show samples
+// uncalibrated, so its EP6 carries them 40 dB up. Any other start does not.
+func TestP1RawGain(t *testing.T) {
+	first := func(startByte byte) int32 {
+		p := newP1(newStub())
+		run := make([]byte, 64)
+		run[0], run[1], run[2], run[3] = 0xEF, 0xFE, 0x04, startByte
+		p.HandleDatagram(&sink{}, run, testFrom)
+		iq := make([]float32, 2*P1SamplesPerPacket)
+		iq[0], iq[1] = 1000, -500
+		pkt, _, _ := p.BuildEP6(iq)
+		// Q then I, as PutIQ24 lays them: im first.
+		v := int32(pkt[16])<<16 | int32(pkt[17])<<8 | int32(pkt[18])
+		return v << 8 >> 8
+	}
+	if got := first(0x01); got != -500 {
+		t.Fatalf("plain start: %d, want -500", got)
+	}
+	if got := first(0x81); got != -500*P1RawGain {
+		t.Fatalf("watchdog-off start: %d, want %d", got, -500*P1RawGain)
 	}
 }

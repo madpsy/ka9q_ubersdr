@@ -51,7 +51,17 @@ const (
 	p1C0AddrMask = 0xFE
 	p1C0MOX      = 0x01
 	p1C0Config   = 0x00
+	p1C0TXFreq   = 0x02
 	p1C0RX1Freq  = 0x04
+
+	// C4 bit 2 of the config register. Clear, and RX1 follows the TX
+	// frequency, as on the hardware; a client may tune that way and never
+	// write the RX1 register at all.
+	p1C4Duplex = 0x04
+
+	// Bit 7 of the start byte turns the radio's own watchdog off.
+	p1StartIQ   = 0x01
+	p1StartNoWD = 0x80
 
 	p1NumRx            = 1
 	p1RoundBytes       = 6*p1NumRx + 2
@@ -60,8 +70,19 @@ const (
 
 	// P1Watchdog is how long a streaming client may go silent before the
 	// stream stops. A real radio has one; without it a client that dies
-	// holds a receiver open against the UberSDR server forever.
+	// holds a receiver open against the UberSDR server forever. A client
+	// that starts with the watchdog off is exempt, as on the hardware: such
+	// a client may send EP2 only when something changes.
 	P1Watchdog = 3 * time.Second
+
+	// P1RawGain lifts the samples by 40 dB for a client that starts with the
+	// watchdog off, taken as the mark of a client that shows samples
+	// uncalibrated. The display gain is set by ear against clients that
+	// calibrate their meters, and puts a real band's peaks near -76 dBFS; a
+	// client showing dBFS as it is, with a 65536-bin FFT, measured the 20 m
+	// noise floor at -162 dB. Even a full-scale int16 at 48 kHz stays near
+	// -20 dBFS after this.
+	P1RawGain = 100
 )
 
 // p1Host is the receiver plumbing protocol 1 drives. An interface so the
@@ -95,12 +116,18 @@ type P1 struct {
 	txSeq   uint32
 	raddr   byte
 	lastRx  time.Time
+	noWD    bool
+	gain    float32
 
 	// What the client last asked for, so a repeat is not a change. EP2 packets
 	// arrive continuously; acting on every one would reconnect hundreds of
 	// times a second.
 	rateHz int
-	freqHz int64
+	freqHz int64 // what RX1 was last tuned to
+
+	// The registers RX1's frequency comes from; which one is the duplex bit.
+	rx1Hz, txHz int64
+	duplex      bool
 
 	warnedMOX   bool
 	warnedRx    int
@@ -148,11 +175,11 @@ func (p *P1) HandleDatagram(conn packetWriter, b []byte, from net.Addr) bool {
 			_, _ = conn.WriteTo(p.discoveryReply(), from)
 		}
 	case 0x04:
-		// Bit 0 streams EP6. The other bits select the bandscope and disable
-		// the radio's own watchdog, neither of which applies here.
+		// Bit 0 streams EP6 and bit 7 disables the watchdog. Bit 1, the
+		// bandscope, does not apply here.
 		if len(b) >= 4 {
-			if b[3]&0x01 != 0 {
-				p.start(conn, from)
+			if b[3]&p1StartIQ != 0 {
+				p.start(conn, from, b[3]&p1StartNoWD != 0)
 			} else {
 				p.stop()
 			}
@@ -260,17 +287,42 @@ func (p *P1) applyCC(cc []byte) {
 		if say {
 			p.host.logf("P1: client asked for %d receivers; this bridge offers %d", want, p1NumRx)
 		}
-	case p1C0RX1Freq:
-		hz := int64(binary.BigEndian.Uint32(cc[1:5]))
 		p.mu.Lock()
-		changed := hz != 0 && hz != p.freqHz
-		if changed {
-			p.freqHz = hz
+		p.duplex = cc[4]&p1C4Duplex != 0
+		p.mu.Unlock()
+		p.retune()
+	case p1C0RX1Freq, p1C0TXFreq:
+		hz := int64(binary.BigEndian.Uint32(cc[1:5]))
+		if hz == 0 {
+			return
+		}
+		p.mu.Lock()
+		if c0&p1C0AddrMask == p1C0RX1Freq {
+			p.rx1Hz = hz
+		} else {
+			p.txHz = hz
 		}
 		p.mu.Unlock()
-		if changed {
-			p.host.p1SetFreq(0, hz)
-		}
+		p.retune()
+	}
+}
+
+// retune tunes RX1 from whichever register now drives it. With duplex clear
+// that is the TX frequency, as on the hardware -- but only once one has been
+// sent, so a client that writes RX1 and never TX is not left at 0 Hz.
+func (p *P1) retune() {
+	p.mu.Lock()
+	hz := p.rx1Hz
+	if !p.duplex && p.txHz != 0 {
+		hz = p.txHz
+	}
+	changed := hz != 0 && hz != p.freqHz
+	if changed {
+		p.freqHz = hz
+	}
+	p.mu.Unlock()
+	if changed {
+		p.host.p1SetFreq(0, hz)
 	}
 }
 
@@ -280,7 +332,7 @@ func (p *P1) applyCC(cc []byte) {
 // receivers, and starting would reconfigure that session out from under it
 // while its samples went here instead. That is the answer a real radio gives,
 // and its discovery reply already said busy.
-func (p *P1) start(conn packetWriter, from net.Addr) {
+func (p *P1) start(conn packetWriter, from net.Addr, noWD bool) {
 	if !p.Active() && p.host.p1P2Busy() {
 		p.mu.Lock()
 		say := !p.saidRefused
@@ -299,6 +351,12 @@ func (p *P1) start(conn packetWriter, from net.Addr) {
 	p.txSeq = 0
 	p.raddr = 0
 	p.lastRx = p.now()
+	saidWD := noWD && !p.noWD
+	p.noWD = noWD
+	p.gain = 1
+	if noWD {
+		p.gain = P1RawGain
+	}
 	if !was && p.rateHz == 0 {
 		// 192 kHz if the client has not said yet, which is what the bridge
 		// starts at.
@@ -318,12 +376,16 @@ func (p *P1) start(conn packetWriter, from net.Addr) {
 		}
 		p.host.p1Enable(0, true)
 	}
+	if saidWD {
+		p.host.logf("P1: client disabled the watchdog; streaming until it stops, samples +40 dB")
+	}
 }
 
 func (p *P1) stop() {
 	p.mu.Lock()
 	was := p.running
 	p.running = false
+	p.noWD = false
 	p.mu.Unlock()
 	if was {
 		p.host.logf("P1: client stopped the stream")
@@ -335,7 +397,7 @@ func (p *P1) stop() {
 // CheckWatchdog stops the stream when the client has gone quiet.
 func (p *P1) CheckWatchdog() {
 	p.mu.Lock()
-	expired := p.running && p.now().Sub(p.lastRx) >= P1Watchdog
+	expired := p.running && !p.noWD && p.now().Sub(p.lastRx) >= P1Watchdog
 	p.mu.Unlock()
 	if expired {
 		p.host.logf("P1: no packets from the client for %s, stopping", P1Watchdog)
@@ -382,7 +444,7 @@ func (p *P1) BuildEP6(iq []float32) ([]byte, packetWriter, net.Addr) {
 		p.fillStatus(frame[3:8])
 		round := frame[8:]
 		for r := 0; r < p1RoundsPerFrame; r++ {
-			PutIQ24(round, iq[2*s], iq[2*s+1])
+			PutIQ24(round, iq[2*s]*p.gain, iq[2*s+1]*p.gain)
 			// round[6:8], the mic word, stays zero.
 			round = round[p1RoundBytes:]
 			s++

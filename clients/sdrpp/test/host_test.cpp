@@ -11,6 +11,7 @@
 //
 // The root dir gets an ubersdr_source_config.json pointing at the receiver.
 #include <core.h>
+#include <gui/gui.h>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <module.h>
@@ -193,12 +194,28 @@ int main(int argc, char** argv) {
     }
     bool infoShown = shown.find(" access") != std::string::npos && shown.find("Session time") != std::string::npos;
     printf("receiver info %s\n", infoShown ? "shown" : "MISSING");
+
+    // The receiver's range reaches SDR++'s frequency display, and tuning past
+    // it says so until the next tune back inside.
+    bool limitsSet = gui::freqSelect.limitFreq && gui::freqSelect.minFreq > 0 && gui::freqSelect.maxFreq > gui::freqSelect.minFreq;
+    printf("frequency limits: %s %llu - %llu Hz\n", limitsSet ? "set" : "MISSING",
+           (unsigned long long)gui::freqSelect.minFreq, (unsigned long long)gui::freqSelect.maxFreq);
+    auto tuneAndLook = [](double f) {
+        sigpath::sourceManager.tune(f);
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        drawMenuFrame();
+        return menuText().find("Outside this receiver's range") != std::string::npos;
+    };
+    bool outNoted = tuneAndLook(gui::freqSelect.maxFreq + 20e6);
+    bool backCleared = !tuneAndLook(14074000);
+    printf("out of range: %s, back in range: %s\n", outNoted ? "noted" : "NOT NOTED", backCleared ? "cleared" : "STILL SHOWN");
+    bool rangeOk = limitsSet && outNoted && backCleared;
     sigpath::sourceManager.stop();
     drawMenuFrame();
     sigpath::iqFrontEnd.stop();
 
     printf("fft frames: %d in %ds, peak %.1f dB\n", frames, seconds, peak);
-    bool ok = frames >= seconds * 10 && peak > -200 && clickOk && infoShown;
+    bool ok = frames >= seconds * 10 && peak > -200 && clickOk && infoShown && rangeOk;
     printf("%s\n", ok ? "PASS" : "FAIL");
     fflush(stdout);
 

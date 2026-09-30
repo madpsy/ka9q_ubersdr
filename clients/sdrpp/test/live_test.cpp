@@ -91,8 +91,6 @@ int main(int argc, char** argv) {
     p.sessionId = newSessionId();
     p.mode = mode;
     p.frequency = getenv("LIVE_FREQ") ? atof(getenv("LIVE_FREQ")) : 7074000;
-    p.minFreq = info.minFreq;
-    p.maxFreq = info.maxFreq;
     p.minMarginDB = margin;
     session.start(p);
 

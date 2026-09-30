@@ -172,6 +172,20 @@ private:
         if (selected && !running) { core::setInputSampleRate(sampleRate()); }
     }
 
+    // SDR++ has no way for a source to say what it covers. The frequency
+    // display's own limits are the one hook both cores share: a typed or
+    // scrolled frequency stops at the receiver's edges. Dragging the
+    // waterfall ignores them; the session holds the centre at the edge and
+    // the menu says so.
+    void applyFreqLimits() {
+        if (!selected) { return; }
+        gui::freqSelect.limitFreq = haveInfo;
+        if (haveInfo) {
+            gui::freqSelect.minFreq = (uint64_t)info.minFreq;
+            gui::freqSelect.maxFreq = (uint64_t)info.maxFreq;
+        }
+    }
+
     void saveServerPrefs() {
         if (prefsKey.empty()) { return; }
         config.acquire();
@@ -386,12 +400,14 @@ private:
         UberSDRSourceModule* _this = (UberSDRSourceModule*)ctx;
         _this->selected = true;
         core::setInputSampleRate(_this->sampleRate());
+        _this->applyFreqLimits();
         flog::info("UberSDRSourceModule '{0}': Menu Select!", _this->name);
     }
 
     static void menuDeselected(void* ctx) {
         UberSDRSourceModule* _this = (UberSDRSourceModule*)ctx;
         _this->selected = false;
+        gui::freqSelect.limitFreq = false;
         flog::info("UberSDRSourceModule '{0}': Menu Deselect!", _this->name);
     }
 
@@ -410,8 +426,6 @@ private:
         p.sessionId = newSessionId();
         p.mode = _this->mode;
         p.frequency = _this->freq;
-        p.minFreq = _this->haveInfo ? _this->info.minFreq : 0;
-        p.maxFreq = _this->haveInfo ? _this->info.maxFreq : 1e12;
         p.minMarginDB = _this->marginDB;
         p.verify = _this->verifyTLS;
         _this->session.start(p);
@@ -589,6 +603,8 @@ private:
         }
 
         drawStatus();
+        // Whatever above changed what we know of the receiver.
+        applyFreqLimits();
     }
 
     void drawStatus() {

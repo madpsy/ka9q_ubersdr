@@ -35,7 +35,6 @@ namespace ubersdr {
             std::string sessionId;
             std::string mode;       // iq, iq48 ... iq384
             double frequency = 0;
-            double minFreq = 0, maxFreq = 0;
             int minMarginDB = 0;    // 0 = lossless
             bool verify = true;
         };

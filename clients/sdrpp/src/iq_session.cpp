@@ -20,6 +20,16 @@ namespace ubersdr {
         const auto kTuneInterval = std::chrono::milliseconds(50);
         // Matches the other clients: keeps the session from idling out.
         const auto kPingInterval = std::chrono::seconds(30);
+
+        // What the menu says while SDR++ is tuned past what the receiver covers;
+        // empty when it is not.
+        std::string rangeNote(double f, double lo, double hi) {
+            if (f >= lo && f <= hi) { return ""; }
+            char buf[160];
+            snprintf(buf, sizeof(buf), "Outside this receiver's range (%.0f kHz - %.3f MHz); streaming from the %s edge",
+                     lo / 1e3, hi / 1e6, f < lo ? "lower" : "upper");
+            return buf;
+        }
     }
 
     IQSession::IQSession(dsp::stream<dsp::complex_t>* out) : out(out) {}
@@ -97,7 +107,10 @@ namespace ubersdr {
             }
             if (stopping) { return; }
 
-            double f = std::clamp(p.frequency, p.minFreq, p.maxFreq);
+            // The receiver refuses a centre it does not cover, so the centre
+            // is held at the nearest edge and the menu says so.
+            const double minFreq = info.minFreq, maxFreq = info.maxFreq;
+            double f = std::clamp(p.frequency, minFreq, maxFreq);
             std::string q = "/ws?frequency=" + std::to_string((long long)std::llround(f));
             q += "&mode=" + p.mode;
             // "pcm-zstd" is still the server's name for the lossless format; from
@@ -119,11 +132,12 @@ namespace ubersdr {
                 std::lock_guard<std::mutex> lck(statusMtx);
                 streamStart = std::chrono::steady_clock::now();
             }
-            setState(State::Streaming);
+            setState(State::Streaming, rangeNote(p.frequency, minFreq, maxFreq));
             flog::info("UberSDR: streaming {0} from {1}", p.mode, p.url.str());
 
             PCMv4StreamDecoder decoder;
             double sentFreq = f;
+            double askedFreq = p.frequency;
             int sentMargin = p.minMarginDB;
             auto lastTune = std::chrono::steady_clock::now() - kTuneInterval;
             auto lastPing = std::chrono::steady_clock::now();
@@ -134,7 +148,16 @@ namespace ubersdr {
             while (!stopping) {
                 auto now = std::chrono::steady_clock::now();
 
-                double want = std::clamp((double)pendingFreq, p.minFreq, p.maxFreq);
+                double asked = pendingFreq;
+                if (asked != askedFreq) {
+                    // A new frequency replaces whatever the menu was saying:
+                    // a range note, or a server error about the last tune.
+                    askedFreq = asked;
+                    serverError.clear();
+                    std::lock_guard<std::mutex> lck(statusMtx);
+                    st.message = rangeNote(asked, minFreq, maxFreq);
+                }
+                double want = std::clamp(asked, minFreq, maxFreq);
                 if (want != sentFreq && now - lastTune >= kTuneInterval) {
                     // The mode goes with every tune: the server treats a tune
                     // without one as a request to keep the current mode, but

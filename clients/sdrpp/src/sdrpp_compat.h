@@ -20,6 +20,7 @@
 // core.h, dsp/stream.h, smgui.h, imgui.h 1.87) is identical in both.
 #include <dsp/stream.h>
 #include <dsp/types.h>
+#include <gui/widgets/frequency_select.h>
 #include <module.h>
 #include <signal_path/source.h>
 
@@ -28,6 +29,12 @@ namespace sigpath {
     // drags in the whole IQ front end and its FFTW/VOLK headers for the sake of
     // this one object.
     SDRPP_EXPORT SourceManager sourceManager;
+}
+
+namespace gui {
+    // Likewise from gui/gui.h, which pulls in the waterfall and VOLK. The
+    // public fields up to maxFreq are laid out alike in both cores.
+    SDRPP_EXPORT FrequencySelect freqSelect;
 }
 
 namespace sdrpp_compat {

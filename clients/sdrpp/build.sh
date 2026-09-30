@@ -272,7 +272,7 @@ test_linux() {
     rc=0
     HOST_TEST_CLICK=1 LD_LIBRARY_PATH="$lib" timeout 120 "$tb/host_test" "$OUT/linux-x86_64/ubersdr_source.so" "$root" \
         "$TEST_SERVER" "$TEST_MODE" 5 > "$root/log.txt" 2>&1 || rc=$?
-    grep -E "registering|click sweep|receiver info|Assert|fft frames|PASS|FAIL|teardown" "$root/log.txt" | sed 's/^/    /'
+    grep -E "registering|click sweep|receiver info|frequency limits|out of range|Assert|fft frames|PASS|FAIL|teardown" "$root/log.txt" | sed 's/^/    /'
     [ "$rc" = 0 ] || fail "linux $f host test (exit $rc)"
     rm -rf "$root"
   done
@@ -304,7 +304,7 @@ test_windows() {
     rc=0
     ( cd "$run" && HOST_TEST_CLICK=1 timeout 180 wine host_test.exe "Z:$(echo "$run/ubersdr_source.dll" | tr / '\\')" \
         "Z:$(echo "$run/root" | tr / '\\')" "$TEST_SERVER" "$TEST_MODE" 5 > log.txt 2>&1 ) || rc=$?
-    grep -E "registering|click sweep|receiver info|Assert|fft frames|PASS|FAIL|teardown" "$run/log.txt" | sed 's/^/    /'
+    grep -E "registering|click sweep|receiver info|frequency limits|out of range|Assert|fft frames|PASS|FAIL|teardown" "$run/log.txt" | sed 's/^/    /'
     [ "$rc" = 0 ] || fail "windows $f host test (exit $rc)"
   done
 }
@@ -333,7 +333,7 @@ test_mac() {
         && rm -rf q && mkdir -p q/root && cp build/ubersdr_source.dylib q/ \
         && xattr -w com.apple.quarantine '0083;00000000;Safari;' q/ubersdr_source.dylib \
         && HOST_TEST_CLICK=1 DYLD_LIBRARY_PATH=\$F ./build-test-$f/host_test \$PWD/q/ubersdr_source.dylib \$PWD/q/root '$TEST_SERVER' '$TEST_MODE' 5 2>&1 \
-           | grep -E 'registering|click sweep|receiver info|Assert|fft frames|PASS|FAIL|teardown|rror'" \
+           | grep -E 'registering|click sweep|receiver info|frequency limits|out of range|Assert|fft frames|PASS|FAIL|teardown|rror'" \
       || fail "macos $f host test"
   done
 }

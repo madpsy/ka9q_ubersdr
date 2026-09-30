@@ -12,6 +12,7 @@
 // The root dir gets an ubersdr_source_config.json pointing at the receiver.
 #include <core.h>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <module.h>
 #include <signal_path/signal_path.h>
 #include <utils/flog.h>
@@ -40,6 +41,9 @@ static void releaseFFT(void*) {
 }
 
 // The menu is drawn in a fixed window so that simulated clicks land on it.
+// Draw one frame and return the text the menu rendered, via ImGui's logger.
+static std::string menuText();
+
 static void drawMenuFrame(float mx = -1, float my = -1, bool down = false) {
     ImGuiIO& io = ImGui::GetIO();
     io.DeltaTime = 1.0f / 60.0f;
@@ -52,6 +56,29 @@ static void drawMenuFrame(float mx = -1, float my = -1, bool down = false) {
     sigpath::sourceManager.showSelectedMenu();
     ImGui::End();
     ImGui::Render();
+}
+
+static std::string menuText() {
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.MousePos = ImVec2(-1, -1);
+    io.MouseDown[0] = false;
+    ImGui::NewFrame();
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(400, 700));
+    ImGui::Begin("source");
+    ImGui::LogToBuffer();
+    sigpath::sourceManager.showSelectedMenu();
+    // Through GetCurrentContext() and the buffer's raw storage: GImGui and
+    // ImGuiTextBuffer's empty string are variables in the core, which a
+    // Windows build cannot reach without an import declaration.
+    ImGuiContext* g = ImGui::GetCurrentContext();
+    std::string text = g->LogBuffer.Buf.Size > 0 ? std::string(g->LogBuffer.Buf.Data, g->LogBuffer.Buf.Size - 1) : "";
+    g->LogBuffer.Buf.clear(); // LogFinish would copy it to the clipboard
+    ImGui::LogFinish();
+    ImGui::End();
+    ImGui::Render();
+    return text;
 }
 
 int main(int argc, char** argv) {
@@ -149,12 +176,29 @@ int main(int argc, char** argv) {
     }
     int frames = fftFrames;
     float peak = fftPeak;
+
+    // What the menu shows while streaming. Started with Play alone (no
+    // Connect unless the click sweep ran), it must still name the receiver.
+    std::string shown = menuText();
+    printf("menu while streaming:\n");
+    {
+        size_t a = 0;
+        while (a < shown.size()) {
+            size_t b = shown.find('\n', a);
+            if (b == std::string::npos) { b = shown.size(); }
+            std::string line = shown.substr(a, b - a);
+            if (line.find_first_not_of(" ") != std::string::npos) { printf("    | %s\n", line.c_str()); }
+            a = b + 1;
+        }
+    }
+    bool infoShown = shown.find(" access") != std::string::npos && shown.find("Session time") != std::string::npos;
+    printf("receiver info %s\n", infoShown ? "shown" : "MISSING");
     sigpath::sourceManager.stop();
     drawMenuFrame();
     sigpath::iqFrontEnd.stop();
 
     printf("fft frames: %d in %ds, peak %.1f dB\n", frames, seconds, peak);
-    bool ok = frames >= seconds * 10 && peak > -200 && clickOk;
+    bool ok = frames >= seconds * 10 && peak > -200 && clickOk && infoShown;
     printf("%s\n", ok ? "PASS" : "FAIL");
     fflush(stdout);
 

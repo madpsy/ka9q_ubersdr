@@ -424,6 +424,9 @@ private:
         if (!_this->running) { return; }
         _this->session.stop();
         _this->running = false;
+        // The rate may have changed while streaming (a refused rate replaced
+        // by one the receiver allows); SDR++ follows it now it can.
+        _this->applySampleRate();
         flog::info("UberSDRSourceModule '{0}': Stop!", _this->name);
     }
 
@@ -438,8 +441,25 @@ private:
         _this->drawMenu();
     }
 
+    // Every start runs /connection itself. When the menu has not heard from
+    // this receiver (Play without Connect), or what it heard is out of date
+    // (the grant changed, or the rate was refused), it takes the session's
+    // answer: the receiver's details, and the rates it actually allows.
+    void adoptSessionInfo() {
+        IQSession::Status s = session.status();
+        if (!s.haveLimits || s.serverKey != prefsKey) { return; }
+        if (haveInfo && info.allowedModes == s.server.allowedModes) { return; }
+        info = s.server;
+        haveInfo = true;
+        probeError.clear();
+        std::string before = mode;
+        rebuildModeList();
+        if (mode != before) { saveServerPrefs(); }
+    }
+
     void drawMenu() {
         collectProbe();
+        adoptSessionInfo();
         if (listsChanged.exchange(false) || firstDraw) { rebuildLists(); }
         if (firstDraw) {
             firstDraw = false;

@@ -81,17 +81,21 @@ namespace ubersdr {
             // then requires, and confirms the mode is still ours to use: the
             // grant is per IP and password and can change between connects.
             ServerInfo info = probeServer(p.url, p.password, p.sessionId, p.verify);
-            if (std::find(info.allowedModes.begin(), info.allowedModes.end(), p.mode) == info.allowedModes.end()) {
-                throw std::runtime_error(std::string(findIQMode(p.mode) ? findIQMode(p.mode)->label : p.mode.c_str()) +
-                                         " is not available to this client on this receiver");
-            }
-            if (stopping) { return; }
+            // Recorded before the mode is checked: when this session is refused
+            // its rate, what the receiver does allow is what the menu needs.
             {
                 std::lock_guard<std::mutex> lck(statusMtx);
                 st.haveLimits = true;
                 st.maxSessionTime = info.maxSessionTime;
                 st.dailyRemaining = info.dailyRemaining;
+                st.server = info;
+                st.serverKey = p.url.str();
             }
+            if (std::find(info.allowedModes.begin(), info.allowedModes.end(), p.mode) == info.allowedModes.end()) {
+                throw std::runtime_error(std::string(findIQMode(p.mode) ? findIQMode(p.mode)->label : p.mode.c_str()) +
+                                         " is not available to this client on this receiver");
+            }
+            if (stopping) { return; }
 
             double f = std::clamp(p.frequency, p.minFreq, p.maxFreq);
             std::string q = "/ws?frequency=" + std::to_string((long long)std::llround(f));

@@ -6,6 +6,7 @@
 // SDR++ stream, and sends tune, margin and keepalive messages between reads.
 // Nothing else touches the socket, so the TLS state never sees two threads.
 #include "http.h"
+#include "server_api.h"
 
 #include <dsp/stream.h>
 #include <dsp/types.h>
@@ -53,6 +54,11 @@ namespace ubersdr {
             int maxSessionTime = 0;       // seconds, 0 = unlimited
             long long dailyRemaining = -1; // seconds at connect, -1 = unlimited
             double streamingSecs = 0;
+
+            // Everything that /connection told this session, for a menu that
+            // was started with Play alone and never ran Connect.
+            ServerInfo server;
+            std::string serverKey; // Url::str() of the receiver it came from
         };
 
         explicit IQSession(dsp::stream<dsp::complex_t>* out);

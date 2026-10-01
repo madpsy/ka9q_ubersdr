@@ -23975,7 +23975,7 @@ const tooltipLine2 = timeStr;
                         { label: 'Round-Trip Time', value: ntpData.rtt_ms !== undefined ? ntpData.rtt_ms.toFixed(2) + ' ms' : 'N/A', icon: '🔄' },
                         { label: 'Stratum', value: ntpData.stratum !== undefined ? ntpData.stratum : 'N/A', icon: '📶' },
                         { label: 'Tolerance', value: toleranceMs + ' ms', icon: '🎯' },
-                        { label: 'NTP Server', value: ntpData.ntp_server || 'N/A', icon: '🌐' },
+                        { label: 'NTP Comparison Server', value: ntpData.ntp_server || 'N/A', icon: '🌐' },
                         { label: 'Last Poll', value: new Date(ntpData.last_poll).toLocaleTimeString(), icon: '🕐' },
                     ].map(s => `
                         <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; text-align: center;">
@@ -24894,7 +24894,7 @@ const tooltipLine2 = timeStr;
                     { label: 'Round-Trip Time', value: (data.rtt_ms !== undefined ? data.rtt_ms.toFixed(2) + ' ms' : 'N/A'), icon: '🔄' },
                     { label: 'Stratum', value: (data.stratum !== undefined ? data.stratum : 'N/A'), icon: '📶' },
                     { label: 'Tolerance', value: (data.tolerance_ms !== undefined ? data.tolerance_ms + ' ms' : 'N/A'), icon: '🎯' },
-                    { label: 'NTP Server', value: data.ntp_server || 'N/A', icon: '🌐' },
+                    { label: 'NTP Comparison Server', value: data.ntp_server || 'N/A', icon: '🌐' },
                     { label: 'Last Poll', value: data.last_poll ? new Date(data.last_poll).toLocaleTimeString() : 'Never', icon: '🕐' },
                 ];
 

@@ -1,4 +1,4 @@
-// Demodulating the quadrature stream here, in the browser — up to four at once.
+// Demodulating the quadrature stream here, in the browser — up to six at once.
 //
 // Every other way of listening on this receiver asks the server for a
 // demodulated channel at the dial: one mode, one passband, one frequency. In
@@ -9,10 +9,10 @@
 //   * You can listen somewhere other than the dial. The offset picks any point
 //     in the twelve kilohertz, at a bandwidth of your own, without retuning and
 //     without the receiver knowing.
-//   * You can do it more than once. The same samples feed up to four
+//   * You can do it more than once. The same samples feed up to six
 //     demodulators at the same time, each with its own mode, filter, ear and
 //     level — so both sides of a split, or a net and the DX it is working, or
-//     four CW signals across a contest pile-up, are one stream and one screen.
+//     six CW signals across a contest pile-up, are one stream and one screen.
 //
 // ── The layout, and why it is this one ───────────────────────────────────────
 //
@@ -109,7 +109,7 @@ const HEAD_H = 26;
 
 // Height of the spectrum, in CSS pixels. Tall enough for the thirty decibels
 // between a signal and the noise it is sitting in to be worth looking at, short
-// enough to leave room under it for four rows in a dock column.
+// enough to leave room under it for several rows in a dock column.
 const SCOPE_H = 96;
 
 // What the two optional parts of a row header cost, before they have been on
@@ -599,7 +599,7 @@ function useIQFrames(player, live, iq, maxFps) {
  * This is the panel's reason for being a panel rather than a list of sliders:
  * a demodulator's offset is a place in a piece of spectrum, and a place in a
  * piece of spectrum is something you point at. Every demodulator's passband is
- * drawn here in its own colour, so the picture is the one view that shows all
+ * drawn here in its own colour, so the picture is the one view that shows
  * all of them at once, and the rows below are its legend.
  *
  * Pressing has two meanings and the markers tell them apart: a press within a
@@ -1131,19 +1131,6 @@ function EcssControls({ vfo, ecss, dialHz, minimal, set }) {
 }
 
 /**
- * One demodulator: its row, and its controls when it is open.
- *
- * The head is a glance and two controls; the body is everything else. Pan and
- * mute live in the head rather than the body deliberately — see the note at the
- * top of this file.
- *
- * `active` and `open` are two different things and the row shows both. Active is
- * which demodulator the picture is aimed at — the one a press on the canvas
- * moves, and the one drawn brightest. Open is whether this row's controls are
- * showing, which is per row and independent: pressing the header of the active
- * row closes it without giving up the aim.
- */
-/**
  * Where one demodulator is heard: the receiver's own output, or a device of its
  * own. Pan still applies on its own device — two demodulators can share a pair
  * of headphones, one in each ear, while a third plays on the speakers.
@@ -1194,6 +1181,19 @@ function VfoOutput({ vfo, set, error }) {
     );
 }
 
+/**
+ * One demodulator: its row, and its controls when it is open.
+ *
+ * The head is a glance and two controls; the body is everything else. Pan and
+ * mute live in the head rather than the body deliberately — see the note at the
+ * top of this file.
+ *
+ * `active` and `open` are two different things and the row shows both. Active is
+ * which demodulator the picture is aimed at — the one a press on the canvas
+ * moves, and the one drawn brightest. Open is whether this row's controls are
+ * showing, which is per row and independent: pressing the header of the active
+ * row closes it without giving up the aim.
+ */
 function VfoRow({
     index, vfo, active, level, signalDb, gateOpen, taps, dialHz, minimal, canRemove, source, armed,
     ecss, sinkError,
@@ -1743,25 +1743,28 @@ export default function IQPanel({ minimal }) {
             )}
 
             <div className="iq-vfos">
-                {vfos.map((vfo, i) => (
-                    <VfoRow
-                        key={i}
-                        index={i}
-                        vfo={vfo}
-                        active={i === active}
-                        level={hearing ? demod.levelOf(i) : 0}
-                        signalDb={hearing ? demod.signalDbOf(i) : null}
-                        gateOpen={hearing ? demod.gateOpenOf(i) : true}
-                        taps={tapsFor(planForVfo(vfo).cutoffHz, workingRate(demod.rate || 12000, planForVfo(vfo)), planForVfo(vfo).transitionHz)}
-                        ecss={hearing ? demod.ecssOf(i) : null}
-                        sinkError={demod.sinkErrorOf(i)}
-                        dialHz={tuning.frequency}
-                        minimal={minimal}
-                        canRemove={vfos.length > 1}
-                        source={source}
-                        armed={live && iq}
-                    />
-                ))}
+                {vfos.map((vfo, i) => {
+                    const plan = planForVfo(vfo);
+                    return (
+                        <VfoRow
+                            key={i}
+                            index={i}
+                            vfo={vfo}
+                            active={i === active}
+                            level={hearing ? demod.levelOf(i) : 0}
+                            signalDb={hearing ? demod.signalDbOf(i) : null}
+                            gateOpen={hearing ? demod.gateOpenOf(i) : true}
+                            taps={tapsFor(plan.cutoffHz, workingRate(demod.rate || 12000, plan), plan.transitionHz)}
+                            ecss={hearing ? demod.ecssOf(i) : null}
+                            sinkError={demod.sinkErrorOf(i)}
+                            dialHz={tuning.frequency}
+                            minimal={minimal}
+                            canRemove={vfos.length > 1}
+                            source={source}
+                            armed={live && iq}
+                        />
+                    );
+                })}
                 {vfos.length < MAX_VFOS && (
                     <Button
                         className="iq-add"

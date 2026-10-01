@@ -11,7 +11,7 @@
 //
 // The second half is the ordinary panel render check (see hookStub.js) plus the
 // two facts about where the panel lives that the user asked for and that nothing
-// else in the tree asserts: the left dock, open by default, and in the Decode
+// else in the tree asserts: the left dock, collapsed by default, and in the Decode
 // group.
 
 const assert = require('assert');

@@ -88,6 +88,8 @@ esbuild clockpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/clockpanel.cjs --log-level=warning
 esbuild iqdemod.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/iqdemod.cjs --log-level=warning
+esbuild dspequiv.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/dspequiv.cjs --log-level=warning
 esbuild wavlossless.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/wavlossless.cjs --log-level=warning
 esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
@@ -667,6 +669,7 @@ node leafletbase.test.js
 node ncdxf.test.js
 node clockpanel.test.js
 node iqdemod.test.js
+node dspequiv.test.js
 node wavlossless.test.js
 node tuningrange.test.js
 node bandtune.test.js

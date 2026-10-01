@@ -1,3 +1,11 @@
+// FROZEN REFERENCE — do not edit.
+//
+// lib/iqDemod.js exactly as it was before DemodChain was split into the
+// primitives in lib/dsp/. dspequiv.test.js runs this and the live module side by
+// side on the same input and requires every output sample to be identical, so
+// this file is the definition of "the refactor changed nothing". Only the import
+// paths below differ from the original.
+
 // Demodulating the quadrature stream in the browser.
 //
 // In `iq` mode the server stops demodulating and sends the raw baseband — 12 kHz
@@ -59,18 +67,12 @@
 // a view over it. components/IQDemodWatch.jsx is the piece that can see the
 // mode and the volume, and it is mounted in App.jsx for the same reason.
 
-import { Emitter } from '../radio/emitter.js';
-import { ComplexFir, designLowpass, tapsFor } from './dsp/fir.js';
-import { Nco } from './dsp/nco.js';
-import { Decimator } from './dsp/decimator.js';
-import { Discriminator, complexPower, envelope } from './dsp/detectors.js';
-import { Agc, DcBlock, Deemphasis } from './dsp/conditioning.js';
-import { PowerDetector, SquelchGate } from './dsp/squelch.js';
-import { SpectrumRing } from './dsp/scope.js';
-import { MIN_BLOCK_SEC } from '../radio/constants.js';
+import { Emitter } from '../../src/radio/emitter.js';
+import { fftInPlace, hannWindow } from '../../src/lib/iqSpectrum.js';
+import { MIN_BLOCK_SEC } from '../../src/radio/constants.js';
 import {
     ECSS_LOW_EDGE, ECSS_TRANSITION, EcssTracker, SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN,
-} from './ecss.js';
+} from '../../src/lib/ecss.js';
 
 // The plain `iq` preset is 12 kHz wide, centred on the dial: radiod's samprate
 // is 12k and the passband is -6k..+6k (see MODES in radio/constants.js, which
@@ -454,12 +456,102 @@ export function planFor({ mode, offsetHz, widthHz, pitchHz, sideband, trackHz, l
 }
 
 // ── the filter ───────────────────────────────────────────────────────────────
-//
-// Designed in lib/dsp/fir.js, with the rest of the chain's stages in lib/dsp/;
-// the times and levels each one uses are documented where they are defined.
-// Re-exported because the panel reads the tap count through this module.
 
-export { designLowpass, tapsFor };
+// Bounds on the FIR length. The floor is what a 6 kHz AM filter needs to have
+// any skirt at all; the ceiling is a cost limit, not a design one — 511 taps on
+// a complex 12 kHz stream is about twelve million multiplies a second, which is
+// a percent or two of one core and as far as this should go inside a WebSocket
+// handler.
+const TAPS_MIN = 31;
+const TAPS_MAX = 511;
+
+// Transition width, as a fraction of the cutoff, bounded either side.
+//
+// Proportional rather than fixed because the modes differ by two orders of
+// magnitude: 400 Hz of skirt is nothing on a 6 kHz AM filter and is wider than
+// the whole passband on a 250 Hz CW one. The floor stops a narrow filter asking
+// for more taps than the ceiling above allows; the cap stops a wide one being
+// needlessly soft.
+const TRANSITION_FRACTION = 0.2;
+const TRANSITION_MIN = 80;
+const TRANSITION_MAX = 400;
+
+/**
+ * How many taps a cutoff needs at this rate — odd, so the filter is symmetric.
+ *
+ * `transitionHz` overrides the proportional skirt, for a mode that needs a
+ * particular one (ECSS, whose rejected sideband starts right at the carrier).
+ */
+export function tapsFor(cutoffHz, rateHz, transitionHz) {
+    const transition = transitionHz > 0
+        ? Math.max(TRANSITION_MIN, transitionHz)
+        : clamp(Math.abs(cutoffHz) * TRANSITION_FRACTION, TRANSITION_MIN, TRANSITION_MAX);
+    // The usual Blackman-window estimate: about 5.5 periods of the transition,
+    // rounded here to 3.3 because the stopband this needs is the -74 dB the
+    // window gives rather than anything tighter.
+    const n = Math.round((3.3 * rateHz) / transition);
+    return clamp(n | 1, TAPS_MIN, TAPS_MAX);
+}
+
+/**
+ * A windowed-sinc low-pass, normalised to unity gain at DC.
+ *
+ * Blackman rather than Hamming: the stopband is 30 dB deeper for the same
+ * length, and on a receiver the thing on the other side of the skirt is often
+ * 40 dB louder than the thing being listened to. Normalising matters more than
+ * it looks — without it the passband gain moves with the tap count, so changing
+ * the filter width would change the volume.
+ */
+export function designLowpass(cutoffHz, rateHz, transitionHz) {
+    const n = tapsFor(cutoffHz, rateHz, transitionHz);
+    const taps = new Float32Array(n);
+    const mid = (n - 1) / 2;
+    // Never past Nyquist: a "cutoff" above it describes no filter at all, and
+    // the sinc would alias into something that is not a low-pass.
+    const fc = clamp(Math.abs(cutoffHz), 1, rateHz / 2 - 1) / rateHz;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+        const x = i - mid;
+        const sinc = x === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * x) / (Math.PI * x);
+        const w = 0.42
+            - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1))
+            + 0.08 * Math.cos((4 * Math.PI * i) / (n - 1));
+        const h = sinc * w;
+        taps[i] = h;
+        sum += h;
+    }
+    if (sum !== 0) for (let i = 0; i < n; i++) taps[i] /= sum;
+    return taps;
+}
+
+// ── the chain ────────────────────────────────────────────────────────────────
+
+// The output the AGC drives towards, well below full scale so a transient has
+// somewhere to go before the clip at the end of the chain.
+const AGC_TARGET = 0.25;
+// Fast enough that a loud signal does not blast, slow enough that speech is not
+// flattened between syllables. Decay is what an operator hears as "the noise
+// comes up between overs", and 600 ms is the usual compromise.
+const AGC_ATTACK_SEC = 0.005;
+const AGC_DECAY_SEC = 0.6;
+// A ceiling on the gain, so silence does not wind up to full-scale hiss.
+const AGC_MAX_GAIN = 300;
+// ECSS's carrier-referred level: one sideband of a 100% modulated tone comes
+// out at half the carrier's amplitude, so at this gain full modulation peaks
+// at 0.75 — louder than the audio AGC's target on typical programme, which
+// sits well under full modulation, and still short of the clip.
+const ECSS_CARRIER_LEVEL = 1.5;
+const ECSS_GAIN_SMOOTH_SEC = 0.02;
+
+// DC blocker corner. Removes the receiver's own centre offset from SSB, the
+// carrier from AM, and the tuning error from FM — where it is not a nicety but
+// the thing that centres the discriminator.
+const DC_CORNER_HZ = 20;
+
+// NFM de-emphasis, 750 us. Transmitters pre-emphasise, so this is a correction
+// rather than a tone control; without it narrowband FM is harsh in a way that
+// sounds like the demodulator is wrong.
+const DEEMPHASIS_SEC = 750e-6;
 
 // ── squelch ──────────────────────────────────────────────────────────────────
 //
@@ -497,8 +589,43 @@ export { designLowpass, tapsFor };
 export const SQUELCH_OFF = -60;
 export const SQUELCH_MAX = 0;
 
-// The squelch's hysteresis, hang, detector smoothing and gate edges are in
-// lib/dsp/squelch.js.
+// How far the level has to fall back before the gate shuts again. Without it a
+// signal sitting on the threshold chops the audio into fragments at the rate the
+// envelope wanders, which is the one failure that makes a squelch worse than no
+// squelch.
+const SQUELCH_HYSTERESIS_DB = 3;
+
+// And how long it stays open after the level has gone.
+//
+// Half a second, which is long by the standards of an FM repeater's tail and
+// deliberately so: this is squelching SSB and CW as often as FM, where the gaps
+// are the spaces between words and the spaces between characters. A tail short
+// enough to go unnoticed on FM chops those into fragments, and a chopped signal
+// is harder to copy than an open channel.
+//
+// The asymmetry with the opening below is the whole shape of the control:
+// shutting is a decision that can afford to be wrong for half a second, and
+// opening is one that cannot be late at all, because what it would be late for
+// is the start of somebody's transmission.
+const SQUELCH_HANG_SEC = 0.5;
+
+// The detector's own smoothing, asymmetric for the same reason.
+//
+// Three milliseconds up, so the level is at the signal within a syllable's
+// onset and the gate opens on the first thing said rather than the second.
+// Fifty down, so it does not follow the troughs of a modulated signal into the
+// hysteresis and back out again between one word and the next.
+const SQUELCH_ATTACK_SEC = 0.003;
+const SQUELCH_DECAY_SEC = 0.05;
+
+// And the gate's own edges, which exist only to keep it from clicking.
+//
+// Two milliseconds open — far below anything the ear places, so the gate is
+// instant in every sense that matters and still not a step discontinuity —
+// against fifteen shut, where there is no hurry and the slower fade is the
+// quieter one.
+const SQUELCH_OPEN_SEC = 0.002;
+const SQUELCH_SHUT_SEC = 0.015;
 
 // What the level reads when there is nothing at all, rather than -Infinity —
 // which is not a number a slider or a canvas can be given.
@@ -599,6 +726,8 @@ export function workingRate(rateHz, plan) {
 // 23 Hz at the 24 kHz a wide stream is demodulated at — fine enough to see the
 // shape of a voice inside a 2.7 kHz filter, and 85 ms or less of history.
 export const AUDIO_FFT_SIZE = 1024;
+const AUDIO_WINDOW = hannWindow(AUDIO_FFT_SIZE);
+const AUDIO_WINDOW_SUM = AUDIO_WINDOW.reduce((a, b) => a + b, 0);
 
 /**
  * The audio a demodulator's filter lets through, in Hz of audio — what its row's
@@ -633,71 +762,54 @@ export function audioBandOf(vfo) {
  * and two arrays, and it hands back audio. It holds phase and filter history
  * across calls, which is the whole reason it is an object — a packet boundary
  * must not be audible.
- *
- * The stages are the primitives in lib/dsp/, called in a fixed order and each
- * run over the whole block before the next:
- *
- *   [Decimator] ─► Nco ─► ComplexFir ─┬─► mode step ─► DcBlock ─► [Deemphasis] ─► Agc ─► × gain ─► × gate ─► clip
- *                                      └─► power ─► PowerDetector ─► SquelchGate ──────────────────────────┘
- *
- * where the mode step is Nco.mixReal (SSB and CW), envelope (AM) or the
- * Discriminator (NFM), and SAM and ECSS replace everything up to it with the
- * EcssTracker, which hands back the audio, the passband power and the carrier
- * level the Agc refers to. The buffers between stages are doubles: the stages
- * used to be one loop holding every intermediate in a double, and a
- * Float32Array between two of them would round where the loop did not.
- * test/dspequiv.test.js holds the result to the original sample for sample.
  */
 export class DemodChain {
     constructor() {
         this.rate = 0;
-        // The stream's own rate, and the decimation from it. `rate` above is the
+        // The stream's own rate, and the front end's state. `rate` above is the
         // one the demodulator runs at; the two differ only on a wide preset.
         this.inRate = 0;
         this.D = 1;
         this.baseHz = 0;
         this.frontKey = '';
-        this.plan = null;
-        this.taps = null;
-        this.tapsKey = '';
-        // How many samples the last block produced, at `rate`.
-        this.outFrames = 0;
-
-        this.front = new Decimator();
-        this.mixer = new Nco();
-        this.fir = new ComplexFir();
-        this.shift = new Nco();
-        this.disc = new Discriminator();
-        this.detector = new PowerDetector();
-        this.gate = new SquelchGate();
-        this.dc = new DcBlock();
-        this.deemphasis = new Deemphasis();
-        this.agc = new Agc();
-        // The last AUDIO_FFT_SIZE samples of what this demodulator put out, for
-        // the open row's audio spectrum — see audioSpectrum.
-        this.scope = new SpectrumRing(AUDIO_FFT_SIZE);
-        // The ECSS tracker, built the first time the mode is chosen, and the
-        // three per-sample arrays it hands back.
-        this.ecss = null;
-        this.ecssY = new Float32Array(0);
-        this.ecssP = new Float32Array(0);
-        this.ecssR = new Float32Array(0);
-
-        // What the decimator keeps.
+        this.frontTaps = null;
+        this.frontN = 0;
+        this.fbI = null;
+        this.fbQ = null;
+        this.fpos = 0;
+        this.fcount = 0;
+        this.rotRe = 1;
+        this.rotIm = 0;
         this.dI = new Float32Array(0);
         this.dQ = new Float32Array(0);
-        // Between the stages: mixed, filtered, power, smoothed power, gate
-        // gain, and the audio itself.
-        this.mI = new Float64Array(0);
-        this.mQ = new Float64Array(0);
-        this.fI = new Float64Array(0);
-        this.fQ = new Float64Array(0);
-        this.pow = new Float64Array(0);
-        this.sig = new Float64Array(0);
-        this.gateGain = new Float64Array(0);
-        this.y = new Float64Array(0);
+        // How many samples the last block produced, at `rate`.
+        this.outFrames = 0;
+        // The last AUDIO_FFT_SIZE samples of what this demodulator put out, for
+        // the open row's audio spectrum — see audioSpectrum.
+        this.scope = new Float32Array(AUDIO_FFT_SIZE);
+        this.scopePos = 0;
+        this.scopeRe = null;
+        this.scopeIm = null;
+        this.scopeDb = null;
+        this.plan = null;
+        this.taps = null;
+        this.n = 0;
+        this.bufI = null;
+        this.bufQ = null;
+        this.pos = 0;
+        this.mixPhase = 0;
+        this.shiftPhase = 0;
+        this.lastI = 0;
+        this.lastQ = 0;
+        this.dcX = 0;
+        this.dcY = 0;
+        this.deY = 0;
+        this.env = 0;
+        this.sigPow = 0;
+        this.gateOn = true;
+        this.gateGain = 1;
+        this.hang = 0;
         this.out = new Float32Array(0);
-
         // Published for the meter, and for the panel to show that something is
         // arriving even when the audio is muted. Taken before the squelch, for
         // the same reason: a gate that has shut is a thing to show, not a
@@ -709,6 +821,16 @@ export class DemodChain {
         // as the state of the row.
         this.sigDb = SQUELCH_SILENT_DB;
         this.gateOpen = true;
+        // The ECSS tracker, built the first time the mode is chosen, and the
+        // two per-sample arrays it hands back to the common back end.
+        this.ecss = null;
+        this.ecssY = new Float32Array(0);
+        this.ecssP = new Float32Array(0);
+        this.ecssR = new Float32Array(0);
+        // ECSS levels against the carrier, and its gain is smoothed so moving
+        // between that and the audio AGC (a lock gained or lost) is not a step.
+        this.ecssGain = 0;
+        this.tapsKey = '';
     }
 
     /**
@@ -737,14 +859,18 @@ export class DemodChain {
         this.baseHz = D > 1 ? plan.centreHz : 0;
         if (D > 1) {
             const fkey = `${inRate}/${D}/${pass}`;
-            if (fkey !== this.frontKey || !this.front.taps) {
+            if (fkey !== this.frontKey || !this.frontTaps) {
                 this.frontKey = fkey;
                 // Cut off midway between the pass edge and where the next band
                 // down folds onto it; the transition is the whole of that gap.
                 const stop = rate - pass;
-                this.front.setFilter(designLowpass((pass + stop) / 2, inRate, stop - pass), D);
+                this.frontTaps = designLowpass((pass + stop) / 2, inRate, stop - pass);
+                this.frontN = this.frontTaps.length;
+                this.fbI = new Float32Array(this.frontN * 2);
+                this.fbQ = new Float32Array(this.frontN * 2);
+                this.fpos = 0;
+                this.fcount = 0;
             }
-            this.front.frequencyHz = this.baseHz;
         }
         const key = `${plan.cutoffHz}/${plan.transitionHz || 0}/${rate}`;
         if (key !== this.tapsKey || !this.taps) {
@@ -759,12 +885,17 @@ export class DemodChain {
             this.ecss.configure(plan, rate, (cutoffHz, transitionHz) => designLowpass(cutoffHz, rate, transitionHz), this.baseHz);
             return;
         }
-        this.fir.setTaps(this.taps);
-        this.mixer.frequencyHz = -(plan.centreHz - this.baseHz);
-        this.shift.frequencyHz = plan.shiftHz;
-        // Full deviation is half the filter width, which is the definition the
-        // width control gives it: a 10 kHz NFM filter is +/-5 kHz of deviation.
-        this.disc.deviationHz = plan.cutoffHz;
+        const n = this.taps.length;
+        if (n !== this.n) {
+            this.n = n;
+            // Doubled, and every sample written twice: the convolution is then a
+            // straight forward scan of n contiguous elements with no index
+            // wrapping inside the inner loop, which is the loop that runs
+            // twelve thousand times a second.
+            this.bufI = new Float32Array(n * 2);
+            this.bufQ = new Float32Array(n * 2);
+            this.pos = 0;
+        }
     }
 
     /**
@@ -776,27 +907,66 @@ export class DemodChain {
      * that is open.
      */
     audioSpectrum() {
-        return { db: this.scope.spectrum(), binHz: (this.rate || 12000) / AUDIO_FFT_SIZE };
+        const n = AUDIO_FFT_SIZE;
+        if (!this.scopeRe) {
+            this.scopeRe = new Float64Array(n);
+            this.scopeIm = new Float64Array(n);
+            this.scopeDb = new Float32Array(n / 2);
+        }
+        const re = this.scopeRe;
+        const im = this.scopeIm;
+        const win = AUDIO_WINDOW;
+        let p = this.scopePos;
+        for (let i = 0; i < n; i++) {
+            re[i] = this.scope[p] * win[i];
+            im[i] = 0;
+            p = p + 1 === n ? 0 : p + 1;
+        }
+        fftInPlace(re, im);
+        // A full-scale sine reads 0 dBFS: the window's coherent gain, and the
+        // half of a real signal's power that lands in the negative bins.
+        const norm = 2 / AUDIO_WINDOW_SUM;
+        const db = this.scopeDb;
+        for (let k = 0; k < n / 2; k++) {
+            const m = Math.hypot(re[k], im[k]) * norm;
+            db[k] = m > 1e-9 ? 20 * Math.log10(m) : -180;
+        }
+        return { db, binHz: (this.rate || 12000) / n };
     }
 
     /** Forget everything carried between blocks. Starting is not resuming. */
     reset() {
-        this.scope.reset();
-        this.front.reset();
-        this.mixer.reset();
-        this.fir.reset();
-        this.shift.reset();
-        this.disc.reset();
-        this.dc.reset();
-        this.deemphasis.reset();
-        this.agc.reset();
-        this.detector.reset();
-        // Open, so starting never clips the first syllable — see SquelchGate.
-        this.gate.reset();
+        this.scope.fill(0);
+        this.scopePos = 0;
+        if (this.fbI) this.fbI.fill(0);
+        if (this.fbQ) this.fbQ.fill(0);
+        this.fpos = 0;
+        this.fcount = 0;
+        this.rotRe = 1;
+        this.rotIm = 0;
+        if (this.bufI) this.bufI.fill(0);
+        if (this.bufQ) this.bufQ.fill(0);
+        this.pos = 0;
+        this.mixPhase = 0;
+        this.shiftPhase = 0;
+        this.lastI = 0;
+        this.lastQ = 0;
+        this.dcX = 0;
+        this.dcY = 0;
+        this.deY = 0;
+        this.env = 0;
         this.level = 0;
+        this.sigPow = 0;
+        // Open, so starting never clips the first syllable. With a squelch set
+        // and nothing arriving it shuts again within a few tens of
+        // milliseconds, which is the right way round for the two mistakes.
+        this.gateOn = true;
+        this.gateGain = 1;
+        this.hang = 0;
         this.sigDb = SQUELCH_SILENT_DB;
         this.gateOpen = true;
         if (this.ecss) this.ecss.reset();
+        this.ecssGain = 0;
     }
 
     /**
@@ -816,21 +986,68 @@ export class DemodChain {
         };
     }
 
-    /** Make every buffer between the stages hold at least `frames`. */
-    _room(frames) {
-        if (this.y.length >= frames) return;
-        this.mI = new Float64Array(frames);
-        this.mQ = new Float64Array(frames);
-        this.fI = new Float64Array(frames);
-        this.fQ = new Float64Array(frames);
-        this.pow = new Float64Array(frames);
-        this.sig = new Float64Array(frames);
-        this.gateGain = new Float64Array(frames);
-        this.y = new Float64Array(frames);
-        this.out = new Float32Array(frames);
-        this.ecssY = new Float32Array(frames);
-        this.ecssP = new Float32Array(frames);
-        this.ecssR = new Float32Array(frames);
+    /**
+     * Mix the plan's centre to zero, low-pass and keep every Dth sample, into
+     * dI/dQ. Returns how many were kept.
+     *
+     * The oscillator is a rotating phasor rather than a cos and a sin per
+     * sample — at 384 kHz the trigonometry alone would be most of the cost —
+     * renormalised once a block so rounding cannot grow it. The decimation
+     * count carries across blocks, since a packet need not be a multiple of D.
+     */
+    _front(planeI, planeQ, frames) {
+        const D = this.D;
+        const n = this.frontN;
+        const taps = this.frontTaps;
+        const bI = this.fbI;
+        const bQ = this.fbQ;
+        const max = Math.ceil(frames / D) + 1;
+        if (this.dI.length < max) {
+            this.dI = new Float32Array(max);
+            this.dQ = new Float32Array(max);
+        }
+        const dI = this.dI;
+        const dQ = this.dQ;
+        const step = (-2 * Math.PI * this.baseHz) / this.inRate;
+        const sRe = Math.cos(step);
+        const sIm = Math.sin(step);
+        let pr = this.rotRe;
+        let pi = this.rotIm;
+        let pos = this.fpos;
+        let count = this.fcount;
+        let m = 0;
+        for (let k = 0; k < frames; k++) {
+            const rawI = planeI[k];
+            const rawQ = planeQ[k];
+            const mi = rawI * pr - rawQ * pi;
+            const mq = rawI * pi + rawQ * pr;
+            const nr = pr * sRe - pi * sIm;
+            pi = pr * sIm + pi * sRe;
+            pr = nr;
+            bI[pos] = mi;
+            bI[pos + n] = mi;
+            bQ[pos] = mq;
+            bQ[pos + n] = mq;
+            pos = pos + 1 === n ? 0 : pos + 1;
+            if (++count < D) continue;
+            count = 0;
+            let fi = 0;
+            let fq = 0;
+            for (let t = 0; t < n; t++) {
+                const h = taps[t];
+                fi += h * bI[pos + t];
+                fq += h * bQ[pos + t];
+            }
+            dI[m] = fi;
+            dQ[m] = fq;
+            m++;
+        }
+        const mag = Math.hypot(pr, pi) || 1;
+        this.rotRe = pr / mag;
+        this.rotIm = pi / mag;
+        this.fpos = pos;
+        this.fcount = count;
+        return m;
     }
 
     /**
@@ -846,82 +1063,214 @@ export class DemodChain {
         // On a wide stream, the front end first: everything below then reads
         // the decimated pair, at `rate`.
         if (this.D > 1) {
-            const max = Math.ceil(frames / this.D) + 1;
-            if (this.dI.length < max) {
-                this.dI = new Float32Array(max);
-                this.dQ = new Float32Array(max);
-            }
-            frames = this.front.process(planeI, planeQ, this.dI, this.dQ, frames, this.inRate);
+            frames = this._front(planeI, planeQ, frames);
             planeI = this.dI;
             planeQ = this.dQ;
             if (!frames) return null;
         }
         this.outFrames = frames;
-        this._room(frames);
-
-        const { kind } = this.plan;
-        const rate = this.rate;
-        const y = this.y;
-        const tracked = isTracked(this.plan);
-
-        // Up to the mode's own step: the audio into `y`, and the power in the
-        // passband — the squelch's measurement — into `pow`.
-        let pow = this.pow;
-        if (tracked) {
-            // The tracker runs its own front end — carrier tracking and the
-            // sideband filters — and hands back audio, passband power and the
-            // carrier level per sample.
-            this.ecss.process(planeI, planeQ, frames, this.ecssY, this.ecssP, this.ecssR);
-            for (let k = 0; k < frames; k++) y[k] = this.ecssY[k];
-            pow = this.ecssP;
-        } else {
-            // 1 — slide the wanted piece of spectrum down to zero.
-            this.mixer.mix(planeI, planeQ, this.mI, this.mQ, frames, rate);
-            // 2 — the complex band-pass.
-            this.fir.process(this.mI, this.mQ, this.fI, this.fQ, frames);
-            // Taken here because this is the only point in the chain where the
-            // number means "how much is in the passband" rather than "how loud
-            // the mode made it".
-            complexPower(this.fI, this.fQ, pow, frames);
-            // 3 — the mode's own step.
-            if (kind === 'ssb') this.shift.mixReal(this.fI, this.fQ, y, frames, rate);
-            else if (kind === 'am') envelope(this.fI, this.fQ, y, frames);
-            else this.disc.process(this.fI, this.fQ, y, frames, rate);
-        }
-
-        // The squelch decides now and acts at the end.
-        this.detector.process(pow, this.sig, frames, rate);
-        this.gate.thresholdDb = squelchDb;
-        this.gate.enabled = squelchDb > SQUELCH_OFF;
-        this.gate.process(this.sig, this.gateGain, frames, rate);
-
-        this.dc.process(y, frames, rate);
-        if (kind === 'fm') this.deemphasis.process(y, frames, rate);
-        // Against the carrier while there is one to trust, against the audio
-        // otherwise — see CARRIER_LEVEL_SEC in lib/ecss.js.
-        if (tracked) this.agc.processReferred(y, this.ecssR, frames, rate, agc);
-        else this.agc.process(y, frames, rate, agc);
-
-        // Measured before the gate and heard after it: the meter goes on saying
-        // what the demodulator is producing while the squelch is holding it
-        // back, which is what makes a threshold set by eye possible at all.
-        const gg = this.gateGain;
+        if (this.out.length < frames) this.out = new Float32Array(frames);
         const out = this.out;
-        let sumSq = 0;
-        for (let k = 0; k < frames; k++) {
-            let v = y[k] * gain;
-            sumSq += v * v;
-            v *= gg[k];
-            out[k] = v > 1 ? 1 : (v < -1 ? -1 : v);
-        }
-        this.scope.push(out, frames);
 
+        const { kind, centreHz, shiftHz, cutoffHz } = this.plan;
+        const rate = this.rate;
+        const n = this.n;
+        const taps = this.taps;
+        const bufI = this.bufI;
+        const bufQ = this.bufQ;
+
+        // ECSS runs its own front end — carrier tracking and the sideband
+        // filters — and hands back audio and passband power per sample, which
+        // then go through the same squelch, DC block and AGC as everything else.
+        const ecss = isTracked(this.plan);
+        if (ecss) {
+            if (this.ecssY.length < frames) {
+                this.ecssY = new Float32Array(frames);
+                this.ecssP = new Float32Array(frames);
+                this.ecssR = new Float32Array(frames);
+            }
+            this.ecss.process(planeI, planeQ, frames, this.ecssY, this.ecssP, this.ecssR);
+        }
+        const ey = this.ecssY;
+        const ep = this.ecssP;
+        const er = this.ecssR;
+        const egA = 1 - Math.exp(-1 / (rate * ECSS_GAIN_SMOOTH_SEC));
+        let ecssGain = this.ecssGain;
+
+        const mixStep = (-2 * Math.PI * (centreHz - this.baseHz)) / rate;
+        const shiftStep = (2 * Math.PI * shiftHz) / rate;
+        const dcR = 1 - (2 * Math.PI * DC_CORNER_HZ) / rate;
+        const deA = 1 - Math.exp(-1 / (rate * DEEMPHASIS_SEC));
+        const atk = 1 - Math.exp(-1 / (rate * AGC_ATTACK_SEC));
+        const dec = 1 - Math.exp(-1 / (rate * AGC_DECAY_SEC));
+        // Full deviation is half the filter width, which is the definition the
+        // width control gives it: a 10 kHz NFM filter is +/-5 kHz of deviation.
+        const fmScale = cutoffHz > 0 ? rate / (2 * Math.PI * cutoffHz) : 0;
+
+        // The squelch, in the units the inner loop can use: powers rather than
+        // decibels, and per-sample coefficients rather than seconds. All of it
+        // is computed here so the loop itself carries no logarithms.
+        const squelching = squelchDb > SQUELCH_OFF;
+        const openPow = 10 ** (squelchDb / 10);
+        const shutPow = 10 ** ((squelchDb - SQUELCH_HYSTERESIS_DB) / 10);
+        const hangSamples = Math.round(rate * SQUELCH_HANG_SEC);
+        const sigAtk = 1 - Math.exp(-1 / (rate * SQUELCH_ATTACK_SEC));
+        const sigDec = 1 - Math.exp(-1 / (rate * SQUELCH_DECAY_SEC));
+        const gateUp = 1 - Math.exp(-1 / (rate * SQUELCH_OPEN_SEC));
+        const gateDown = 1 - Math.exp(-1 / (rate * SQUELCH_SHUT_SEC));
+
+        let { pos, mixPhase, shiftPhase, lastI, lastQ, dcX, dcY, deY, env } = this;
+        let { sigPow, gateOn, gateGain, hang } = this;
+        let sumSq = 0;
+
+        for (let k = 0; k < frames; k++) {
+            let y;
+            let sigNow;
+            if (ecss) {
+                y = ey[k];
+                sigNow = ep[k];
+            } else {
+                // 1 — slide the wanted piece of spectrum down to zero.
+                const mc = Math.cos(mixPhase);
+                const ms = Math.sin(mixPhase);
+                mixPhase += mixStep;
+                const rawI = planeI[k];
+                const rawQ = planeQ[k];
+                const mi = rawI * mc - rawQ * ms;
+                const mq = rawI * ms + rawQ * mc;
+
+                // 2 — the complex band-pass, as two real convolutions.
+                bufI[pos] = mi;
+                bufI[pos + n] = mi;
+                bufQ[pos] = mq;
+                bufQ[pos + n] = mq;
+                pos = pos + 1 === n ? 0 : pos + 1;
+                let fi = 0;
+                let fq = 0;
+                for (let t = 0; t < n; t++) {
+                    const h = taps[t];
+                    fi += h * bufI[pos + t];
+                    fq += h * bufQ[pos + t];
+                }
+
+                // The squelch's measurement, taken here because this is the only
+                // point in the chain where the number means "how much is in the
+                // passband" rather than "how loud the mode made it". Power rather
+                // than magnitude: the comparison is against a squared threshold, so
+                // the square root belongs once per block and not once per sample.
+                sigNow = fi * fi + fq * fq;
+
+                // 3 — the mode's own step.
+                if (kind === 'ssb') {
+                    const sc = Math.cos(shiftPhase);
+                    const ss = Math.sin(shiftPhase);
+                    shiftPhase += shiftStep;
+                    y = fi * sc - fq * ss;
+                } else if (kind === 'am') {
+                    y = Math.sqrt(fi * fi + fq * fq);
+                } else {
+                    // z[k] * conj(z[k-1]): the argument is the phase advanced in one
+                    // sample, which is the instantaneous frequency. atan2 rather
+                    // than the small-angle shortcut because at 12 kHz a 3 kHz
+                    // deviation is a radian and a half per sample, where the
+                    // approximation is not small and not an approximation.
+                    const re = fi * lastI + fq * lastQ;
+                    const im = fq * lastI - fi * lastQ;
+                    lastI = fi;
+                    lastQ = fq;
+                    y = (re === 0 && im === 0) ? 0 : Math.atan2(im, re) * fmScale;
+                }
+            }
+
+            // The squelch, on the passband power whichever front end measured it.
+            sigPow += (sigNow > sigPow ? sigAtk : sigDec) * (sigNow - sigPow);
+            if (squelching) {
+                if (sigPow >= openPow) {
+                    // Instantly, and from wherever the gate was: a signal over
+                    // the threshold opens it and hands it the whole hang again.
+                    gateOn = true;
+                    hang = hangSamples;
+                } else if (sigPow < shutPow) {
+                    // Between the two thresholds nothing is decided — that gap
+                    // is the hysteresis — and below the lower one the hang has
+                    // to run out before the gate shuts.
+                    if (hang > 0) hang--;
+                    else gateOn = false;
+                }
+            }
+            const want = squelching ? (gateOn ? 1 : 0) : 1;
+            gateGain += (want > gateGain ? gateUp : gateDown) * (want - gateGain);
+
+            // DC block. On AM this is what strips the carrier; on FM it is what
+            // centres the discriminator, so a few hundred hertz of mistuning
+            // stops being a DC step that eats the headroom.
+            dcY = y - dcX + dcR * dcY;
+            dcX = y;
+            y = dcY;
+
+            if (kind === 'fm') {
+                deY += deA * (y - deY);
+                y = deY;
+            }
+
+            const mag = y < 0 ? -y : y;
+            env += (mag > env ? atk : dec) * (mag - env);
+            if (agc && ecss) {
+                // Against the carrier while there is one to trust, against the
+                // audio otherwise — see CARRIER_LEVEL_SEC in lib/ecss.js.
+                const want = er[k] > 0
+                    ? Math.min(AGC_MAX_GAIN, ECSS_CARRIER_LEVEL / er[k])
+                    : (env > 0 ? Math.min(AGC_MAX_GAIN, AGC_TARGET / env) : 0);
+                ecssGain += egA * (want - ecssGain);
+                y *= ecssGain;
+            } else if (agc) {
+                const g = env > 0 ? Math.min(AGC_MAX_GAIN, AGC_TARGET / env) : 0;
+                y *= g;
+            }
+            y *= gain;
+
+            // Measured before the gate and heard after it: the meter goes on
+            // saying what the demodulator is producing while the squelch is
+            // holding it back, which is what makes a threshold set by eye
+            // possible at all.
+            sumSq += y * y;
+            y *= gateGain;
+            out[k] = y > 1 ? 1 : (y < -1 ? -1 : y);
+        }
+
+        // Kept for the audio spectrum. A copy of a few hundred floats a block,
+        // which is nothing beside the filter that made them.
+        const ring = this.scope;
+        const rn = ring.length;
+        let rp = this.scopePos;
+        for (let k = 0; k < frames; k++) {
+            ring[rp] = out[k];
+            rp = rp + 1 === rn ? 0 : rp + 1;
+        }
+        this.scopePos = rp;
+
+        this.pos = pos;
+        this.ecssGain = ecssGain;
+        // Wrapped once per block rather than per sample: unbounded phase loses
+        // precision after an hour or two of listening, and Math.cos of a number
+        // that large is no longer the cosine of the angle meant.
+        this.mixPhase = mixPhase % (2 * Math.PI);
+        this.shiftPhase = shiftPhase % (2 * Math.PI);
+        this.lastI = lastI;
+        this.lastQ = lastQ;
+        this.dcX = dcX;
+        this.dcY = dcY;
+        this.deY = deY;
+        this.env = env;
+        this.sigPow = sigPow;
+        this.gateOn = gateOn;
+        this.gateGain = gateGain;
+        this.hang = hang;
         this.level = Math.sqrt(sumSq / frames);
-        const p = this.detector.level;
-        this.sigDb = p > 0
-            ? Math.max(SQUELCH_SILENT_DB, 10 * Math.log10(p))
+        this.sigDb = sigPow > 0
+            ? Math.max(SQUELCH_SILENT_DB, 10 * Math.log10(sigPow))
             : SQUELCH_SILENT_DB;
-        this.gateOpen = this.gate.open;
+        this.gateOpen = !squelching || gateOn;
         return out;
     }
 }

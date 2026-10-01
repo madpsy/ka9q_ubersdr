@@ -1,6 +1,10 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -137,11 +141,12 @@ func sessionsToGeoJSON(rawSessions []map[string]interface{}) geoJSONFeatureColle
 
 		// Stable feature id keeps the same listener on the same marker across
 		// polls. Prefer the user session id, fall back to SSRC / channel id.
-		id := firstNonEmpty(
+		// Never published raw: see geoJSONFeatureID.
+		id := geoJSONFeatureID(firstNonEmpty(
 			asString(s["user_session_id"]),
 			asString(s["ssrc"]),
 			asString(s["id"]),
-		)
+		))
 
 		fc.Features = append(fc.Features, geoJSONFeature{
 			Type:       "Feature",
@@ -152,6 +157,30 @@ func sessionsToGeoJSON(rawSessions []map[string]interface{}) geoJSONFeatureColle
 	}
 
 	return fc
+}
+
+// geoJSONIDKey keys geoJSONFeatureID. It is random per process, so feature ids
+// are stable for as long as the server runs and change on restart.
+var geoJSONIDKey = func() []byte {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		panic(fmt.Sprintf("sessions geojson: cannot generate id key: %v", err))
+	}
+	return key
+}()
+
+// geoJSONFeatureID turns a session identifier into an opaque marker id. The
+// feed is public, and the raw identifiers must not be: KiwiSDR and WebSDR user
+// session ids embed the client IP ("kiwi-<ts>-<ip>", "websdr-<ts>-<ip>"), and
+// native ones are the client's own session UUID. The hash is keyed because an
+// unkeyed one could be reversed by trying every IPv4 address.
+func geoJSONFeatureID(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, geoJSONIDKey)
+	mac.Write([]byte(sessionID))
+	return hex.EncodeToString(mac.Sum(nil)[:8])
 }
 
 // geoJSONSessionTitle builds a short human label for a listener marker, e.g.

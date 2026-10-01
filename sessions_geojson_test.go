@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -65,8 +66,11 @@ func TestSessionsToGeoJSON(t *testing.T) {
 	if f.Type != "Feature" {
 		t.Errorf("feature type = %q", f.Type)
 	}
-	if f.ID != "sess-abc" {
-		t.Errorf("feature id = %q, want sess-abc (stable across polls)", f.ID)
+	if f.ID == "" || f.ID == "sess-abc" {
+		t.Errorf("feature id = %q, want an opaque id, not the raw session id", f.ID)
+	}
+	if again := sessionsToGeoJSON(raw).Features[0].ID; again != f.ID {
+		t.Errorf("feature id changed between polls: %q then %q", f.ID, again)
 	}
 	// GeoJSON coordinate order is [longitude, latitude].
 	if len(f.Geometry.Coordinates) != 2 || f.Geometry.Coordinates[0] != 13.4 || f.Geometry.Coordinates[1] != 52.5 {
@@ -142,5 +146,29 @@ func TestBuildReceiverInfoPayload(t *testing.T) {
 	}
 	if p["chat_enabled"] != true {
 		t.Errorf("chat_enabled = %v", p["chat_enabled"])
+	}
+}
+
+// KiwiSDR and WebSDR user session ids embed the client IP; the public feed
+// must not carry it.
+func TestSessionsGeoJSONHidesClientIP(t *testing.T) {
+	for _, uid := range []string{"kiwi-1790931033-73.25.150.208", "websdr-1790931033-73.25.150.208"} {
+		fc := sessionsToGeoJSON([]map[string]interface{}{{
+			"user_session_id": uid,
+			"latitude":        45.5,
+			"longitude":       -122.7,
+			"frequency":       14084000.0,
+			"mode":            "usb",
+		}})
+		data, err := json.Marshal(fc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "73.25.150.208") || strings.Contains(string(data), "1790931033") {
+			t.Errorf("feed for %s leaks the session id: %s", uid, data)
+		}
+	}
+	if geoJSONFeatureID("kiwi-1-192.0.2.1") == geoJSONFeatureID("kiwi-1-192.0.2.2") {
+		t.Error("different sessions share a feature id")
 	}
 }

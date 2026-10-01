@@ -218,3 +218,21 @@ func TestKiwiRXSlotExhaustion(t *testing.T) {
 		t.Errorf("third user got slot %d with 2 slots, want -1", c)
 	}
 }
+
+// Without a GeoIP database the location falls back to what a KiwiSDR browser
+// sent with "SET geoloc"; other listeners have none.
+func TestKiwiUserListLocationFallback(t *testing.T) {
+	f := newUserListFixture(t, 3)
+	f.sm.geoIPService = &GeoIPService{enabled: false}
+	f.listen("kiwi-1-203.0.113.1", "203.0.113.1", 7100000)
+	f.listen("native-b", "203.0.113.2", 14200000)
+	f.h.setGeolocation("kiwi-1-203.0.113.1", "Dalgety Bay, Scotland, UK")
+
+	users := f.h.buildUserList("")
+	if got, want := users[0].Location, kiwiEncodeString("Dalgety Bay, Scotland, UK"); got != want {
+		t.Errorf("KiwiSDR browser location %q, want %q", got, want)
+	}
+	if users[1].Location != "" {
+		t.Errorf("native listener location %q, want empty without GeoIP", users[1].Location)
+	}
+}

@@ -569,7 +569,9 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *htt
 	// Frequency range (0-30 MHz in Hz)
 	status.WriteString("bands=0-30000000\n")
 	status.WriteString("freq_offset=0.000\n")
-	status.WriteString("mode=rx4_wf4\n")
+	// FPGA channel configuration, verbatim from a real KiwiSDR. The separator
+	// is a dot ("rx8.wf3"), not an underscore.
+	status.WriteString("mode=rx8.wf3\n")
 
 	// User counts
 	status.WriteString(fmt.Sprintf("users=%d\n", currentUsers))
@@ -2688,8 +2690,8 @@ func (kwsh *KiwiWebSocketHandler) buildUserList(viewerUserSessionID string) []Ki
 			continue
 		}
 
-		geoloc := ""
-		if u.Protocol == "kiwi" {
+		geoloc := kwsh.geoIPLocation(u.ClientIP)
+		if geoloc == "" && u.Protocol == "kiwi" {
 			geoloc = kwsh.getGeolocation(u.UserSessionID)
 		}
 
@@ -2709,6 +2711,36 @@ func (kwsh *KiwiWebSocketHandler) buildUserList(viewerUserSessionID string) []Ki
 		}
 	}
 	return users
+}
+
+// geoIPLocation is the listener's location from the server's GeoIP database,
+// as "City, Region, Country" with missing parts left out: the same lookup and
+// format the admin sessions view uses. It is "" when GeoIP is disabled or
+// knows nothing about the address.
+//
+// It is preferred over a client's "SET geoloc", which only the KiwiSDR browser
+// page sends (kiwirecorder and similar clients never do, and WebSDR and native
+// listeners have no equivalent), so every listener is located the same way.
+func (kwsh *KiwiWebSocketHandler) geoIPLocation(clientIP string) string {
+	geo := kwsh.sessions.geoIPService
+	if geo == nil || clientIP == "" || !geo.IsEnabled() {
+		return ""
+	}
+	result, err := geo.Lookup(clientIP, false)
+	if err != nil {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if result.City != "" {
+		parts = append(parts, result.City)
+	}
+	if len(result.Subdivisions) > 0 && result.Subdivisions[0].Name != "" {
+		parts = append(parts, result.Subdivisions[0].Name)
+	}
+	if result.Country != "" {
+		parts = append(parts, result.Country)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // sendUserList sends this client's user list as MSG user_cb=<json>.

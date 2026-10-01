@@ -314,7 +314,7 @@ t('a shared graph is offered rather than loaded, and the offer can be taken or r
     assert.strictEqual(JSON.stringify(getPlayground(radio().player).graph), before, 'the graph was replaced without asking');
     const offer = deep(tree).find((n) => cls(n) === 'pg-offer');
     assert.ok(offer, 'no offer');
-    assert.match(words(offer), /graph of 1 blocks/);
+    assert.match(words(offer), /graph of 1 block\./);
     cleanups.forEach((f) => f());
     offerSharedGraph(null);
     closePlayground();

@@ -14363,6 +14363,7 @@ a.btn { text-decoration: none; }
    ========================================================================= */
 
 .pg {
+    position: relative;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
@@ -14394,16 +14395,38 @@ a.btn { text-decoration: none; }
 .pg-bar__status { flex: 1; min-width: 140px; font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
 .pg-bar__group { display: flex; gap: 2px; flex-wrap: wrap; }
 
-.pg-offer, .pg-notice {
+.pg-notice {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 6px 12px;
     border-bottom: 1px solid var(--border);
     font-size: calc(12px * var(--ui-scale));
+    background: var(--surface-2);
+    color: var(--text-dim);
 }
-.pg-offer { background: var(--accent-soft); }
-.pg-notice { background: var(--surface-2); color: var(--text-dim); }
+.pg-offer {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.45);
+}
+.pg-offer__card {
+    width: min(420px, 100%);
+    padding: 16px 18px;
+    background: var(--surface-2);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    font-size: calc(13px * var(--ui-scale));
+}
+.pg-offer__title { font-weight: 600; font-size: calc(15px * var(--ui-scale)); margin-bottom: 6px; }
+.pg-offer__card p { margin: 0 0 14px; color: var(--text-dim); line-height: 1.45; }
+.pg-offer__actions { display: flex; justify-content: flex-end; gap: 8px; }
 .pg-notice__link { flex: 1; min-width: 0; font-family: var(--mono); }
 .pg-notice__close { margin-left: auto; border: 0; background: none; color: var(--text-dim); cursor: pointer; }
 

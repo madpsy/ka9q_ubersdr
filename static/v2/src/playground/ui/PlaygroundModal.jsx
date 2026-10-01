@@ -211,16 +211,25 @@ function Summary({ pg, graph, info, stats }) {
     );
 }
 
+// Over the middle of the window rather than in a strip along the top: a link
+// that was followed is the reason the window opened, and until it is answered
+// the graph underneath is still the operator's own.
 function SharedOffer({ pending, onLoad }) {
     const ok = pending.graph && pending.graph.nodes.length > 0;
+    const count = ok ? pending.graph.nodes.length : 0;
     return (
-        <div className="pg-offer">
-            <span>
-                {ok ? `A link brought a graph of ${pending.graph.nodes.length} blocks.` : 'A playground link could not be read.'}
-                {pending.errors && pending.errors.length ? ` ${pending.errors.map((e) => e.message).join(' ')}` : ''}
-            </span>
-            {ok && <Button size="sm" variant="primary" onClick={onLoad}>Load it</Button>}
-            <Button size="sm" variant="ghost" onClick={() => offerSharedGraph(null)}>{ok ? 'Keep mine' : 'Dismiss'}</Button>
+        <div className="pg-offer" role="dialog" aria-label="Shared graph">
+            <div className="pg-offer__card">
+                <div className="pg-offer__title">{ok ? 'Shared graph' : 'Shared graph unreadable'}</div>
+                <p>
+                    {ok ? `A link brought a graph of ${count} ${count === 1 ? 'block' : 'blocks'}. Loading it replaces the one open now; Undo puts that back.` : 'A playground link could not be read.'}
+                    {pending.errors && pending.errors.length ? ` ${pending.errors.map((e) => e.message).join(' ')}` : ''}
+                </p>
+                <div className="pg-offer__actions">
+                    <Button size="sm" variant="ghost" onClick={() => offerSharedGraph(null)}>{ok ? 'Keep mine' : 'Dismiss'}</Button>
+                    {ok && <Button size="sm" variant="primary" onClick={onLoad}>Load it</Button>}
+                </div>
+            </div>
         </div>
     );
 }

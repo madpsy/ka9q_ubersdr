@@ -11811,6 +11811,11 @@ a.btn { text-decoration: none; }
     align-items: center;
     touch-action: none;
     cursor: pointer;
+    /* Nothing in it to select or pick up: a press is a thumb being moved. See
+       RangeSlider's onDown, which says the same to the browser in script. */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
 }
 .range__track {
     position: absolute;

@@ -205,6 +205,13 @@ export function RangeSlider({
     const onDown = (e) => {
         const at = valueAt(e.clientX);
         if (at == null) return;
+        // The press is ours. Left to the browser, a mouse press here also
+        // starts its own gesture — selecting the text around the slider, or
+        // picking up a selection that already covers it and dragging the
+        // whole thing off as a ghost image — and the thumb sits still while
+        // the page does that instead. Keyboard focus is unaffected: the thumbs
+        // are still reached with Tab.
+        e.preventDefault();
         // Nearer end wins, and a tie goes to the one with room to move.
         const end = Math.abs(at - low) <= Math.abs(at - high) ? 'low' : 'high';
         dragging.current = end;

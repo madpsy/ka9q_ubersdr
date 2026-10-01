@@ -9,6 +9,7 @@ import IQPanel, { ListeningCard, VFO_FALLBACK, ecssReport, holdReading, vfoSumma
 import { PANEL_BY_ID } from '../src/panels/registry.jsx';
 import IQDemodWatch from '../src/components/IQDemodWatch.jsx';
 import { formatFreqExact } from '../src/lib/format.js';
+import { RangeSlider } from '../src/components/ui.jsx';
 import { GROUPS } from '../src/panels/groups.jsx';
 import {
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
@@ -26,7 +27,7 @@ import {
 } from '../src/lib/iqDemod.js';
 
 module.exports = {
-    IQDemodWatch, formatFreqExact,
+    IQDemodWatch, formatFreqExact, RangeSlider,
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,

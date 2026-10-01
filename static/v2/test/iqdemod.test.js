@@ -34,7 +34,7 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 globalThis.TextDecoder = globalThis.TextDecoder || require('util').TextDecoder;
 
 const {
-    IQDemodWatch, formatFreqExact,
+    IQDemodWatch, formatFreqExact, RangeSlider,
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
@@ -1848,6 +1848,31 @@ t('USB and LSB start 50 Hz off the carrier by default, and the cut moves the fil
     saveDemodSettings({ vfos: [{ mode: 'usb', lowCutHz: 'x' }] });
     assert.strictEqual(vfo0().lowCutHz, LOW_CUT_DEFAULT);
     fresh();
+});
+
+t('a press on the double-ended slider is the slider’s, not the browser’s', () => {
+    // Left to the browser, a mouse press also starts its own gesture —
+    // selecting text, or dragging a selection off as a ghost image — and the
+    // thumb stays where it was. The press has to be claimed.
+    const changes = [];
+    reset();
+    const { tree } = render(RangeSlider, {
+        low: 50, high: 2700, min: 0, max: 6000, step: 10, gap: 100, onChange: (v) => changes.push(v),
+    }, {});
+    tree.props.ref.current = { getBoundingClientRect: () => ({ left: 0, width: 600 }) };
+    let claimed = false;
+    tree.props.onPointerDown({
+        clientX: 30, pointerId: 1, pointerType: 'mouse',
+        preventDefault() { claimed = true; },
+        currentTarget: { setPointerCapture() {} },
+    });
+    assert.ok(claimed, 'the browser was left to start its own drag');
+    // And the press still did its job: the nearer thumb, the low one, moved.
+    assert.deepStrictEqual(changes, [{ low: 300, high: 2700 }]);
+    // The stylesheet agrees there is nothing in it to select or pick up.
+    const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+    const rule = (css.match(/\n\.range\s*\{([^}]*)\}/) || [])[1] || '';
+    assert.ok(/user-select:\s*none/.test(rule) && /-webkit-user-drag:\s*none/.test(rule), `.range: ${rule}`);
 });
 
 t('the low cut takes out what is under it, and leaves the rest of the voice', () => {

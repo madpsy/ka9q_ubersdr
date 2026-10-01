@@ -308,6 +308,8 @@ t('the window is nothing while closed, and the whole editor while open', () => {
 });
 
 t('From IQ Demod asks before replacing a graph, as New does, and not on an empty canvas', () => {
+    // One demodulator: with more, it asks which (below).
+    resetDemodSettings();
     reset();
     const ctx = radio();
     const pg = getPlayground(ctx.player);
@@ -425,6 +427,167 @@ t('the playground window pauses the spectrum while it is open and resumes it on 
     r.cleanups.forEach((f) => f());
     assert.deepStrictEqual(off.calls, []);
     closePlayground();
+});
+
+// ── several demodulators ────────────────────────────────────────────────────
+
+const THREE = {
+    vfos: [
+        { mode: 'usb', offsetHz: -3000 },
+        { mode: 'ecss', offsetHz: 1500, sinkId: 'headset-2', pan: 'left' },
+        { mode: 'nfm', offsetHz: -1500, pan: 'right', muted: true },
+    ],
+    active: 1,
+};
+
+t('one demodulator of several comes as asked, the selected one by default', () => {
+    resetDemodSettings();
+    saveDemodSettings(THREE);
+    const modeOf = (graph) => (graph.nodes.some((n) => n.type === 'carrier-tracker') ? 'tracked' : 'plain');
+    assert.strictEqual(modeOf(graphFromIQDemod(12000)), 'tracked', 'not the selected one');
+    assert.strictEqual(modeOf(graphFromIQDemod(12000, 0)), 'plain');
+    const nfm = graphFromIQDemod(12000, 2);
+    assert.ok(nfm.nodes.some((n) => n.type === 'fm-discriminator'));
+    assert.deepStrictEqual(
+        (({ channel, muted }) => ({ channel, muted }))(nfm.nodes.find((n) => n.id === 'audio').params),
+        { channel: 'right', muted: true },
+    );
+    resetDemodSettings();
+});
+
+t('all of IQ Demod’s demodulators come on one IQ stream, a group each, every chain whole', () => {
+    resetDemodSettings();
+    saveDemodSettings(THREE);
+    for (const rate of [12000, 48000]) {
+        const graph = P.graphFromAllChannels(rate);
+        const c = compile(graph, rate);
+        assert.ok(c.ok, `${rate}: ${JSON.stringify(c.errors)}`);
+        assert.strictEqual(graph.nodes.filter((n) => n.type === 'iq-in').length, 1, 'not one IQ stream');
+        const groups = graph.nodes.filter((n) => n.type === 'group');
+        assert.deepStrictEqual(groups.map((n) => n.params.title), [
+            'Channel 1 · USB · 2.7 kHz · −3 kHz', 'Channel 2 · ECSS · 4.5 kHz · +1.5 kHz', 'Channel 3 · NFM · 8 kHz · −1.5 kHz',
+        ]);
+        for (const [i, grp] of groups.entries()) {
+            const own = graph.nodes.filter((n) => n.id.startsWith(`c${i + 1}_`) && n.type !== 'group').map((n) => n.id).sort();
+            // Every block of the channel inside its group, and nothing else.
+            assert.deepStrictEqual(nodesInside(graph, grp.id).sort(), own, `channel ${i + 1}`);
+            // Fed from the shared stream.
+            assert.ok(graph.wires.some((w) => w[0] === 'iq' && w[2] === `c${i + 1}_decimate`), `channel ${i + 1} not fed`);
+        }
+        // The groups do not overlap.
+        const boxes = groups.map(nodeBox).sort((a, b) => a.y - b.y);
+        for (let k = 1; k < boxes.length; k++) assert.ok(boxes[k].y >= boxes[k - 1].y + boxes[k - 1].h, 'groups overlap');
+        // Each one's output, as the panel plays it, named after it.
+        const out = (i) => graph.nodes.find((n) => n.id === `c${i}_audio`);
+        assert.deepStrictEqual([1, 2, 3].map((i) => out(i).name), ['Channel 1 audio', 'Channel 2 audio', 'Channel 3 audio']);
+        assert.deepStrictEqual(
+            [1, 2, 3].map((i) => [out(i).params.device, out(i).params.channel, out(i).params.muted]),
+            [['', 'both', false], ['headset-2', 'left', false], ['', 'right', true]],
+        );
+        // The ECSS chain keeps its wires to the tracker, under its own ids.
+        assert.ok(graph.wires.some((w) => w[0] === 'c2_decimate' && w[1] === 'middle' && w[2] === 'c2_tracker'));
+    }
+    resetDemodSettings();
+});
+
+t('with several demodulators, From IQ Demod asks which — or all — and says what it replaces', () => {
+    resetDemodSettings();
+    saveDemodSettings(THREE);
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    openPlayground();
+    pg.setGraph(g([]));
+    let r = render(PlaygroundWindow, {}, ctx);
+    const again = () => {
+        r.cleanups.forEach((f) => f());
+        r = render(PlaygroundWindow, {}, ctx);
+    };
+    const btn = (label) => {
+        const b = deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === label);
+        assert.ok(b, `no “${label}” button`);
+        return b;
+    };
+    const picker = () => deep(r.tree).find((n) => cls(n).split(' ').includes('pg-pick'));
+    // Let go however it ends: a render left mounted leaks into the tests after.
+    try {
+        // Asked even on an empty canvas: the question is which.
+        btn('From IQ Demod').props.onClick();
+        again();
+        assert.ok(picker(), 'no choice of demodulator');
+        assert.ok(btn('2 · ECSS · 4.5 kHz · +1.5 kHz (selected)'), 'the selected one is not marked');
+        assert.ok(!/will be replaced/.test(words(picker())), 'an empty canvas is said to be replaced');
+        btn('3 · NFM · 8 kHz · −1.5 kHz').props.onClick();
+        again();
+        assert.ok(!picker());
+        assert.ok(pg.graph.nodes.some((n) => n.type === 'fm-discriminator') && !pg.graph.nodes.some((n) => n.type === 'carrier-tracker'));
+        // With a graph open, the same question says it will be replaced; Cancel keeps it.
+        btn('From IQ Demod').props.onClick();
+        again();
+        assert.match(words(picker()), /will be replaced/);
+        btn('Cancel').props.onClick();
+        again();
+        assert.ok(pg.graph.nodes.some((n) => n.type === 'fm-discriminator'));
+        // All channels.
+        btn('From IQ Demod').props.onClick();
+        again();
+        btn('All channels').props.onClick();
+        again();
+        assert.strictEqual(pg.graph.nodes.filter((n) => n.type === 'audio-out').length, 3);
+    } finally {
+        r.cleanups.forEach((f) => f());
+        closePlayground();
+        resetDemodSettings();
+    }
+});
+
+t('a template asks before replacing a graph, as New does, and loads straight onto an empty canvas', () => {
+    resetDemodSettings();
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    openPlayground();
+    pg.setGraph(g([{ id: 'mine', type: 'signal', x: 40, y: 80 }]));
+    let r = render(PlaygroundWindow, {}, ctx);
+    const again = () => {
+        r.cleanups.forEach((f) => f());
+        r = render(PlaygroundWindow, {}, ctx);
+    };
+    const btn = (label) => {
+        const b = deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === label);
+        assert.ok(b, `no “${label}” button`);
+        return b;
+    };
+    const dialog = () => deep(r.tree).find((n) => cls(n).split(' ').includes('pg-confirm'));
+    // As the Templates menu hands one over.
+    const pick = (tpl) => walk(r.tree).find((n) => n.props && n.props.onTemplate).props.onTemplate(tpl);
+    const tpl = TEMPLATES.find((x) => x.id === 'filter-bench');
+    try {
+        pick(tpl);
+        again();
+        assert.ok(dialog(), 'replaced without asking');
+        assert.match(words(dialog()), new RegExp(`Load “${tpl.title}”\\?.*1 block, will be replaced by the template`));
+        assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['mine'], 'replaced before the answer');
+        btn('Cancel').props.onClick();
+        again();
+        assert.ok(!dialog());
+        assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['mine']);
+        pick(tpl);
+        again();
+        btn('Load it').props.onClick();
+        again();
+        assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id).sort(), tpl.build().nodes.map((n) => n.id).sort());
+        // An empty canvas: no question.
+        pg.setGraph(g([]));
+        again();
+        pick(tpl);
+        again();
+        assert.ok(!dialog(), 'asked about an empty canvas');
+        assert.ok(pg.graph.nodes.length > 0);
+    } finally {
+        r.cleanups.forEach((f) => f());
+        closePlayground();
+    }
 });
 
 t('a shared graph is offered rather than loaded, and the offer can be taken or refused', () => {

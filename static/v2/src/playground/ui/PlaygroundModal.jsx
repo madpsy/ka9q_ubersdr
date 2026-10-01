@@ -14,10 +14,8 @@ import { serverClock } from '../../radio/serverClock.js';
 import { Button, Icon, Modal } from '../../components/ui.jsx';
 import { buildShareUrl } from '../../lib/share.js';
 import { saveText } from '../../lib/saveFile.js';
-import { demodSettings, planForVfo } from '../../lib/iqDemod.js';
 import { emptyGraph, parseGraph, serializeGraph } from '../graph.js';
 import { Runtime } from '../runtime.js';
-import { graphForPlan } from '../fromPlan.js';
 import { encodeShare } from '../share.js';
 import { getPlayground, graphIqWidth, needsReceiver } from '../engine.js';
 import {
@@ -34,6 +32,7 @@ import Inspector from './Inspector.jsx';
 import Palette from './Palette.jsx';
 import { closePlayground, offerSharedGraph, usePlaygroundUi } from './store.js';
 import { holdSpectrum } from '../../lib/spectrumPause.js';
+import { channelSummary, graphFromAllChannels, graphFromIQDemod, iqDemodChannels } from '../fromIQDemod.js';
 
 // The nodes whose readings the cards draw. Others have nothing live to show,
 // and asking for an Audio out's reading would copy its samples back for nothing.
@@ -54,24 +53,7 @@ function streamRateFor(mode, measured) {
     return def ? def.high - def.low : 12000;
 }
 
-/** IQ Demod's selected demodulator as a graph, its output settings carried over. */
-export function graphFromIQDemod(rate) {
-    const s = demodSettings();
-    const vfo = s.vfos[s.active] || s.vfos[0];
-    const g = parseGraph(graphForPlan(planForVfo(vfo), rate, {
-        agc: vfo.agc, gain: vfo.gain, squelchDb: vfo.squelchDb, lockMute: vfo.lockMute, adaptive: true,
-    })).graph;
-    const out = g.nodes.find((n) => n.id === 'audio');
-    if (out) {
-        out.params = {
-            ...out.params,
-            device: vfo.sinkId || '',
-            channel: vfo.pan === 'left' ? 'left' : vfo.pan === 'right' ? 'right' : 'both',
-            muted: !!vfo.muted,
-        };
-    }
-    return autoLayout(g);
-}
+export { graphFromIQDemod, graphFromAllChannels };
 
 /**
  * Compile a graph off to the side, as the worker would: its errors, every
@@ -302,21 +284,53 @@ function SharedOffer({ pending, onLoad }) {
     );
 }
 
-// Before New, Import or From IQ Demod throws away a graph: a canvas cleared by
-// a stray press is hours of wiring gone, and the way to keep a copy is right
-// here.
+// Before New, Import, From IQ Demod or a template throws away a graph: a
+// canvas cleared by a stray press is hours of wiring gone, and the way to keep
+// a copy is right here. A title may name what is coming (`subject`).
 const REPLACING = {
     new: { title: 'Start a new graph?', what: 'will be cleared from the canvas', go: 'Clear it' },
     import: { title: 'Import a graph?', what: 'will be replaced by the file you choose', go: 'Choose file…' },
     demod: { title: 'Load IQ Demod’s demodulator?', what: 'will be replaced by IQ Demod’s selected demodulator', go: 'Replace it' },
+    template: { title: (subject) => `Load “${subject}”?`, what: 'will be replaced by the template', go: 'Load it' },
 };
 
-function ConfirmReplace({ kind, count, onExport, onCancel, onConfirm }) {
-    const t = REPLACING[kind];
+/**
+ * From IQ Demod with more than one demodulator in the panel: which to bring,
+ * or all of them. Also says what it replaces, where there is anything to
+ * replace, so it is the one question rather than two.
+ */
+function PickChannel({ channels, active, count, onExport, onCancel, onPick }) {
     return (
-        <div className="pg-dialog pg-confirm" role="dialog" aria-label={t.title}>
+        <div className="pg-dialog pg-confirm pg-pick" role="dialog" aria-label="Which demodulator?">
             <div className="pg-dialog__card">
-                <div className="pg-dialog__title">{t.title}</div>
+                <div className="pg-dialog__title">Which demodulator?</div>
+                <p>{`IQ Demod has ${channels.length}. Bring one of them, or all of them on one IQ stream, each in a group of its own.`}</p>
+                <div className="pg-pick__list">
+                    {channels.map((c, i) => (
+                        <Button key={i} size="sm" variant={i === active ? 'primary' : 'default'} onClick={() => onPick(i)}>
+                            {`${channelSummary(c, i)}${i === active ? ' (selected)' : ''}`}
+                        </Button>
+                    ))}
+                </div>
+                {count > 0 && <p>{`The graph open now, ${count} ${count === 1 ? 'block' : 'blocks'}, will be replaced. Export it first to keep a copy.`}</p>}
+                <div className="pg-dialog__actions">
+                    {count > 0 && <Button size="sm" variant="ghost" icon={<Icon.Download />} onClick={onExport}>Export</Button>}
+                    <span className="pg-dialog__gap" />
+                    <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
+                    <Button size="sm" variant={count > 0 ? 'danger' : 'primary'} onClick={() => onPick('all')}>All channels</Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ConfirmReplace({ kind, subject, count, onExport, onCancel, onConfirm }) {
+    const t = REPLACING[kind];
+    const title = typeof t.title === 'function' ? t.title(subject) : t.title;
+    return (
+        <div className="pg-dialog pg-confirm" role="dialog" aria-label={title}>
+            <div className="pg-dialog__card">
+                <div className="pg-dialog__title">{title}</div>
                 <p>{`The graph open now, ${count} ${count === 1 ? 'block' : 'blocks'}, ${t.what}. Export it first to keep a copy.`}</p>
                 <div className="pg-dialog__actions">
                     <Button size="sm" variant="ghost" icon={<Icon.Download />} onClick={onExport}>Export</Button>
@@ -361,6 +375,8 @@ export function PlaygroundWindow({ onClose }) {
     const [selection, setPicked] = useState({ nodes: new Set(), wire: null });
     const [notice, setNotice] = useState(null);
     const [asking, setAsking] = useState(null);
+    // The template a 'template' question is about.
+    const [template, setTemplate] = useState(null);
     const [sides, setSides] = useState(readSides);
     // The latest, for two folds before the next render to both count.
     const sidesNow = useRef(sides);
@@ -625,9 +641,20 @@ export function PlaygroundWindow({ onClose }) {
                     onUndo={undo}
                     onRedo={redo}
                     onFit={() => fit()}
-                    onFromDemod={() => (graph.nodes.length ? setAsking('demod') : replace(graphFromIQDemod(rate), 'Loaded IQ Demod’s selected demodulator.'))}
+                    onFromDemod={() => {
+                        if (iqDemodChannels().vfos.length > 1) setAsking('pick');
+                        else if (graph.nodes.length) setAsking('demod');
+                        else replace(graphFromIQDemod(rate), 'Loaded IQ Demod’s selected demodulator.');
+                    }}
                     onNew={() => (graph.nodes.length ? setAsking('new') : replace(emptyGraph(), null))}
-                    onTemplate={(t) => replaceKeepingBack(t.build(rate), `Loaded “${t.title}”. ${t.summary}`)}
+                    onTemplate={(t) => {
+                        if (!graph.nodes.length) {
+                            replace(t.build(rate), `Loaded “${t.title}”. ${t.summary}`);
+                            return;
+                        }
+                        setTemplate(t);
+                        setAsking('template');
+                    }}
                     onAnnotate={add}
                     onImport={() => (graph.nodes.length ? setAsking('import') : chooseFile())}
                     onExport={exportFile}
@@ -641,9 +668,26 @@ export function PlaygroundWindow({ onClose }) {
                     onChange={(e) => { importFile(e.target.files && e.target.files[0]); e.target.value = ''; }}
                 />
             </div>
-            {asking && (
+            {asking === 'pick' && (
+                <PickChannel
+                    channels={iqDemodChannels().vfos}
+                    active={iqDemodChannels().active}
+                    count={graph.nodes.length}
+                    onExport={exportFile}
+                    onCancel={() => setAsking(null)}
+                    onPick={(which) => {
+                        setAsking(null);
+                        const next = which === 'all' ? graphFromAllChannels(rate) : graphFromIQDemod(rate, which);
+                        const what = which === 'all' ? `Loaded all ${iqDemodChannels().vfos.length} of IQ Demod’s demodulators.` : `Loaded IQ Demod’s demodulator ${channelSummary(iqDemodChannels().vfos[which], which)}.`;
+                        if (graph.nodes.length) replaceKeepingBack(next, what);
+                        else replace(next, what);
+                    }}
+                />
+            )}
+            {asking && asking !== 'pick' && (
                 <ConfirmReplace
                     kind={asking}
+                    subject={template && template.title}
                     count={graph.nodes.length}
                     onExport={exportFile}
                     onCancel={() => setAsking(null)}
@@ -651,6 +695,7 @@ export function PlaygroundWindow({ onClose }) {
                         setAsking(null);
                         if (asking === 'import') chooseFile();
                         else if (asking === 'demod') replaceKeepingBack(graphFromIQDemod(rate), 'Loaded IQ Demod’s selected demodulator.');
+                        else if (asking === 'template' && template) replaceKeepingBack(template.build(rate), `Loaded “${template.title}”. ${template.summary}`);
                         else replaceKeepingBack(emptyGraph(), 'Started a new graph.');
                     }}
                 />

@@ -2930,6 +2930,14 @@ type UnifiedUserInfo struct {
 // states before the client has sent its first SET mod / tune command and must not
 // appear in user lists.
 func (sm *SessionManager) GetNonBypassedAudioUsers() []UnifiedUserInfo {
+	return sm.GetAudioUsersForViewer("")
+}
+
+// GetAudioUsersForViewer is GetNonBypassedAudioUsers plus the viewer's own
+// listener (viewerUserSessionID) even when it is bypassed, so a bypassed
+// client still sees itself in its own user list without being shown to anyone
+// else. An empty viewerUserSessionID gives exactly GetNonBypassedAudioUsers.
+func (sm *SessionManager) GetAudioUsersForViewer(viewerUserSessionID string) []UnifiedUserInfo {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -2942,10 +2950,11 @@ func (sm *SessionManager) GetNonBypassedAudioUsers() []UnifiedUserInfo {
 		if session.ClientIP == "" {
 			continue
 		}
-		if sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
+		if session.UserSessionID == "" {
 			continue
 		}
-		if session.UserSessionID == "" {
+		if session.UserSessionID != viewerUserSessionID &&
+			sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
 			continue
 		}
 		// Skip sessions that have not yet been tuned to a frequency.
@@ -3005,6 +3014,15 @@ func (sm *SessionManager) GetNonBypassedAudioUsers() []UnifiedUserInfo {
 		return users[i].CreatedAt.Before(users[j].CreatedAt)
 	})
 	return users
+}
+
+// HasUserSession reports whether any session (audio or spectrum) still exists
+// for userSessionID.
+func (sm *SessionManager) HasUserSession(userSessionID string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	_, exists := sm.userSessionUUIDs[userSessionID]
+	return exists
 }
 
 // canAcceptNewUUIDLocked checks if a new UUID can be accepted without exceeding max_sessions.

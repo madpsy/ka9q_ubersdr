@@ -65,10 +65,9 @@ type KiwiWebSocketHandler struct {
 	gpsdoMonitor       *GPSDOMonitor        // nil when the receiver has no Leo Bodnar GPSDO
 	kiwiRegistrar      *KiwiSDRComRegistrar // may be nil if registration is disabled
 	kiwiRXSlots        map[string]int       // Map userSessionID to RX channel number
-	kiwiVacatedSlots   map[string]int       // Slots that need a clearing user_cb entry on next sendUserList
 	kiwiGeolocations   map[string]string    // Map userSessionID to geolocation string
-	nextRXSlot         int                  // Next available RX slot
-	mu                 sync.RWMutex         // Protects kiwiRXSlots, kiwiVacatedSlots, kiwiGeolocations, and nextRXSlot
+	kiwiLiveConns      map[string]int       // Open SND + W/F sockets per userSessionID
+	mu                 sync.RWMutex         // Protects kiwiRXSlots, kiwiGeolocations and kiwiLiveConns
 
 	// Registry of active SND connections for push-on-disconnect.
 	// Keyed by userSessionID; value is the kiwiConn that owns the SND stream.
@@ -94,9 +93,8 @@ func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioRecei
 		radiod:             sessions.radiod, // Get radiod from sessions
 		noiseFloorMonitor:  noiseFloorMonitor,
 		kiwiRXSlots:        make(map[string]int),
-		kiwiVacatedSlots:   make(map[string]int),
 		kiwiGeolocations:   make(map[string]string),
-		nextRXSlot:         0,
+		kiwiLiveConns:      make(map[string]int),
 		activeSNDConns:     make(map[string]*kiwiConn),
 		snrHistory:         make([]snrMeasRecord, 0, snrHistoryMax),
 	}
@@ -199,40 +197,115 @@ func (kwsh *KiwiWebSocketHandler) SetKiwiRegistrar(r *KiwiSDRComRegistrar) {
 	kwsh.kiwiRegistrar = r
 }
 
-// getOrAssignRXSlot gets or assigns an RX slot number for a Kiwi user
-func (kwsh *KiwiWebSocketHandler) getOrAssignRXSlot(userSessionID string) int {
+// getOrAssignRXSlot returns the RX slot held by userSessionID, assigning a free
+// slot below max_sessions if it has none: the lowest one normally, the highest
+// one when fromTop is set. It returns -1 when every slot is taken.
+//
+// Bypassed users are not counted against max_sessions, so they can push the
+// total past the number of slots. They take slots from the top (fromTop) so
+// that they only compete with regular users, who fill from the bottom, when
+// the receiver is completely full.
+//
+// Slots are freed by pruneRXSlots, not here.
+func (kwsh *KiwiWebSocketHandler) getOrAssignRXSlot(userSessionID string, fromTop bool) int {
 	kwsh.mu.Lock()
 	defer kwsh.mu.Unlock()
 
-	// Check if user already has a slot
 	if slot, exists := kwsh.kiwiRXSlots[userSessionID]; exists {
 		return slot
 	}
 
-	// Assign new slot (RX slots are 0-based: RX0, RX1, RX2, etc.)
-	slot := kwsh.nextRXSlot
-	kwsh.kiwiRXSlots[userSessionID] = slot
-	kwsh.nextRXSlot++
-
-	// Wrap around if we exceed max sessions
-	if kwsh.nextRXSlot >= kwsh.config.Server.MaxSessions {
-		kwsh.nextRXSlot = 0
+	used := make(map[int]bool, len(kwsh.kiwiRXSlots))
+	for _, slot := range kwsh.kiwiRXSlots {
+		used[slot] = true
 	}
-
-	return slot
+	maxSlots := kwsh.config.Server.MaxSessions
+	for n := 0; n < maxSlots; n++ {
+		slot := n
+		if fromTop {
+			slot = maxSlots - 1 - n
+		}
+		if !used[slot] {
+			kwsh.kiwiRXSlots[userSessionID] = slot
+			return slot
+		}
+	}
+	return -1
 }
 
-// releaseRXSlot moves a disconnected user's slot from kiwiRXSlots into
-// kiwiVacatedSlots.  The slot stays visible to sendUserList() so it can emit
-// a clearing {"i": slot} entry to the KiwiSDR frontend on the next user_cb
-// push.  sendUserList() is responsible for deleting entries from
-// kiwiVacatedSlots once the clearing entry has been sent.
-func (kwsh *KiwiWebSocketHandler) releaseRXSlot(userSessionID string) {
+// rxChan is the rx_chan value announced to this KiwiSDR client. A client
+// without a slot is told 0 rather than -1 or anything >= wf_chans: the
+// frontend switches to the audio-FFT display when rx_chan >= wf_chans.
+//
+// It runs from sendInitMessages, after "SET auth", so kc.password is known.
+func (kc *kiwiConn) rxChan() int {
+	bypassed := kc.config.Server.IsIPTimeoutBypassed(kc.clientIP, kc.password)
+	if slot := kc.handler.getOrAssignRXSlot(kc.userSessionID, bypassed); slot >= 0 {
+		return slot
+	}
+	return 0
+}
+
+// addLiveConn and removeLiveConn count the open SND and W/F sockets for a
+// userSessionID. A KiwiSDR client is handed its slot in the init messages,
+// before "SET mod" creates its audio session, so an open socket must hold the
+// slot on its own or pruneRXSlots could hand it to someone else in between.
+func (kwsh *KiwiWebSocketHandler) addLiveConn(userSessionID string) {
 	kwsh.mu.Lock()
 	defer kwsh.mu.Unlock()
-	if slot, exists := kwsh.kiwiRXSlots[userSessionID]; exists {
+	kwsh.kiwiLiveConns[userSessionID]++
+}
+
+func (kwsh *KiwiWebSocketHandler) removeLiveConn(userSessionID string) {
+	kwsh.mu.Lock()
+	defer kwsh.mu.Unlock()
+	if kwsh.kiwiLiveConns[userSessionID] <= 1 {
+		delete(kwsh.kiwiLiveConns, userSessionID)
+	} else {
+		kwsh.kiwiLiveConns[userSessionID]--
+	}
+}
+
+// pruneRXSlots frees the slot (and geolocation) of every userSessionID that has
+// neither an open KiwiSDR socket nor any session left in the session manager.
+// Slots are handed out to WebSDR and native listeners too, and nothing tells
+// this handler when those leave, so this runs before every user list is built.
+func (kwsh *KiwiWebSocketHandler) pruneRXSlots() {
+	kwsh.mu.RLock()
+	candidates := make([]string, 0, len(kwsh.kiwiRXSlots))
+	for userSessionID := range kwsh.kiwiRXSlots {
+		if kwsh.kiwiLiveConns[userSessionID] == 0 {
+			candidates = append(candidates, userSessionID)
+		}
+	}
+	for userSessionID := range kwsh.kiwiGeolocations {
+		if _, hasSlot := kwsh.kiwiRXSlots[userSessionID]; !hasSlot && kwsh.kiwiLiveConns[userSessionID] == 0 {
+			candidates = append(candidates, userSessionID)
+		}
+	}
+	kwsh.mu.RUnlock()
+
+	// Ask the session manager without holding kwsh.mu, so the two locks are
+	// never nested.
+	gone := candidates[:0]
+	for _, userSessionID := range candidates {
+		if !kwsh.sessions.HasUserSession(userSessionID) {
+			gone = append(gone, userSessionID)
+		}
+	}
+	if len(gone) == 0 {
+		return
+	}
+
+	kwsh.mu.Lock()
+	defer kwsh.mu.Unlock()
+	for _, userSessionID := range gone {
+		// A socket may have opened since the snapshot.
+		if kwsh.kiwiLiveConns[userSessionID] > 0 {
+			continue
+		}
 		delete(kwsh.kiwiRXSlots, userSessionID)
-		kwsh.kiwiVacatedSlots[userSessionID] = slot
+		delete(kwsh.kiwiGeolocations, userSessionID)
 	}
 }
 
@@ -425,71 +498,10 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiSMeter(w http.ResponseWriter, r *htt
 //   - An empty slot:      {"i":slot}
 //
 // We return the same data to any caller (no local-IP restriction) since this
-// is a read-only, non-sensitive endpoint that only exposes what the KiwiSDR
-// frontend already shows publicly.
+// is a read-only endpoint that only exposes what the KiwiSDR frontend already
+// shows publicly. Client IPs are never included (see buildUserList).
 func (kwsh *KiwiWebSocketHandler) HandleKiwiUsers(w http.ResponseWriter, r *http.Request) {
-	allUsers := kwsh.sessions.GetNonBypassedAudioUsers()
-	maxSlots := kwsh.config.Server.MaxSessions
-
-	// Build a slot→KiwiUserInfo map for active users.
-	// We use slot index as key so we can fill the full slot array below.
-	slotMap := make(map[int]*KiwiUserInfo, len(allUsers))
-	seenUUIDs := make(map[string]bool, len(allUsers))
-	for _, u := range allUsers {
-		if seenUUIDs[u.UserSessionID] {
-			continue
-		}
-		seenUUIDs[u.UserSessionID] = true
-		if u.FrequencyHz == 0 {
-			continue
-		}
-		rxSlot := kwsh.getOrAssignRXSlot(u.UserSessionID)
-		geoloc := ""
-		if u.Protocol == "kiwi" {
-			geoloc = kwsh.getGeolocation(u.UserSessionID)
-		}
-		tc := int(time.Since(u.CreatedAt).Seconds())
-		tSec := tc % 60
-		tc /= 60
-		tMin := tc % 60
-		tc /= 60
-		tHr := tc
-		connTime := fmt.Sprintf("%d:%02d:%02d", tHr, tMin, tSec)
-
-		slotMap[rxSlot] = &KiwiUserInfo{
-			Occupied:        true,
-			Index:           rxSlot,
-			Name:            kiwiEncodeString(u.DisplayName),
-			Location:        kiwiEncodeString(geoloc),
-			Frequency:       int(u.FrequencyHz),
-			Mode:            u.Mode,
-			Zoom:            0,
-			Waterfall:       0,
-			FreqChange:      0,
-			Time:            connTime,
-			InactivityTimer: 0,
-			RecordNum:       0,
-			AckTime:         "0:00:00",
-			Extension:       "",
-			Antenna:         u.ClientIP,
-			Compression:     0.0,
-			FreqOffset:      0.0,
-			ColorAnt:        0,
-			NoiseCancel:     0,
-			NoiseSubtract:   0,
-		}
-	}
-
-	// Always emit all maxSlots entries (0 … maxSlots-1), matching the real
-	// KiwiSDR which returns [{"i":0},{"i":1},…] even when no one is connected.
-	users := make([]KiwiUserInfo, maxSlots)
-	for i := 0; i < maxSlots; i++ {
-		if entry, ok := slotMap[i]; ok {
-			users[i] = *entry
-		} else {
-			users[i] = KiwiUserInfo{Index: i}
-		}
-	}
+	users := kwsh.buildUserList("")
 
 	jsonData, err := json.Marshal(users)
 	if err != nil {
@@ -1391,6 +1403,9 @@ func (kc *kiwiConn) handle() {
 	if kc.connType == "SND" && kc.handler != nil {
 		kc.handler.registerSNDConn(kc)
 	}
+	if kc.handler != nil {
+		kc.handler.addLiveConn(kc.userSessionID)
+	}
 
 	// Don't send initialization messages yet - wait for SET auth command
 	// The client must send "SET auth t=kiwi p=#" (or with a password) first
@@ -1410,11 +1425,9 @@ func (kc *kiwiConn) handle() {
 	// Order matters:
 	//   1. Unregister this SND conn FIRST so broadcastUserList() does not try
 	//      to send to an already-closed WebSocket.
-	//   2. Destroy the session so GetNonBypassedAudioUsers() no longer returns
-	//      this user.
-	//   3. Move the slot to kiwiVacatedSlots via releaseRXSlot() so the next
-	//      sendUserList() call emits a clearing {"i":slot} entry.
-	//   4. broadcastUserList() pushes the updated list (with the clearing entry)
+	//   2. Destroy the session and drop this socket's hold on the slot, so
+	//      pruneRXSlots() frees it once the paired socket has gone too.
+	//   3. broadcastUserList() pushes the updated list, with this slot empty,
 	//      to every remaining connected KiwiSDR SND client immediately.
 	if kc.connType == "SND" && kc.handler != nil {
 		kc.handler.unregisterSNDConn(kc.userSessionID)
@@ -1425,11 +1438,9 @@ func (kc *kiwiConn) handle() {
 			log.Printf("Error destroying KiwiSDR session: %v", err)
 		}
 	}
-	if kc.handler != nil && kc.userSessionID != "" {
-		kc.handler.releaseRXSlot(kc.userSessionID)
+	if kc.handler != nil {
+		kc.handler.removeLiveConn(kc.userSessionID)
 		if kc.connType == "SND" {
-			// Push the updated user list (with the clearing entry for this slot)
-			// to all remaining connected KiwiSDR SND clients immediately.
 			kc.handler.broadcastUserList()
 		}
 	}
@@ -2296,7 +2307,7 @@ func (kc *kiwiConn) sendInitMessages() {
 		kc.sendMsg("client_public_ip", kc.clientIP)
 
 		// Send RX channel number (which slot this user is assigned to)
-		rxSlot := kc.handler.getOrAssignRXSlot(kc.userSessionID)
+		rxSlot := kc.rxChan()
 		kc.sendMsg("rx_chan", fmt.Sprintf("%d", rxSlot))
 
 		// Check if client is local (same as server or in bypass list)
@@ -2332,7 +2343,10 @@ func (kc *kiwiConn) sendInitMessages() {
 		// URL encoded JSON array: []
 		extListJSON := "%5B%5D"
 		kc.sendMsg("kiwi_up", "1")
-		kc.sendMsg("rx_chan", "1")
+		// The frontend takes rx_chan from this socket (a real KiwiSDR sends
+		// only is_local on SND), so it must be the user's real slot: it picks
+		// the "you" row in the user list.
+		kc.sendMsg("rx_chan", fmt.Sprintf("%d", kc.rxChan()))
 		kc.sendMsg("extint_list_json", extListJSON)
 
 		// Send wf_setup to trigger wf_init() on client
@@ -2616,7 +2630,8 @@ type KiwiUserInfo struct {
 	AckTime string `json:"rs"`
 	// Extension: name of the active KiwiSDR extension (empty string if none).
 	Extension string `json:"e"`
-	// Antenna: client IP address (shown to admin; empty for public view).
+	// Antenna: client IP address. A real KiwiSDR fills it on the admin page
+	// only; buildUserList always leaves it empty.
 	Antenna       string  `json:"a"`
 	Compression   float64 `json:"c"`
 	FreqOffset    float64 `json:"fo"`
@@ -2636,117 +2651,69 @@ func (u KiwiUserInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(plain(u))
 }
 
-// sendUserList sends the list of active users in KiwiSDR format.
-// It includes all non-bypassed audio listeners regardless of which protocol
-// they connected through (KiwiSDR, WebSDR, or native UberSDR).
-func (kc *kiwiConn) sendUserList() {
-	allUsers := kc.sessions.GetNonBypassedAudioUsers()
+// buildUserList returns the user list in KiwiSDR format: exactly max_sessions
+// entries in slot order, a full object for each occupied slot and {"i":N} for
+// each empty one. That is what a real KiwiSDR sends every time, and the frontend
+// relies on it: it applies the entries in order and redraws row N from entry N,
+// so one entry per slot means no row is ever left stale or blanked by a
+// duplicate.
+//
+// Listeners of every protocol (KiwiSDR, WebSDR, native UberSDR) are included.
+// Bypassed listeners are hidden, except that viewerUserSessionID always sees
+// itself. "a" (client IP) is always empty: a real KiwiSDR only fills it on the
+// admin page, and the frontend shows it to whoever receives it.
+func (kwsh *KiwiWebSocketHandler) buildUserList(viewerUserSessionID string) []KiwiUserInfo {
+	maxSlots := kwsh.config.Server.MaxSessions
+	if maxSlots <= 0 {
+		return []KiwiUserInfo{}
+	}
 
-	// Build KiwiUserInfo entries, assigning a stable RX slot per user session.
-	userMap := make(map[string]*KiwiUserInfo, len(allUsers))
+	kwsh.pruneRXSlots()
 
-	for _, u := range allUsers {
-		if _, exists := userMap[u.UserSessionID]; exists {
-			continue
-		}
-		// Safety net: never send a zero-frequency entry to the client.
-		// GetNonBypassedAudioUsers already filters these, but guard here too
-		// in case a session is in a transient untuned state.
+	users := make([]KiwiUserInfo, maxSlots)
+	for i := range users {
+		users[i] = KiwiUserInfo{Index: i}
+	}
+
+	// Oldest listener first, so slots are assigned in a stable order.
+	for _, u := range kwsh.sessions.GetAudioUsersForViewer(viewerUserSessionID) {
 		if u.FrequencyHz == 0 {
 			continue
 		}
+		// Everyone listed is non-bypassed apart from, possibly, the viewer,
+		// whose own socket has already claimed its slot (from the top if it
+		// is bypassed), so false only affects listeners without one yet.
+		rxSlot := kwsh.getOrAssignRXSlot(u.UserSessionID, false)
+		if rxSlot < 0 || rxSlot >= maxSlots || users[rxSlot].Occupied {
+			continue
+		}
 
-		rxSlot := kc.handler.getOrAssignRXSlot(u.UserSessionID)
-
-		// For KiwiSDR users, also look up geolocation set via SET geoloc.
 		geoloc := ""
 		if u.Protocol == "kiwi" {
-			geoloc = kc.handler.getGeolocation(u.UserSessionID)
+			geoloc = kwsh.getGeolocation(u.UserSessionID)
 		}
 
-		timeConnected := int(time.Since(u.CreatedAt).Seconds())
+		// Connected time as "H:MM:SS", matching the real KiwiSDR.
+		tc := int(time.Since(u.CreatedAt).Seconds())
+		connTime := fmt.Sprintf("%d:%02d:%02d", tc/3600, tc/60%60, tc%60)
 
-		// Format connected time as "H:MM:SS" matching the real KiwiSDR.
-		tc := timeConnected
-		tSec := tc % 60
-		tc /= 60
-		tMin := tc % 60
-		tc /= 60
-		tHr := tc
-		connTime := fmt.Sprintf("%d:%02d:%02d", tHr, tMin, tSec)
-
-		entry := &KiwiUserInfo{
-			Occupied:        true,
-			Index:           rxSlot,
-			Name:            kiwiEncodeString(u.DisplayName),
-			Location:        kiwiEncodeString(geoloc),
-			Frequency:       int(u.FrequencyHz),
-			Mode:            u.Mode,
-			Zoom:            0,
-			Waterfall:       0,
-			FreqChange:      0,
-			Time:            connTime,
-			InactivityTimer: 0,
-			RecordNum:       0,
-			AckTime:         "0:00:00",
-			Extension:       "", // KiwiSDR extension name; empty if none active
-			Antenna:         u.ClientIP,
-			Compression:     0.0,
-			FreqOffset:      0.0,
-			ColorAnt:        0,
-			NoiseCancel:     0,
-			NoiseSubtract:   0,
-		}
-		userMap[u.UserSessionID] = entry
-	}
-
-	// Build the final slice: active users + empty entries for vacated slots.
-	// The JS user_cb() clears a slot when it receives an entry with an
-	// undefined/empty "n" field, so we must send {"i": slot} for every slot
-	// that is assigned but no longer occupied.
-	users := make([]KiwiUserInfo, 0, len(userMap))
-
-	// Active users.
-	for _, user := range userMap {
-		users = append(users, *user)
-	}
-
-	// Collect clearing entries and the set of vacated sessionIDs to delete
-	// after we drop the read lock.
-	var toDelete []string
-
-	kc.handler.mu.RLock()
-	// 1. Slots that were explicitly vacated by releaseRXSlot() on disconnect.
-	//    These MUST be cleared even if the session no longer appears in
-	//    kiwiRXSlots (which is the whole point of kiwiVacatedSlots).
-	for sessionID, slot := range kc.handler.kiwiVacatedSlots {
-		if _, active := userMap[sessionID]; !active {
-			users = append(users, KiwiUserInfo{Index: slot})
-			toDelete = append(toDelete, sessionID)
+		users[rxSlot] = KiwiUserInfo{
+			Occupied:  true,
+			Index:     rxSlot,
+			Name:      kiwiEncodeString(u.DisplayName),
+			Location:  kiwiEncodeString(geoloc),
+			Frequency: int(u.FrequencyHz),
+			Mode:      u.Mode,
+			Time:      connTime,
+			AckTime:   "0:00:00",
 		}
 	}
-	// 2. Slots still in kiwiRXSlots that belong to sessions no longer active
-	//    (e.g. WebSDR users whose slots were assigned here but never released).
-	for sessionID, slot := range kc.handler.kiwiRXSlots {
-		if _, active := userMap[sessionID]; !active {
-			users = append(users, KiwiUserInfo{Index: slot})
-		}
-	}
-	kc.handler.mu.RUnlock()
+	return users
+}
 
-	// Delete the vacated entries now that the clearing message has been built.
-	if len(toDelete) > 0 {
-		kc.handler.mu.Lock()
-		for _, sessionID := range toDelete {
-			delete(kc.handler.kiwiVacatedSlots, sessionID)
-		}
-		kc.handler.mu.Unlock()
-	}
-
-	// Sort by RX slot for consistent ordering.
-	sort.Slice(users, func(i, j int) bool {
-		return users[i].Index < users[j].Index
-	})
+// sendUserList sends this client's user list as MSG user_cb=<json>.
+func (kc *kiwiConn) sendUserList() {
+	users := kc.handler.buildUserList(kc.userSessionID)
 
 	// Marshal to compact JSON and send as MSG user_cb=<json>.
 	jsonData, err := json.Marshal(users)

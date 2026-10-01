@@ -4,6 +4,7 @@ import { useDisplay } from '../display/DisplayContext.jsx';
 import FrequencyDial from '../components/FrequencyDial.jsx';
 import FilterReset from '../components/FilterReset.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
+import { MarginPicker } from './AudioPanel.jsx';
 import { VFO_IDS, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import {
     AGC_CONTROLS, FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MODES, MODE_BY_ID, TUNING_STEPS,
@@ -214,6 +215,12 @@ export default function ReceiverPanel({ minimal }) {
                         <span className="passband__mode">{mode.label}</span>
                         <span>{tuning.bandwidthHigh} Hz</span>
                     </div>
+
+                    {/* The Audio panel's quality slider, repeated here in IQ
+                        only: it is the one thing left to adjust about an IQ
+                        stream, and this is where IQ is chosen. Outside IQ it
+                        does nothing, so it stays in the Audio panel. */}
+                    {iq && <MarginPicker />}
 
                     {hasAGCSettings(tuning.mode) && <AGCSettings />}
 

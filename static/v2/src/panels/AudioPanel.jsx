@@ -38,7 +38,10 @@ const IQ_CHANNELS = [
 // IQ -- a demodulated channel is already an order of magnitude cheaper, and the
 // server ignores the request there -- so it says so rather than appearing to do
 // nothing.
-function MarginPicker() {
+//
+// Exported for the Receiver panel, which shows the same control in IQ: there
+// it sits beside the fixed filter width, the other number IQ decides for you.
+export function MarginPicker() {
     const { audio, actions, tuning } = useRadio();
     const iq = isIQ(tuning.mode);
     // Dragging shows locally and commits on release, so a drag across the track

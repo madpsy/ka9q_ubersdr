@@ -23947,13 +23947,23 @@ const tooltipLine2 = timeStr;
             }
             const serverTimeStr = ntpData.server_time ? new Date(ntpData.server_time).toLocaleString(undefined, {timeZoneName: 'short'}) : 'N/A';
             const ntpTimeStr = ntpData.ntp_time ? new Date(ntpData.ntp_time).toLocaleString(undefined, {timeZoneName: 'short'}) : 'N/A';
+            // Which source the host's time daemon has selected - information only, not health
+            let hostSourceStr = 'Unknown';
+            if (ntpData.served_by_ubersdr_ntp) {
+                hostSourceStr = '<strong style="color: #28a745;">UberSDR NTP</strong>';
+            } else if (ntpData.host_time_source) {
+                hostSourceStr = `<strong>${escapeHtml(ntpData.host_time_source)}</strong> (not UberSDR NTP)`;
+            } else if (ntpData.host_time_source_checked) {
+                hostSourceStr = 'No source selected';
+            }
 
             const statusBannerHTML = `
                 <div style="margin-bottom: 15px; padding: 15px; background: ${healthy ? '#d4edda' : '#f8d7da'}; border: 1px solid ${healthy ? '#c3e6cb' : '#f5c6cb'}; border-radius: 5px;">
                     <strong style="font-size: 16px;">${statusIcon} Status: ${healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
                     <span style="color: #666; font-size: 14px;">Synced: <strong style="color: ${ntpData.synced ? '#28a745' : '#dc3545'};">${ntpData.synced ? 'Yes' : 'No'}</strong></span><br>
                     <span style="color: #666; font-size: 13px; margin-top: 6px; display: inline-block;">🖥️ System Time: <strong>${serverTimeStr}</strong></span><br>
-                    <span style="color: #666; font-size: 13px;">🌐 NTP Time: <strong>${ntpTimeStr}</strong></span>
+                    <span style="color: #666; font-size: 13px;">🌐 NTP Time: <strong>${ntpTimeStr}</strong></span><br>
+                    <span style="color: #666; font-size: 13px;">🛰️ Host Time Source: ${hostSourceStr}</span>
                     ${issuesHTML}
                 </div>`;
 

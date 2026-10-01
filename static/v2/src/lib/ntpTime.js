@@ -427,20 +427,25 @@ export function referenceOf(time, status) {
         return { kind: 'none', text: '—', sub: 'unsynchronised', detail: '' };
     }
     const served = (status && status.served) || null;
-    const names = (served && served.used_names) || [];
+    // Addresses stay in the API and off the panel: above stratum 1 the refid is the
+    // upstream's address, and an upstream configured by address is named by it too. An
+    // address is treated as no refid, and as a source with no name.
+    const allNames = (served && served.used_names) || [];
+    const names = allNames.filter((n) => !isAddress(n));
+    const unnamed = names.length ? '' : (allNames.length ? 'upstream server' : '');
     const mix = stationMix(status && status.sources);
-    const refid = time.refid || '';
+    const refid = isAddress(time.refid) ? '' : (time.refid || '');
     if (mix) {
         return {
             kind: 'radio',
             text: mix.text,
-            sub: names.length ? names.join(', ') : 'off air',
-            detail: `${mix.detail} · refid ${refid}`,
+            sub: names.length ? names.join(', ') : (unnamed || 'off air'),
+            detail: refid ? `${mix.detail} · refid ${refid}` : mix.detail,
         };
     }
     // No radio source in the answer. Either the status document has not been read yet — in
     // which case the stratum still says which class is serving — or the time has failed over
-    // to an upstream, whose refid is its address.
+    // to an upstream.
     const upstream = Number(time.stratum) > 1;
     if (!upstream && !status) {
         return { kind: 'radio', text: refid || 'radio', sub: 'naming sources…', detail: '' };
@@ -448,9 +453,18 @@ export function referenceOf(time, status) {
     return {
         kind: upstream ? 'ntp' : 'radio',
         text: upstream ? 'NTP' : (refid || 'radio'),
-        sub: names.length ? names.join(', ') : (refid || '—'),
-        detail: `refid ${refid}`,
+        sub: names.length ? names.join(', ') : (unnamed || refid || (upstream ? 'upstream server' : '—')),
+        detail: refid ? `refid ${refid}` : '',
     };
+}
+
+/** Whether a refid is an IPv4 or IPv6 address rather than a reference's name. */
+export function isAddress(refid) {
+    const s = String(refid || '').trim();
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) return true;
+    // IPv6, bare or bracketed, with or without a zone; an embedded IPv4 tail is allowed.
+    const v6 = s.replace(/^\[(.*)\]$/, '$1').replace(/%[^%]*$/, '');
+    return v6.includes(':') && /^[0-9a-f:.]+$/i.test(v6);
 }
 
 /**
@@ -464,7 +478,8 @@ export function servingNote(status) {
     const k = (status && status.clock) || null;
     if (!k) return null;
     if (k.serving === 'secondary') {
-        return { tone: 'bad', text: `failed over to ${k.secondary || 'standby'}` };
+        const to = k.secondary && !isAddress(k.secondary) ? k.secondary : 'standby';
+        return { tone: 'bad', text: `failed over to ${to}` };
     }
     if (k.serving === 'coasting') {
         return { tone: 'warn', text: 'coasting — no source is ready' };

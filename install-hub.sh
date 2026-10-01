@@ -311,7 +311,48 @@ fi
 echo "Installing dependencies..."
 sudo apt update
 sudo apt upgrade -y
-sudo apt install -y sudo nano cron ntpsec libfftw3-bin libwebsockets19t64 ssh tmux btop htop jq
+sudo apt install -y sudo nano cron chrony libfftw3-bin libwebsockets19t64 ssh tmux btop htop jq
+
+# Configure chrony. The first line marks a config we have already installed, so
+# re-runs leave it (and any local edits below that line) alone.
+CHRONY_CONF=/etc/chrony/chrony.conf
+CHRONY_MARKER="# ubersdr-ntp configuration"
+if [ "$(head -n 1 "$CHRONY_CONF" 2>/dev/null)" = "$CHRONY_MARKER" ]; then
+    echo "chrony already configured for ubersdr-ntp - leaving $CHRONY_CONF unchanged."
+else
+    echo "Configuring chrony..."
+    sudo tee "$CHRONY_CONF" > /dev/null <<'EOF'
+# ubersdr-ntp configuration
+
+# Local ubersdr-ntp source
+server 127.0.0.1 iburst minpoll 4 maxpoll 6
+
+# Cloudflare NTP fallback/reference source
+server time.cloudflare.com iburst
+
+# Allow large corrections to be stepped at any time
+makestep 0.1 -1
+
+# Clock drift
+driftfile /var/lib/chrony/chrony.drift
+
+# Measurement history
+dumpdir /var/lib/chrony
+
+# Hardware timestamping
+hwtimestamp *
+
+# Don't serve NTP
+# No "allow" directive
+
+# Keep RTC synchronized
+rtcsync
+
+# Only one source is required
+minsources 1
+EOF
+    sudo systemctl restart chrony
+fi
 
 # Disable IPv6 on the external interface to prevent Docker NAT issues with client
 # IP detection. When IPv6 clients connect to IPv4-only Docker containers, the kernel

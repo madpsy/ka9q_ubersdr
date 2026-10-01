@@ -1876,6 +1876,20 @@ rotctl:
   # The elevation will remain at its current position
   park_azimuth: 0
 
+  # Position tolerance in degrees (default: 2, allowed range: 1-15)
+  # How close the rotator must get to the target for a move to count as reached.
+  # Many rotators stop a little short or overshoot because their controller has
+  # a deadband and won't act on a small correction.
+  #
+  # There is also a wider "close enough" stop at 250% of this value
+  # (2° -> 5°). If the rotator stops moving within that wider window for 10
+  # seconds, or is still creeping in when the 90 second move timeout expires,
+  # the move is accepted instead of being retried and reported as stuck.
+  # Raise this if your rotator regularly settles a few degrees off target.
+  # Values outside 1-15 are clamped to that range.
+  # The wider "close enough" stop only applies when verify_position is true.
+  tolerance: 2
+
   # Position Verification (recommended: true)
   # When enabled, the system will:
   # - Track rotator movement to verify it reaches the target bearing

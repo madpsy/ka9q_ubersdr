@@ -23,11 +23,30 @@ type NtpHealthStatus struct {
 	NTPServer   string   `json:"ntp_server"`
 	ToleranceMs int      `json:"tolerance_ms"`
 	Issues      []string `json:"issues"`
+
+	// The source the host's time daemon has selected, information only.
+	// HostTimeSourceChecked is false when the host could not be asked.
+	HostTimeSourceChecked bool   `json:"host_time_source_checked"`
+	HostTimeSource        string `json:"host_time_source,omitempty"`
+	ServedByUberSDRNTP    bool   `json:"served_by_ubersdr_ntp"`
 }
 
 // buildNTPHealthPayload builds the NtpHealthStatus payload from global NTP state.
 // This is the same data returned by GET /admin/ntp-health and published to MQTT.
 func buildNTPHealthPayload(cfg *Config) NtpHealthStatus {
+	status := buildNTPHealthStatus(cfg)
+
+	globalHostTimeSource.mu.RLock()
+	status.HostTimeSourceChecked = globalHostTimeSource.checked
+	status.HostTimeSource = globalHostTimeSource.source
+	globalHostTimeSource.mu.RUnlock()
+	status.ServedByUberSDRNTP = status.HostTimeSource == ubersdrNTPSource
+
+	return status
+}
+
+// buildNTPHealthStatus builds the health fields from the cached NTP poll.
+func buildNTPHealthStatus(cfg *Config) NtpHealthStatus {
 	toleranceMs := cfg.NTP.SyncToleranceMs
 	if toleranceMs <= 0 {
 		toleranceMs = 500
@@ -253,13 +272,17 @@ func StartNTPChecker(cfg *Config) {
 	log.Printf("NTP: starting checker (polling every %v, server: %s)", ntpPollInterval, cfg.NTP.ntpServer())
 
 	// Initial poll at startup.
-	go pollNTP(cfg)
+	go func() {
+		pollNTP(cfg)
+		pollHostTimeSource(cfg)
+	}()
 
 	go func() {
 		ticker := time.NewTicker(ntpPollInterval)
 		defer ticker.Stop()
 		for range ticker.C {
 			pollNTP(cfg)
+			pollHostTimeSource(cfg)
 		}
 	}()
 }

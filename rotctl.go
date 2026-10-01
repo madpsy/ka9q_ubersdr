@@ -595,13 +595,22 @@ type RotatorController struct {
 	maxRetries         int
 	retryTimeout       time.Duration
 	stuckThreshold     time.Duration
+	settleThreshold    time.Duration
 	successTolerance   float64
 	closeTolerance     float64
 	moveErrorPos       Position // where the rotator was when MoveError was set
 }
 
-// NewRotatorController creates a new rotator controller
-func NewRotatorController(host string, port int, verifyPosition bool) *RotatorController {
+// closeTolerancePercent sets the "close enough" stop as a percentage of the
+// configured tolerance. A rotator that stops beyond the tolerance but within
+// this (e.g. 2° tolerance -> 5°) is accepted rather than retried, because the
+// controller's own deadband won't act on such a small correction.
+const closeTolerancePercent = 250.0
+
+// NewRotatorController creates a new rotator controller. tolerance is how close
+// in degrees the rotator must get for a move to count as reached.
+func NewRotatorController(host string, port int, verifyPosition bool, tolerance float64) *RotatorController {
+	closeTolerance := tolerance * closeTolerancePercent / 100
 	return &RotatorController{
 		client: NewRotctlClient(host, port),
 		state: &RotatorState{
@@ -618,8 +627,9 @@ func NewRotatorController(host string, port int, verifyPosition bool) *RotatorCo
 		maxRetries:         3,                // Maximum retry attempts
 		retryTimeout:       90 * time.Second, // 90 seconds per attempt
 		stuckThreshold:     30 * time.Second, // Declare stuck after 30s of no movement
-		successTolerance:   2.0,              // Within 2° = success
-		closeTolerance:     5.0,              // Within 5° after timeout = close enough
+		settleThreshold:    10 * time.Second, // Stopped within closeTolerance for 10s = done
+		successTolerance:   tolerance,        // Within tolerance = success
+		closeTolerance:     closeTolerance,   // After timeout or settling = close enough
 	}
 }
 
@@ -695,10 +705,7 @@ func (rc *RotatorController) UpdateState() error {
 		if azDiff <= rc.successTolerance && elDiff <= rc.successTolerance {
 			log.Printf("Rotator reached target: azimuth=%.1f°, elevation=%.1f° (within %.1f°)",
 				pos.Azimuth, pos.Elevation, rc.successTolerance)
-			rc.state.Moving = false
-			rc.targetPos = nil
-			rc.retryCount = 0
-			rc.positionHistory = rc.positionHistory[:0] // Clear history
+			rc.finishMove()
 			return nil
 		}
 
@@ -718,10 +725,7 @@ func (rc *RotatorController) UpdateState() error {
 				if azDiff <= rc.closeTolerance && elDiff <= rc.closeTolerance {
 					log.Printf("Rotator close enough after timeout: %.1f° from target (tolerance: %.1f°)",
 						max(azDiff, elDiff), rc.closeTolerance)
-					rc.state.Moving = false
-					rc.targetPos = nil
-					rc.retryCount = 0
-					rc.positionHistory = rc.positionHistory[:0]
+					rc.finishMove()
 					return nil
 				}
 
@@ -732,6 +736,17 @@ func (rc *RotatorController) UpdateState() error {
 		} else {
 			// Not moving - check if stuck
 			timeSinceMovement := now.Sub(rc.lastMovementTime)
+
+			// Stopped just short of the target. Controllers have their own
+			// deadband and won't act on a small correction, so retrying would
+			// only burn the retries and end in a false MoveError.
+			if timeSinceMovement > rc.settleThreshold && azDiff <= rc.closeTolerance && elDiff <= rc.closeTolerance {
+				log.Printf("Rotator settled close to target: %.1f° off (tolerance: %.1f°)",
+					max(azDiff, elDiff), rc.closeTolerance)
+				rc.finishMove()
+				return nil
+			}
+
 			if timeSinceMovement > rc.stuckThreshold {
 				log.Printf("Rotator stuck (no movement for %v), %.1f° from target", timeSinceMovement, max(azDiff, elDiff))
 				rc.retryCommand()
@@ -1059,6 +1074,14 @@ func (rc *RotatorController) hasConsistentDirection() bool {
 	return consistency > 0.8
 }
 
+// finishMove ends tracking of the current target. Callers hold rc.mu.
+func (rc *RotatorController) finishMove() {
+	rc.state.Moving = false
+	rc.targetPos = nil
+	rc.retryCount = 0
+	rc.positionHistory = rc.positionHistory[:0]
+}
+
 // retryCommand retries the position command if within retry limits
 func (rc *RotatorController) retryCommand() {
 	if rc.retryCount >= rc.maxRetries {
@@ -1068,10 +1091,7 @@ func (rc *RotatorController) retryCommand() {
 			rc.targetPos.Azimuth, rc.maxRetries, rc.state.Position.Azimuth)
 		rc.state.MoveErrorAt = time.Now()
 		rc.moveErrorPos = *rc.state.Position
-		rc.state.Moving = false
-		rc.targetPos = nil
-		rc.retryCount = 0
-		rc.positionHistory = rc.positionHistory[:0]
+		rc.finishMove()
 		return
 	}
 

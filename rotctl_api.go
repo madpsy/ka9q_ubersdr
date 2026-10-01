@@ -20,6 +20,7 @@ type RotctlConfig struct {
 	UpdateInterval int     `yaml:"update_interval"` // Update interval in milliseconds (default: 2000)
 	ParkAzimuth    float64 `yaml:"park_azimuth"`    // Azimuth to move to when park command is executed (default: 0)
 	VerifyPosition bool    `yaml:"verify_position"` // Enable position verification and auto-retry (default: true)
+	Tolerance      float64 `yaml:"tolerance"`       // Degrees from target that count as reached (default: 2, clamped to 1-15)
 }
 
 // RotctlAPIHandler handles HTTP API requests for rotator control
@@ -61,6 +62,18 @@ func NewRotctlAPIHandler(config *RotctlConfig) (*RotctlAPIHandler, error) {
 		config.UpdateInterval = 2000 // Default 2000ms (2 seconds)
 	}
 
+	if config.Tolerance == 0 {
+		config.Tolerance = 2.0 // Default 2°
+	}
+	if config.Tolerance < 1 || config.Tolerance > 15 {
+		clamped := 1.0
+		if config.Tolerance > 15 {
+			clamped = 15.0
+		}
+		log.Printf("Warning: rotctl tolerance %.1f° out of range, using %.1f° (allowed 1-15°)", config.Tolerance, clamped)
+		config.Tolerance = clamped
+	}
+
 	// VerifyPosition defaults to true if not explicitly set
 	// Note: In YAML, booleans default to false, so we assume true unless explicitly disabled
 	// This is handled by checking if it's false and the user likely wants it enabled
@@ -74,7 +87,7 @@ func NewRotctlAPIHandler(config *RotctlConfig) (*RotctlAPIHandler, error) {
 		log.Printf("Warning: No rotctl password set - operating in READ-ONLY mode")
 	}
 
-	controller := NewRotatorController(config.Host, config.Port, verifyPosition)
+	controller := NewRotatorController(config.Host, config.Port, verifyPosition, config.Tolerance)
 
 	handler := &RotctlAPIHandler{
 		controller:  controller,

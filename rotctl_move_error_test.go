@@ -65,7 +65,7 @@ func (f *fakeRotctld) setAzimuth(az float64) {
 func newTestController(t *testing.T, f *fakeRotctld) *RotatorController {
 	t.Helper()
 	addr := f.ln.Addr().(*net.TCPAddr)
-	rc := NewRotatorController("127.0.0.1", addr.Port, true)
+	rc := NewRotatorController("127.0.0.1", addr.Port, true, 2.0)
 	rc.stuckThreshold = time.Millisecond
 	if err := rc.Connect(); err != nil {
 		t.Fatal(err)
@@ -153,5 +153,30 @@ func TestRotatorMoveErrorSurvivesPositionPolls(t *testing.T) {
 	}
 	if s := rc.GetState(); s.MoveError != nil || !s.MoveErrorAt.IsZero() {
 		t.Fatalf("move failure not cleared once the rotator moved: %v", s.MoveError)
+	}
+}
+
+func TestRotatorSettledCloseToTargetIsNotAFailure(t *testing.T) {
+	f := newFakeRotctld(t, 90)
+	rc := newTestController(t, f)
+	rc.settleThreshold = time.Millisecond
+
+	// Stopping 4° short is outside the 2° tolerance but within the 5° close stop:
+	// the controller's deadband won't act on it, so retrying can't help.
+	if err := rc.SetAzimuth(94); err != nil {
+		t.Fatal(err)
+	}
+	pollUntilStopped(t, rc)
+	if s := rc.GetState(); s.MoveError != nil {
+		t.Fatalf("settling within closeTolerance was reported as a failure: %v", s.MoveError)
+	}
+
+	// Stopping well short still fails.
+	if err := rc.SetAzimuth(110); err != nil {
+		t.Fatal(err)
+	}
+	pollUntilStopped(t, rc)
+	if rc.GetState().MoveError == nil {
+		t.Fatal("expected MoveError for a rotator stuck 20° from target")
 	}
 }

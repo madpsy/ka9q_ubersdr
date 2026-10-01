@@ -49,7 +49,7 @@ const {
     deviceHistoryAdd, deviceLabel, deviceSeries, deviceTone, deviceVerdict, deviceWithin,
     DEVICE_HOLD_S, DEVICE_WINDOW_S, dialEdge, dialPos, dialSpan, dispersionTone,
     CLOCK_KEYS, browserZone, clockFaces, faceDateAt, facePartsAt, faceFor, faceText,
-    formatDur, formatMs, localIsUtc, newClock, nextFaceKey, nextSecondDelay, ntpAvailable,
+    formatDur, formatMs, isAddress, localIsUtc, newClock, nextFaceKey, nextSecondDelay, ntpAvailable,
     offsetText, receiverOffsetMin, referenceKey, referenceOf, sampleFrom, saveBigClock,
     saveShowRef, saveShowMs, savedBigClock, savedShowRef, savedShowMs, servingNote,
     staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText, zoneOffsetMin,
@@ -420,6 +420,7 @@ t('a failover to the network is not dressed up as stratum 1', () => {
     assert.strictEqual(r.kind, 'ntp');
     assert.strictEqual(r.text, 'NTP');
     assert.strictEqual(r.sub, 'time.cloudflare.com');
+    assert.ok(!r.detail.includes('162.159.200.123'));
 });
 
 t('before the source document has been read, the stratum still says which class', () => {
@@ -428,7 +429,36 @@ t('before the source document has been read, the stratum still says which class'
     assert.strictEqual(radio.text, 'WWV');
     const net = referenceOf({ synchronised: true, stratum: 3, refid: '1.2.3.4' }, null);
     assert.strictEqual(net.kind, 'ntp');
-    assert.strictEqual(net.sub, '1.2.3.4');
+    // The upstream's address is its refid; the panel does not show it.
+    assert.strictEqual(net.sub, 'upstream server');
+    assert.ok(!net.detail.includes('1.2.3.4'));
+});
+
+t('an address refid is never shown, IPv4 or IPv6', () => {
+    for (const a of ['1.2.3.4', '162.159.200.123', '2606:4700:f1::123', '::1', '[2001:db8::1]',
+        'fe80::1%eth0', '::ffff:192.0.2.1']) {
+        assert.ok(isAddress(a), a);
+        const r = referenceOf({ synchronised: true, stratum: 3, refid: a }, { served: {} });
+        assert.ok(!r.text.includes(a) && !r.sub.includes(a) && !r.detail.includes(a), a);
+        assert.strictEqual(r.sub, 'upstream server');
+    }
+    // An upstream configured by address is named by it: the name is hidden too, and the
+    // rest of the names still show.
+    for (const a of ['162.159.200.123', '2606:4700:f1::123']) {
+        const only = referenceOf(
+            { synchronised: true, stratum: 3, refid: a }, { served: { used_names: [a] } });
+        assert.strictEqual(only.sub, 'upstream server', a);
+        const mixed = referenceOf(
+            { synchronised: true, stratum: 3, refid: a },
+            { served: { used_names: [a, 'time.cloudflare.com'] } });
+        assert.strictEqual(mixed.sub, 'time.cloudflare.com', a);
+        assert.deepStrictEqual(
+            servingNote({ clock: { serving: 'secondary', secondary: a } }),
+            { tone: 'bad', text: 'failed over to standby' });
+    }
+    for (const n of ['WWV', 'WWVH', 'TDF', 'GPS', 'DCF', '', null]) assert.ok(!isAddress(n), String(n));
+    // A radio refid still reads as the station.
+    assert.strictEqual(referenceOf({ synchronised: true, stratum: 1, refid: 'WWV' }, null).text, 'WWV');
 });
 
 t('the arrangement working is worth no words at all', () => {

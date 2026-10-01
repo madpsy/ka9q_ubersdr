@@ -42,10 +42,10 @@ const {
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
     TRACK_DEFAULT, TRACK_MAX, TRACK_MIN, clampTrack,
     VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
-    designLowpass, expandActiveVfo, getIQDemod, offsetLimits, passbandFor, planFor,
+    designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth,
+    vfoPassband, vfoWidth, setIQSpan,
 } = require('./.build/iqdemod.cjs');
 
 // Storage that actually remembers, so the settings tests exercise the real path
@@ -1346,6 +1346,59 @@ t('a width too wide for the span leaves the offset with nowhere to go', () => {
     const { min, max } = offsetLimits('nfm', 12000);
     assert.strictEqual(min, 0);
     assert.strictEqual(max, 0);
+});
+
+// The widest any demodulator's filter may be, whatever the stream: the 12 kHz
+// of plain IQ, which is already more than any listening mode needs.
+const IQ_SPAN_CAP = 12000;
+
+t('the reach follows the stream rate, and a narrower stream pulls offsets back in', () => {
+    fresh({ mode: 'usb', widths: { usb: 2700 } });
+    assert.strictEqual(iqHalfSpan(), IQ_HALF_SPAN);
+    // A 48 kHz stream reaches ±24 kHz, so a demodulator can go out to +20.
+    assert.strictEqual(setIQSpan(48000), true);
+    assert.strictEqual(iqHalfSpan(), 24000);
+    assert.deepStrictEqual(offsetLimits('usb', 2700), { min: -24000, max: 24000 - 2700 });
+    updateVfo(0, { offsetHz: 20000 });
+    assert.strictEqual(vfo0().offsetHz, 20000);
+    // The same rate again is not a change, and republishes nothing.
+    assert.strictEqual(setIQSpan(48000), false);
+    // Back to plain IQ: the offset it can no longer reach comes in to the edge.
+    assert.strictEqual(setIQSpan(12000), true);
+    assert.strictEqual(vfo0().offsetHz, IQ_HALF_SPAN - 2700);
+    // Only the reach widens: the filter widths keep their listening-sized caps,
+    // so a 48 kHz stream does not offer a 48 kHz USB filter.
+    for (const m of DEMOD_MODES) {
+        assert.strictEqual(clampWidth(m.id, 1e6), m.max, m.id);
+        assert.ok(m.max <= IQ_SPAN_CAP, m.id);
+    }
+    // And forgetting the settings forgets the span with them.
+    setIQSpan(96000);
+    resetDemodSettings();
+    assert.strictEqual(iqHalfSpan(), IQ_HALF_SPAN);
+});
+
+t('the engine takes its reach from the rate the packets arrive at', () => {
+    fresh();
+    const gain = () => ({ gain: { value: 1, setTargetAtTime() {} }, connect() {}, disconnect() {} });
+    const ctx = {
+        state: 'running', currentTime: 0, destination: {},
+        createGain: gain,
+        createStereoPanner: () => ({ pan: { setTargetAtTime() {} }, connect() {}, disconnect() {} }),
+        createBuffer: (ch, n, rate) => ({ duration: n / rate, copyToChannel() {} }),
+        createBufferSource: () => ({ connect() {}, start() {} }),
+    };
+    let tap = null;
+    const player = { ctx, ducked: false, setDucked(v) { this.ducked = v; }, onAudio(fn) { tap = fn; return () => { tap = null; }; } };
+    const { IQDemod } = require('./.build/iqdemod.cjs');
+    const engine = new IQDemod(player);
+    engine.setQuadrature(true);
+    engine.start();
+    const n = 960;
+    tap([new Float32Array(n), new Float32Array(n)], n, 48000);
+    assert.strictEqual(iqHalfSpan(), 24000);
+    engine.destroy();
+    resetDemodSettings();
 });
 
 t('each mode keeps its own width', () => {

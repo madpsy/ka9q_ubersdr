@@ -68,8 +68,37 @@ import {
 // is 12k and the passband is -6k..+6k (see MODES in radio/constants.js, which
 // matches the preset exactly and explains why). Everything here is expressed as
 // an offset from the dial in hertz, so this is the edge of what can be reached.
+//
+// It is the edge *until a stream says otherwise*. A complex stream covers its
+// own sample rate, so the wide presets (iq48 upwards) reach ±24 kHz and beyond,
+// and the engine moves the edge to match the first time it hears a rate — see
+// setIQSpan. This is the starting point, and what is assumed before any packet.
 export const IQ_HALF_SPAN = 6000;
 export const IQ_SPAN = IQ_HALF_SPAN * 2;
+
+let halfSpan = IQ_HALF_SPAN;
+
+/** How far either side of the dial the stream currently reaches, in hertz. */
+export function iqHalfSpan() {
+    return halfSpan;
+}
+
+/**
+ * Follow the stream's sample rate.
+ *
+ * A change republishes the settings, which runs every demodulator back through
+ * sanitise and so clamps any offset the new span cannot reach — going from a
+ * 48 kHz stream back to 12 kHz pulls a demodulator at +20 kHz in to the edge,
+ * exactly as narrowing a filter does — and tells the panel its limits moved.
+ * Returns whether anything changed.
+ */
+export function setIQSpan(rateHz) {
+    const next = rateHz > 0 ? Math.round(rateHz / 2) : IQ_HALF_SPAN;
+    if (next === halfSpan) return false;
+    halfSpan = next;
+    publish(demodSettings());
+    return true;
+}
 
 /**
  * The demodulators, and the filter widths each is offered.
@@ -240,7 +269,7 @@ export function passbandFor(modeId, offsetHz, widthHz, sideband) {
  * How far the offset may travel before the passband hangs off the end of the
  * stream.
  *
- * Refused rather than allowed-and-empty: outside the 12 kHz there is nothing at
+ * Refused rather than allowed-and-empty: outside the stream there is nothing at
  * all, so a filter half over the edge is a filter with half its noise and none
  * of its signal — and, worse, one whose readout still claims a bandwidth it is
  * not receiving. A width too wide for the span at any offset collapses this to a
@@ -251,8 +280,8 @@ export function offsetLimits(modeId, widthHz, sideband) {
     // Derived from the passband rather than restated per mode, so the two
     // cannot disagree.
     const band = passbandFor(modeId, 0, w, sideband);
-    let min = -IQ_HALF_SPAN - band.lo;
-    let max = IQ_HALF_SPAN - band.hi;
+    let min = -halfSpan - band.lo;
+    let max = halfSpan - band.hi;
     if (min > max) {
         const mid = (min + max) / 2;
         return { min: mid, max: mid };
@@ -1243,6 +1272,7 @@ export function resetDemodSettings() {
     clearTimeout(writeTimer);
     writeTimer = null;
     current = null;
+    halfSpan = IQ_HALF_SPAN;
 }
 
 // ── the engine ───────────────────────────────────────────────────────────────
@@ -1554,6 +1584,9 @@ export class IQDemod extends Emitter {
         if (this.rate !== rate || this.frames !== frames) {
             this.rate = rate;
             this.frames = frames;
+            // The reach follows the rate, so a wide IQ stream can be listened
+            // to across the whole of it. Republishes, which re-renders the panel.
+            setIQSpan(rate);
             this.emit('change');
         }
     }

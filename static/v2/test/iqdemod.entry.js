@@ -16,11 +16,11 @@ import {
 import {
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
     TRACK_DEFAULT, TRACK_MAX, TRACK_MIN, clampTrack,
-    VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
-    designLowpass, expandActiveVfo, getIQDemod, offsetLimits, passbandFor, planFor,
+    VFO_LABELS, DemodChain, IQDemod, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
+    designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth,
+    vfoPassband, vfoWidth, setIQSpan,
 } from '../src/lib/iqDemod.js';
 
 module.exports = {
@@ -31,9 +31,9 @@ module.exports = {
     IQPanel, ListeningCard, VFO_FALLBACK, ecssReport, holdReading, vfoSummary, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
     TRACK_DEFAULT, TRACK_MAX, TRACK_MIN, clampTrack,
-    VFO_LABELS, DemodChain, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
-    designLowpass, expandActiveVfo, getIQDemod, offsetLimits, passbandFor, planFor,
+    VFO_LABELS, DemodChain, IQDemod, addVfo, clampOffset, clampWidth, collapseVfos, demodSettings,
+    designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth,
+    vfoPassband, vfoWidth, setIQSpan,
 };

@@ -77,7 +77,7 @@ import {
 } from '../lib/iqSpectrum.js';
 import {
     DEMOD_MODES, MAX_VFOS, PANS, PITCH_MAX, PITCH_MIN, SIDEBAND_OPTIONS, SQUELCH_MAX, SQUELCH_OFF,
-    TRACK_MAX, TRACK_MIN, VFO_LABELS, addVfo, collapseVfos, demodMode, expandActiveVfo, getIQDemod, offsetLimits, onDemodSettings,
+    TRACK_MAX, TRACK_MIN, VFO_LABELS, addVfo, collapseVfos, demodMode, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, onDemodSettings,
     planForVfo, removeVfo, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo, vfoPassband,
     vfoWidth,
 } from '../lib/iqDemod.js';
@@ -442,6 +442,10 @@ function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, ma
     st.current.active = active;
     st.current.rate = source.spec.rate;
     st.current.carriers = carriers || [];
+    // The edges are wherever the stream's rate puts them: ±6 kHz on plain IQ,
+    // further on the wide presets.
+    const half = iqHalfSpan() / 1000;
+    const spanLabel = `${Number.isInteger(half) ? half : half.toFixed(1)} kHz`;
 
     useEffect(() => {
         st.current.levels = createLevels();
@@ -533,9 +537,9 @@ function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, ma
                 </div>
             )}
             <div className="iq-scope__scale">
-                <span>−6 kHz</span>
+                <span>−{spanLabel}</span>
                 <span>dial</span>
-                <span>+6 kHz</span>
+                <span>+{spanLabel}</span>
             </div>
         </div>
     );

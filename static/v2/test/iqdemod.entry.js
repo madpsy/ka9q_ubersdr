@@ -21,7 +21,7 @@ import {
     designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth, setIQSpan,
+    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN,
 } from '../src/lib/iqDemod.js';
 
 module.exports = {
@@ -37,5 +37,5 @@ module.exports = {
     designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth, setIQSpan,
+    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN,
 };

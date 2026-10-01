@@ -46,7 +46,7 @@ const {
     designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth, setIQSpan,
+    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN,
 } = require('./.build/iqdemod.cjs');
 
 // Storage that actually remembers, so the settings tests exercise the real path
@@ -937,6 +937,129 @@ t('SAM keeps its phase through a long carrier fade on a drifting transmitter', (
         const late = silent ? level(6.52, 6.8) : level(6, 6.45);
         const db = 20 * Math.log10(late / before);
         assert.ok(Math.abs(db) < 0.5, `${silent ? 'silent' : 'speaking'}: the programme moved ${db.toFixed(2)} dB`);
+    }
+});
+
+// ── wide streams ────────────────────────────────────────────────────────────
+//
+// On a wide IQ preset each chain mixes its passband to zero, filters, and keeps
+// one sample in D before the demodulator proper — see decimationFor. These hold
+// it to the three things that could go wrong: the audio landing at the wrong
+// pitch or level, something from elsewhere in the stream folding into it, and
+// the carrier tracker losing its place.
+
+/**
+ * Run a stream at `rate` through one chain, a packet at a time, and collect what
+ * came out — at the chain's own rate, which on a wide stream is not `rate`.
+ */
+function runWide(plan, gen, rate, secs, { block = rate / 50, planAt } = {}) {
+    const chain = new DemodChain();
+    chain.configure(plan, rate);
+    const total = Math.round(secs * rate);
+    const parts = [];
+    const log = [];
+    const I = new Float32Array(block);
+    const Q = new Float32Array(block);
+    for (let at = 0; at < total; at += block) {
+        if (planAt) {
+            const p = planAt(at / rate);
+            if (p) chain.configure(p, rate);
+        }
+        const len = Math.min(block, total - at);
+        for (let i = 0; i < len; i++) {
+            const s = gen((at + i) / rate);
+            I[i] = s.i;
+            Q[i] = s.q;
+        }
+        const o = chain.process(I.subarray(0, len), Q.subarray(0, len), len, { agc: false, gain: 1 });
+        if (o) parts.push(Float32Array.from(o.subarray(0, chain.outFrames)));
+        const st = chain.ecssStatus;
+        if (st) log.push({ t: at / rate, state: st.state, hz: st.carrierHz });
+    }
+    const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0));
+    let k = 0;
+    for (const p of parts) { out.set(p, k); k += p.length; }
+    return { out, outRate: chain.rate, log, chain };
+}
+
+/** The steady part of a run: from `fromSec` on, at the rate it came out at. */
+const steady = (r, fromSec) => Array.from(r.out.subarray(Math.round(fromSec * r.outRate)));
+
+t('a wide stream is demodulated at a working rate of its own', () => {
+    assert.strictEqual(decimationFor(12000), 1);
+    assert.strictEqual(workingRate(12000), 12000);
+    for (const rate of [48000, 96000, 192000, 384000]) {
+        assert.strictEqual(workingRate(rate), WORK_RATE_MIN, `${rate}`);
+        assert.strictEqual(rate % decimationFor(rate), 0, `${rate} does not divide`);
+    }
+});
+
+t('on a wide stream a tone comes out at the same pitch and level as on plain IQ', () => {
+    try {
+        setIQSpan(192000);
+        // USB at +2 kHz with a tone at +3 kHz is 1 kHz of audio, wherever in the
+        // stream the pair sits.
+        const plain = runWide(planFor({ mode: 'usb', offsetHz: 2000, widthHz: 2700 }), tone(3000, 0.5), 12000, 1);
+        const ref = amplitudeAt(steady(plain, 0.4), 1000, plain.outRate);
+        assert.ok(ref > 0.2, `no tone on plain IQ: ${ref}`);
+        for (const [rate, at] of [[48000, 2000], [192000, 2000], [192000, 40000], [192000, -60000]]) {
+            const r = runWide(planFor({ mode: 'usb', offsetHz: at, widthHz: 2700 }), tone(at + 1000, 0.5), rate, 1);
+            assert.strictEqual(r.outRate, workingRate(rate));
+            const a = amplitudeAt(steady(r, 0.4), 1000, r.outRate);
+            const db = 20 * Math.log10(a / ref);
+            assert.ok(Math.abs(db) < 0.5, `${rate} Hz at ${at}: the tone moved ${db.toFixed(2)} dB`);
+            // And it is a tone at 1 kHz, not near it.
+            const off = amplitudeAt(steady(r, 0.4), 1100, r.outRate);
+            assert.ok(off < a / 30, `${rate} Hz at ${at}: not at 1 kHz`);
+        }
+    } finally {
+        fresh();
+    }
+});
+
+t('nothing elsewhere in a wide stream folds into the passband', () => {
+    // USB at the dial on IQ 192: the working rate is 24 kHz, so a signal 24 kHz
+    // above the passband would land exactly on it if the front filter let it
+    // through. It sits at 1 kHz of audio, where the wanted tone does.
+    try {
+        setIQSpan(192000);
+        const plan = planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700 });
+        const wanted = amplitudeAt(steady(runWide(plan, tone(1000, 0.5), 192000, 1), 0.4), 1000, WORK_RATE_MIN);
+        for (const f of [1000 + WORK_RATE_MIN, 1000 - WORK_RATE_MIN, 1000 + 2 * WORK_RATE_MIN]) {
+            const leak = amplitudeAt(steady(runWide(plan, tone(f, 0.5), 192000, 1), 0.4), 1000, WORK_RATE_MIN);
+            const db = 20 * Math.log10(leak / wanted);
+            assert.ok(db < -60, `a signal at ${f} Hz came through at ${db.toFixed(1)} dB`);
+        }
+    } finally {
+        fresh();
+    }
+});
+
+t('SAM locks on a wide stream, and keeps the lock as the offset moves', () => {
+    // A station 30 kHz up an IQ 192 stream, its carrier 70 Hz off the offset.
+    // Moving the offset 200 Hz has to carry the loop with it, as it does at
+    // 12 kHz — the front end shifts the stream, and the tracker has to know.
+    try {
+        setIQSpan(192000);
+        const base = station({ carrierHz: 70 });
+        const sig = (t) => {
+            const s = base(t);
+            const p = 2 * Math.PI * 30000 * t;
+            const c = Math.cos(p);
+            const n = Math.sin(p);
+            return { i: s.i * c - s.q * n, q: s.i * n + s.q * c };
+        };
+        const r = runWide(samPlan({ offsetHz: 30000 }), sig, 192000, 4, {
+            planAt: (t) => (t >= 2.5 ? samPlan({ offsetHz: 30200 }) : null),
+        });
+        const before = r.log.filter((l) => l.t > 1.5 && l.t < 2.5);
+        assert.ok(before.length && before.every(LOCKED), 'SAM did not lock on IQ 192');
+        assert.ok(before.every((l) => Math.abs(l.hz - 70) < 2), `carrier read as ${before[before.length - 1].hz}`);
+        const later = r.log.filter((l) => l.t >= 2.5);
+        assert.ok(later.every(LOCKED), 'moving the offset cost the lock');
+        assert.ok(Math.abs(later[later.length - 1].hz - (-130)) < 2, `after the move the carrier read ${later[later.length - 1].hz}`);
+    } finally {
+        fresh();
     }
 });
 

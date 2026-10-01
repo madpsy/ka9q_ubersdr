@@ -667,7 +667,14 @@ export class EcssTracker {
      * keeps it locked until the station has left the tracking window — which is
      * what tuning near a carrier should feel like.
      */
-    configure(plan, rate, design) {
+    // `baseHz` is how far the stream has already been shifted before it gets
+    // here — lib/iqDemod.js's decimating front end, on a wide IQ preset, mixes
+    // the plan's centre down to zero before this sees a sample. The centre is
+    // still kept in the dial's coordinates, so the bookkeeping below (which
+    // moves the loop with the offset) is exactly what it was; only the mixing
+    // and the room at the edges are taken relative to the stream it is given.
+    configure(plan, rate, design, baseHz = 0) {
+        this.baseHz = baseHz;
         const rateChanged = this.rate !== rate;
         if (!rateChanged && this.centreHz != null && plan.centreHz !== this.centreHz) {
             const moved = (TWO_PI * (plan.centreHz - this.centreHz)) / rate;
@@ -726,7 +733,7 @@ export class EcssTracker {
     _fit() {
         const rate = this.rate;
         const ref = this.locked ? this.freq : this.commit;
-        const at = this.centreHz + (ref * rate) / TWO_PI;
+        const at = this.centreHz - (this.baseHz || 0) + (ref * rate) / TWO_PI;
         const room = (side) => {
             const free = rate / 2 - EDGE_GUARD - side * at;
             const w = Math.min(this.plan.widthHz, free);
@@ -764,7 +771,7 @@ export class EcssTracker {
     process(planeI, planeQ, frames, out, pow, ref) {
         const rate = this.rate;
         this._fit();
-        const w0 = (TWO_PI * this.centreHz) / rate;
+        const w0 = (TWO_PI * (this.centreHz - (this.baseHz || 0))) / rate;
         const range = this._range();
         const maxFreq = (TWO_PI * range * 1.2) / rate;
 

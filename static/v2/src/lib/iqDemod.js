@@ -588,9 +588,65 @@ export function signalMeter(db) {
  * across calls, which is the whole reason it is an object — a packet boundary
  * must not be audible.
  */
+// ── the decimating front end ─────────────────────────────────────────────────
+//
+// The chain below was written for plain IQ's 12 kHz, where running its filter
+// on every sample costs nothing. On a wide preset it runs on every sample of 48
+// to 384 kHz instead, and at the 511-tap ceiling that is the whole budget: two
+// AM demodulators on IQ 192 measured 27% of a core each in node and took the
+// main thread with them in Chrome, so the audio played for a few seconds and
+// stopped.
+//
+// Nothing a demodulator listens to is wider than 12 kHz, so on a wide stream
+// each chain first mixes its own passband down to zero, low-passes it with a
+// short filter, and keeps every Dth sample — evaluating the filter only at the
+// samples it keeps. The chain proper then runs exactly as it did, at
+// WORK_RATE_MIN or a little over. What comes out is demodulated audio at that
+// rate, which Web Audio resamples to the context's; the IQ stream itself is
+// untouched, and is what the recorder and the picture still see.
+
+// The rate a chain works at, at least. 24 kHz rather than 12: the widest
+// passband any mode reaches from its own centre is ±7.2 kHz (12 kHz of SAM, plus
+// the tracker's 1.2 kHz of pull either way), and the front filter needs room to
+// roll off between that and the alias of the next band down.
+export const WORK_RATE_MIN = 24000;
+// The front filter's pass edge. Everything a chain reads is inside it; what
+// folds back past the decimation lands between here and the working Nyquist,
+// outside every chain's own passband, where its filter takes it away.
+const FRONT_PASS_HZ = 8000;
+
+/** How many input samples each working sample stands for. 1 below 48 kHz. */
+export function decimationFor(rateHz) {
+    return Math.max(1, Math.floor(rateHz / WORK_RATE_MIN));
+}
+
+/** The rate a chain's demodulator actually runs at, for this stream rate. */
+export function workingRate(rateHz) {
+    const rate = rateHz > 0 ? rateHz : 12000;
+    return rate / decimationFor(rate);
+}
+
 export class DemodChain {
     constructor() {
         this.rate = 0;
+        // The stream's own rate, and the front end's state. `rate` above is the
+        // one the demodulator runs at; the two differ only on a wide preset.
+        this.inRate = 0;
+        this.D = 1;
+        this.baseHz = 0;
+        this.frontKey = '';
+        this.frontTaps = null;
+        this.frontN = 0;
+        this.fbI = null;
+        this.fbQ = null;
+        this.fpos = 0;
+        this.fcount = 0;
+        this.rotRe = 1;
+        this.rotIm = 0;
+        this.dI = new Float32Array(0);
+        this.dQ = new Float32Array(0);
+        // How many samples the last block produced, at `rate`.
+        this.outFrames = 0;
         this.plan = null;
         this.taps = null;
         this.n = 0;
@@ -643,12 +699,34 @@ export class DemodChain {
      * of offset should sound like tuning, not like a click.
      */
     configure(plan, rateHz) {
-        const rate = rateHz > 0 ? rateHz : 12000;
+        const inRate = rateHz > 0 ? rateHz : 12000;
+        const D = decimationFor(inRate);
+        const rate = inRate / D;
         // SAM and ECSS share the tracker, and moving between them keeps the
         // carrier: it is the same carrier either way.
         const entering = isTracked(plan) && !isTracked(this.plan);
         this.plan = plan;
         this.rate = rate;
+        this.inRate = inRate;
+        this.D = D;
+        // The front end mixes the plan's centre to zero, so the rest of the
+        // chain mixes by whatever is left — nothing, outside the tracker.
+        this.baseHz = D > 1 ? plan.centreHz : 0;
+        if (D > 1) {
+            const fkey = `${inRate}/${D}`;
+            if (fkey !== this.frontKey || !this.frontTaps) {
+                this.frontKey = fkey;
+                // Cut off midway between the pass edge and where the next band
+                // down folds onto it; the transition is the whole of that gap.
+                const stop = rate - FRONT_PASS_HZ;
+                this.frontTaps = designLowpass((FRONT_PASS_HZ + stop) / 2, inRate, stop - FRONT_PASS_HZ);
+                this.frontN = this.frontTaps.length;
+                this.fbI = new Float32Array(this.frontN * 2);
+                this.fbQ = new Float32Array(this.frontN * 2);
+                this.fpos = 0;
+                this.fcount = 0;
+            }
+        }
         const key = `${plan.cutoffHz}/${plan.transitionHz || 0}/${rate}`;
         if (key !== this.tapsKey || !this.taps) {
             this.tapsKey = key;
@@ -659,7 +737,7 @@ export class DemodChain {
             // fresh search, not the tail of a carrier found some time ago.
             if (!this.ecss) this.ecss = new EcssTracker();
             if (entering) this.ecss.reset();
-            this.ecss.configure(plan, rate, (cutoffHz, transitionHz) => designLowpass(cutoffHz, rate, transitionHz));
+            this.ecss.configure(plan, rate, (cutoffHz, transitionHz) => designLowpass(cutoffHz, rate, transitionHz), this.baseHz);
             return;
         }
         const n = this.taps.length;
@@ -677,6 +755,12 @@ export class DemodChain {
 
     /** Forget everything carried between blocks. Starting is not resuming. */
     reset() {
+        if (this.fbI) this.fbI.fill(0);
+        if (this.fbQ) this.fbQ.fill(0);
+        this.fpos = 0;
+        this.fcount = 0;
+        this.rotRe = 1;
+        this.rotIm = 0;
         if (this.bufI) this.bufI.fill(0);
         if (this.bufQ) this.bufQ.fill(0);
         this.pos = 0;
@@ -726,8 +810,82 @@ export class DemodChain {
      * next one — the caller copies it into an AudioBuffer immediately, which is
      * the only thing that reads it.
      */
+    /**
+     * Mix the plan's centre to zero, low-pass and keep every Dth sample, into
+     * dI/dQ. Returns how many were kept.
+     *
+     * The oscillator is a rotating phasor rather than a cos and a sin per
+     * sample — at 384 kHz the trigonometry alone would be most of the cost —
+     * renormalised once a block so rounding cannot grow it. The decimation
+     * count carries across blocks, since a packet need not be a multiple of D.
+     */
+    _front(planeI, planeQ, frames) {
+        const D = this.D;
+        const n = this.frontN;
+        const taps = this.frontTaps;
+        const bI = this.fbI;
+        const bQ = this.fbQ;
+        const max = Math.ceil(frames / D) + 1;
+        if (this.dI.length < max) {
+            this.dI = new Float32Array(max);
+            this.dQ = new Float32Array(max);
+        }
+        const dI = this.dI;
+        const dQ = this.dQ;
+        const step = (-2 * Math.PI * this.baseHz) / this.inRate;
+        const sRe = Math.cos(step);
+        const sIm = Math.sin(step);
+        let pr = this.rotRe;
+        let pi = this.rotIm;
+        let pos = this.fpos;
+        let count = this.fcount;
+        let m = 0;
+        for (let k = 0; k < frames; k++) {
+            const rawI = planeI[k];
+            const rawQ = planeQ[k];
+            const mi = rawI * pr - rawQ * pi;
+            const mq = rawI * pi + rawQ * pr;
+            const nr = pr * sRe - pi * sIm;
+            pi = pr * sIm + pi * sRe;
+            pr = nr;
+            bI[pos] = mi;
+            bI[pos + n] = mi;
+            bQ[pos] = mq;
+            bQ[pos + n] = mq;
+            pos = pos + 1 === n ? 0 : pos + 1;
+            if (++count < D) continue;
+            count = 0;
+            let fi = 0;
+            let fq = 0;
+            for (let t = 0; t < n; t++) {
+                const h = taps[t];
+                fi += h * bI[pos + t];
+                fq += h * bQ[pos + t];
+            }
+            dI[m] = fi;
+            dQ[m] = fq;
+            m++;
+        }
+        const mag = Math.hypot(pr, pi) || 1;
+        this.rotRe = pr / mag;
+        this.rotIm = pi / mag;
+        this.fpos = pos;
+        this.fcount = count;
+        return m;
+    }
+
     process(planeI, planeQ, frames, { agc = true, gain = 1, squelchDb = SQUELCH_OFF } = {}) {
+        this.outFrames = 0;
         if (!this.plan || !this.taps || !frames) return null;
+        // On a wide stream, the front end first: everything below then reads
+        // the decimated pair, at `rate`.
+        if (this.D > 1) {
+            frames = this._front(planeI, planeQ, frames);
+            planeI = this.dI;
+            planeQ = this.dQ;
+            if (!frames) return null;
+        }
+        this.outFrames = frames;
         if (this.out.length < frames) this.out = new Float32Array(frames);
         const out = this.out;
 
@@ -756,7 +914,7 @@ export class DemodChain {
         const egA = 1 - Math.exp(-1 / (rate * ECSS_GAIN_SMOOTH_SEC));
         let ecssGain = this.ecssGain;
 
-        const mixStep = (-2 * Math.PI * centreHz) / rate;
+        const mixStep = (-2 * Math.PI * (centreHz - this.baseHz)) / rate;
         const shiftStep = (2 * Math.PI * shiftHz) / rate;
         const dcR = 1 - (2 * Math.PI * DC_CORNER_HZ) / rate;
         const deA = 1 - Math.exp(-1 / (rate * DEEMPHASIS_SEC));
@@ -1621,8 +1779,12 @@ export class IQDemod extends Emitter {
             voice.gain.gain.setTargetAtTime(vfo.muted ? 0 : 1, now, 0.015);
         }
 
-        const buffer = ctx.createBuffer(1, frames, rate);
-        buffer.copyToChannel(audio.subarray(0, frames), 0);
+        // At the chain's own rate and length, which on a wide preset are the
+        // decimated ones; Web Audio resamples the buffer to the context's.
+        const n = chain.outFrames;
+        if (!n) return;
+        const buffer = ctx.createBuffer(1, n, chain.rate);
+        buffer.copyToChannel(audio.subarray(0, n), 0);
 
         if (voice.nextPlayTime < now) voice.nextPlayTime = now + LEAD_IN_SEC;
         else if (voice.nextPlayTime - now > MAX_QUEUE_SEC) return;

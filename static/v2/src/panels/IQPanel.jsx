@@ -79,7 +79,7 @@ import {
 import {
     DEMOD_MODES, MAX_VFOS, PANS, PITCH_MAX, PITCH_MIN, SIDEBAND_OPTIONS, SQUELCH_MAX, SQUELCH_OFF,
     TRACK_MAX, TRACK_MIN, VFO_LABELS, addVfo, collapseVfos, demodMode, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, onDemodSettings,
-    planForVfo, removeVfo, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo, vfoPassband,
+    planForVfo, removeVfo, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo, vfoPassband, workingRate,
     vfoWidth,
 } from '../lib/iqDemod.js';
 
@@ -1389,7 +1389,7 @@ export default function IQPanel({ minimal }) {
                         level={hearing ? demod.levelOf(i) : 0}
                         signalDb={hearing ? demod.signalDbOf(i) : null}
                         gateOpen={hearing ? demod.gateOpenOf(i) : true}
-                        taps={tapsFor(planForVfo(vfo).cutoffHz, demod.rate || 12000, planForVfo(vfo).transitionHz)}
+                        taps={tapsFor(planForVfo(vfo).cutoffHz, workingRate(demod.rate || 12000), planForVfo(vfo).transitionHz)}
                         ecss={hearing ? demod.ecssOf(i) : null}
                         dialHz={tuning.frequency}
                         minimal={minimal}

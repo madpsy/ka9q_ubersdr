@@ -273,13 +273,13 @@ t('the tooltip says how, but only while there is something to turn off', () => {
 // where the Off button below the slider is dropped and this is the only way off
 // the squelch that is not dragging the slider to the stop.
 
-function signal(squelch, snr, props = { minimal: true }) {
+function signal(squelch, snr, props = { minimal: true }, mode = 'usb') {
     reset();
     const sent = [];
     const ctx = {
         running: true,
         squelch,
-        tuning: { mode: 'usb', frequency: 14_200_000, bandwidthLow: 50, bandwidthHigh: 2700 },
+        tuning: { mode, frequency: 14_200_000, bandwidthLow: 50, bandwidthHigh: 2700 },
         audio: { bufferSec: 0.5 },
         meters: { current: { snr, snrHistory: snr == null ? [] : [snr, snr, snr] } },
         actions: {
@@ -297,7 +297,7 @@ function signal(squelch, snr, props = { minimal: true }) {
     // never tears it down leaves four live timers and node never exits.
     for (const off of cleanups) off();
     const hold = nodes.find((n) => n.props?.className === 'squelch-row__hold');
-    return { sent, hold, auto: hold && deep(hold).find((n) => n.type === 'button') };
+    return { sent, hold, auto: hold && deep(hold).find((n) => n.type === 'button'), nodes };
 }
 
 t('right-clicking Auto on the Signal panel turns the squelch off', () => {
@@ -355,6 +355,16 @@ t('the full view keeps its Off button as well', () => {
 // change nothing. Worth its own test since the SNR beside them is live in IQ
 // like anywhere else: the reading is real, the gate is not, and a marker
 // tracking along a working-looking slider is exactly the wrong thing to draw.
+
+t('in IQ the Signal panel explains the missing squelch, but not in the minimal view', () => {
+    const text = (minimal) => signal(ON, 12, { minimal }, 'iq').nodes.map((n) => words(n)).join(' ');
+    const full = text(false);
+    assert.ok(/does not gate a quadrature stream/.test(full), 'the full view lost its reason');
+    const min = text(true);
+    assert.ok(!/does not gate a quadrature stream/.test(min), 'the minimal view still carries the sentence');
+    // What minimal keeps: the label, saying the control is unavailable.
+    assert.ok(/Squelch/.test(min) && /Unavailable/.test(min), `minimal says: ${min}`);
+});
 
 t('the pad squelch is inert in IQ, where nothing is gating', () => {
     const iq = pad(ON, 12, 'iq');

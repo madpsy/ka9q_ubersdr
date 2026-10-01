@@ -246,10 +246,14 @@ function SquelchControl({ minimal }) {
     if (isIQ(tuning.mode)) {
         return (
             <Field label="Squelch" hint="Unavailable">
-                <div className="note note--tight">
-                    Not available in IQ mode: the receiver does not gate a
-                    quadrature stream, and there is no live SNR to gate on.
-                </div>
+                {/* The reason is the full view's: minimal keeps the label and
+                    its "Unavailable", which says all a cut-down panel needs. */}
+                {!minimal && (
+                    <div className="note note--tight">
+                        Not available in IQ mode: the receiver does not gate a
+                        quadrature stream, and there is no live SNR to gate on.
+                    </div>
+                )}
             </Field>
         );
     }

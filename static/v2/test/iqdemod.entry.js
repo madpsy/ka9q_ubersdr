@@ -8,11 +8,12 @@ import { deep, render, reset, walk, words } from './hookStub.js';
 import IQPanel, { ListeningCard, VFO_FALLBACK, ecssReport, holdReading, vfoSummary } from '../src/panels/IQPanel.jsx';
 import { PANEL_BY_ID } from '../src/panels/registry.jsx';
 import IQDemodWatch from '../src/components/IQDemodWatch.jsx';
+import { formatFreqExact } from '../src/lib/format.js';
 import { GROUPS } from '../src/panels/groups.jsx';
 import {
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
-    squelchLineDb,
+    squelchLineDb, scaleTicks, SCALE_GAP_PX, audioTicks, AUDIO_GAP_PX,
 } from '../src/lib/iqSpectrum.js';
 import {
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
@@ -21,15 +22,15 @@ import {
     designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN,
+    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN, modeMax, modeWidths, reachOf, audioBandOf, AUDIO_FFT_SIZE,
 } from '../src/lib/iqDemod.js';
 
 module.exports = {
-    IQDemodWatch,
+    IQDemodWatch, formatFreqExact,
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
-    squelchLineDb,
+    squelchLineDb, scaleTicks, SCALE_GAP_PX, audioTicks, AUDIO_GAP_PX,
     IQPanel, ListeningCard, VFO_FALLBACK, ecssReport, holdReading, vfoSummary, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
     TRACK_DEFAULT, TRACK_MAX, TRACK_MIN, clampTrack,
@@ -37,5 +38,5 @@ module.exports = {
     designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN,
+    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN, modeMax, modeWidths, reachOf, audioBandOf, AUDIO_FFT_SIZE,
 };

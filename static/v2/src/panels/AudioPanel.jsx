@@ -6,9 +6,8 @@ import {
     isIQ, marginFromSlider, MARGIN_DEFAULT_DB, MARGIN_LOSSLESS, MARGIN_MIN_DB, MARGIN_STEP_DB,
     sliderFromMargin,
 } from '../radio/constants.js';
-import {
-    listOutputDevices, micPermission, sinkLabel, sinkSupport, unlockDeviceLabels,
-} from '../lib/audioSinks.js';
+import { sinkLabel, sinkSupport } from '../lib/audioSinks.js';
+import useOutputDevices from '../lib/useOutputDevices.js';
 
 const CHANNELS = [
     { value: 'both', label: 'Both' },
@@ -251,65 +250,11 @@ function ChannelPicker() {
 function OutputDevicePicker() {
     const { audio, actions } = useRadio();
     const support = useMemo(sinkSupport, []);
-    const [devices, setDevices] = useState([]);
-    const [hidden, setHidden] = useState(false);
-    // Whether the microphone has already been asked about — only to tell "nobody
-    // has been asked" apart from "asked, granted, and there is still nothing to
-    // list", which look the same from here and want opposite advice.
-    const [perm, setPerm] = useState(null);
-    const [error, setError] = useState('');
-    const [busy, setBusy] = useState(false);
-    const alive = useRef(true);
-
-    // `unlock` is what separates the button from the mount and the devicechange
-    // event: those re-read silently, the button may also ask for the mic. It
-    // asks only when there is something to gain — names that are still hidden
-    // after the list has been re-read.
-    const refresh = useCallback(async (unlock) => {
-        try {
-            let { devices: found, hidden: anon } = await listOutputDevices();
-            if (!alive.current) return;
-            micPermission().then((state) => { if (alive.current) setPerm(state); });
-            if (anon && unlock) {
-                setBusy(true);
-                try {
-                    await unlockDeviceLabels();
-                    if (!alive.current) return;
-                    ({ devices: found, hidden: anon } = await listOutputDevices());
-                } catch (permErr) {
-                    // Denied, or dismissed. The re-read above still stands, so
-                    // keep it and say why the names are missing.
-                    if (!alive.current) return;
-                    setDevices(found);
-                    setHidden(anon);
-                    setError('Microphone permission denied — device names stay hidden.');
-                    return;
-                } finally {
-                    if (alive.current) setBusy(false);
-                }
-                if (!alive.current) return;
-            }
-            setDevices(found);
-            setHidden(anon);
-            setError('');
-        } catch (err) {
-            if (alive.current) setError(err.message || 'could not list devices');
-        }
-    }, []);
-
-    useEffect(() => {
-        alive.current = true;
-        if (!support.supported) return undefined;
-        const reread = () => refresh(false);
-        reread();
-        // Plugging in a headset should not need the panel reopening.
-        const md = navigator.mediaDevices;
-        md.addEventListener('devicechange', reread);
-        return () => {
-            alive.current = false;
-            md.removeEventListener('devicechange', reread);
-        };
-    }, [support.supported, refresh]);
+    // The list, its refresh and the microphone question are shared with the IQ
+    // demod panel's per-demodulator outputs — see lib/useOutputDevices.js.
+    const {
+        devices, hidden, perm, error, setError, busy, setBusy, refresh, alive,
+    } = useOutputDevices(support.supported);
 
     if (!support.supported) {
         return (

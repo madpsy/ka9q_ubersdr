@@ -34,11 +34,11 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 globalThis.TextDecoder = globalThis.TextDecoder || require('util').TextDecoder;
 
 const {
-    IQDemodWatch,
+    IQDemodWatch, formatFreqExact,
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
-    squelchLineDb,
+    squelchLineDb, scaleTicks, SCALE_GAP_PX, audioTicks, AUDIO_GAP_PX,
     IQPanel, ListeningCard, VFO_FALLBACK, ecssReport, holdReading, vfoSummary, PANEL_BY_ID, GROUPS,
     DEMOD_MODES, IQ_HALF_SPAN, MAX_VFOS, PANS, SIGNAL_FLOOR_DB, SQUELCH_MAX, SQUELCH_OFF,
     TRACK_DEFAULT, TRACK_MAX, TRACK_MIN, clampTrack,
@@ -46,7 +46,7 @@ const {
     designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN,
+    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN, modeMax, modeWidths, reachOf, audioBandOf, AUDIO_FFT_SIZE,
 } = require('./.build/iqdemod.cjs');
 
 // Storage that actually remembers, so the settings tests exercise the real path
@@ -1063,6 +1063,118 @@ t('SAM locks on a wide stream, and keeps the lock as the offset moves', () => {
     }
 });
 
+t('the AM family gets 8 and 10 kHz a side on a wide stream, and only there', () => {
+    try {
+        fresh();
+        // Plain IQ: the limits as they always were.
+        assert.deepStrictEqual(modeWidths('am'), [5400, 7000, 9000, 10000, 12000]);
+        assert.strictEqual(modeMax('am'), 12000);
+        assert.strictEqual(modeMax('ecss'), 6000);
+        assert.strictEqual(clampWidth('sam', 20000), 12000);
+        // IQ 48 and up: totals of 16 and 20 for AM and SAM, 8 and 10 a side for ECSS.
+        setIQSpan(48000);
+        assert.deepStrictEqual(modeWidths('am'), [5400, 7000, 9000, 10000, 12000, 16000, 20000]);
+        assert.deepStrictEqual(modeWidths('sam').slice(-2), [16000, 20000]);
+        assert.deepStrictEqual(modeWidths('ecss').slice(-2), [8000, 10000]);
+        assert.strictEqual(clampWidth('ecss', 10000), 10000);
+        // Nothing else moves.
+        assert.strictEqual(modeMax('usb'), 6000);
+        assert.strictEqual(modeMax('nfm'), 12000);
+        // Back to plain IQ, a 20 kHz filter is brought in to what fits.
+        updateVfo(0, { mode: 'am', widths: { am: 20000 } });
+        assert.strictEqual(vfoWidth(vfo0()), 20000);
+        setIQSpan(12000);
+        assert.strictEqual(vfoWidth(vfo0()), 12000);
+    } finally {
+        fresh();
+    }
+});
+
+t('the row shows the wide widths as buttons on a wide stream', () => {
+    const buttons = () => {
+        reset();
+        const { tree, cleanups } = render(IQPanel, {}, context());
+        for (const off of cleanups) off();
+        return deep(tree).filter((n) => n.type === 'button').map((n) => words(n)).filter((w) => /^[\d.]+k$/.test(w));
+    };
+    // The width slider: the one whose range is the bandwidth's.
+    const slider = () => {
+        reset();
+        const { tree, cleanups } = render(IQPanel, {}, context());
+        for (const off of cleanups) off();
+        const s = deep(tree).find((n) => n.type === 'input' && n.props.type === 'range' && n.props.step === 50
+            && n.props.min >= 1000 && n.props.max >= 6000);
+        return s && { min: s.props.min, max: s.props.max, value: s.props.value };
+    };
+    try {
+        // In the audio each sideband carries, so all three read the same.
+        const plain = ['2.7k', '3.5k', '4.5k', '5k', '6k'];
+        for (const mode of ['am', 'sam', 'ecss']) {
+            fresh({ mode });
+            assert.deepStrictEqual(buttons(), plain, `${mode} on plain IQ`);
+            const sl = slider();
+            assert.deepStrictEqual([sl.min, sl.max, sl.value], [1000, 6000, 4500], `${mode} slider`);
+            setIQSpan(48000);
+            assert.deepStrictEqual(buttons(), [...plain, '8k', '10k'], `${mode} on IQ 48`);
+            assert.strictEqual(slider().max, 10000, `${mode} slider on IQ 48`);
+        }
+        // And a press on AM's 4.5k is 9 kHz of filter across the carrier.
+        fresh({ mode: 'am' });
+        assert.strictEqual(vfoWidth(vfo0()), 9000);
+        assert.deepStrictEqual(vfoPassband(vfo0()), { lo: -4500, hi: 4500 });
+    } finally {
+        fresh();
+    }
+});
+
+t('a wide filter raises the working rate only as far as it needs', () => {
+    // Up to plain IQ's widths every plan works at 24 kHz, as before.
+    for (const plan of [
+        planFor({ mode: 'am', widthHz: 12000 }),
+        planFor({ mode: 'sam', widthHz: 12000, trackHz: 1000 }),
+        planFor({ mode: 'ecss', widthHz: 6000, trackHz: 1000 }),
+    ]) assert.strictEqual(workingRate(192000, plan), WORK_RATE_MIN, plan.kind);
+    try {
+        setIQSpan(192000);
+        // 10 kHz a side needs more room than 24 kHz has, and gets it.
+        for (const plan of [
+            planFor({ mode: 'am', widthHz: 20000 }),
+            planFor({ mode: 'sam', widthHz: 20000, trackHz: 1000 }),
+            planFor({ mode: 'ecss', widthHz: 10000, trackHz: 1000 }),
+        ]) {
+            const work = workingRate(192000, plan);
+            assert.ok(work >= 2 * reachOf(plan) + 8000, `${plan.kind}: ${work} Hz for a reach of ${reachOf(plan)}`);
+            assert.ok(work < 48000, `${plan.kind}: ${work} Hz is more than it needs`);
+            assert.strictEqual(192000 % decimationFor(192000, plan), 0);
+        }
+    } finally {
+        fresh();
+    }
+});
+
+t('20 kHz of AM on IQ 192 hears 9 kHz of audio that 12 kHz cannot', () => {
+    try {
+        setIQSpan(192000);
+        // A carrier 30 kHz up the stream, modulated by a 9 kHz tone.
+        const am = (t) => {
+            const env = 0.4 * (1 + 0.5 * Math.cos(2 * Math.PI * 9000 * t));
+            const p = 2 * Math.PI * 30000 * t;
+            return { i: env * Math.cos(p), q: env * Math.sin(p) };
+        };
+        const level = (w) => {
+            const r = runWide(planFor({ mode: 'am', offsetHz: 30000, widthHz: w }), am, 192000, 0.6);
+            return amplitudeAt(steady(r, 0.3), 9000, r.outRate);
+        };
+        const wide = level(20000);
+        const narrow = level(12000);
+        // The modulation is 0.2 of full scale; 20 kHz carries it within a dB.
+        assert.ok(Math.abs(20 * Math.log10(wide / 0.2)) < 1, `9 kHz at 20 kHz wide: ${wide}`);
+        assert.ok(narrow < wide / 100, `12 kHz let 9 kHz through: ${narrow}`);
+    } finally {
+        fresh();
+    }
+});
+
 t('SAM gains the same 3 dB as Both on a clean channel', () => {
     const one = toneSnrDb(runEcss(ecssPlan({ sideband: 'usb' }), gridStation({ cnrDb: 20 }), 10).out, 4);
     const sam = toneSnrDb(runEcss(samPlan({ widthHz: 9000 }), gridStation({ cnrDb: 20 }), 10).out, 4);
@@ -1538,6 +1650,125 @@ t('on IQ 192 each voice is handed 20 ms buffers, not one per packet', () => {
         assert.ok(started.every((b) => b.duration >= 0.02 && b.sampleRate === WORK_RATE_MIN), 'a short buffer, or one at the stream rate');
     } finally {
         engine.destroy();
+        fresh();
+    }
+});
+
+t('a demodulator’s output device is saved, and anything odd is read as the receiver’s', () => {
+    fresh();
+    assert.strictEqual(vfo0().sinkId, '', 'a new demodulator follows the receiver');
+    updateVfo(0, { sinkId: 'headset-1' });
+    saveDemodSettings({});                // through sanitise again, as a load is
+    assert.strictEqual(vfo0().sinkId, 'headset-1');
+    saveDemodSettings({ vfos: [{ mode: 'usb', sinkId: 42 }] });
+    assert.strictEqual(vfo0().sinkId, '', 'a number is not a device');
+    fresh();
+});
+
+// Promises that settle on the spot, so a synchronous test can see what a device
+// accepting or refusing leads to without waiting on the microtask queue.
+const settled = (v) => ({
+    then(ok) { try { return settled(ok ? ok(v) : v); } catch (e) { return refused(e); } },
+    catch() { return this; },
+});
+const refused = (e) => ({
+    then(ok, bad) { return bad ? settled(bad(e)) : this; },
+    catch(bad) { return settled(bad(e)); },
+});
+
+t('each demodulator plays to its own device, panned, or to the receiver’s output', () => {
+    // Two voices: the first follows the receiver, the second has a device of
+    // its own. Pan is set on both, because one device can still carry two
+    // demodulators, one per ear.
+    fresh({ mode: 'am', widths: { am: 6000 }, pan: 'left' });
+    addVfo();
+    updateVfo(1, { sinkId: 'headset-1', pan: 'right' });
+
+    const node = (kind, extra = {}) => ({
+        kind, out: new Set(), connect(to) { this.out.add(to); return to; }, disconnect() { this.out.clear(); }, ...extra,
+    });
+    const gainNode = () => node('gain', { gain: { value: 1, setTargetAtTime(v) { this.value = v; } } });
+    const ctx = {
+        state: 'running', currentTime: 0, destination: node('destination'),
+        createGain: gainNode,
+        createStereoPanner: () => node('panner', { pan: { value: 0, setTargetAtTime(v) { this.value = v; } } }),
+        createMediaStreamDestination: () => node('stream', { stream: { id: 's' } }),
+        createBuffer: (ch, n, rate) => ({ duration: n / rate, copyToChannel() {} }),
+        createBufferSource: () => node('source', { start() {} }),
+    };
+    const bus = node('bus', { context: ctx });
+    const elements = [];
+    let refuse = null;
+    const doc = globalThis.document;
+    globalThis.document = {
+        ...doc,
+        body: { appendChild(el) { el.parentNode = this; }, removeChild(el) { el.parentNode = null; } },
+        createElement: (tag) => {
+            const el = {
+                tag, style: {}, parentNode: null, srcObject: null, sinkId: null, playing: false,
+                setAttribute() {},
+                setSinkId(id) { return refuse ? refused(new Error(refuse)) : settled((el.sinkId = id)); },
+                play() { el.playing = true; return settled(); },
+                pause() { el.playing = false; },
+            };
+            elements.push(el);
+            return el;
+        },
+    };
+    let tap = null;
+    const player = {
+        ctx, outputBus: bus, ducked: false, setDucked(v) { this.ducked = v; },
+        onAudio(fn) { tap = fn; return () => { tap = null; }; },
+    };
+    const { IQDemod } = require('./.build/iqdemod.cjs');
+    const engine = new IQDemod(player);
+    const packet = () => tap([new Float32Array(240), new Float32Array(240)], 240, 12000);
+    try {
+        engine.setQuadrature(true);
+        engine.start();
+        packet();
+        const [a, b] = engine.voices;
+        // Pan ahead of the output, on both.
+        assert.ok(a.panner && a.gain.out.has(a.panner) && b.gain.out.has(b.panner), 'mute → pan');
+        // The first into the receiver's master, and that into the receiver's
+        // own output bus — not the context's default destination.
+        const master = [...a.panner.out][0];
+        assert.ok(master && master.out.has(bus), 'the receiver’s master is not on its output bus');
+        // The second into an output of its own: a gain, a stream, an element on
+        // the device.
+        const own = [...b.panner.out][0];
+        assert.ok(own && own !== master, 'the second demodulator shares the receiver’s output');
+        const stream = [...own.out][0];
+        assert.strictEqual(stream.kind, 'stream');
+        assert.strictEqual(elements.length, 1);
+        assert.strictEqual(elements[0].srcObject, stream.stream);
+        assert.strictEqual(elements[0].sinkId, 'headset-1');
+        assert.ok(elements[0].playing, 'the element was never played');
+        assert.strictEqual(engine.sinkErrorOf(1), null);
+
+        // Volume and mute reach both outputs.
+        engine.setOutput(0.5, false);
+        assert.strictEqual(master.gain.value, 0.5);
+        assert.strictEqual(own.gain.value, 0.5);
+        engine.setOutput(0.5, true);
+        assert.strictEqual(own.gain.value, 0, 'mute missed the device of its own');
+
+        // Back to the receiver's output: the element is given back.
+        updateVfo(1, { sinkId: '' });
+        packet();
+        assert.ok(b.panner.out.has(master), 'not back on the receiver’s output');
+        assert.strictEqual(elements[0].parentNode, null, 'the element was left in the page');
+
+        // A device that refuses: back on the receiver's output, and said so.
+        refuse = 'NotFoundError';
+        updateVfo(1, { sinkId: 'gone-2' });
+        packet();
+        const fallen = [...b.panner.out][0];
+        assert.ok(fallen.out.has(master), 'a refused device left the demodulator silent');
+        assert.ok(/NotFoundError/.test(engine.sinkErrorOf(1) || ''), `error: ${engine.sinkErrorOf(1)}`);
+    } finally {
+        engine.destroy();
+        globalThis.document = doc;
         fresh();
     }
 });
@@ -2193,6 +2424,84 @@ function context(over) {
 
 const engine = () => getIQDemod(context().player);
 
+t('hovering the picture reads out the frequency and the level there, live', () => {
+    fresh();
+    const frames = [];
+    const taps = [];
+    const raf = globalThis.requestAnimationFrame;
+    const gcs = globalThis.getComputedStyle;
+    globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+    globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
+    try {
+        const ctx = context();
+        ctx.player.onAudio = (fn) => { taps.push(fn); return () => {}; };
+        reset();
+        const panel = render(IQPanel, {}, ctx);
+        const scopeEl = walk(panel.tree).find((n) => typeof n.type === 'function' && n.type.name === 'IQScope');
+        reset();
+        const { tree, cleanups } = render(scopeEl.type, scopeEl.props, ctx);
+        cleanups.push(...panel.cleanups);
+
+        const c2d = new Proxy({}, {
+            get: (o, k) => (k in o ? o[k] : () => ({ width: 0 })),
+            set: (o, k, v) => { o[k] = v; return true; },
+        });
+        const nodes = deep(tree);
+        const canvas = nodes.find((n) => cls(n).split(' ').includes('iq-scope__canvas'));
+        canvas.props.ref.current = {
+            clientWidth: 600, width: 0, height: 0, getContext: () => c2d,
+            getBoundingClientRect: () => ({ left: 0, top: 0, width: 600, height: 120 }),
+        };
+        assert.strictEqual(canvas.props.title, undefined, 'a browser tooltip would cover the readout');
+        const tipNode = nodes.find((n) => cls(n).split(' ').includes('iq-scope__tip'));
+        const tip = { hidden: true, style: {}, textContent: '' };
+        tipNode.props.ref.current = tip;
+
+        // A steady tone on the dial, loud and then quiet.
+        let amp = 0.5;
+        let t0 = 0;
+        const feed = (packets) => {
+            for (let k = 0; k < packets; k++) {
+                const n = 240;
+                const I = new Float32Array(n).fill(amp);
+                const Q = new Float32Array(n);
+                for (const tap of taps) tap([I, Q], n, 12000);
+                t0 += n;
+            }
+            for (const fn of frames.splice(0)) fn();
+        };
+        const db = () => Number((tip.textContent.match(/(-?[\d.]+) dBFS/) || [])[1]);
+
+        // The middle of the picture is the dial.
+        canvas.props.onPointerMove({ pointerType: 'mouse', pointerId: 1, clientX: 300, clientY: 40, currentTarget: canvas.props.ref.current });
+        feed(10);
+        assert.strictEqual(tip.hidden, false, 'no readout under the pointer');
+        assert.ok(tip.textContent.startsWith(formatFreqExact(7_100_000)), tip.textContent);
+        const loud = db();
+        assert.ok(Number.isFinite(loud), `no level: ${tip.textContent}`);
+
+        // Quieter, and the figure follows on the frames after with the pointer
+        // still. Only so far here: the picture's smoothing runs on real time,
+        // and these frames come microseconds apart.
+        amp = 0.005;
+        for (let i = 0; i < 30; i++) feed(2);
+        const quiet = db();
+        assert.ok(quiet < loud - 6, `the level stayed at ${quiet} after ${loud}`);
+
+        // Off the picture, gone; and a finger is tuning, not reading.
+        canvas.props.onPointerLeave();
+        assert.strictEqual(tip.hidden, true, 'the readout outlived the pointer');
+        canvas.props.onPointerMove({ pointerType: 'touch', pointerId: 2, clientX: 100, clientY: 40, currentTarget: canvas.props.ref.current });
+        feed(1);
+        assert.strictEqual(tip.hidden, true, 'a finger brought up the readout');
+        for (const off of cleanups) off();
+    } finally {
+        globalThis.requestAnimationFrame = raf;
+        globalThis.getComputedStyle = gcs;
+        fresh();
+    }
+});
+
 t('the passbands on the picture rescale when the IQ width changes, without a re-render', () => {
     // The transform follows the stream's rate as packets arrive. The passbands
     // drawn over it have to follow on the next frame too — not wait for a
@@ -2294,10 +2603,170 @@ t('the IQ widths sit under the picture only when a wide preset is allowed', () =
     fresh();
 });
 
+// ── the audio spectrum ──────────────────────────────────────────────────────
+
+t('an open row’s audio spectrum spans the audio its filter passes, from 0 Hz', () => {
+    const band = (mode, widths, extra = {}) => audioBandOf({ mode, widths, pitchHz: 700, ...extra });
+    assert.deepStrictEqual(band('usb', { usb: 2700 }), { lo: 0, hi: 2700 });
+    assert.deepStrictEqual(band('lsb', { lsb: 1800 }), { lo: 0, hi: 1800 });
+    assert.deepStrictEqual(band('ecss', { ecss: 4500 }), { lo: 0, hi: 4500 });
+    // The AM family and NFM hear half their total: the audio a side.
+    assert.deepStrictEqual(band('am', { am: 9000 }), { lo: 0, hi: 4500 });
+    assert.deepStrictEqual(band('sam', { sam: 12000 }), { lo: 0, hi: 6000 });
+    assert.deepStrictEqual(band('nfm', { nfm: 8000 }), { lo: 0, hi: 4000 });
+    // CW up to its note plus half the filter, so the note sits where it sounds.
+    assert.deepStrictEqual(band('cwu', { cwu: 500 }), { lo: 0, hi: 950 });
+    // And it follows the width as it changes.
+    assert.ok(band('usb', { usb: 4000 }).hi > band('usb', { usb: 2700 }).hi);
+});
+
+t('the audio spectrum shows a demodulated tone where it is, at its level', () => {
+    // USB at +2 kHz with a tone at +3 kHz: 1 kHz of audio.
+    const chain = new DemodChain();
+    chain.configure(planFor({ mode: 'usb', offsetHz: 2000, widthHz: 2700 }), RATE);
+    const n = 240;
+    const I = new Float32Array(n);
+    const Q = new Float32Array(n);
+    for (let k = 0; k < 50; k++) {
+        for (let i = 0; i < n; i++) {
+            const t = (k * n + i) / RATE;
+            I[i] = 0.5 * Math.cos(2 * Math.PI * 3000 * t);
+            Q[i] = 0.5 * Math.sin(2 * Math.PI * 3000 * t);
+        }
+        chain.process(I, Q, n, { agc: false, gain: 1 });
+    }
+    const { db, binHz } = chain.audioSpectrum();
+    assert.strictEqual(db.length, AUDIO_FFT_SIZE / 2);
+    assert.strictEqual(binHz, RATE / AUDIO_FFT_SIZE);
+    let peak = 0;
+    for (let k = 1; k < db.length; k++) if (db[k] > db[peak]) peak = k;
+    assert.ok(Math.abs(peak * binHz - 1000) <= binHz, `the peak is at ${peak * binHz} Hz`);
+    // A 0.5 tone demodulates to 0.5 of audio, about -6 dBFS; the window's
+    // scalloping can take a little off between bins.
+    assert.ok(db[peak] > -8 && db[peak] < -4, `${db[peak].toFixed(1)} dBFS`);
+    // And well clear of the floor away from it.
+    assert.ok(db[Math.round(2500 / binHz)] < db[peak] - 40, 'no floor under the tone');
+});
+
+t('the audio scale runs from 0 Hz to the top of the filter, with figures between', () => {
+    const labels = (hi, w) => audioTicks(hi, w).map((x) => x.label);
+    assert.deepStrictEqual(labels(2700, 80), ['0']);
+    const narrow = audioTicks(2700, 200);
+    assert.deepStrictEqual([narrow[0].label, narrow[narrow.length - 1].label], ['0', '2.7k']);
+    assert.deepStrictEqual([narrow[0].align, narrow[narrow.length - 1].align], ['start', 'end']);
+    assert.ok(labels(2700, 400).includes('1k'), labels(2700, 400).join(' '));
+    assert.deepStrictEqual(labels(950, 300), ['0', '200', '400', '600', '950']);
+    assert.deepStrictEqual(labels(10000, 600).slice(-1), ['10k']);
+    for (const hi of [500, 950, 2700, 4500, 6000, 10000]) {
+        for (const w of [120, 200, 320, 600]) {
+            const t = audioTicks(hi, w);
+            assert.strictEqual(t[0].hz, 0);
+            const inner = t.slice(1, -1);
+            for (let i = 1; i < inner.length; i++) {
+                assert.ok((inner[i].frac - inner[i - 1].frac) * w >= AUDIO_GAP_PX - 1e-6, `${hi} at ${w}px: crowded`);
+            }
+        }
+    }
+});
+
+t('an open row shows the audio spectrum, a shut one the level bar, and a press flips bars and area', () => {
+    fresh({ mode: 'usb', widths: { usb: 2700 } });
+    addVfo();
+    updateVfo(1, { open: false });
+    const store = {};
+    const ls = globalThis.localStorage;
+    globalThis.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; }, removeItem() {} };
+    try {
+        reset();
+        const panel = render(IQPanel, {}, context());
+        for (const off of panel.cleanups) off();
+        const all = deep(panel.tree);
+        assert.strictEqual(all.filter((n) => cls(n) === 'iq-vfo__audio').length, 1, 'one open row, one spectrum');
+        assert.strictEqual(all.filter((n) => cls(n) === 'iq-vfo__level').length, 1, 'the shut row keeps its bar');
+        const scale = all.find((n) => cls(n) === 'iq-vfo__audio-scale');
+        const text = words(scale);
+        assert.ok(/^0\b/.test(text) && /2\.7k$/.test(text), `scale: ${text}`);
+
+        // The scope on its own, to press it.
+        // Nested a component or two down, so walked through them.
+        const findScope = (node) => {
+            if (!node || typeof node !== 'object') return null;
+            if (Array.isArray(node)) { for (const n of node) { const f = findScope(n); if (f) return f; } return null; }
+            if (typeof node.type === 'function' && node.type.name === 'AudioScope') return node;
+            if (typeof node.type === 'function') return findScope(node.type(node.props || {}));
+            const kids = node.children && node.children.length ? node.children : (node.props && node.props.children != null ? [node.props.children] : []);
+            return findScope(kids);
+        };
+        const el = findScope(panel.tree);
+        assert.ok(el, 'no audio scope component');
+        const press = () => {
+            reset();
+            const r = render(el.type, el.props, context());
+            const btn = deep(r.tree).find((n) => n.type === 'button');
+            for (const off of r.cleanups) off();
+            return btn;
+        };
+        const before = press();
+        assert.ok(/press for a filled area/.test(before.props.title), before.props.title);
+        before.props.onClick();
+        assert.strictEqual(store['ubersdr.v2.iqAudioScope'], 'area', 'the choice was not kept');
+        assert.ok(/press for bars/.test(press().props.title), 'the next render is not an area');
+        press().props.onClick();
+        assert.strictEqual(store['ubersdr.v2.iqAudioScope'], 'bars');
+    } finally {
+        globalThis.localStorage = ls;
+        fresh();
+    }
+});
+
+t('the scale under the picture is real frequencies: the dial, the edges, and more as it widens', () => {
+    const labels = (dial, span, w) => scaleTicks(dial, span, w).map((x) => x.label);
+    // Plain IQ on 40 m in a narrow dock: the dial and the two edges, exact.
+    assert.deepStrictEqual(labels(7_074_000, 12000, 220), ['7.068', '7.074', '7.080']);
+    const edges = scaleTicks(7_074_000, 12000, 220);
+    assert.deepStrictEqual(edges.map((x) => x.align), ['start', 'center', 'end']);
+    assert.deepStrictEqual(edges.map((x) => x.frac), [0, 0.5, 1]);
+    assert.ok(edges[1].dial && !edges[0].dial && !edges[2].dial);
+    // An off-grid dial to the hertz, without the trailing zeros.
+    assert.strictEqual(scaleTicks(14_074_321, 12000, 300)[1].label, '14.074321');
+    assert.strictEqual(scaleTicks(7_074_500, 12000, 300)[1].label, '7.0745');
+    // Wider, and round frequencies fill in between.
+    const wide = labels(7_074_000, 12000, 900);
+    assert.ok(wide.length >= 7, wide.join(' '));
+    assert.deepStrictEqual([wide[0], wide[wide.length - 1]], ['7.068', '7.080']);
+    assert.ok(wide.includes('7.074'));
+    // All to the same places, so the row reads as one scale.
+    for (const l of [...wide, ...labels(7_074_000, 192000, 900)]) assert.ok(/^\d+\.\d{3,}$/.test(l), l);
+    // IQ 192: the edges are ±96 kHz of the dial, and steps between are coarse.
+    const w192 = labels(7_074_000, 192000, 900);
+    assert.deepStrictEqual([w192[0], w192[w192.length - 1]], ['6.978', '7.170']);
+    // Long wave in kHz.
+    assert.deepStrictEqual(labels(77_500, 12000, 220), ['71.5', '77.5', '83.5']);
+    // Too narrow for three, the dial alone.
+    assert.deepStrictEqual(labels(7_074_000, 12000, 120), ['7.074']);
+    // Wherever they land: the three anchors always there, the rest never
+    // crowding a neighbour, and each where its frequency is.
+    for (const span of [12000, 48000, 96000, 192000, 384000]) {
+        for (const w of [220, 300, 480, 640, 900, 1400]) {
+            const t = scaleTicks(14_074_321, span, w);
+            assert.strictEqual(t[0].align, 'start');
+            assert.strictEqual(t[t.length - 1].align, 'end');
+            assert.ok(t.some((x) => x.dial && x.frac === 0.5), `${span} at ${w}px: no dial`);
+            const inner = t.slice(1, -1);
+            for (let i = 1; i < inner.length; i++) {
+                assert.ok((inner[i].frac - inner[i - 1].frac) * w >= SCALE_GAP_PX - 1e-6, `${span} at ${w}px: crowded`);
+            }
+            for (const x of t) {
+                assert.ok(Math.abs(x.frac - ((x.hz - (14_074_321 - span / 2)) / span)) < 1e-9);
+            }
+        }
+    }
+});
+
 t('the picture is scaled to the IQ width in use, with no demodulator running', () => {
     // The engine only hears the rate from packets it demodulates, so the
-    // scale has to come from the mode: IQ 48 with nothing started still reads
-    // ±24 kHz, and going back to plain IQ brings ±6 kHz back.
+    // scale has to come from the mode: IQ 48 with nothing started still labels
+    // ±24 kHz of the dial, and going back to plain IQ brings ±6 kHz back.
     fresh();
     const scale = (mode, high) => {
         const ctx = context({ tuning: { frequency: 7_100_000, mode, bandwidthLow: -high, bandwidthHigh: high } });
@@ -2308,14 +2777,17 @@ t('the picture is scaled to the IQ width in use, with no demodulator running', (
         const edges = deep(tree).filter((n) => cls(n) === 'iq-scope__scale');
         for (const off of cleanups) off();
         assert.strictEqual(edges.length, 1, 'no scale under the picture');
-        return deepWords(edges[0]);
+        return words(edges[0]);
     };
     assert.ok(!getIQDemod(context().player).running, 'a demodulator is running');
+    // Unmeasured, the scale takes a 300px dock's worth of labels.
+    const want = (span) => scaleTicks(7_100_000, span, 300).map((x) => x.label).join(' ');
     let text = scale('iq48', 24000);
-    assert.ok(/−\s*24 kHz/.test(text) && /\+\s*24 kHz/.test(text), `IQ 48 scale: ${text}`);
+    assert.strictEqual(text, want(48000), 'IQ 48 is not labelled across 48 kHz');
     assert.strictEqual(iqHalfSpan(), 24000, 'the offsets are not clamped to the wide span');
     text = scale('iq', 6000);
-    assert.ok(/−\s*6 kHz/.test(text) && /\+\s*6 kHz/.test(text), `IQ scale: ${text}`);
+    assert.strictEqual(text, want(12000), 'plain IQ is not labelled across 12 kHz');
+    assert.notStrictEqual(want(48000), want(12000));
     assert.strictEqual(iqHalfSpan(), IQ_HALF_SPAN);
     fresh();
 });
@@ -2521,8 +2993,12 @@ t('a collapsed row keeps its level meter', () => {
     const nodes = deep(tree);
     assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__body').length, 1,
         'the closed row still drew its controls');
-    assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__level').length, 2,
-        'a row lost its audio meter when it was collapsed');
+    // The shut row's audio meter is its bar; the open one shows the audio as
+    // a spectrum in the same place — one audio reading a row, either way.
+    assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__level').length, 1,
+        'the collapsed row lost its audio meter');
+    assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__audio').length, 1,
+        'the open row has no audio spectrum');
     // And the signal meter with it: that one is the whole point of a collapsed
     // row, since it is the only reading left that says anything is arriving.
     assert.strictEqual(nodes.filter((n) => cls(n) === 'iq-vfo__signal').length, 2,

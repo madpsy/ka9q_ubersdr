@@ -58,7 +58,7 @@
 // are, and components/IQDemodWatch.jsx is what pushes the mode and the volume
 // into it. This file is a view over that object and a set of controls.
 
-import React, { useEffect, useLayoutEffect, useReducer, useRef, useState } from '../react.js';
+import React, { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { resolveMaxFps, useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
@@ -71,15 +71,18 @@ import { formatFreqExact, formatSpan } from '../lib/format.js';
 import { haptic } from '../lib/haptics.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import { cssVar, sizedCanvas } from '../lib/audioWaterfall.js';
+import { elementSinkSupport, sinkLabel } from '../lib/audioSinks.js';
+import useOutputDevices from '../lib/useOutputDevices.js';
 import { createLevels, updateLevels } from '../lib/ifSpectrum.js';
 import {
     IQSpectrum, aimCancel, aimDown, aimMove, aimUp, binsToPixels, fractionOffset, markerAt,
-    newAim, offsetFraction, squelchLineDb,
+    newAim, offsetFraction, scaleTicks, audioTicks, squelchLineDb,
 } from '../lib/iqSpectrum.js';
 import {
     DEMOD_MODES, MAX_VFOS, PANS, PITCH_MAX, PITCH_MIN, SIDEBAND_OPTIONS, SQUELCH_MAX, SQUELCH_OFF,
     TRACK_MAX, TRACK_MIN, VFO_LABELS, addVfo, collapseVfos, demodMode, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, onDemodSettings,
-    planForVfo, removeVfo, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo, vfoPassband, workingRate,
+    planForVfo, removeVfo, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo, vfoPassband, workingRate, modeMax, modeWidths,
+    audioBandOf,
     vfoWidth,
 } from '../lib/iqDemod.js';
 
@@ -217,6 +220,159 @@ function VfoStrip({ source, vfo, index, armed, height }) {
             title="This demodulator’s passband"
         />
     );
+}
+
+// ── the audio spectrum ───────────────────────────────────────────────────────
+//
+// An open row shows what its demodulator is putting out as a spectrum rather
+// than a level bar: across exactly the audio its filter passes (audioBandOf), so
+// widening the filter widens the picture, and what is under it — the shape of a
+// voice, a CW note, the hiss of an empty channel — is visible at a glance. A
+// press swaps bars for a filled area; the choice is shared by every row and
+// kept.
+
+const AUDIO_STYLE_KEY = 'ubersdr.v2.iqAudioScope';
+export const AUDIO_SCOPE_H = 22;
+let audioStyle = null;
+const audioStyleListeners = new Set();
+
+function readAudioStyle() {
+    try {
+        return localStorage.getItem(AUDIO_STYLE_KEY) === 'area' ? 'area' : 'bars';
+    } catch (err) {
+        return 'bars';
+    }
+}
+
+/** The shared bars-or-area choice, and the press that flips it everywhere. */
+export function useAudioStyle() {
+    const [style, setStyle] = useState(() => {
+        if (audioStyle == null) audioStyle = readAudioStyle();
+        return audioStyle;
+    });
+    useEffect(() => {
+        audioStyleListeners.add(setStyle);
+        return () => audioStyleListeners.delete(setStyle);
+    }, []);
+    const flip = () => {
+        audioStyle = (audioStyle || style) === 'bars' ? 'area' : 'bars';
+        try { localStorage.setItem(AUDIO_STYLE_KEY, audioStyle); } catch (err) { /* private mode */ }
+        for (const fn of Array.from(audioStyleListeners)) fn(audioStyle);
+    };
+    return [style, flip];
+}
+
+function AudioScope({ index, vfo, source, armed }) {
+    const ref = useRef(null);
+    const [style, flip] = useAudioStyle();
+    // Its own width, for how many figures fit on the scale under it. 200px
+    // until measured: about what a row's chart gets in a narrow dock.
+    const box = useRef(null);
+    const [boxW, setBoxW] = useState(200);
+    useLayoutEffect(() => {
+        const el = box.current;
+        if (!el || typeof ResizeObserver === 'undefined') return undefined;
+        const ro = new ResizeObserver(() => setBoxW(el.clientWidth || 200));
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+    const st = useRef({ levels: createLevels(), px: null });
+    st.current.vfo = vfo;
+    st.current.index = index;
+    st.current.style = style;
+
+    useEffect(() => {
+        st.current.levels = createLevels();
+        if (!armed) return undefined;
+        // On the panel's own frame loop, at its rate cap: one transform per
+        // open row per frame, and none at all for a row that is shut.
+        return source.subscribe((bins, dt) => {
+            drawAudio(ref.current, st.current, getIQDemod().audioSpectrumOf(st.current.index), dt);
+        });
+    }, [source, armed]);
+
+    // Stopped, there is no loop: drawn on render so a style change still shows.
+    useEffect(() => {
+        if (!armed) drawAudio(ref.current, st.current, null, 0);
+    });
+
+    const band = audioBandOf(vfo);
+    return (
+        <button
+            type="button"
+            ref={box}
+            className="iq-vfo__audio"
+            title={`Audio, 0 Hz to ${formatSpan(band.hi)} — press for ${style === 'bars' ? 'a filled area' : 'bars'}`}
+            onClick={flip}
+        >
+            <canvas ref={ref} style={{ height: `${AUDIO_SCOPE_H}px` }} />
+            {/* 0 Hz at the left, the top of the filter's audio at the right. */}
+            <span className="iq-vfo__audio-scale">
+                {audioTicks(band.hi, boxW).map((t) => (
+                    <span
+                        key={t.hz}
+                        className={t.align === 'center' ? undefined : `is-${t.align}`}
+                        style={{ left: `${(t.frac * 100).toFixed(3)}%` }}
+                    >
+                        {t.label}
+                    </span>
+                ))}
+            </span>
+        </button>
+    );
+}
+
+/** One frame of one row's audio spectrum. */
+function drawAudio(canvas, s, spec, dt) {
+    if (!canvas) return;
+    const { w, h, dpr } = sizedCanvas(canvas, AUDIO_SCOPE_H);
+    const c = canvas.getContext('2d');
+    if (!c) return;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, w, h);
+    c.fillStyle = cssVar('--surface-3', '#1a2130');
+    c.fillRect(0, 0, w, h);
+    if (!spec) return;
+
+    // The bins the filter's audio covers, and nothing either side of it.
+    const band = audioBandOf(s.vfo);
+    const n = spec.db.length;
+    const k0 = Math.max(0, Math.min(n - 1, Math.floor(band.lo / spec.binHz)));
+    const k1 = Math.max(k0 + 1, Math.min(n, Math.ceil(band.hi / spec.binHz) + 1));
+    if (!s.px || s.px.length !== w) s.px = new Float32Array(w);
+    binsToPixels(spec.db.subarray(k0, k1), s.px);
+    const { floor, ceil } = updateLevels(s.levels, s.px, dt);
+    const range = Math.max(1, ceil - floor);
+    const hOf = (db) => (Number.isFinite(db) ? Math.max(0, Math.min(h, ((db - floor) / range) * h)) : 0);
+    const colour = cssVar(`--iq-vfo-${(s.index % MAX_VFOS) + 1}`, VFO_FALLBACK[s.index % MAX_VFOS]);
+
+    if (s.style === 'area') {
+        // Filled to the floor, solidly enough to read as a shape at this
+        // height, with its edge drawn over the top.
+        c.beginPath();
+        c.moveTo(0, h);
+        for (let x = 0; x < w; x++) c.lineTo(x, h - hOf(s.px[x]));
+        c.lineTo(w, h);
+        c.closePath();
+        c.globalAlpha = 0.55;
+        c.fillStyle = colour;
+        c.fill();
+        c.globalAlpha = 1;
+        c.lineWidth = Math.max(1, dpr);
+        c.strokeStyle = colour;
+        c.stroke();
+        return;
+    }
+    // Bars: each the loudest column under it, a pixel apart.
+    const bw = Math.max(2, Math.round(3 * dpr));
+    const gap = Math.max(1, Math.round(dpr));
+    c.fillStyle = colour;
+    for (let x = 0; x + bw <= w; x += bw + gap) {
+        let peak = -Infinity;
+        for (let i = x; i < x + bw; i++) if (s.px[i] > peak) peak = s.px[i];
+        const bh = hOf(peak);
+        if (bh > 0) c.fillRect(x, h - bh, bw, bh);
+    }
 }
 
 /** One frame of one strip. */
@@ -433,8 +589,20 @@ function useIQFrames(player, live, iq, maxFps) {
  * — see the note there about why a complex transform can show the two sides of
  * the dial apart when the audio analyser behind the Audio scope cannot.
  */
-function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, marks, carriers }) {
+function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, marks, carriers, dialHz }) {
     const ref = useRef(null);
+    // The scale's own width, for how many frequencies fit under the picture.
+    // 300px until measured: a narrow dock's worth, so the first frame errs on
+    // the side of fewer labels rather than more.
+    const scaleRef = useRef(null);
+    const [scaleW, setScaleW] = useState(300);
+    useLayoutEffect(() => {
+        const el = scaleRef.current;
+        if (!el || typeof ResizeObserver === 'undefined') return undefined;
+        const ro = new ResizeObserver(() => setScaleW(el.clientWidth || 300));
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
     const st = useRef({
         levels: createLevels(),
         px: null,
@@ -448,10 +616,16 @@ function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, ma
     st.current.active = active;
     st.current.rate = source.spec.rate;
     st.current.carriers = carriers || [];
-    // The edges are wherever the stream's rate puts them: ±6 kHz on plain IQ,
-    // further on the wide presets.
-    const half = iqHalfSpan() / 1000;
-    const spanLabel = `${Number.isInteger(half) ? half : half.toFixed(1)} kHz`;
+    st.current.dialHz = dialHz;
+    // The readout that follows the pointer. Written straight into the element
+    // by the draw loop rather than through state: its level changes every
+    // frame, and re-rendering the panel sixty times a second to say so would
+    // cost far more than the picture does.
+    const tipRef = useRef(null);
+    // Real frequencies across the whole stream — ±6 kHz of the dial on plain
+    // IQ, further on the wide presets — as many as the width holds. See
+    // scaleTicks.
+    const ticks = scaleTicks(dialHz, iqHalfSpan() * 2, scaleW);
 
     useEffect(() => {
         st.current.levels = createLevels();
@@ -463,8 +637,16 @@ function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, ma
         return source.subscribe((bins, dt) => {
             st.current.rate = source.spec.rate;
             draw(ref.current, st.current, bins, dt, marks);
+            showTip(tipRef.current, st.current);
         });
     }, [source, live, iq, marks.dial, marks.edge]);
+    // Nothing to read off a picture that is not running.
+    useEffect(() => {
+        if (!(live && iq)) {
+            st.current.hover = null;
+            showTip(tipRef.current, st.current);
+        }
+    }, [live, iq]);
 
     // Where in the picture the pointer is, in pixels from its left edge, or null
     // if it cannot be measured.
@@ -519,7 +701,23 @@ function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, ma
         act(e, r);
         if (r.tune) haptic('tune', 'spectrum');
     };
-    const move = (e) => act(e, aimMove(st.current.aim, e));
+    // A mouse or a pen over the picture is somebody reading it; a finger on it
+    // is somebody tuning, and has nothing to hover with.
+    const move = (e) => {
+        const s = st.current;
+        if (e.pointerType !== 'touch' && live && iq) {
+            const rect = ref.current && ref.current.getBoundingClientRect();
+            s.hover = rect && rect.width
+                ? { x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width }
+                : null;
+            showTip(tipRef.current, s);
+        }
+        act(e, aimMove(s.aim, e));
+    };
+    const leave = () => {
+        st.current.hover = null;
+        showTip(tipRef.current, st.current);
+    };
     const up = (e) => {
         const r = aimUp(st.current.aim, e);
         release(e);
@@ -534,28 +732,71 @@ function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, ma
 
     return (
         <div className="iq-scope">
+            {/* No title: the readout below follows the pointer, and a browser
+                tooltip would sit on top of it. The instructions stay with the
+                picture as its label. */}
             <canvas
                 ref={ref}
                 className={`iq-scope__canvas${running ? ' is-live' : ''}`}
                 style={{ height: `${SCOPE_H}px` }}
-                title="Press or drag to move a demodulator; press a marker to pick that one up"
+                aria-label="Press or drag to move a demodulator; press a marker to pick that one up"
                 onPointerDown={down}
                 onPointerMove={move}
                 onPointerUp={up}
                 onPointerCancel={cancel}
+                onPointerLeave={leave}
             />
+            <div ref={tipRef} className="spec-tip iq-scope__tip" hidden />
             {!(live && iq) && (
                 <div className="iq-scope__veil">
                     {live ? 'The receiver is not in IQ.' : 'The receiver is off.'}
                 </div>
             )}
-            <div className="iq-scope__scale">
-                <span>−{spanLabel}</span>
-                <span>dial</span>
-                <span>+{spanLabel}</span>
+            <div className="iq-scope__scale" ref={scaleRef}>
+                {ticks.map((t) => (
+                    <span
+                        key={t.hz}
+                        className={t.dial ? 'is-dial' : t.align === 'center' ? undefined : `is-${t.align}`}
+                        style={{ left: `${(t.frac * 100).toFixed(3)}%` }}
+                    >
+                        {t.label}
+                    </span>
+                ))}
             </div>
         </div>
     );
+}
+
+/**
+ * The pointer's readout: the frequency under it and the level there, in dBFS.
+ *
+ * The level is the picture's own, the pixel column the pointer is over, so the
+ * figure is what the trace is drawing at that point and moves with it. Before a
+ * frame has drawn anything the frequency is still worth saying, so the level is
+ * left off rather than the readout.
+ */
+function showTip(tip, s) {
+    if (!tip) return;
+    const at = s.hover;
+    if (!at || !(at.w > 0) || !(s.rate > 0)) {
+        tip.hidden = true;
+        return;
+    }
+    const frac = Math.max(0, Math.min(1, at.x / at.w));
+    const hz = (s.dialHz || 0) + fractionOffset(frac, s.rate);
+    let text = formatFreqExact(Math.round(hz));
+    if (s.px && s.px.length) {
+        const db = s.px[Math.min(s.px.length - 1, Math.floor(frac * s.px.length))];
+        if (Number.isFinite(db)) text += ` · ${db.toFixed(1)} dBFS`;
+    }
+    tip.textContent = text;
+    tip.hidden = false;
+    // Beside the pointer, and on its other side near the right edge so the
+    // readout does not run off the picture.
+    const flip = at.x > at.w - 160;
+    tip.style.left = `${Math.round(at.x + (flip ? -12 : 12))}px`;
+    tip.style.top = `${Math.round(Math.max(0, at.y - 22))}px`;
+    tip.style.transform = flip ? 'translateX(-100%)' : 'none';
 }
 
 /**
@@ -878,9 +1119,62 @@ function EcssControls({ vfo, ecss, dialHz, minimal, set }) {
  * showing, which is per row and independent: pressing the header of the active
  * row closes it without giving up the aim.
  */
+/**
+ * Where one demodulator is heard: the receiver's own output, or a device of its
+ * own. Pan still applies on its own device — two demodulators can share a pair
+ * of headphones, one in each ear, while a third plays on the speakers.
+ *
+ * Not drawn at all where the browser cannot send part of a page to one device
+ * and the rest to another; the Audio panel's Output says why for the whole
+ * receiver, and saying it again in every row would be six copies of the same
+ * sentence.
+ */
+function VfoOutput({ vfo, set, error }) {
+    const supported = useMemo(elementSinkSupport, []);
+    const { devices, hidden, refresh } = useOutputDevices(supported);
+    if (!supported) return null;
+    const id = vfo.sinkId || '';
+    const known = !id || devices.some((d) => d.deviceId === id);
+    return (
+        <>
+            <Field label="Output">
+                {/* Re-read on focus: names unlocked by the Audio panel's Refresh
+                    since this row was drawn are a devicechange the browser does
+                    not always send. */}
+                <select
+                    className="select"
+                    value={id}
+                    onFocus={() => refresh(false)}
+                    onChange={(e) => set({ sinkId: e.target.value })}
+                >
+                    <option value="">Receiver output</option>
+                    {devices
+                        .filter((d) => d.deviceId)
+                        .map((d) => (
+                            <option key={d.deviceId} value={d.deviceId}>
+                                {d.deviceId === 'default' ? 'System Default' : sinkLabel(d)}
+                            </option>
+                        ))}
+                    {!known && <option value={id}>Saved device …{id.slice(-6)}</option>}
+                </select>
+            </Field>
+            {error ? (
+                <div className="note note--tight note--warn">
+                    That device could not be used ({error}) — playing on the receiver’s output instead.
+                </div>
+            ) : hidden && (
+                <div className="note note--tight">
+                    Device names are hidden until microphone permission is granted —
+                    Refresh under the Audio panel’s Output asks for it.
+                </div>
+            )}
+        </>
+    );
+}
+
 function VfoRow({
     index, vfo, active, level, signalDb, gateOpen, taps, dialHz, minimal, canRemove, source, armed,
-    ecss,
+    ecss, sinkError,
 }) {
     const mode = demodMode(vfo.mode);
     const width = vfoWidth(vfo);
@@ -950,6 +1244,9 @@ function VfoRow({
     // enough to land on a carrier: ten hertz is a fifth of the narrowest CW
     // filter offered and well inside any voice passband.
     const widthStep = mode.min < 500 ? 10 : 50;
+    // 2 where the width is a total across the carrier and the panel shows a
+    // sideband of it — AM and SAM. See DEMOD_MODES.
+    const sides = mode.sides || 1;
 
     return (
         <div
@@ -1088,9 +1385,14 @@ function VfoRow({
                 </div>
                 <div className="iq-vfo__meter">
                     {open && <span className="iq-vfo__meter-name">Audio</span>}
-                    <div className="iq-vfo__level" title="What this demodulator is putting out">
-                        <i style={{ width: `${Math.min(100, level * 400)}%` }} />
-                    </div>
+                    {/* Open, the spectrum of the audio; shut, the bar it always was. */}
+                    {open ? (
+                        <AudioScope index={index} vfo={vfo} source={source} armed={armed} />
+                    ) : (
+                        <div className="iq-vfo__level" title="What this demodulator is putting out">
+                            <i style={{ width: `${Math.min(100, level * 400)}%` }} />
+                        </div>
+                    )}
                     {open && <span className="iq-vfo__meter-val">{levelLabel(audioDb)}</span>}
                 </div>
             </div>
@@ -1120,26 +1422,33 @@ function VfoRow({
                         />
                     </Field>
 
+                    {/* The AM family is shown as the audio it carries — the
+                        width of a sideband — so AM, SAM and ECSS have the same
+                        buttons and the same slider and a figure means the same
+                        thing in each. AM and SAM keep their total underneath
+                        (see `sides` in DEMOD_MODES); the passband readout after
+                        the dot is still where the filter actually sits. */}
                     <Field
                         label="Bandwidth"
-                        hint={`${formatSpan(width)} · ${offsetLabel(band.lo)} to ${offsetLabel(band.hi)}`}
+                        hint={`${formatSpan(width / sides)}${sides === 2 || vfo.mode === 'ecss' ? ' audio' : ''} · ${offsetLabel(band.lo)} to ${offsetLabel(band.hi)}`}
                     >
                         <Segmented
-                            options={mode.widths.map((w) => ({ value: w, label: widthLabel(w) }))}
+                            options={modeWidths(vfo.mode).map((w) => ({ value: w, label: widthLabel(w / sides) }))}
                             value={width}
                             onChange={(w) => set({ widths: { [vfo.mode]: w } })}
                             size="sm"
-                            columns={mode.widths.length}
+                            // Wraps rather than squeezing: a wide stream adds two
+                            // more to the AM family's five.
+                            minItemWidth={44}
                         />
                     </Field>
                     <Slider
-                        value={width}
-                        min={mode.min}
-                        max={mode.max}
+                        value={width / sides}
+                        min={mode.min / sides}
+                        max={modeMax(vfo.mode) / sides}
                         step={widthStep}
-                        onChange={(w) => set({ widths: { [vfo.mode]: w } })}
+                        onChange={(w) => set({ widths: { [vfo.mode]: w * sides } })}
                     />
-
                     {(vfo.mode === 'cwl' || vfo.mode === 'cwu') && (
                         <Field label="CW pitch" hint={`${vfo.pitchHz} Hz`}>
                             <Slider
@@ -1213,6 +1522,7 @@ function VfoRow({
                                     onChange={(gain) => set({ gain })}
                                 />
                             </Field>
+                            <VfoOutput vfo={vfo} set={set} error={sinkError} />
                         </>
                     )}
                 </div>
@@ -1351,6 +1661,7 @@ export default function IQPanel({ minimal }) {
                 sitting, survives the trim. */}
             {!minimal && (
                 <IQScope
+                    dialHz={tuning.frequency}
                     source={source}
                     live={live}
                     iq={iq}
@@ -1389,8 +1700,9 @@ export default function IQPanel({ minimal }) {
                         level={hearing ? demod.levelOf(i) : 0}
                         signalDb={hearing ? demod.signalDbOf(i) : null}
                         gateOpen={hearing ? demod.gateOpenOf(i) : true}
-                        taps={tapsFor(planForVfo(vfo).cutoffHz, workingRate(demod.rate || 12000), planForVfo(vfo).transitionHz)}
+                        taps={tapsFor(planForVfo(vfo).cutoffHz, workingRate(demod.rate || 12000, planForVfo(vfo)), planForVfo(vfo).transitionHz)}
                         ecss={hearing ? demod.ecssOf(i) : null}
+                        sinkError={demod.sinkErrorOf(i)}
                         dialHz={tuning.frequency}
                         minimal={minimal}
                         canRemove={vfos.length > 1}

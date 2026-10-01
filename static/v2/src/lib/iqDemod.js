@@ -60,6 +60,7 @@
 // mode and the volume, and it is mounted in App.jsx for the same reason.
 
 import { Emitter } from '../radio/emitter.js';
+import { fftInPlace, hannWindow } from './iqSpectrum.js';
 import { MIN_BLOCK_SEC } from '../radio/constants.js';
 import {
     ECSS_LOW_EDGE, ECSS_TRANSITION, EcssTracker, SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN,
@@ -115,6 +116,14 @@ export function setIQSpan(rateHz) {
  * side of it. That is the figure a receiver's filter is named for, and making
  * one mode mean something else would make the number unreadable.
  */
+// The AM family's widths, a sideband at a time — see the note in DEMOD_MODES.
+const SIDE_WIDTHS = [2700, 3500, 4500, 5000, 6000];
+const SIDE_WIDE = [8000, 10000];
+const SIDE_MIN = 1000;
+const SIDE_MAX = 6000;
+const SIDE_WIDE_MAX = 10000;
+const SIDE_FALLBACK = 4500;
+
 export const DEMOD_MODES = [
     {
         id: 'lsb',
@@ -152,34 +161,49 @@ export const DEMOD_MODES = [
         max: 2000,
         fallback: 500,
     },
+    // AM, SAM and ECSS share one scale: the width of a sideband, which is the
+    // audio width and the figure a broadcast is described by. AM and SAM keep a
+    // total underneath — their filter straddles the carrier — so `sides: 2`
+    // says the panel shows half of it. Same buttons, same slider, in all three.
     {
         id: 'am',
         label: 'AM',
         summary: 'Envelope detector — the passband straddles the carrier.',
-        widths: [4000, 6000, 8000, 10000],
-        min: 1000,
-        max: 12000,
-        fallback: 6000,
+        widths: SIDE_WIDTHS.map((w) => w * 2),
+        min: SIDE_MIN * 2,
+        max: SIDE_MAX * 2,
+        // On a stream wider than plain IQ's 12 kHz, 8 and 10 kHz a side — the
+        // whole of a broadcast's sidebands, where the transmitter sends them.
+        wideWidths: SIDE_WIDE.map((w) => w * 2),
+        wideMax: SIDE_WIDE_MAX * 2,
+        fallback: SIDE_FALLBACK * 2,
+        sides: 2,
     },
     {
         id: 'sam',
         label: 'SAM',
         summary: 'Synchronous AM — both sidebands, detected against the tracked carrier.',
-        widths: [4000, 6000, 8000, 10000],
-        min: 1000,
-        max: 12000,
-        fallback: 6000,
+        widths: SIDE_WIDTHS.map((w) => w * 2),
+        min: SIDE_MIN * 2,
+        max: SIDE_MAX * 2,
+        wideWidths: SIDE_WIDE.map((w) => w * 2),
+        wideMax: SIDE_WIDE_MAX * 2,
+        fallback: SIDE_FALLBACK * 2,
+        sides: 2,
     },
     {
         id: 'ecss',
         label: 'ECSS',
         summary: 'Exalted-carrier SSB — AM tracked by its carrier, heard on one sideband.',
-        // Per sideband, so 4.5 kHz is the audio a broadcast actually carries
-        // and 6 kHz the whole of one side of the stream.
-        widths: [2700, 3500, 4500, 5000, 6000],
-        min: 1000,
-        max: 6000,
-        fallback: 4500,
+        // Per sideband already, so 4.5 kHz is the audio a broadcast actually
+        // carries and 6 kHz the whole of one side of plain IQ's stream.
+        widths: SIDE_WIDTHS,
+        min: SIDE_MIN,
+        max: SIDE_MAX,
+        wideWidths: SIDE_WIDE,
+        wideMax: SIDE_WIDE_MAX,
+        fallback: SIDE_FALLBACK,
+        sides: 1,
     },
     {
         id: 'nfm',
@@ -232,12 +256,28 @@ const LEGACY_MODES = { cw: 'cwu' };
 // And where their filter widths went: plain CW's to both of its halves.
 const LEGACY_WIDTHS = { cwl: 'cw', cwu: 'cw' };
 
+// Whether the stream is wider than plain IQ's 12 kHz, which is what opens the
+// AM family's wide widths: on 12 kHz there is no room for 8 kHz a side.
+const wideSpan = () => halfSpan > IQ_HALF_SPAN;
+
+/** The widest filter this mode takes on the stream in use. */
+export function modeMax(modeId) {
+    const m = demodMode(modeId);
+    return wideSpan() && m.wideMax ? m.wideMax : m.max;
+}
+
+/** The width buttons this mode offers on the stream in use. */
+export function modeWidths(modeId) {
+    const m = demodMode(modeId);
+    return wideSpan() && m.wideWidths ? [...m.widths, ...m.wideWidths] : m.widths;
+}
+
 /** The width this mode will accept, for a stored or typed figure. */
 export function clampWidth(modeId, widthHz) {
     const m = demodMode(modeId);
     const w = Number(widthHz);
     if (!Number.isFinite(w)) return m.fallback;
-    return clamp(Math.round(w), m.min, m.max);
+    return clamp(Math.round(w), m.min, modeMax(modeId));
 }
 
 /**
@@ -606,25 +646,87 @@ export function signalMeter(db) {
 // rate, which Web Audio resamples to the context's; the IQ stream itself is
 // untouched, and is what the recorder and the picture still see.
 
-// The rate a chain works at, at least. 24 kHz rather than 12: the widest
-// passband any mode reaches from its own centre is ±7.2 kHz (12 kHz of SAM, plus
-// the tracker's 1.2 kHz of pull either way), and the front filter needs room to
-// roll off between that and the alias of the next band down.
+// The rate a chain works at, at least. 24 kHz rather than 12: up to plain IQ's
+// widths the passband reaches ±7.2 kHz from its own centre at most (12 kHz of
+// SAM, plus the tracker's 1.2 kHz of pull either way), and the front filter
+// needs room to roll off between that and the alias of the next band down.
 export const WORK_RATE_MIN = 24000;
-// The front filter's pass edge. Everything a chain reads is inside it; what
-// folds back past the decimation lands between here and the working Nyquist,
-// outside every chain's own passband, where its filter takes it away.
+// The front filter's pass edge, at least. Everything a chain reads is inside
+// it; what folds back past the decimation lands between here and the working
+// Nyquist, outside every chain's own passband, where its filter takes it away.
 const FRONT_PASS_HZ = 8000;
+// What the front filter is given to roll off in, beyond twice its pass edge.
+const FRONT_ROLLOFF_HZ = 8000;
 
-/** How many input samples each working sample stands for. 1 below 48 kHz. */
-export function decimationFor(rateHz) {
-    return Math.max(1, Math.floor(rateHz / WORK_RATE_MIN));
+/**
+ * How far from its own centre a plan's passband reaches, in Hz.
+ *
+ * What sets the front end's pass edge. Only the wide widths go past 8 kHz —
+ * 10 kHz a side of AM, or of ECSS hung off a carrier the tracker may have
+ * pulled 1.2 kHz away — and those are why the working rate is not fixed.
+ */
+export function reachOf(plan) {
+    if (!plan) return 0;
+    const pull = plan.trackHz ? plan.trackHz * 1.2 : 0;
+    switch (plan.kind) {
+        case 'ecss': return plan.widthHz + pull;
+        case 'sam': return plan.widthHz / 2 + pull;
+        default: return plan.cutoffHz;
+    }
 }
 
-/** The rate a chain's demodulator actually runs at, for this stream rate. */
-export function workingRate(rateHz) {
+/** The front filter's pass edge for a plan. */
+function frontPassFor(plan) {
+    return Math.max(FRONT_PASS_HZ, Math.ceil(reachOf(plan) + 500));
+}
+
+/**
+ * How many input samples each working sample stands for. 1 on plain IQ, and
+ * wherever the rate leaves no room to keep fewer: the working rate has to hold
+ * the plan's pass edge twice over, plus the front filter's roll-off.
+ */
+export function decimationFor(rateHz, plan) {
+    const need = 2 * frontPassFor(plan) + FRONT_ROLLOFF_HZ;
+    return Math.max(1, Math.floor(rateHz / need));
+}
+
+/** The rate a chain's demodulator actually runs at, for this stream and plan. */
+export function workingRate(rateHz, plan) {
     const rate = rateHz > 0 ? rateHz : 12000;
-    return rate / decimationFor(rate);
+    return rate / decimationFor(rate, plan);
+}
+
+// The audio spectrum's transform: 1024 points, so 11.7 Hz a bin at 12 kHz and
+// 23 Hz at the 24 kHz a wide stream is demodulated at — fine enough to see the
+// shape of a voice inside a 2.7 kHz filter, and 85 ms or less of history.
+export const AUDIO_FFT_SIZE = 1024;
+const AUDIO_WINDOW = hannWindow(AUDIO_FFT_SIZE);
+const AUDIO_WINDOW_SUM = AUDIO_WINDOW.reduce((a, b) => a + b, 0);
+
+/**
+ * The audio a demodulator's filter lets through, in Hz of audio — what its row's
+ * audio spectrum spans, so the picture follows the width as it is changed.
+ *
+ * Always from 0 Hz, so the left edge of every row's picture means the same
+ * thing. A sideband mode hears up to the width; AM, SAM and NFM half of their
+ * total, the audio each side carries; CW up to its pitch plus half the filter,
+ * so the note sits where it sounds.
+ */
+export function audioBandOf(vfo) {
+    const w = vfoWidth(vfo);
+    switch (demodMode(vfo.mode).id) {
+        case 'usb':
+        case 'lsb':
+        case 'ecss':
+            return { lo: 0, hi: w };
+        case 'cwl':
+        case 'cwu': {
+            const pitch = clamp(Math.round(Number(vfo.pitchHz) || 0), PITCH_MIN, PITCH_MAX);
+            return { lo: 0, hi: pitch + w / 2 };
+        }
+        default:
+            return { lo: 0, hi: w / 2 };
+    }
 }
 
 export class DemodChain {
@@ -648,6 +750,13 @@ export class DemodChain {
         this.dQ = new Float32Array(0);
         // How many samples the last block produced, at `rate`.
         this.outFrames = 0;
+        // The last AUDIO_FFT_SIZE samples of what this demodulator put out, for
+        // the open row's audio spectrum — see audioSpectrum.
+        this.scope = new Float32Array(AUDIO_FFT_SIZE);
+        this.scopePos = 0;
+        this.scopeRe = null;
+        this.scopeIm = null;
+        this.scopeDb = null;
         this.plan = null;
         this.taps = null;
         this.n = 0;
@@ -701,8 +810,9 @@ export class DemodChain {
      */
     configure(plan, rateHz) {
         const inRate = rateHz > 0 ? rateHz : 12000;
-        const D = decimationFor(inRate);
+        const D = decimationFor(inRate, plan);
         const rate = inRate / D;
+        const pass = frontPassFor(plan);
         // SAM and ECSS share the tracker, and moving between them keeps the
         // carrier: it is the same carrier either way.
         const entering = isTracked(plan) && !isTracked(this.plan);
@@ -714,13 +824,13 @@ export class DemodChain {
         // chain mixes by whatever is left — nothing, outside the tracker.
         this.baseHz = D > 1 ? plan.centreHz : 0;
         if (D > 1) {
-            const fkey = `${inRate}/${D}`;
+            const fkey = `${inRate}/${D}/${pass}`;
             if (fkey !== this.frontKey || !this.frontTaps) {
                 this.frontKey = fkey;
                 // Cut off midway between the pass edge and where the next band
                 // down folds onto it; the transition is the whole of that gap.
-                const stop = rate - FRONT_PASS_HZ;
-                this.frontTaps = designLowpass((FRONT_PASS_HZ + stop) / 2, inRate, stop - FRONT_PASS_HZ);
+                const stop = rate - pass;
+                this.frontTaps = designLowpass((pass + stop) / 2, inRate, stop - pass);
                 this.frontN = this.frontTaps.length;
                 this.fbI = new Float32Array(this.frontN * 2);
                 this.fbQ = new Float32Array(this.frontN * 2);
@@ -754,8 +864,46 @@ export class DemodChain {
         }
     }
 
+    /**
+     * The spectrum of what this demodulator has lately put out — the audio,
+     * after the squelch, as heard. dBFS per bin from DC to the working Nyquist,
+     * `binHz` apart. The array is reused between calls.
+     *
+     * Computed only when asked: the panel asks once a frame, and only for a row
+     * that is open.
+     */
+    audioSpectrum() {
+        const n = AUDIO_FFT_SIZE;
+        if (!this.scopeRe) {
+            this.scopeRe = new Float64Array(n);
+            this.scopeIm = new Float64Array(n);
+            this.scopeDb = new Float32Array(n / 2);
+        }
+        const re = this.scopeRe;
+        const im = this.scopeIm;
+        const win = AUDIO_WINDOW;
+        let p = this.scopePos;
+        for (let i = 0; i < n; i++) {
+            re[i] = this.scope[p] * win[i];
+            im[i] = 0;
+            p = p + 1 === n ? 0 : p + 1;
+        }
+        fftInPlace(re, im);
+        // A full-scale sine reads 0 dBFS: the window's coherent gain, and the
+        // half of a real signal's power that lands in the negative bins.
+        const norm = 2 / AUDIO_WINDOW_SUM;
+        const db = this.scopeDb;
+        for (let k = 0; k < n / 2; k++) {
+            const m = Math.hypot(re[k], im[k]) * norm;
+            db[k] = m > 1e-9 ? 20 * Math.log10(m) : -180;
+        }
+        return { db, binHz: (this.rate || 12000) / n };
+    }
+
     /** Forget everything carried between blocks. Starting is not resuming. */
     reset() {
+        this.scope.fill(0);
+        this.scopePos = 0;
         if (this.fbI) this.fbI.fill(0);
         if (this.fbQ) this.fbQ.fill(0);
         this.fpos = 0;
@@ -1056,6 +1204,17 @@ export class DemodChain {
             out[k] = y > 1 ? 1 : (y < -1 ? -1 : y);
         }
 
+        // Kept for the audio spectrum. A copy of a few hundred floats a block,
+        // which is nothing beside the filter that made them.
+        const ring = this.scope;
+        const rn = ring.length;
+        let rp = this.scopePos;
+        for (let k = 0; k < frames; k++) {
+            ring[rp] = out[k];
+            rp = rp + 1 === rn ? 0 : rp + 1;
+        }
+        this.scopePos = rp;
+
         this.pos = pos;
         this.ecssGain = ecssGain;
         // Wrapped once per block rather than per sample: unbounded phase loses
@@ -1156,6 +1315,11 @@ const VFO_DEFAULTS = {
     // arrival with nothing on screen saying why.
     squelchDb: SQUELCH_OFF,
     pan: 'center',
+    // The output device, by the id the browser gives it, or '' to go wherever
+    // the receiver's own audio goes. Pan still applies on a device of its own:
+    // two demodulators can share one pair of headphones, one in each ear, while
+    // a third plays on the speakers.
+    sinkId: '',
     muted: false,
     // Whether its controls are showing. A view state, but a persisted one: which
     // rows somebody has left open is part of how they have arranged the panel,
@@ -1220,6 +1384,7 @@ function sanitiseVfo(raw) {
             ? clamp(Math.round(squelchDb), SQUELCH_OFF, SQUELCH_MAX)
             : SQUELCH_OFF,
         pan: PAN_VALUES.includes(src.pan) ? src.pan : 'center',
+        sinkId: typeof src.sinkId === 'string' ? src.sinkId.slice(0, 512) : '',
         muted: src.muted === true,
         open: src.open !== false,
     };
@@ -1515,6 +1680,9 @@ export class IQDemod extends Emitter {
         this.restoreMode = null;
         this._untap = null;
         this._master = null;
+        // One output per device a demodulator has been sent to, by sink id —
+        // see _outFor. The receiver's own output is `_master`, not in here.
+        this._sinks = new Map();
         this._ctx = null;
         this._volume = 1;
         this._muted = false;
@@ -1556,6 +1724,12 @@ export class IQDemod extends Emitter {
     signalDbOf(index) {
         const chain = this.chains[index];
         return this.active && this._quad && chain ? chain.sigDb : null;
+    }
+
+    /** One demodulator's audio spectrum, or null while nothing is playing. */
+    audioSpectrumOf(index) {
+        const chain = this.chains[index];
+        return this.active && this._quad && chain && chain.rate ? chain.audioSpectrum() : null;
     }
 
     /** What one demodulator's ECSS tracker is doing, or null. */
@@ -1635,11 +1809,25 @@ export class IQDemod extends Emitter {
     setOutput(volume, muted) {
         this._volume = Number.isFinite(volume) ? volume : 1;
         this._muted = !!muted;
-        if (this._master && this._ctx) {
-            this._master.gain.setTargetAtTime(
-                this._muted ? 0 : this._volume, this._ctx.currentTime, 0.015,
-            );
+        if (!this._ctx) return;
+        const level = this._muted ? 0 : this._volume;
+        const outs = [this._master, ...Array.from(this._sinks.values(), (o) => o.gain)];
+        for (const g of outs) {
+            if (g) g.gain.setTargetAtTime(level, this._ctx.currentTime, 0.015);
         }
+    }
+
+    /**
+     * Why a demodulator's chosen device is not being used, or null.
+     *
+     * A device that refuses — unplugged since it was chosen, or not one this
+     * browser will hand to a page — falls back to the receiver's output rather
+     * than going silent, and the row says so.
+     */
+    sinkErrorOf(index) {
+        const vfo = this._settings.vfos[index];
+        const out = vfo && vfo.sinkId ? this._sinks.get(vfo.sinkId) : null;
+        return out ? out.error : null;
     }
 
     /**
@@ -1672,7 +1860,81 @@ export class IQDemod extends Emitter {
             try { this._master.disconnect(); } catch (err) { /* context already gone */ }
         }
         this._master = null;
+        for (const id of Array.from(this._sinks.keys())) this._dropSink(id);
         this._ctx = null;
+    }
+
+    /**
+     * The node a demodulator sent to `sinkId` connects to.
+     *
+     * '' is the receiver's own output. Anything else gets an output of its own:
+     * a gain carrying the volume and mute, into a stream, played by a hidden
+     * <audio> element pointed at the device — the route the player itself takes
+     * on Firefox (see AudioPlayer._applyOutput), and the only one that can send
+     * one context to several devices at once. The stream is stereo, so the pan
+     * ahead of it still decides the ear.
+     */
+    _outFor(sinkId) {
+        if (!sinkId) return this._master;
+        const have = this._sinks.get(sinkId);
+        if (have) return have.gain;
+        const ctx = this._ctx;
+        const gain = ctx.createGain();
+        gain.gain.value = this._muted ? 0 : this._volume;
+        const out = { gain, dest: null, el: null, error: null };
+        this._sinks.set(sinkId, out);
+        const fallBack = (err) => {
+            // Back onto the receiver's output rather than into a stream nobody
+            // is playing: a demodulator that went silent because its headphones
+            // were unplugged would read as broken.
+            out.error = (err && (err.message || err.name)) || 'the device refused';
+            try { gain.disconnect(); } catch (e) { /* not connected */ }
+            if (this._master) gain.connect(this._master);
+            this.emit('change');
+        };
+        try {
+            const dest = ctx.createMediaStreamDestination();
+            const el = document.createElement('audio');
+            // iOS plays nothing inline without it — see the player's element.
+            el.setAttribute('playsinline', '');
+            el.style.display = 'none';
+            document.body.appendChild(el);
+            el.srcObject = dest.stream;
+            out.dest = dest;
+            out.el = el;
+            gain.connect(dest);
+            // The device first and playback after, so a refusal is known before
+            // anything has been sent to it.
+            el.setSinkId(sinkId)
+                .then(() => (this._sinks.get(sinkId) === out ? el.play() : null))
+                .catch(fallBack);
+        } catch (err) {
+            fallBack(err);
+        }
+        return gain;
+    }
+
+    _dropSink(sinkId) {
+        const out = this._sinks.get(sinkId);
+        if (!out) return;
+        this._sinks.delete(sinkId);
+        try { out.gain.disconnect(); } catch (err) { /* context already gone */ }
+        if (out.el) {
+            try { out.el.pause(); } catch (err) { /* ignore */ }
+            out.el.srcObject = null;
+            if (out.el.parentNode) out.el.parentNode.removeChild(out.el);
+        }
+    }
+
+    /** Connect a voice to its demodulator's output, if that has changed. */
+    _route(voice, sinkId) {
+        const want = sinkId || '';
+        if (voice.sink === want) return;
+        const node = voice.panner || voice.gain;
+        try { node.disconnect(); } catch (err) { /* not connected */ }
+        const to = this._outFor(want);
+        if (to) node.connect(to);
+        voice.sink = want;
     }
 
     _ensureMaster() {
@@ -1684,7 +1946,12 @@ export class IQDemod extends Emitter {
         this._teardown();
         const master = ctx.createGain();
         master.gain.value = this._muted ? 0 : this._volume;
-        master.connect(ctx.destination);
+        // Into the receiver's own last node rather than straight to the
+        // context's destination, so it goes wherever the receiver's audio is
+        // routed — a chosen device on Firefox, the Media Session element — and
+        // not to the default output beside it. See AudioPlayer.outputBus.
+        const bus = this.player.outputBus;
+        master.connect(bus && bus.context === ctx ? bus : ctx.destination);
         this._master = master;
         this._ctx = ctx;
         return master;
@@ -1701,14 +1968,11 @@ export class IQDemod extends Emitter {
             // in both ears rather than no audio, which is the right way for a
             // stereo placement to degrade.
             const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-            if (panner) {
-                gain.connect(panner);
-                panner.connect(master);
-            } else {
-                gain.connect(master);
-            }
+            if (panner) gain.connect(panner);
             v = {
                 gain, panner, nextPlayTime: 0, pan: null, muted: null,
+                // Which output it is connected to; null until _route says.
+                sink: null,
                 // Audio waiting to make up one block — see _playOne.
                 pend: null, pendN: 0, pendRate: 0,
             };
@@ -1744,6 +2008,11 @@ export class IQDemod extends Emitter {
         for (let i = 0; i < vfos.length; i++) {
             this._playOne(i, vfos[i], planes, frames, rate, ctx);
         }
+        // A device nobody is sent to any more gives its element back.
+        if (this._sinks.size) {
+            const used = new Set(vfos.map((v) => v.sinkId || ''));
+            for (const id of Array.from(this._sinks.keys())) if (!used.has(id)) this._dropSink(id);
+        }
 
         // Read by the panel's readouts. Latched here so they can say what the
         // stream is without the panel having to ask the player.
@@ -1761,6 +2030,7 @@ export class IQDemod extends Emitter {
         const chain = this.chains[index];
         const voice = this._voice(index);
         if (!chain || !voice) return;
+        this._route(voice, vfo.sinkId);
 
         chain.configure(planForVfo(vfo), rate);
 

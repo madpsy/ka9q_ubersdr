@@ -1192,6 +1192,20 @@ export class AudioPlayer extends Emitter {
         return { planes: this._pend.map((a) => a.subarray(0, n)), frames: n, captureMs: this._pendCapture };
     }
 
+    /**
+     * Where something else's audio joins the receiver's on its way out.
+     *
+     * The last node of the graph, after the duck: whatever is connected here
+     * goes wherever the receiver's own audio goes — the context's device, the
+     * element a chosen device or Media Session needs (see _applyOutput) — and is
+     * silenced with it when an outside stream has taken over playback, without
+     * being ducked along with it. The IQ demod panel's voices end here unless
+     * one has been given a device of its own. A new one with every context.
+     */
+    get outputBus() {
+        return this.local || null;
+    }
+
     // Ask to be told, once, when audio is next genuinely playing.
     //
     // This exists for Media Session. Chrome builds its media session from real

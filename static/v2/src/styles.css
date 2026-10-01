@@ -13938,6 +13938,9 @@ a.btn { text-decoration: none; }
    the server's bins with a veil, a ruler and five layouts, and this is a fixed
    picture of a fixed span whose whole interaction is "press here". */
 .iq-scope { position: relative; }
+/* The pointer's frequency and level, beside it — the receiver's own spectrum
+   readout (.spec-tip) carries the look; this only adds the hiding. */
+.iq-scope__tip[hidden] { display: none; }
 .iq-scope__canvas {
     display: block;
     width: 100%;
@@ -13980,15 +13983,28 @@ a.btn { text-decoration: none; }
 }
 /* Only the two ends and the middle are labelled. The span never changes, so a
    full ruler would be three numbers of information drawn as fifteen. */
+/* Frequencies placed where they fall rather than spread out, so each sits
+   under its own place on the picture: centred on its point, one line tall. */
 .iq-scope__scale {
-    display: flex;
-    justify-content: space-between;
+    position: relative;
+    height: 1.4em;
     margin-top: 2px;
     font-family: var(--mono);
     font-size: calc(9.5px * var(--ui-scale));
     color: var(--text-faint);
     font-variant-numeric: tabular-nums;
 }
+.iq-scope__scale > span {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+/* The two edges of the stream, flush with the ends of the picture. */
+.iq-scope__scale > span.is-start { transform: none; }
+.iq-scope__scale > span.is-end { transform: translateX(-100%); }
+/* The dial, a step brighter than the round numbers around it. */
+.iq-scope__scale > span.is-dial { color: var(--text-dim); }
 
 /* ── The demodulator rows ────────────────────────────────────────────────────
    The list under the picture is its legend as much as it is a set of controls,
@@ -14220,6 +14236,41 @@ a.btn { text-decoration: none; }
    line up with the controls under them, and the figures are right-aligned in a
    fixed column so they do not shuffle the bars sideways as they change. */
 .iq-vfo__meters.is-labelled { gap: 2px; padding: 3px 7px 4px; }
+/* The open row's audio spectrum, in the bar's place: as wide, a little taller,
+   and a button because a press swaps bars for a line. */
+.iq-vfo__audio {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    background: none;
+    overflow: hidden;
+    cursor: pointer;
+    line-height: 0;
+}
+.iq-vfo__audio canvas { display: block; width: 100%; }
+/* Its scale: the main picture's, smaller. */
+.iq-vfo__audio-scale {
+    position: relative;
+    display: block;
+    height: 1.3em;
+    margin-top: 1px;
+    font-family: var(--mono);
+    font-size: calc(8.5px * var(--ui-scale));
+    line-height: 1.3;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+}
+.iq-vfo__audio-scale > span {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+.iq-vfo__audio-scale > span.is-start { transform: none; }
+.iq-vfo__audio-scale > span.is-end { transform: translateX(-100%); }
+.iq-vfo__audio:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .iq-vfo__meter-name,
 .iq-vfo__meter-val {
     flex: none;

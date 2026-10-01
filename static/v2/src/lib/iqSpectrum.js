@@ -144,6 +144,118 @@ export function fractionOffset(frac, rateHz) {
     return (frac - 0.5) * rateHz;
 }
 
+// The steps the scale under the picture may use, finest first: round numbers a
+// frequency is read in, from 100 Hz on plain IQ across a wide float to 200 kHz
+// across the whole of IQ 384 in a narrow dock.
+const SCALE_STEPS = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000];
+// The least room a label is given, centre to centre. About a label and a half:
+// "7.0745" is six figures of a 9.5px monospace face.
+export const SCALE_GAP_PX = 72;
+
+/**
+ * The frequencies to label under the picture, as many as its width allows.
+ *
+ * Always three: the dial in the middle and the two edges of the stream, flush
+ * with the ends of the picture — what is being listened around, and how far
+ * the picture reaches either way. Between them, round frequencies at the
+ * finest step that keeps labels SCALE_GAP_PX apart, so a wider picture gets
+ * more; one that would crowd the dial or an edge is left off.
+ *
+ * Real frequencies rather than offsets from the dial: what is on the picture is
+ * somewhere on the band, and that is the number anybody wants to read off it.
+ * Megahertz, always to the kilohertz — the three anchors to the hertz, trimmed
+ * (7.074, 7.0745, 7.074321), and the round ones to their step where that is
+ * finer — and kilohertz below a megahertz, where the long-wave time signals are.
+ *
+ * @returns [{ hz, frac, label, align, dial }], `frac` across the picture from
+ *          its left edge, `align` 'start', 'center' or 'end' — how the label
+ *          sits on its point — and `dial` true on the middle one
+ */
+export function scaleTicks(dialHz, rateHz, widthPx, gapPx = SCALE_GAP_PX) {
+    if (!(rateHz > 0) || !(widthPx > 0)) return [];
+    const lo = dialHz - rateHz / 2;
+    const hi = dialHz + rateHz / 2;
+    const centre = { hz: dialHz, frac: 0.5, label: exactLabel(dialHz), align: 'center', dial: true };
+    // Too narrow for three: the dial alone, which is the one that matters.
+    if (widthPx < 2 * gapPx) return [centre];
+    const ticks = [
+        { hz: lo, frac: 0, label: exactLabel(lo), align: 'start' },
+        centre,
+        { hz: hi, frac: 1, label: exactLabel(hi), align: 'end' },
+    ];
+    const most = Math.max(1, Math.floor(widthPx / gapPx));
+    const step = SCALE_STEPS.find((s) => rateHz / s <= most) || SCALE_STEPS[SCALE_STEPS.length - 1];
+    // Clear of the anchors: a gap from the dial, and a little more from an
+    // edge, whose label runs inward from it rather than straddling it.
+    const clearOf = (frac) => {
+        const px = frac * widthPx;
+        return Math.abs(px - widthPx / 2) >= gapPx
+            && px >= gapPx * 1.2 && widthPx - px >= gapPx * 1.2;
+    };
+    for (let hz = Math.ceil(lo / step) * step; hz <= hi; hz += step) {
+        const frac = (hz - lo) / rateHz;
+        if (!clearOf(frac)) continue;
+        ticks.push({ hz, frac, label: scaleLabel(hz, step), align: 'center' });
+    }
+    return ticks.sort((a, b) => a.frac - b.frac);
+}
+
+function scaleLabel(hz, step) {
+    if (hz < 1e6) {
+        const places = Math.max(0, Math.ceil(3 - Math.log10(step) - 1e-9));
+        return (hz / 1e3).toFixed(places);
+    }
+    // Never coarser than the kilohertz the dial and the edges are given, so a
+    // row reads 7.050 7.060 7.074 rather than 7.050 7.06 7.074.
+    const places = Math.max(3, Math.ceil(6 - Math.log10(step) - 1e-9));
+    return (hz / 1e6).toFixed(places);
+}
+
+// To the hertz, without the zeros: kilohertz resolution at least.
+function exactLabel(hz) {
+    const r = Math.round(hz);
+    if (r < 1e6) return String(Number((r / 1e3).toFixed(3)));
+    let t = (r / 1e6).toFixed(6);
+    while (t.endsWith('0') && t.length - t.indexOf('.') > 4) t = t.slice(0, -1);
+    return t;
+}
+
+// The steps the audio spectrum's scale may use, in Hz of audio.
+const AUDIO_STEPS = [100, 200, 250, 500, 1000, 2000, 2500, 5000];
+// Labels here are short — "2.5k" — so they can sit closer than the band's.
+export const AUDIO_GAP_PX = 44;
+
+/**
+ * The audio frequencies to label under a row's audio spectrum, which runs from
+ * 0 Hz at its left edge to `hiHz` at its right.
+ *
+ * The same shape as scaleTicks: both ends always, flush with the ends of the
+ * picture, and round figures between them at the finest step that keeps labels
+ * AUDIO_GAP_PX apart and clear of the ends.
+ *
+ * @returns [{ hz, frac, label, align }]
+ */
+export function audioTicks(hiHz, widthPx, gapPx = AUDIO_GAP_PX) {
+    if (!(hiHz > 0) || !(widthPx > 0)) return [];
+    const ticks = [{ hz: 0, frac: 0, label: '0', align: 'start' }];
+    if (widthPx < 2 * gapPx) return ticks;
+    ticks.push({ hz: hiHz, frac: 1, label: audioLabel(hiHz), align: 'end' });
+    const most = Math.max(1, Math.floor(widthPx / gapPx));
+    const step = AUDIO_STEPS.find((s) => hiHz / s <= most) || AUDIO_STEPS[AUDIO_STEPS.length - 1];
+    for (let hz = step; hz < hiHz; hz += step) {
+        const px = (hz / hiHz) * widthPx;
+        if (px < gapPx || widthPx - px < gapPx * 1.2) continue;
+        ticks.push({ hz, frac: hz / hiHz, label: audioLabel(hz), align: 'center' });
+    }
+    return ticks.sort((a, b) => a.frac - b.frac);
+}
+
+function audioLabel(hz) {
+    const r = Math.round(hz);
+    if (r < 1000) return String(r);
+    return `${Number((r / 1000).toFixed(2))}k`;
+}
+
 /**
  * A ring of the most recent quadrature samples, and the transform of them.
  *

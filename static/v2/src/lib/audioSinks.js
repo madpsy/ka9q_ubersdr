@@ -37,6 +37,21 @@ export function sinkSupport() {
     return { supported: true, reason: '' };
 }
 
+// Whether a part of the page can be sent to a device of its own while the rest
+// stays where it is — what the IQ demod panel offers per demodulator. That is
+// only possible through a media element (a context has one device), so it needs
+// the element's setSinkId specifically, where the receiver's own picker can make
+// do with either.
+export function elementSinkSupport() {
+    // No page, no devices — and sinkSupport reads `location` first.
+    if (typeof location === 'undefined' || typeof navigator === 'undefined') return false;
+    return sinkSupport().supported
+        && typeof HTMLAudioElement !== 'undefined'
+        && typeof HTMLAudioElement.prototype.setSinkId === 'function'
+        && typeof AudioContext !== 'undefined'
+        && typeof AudioContext.prototype.createMediaStreamDestination === 'function';
+}
+
 // Sorted by label, with unlabelled entries last so the readable ones are not
 // buried among "Output 3f9a2c…" strings.
 function byLabel(a, b) {

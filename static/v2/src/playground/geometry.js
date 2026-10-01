@@ -11,6 +11,7 @@
 // transforming the whole world, and screenToWorld undoes that.
 
 import { BLOCK_BY_TYPE } from './blocks/index.js';
+import { MARKER_SIZE } from './blocks/annotate.js';
 import { inputsOf, isStream, outputsOf } from './block.js';
 
 export const NODE_W = 196;
@@ -38,9 +39,53 @@ const WIDTH = {
     'bit-view': 260,
 };
 
-/** A card's width. */
-export function nodeWidth(type) {
+/** A card's width — or, given its settings, an annotation's. */
+export function nodeWidth(type, params) {
+    if (params && isAnnotation(type)) return annotationBox({ type, params, x: 0, y: 0 }).w;
     return WIDTH[type] || NODE_W;
+}
+
+/** Whether a type is an annotation: drawn, never run (blocks/annotate.js). */
+export function isAnnotation(type) {
+    const def = BLOCK_BY_TYPE[type];
+    return !!(def && def.annotation);
+}
+
+/**
+ * An annotation's box in the world. Most are as big as their settings say; an
+ * arrow runs from its position to `dx`, `dy` on, either way, so its box is
+ * wherever its two ends put it; a step marker is a fixed badge.
+ */
+function annotationBox(n) {
+    const p = n.params || {};
+    if (n.type === 'arrow') {
+        const x0 = Math.min(n.x, n.x + p.dx);
+        const y0 = Math.min(n.y, n.y + p.dy);
+        return { x: x0, y: y0, w: Math.abs(p.dx), h: Math.abs(p.dy) };
+    }
+    if (n.type === 'marker') return { x: n.x, y: n.y, w: MARKER_SIZE, h: MARKER_SIZE };
+    return { x: n.x, y: n.y, w: p.w, h: p.h };
+}
+
+/** The box a node takes on the canvas: a card's, or an annotation's. */
+export function nodeBox(n) {
+    if (isAnnotation(n.type)) return annotationBox(n);
+    return { x: n.x, y: n.y, w: nodeWidth(n.type), h: nodeHeight(n) };
+}
+
+/**
+ * The nodes a group box carries when it is dragged: every node whose box lies
+ * wholly inside it, annotations included, other than itself.
+ */
+export function nodesInside(graph, groupId) {
+    const g = graph.nodes.find((n) => n.id === groupId);
+    if (!g) return [];
+    const b = nodeBox(g);
+    return graph.nodes.filter((n) => {
+        if (n.id === groupId) return false;
+        const o = nodeBox(n);
+        return o.x >= b.x && o.y >= b.y && o.x + o.w <= b.x + b.w && o.y + o.h <= b.y + b.h;
+    }).map((n) => n.id);
 }
 
 // The height of a spectrum, and of a waterfall, on a card; both stacked when
@@ -74,10 +119,17 @@ export function visualHeight(type, params) {
             return params && params.centreHz > 0 ? 42 : 26;
         case 'demodulator':
             return 30;
+        case 'data-tx':
+            return 26;
+        case 'signal':
+            // A line for each tone.
+            return params && params.tone2 ? 34 : 16;
         case 'signal-detector':
             return 64;
         case 'console':
             return 76;
+        case 'text-diff':
+            return 94;
         case 'bit-view':
             return 30;
         case 'costas-loop':
@@ -142,6 +194,7 @@ const NO_RF = new Set(['Viewers', 'Sinks', 'Sources', 'Control']);
  */
 export function nodeHeight(typeOrNode, params) {
     const node = typeof typeOrNode === 'object' && typeOrNode ? typeOrNode : { type: typeOrNode, params };
+    if (isAnnotation(node.type)) return annotationBox({ x: 0, y: 0, ...node }).h;
     const def = BLOCK_BY_TYPE[node.type];
     const rows = def ? Math.max(inputsOf(node, def).length, outputsOf(node, def).length, 1) : 1;
     return HEAD_H + PAD * 2 + rows * ROW_H + visualHeight(node.type, node.params) + (hasRfLine(node.type) ? RF_H : 0) + FOOT_H;
@@ -215,11 +268,20 @@ export function portAt(graph, side, x, y, radius, kind = null) {
     return best;
 }
 
-/** The node whose card contains a world point, topmost (last drawn) first. */
+/**
+ * The node whose card contains a world point, topmost first: cards before
+ * annotations, which are drawn under them, each in reverse of drawing order.
+ */
 export function nodeAt(graph, x, y) {
-    for (let i = graph.nodes.length - 1; i >= 0; i--) {
-        const n = graph.nodes[i];
-        if (x >= n.x && x <= n.x + nodeWidth(n.type) && y >= n.y && y <= n.y + nodeHeight(n)) return n.id;
+    const inside = (n) => {
+        const b = nodeBox(n);
+        return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+    };
+    for (const under of [false, true]) {
+        for (let i = graph.nodes.length - 1; i >= 0; i--) {
+            const n = graph.nodes[i];
+            if (isAnnotation(n.type) === under && inside(n)) return n.id;
+        }
     }
     return null;
 }
@@ -232,15 +294,19 @@ export function graphBounds(graph) {
     let x1 = -Infinity;
     let y1 = -Infinity;
     for (const n of graph.nodes) {
-        x0 = Math.min(x0, n.x);
-        y0 = Math.min(y0, n.y);
-        x1 = Math.max(x1, n.x + nodeWidth(n.type));
-        y1 = Math.max(y1, n.y + nodeHeight(n));
+        const b = nodeBox(n);
+        x0 = Math.min(x0, b.x);
+        y0 = Math.min(y0, b.y);
+        x1 = Math.max(x1, b.x + b.w);
+        y1 = Math.max(y1, b.y + b.h);
     }
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 export const ZOOM_MIN = 0.3;
+// Each press of a zoom button, or double-click on the canvas: three to go from
+// fitted to the closest.
+export const ZOOM_STEP = 1.4;
 export const ZOOM_MAX = 2;
 
 /** The view that shows the whole graph in a `w` × `h` canvas, with a margin. */
@@ -287,7 +353,8 @@ const GAP_Y = 24;
  * column further right than the furthest block feeding it, and stacked down its
  * column in the order the graph lists them. For a graph that arrives with no
  * positions — or with positions from something that knew nothing of card
- * sizes, like graphForPlan.
+ * sizes, like graphForPlan. Annotations stay where they were put: they are
+ * placed by hand, round whatever they describe.
  */
 export function autoLayout(graph) {
     const depth = new Map(graph.nodes.map((n) => [n.id, 0]));
@@ -317,6 +384,7 @@ export function autoLayout(graph) {
     // Each column as wide as its widest card.
     const colW = new Map();
     for (const n of graph.nodes) {
+        if (isAnnotation(n.type)) continue;
         const c = depth.get(n.id);
         colW.set(c, Math.max(colW.get(c) || 0, nodeWidth(n.type)));
     }
@@ -328,6 +396,7 @@ export function autoLayout(graph) {
     }
     const columnY = new Map();
     const nodes = graph.nodes.map((n) => {
+        if (isAnnotation(n.type)) return n;
         const c = depth.get(n.id);
         const y = columnY.get(c) || 0;
         columnY.set(c, y + nodeHeight(n) + GAP_Y);

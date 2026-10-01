@@ -700,6 +700,73 @@ export function ConsoleView({ pg, id, reading, large = false }) {
     );
 }
 
+// What each kind of difference is called, for a hover and the legend.
+const DIFF_TITLES = { wrong: 'Wrong', extra: 'Extra: nothing was sent here', missing: 'Missing: sent, not received', noise: 'Noise, before or after the message' };
+
+/** Received text with its differences from the sent marked: the newest `max` characters of it, or all. */
+function DiffText({ segments, max = Infinity }) {
+    let budget = max;
+    const shown = [];
+    for (let k = segments.length - 1; k >= 0 && budget > 0; k--) {
+        const s = segments[k];
+        const text = s.text.length > budget ? s.text.slice(-budget) : s.text;
+        budget -= text.length;
+        shown.push({ ...s, text, key: k });
+    }
+    shown.reverse();
+    return shown.map((s) => (
+        <span
+            key={s.key}
+            className={`pg-diff__${s.kind}`}
+            title={s.kind === 'wrong' ? `Wrong: ${JSON.stringify(s.sent)} was sent` : DIFF_TITLES[s.kind]}
+        >
+            {s.text}
+        </span>
+    ));
+}
+
+/** A one-line account of a comparison. */
+function diffSummary(r) {
+    if (!r || r.cer === null) return 'Nothing received to compare yet';
+    const pct = r.cer * 100;
+    return `${pct < 10 && pct > 0 ? pct.toFixed(1) : Math.round(pct)}% wrong · ${r.errors} of ${r.compared} characters`;
+}
+
+/**
+ * Sent against received: the received text with each wrong, extra and
+ * missing character marked, and the character error rate. On a card the
+ * newest few lines; large, all of it lined up, a legend and a Clear.
+ */
+export function DiffView({ pg, id, reading, large = false }) {
+    const segs = (reading && reading.segments) || [];
+    const bad = reading && reading.errors > 0;
+    if (!large) {
+        return (
+            <div className="pg-diff">
+                <div className={`pg-vis__state${bad ? ' is-shut' : reading && reading.cer === 0 ? ' is-open' : ''}`}>{diffSummary(reading)}</div>
+                <pre className="pg-console pg-diff__text">{segs.length ? <DiffText segments={segs} max={90} /> : <span className="pg-list__empty">Wire sent text and received text in</span>}</pre>
+            </div>
+        );
+    }
+    return (
+        <div className="pg-view">
+            <div className={`pg-vis__state${bad ? ' is-shut' : reading && reading.cer === 0 ? ' is-open' : ''}`}>{diffSummary(reading)}</div>
+            <pre className="pg-console is-large pg-diff__text">{segs.length ? <DiffText segments={segs} /> : 'Nothing to compare yet.'}</pre>
+            <div className="pg-diff__legend">
+                <span className="pg-diff__same">right</span>
+                <span className="pg-diff__wrong">wrong</span>
+                <span className="pg-diff__extra">extra</span>
+                <span className="pg-diff__missing">missing</span>
+                <span className="pg-diff__noise">noise</span>
+            </div>
+            <div className="pg-insp__row">
+                <span className="pg-list__dim">{reading && reading.pending ? `${reading.pending} sent characters still to come` : ''}</span>
+                <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={() => pg.command(id, 'clear')}>Clear</Button>
+            </div>
+        </div>
+    );
+}
+
 /** The newest bits, as a row of cells: filled for 1, empty for 0. */
 export function BitView({ reading, large = false }) {
     const bits = (reading && reading.bits) || [];
@@ -723,7 +790,7 @@ export function BitView({ reading, large = false }) {
 /** Whether a block type is an instrument with a picture. */
 export const INSTRUMENTS = new Set([
     'iq-spectrum', 'audio-spectrum', 'scope', 'constellation', 'frequency-counter', 'phase-meter', 'iq-phase-meter',
-    'signal-detector', 'message-log', 'console', 'bit-view',
+    'signal-detector', 'message-log', 'console', 'text-diff', 'bit-view',
 ]);
 
 /**
@@ -764,6 +831,8 @@ export function Instrument({ pg, node, look, origin, large = false }) {
             return <LogView pg={pg} id={node.id} reading={reading} origin={origin} large={large} />;
         case 'console':
             return <ConsoleView pg={pg} id={node.id} reading={reading} large={large} />;
+        case 'text-diff':
+            return <DiffView pg={pg} id={node.id} reading={reading} large={large} />;
         case 'bit-view':
             return <BitView reading={reading} large={large} />;
         default:

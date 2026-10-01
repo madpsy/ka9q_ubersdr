@@ -10,6 +10,7 @@
 import React, { useEffect, useReducer, useRef, useState } from '../../react.js';
 import { INSTRUMENTS, Instrument } from './viewers.jsx';
 import { parseChoices } from '../blocks/controls.js';
+import { WAVEFORMS } from '../blocks/sources.js';
 import { cssVar, sizedCanvas } from '../../lib/audioWaterfall.js';
 import { airSpan, rfLabel, rfOf, shiftLabel, sourceZero } from '../probes.js';
 
@@ -325,6 +326,36 @@ function SimpleVisual({ pg, node, origin, rate }) {
                     {!reading ? '—' : `${reading.chars} characters${reading.tunedHz != null ? ` · tuned ${reading.tunedHz >= 0 ? '+' : ''}${reading.tunedHz.toFixed(1)} Hz` : ''}`}
                 </div>
             );
+        case 'signal': {
+            const p = node.params;
+            const shape = (WAVEFORMS.find((w) => w.value === p.waveform) || WAVEFORMS[0]).label;
+            const zero = sourceZero(node);
+            const at = (hz) => (zero != null ? rfLabel(zero + hz) : shiftLabel(hz));
+            return (
+                <div className="pg-vis__player">
+                    <div className="pg-vis__state">{`${shape} ${at(p.frequencyHz)}`}</div>
+                    {p.tone2 && <div className="pg-vis__state">{`${shape} ${at(p.frequency2Hz)}`}</div>}
+                </div>
+            );
+        }
+        case 'data-tx': {
+            const p = node.params;
+            const r = reading || {};
+            const how = {
+                cw: `CW ${p.wpm} wpm`,
+                rtty: `RTTY ${p.baud} Bd ${p.shiftHz} Hz`,
+                psk: `PSK${Math.round(p.pskBaud)}`,
+                navtex: 'NAVTEX',
+            }[p.mode] || '';
+            const zero = sourceZero(node);
+            const at = zero != null ? rfLabel(zero + p.offsetHz) : shiftLabel(p.offsetHz);
+            return (
+                <div className="pg-vis__player">
+                    <div className="pg-vis__state">{`${how} · ${at}${p.noise ? ` · SNR ${p.snrDb} dB` : ''}`}</div>
+                    <div className="pg-counter__gate"><i style={{ width: `${Math.round((r.progress || 0) * 100)}%` }} /></div>
+                </div>
+            );
+        }
         case 'iq-player': {
             const r = reading || {};
             const has = pg.hasFile ? pg.hasFile(node.id) : false;

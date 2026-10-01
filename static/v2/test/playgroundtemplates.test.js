@@ -2,7 +2,7 @@
 // summary says it does.
 
 const assert = require('assert');
-const { compile, Runtime, TEMPLATES, controlPort } = require('./.build/playground.cjs');
+const { compile, Runtime, TEMPLATES, TEST_MESSAGES, controlPort } = require('./.build/playground.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -90,6 +90,43 @@ t('“Play an IQ file” needs no receiver; the others that listen do', () => {
     assert.ok(!byId.player.build().nodes.some((n) => n.type === 'iq-in'));
     for (const id of ['listen', 'strongest', 'afc', 'record', 'audio-bench']) {
         assert.ok(byId[id].build().nodes.some((n) => n.type === 'iq-in'), id);
+    }
+});
+
+t('every IQ Demod mode has a template, drawn out in blocks, its decimator on Auto', () => {
+    const modes = TEMPLATES.filter((x) => x.id.startsWith('mode-')).map((x) => x.id.slice(5));
+    assert.deepStrictEqual(modes.sort(), ['am', 'cwl', 'cwu', 'ecss', 'lsb', 'nfm', 'sam', 'usb']);
+    for (const id of modes) {
+        const g = byId[`mode-${id}`].build();
+        assert.ok(!g.nodes.some((n) => n.type === 'demodulator'), `${id} is one Demodulator block`);
+        assert.ok(g.nodes.some((n) => n.type === 'iq-in') && g.nodes.some((n) => n.type === 'audio-out'), id);
+        assert.strictEqual(g.nodes.some((n) => n.type === 'carrier-tracker'), id === 'sam' || id === 'ecss', `${id}: carrier tracker`);
+        for (const rate of [12000, 192000]) {
+            const d = byId[`mode-${id}`].build(rate).nodes.find((n) => n.type === 'decimate');
+            assert.ok(d && d.params.auto, `${id} built at ${rate} has no decimator on Auto`);
+        }
+        // SAM and ECSS are told by wires what the decimator mixed from and
+        // where the stream's edges are.
+        if (id === 'sam' || id === 'ecss') {
+            for (const [out, param] of [['centre', 'baseHz'], ['middle', 'middleHz']]) {
+                assert.ok(g.wires.some((w) => w[0] === 'decimate' && w[1] === out && w[2] === 'tracker' && w[3] === controlPort(param)), `${id}: no ${out} wire`);
+            }
+        }
+    }
+    const ecss = byId['mode-ecss'].build().nodes.find((n) => n.type === 'carrier-tracker');
+    assert.strictEqual(ecss.params.sideband, 'both', 'ECSS starts on the panel’s default sideband');
+});
+
+t('each decoder test bench decodes its transmitter, with no receiver', () => {
+    for (const mode of ['cw', 'rtty', 'psk', 'navtex']) {
+        const g = byId[`bench-${mode}`].build();
+        assert.ok(!g.nodes.some((n) => n.type === 'iq-in'), `${mode}: the bench needs a receiver`);
+        const rt = new Runtime(g, 48000);
+        for (let p = 0; p < 50 * 25; p++) rt.process({ i: null, q: null, frames: 960, rate: 48000 });
+        assert.ok(rt.read('console').text.length > 20 && /CQ|ZCZC/.test(rt.read('console').text), `${mode}: ${JSON.stringify(rt.read('console').text)}`);
+        // The sent console has the message too.
+        const first = TEST_MESSAGES[mode].split('\n')[0];
+        assert.ok(rt.read('sent').text.startsWith(first), `${mode}: sent ${JSON.stringify(rt.read('sent').text)}`);
     }
 });
 

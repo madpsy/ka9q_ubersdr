@@ -18,6 +18,8 @@ import { resampleRatio } from '../src/lib/dsp/resample.js';
 import { findSignals } from '../src/playground/blocks/messages.js';
 import { TEMPLATES } from '../src/playground/templates.js';
 import { MORSE, VARICODE, encodeIta2, encodeMorse, encodeSitorB, encodeVaricode } from '../src/playground/codes.js';
+import { SNR_BANDWIDTH_HZ, TEST_MESSAGES, Transmitter } from '../src/playground/transmit.js';
+import { alignText, normaliseText } from '../src/playground/textdiff.js';
 
 module.exports = {
     DemodChain, planFor, setIQSpan,
@@ -27,4 +29,5 @@ module.exports = {
     PROBES, acrossPair, addAcross, addProbe, frequencyOrigins, inputOrigin, nodeHeight, nodeWidth,
     canConnect, exposeControl, controlPort, inputsOf, parseChoices, demodPlan, expandDemodulator, expandDecoder, resampleRatio, findSignals, TEMPLATES,
     MORSE, VARICODE, encodeIta2, encodeMorse, encodeSitorB, encodeVaricode,
+    SNR_BANDWIDTH_HZ, TEST_MESSAGES, Transmitter, alignText, normaliseText,
 };

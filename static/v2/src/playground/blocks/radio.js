@@ -18,6 +18,9 @@ export const DEMOD_MODE_OPTIONS = [
     { value: 'nfm', label: 'NFM' },
 ];
 
+// A setting only some modes use is shown only in those modes.
+const modeIn = (...modes) => (p) => modes.includes(p.mode);
+
 /**
  * The plan a demodulator block's settings make at `rateHz`: planFor's, with the
  * offset applied here and held so the passband stays inside the stream.
@@ -58,17 +61,17 @@ export const DemodulatorBlock = {
         mode: { kind: 'choice', label: 'Mode', default: 'usb', options: DEMOD_MODE_OPTIONS },
         offsetHz: { kind: 'number', label: 'Offset', unit: 'Hz', default: 0, min: -192000, max: 192000, step: 10, live: true },
         widthHz: { kind: 'number', label: 'Width', unit: 'Hz', default: 2700, min: 50, max: 20000, step: 50 },
-        lowCutHz: { kind: 'number', label: 'Low cut (SSB)', unit: 'Hz', default: 50, min: 0, max: 1000, step: 10 },
-        pitchHz: { kind: 'number', label: 'CW pitch', unit: 'Hz', default: 700, min: 300, max: 1200, step: 10, live: true },
+        lowCutHz: { kind: 'number', label: 'Low cut (SSB)', unit: 'Hz', default: 50, min: 0, max: 1000, step: 10, showIf: modeIn('usb', 'lsb') },
+        pitchHz: { kind: 'number', label: 'CW pitch', unit: 'Hz', default: 700, min: 300, max: 1200, step: 10, live: true, showIf: modeIn('cwu', 'cwl') },
         sideband: {
-            kind: 'choice', label: 'Sideband (ECSS)', default: 'both',
+            kind: 'choice', label: 'Sideband (ECSS)', default: 'both', showIf: modeIn('ecss'),
             options: SIDEBANDS.map((s) => ({ value: s, label: s === 'both' ? 'Both' : s === 'auto' ? 'Auto' : s.toUpperCase() })),
         },
-        trackHz: { kind: 'number', label: 'Tracking range', unit: 'Hz', default: TRACK_DEFAULT, min: TRACK_MIN, max: TRACK_MAX, step: 10 },
+        trackHz: { kind: 'number', label: 'Tracking range', unit: 'Hz', default: TRACK_DEFAULT, min: TRACK_MIN, max: TRACK_MAX, step: 10, showIf: modeIn('sam', 'ecss') },
         agc: { kind: 'bool', label: 'AGC', default: true },
         gain: { kind: 'number', label: 'Gain', unit: '×', default: 1, min: 0, max: 4, step: 0.05, live: true },
         squelchDb: { kind: 'number', label: 'Squelch', unit: 'dBFS', default: -60, min: -60, max: 0, step: 1, live: true },
-        lockMute: { kind: 'bool', label: 'Mute until locked (SAM/ECSS)', default: true },
+        lockMute: { kind: 'bool', label: 'Mute until locked (SAM/ECSS)', default: true, showIf: modeIn('sam', 'ecss') },
     },
     rate: (inRate, p) => workingRate(inRate, demodPlan(p, inRate)),
     // Never more out than in: a decimating chain puts out fewer.

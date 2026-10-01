@@ -18,6 +18,7 @@ import { ComplexFir, designLowpass } from '../../lib/dsp/fir.js';
 import { Decimator } from '../../lib/dsp/decimator.js';
 import { Nco } from '../../lib/dsp/nco.js';
 import { Ita2Decoder, SitorDecoder, VaricodeDecoder, ccirValid, morseChar } from '../codes.js';
+import { alignText, normaliseText } from '../textdiff.js';
 
 /**
  * A complex signal brought down to the lowest rate at least `need` Hz, by a
@@ -286,15 +287,16 @@ const CONSOLE_KEEP = 20000;
 /**
  * A teleprinter's paper: the text messages that arrive, run together as they
  * would print. Carriage returns are dropped and line feeds kept, which is how
- * every RTTY program shows a teleprinter's CR LF.
+ * every RTTY program shows a teleprinter's CR LF. What it prints it passes on,
+ * so a console can sit in a line of text — into a Text difference, say.
  */
 export const ConsoleBlock = {
     type: 'console',
     label: 'Text console',
     category: 'Viewers',
-    summary: 'Prints the text a decoder puts out, as a teleprinter would.',
+    summary: 'Prints the text a decoder puts out, as a teleprinter would, and passes it on.',
     inputs: [{ name: 'in', kind: MESSAGE }],
-    outputs: [],
+    outputs: [{ name: 'out', kind: MESSAGE }],
     params: {},
     create() {
         let text = '';
@@ -304,15 +306,98 @@ export const ConsoleBlock = {
             reset() { text = ''; count = 0; },
             command(name) { if (name === 'clear') text = ''; },
             read() { return { text: text.slice(-4000), count }; },
-            process(ins) {
+            process(ins, outs) {
                 const input = ins[0];
                 if (!input || !input.list.length) return 0;
                 for (const m of input.list) {
                     if (m.type !== 'text' || !m.text) continue;
-                    text += m.text.replace(/\r/g, '');
+                    const printed = m.text.replace(/\r/g, '');
+                    text += printed;
                     count += m.text.length;
+                    if (printed && outs[0]) outs[0].list.push({ type: 'text', text: printed });
                 }
                 if (text.length > CONSOLE_KEEP) text = text.slice(-CONSOLE_KEEP);
+                return 0;
+            },
+        };
+    },
+};
+
+// How often a Text difference lines its two up again, in packets: a few
+// times a second, and only when either has changed.
+const DIFF_EVERY = 10;
+
+/**
+ * Two lines of text side by side, and where they part: what was sent against
+ * what a decoder made of it (textdiff.js). The received text is shown with
+ * each wrong, extra and missing character marked, and the character error
+ * rate goes out as a control — to plot, or to steer by.
+ *
+ * Sent text the decoder has not reached yet is still to come, not missing,
+ * and what a decoder prints in noise before the message starts or after it
+ * ends is shown but not counted.
+ */
+export const TextDiffBlock = {
+    type: 'text-diff',
+    label: 'Text difference',
+    category: 'Viewers',
+    summary: 'Compares sent text with received: marks every wrong, extra and missing character, and gives the error rate.',
+    inputs: [{ name: 'sent', kind: MESSAGE }, { name: 'received', kind: MESSAGE }],
+    // The character error rate, 0 to 1.
+    outputs: [{ name: 'cer', kind: CONTROL }],
+    params: {
+        ignoreSpacing: { kind: 'bool', label: 'Ignore spacing', default: true },
+        ignoreCase: { kind: 'bool', label: 'Ignore capitals', default: true },
+    },
+    create() {
+        let sent = '';
+        let received = '';
+        let p = {};
+        let result = null;
+        let dirty = false;
+        let since = 0;
+        const KEEP = 4 * CONSOLE_KEEP;
+        const take = (input) => {
+            let t = '';
+            if (input) for (const m of input.list) if (m.type === 'text' && m.text) t += m.text;
+            return t;
+        };
+        const compare = () => {
+            result = alignText(normaliseText(sent, p), normaliseText(received, p), { freeSpace: p.ignoreSpacing });
+            dirty = false;
+            since = 0;
+        };
+        return {
+            configure(params) {
+                const changed = params.ignoreSpacing !== p.ignoreSpacing || params.ignoreCase !== p.ignoreCase;
+                p = params;
+                // Compared again at the next packet, which sends it too.
+                if (changed && result) {
+                    dirty = true;
+                    since = DIFF_EVERY;
+                }
+            },
+            reset() { sent = ''; received = ''; result = null; dirty = false; },
+            command(name) {
+                if (name === 'clear') { sent = ''; received = ''; result = null; dirty = false; }
+            },
+            // The last comparison made, which is what the `cer` output last
+            // said: the two never disagree.
+            read() {
+                return result ? { ...result, sentChars: sent.length, receivedChars: received.length } : null;
+            },
+            process(ins, outs) {
+                const a = take(ins[0]);
+                const b = take(ins[1]);
+                if (a || b) {
+                    sent = (sent + a).slice(-KEEP);
+                    received = (received + b).slice(-KEEP);
+                    dirty = true;
+                }
+                if (dirty && ++since >= DIFF_EVERY) {
+                    compare();
+                    if (outs[0] && result.cer !== null) emitControl(outs[0], result.cer);
+                }
                 return 0;
             },
         };

@@ -68,3 +68,34 @@ export function onSpectrumPaused(fn) {
     listeners.add(fn);
     return () => { listeners.delete(fn); };
 }
+
+// --- held by something that covers the display ------------------------------
+
+/**
+ * Pause the spectrum for as long as something has the screen — the playground,
+ * whose window covers the display and whose work wants the CPU and the
+ * bandwidth a waterfall nobody can see would take. Paused the way the toolbar
+ * pauses it, flag and all, so the display is in the state it would be in had
+ * the operator pressed pause themselves.
+ *
+ * Returns the release, to call with whether the receiver is still running. It
+ * brings the spectrum back only if this paused it, the receiver is still up,
+ * and it is still paused: one already paused stays paused, one the operator
+ * resumed meanwhile is left alone, and a receiver stopped meanwhile keeps its
+ * socket closed (stopping clears the flag, and reopening would hold the slot
+ * that stopping gave up).
+ */
+export function holdSpectrum(conn) {
+    if (!conn || paused) return () => {};
+    suspendSpectrum(conn);
+    setSpectrumPaused(true);
+    let released = false;
+    return (stillRunning) => {
+        if (released) return;
+        released = true;
+        if (!stillRunning || !paused) return;
+        resumeSpectrum(conn);
+        setSpectrumPaused(false);
+    };
+}
+

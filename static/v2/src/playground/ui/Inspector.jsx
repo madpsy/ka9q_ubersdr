@@ -10,12 +10,14 @@ import { Button, Field, Icon, Readout, Segmented, Slider, Switch } from '../../c
 import { elementSinkSupport, sinkLabel } from '../../lib/audioSinks.js';
 import useOutputDevices from '../../lib/useOutputDevices.js';
 import { BLOCK_BY_TYPE } from '../blocks/index.js';
+import { decimateFactor } from '../blocks/mixing.js';
 import { formatCpu, formatLatency, formatRate } from './Canvas.jsx';
 import { INSTRUMENTS, Instrument } from './viewers.jsx';
 import { PROBES, acrossPair, airSpan, inputOrigin, outputKind, sourceZero } from '../probes.js';
 import { RfLine, recordingLabel } from './CardVisual.jsx';
 import { hasRfLine } from '../geometry.js';
 import { controlPort, controllable, inputsOf, outputsOf } from '../block.js';
+import { NAME_MAX, nodeName } from '../graph.js';
 import { decodeWav } from '../wavfile.js';
 import { expandable } from '../expand.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
@@ -199,12 +201,12 @@ function ControlToggle({ exposed, onExpose }) {
     );
 }
 
-export function ParamRow({ name, spec, value, rate, onChange, sinkError, exposed, onExpose, drivenBy, drivenValue }) {
+export function ParamRow({ name, spec, value, params, rate, onChange, sinkError, exposed, onExpose, drivenBy, drivenValue }) {
     const field = drivenBy ? (
         <Field label={spec.label} hint={drivenValue == null ? '—' : String(Number.isFinite(drivenValue) ? Number(drivenValue.toPrecision(6)) : drivenValue)}>
             <div className="pg-driven">driven by {drivenBy}</div>
         </Field>
-    ) : <ParamField name={name} spec={spec} value={value} rate={rate} onChange={onChange} sinkError={sinkError} />;
+    ) : <ParamField name={name} spec={spec} value={value} params={params} rate={rate} onChange={onChange} sinkError={sinkError} />;
     if (!controllable(spec) || !onExpose) return field;
     return (
         <div className="pg-param">
@@ -214,9 +216,26 @@ export function ParamRow({ name, spec, value, rate, onChange, sinkError, exposed
     );
 }
 
-export function ParamField({ name, spec, value, rate, onChange, sinkError }) {
+export function ParamField({ name, spec, value, params, rate, onChange, sinkError }) {
     switch (spec.kind) {
         case 'text':
+            // A placeholder may depend on the block's other settings: what an
+            // empty message sends depends on the mode.
+            if (spec.multiline) {
+                return (
+                    <Field label={spec.label}>
+                        <textarea
+                            className="input pg-insp__textarea"
+                            rows={4}
+                            value={value}
+                            maxLength={spec.max}
+                            placeholder={typeof spec.placeholder === 'function' ? spec.placeholder(params || {}) : spec.placeholder}
+                            onChange={(e) => onChange(e.target.value)}
+                            onKeyDown={(e) => e.stopPropagation()}
+                        />
+                    </Field>
+                );
+            }
             return (
                 <Field label={spec.label}>
                     <input
@@ -232,6 +251,25 @@ export function ParamField({ name, spec, value, rate, onChange, sinkError }) {
         case 'device':
             return <DeviceField value={value} onChange={onChange} error={sinkError} />;
         case 'choice':
+            if (spec.swatches) {
+                return (
+                    <Field label={spec.label}>
+                        <div className="pg-swatches" role="radiogroup" aria-label={spec.label}>
+                            {spec.options.map((o) => (
+                                <button
+                                    key={String(o.value)}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={value === o.value}
+                                    title={o.label}
+                                    className={`pg-swatch pg-ann--${o.value}${value === o.value ? ' is-on' : ''}`}
+                                    onClick={() => onChange(o.value)}
+                                />
+                            ))}
+                        </div>
+                    </Field>
+                );
+            }
             if (spec.options.length <= 4) {
                 return (
                     <Field label={spec.label}>
@@ -304,10 +342,22 @@ function ReceiverControls({ graph, node, onParams }) {
     );
 }
 
+/** What a decimator is doing to the rate arriving, in a sentence. */
+function decimateNote(p, rate) {
+    const D = decimateFactor(rate, p);
+    const now = `${formatRate(rate)} Hz in, ${formatRate(rate / D)} Hz out`;
+    if (!p.auto) return `Keeping 1 sample in ${D}: ${now}.`;
+    return D > 1
+        ? `Auto: keeping 1 sample in ${D} — ${now}. Follows the IQ width.`
+        : `Auto: the stream is already narrow, so it keeps every sample and only brings the centre to zero — ${now}. Follows the IQ width.`;
+}
+
 /** Where on the air a source's samples are from, in a sentence. */
 function coverNote(node, dialHz, rate) {
     const c = airSpan(sourceZero(node, dialHz), rate);
     if (c) return `Covers ${c.range}, centred on ${c.centre}${c.width ? ` — ${c.width}` : ''}.`;
+    if (node.type === 'signal') return 'Not on the air: the tones are offsets from zero. Give it a centre frequency to put them on real frequencies.';
+    if (node.type === 'data-tx') return 'Not on the air: the signal is at an offset from zero. Give it a centre frequency to put it on a real one.';
     return node.type === 'iq-in'
         ? 'Not tuned yet: the range shows once the receiver has a frequency.'
         : 'This file does not say where it was recorded, so the spectra show offsets rather than frequencies. Set the centre frequency if you know it.';
@@ -379,9 +429,36 @@ function RecorderControls({ pg, id, maxSeconds, label }) {
     );
 }
 
+/**
+ * A block's name, as a box to write it in: the type's label shown faintly
+ * when it has none, and kept as each letter is typed — one undo step for the
+ * lot (see onRename). What is typed is shown as typed until the box is left:
+ * the name kept is trimmed, and showing that would eat the space before the
+ * next word.
+ */
+function NameField({ node, def, onRename }) {
+    const [draft, setDraft] = useState(null);
+    return (
+        <Field label="Name">
+            <input
+                className="input"
+                value={draft ?? (node.name || '')}
+                placeholder={def.label}
+                maxLength={NAME_MAX}
+                onChange={(e) => {
+                    setDraft(e.target.value);
+                    onRename(node.id, e.target.value);
+                }}
+                onBlur={() => setDraft(null)}
+                onKeyDown={(e) => e.stopPropagation()}
+            />
+        </Field>
+    );
+}
+
 export default function Inspector({
     pg, graph, selection, errorsByNode, rates, latencies, stats, onParams, onRemove, onDuplicate, summary,
-    look, origins, onProbe, onAcross, onExpose, onExpand,
+    look, origins, onProbe, onAcross, onExpose, onExpand, onRename,
 }) {
     const ids = [...selection.nodes];
     if (!ids.length && selection.wire != null && graph.wires[selection.wire]) {
@@ -417,17 +494,20 @@ export default function Inspector({
     return (
         <div className="pg-insp">
             <div className="pg-insp__head">
-                <div className="pg-insp__title">{def.label}</div>
-                <div className="pg-insp__id">{node.id}</div>
+                <div className="pg-insp__title">{nodeName(node)}</div>
+                <div className="pg-insp__id">{node.name ? `${def.label} · ${node.id}` : node.id}</div>
             </div>
             <p className="pg-insp__summary">{def.summary}</p>
+            {!def.annotation && onRename && <NameField key={node.id} node={node} def={def} onRename={onRename} />}
             {errs.map((e, i) => <div key={i} className="note note--tight note--warn">{e.message}</div>)}
-            <div className="readout-grid">
-                <Readout label="Rate" value={formatRate(rates[node.id]) || '—'} unit={rates[node.id] ? 'Hz' : undefined} />
-                <Readout label="Latency" value={lat ? formatLatency(lat.own) : '—'} />
-                <Readout label="From source" value={lat ? formatLatency(lat.total) : '—'} />
-                <Readout label="CPU" value={s ? formatCpu(s.cpu) : '—'} />
-            </div>
+            {!def.annotation && (
+                <div className="readout-grid">
+                    <Readout label="Rate" value={formatRate(rates[node.id]) || '—'} unit={rates[node.id] ? 'Hz' : undefined} />
+                    <Readout label="Latency" value={lat ? formatLatency(lat.own) : '—'} />
+                    <Readout label="From source" value={lat ? formatLatency(lat.total) : '—'} />
+                    <Readout label="CPU" value={s ? formatCpu(s.cpu) : '—'} />
+                </div>
+            )}
             {def.latencyNote && <div className="pg-insp__note">{def.latencyNote}</div>}
             {node.type === 'iq-in' && (
                 <div className="pg-insp__note">
@@ -442,7 +522,7 @@ export default function Inspector({
                     <RfLine pg={pg} graph={graph} node={node} dialHz={look && look.dialHz} origins={origins} />
                 </div>
             )}
-            {(node.type === 'iq-in' || node.type === 'iq-player') && (
+            {(node.type === 'iq-in' || node.type === 'iq-player' || node.type === 'signal' || node.type === 'data-tx') && (
                 <div className="pg-insp__note">{coverNote(node, look && look.dialHz, rates[node.id])}</div>
             )}
             {INSTRUMENTS.has(node.type) && (
@@ -462,6 +542,9 @@ export default function Inspector({
                     <div className="pg-insp__title">Settings</div>
                     {Object.entries(def.params).map(([name, spec]) => {
                         const exposed = (node.controls || []).includes(name);
+                        // Hidden when the block's other settings make it moot —
+                        // unless exposed, so its wire and toggle stay in reach.
+                        if (spec.showIf && !exposed && !spec.showIf(node.params)) return null;
                         const w = exposed && graph.wires.find((x) => x[2] === node.id && x[3] === controlPort(name));
                         const driven = pg.driven && pg.driven[node.id] ? pg.driven[node.id][name] : undefined;
                         return (
@@ -470,6 +553,7 @@ export default function Inspector({
                                 name={name}
                                 spec={spec}
                                 value={node.params[name]}
+                                params={node.params}
                                 rate={rates[node.id]}
                                 sinkError={spec.kind === 'device' ? pg.sinkErrorOf(node.id) : null}
                                 onChange={(v) => onParams(node.id, { [name]: v }, `param:${node.id}:${name}`)}
@@ -491,6 +575,16 @@ export default function Inspector({
                 />
             )}
             {node.type === 'iq-player' && <PlayerControls pg={pg} node={node} />}
+            {node.type === 'data-tx' && (
+                <div className="pg-insp__section">
+                    <div className="pg-insp__row">
+                        <Button size="sm" variant="ghost" icon={<Icon.RotateLeft />} onClick={() => pg.command(node.id, 'restart')}>Send again</Button>
+                    </div>
+                </div>
+            )}
+            {node.type === 'decimate' && rates[node.id] > 0 && (
+                <div className="pg-insp__note">{decimateNote(node.params, rates[node.id])}</div>
+            )}
             {expandable(node) && onExpand && (
                 <div className="pg-insp__section">
                     <div className="pg-insp__title">Inside</div>

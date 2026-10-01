@@ -9,7 +9,7 @@
 const assert = require('assert');
 const {
     GRAPH_VERSION, parseGraph, compile, Runtime, encodeIta2, encodeVaricode, encodeMorse, encodeSitorB, VARICODE, MORSE,
-    expandDecoder, TEMPLATES,
+    expandDecoder, TEMPLATES, BLOCK_BY_TYPE, SNR_BANDWIDTH_HZ, TEST_MESSAGES, Transmitter, alignText, normaliseText,
 } = require('./.build/playground.cjs');
 
 let pass = 0;
@@ -553,5 +553,192 @@ t('the digital templates compile, and the decoding ones decode', () => {
     assert.strictEqual(inside.text.trim(), MSG);
     assert.ok(inside.rt.read('eye').a, 'the eye shows nothing');
 });
+
+// ── the data transmitter ────────────────────────────────────────────────────
+
+/**
+ * A data transmitter straight into a one-block decoder, run for `seconds` with
+ * no receiver; the console's text.
+ */
+function transmit(tx, decoderType, dec = {}, seconds = 25, rate = 12000) {
+    const g = graph(
+        [
+            { id: 'tx', type: 'data-tx', params: { repeat: false, ...tx } },
+            { id: 'd', type: decoderType, params: { offsetHz: tx.offsetHz ?? 1000, ...dec } },
+            { id: 'con', type: 'console' },
+            { id: 'sent', type: 'console' },
+        ],
+        [['tx', 'out', 'd', 'in'], ['d', 'text', 'con', 'in'], ['tx', 'sent', 'sent', 'in']],
+    );
+    const rt = new Runtime(g, rate);
+    assert.ok(rt.ok, JSON.stringify(rt.errors));
+    const p = rate / 50;
+    // When each console's text first reached its full length.
+    const done = { con: null, sent: null };
+    for (let k = 0; k < seconds * 50; k++) {
+        rt.process({ i: null, q: null, frames: p, rate });
+        for (const id of ['con', 'sent']) if (done[id] === null && rt.read(id).text.trim() === (tx.text || TEST_MESSAGES[tx.mode])) done[id] = k;
+    }
+    return { text: rt.read('con').text, sent: rt.read('sent').text, done, rt };
+}
+
+const DECODER_FOR = { cw: 'cw-decoder', rtty: 'rtty-decoder', psk: 'psk31-decoder', navtex: 'navtex-decoder' };
+
+for (const mode of Object.keys(DECODER_FOR)) {
+    t(`the data transmitter's ${mode} test message decodes, word for word, and its sent text says the same first`, () => {
+        const { text, sent, done } = transmit({ mode }, DECODER_FOR[mode]);
+        assert.strictEqual(text.trim(), TEST_MESSAGES[mode]);
+        assert.strictEqual(sent.trim(), TEST_MESSAGES[mode]);
+        // As it goes out, so never behind the decoder — and not all at once.
+        assert.ok(done.sent !== null && done.sent <= done.con, `sent done at packet ${done.sent}, decoded at ${done.con}`);
+        assert.ok(done.sent > 50, 'the sent text came out all at once');
+    });
+}
+
+// Speeds, shifts and noise a decoder should still read: the message comes
+// through, whatever the noise prints either side of it — from its second word,
+// as in noise a decoder is still settling when the first arrives.
+for (const [name, tx, dec, seconds] of [
+    ['CW at 35 wpm, SNR 6 dB', { mode: 'cw', wpm: 35, noise: true, snrDb: 6 }, {}, 20],
+    ['RTTY at 75 baud, 850 Hz shift, SNR 5 dB', { mode: 'rtty', baud: 75, shiftHz: 850, noise: true, snrDb: 5 }, { baud: 75, shiftHz: 850 }, 18],
+    ['RTTY inverted, one stop bit', { mode: 'rtty', invert: true, stopBits: 1 }, { invert: true, stopBits: 1 }, 25],
+    ['PSK125 at SNR 0 dB', { mode: 'psk', pskBaud: 125, noise: true, snrDb: 0 }, { baud: 125 }, 12],
+    ['NAVTEX at SNR 0 dB', { mode: 'navtex', noise: true, snrDb: 0 }, {}, 25],
+    ['RTTY 1.5 kHz down, at 48 kHz', { mode: 'rtty', offsetHz: -1500 }, {}, 25],
+]) {
+    t(`the data transmitter: ${name}`, () => {
+        const rate = name.includes('48 kHz') ? 48000 : 12000;
+        const { text } = transmit(tx, DECODER_FOR[tx.mode], dec, seconds, rate);
+        const want = TEST_MESSAGES[tx.mode];
+        assert.ok(text.includes(want.slice(want.indexOf(' ') + 1)), JSON.stringify(text));
+    });
+}
+
+t('the data transmitter sends the message given, in place of the test one', () => {
+    assert.strictEqual(transmit({ mode: 'rtty', text: 'HELLO PLAYGROUND 42' }, 'rtty-decoder', {}, 12).text.trim(), 'HELLO PLAYGROUND 42');
+    // What a mode cannot send is left out rather than sent wrong: CW has no
+    // lower case, so it sends it as capitals; and nothing for a '#'. The sent
+    // text says so too.
+    const cw = transmit({ mode: 'cw', text: 'test # 73' }, 'cw-decoder', {}, 15);
+    assert.strictEqual(cw.text.trim(), 'TEST 73');
+    assert.strictEqual(cw.sent.trim(), 'TEST 73');
+});
+
+t('the data transmitter repeats, with its gap, or sends once and stops', () => {
+    const once = transmit({ mode: 'rtty', text: 'ONE' }, 'rtty-decoder', {}, 20);
+    assert.strictEqual(once.text.trim(), 'ONE');
+    assert.deepStrictEqual({ sending: once.rt.read('tx').sending, loops: once.rt.read('tx').loops }, { sending: false, loops: 1 });
+    const again = transmit({ mode: 'rtty', text: 'ONE', repeat: true, gapSec: 1 }, 'rtty-decoder', {}, 20);
+    assert.ok((again.text.match(/ONE/g) || []).length >= 3, JSON.stringify(again.text));
+    // What was sent shows each copy on a line of its own.
+    assert.ok(again.sent.startsWith('ONE\nONE\nONE'), JSON.stringify(again.sent));
+    assert.strictEqual(once.sent, 'ONE');
+});
+
+t('the data transmitter sets its level, and its SNR in 2.5 kHz whatever the stream', () => {
+    for (const rate of [12000, 48000]) {
+        const tx = new Transmitter();
+        const p = { ...defaults('data-tx'), mode: 'navtex', levelDb: -20, noise: true, snrDb: 10, repeat: true, gapSec: 0 };
+        tx.configure(p, rate);
+        const n = rate * 4;
+        const re = new Float64Array(n);
+        const im = new Float64Array(n);
+        tx.process(re, im, n);
+        let total = 0;
+        for (let k = 0; k < n; k++) total += re[k] * re[k] + im[k] * im[k];
+        // FSK is constant envelope, so signal power is the level's; the rest
+        // is noise, spread over the stream.
+        const signal = 10 ** (-20 / 10);
+        const noisePower = total / n - signal;
+        const inBand = noisePower * (SNR_BANDWIDTH_HZ / rate);
+        const snr = 10 * Math.log10(signal / inBand);
+        assert.ok(Math.abs(snr - 10) < 0.2, `${rate}: SNR ${snr.toFixed(2)} dB`);
+    }
+});
+
+t('the data transmitter shows only the settings its mode uses', () => {
+    const spec = BLOCK_BY_TYPE['data-tx'].params;
+    const shown = (mode) => Object.keys(spec).filter((k) => !spec[k].showIf || spec[k].showIf({ ...defaults('data-tx'), mode }));
+    assert.ok(shown('cw').includes('wpm') && !shown('cw').includes('baud') && !shown('cw').includes('pskBaud'));
+    assert.ok(shown('rtty').includes('baud') && shown('rtty').includes('shiftHz') && shown('rtty').includes('invert') && !shown('rtty').includes('wpm'));
+    assert.ok(shown('psk').includes('pskBaud') && !shown('psk').includes('invert'));
+    assert.ok(shown('navtex').includes('invert') && !shown('navtex').includes('baud'));
+    // An empty message shows what will be sent in its place.
+    assert.strictEqual(spec.text.placeholder({ mode: 'navtex' }), TEST_MESSAGES.navtex);
+});
+
+// ── text difference ─────────────────────────────────────────────────────────
+
+/** A comparison as a string: [got≠sent], {+extra}, {-missing}, <noise>. */
+function marked(sent, received) {
+    const r = alignText(normaliseText(sent), normaliseText(received));
+    const s = r.segments.map((x) => ({
+        same: x.text, wrong: `[${x.text}≠${x.sent}]`, extra: `{+${x.text}}`, missing: `{-${x.text}}`, noise: `<${x.text}>`,
+    })[x.kind]).join('');
+    return { s, ...r };
+}
+
+t('text difference marks wrong, extra and missing characters, and counts them', () => {
+    const S = 'CQ CQ DE TEST TEST K';
+    assert.deepStrictEqual(
+        (({ s, errors, compared }) => ({ s, errors, compared }))(marked(S, 'CQ C DE TEXT TESST K')),
+        { s: 'CQ C{-Q} DE TE[X≠S]T TE{+S}ST K', errors: 3, compared: 20 },
+    );
+    assert.strictEqual(marked(S, 'CQ C DE TEXT TESST K').cer, 3 / 20);
+    assert.strictEqual(marked(S, S).cer, 0);
+});
+
+t('text difference waits for a decoder that is behind, and does not count noise', () => {
+    const S = 'CQ CQ DE TEST TEST K';
+    const behind = marked(S, 'CQ CQ DE TE');
+    assert.deepStrictEqual([behind.errors, behind.compared, behind.pending], [0, 11, 9]);
+    assert.strictEqual(marked(S, 'EEN T CQ CQ DE TEST').s, '<EEN T >CQ CQ DE TEST');
+    assert.strictEqual(marked(S, `${S} ETEEN TE`).s, `${S}< ETEEN TE>`);
+    // Pure noise, even where it hits a letter, is not the message begun.
+    assert.strictEqual(marked(S, 'XJQZ').cer, null);
+    assert.strictEqual(marked(S, '').cer, null);
+    // Spacing and capitals, as asked.
+    assert.strictEqual(marked('cq  cq\nde', 'CQ CQ DE').cer, 0);
+    assert.strictEqual(alignText(normaliseText('cq', { ignoreCase: false }), normaliseText('CQ', { ignoreCase: false })).errors, 0, 'no match is no message');
+});
+
+t('a console passes on what it prints', () => {
+    const g = graph(
+        [
+            { id: 'tx', type: 'data-tx', params: { mode: 'rtty', text: 'PASS IT ON', repeat: false } },
+            { id: 'a', type: 'console' },
+            { id: 'b', type: 'console' },
+        ],
+        [['tx', 'sent', 'a', 'in'], ['a', 'out', 'b', 'in']],
+    );
+    const rt = new Runtime(g, 12000);
+    for (let k = 0; k < 50 * 10; k++) rt.process({ i: null, q: null, frames: 240, rate: 12000 });
+    assert.strictEqual(rt.read('b').text, 'PASS IT ON');
+    assert.strictEqual(rt.read('b').text, rt.read('a').text);
+});
+
+t('a decoder test bench’s text difference is clean in the clear and counts errors in noise', () => {
+    const run = (params, seconds) => {
+        const g = TEMPLATES.find((x) => x.id === 'bench-rtty').build();
+        g.nodes.find((n) => n.id === 'tx').params = { ...g.nodes.find((n) => n.id === 'tx').params, ...params };
+        g.nodes.push({ id: 'plot', type: 'control-plot', params: {}, x: 0, y: 0 });
+        g.wires.push(['diff', 'cer', 'plot', 'in']);
+        const rt = new Runtime(g, 12000);
+        for (let k = 0; k < 50 * seconds; k++) rt.process({ i: null, q: null, frames: 240, rate: 12000 });
+        return { diff: rt.read('diff'), plot: rt.read('plot') };
+    };
+    const clean = run({}, 30);
+    assert.strictEqual(clean.diff.errors, 0, JSON.stringify(clean.diff.segments));
+    assert.ok(clean.diff.compared > 80, `compared ${clean.diff.compared}`);
+    assert.strictEqual(clean.plot.value, 0, 'the error rate did not go out');
+    const noisy = run({ noise: true, snrDb: -9 }, 30);
+    assert.ok(noisy.diff.errors > 0 && noisy.diff.cer > 0, JSON.stringify(noisy.diff));
+    assert.ok(noisy.diff.cer < 1, 'nothing decoded at all: the test proves nothing');
+    assert.strictEqual(noisy.plot.value, noisy.diff.cer);
+});
+
+function defaults(type) {
+    return Object.fromEntries(Object.entries(BLOCK_BY_TYPE[type].params).map(([k, v]) => [k, v.default]));
+}
 
 console.log(`\n${pass} passed`);

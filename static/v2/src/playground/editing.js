@@ -9,6 +9,7 @@
 
 import { BLOCK_BY_TYPE } from './blocks/index.js';
 import { controlPort, controllable, inputsOf, isStream, outputsOf, sanitizeParams } from './block.js';
+import { cleanName } from './graph.js';
 
 /** A copy of a graph that shares nothing with it. */
 export const cloneGraph = (g) => ({
@@ -35,6 +36,23 @@ export function addNode(graph, type, x = 0, y = 0, params = {}) {
     const id = freshId(g, type);
     g.nodes.push({ id, type, params: sanitizeParams(def, params), x: Math.round(x), y: Math.round(y) });
     return { graph: g, id };
+}
+
+/**
+ * Give block `id` a name — cleaned as a stored one is (graph.js cleanName), so
+ * an empty one, or the block's own label, puts it back to its type's label.
+ * The graph unchanged if that changes nothing.
+ */
+export function renameNode(graph, id, name) {
+    const n = graph.nodes.find((x) => x.id === id);
+    if (!n) return graph;
+    const clean = cleanName(name, n.type);
+    if (clean === (n.name || '')) return graph;
+    const g = cloneGraph(graph);
+    const m = g.nodes.find((x) => x.id === id);
+    if (clean) m.name = clean;
+    else delete m.name;
+    return g;
 }
 
 /** Remove blocks, and every wire to or from them. */
@@ -163,7 +181,9 @@ export function duplicateNodes(graph, ids, offset = 40) {
         if (!set.has(n.id)) continue;
         const r = addNode(g, n.type, n.x + offset, n.y + offset, n.params);
         g = r.graph;
-        if (n.controls) g.nodes.find((x) => x.id === r.id).controls = [...n.controls];
+        const copy = g.nodes.find((x) => x.id === r.id);
+        if (n.controls) copy.controls = [...n.controls];
+        if (n.name) copy.name = n.name;
         map.set(n.id, r.id);
     }
     for (const w of graph.wires) {

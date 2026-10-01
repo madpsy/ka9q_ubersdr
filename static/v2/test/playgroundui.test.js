@@ -43,6 +43,7 @@ const {
     Inspector, CardVisual, Palette, closePlayground, offerSharedGraph, openPlayground, playgroundUiState,
     EditHistory, addNode, canConnect, connectPorts, disconnectInput, duplicateNodes, freshId, moveNodes, removeNodes, removeWire,
     NODE_W, nodeWidth, autoLayout, graphBounds, fitView, nodeAt, nodeHeight, portAt, portPosition, screenToWorld, wirePath, zoomAbout,
+    isAnnotation, nodeBox, nodesInside,
     Instrument, SpectrumView, ScopeView, ConstellationView, spectrumAxis, scopeRange, freqLabel, timeLabel, INSTRUMENTS,
     spectrumMarks, counterText, groupDigits, PROBES,
     BLOCKS, BLOCK_BY_TYPE, GRAPH_VERSION, compile, parseGraph, getPlayground, resetDemodSettings, saveDemodSettings,
@@ -293,15 +294,136 @@ t('the window is nothing while closed, and the whole editor while open', () => {
     const all = deep(tree);
     const has = (c) => all.some((n) => cls(n).split(' ').includes(c));
     for (const c of ['pg', 'pg-bar', 'pg__side--left', 'pg-canvas', 'pg__side--right']) assert.ok(has(c), `no ${c}`);
-    // Every block the palette offers.
+    // Every block the palette offers; the annotations are on the toolbar.
     const items = all.filter((n) => cls(n) === 'pg-pal__item');
-    assert.strictEqual(items.length, BLOCKS.length);
+    assert.strictEqual(items.length, BLOCKS.filter((b) => !b.annotation).length);
+    assert.strictEqual(all.filter((n) => cls(n) === 'pg-bar__tool').length, BLOCKS.filter((b) => b.annotation).length);
     // A card per block in the graph, and a wire per wire.
     const pg = getPlayground(radio().player);
     assert.strictEqual(all.filter((n) => cls(n).split(' ').includes('pg-card')).length, pg.graph.nodes.length);
     assert.strictEqual(all.filter((n) => /\bpg-wire pg-wire--/.test(cls(n))).length, pg.graph.wires.length);
     assert.match(words(tree), /Start/);
     cleanups.forEach((f) => f());
+    closePlayground();
+});
+
+t('From IQ Demod asks before replacing a graph, as New does, and not on an empty canvas', () => {
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    openPlayground();
+    pg.setGraph(g([{ id: 'mine', type: 'signal', x: 40, y: 80 }]));
+    let r = render(PlaygroundWindow, {}, ctx);
+    // Each render's effects let go before the next: left running, they go on
+    // answering the playground's changes into the tests after this one.
+    const again = () => {
+        r.cleanups.forEach((f) => f());
+        r = render(PlaygroundWindow, {}, ctx);
+    };
+    const btn = (label) => deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === label);
+    const dialog = () => deep(r.tree).find((n) => cls(n).split(' ').includes('pg-confirm'));
+    btn('From IQ Demod').props.onClick();
+    again();
+    assert.ok(dialog(), 'replaced without asking');
+    assert.match(words(dialog()), /Load IQ Demod’s demodulator\?.*1 block, will be replaced by IQ Demod’s selected demodulator/);
+    assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['mine'], 'replaced before the answer');
+    // Cancel keeps it.
+    btn('Cancel').props.onClick();
+    again();
+    assert.ok(!dialog());
+    assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['mine']);
+    // Replace it replaces it.
+    btn('From IQ Demod').props.onClick();
+    again();
+    btn('Replace it').props.onClick();
+    again();
+    assert.ok(!dialog());
+    assert.ok(pg.graph.nodes.some((n) => n.type === 'iq-in') && !pg.graph.nodes.some((n) => n.id === 'mine'), JSON.stringify(pg.graph.nodes.map((n) => n.id)));
+    // An empty canvas has nothing to lose: no question.
+    pg.setGraph(g([]));
+    again();
+    btn('From IQ Demod').props.onClick();
+    again();
+    assert.ok(!dialog(), 'asked about an empty canvas');
+    assert.ok(pg.graph.nodes.some((n) => n.type === 'iq-in'));
+    r.cleanups.forEach((f) => f());
+    closePlayground();
+});
+
+// ── the spectrum, while the window is open ──────────────────────────────────
+
+/** A spectrum connection that records being closed and reopened, at 14.074 MHz and 10 Hz bins. */
+function fakeSpectrum() {
+    const calls = [];
+    return {
+        calls,
+        connected: true,
+        centerFreq: 14_074_000,
+        binBandwidth: 10,
+        disconnect() { calls.push('disconnect'); this.connected = false; },
+        connect(view) { calls.push(['connect', view]); this.connected = true; },
+    };
+}
+
+t('holding the spectrum pauses it as the toolbar does, and lets it go only if it is still ours to', () => {
+    // Paused, then brought back where it was.
+    P.setSpectrumPaused(false);
+    let sc = fakeSpectrum();
+    let release = P.holdSpectrum(sc);
+    assert.deepStrictEqual(sc.calls, ['disconnect']);
+    assert.strictEqual(P.spectrumPaused(), true, 'not marked paused');
+    release(true);
+    release(true);
+    assert.deepStrictEqual(sc.calls, ['disconnect', ['connect', { frequency: 14_074_000, binBandwidth: 10 }]], 'not brought back, or brought back twice');
+    assert.strictEqual(P.spectrumPaused(), false);
+    // Already paused: left alone, and left paused.
+    P.setSpectrumPaused(true);
+    sc = fakeSpectrum();
+    P.holdSpectrum(sc)(true);
+    assert.deepStrictEqual(sc.calls, []);
+    assert.strictEqual(P.spectrumPaused(), true);
+    // Resumed by the operator meanwhile: not touched again.
+    P.setSpectrumPaused(false);
+    sc = fakeSpectrum();
+    release = P.holdSpectrum(sc);
+    P.setSpectrumPaused(false);
+    release(true);
+    assert.deepStrictEqual(sc.calls, ['disconnect']);
+    // The receiver stopped meanwhile: its socket stays closed.
+    P.setSpectrumPaused(false);
+    sc = fakeSpectrum();
+    release = P.holdSpectrum(sc);
+    release(false);
+    assert.deepStrictEqual(sc.calls, ['disconnect']);
+    P.setSpectrumPaused(false);
+});
+
+t('the playground window pauses the spectrum while it is open and resumes it on closing', () => {
+    P.setSpectrumPaused(false);
+    reset();
+    const sc = fakeSpectrum();
+    openPlayground();
+    let r = render(PlaygroundWindow, {}, radio({ spectrumConn: sc }));
+    assert.deepStrictEqual(sc.calls, ['disconnect'], 'not paused on opening');
+    assert.strictEqual(P.spectrumPaused(), true);
+    r.cleanups.forEach((f) => f());
+    assert.deepStrictEqual(sc.calls, ['disconnect', ['connect', { frequency: 14_074_000, binBandwidth: 10 }]], 'not resumed on closing');
+    assert.strictEqual(P.spectrumPaused(), false);
+    // Paused before it opened: still paused after it closes.
+    P.setSpectrumPaused(true);
+    reset();
+    const was = fakeSpectrum();
+    r = render(PlaygroundWindow, {}, radio({ spectrumConn: was }));
+    r.cleanups.forEach((f) => f());
+    assert.deepStrictEqual(was.calls, []);
+    assert.strictEqual(P.spectrumPaused(), true);
+    // With the receiver off there is nothing to pause.
+    P.setSpectrumPaused(false);
+    reset();
+    const off = fakeSpectrum();
+    r = render(PlaygroundWindow, {}, radio({ spectrumConn: off, running: false }));
+    r.cleanups.forEach((f) => f());
+    assert.deepStrictEqual(off.calls, []);
     closePlayground();
 });
 
@@ -420,15 +542,21 @@ t('double-clicking a block selects it and opens the folded right-hand panel', ()
     r = render(PlaygroundWindow, {}, ctx);
     assert.ok(!cls(body()).includes('is-right-shut'), 'the right panel stayed folded');
     assert.match(words(deep(r.tree).find((n) => cls(n).includes('pg__side--right'))), /Gain/);
+    // Let go before the next mount: left subscribed, this window's listeners
+    // go on writing into whatever hook slots the tests after it are using.
+    r.cleanups.forEach((f) => f());
 
-    // On empty canvas: nothing.
+    // On empty canvas: no panel — it zooms a step instead.
     localStorage.setItem('ubersdr.v2.playground.sides', JSON.stringify({ left: false, right: true }));
     reset();
     r = render(PlaygroundWindow, {}, ctx);
+    const zoom = () => Number(/scale\(([\d.]+)\)/.exec(deep(r.tree).find((n) => cls(n) === 'pg-world').props.style.transform)[1]);
+    const before = zoom();
     deep(r.tree).find((n) => n.props && n.props.onDoubleClick).props.onDoubleClick({ clientX: -5000, clientY: -5000, target: { closest: () => null } });
     r.cleanups.forEach((f) => f());
     r = render(PlaygroundWindow, {}, ctx);
     assert.ok(cls(body()).includes('is-right-shut'), 'a double-click on nothing opened the panel');
+    assert.ok(zoom() > before, `a double-click on nothing did not zoom (${before} → ${zoom()})`);
     r.cleanups.forEach((f) => f());
     localStorage.removeItem('ubersdr.v2.playground.sides');
     closePlayground();
@@ -764,6 +892,291 @@ t('the port a dragged wire would land on is lit, green where it can go and red w
     r.cleanups.forEach((f) => f());
 });
 
+// ── annotations ─────────────────────────────────────────────────────────────
+
+t('annotations take the room their settings give, arrows either way, and sit under the cards', () => {
+    const graph = g([
+        { id: 'a', type: 'arrow', x: 100, y: 100, params: { dx: -60, dy: 40 } },
+        { id: 'n', type: 'note', x: 0, y: 0, params: { w: 300, h: 200 } },
+        { id: 'c', type: 'gain', x: 20, y: 20 },
+        { id: 'm', type: 'marker', x: 500, y: 500 },
+    ]);
+    assert.deepStrictEqual(nodeBox(graph.nodes[0]), { x: 40, y: 100, w: 60, h: 40 });
+    assert.deepStrictEqual(nodeBox(graph.nodes[1]), { x: 0, y: 0, w: 300, h: 200 });
+    assert.strictEqual(nodeBox(graph.nodes[3]).w, 30);
+    // A card on a note is the card.
+    assert.strictEqual(nodeAt(graph, 30, 30), 'c');
+    assert.strictEqual(nodeAt(graph, 250, 150), 'n');
+    const b = graphBounds(graph);
+    assert.deepStrictEqual([b.x, b.y, b.x + b.w, b.y + b.h], [0, 0, 530, 530]);
+    // None in the palette's sections, none with ports — exposed or not.
+    for (const def of BLOCKS.filter((x) => x.annotation)) {
+        assert.ok(isAnnotation(def.type));
+        assert.ok(!CATEGORIES_HAVE(def.category), `${def.type} is in the palette`);
+        assert.ok(Object.values(def.params).every((spec) => spec.control === false || !['number', 'bool'].includes(spec.kind)), `${def.type} has a controllable setting`);
+    }
+    // Laying out leaves them where they were put.
+    const laid = autoLayout(graph);
+    assert.deepStrictEqual(laid.nodes.filter((n) => isAnnotation(n.type)).map((n) => [n.x, n.y]), [[100, 100], [0, 0], [500, 500]]);
+    // And a graph of them compiles, and runs doing nothing.
+    assert.ok(compile(g(BLOCKS.filter((x) => x.annotation).map((x, i) => ({ id: `a${i}`, type: x.type }))), 12000).ok);
+});
+
+function CATEGORIES_HAVE(category) {
+    return P.CATEGORIES.includes(category);
+}
+
+/** A canvas over `graph`, with the playground holding it, and a way to press, drag and let go. */
+function annotationCanvas(graph, selected = []) {
+    const pg = getPlayground(radio().player);
+    pg.setGraph(graph);
+    // After the graph is set: setting it tells anything still listening,
+    // which must not use up the hooks this render is about to be given.
+    reset();
+    const edits = [];
+    const views = [];
+    const opened = [];
+    const props = {
+        pg, graph: pg.graph, view: { x: 0, y: 0, zoom: 1 }, setView(v) { views.push(v); }, selection: { nodes: new Set(selected), wire: null },
+        onOpenNode(id) { opened.push(id); },
+        setPicked() {}, onEdit() {}, onMoved() { edits.push('moved'); }, errorsByNode: {}, rates: {}, latencies: {}, stats: null, look: null, origins: null,
+        onParams(id, patch) { edits.push([id, patch]); },
+    };
+    let r = render(P.Canvas, props, radio());
+    const root = () => deep(r.tree).find((x) => x.props && x.props.onPointerMove);
+    // A pointer event on whatever carries `attrs`, found as closest() would.
+    const at = (x, y, attrs = null) => ({
+        button: 0, pointerId: 1, clientX: x, clientY: y,
+        target: { closest: (sel) => (attrs && ((sel === '[data-handle]' && attrs['data-handle']) || (sel === '[data-node]' && attrs['data-node']) || (sel === '.pg-ann__title' && attrs.title) || (sel === '.pg-card__label' && attrs.label)) ? { getAttribute: (k) => attrs[k] } : null) },
+    });
+    return {
+        pg, edits, views, opened, root, at,
+        rerender() { r.cleanups.forEach((f) => f()); r = render(P.Canvas, { ...props, graph: pg.graph }, radio()); return r; },
+        tree: () => r.tree,
+        done() { r.cleanups.forEach((f) => f()); },
+    };
+}
+
+t('every annotation draws on the canvas, selected or not, under the wires', () => {
+    const types = BLOCKS.filter((x) => x.annotation).map((x) => x.type);
+    const graph = g(types.map((type, i) => ({ id: `a${i}`, type, x: i * 50, y: 0 })));
+    for (const sel of [[], graph.nodes.map((n) => n.id)]) {
+        const c = annotationCanvas(graph, sel);
+        const all = deep(c.tree());
+        const layer = all.find((x) => cls(x) === 'pg-anns');
+        assert.ok(layer, 'no annotation layer');
+        for (const n of graph.nodes) assert.ok(all.some((x) => x.props && x.props['data-node'] === n.id), `${n.type} has nothing to take hold of`);
+        // Handles only when selected: a size handle each, two ends for the arrow, none for the marker.
+        const handles = all.filter((x) => x.props && x.props['data-handle']).length;
+        assert.strictEqual(handles, sel.length ? (types.length - 2) + 2 : 0);
+        c.done();
+    }
+});
+
+t('dragging a group takes what is inside it, and nothing outside', () => {
+    const graph = g([
+        { id: 'grp', type: 'group', x: 0, y: 0, params: { w: 500, h: 300 } },
+        { id: 'in1', type: 'gain', x: 40, y: 60 },
+        { id: 'in2', type: 'note', x: 300, y: 60, params: { w: 100, h: 80 } },
+        { id: 'out', type: 'gain', x: 600, y: 60 },
+        { id: 'half', type: 'gain', x: 450, y: 200 },
+    ]);
+    assert.deepStrictEqual(nodesInside(graph, 'grp').sort(), ['in1', 'in2']);
+    const c = annotationCanvas(graph);
+    c.root().props.onPointerDown(c.at(20, 10, { 'data-node': 'grp', title: true }));
+    c.root().props.onPointerMove(c.at(70, 40));
+    c.root().props.onPointerUp(c.at(70, 40));
+    const pos = (id) => { const n = c.pg.graph.nodes.find((x) => x.id === id); return [n.x, n.y]; };
+    assert.deepStrictEqual([pos('grp'), pos('in1'), pos('in2'), pos('out'), pos('half')], [[50, 30], [90, 90], [350, 90], [600, 60], [450, 200]]);
+    assert.deepStrictEqual(c.edits, ['moved'], 'one undo step');
+    c.done();
+});
+
+t('an annotation’s handle resizes it, an arrow’s moves one end, each as one undo step', () => {
+    const graph = g([
+        { id: 'r', type: 'rect', x: 0, y: 0, params: { w: 100, h: 50 } },
+        { id: 'a', type: 'arrow', x: 300, y: 300, params: { dx: 100, dy: 0 } },
+    ]);
+    const c = annotationCanvas(graph, ['r', 'a']);
+    const drag = (attrs, from, to) => {
+        c.root().props.onPointerDown(c.at(from[0], from[1], attrs));
+        c.root().props.onPointerMove(c.at(to[0], to[1]));
+        c.root().props.onPointerUp(c.at(to[0], to[1]));
+    };
+    const node = (id) => c.pg.graph.nodes.find((x) => x.id === id);
+    drag({ 'data-node': 'r', 'data-handle': 'size' }, [100, 50], [160, 10]);
+    // Never smaller than it can be drawn.
+    assert.deepStrictEqual([node('r').params.w, node('r').params.h], [160, 16]);
+    drag({ 'data-node': 'a', 'data-handle': 'end' }, [400, 300], [400, 380]);
+    assert.deepStrictEqual([node('a').x, node('a').y, node('a').params.dx, node('a').params.dy], [300, 300, 100, 80]);
+    // The start moves and the end stays put.
+    drag({ 'data-node': 'a', 'data-handle': 'start' }, [300, 300], [250, 300]);
+    assert.deepStrictEqual([node('a').x, node('a').y, node('a').params.dx, node('a').params.dy], [250, 300, 150, 80]);
+    assert.deepStrictEqual(c.edits, ['moved', 'moved', 'moved']);
+    c.done();
+});
+
+t('a note is written in place on a double-click, and Escape leaves it as it was', () => {
+    const graph = g([{ id: 'n', type: 'note', x: 0, y: 0, params: { text: 'old' } }, { id: 'r', type: 'rect', x: 400, y: 0 }]);
+    const c = annotationCanvas(graph);
+    const box = () => deep(c.tree()).find((x) => x.type === 'textarea');
+    c.root().props.onDoubleClick(c.at(50, 50, { 'data-node': 'n' }));
+    c.rerender();
+    assert.ok(box(), 'no text box to write in');
+    assert.strictEqual(box().props.value, 'old');
+    box().props.onKeyDown({ key: 'Escape', stopPropagation() {}, preventDefault() {} });
+    c.rerender();
+    assert.ok(!box(), 'Escape left the box open');
+    assert.deepStrictEqual(c.edits, [], 'Escape kept something');
+    // A shape has nothing to write: a double-click on one opens no box.
+    c.root().props.onDoubleClick(c.at(450, 50, { 'data-node': 'r' }));
+    c.rerender();
+    assert.ok(!box());
+    c.done();
+});
+
+t('the in-place editor keeps what was typed on Enter or leaving, and nothing on Escape — once per edit', () => {
+    const run = (session, keys, multiline = false) => {
+        reset();
+        const done = [];
+        const props = { value: 'old', session, multiline, onDone: (v) => done.push(v) };
+        let el = render(P.InPlace, props, radio()).tree;
+        el.props.onChange({ target: { value: 'new' } });
+        el = render(P.InPlace, props, radio()).tree;
+        assert.strictEqual(el.props.value, 'new');
+        keys(el);
+        return done;
+    };
+    const key = (k, extra = {}) => ({ key: k, stopPropagation() {}, preventDefault() {}, ...extra });
+    assert.deepStrictEqual(run(1, (el) => el.props.onKeyDown(key('Enter'))), ['new']);
+    assert.deepStrictEqual(run(2, (el) => el.props.onBlur()), ['new']);
+    // Escape, and then the blur as the box goes: nothing kept, and only once.
+    assert.deepStrictEqual(run(3, (el) => { el.props.onKeyDown(key('Escape')); el.props.onBlur(); }), [null]);
+    // In a note, Enter is a new line; Ctrl+Enter finishes.
+    assert.deepStrictEqual(run(4, (el) => el.props.onKeyDown(key('Enter')), true), []);
+    assert.deepStrictEqual(run(5, (el) => el.props.onKeyDown(key('Enter', { ctrlKey: true })), true), ['new']);
+});
+
+// ── names ───────────────────────────────────────────────────────────────────
+
+t('a block can be renamed, back to its own label by an empty name, and copies keep it', () => {
+    const graph = g([{ id: 'a', type: 'gain' }]);
+    const named = P.renameNode(graph, 'a', '  Make  louder ');
+    assert.strictEqual(named.nodes[0].name, 'Make louder');
+    assert.strictEqual(graph.nodes[0].name, undefined, 'the old graph was changed');
+    assert.strictEqual(P.renameNode(named, 'a', 'Make louder'), named, 'no change, no edit');
+    for (const back of ['', '   ', BLOCK_BY_TYPE.gain.label]) assert.ok(!('name' in P.renameNode(named, 'a', back).nodes[0]), JSON.stringify(back));
+    const copy = P.duplicateNodes(named, ['a']);
+    assert.strictEqual(copy.graph.nodes.find((n) => n.id === copy.ids[0]).name, 'Make louder');
+});
+
+t('a card shows its name, and its pencil or a click on its title renames it', () => {
+    const graph = g([{ id: 'a', type: 'gain', name: 'Make louder', x: 0, y: 0 }]);
+    const c = annotationCanvas(graph);
+    const edits = [];
+    const canvas = () => deep(c.tree());
+    const label = () => canvas().find((x) => cls(x) === 'pg-card__label');
+    const box = () => canvas().find((x) => cls(x) === 'pg-card__name');
+    assert.strictEqual(words(label()), 'Make louder');
+    // The pencil.
+    const pencil = canvas().find((x) => cls(x) === 'pg-card__rename');
+    assert.ok(pencil && pencil.type === 'button', 'no rename button');
+    pencil.props.onClick();
+    c.rerender();
+    assert.ok(box(), 'the pencil opened no box');
+    assert.strictEqual(box().props.value, 'Make louder');
+    assert.strictEqual(box().props.maxLength, 60);
+    box().props.onKeyDown({ key: 'Escape', stopPropagation() {}, preventDefault() {} });
+    c.rerender();
+    assert.ok(!box() && label(), 'Escape left it open');
+    // A click on the title: pressed and let go where it was.
+    c.root().props.onPointerDown(c.at(30, 10, { 'data-node': 'a', label: true }));
+    c.root().props.onPointerUp(c.at(30, 10));
+    c.rerender();
+    assert.ok(box(), 'a click on the title opened no box');
+    box().props.onKeyDown({ key: 'Escape', stopPropagation() {}, preventDefault() {} });
+    c.rerender();
+    // A drag by the title moves the card, and renames nothing.
+    c.root().props.onPointerDown(c.at(30, 10, { 'data-node': 'a', label: true }));
+    c.root().props.onPointerMove(c.at(90, 50));
+    c.root().props.onPointerUp(c.at(90, 50));
+    c.rerender();
+    assert.ok(!box(), 'a drag opened the box');
+    assert.deepStrictEqual(c.edits, ['moved']);
+    c.done();
+});
+
+t('the inspector shows a block’s name, its type beside it, and a box to rename it in', () => {
+    reset();
+    const pg = getPlayground(radio().player);
+    const renamed = [];
+    const show = (graph) => deep(React.createElement(Inspector, {
+        pg, graph, selection: { nodes: new Set(['a']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+        onParams() {}, onRemove() {}, onDuplicate() {}, summary: null, onRename: (id, name) => renamed.push([id, name]),
+    }));
+    let all = show(g([{ id: 'a', type: 'gain', name: 'Make louder' }]));
+    assert.strictEqual(words(all.find((x) => cls(x) === 'pg-insp__title')), 'Make louder');
+    assert.strictEqual(words(all.find((x) => cls(x) === 'pg-insp__id')), `${BLOCK_BY_TYPE.gain.label} · a`);
+    const input = all.find((x) => x.type === 'input' && x.props.placeholder === BLOCK_BY_TYPE.gain.label);
+    assert.ok(input, 'no name box');
+    assert.strictEqual(input.props.value, 'Make louder');
+    input.props.onChange({ target: { value: 'Quieter' } });
+    assert.deepStrictEqual(renamed, [['a', 'Quieter']]);
+    // Not renamed: the type's label, and an empty box showing it.
+    all = show(g([{ id: 'a', type: 'gain' }]));
+    assert.strictEqual(words(all.find((x) => cls(x) === 'pg-insp__title')), BLOCK_BY_TYPE.gain.label);
+    // Annotations carry their own words, and get no name box.
+    all = show(g([{ id: 'a', type: 'note' }]));
+    assert.ok(!all.some((x) => x.type === 'input' && x.props.placeholder === BLOCK_BY_TYPE.note.label));
+});
+
+t('a double-click on empty grid zooms a step toward the pointer, and nowhere else', () => {
+    const graph = g([
+        { id: 'c', type: 'gain', x: 0, y: 0 },
+        { id: 'grp', type: 'group', x: 600, y: 0, params: { w: 400, h: 300 } },
+        { id: 'n', type: 'note', x: 0, y: 400, params: { w: 200, h: 100 } },
+        { id: 'box', type: 'rect', x: 400, y: 400, params: { w: 100, h: 100 } },
+    ]);
+    const c = annotationCanvas(graph);
+    const dbl = (x, y, attrs = null) => c.root().props.onDoubleClick(c.at(x, y, attrs));
+    // Empty grid: one step in, and the point under the pointer stays put.
+    dbl(300, 200);
+    assert.strictEqual(c.views.length, 1);
+    const v = c.views[0];
+    assert.ok(Math.abs(v.zoom - 1.4) < 1e-9, `zoom ${v.zoom}`);
+    assert.ok(Math.abs((300 - v.x) / v.zoom - 300) < 1e-9 && Math.abs((200 - v.y) / v.zoom - 200) < 1e-9, 'the point under the pointer moved');
+    // The see-through inside of a group, or of a hollow shape, is grid too.
+    dbl(800, 200);
+    dbl(450, 450);
+    assert.strictEqual(c.views.length, 3);
+    // A card opens, a note is written in: neither zooms. A note counts
+    // wherever in it the pointer is, whatever the browser says was pressed.
+    dbl(50, 50);
+    assert.deepStrictEqual(c.opened, ['c']);
+    dbl(100, 450);
+    assert.strictEqual(c.views.length, 3, 'a double-click on a note zoomed');
+    // A group's title is for its name, a shape's outline for itself, a wire
+    // for the wire.
+    dbl(620, 10, { 'data-node': 'grp', title: true });
+    dbl(402, 450, { 'data-node': 'box' });
+    c.root().props.onDoubleClick({ ...c.at(300, 600), target: { closest: (sel) => (sel === '.pg-wire__hit' ? {} : null) } });
+    assert.strictEqual(c.views.length, 3);
+    c.done();
+});
+
+t('a double-click zooms no closer than the closest zoom', () => {
+    const c = annotationCanvas(g([]));
+    // As though already at the closest.
+    const r = render(P.Canvas, {
+        pg: c.pg, graph: c.pg.graph, view: { x: 0, y: 0, zoom: 2 }, setView: (v) => c.views.push(v), selection: { nodes: new Set(), wire: null },
+        setPicked() {}, onEdit() {}, onMoved() {}, onOpenNode() {}, errorsByNode: {}, rates: {}, latencies: {}, stats: null, look: null, origins: null, onParams() {},
+    }, radio());
+    deep(r.tree).find((x) => x.props && x.props.onDoubleClick).props.onDoubleClick(c.at(100, 100));
+    assert.strictEqual(c.views[c.views.length - 1].zoom, 2);
+    r.cleanups.forEach((f) => f());
+    c.done();
+});
+
 t('the inspector renders every block type’s settings', () => {
     const pg = getPlayground(radio().player);
     for (const def of BLOCKS) {
@@ -777,7 +1190,8 @@ t('the inspector renders every block type’s settings', () => {
         const all = deep(el);
         const text = words(el);
         assert.ok(text.includes(def.label), `${def.type}: no title`);
-        assert.ok(text.includes('1.2%'), `${def.type}: no CPU figure`);
+        // An annotation never runs: no rate, latency or CPU to show.
+        assert.strictEqual(text.includes('1.2%'), !def.annotation, `${def.type}: ${def.annotation ? 'a CPU figure on an annotation' : 'no CPU figure'}`);
         // The IQ stream's one setting is the receiver's width, worked with the
         // Receiver panel's own buttons in a section of its own.
         if (def.type === 'iq-in') assert.ok(/Receiver.*IQ width.*12 kHz/.test(text), `iq-in: no receiver controls: ${text}`);
@@ -946,7 +1360,8 @@ t('the cards the editor asks readings for are the ones that draw them', () => {
 t('the palette filters by what is typed', () => {
     reset();
     const all = deep(React.createElement(Palette, { onAdd() {} })).filter((n) => cls(n) === 'pg-pal__item');
-    assert.strictEqual(all.length, BLOCKS.length);
+    // Every block but the annotations, which the toolbar adds.
+    assert.strictEqual(all.length, BLOCKS.filter((b) => !b.annotation).length);
 });
 
 // ── instruments ─────────────────────────────────────────────────────────────

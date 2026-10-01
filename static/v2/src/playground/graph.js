@@ -6,7 +6,10 @@
 //     v: 1,
 //     nodes: [{ id: 'n1', type: 'lowpass', params: { cutoffHz: 1350 }, x: 120, y: 40 }],
 //                                                  `controls: ['cutoffHz']` exposes
-//                                                  parameters as control inputs
+//                                                  parameters as control inputs;
+//                                                  `name: 'Voice filter'` is what
+//                                                  the operator called it, where
+//                                                  they did
 //     wires: [['n1', 'out', 'n2', 'in']],          from node, port, to node, port
 //   }
 //
@@ -45,6 +48,28 @@ export function emptyGraph() {
 
 const isName = (v) => typeof v === 'string' && v.length > 0 && v.length <= 64;
 
+// The longest name a block can be given.
+export const NAME_MAX = 60;
+
+/**
+ * A block's name as given, made fit to keep: on one line, trimmed, and no
+ * longer than NAME_MAX — or '' for none, which is also what a name that only
+ * repeats the block's own label comes to, so that a block not renamed keeps
+ * following its type's label.
+ */
+export function cleanName(name, type) {
+    if (typeof name !== 'string') return '';
+    const t = name.replace(/\s+/g, ' ').trim().slice(0, NAME_MAX).trim();
+    const def = BLOCK_BY_TYPE[type];
+    return def && t === def.label ? '' : t;
+}
+
+/** What a block is called: its name, or its type's label where it has none. */
+export function nodeName(node) {
+    const def = node && BLOCK_BY_TYPE[node.type];
+    return (node && node.name) || (def ? def.label : '');
+}
+
 /**
  * Read a stored or shared graph. Returns `{ graph, errors }`: the graph as far
  * as it could be read, and what had to be left out. Nothing here throws —
@@ -78,9 +103,11 @@ export function parseGraph(raw) {
         const controls = Array.isArray(n.controls)
             ? [...new Set(n.controls.filter((c) => typeof c === 'string' && controllable(type.params[c])))]
             : [];
+        const name = cleanName(n.name, n.type);
         nodes.push({
             id: n.id,
             type: n.type,
+            ...(name ? { name } : {}),
             params: sanitizeParams(type, n.params),
             ...(controls.length ? { controls } : {}),
             x: Number.isFinite(Number(n.x)) ? Number(n.x) : 0,
@@ -117,6 +144,7 @@ export function serializeGraph(graph) {
                 if (!spec || value !== spec.default) params[name] = value;
             }
             const out = { id: n.id, type: n.type };
+            if (n.name) out.name = n.name;
             if (Object.keys(params).length) out.params = params;
             if (n.controls && n.controls.length) out.controls = [...n.controls];
             // Always, zero included: where a block sits is part of the graph,

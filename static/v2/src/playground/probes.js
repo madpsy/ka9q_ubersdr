@@ -79,13 +79,14 @@ export function addProbe(graph, fromId, fromPort, type, intoPort = null) {
  *
  * The receiver's stream is centred on the dial, so its zero is the dial; a
  * player's is the centre frequency its file was recorded at, where that is
- * known. A shift by f moves everything up by f, so the zero it puts out stood
- * for f below the one it took in; a decimator brings its centre to zero, so
- * its zero stood for that much above. Filters move nothing. A shift whose
- * frequency a control is driving is moving, so it is not known; nor is
- * anything after a conjugate (which mirrors), a multiply (which mixes two
- * signals) or a generator (which was never on the air) — and an instrument
- * after one labels offsets rather than inventing a frequency.
+ * known, and a generator's the one it was given, if any. A shift by f moves
+ * everything up by f, so the zero it puts out stood for f below the one it
+ * took in; a decimator brings its centre to zero, so its zero stood for that
+ * much above. Filters move nothing. A shift whose frequency a control is
+ * driving is moving, so it is not known; nor is anything after a conjugate
+ * (which mirrors), a multiply (which mixes two signals) or a generator given
+ * no centre (which was never on the air) — and an instrument after one labels
+ * offsets rather than inventing a frequency.
  *
  * Given `driven` — the values controls have set, by node, from the engine —
  * a driven shift is known after all: wherever it is right now.
@@ -119,7 +120,7 @@ export function frequencyOrigins(graph, dialHz, driven = null) {
                 return from ? originOf(from) : null;
             };
             if (n.type === 'iq-in') o = dialHz > 0 ? dialHz : null;
-            else if (n.type === 'iq-player') o = n.params.centreHz > 0 ? n.params.centreHz : null;
+            else if (n.type === 'iq-player' || n.type === 'signal' || n.type === 'data-tx') o = n.params.centreHz > 0 ? n.params.centreHz : null;
             else if (n.type === 'shift') {
                 const u = upstream();
                 const f = setting(n, 'frequencyHz');
@@ -165,7 +166,7 @@ export function airSpan(zeroHz, rateHz) {
 export function sourceZero(node, dialHz) {
     if (!node) return null;
     if (node.type === 'iq-in') return dialHz > 0 ? dialHz : null;
-    if (node.type === 'iq-player') return node.params.centreHz > 0 ? node.params.centreHz : null;
+    if (node.type === 'iq-player' || node.type === 'signal' || node.type === 'data-tx') return node.params.centreHz > 0 ? node.params.centreHz : null;
     return null;
 }
 
@@ -197,8 +198,8 @@ const TUNED = new Set(['demodulator', 'rtty-decoder', 'psk31-decoder', 'cw-decod
  * is `{ driven, reading }` from the engine, for whatever controls are moving.
  *
  * Returns `{ hz, shiftHz, listening, live }` — `hz` null where it is not
- * known (after a generator, a mirror, a mix, or a control not yet heard
- * from), `live` whether it can change while running — or null for a block
+ * known (after a generator with no centre, a mirror, a mix, or a control not
+ * yet heard from), `live` whether it can change while running — or null for a block
  * that takes no complex stream.
  */
 export function rfOf(graph, node, dialHz, origins = null, live = null) {

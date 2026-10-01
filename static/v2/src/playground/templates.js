@@ -8,8 +8,18 @@
 import { GRAPH_VERSION, parseGraph } from './graph.js';
 import { autoLayout } from './geometry.js';
 import { controlPort } from './block.js';
+import { graphForPlan } from './fromPlan.js';
+import { DEMOD_MODES, VFO_DEFAULTS, planForVfo } from '../lib/iqDemod.js';
 
 const g = (nodes, wires) => autoLayout(parseGraph({ v: GRAPH_VERSION, nodes, wires }).graph);
+
+// The decoders a test bench is made for, with the transmitter mode each takes.
+const BENCHES = [
+    { mode: 'cw', decoder: 'cw-decoder', label: 'CW' },
+    { mode: 'rtty', decoder: 'rtty-decoder', label: 'RTTY' },
+    { mode: 'psk', decoder: 'psk31-decoder', label: 'PSK31' },
+    { mode: 'navtex', decoder: 'navtex-decoder', label: 'NAVTEX' },
+];
 
 export const TEMPLATES = [
     {
@@ -208,6 +218,63 @@ export const TEMPLATES = [
             ],
         ),
     },
+    // One for each of IQ Demod's modes, after the hand-made ones.
+    ...DEMOD_MODES.map(modeTemplate),
+    // And a bench for each decoder, with a transmitter to feed it.
+    ...BENCHES.map(benchTemplate),
 ];
+
+/**
+ * A decoder with a transmitter feeding it, no receiver needed: what was sent
+ * on one console and what was decoded on another, side by side, both passed on
+ * to a Text difference that marks where they part and gives the error rate,
+ * and the signal on a spectrum. Both sit 1 kHz up, so moving one's offset and
+ * not the other's is the first thing to try.
+ */
+function benchTemplate(b) {
+    return {
+        id: `bench-${b.mode}`,
+        group: 'Decoder test benches',
+        title: `Test the ${b.label} decoder`,
+        summary: `A data transmitter sending ${b.label} into the ${b.label} decoder, no receiver needed: what was sent and what was decoded side by side, and a Text difference marking every mistake with the error rate. Switch on noise and lower the SNR to watch the errors start.`,
+        build: () => g(
+            [
+                { id: 'tx', type: 'data-tx', params: { mode: b.mode, offsetHz: 1000 } },
+                { id: 'decoder', type: b.decoder, params: { offsetHz: 1000 } },
+                { id: 'console', type: 'console' },
+                { id: 'sent', type: 'console' },
+                { id: 'diff', type: 'text-diff' },
+                { id: 'spectrum', type: 'iq-spectrum', params: { display: 'both' } },
+            ],
+            [
+                ['tx', 'out', 'decoder', 'in'], ['decoder', 'text', 'console', 'in'],
+                ['tx', 'sent', 'sent', 'in'], ['tx', 'out', 'spectrum', 'in'],
+                ['sent', 'out', 'diff', 'sent'], ['console', 'out', 'diff', 'received'],
+            ],
+        ),
+    };
+}
+
+/**
+ * An IQ Demod mode drawn out block by block, as "From IQ Demod" draws the
+ * panel's selected demodulator — but as a freshly added one in that mode
+ * would be, from the panel's own defaults, so it is the same whatever the
+ * panel happens to be set to. Built for the stream's rate, where the modal
+ * gives one, so a wide stream gets the decimator the panel would use.
+ */
+function modeTemplate(m) {
+    return {
+        id: `mode-${m.id}`,
+        group: 'IQ Demod’s modes, taken apart',
+        title: `${m.label}, block by block`,
+        summary: `${m.summary} IQ Demod’s ${m.label} demodulator, built from its parts rather than as one Demodulator block: every filter, detector and level is there to look at and change.`,
+        build: (rateHz = 12000) => {
+            const vfo = { ...VFO_DEFAULTS, mode: m.id };
+            return autoLayout(parseGraph(graphForPlan(planForVfo(vfo), rateHz, {
+                agc: vfo.agc, gain: vfo.gain, squelchDb: vfo.squelchDb, lockMute: vfo.lockMute, adaptive: true,
+            })).graph);
+        },
+    };
+}
 
 export const TEMPLATE_BY_ID = Object.fromEntries(TEMPLATES.map((t) => [t.id, t]));

@@ -146,7 +146,11 @@ export const CarrierTrackerBlock = {
         centreHz: { kind: 'number', label: 'Carrier near', unit: 'Hz', default: 0, min: -192000, max: 192000, step: 10, live: true },
         // Where the stream arriving here was mixed from, if a decimator ahead
         // of this moved it — so the tracker knows where the stream's edges are.
-        baseHz: { kind: 'number', label: 'Stream centre', unit: 'Hz', default: 0, min: -192000, max: 192000, step: 10 },
+        baseHz: { kind: 'number', label: 'Stream centre', unit: 'Hz', default: 0, min: -192000, max: 192000, step: 10, live: true },
+        // Where the middle of the band arriving is, which its edges hang from:
+        // zero unless the stream was mixed without being filtered. A
+        // decimator's `middle` output says, at whatever factor it is on.
+        middleHz: { kind: 'number', label: 'Band middle', unit: 'Hz', default: 0, min: -192000, max: 192000, step: 10, live: true },
         widthHz: { kind: 'number', label: 'Width', unit: 'Hz', default: 4500, min: 300, max: 20000, step: 50 },
         sideband: {
             kind: 'choice',
@@ -183,6 +187,7 @@ export const CarrierTrackerBlock = {
                     trackHz: p.trackHz,
                 };
                 tracker.configure(plan, r, (cutoffHz, transitionHz) => designLowpass(cutoffHz, r, transitionHz), p.baseHz);
+                tracker.middleHz = p.middleHz;
             },
             reset() { tracker.reset(); mute.reset(); },
             latency: () => tracker.latencySamples,

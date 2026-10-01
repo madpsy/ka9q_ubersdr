@@ -35,10 +35,15 @@ const SPLITS = {
 
 const seen = { states: new Set(), shut: 0, open: 0, decimated: 0, empty: 0 };
 
-function versus({ settings, back, rate, seconds, split }) {
+// `adaptive` runs the graph a person is given — its decimator on Auto, built
+// at `builtAt` — rather than the chain's own shape. Off plain IQ that is the
+// chain's own shape, so it is held bit for bit; on plain IQ its decimator mixes
+// where the chain's shift or tracker would, a different oscillator, so it is
+// held to `close` rather than exactly.
+function versus({ settings, back, rate, seconds, split, adaptive = false, builtAt = rate, close = 0 }) {
     const plan = planFor(settings);
     const chain = new DemodChain();
-    const rt = new Runtime(graphForPlan(plan, rate, back), rate);
+    const rt = new Runtime(graphForPlan(plan, builtAt, { ...back, adaptive }), rate);
     assert.ok(rt.ok, `the graph does not compile: ${rt.errors.map((e) => e.message).join('; ')}`);
     const { I, Q, n } = scene(rate, seconds);
     const next = SPLITS[split](rate);
@@ -56,9 +61,13 @@ function versus({ settings, back, rate, seconds, split }) {
         const want = out ? chain.outFrames : 0;
         assert.strictEqual(heard.frames, want, `${where}: ${heard.frames} frames from the graph, ${want} from the chain`);
         for (let k = 0; k < want; k++) {
-            if (!Object.is(heard.samples[k], out[k])) {
+            if (close ? !(Math.abs(heard.samples[k] - out[k]) <= close) : !Object.is(heard.samples[k], out[k])) {
                 assert.fail(`${where}: sample ${k}: ${heard.samples[k]} (graph) vs ${out[k]} (chain)`);
             }
+        }
+        if (close) {
+            at += len;
+            continue;
         }
         if (!want) seen.empty++;
         assert.ok(Object.is(rt.read('meter').level, chain.level), `${where}: meter ${rt.read('meter').level} vs ${chain.level}`);
@@ -145,6 +154,93 @@ for (const m of [MODES[0], MODES[7]]) {
         versus({ settings: { ...BASE, ...m }, back: BACKS[1], rate: 192000, seconds: 1.5, split: 'odd' });
     });
 }
+
+// The graph a person is given — From IQ Demod, a template, an expanded block —
+// has its decimator on Auto, so it follows the IQ width. Held to the chain at
+// every width, whatever width it was built at.
+for (const m of MODES) {
+    for (const { rate, seconds } of RATES.slice(1)) {
+        t(`adaptive graph = DemodChain: ${label(m)} @${rate / 1000}k, bit for bit`, () => {
+            versus({ settings: { ...BASE, ...m }, back: BACKS[1], rate, seconds, split: 'packet', adaptive: true });
+        });
+    }
+    t(`adaptive graph ≈ DemodChain: ${label(m)} @12k, to rounding`, () => {
+        versus({ settings: { ...BASE, ...m }, back: BACKS[1], rate: 12000, seconds: 3.2, split: 'packet', adaptive: true, close: 2e-6 });
+    });
+}
+for (const m of [MODES[0], MODES[6], MODES[7], MODES[10]]) {
+    t(`adaptive graph built at 192k, run at 12k and 48k: ${label(m)}`, () => {
+        versus({ settings: { ...BASE, ...m }, back: BACKS[1], rate: 48000, seconds: 2.4, split: 'packet', adaptive: true, builtAt: 192000 });
+        versus({ settings: { ...BASE, ...m }, back: BACKS[1], rate: 12000, seconds: 3.2, split: 'packet', adaptive: true, builtAt: 192000, close: 2e-6 });
+    });
+}
+t('adaptive graph ≈ DemodChain: ecss @12k, mute until locked, random packet cuts', () => {
+    versus({ settings: { ...BASE, ...MODES[7] }, back: MUTED, rate: 12000, seconds: 2.2, split: 'random', adaptive: true, close: 2e-6 });
+});
+
+t('Decimate on Auto keeps as many samples as the width allows, down to every one', () => {
+    const dec = BLOCK_BY_TYPE.decimate;
+    const p = sanitizeParams(dec, {});
+    assert.strictEqual(p.auto, true, 'a new decimator is not on Auto');
+    const factors = [12000, 48000, 96000, 192000, 384000].map((r) => r / dec.rate(r, p));
+    assert.deepStrictEqual(factors, [1, 2, 4, 8, 16]);
+    // Manual still means the number given.
+    assert.strictEqual(48000 / dec.rate(48000, { ...p, auto: false, factor: 3 }), 3);
+});
+
+t('a decimator saved with a factor and nothing about Auto keeps that factor', () => {
+    const dec = BLOCK_BY_TYPE.decimate;
+    assert.strictEqual(sanitizeParams(dec, { factor: 4 }).auto, false);
+    assert.strictEqual(sanitizeParams(dec, { factor: 4, auto: true }).auto, true);
+    const g = parseGraph({ v: GRAPH_VERSION, nodes: [{ id: 'd', type: 'decimate', params: { factor: 4, passHz: 3000 } }], wires: [] }).graph;
+    assert.strictEqual(g.nodes[0].params.auto, false);
+});
+
+t('at a factor of 1 Decimate only mixes, and its middle output says where the edges went', () => {
+    const run = (rate) => {
+        const g = parseGraph({
+            v: GRAPH_VERSION,
+            nodes: [{ id: 'iq', type: 'iq-in' }, { id: 'd', type: 'decimate', params: { auto: true, frequencyHz: 1500 } }, { id: 'p', type: 'control-plot' }],
+            wires: [['iq', 'out', 'd', 'in'], ['d', 'middle', 'p', 'in']],
+        }).graph;
+        const rt = new Runtime(g, rate);
+        assert.ok(rt.ok, rt.errors.map((e) => e.message).join('; '));
+        const n = rate / 50;
+        const I = new Float32Array(n);
+        const Q = new Float32Array(n);
+        // A tone at the centre, which should arrive at zero: DC.
+        for (let k = 0; k < n; k++) { I[k] = Math.cos((2 * Math.PI * 1500 * k) / rate); Q[k] = Math.sin((2 * Math.PI * 1500 * k) / rate); }
+        for (let p = 0; p < 5; p++) rt.process({ i: I, q: Q, frames: n, rate });
+        return { rt, node: rt.nodes.get('d') };
+    };
+    const narrow = run(12000);
+    assert.strictEqual(narrow.node.inst.latency(), 0, 'a factor of 1 still filters');
+    const out = narrow.node.outs[0];
+    assert.strictEqual(out.n, 240, 'a factor of 1 dropped samples');
+    for (let k = 0; k < out.n; k++) assert.ok(Math.abs(out.re[k] - 1) < 1e-4 && Math.abs(out.im[k]) < 1e-4, `sample ${k} not at zero`);
+    assert.strictEqual(narrow.rt.read('p').value, -1500);
+    const wide = run(192000);
+    assert.strictEqual(wide.node.outs[0].n, 3840 / 8);
+    assert.strictEqual(wide.rt.read('p').value, 0, 'a filtered band is centred');
+});
+
+t('moving an adaptive graph’s decimator moves its tracker’s centre and edges with it', () => {
+    const plan = planFor({ ...BASE, ...MODES[7] });
+    const g = parseGraph(graphForPlan(plan, 12000, { ...BACKS[1], adaptive: true })).graph;
+    const rt = new Runtime(g, 12000);
+    const packet = { i: new Float32Array(240), q: new Float32Array(240), frames: 240, rate: 12000 };
+    rt.process(packet);
+    assert.strictEqual(rt.nodes.get('tracker').params.baseHz, plan.centreHz);
+    assert.strictEqual(rt.nodes.get('tracker').params.middleHz, -plan.centreHz);
+    rt.setParams('decimate', { frequencyHz: plan.centreHz + 500 });
+    rt.process(packet);
+    assert.deepStrictEqual(rt.driven().tracker, { baseHz: plan.centreHz + 500, middleHz: -(plan.centreHz + 500) });
+    // Wide, the band is filtered and centred: only the centre carries over.
+    rt.setStreamRate(192000);
+    rt.process({ i: new Float32Array(3840), q: new Float32Array(3840), frames: 3840, rate: 192000 });
+    assert.strictEqual(rt.nodes.get('tracker').params.middleHz, 0);
+    assert.strictEqual(rt.nodes.get('tracker').params.baseHz, plan.centreHz + 500);
+});
 
 t('the comparisons reached every path that matters', () => {
     assert.ok(seen.open && seen.shut, 'the squelch did not both open and shut');
@@ -368,6 +464,52 @@ t('a parameter changed while running takes effect without a rebuild', () => {
     assert.strictEqual(rt.plan, plan, 'a live parameter rebuilt the graph');
     assert.ok(tone(2500) > 0.2, 'the new frequency was not heard');
     assert.ok(tone(1000) < 0.01, 'the old frequency was still there');
+});
+
+// The generator's output, `frames` of it at 48 kHz.
+const generate = (params, frames = 4800) => {
+    const g = parseGraph({ v: GRAPH_VERSION, nodes: [{ id: 's', type: 'signal', params }], wires: [] }).graph;
+    const inst = BLOCK_BY_TYPE.signal.create();
+    inst.configure(g.nodes[0].params, 48000);
+    const out = { re: new Float64Array(frames), im: new Float64Array(frames) };
+    inst.process([], [out], frames);
+    return out;
+};
+// How strongly a stream holds e^{j2πft}, as an amplitude.
+const line = (out, hz) => {
+    let r = 0;
+    let i = 0;
+    for (let k = 0; k < out.re.length; k++) {
+        const ph = (-2 * Math.PI * hz * k) / 48000;
+        r += out.re[k] * Math.cos(ph) - out.im[k] * Math.sin(ph);
+        i += out.re[k] * Math.sin(ph) + out.im[k] * Math.cos(ph);
+    }
+    return Math.hypot(r, i) / out.re.length;
+};
+
+t('a generator’s shaped tones are analytic, with each shape’s harmonics', () => {
+    const sq = generate({ waveform: 'square', frequencyHz: 1000, amplitude: 1 });
+    assert.ok(Math.abs(line(sq, 1000) - 4 / Math.PI) < 1e-6, 'square fundamental');
+    assert.ok(Math.abs(line(sq, 3000) - 4 / (3 * Math.PI)) < 1e-6, 'square third');
+    assert.ok(line(sq, 2000) < 1e-9, 'a square has no even harmonics');
+    const tri = generate({ waveform: 'triangle', frequencyHz: 1000, amplitude: 1 });
+    assert.ok(Math.abs(line(tri, 3000) - 8 / (9 * Math.PI * Math.PI)) < 1e-6, 'triangle third');
+    const saw = generate({ waveform: 'sawtooth', frequencyHz: 1000, amplitude: 1 });
+    assert.ok(Math.abs(line(saw, 2000) - 1 / Math.PI) < 1e-6, 'a sawtooth has every harmonic');
+    for (const out of [sq, tri, saw]) {
+        for (const hz of [-1000, -3000]) assert.ok(line(out, hz) < 1e-9, `energy mirrored to ${hz} Hz`);
+    }
+    // Nothing above Nyquist, where it would fold back.
+    const high = generate({ waveform: 'square', frequencyHz: 9000, amplitude: 1 });
+    assert.ok(line(high, 27000 - 48000) < 1e-9, 'the third harmonic of 9 kHz aliased');
+});
+
+t('a generator’s second tone is there only when switched on', () => {
+    const one = generate({ frequencyHz: 1000, amplitude: 0.5, frequency2Hz: -2000, amplitude2: 0.25 });
+    assert.ok(line(one, -2000) < 1e-9);
+    const two = generate({ frequencyHz: 1000, amplitude: 0.5, tone2: true, frequency2Hz: -2000, amplitude2: 0.25 });
+    assert.ok(Math.abs(line(two, 1000) - 0.5) < 1e-6);
+    assert.ok(Math.abs(line(two, -2000) - 0.25) < 1e-6);
 });
 
 t('a parameter that moves a rate rebuilds, and downstream follows', () => {

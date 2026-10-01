@@ -586,7 +586,12 @@ export function frontPassFor(plan) {
  * the plan's pass edge twice over, plus the front filter's roll-off.
  */
 export function decimationFor(rateHz, plan) {
-    const need = 2 * frontPassFor(plan) + FRONT_ROLLOFF_HZ;
+    return decimationForPass(rateHz, frontPassFor(plan));
+}
+
+/** decimationFor for a front end passing `passHz` either side of zero. */
+export function decimationForPass(rateHz, passHz) {
+    const need = 2 * passHz + FRONT_ROLLOFF_HZ;
     return Math.max(1, Math.floor(rateHz / need));
 }
 
@@ -998,7 +1003,7 @@ export const PANS = [
 
 const PAN_VALUES = PANS.map((p) => p.value);
 
-const VFO_DEFAULTS = {
+export const VFO_DEFAULTS = {
     mode: 'usb',
     offsetHz: 0,
     // One width per mode rather than one width. The modes differ by two orders

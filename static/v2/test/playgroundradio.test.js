@@ -91,12 +91,22 @@ for (const [rate, m] of [[12000, MODES[0]], [48000, MODES[3]], [12000, MODES[5]]
         assert.ok(compile(x, rate).ok, JSON.stringify(compile(x, rate).errors));
         const after = run(x, rate, 2);
         assert.strictEqual(after.out.length, before.out.length);
+        // Its decimator is on Auto, so it keeps working when the width
+        // changes. Off plain IQ that is the block's own front end, bit for
+        // bit; on plain IQ it mixes where the block's shift or tracker would,
+        // so the two agree to rounding.
+        const close = rate === 12000 ? 2e-6 : 0;
         for (let k = 0; k < before.out.length; k++) {
-            if (!Object.is(after.out[k], before.out[k])) assert.fail(`sample ${k}: ${after.out[k]} vs ${before.out[k]}`);
+            const same = close ? Math.abs(after.out[k] - before.out[k]) <= close : Object.is(after.out[k], before.out[k]);
+            if (!same) assert.fail(`sample ${k}: ${after.out[k]} vs ${before.out[k]}`);
+        }
+        assert.ok(x.nodes.some((n) => n.type === 'decimate' && n.params.auto), 'no decimator on Auto');
+        if (m.mode === 'sam' || m.mode === 'ecss') {
+            assert.ok(x.wires.some((w) => w[0] === 'd_decimate' && w[1] === 'middle' && w[2] === 'd_tracker'), 'the tracker is not told where the edges are');
         }
         // The passband level carries on to whatever read the block's.
         assert.ok(x.wires.some((w) => w[1] === 'db' && w[2] === 'p'), 'the signal output was not carried over');
-        assert.ok(Math.abs(after.rt.read('p').value - before.rt.read('p').value) < 1e-9, 'the signal reading changed');
+        assert.ok(Math.abs(after.rt.read('p').value - before.rt.read('p').value) < (close ? 1e-3 : 1e-9), 'the signal reading changed');
     });
 }
 

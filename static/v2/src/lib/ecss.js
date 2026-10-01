@@ -595,6 +595,9 @@ export class EcssTracker {
     constructor() {
         this.rate = 0;
         this.centreHz = null;
+        // Where the middle of the stream's band is, in its own frequencies.
+        // See _fit.
+        this.middleHz = 0;
         this.plan = null;
         this.design = null;
         this.usb = new SidebandFilter();
@@ -784,7 +787,11 @@ export class EcssTracker {
     _fit() {
         const rate = this.rate;
         const ref = this.locked ? this.freq : this.commit;
-        const at = this.centreHz - (this.baseHz || 0) + (ref * rate) / TWO_PI;
+        // Measured from the middle of the stream's band, which is where its
+        // edges hang from: zero, unless the stream was shifted round without
+        // being filtered (a playground graph can do that; the panel never does)
+        // — then its edges went with it, and `middleHz` says where.
+        const at = this.centreHz - (this.baseHz || 0) + (ref * rate) / TWO_PI - (this.middleHz || 0);
         const room = (side) => {
             const free = rate / 2 - EDGE_GUARD - side * at;
             const w = Math.min(this.plan.widthHz, free);

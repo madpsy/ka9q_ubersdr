@@ -21,9 +21,9 @@ import { graphForPlan } from '../fromPlan.js';
 import { encodeShare } from '../share.js';
 import { getPlayground, graphIqWidth, needsReceiver } from '../engine.js';
 import {
-    EditHistory, addNode, cloneGraph, duplicateNodes, exposeControl, removeNodes, removeWire,
+    EditHistory, addNode, cloneGraph, duplicateNodes, exposeControl, removeNodes, removeWire, renameNode,
 } from '../editing.js';
-import { ZOOM_MAX, ZOOM_MIN, autoLayout, fitView, screenToWorld, zoomToward } from '../geometry.js';
+import { ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, autoLayout, fitView, isAnnotation, nodeBox, screenToWorld, zoomToward } from '../geometry.js';
 import { addAcross, addProbe, frequencyOrigins } from '../probes.js';
 import { expandNode } from '../expand.js';
 import { TEMPLATES } from '../templates.js';
@@ -33,18 +33,16 @@ import Canvas, { formatCpu, formatLatency } from './Canvas.jsx';
 import Inspector from './Inspector.jsx';
 import Palette from './Palette.jsx';
 import { closePlayground, offerSharedGraph, usePlaygroundUi } from './store.js';
+import { holdSpectrum } from '../../lib/spectrumPause.js';
 
 // The nodes whose readings the cards draw. Others have nothing live to show,
 // and asking for an Audio out's reading would copy its samples back for nothing.
 export const WATCHED_TYPES = new Set([
-    'meter', 'level-detector', 'squelch', 'carrier-tracker', 'control-scale', 'integrator', 'control-plot', 'iq-player', 'demodulator',
+    'meter', 'level-detector', 'squelch', 'carrier-tracker', 'control-scale', 'integrator', 'control-plot', 'iq-player', 'data-tx', 'demodulator',
     'costas-loop', 'morse-decoder', 'uart', 'sitor-decoder', 'fsk-detector', 'ook-detector',
     'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder',
     ...INSTRUMENTS,
 ]);
-
-// Each press of a zoom button: three to go from fitted to the closest.
-const ZOOM_STEP = 1.4;
 
 /** The query parameter a shared graph arrives in. */
 export const SHARE_PARAM = 'playground';
@@ -61,7 +59,7 @@ export function graphFromIQDemod(rate) {
     const s = demodSettings();
     const vfo = s.vfos[s.active] || s.vfos[0];
     const g = parseGraph(graphForPlan(planForVfo(vfo), rate, {
-        agc: vfo.agc, gain: vfo.gain, squelchDb: vfo.squelchDb, lockMute: vfo.lockMute,
+        agc: vfo.agc, gain: vfo.gain, squelchDb: vfo.squelchDb, lockMute: vfo.lockMute, adaptive: true,
     })).graph;
     const out = g.nodes.find((n) => n.id === 'audio');
     if (out) {
@@ -159,7 +157,10 @@ export function TemplatesMenu({ onPick }) {
             <Button size="sm" variant="ghost" icon={<Icon.Layers />} aria-expanded={open} onClick={() => setOpen(!open)}>Templates</Button>
             {open && (
                 <div className="pg-tpl__list" role="menu">
-                    {TEMPLATES.map((t) => (
+                    {TEMPLATES.map((t, k) => [
+                        t.group && t.group !== (TEMPLATES[k - 1] || {}).group && (
+                            <div key={`group:${t.group}`} className="pg-tpl__group">{t.group}</div>
+                        ),
                         <button
                             key={t.id}
                             type="button"
@@ -169,17 +170,42 @@ export function TemplatesMenu({ onPick }) {
                         >
                             <span className="pg-tpl__title">{t.title}</span>
                             <span className="pg-tpl__summary">{t.summary}</span>
-                        </button>
-                    ))}
+                        </button>,
+                    ])}
                 </div>
             )}
         </span>
     );
 }
 
+// The toolbar's annotation buttons, each with a glyph of what it adds.
+const ANNOTATE_TOOLS = [
+    { type: 'note', title: 'Add a note', glyph: <><path d="M4 4h16v11l-5 5H4z" /><path d="M15 20v-5h5" /><path d="M8 9h8M8 13h5" /></> },
+    { type: 'heading', title: 'Add a heading', glyph: <path d="M6 5h12M12 5v14M9 19h6" /> },
+    { type: 'group', title: 'Add a group box — drag it by its title and what is inside goes with it', glyph: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></> },
+    { type: 'rect', title: 'Add a rectangle', glyph: <rect x="4" y="6" width="16" height="12" rx="1.5" /> },
+    { type: 'ellipse', title: 'Add an ellipse', glyph: <ellipse cx="12" cy="12" rx="8.5" ry="6" /> },
+    { type: 'arrow', title: 'Add an arrow', glyph: <><path d="M4 18 18 6" /><path d="M11 6h7v7" /></> },
+    { type: 'marker', title: 'Add a numbered step marker', glyph: <><circle cx="12" cy="12" r="8.5" /><path d="M11 9l2-1.5V16" /></> },
+];
+
+function AnnotateTools({ onAdd }) {
+    return (
+        <span className="pg-bar__group" role="group" aria-label="Annotate">
+            {ANNOTATE_TOOLS.map((t) => (
+                <button key={t.type} type="button" className="pg-bar__tool" title={t.title} aria-label={t.title} onClick={() => onAdd(t.type)}>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        {t.glyph}
+                    </svg>
+                </button>
+            ))}
+        </span>
+    );
+}
+
 function Toolbar({
     pg, live, offline, iq, onStart, onStop, history, onUndo, onRedo, onFit, onFromDemod, onNew, onImport, onExport, onShare,
-    onTemplate,
+    onTemplate, onAnnotate,
 }) {
     const on = pg.running;
     return (
@@ -207,6 +233,7 @@ function Toolbar({
                 <Button size="sm" variant="ghost" icon={<Icon.RotateRight />} disabled={!history.canRedo} title="Redo (Ctrl+Shift+Z)" onClick={onRedo} />
                 <Button size="sm" variant="ghost" icon={<Icon.Expand />} title="Fit the graph to the window (F)" onClick={onFit} />
             </span>
+            <AnnotateTools onAdd={onAnnotate} />
             <span className="pg-bar__group">
                 <TemplatesMenu onPick={onTemplate} />
                 <Button size="sm" variant="ghost" icon={<Icon.Waves />} title="Replace the graph with IQ Demod’s selected demodulator" onClick={onFromDemod}>From IQ Demod</Button>
@@ -227,7 +254,7 @@ function Summary({ pg, graph, info, stats }) {
         <>
             <div className="pg-insp__title">This graph</div>
             <div className="readout-grid">
-                <div className="readout"><div className="readout__label">Blocks</div><div className="readout__value">{graph.nodes.length}</div></div>
+                <div className="readout"><div className="readout__label">Blocks</div><div className="readout__value">{graph.nodes.filter((n) => !isAnnotation(n.type)).length}</div></div>
                 <div className="readout"><div className="readout__label">To the speakers</div><div className="readout__value">{outs.length ? formatLatency(worst) : '—'}</div></div>
                 <div className="readout"><div className="readout__label">CPU</div><div className="readout__value">{stats ? formatCpu(stats.cpu) : '—'}</div></div>
                 <div className="readout"><div className="readout__label">Last packet</div><div className="readout__value">{pg.running ? `${pg.costMs.toFixed(2)} ms` : '—'}</div></div>
@@ -275,11 +302,13 @@ function SharedOffer({ pending, onLoad }) {
     );
 }
 
-// Before New or Import throws away a graph: a canvas cleared by a stray press
-// is hours of wiring gone, and the way to keep a copy is right here.
+// Before New, Import or From IQ Demod throws away a graph: a canvas cleared by
+// a stray press is hours of wiring gone, and the way to keep a copy is right
+// here.
 const REPLACING = {
     new: { title: 'Start a new graph?', what: 'will be cleared from the canvas', go: 'Clear it' },
     import: { title: 'Import a graph?', what: 'will be replaced by the file you choose', go: 'Choose file…' },
+    demod: { title: 'Load IQ Demod’s demodulator?', what: 'will be replaced by IQ Demod’s selected demodulator', go: 'Replace it' },
 };
 
 function ConfirmReplace({ kind, count, onExport, onCancel, onConfirm }) {
@@ -301,8 +330,22 @@ function ConfirmReplace({ kind, count, onExport, onCancel, onConfirm }) {
 }
 
 export function PlaygroundWindow({ onClose }) {
-    const { running, audioState, tuning, actions, player, allowedIQModes, audioConn } = useRadio();
+    const { running, audioState, tuning, actions, player, allowedIQModes, audioConn, spectrumConn } = useRadio();
     const pg = getPlayground(player);
+
+    // The spectrum is paused while this window is open — it covers the display,
+    // and a waterfall nobody can see is CPU and bandwidth the graph could use —
+    // and comes back on closing, unless it was paused already (lib/
+    // spectrumPause.js holdSpectrum). Held again if the receiver is started
+    // while the window is open; never brought back for a receiver that has
+    // stopped, which the latest `running` says on the way out.
+    const runningNow = useRef(running);
+    runningNow.current = running;
+    useEffect(() => {
+        if (!running || !spectrumConn) return undefined;
+        const release = holdSpectrum(spectrumConn);
+        return () => release(runningNow.current);
+    }, [running, spectrumConn]);
     const ui = usePlaygroundUi();
     const iq = isIQ(tuning.mode);
     const live = running && audioState === 'open';
@@ -468,11 +511,17 @@ export function PlaygroundWindow({ onClose }) {
         if (back && isIQ(tuning.mode)) actions.setMode(back);
     };
 
+    // In the middle of what can be seen, stepped a little each time so a few
+    // added in a row do not land on one another.
     const add = (type) => {
         const { w, h } = size();
         const centre = screenToWorld(view, w / 2, h / 2);
         const n = graph.nodes.length % 6;
-        const r = addNode(graph, type, centre.x - 98 + n * 18, centre.y - 40 + n * 18);
+        const r = addNode(graph, type, 0, 0);
+        const box = nodeBox(r.graph.nodes.find((x) => x.id === r.id));
+        const placed = r.graph.nodes.find((x) => x.id === r.id);
+        placed.x = Math.round(centre.x - box.w / 2 + n * 18);
+        placed.y = Math.round(centre.y - box.h / 2 + n * 18);
         apply(r.graph, null);
         setPicked({ nodes: new Set([r.id]), wire: null });
     };
@@ -576,9 +625,10 @@ export function PlaygroundWindow({ onClose }) {
                     onUndo={undo}
                     onRedo={redo}
                     onFit={() => fit()}
-                    onFromDemod={() => replace(graphFromIQDemod(rate), 'Loaded IQ Demod’s selected demodulator.')}
+                    onFromDemod={() => (graph.nodes.length ? setAsking('demod') : replace(graphFromIQDemod(rate), 'Loaded IQ Demod’s selected demodulator.'))}
                     onNew={() => (graph.nodes.length ? setAsking('new') : replace(emptyGraph(), null))}
-                    onTemplate={(t) => replaceKeepingBack(t.build(), `Loaded “${t.title}”. ${t.summary}`)}
+                    onTemplate={(t) => replaceKeepingBack(t.build(rate), `Loaded “${t.title}”. ${t.summary}`)}
+                    onAnnotate={add}
                     onImport={() => (graph.nodes.length ? setAsking('import') : chooseFile())}
                     onExport={exportFile}
                     onShare={share}
@@ -600,6 +650,7 @@ export function PlaygroundWindow({ onClose }) {
                     onConfirm={() => {
                         setAsking(null);
                         if (asking === 'import') chooseFile();
+                        else if (asking === 'demod') replaceKeepingBack(graphFromIQDemod(rate), 'Loaded IQ Demod’s selected demodulator.');
                         else replaceKeepingBack(emptyGraph(), 'Started a new graph.');
                     }}
                 />
@@ -687,6 +738,7 @@ export function PlaygroundWindow({ onClose }) {
                         onProbe={probe}
                         onAcross={across}
                         onExpand={expand}
+                        onRename={(id, name) => apply(renameNode(graph, id, name), `name:${id}`)}
                         onExpose={(id, param, on) => apply(exposeControl(graph, id, param, on))}
                         summary={<Summary pg={pg} graph={graph} info={info} stats={stats} />}
                     />

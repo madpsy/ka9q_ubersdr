@@ -196,6 +196,12 @@ t('a player’s spectrum is labelled at its file’s centre frequency', () => {
     assert.strictEqual(frequencyOrigins(graph([{ id: 'pl', type: 'iq-player' }], []), 7100000).get('pl.out'), null);
 });
 
+t('a generator given a centre frequency is on the air, and one without is not', () => {
+    const o = frequencyOrigins(graph([{ id: 'g', type: 'signal', params: { centreHz: 7074000 } }], []), 14000000);
+    assert.strictEqual(o.get('g.out'), 7074000);
+    assert.strictEqual(frequencyOrigins(graph([{ id: 'g', type: 'signal' }], []), 14000000).get('g.out'), null);
+});
+
 // ── running with no receiver ────────────────────────────────────────────────
 
 function fakePlayer() {

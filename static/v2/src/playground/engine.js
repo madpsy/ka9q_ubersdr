@@ -66,7 +66,7 @@ export function graphIqWidth(graph) {
 /** What a playground holds before anybody has built anything: USB at the dial. */
 export function defaultGraph() {
     const plan = planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700, lowCutHz: 50 });
-    return autoLayout(parseGraph(graphForPlan(plan, 12000)).graph);
+    return autoLayout(parseGraph(graphForPlan(plan, 12000, { adaptive: true })).graph);
 }
 
 function loadGraph() {

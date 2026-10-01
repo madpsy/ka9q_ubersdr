@@ -20,6 +20,8 @@
 //     rate(inRate, params)            the rate it puts out; same as in if absent
 //     maxOut(n, params, inRate)       most frames it can put out for n in; n if
 //                                     absent
+//     upgrade(stored)                 optional: stored params from an older
+//                                     graph, made to mean what they meant then
 //     create()                        a fresh instance
 //   }
 //
@@ -200,7 +202,8 @@ export function sanitizeParam(spec, value) {
 
 /** Every parameter of `type`, from what was stored, with defaults filling gaps. */
 export function sanitizeParams(type, raw) {
-    const src = raw && typeof raw === 'object' ? raw : {};
+    const stored = raw && typeof raw === 'object' ? raw : {};
+    const src = type.upgrade ? type.upgrade(stored) : stored;
     const out = {};
     for (const [name, spec] of Object.entries(type.params || {})) {
         out[name] = sanitizeParam(spec, src[name]);

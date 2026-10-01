@@ -1,10 +1,11 @@
 // Taking a demodulator block apart: the same receiver, drawn out as blocks.
 //
 // A Demodulator block is the IQ Demod panel's DemodChain; graphForPlan draws
-// that chain as blocks, and the two are held sample for sample to each other
-// by test/playground.test.js. So expanding is exact — the audio after is the
-// audio before — and what was one box is now every stage of it, each with its
-// own settings and a port to probe.
+// that chain as blocks, and the two are held to each other by
+// test/playground.test.js. So expanding keeps the sound — the audio after is
+// the audio before — and what was one box is now every stage of it, each with
+// its own settings and a port to probe. Its decimator is on Auto, as the block
+// was in effect, so it keeps working when the IQ width changes.
 
 import { BLOCK_BY_TYPE } from './blocks/index.js';
 import { demodPlan } from './blocks/radio.js';
@@ -30,7 +31,7 @@ export function expandDemodulator(graph, id, rateHz) {
     const p = node.params;
     const plan = demodPlan(p, rateHz);
     const inner = autoLayout(parseGraph(graphForPlan(plan, rateHz, {
-        agc: p.agc, gain: p.gain, squelchDb: p.squelchDb, lockMute: p.lockMute,
+        agc: p.agc, gain: p.gain, squelchDb: p.squelchDb, lockMute: p.lockMute, adaptive: true,
     })).graph);
 
     const g = cloneGraph(graph);

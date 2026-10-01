@@ -556,6 +556,33 @@ t('a shared graph comes back whole, short, and without anybody’s devices', asy
     assert.deepStrictEqual(back.graph, want);
 });
 
+t('blocks keep the names they are given through a link and a file (storage keeps the file’s form)', async () => {
+    const g = parseGraph({
+        v: GRAPH_VERSION,
+        nodes: [
+            { id: 's', type: 'signal', name: '  Test   tone ', x: 0, y: 0 },
+            { id: 'r', type: 'real-part', name: 'Real part', x: 200, y: 0 },
+            { id: 'o', type: 'audio-out', name: 'Speakers ✓', x: 400, y: 0 },
+            { id: 'n', type: 'gain', name: 42, x: 600, y: 0 },
+        ],
+        wires: [['s', 'out', 'r', 'in'], ['r', 'out', 'o', 'in']],
+    }).graph;
+    // Kept as one line, trimmed; a name that only repeats the label, or is
+    // not text, is no name.
+    assert.deepStrictEqual(g.nodes.map((n) => n.name), ['Test tone', undefined, 'Speakers ✓', undefined]);
+    // A file: what Export writes, read back as Import reads it.
+    const file = JSON.parse(JSON.stringify(serializeGraph(g)));
+    assert.deepStrictEqual(file.nodes.map((n) => n.name), ['Test tone', undefined, 'Speakers ✓', undefined]);
+    assert.deepStrictEqual(parseGraph(file).graph, g);
+    // A link.
+    const back = await decodeShare(await encodeShare(g));
+    assert.deepStrictEqual(back.errors, []);
+    assert.deepStrictEqual(back.graph.nodes.map((n) => n.name), ['Test tone', undefined, 'Speakers ✓', undefined]);
+    // Too long: cut, not refused.
+    const long = parseGraph({ v: GRAPH_VERSION, nodes: [{ id: 'a', type: 'gain', name: 'x'.repeat(500) }], wires: [] }).graph;
+    assert.strictEqual(long.nodes[0].name.length, 60);
+});
+
 t('a share code that is not one, is damaged, is newer, or expands too far is refused', async () => {
     assert.match((await decodeShare('hello')).errors[0].message, /Not a playground link/);
     assert.match((await decodeShare('pg1.z.AAAA')).errors[0].message, /damaged/);

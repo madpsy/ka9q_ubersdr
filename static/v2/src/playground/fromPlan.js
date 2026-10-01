@@ -19,18 +19,32 @@
 //
 // and SAM and ECSS replace shift, lowpass, detector and power with the carrier
 // tracker, whose carrier output the AGC levels against.
+//
+// The decimator is there only where the chain has one — a stream wider than
+// 12 kHz — which is what keeps the graph the chain, sample for sample. Asked
+// for `adaptive`, it is always there, on Auto, so the graph follows the IQ
+// width: built on one, it works on any. That is the graph somebody is given
+// to keep. Off plain IQ it is still the chain's own, as Auto picks the factor
+// the chain does; on plain IQ it mixes the centre down where the chain's shift
+// or tracker would, so it agrees with the chain to within the rounding of a
+// different oscillator rather than bit for bit. Mixing without filtering moves
+// the stream's edges, which the carrier tracker keeps its filters clear of, so
+// the decimator's `middle` output is wired to tell it where they went — and its
+// `centre`, what the tracker's frequencies are measured from.
 
 import { decimationFor, frontPassFor } from '../lib/iqDemod.js';
 import { GRAPH_VERSION } from './graph.js';
+import { controlPort } from './block.js';
 
 const SQUELCH_OFF = -60;
 
 /**
  * The graph for one plan (planFor's output) at one stream rate, with the panel's
  * per-demodulator back end: `agc`, `gain`, `squelchDb` and `lockMute` as
- * DemodChain.process takes them.
+ * DemodChain.process takes them, and `adaptive` for a graph that follows the
+ * stream's width (above).
  */
-export function graphForPlan(plan, rateHz, { agc = true, gain = 1, squelchDb = SQUELCH_OFF, lockMute = false } = {}) {
+export function graphForPlan(plan, rateHz, { agc = true, gain = 1, squelchDb = SQUELCH_OFF, lockMute = false, adaptive = false } = {}) {
     const nodes = [];
     const wires = [];
     let col = 0;
@@ -42,13 +56,14 @@ export function graphForPlan(plan, rateHz, { agc = true, gain = 1, squelchDb = S
 
     const rate = rateHz > 0 ? rateHz : 12000;
     const D = decimationFor(rate, plan);
-    const baseHz = D > 1 ? plan.centreHz : 0;
+    const front = adaptive || D > 1;
+    const baseHz = front ? plan.centreHz : 0;
     const tracked = plan.kind === 'sam' || plan.kind === 'ecss';
 
     let at = add('iq', 'iq-in');
     col++;
-    if (D > 1) {
-        at = add('decimate', 'decimate', { factor: D, frequencyHz: baseHz, passHz: frontPassFor(plan) });
+    if (front) {
+        at = add('decimate', 'decimate', { auto: adaptive, factor: D, frequencyHz: baseHz, passHz: frontPassFor(plan) });
         wire('iq', 'out', 'decimate', 'in');
         col++;
     }
@@ -67,6 +82,15 @@ export function graphForPlan(plan, rateHz, { agc = true, gain = 1, squelchDb = S
             lockMute,
         });
         wire(at, 'out', 'tracker', 'in');
+        // The decimator tells the tracker what it mixed from, so moving its
+        // Centre moves the tracker's with it; and, as on Auto the factor can
+        // come to 1, where it only mixes and the stream's edges move, where
+        // they went.
+        if (adaptive) {
+            nodes[nodes.length - 1].controls = ['baseHz', 'middleHz'];
+            wire('decimate', 'centre', 'tracker', controlPort('baseHz'));
+            wire('decimate', 'middle', 'tracker', controlPort('middleHz'));
+        }
         col++;
         audio = ['tracker', 'audio'];
         power = ['tracker', 'power'];

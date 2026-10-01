@@ -276,10 +276,20 @@ function SimpleVisual({ pg, node, origin, rate }) {
         case 'carrier-tracker': {
             const s = reading && reading.state;
             const words = { locked: 'Locked', hold: 'Holding', acquire: 'Locking', search: 'Searching' };
+            // Which it is, first: SAM and ECSS chains are the same blocks, and
+            // this is the one place they differ. Auto says which side it chose.
+            const p = node.params;
+            const side = { usb: 'USB', lsb: 'LSB', both: 'Both', auto: 'Auto' }[p.sideband] || p.sideband;
+            const chosen = reading && reading.side ? String(reading.side).toUpperCase() : null;
+            const how = p.mode === 'sam' ? 'SAM · both sidebands'
+                : `ECSS · ${side}${p.sideband === 'auto' && chosen ? ` → ${chosen}` : ''}`;
             return (
-                <div className={`pg-vis__state${s === 'locked' || s === 'hold' ? ' is-open' : ''}`}>
-                    {s ? words[s] || s : '—'}
-                    {reading && reading.carrierHz != null ? ` · ${reading.carrierHz.toFixed(1)} Hz` : ''}
+                <div className="pg-vis__tracker">
+                    <div className="pg-vis__state">{how}</div>
+                    <div className={`pg-vis__state${s === 'locked' || s === 'hold' ? ' is-open' : ''}`}>
+                        {s ? words[s] || s : '—'}
+                        {reading && reading.carrierHz != null ? ` · ${reading.carrierHz.toFixed(1)} Hz` : ''}
+                    </div>
                 </div>
             );
         }

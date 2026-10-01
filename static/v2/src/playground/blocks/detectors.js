@@ -156,6 +156,8 @@ export const CarrierTrackerBlock = {
             kind: 'choice',
             label: 'Sideband',
             default: 'both',
+            // SAM always hears both: the setting is ECSS's alone.
+            showIf: (p) => p.mode === 'ecss',
             options: SIDEBANDS.map((s) => ({ value: s, label: s === 'both' ? 'Both' : s === 'auto' ? 'Auto' : s.toUpperCase() })),
         },
         trackHz: { kind: 'number', label: 'Tracking range', unit: 'Hz', default: TRACK_DEFAULT, min: TRACK_MIN, max: TRACK_MAX, step: 10 },

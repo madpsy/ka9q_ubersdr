@@ -1384,6 +1384,28 @@ t('every card visual renders, with and without readings', () => {
     assert.strictEqual(shut, '—');
 });
 
+t('a carrier tracker’s card says SAM or ECSS and which sideband, and SAM has no Sideband setting', () => {
+    const pg = getPlayground(radio().player);
+    const card = (params, reading) => {
+        reset();
+        pg.readings = { n: reading };
+        const node = g([{ id: 'n', type: 'carrier-tracker', params }]).nodes[0];
+        // Spacing as a browser shows it: the stub puts a space between pieces of text.
+        return words(React.createElement(CardVisual, { pg, node })).replace(/\s+/g, ' ');
+    };
+    const locked = { state: 'locked', locked: true, carrierHz: 12.3, side: 'lsb' };
+    assert.strictEqual(card({ mode: 'sam' }, locked), 'SAM · both sidebands Locked · 12.3 Hz');
+    assert.strictEqual(card({ mode: 'ecss', sideband: 'usb' }, locked), 'ECSS · USB Locked · 12.3 Hz');
+    assert.strictEqual(card({ mode: 'ecss', sideband: 'both' }, locked), 'ECSS · Both Locked · 12.3 Hz');
+    // Auto says which side it has chosen.
+    assert.strictEqual(card({ mode: 'ecss', sideband: 'auto' }, locked), 'ECSS · Auto → LSB Locked · 12.3 Hz');
+    assert.strictEqual(card({ mode: 'sam' }, { state: 'search', locked: false, carrierHz: null }), 'SAM · both sidebands Searching');
+    pg.readings = {};
+    const spec = BLOCK_BY_TYPE['carrier-tracker'].params.sideband;
+    assert.strictEqual(spec.showIf({ mode: 'sam' }), false);
+    assert.strictEqual(spec.showIf({ mode: 'ecss' }), true);
+});
+
 // ── where on the air ────────────────────────────────────────────────────────
 
 t('the RF and offset labels read as a dial does', () => {

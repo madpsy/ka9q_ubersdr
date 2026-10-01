@@ -14756,6 +14756,8 @@ a.btn { text-decoration: none; }
 .pg-vis__bar span { position: relative; padding-left: 4px; font-family: var(--mono); font-size: 9px; line-height: 12px; color: var(--text); }
 .pg-vis__spectrum { display: block; width: 100%; border-radius: 3px; background: var(--surface-3); }
 .pg-vis__state { font-size: 11px; color: var(--text-dim); }
+.pg-vis__tracker { display: flex; flex-direction: column; gap: 2px; }
+.pg-vis__tracker .pg-vis__state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pg-vis__state.is-open { color: var(--good); }
 .pg-vis__state.is-shut { color: var(--bad); }
 .pg-vis__rec { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-dim); }

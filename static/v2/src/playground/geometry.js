@@ -108,7 +108,8 @@ export function visualHeight(type, params) {
         case 'squelch':
             return 16;
         case 'carrier-tracker':
-            return 18;
+            // What it is, and whether it has the carrier: a line each.
+            return 34;
         case 'wav-recorder':
         case 'iq-recorder':
             return 24;

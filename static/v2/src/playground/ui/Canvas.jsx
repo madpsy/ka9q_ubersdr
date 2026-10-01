@@ -15,7 +15,7 @@
 import React, { useEffect, useRef, useState } from '../../react.js';
 import { BLOCK_BY_TYPE } from '../blocks/index.js';
 import {
-    FOOT_H, HEAD_H, PAD, PORT_GRAB_PX, RF_H, ROW_H, hasRfLine, nodeHeight, nodeWidth, portAt, portPositionByName, visualTop,
+    FOOT_H, HEAD_H, PAD, PORT_GRAB_PX, RF_H, ROW_H, hasRfLine, nodeAt, nodeHeight, nodeWidth, portAt, portPositionByName, visualTop,
     screenToWorld, wirePath, zoomAbout,
 } from '../geometry.js';
 import { canConnect, connectPorts, disconnectInput } from '../editing.js';
@@ -105,7 +105,7 @@ function Card({ pg, graph, node, selected, errors, rate, latency, cpu, wiredIn, 
 }
 
 export default function Canvas({
-    pg, graph, view, setView, selection, setPicked, onEdit, onMoved, errorsByNode, rates, latencies, stats, look, origins, onParams,
+    pg, graph, view, setView, selection, setPicked, onEdit, onMoved, onOpenNode, errorsByNode, rates, latencies, stats, look, origins, onParams,
 }) {
     const root = useRef(null);
     const drag = useRef(null);
@@ -234,6 +234,16 @@ export default function Canvas({
         }
     };
 
+    // By where the pointer is rather than by the event's target: the press
+    // that began the double-click captured the pointer to the canvas, and a
+    // browser may then deliver the click to the canvas, not the card.
+    const onDouble = (e) => {
+        if (e.target.closest && e.target.closest('button, input, select')) return;
+        const at = world(e);
+        const id = nodeAt(graph, at.x, at.y);
+        if (id && onOpenNode) onOpenNode(id);
+    };
+
     const wiredIn = new Set(graph.wires.map((w) => `${w[2]}.${w[3]}`));
     const byId = new Map(graph.nodes.map((n) => [n.id, n]));
     const kindOf = (w) => {
@@ -257,6 +267,7 @@ export default function Canvas({
             onPointerMove={onMove}
             onPointerUp={onUp}
             onPointerCancel={onUp}
+            onDoubleClick={onDouble}
         >
             <div
                 className="pg-world"

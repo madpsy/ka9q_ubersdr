@@ -286,6 +286,12 @@ export function PlaygroundWindow({ onClose }) {
         writeSides(next);
         setSides(next);
     };
+    // A block double-clicked: its settings, with the panel that holds them
+    // opened if it had been folded away.
+    const openNode = (id) => {
+        setPicked({ nodes: new Set([id]), wire: null });
+        if (sidesNow.current.right) fold('right');
+    };
     const canvasBox = useRef(null);
     const fileInput = useRef(null);
 
@@ -543,6 +549,7 @@ export function PlaygroundWindow({ onClose }) {
                         setPicked={setPicked}
                         onEdit={apply}
                         onMoved={moved}
+                        onOpenNode={openNode}
                         errorsByNode={info.errorsByNode}
                         rates={info.rates}
                         latencies={info.latencies}

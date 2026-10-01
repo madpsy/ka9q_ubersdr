@@ -400,6 +400,40 @@ t('New and Import ask before replacing a graph, and offer Export first; an empty
     closePlayground();
 });
 
+t('double-clicking a block selects it and opens the folded right-hand panel', () => {
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    pg.setGraph(g([{ id: 'a', type: 'signal', x: 0, y: 0 }, { id: 'b', type: 'gain', x: 400, y: 0 }]));
+    localStorage.setItem('ubersdr.v2.playground.sides', JSON.stringify({ left: false, right: true }));
+    let r = render(PlaygroundWindow, {}, ctx);
+    const body = () => deep(r.tree).find((n) => cls(n).split(' ').includes('pg__body'));
+    assert.ok(cls(body()).includes('is-right-shut'), 'the right panel did not start folded');
+    const canvas = deep(r.tree).find((n) => n.props && n.props.onDoubleClick && cls(n).split(' ').includes('pg-canvas'));
+    assert.ok(canvas, 'the canvas takes no double-click');
+    // On the gain block, with the target the canvas itself, as under pointer capture.
+    // The view starts at (32, 32) until fitted; fitting needs a real box.
+    const view = deep(r.tree).find((n) => cls(n) === 'pg-world').props.style.transform;
+    const [, vx, vy, z] = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(view).map(Number);
+    canvas.props.onDoubleClick({ clientX: vx + (420 * z), clientY: vy + (20 * z), target: { closest: () => null } });
+    r.cleanups.forEach((f) => f());
+    r = render(PlaygroundWindow, {}, ctx);
+    assert.ok(!cls(body()).includes('is-right-shut'), 'the right panel stayed folded');
+    assert.match(words(deep(r.tree).find((n) => cls(n).includes('pg__side--right'))), /Gain/);
+
+    // On empty canvas: nothing.
+    localStorage.setItem('ubersdr.v2.playground.sides', JSON.stringify({ left: false, right: true }));
+    reset();
+    r = render(PlaygroundWindow, {}, ctx);
+    deep(r.tree).find((n) => n.props && n.props.onDoubleClick).props.onDoubleClick({ clientX: -5000, clientY: -5000, target: { closest: () => null } });
+    r.cleanups.forEach((f) => f());
+    r = render(PlaygroundWindow, {}, ctx);
+    assert.ok(cls(body()).includes('is-right-shut'), 'a double-click on nothing opened the panel');
+    r.cleanups.forEach((f) => f());
+    localStorage.removeItem('ubersdr.v2.playground.sides');
+    closePlayground();
+});
+
 t('the inspector renders every block type’s settings', () => {
     const pg = getPlayground(radio().player);
     for (const def of BLOCKS) {

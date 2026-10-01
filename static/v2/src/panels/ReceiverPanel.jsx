@@ -118,7 +118,10 @@ function VfoBar() {
 // context for the new rate the first time a packet carries it. Measured against
 // a live receiver going usb → iq48 → iq96 → iq → iq192 on one socket, with the
 // throughput matching each new rate within a packet.
-function IQWidths({ mode, allowed, onChoose }) {
+//
+// Exported for the IQ demod panel, which shows the same row under its picture
+// whenever a wide preset is on offer.
+export function IQWidths({ mode, allowed, onChoose }) {
     const options = [
         { value: 'iq', label: '12 kHz', title: 'Plain IQ — 12 kHz' },
         ...WIDE_IQ_MODES

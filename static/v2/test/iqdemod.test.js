@@ -2030,6 +2030,107 @@ function context(over) {
 
 const engine = () => getIQDemod(context().player);
 
+t('the passbands on the picture rescale when the IQ width changes, without a re-render', () => {
+    // The transform follows the stream's rate as packets arrive. The passbands
+    // drawn over it have to follow on the next frame too — not wait for a
+    // slider to re-render the panel, which is how 12 kHz -> IQ 48 used to look:
+    // a wider spectrum under filters still drawn four times too wide.
+    fresh({ mode: 'usb', offsetHz: 0, widths: { usb: 2700 } });
+    const frames = [];
+    const taps = [];
+    const raf = globalThis.requestAnimationFrame;
+    const gcs = globalThis.getComputedStyle;
+    globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+    globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
+    try {
+        const ctx = context();
+        ctx.player.onAudio = (fn) => { taps.push(fn); return () => {}; };
+        reset();
+        const panel = render(IQPanel, {}, ctx);
+        // The stub runs only the top component's effects, so the picture is
+        // mounted on its own, with the props the panel gave it — the same
+        // frame source, whose loop and tap the panel's effects started.
+        const scopeEl = walk(panel.tree).find((n) => typeof n.type === 'function' && n.type.name === 'IQScope');
+        assert.ok(scopeEl, 'no picture in the panel');
+        reset();
+        const { tree, cleanups } = render(scopeEl.type, scopeEl.props, ctx);
+        cleanups.push(...panel.cleanups);
+
+        // A 2D context that remembers where the passbands went.
+        const rects = [];
+        const state = {};
+        const c2d = new Proxy(state, {
+            get: (o, k) => (k in o ? o[k]
+                : k === 'fillRect' ? (x, y, w) => rects.push({ alpha: o.globalAlpha, w })
+                    : () => ({ width: 0 })),
+            set: (o, k, v) => { o[k] = v; return true; },
+        });
+        const canvas = deep(tree).find((n) => cls(n).split(' ').includes('iq-scope__canvas'));
+        assert.ok(canvas && canvas.props.ref, 'no picture');
+        canvas.props.ref.current = { clientWidth: 600, width: 0, height: 0, getContext: () => c2d };
+
+        // The width the active demodulator's passband is drawn at, after a
+        // packet at this rate and one frame.
+        const drawnAt = (rate) => {
+            const n = rate / 50;
+            for (const tap of taps) tap([new Float32Array(n), new Float32Array(n)], n, rate);
+            rects.length = 0;
+            // Every loop waiting on a frame, once — the picture's among them.
+            for (const fn of frames.splice(0)) fn();
+            const band = rects.find((r) => r.alpha === 0.30);
+            assert.ok(band, `no passband drawn at ${rate}`);
+            return band.w;
+        };
+        const narrow = drawnAt(12000);
+        const wide = drawnAt(48000);
+        // 2.7 kHz of 12 kHz, then of 48: a quarter the width, on the very next frame.
+        assert.ok(Math.abs(narrow / wide - 4) < 0.01, `passband ${narrow}px at 12 kHz, ${wide}px at 48 kHz`);
+        for (const off of cleanups) off();
+    } finally {
+        globalThis.requestAnimationFrame = raf;
+        globalThis.getComputedStyle = gcs;
+        fresh();
+    }
+});
+
+t('the IQ widths sit under the picture only when a wide preset is allowed', () => {
+    fresh();
+    const row = (tree) => deep(tree).find((n) => n.props && n.props['aria-label'] === 'IQ width');
+
+    // Plain IQ alone: nothing to choose between, so no row at all.
+    for (const allowedIQModes of [[], undefined]) {
+        reset();
+        const { tree, cleanups } = render(IQPanel, {}, context({ allowedIQModes }));
+        assert.ok(!row(tree), `a row with ${JSON.stringify(allowedIQModes)}`);
+        for (const off of cleanups) off();
+    }
+
+    // Two wide presets: 12 kHz and exactly those two, the one in use lit.
+    reset();
+    const ctx = context({
+        allowedIQModes: ['iq48', 'iq96'],
+        tuning: { frequency: 7_100_000, mode: 'iq48', bandwidthLow: -24000, bandwidthHigh: 24000 },
+    });
+    const { tree, cleanups } = render(IQPanel, {}, ctx);
+    const group = row(tree);
+    assert.ok(group, 'no row under the picture');
+    const buttons = deep(group).filter((n) => n.type === 'button');
+    assert.deepStrictEqual(buttons.map((b) => words(b)), ['12 kHz', '48 kHz', '96 kHz']);
+    assert.ok(cls(buttons[1]).includes('is-active'), 'the width in use is not lit');
+    // And not in the minimal view, where the picture itself is gone.
+    reset();
+    const min = render(IQPanel, { minimal: true }, ctx);
+    assert.ok(!row(min.tree), 'a row in the minimal view');
+    for (const off of min.cleanups) off();
+
+    // Pressing a width asks for it; pressing the one in use asks for nothing.
+    buttons[2].props.onClick();
+    buttons[1].props.onClick();
+    assert.deepStrictEqual(ctx.calls.filter((c) => c[0] === 'setMode'), [['setMode', 'iq96']]);
+    for (const off of cleanups) off();
+    fresh();
+});
+
 t('the picture is scaled to the IQ width in use, with no demodulator running', () => {
     // The engine only hears the rate from packets it demodulates, so the
     // scale has to come from the mode: IQ 48 with nothing started still reads

@@ -65,7 +65,8 @@ import { markColors } from '../display/uiConfig.js';
 import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { Button, Field, Icon, Readout, Segmented, Slider, Switch } from '../components/ui.jsx';
 import FreqEntry from '../components/FreqEntry.jsx';
-import { isIQ } from '../radio/constants.js';
+import { WIDE_IQ_MODES, isIQ } from '../radio/constants.js';
+import { IQWidths } from './ReceiverPanel.jsx';
 import { formatFreqExact, formatSpan } from '../lib/format.js';
 import { haptic } from '../lib/haptics.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
@@ -191,7 +192,12 @@ function VfoStrip({ source, vfo, index, armed, height }) {
     useEffect(() => {
         st.current.levels = createLevels();
         if (!armed) return undefined;
-        return source.subscribe((bins, dt) => drawStrip(ref.current, st.current, bins, dt));
+        // The rate re-read per frame, not only per render: it changes under the
+        // panel when the IQ width does, and nothing re-renders a strip then.
+        return source.subscribe((bins, dt) => {
+            st.current.rate = source.spec.rate;
+            drawStrip(ref.current, st.current, bins, dt);
+        });
     }, [source, armed, height]);
 
     // Off air, there is no loop to redraw this and the last frame would sit
@@ -450,7 +456,14 @@ function IQScope({ source, live, iq, running, vfos, active, onOffset, onPick, ma
     useEffect(() => {
         st.current.levels = createLevels();
         if (!live || !iq) return undefined;
-        return source.subscribe((bins, dt) => draw(ref.current, st.current, bins, dt, marks));
+        // The rate re-read per frame, not only per render. Going from 12 kHz to
+        // IQ 48 rescales the transform at once, and a rate copied on render
+        // left every passband drawn — and every press placed — at the old
+        // scale until something happened to re-render the panel.
+        return source.subscribe((bins, dt) => {
+            st.current.rate = source.spec.rate;
+            draw(ref.current, st.current, bins, dt, marks);
+        });
     }, [source, live, iq, marks.dial, marks.edge]);
 
     // Where in the picture the pointer is, in pixels from its left edge, or null
@@ -1214,7 +1227,12 @@ function VfoRow({
  * set once: the gain and the AGC. See the registry's `minimal`.
  */
 export default function IQPanel({ minimal }) {
-    const { running, audioState, tuning, actions, player } = useRadio();
+    const { running, audioState, tuning, actions, player, allowedIQModes } = useRadio();
+    // The wide IQ presets this visit may use. The row of widths under the
+    // picture only appears when there is one: with plain IQ's 12 kHz alone
+    // there is nothing to choose between.
+    const allowed = allowedIQModes || [];
+    const widths = WIDE_IQ_MODES.some((m) => allowed.includes(m.id));
     const display = useDisplay();
     const touch = useMediaQuery(TOUCH_QUERY);
     const maxFps = resolveMaxFps(display.maxFps, touch);
@@ -1346,6 +1364,18 @@ export default function IQPanel({ minimal }) {
                         const e = hearing ? demod.ecssOf(i) : null;
                         return e && e.locked ? v.offsetHz + e.carrierHz : null;
                     })}
+                />
+            )}
+
+            {/* The same row the Receiver panel's IQ button opens. A tune, so
+                the picture, the reach and the passbands follow on the next
+                packet; from a listening mode it goes through the IQ
+                confirmation like any other way in. */}
+            {!minimal && widths && (
+                <IQWidths
+                    mode={tuning.mode}
+                    allowed={allowed}
+                    onChoose={(id) => { if (id !== tuning.mode) actions.setMode(id); }}
                 />
             )}
 

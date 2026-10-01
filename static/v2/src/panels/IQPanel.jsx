@@ -74,6 +74,7 @@ import { cssVar, sizedCanvas } from '../lib/audioWaterfall.js';
 import { elementSinkSupport, sinkLabel } from '../lib/audioSinks.js';
 import useOutputDevices from '../lib/useOutputDevices.js';
 import { createLevels, updateLevels } from '../lib/ifSpectrum.js';
+import { approachFor } from '../lib/timeConstant.js';
 import {
     IQSpectrum, aimCancel, aimDown, aimMove, aimUp, binsToPixels, fractionOffset, markerAt,
     newAim, offsetFraction, scaleTicks, audioTicks, squelchLineDb,
@@ -232,6 +233,12 @@ function VfoStrip({ source, vfo, index, armed, height }) {
 // kept.
 
 const AUDIO_STYLE_KEY = 'ubersdr.v2.iqAudioScope';
+// How far each column moves towards a new reading per 50 ms (timeConstant.js's
+// reference interval, which approachFor scales to the real one, so a capped or
+// busy panel smooths over the same time): about a 0.15 s time constant. A
+// single transform of 85 ms of audio is a noisy estimate, and without this the
+// bars jitter on a steady tone; much longer and speech smears.
+const AUDIO_SMOOTH_K = 0.3;
 export const AUDIO_SCOPE_H = 22;
 let audioStyle = null;
 const audioStyleListeners = new Set();
@@ -341,6 +348,21 @@ function drawAudio(canvas, s, spec, dt) {
     const k1 = Math.max(k0 + 1, Math.min(n, Math.ceil(band.hi / spec.binHz) + 1));
     if (!s.px || s.px.length !== w) s.px = new Float32Array(w);
     binsToPixels(spec.db.subarray(k0, k1), s.px);
+    // Smoothed over a few frames, in decibels. Started again whenever the
+    // columns stop meaning the same frequencies — the width changed, or the
+    // picture did — rather than easing from one scale into another.
+    const key = `${k0}/${k1}/${w}`;
+    if (!s.avg || s.avgKey !== key) {
+        s.avg = Float32Array.from(s.px, (v) => (Number.isFinite(v) ? v : -180));
+        s.avgKey = key;
+    } else {
+        const a = approachFor(AUDIO_SMOOTH_K, dt > 0 ? dt : 1 / 60);
+        for (let x = 0; x < w; x++) {
+            const v = s.px[x];
+            if (Number.isFinite(v)) s.avg[x] += a * (v - s.avg[x]);
+        }
+    }
+    s.px.set(s.avg);
     const { floor, ceil } = updateLevels(s.levels, s.px, dt);
     const range = Math.max(1, ceil - floor);
     const hOf = (db) => (Number.isFinite(db) ? Math.max(0, Math.min(h, ((db - floor) / range) * h)) : 0);

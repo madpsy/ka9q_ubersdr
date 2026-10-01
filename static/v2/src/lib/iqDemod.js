@@ -117,7 +117,9 @@ export function setIQSpan(rateHz) {
  * one mode mean something else would make the number unreadable.
  */
 // The AM family's widths, a sideband at a time — see the note in DEMOD_MODES.
-const SIDE_WIDTHS = [2700, 3500, 4500, 5000, 6000];
+// From 4.5 kHz: a broadcast's audio, which is what these modes are for. Anything
+// narrower is still on the slider.
+const SIDE_WIDTHS = [4500, 5000, 6000];
 const SIDE_WIDE = [8000, 10000];
 const SIDE_MIN = 1000;
 const SIDE_MAX = 6000;

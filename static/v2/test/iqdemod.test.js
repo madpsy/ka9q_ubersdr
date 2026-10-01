@@ -1067,13 +1067,13 @@ t('the AM family gets 8 and 10 kHz a side on a wide stream, and only there', () 
     try {
         fresh();
         // Plain IQ: the limits as they always were.
-        assert.deepStrictEqual(modeWidths('am'), [5400, 7000, 9000, 10000, 12000]);
+        assert.deepStrictEqual(modeWidths('am'), [9000, 10000, 12000]);
         assert.strictEqual(modeMax('am'), 12000);
         assert.strictEqual(modeMax('ecss'), 6000);
         assert.strictEqual(clampWidth('sam', 20000), 12000);
         // IQ 48 and up: totals of 16 and 20 for AM and SAM, 8 and 10 a side for ECSS.
         setIQSpan(48000);
-        assert.deepStrictEqual(modeWidths('am'), [5400, 7000, 9000, 10000, 12000, 16000, 20000]);
+        assert.deepStrictEqual(modeWidths('am'), [9000, 10000, 12000, 16000, 20000]);
         assert.deepStrictEqual(modeWidths('sam').slice(-2), [16000, 20000]);
         assert.deepStrictEqual(modeWidths('ecss').slice(-2), [8000, 10000]);
         assert.strictEqual(clampWidth('ecss', 10000), 10000);
@@ -1108,7 +1108,7 @@ t('the row shows the wide widths as buttons on a wide stream', () => {
     };
     try {
         // In the audio each sideband carries, so all three read the same.
-        const plain = ['2.7k', '3.5k', '4.5k', '5k', '6k'];
+        const plain = ['4.5k', '5k', '6k'];
         for (const mode of ['am', 'sam', 'ecss']) {
             fresh({ mode });
             assert.deepStrictEqual(buttons(), plain, `${mode} on plain IQ`);

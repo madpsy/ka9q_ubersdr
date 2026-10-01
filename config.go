@@ -388,6 +388,7 @@ type ServerConfig struct {
 	WebSDRRegisterWebSDROrg         bool              `yaml:"websdr_register_websdrorg"`           // Register with the websdr.org public directory (default: false)
 	WebSDRHostname                  string            `yaml:"websdr_hostname"`                     // Public hostname advertised to websdr.org (empty = derive from admin.public_url)
 	WebSDRTCPPort                   int               `yaml:"websdr_tcp_port"`                     // Public TCP port advertised to websdr.org (default: 8901; differs from the listen port behind a tunnel)
+	WebSDRADPCMAudio                bool              `yaml:"websdr_adpcm_audio"`                  // Serve PA3FWM's original sound client and its ADPCM stream instead of our Opus one (default: false)
 	KiwiSDRRegisterKiwiSDRCom       bool              `yaml:"kiwisdr_register_kiwisdrcom"`         // Register with rx.kiwisdr.com public directory (default: false)
 	KiwiSDRHost                     string            `yaml:"kiwisdr_host"`                        // Public hostname advertised to rx.kiwisdr.com (required for registration)
 	LogFileEnabled                  bool              `yaml:"logfile_enabled"`                     // Enable HTTP request logging (default: false)

@@ -571,6 +571,15 @@ server:
   # Only used when websdr_register_websdrorg is true.
   websdr_tcp_port: 8901
 
+  # Send WebSDR clients the original audio format (default: false).
+  #   false — our replacement websdr-sound.js, decoding UberSDR's Opus stream.
+  #   true  — PA3FWM's original websdr-sound.js and the ADPCM format a real WebSDR
+  #           sends. Uses roughly 3x the bandwidth of Opus, and audio is cut at
+  #           6.1 kHz, but the client's Record button works.
+  # Both the script served as websdr-sound.js and the stream follow this setting, so
+  # pages left open across a change need a reload.
+  websdr_adpcm_audio: false
+
   # HTTP request logging (Apache combined log format)
   # Enable/disable HTTP request logging to disk (default: false)
   # When enabled, logs all HTTP requests to the specified logfile

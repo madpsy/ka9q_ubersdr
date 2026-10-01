@@ -352,6 +352,9 @@ func (h *WebSDRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// first zoom; see websdrBaseJSPatches.
 	case path == "/websdr-base.js":
 		h.serveBaseJS(w, r)
+	// Our Opus client or PA3FWM's original, to match websdr_adpcm_audio.
+	case path == "/websdr-sound.js":
+		h.serveSoundJS(w, r)
 	default:
 		h.serveStaticFile(w, r)
 	}
@@ -547,6 +550,19 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 	c.session = session
 	h.audioReceiver.GetChannelAudio(session)
 
+	defer func() {
+		h.audioReceiver.ReleaseChannelAudio(session)
+		_ = h.sessions.DestroySession(session.ID)
+		conn.Close()
+	}()
+
+	if h.adpcmAudio() {
+		done := make(chan struct{})
+		go c.readAudioCommands(done)
+		c.streamADPCMAudio(done)
+		return
+	}
+
 	// Initialise Opus encoder using the same config as the main WebSocket handler.
 	bitrate := h.config.Audio.Opus.Bitrate
 	if bitrate == 0 {
@@ -559,17 +575,9 @@ func (h *WebSDRHandler) handleAudioStream(w http.ResponseWriter, r *http.Request
 	opusEnc, encErr := NewOpusEncoderForClient(session.SampleRate, bitrate, complexity)
 	if encErr != nil {
 		log.Printf("WebSDR: failed to create Opus encoder: %v", encErr)
-		conn.Close()
-		_ = h.sessions.DestroySession(session.ID)
 		return
 	}
 	c.opusEncoder = opusEnc
-
-	defer func() {
-		h.audioReceiver.ReleaseChannelAudio(session)
-		_ = h.sessions.DestroySession(session.ID)
-		conn.Close()
-	}()
 
 	done := make(chan struct{})
 	go c.readAudioCommands(done)

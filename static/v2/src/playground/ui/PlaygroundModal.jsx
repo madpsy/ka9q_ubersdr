@@ -18,7 +18,7 @@ import { emptyGraph, parseGraph, serializeGraph } from '../graph.js';
 import { Runtime } from '../runtime.js';
 import { graphForPlan } from '../fromPlan.js';
 import { encodeShare } from '../share.js';
-import { getPlayground, needsReceiver } from '../engine.js';
+import { getPlayground, graphIqWidth, needsReceiver } from '../engine.js';
 import {
     EditHistory, addNode, cloneGraph, duplicateNodes, exposeControl, removeNodes, removeWire,
 } from '../editing.js';
@@ -260,7 +260,7 @@ function ConfirmReplace({ kind, count, onExport, onCancel, onConfirm }) {
 }
 
 export function PlaygroundWindow({ onClose }) {
-    const { running, audioState, tuning, actions, player } = useRadio();
+    const { running, audioState, tuning, actions, player, allowedIQModes } = useRadio();
     const pg = getPlayground(player);
     const ui = usePlaygroundUi();
     const iq = isIQ(tuning.mode);
@@ -352,14 +352,50 @@ export function PlaygroundWindow({ onClose }) {
     // A graph with no IQ stream in it — a file, a generator — runs by
     // itself: no receiver needed, and the mode is left alone.
     const offline = !needsReceiver(graph);
-    const start = () => {
-        if (offline) {
+    // Whether this visit may have the IQ width a graph is built for.
+    const widthUsable = (g) => {
+        const want = graphIqWidth(g);
+        return !want || want === 'iq' || (allowedIQModes || []).includes(want);
+    };
+    // `g` for a graph just handed to the engine, which this render has not seen.
+    const start = (g = graph) => {
+        if (!needsReceiver(g)) {
             pg.start();
             return;
         }
         pg.restoreMode = iq ? null : tuning.mode;
-        if (!iq) actions.setMode('iq');
+        // At the IQ width the graph is built for, where this visit may have
+        // it; plain IQ where not, which the IQ stream block says.
+        const width = widthUsable(g) ? graphIqWidth(g) : 'iq';
+        if (tuning.mode !== width) actions.setMode(width);
         pg.start();
+    };
+    // A graph from a link starts as soon as it is loaded: following a link to
+    // hear something and then having to find Start is one step too many. Only
+    // when it can run as it was built — the receiver up, and the IQ width the
+    // sender used available here. A playground already running carries on
+    // with the new graph by itself.
+    const loadShared = (g) => {
+        offerSharedGraph(null);
+        if (pg.running) {
+            replaceKeepingBack(g, 'Loaded the shared graph.');
+            return;
+        }
+        if (!needsReceiver(g)) {
+            replaceKeepingBack(g, 'Loaded the shared graph. It runs without the receiver: press Start when ready.');
+            return;
+        }
+        if (!widthUsable(g)) {
+            const m = MODE_BY_ID[graphIqWidth(g)];
+            replaceKeepingBack(g, `Loaded the shared graph, but not started: it is built for ${m ? m.label : 'wide IQ'}, which this receiver does not offer you.`);
+            return;
+        }
+        if (!live) {
+            replaceKeepingBack(g, 'Loaded the shared graph. Press Start once the receiver is running.');
+            return;
+        }
+        replaceKeepingBack(g, 'Loaded the shared graph and started it.');
+        start(g);
     };
     const stop = () => {
         if (pg.offline) {
@@ -474,7 +510,7 @@ export function PlaygroundWindow({ onClose }) {
                     live={live || offline}
                     offline={offline}
                     iq={iq}
-                    onStart={start}
+                    onStart={() => start()}
                     onStop={stop}
                     history={history.current}
                     onUndo={undo}
@@ -511,10 +547,7 @@ export function PlaygroundWindow({ onClose }) {
             {ui.pending && (
                 <SharedOffer
                     pending={ui.pending}
-                    onLoad={() => {
-                        replaceKeepingBack(ui.pending.graph, 'Loaded the shared graph.');
-                        offerSharedGraph(null);
-                    }}
+                    onLoad={() => loadShared(ui.pending.graph)}
                 />
             )}
             {notice && (

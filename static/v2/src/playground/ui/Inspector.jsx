@@ -18,6 +18,10 @@ import { hasRfLine } from '../geometry.js';
 import { controlPort, controllable, inputsOf, outputsOf } from '../block.js';
 import { decodeWav } from '../wavfile.js';
 import { expandable } from '../expand.js';
+import { useRadio } from '../../radio/RadioContext.jsx';
+import { isIQ } from '../../radio/constants.js';
+import FrequencyDial from '../../components/FrequencyDial.jsx';
+import { IQWidths } from '../../panels/ReceiverPanel.jsx';
 
 /**
  * Buttons that hang an instrument off one output. On an input, `from` is the
@@ -266,6 +270,40 @@ export function ParamField({ name, spec, value, rate, onChange, sinkError }) {
     }
 }
 
+/**
+ * The receiver, from the IQ stream block: its frequency, and the IQ width the
+ * graph is built for, with the Receiver panel's own controls. The frequency is
+ * the receiver's and is tuned at once. The width is the graph's — it travels
+ * with a shared or saved graph — and PlaygroundWatch puts the receiver on it.
+ */
+function ReceiverControls({ graph, node, onParams }) {
+    const { tuning, actions, allowedIQModes } = useRadio();
+    const allowed = allowedIQModes || [];
+    const width = node.params.width || 'iq';
+    const spec = BLOCK_BY_TYPE['iq-in'].params.width;
+    const label = (spec.options.find((o) => o.value === width) || spec.options[0]).label;
+    const usable = width === 'iq' || allowed.includes(width);
+    // Every IQ stream block in the graph, as one: there is one stream.
+    const choose = (id) => {
+        for (const n of graph.nodes) {
+            if (n.type === 'iq-in' && n.params.width !== id) onParams(n.id, { width: id }, 'iq-width');
+        }
+    };
+    let note = null;
+    if (!usable) note = `This graph is built for ${label} IQ, which this receiver does not offer you. It runs at 12 kHz.`;
+    else if (tuning.mode !== width && !isIQ(tuning.mode)) note = `The receiver goes to ${label} IQ when the graph starts.`;
+    return (
+        <div className="pg-insp__section">
+            <div className="pg-insp__title">Receiver</div>
+            <FrequencyDial frequency={tuning.frequency} onChange={actions.setFrequency} />
+            <Field label="IQ width">
+                <IQWidths mode={width} allowed={allowed} onChoose={choose} />
+            </Field>
+            {note && <div className="pg-insp__note">{note}</div>}
+        </div>
+    );
+}
+
 /** Where on the air a source's samples are from, in a sentence. */
 function coverNote(node, dialHz, rate) {
     const c = airSpan(sourceZero(node, dialHz), rate);
@@ -411,7 +449,8 @@ export default function Inspector({
                     />
                 </div>
             )}
-            {Object.keys(def.params).length > 0 && (
+            {node.type === 'iq-in' && <ReceiverControls graph={graph} node={node} onParams={onParams} />}
+            {Object.keys(def.params).length > 0 && node.type !== 'iq-in' && (
                 <div className="pg-insp__section">
                     <div className="pg-insp__title">Settings</div>
                     {Object.entries(def.params).map(([name, spec]) => {

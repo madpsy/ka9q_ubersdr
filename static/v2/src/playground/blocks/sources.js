@@ -13,7 +13,26 @@ export const IqInBlock = {
     summary: 'The receiver’s quadrature stream, centred on the dial.',
     inputs: [],
     outputs: [{ name: 'out', kind: COMPLEX }],
-    params: {},
+    // The receiver's IQ width this graph is built for. Not used here — the
+    // stream arrives at whatever rate the receiver sends — but kept in the
+    // graph so a shared or saved one says what it needs, and the playground
+    // switches the receiver to it (see PlaygroundWatch). The inspector works it
+    // with the receiver's own width buttons rather than as an ordinary setting.
+    params: {
+        width: {
+            kind: 'choice',
+            label: 'IQ width',
+            default: 'iq',
+            control: false,
+            options: [
+                { value: 'iq', label: '12 kHz' },
+                { value: 'iq48', label: '48 kHz' },
+                { value: 'iq96', label: '96 kHz' },
+                { value: 'iq192', label: '192 kHz' },
+                { value: 'iq384', label: '384 kHz' },
+            ],
+        },
+    },
     create() {
         return {
             configure() {},

@@ -116,6 +116,9 @@ function initialTuning() {
             frequency: link.frequency > 0 || saved.frequency != null,
             mode: !!link.mode || !!MODE_BY_ID[saved.mode],
         },
+        // The wide IQ a link asked for and `mode` could not start in. Taken up
+        // once /connection says this visit may have it — see the provider.
+        wideFromLink: isWideIQ(link.mode) ? link.mode : null,
     };
 }
 
@@ -132,9 +135,10 @@ export function RadioProvider({ children }) {
     const start = useMemo(initialTuning, []);
 
     // `chosen` is not part of the tuning: it says where the tuning came from,
-    // and only until the operator's defaults have had their chance.
+    // and only until the operator's defaults have had their chance. Nor is
+    // `wideFromLink`, which is what the link asked for, not what is tuned.
     const [tuning, setTuning] = useState(() => {
-        const { chosen, ...t } = start;
+        const { chosen, wideFromLink, ...t } = start;
         return t;
     });
     // Whether the tuning may be saved yet. Not until the operator's defaults
@@ -1879,6 +1883,20 @@ export function RadioProvider({ children }) {
     // so holds the first render's closure for the life of the page.
     const actionsRef = useRef(null);
     actionsRef.current = actions;
+
+    // A link sent from a wide IQ mode started in plain IQ, because whether
+    // this visit may have the wide one was not known yet. It is now known each
+    // time /connection answers — the second answer counts a password typed
+    // into the Start overlay — and the link's width is put back the first time
+    // it is allowed. Not if the operator has moved off plain IQ meanwhile:
+    // that was a choice, and this is only finishing what the link started.
+    const wideFromLink = useRef(start.wideFromLink);
+    useEffect(() => {
+        const want = wideFromLink.current;
+        if (!want || !allowedIQModes.includes(want)) return;
+        wideFromLink.current = null;
+        if (tuningRef.current.mode === 'iq') actions.setMode(want);
+    }, [allowedIQModes, actions]);
 
     // SAM gives up on a carrier that has stopped moving — see lib/samFallback.js
     // for why that is measured as a number holding still rather than as packets

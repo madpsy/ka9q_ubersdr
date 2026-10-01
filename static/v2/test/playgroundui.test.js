@@ -434,6 +434,156 @@ t('double-clicking a block selects it and opens the folded right-hand panel', ()
     closePlayground();
 });
 
+t('the IQ stream block tunes the receiver and sets the graph’s IQ width with the Receiver panel’s controls', () => {
+    const pg = getPlayground(radio().player);
+    const graph = g([{ id: 'a', type: 'iq-in' }, { id: 'b', type: 'iq-in' }, { id: 'c', type: 'gain' }]);
+    const view = (ctx, gr = graph) => {
+        reset();
+        window.__testContext = ctx;
+        const el = React.createElement(Inspector, {
+            pg, graph: gr, selection: { nodes: new Set(['a']), wire: null }, errorsByNode: {}, rates: { a: 12000 },
+            latencies: {}, stats: null, onParams: ctx.onParams, onRemove() {}, onDuplicate() {}, summary: null,
+        });
+        return deep(el);
+    };
+    const edits = [];
+    const ctx = radio({ allowedIQModes: ['iq48', 'iq96'], onParams: (id, patch, why) => edits.push([id, patch, why]) });
+    ctx.onParams = (id, patch, why) => edits.push([id, patch, why]);
+    let all = view(ctx);
+    const dial = all.find((n) => cls(n).split(' ').includes('dial'));
+    assert.ok(dial, 'no frequency dial');
+    assert.match(words(dial).replace(/\s/g, ''), /7\.100\.000/, 'the dial is not on the receiver’s frequency');
+    const widths = all.filter((n) => n.props && n.props.onClick && /^\d+ kHz$/.test(words(n)));
+    assert.deepStrictEqual(widths.map(words), ['12 kHz', '48 kHz', '96 kHz'], 'offered widths this visit may not have');
+    widths[2].props.onClick();
+    assert.deepStrictEqual(edits, [['a', { width: 'iq96' }, 'iq-width'], ['b', { width: 'iq96' }, 'iq-width']], 'not every IQ stream block was set');
+
+    // A graph built for a width this visit may not have says so.
+    const wide = g([{ id: 'a', type: 'iq-in', params: { width: 'iq384' } }]);
+    assert.match(words({ type: 'div', props: {}, children: view(radio({ allowedIQModes: ['iq48'] }), wide).filter((n) => cls(n) === 'pg-insp__note') }), /384 kHz IQ, which this receiver does not offer you/);
+    // And one that will switch when it starts, from a mode that is not IQ.
+    const usb = radio({ allowedIQModes: ['iq96'] });
+    usb.tuning = { ...usb.tuning, mode: 'usb' };
+    assert.match(words({ type: 'div', props: {}, children: view(usb, g([{ id: 'a', type: 'iq-in', params: { width: 'iq96' } }])).filter((n) => cls(n) === 'pg-insp__note') }), /goes to 96 kHz IQ when the graph starts/);
+});
+
+t('the graph’s IQ width and the receiver’s follow each other, each only when it is the one that changed', () => {
+    const ctx = radio({ allowedIQModes: ['iq96'] });
+    const pg = getPlayground(ctx.player);
+    pg.setGraph(g([{ id: 'iq', type: 'iq-in' }]));
+    reset();
+    let r = render(P.PlaygroundWatch, {}, ctx);
+    assert.deepStrictEqual(ctx.calls, [], 'mounting changed the mode');
+    // Chosen on the block, with the receiver in IQ: the receiver follows.
+    pg.setParams('iq', { width: 'iq96' });
+    r.cleanups.forEach((f) => f());
+    r = render(P.PlaygroundWatch, {}, ctx);
+    assert.deepStrictEqual(ctx.calls, [['setMode', 'iq96']]);
+    ctx.tuning = { ...ctx.tuning, mode: 'iq96' };
+    r.cleanups.forEach((f) => f());
+    r = render(P.PlaygroundWatch, {}, ctx);
+    assert.deepStrictEqual(ctx.calls, [['setMode', 'iq96']], 'the two chased each other');
+    // A width this visit may not have is left alone.
+    pg.setParams('iq', { width: 'iq384' });
+    r.cleanups.forEach((f) => f());
+    r = render(P.PlaygroundWatch, {}, ctx);
+    assert.strictEqual(ctx.calls.length, 1, 'switched to a width that is not allowed');
+    // The Receiver panel changing the width while the graph runs: written into the graph.
+    pg.setParams('iq', { width: 'iq96' });
+    r.cleanups.forEach((f) => f());
+    r = render(P.PlaygroundWatch, {}, ctx);
+    ctx.calls.length = 0;
+    pg.active = true;
+    ctx.tuning = { ...ctx.tuning, mode: 'iq' };
+    r.cleanups.forEach((f) => f());
+    r = render(P.PlaygroundWatch, {}, ctx);
+    assert.strictEqual(pg.graph.nodes[0].params.width, 'iq', 'the graph did not take the receiver’s width');
+    r.cleanups.forEach((f) => f());
+    r = render(P.PlaygroundWatch, {}, ctx);
+    assert.deepStrictEqual(ctx.calls, [], 'writing the receiver’s width moved the receiver');
+    pg.active = false;
+    // Not running: the Receiver panel's choice stays out of the graph.
+    ctx.tuning = { ...ctx.tuning, mode: 'iq96' };
+    r.cleanups.forEach((f) => f());
+    r = render(P.PlaygroundWatch, {}, ctx);
+    assert.strictEqual(pg.graph.nodes[0].params.width, 'iq');
+    r.cleanups.forEach((f) => f());
+    closePlayground();
+});
+
+t('Start puts the receiver on the graph’s IQ width where this visit may have it, and plain IQ where not', () => {
+    const pg = getPlayground(radio().player);
+    const realStart = pg.start;
+    pg.start = () => {};
+    try {
+        for (const [allowed, mode, want] of [[['iq96'], 'usb', 'iq96'], [[], 'usb', 'iq'], [['iq96'], 'iq', 'iq96'], [['iq96'], 'iq96', null]]) {
+            const ctx = radio({ allowedIQModes: allowed });
+            ctx.tuning = { ...ctx.tuning, mode };
+            pg.setGraph(g([{ id: 'iq', type: 'iq-in', params: { width: 'iq96' } }]));
+            reset();
+            const r = render(PlaygroundWindow, {}, ctx);
+            deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === 'Start').props.onClick();
+            assert.deepStrictEqual(ctx.calls, want ? [['setMode', want]] : [], `from ${mode} with ${JSON.stringify(allowed)}`);
+            r.cleanups.forEach((f) => f());
+        }
+    } finally {
+        pg.start = realStart;
+        closePlayground();
+    }
+});
+
+t('a shared graph starts when loaded, where the receiver is up and its IQ width is available here', () => {
+    const pg = getPlayground(radio().player);
+    const realStart = pg.start;
+    let started = 0;
+    pg.start = () => { started++; };
+    const shared = (width) => g([{ id: 'iq', type: 'iq-in', params: { width } }, { id: 'gn', type: 'gain' }], [['iq', 'out', 'gn', 'in']]);
+    const load = (graph, over, before = (ctx) => ctx) => {
+        started = 0;
+        const ctx = before(radio(over));
+        pg.setGraph(g([{ id: 'mine', type: 'signal' }]));
+        offerSharedGraph({ graph, errors: [] });
+        reset();
+        let r = render(PlaygroundWindow, {}, ctx);
+        deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === 'Load it').props.onClick();
+        r.cleanups.forEach((f) => f());
+        r = render(PlaygroundWindow, {}, ctx);
+        const note = words(deep(r.tree).find((n) => cls(n) === 'pg-notice'));
+        r.cleanups.forEach((f) => f());
+        return { ctx, note };
+    };
+    try {
+        let x = load(shared('iq96'), { allowedIQModes: ['iq96'] });
+        assert.strictEqual(started, 1, 'not started');
+        assert.deepStrictEqual(x.ctx.calls, [['setMode', 'iq96']]);
+        assert.match(x.note, /started it/);
+        assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['iq', 'gn'], 'started the wrong graph');
+
+        x = load(shared('iq96'), { allowedIQModes: [] });
+        assert.strictEqual(started, 0, 'started at a width it was not built for');
+        assert.deepStrictEqual(x.ctx.calls, []);
+        assert.match(x.note, /not started: it is built for IQ 96, which this receiver does not offer you/);
+
+        x = load(shared('iq'), { audioState: 'connecting' });
+        assert.strictEqual(started, 0, 'started with the receiver not up');
+        assert.match(x.note, /Press Start once the receiver is running/);
+
+        x = load(g([{ id: 's', type: 'signal' }]), {});
+        assert.strictEqual(started, 0, 'a graph that runs by itself was started');
+
+        // Already running: the new graph carries on in the running engine.
+        pg.active = true;
+        x = load(shared('iq'), {});
+        pg.active = false;
+        assert.strictEqual(started, 0, 'started twice');
+        assert.match(x.note, /^Loaded the shared graph\./);
+    } finally {
+        pg.start = realStart;
+        pg.active = false;
+        closePlayground();
+    }
+});
+
 t('the inspector renders every block type’s settings', () => {
     const pg = getPlayground(radio().player);
     for (const def of BLOCKS) {
@@ -448,7 +598,10 @@ t('the inspector renders every block type’s settings', () => {
         const text = words(el);
         assert.ok(text.includes(def.label), `${def.type}: no title`);
         assert.ok(text.includes('1.2%'), `${def.type}: no CPU figure`);
-        if (Object.keys(def.params).length) assert.ok(text.includes('Settings'), `${def.type}: no settings`);
+        // The IQ stream's one setting is the receiver's width, worked with the
+        // Receiver panel's own buttons in a section of its own.
+        if (def.type === 'iq-in') assert.ok(/Receiver.*IQ width.*12 kHz/.test(text), `iq-in: no receiver controls: ${text}`);
+        else if (Object.keys(def.params).length) assert.ok(text.includes('Settings'), `${def.type}: no settings`);
         if (def.type === 'wav-recorder') assert.ok(text.includes('Record'), 'the recorder has no Record');
         assert.ok(all.length > 5);
     }
@@ -923,7 +1076,7 @@ const tAsync = async (name, fn) => {
         input.props.onChange({ target: { files: [{ name: 'g.json', text: async () => saved }], value: 'x' } });
         await new Promise((res) => setTimeout(res, 0));
         assert.deepStrictEqual({ x: lp().x, y: lp().y }, moved, 'import moved it');
-        assert.deepStrictEqual(pg.graph.nodes.find((n) => n.id === 'iq'), { id: 'iq', type: 'iq-in', params: {}, x: 0, y: 0 });
+        assert.deepStrictEqual(pg.graph.nodes.find((n) => n.id === 'iq'), { id: 'iq', type: 'iq-in', params: { width: 'iq' }, x: 0, y: 0 });
 
         // And a link.
         const shared = await decodeShare(await encodeShare(pg.graph));

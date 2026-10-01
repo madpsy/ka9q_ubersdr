@@ -21,10 +21,10 @@
 // panel whose button opens it — that panel is unmounted whenever its dock
 // section is folded.
 
-import React, { useEffect, useState } from '../react.js';
+import React, { useEffect, useReducer, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { isIQ } from '../radio/constants.js';
-import { getPlayground } from '../playground/engine.js';
+import { getPlayground, graphIqWidth } from '../playground/engine.js';
 import { decodeShare } from '../playground/share.js';
 import PlaygroundModal, { SHARE_PARAM } from '../playground/ui/PlaygroundModal.jsx';
 import { offerSharedGraph } from '../playground/ui/store.js';
@@ -49,7 +49,7 @@ export function takeShareCode(loc = typeof location === 'undefined' ? null : loc
 }
 
 export default function PlaygroundWatch() {
-    const { running, tuning, audio, player, iqPrompt } = useRadio();
+    const { running, tuning, actions, audio, player, iqPrompt, allowedIQModes } = useRadio();
     const pg = getPlayground(player);
     const iq = isIQ(tuning.mode);
 
@@ -68,6 +68,35 @@ export default function PlaygroundWatch() {
         offerSharedGraph(shared);
         setShared(null);
     }, [shared, running]);
+
+    // The IQ width the graph is built for, and the receiver's, kept together.
+    // Each side is acted on only when it is the one that changed, so the two
+    // cannot chase each other: the graph's width changing (chosen on the IQ
+    // stream block, a graph loaded, an undo) moves the receiver if it is in IQ
+    // already — out of IQ, Start does it; the receiver's width changing while
+    // the graph runs (the Receiver panel) is written into the graph, so what
+    // is saved and shared is what was heard.
+    const [, bump] = useReducer((n) => n + 1, 0);
+    useEffect(() => pg.on('change', bump), [pg]);
+    const want = graphIqWidth(pg.graph);
+    const lastWant = useRef(want);
+    const lastMode = useRef(tuning.mode);
+    useEffect(() => {
+        if (want === lastWant.current) return;
+        lastWant.current = want;
+        if (!want || !iq || want === tuning.mode) return;
+        if (want !== 'iq' && !(allowedIQModes || []).includes(want)) return;
+        actions.setMode(want);
+    });
+    useEffect(() => {
+        if (tuning.mode === lastMode.current) return;
+        lastMode.current = tuning.mode;
+        if (!pg.running || pg.offline || !iq || !want || want === tuning.mode) return;
+        lastWant.current = tuning.mode;
+        for (const n of pg.graph.nodes) {
+            if (n.type === 'iq-in') pg.setParams(n.id, { width: tuning.mode });
+        }
+    });
 
     useEffect(() => {
         pg.setQuadrature(iq && running);

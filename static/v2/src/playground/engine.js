@@ -57,6 +57,12 @@ const OFFLINE_CATCH_UP_MS = 200;
 /** Whether a graph listens to the receiver, as against running by itself. */
 export const needsReceiver = (graph) => graph.nodes.some((n) => n.type === 'iq-in');
 
+/** The IQ mode a graph's stream is built for, from its IQ stream block; null without one. */
+export function graphIqWidth(graph) {
+    const n = graph.nodes.find((x) => x.type === 'iq-in');
+    return n ? n.params.width || 'iq' : null;
+}
+
 /** What a playground holds before anybody has built anything: USB at the dial. */
 export function defaultGraph() {
     const plan = planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700, lowCutHz: 50 });

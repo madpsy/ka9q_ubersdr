@@ -3,7 +3,7 @@ import { useMeters, useRadio } from '../radio/RadioContext.jsx';
 import { Button, Field, Icon, Readout, Segmented, Slider } from '../components/ui.jsx';
 import LosslessWarning from '../components/LosslessWarning.jsx';
 import {
-    isIQ, marginFromSlider, MARGIN_LOSSLESS, MARGIN_MIN_DB, MARGIN_STEP_DB,
+    isIQ, marginFromSlider, MARGIN_DEFAULT_DB, MARGIN_LOSSLESS, MARGIN_MIN_DB, MARGIN_STEP_DB,
     sliderFromMargin,
 } from '../radio/constants.js';
 import {
@@ -52,6 +52,10 @@ export function MarginPicker() {
     const timer = useRef(null);
     const value = dragging ?? sliderFromMargin(audio.minMargin);
     const lossless = value >= MARGIN_LOSSLESS;
+    // Past the measured transparent setting the stream is lossless in all but
+    // name, and paying for bits that sit under the noise. Not at the top
+    // itself: that is lossless on purpose, and says so.
+    const generous = iq && !lossless && value > MARGIN_DEFAULT_DB;
 
     const commit = useCallback((v) => {
         clearTimeout(timer.current);
@@ -85,19 +89,18 @@ export function MarginPicker() {
                     onCommit={() => { if (dragging != null) commit(dragging); }}
                 />
             </Field>
-            <div className="note note--tight">
-                {iq ? (
-                    <>
-                        Drops bits that fall below the band&rsquo;s noise floor: lower
-                        saves more bandwidth, the top sends every bit.
-                    </>
-                ) : (
-                    <>
-                        Only IQ carries enough bandwidth to be worth reducing, so this
-                        applies to IQ modes. Demodulated audio is always sent whole.
-                    </>
-                )}
-            </div>
+            {!iq && (
+                <div className="note note--tight">
+                    Only IQ carries enough bandwidth to be worth reducing, so this
+                    applies to IQ modes. Demodulated audio is always sent whole.
+                </div>
+            )}
+            {generous && (
+                <div className="note note--tight note--warn">
+                    Above {MARGIN_DEFAULT_DB} dB this is more or less lossless already:
+                    the extra bits are noise, and they cost bandwidth.
+                </div>
+            )}
         </>
     );
 }

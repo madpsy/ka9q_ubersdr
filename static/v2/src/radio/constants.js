@@ -509,11 +509,10 @@ export function autoSquelchValue(snrHistory) {
 export const MARGIN_MIN_DB = 10;
 export const MARGIN_MAX_DB = 60;
 
-// Where IQ starts until the operator moves the slider. Not the floor: 15 dB
-// lifts the noise floor by about what a meter resolves (0.14 dB), where the
-// floor's 10 dB lifts it by 0.4 dB, a trade worth offering but not worth
-// making for someone who has never touched the control.
-export const MARGIN_IQ_START_DB = 15;
+// Where IQ starts until the operator moves the slider: the floor. 10 dB lifts
+// the noise floor by about 0.4 dB, for the smallest stream the server will
+// send; a capture that needs more room can move the slider up.
+export const MARGIN_IQ_START_DB = MARGIN_MIN_DB;
 
 // One decibel, which is the resolution the protocol actually has -- the server
 // rounds every request to a whole dB -- and it has to divide the distance to
@@ -576,10 +575,8 @@ export function clampMargin(dB) {
 // The server only reduces depth on IQ, so everything else is lossless whatever
 // is asked for -- and asking anyway would leave the disabled slider showing a
 // number that is not being applied. IQ takes the preference, which is
-// MARGIN_IQ_START_DB until somebody moves the control: a real saving while
-// still under what a meter resolves, and IQ is the one mode whose bandwidth is
-// worth defaulting away from. The narrower margins down to MARGIN_MIN_DB are
-// there for an operator who chooses them.
+// MARGIN_IQ_START_DB until somebody moves the control: IQ is the one mode
+// whose bandwidth is worth defaulting away from, so it starts at the floor.
 export function marginForMode(mode, pref) {
     return isIQ(mode) ? clampMargin(pref) : 0;
 }

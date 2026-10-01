@@ -190,12 +190,14 @@ export function RadioProvider({ children }) {
     // `audioMinMarginFromUser` is what says the operator chose it. The value
     // alone cannot: every save wrote `audioMinMargin`, so browsers that have
     // never touched the control still have a 0 stored from before the setting
-    // followed the mode. A stored margin above zero can only have come from
-    // the slider, though, so that counts as a choice too and those settings
-    // survive the change.
+    // followed the mode. For settings saved before the flag existed, a stored
+    // margin above zero can only have come from the slider, so that counts as
+    // a choice too. Once the flag is there it decides alone: an untouched
+    // browser stores the built-in start value, which must follow the default
+    // rather than be mistaken for a choice.
     const [marginPref, marginFromUser] = useMemo(() => {
         const chosen = saved.audioMinMarginFromUser === true
-            || clampMargin(saved.audioMinMargin) > 0;
+            || (saved.audioMinMarginFromUser == null && clampMargin(saved.audioMinMargin) > 0);
         return [chosen ? clampMargin(saved.audioMinMargin) : MARGIN_IQ_START_DB, chosen];
     }, [saved]);
     const [audio, setAudio] = useState({
@@ -977,10 +979,9 @@ export function RadioProvider({ children }) {
     }, [tuning.mode]);
 
     // The reduced-depth margin follows the mode, because the server only honours
-    // it on IQ. Entering IQ asks for the stored margin — 15 dB, under what a
-    // meter resolves, until the operator moves the slider, which goes down to
-    // the server's 10 dB floor; leaving it goes back to lossless, which is what the demodulated
-    // stream is anyway. The slider is disabled outside IQ, so this is also what
+    // it on IQ. Entering IQ asks for the stored margin — the server's 10 dB
+    // floor until the operator moves the slider; leaving it goes back to
+    // lossless, which is what the demodulated stream is anyway. The slider is disabled outside IQ, so this is also what
     // parks it at its top stop rather than on a number nothing is applying.
     //
     // Here rather than in the Audio panel for the reason the gates above are:
@@ -1591,7 +1592,7 @@ export function RadioProvider({ children }) {
             //
             // Recorded as the operator's choice for IQ as well as applied, so
             // that leaving IQ — which drops the stream back to lossless — and
-            // coming back returns to this rather than to the built-in 15 dB.
+            // coming back returns to this rather than to the built-in 10 dB.
             setAudioMargin(dB) {
                 const next = audioConn.setMinMargin(dB);
                 marginPrefRef.current = next;

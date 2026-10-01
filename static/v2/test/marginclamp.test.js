@@ -141,19 +141,16 @@ t('only IQ carries a margin', () => {
 });
 
 // A reduced margin, not lossless: IQ is the one mode whose bandwidth is worth
-// defaulting away from. But 15 dB rather than the floor -- the floor lifts the
-// noise floor visibly, which is the operator's trade to make, not ours.
-t('IQ starts at 15 dB, above the floor', () => {
-    assert.strictEqual(MARGIN_IQ_START_DB, 15);
-    assert.ok(MARGIN_IQ_START_DB > MARGIN_MIN_DB && MARGIN_IQ_START_DB <= MARGIN_MAX_DB);
+// defaulting away from, and it starts at the floor.
+t('IQ starts at the 10 dB floor', () => {
+    assert.strictEqual(MARGIN_IQ_START_DB, 10);
+    assert.strictEqual(MARGIN_IQ_START_DB, MARGIN_MIN_DB);
     assert.strictEqual(marginForMode('iq', MARGIN_IQ_START_DB), MARGIN_IQ_START_DB);
     assert.strictEqual(sliderFromMargin(marginForMode('iq', MARGIN_IQ_START_DB)), MARGIN_IQ_START_DB);
-    assert.strictEqual((MARGIN_IQ_START_DB - MARGIN_MIN_DB) % MARGIN_STEP_DB, 0,
-        `${MARGIN_IQ_START_DB} dB is not on a slider step`);
 });
 
-// A saved choice below the start value is kept, not raised to it.
-t('an operator can still choose the floor', () => {
+// A saved choice is kept as it is.
+t('an operator can choose the floor', () => {
     assert.strictEqual(marginForMode('iq', MARGIN_MIN_DB), MARGIN_MIN_DB);
     assert.strictEqual(sliderFromMargin(MARGIN_MIN_DB), MARGIN_MIN_DB);
     assert.strictEqual(marginFromSlider(12), 12);

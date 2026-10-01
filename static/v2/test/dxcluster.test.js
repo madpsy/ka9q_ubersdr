@@ -281,6 +281,20 @@ t('a socket that stays up earns its budget back', async (conn) => {
     assert.strictEqual(conn.attempts, 0, 'settled, so the next drop starts from scratch');
 });
 
+// --- chat status ------------------------------------------------------------
+
+t('a wide IQ preset is published to chat without its edges', async (conn) => {
+    // The chat server refuses any edge past ±12 kHz, and refuses the whole
+    // status with it. IQ 48's ±24 kHz did exactly that.
+    conn.setStatus({ frequency: 7074000.4, mode: 'iq48', bandwidthLow: -24000, bandwidthHigh: 24000, binBandwidth: 50 });
+    assert.deepStrictEqual(conn.lastStatus, { frequency: 7074000, mode: 'iq48', zoom_bw: 50 });
+    // Plain IQ and the listening modes still carry theirs.
+    conn.setStatus({ frequency: 7074000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 });
+    assert.deepStrictEqual(conn.lastStatus, { frequency: 7074000, mode: 'iq', bw_low: -6000, bw_high: 6000 });
+    conn.setStatus({ frequency: 7074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 });
+    assert.deepStrictEqual(conn.lastStatus, { frequency: 7074000, mode: 'usb', bw_low: 50, bw_high: 2700 });
+});
+
 // --- refusal ----------------------------------------------------------------
 
 t('a refused connection check opens no socket', async (conn) => {

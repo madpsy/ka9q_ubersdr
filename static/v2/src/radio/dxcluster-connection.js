@@ -46,6 +46,7 @@
 //                     plus one binary frame per decoder result
 
 import { Emitter } from './emitter.js';
+import { isWideIQ } from './constants.js';
 import { connectionCheck, getBypassPassword, getSessionId, wsBase } from './session.js';
 import {
     HANDSHAKE_TIMEOUT_MS, abandon, checkSocket, reviveOnWake,
@@ -521,11 +522,21 @@ export class DXClusterConnection extends Emitter {
     // leaving it out made following a v2 user strictly worse than following a v1 one.
     setStatus({ frequency, mode, bandwidthLow, bandwidthHigh, binBandwidth }) {
         const zoom = Number(binBandwidth);
+        // No edges on a wide IQ preset. Its passband is the preset's whole
+        // stream — ±24 kHz on IQ 48, up to ±192 kHz — and the chat server
+        // refuses any edge past ±12 kHz, which threw the whole status out with
+        // "invalid bandwidth" and left us listed on the last mode we were in.
+        // Every field is optional there; the frequency and mode still go, and
+        // are what anyone following us needs. The radio's own tune leaves the
+        // edges out for these modes for the same kind of reason.
+        const edges = isWideIQ(mode) ? {} : {
+            bw_low: Math.round(bandwidthLow),
+            bw_high: Math.round(bandwidthHigh),
+        };
         this.lastStatus = {
             frequency: Math.round(frequency),
             mode,
-            bw_low: Math.round(bandwidthLow),
-            bw_high: Math.round(bandwidthHigh),
+            ...edges,
             ...(zoom > 0 ? { zoom_bw: zoom } : {}),
         };
         // Held until the subscription is confirmed, as the name above is, and

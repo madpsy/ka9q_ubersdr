@@ -2827,13 +2827,14 @@ t('an open row shows the audio spectrum, a shut one the level bar, and a press f
             for (const off of r.cleanups) off();
             return btn;
         };
+        // The filled area first, unless bars have been chosen before.
         const before = press();
-        assert.ok(/press for a filled area/.test(before.props.title), before.props.title);
+        assert.ok(/press for bars/.test(before.props.title), before.props.title);
         before.props.onClick();
-        assert.strictEqual(store['ubersdr.v2.iqAudioScope'], 'area', 'the choice was not kept');
-        assert.ok(/press for bars/.test(press().props.title), 'the next render is not an area');
+        assert.strictEqual(store['ubersdr.v2.iqAudioScope'], 'bars', 'the choice was not kept');
+        assert.ok(/press for a filled area/.test(press().props.title), 'the next render is not bars');
         press().props.onClick();
-        assert.strictEqual(store['ubersdr.v2.iqAudioScope'], 'bars');
+        assert.strictEqual(store['ubersdr.v2.iqAudioScope'], 'area');
     } finally {
         globalThis.localStorage = ls;
         fresh();

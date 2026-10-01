@@ -229,8 +229,8 @@ function VfoStrip({ source, vfo, index, armed, height }) {
 // than a level bar: across exactly the audio its filter passes (audioBandOf), so
 // widening the filter widens the picture, and what is under it — the shape of a
 // voice, a CW note, the hiss of an empty channel — is visible at a glance. A
-// press swaps bars for a filled area; the choice is shared by every row and
-// kept.
+// press swaps the filled area for bars and back; the choice is shared by every
+// row and kept.
 
 const AUDIO_STYLE_KEY = 'ubersdr.v2.iqAudioScope';
 // How far each column moves towards a new reading per 50 ms (timeConstant.js's
@@ -245,9 +245,11 @@ const audioStyleListeners = new Set();
 
 function readAudioStyle() {
     try {
-        return localStorage.getItem(AUDIO_STYLE_KEY) === 'area' ? 'area' : 'bars';
+        // The filled area unless bars have been chosen: it reads as a shape at
+        // this height where bars read as a row of separate readings.
+        return localStorage.getItem(AUDIO_STYLE_KEY) === 'bars' ? 'bars' : 'area';
     } catch (err) {
-        return 'bars';
+        return 'area';
     }
 }
 

@@ -21,7 +21,7 @@
 // panel whose button opens it — that panel is unmounted whenever its dock
 // section is folded.
 
-import React, { useEffect } from '../react.js';
+import React, { useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { isIQ } from '../radio/constants.js';
 import { getPlayground } from '../playground/engine.js';
@@ -53,11 +53,21 @@ export default function PlaygroundWatch() {
     const pg = getPlayground(player);
     const iq = isIQ(tuning.mode);
 
+    // Read at once, so the address bar is tidied, but offered only once the
+    // receiver is running: until then the Start overlay is up, and the
+    // playground opening over it would hide the one button that has to be
+    // pressed first.
+    const [shared, setShared] = useState(null);
     useEffect(() => {
         const code = takeShareCode();
         if (!code) return;
-        decodeShare(code).then((result) => offerSharedGraph(result));
+        decodeShare(code).then(setShared);
     }, []);
+    useEffect(() => {
+        if (!shared || !running) return;
+        offerSharedGraph(shared);
+        setShared(null);
+    }, [shared, running]);
 
     useEffect(() => {
         pg.setQuadrature(iq && running);

@@ -897,5 +897,28 @@ const tAsync = async (name, fn) => {
         r.cleanups.forEach((f) => f());
         closePlayground();
     });
+    await tAsync('a shared link waits for the Start overlay: the playground opens once the receiver is running', async () => {
+        const code = await P.encodeShare(g([{ id: 's', type: 'signal', x: 10, y: 20 }]));
+        const loc = { origin: 'http://x', pathname: '/v2/', search: `?freq=7100000&playground=${code}`, hash: '' };
+        globalThis.location = loc;
+        globalThis.history = { state: null, replaceState(st, t, url) { loc.search = url.includes('?') ? url.slice(url.indexOf('?')) : ''; } };
+        offerSharedGraph(null);
+        closePlayground();
+        reset();
+        let r = render(P.PlaygroundWatch, {}, radio({ running: false }));
+        await new Promise((res) => setTimeout(res, 20));
+        assert.strictEqual(loc.search, '?freq=7100000', 'the code was left in the address');
+        r.cleanups.forEach((f) => f());
+        r = render(P.PlaygroundWatch, {}, radio({ running: false }));
+        assert.strictEqual(playgroundUiState().open, false, 'the playground opened over the Start overlay');
+        assert.strictEqual(playgroundUiState().pending, null);
+        r.cleanups.forEach((f) => f());
+        r = render(P.PlaygroundWatch, {}, radio({ running: true }));
+        assert.strictEqual(playgroundUiState().open, true, 'the playground did not open once running');
+        assert.deepStrictEqual(playgroundUiState().pending.graph.nodes.map((n) => [n.id, n.x, n.y]), [['s', 10, 20]]);
+        r.cleanups.forEach((f) => f());
+        offerSharedGraph(null);
+        closePlayground();
+    });
     console.log(`\n${pass} passed`);
 })();

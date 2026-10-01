@@ -1502,6 +1502,46 @@ t('the reach follows the stream rate, and a narrower stream pulls offsets back i
     assert.strictEqual(iqHalfSpan(), IQ_HALF_SPAN);
 });
 
+t('on IQ 192 each voice is handed 20 ms buffers, not one per packet', () => {
+    // 550 packets a second of 1.8 ms, decimated to 44 samples each: a source
+    // node per one of those, per voice, was what stopped the audio after half
+    // a minute. Two AM voices, a second of stream.
+    fresh({ mode: 'am', widths: { am: 6000 } });
+    addVfo();
+    setIQSpan(192000);
+    const started = [];
+    const ctx = {
+        state: 'running', currentTime: 0, destination: {},
+        createGain: () => ({ gain: { value: 1, setTargetAtTime() {} }, connect() {}, disconnect() {} }),
+        createStereoPanner: () => ({ pan: { setTargetAtTime() {} }, connect() {}, disconnect() {} }),
+        createBuffer: (ch, n, rate) => ({ length: n, sampleRate: rate, duration: n / rate, copyToChannel() {} }),
+        createBufferSource: () => {
+            const n = { connect() {}, start() { started.push(n.buffer); } };
+            return n;
+        },
+    };
+    let tap = null;
+    const player = { ctx, ducked: false, setDucked(v) { this.ducked = v; }, onAudio(fn) { tap = fn; return () => { tap = null; }; } };
+    const { IQDemod } = require('./.build/iqdemod.cjs');
+    const engine = new IQDemod(player);
+    try {
+        engine.setQuadrature(true);
+        engine.start();
+        const n = 349;
+        const I = new Float32Array(n).map((_, i) => Math.cos(i));
+        const Q = new Float32Array(n).map((_, i) => Math.sin(i));
+        for (let k = 0; k < 550; k++) {
+            tap([I, Q], n, 192000);
+            ctx.currentTime += n / 192000;
+        }
+        assert.ok(started.length > 80 && started.length <= 104, `${started.length} buffers for two voices over one second`);
+        assert.ok(started.every((b) => b.duration >= 0.02 && b.sampleRate === WORK_RATE_MIN), 'a short buffer, or one at the stream rate');
+    } finally {
+        engine.destroy();
+        fresh();
+    }
+});
+
 t('the engine takes its reach from the rate the packets arrive at', () => {
     fresh();
     const gain = () => ({ gain: { value: 1, setTargetAtTime() {} }, connect() {}, disconnect() {} });

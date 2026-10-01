@@ -60,6 +60,7 @@
 // mode and the volume, and it is mounted in App.jsx for the same reason.
 
 import { Emitter } from '../radio/emitter.js';
+import { MIN_BLOCK_SEC } from '../radio/constants.js';
 import {
     ECSS_LOW_EDGE, ECSS_TRANSITION, EcssTracker, SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN,
 } from './ecss.js';
@@ -1605,7 +1606,10 @@ export class IQDemod extends Emitter {
         this._quad = next;
         if (next) {
             for (const c of this.chains) c.reset();
-            for (const v of this.voices) v.nextPlayTime = 0;
+            for (const v of this.voices) {
+                v.nextPlayTime = 0;
+                v.pendN = 0;
+            }
         }
         this._applyDuck();
         this.emit('change');
@@ -1703,7 +1707,11 @@ export class IQDemod extends Emitter {
             } else {
                 gain.connect(master);
             }
-            v = { gain, panner, nextPlayTime: 0, pan: null, muted: null };
+            v = {
+                gain, panner, nextPlayTime: 0, pan: null, muted: null,
+                // Audio waiting to make up one block — see _playOne.
+                pend: null, pendN: 0, pendRate: 0,
+            };
             this.voices[index] = v;
         }
         return v;
@@ -1781,10 +1789,31 @@ export class IQDemod extends Emitter {
 
         // At the chain's own rate and length, which on a wide preset are the
         // decimated ones; Web Audio resamples the buffer to the context's.
-        const n = chain.outFrames;
-        if (!n) return;
-        const buffer = ctx.createBuffer(1, n, chain.rate);
-        buffer.copyToChannel(audio.subarray(0, n), 0);
+        //
+        // Joined up to MIN_BLOCK_SEC first, as the player does with its own
+        // packets and for the same reason: IQ 192's 1.8 ms packets decimate to
+        // 44 samples, and a source node per one of those per voice was most of
+        // what wore the browser down. See MIN_BLOCK_SEC in audio-player.js.
+        const got = chain.outFrames;
+        if (!got) return;
+        const outRate = chain.rate;
+        const want = Math.round(outRate * MIN_BLOCK_SEC);
+        if (voice.pendRate !== outRate) {
+            voice.pendRate = outRate;
+            voice.pendN = 0;
+        }
+        if (!voice.pend || voice.pend.length < want + got) {
+            const grown = new Float32Array((want + got) * 2);
+            if (voice.pend && voice.pendN) grown.set(voice.pend.subarray(0, voice.pendN));
+            voice.pend = grown;
+        }
+        voice.pend.set(audio.subarray(0, got), voice.pendN);
+        voice.pendN += got;
+        if (voice.pendN < want) return;
+        const n = voice.pendN;
+        voice.pendN = 0;
+        const buffer = ctx.createBuffer(1, n, outRate);
+        buffer.copyToChannel(voice.pend.subarray(0, n), 0);
 
         if (voice.nextPlayTime < now) voice.nextPlayTime = now + LEAD_IN_SEC;
         else if (voice.nextPlayTime - now > MAX_QUEUE_SEC) return;

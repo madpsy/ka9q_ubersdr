@@ -11,6 +11,7 @@ import { NR2Processor } from '../lib/nr2.js';
 import { getRmNoise } from '../lib/rmnoise.js';
 import { NoiseBlanker } from '../lib/noiseBlanker.js';
 import { Emitter } from './emitter.js';
+import { MIN_BLOCK_SEC } from './constants.js';
 
 // How often the gate looks at the level. 20 ms is well inside its own attack
 // time, and a timer is the right tool: this must keep working with no panel
@@ -165,6 +166,11 @@ export class AudioPlayer extends Emitter {
         this.sampleRate = 0;        // rate the context actually runs at
         this.requestedRate = 0;     // rate we asked for, which may differ
         this.nextPlayTime = 0;
+        // Short packets waiting to make up one MIN_BLOCK_SEC buffer — see there.
+        this._pend = [];
+        this._pendFrames = 0;
+        this._pendRate = 0;
+        this._pendCapture = null;
         // When the last sample queued was captured, Unix ms on the receiver's
         // clock, or null when the stream carries no capture times. Kept with
         // the queue rather than taken from the socket, because the two part
@@ -486,6 +492,7 @@ export class AudioPlayer extends Emitter {
         this._flowed = false;
         this.nextPlayTime = this.ctx.currentTime + this._primeSec();
         this.queueEndCaptureMs = null;
+        this._pendFrames = 0;
     }
 
     // Nothing else notices a context that has stopped running.
@@ -1088,6 +1095,13 @@ export class AudioPlayer extends Emitter {
         const ctx = this.ctx;
         if (!ctx || ctx.state === 'closed') return;
 
+        // Short packets are joined into one buffer — see MIN_BLOCK_SEC. A packet
+        // already that long, which is every packet outside the wide IQ presets,
+        // goes through untouched.
+        const block = this._block(planes, frames, sampleRate, captureMs);
+        if (!block) return;
+        ({ planes, frames, captureMs } = block);
+
         // Always at least two channels, with a mono stream duplicated into both
         // — v1 does the same. The output routing above can then select a side
         // in any mode, rather than only on the stereo IQ modes.
@@ -1137,6 +1151,45 @@ export class AudioPlayer extends Emitter {
             this._flowed = true;
             this.emit('flowing', this.contextEpoch);
         }
+    }
+
+    /**
+     * Join short packets into one MIN_BLOCK_SEC block, or pass a long one
+     * straight back. Returns null while a block is still filling.
+     *
+     * The capture time is the first packet's, since it is the block's first
+     * sample. A change of rate or channel count abandons what was waiting —
+     * at most one block, at a moment the stream is being rebuilt anyway.
+     */
+    _block(planes, frames, sampleRate, captureMs) {
+        const want = Math.round(sampleRate * MIN_BLOCK_SEC);
+        if (!this._pendFrames && frames >= want) return { planes, frames, captureMs };
+        if (this._pendFrames && (this._pendRate !== sampleRate || this._pend.length !== planes.length)) {
+            this._pendFrames = 0;
+        }
+        const need = want + frames;
+        if (this._pend.length !== planes.length || this._pend[0].length < need) {
+            const keep = this._pendFrames;
+            this._pend = planes.map((_, c) => {
+                const a = new Float32Array(need * 2);
+                if (keep && this._pend[c]) a.set(this._pend[c].subarray(0, keep));
+                return a;
+            });
+        }
+        if (!this._pendFrames) {
+            this._pendRate = sampleRate;
+            this._pendCapture = captureMs;
+        }
+        for (let c = 0; c < planes.length; c++) {
+            this._pend[c].set(planes[c].subarray(0, frames), this._pendFrames);
+        }
+        this._pendFrames += frames;
+        if (this._pendFrames < want) return null;
+        const n = this._pendFrames;
+        this._pendFrames = 0;
+        // Read straight into an AudioBuffer by the caller before the next
+        // packet arrives, so handing out the shared arrays is safe.
+        return { planes: this._pend.map((a) => a.subarray(0, n)), frames: n, captureMs: this._pendCapture };
     }
 
     // Ask to be told, once, when audio is next genuinely playing.

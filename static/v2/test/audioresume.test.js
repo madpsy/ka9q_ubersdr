@@ -142,6 +142,54 @@ t('the context left behind by a rate change is not resumed', () => {
     assert.strictEqual(old.resumes, before, 'the replaced context was resumed');
 });
 
+// ── short packets ────────────────────────────────────────────────────────────
+//
+// IQ 192 arrives as ~550 packets a second of 1.8 ms each. One AudioBuffer and
+// one source node per packet wore the browser down until the audio stopped
+// after half a minute, so short packets are joined into MIN_BLOCK_SEC blocks
+// before they are scheduled. Anything already that long — every other mode —
+// must go through exactly as it did.
+
+function scheduling(rate, channels, frames, packets) {
+    const ctx = fakeContext();
+    const started = [];
+    ctx.createBuffer = (ch, n, r) => ({ numberOfChannels: ch, length: n, sampleRate: r, duration: n / r, copyToChannel() {} });
+    ctx.createBufferSource = () => {
+        const n = { connect() {}, disconnect() {}, start() { started.push(n.buffer); } };
+        return n;
+    };
+    const p = playerOn(ctx);
+    const tapped = [];
+    p.onAudio((planes, n) => tapped.push(n));
+    const planes = Array.from({ length: channels }, () => new Float32Array(frames));
+    // The clock moves as the packets arrive, as it would live — a clock held
+    // still would have the queue ceiling dropping everything past 200 ms.
+    for (let i = 0; i < packets; i++) {
+        p._schedule(planes, frames, rate);
+        ctx.currentTime += frames / rate;
+    }
+    return { started, tapped };
+}
+
+t('a 20 ms packet is one buffer, as it always was', () => {
+    const { started } = scheduling(12000, 1, 240, 50);
+    assert.strictEqual(started.length, 50);
+    assert.ok(started.every((b) => b.length === 240));
+});
+
+t('IQ 192’s 1.8 ms packets are joined into 20 ms buffers, and none is lost', () => {
+    const { started, tapped } = scheduling(192000, 2, 349, 550);
+    // A second of IQ 192: about fifty buffers rather than five hundred and fifty.
+    assert.ok(started.length <= 51, `${started.length} buffers for one second`);
+    assert.ok(started.every((b) => b.duration >= 0.02 && b.numberOfChannels === 2), 'a short or mono buffer');
+    const queued = started.reduce((n, b) => n + b.length, 0);
+    const pending = 550 * 349 - queued;
+    assert.ok(pending >= 0 && pending < 3840, `${pending} frames unaccounted for`);
+    // And whatever taps the stream still sees every packet as it came.
+    assert.strictEqual(tapped.length, 550);
+    assert.ok(tapped.every((n) => n === 349));
+});
+
 console.log('\n' + pass + ' ok');
 // Same reason noisegraph.test.js does: every context built here leaves a
 // clip-watch interval behind, and nothing in a test is a receiver that would

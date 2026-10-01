@@ -100,6 +100,16 @@ export const MODES = [
     { id: 'iq', label: 'IQ', group: 'iq', low: -6000, high: 6000 },
 ];
 
+// The shortest buffer handed to Web Audio, by the player and by the IQ demod
+// panel's voices alike. Every mode but the wide IQ presets arrives in packets
+// this long already — radiod's 20 ms — and goes straight through. The wide
+// presets do not: IQ 192 arrives as about 550 packets a second of 1.8 ms each,
+// and one buffer and one source node per packet was over half a thousand nodes
+// a second for the browser to create, schedule and collect, ducked or not.
+// Audio played for half a minute and then stopped. So short packets are joined
+// up to this length first.
+export const MIN_BLOCK_SEC = 0.02;
+
 // The wide IQ presets. Not in MODES, which is what every mode picker, cycle
 // and menu walks: they need the server's say-so (allowed_iq_modes on the
 // /connection reply, kept as `allowedIQModes` on the radio context) and are

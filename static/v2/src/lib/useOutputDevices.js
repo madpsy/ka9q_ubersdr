@@ -4,8 +4,8 @@
 // receiver as a whole, and each IQ demodulator's own. Both need the same three
 // things done the same way — the list read on mount and again whenever a device
 // comes or goes, and the names the browser withholds until microphone
-// permission is granted asked for only when somebody presses Refresh — so they
-// are here once rather than in each picker.
+// permission is granted asked for only when somebody presses Refresh or clicks
+// the dropdown — so they are here once rather than in each picker.
 
 import { useCallback, useEffect, useRef, useState } from '../react.js';
 import { listOutputDevices, micPermission, unlockDeviceLabels } from './audioSinks.js';

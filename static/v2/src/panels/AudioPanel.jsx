@@ -293,6 +293,9 @@ function OutputDevicePicker() {
                     className="select"
                     value={audio.sinkId}
                     disabled={busy}
+                    // Opening the list is a Refresh too, so the names can be
+                    // unlocked from the dropdown itself.
+                    onPointerDown={() => refresh(true)}
                     onChange={(e) => choose(e.target.value)}
                 >
                     <option value="">System Default</option>

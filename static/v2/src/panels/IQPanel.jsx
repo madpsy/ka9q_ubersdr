@@ -1155,19 +1155,22 @@ function EcssControls({ vfo, ecss, dialHz, minimal, set }) {
  */
 function VfoOutput({ vfo, set, error }) {
     const supported = useMemo(elementSinkSupport, []);
-    const { devices, hidden, refresh } = useOutputDevices(supported);
+    const { devices, refresh } = useOutputDevices(supported);
     if (!supported) return null;
     const id = vfo.sinkId || '';
     const known = !id || devices.some((d) => d.deviceId === id);
     return (
         <>
             <Field label="Output">
-                {/* Re-read on focus: names unlocked by the Audio panel's Refresh
-                    since this row was drawn are a devicechange the browser does
-                    not always send. */}
+                {/* Clicking it does what the Audio panel's Refresh does — re-read,
+                    and ask for the microphone if the names are still hidden.
+                    Focus from the keyboard re-reads quietly: names unlocked
+                    elsewhere since this row was drawn are a devicechange the
+                    browser does not always send. */}
                 <select
                     className="select"
                     value={id}
+                    onPointerDown={() => refresh(true)}
                     onFocus={() => refresh(false)}
                     onChange={(e) => set({ sinkId: e.target.value })}
                 >
@@ -1182,14 +1185,9 @@ function VfoOutput({ vfo, set, error }) {
                     {!known && <option value={id}>Saved device …{id.slice(-6)}</option>}
                 </select>
             </Field>
-            {error ? (
+            {error && (
                 <div className="note note--tight note--warn">
                     That device could not be used ({error}) — playing on the receiver’s output instead.
-                </div>
-            ) : hidden && (
-                <div className="note note--tight">
-                    Device names are hidden until microphone permission is granted —
-                    Refresh under the Audio panel’s Output asks for it.
                 </div>
             )}
         </>

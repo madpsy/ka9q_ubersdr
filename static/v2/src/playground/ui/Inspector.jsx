@@ -429,6 +429,13 @@ export default function Inspector({
                 <Readout label="CPU" value={s ? formatCpu(s.cpu) : '—'} />
             </div>
             {def.latencyNote && <div className="pg-insp__note">{def.latencyNote}</div>}
+            {node.type === 'iq-in' && (
+                <div className="pg-insp__note">
+                    {lat && lat.own != null
+                        ? 'Latency here is how old the IQ is on arriving: capture at the receiver to this browser, measured from the time stamped on every packet. Every block after this counts it in From source.'
+                        : 'How old the IQ is on arriving — capture at the receiver to this browser — shows here once it is arriving.'}
+                </div>
+            )}
             {hasRfLine(node.type) && (
                 <div className="pg-insp__rf">
                     <span className="pg-insp__rf-label">On the air</span>

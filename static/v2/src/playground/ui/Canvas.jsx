@@ -26,7 +26,7 @@ import { inputsOf, outputsOf } from '../block.js';
 /** Seconds as the shortest honest reading: µs, ms or s. */
 export function formatLatency(sec) {
     if (sec == null || !Number.isFinite(sec)) return '—';
-    if (sec === 0) return '0';
+    if (sec === 0) return '0 ms';
     if (sec < 0.001) return `${Math.round(sec * 1e6)} µs`;
     if (sec < 1) return `${(sec * 1000).toFixed(sec < 0.01 ? 1 : 0)} ms`;
     return `${sec.toFixed(2)} s`;

@@ -5,7 +5,7 @@
 import { deep, render, reset, walk, words } from './hookStub.js';
 import IQPanel from '../src/panels/IQPanel.jsx';
 import PlaygroundWatch, { takeShareCode } from '../src/components/PlaygroundWatch.jsx';
-import PlaygroundModal, { PlaygroundWindow, TemplatesMenu, WATCHED_TYPES, graphFromIQDemod } from '../src/playground/ui/PlaygroundModal.jsx';
+import PlaygroundModal, { PlaygroundWindow, TemplatesMenu, WATCHED_TYPES, graphFromIQDemod, withArrival } from '../src/playground/ui/PlaygroundModal.jsx';
 import { TEMPLATES } from '../src/playground/templates.js';
 import Inspector, { ParamField } from '../src/playground/ui/Inspector.jsx';
 import Canvas, { formatCpu, formatLatency, formatRate } from '../src/playground/ui/Canvas.jsx';
@@ -33,6 +33,7 @@ import { resetDemodSettings, saveDemodSettings } from '../src/lib/iqDemod.js';
 
 module.exports = {
     deep, render, reset, walk, words,
+    withArrival,
     IQPanel, PlaygroundWatch, takeShareCode, PlaygroundModal, PlaygroundWindow, WATCHED_TYPES, graphFromIQDemod, TemplatesMenu, TEMPLATES,
     Inspector, ParamField, Canvas, formatCpu, formatLatency, formatRate, CardVisual, RfLine, Palette,
     airSpan, rfLabel, rfOf, shiftLabel, hasRfLine, encodeShare, decodeShare,

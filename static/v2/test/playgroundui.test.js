@@ -584,6 +584,29 @@ t('a shared graph starts when loaded, where the receiver is up and its IQ width 
     }
 });
 
+t('the IQ stream’s age on arriving is its latency, and every block after it counts it', () => {
+    const graph = g(
+        [{ id: 'iq', type: 'iq-in' }, { id: 'lp', type: 'lowpass' }, { id: 'a', type: 'to-audio' }, { id: 's', type: 'signal' }, { id: 'gn', type: 'gain' }],
+        [['iq', 'out', 'lp', 'in'], ['lp', 'out', 'a', 'in'], ['s', 'out', 'gn', 'in']],
+    );
+    const rt = new (require('./.build/playground.cjs').Runtime)(graph, 12000, { now: () => 0 });
+    const latencies = {};
+    for (const n of graph.nodes) latencies[n.id] = rt.latencyOf(n.id);
+    const info = { latencies, order: rt.plan.order, inputs: rt.plan.inputs };
+    const lp = latencies.lp.own;
+    assert.ok(lp > 0);
+    let l = P.withArrival(info, graph, 0.25);
+    assert.deepStrictEqual([l.iq.own, l.iq.total], [0.25, 0.25]);
+    assert.ok(Math.abs(l.lp.total - (0.25 + lp)) < 1e-12, 'the filter does not count the arrival');
+    assert.ok(Math.abs(l.a.total - (0.25 + lp)) < 1e-12);
+    assert.deepStrictEqual([l.gn.own, l.gn.total], [0, 0], 'a generator’s path took the receiver’s age');
+    // Not arriving: the IQ stream's own figure is unknown, not nought.
+    l = P.withArrival(info, graph, null);
+    assert.deepStrictEqual([l.iq.own, l.iq.total], [null, null]);
+    assert.strictEqual(formatLatency(l.iq.own), '—');
+    assert.ok(Math.abs(l.lp.total - lp) < 1e-12);
+});
+
 t('the inspector renders every block type’s settings', () => {
     const pg = getPlayground(radio().player);
     for (const def of BLOCKS) {
@@ -1010,7 +1033,7 @@ t('the toolbar offers the templates', () => {
 });
 
 t('figures read as people say them', () => {
-    assert.strictEqual(formatLatency(0), '0');
+    assert.strictEqual(formatLatency(0), '0 ms');
     assert.strictEqual(formatLatency(0.0004), '400 µs');
     assert.strictEqual(formatLatency(0.0213), '21 ms');
     assert.strictEqual(formatLatency(0.0042), '4.2 ms');

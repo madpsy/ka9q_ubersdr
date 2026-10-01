@@ -10,6 +10,7 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from '../../react.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
 import { MODE_BY_ID, isIQ } from '../../radio/constants.js';
+import { serverClock } from '../../radio/serverClock.js';
 import { Button, Icon, Modal } from '../../components/ui.jsx';
 import { buildShareUrl } from '../../lib/share.js';
 import { saveText } from '../../lib/saveFile.js';
@@ -87,7 +88,41 @@ function inspect(graph, rate) {
         const l = rt.latencyOf(n.id);
         if (l) latencies[n.id] = l;
     }
-    return { ok: rt.ok, errors: rt.errors, errorsByNode, rates: rt.plan.inRate, latencies };
+    return {
+        ok: rt.ok, errors: rt.errors, errorsByNode, rates: rt.plan.inRate, latencies,
+        order: rt.plan.order || [], inputs: rt.plan.inputs || {},
+    };
+}
+
+/**
+ * The latencies with the IQ stream's own age put in: how old its samples
+ * already are on arriving here — capture at the receiver, radiod, the network
+ * — measured from the capture time on every packet (see audio-connection's
+ * arrivalLag). Each block downstream then reads from the antenna rather than
+ * from the graph's edge. `arrivalSec` null — nothing arriving, or the
+ * receiver's clock not measured yet — leaves the IQ stream's own figure
+ * unknown and every total as the blocks alone make it.
+ * Exported for the test.
+ */
+export function withArrival(info, graph, arrivalSec) {
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const known = arrivalSec != null && Number.isFinite(arrivalSec);
+    const out = {};
+    for (const id of info.order) {
+        const l = info.latencies[id];
+        const n = byId.get(id);
+        if (!l || !n) continue;
+        if (n.type === 'iq-in') {
+            out[id] = { own: known ? Math.max(0, arrivalSec) : null, total: known ? Math.max(0, arrivalSec) : null, arrival: true };
+            continue;
+        }
+        let before = 0;
+        for (const f of info.inputs[id] || []) {
+            if (f && out[f[0]] && out[f[0]].total > before) before = out[f[0]].total;
+        }
+        out[id] = { own: l.own, total: before + l.own };
+    }
+    return out;
 }
 
 /** Everything about a graph except where its cards sit. */
@@ -184,6 +219,7 @@ function Toolbar({
 function Summary({ pg, graph, info, stats }) {
     const outs = graph.nodes.filter((n) => n.type === 'audio-out');
     const worst = outs.reduce((m, n) => Math.max(m, (info.latencies[n.id] || {}).total || 0), 0);
+    const measured = graph.nodes.some((n) => n.type === 'iq-in' && info.latencies[n.id] && info.latencies[n.id].own != null);
     return (
         <>
             <div className="pg-insp__title">This graph</div>
@@ -205,7 +241,9 @@ function Summary({ pg, graph, info, stats }) {
                 <p>To see a signal anywhere, select a block or a wire and attach an instrument — spectrum, scope, constellation, frequency counter — to any input or output. Instruments only listen: the path carries on as it was.</p>
                 <p>Select a filter and press Measure gain &amp; phase to see what it does to the signal going through it.</p>
                 <p>Drag the background to pan, scroll to zoom. Shift-press to select several. Delete removes, Ctrl+D duplicates, Ctrl+Z undoes.</p>
-                <p>“To the speakers” is the delay the blocks add. The receiver’s own buffering comes on top.</p>
+                <p>{measured
+                    ? '“To the speakers” is how old the audio is on leaving the graph: capture at the receiver and the trip here, measured, plus the delay the blocks add. This browser’s audio output comes on top.'
+                    : '“To the speakers” is the delay the blocks add. How old the IQ already is on arriving shows on the IQ stream block once it is arriving; this browser’s audio output comes on top.'}</p>
             </div>
         </>
     );
@@ -260,7 +298,7 @@ function ConfirmReplace({ kind, count, onExport, onCancel, onConfirm }) {
 }
 
 export function PlaygroundWindow({ onClose }) {
-    const { running, audioState, tuning, actions, player, allowedIQModes } = useRadio();
+    const { running, audioState, tuning, actions, player, allowedIQModes, audioConn } = useRadio();
     const pg = getPlayground(player);
     const ui = usePlaygroundUi();
     const iq = isIQ(tuning.mode);
@@ -297,7 +335,19 @@ export function PlaygroundWindow({ onClose }) {
 
     const graph = pg.graph;
     const key = structureKey(graph);
-    const info = useMemo(() => inspect(graph, rate), [key, rate]);
+    const compiled = useMemo(() => inspect(graph, rate), [key, rate]);
+    // The IQ's age on arriving, read again every second while it arrives.
+    const [, tickAge] = useReducer((n) => n + 1, 0);
+    const listening = needsReceiver(graph) && iq && running;
+    useEffect(() => {
+        if (!listening) return undefined;
+        const t = setInterval(tickAge, 1000);
+        return () => clearInterval(t);
+    }, [listening]);
+    const lag = listening && audioConn ? audioConn.arrivalLag : null;
+    const clk = lag != null ? serverClock() : null;
+    const arrivalSec = clk ? (lag + clk.theta) / 1000 : null;
+    const info = { ...compiled, latencies: withArrival(compiled, graph, arrivalSec) };
     const origins = useMemo(() => frequencyOrigins(graph, tuning.frequency), [key, tuning.frequency]);
     const display = useDisplay();
     // What the instruments draw with: the operator's waterfall palette, and

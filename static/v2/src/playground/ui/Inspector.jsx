@@ -1,0 +1,491 @@
+// The right-hand column: what the selection is, and its controls.
+//
+// One block selected: its parameters, drawn from its type's ParamSpecs so a new
+// block needs no new interface; what it costs (latency, CPU) and why it cannot
+// run, if it cannot; and, for the two sinks that need them, an output device
+// and a recorder's controls. Nothing selected: the graph as a whole.
+
+import React, { useEffect, useMemo, useReducer, useRef, useState } from '../../react.js';
+import { Button, Field, Icon, Readout, Segmented, Slider, Switch } from '../../components/ui.jsx';
+import { elementSinkSupport, sinkLabel } from '../../lib/audioSinks.js';
+import useOutputDevices from '../../lib/useOutputDevices.js';
+import { BLOCK_BY_TYPE } from '../blocks/index.js';
+import { formatCpu, formatLatency, formatRate } from './Canvas.jsx';
+import { INSTRUMENTS, Instrument } from './viewers.jsx';
+import { PROBES, acrossPair, inputOrigin, outputKind } from '../probes.js';
+import { controlPort, controllable, inputsOf, outputsOf } from '../block.js';
+import { decodeWav } from '../wavfile.js';
+import { expandable } from '../expand.js';
+import { recordingLabel } from './CardVisual.jsx';
+
+/**
+ * Buttons that hang an instrument off one output. On an input, `from` is the
+ * output that feeds it — probing an input is probing what arrives there.
+ */
+function ProbeButtons({ kind, onProbe }) {
+    return (
+        <span className="pg-probe">
+            {(PROBES[kind] || []).map((p) => (
+                <button key={p.type} type="button" className="pg-probe__btn" title={`Attach ${p.label.toLowerCase()} here`} onClick={() => onProbe(p.type)}>
+                    {p.label}
+                </button>
+            ))}
+        </span>
+    );
+}
+
+/**
+ * An IQ player's file: load one, see what it is, start it again. Decoded here,
+ * on the page, and handed to the worker whole — see PlaygroundEngine.loadFile.
+ */
+function PlayerControls({ pg, node }) {
+    const input = useRef(null);
+    const [error, setError] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const reading = pg.readings ? pg.readings[node.id] : null;
+    const load = async (file) => {
+        if (!file) return;
+        setBusy(true);
+        setError(null);
+        try {
+            const data = decodeWav(await file.arrayBuffer(), file.name);
+            pg.loadFile(node.id, data, file.name);
+        } catch (err) {
+            setError(err.message || String(err));
+        } finally {
+            setBusy(false);
+        }
+    };
+    const has = pg.hasFile(node.id);
+    return (
+        <div className="pg-insp__section">
+            <div className="pg-insp__title">Recording</div>
+            <div className="pg-insp__row">
+                <Button size="sm" variant={has ? 'default' : 'primary'} icon={<Icon.Upload />} disabled={busy} onClick={() => input.current && input.current.click()}>
+                    {busy ? 'Reading…' : has ? 'Load another' : 'Load IQ file'}
+                </Button>
+                {has && <Button size="sm" variant="ghost" icon={<Icon.RotateLeft />} onClick={() => pg.command(node.id, 'restart')}>From the start</Button>}
+            </div>
+            <input
+                ref={input}
+                type="file"
+                accept=".wav,audio/wav,audio/x-wav"
+                hidden
+                onChange={(e) => { load(e.target.files && e.target.files[0]); e.target.value = ''; }}
+            />
+            {node.params.fileName && (
+                <div className="pg-insp__note">
+                    {node.params.fileName}
+                    {node.params.rateHz ? ` · ${formatRate(node.params.rateHz)} Hz` : ''}
+                    {reading && reading.duration ? ` · ${clock(reading.position)} of ${clock(reading.duration)}` : ''}
+                </div>
+            )}
+            {!has && node.params.fileName && <div className="note note--tight">Files are not kept with the graph: load it again to play it.</div>}
+            {error && <div className="note note--tight note--warn">{error}</div>}
+        </div>
+    );
+}
+
+/** What a selected wire carries, and the instruments to look at it with. */
+function WireInspector({ graph, wire, rates, onProbe, onRemoveWire }) {
+    const [fromId, fromPort, toId, toPort] = wire;
+    const kind = outputKind(graph, fromId, fromPort);
+    return (
+        <div className="pg-insp">
+            <div className="pg-insp__title">Wire</div>
+            <p className="pg-insp__summary">
+                {`${fromId}.${fromPort} → ${toId}.${toPort}: a ${kind} signal${rates[fromId] ? ` at ${formatRate(rates[toId] || rates[fromId])} Hz` : ''}.`}
+            </p>
+            <div className="pg-insp__section">
+                <div className="pg-insp__title">Look at it</div>
+                <ProbeButtons kind={kind} onProbe={(type) => onProbe(fromId, fromPort, type)} />
+            </div>
+            <div className="pg-insp__row">
+                <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={onRemoveWire}>Remove wire</Button>
+            </div>
+        </div>
+    );
+}
+
+/** A number as typed: committed on Enter or on leaving the box. */
+function NumberBox({ value, min, max, onChange, unit }) {
+    const [draft, setDraft] = useState(null);
+    const commit = () => {
+        if (draft === null) return;
+        const v = Number(draft);
+        setDraft(null);
+        if (draft.trim() !== '' && Number.isFinite(v)) onChange(Math.max(min, Math.min(max, v)));
+    };
+    return (
+        <span className="pg-num">
+            <input
+                className="input pg-num__input"
+                inputMode="decimal"
+                value={draft === null ? String(value) : draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') commit();
+                    if (e.key === 'Escape') setDraft(null);
+                    e.stopPropagation();
+                }}
+            />
+            {unit && <span className="pg-num__unit">{unit}</span>}
+        </span>
+    );
+}
+
+/**
+ * A slider's travel for a parameter. A frequency's declared range covers the
+ * widest stream there is; at the rate this block actually works at, anything
+ * past Nyquist means nothing, so the slider stops there and the box still
+ * takes the rest.
+ */
+function travel(spec, rate) {
+    if (spec.unit !== 'Hz' || !(rate > 0)) return { min: spec.min, max: spec.max };
+    const ny = rate / 2;
+    return { min: Math.max(spec.min, spec.min < 0 ? -ny : spec.min), max: Math.min(spec.max, ny) };
+}
+
+function DeviceField({ value, onChange, error }) {
+    const supported = useMemo(elementSinkSupport, []);
+    const { devices, refresh } = useOutputDevices(supported);
+    if (!supported) {
+        return <div className="note note--tight">This browser can only play to the receiver’s own output.</div>;
+    }
+    const known = !value || devices.some((d) => d.deviceId === value);
+    return (
+        <Field label="Output">
+            <select
+                className="select"
+                value={value || ''}
+                onPointerDown={() => refresh(true)}
+                onFocus={() => refresh(false)}
+                onChange={(e) => onChange(e.target.value)}
+            >
+                <option value="">Receiver output</option>
+                {devices.filter((d) => d.deviceId).map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                        {d.deviceId === 'default' ? 'System Default' : sinkLabel(d)}
+                    </option>
+                ))}
+                {!known && <option value={value}>Saved device …{value.slice(-6)}</option>}
+            </select>
+            {error && <div className="note note--tight note--warn">That device could not be used ({error}) — playing on the receiver’s output instead.</div>}
+        </Field>
+    );
+}
+
+/**
+ * A parameter's control: the toggle that gives it a control input, and while
+ * a wire drives it, the value it has been driven to instead of a slider.
+ */
+function ControlToggle({ exposed, onExpose }) {
+    return (
+        <button
+            type="button"
+            className={`pg-ctl${exposed ? ' is-on' : ''}`}
+            title={exposed ? 'Remove this setting’s control input' : 'Give this setting a control input, so another block can drive it'}
+            aria-pressed={exposed}
+            onClick={() => onExpose(!exposed)}
+        >
+            ⊸
+        </button>
+    );
+}
+
+export function ParamRow({ name, spec, value, rate, onChange, sinkError, exposed, onExpose, drivenBy, drivenValue }) {
+    const field = drivenBy ? (
+        <Field label={spec.label} hint={drivenValue == null ? '—' : String(Number.isFinite(drivenValue) ? Number(drivenValue.toPrecision(6)) : drivenValue)}>
+            <div className="pg-driven">driven by {drivenBy}</div>
+        </Field>
+    ) : <ParamField name={name} spec={spec} value={value} rate={rate} onChange={onChange} sinkError={sinkError} />;
+    if (!controllable(spec) || !onExpose) return field;
+    return (
+        <div className="pg-param">
+            <div className="pg-param__field">{field}</div>
+            <ControlToggle exposed={exposed} onExpose={onExpose} />
+        </div>
+    );
+}
+
+export function ParamField({ name, spec, value, rate, onChange, sinkError }) {
+    switch (spec.kind) {
+        case 'text':
+            return (
+                <Field label={spec.label}>
+                    <input
+                        className="input"
+                        value={value}
+                        onChange={(e) => onChange(e.target.value)}
+                        onKeyDown={(e) => e.stopPropagation()}
+                    />
+                </Field>
+            );
+        case 'bool':
+            return <Switch checked={value} onChange={onChange} label={spec.label} />;
+        case 'device':
+            return <DeviceField value={value} onChange={onChange} error={sinkError} />;
+        case 'choice':
+            if (spec.options.length <= 4) {
+                return (
+                    <Field label={spec.label}>
+                        <Segmented options={spec.options} value={value} onChange={onChange} size="sm" />
+                    </Field>
+                );
+            }
+            return (
+                <Field label={spec.label}>
+                    <select
+                        className="select"
+                        value={String(value)}
+                        onChange={(e) => {
+                            const o = spec.options.find((x) => String(x.value) === e.target.value);
+                            if (o) onChange(o.value);
+                        }}
+                    >
+                        {spec.options.map((o) => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}
+                    </select>
+                </Field>
+            );
+        default: {
+            const t = travel(spec, rate);
+            return (
+                <Field label={spec.label} hint={<NumberBox value={value} min={spec.min} max={spec.max} unit={spec.unit} onChange={onChange} />}>
+                    <Slider
+                        value={Math.max(t.min, Math.min(t.max, value))}
+                        min={t.min}
+                        max={t.max}
+                        step={spec.step || 1}
+                        onChange={onChange}
+                    />
+                </Field>
+            );
+        }
+    }
+}
+
+function clock(sec) {
+    const s = Math.floor(sec);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function RecorderControls({ pg, id, maxSeconds, label }) {
+    const [, bump] = useReducer((n) => n + 1, 0);
+    useEffect(() => {
+        const off = pg.on('change', bump);
+        const t = setInterval(() => {
+            const r = pg.recordings.get(id);
+            if (r && r.state === 'recording') bump();
+        }, 500);
+        return () => { off(); clearInterval(t); };
+    }, [pg, id]);
+    const rec = pg.recordings.get(id);
+    const state = rec ? rec.state : 'idle';
+    const [error, setError] = useState(null);
+    return (
+        <div className="pg-insp__section">
+            <div className="pg-insp__title">Recording</div>
+            <div className="pg-insp__row">
+                {state === 'recording' ? (
+                    <Button size="sm" icon={<Icon.Stop />} onClick={() => pg.stopRecording(id)}>Stop</Button>
+                ) : (
+                    <Button
+                        size="sm"
+                        variant="primary"
+                        icon={<Icon.Record />}
+                        disabled={!pg.running}
+                        title={pg.running ? undefined : 'Start the playground to record'}
+                        onClick={() => pg.startRecording(id, label)}
+                    >
+                        Record
+                    </Button>
+                )}
+                <span className="pg-insp__clock">
+                    {rec && state !== 'idle' ? `${clock(rec.seconds)} of ${clock(rec.limitSeconds)}` : `Limit ${clock(maxSeconds)}`}
+                    {rec && rec.channels ? ` · ${rec.channels === 2 ? 'stereo' : 'mono'} ${formatRate(rec.rate)}` : ''}
+                </span>
+            </div>
+            {rec && rec.reason && <div className="note note--tight">{rec.reason}</div>}
+            {state === 'held' && (
+                <>
+                    {/* The browser's own player: it already does scrubbing,
+                        volume and the keyboard, on every platform. */}
+                    <audio className="pg-insp__audio" controls src={rec.url() || undefined} />
+                    <div className="pg-insp__row">
+                        <Button
+                            size="sm"
+                            icon={<Icon.Download />}
+                            onClick={() => pg.saveRecording(id).catch((e) => setError(e.message || String(e)))}
+                        >
+                            Save WAV
+                        </Button>
+                        <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={() => pg.clearRecording(id)}>
+                            Discard
+                        </Button>
+                    </div>
+                    {error && <div className="note note--tight note--warn">{error}</div>}
+                </>
+            )}
+        </div>
+    );
+}
+
+export default function Inspector({
+    pg, graph, selection, errorsByNode, rates, latencies, stats, onParams, onRemove, onDuplicate, summary,
+    look, origins, onProbe, onAcross, onExpose, onExpand,
+}) {
+    const ids = [...selection.nodes];
+    if (!ids.length && selection.wire != null && graph.wires[selection.wire]) {
+        return (
+            <WireInspector
+                graph={graph}
+                wire={graph.wires[selection.wire]}
+                rates={rates}
+                onProbe={onProbe || (() => {})}
+                onRemoveWire={onRemove}
+            />
+        );
+    }
+    if (ids.length > 1) {
+        return (
+            <div className="pg-insp">
+                <div className="pg-insp__title">{ids.length} blocks selected</div>
+                <div className="pg-insp__row">
+                    <Button size="sm" icon={<Icon.Copy />} onClick={onDuplicate}>Duplicate</Button>
+                    <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={onRemove}>Remove</Button>
+                </div>
+            </div>
+        );
+    }
+    const node = ids.length === 1 ? graph.nodes.find((n) => n.id === ids[0]) : null;
+    if (!node) return <div className="pg-insp">{summary}</div>;
+
+    const def = BLOCK_BY_TYPE[node.type];
+    const errs = errorsByNode[node.id] || [];
+    const lat = latencies[node.id];
+    const s = stats && stats.nodes ? stats.nodes[node.id] : null;
+    const wiresIn = graph.wires.filter((w) => w[2] === node.id);
+    return (
+        <div className="pg-insp">
+            <div className="pg-insp__head">
+                <div className="pg-insp__title">{def.label}</div>
+                <div className="pg-insp__id">{node.id}</div>
+            </div>
+            <p className="pg-insp__summary">{def.summary}</p>
+            {errs.map((e, i) => <div key={i} className="note note--tight note--warn">{e.message}</div>)}
+            <div className="readout-grid">
+                <Readout label="Rate" value={formatRate(rates[node.id]) || '—'} unit={rates[node.id] ? 'Hz' : undefined} />
+                <Readout label="Latency" value={lat ? formatLatency(lat.own) : '—'} />
+                <Readout label="From source" value={lat ? formatLatency(lat.total) : '—'} />
+                <Readout label="CPU" value={s ? formatCpu(s.cpu) : '—'} />
+            </div>
+            {def.latencyNote && <div className="pg-insp__note">{def.latencyNote}</div>}
+            {INSTRUMENTS.has(node.type) && (
+                <div className="pg-insp__section pg-insp__large">
+                    <Instrument
+                        pg={pg}
+                        node={node}
+                        look={look}
+                        origin={origins ? inputOrigin(graph, origins, node.id) : null}
+                        large
+                    />
+                </div>
+            )}
+            {Object.keys(def.params).length > 0 && (
+                <div className="pg-insp__section">
+                    <div className="pg-insp__title">Settings</div>
+                    {Object.entries(def.params).map(([name, spec]) => {
+                        const exposed = (node.controls || []).includes(name);
+                        const w = exposed && graph.wires.find((x) => x[2] === node.id && x[3] === controlPort(name));
+                        const driven = pg.driven && pg.driven[node.id] ? pg.driven[node.id][name] : undefined;
+                        return (
+                            <ParamRow
+                                key={name}
+                                name={name}
+                                spec={spec}
+                                value={node.params[name]}
+                                rate={rates[node.id]}
+                                sinkError={spec.kind === 'device' ? pg.sinkErrorOf(node.id) : null}
+                                onChange={(v) => onParams(node.id, { [name]: v }, `param:${node.id}:${name}`)}
+                                exposed={exposed}
+                                onExpose={onExpose ? (on) => onExpose(node.id, name, on) : null}
+                                drivenBy={w ? `${w[0]}.${w[1]}` : null}
+                                drivenValue={driven === undefined ? null : driven}
+                            />
+                        );
+                    })}
+                </div>
+            )}
+            {(node.type === 'wav-recorder' || node.type === 'iq-recorder') && (
+                <RecorderControls
+                    pg={pg}
+                    id={node.id}
+                    maxSeconds={node.params.maxSeconds}
+                    label={recordingLabel(node.type, origins ? inputOrigin(graph, origins, node.id) : null)}
+                />
+            )}
+            {node.type === 'iq-player' && <PlayerControls pg={pg} node={node} />}
+            {expandable(node) && onExpand && (
+                <div className="pg-insp__section">
+                    <div className="pg-insp__title">Inside</div>
+                    <p className="pg-insp__summary">
+                        {node.type === 'demodulator'
+                            ? 'This is the IQ Demod panel’s own demodulator. Expand it to replace it with the blocks it is made of — the same sound, every stage of it to adjust and probe.'
+                            : 'This decoder is a small graph of the Digital blocks. Expand it to lay them out in its place — the same text, every stage of the modem to adjust and probe.'}
+                    </p>
+                    <div className="pg-insp__row">
+                        <Button size="sm" icon={<Icon.Expand />} onClick={() => onExpand(node.id)}>Expand into blocks</Button>
+                    </div>
+                </div>
+            )}
+            {inputsOf(node, def).length > 0 && (
+                <div className="pg-insp__section">
+                    <div className="pg-insp__title">Inputs</div>
+                    {inputsOf(node, def).map((p) => {
+                        const w = wiresIn.find((x) => x[3] === p.name);
+                        return (
+                            <div key={p.name} className="pg-insp__portblock">
+                                <div className="pg-insp__port">
+                                    <span className={`pg-insp__kind pg-insp__kind--${p.kind}`}>{p.kind}</span>
+                                    <span>{p.param ? `${p.label} (control)` : p.name}</span>
+                                    <span className="pg-insp__from">{w ? `← ${w[0]}.${w[1]}` : p.optional ? 'optional' : 'not wired'}</span>
+                                </div>
+                                {w && onProbe && <ProbeButtons kind={p.kind} onProbe={(type) => onProbe(w[0], w[1], type)} />}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+            {onAcross && acrossPair(graph, node.id) && (
+                <div className="pg-insp__section">
+                    <div className="pg-insp__title">Across this block</div>
+                    <p className="pg-insp__summary">
+                        Compare what goes in with what comes out: the gain and phase it applies at the frequency passing through it.
+                    </p>
+                    <div className="pg-insp__row">
+                        <Button size="sm" icon={<Icon.Target />} onClick={() => onAcross(node.id)}>Measure gain &amp; phase</Button>
+                    </div>
+                </div>
+            )}
+            {outputsOf(node, def).length > 0 && onProbe && (
+                <div className="pg-insp__section">
+                    <div className="pg-insp__title">Outputs — attach an instrument</div>
+                    {outputsOf(node, def).map((p) => (
+                        <div key={p.name} className="pg-insp__portblock">
+                            <div className="pg-insp__port">
+                                <span className={`pg-insp__kind pg-insp__kind--${p.kind}`}>{p.kind}</span>
+                                <span>{p.name}</span>
+                            </div>
+                            <ProbeButtons kind={p.kind} onProbe={(type) => onProbe(node.id, p.name, type)} />
+                        </div>
+                    ))}
+                </div>
+            )}
+            <div className="pg-insp__row">
+                <Button size="sm" icon={<Icon.Copy />} onClick={onDuplicate}>Duplicate</Button>
+                <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={onRemove}>Remove</Button>
+            </div>
+        </div>
+    );
+}

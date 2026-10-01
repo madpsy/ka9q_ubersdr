@@ -31,6 +31,7 @@ import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import DXClusterWatch from './components/DXClusterWatch.jsx';
 import MeasureWatch from './components/MeasureWatch.jsx';
 import IQDemodWatch from './components/IQDemodWatch.jsx';
+import PlaygroundWatch from './components/PlaygroundWatch.jsx';
 import RecorderFormatWatch from './components/RecorderFormatWatch.jsx';
 import { MediaSessionProvider } from './radio/media/MediaSessionContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
@@ -301,6 +302,10 @@ export default function App() {
                                     collapsed panel would leave both in place
                                     with nothing on screen to undo them. */}
                                 <IQDemodWatch />
+                                {/* And the playground's, which holds the
+                                    receiver the same way from a window that
+                                    can be closed. */}
+                                <PlaygroundWatch />
                                 {/* And the recorder's format, which decides
                                     what the stream has to be: WAV off an Opus
                                     stream is an uncompressed copy of a lossy

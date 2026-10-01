@@ -140,3 +140,193 @@ export class ComplexFir {
         this.pos = pos;
     }
 }
+
+// ── the other shapes ─────────────────────────────────────────────────────────
+//
+// Everything below is built from designLowpass, so it shares its window, its
+// tap budget and its unity gain, and adds one well-known transformation each.
+// None of it is used by the IQ Demod panel's demodulators; it is for the
+// playground's filter blocks.
+//
+// All of these are linear-phase: an FIR of n taps delays everything by
+// (n - 1) / 2 samples, whatever its shape. That figure is the block's latency.
+
+/** A cutoff and an edge pair kept apart by at least `min` Hz. */
+function band(lowHz, highHz, min = 10) {
+    const lo = Math.min(lowHz, highHz);
+    const hi = Math.max(lowHz, highHz, lo + min);
+    return { lo, hi, centre: (lo + hi) / 2, half: (hi - lo) / 2 };
+}
+
+/**
+ * High-pass by spectral inversion: an impulse minus the low-pass. Passes above
+ * `cutoffHz` — on a complex signal, above it on both sides of zero.
+ */
+export function designHighpass(cutoffHz, rateHz, transitionHz) {
+    const taps = designLowpass(cutoffHz, rateHz, transitionHz);
+    for (let i = 0; i < taps.length; i++) taps[i] = -taps[i];
+    taps[(taps.length - 1) / 2] += 1;
+    return taps;
+}
+
+/**
+ * Band-pass for a real signal: the low-pass at half the band's width, moved up
+ * to its centre by a cosine. Unity gain at the centre.
+ */
+export function designBandpass(lowHz, highHz, rateHz, transitionHz) {
+    const b = band(lowHz, highHz);
+    const taps = designLowpass(b.half, rateHz, transitionHz);
+    const mid = (taps.length - 1) / 2;
+    const w = (2 * Math.PI * b.centre) / rateHz;
+    for (let i = 0; i < taps.length; i++) taps[i] *= 2 * Math.cos(w * (i - mid));
+    return taps;
+}
+
+/** Band-stop for a real signal: an impulse minus the band-pass. */
+export function designBandstop(lowHz, highHz, rateHz, transitionHz) {
+    const taps = designBandpass(lowHz, highHz, rateHz, transitionHz);
+    for (let i = 0; i < taps.length; i++) taps[i] = -taps[i];
+    taps[(taps.length - 1) / 2] += 1;
+    return taps;
+}
+
+/**
+ * Band-pass for a complex signal, on one side of zero only: passes `lowHz` to
+ * `highHz`, which may both be negative. The low-pass at half the width, moved
+ * to the band's centre by a complex exponential — so, unlike a real band-pass,
+ * the mirror image of the band is rejected.
+ *
+ * Returns the impulse response, `re` and `im`, in time order.
+ */
+export function designComplexBandpass(lowHz, highHz, rateHz, transitionHz) {
+    const b = band(lowHz, highHz);
+    const lp = designLowpass(b.half, rateHz, transitionHz);
+    const mid = (lp.length - 1) / 2;
+    const w = (2 * Math.PI * b.centre) / rateHz;
+    const re = new Float32Array(lp.length);
+    const im = new Float32Array(lp.length);
+    for (let i = 0; i < lp.length; i++) {
+        re[i] = lp[i] * Math.cos(w * (i - mid));
+        im[i] = lp[i] * Math.sin(w * (i - mid));
+    }
+    return { re, im };
+}
+
+/** How many taps a band-pass of this band needs, as the designs above use. */
+export function bandTapsFor(lowHz, highHz, rateHz, transitionHz) {
+    return tapsFor(band(lowHz, highHz).half, rateHz, transitionHz);
+}
+
+/**
+ * A real FIR on a real signal. Same doubled delay line as ComplexFir, one
+ * channel. The taps are symmetric (every design here is), so their order does
+ * not matter.
+ */
+export class RealFir {
+    constructor() {
+        this.taps = null;
+        this.n = 0;
+        this.buf = null;
+        this.pos = 0;
+    }
+
+    setTaps(taps) {
+        this.taps = taps;
+        if (taps.length !== this.n) {
+            this.n = taps.length;
+            this.buf = new Float32Array(this.n * 2);
+            this.pos = 0;
+        }
+    }
+
+    reset() {
+        if (this.buf) this.buf.fill(0);
+        this.pos = 0;
+    }
+
+    process(input, out, frames) {
+        const n = this.n;
+        const taps = this.taps;
+        const buf = this.buf;
+        let pos = this.pos;
+        for (let k = 0; k < frames; k++) {
+            const x = input[k];
+            buf[pos] = x;
+            buf[pos + n] = x;
+            pos = pos + 1 === n ? 0 : pos + 1;
+            let y = 0;
+            for (let t = 0; t < n; t++) y += taps[t] * buf[pos + t];
+            out[k] = y;
+        }
+        this.pos = pos;
+    }
+}
+
+/**
+ * A complex FIR — complex taps on a complex signal — for the one-sided
+ * band-pass, whose taps are not symmetric and so have to be applied the right
+ * way round: the delay line runs oldest to newest, so the impulse response is
+ * stored reversed.
+ */
+export class ComplexTapFir {
+    constructor() {
+        this.re = null;
+        this.im = null;
+        this.n = 0;
+        this.bufI = null;
+        this.bufQ = null;
+        this.pos = 0;
+    }
+
+    /** `taps` is { re, im }, the impulse response in time order. */
+    setTaps(taps) {
+        const n = taps.re.length;
+        this.re = new Float32Array(n);
+        this.im = new Float32Array(n);
+        for (let t = 0; t < n; t++) {
+            this.re[t] = taps.re[n - 1 - t];
+            this.im[t] = taps.im[n - 1 - t];
+        }
+        if (n !== this.n) {
+            this.n = n;
+            this.bufI = new Float32Array(n * 2);
+            this.bufQ = new Float32Array(n * 2);
+            this.pos = 0;
+        }
+    }
+
+    reset() {
+        if (this.bufI) this.bufI.fill(0);
+        if (this.bufQ) this.bufQ.fill(0);
+        this.pos = 0;
+    }
+
+    process(inI, inQ, outI, outQ, frames) {
+        const n = this.n;
+        const hr = this.re;
+        const hi = this.im;
+        const bI = this.bufI;
+        const bQ = this.bufQ;
+        let pos = this.pos;
+        for (let k = 0; k < frames; k++) {
+            const xi = inI[k];
+            const xq = inQ[k];
+            bI[pos] = xi;
+            bI[pos + n] = xi;
+            bQ[pos] = xq;
+            bQ[pos + n] = xq;
+            pos = pos + 1 === n ? 0 : pos + 1;
+            let yi = 0;
+            let yq = 0;
+            for (let t = 0; t < n; t++) {
+                const a = bI[pos + t];
+                const b = bQ[pos + t];
+                yi += hr[t] * a - hi[t] * b;
+                yq += hr[t] * b + hi[t] * a;
+            }
+            outI[k] = yi;
+            outQ[k] = yq;
+        }
+        this.pos = pos;
+    }
+}

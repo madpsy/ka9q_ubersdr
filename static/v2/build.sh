@@ -71,6 +71,17 @@ RUNTIME=(
     --outfile=dist/panel-runtime.js
 )
 
+# The playground's worker, a bundle of its own for the same reason: it runs in
+# a Worker, which loads a script by URL (src/playground/host.js).
+PLAYGROUND=(
+    src/playground/worker.entry.js
+    --bundle
+    --format=iife
+    --target=es2020
+    --log-level=warning
+    --outfile=dist/playground-worker.js
+)
+
 # The names a manifest may use, for the admin editor to check one against.
 #
 # Generated from the source rather than written out again: the icon keys and the
@@ -102,17 +113,20 @@ case "$MODE" in
     prod)
         esbuild "${COMMON[@]}" --minify
         esbuild "${RUNTIME[@]}" --minify
+        esbuild "${PLAYGROUND[@]}" --minify
         panel_meta
-        echo "built $OUT ($(numfmt --to=iec < <(wc -c < "$OUT"))), dist/panel-runtime.js and dist/v2.css"
+        echo "built $OUT ($(numfmt --to=iec < <(wc -c < "$OUT"))), dist/panel-runtime.js, dist/playground-worker.js and dist/v2.css"
         ;;
     dev)
         esbuild "${COMMON[@]}" --sourcemap=inline
         esbuild "${RUNTIME[@]}" --sourcemap=inline
+        esbuild "${PLAYGROUND[@]}" --sourcemap=inline
         panel_meta
-        echo "built $OUT and dist/panel-runtime.js (dev)"
+        echo "built $OUT, dist/panel-runtime.js and dist/playground-worker.js (dev)"
         ;;
     watch)
         esbuild "${RUNTIME[@]}" --sourcemap=inline
+        esbuild "${PLAYGROUND[@]}" --sourcemap=inline
         panel_meta
         esbuild "${COMMON[@]}" --sourcemap=inline --watch
         ;;

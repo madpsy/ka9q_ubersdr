@@ -65,6 +65,7 @@ import { markColors } from '../display/uiConfig.js';
 import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { Button, Field, Icon, RangeSlider, Readout, Segmented, Slider, Switch } from '../components/ui.jsx';
 import FreqEntry from '../components/FreqEntry.jsx';
+import { openPlayground } from '../playground/ui/store.js';
 import { WIDE_IQ_MODES, isIQ } from '../radio/constants.js';
 import { IQWidths } from './ReceiverPanel.jsx';
 import { formatFreqExact, formatSpan } from '../lib/format.js';
@@ -1701,6 +1702,24 @@ export default function IQPanel({ minimal }) {
                         : hearing ? `Demodulating ${vfos.length > 1 ? `${vfos.length} signals ` : ''}in the browser.`
                             : 'Waiting for the quadrature stream…'}
                 </span>
+                {/* Opposite Start, at the far end of the same row: the way
+                    into building a demodulator of your own from the same
+                    stream. Only in the full view — minimal is the operating
+                    controls, and this is not one. The window it opens lives
+                    page-wide (components/PlaygroundWatch.jsx), so folding
+                    this panel away does not close it. */}
+                {!minimal && (
+                    <Button
+                        className="iq-run__playground"
+                        size="sm"
+                        variant="ghost"
+                        icon={<Icon.Puzzle />}
+                        title="Build a demodulator from blocks"
+                        onClick={openPlayground}
+                    >
+                        Playground
+                    </Button>
+                )}
             </div>
 
             {/* The picture first: it is the map every row below is a legend for,

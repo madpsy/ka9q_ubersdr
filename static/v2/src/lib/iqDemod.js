@@ -67,6 +67,7 @@ import { Discriminator, complexPower, envelope } from './dsp/detectors.js';
 import { Agc, DcBlock, Deemphasis } from './dsp/conditioning.js';
 import { PowerDetector, SquelchGate } from './dsp/squelch.js';
 import { SpectrumRing } from './dsp/scope.js';
+import { claimIQ, releaseIQ } from './iqExclusive.js';
 import { MIN_BLOCK_SEC } from '../radio/constants.js';
 import {
     ECSS_LOW_EDGE, ECSS_TRANSITION, EcssTracker, SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN,
@@ -575,7 +576,7 @@ export function reachOf(plan) {
 }
 
 /** The front filter's pass edge for a plan. */
-function frontPassFor(plan) {
+export function frontPassFor(plan) {
     return Math.max(FRONT_PASS_HZ, Math.ceil(reachOf(plan) + 500));
 }
 
@@ -1440,6 +1441,11 @@ export class IQDemod extends Emitter {
 
     start() {
         if (this.active) return;
+        // The playground and this never run together — see lib/iqExclusive.js.
+        // If it was running, the receiver is in IQ because of it, and the mode
+        // it would have gone back to is the one to go back to now.
+        const inherited = claimIQ(this);
+        if (inherited && !this.restoreMode) this.restoreMode = inherited;
         this.active = true;
         for (const c of this.chains) c.reset();
         this._untap = this.player.onAudio((planes, frames, sampleRate) => {
@@ -1452,6 +1458,7 @@ export class IQDemod extends Emitter {
     stop() {
         if (!this.active) return;
         this.active = false;
+        releaseIQ(this);
         if (this._untap) this._untap();
         this._untap = null;
         this._applyDuck();

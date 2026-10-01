@@ -90,6 +90,16 @@ esbuild iqdemod.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/iqdemod.cjs --log-level=warning
 esbuild dspequiv.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dspequiv.cjs --log-level=warning
+esbuild playground.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/playground.cjs --log-level=warning
+esbuild playgroundengine.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/playgroundengine.cjs --log-level=warning
+esbuild playgroundui.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/playgroundui.cjs --log-level=warning
+# The playground's worker exactly as build.sh ships it, for the test that loads
+# it in a real worker thread.
+esbuild ../src/playground/worker.entry.js --bundle --format=iife --target=es2020 \
+    --outfile=.build/playground-worker.js --log-level=warning
 esbuild wavlossless.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/wavlossless.cjs --log-level=warning
 esbuild ../src/lib/backoff.js --bundle --format=cjs --platform=node \
@@ -670,6 +680,18 @@ node ncdxf.test.js
 node clockpanel.test.js
 node iqdemod.test.js
 node dspequiv.test.js
+node playground.test.js
+node playgroundfilters.test.js
+node playgroundviewers.test.js
+node playgroundcontrols.test.js
+node playgroundradio.test.js
+node playgroundtiming.test.js
+node playgroundmessages.test.js
+node playgroundtemplates.test.js
+node playgrounddigital.test.js
+node playgroundengine.test.js
+node playgroundfiles.test.js
+node playgroundui.test.js
 node wavlossless.test.js
 node tuningrange.test.js
 node bandtune.test.js

@@ -579,6 +579,21 @@ export class EcssTracker {
         this.reset();
     }
 
+    /**
+     * How late the audio comes out, in samples at the tracker's rate: half the
+     * sideband filter's length, the longer of the two since Auto can switch
+     * between them — and in Both, the combiner's transform on top of that. SAM
+     * is its one straddling filter. Read by the playground; nothing here uses
+     * it.
+     */
+    get latencySamples() {
+        if (!this.plan) return 0;
+        const half = (f) => Math.max(0, (f.n - 1) / 2);
+        if (this.plan.kind === 'sam') return half(this.dsb);
+        const side = Math.max(half(this.usb), half(this.lsb));
+        return this.plan.sideband === 'both' ? side + this.combiner.N : side;
+    }
+
     /** Forget the carrier. Starting is not resuming. */
     reset() {
         this.phase = 0;

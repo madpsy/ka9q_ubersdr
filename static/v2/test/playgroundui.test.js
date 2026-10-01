@@ -320,6 +320,28 @@ t('a shared graph is offered rather than loaded, and the offer can be taken or r
     closePlayground();
 });
 
+t('a loaded shared graph can be swapped back for the one that was open, even after editing it', () => {
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    pg.setGraph(g([{ id: 'mine', type: 'signal', x: 40, y: 80 }]));
+    const before = JSON.stringify(pg.graph);
+    offerSharedGraph({ graph: g([{ id: 's', type: 'signal' }]), errors: [] });
+    let r = render(PlaygroundWindow, {}, ctx);
+    const btn = (label) => deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === label);
+    btn('Load it').props.onClick();
+    assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['s']);
+    r.cleanups.forEach((f) => f());
+    // Rendered again on the same hook state: the notice is the window's own.
+    r = render(PlaygroundWindow, {}, ctx);
+    assert.match(words(deep(r.tree).find((n) => cls(n) === 'pg-notice')), /Loaded the shared graph/);
+    pg.setGraph(g([{ id: 's', type: 'signal' }, { id: 't', type: 'signal' }]));
+    btn('Put mine back').props.onClick();
+    assert.strictEqual(JSON.stringify(pg.graph), before, 'the graph that was open did not come back');
+    r.cleanups.forEach((f) => f());
+    closePlayground();
+});
+
 t('the inspector renders every block type’s settings', () => {
     const pg = getPlayground(radio().player);
     for (const def of BLOCKS) {

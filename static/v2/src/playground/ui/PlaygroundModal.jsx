@@ -222,7 +222,7 @@ function SharedOffer({ pending, onLoad }) {
             <div className="pg-offer__card">
                 <div className="pg-offer__title">{ok ? 'Shared graph' : 'Shared graph unreadable'}</div>
                 <p>
-                    {ok ? `A link brought a graph of ${count} ${count === 1 ? 'block' : 'blocks'}. Loading it replaces the one open now; Undo puts that back.` : 'A playground link could not be read.'}
+                    {ok ? `A link brought a graph of ${count} ${count === 1 ? 'block' : 'blocks'}. Loading it replaces the one open now; you can put yours back afterwards.` : 'A playground link could not be read.'}
                     {pending.errors && pending.errors.length ? ` ${pending.errors.map((e) => e.message).join(' ')}` : ''}
                 </p>
                 <div className="pg-offer__actions">
@@ -304,6 +304,17 @@ export function PlaygroundWindow({ onClose }) {
         setPicked({ nodes: new Set(), wire: null });
         fit(next);
         if (message) setNotice(message);
+    };
+    // A replacement the operator did not build, with a button on the notice
+    // that brings back what they had. As an edit of its own rather than an
+    // undo, so it still restores their graph after they have changed the new
+    // one.
+    const replaceKeepingBack = (next, text) => replace(next, { text, back: cloneGraph(graph) });
+    const putBack = (back) => {
+        apply(back);
+        setPicked({ nodes: new Set(), wire: null });
+        fit(back);
+        setNotice('Your graph is back. Undo brings the loaded one back again.');
     };
 
     // A graph with no IQ stream in it — a file, a generator — runs by
@@ -438,7 +449,7 @@ export function PlaygroundWindow({ onClose }) {
                     onFit={() => fit()}
                     onFromDemod={() => replace(graphFromIQDemod(rate), 'Loaded IQ Demod’s selected demodulator.')}
                     onNew={() => replace(emptyGraph(), null)}
-                    onTemplate={(t) => replace(t.build(), `Loaded “${t.title}”. ${t.summary} Undo puts your graph back.`)}
+                    onTemplate={(t) => replaceKeepingBack(t.build(), `Loaded “${t.title}”. ${t.summary}`)}
                     onImport={() => fileInput.current && fileInput.current.click()}
                     onExport={exportFile}
                     onShare={share}
@@ -455,14 +466,19 @@ export function PlaygroundWindow({ onClose }) {
                 <SharedOffer
                     pending={ui.pending}
                     onLoad={() => {
-                        replace(ui.pending.graph, 'Loaded the shared graph. Undo puts yours back.');
+                        replaceKeepingBack(ui.pending.graph, 'Loaded the shared graph.');
                         offerSharedGraph(null);
                     }}
                 />
             )}
             {notice && (
                 <div className="pg-notice">
-                    {typeof notice === 'string' ? notice : (
+                    {typeof notice === 'string' ? notice : notice.back ? (
+                        <>
+                            <span>{notice.text}</span>
+                            <Button size="sm" variant="primary" icon={<Icon.RotateLeft />} onClick={() => putBack(notice.back)}>Put mine back</Button>
+                        </>
+                    ) : (
                         <>
                             {notice.copied ? 'Link copied.' : 'Copy this link:'}
                             <input className="input pg-notice__link" readOnly value={notice.link} onFocus={(e) => e.target.select()} />

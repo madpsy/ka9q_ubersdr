@@ -1,15 +1,16 @@
-import React, { useEffect, useState } from '../react.js';
+import React, { useCallback, useEffect, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import FrequencyDial from '../components/FrequencyDial.jsx';
 import FilterReset from '../components/FilterReset.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import { MarginPicker } from './AudioPanel.jsx';
+import useHoldPress from '../lib/useHoldPress.js';
 import { VFO_IDS, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
 import {
     AGC_CONTROLS, FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MODES, MODE_BY_ID, TUNING_STEPS,
     edgesForShift, edgesForWidth, filterShift, hasAGCSettings, isIQ,
-    maxFilterWidth, stepLabel,
+    maxFilterWidth, stepLabel, WIDE_IQ_MODES,
 } from '../radio/constants.js';
 
 // AGC, shown only for USB and LSB — the only modes v1 exposes it for.
@@ -106,8 +107,41 @@ function VfoBar() {
 // else, and the VFOs have a panel of their own now for anyone who wants to see
 // or switch them. They are also on the keyboard and mappable to a control
 // surface, so nothing becomes unreachable by dropping the row.
+// The IQ widths this visit may use, as a row under the mode buttons. Plain IQ's
+// 12 kHz is always there; the wide presets are whichever the server listed in
+// allowed_iq_modes. Opened by right-clicking or holding the IQ button, and shut
+// again by choosing one — choosing the one already in use is the way out
+// without changing anything.
+//
+// A tune, not a reconnect: the server moves the channel to the new preset on the
+// same socket and says so in a status message, and the player rebuilds its
+// context for the new rate the first time a packet carries it. Measured against
+// a live receiver going usb → iq48 → iq96 → iq → iq192 on one socket, with the
+// throughput matching each new rate within a packet.
+function IQWidths({ mode, allowed, onChoose }) {
+    const options = [
+        { value: 'iq', label: '12 kHz', title: 'Plain IQ — 12 kHz' },
+        ...WIDE_IQ_MODES
+            .filter((m) => allowed.includes(m.id))
+            .map((m) => {
+                const k = (m.high - m.low) / 1000;
+                return { value: m.id, label: `${k} kHz`, title: `${m.label} — ${k} kHz of RF` };
+            }),
+    ];
+    return (
+        <div role="group" aria-label="IQ width" className="stack">
+            <Segmented minItemWidth={54} size="sm" value={mode} onChange={onChoose} options={options} />
+            {options.length === 1 && (
+                <div className="note note--tight">
+                    This receiver offers you no IQ wider than 12 kHz.
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function ReceiverPanel({ minimal }) {
-    const { tuning, actions, running } = useRadio();
+    const { tuning, actions, running, allowedIQModes } = useRadio();
     // Shared with click-to-tune on the spectrum, so both land on the same grid.
     const display = useDisplay();
     const step = display.tuneStep || 500;
@@ -118,6 +152,23 @@ export default function ReceiverPanel({ minimal }) {
     const mode = MODE_BY_ID[tuning.mode] || MODES[0];
     const width = Math.abs(tuning.bandwidthHigh - tuning.bandwidthLow);
     const iq = isIQ(tuning.mode);
+
+    // The IQ width row. Opening is idempotent, as useHoldPress requires: a long
+    // press on Android arrives as both the timer and a contextmenu.
+    const [iqWidths, setIqWidths] = useState(false);
+    const openWidths = useCallback(() => setIqWidths(true), []);
+    const [iqPress, iqAfterHold] = useHoldPress(openWidths);
+    const chooseWidth = (id) => {
+        setIqWidths(false);
+        if (id !== tuning.mode) actions.setMode(id);
+    };
+    const chooseMode = (id) => {
+        setIqWidths(false);
+        // Already in some IQ: pressing the lit button keeps the width in use
+        // rather than quietly dropping a wide preset back to 12 kHz.
+        if (id === 'iq' && iq) return;
+        actions.setMode(id);
+    };
 
     // Lower-sideband modes are edited as a positive width around the carrier so
     // the sliders behave the same way regardless of sideband.
@@ -153,14 +204,28 @@ export default function ReceiverPanel({ minimal }) {
             <div role="group" aria-label="Mode">
                 {/* Wraps to as many rows as the dock width needs: 4x2 at the
                     default width, never fewer than 3 columns when narrowed. */}
+                {/* Every IQ width lights the one IQ button, labelled with the
+                    width in use; the button itself always asks for plain IQ. */}
                 <Segmented
                     minItemWidth={54}
                     size="sm"
-                    value={tuning.mode}
-                    onChange={actions.setMode}
-                    options={MODES.map((m) => ({ value: m.id, label: m.label }))}
+                    value={iq ? 'iq' : tuning.mode}
+                    onChange={chooseMode}
+                    options={MODES.map((m) => (m.id === 'iq'
+                        ? {
+                            value: m.id,
+                            label: iq ? mode.label : m.label,
+                            title: 'IQ — right-click or hold for wider IQ',
+                            press: iqPress,
+                            afterHold: iqAfterHold,
+                        }
+                        : { value: m.id, label: m.label }))}
                 />
             </div>
+
+            {iqWidths && (
+                <IQWidths mode={tuning.mode} allowed={allowedIQModes || []} onChoose={chooseWidth} />
+            )}
 
             {!minimal && (
                 <>

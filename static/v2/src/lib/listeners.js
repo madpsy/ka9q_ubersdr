@@ -17,6 +17,7 @@
 // One loop serves both, and nothing polls when neither is watching.
 
 import { getServerSessionId } from '../radio/session.js';
+import { isIQ } from '../radio/constants.js';
 import { feedInterval, setFeedsAllowed } from './serverFeeds.js';
 
 // v1's cadence (app.js startStatsUpdates).
@@ -71,7 +72,8 @@ export function activeLabel(atMs, nowMs) {
 // v1 refuses to tune to an IQ channel, and so does this: there is no audio to
 // listen to and the passband means something else entirely.
 export function tunable(channel) {
-    return !!channel && !channel.you && channel.mode !== 'iq' && channel.frequency > 0;
+    // Any IQ, the wide presets included.
+    return !!channel && !channel.you && !isIQ(channel.mode) && channel.frequency > 0;
 }
 
 // --- shared polling ---------------------------------------------------------

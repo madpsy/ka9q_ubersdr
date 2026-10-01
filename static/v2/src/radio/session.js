@@ -251,6 +251,12 @@ async function checkConnection() {
             // IP look identical from here, and the second leaves nothing in the
             // browser to look at.
             bypassed: !!data.bypassed,
+            // The wide IQ presets (iq48 upwards) this client may ask for —
+            // all of them when bypassed, the operator's public_iq_modes
+            // otherwise. Plain `iq` is never listed: it is always available.
+            allowedIQModes: Array.isArray(data.allowed_iq_modes)
+                ? data.allowed_iq_modes.filter((m) => typeof m === 'string')
+                : [],
             status: res.status,
             sessionId: id,
         };
@@ -266,6 +272,8 @@ async function checkConnection() {
             // being wrong is a listener seeing a range marked as blocked that
             // they can in fact hear, which is the harmless direction.
             bypassed: false,
+            // And no wide IQ, for the same reason.
+            allowedIQModes: [],
             status: 0,
             sessionId: id,
         };

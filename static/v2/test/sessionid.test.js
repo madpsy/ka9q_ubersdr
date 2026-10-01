@@ -55,6 +55,7 @@ global.fetch = async (url, opts) => {
             client_ip: '10.0.0.9',
             session_timeout: 300,
             max_session_time: 0,
+            allowed_iq_modes: ['iq48', 'iq96'],
         }),
     };
 };
@@ -172,6 +173,20 @@ t('the check reports which id it registered', async () => {
     // await — so they read it from the answer rather than from the global.
     const check = await s.connectionCheck();
     assert.strictEqual(check.sessionId, s.getSessionId());
+});
+
+t('the wide IQ modes the server allows are passed through', async () => {
+    const check = await s.connectionCheck();
+    assert.deepStrictEqual(check.allowedIQModes, ['iq48', 'iq96']);
+});
+
+t('an unanswered check allows no wide IQ', async () => {
+    // Same direction as bypassed: a failed check must not hand out a privilege.
+    const fine = global.fetch;
+    global.fetch = async () => { throw new Error('offline'); };
+    const r = await s.connectionCheck();
+    global.fetch = fine;
+    assert.deepStrictEqual(r.allowedIQModes, []);
 });
 
 t('a refusal is not cached, so the next attempt asks again', async () => {

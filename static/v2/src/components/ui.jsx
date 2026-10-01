@@ -68,7 +68,15 @@ export function Segmented({ options, value, onChange, size = 'md', columns, minI
                     // at all, and silently offering two choices instead of three would look
                     // like the feature does not exist.
                     disabled={!!o.disabled}
-                    onClick={() => onChange(o.value)}
+                    // A second job for one option: lib/useHoldPress's `press`
+                    // handlers, and its `afterHold` to swallow the click a hold
+                    // leaves behind. The Receiver panel's IQ button uses it for
+                    // the wide IQ presets.
+                    {...(o.press || {})}
+                    onClick={() => {
+                        if (o.afterHold && o.afterHold()) return;
+                        onChange(o.value);
+                    }}
                 >
                     {o.label}
                 </button>

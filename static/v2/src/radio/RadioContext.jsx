@@ -26,7 +26,7 @@ import { getRmNoise, rmCredentials, rmModeSupported } from '../lib/rmnoise.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, applyTuningRange, bandwidthLimits, defaultAGC,
     hasAGCSettings,
-    isIQ, SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
+    isIQ, isWideIQ, SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
     autoSquelchValue, squelchEnabled, squelchThreshold, clampMargin,
     marginForMode, MARGIN_IQ_START_DB } from './constants.js';
 import { clamp } from '../lib/format.js';
@@ -83,7 +83,12 @@ function initialTuning() {
     // clamped — see lib/share.js, which is also what writes them.
     const link = readShareUrl(location.search);
 
-    const mode = link.mode || (MODE_BY_ID[saved.mode] ? saved.mode : FALLBACK_MODE);
+    const asked = link.mode || (MODE_BY_ID[saved.mode] ? saved.mode : FALLBACK_MODE);
+    // A wide IQ preset comes back as plain IQ. Whether this visit may have one
+    // is not known until /connection answers, and the socket is opened asking
+    // for this mode: one that is no longer allowed would be refused at the
+    // door, and the reconnect would ask for it again.
+    const mode = isWideIQ(asked) ? 'iq' : asked;
     const def = MODE_BY_ID[mode];
     const restore = saved.mode === mode;
     // A layout saved before the limits changed can hold a wider passband than
@@ -113,6 +118,14 @@ function initialTuning() {
         },
     };
 }
+
+// A state updater for a list of mode names that keeps the previous array when
+// the new one says the same thing. Every session start re-reads /connection,
+// and a fresh array each time would re-render every panel on the context for
+// an answer that had not changed.
+const sameModes = (next) => (prev) => (
+    prev.length === next.length && prev.every((m, i) => m === next[i]) ? prev : next
+);
 
 export function RadioProvider({ children }) {
     const saved = useMemo(loadRadioSettings, []);
@@ -160,6 +173,13 @@ export function RadioProvider({ children }) {
     // Starts false so anything reading it errs towards the ordinary listener's
     // view until the server says otherwise.
     const [bypassed, setBypassed] = useState(false);
+    // The wide IQ presets this client may use, from the same /connection reply
+    // and for the same reason: what is allowed depends on bypass and on the
+    // operator's public_iq_modes, and only the server knows both. Plain `iq`
+    // is never in it — it is always available. Empty until the server answers.
+    const [allowedIQModes, setAllowedIQModes] = useState([]);
+    const allowedIQRef = useRef(allowedIQModes);
+    allowedIQRef.current = allowedIQModes;
     // Why the last session ended, when it was not the operator who ended it —
     // { kind, message, at }, or null. Set by noteFailure and cleared by the
     // next start, so it describes the reason there is nothing running now
@@ -810,7 +830,9 @@ export function RadioProvider({ children }) {
     useEffect(() => {
         let cancelled = false;
         connectionCheck().then((r) => {
-            if (!cancelled) setBypassed(!!(r && r.bypassed));
+            if (cancelled) return;
+            setBypassed(!!(r && r.bypassed));
+            setAllowedIQModes(sameModes((r && r.allowedIQModes) || []));
         }, () => { /* not bypassed, which is the default already */ });
         return () => { cancelled = true; };
     }, []);
@@ -1198,8 +1220,10 @@ export function RadioProvider({ children }) {
             const next = MODE_BY_ID[mode] ? mode : t.mode;
             const def = MODE_BY_ID[next];
             const l = bandwidthLimits(next);
-            const lo = bandwidthLow != null ? bandwidthLow : (next === t.mode ? t.bandwidthLow : def.low);
-            const hi = bandwidthHigh != null ? bandwidthHigh : (next === t.mode ? t.bandwidthHigh : def.high);
+            // A wide IQ preset's edges are the preset's, whatever was asked.
+            const fixed = isWideIQ(next);
+            const lo = bandwidthLow != null && !fixed ? bandwidthLow : (next === t.mode ? t.bandwidthLow : def.low);
+            const hi = bandwidthHigh != null && !fixed ? bandwidthHigh : (next === t.mode ? t.bandwidthHigh : def.high);
             applyTuning({
                 ...(frequency != null ? { frequency } : {}),
                 mode: next,
@@ -1223,6 +1247,16 @@ export function RadioProvider({ children }) {
         // retuning while already there, costs nothing and asking again would be
         // a dialog in the way of the answer. Returns true when it took the
         // request, meaning the caller must not act on it.
+        // A wide IQ preset this visit has not been given. The server would
+        // refuse the tune anyway, but only after the dial, the passband and the
+        // panels had all moved to it — and nothing moves them back. So it is
+        // refused here, where every route to a mode change passes.
+        const refuseWideIQ = (mode) => {
+            if (!isWideIQ(mode) || allowedIQRef.current.includes(mode)) return false;
+            pushLog('warn', `${MODE_BY_ID[mode].label} is not available to you on this receiver`);
+            return true;
+        };
+
         const gateIQ = (pending) => {
             if (!isIQ(pending.mode) || isIQ(tuningRef.current.mode)) return false;
             pendingIQ.current = pending;
@@ -1273,7 +1307,10 @@ export function RadioProvider({ children }) {
                 // Re-read here as well as on mount: startSessionId above makes a
                 // new id, so this is a fresh check, and it is the one that knows
                 // about a password typed into the Start overlay since.
-                if (r) setBypassed(!!r.bypassed);
+                if (r) {
+                    setBypassed(!!r.bypassed);
+                    setAllowedIQModes(sameModes(r.allowedIQModes || []));
+                }
             }, () => { /* the countdown just stays as it was */ });
             const t = tuningRef.current;
             await audioConn.connect(t);
@@ -1374,6 +1411,7 @@ export function RadioProvider({ children }) {
                 // screen — a dialog asking whether to commit to a change that
                 // is going to be dropped whatever the answer is.
                 if (refuseTuning()) return;
+                if (refuseWideIQ(mode)) return;
                 if (gateIQ({ kind: 'mode', mode })) return;
                 commitMode(mode);
             },
@@ -1403,6 +1441,7 @@ export function RadioProvider({ children }) {
                 const next = MODE_BY_ID[req.mode] ? req.mode : tuningRef.current.mode;
                 // Before gateIQ, for the reason given in setMode.
                 if (refuseTuning()) return;
+                if (refuseWideIQ(next)) return;
                 if (gateIQ({ kind: 'tune', mode: next, req })) return;
                 commitTune(req);
             },
@@ -1867,7 +1906,7 @@ export function RadioProvider({ children }) {
 
     const value = useMemo(() => ({
         tuning, audioState, spectrumState, view, running, serverInfo, session, lost,
-        audio, squelch, agc, dsp, followTuning, filters, noise, locked, bypassed,
+        audio, squelch, agc, dsp, followTuning, filters, noise, locked, bypassed, allowedIQModes,
         // `bookmarks` and `local` are what *propagates* — the marker bar, the
         // ⏮/⏭ neighbours, the lock screen, the Markers panel — so a hidden
         // group disappears from all of them without any of them knowing the
@@ -1885,7 +1924,7 @@ export function RadioProvider({ children }) {
         modes: MODES,
         iqPrompt,
         audioChannels,
-    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, locked, bypassed, catalog, localMarks, hidden, actions, iqPrompt, audioChannels]);
+    }), [tuning, audioState, spectrumState, view, running, serverInfo, session, lost, audio, squelch, agc, dsp, followTuning, filters, noise, locked, bypassed, allowedIQModes, catalog, localMarks, hidden, actions, iqPrompt, audioChannels]);
 
     return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;
 }

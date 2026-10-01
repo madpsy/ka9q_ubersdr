@@ -8,6 +8,7 @@ const {
     MAX_FREQ, MIN_FREQ,
     SQUELCH_MIN, SQUELCH_MAX, SQUELCH_SENTINEL, SQUELCH_STEP,
     autoSquelchValue, bandwidthLimits, maxFilterWidth, snapStep, squelchEnabled, squelchThreshold,
+    MODES, MODE_BY_ID, WIDE_IQ_MODES, isIQ, isWideIQ,
 } = require('./.build/constants.cjs');
 const dspLib = require('./.build/dsp.cjs');
 const mk = require('./.build/markers.cjs');
@@ -320,6 +321,37 @@ t('setAudioGate emits the server field names and records for reconnect', () => {
 
     a.setAudioGate({ minSnr: SQUELCH_SENTINEL });
     assert.deepStrictEqual(sent[1], { type: 'set_audio_gate', min_snr: -999 });
+});
+
+t('a tune into a wide IQ preset carries no filter edges', () => {
+    // websocket.go refuses the whole tune when a wide preset comes with edges,
+    // so sending them would leave the receiver in the old mode.
+    const a = new AudioConnection();
+    const sent = [];
+    a.ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)) };
+    global.WebSocket = { OPEN: 1 };
+    a.params = { frequency: 7074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 };
+
+    a.tune({ frequency: 7074000, mode: 'iq48', bandwidthLow: -24000, bandwidthHigh: 24000 });
+    assert.deepStrictEqual(sent[0], { type: 'tune', frequency: 7074000, mode: 'iq48' });
+    // And plain IQ still sends its own.
+    a.tune({ frequency: 7074000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 });
+    assert.deepStrictEqual(sent[1], {
+        type: 'tune', frequency: 7074000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000,
+    });
+});
+
+t('the wide IQ presets are known by id but offered by no mode list', () => {
+    for (const m of WIDE_IQ_MODES) {
+        assert.ok(MODE_BY_ID[m.id], m.id);
+        assert.ok(isIQ(m.id) && isWideIQ(m.id), m.id);
+        assert.ok(!MODES.some((x) => x.id === m.id), `${m.id} must stay out of MODES`);
+        // The passband limits are the preset's whole stream.
+        assert.deepStrictEqual(bandwidthLimits(m.id), { min: m.low, max: m.high, sideband: 'both' });
+    }
+    assert.ok(!isWideIQ('iq'));
+    assert.strictEqual(MODE_BY_ID.iq48.high - MODE_BY_ID.iq48.low, 48000);
+    assert.strictEqual(MODE_BY_ID.iq384.high - MODE_BY_ID.iq384.low, 384000);
 });
 
 t('setAudioGate with no thresholds is not sent', () => {

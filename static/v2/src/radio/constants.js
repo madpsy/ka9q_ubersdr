@@ -95,13 +95,33 @@ export const MODES = [
     // say why. Matching the preset exactly means the mode change moves no
     // filter at all.
     //
-    // The wide variants (iq48 upwards) are still absent. They need operator
-    // authorisation, they refuse passband edges in favour of the radiod preset,
-    // and at 48-384 kHz they are for feeding external tools, not a browser.
+    // The wide variants (iq48 upwards) are kept out of this list — see
+    // WIDE_IQ_MODES below.
     { id: 'iq', label: 'IQ', group: 'iq', low: -6000, high: 6000 },
 ];
 
-export const MODE_BY_ID = Object.fromEntries(MODES.map((m) => [m.id, m]));
+// The wide IQ presets. Not in MODES, which is what every mode picker, cycle
+// and menu walks: they need the server's say-so (allowed_iq_modes on the
+// /connection reply, kept as `allowedIQModes` on the radio context) and are
+// reached from the Receiver panel's IQ button by right-click or hold.
+//
+// In MODE_BY_ID all the same, so a tune to one is a tune like any other. The
+// edges are the preset's own and are never sent: the server refuses a tune
+// that carries edges for one of these, the whole tune and not just the edges
+// (websocket.go). They are here for the passband readout and the spectrum.
+export const WIDE_IQ_MODES = [
+    { id: 'iq48', label: 'IQ 48', group: 'iq', low: -24000, high: 24000 },
+    { id: 'iq96', label: 'IQ 96', group: 'iq', low: -48000, high: 48000 },
+    { id: 'iq192', label: 'IQ 192', group: 'iq', low: -96000, high: 96000 },
+    { id: 'iq384', label: 'IQ 384', group: 'iq', low: -192000, high: 192000 },
+];
+
+export const MODE_BY_ID = Object.fromEntries([...MODES, ...WIDE_IQ_MODES].map((m) => [m.id, m]));
+
+/** One of the wide IQ presets, which take no filter edges. */
+export function isWideIQ(mode) {
+    return WIDE_IQ_MODES.some((m) => m.id === mode);
+}
 
 // Whether a mode carries a stereo I/Q pair rather than demodulated audio.
 //
@@ -182,6 +202,11 @@ export function bandwidthLimits(mode) {
         // coincidence: one is the AM family's 12 kHz filter, this one is the
         // whole of the quadrature baseband.
         case 'iq': return { min: -6000, max: 6000, sideband: 'both' };
+        // The wide presets: the whole of their stream, which is all they take.
+        case 'iq48': case 'iq96': case 'iq192': case 'iq384': {
+            const m = MODE_BY_ID[mode];
+            return { min: m.low, max: m.high, sideband: 'both' };
+        }
         // am, sam, nfm — 12 kHz maximum width.
         default: return { min: -6000, max: 6000, sideband: 'both' };
     }

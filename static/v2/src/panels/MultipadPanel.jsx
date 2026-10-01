@@ -459,9 +459,11 @@ function FreqWheel({ headRef, showBw, minimal }) {
                     A select rather than more buttons because the head is a row
                     that already holds a 27 px frequency readout: two more chips
                     would either wrap it or squeeze the readout to nothing. */}
+                {/* A wide IQ preset is shown as IQ: it is not an option here,
+                    and a select whose value matches none shows the first. */}
                 <select
                     className="pad-wheel__step pad-wheel__mode"
-                    value={tuning.mode}
+                    value={isIQ(tuning.mode) ? 'iq' : tuning.mode}
                     aria-label="Mode"
                     title="Demodulation mode"
                     onChange={(e) => actions.setMode(e.target.value)}
@@ -1173,8 +1175,10 @@ export default function MultipadPanel({ minimal }) {
                     <Segmented
                         minItemWidth={32}
                         size="sm"
-                        value={tuning.mode}
-                        onChange={actions.setMode}
+                        // Any IQ lights IQ, and pressing it there keeps the
+                        // width in use — see the Receiver panel's mode row.
+                        value={isIQ(tuning.mode) ? 'iq' : tuning.mode}
+                        onChange={(id) => { if (!(id === 'iq' && isIQ(tuning.mode))) actions.setMode(id); }}
                         options={MODES.map((m) => ({ value: m.id, label: m.label }))}
                     />
 

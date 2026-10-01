@@ -14,11 +14,17 @@
 
 import React from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
+import { MODE_BY_ID } from '../radio/constants.js';
 import { Button, Modal } from './ui.jsx';
 
 export default function IQConfirm() {
     const { iqPrompt, actions } = useRadio();
     if (!iqPrompt) return null;
+    // The wide presets say their own width, and cost in proportion: plain IQ's
+    // 12 kHz is the roughly-six-times figure below.
+    const def = MODE_BY_ID[iqPrompt.mode] || MODE_BY_ID.iq;
+    const spanKHz = (def.high - def.low) / 1000;
+    const times = Math.round((6 * spanKHz) / 12);
 
     return (
         <Modal onClose={actions.cancelIQ} label="Use IQ mode">
@@ -29,14 +35,14 @@ export default function IQConfirm() {
                     — which reads a capitalised Switch as the ui.jsx component. */}
                 <h2 className="vibe__title">Use IQ mode?</h2>
                 <p className="vibe__text">
-                    IQ sends the raw quadrature baseband &mdash; 12 kHz of RF as a
+                    IQ sends the raw quadrature baseband &mdash; {spanKHz} kHz of RF as a
                     stereo pair, left I and right Q &mdash; rather than demodulated
                     audio. It is meant for recording and for feeding external
                     software, and what comes out of the speakers is not a signal
                     you can listen to.
                 </p>
                 <p className="vibe__text">
-                    Sent whole it is roughly <strong>6&times; the bandwidth of
+                    Sent whole it is roughly <strong>{times}&times; the bandwidth of
                     Opus</strong>, and that cost falls on whoever runs this receiver,
                     so it starts at the Audio panel&rsquo;s narrowest Quality setting
                     &mdash; bits below the band&rsquo;s own noise floor are dropped,

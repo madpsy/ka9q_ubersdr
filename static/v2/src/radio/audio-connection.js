@@ -17,7 +17,7 @@
 // The server falls back to JSON `audio` messages (base64 PCM) when Opus is
 // unavailable; that path is handled too so the UI still works on such a server.
 
-import { marginFromSlider } from './constants.js';
+import { isWideIQ, marginFromSlider } from './constants.js';
 import { Emitter } from './emitter.js';
 import { failureKind } from '../lib/connectFailure.js';
 import { PCMStreamDecoder, isZstdFrame } from './pcm-stream.js';
@@ -224,6 +224,12 @@ export class AudioConnection extends Emitter {
             format: this.format,
             version: String(PROTOCOL_VERSION),
         });
+        // A wide IQ preset keeps the preset's own edges. The server ignores
+        // them here, but refuses a tune that carries them — see tune().
+        if (isWideIQ(params.mode)) {
+            q.delete('bandwidthLow');
+            q.delete('bandwidthHigh');
+        }
         // Omitted entirely when lossless, so the request looks exactly as it did
         // before the mode existed.
         if (this.minMargin > 0) q.set('min_margin', String(this.minMargin));
@@ -376,8 +382,13 @@ export class AudioConnection extends Emitter {
         const msg = { type: 'tune' };
         if (frequency != null) msg.frequency = Math.round(frequency);
         if (mode != null) msg.mode = mode;
-        if (bandwidthLow != null) msg.bandwidthLow = Math.round(bandwidthLow);
-        if (bandwidthHigh != null) msg.bandwidthHigh = Math.round(bandwidthHigh);
+        // Never with a wide IQ preset: websocket.go rejects the *whole* tune
+        // when one carries edges, so the mode change would not happen at all.
+        // The mode in force counts, not just the one being sent — a retune
+        // inside iq96 is still in iq96.
+        const wide = isWideIQ(mode != null ? mode : this.params && this.params.mode);
+        if (bandwidthLow != null && !wide) msg.bandwidthLow = Math.round(bandwidthLow);
+        if (bandwidthHigh != null && !wide) msg.bandwidthHigh = Math.round(bandwidthHigh);
         if (this.params) Object.assign(this.params, { frequency, mode, bandwidthLow, bandwidthHigh });
         return this.send(msg);
     }

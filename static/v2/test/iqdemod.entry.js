@@ -7,6 +7,7 @@
 import { deep, render, reset, walk, words } from './hookStub.js';
 import IQPanel, { ListeningCard, VFO_FALLBACK, ecssReport, holdReading, vfoSummary } from '../src/panels/IQPanel.jsx';
 import { PANEL_BY_ID } from '../src/panels/registry.jsx';
+import IQDemodWatch from '../src/components/IQDemodWatch.jsx';
 import { GROUPS } from '../src/panels/groups.jsx';
 import {
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
@@ -24,6 +25,7 @@ import {
 } from '../src/lib/iqDemod.js';
 
 module.exports = {
+    IQDemodWatch,
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,

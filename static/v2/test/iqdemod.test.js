@@ -34,6 +34,7 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEv
 globalThis.TextDecoder = globalThis.TextDecoder || require('util').TextDecoder;
 
 const {
+    IQDemodWatch,
     deep, render, reset, walk, words,
     DRAG_SLOP_PX, IQ_FFT_SIZE, IQSpectrum, MARKER_GRAB_PX, aimCancel, aimDown, aimMove, aimUp,
     binsToPixels, fftInPlace, fractionOffset, hannWindow, markerAt, newAim, offsetFraction,
@@ -2028,6 +2029,32 @@ function context(over) {
 }
 
 const engine = () => getIQDemod(context().player);
+
+t('the picture is scaled to the IQ width in use, with no demodulator running', () => {
+    // The engine only hears the rate from packets it demodulates, so the
+    // scale has to come from the mode: IQ 48 with nothing started still reads
+    // ±24 kHz, and going back to plain IQ brings ±6 kHz back.
+    fresh();
+    const scale = (mode, high) => {
+        const ctx = context({ tuning: { frequency: 7_100_000, mode, bandwidthLow: -high, bandwidthHigh: high } });
+        reset();
+        render(IQDemodWatch, {}, ctx);
+        reset();
+        const { tree, cleanups } = render(IQPanel, {}, ctx);
+        const edges = deep(tree).filter((n) => cls(n) === 'iq-scope__scale');
+        for (const off of cleanups) off();
+        assert.strictEqual(edges.length, 1, 'no scale under the picture');
+        return deepWords(edges[0]);
+    };
+    assert.ok(!getIQDemod(context().player).running, 'a demodulator is running');
+    let text = scale('iq48', 24000);
+    assert.ok(/−\s*24 kHz/.test(text) && /\+\s*24 kHz/.test(text), `IQ 48 scale: ${text}`);
+    assert.strictEqual(iqHalfSpan(), 24000, 'the offsets are not clamped to the wide span');
+    text = scale('iq', 6000);
+    assert.ok(/−\s*6 kHz/.test(text) && /\+\s*6 kHz/.test(text), `IQ scale: ${text}`);
+    assert.strictEqual(iqHalfSpan(), IQ_HALF_SPAN);
+    fresh();
+});
 
 t('it renders docked and minimal', () => {
     for (const minimal of [false, true]) {

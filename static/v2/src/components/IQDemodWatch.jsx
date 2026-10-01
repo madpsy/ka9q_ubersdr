@@ -17,6 +17,8 @@
 //                 to, so it follows the same volume and mute. The DRM panel does
 //                 this with its own gain node for the same reason.
 //   the way out   a receiver switched off, or a mode changed by hand, stops it.
+//   the width     which IQ preset is in use, so the reach and the picture's
+//                 scale are right before any packet has been demodulated.
 //
 // The mode is deliberately *not* put back on that last path: if the operator has
 // chosen a mode themselves that is the one they want. Stop puts it back, and
@@ -24,8 +26,8 @@
 
 import { useEffect } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { isIQ } from '../radio/constants.js';
-import { getIQDemod } from '../lib/iqDemod.js';
+import { MODE_BY_ID, isIQ } from '../radio/constants.js';
+import { getIQDemod, setIQSpan } from '../lib/iqDemod.js';
 
 export default function IQDemodWatch() {
     const { running, tuning, audio, player, iqPrompt } = useRadio();
@@ -35,6 +37,16 @@ export default function IQDemodWatch() {
     useEffect(() => {
         demod.setQuadrature(iq && running);
     }, [demod, iq, running]);
+
+    // The reach follows the IQ width chosen, not only the packets. The engine
+    // learns the rate from the stream, but only while a demodulator is running
+    // — so without this, a switch to IQ 48 with none started left the panel's
+    // picture labelled, and its offsets clamped, as plain IQ's ±6 kHz. The
+    // preset's span is its rate, which is what the stream will carry.
+    useEffect(() => {
+        const def = iq && MODE_BY_ID[tuning.mode];
+        if (def) setIQSpan(def.high - def.low);
+    }, [iq, tuning.mode]);
 
     useEffect(() => {
         demod.setOutput(audio.volume, audio.muted);

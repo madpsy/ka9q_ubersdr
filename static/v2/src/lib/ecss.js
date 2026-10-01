@@ -99,6 +99,42 @@ export const ECSS_ACQUIRE = 'acquire';
 export const ECSS_LOCKED = 'locked';
 export const ECSS_HOLD = 'hold';
 
+// ── silent until locked ─────────────────────────────────────────────────────
+
+// How quickly the audio comes up once the tracker locks, and goes once it
+// loses the carrier: quick enough that the start of a sentence is not lost,
+// slow enough not to click. A hold — a fade riding through — counts as locked,
+// so a dip in the carrier does not chop the programme.
+export const LOCK_MUTE_SEC = 0.03;
+
+/**
+ * Silence while the tracker has no carrier. Before it locks, SAM and ECSS hear
+ * whatever is at the offset as plain sideband, mistuned — the whistle and
+ * garble of a search — which is worth hearing on a weak signal and not on
+ * a broadcast. This is a gain per sample to multiply the audio by: rising
+ * towards 1 while `locked`, falling towards 0 while not.
+ */
+export class LockMute {
+    constructor() { this.g = 0; }
+
+    reset() { this.g = 0; }
+
+    /** Fill `out` with the gain for `frames` samples at `rate`. */
+    process(locked, out, frames, rate) {
+        const a = 1 - Math.exp(-1 / (rate * LOCK_MUTE_SEC));
+        const target = locked ? 1 : 0;
+        let g = this.g;
+        for (let k = 0; k < frames; k++) {
+            g += a * (target - g);
+            out[k] = g;
+        }
+        // Settled is exactly settled, so a locked signal is not left a
+        // millionth down for ever.
+        if (Math.abs(g - target) < 1e-6) g = target;
+        this.g = g;
+    }
+}
+
 // ── the loop ─────────────────────────────────────────────────────────────────
 
 // The carrier's own low-pass, ahead of the phase detector: two one-pole

@@ -42,7 +42,7 @@ function versus({ settings, back, rate, seconds, split }) {
     assert.ok(rt.ok, `the graph does not compile: ${rt.errors.map((e) => e.message).join('; ')}`);
     const { I, Q, n } = scene(rate, seconds);
     const next = SPLITS[split](rate);
-    const opts = { agc: back.agc, gain: back.gain, squelchDb: back.squelchDb };
+    const opts = { agc: back.agc, gain: back.gain, squelchDb: back.squelchDb, lockMute: !!back.lockMute };
     for (let at = 0, p = 0; at < n; p++) {
         const len = Math.min(next(), n - at);
         const pI = I.subarray(at, at + len);
@@ -126,6 +126,19 @@ for (const rate of [12000, 192000]) {
         });
     }
 }
+
+// Silent until locked: the mute after the squelch, fading in on the lock.
+const MUTED = { agc: true, gain: 1, squelchDb: -28, lockMute: true };
+for (const { rate, seconds } of RATES.slice(0, 2)) {
+    for (const m of [MODES[6], MODES[7], MODES[8]]) {
+        t(`graph = DemodChain: ${label(m)} @${rate / 1000}k, mute until locked`, () => {
+            versus({ settings: { ...BASE, ...m }, back: MUTED, rate, seconds, split: 'packet' });
+        });
+    }
+}
+t('graph = DemodChain: ecss @12k, mute until locked, random packet cuts', () => {
+    versus({ settings: { ...BASE, ...MODES[7] }, back: MUTED, rate: 12000, seconds: 2.2, split: 'random' });
+});
 
 for (const m of [MODES[0], MODES[7]]) {
     t(`graph = DemodChain: ${label(m)} @192k, packets shorter than the decimation`, () => {

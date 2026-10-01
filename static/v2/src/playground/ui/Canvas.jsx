@@ -15,11 +15,11 @@
 import React, { useEffect, useRef, useState } from '../../react.js';
 import { BLOCK_BY_TYPE } from '../blocks/index.js';
 import {
-    FOOT_H, HEAD_H, PAD, PORT_GRAB_PX, ROW_H, nodeHeight, nodeWidth, portAt, portPositionByName, visualTop,
+    FOOT_H, HEAD_H, PAD, PORT_GRAB_PX, RF_H, ROW_H, hasRfLine, nodeHeight, nodeWidth, portAt, portPositionByName, visualTop,
     screenToWorld, wirePath, zoomAbout,
 } from '../geometry.js';
 import { canConnect, connectPorts, disconnectInput } from '../editing.js';
-import CardVisual from './CardVisual.jsx';
+import CardVisual, { RfLine } from './CardVisual.jsx';
 import { inputOrigin } from '../probes.js';
 import { inputsOf, outputsOf } from '../block.js';
 
@@ -46,7 +46,7 @@ export function formatRate(hz) {
     return hz >= 1000 ? `${Number((hz / 1000).toFixed(hz % 1000 ? 2 : 0))}k` : `${Math.round(hz)}`;
 }
 
-function Card({ pg, node, selected, errors, rate, latency, cpu, wiredIn, onPortDown, look, origin, onParams }) {
+function Card({ pg, graph, node, selected, errors, rate, latency, cpu, wiredIn, onPortDown, look, origin, origins, onParams }) {
     const def = BLOCK_BY_TYPE[node.type];
     if (!def) return null;
     const h = nodeHeight(node);
@@ -88,8 +88,13 @@ function Card({ pg, node, selected, errors, rate, latency, cpu, wiredIn, onPortD
                 className="pg-card__visual"
                 style={{ top: `${visualTop(node)}px` }}
             >
-                <CardVisual pg={pg} node={node} look={look} origin={origin} onParams={onParams} />
+                <CardVisual pg={pg} node={node} look={look} origin={origin} rate={rate} onParams={onParams} />
             </div>
+            {hasRfLine(node.type) && (
+                <div className="pg-card__rfbox" style={{ bottom: `${FOOT_H}px`, height: `${RF_H}px` }}>
+                    <RfLine pg={pg} graph={graph} node={node} dialHz={look && look.dialHz} origins={origins} />
+                </div>
+            )}
             <div className="pg-card__foot" style={{ height: `${FOOT_H}px` }}>
                 <span title="The rate this block works at">{formatRate(rate)}</span>
                 <span title={latencyTitle}>{latency ? `⏱ ${formatLatency(latency.own)}${def.latencyNote ? '*' : ''}` : ''}</span>
@@ -296,6 +301,8 @@ export default function Canvas({
                             onPortDown={onPortDown}
                             look={look}
                             origin={origins ? inputOrigin(graph, origins, n.id) : null}
+                            graph={graph}
+                            origins={origins}
                             onParams={onParams}
                         />
                     );

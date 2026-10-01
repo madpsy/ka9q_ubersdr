@@ -27,10 +27,10 @@ const SQUELCH_OFF = -60;
 
 /**
  * The graph for one plan (planFor's output) at one stream rate, with the panel's
- * per-demodulator back end: `agc`, `gain` and `squelchDb` as DemodChain.process
- * takes them.
+ * per-demodulator back end: `agc`, `gain`, `squelchDb` and `lockMute` as
+ * DemodChain.process takes them.
  */
-export function graphForPlan(plan, rateHz, { agc = true, gain = 1, squelchDb = SQUELCH_OFF } = {}) {
+export function graphForPlan(plan, rateHz, { agc = true, gain = 1, squelchDb = SQUELCH_OFF, lockMute = false } = {}) {
     const nodes = [];
     const wires = [];
     let col = 0;
@@ -64,6 +64,7 @@ export function graphForPlan(plan, rateHz, { agc = true, gain = 1, squelchDb = S
             widthHz: plan.widthHz,
             sideband: plan.sideband || 'both',
             trackHz: plan.trackHz,
+            lockMute,
         });
         wire(at, 'out', 'tracker', 'in');
         col++;
@@ -115,8 +116,18 @@ export function graphForPlan(plan, rateHz, { agc = true, gain = 1, squelchDb = S
     wire('gain', 'out', 'gate', 'a');
     wire('squelch', 'out', 'gate', 'b');
     col++;
+    let gated = ['gate', 'out'];
+    if (tracked && lockMute) {
+        // Silent until the tracker locks: after the squelch, as the chain
+        // does it.
+        add('mute', 'multiply');
+        wire('gate', 'out', 'mute', 'a');
+        wire('tracker', 'lock', 'mute', 'b');
+        gated = ['mute', 'out'];
+        col++;
+    }
     add('clip', 'clip');
-    wire('gate', 'out', 'clip', 'in');
+    wire(...gated, 'clip', 'in');
     col++;
     add('audio', 'audio-out');
     wire('clip', 'out', 'audio', 'in');

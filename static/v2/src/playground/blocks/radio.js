@@ -68,6 +68,7 @@ export const DemodulatorBlock = {
         agc: { kind: 'bool', label: 'AGC', default: true },
         gain: { kind: 'number', label: 'Gain', unit: '×', default: 1, min: 0, max: 4, step: 0.05, live: true },
         squelchDb: { kind: 'number', label: 'Squelch', unit: 'dBFS', default: -60, min: -60, max: 0, step: 1, live: true },
+        lockMute: { kind: 'bool', label: 'Mute until locked (SAM/ECSS)', default: true },
     },
     rate: (inRate, p) => workingRate(inRate, demodPlan(p, inRate)),
     // Never more out than in: a decimating chain puts out fewer.
@@ -107,7 +108,7 @@ export const DemodulatorBlock = {
             },
             process(ins, outs, n) {
                 chain.configure(plan, rate);
-                const audio = chain.process(ins[0].re, ins[0].im, n, { agc: p.agc, gain: p.gain, squelchDb: p.squelchDb });
+                const audio = chain.process(ins[0].re, ins[0].im, n, { agc: p.agc, gain: p.gain, squelchDb: p.squelchDb, lockMute: p.lockMute });
                 const m = audio ? chain.outFrames : 0;
                 for (let k = 0; k < m; k++) outs[0].re[k] = audio[k];
                 if (outs[1]) emitControl(outs[1], chain.sigDb);

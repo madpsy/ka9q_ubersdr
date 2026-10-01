@@ -1053,9 +1053,10 @@ export function ecssReport(ecss, vfo, dialHz) {
         // Still locked in every sense the audio cares about: the carrier has
         // faded and the loop is coasting on the frequency it had.
         case 'hold': return { text: 'Holding', tone: 'ok', carrier, side };
-        case 'acquire': return { text: 'Locking', tone: 'weak', carrier, side };
-        // Plain sideband at the offset until a carrier turns up.
-        default: return { text: 'Searching', tone: 'weak', carrier: null, side };
+        case 'acquire': return { text: ecss.muted ? 'Locking · muted' : 'Locking', tone: 'weak', carrier, side };
+        // Plain sideband at the offset until a carrier turns up — or nothing,
+        // with mute until locked on.
+        default: return { text: ecss.muted ? 'Searching · muted' : 'Searching', tone: 'weak', carrier: null, side };
     }
 }
 
@@ -1116,6 +1117,12 @@ function EcssControls({ vfo, ecss, dialHz, minimal, set }) {
                     value={shown.current == null ? '—' : formatFreqExact(shown.current)}
                 />
             </div>
+            <Switch
+                checked={vfo.lockMute}
+                onChange={(lockMute) => set({ lockMute })}
+                label="Mute until locked"
+                title="Silent until the tracker has a carrier. Off, you hear the signal as plain sideband while it searches — mistuned, but sometimes enough on a weak one."
+            />
             {!minimal && (
                 <Field label="Tracking range" hint={`±${vfo.trackHz} Hz of the offset`}>
                     <Slider

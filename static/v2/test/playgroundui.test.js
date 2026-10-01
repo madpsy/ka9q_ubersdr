@@ -47,6 +47,7 @@ const {
     spectrumMarks, counterText, groupDigits, PROBES,
     BLOCKS, BLOCK_BY_TYPE, GRAPH_VERSION, compile, parseGraph, getPlayground, resetDemodSettings, saveDemodSettings,
     formatCpu, formatLatency, formatRate,
+    RfLine, airSpan, rfLabel, rfOf, shiftLabel, hasRfLine,
 } = P;
 
 let pass = 0;
@@ -291,7 +292,7 @@ t('the window is nothing while closed, and the whole editor while open', () => {
     assert.ok(tree, 'nothing rendered while open');
     const all = deep(tree);
     const has = (c) => all.some((n) => cls(n).split(' ').includes(c));
-    for (const c of ['pg', 'pg-bar', 'pg__palette', 'pg-canvas', 'pg__inspector']) assert.ok(has(c), `no ${c}`);
+    for (const c of ['pg', 'pg-bar', 'pg__side--left', 'pg-canvas', 'pg__side--right']) assert.ok(has(c), `no ${c}`);
     // Every block the palette offers.
     const items = all.filter((n) => cls(n) === 'pg-pal__item');
     assert.strictEqual(items.length, BLOCKS.length);
@@ -357,6 +358,137 @@ t('every card visual renders, with and without readings', () => {
     reset();
     const shut = words(React.createElement(CardVisual, { pg, node: { id: 'n', type: 'squelch' } }));
     assert.strictEqual(shut, '—');
+});
+
+// ── where on the air ────────────────────────────────────────────────────────
+
+t('the RF and offset labels read as a dial does', () => {
+    assert.strictEqual(rfLabel(14074000), '14.074 000 MHz');
+    assert.strictEqual(rfLabel(14075500.4), '14.075 500 MHz');
+    assert.strictEqual(rfLabel(519000), '519.000 kHz');
+    assert.strictEqual(shiftLabel(-1000), '−1 000 Hz');
+    assert.strictEqual(shiftLabel(1500), '+1 500 Hz');
+    assert.strictEqual(shiftLabel(0), '±0 Hz');
+    assert.strictEqual(shiftLabel(125000), '+125 kHz');
+    const c = airSpan(14074000, 48000);
+    assert.strictEqual(c.range, '14.050–14.098 MHz');
+    assert.strictEqual(c.width, '48 kHz wide');
+    assert.strictEqual(airSpan(518000, 12000).range, '512.0–524.0 kHz');
+    assert.strictEqual(airSpan(0, 48000), null);
+});
+
+const rfChain = () => g(
+    [
+        { id: 'iq', type: 'iq-in' },
+        { id: 'shift', type: 'shift', params: { frequencyHz: -1000 } },
+        { id: 'lp', type: 'lowpass', params: { cutoffHz: 3000 } },
+        { id: 'psk', type: 'psk31-decoder', params: { offsetHz: 500 } },
+        { id: 'demod', type: 'demodulator', params: { mode: 'usb', offsetHz: -2000 } },
+        { id: 'am', type: 'envelope' },
+        { id: 'spec', type: 'iq-spectrum' },
+    ],
+    [
+        ['iq', 'out', 'shift', 'in'], ['shift', 'out', 'lp', 'in'], ['lp', 'out', 'psk', 'in'],
+        ['iq', 'out', 'demod', 'in'], ['lp', 'out', 'am', 'in'], ['lp', 'out', 'spec', 'in'],
+    ],
+);
+
+t('every stream block knows its RF and its offset from the centre, all down the chain', () => {
+    const graph = rfChain();
+    const at = (id, live) => rfOf(graph, graph.nodes.find((n) => n.id === id), 14074000, null, live);
+    // Shifting down by 1 kHz brings what was 1 kHz up to zero.
+    assert.deepStrictEqual([at('shift').hz, at('shift').shiftHz], [14075000, 1000]);
+    // A filter moves nothing.
+    assert.deepStrictEqual([at('lp').hz, at('lp').shiftHz], [14075000, 1000]);
+    // A decoder listens at its offset into what it is fed.
+    assert.deepStrictEqual([at('psk').hz, at('psk').shiftHz, at('psk').listening], [14075500, 1500, true]);
+    assert.ok(at('psk').live, 'auto-tune moves it');
+    // …and follows auto-tune to where it pulled itself.
+    assert.strictEqual(at('psk', { driven: {}, reading: { tunedHz: 512 } }).hz, 14075512);
+    assert.deepStrictEqual([at('demod').hz, at('demod').shiftHz], [14072000, -2000]);
+    // A detector works at the zero of what feeds it.
+    assert.strictEqual(at('am').hz, 14075000);
+    assert.strictEqual(at('iq'), null, 'a source says it on its own card');
+    assert.ok(hasRfLine('shift') && hasRfLine('psk31-decoder') && hasRfLine('demodulator'));
+    assert.ok(!hasRfLine('iq-in') && !hasRfLine('iq-spectrum') && !hasRfLine('audio-out') && !hasRfLine('slider'));
+});
+
+t('a shift a control drives is unknown until the engine says where it is', () => {
+    const graph = g(
+        [
+            { id: 'iq', type: 'iq-in' },
+            { id: 'shift', type: 'shift', params: { frequencyHz: 0 }, controls: ['frequencyHz'] },
+            { id: 'k', type: 'number', params: { value: -700 } },
+            { id: 'lp', type: 'lowpass' },
+        ],
+        [['iq', 'out', 'shift', 'in'], ['k', 'out', 'shift', 'set:frequencyHz'], ['shift', 'out', 'lp', 'in']],
+    );
+    const lp = graph.nodes.find((n) => n.id === 'lp');
+    const still = rfOf(graph, lp, 7000000);
+    assert.strictEqual(still.hz, null);
+    assert.ok(still.live);
+    const live = rfOf(graph, lp, 7000000, null, { driven: { shift: { frequencyHz: -700 } } });
+    assert.deepStrictEqual([live.hz, live.shiftHz], [7000700, 700]);
+});
+
+t('after a generator there is no RF to show, and the line says so', () => {
+    const graph = g(
+        [{ id: 'gen', type: 'signal' }, { id: 'lp', type: 'lowpass' }],
+        [['gen', 'out', 'lp', 'in']],
+    );
+    const info = rfOf(graph, graph.nodes[1], 14074000);
+    assert.strictEqual(info.hz, null);
+    assert.strictEqual(info.shiftHz, null);
+    const pg = getPlayground(radio().player);
+    reset();
+    assert.strictEqual(words(React.createElement(RfLine, { pg, graph, node: graph.nodes[1], dialHz: 14074000 })), 'RF —');
+});
+
+t('the RF line renders on the card, and the source card shows its range', () => {
+    const graph = rfChain();
+    const pg = getPlayground(radio().player);
+    pg.readings = {};
+    reset();
+    const line = words(React.createElement(RfLine, { pg, graph, node: graph.nodes.find((n) => n.id === 'psk'), dialHz: 14074000 }));
+    assert.ok(line.includes('14.075 500 MHz') && line.includes('+1 500 Hz'), line);
+    reset();
+    const src = words(React.createElement(CardVisual, { pg, node: graph.nodes[0], look: { dialHz: 14074000 }, rate: 48000 }));
+    assert.ok(src.includes('14.050–14.098 MHz') && src.includes('48 kHz wide'), src);
+    reset();
+    assert.ok(words(React.createElement(CardVisual, { pg, node: graph.nodes[0], look: { dialHz: 0 }, rate: 48000 })).includes('Not tuned'));
+});
+
+t('both side panels fold away to a rail and open again, and are remembered', () => {
+    localStorage.removeItem('ubersdr.v2.playground.sides');
+    openPlayground();
+    reset();
+    let r = render(PlaygroundModal, {}, radio());
+    const find = (c) => deep(r.tree).find((n) => cls(n).split(' ').includes(c));
+    const heads = () => deep(r.tree).filter((n) => cls(n) === 'pg__side-head');
+    assert.strictEqual(heads().length, 2);
+    assert.ok(!cls(find('pg__body')).includes('shut'));
+    heads()[0].props.onClick();
+    r.cleanups.forEach((f) => f());
+    reset();
+    r = render(PlaygroundModal, {}, radio());
+    assert.ok(cls(find('pg__body')).includes('is-left-shut'), cls(find('pg__body')));
+    assert.ok(cls(find('pg__side--left')).includes('is-shut'));
+    assert.ok(!deep(r.tree).some((n) => cls(n) === 'pg-pal__item'), 'the palette is still drawn while folded');
+    assert.ok(words(find('pg__side--left')).includes('Blocks'));
+    assert.strictEqual(JSON.parse(localStorage.getItem('ubersdr.v2.playground.sides')).left, true);
+    // The other one too, then both back.
+    heads()[0].props.onClick();
+    r.cleanups.forEach((f) => f());
+    reset();
+    r = render(PlaygroundModal, {}, radio());
+    assert.ok(cls(find('pg__body')).includes('is-left-shut') && cls(find('pg__body')).includes('is-right-shut'));
+    for (const rail of deep(r.tree).filter((n) => cls(n) === 'pg__rail')) rail.props.onClick();
+    r.cleanups.forEach((f) => f());
+    reset();
+    r = render(PlaygroundModal, {}, radio());
+    assert.ok(!cls(find('pg__body')).includes('shut'));
+    r.cleanups.forEach((f) => f());
+    closePlayground();
 });
 
 t('the cards the editor asks readings for are the ones that draw them', () => {
@@ -622,4 +754,68 @@ t('figures read as people say them', () => {
     assert.strictEqual(formatRate(27428.57), '27.43k');
 });
 
-console.log(`\n${pass} passed`);
+// ── where blocks are, through export, import and a link ─────────────────────
+
+// Through the editor itself, as a person does it: drag a block with the
+// pointer, press Export, import the file, share it and open the link.
+const tAsync = async (name, fn) => {
+    try { await fn(); console.log('ok    ' + name); pass++; }
+    catch (e) { console.log('FAIL  ' + name + '\n      ' + (e.stack || e.message)); process.exitCode = 1; }
+};
+
+(async () => {
+    await tAsync('a block dragged on the canvas stays where it was put, through export, import and a shared link', async () => {
+        const { encodeShare, decodeShare } = P;
+        localStorage.removeItem('ubersdr.v2.playground.sides');
+        const ctx = radio();
+        const pg = getPlayground(ctx.player);
+        pg.setGraph(g(
+            [{ id: 'iq', type: 'iq-in', x: 0, y: 0 }, { id: 'lp', type: 'lowpass', x: 300, y: 0 }, { id: 'a', type: 'to-audio', x: 600, y: 0 }],
+            [['iq', 'out', 'lp', 'in'], ['lp', 'out', 'a', 'in']],
+        ));
+        openPlayground();
+        reset();
+        let r = render(PlaygroundWindow, { onClose() {} }, ctx);
+        const canvas = deep(r.tree).find((n) => n.props && n.props.onPointerDown && cls(n).split(' ').includes('pg-canvas'));
+        assert.ok(canvas, 'no canvas');
+        const onCard = (id) => ({ closest: (sel) => (sel === '[data-node]' ? { getAttribute: () => id } : null) });
+        const ev = (x, y, target) => ({ button: 0, pointerId: 1, clientX: x, clientY: y, shiftKey: false, target: target || { closest: () => null } });
+        canvas.props.onPointerDown(ev(400, 100, onCard('lp')));
+        canvas.props.onPointerMove(ev(440, 160));
+        canvas.props.onPointerMove(ev(520, 300));
+        canvas.props.onPointerUp(ev(520, 300));
+        const lp = () => pg.graph.nodes.find((n) => n.id === 'lp');
+        const moved = { x: lp().x, y: lp().y };
+        assert.ok(moved.x !== 300 && moved.y !== 0, `the drag did not move it: ${JSON.stringify(moved)}`);
+
+        // Export, by the button.
+        let saved = null;
+        globalThis.window = globalThis.window || {};
+        window.ubersdrSaveFile = async (blob) => { saved = await blob.text(); };
+        r.cleanups.forEach((f) => f());
+        reset();
+        r = render(PlaygroundWindow, { onClose() {} }, ctx);
+        const btn = (label) => deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === label);
+        btn('Export').props.onClick();
+        await new Promise((res) => setTimeout(res, 0));
+        assert.ok(saved, 'nothing exported');
+        const file = JSON.parse(saved);
+        for (const n of file.nodes) assert.ok('x' in n && 'y' in n, `${n.id} was written without its position`);
+        assert.deepStrictEqual(file.nodes.find((n) => n.id === 'lp'), { id: 'lp', type: 'lowpass', x: moved.x, y: moved.y });
+
+        // Somewhere else, then import the file back.
+        pg.setGraph(g([{ id: 'iq', type: 'iq-in' }]));
+        const input = deep(r.tree).find((n) => n.type === 'input' && n.props && n.props.type === 'file');
+        input.props.onChange({ target: { files: [{ name: 'g.json', text: async () => saved }], value: 'x' } });
+        await new Promise((res) => setTimeout(res, 0));
+        assert.deepStrictEqual({ x: lp().x, y: lp().y }, moved, 'import moved it');
+        assert.deepStrictEqual(pg.graph.nodes.find((n) => n.id === 'iq'), { id: 'iq', type: 'iq-in', params: {}, x: 0, y: 0 });
+
+        // And a link.
+        const shared = await decodeShare(await encodeShare(pg.graph));
+        assert.deepStrictEqual(shared.graph.nodes.map((n) => [n.id, n.x, n.y]), pg.graph.nodes.map((n) => [n.id, n.x, n.y]));
+        r.cleanups.forEach((f) => f());
+        closePlayground();
+    });
+    console.log(`\n${pass} passed`);
+})();

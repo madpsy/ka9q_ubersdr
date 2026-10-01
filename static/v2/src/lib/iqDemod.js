@@ -70,7 +70,7 @@ import { SpectrumRing } from './dsp/scope.js';
 import { claimIQ, releaseIQ } from './iqExclusive.js';
 import { MIN_BLOCK_SEC } from '../radio/constants.js';
 import {
-    ECSS_LOW_EDGE, ECSS_TRANSITION, EcssTracker, SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN,
+    ECSS_LOW_EDGE, ECSS_TRANSITION, EcssTracker, LockMute, SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN,
 } from './ecss.js';
 
 // The plain `iq` preset is 12 kHz wide, centred on the dial: radiod's samprate
@@ -683,6 +683,10 @@ export class DemodChain {
         this.ecssY = new Float32Array(0);
         this.ecssP = new Float32Array(0);
         this.ecssR = new Float32Array(0);
+        // Silence until the tracker locks, where asked for.
+        this.lockMute = new LockMute();
+        this.lockGain = new Float64Array(0);
+        this.lockMuted = false;
 
         // What the decimator keeps.
         this.dI = new Float32Array(0);
@@ -798,6 +802,7 @@ export class DemodChain {
         this.sigDb = SQUELCH_SILENT_DB;
         this.gateOpen = true;
         if (this.ecss) this.ecss.reset();
+        this.lockMute.reset();
     }
 
     /**
@@ -814,6 +819,8 @@ export class DemodChain {
             // SAM has no sideband to report: it always hears both, equally.
             side: this.plan.kind === 'sam' ? null
                 : this.plan.sideband === 'both' ? 'both' : e.side,
+            // Silent for want of a lock, so the readout can say why.
+            muted: this.lockMuted,
         };
     }
 
@@ -832,6 +839,7 @@ export class DemodChain {
         this.ecssY = new Float32Array(frames);
         this.ecssP = new Float32Array(frames);
         this.ecssR = new Float32Array(frames);
+        this.lockGain = new Float64Array(frames);
     }
 
     /**
@@ -841,7 +849,7 @@ export class DemodChain {
      * next one — the caller copies it into an AudioBuffer immediately, which is
      * the only thing that reads it.
      */
-    process(planeI, planeQ, frames, { agc = true, gain = 1, squelchDb = SQUELCH_OFF } = {}) {
+    process(planeI, planeQ, frames, { agc = true, gain = 1, squelchDb = SQUELCH_OFF, lockMute = false } = {}) {
         this.outFrames = 0;
         if (!this.plan || !this.taps || !frames) return null;
         // On a wide stream, the front end first: everything below then reads
@@ -906,15 +914,24 @@ export class DemodChain {
         // Measured before the gate and heard after it: the meter goes on saying
         // what the demodulator is producing while the squelch is holding it
         // back, which is what makes a threshold set by eye possible at all.
+        // And silent until locked, for SAM and ECSS when asked — after the
+        // AGC, like the squelch, so the AGC has been levelling all along and
+        // the lock does not arrive as a blast.
         const gg = this.gateGain;
         const out = this.out;
+        const muting = tracked && lockMute;
+        if (muting) this.lockMute.process(this.ecss.locked, this.lockGain, frames, rate);
+        const lg = this.lockGain;
         let sumSq = 0;
         for (let k = 0; k < frames; k++) {
             let v = y[k] * gain;
             sumSq += v * v;
             v *= gg[k];
+            if (muting) v *= lg[k];
             out[k] = v > 1 ? 1 : (v < -1 ? -1 : v);
         }
+        this.lockMuted = muting && !this.ecss.locked;
+        if (!muting) this.lockMute.reset();
         this.scope.push(out, frames);
 
         this.level = Math.sqrt(sumSq / frames);
@@ -997,6 +1014,10 @@ const VFO_DEFAULTS = {
     // so the mode works on arrival and neither has to be touched.
     sideband: 'both',
     trackHz: TRACK_DEFAULT,
+    // SAM and ECSS: silent until the tracker has a carrier, rather than the
+    // whistle of a search. On, because those modes are for broadcasts, and
+    // a broadcast is heard locked or not at all.
+    lockMute: true,
     agc: true,
     gain: 1,
     // Off, and deliberately: a squelch is a thing you reach for on a quiet
@@ -1072,6 +1093,7 @@ function sanitiseVfo(raw) {
             : clampLowCut(src.lowCutHz, modeMax('usb')),
         sideband,
         trackHz: src.trackHz === undefined ? TRACK_DEFAULT : clampTrack(src.trackHz),
+        lockMute: src.lockMute !== false,
         agc: src.agc !== false,
         gain: Number.isFinite(gain) ? clamp(gain, 0, 4) : 1,
         squelchDb: Number.isFinite(squelchDb)
@@ -1743,6 +1765,7 @@ export class IQDemod extends Emitter {
             agc: vfo.agc,
             gain: vfo.gain,
             squelchDb: vfo.squelchDb,
+            lockMute: vfo.lockMute,
         });
         if (!audio) return;
 

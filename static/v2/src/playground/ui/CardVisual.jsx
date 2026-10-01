@@ -11,6 +11,7 @@ import React, { useEffect, useReducer, useRef, useState } from '../../react.js';
 import { INSTRUMENTS, Instrument } from './viewers.jsx';
 import { parseChoices } from '../blocks/controls.js';
 import { cssVar, sizedCanvas } from '../../lib/audioWaterfall.js';
+import { airSpan, rfLabel, rfOf, shiftLabel, sourceZero } from '../probes.js';
 
 const FLOOR_DB = -80;
 
@@ -80,12 +81,56 @@ function Recorder({ pg, id, label }) {
 /**
  * The visual for one node, or nothing for a type that has none. `look` is the
  * page's palette and dial, and `origin` where a complex input's zero is on the
- * air (probes.js) — both for the instruments.
+ * air (probes.js) — both for the instruments. `rate` is the block's own, for
+ * the sources to say how much of the air they cover.
  */
-export default function CardVisual({ pg, node, look, origin, onParams }) {
+export default function CardVisual({ pg, node, look, origin, rate, onParams }) {
     if (INSTRUMENTS.has(node.type)) return <Instrument pg={pg} node={node} look={look} origin={origin} />;
     if (KNOBS.has(node.type)) return <Knob node={node} onParams={onParams} />;
-    return <SimpleVisual pg={pg} node={node} origin={origin} />;
+    if (node.type === 'iq-in') return <Coverage zeroHz={sourceZero(node, look && look.dialHz)} rate={rate} />;
+    return <SimpleVisual pg={pg} node={node} origin={origin} rate={rate} />;
+}
+
+/**
+ * Where on the air a block is working, and its offset from the source's
+ * centre — on every card along a chain, so the frequency can be followed
+ * from the stream to the decoder. Most never move while running and are
+ * worked out once; one that a control drives, or an auto-tuning decoder,
+ * follows the engine's readings.
+ */
+export function RfLine({ pg, graph, node, dialHz, origins }) {
+    const still = rfOf(graph, node, dialHz, origins);
+    const [, bump] = useReducer((n) => n + 1, 0);
+    const live = !!(still && still.live);
+    useEffect(() => (live ? pg.on('readings', bump) : undefined), [pg, live]);
+    const info = live && pg.running
+        ? rfOf(graph, node, dialHz, origins, { driven: pg.driven, reading: pg.readings ? pg.readings[node.id] : null })
+        : still;
+    if (!info) return null;
+    const what = info.listening ? 'Listening at' : 'The zero of this block’s output is';
+    return (
+        <div
+            className={`pg-card__rf${info.hz == null ? ' is-unknown' : ''}`}
+            title={info.hz == null
+                ? 'Not a frequency on the air here: after a generator, a mirror or a mix, or a control not yet heard from.'
+                : `${what} ${rfLabel(info.hz)}${info.shiftHz != null ? `, ${shiftLabel(info.shiftHz)} from the source’s centre` : ''}`}
+        >
+            <span className="pg-card__rf-hz">{info.hz == null ? 'RF —' : rfLabel(info.hz)}</span>
+            {info.shiftHz != null && <span className="pg-card__rf-shift">{shiftLabel(info.shiftHz)}</span>}
+        </div>
+    );
+}
+
+/** The stretch of the air a source covers, and where its centre is. */
+function Coverage({ zeroHz, rate, quiet = false }) {
+    const c = airSpan(zeroHz, rate);
+    if (!c) return quiet ? null : <div className="pg-vis__state">Not tuned</div>;
+    return (
+        <div className="pg-vis__cover" title={`Centred on ${c.centre}${c.width ? `, ${c.width}` : ''}`}>
+            <div className="pg-vis__cover-range">{c.range}</div>
+            <div className="pg-vis__state">{`centre ${c.centre}${c.width ? ` · ${c.width}` : ''}`}</div>
+        </div>
+    );
 }
 
 // ── controls, worked on the card ────────────────────────────────────────────
@@ -212,7 +257,7 @@ function Sparkline({ history }) {
     return <canvas ref={ref} className="pg-vis__spark" style={{ height: '44px' }} />;
 }
 
-function SimpleVisual({ pg, node, origin }) {
+function SimpleVisual({ pg, node, origin, rate }) {
     const reading = useReadings(pg, node.id);
     switch (node.type) {
         case 'meter':
@@ -290,6 +335,7 @@ function SimpleVisual({ pg, node, origin }) {
                         {has ? (node.params.fileName || 'Loaded') : node.params.fileName ? `Load ${node.params.fileName} again` : 'No file — load one in the inspector'}
                     </div>
                     <div className="pg-counter__gate"><i style={{ width: `${Math.round(pos * 100)}%` }} /></div>
+                    <Coverage zeroHz={sourceZero(node)} rate={rate} quiet />
                 </div>
             );
         }

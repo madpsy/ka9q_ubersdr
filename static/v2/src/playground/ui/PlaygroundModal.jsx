@@ -57,7 +57,7 @@ export function graphFromIQDemod(rate) {
     const s = demodSettings();
     const vfo = s.vfos[s.active] || s.vfos[0];
     const g = parseGraph(graphForPlan(planForVfo(vfo), rate, {
-        agc: vfo.agc, gain: vfo.gain, squelchDb: vfo.squelchDb,
+        agc: vfo.agc, gain: vfo.gain, squelchDb: vfo.squelchDb, lockMute: vfo.lockMute,
     })).graph;
     const out = g.nodes.find((n) => n.id === 'audio');
     if (out) {
@@ -242,6 +242,15 @@ export function PlaygroundWindow({ onClose }) {
     const [view, setView] = useState({ x: 32, y: 32, zoom: 1 });
     const [selection, setPicked] = useState({ nodes: new Set(), wire: null });
     const [notice, setNotice] = useState(null);
+    const [sides, setSides] = useState(readSides);
+    // The latest, for two folds before the next render to both count.
+    const sidesNow = useRef(sides);
+    const fold = (side) => {
+        const next = { ...sidesNow.current, [side]: !sidesNow.current[side] };
+        sidesNow.current = next;
+        writeSides(next);
+        setSides(next);
+    };
     const canvasBox = useRef(null);
     const fileInput = useRef(null);
 
@@ -455,8 +464,10 @@ export function PlaygroundWindow({ onClose }) {
                     </button>
                 </div>
             )}
-            <div className="pg__body">
-                <aside className="pg__palette"><Palette onAdd={add} /></aside>
+            <div className={`pg__body${sides.left ? ' is-left-shut' : ''}${sides.right ? ' is-right-shut' : ''}`}>
+                <SidePanel side="left" label="Blocks" shut={sides.left} onToggle={() => fold('left')}>
+                    <Palette onAdd={add} />
+                </SidePanel>
                 <div className="pg__canvas" ref={canvasBox}>
                     <Canvas
                         pg={pg}
@@ -476,7 +487,7 @@ export function PlaygroundWindow({ onClose }) {
                         onParams={params}
                     />
                 </div>
-                <aside className="pg__inspector">
+                <SidePanel side="right" label={selection.nodes.size || selection.wire != null ? 'Selected' : 'This graph'} shut={sides.right} onToggle={() => fold('right')}>
                     <Inspector
                         pg={pg}
                         graph={graph}
@@ -496,9 +507,55 @@ export function PlaygroundWindow({ onClose }) {
                         onExpose={(id, param, on) => apply(exposeControl(graph, id, param, on))}
                         summary={<Summary pg={pg} graph={graph} info={info} stats={stats} />}
                     />
-                </aside>
+                </SidePanel>
             </div>
         </div>
+    );
+}
+
+// ── the side panels, open or folded away ────────────────────────────────────
+
+// Which side panels are folded, kept for this browser: a convenience, so a
+// lost or blocked store just means both open.
+const SIDES_KEY = 'ubersdr.v2.playground.sides';
+
+export function readSides() {
+    try {
+        const v = JSON.parse(localStorage.getItem(SIDES_KEY) || '{}');
+        return { left: !!(v && v.left), right: !!(v && v.right) };
+    } catch (e) {
+        return { left: false, right: false };
+    }
+}
+
+function writeSides(v) {
+    try { localStorage.setItem(SIDES_KEY, JSON.stringify(v)); } catch (e) { /* private mode */ }
+}
+
+/**
+ * One side panel: a header that folds it away, as the main window's docks
+ * do, and — folded — a narrow rail with its name that opens it again.
+ */
+export function SidePanel({ side, label, shut, onToggle, children }) {
+    const chevron = (side === 'left') === shut ? <Icon.ChevronRight size={14} /> : <Icon.ChevronLeft size={14} />;
+    if (shut) {
+        return (
+            <aside className={`pg__side pg__side--${side} is-shut`}>
+                <button type="button" className="pg__rail" title={`Show ${label.toLowerCase()}`} aria-expanded={false} onClick={onToggle}>
+                    <span className="dock__collapse">{chevron}</span>
+                    <span className="pg__rail-label">{label}</span>
+                </button>
+            </aside>
+        );
+    }
+    return (
+        <aside className={`pg__side pg__side--${side}`}>
+            <button type="button" className="pg__side-head" title={`Hide ${label.toLowerCase()}`} aria-expanded onClick={onToggle}>
+                <span className="dock__name">{label}</span>
+                <span className="dock__collapse">{chevron}</span>
+            </button>
+            <div className="pg__side-body">{children}</div>
+        </aside>
     );
 }
 

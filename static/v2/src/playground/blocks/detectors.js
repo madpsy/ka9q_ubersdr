@@ -3,7 +3,7 @@
 import { COMPLEX, REAL } from '../block.js';
 import { ComplexFir, designLowpass } from '../../lib/dsp/fir.js';
 import { Discriminator, complexPower, envelope } from '../../lib/dsp/detectors.js';
-import { EcssTracker, SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN } from '../../lib/ecss.js';
+import { EcssTracker, LockMute, SIDEBANDS, TRACK_DEFAULT, TRACK_MAX, TRACK_MIN } from '../../lib/ecss.js';
 
 /**
  * A windowed-sinc low-pass run over I and Q. On a complex signal that passes
@@ -118,9 +118,11 @@ export const DiscriminatorBlock = {
  * `centreHz`, locks to it, and demodulates against it — both sidebands for SAM,
  * one or a weighted pair for ECSS.
  *
- * Three outputs, because the IQ Demod panel uses all three: the audio, the
- * power in its passband for a squelch, and the carrier's level for an AGC to
- * level against. Each is single precision, as the panel's are.
+ * Four outputs, because the IQ Demod panel uses all four: the audio, the
+ * power in its passband for a squelch, the carrier's level for an AGC to
+ * level against, and a gain that is 0 until it locks — to multiply the audio
+ * by, after the AGC, for silence while it searches (1 throughout with that
+ * off). The first three are single precision, as the panel's are.
  */
 export const CarrierTrackerBlock = {
     type: 'carrier-tracker',
@@ -132,6 +134,7 @@ export const CarrierTrackerBlock = {
         { name: 'audio', kind: REAL },
         { name: 'power', kind: REAL },
         { name: 'carrier', kind: REAL },
+        { name: 'lock', kind: REAL },
     ],
     params: {
         mode: {
@@ -152,9 +155,13 @@ export const CarrierTrackerBlock = {
             options: SIDEBANDS.map((s) => ({ value: s, label: s === 'both' ? 'Both' : s === 'auto' ? 'Auto' : s.toUpperCase() })),
         },
         trackHz: { kind: 'number', label: 'Tracking range', unit: 'Hz', default: TRACK_DEFAULT, min: TRACK_MIN, max: TRACK_MAX, step: 10 },
+        lockMute: { kind: 'bool', label: 'Mute until locked', default: true },
     },
     create() {
         const tracker = new EcssTracker();
+        const mute = new LockMute();
+        let muting = true;
+        let rate = 12000;
         let Y = new Float32Array(0);
         let P = new Float32Array(0);
         let R = new Float32Array(0);
@@ -166,6 +173,8 @@ export const CarrierTrackerBlock = {
                 // keeps it.
                 if (kind === null) tracker.reset();
                 kind = p.mode;
+                muting = p.lockMute;
+                rate = r;
                 const plan = {
                     kind: p.mode,
                     centreHz: p.centreHz,
@@ -175,7 +184,7 @@ export const CarrierTrackerBlock = {
                 };
                 tracker.configure(plan, r, (cutoffHz, transitionHz) => designLowpass(cutoffHz, r, transitionHz), p.baseHz);
             },
-            reset() { tracker.reset(); },
+            reset() { tracker.reset(); mute.reset(); },
             latency: () => tracker.latencySamples,
             read() {
                 return {
@@ -196,6 +205,11 @@ export const CarrierTrackerBlock = {
                     outs[0].re[k] = Y[k];
                     outs[1].re[k] = P[k];
                     outs[2].re[k] = R[k];
+                }
+                if (muting) mute.process(tracker.locked, outs[3].re, n, rate);
+                else {
+                    mute.reset();
+                    outs[3].re.fill(1, 0, n);
                 }
                 return n;
             },

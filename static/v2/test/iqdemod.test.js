@@ -377,7 +377,7 @@ t('a packet boundary is not audible', () => {
  * the end of each packet. `planAt(t)` may return a new plan, which is how an
  * offset being dragged is simulated.
  */
-function runEcss(plan, gen, secs, { block = 240, planAt, agc = false } = {}) {
+function runEcss(plan, gen, secs, { block = 240, planAt, agc = false, lockMute = false } = {}) {
     const chain = new DemodChain();
     chain.configure(plan, RATE);
     const total = Math.round(secs * RATE);
@@ -396,10 +396,10 @@ function runEcss(plan, gen, secs, { block = 240, planAt, agc = false } = {}) {
             I[i] = s.i;
             Q[i] = s.q;
         }
-        const o = chain.process(I.subarray(0, len), Q.subarray(0, len), len, { agc, gain: 1 });
+        const o = chain.process(I.subarray(0, len), Q.subarray(0, len), len, { agc, gain: 1, lockMute });
         out.set(o.subarray(0, len), at);
         const st = chain.ecssStatus;
-        log.push({ t: at / RATE, state: st.state, hz: st.carrierHz, side: st.side });
+        log.push({ t: at / RATE, state: st.state, hz: st.carrierHz, side: st.side, muted: st.muted });
     }
     return { out, log, chain };
 }
@@ -490,6 +490,52 @@ const ecssPlan = (over = {}) => planFor({
 });
 
 const LOCKED = (l) => l.state === 'locked' || l.state === 'hold';
+
+t('mute until locked: silent while ECSS and SAM search, the programme once locked, and the noise never', () => {
+    const rms = (a) => Math.sqrt(a.reduce((s, v) => s + v * v, 0) / Math.max(1, a.length));
+    for (const mode of ['ecss', 'sam']) {
+        const plan = planFor({ mode, offsetHz: 0, widthHz: 4500, sideband: 'auto', trackHz: 300 });
+        const { out, log } = runEcss(plan, station({ carrierHz: 137 }), 3, { agc: true, lockMute: true });
+        const first = log.findIndex(LOCKED);
+        assert.ok(first > 0, `${mode}: locked at once, so nothing was muted`);
+        // Every sample before the lock is silence — not quiet, silence.
+        const before = out.subarray(0, Math.round(log[first].t * RATE));
+        assert.ok(before.every((v) => v === 0), `${mode}: heard something while searching`);
+        assert.ok(log.slice(0, first).every((l) => l.muted), `${mode}: the readout did not say muted`);
+        assert.ok(!log[log.length - 1].muted);
+        // Off: the search is heard — and loud, louder than the programme,
+        // which is what the mute is for.
+        const open = runEcss(plan, station({ carrierHz: 137 }), 3, { agc: true });
+        const searching = rms(Array.from(open.out.subarray(0, before.length)));
+        // Faded in over tens of milliseconds, and from then on exactly what
+        // is heard without the mute: it takes nothing from a locked signal.
+        // (Settled to exactly 1 takes about fourteen time constants.)
+        const from = Math.round((log[first].t + 0.6) * RATE);
+        const a = out.subarray(from);
+        const b = open.out.subarray(from);
+        assert.ok(a.every((v, k) => v === b[k]), `${mode}: the mute changed the locked audio`);
+        assert.ok(rms(Array.from(a)) > 0.02, `${mode}: silent after locking`);
+        assert.ok(searching > rms(Array.from(a)), `${mode}: the search was not the loud part (${searching} vs ${rms(Array.from(a))})`);
+    }
+    // Nothing to lock to: nothing heard at all.
+    const noise = () => ({ i: 0.05 * gaussian(), q: 0.05 * gaussian() });
+    const shut = runEcss(ecssPlan(), noise, 3, { agc: true, lockMute: true });
+    assert.ok(!shut.log.some(LOCKED), 'locked to noise');
+    assert.ok(shut.out.every((v) => v === 0), 'noise came through the mute');
+    assert.ok(rms(Array.from(runEcss(ecssPlan(), noise, 3, { agc: true }).out)) > 0.01, 'and without it, the noise is heard');
+});
+
+t('mute until locked is on unless turned off, and the readout says why it is quiet', () => {
+    saveDemodSettings({ vfos: [{ mode: 'ecss' }] });
+    assert.strictEqual(demodSettings().vfos[0].lockMute, true);
+    saveDemodSettings({ vfos: [{ mode: 'ecss', lockMute: false }] });
+    assert.strictEqual(demodSettings().vfos[0].lockMute, false);
+    resetDemodSettings();
+    const vfo = { offsetHz: 0 };
+    assert.strictEqual(ecssReport({ state: 'search', muted: true, side: 'both' }, vfo, 0).text, 'Searching · muted');
+    assert.strictEqual(ecssReport({ state: 'acquire', muted: true, side: 'both', carrierHz: 5 }, vfo, 0).text, 'Locking · muted');
+    assert.strictEqual(ecssReport({ state: 'search', muted: false, side: 'both' }, vfo, 0).text, 'Searching');
+});
 
 t('ECSS finds a carrier off the offset and hears the programme at its true pitch', () => {
     // The whole reason for the mode. A carrier 137 Hz from where the operator

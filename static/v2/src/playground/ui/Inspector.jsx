@@ -12,11 +12,12 @@ import useOutputDevices from '../../lib/useOutputDevices.js';
 import { BLOCK_BY_TYPE } from '../blocks/index.js';
 import { formatCpu, formatLatency, formatRate } from './Canvas.jsx';
 import { INSTRUMENTS, Instrument } from './viewers.jsx';
-import { PROBES, acrossPair, inputOrigin, outputKind } from '../probes.js';
+import { PROBES, acrossPair, airSpan, inputOrigin, outputKind, sourceZero } from '../probes.js';
+import { RfLine, recordingLabel } from './CardVisual.jsx';
+import { hasRfLine } from '../geometry.js';
 import { controlPort, controllable, inputsOf, outputsOf } from '../block.js';
 import { decodeWav } from '../wavfile.js';
 import { expandable } from '../expand.js';
-import { recordingLabel } from './CardVisual.jsx';
 
 /**
  * Buttons that hang an instrument off one output. On an input, `from` is the
@@ -265,6 +266,15 @@ export function ParamField({ name, spec, value, rate, onChange, sinkError }) {
     }
 }
 
+/** Where on the air a source's samples are from, in a sentence. */
+function coverNote(node, dialHz, rate) {
+    const c = airSpan(sourceZero(node, dialHz), rate);
+    if (c) return `Covers ${c.range}, centred on ${c.centre}${c.width ? ` — ${c.width}` : ''}.`;
+    return node.type === 'iq-in'
+        ? 'Not tuned yet: the range shows once the receiver has a frequency.'
+        : 'This file does not say where it was recorded, so the spectra show offsets rather than frequencies. Set the centre frequency if you know it.';
+}
+
 function clock(sec) {
     const s = Math.floor(sec);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -381,6 +391,15 @@ export default function Inspector({
                 <Readout label="CPU" value={s ? formatCpu(s.cpu) : '—'} />
             </div>
             {def.latencyNote && <div className="pg-insp__note">{def.latencyNote}</div>}
+            {hasRfLine(node.type) && (
+                <div className="pg-insp__rf">
+                    <span className="pg-insp__rf-label">On the air</span>
+                    <RfLine pg={pg} graph={graph} node={node} dialHz={look && look.dialHz} origins={origins} />
+                </div>
+            )}
+            {(node.type === 'iq-in' || node.type === 'iq-player') && (
+                <div className="pg-insp__note">{coverNote(node, look && look.dialHz, rates[node.id])}</div>
+            )}
             {INSTRUMENTS.has(node.type) && (
                 <div className="pg-insp__section pg-insp__large">
                     <Instrument

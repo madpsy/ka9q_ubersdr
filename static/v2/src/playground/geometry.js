@@ -18,6 +18,8 @@ export const HEAD_H = 26;
 export const ROW_H = 20;
 export const PAD = 6;
 export const FOOT_H = 18;
+// The line above the footer saying where on the air a block is working.
+export const RF_H = 16;
 
 // The instruments are wider: a spectrum three hundred pixels across can be
 // read, and a constellation wants to be square.
@@ -65,8 +67,11 @@ export function visualHeight(type, params) {
         case 'wav-recorder':
         case 'iq-recorder':
             return 24;
+        case 'iq-in':
+            return 30;
         case 'iq-player':
-            return 26;
+            // A line more for where on the air, when the file says.
+            return params && params.centreHz > 0 ? 42 : 26;
         case 'demodulator':
             return 30;
         case 'signal-detector':
@@ -119,6 +124,19 @@ export function visualHeight(type, params) {
 }
 
 /**
+ * Whether a card carries the RF line: every block that takes a complex
+ * stream and does something with it. The instruments label their own axes,
+ * sinks and sources say it in their own ways, and control blocks never see
+ * a stream.
+ */
+export function hasRfLine(type) {
+    const def = BLOCK_BY_TYPE[type];
+    if (!def || NO_RF.has(def.category)) return false;
+    return def.inputs.some((p) => p.kind === 'complex');
+}
+const NO_RF = new Set(['Viewers', 'Sinks', 'Sources', 'Control']);
+
+/**
  * A card's height: from a node — whose exposed controls add input rows — or
  * from a type and its parameters, for a card with none.
  */
@@ -126,7 +144,7 @@ export function nodeHeight(typeOrNode, params) {
     const node = typeof typeOrNode === 'object' && typeOrNode ? typeOrNode : { type: typeOrNode, params };
     const def = BLOCK_BY_TYPE[node.type];
     const rows = def ? Math.max(inputsOf(node, def).length, outputsOf(node, def).length, 1) : 1;
-    return HEAD_H + PAD * 2 + rows * ROW_H + visualHeight(node.type, node.params) + FOOT_H;
+    return HEAD_H + PAD * 2 + rows * ROW_H + visualHeight(node.type, node.params) + (hasRfLine(node.type) ? RF_H : 0) + FOOT_H;
 }
 
 /** Where a card's live picture starts, below its port rows. */

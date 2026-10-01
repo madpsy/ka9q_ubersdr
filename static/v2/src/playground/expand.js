@@ -30,7 +30,7 @@ export function expandDemodulator(graph, id, rateHz) {
     const p = node.params;
     const plan = demodPlan(p, rateHz);
     const inner = autoLayout(parseGraph(graphForPlan(plan, rateHz, {
-        agc: p.agc, gain: p.gain, squelchDb: p.squelchDb,
+        agc: p.agc, gain: p.gain, squelchDb: p.squelchDb, lockMute: p.lockMute,
     })).graph);
 
     const g = cloneGraph(graph);

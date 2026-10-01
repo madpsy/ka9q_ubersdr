@@ -87,16 +87,25 @@ export function addProbe(graph, fromId, fromPort, type, intoPort = null) {
  * signals) or a generator (which was never on the air) — and an instrument
  * after one labels offsets rather than inventing a frequency.
  *
+ * Given `driven` — the values controls have set, by node, from the engine —
+ * a driven shift is known after all: wherever it is right now.
+ *
  * Returns a map of `${id}.${port}` to Hz, or null.
  */
-export function frequencyOrigins(graph, dialHz) {
+export function frequencyOrigins(graph, dialHz, driven = null) {
     const out = new Map();
     const into = new Map();
     for (const w of graph.wires) into.set(`${w[2]}.${w[3]}`, `${w[0]}.${w[1]}`);
     const byId = new Map(graph.nodes.map((n) => [n.id, n]));
     const PASS = new Set(['lowpass', 'complex-highpass', 'complex-bandpass', 'delay', 'resample']);
     const visiting = new Set();
-    const driven = (n, param) => (n.controls || []).includes(param) && into.has(`${n.id}.set:${param}`);
+    const isDriven = (n, param) => (n.controls || []).includes(param) && into.has(`${n.id}.set:${param}`);
+    // A driven setting's value now, or null where it is driven and not known.
+    const setting = (n, param) => {
+        if (!isDriven(n, param)) return n.params[param];
+        const v = driven && driven[n.id] ? driven[n.id][param] : undefined;
+        return Number.isFinite(v) ? v : null;
+    };
     const originOf = (key) => {
         if (out.has(key)) return out.get(key);
         if (visiting.has(key)) return null;
@@ -113,10 +122,12 @@ export function frequencyOrigins(graph, dialHz) {
             else if (n.type === 'iq-player') o = n.params.centreHz > 0 ? n.params.centreHz : null;
             else if (n.type === 'shift') {
                 const u = upstream();
-                o = u == null || driven(n, 'frequencyHz') ? null : u - n.params.frequencyHz;
+                const f = setting(n, 'frequencyHz');
+                o = u == null || f == null ? null : u - f;
             } else if (n.type === 'decimate') {
                 const u = upstream();
-                o = u == null || driven(n, 'frequencyHz') ? null : u + n.params.frequencyHz;
+                const f = setting(n, 'frequencyHz');
+                o = u == null || f == null ? null : u + f;
             } else if (PASS.has(n.type)) o = upstream();
         }
         visiting.delete(key);
@@ -129,6 +140,112 @@ export function frequencyOrigins(graph, dialHz) {
         for (const p of def.outputs) if (p.kind === 'complex') originOf(`${n.id}.${p.name}`);
     }
     return out;
+}
+
+/**
+ * The stretch of the air a complex stream covers: `rateHz` wide, centred on
+ * its zero. In MHz to the kHz above 1 MHz, in kHz to the 100 Hz below — the
+ * span runs to tens of kHz, so finer would only be noise on the card. Null
+ * when the zero is not known.
+ */
+export function airSpan(zeroHz, rateHz) {
+    if (!(zeroHz > 0)) return null;
+    const mhz = zeroHz + (rateHz > 0 ? rateHz / 2 : 0) >= 1e6;
+    const name = (hz) => (mhz ? (hz / 1e6).toFixed(3) : (hz / 1e3).toFixed(1));
+    const unit = mhz ? 'MHz' : 'kHz';
+    const centre = mhz ? `${(zeroHz / 1e6).toFixed(6)} MHz` : `${(zeroHz / 1e3).toFixed(3)} kHz`;
+    if (!(rateHz > 0)) return { lo: zeroHz, hi: zeroHz, range: centre, centre, width: '' };
+    const lo = zeroHz - rateHz / 2;
+    const hi = zeroHz + rateHz / 2;
+    const width = `${Number((rateHz / 1000).toFixed(rateHz % 1000 ? 2 : 0))} kHz wide`;
+    return { lo, hi, range: `${name(lo)}–${name(hi)} ${unit}`, centre, width };
+}
+
+/** Where a source block's output is centred on the air, or null. */
+export function sourceZero(node, dialHz) {
+    if (!node) return null;
+    if (node.type === 'iq-in') return dialHz > 0 ? dialHz : null;
+    if (node.type === 'iq-player') return node.params.centreHz > 0 ? node.params.centreHz : null;
+    return null;
+}
+
+/** The source at the head of the stream reaching a node, following its first complex input up. */
+export function sourceOf(graph, id) {
+    const seen = new Set();
+    let at = graph.nodes.find((n) => n.id === id);
+    while (at && !seen.has(at.id)) {
+        seen.add(at.id);
+        const def = BLOCK_BY_TYPE[at.type];
+        const port = def && def.inputs.find((p) => p.kind === 'complex');
+        if (!port) return at;
+        const w = graph.wires.find((x) => x[2] === at.id && x[3] === port.name);
+        if (!w) return null;
+        at = graph.nodes.find((n) => n.id === w[0]);
+    }
+    return null;
+}
+
+// Blocks that listen somewhere in their input rather than at its zero.
+const TUNED = new Set(['demodulator', 'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder']);
+
+/**
+ * Where on the air a block is working, and how far that is from the centre
+ * of the source it hangs from. For a block that puts out a complex stream, the
+ * frequency its output's zero stands for; for one that listens at an offset in
+ * its input — a demodulator, a decoder — the frequency it listens at,
+ * following an auto-tuning decoder to wherever it has pulled itself. `live`
+ * is `{ driven, reading }` from the engine, for whatever controls are moving.
+ *
+ * Returns `{ hz, shiftHz, listening, live }` — `hz` null where it is not
+ * known (after a generator, a mirror, a mix, or a control not yet heard
+ * from), `live` whether it can change while running — or null for a block
+ * that takes no complex stream.
+ */
+export function rfOf(graph, node, dialHz, origins = null, live = null) {
+    const def = node && BLOCK_BY_TYPE[node.type];
+    if (!def || !def.inputs.some((p) => p.kind === 'complex')) return null;
+    const anyDriven = graph.nodes.some((n) => (n.controls || []).includes('frequencyHz') && graph.wires.some((w) => w[2] === n.id && w[3] === `set:frequencyHz`));
+    const map = live && anyDriven ? frequencyOrigins(graph, dialHz, live.driven) : origins || frequencyOrigins(graph, dialHz);
+    const out = def.outputs.find((p) => p.kind === 'complex');
+    const listening = TUNED.has(node.type);
+    let hz = null;
+    if (out && !listening) hz = map.get(`${node.id}.${out.name}`) ?? null;
+    else {
+        const base = inputOrigin(graph, map, node.id);
+        if (base != null) {
+            const tuned = live && live.reading && Number.isFinite(live.reading.tunedHz) ? live.reading.tunedHz : null;
+            hz = base + (listening ? (tuned ?? node.params.offsetHz ?? 0) : 0);
+        }
+    }
+    const src = sourceOf(graph, node.id);
+    const centre = sourceZero(src, dialHz);
+    return {
+        hz,
+        shiftHz: hz != null && centre != null ? hz - centre : null,
+        listening,
+        live: anyDriven || (node.type === 'psk31-decoder' && !!node.params.afc),
+    };
+}
+
+/** A frequency on the air, to the hertz, grouped in threes: "14.073 000 MHz". */
+export function rfLabel(hz) {
+    if (hz == null || !Number.isFinite(hz)) return '';
+    const group = (s) => s.replace(/(\d{3})(?=\d)/g, '$1 ');
+    if (Math.abs(hz) >= 1e6) {
+        const [a, b] = (hz / 1e6).toFixed(6).split('.');
+        return `${a}.${group(b)} MHz`;
+    }
+    return `${(hz / 1e3).toFixed(3)} kHz`;
+}
+
+/** An offset from the centre, signed: "−1 000 Hz", "+12.5 kHz". */
+export function shiftLabel(hz) {
+    if (hz == null || !Number.isFinite(hz)) return '';
+    const r = Math.round(hz);
+    const sign = r > 0 ? '+' : r < 0 ? '−' : '±';
+    const a = Math.abs(r);
+    if (a >= 100000) return `${sign}${Number((a / 1000).toFixed(1))} kHz`;
+    return `${sign}${String(a).replace(/\B(?=(\d{3})+$)/g, ' ')} Hz`;
 }
 
 /**

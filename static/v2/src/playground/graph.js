@@ -119,8 +119,11 @@ export function serializeGraph(graph) {
             const out = { id: n.id, type: n.type };
             if (Object.keys(params).length) out.params = params;
             if (n.controls && n.controls.length) out.controls = [...n.controls];
-            if (n.x) out.x = Math.round(n.x);
-            if (n.y) out.y = Math.round(n.y);
+            // Always, zero included: where a block sits is part of the graph,
+            // and a file with half its blocks missing a coordinate reads as
+            // one that lost them.
+            out.x = Math.round(n.x || 0);
+            out.y = Math.round(n.y || 0);
             return out;
         }),
         wires: graph.wires.map((w) => [...w]),

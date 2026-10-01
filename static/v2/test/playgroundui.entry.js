@@ -18,7 +18,7 @@ import {
 } from '../src/playground/editing.js';
 import {
     NODE_W, hasRfLine, autoLayout, graphBounds, fitView, nodeAt, nodeHeight, nodeWidth, portAt, portPosition, screenToWorld, wirePath,
-    zoomAbout,
+    zoomAbout, zoomToward, ZOOM_MAX, ZOOM_MIN,
 } from '../src/playground/geometry.js';
 import {
     ConstellationView, INSTRUMENTS, Instrument, ScopeView, SpectrumView, freqLabel, scopeRange, spectrumAxis, timeLabel,
@@ -33,7 +33,7 @@ import { resetDemodSettings, saveDemodSettings } from '../src/lib/iqDemod.js';
 
 module.exports = {
     deep, render, reset, walk, words,
-    withArrival,
+    withArrival, zoomToward, ZOOM_MAX, ZOOM_MIN,
     IQPanel, PlaygroundWatch, takeShareCode, PlaygroundModal, PlaygroundWindow, WATCHED_TYPES, graphFromIQDemod, TemplatesMenu, TEMPLATES,
     Inspector, ParamField, Canvas, formatCpu, formatLatency, formatRate, CardVisual, RfLine, Palette,
     airSpan, rfLabel, rfOf, shiftLabel, hasRfLine, encodeShare, decodeShare,

@@ -23,7 +23,7 @@ import { getPlayground, graphIqWidth, needsReceiver } from '../engine.js';
 import {
     EditHistory, addNode, cloneGraph, duplicateNodes, exposeControl, removeNodes, removeWire,
 } from '../editing.js';
-import { autoLayout, fitView, screenToWorld } from '../geometry.js';
+import { ZOOM_MAX, ZOOM_MIN, autoLayout, fitView, screenToWorld, zoomToward } from '../geometry.js';
 import { addAcross, addProbe, frequencyOrigins } from '../probes.js';
 import { expandNode } from '../expand.js';
 import { TEMPLATES } from '../templates.js';
@@ -42,6 +42,9 @@ export const WATCHED_TYPES = new Set([
     'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder',
     ...INSTRUMENTS,
 ]);
+
+// Each press of a zoom button: three to go from fitted to the closest.
+const ZOOM_STEP = 1.4;
 
 /** The query parameter a shared graph arrives in. */
 export const SHARE_PARAM = 'playground';
@@ -371,6 +374,13 @@ export function PlaygroundWindow({ onClose }) {
         const { w, h } = size();
         setView(fitView(g, w, h));
     };
+    // The zoom buttons: toward the selected blocks where there are some.
+    const zoomBy = (factor) => {
+        const { w, h } = size();
+        const picked = graph.nodes.filter((n) => selection.nodes.has(n.id));
+        // From the latest view, so two presses before a render are two steps.
+        setView((v) => zoomToward(v, w, h, factor, picked.length ? { nodes: picked } : null));
+    };
     // Fit once on opening, so the graph is on screen however it was left.
     useEffect(() => { fit(); }, []);
 
@@ -641,6 +651,24 @@ export function PlaygroundWindow({ onClose }) {
                         origins={origins}
                         onParams={params}
                     />
+                    <div className="pg-zoom" role="group" aria-label="Zoom">
+                        <button
+                            type="button"
+                            className="pg-zoom__btn"
+                            title={selection.nodes.size ? 'Zoom in on the selected block' : 'Zoom in'}
+                            aria-label="Zoom in"
+                            disabled={view.zoom >= ZOOM_MAX}
+                            onClick={() => zoomBy(ZOOM_STEP)}
+                        >+</button>
+                        <button
+                            type="button"
+                            className="pg-zoom__btn"
+                            title="Zoom out"
+                            aria-label="Zoom out"
+                            disabled={view.zoom <= ZOOM_MIN}
+                            onClick={() => zoomBy(1 / ZOOM_STEP)}
+                        >−</button>
+                    </div>
                 </div>
                 <SidePanel side="right" label={selection.nodes.size || selection.wire != null ? 'Selected' : 'This graph'} shut={sides.right} onToggle={() => fold('right')}>
                     <Inspector

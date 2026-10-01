@@ -607,6 +607,47 @@ t('the IQ stream’s age on arriving is its latency, and every block after it co
     assert.ok(Math.abs(l.lp.total - lp) < 1e-12);
 });
 
+t('the zoom buttons zoom about the middle, or bring the selected blocks to it, within the limits', () => {
+    const { zoomToward, ZOOM_MAX, ZOOM_MIN } = P;
+    const view = { x: 100, y: 50, zoom: 1 };
+    // Nothing selected: the point in the middle of the canvas stays there.
+    const v = zoomToward(view, 800, 600, 2);
+    const mid = (vw) => [(400 - vw.x) / vw.zoom, (300 - vw.y) / vw.zoom];
+    assert.deepStrictEqual(mid(v), mid(view));
+    assert.strictEqual(v.zoom, ZOOM_MAX);
+    // A block selected: its centre comes to the middle.
+    const n = { id: 'b', type: 'gain', x: 1000, y: 700 };
+    const w = zoomToward(view, 800, 600, 1.4, { nodes: [n] });
+    const c = [n.x + nodeWidth(n.type) / 2, n.y + nodeHeight(n) / 2];
+    assert.ok(Math.abs(w.x + c[0] * w.zoom - 400) <= 0.5 && Math.abs(w.y + c[1] * w.zoom - 300) <= 0.5, `not centred: ${JSON.stringify(w)}`);
+    assert.strictEqual(zoomToward(view, 800, 600, 0.01).zoom, ZOOM_MIN);
+
+    // On the window: top left of the canvas, and pressing them moves the view.
+    reset();
+    const ctx = radio();
+    getPlayground(ctx.player).setGraph(g([{ id: 'a', type: 'gain', x: 0, y: 0 }, { id: 'b', type: 'gain', x: 900, y: 600 }]));
+    let r = render(PlaygroundWindow, {}, ctx);
+    const transform = () => deep(r.tree).find((x) => cls(x) === 'pg-world').props.style.transform;
+    const zoomOf = () => Number(/scale\(([\d.]+)\)/.exec(transform())[1]);
+    const btn = (label) => deep(r.tree).find((x) => x.props && x.props['aria-label'] === label);
+    assert.ok(deep(r.tree).find((x) => cls(x) === 'pg-zoom'), 'no zoom buttons');
+    // Once more, for the view the opening fit chose.
+    r.cleanups.forEach((f) => f());
+    r = render(PlaygroundWindow, {}, ctx);
+    const z0 = zoomOf();
+    btn('Zoom in').props.onClick();
+    r.cleanups.forEach((f) => f());
+    r = render(PlaygroundWindow, {}, ctx);
+    assert.ok(zoomOf() > z0, 'Zoom in did not');
+    btn('Zoom out').props.onClick();
+    btn('Zoom out').props.onClick();
+    r.cleanups.forEach((f) => f());
+    r = render(PlaygroundWindow, {}, ctx);
+    assert.ok(zoomOf() < z0, 'Zoom out did not');
+    r.cleanups.forEach((f) => f());
+    closePlayground();
+});
+
 t('the inspector renders every block type’s settings', () => {
     const pg = getPlayground(radio().player);
     for (const def of BLOCKS) {

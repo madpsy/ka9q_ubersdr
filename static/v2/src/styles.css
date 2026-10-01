@@ -14481,6 +14481,32 @@ a.btn { text-decoration: none; }
 }
 .pg__side--left .pg__rail-label { transform: rotate(180deg); }
 .pg__canvas { position: relative; min-width: 0; min-height: 0; }
+/* Zoom buttons, top left of the canvas, in the manner of a map's. */
+.pg-zoom {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm, 6px);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+}
+.pg-zoom__btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    background: var(--surface-2);
+    color: var(--text);
+    font: 600 18px/1 var(--font, inherit);
+    cursor: pointer;
+}
+.pg-zoom__btn + .pg-zoom__btn { border-top: 1px solid var(--border-strong); }
+.pg-zoom__btn:hover:not(:disabled) { background: var(--surface-hover); }
+.pg-zoom__btn:disabled { color: var(--text-faint); cursor: default; }
 
 /* ── the palette ── */
 .pg-pal { display: flex; flex-direction: column; gap: 10px; padding: 10px; }

@@ -255,6 +255,23 @@ export function fitView(graph, w, h, margin = 32) {
     };
 }
 
+/**
+ * The zoom buttons' step in a `w` × `h` canvas. With `focus` — the blocks
+ * selected, as a graph — they come to the middle as the zoom changes, so
+ * zooming in goes to them rather than to wherever the canvas happened to be;
+ * without, the middle of the canvas stays put.
+ */
+export function zoomToward(view, w, h, factor, focus = null) {
+    const b = focus ? graphBounds(focus) : null;
+    if (!b) return zoomAbout(view, w / 2, h / 2, factor);
+    const zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, view.zoom * factor));
+    return {
+        x: Math.round(w / 2 - (b.x + b.w / 2) * zoom),
+        y: Math.round(h / 2 - (b.y + b.h / 2) * zoom),
+        zoom,
+    };
+}
+
 /** Zoom by `factor` about a screen point, so what is under the pointer stays there. */
 export function zoomAbout(view, sx, sy, factor) {
     const zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, view.zoom * factor));

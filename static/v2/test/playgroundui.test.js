@@ -648,6 +648,122 @@ t('the zoom buttons zoom about the middle, or bring the selected blocks to it, w
     closePlayground();
 });
 
+t('wires are taken and dropped by distance, moved by either end, and only changed on the drop', () => {
+    // The canvas as the component rendered, so its own drag state is kept
+    // between renders, with the window's part — the graph, the edits, the
+    // selection — played here.
+    reset();
+    let graph = g(
+        [{ id: 's1', type: 'signal', x: 0, y: 0 }, { id: 's2', type: 'signal', x: 0, y: 300 },
+            { id: 'g1', type: 'shift', x: 500, y: 0 }, { id: 'g2', type: 'shift', x: 500, y: 300 }],
+        [['s1', 'out', 'g1', 'in']],
+    );
+    let edits = 0;
+    let picked = null;
+    const view = { x: 40, y: 30, zoom: 0.5 };
+    const props = () => ({
+        pg: getPlayground(radio().player), graph, view, setView() {}, selection: { nodes: new Set(), wire: picked ? picked.wire : null },
+        setPicked: (v) => { picked = v; }, onEdit: (next) => { graph = next; edits++; }, onMoved() {},
+        errorsByNode: {}, rates: {}, latencies: {}, stats: null, look: null, origins: null, onParams() {},
+    });
+    let r = render(P.Canvas, props(), radio());
+    const again = () => { r.cleanups.forEach((f) => f()); r = render(P.Canvas, props(), radio()); };
+    // A port on screen, nudged by (dx, dy) screen pixels.
+    const at = (id, side, dx = 0, dy = 0) => {
+        const p = portPosition(graph.nodes.find((n) => n.id === id), side, 0);
+        return { x: view.x + p.x * view.zoom + dx, y: view.y + p.y * view.zoom + dy };
+    };
+    const root = () => deep(r.tree).find((x) => x.props && x.props.onPointerMove);
+    const ev = (p) => ({ button: 0, pointerId: 1, clientX: p.x, clientY: p.y, shiftKey: false, target: { closest: () => null } });
+    const wires = () => graph.wires.map((w) => w.join('.')).sort();
+    const drag = (from, to, down = (e) => root().props.onPointerDown(e)) => {
+        edits = 0;
+        down(ev(from));
+        again();
+        root().props.onPointerMove(ev({ x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }));
+        again();
+        root().props.onPointerMove(ev(to));
+        again();
+        root().props.onPointerUp(ev(to));
+        again();
+    };
+
+    // From an output, pressed beside the dot rather than on it, to well short of an input.
+    drag(at('s2', 'out', 9, 5), at('g2', 'in', -15, 12));
+    assert.deepStrictEqual(wires(), ['s1.out.g1.in', 's2.out.g2.in']);
+
+    // A click on a wired input: the wire stays, and is selected.
+    edits = 0;
+    root().props.onPointerDown(ev(at('g1', 'in')));
+    root().props.onPointerUp(ev(at('g1', 'in')));
+    again();
+    assert.strictEqual(edits, 0, 'a click changed the graph');
+    assert.strictEqual(graph.wires[picked.wire].join('.'), 's1.out.g1.in', 'the click did not select its wire');
+
+    // Its input end, to g2: replaces what was there, as one edit — one undo step.
+    drag(at('g1', 'in'), at('g2', 'in', 6, -6));
+    assert.deepStrictEqual(wires(), ['s1.out.g2.in']);
+    assert.strictEqual(edits, 1);
+
+    // Mid-drag, the wire being moved is not drawn where it was.
+    root().props.onPointerDown(ev(at('g2', 'in')));
+    root().props.onPointerMove(ev(at('g2', 'in', -60, 40)));
+    again();
+    assert.strictEqual(deep(r.tree).filter((x) => cls(x) === 'pg-wire__hit').length, 0, 'the lifted wire was still drawn');
+    assert.strictEqual(deep(r.tree).filter((x) => /pg-wire--ghost/.test(cls(x))).length, 1, 'no wire follows the pointer');
+    root().props.onPointerUp(ev(at('g2', 'in')));
+    again();
+    assert.deepStrictEqual(wires(), ['s1.out.g2.in'], 'dropped back where it was, it was changed');
+
+    // Taken along its length near the output end: the output end moves, to s2.
+    const a = at('s1', 'out');
+    const b = at('g2', 'in');
+    const near = { x: a.x + (b.x - a.x) * 0.15, y: a.y + (b.y - a.y) * 0.15 };
+    drag(near, at('s2', 'out', -8, 4), (e) => {
+        const hit = deep(r.tree).find((x) => cls(x) === 'pg-wire__hit');
+        hit.props.onPointerDown({ ...e, stopPropagation() {} });
+    });
+    assert.deepStrictEqual(wires(), ['s2.out.g2.in']);
+    assert.strictEqual(edits, 1);
+
+    // Dropped on nothing: removed.
+    drag(at('g2', 'in'), { x: at('g2', 'in').x - 150, y: at('g2', 'in').y + 120 });
+    assert.deepStrictEqual(wires(), []);
+
+    // Backwards, from an empty input to an output.
+    drag(at('g1', 'in', -5, 0), at('s1', 'out', 10, 10));
+    assert.deepStrictEqual(wires(), ['s1.out.g1.in']);
+    r.cleanups.forEach((f) => f());
+});
+
+t('the port a dragged wire would land on is lit, green where it can go and red where not', () => {
+    reset();
+    const graph = g(
+        [{ id: 's', type: 'signal', x: 0, y: 0 }, { id: 'sh', type: 'shift', x: 400, y: 0 }, { id: 'gn', type: 'gain', x: 400, y: 300 }],
+    );
+    const props = {
+        pg: getPlayground(radio().player), graph, view: { x: 0, y: 0, zoom: 1 }, setView() {}, selection: { nodes: new Set(), wire: null },
+        setPicked() {}, onEdit() {}, onMoved() {}, errorsByNode: {}, rates: {}, latencies: {}, stats: null, look: null, origins: null, onParams() {},
+    };
+    let r = render(P.Canvas, props, radio());
+    const pt = (id, side, dx, dy) => {
+        const p = portPosition(graph.nodes.find((n) => n.id === id), side, 0);
+        return { button: 0, pointerId: 1, clientX: p.x + dx, clientY: p.y + dy, target: { closest: () => null } };
+    };
+    const root = () => deep(r.tree).find((x) => x.props && x.props.onPointerMove);
+    const lit = () => deep(r.tree).filter((x) => /is-(target|refused)/.test(cls(x))).map((x) => cls(x).match(/is-(target|refused)/)[0]);
+    root().props.onPointerDown(pt('s', 'out', 6, 0));
+    root().props.onPointerMove(pt('sh', 'in', -10, 8));
+    r = render(P.Canvas, props, radio());
+    assert.deepStrictEqual(lit(), ['is-target']);
+    // A real input, for a complex wire: not offered at all.
+    root().props.onPointerMove(pt('gn', 'in', -4, 4));
+    r = render(P.Canvas, props, radio());
+    assert.deepStrictEqual(lit(), []);
+    root().props.onPointerUp(pt('gn', 'in', -4, 4));
+    r.cleanups.forEach((f) => f());
+});
+
 t('the inspector renders every block type’s settings', () => {
     const pg = getPlayground(radio().player);
     for (const def of BLOCKS) {

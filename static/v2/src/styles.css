@@ -14637,6 +14637,11 @@ a.btn { text-decoration: none; }
 .pg-port--real .pg-port__dot { background: var(--violet); }
 .pg-port--in:not(.is-wired):not(.is-optional) .pg-port__dot { box-shadow: 0 0 0 2px var(--bad); }
 .pg-port.is-optional .pg-port__dot { opacity: 0.6; }
+/* The port a dragged wire would land on: green where it can, red where not. */
+.pg-port__dot { transition: transform 80ms ease-out; }
+.pg-port.is-target .pg-port__dot { transform: scale(1.6); box-shadow: 0 0 0 2px var(--good); opacity: 1; }
+.pg-port.is-refused .pg-port__dot { transform: scale(1.6); box-shadow: 0 0 0 2px var(--bad); }
+.pg-port--message.is-target .pg-port__dot, .pg-port--message.is-refused .pg-port__dot { transform: rotate(45deg) scale(1.6); }
 
 /* ── what a card draws ── */
 .pg-vis__bar {

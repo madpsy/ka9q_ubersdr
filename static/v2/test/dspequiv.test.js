@@ -61,7 +61,10 @@ function compare(where, a, b, outA, outB, wantSpectrum) {
     for (const key of ['rate', 'inRate', 'D', 'level', 'sigDb', 'gateOpen']) {
         if (!same(a[key], b[key])) assert.fail(`${where}: ${key} ${b[key]} (new) vs ${a[key]} (reference)`);
     }
-    assert.deepStrictEqual(b.ecssStatus, a.ecssStatus, `${where}: ecssStatus`);
+    // `muted` is newer than the reference — mute until locked, which these
+    // cases leave off — and says so: never true here.
+    const status = b.ecssStatus && (({ muted, ...rest }) => (assert.strictEqual(muted, false, `${where}: muted`), rest))(b.ecssStatus);
+    assert.deepStrictEqual(status, a.ecssStatus, `${where}: ecssStatus`);
     if (wantSpectrum) {
         const sa = a.audioSpectrum();
         const sb = b.audioSpectrum();

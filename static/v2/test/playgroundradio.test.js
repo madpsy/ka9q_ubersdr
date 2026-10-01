@@ -69,7 +69,7 @@ for (const rate of [12000, 192000]) {
             for (let at = 0; at < n; at += p) {
                 const len = Math.min(p, n - at);
                 chain.configure(plan, rate);
-                const a = chain.process(I.subarray(at, at + len), Q.subarray(at, at + len), len, { agc: true, gain: 1, squelchDb: -28 });
+                const a = chain.process(I.subarray(at, at + len), Q.subarray(at, at + len), len, { agc: true, gain: 1, squelchDb: -28, lockMute: params.lockMute !== false });
                 if (a) for (let k = 0; k < chain.outFrames; k++) want.push(a[k]);
             }
             assert.strictEqual(out.length, want.length);

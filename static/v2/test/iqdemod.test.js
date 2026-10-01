@@ -46,7 +46,7 @@ const {
     designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN, modeMax, modeWidths, reachOf, audioBandOf, AUDIO_FFT_SIZE,
+    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN, modeMax, modeWidths, reachOf, audioBandOf, AUDIO_FFT_SIZE, LOW_CUT_DEFAULT, LOW_CUT_MAX, SSB_MIN_SPAN, clampLowCut,
 } = require('./.build/iqdemod.cjs');
 
 // Storage that actually remembers, so the settings tests exercise the real path
@@ -81,6 +81,29 @@ const vfo0 = () => demodSettings().vfos[0];
 const deepWords = (tree) => deep(tree).map((n) => words(n)).join(' ');
 
 /** An element's class name, or '' — several assertions below key off it. */
+/**
+ * The first element of a named component in a tree, looking inside the
+ * components on the way down — which walk() does not — but not inside the one
+ * being looked for, so its props are the ones its parent gave it.
+ */
+function findComponent(node, name) {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+        for (const n of node) {
+            const hit = findComponent(n, name);
+            if (hit) return hit;
+        }
+        return null;
+    }
+    if (typeof node.type === 'function') {
+        if (node.type.name === name) return node;
+        return findComponent(node.type(node.props || {}), name);
+    }
+    const kids = node.children && node.children.length ? node.children
+        : (node.props && node.props.children != null ? [node.props.children] : []);
+    return findComponent(kids, name);
+}
+
 const cls = (n) => (n && n.props && typeof n.props.className === 'string' ? n.props.className : '');
 
 let pass = 0;
@@ -1796,6 +1819,79 @@ t('the engine takes its reach from the rate the packets arrive at', () => {
     resetDemodSettings();
 });
 
+t('USB and LSB start 50 Hz off the carrier by default, and the cut moves the filter', () => {
+    fresh({ mode: 'usb', offsetHz: 1000, widths: { usb: 2700 } });
+    assert.strictEqual(vfo0().lowCutHz, LOW_CUT_DEFAULT);
+    assert.strictEqual(LOW_CUT_DEFAULT, 50);
+    assert.deepStrictEqual(vfoPassband(vfo0()), { lo: 1050, hi: 3700 });
+    // The filter sits between the cut and the width, and the audio is shifted
+    // by the same midpoint, so the carrier still lands on 0 Hz.
+    let plan = planForVfo(vfo0());
+    assert.strictEqual(plan.cutoffHz, (2700 - 50) / 2);
+    assert.strictEqual(plan.centreHz, 1000 + (2700 + 50) / 2);
+    assert.strictEqual(plan.shiftHz, (2700 + 50) / 2);
+    // LSB, mirrored.
+    updateVfo(0, { mode: 'lsb', widths: { lsb: 2400 }, lowCutHz: 300 });
+    assert.deepStrictEqual(vfoPassband(vfo0()), { lo: 1000 - 2400, hi: 1000 - 300 });
+    plan = planForVfo(vfo0());
+    assert.strictEqual(plan.centreHz, 1000 - (2400 + 300) / 2);
+    assert.strictEqual(plan.shiftHz, -(2400 + 300) / 2);
+    // Never closer to the top than SSB_MIN_SPAN, never past LOW_CUT_MAX.
+    assert.strictEqual(clampLowCut(900, 800), 800 - SSB_MIN_SPAN);
+    assert.strictEqual(clampLowCut(5000, 6000), LOW_CUT_MAX);
+    assert.strictEqual(clampLowCut(-20, 2700), 0);
+    // Other modes have no cut: CW's filter still straddles its note.
+    assert.deepStrictEqual(passbandFor('cwu', 0, 500, 'both', 300), { lo: -250, hi: 250 });
+    // A stored cut is read back, and nonsense is the default.
+    saveDemodSettings({ vfos: [{ mode: 'usb', lowCutHz: 200 }] });
+    assert.strictEqual(vfo0().lowCutHz, 200);
+    saveDemodSettings({ vfos: [{ mode: 'usb', lowCutHz: 'x' }] });
+    assert.strictEqual(vfo0().lowCutHz, LOW_CUT_DEFAULT);
+    fresh();
+});
+
+t('the low cut takes out what is under it, and leaves the rest of the voice', () => {
+    // USB at the dial, 2.7 kHz wide. A tone 150 Hz up is under a 300 Hz cut,
+    // one 1 kHz up is well inside it.
+    const level = (lowCutHz, hz) => amplitudeAt(
+        demodulate(planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700, lowCutHz }), tone(hz, 0.5)), hz,
+    );
+    assert.ok(level(300, 150) < level(300, 1000) / 30, 'a 300 Hz cut let 150 Hz through');
+    assert.ok(Math.abs(20 * Math.log10(level(300, 1000) / level(50, 1000))) < 0.5, 'the cut moved the voice');
+    assert.ok(level(50, 150) > level(300, 150) * 10, 'a 50 Hz cut took 150 Hz out as well');
+});
+
+t('USB and LSB get a double-ended bandwidth slider; the other modes keep one thumb', () => {
+    const sliders = () => {
+        reset();
+        const { tree, cleanups } = render(IQPanel, {}, context());
+        for (const off of cleanups) off();
+        return { range: findComponent(tree, 'RangeSlider') };
+    };
+    try {
+        for (const mode of ['usb', 'lsb']) {
+            fresh({ mode, widths: { [mode]: 2700 } });
+            const { range } = sliders();
+            assert.ok(range, `${mode} has no double-ended slider`);
+            assert.deepStrictEqual([range.props.low, range.props.high, range.props.min], [50, 2700, 0], mode);
+            assert.strictEqual(range.props.gap, SSB_MIN_SPAN);
+            // Dragging the low thumb sets the cut and leaves the width alone.
+            range.props.onChange({ low: 300, high: 2700 });
+            assert.strictEqual(vfo0().lowCutHz, 300);
+            assert.strictEqual(vfoWidth(vfo0()), 2700);
+            // The top edge cannot go under the mode's narrowest filter.
+            range.props.onChange({ low: 50, high: 150 });
+            assert.strictEqual(vfoWidth(vfo0()), DEMOD_MODES.find((m) => m.id === mode).min);
+        }
+        for (const mode of ['am', 'cwu', 'ecss', 'nfm']) {
+            fresh({ mode });
+            assert.ok(!sliders().range, `${mode} grew a double-ended slider`);
+        }
+    } finally {
+        fresh();
+    }
+});
+
 t('each mode keeps its own width', () => {
     fresh();
     updateVfo(0, { mode: 'usb', widths: { usb: 2400 } });
@@ -2843,7 +2939,7 @@ t('pressing the spectrum moves that demodulator, and cannot leave the span', () 
     assert.ok(scope, 'no spectrum in the panel');
     // What it is told to draw is what is actually running, or aiming at a signal
     // would put the filter somewhere else.
-    assert.deepStrictEqual(scope.props.vfos.map(vfoPassband), [passbandFor('usb', 0, 2700)]);
+    assert.deepStrictEqual(scope.props.vfos.map(vfoPassband), [passbandFor('usb', 0, 2700, 'both', LOW_CUT_DEFAULT)]);
 
     scope.props.onOffset(0, 2500);
     assert.strictEqual(vfo0().offsetHz, 2500, 'a press did not move the demodulator');

@@ -22,7 +22,7 @@ import {
     designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN, modeMax, modeWidths, reachOf, audioBandOf, AUDIO_FFT_SIZE,
+    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN, modeMax, modeWidths, reachOf, audioBandOf, AUDIO_FFT_SIZE, LOW_CUT_DEFAULT, LOW_CUT_MAX, SSB_MIN_SPAN, clampLowCut,
 } from '../src/lib/iqDemod.js';
 
 module.exports = {
@@ -38,5 +38,5 @@ module.exports = {
     designLowpass, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, passbandFor, planFor,
     planForVfo, removeVfo,
     resetDemodSettings, saveDemodSettings, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo,
-    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN, modeMax, modeWidths, reachOf, audioBandOf, AUDIO_FFT_SIZE,
+    vfoPassband, vfoWidth, setIQSpan, workingRate, decimationFor, WORK_RATE_MIN, modeMax, modeWidths, reachOf, audioBandOf, AUDIO_FFT_SIZE, LOW_CUT_DEFAULT, LOW_CUT_MAX, SSB_MIN_SPAN, clampLowCut,
 };

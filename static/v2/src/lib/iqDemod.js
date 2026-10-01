@@ -282,6 +282,21 @@ export function clampWidth(modeId, widthHz) {
     return clamp(Math.round(w), m.min, modeMax(modeId));
 }
 
+// The low cut on USB and LSB: where the filter starts, measured from the
+// carrier, with the width as where it stops. 50 Hz by default — under the
+// lowest voice, over the hum and the carrier leak that sit right on it — and
+// never closer than SSB_MIN_SPAN to the top, so there is always a filter.
+export const LOW_CUT_DEFAULT = 50;
+export const LOW_CUT_MAX = 1000;
+export const SSB_MIN_SPAN = 100;
+
+/** A low cut that leaves at least SSB_MIN_SPAN of filter under `widthHz`. */
+export function clampLowCut(lowCutHz, widthHz) {
+    const v = Number(lowCutHz);
+    const top = Math.max(0, Math.min(LOW_CUT_MAX, (Number(widthHz) || 0) - SSB_MIN_SPAN));
+    return clamp(Number.isFinite(v) ? Math.round(v) : LOW_CUT_DEFAULT, 0, top);
+}
+
 /**
  * Where the passband lands, as offsets from the dial.
  *
@@ -290,12 +305,15 @@ export function clampWidth(modeId, widthHz) {
  * draws and what the offset limits below are derived from, so the two cannot
  * disagree about where the filter is.
  */
-export function passbandFor(modeId, offsetHz, widthHz, sideband) {
+export function passbandFor(modeId, offsetHz, widthHz, sideband, lowCutHz = 0) {
     const w = clampWidth(modeId, widthHz);
     const off = Number(offsetHz) || 0;
-    switch (demodMode(modeId).id) {
-        case 'usb': return { lo: off, hi: off + w };
-        case 'lsb': return { lo: off - w, hi: off };
+    const id = demodMode(modeId).id;
+    // USB and LSB start their low cut away from the carrier.
+    const lc = id === 'usb' || id === 'lsb' ? clampLowCut(lowCutHz, w) : 0;
+    switch (id) {
+        case 'usb': return { lo: off + lc, hi: off + w };
+        case 'lsb': return { lo: off - w, hi: off - lc };
         // ECSS in a fixed sideband is that sideband; Both and Auto use either,
         // so both have to be inside the stream.
         case 'ecss':
@@ -377,16 +395,22 @@ export function clampOffset(modeId, offsetHz, widthHz, sideband) {
  *        for the tap readout; the filter runs from ECSS_LOW_EDGE to w either
  *        side of the carrier.
  */
-export function planFor({ mode, offsetHz, widthHz, pitchHz, sideband, trackHz }) {
+export function planFor({ mode, offsetHz, widthHz, pitchHz, sideband, trackHz, lowCutHz = 0 }) {
     const m = demodMode(mode);
     const w = clampWidth(m.id, widthHz);
     const off = clampOffset(m.id, offsetHz, w, sideband);
     const half = w / 2;
+    // USB and LSB: a filter from the low cut to the width, so centred midway
+    // between them and as wide as the gap, and the audio shifted by the same
+    // midpoint — the carrier lands at 0 Hz of audio wherever the cut is.
+    const lc = clampLowCut(lowCutHz, w);
+    const mid = (lc + w) / 2;
+    const span = (w - lc) / 2;
     switch (m.id) {
         case 'usb':
-            return { kind: 'ssb', centreHz: off + half, cutoffHz: half, shiftHz: half };
+            return { kind: 'ssb', centreHz: off + mid, cutoffHz: span, shiftHz: mid };
         case 'lsb':
-            return { kind: 'ssb', centreHz: off - half, cutoffHz: half, shiftHz: -half };
+            return { kind: 'ssb', centreHz: off - mid, cutoffHz: span, shiftHz: -mid };
         case 'cwl':
         case 'cwu':
             return {
@@ -1306,6 +1330,9 @@ const VFO_DEFAULTS = {
     // the new mode's default would throw away a choice that was deliberate.
     widths: {},
     pitchHz: 700,
+    // USB and LSB only: where the filter starts, from the carrier. See
+    // LOW_CUT_DEFAULT.
+    lowCutHz: LOW_CUT_DEFAULT,
     // ECSS only. Both sidebands and the window a click on the picture needs,
     // so the mode works on arrival and neither has to be touched.
     sideband: 'both',
@@ -1378,6 +1405,11 @@ function sanitiseVfo(raw) {
         widths,
         offsetHz: clampOffset(mode, src.offsetHz, widths[mode], sideband),
         pitchHz: clamp(Math.round(Number(src.pitchHz) || VFO_DEFAULTS.pitchHz), PITCH_MIN, PITCH_MAX),
+        // Clamped against the widest a sideband filter can be rather than the
+        // one in force, so a cut set under a wide filter survives a narrower
+        // one being tried; the plan clamps it to the width that is there.
+        lowCutHz: src.lowCutHz === undefined ? LOW_CUT_DEFAULT
+            : clampLowCut(src.lowCutHz, modeMax('usb')),
         sideband,
         trackHz: src.trackHz === undefined ? TRACK_DEFAULT : clampTrack(src.trackHz),
         agc: src.agc !== false,
@@ -1585,12 +1617,13 @@ export function planForVfo(vfo) {
         pitchHz: vfo.pitchHz,
         sideband: vfo.sideband,
         trackHz: vfo.trackHz,
+        lowCutHz: vfo.lowCutHz,
     });
 }
 
 /** Where a demodulator's passband lands, as offsets from the dial. */
 export function vfoPassband(vfo) {
-    return passbandFor(vfo.mode, vfo.offsetHz, vfoWidth(vfo), vfo.sideband);
+    return passbandFor(vfo.mode, vfo.offsetHz, vfoWidth(vfo), vfo.sideband, vfo.lowCutHz);
 }
 
 /** Testing seam: forget the cached copy so the next read goes to storage. */

@@ -63,7 +63,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { resolveMaxFps, useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
 import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
-import { Button, Field, Icon, Readout, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { Button, Field, Icon, RangeSlider, Readout, Segmented, Slider, Switch } from '../components/ui.jsx';
 import FreqEntry from '../components/FreqEntry.jsx';
 import { WIDE_IQ_MODES, isIQ } from '../radio/constants.js';
 import { IQWidths } from './ReceiverPanel.jsx';
@@ -83,7 +83,7 @@ import {
     DEMOD_MODES, MAX_VFOS, PANS, PITCH_MAX, PITCH_MIN, SIDEBAND_OPTIONS, SQUELCH_MAX, SQUELCH_OFF,
     TRACK_MAX, TRACK_MIN, VFO_LABELS, addVfo, collapseVfos, demodMode, expandActiveVfo, getIQDemod, iqHalfSpan, offsetLimits, onDemodSettings,
     planForVfo, removeVfo, selectVfo, signalMeter, tapsFor, toggleVfo, updateVfo, vfoPassband, workingRate, modeMax, modeWidths,
-    audioBandOf,
+    audioBandOf, clampLowCut, SSB_MIN_SPAN,
     vfoWidth,
 } from '../lib/iqDemod.js';
 
@@ -1269,6 +1269,13 @@ function VfoRow({
     // 2 where the width is a total across the carrier and the panel shows a
     // sideband of it — AM and SAM. See DEMOD_MODES.
     const sides = mode.sides || 1;
+    // USB and LSB have a low cut as well as a width: a filter from one to the
+    // other, both measured from the carrier, set on one double-ended slider.
+    const ssb = vfo.mode === 'usb' || vfo.mode === 'lsb';
+    const lowCut = ssb ? clampLowCut(vfo.lowCutHz, width) : 0;
+    // What the filter actually passes: the gap between the edges on a sideband
+    // mode, the audio a side on the AM family, the width elsewhere.
+    const passes = ssb ? width - lowCut : width / sides;
 
     return (
         <div
@@ -1452,7 +1459,7 @@ function VfoRow({
                         the dot is still where the filter actually sits. */}
                     <Field
                         label="Bandwidth"
-                        hint={`${formatSpan(width / sides)}${sides === 2 || vfo.mode === 'ecss' ? ' audio' : ''} · ${offsetLabel(band.lo)} to ${offsetLabel(band.hi)}`}
+                        hint={`${formatSpan(passes)}${sides === 2 || vfo.mode === 'ecss' ? ' audio' : ''} · ${offsetLabel(band.lo)} to ${offsetLabel(band.hi)}`}
                     >
                         <Segmented
                             options={modeWidths(vfo.mode).map((w) => ({ value: w, label: widthLabel(w / sides) }))}
@@ -1464,13 +1471,33 @@ function VfoRow({
                             minItemWidth={44}
                         />
                     </Field>
-                    <Slider
-                        value={width / sides}
-                        min={mode.min / sides}
-                        max={modeMax(vfo.mode) / sides}
-                        step={widthStep}
-                        onChange={(w) => set({ widths: { [vfo.mode]: w * sides } })}
-                    />
+                    {ssb ? (
+                        // The left thumb is the low cut, the right one the
+                        // width the buttons above set. The top edge is held at
+                        // the mode's narrowest so it cannot be dragged below a
+                        // filter the mode will take.
+                        <RangeSlider
+                            low={lowCut}
+                            high={width}
+                            min={0}
+                            max={modeMax(vfo.mode)}
+                            step={widthStep}
+                            gap={SSB_MIN_SPAN}
+                            format={(v) => `${formatSpan(v)} from the carrier`}
+                            onChange={({ low, high }) => set({
+                                lowCutHz: low,
+                                widths: { [vfo.mode]: Math.max(mode.min, high) },
+                            })}
+                        />
+                    ) : (
+                        <Slider
+                            value={width / sides}
+                            min={mode.min / sides}
+                            max={modeMax(vfo.mode) / sides}
+                            step={widthStep}
+                            onChange={(w) => set({ widths: { [vfo.mode]: w * sides } })}
+                        />
+                    )}
                     {(vfo.mode === 'cwl' || vfo.mode === 'cwu') && (
                         <Field label="CW pitch" hint={`${vfo.pitchHz} Hz`}>
                             <Slider

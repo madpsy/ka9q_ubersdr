@@ -651,6 +651,20 @@ export function LayoutProvider({ children }) {
         }));
     }, []);
 
+    // Closes several sections in one write — the dock header's collapse-all.
+    // The caller decides which: it is the one that knows what is drawn and
+    // which of it is pinned. Sections already closed are left as they are, so
+    // a dock with nothing open does not churn the stored layout.
+    const closeSections = useCallback((ids) => {
+        setLayout((l) => {
+            const shut = ids.filter((id) => l.sections[id]?.open !== false);
+            if (!shut.length) return l;
+            const sections = { ...l.sections };
+            for (const id of shut) sections[id] = { ...sections[id], open: false };
+            return { ...l, sections };
+        });
+    }, []);
+
     // Minimal view: the panel renders its cut-down form. It is per panel and
     // not per placement, so a panel reads the same whether it is docked or
     // floating — the point is what you want to see from it, not where it is.
@@ -940,6 +954,7 @@ export function LayoutProvider({ children }) {
         setDockCollapsed,
         setDockSize,
         toggleSection,
+        closeSections,
         toggleSectionMinimal,
         setSectionScale,
         setSectionHidden,
@@ -948,7 +963,7 @@ export function LayoutProvider({ children }) {
         swapPanels,
         revealPanel,
         resetLayout,
-    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, toggleSectionMinimal, setSectionScale, setSectionHidden, movePanel, movePanelNear,
+    }), [layout, toggleDock, setDockCollapsed, setDockSize, toggleSection, closeSections, toggleSectionMinimal, setSectionScale, setSectionHidden, movePanel, movePanelNear,
         swapPanels, revealPanel, setFloat, setFloatMin, raiseFloat, placementOf, setWeights, setPanelHeight, togglePin, resetLayout]);
 
     return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;

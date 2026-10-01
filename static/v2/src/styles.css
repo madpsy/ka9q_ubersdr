@@ -1050,6 +1050,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
     color: var(--text-dim);
     flex: none;
 }
+/* The collapse-all button sits over the header, just left of the dock's own
+   arrow — see Dock.jsx for why it is not inside the header button. The
+   header's right padding (8px) plus that arrow (20px) plus a 2px gap. */
+.dock__head { position: relative; flex: none; }
+.dock__collapse-all {
+    position: absolute;
+    top: 50%;
+    right: 30px;
+    transform: translateY(-50%);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+}
+.dock__collapse-all:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.dock__collapse-all:disabled { opacity: 0.35; cursor: default; }
 
 .dock__body {
     flex: 1;

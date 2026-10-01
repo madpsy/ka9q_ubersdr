@@ -1560,9 +1560,12 @@ function VfoRow({
                                 checked={vfo.agc}
                                 onChange={(agc) => set({ agc })}
                                 label="Automatic gain"
-                                title="Levels this demodulator. Without it the gain below is the only control."
+                                title="Levels this demodulator. Without it the gain below is the only control; with it, that slider sets the level."
                             />
-                            <Field label="Gain" hint={`${vfo.gain.toFixed(2)}×`}>
+                            {/* Applied after the AGC as well as without it
+                                (DemodChain.process), so with the AGC on it is
+                                how loud the levelled audio is, not a gain. */}
+                            <Field label={vfo.agc ? 'Level' : 'Gain'} hint={`${vfo.gain.toFixed(2)}×`}>
                                 <Slider
                                     value={vfo.gain}
                                     min={0}

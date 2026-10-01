@@ -12,7 +12,7 @@ import { Icon } from './ui.jsx';
 import { useDragEndReset } from '../lib/useDragEnd.js';
 import { draggingPanel, nearestPanelGap } from '../lib/panelDrag.js';
 import { columnOf, dockCeiling, fitDock } from '../lib/dockSize.js';
-import { pinnedPanel } from '../lib/dockPin.js';
+import { PINNABLE, pinnedPanel } from '../lib/dockPin.js';
 
 // A panel's share of the bottom dock's width: what the operator dragged it to,
 // otherwise what the panel asks for, otherwise an equal share. Reading the
@@ -131,7 +131,7 @@ const PEEK_CLOSE_MS = 320;
 export default function Dock({ side }) {
     const {
         docks, sections, toggleDock, setDockSize, movePanel, movePanelNear, weights, setWeights,
-        heights, pins,
+        heights, pins, closeSections,
     } = useLayout();
     const applies = usePanelApplies();
     const dock = docks[side];
@@ -290,6 +290,13 @@ export default function Dock({ side }) {
     // What is left to scroll. The dock is empty when nothing is *in the body* —
     // a dock holding only a pinned panel still wants somewhere to drop the next.
     const scrolling = pinned ? visible.length - 1 : visible.length;
+    // What the header's collapse-all would close: everything drawn bar the
+    // pinned panel, which stays as it is — it is pinned because it is the one
+    // being kept in view. Side docks only: the bottom dock's own collapse
+    // arrow already points down, and a second down arrow beside it would read
+    // as the same button twice.
+    const closable = PINNABLE.includes(side) ? visible.filter((id) => id !== pinned) : [];
+    const anyOpen = closable.some((id) => sections[id]?.open !== false);
 
     const onResizeDown = useCallback((e) => {
         e.preventDefault();
@@ -368,18 +375,34 @@ export default function Dock({ side }) {
             {/* The whole header collapses the dock, the way a panel's header
                 opens and closes it. One button rather than a bar with a button
                 inside it, so there is no nested click target to disagree. */}
-            <button
-                type="button"
-                className="dock__header"
-                // In a peek this header is what pins the dock open, so it must
-                // not offer to collapse something that is already collapsed.
-                title={dock.collapsed ? `Keep ${side} panels open` : `Collapse ${side} panels`}
-                aria-expanded={!dock.collapsed}
-                onClick={() => toggleDock(side)}
-            >
-                <span className="dock__name">{side} panels</span>
-                <span className="dock__collapse">{COLLAPSE_ICON[side].open}</span>
-            </button>
+            <div className="dock__head">
+                <button
+                    type="button"
+                    className="dock__header"
+                    // In a peek this header is what pins the dock open, so it must
+                    // not offer to collapse something that is already collapsed.
+                    title={dock.collapsed ? `Keep ${side} panels open` : `Collapse ${side} panels`}
+                    aria-expanded={!dock.collapsed}
+                    onClick={() => toggleDock(side)}
+                >
+                    <span className="dock__name">{side} panels</span>
+                    <span className="dock__collapse">{COLLAPSE_ICON[side].open}</span>
+                </button>
+                {/* A sibling laid over the header rather than a child of it:
+                    a button inside a button is invalid markup, and the click
+                    would collapse the dock as well as its panels. */}
+                {closable.length > 0 && (
+                    <button
+                        type="button"
+                        className="dock__collapse dock__collapse-all"
+                        title={pinned ? 'Collapse all panels except the pinned one' : 'Collapse all panels'}
+                        disabled={!anyOpen}
+                        onClick={() => closeSections(closable)}
+                    >
+                        <Icon.Chevron size={14} />
+                    </button>
+                )}
+            </div>
 
             {pinned && (
                 /* Outside .dock__body, so it is not scrolled and does not clip.

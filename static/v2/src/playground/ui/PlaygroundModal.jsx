@@ -218,16 +218,41 @@ function SharedOffer({ pending, onLoad }) {
     const ok = pending.graph && pending.graph.nodes.length > 0;
     const count = ok ? pending.graph.nodes.length : 0;
     return (
-        <div className="pg-offer" role="dialog" aria-label="Shared graph">
-            <div className="pg-offer__card">
-                <div className="pg-offer__title">{ok ? 'Shared graph' : 'Shared graph unreadable'}</div>
+        <div className="pg-dialog pg-offer" role="dialog" aria-label="Shared graph">
+            <div className="pg-dialog__card">
+                <div className="pg-dialog__title">{ok ? 'Shared graph' : 'Shared graph unreadable'}</div>
                 <p>
                     {ok ? `A link brought a graph of ${count} ${count === 1 ? 'block' : 'blocks'}. Loading it replaces the one open now; you can put yours back afterwards.` : 'A playground link could not be read.'}
                     {pending.errors && pending.errors.length ? ` ${pending.errors.map((e) => e.message).join(' ')}` : ''}
                 </p>
-                <div className="pg-offer__actions">
+                <div className="pg-dialog__actions">
                     <Button size="sm" variant="ghost" onClick={() => offerSharedGraph(null)}>{ok ? 'Keep mine' : 'Dismiss'}</Button>
                     {ok && <Button size="sm" variant="primary" onClick={onLoad}>Load it</Button>}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Before New or Import throws away a graph: a canvas cleared by a stray press
+// is hours of wiring gone, and the way to keep a copy is right here.
+const REPLACING = {
+    new: { title: 'Start a new graph?', what: 'will be cleared from the canvas', go: 'Clear it' },
+    import: { title: 'Import a graph?', what: 'will be replaced by the file you choose', go: 'Choose file…' },
+};
+
+function ConfirmReplace({ kind, count, onExport, onCancel, onConfirm }) {
+    const t = REPLACING[kind];
+    return (
+        <div className="pg-dialog pg-confirm" role="dialog" aria-label={t.title}>
+            <div className="pg-dialog__card">
+                <div className="pg-dialog__title">{t.title}</div>
+                <p>{`The graph open now, ${count} ${count === 1 ? 'block' : 'blocks'}, ${t.what}. Export it first to keep a copy.`}</p>
+                <div className="pg-dialog__actions">
+                    <Button size="sm" variant="ghost" icon={<Icon.Download />} onClick={onExport}>Export</Button>
+                    <span className="pg-dialog__gap" />
+                    <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
+                    <Button size="sm" variant="danger" onClick={onConfirm}>{t.go}</Button>
                 </div>
             </div>
         </div>
@@ -251,6 +276,7 @@ export function PlaygroundWindow({ onClose }) {
     const [view, setView] = useState({ x: 32, y: 32, zoom: 1 });
     const [selection, setPicked] = useState({ nodes: new Set(), wire: null });
     const [notice, setNotice] = useState(null);
+    const [asking, setAsking] = useState(null);
     const [sides, setSides] = useState(readSides);
     // The latest, for two folds before the next render to both count.
     const sidesNow = useRef(sides);
@@ -405,11 +431,12 @@ export function PlaygroundWindow({ onClose }) {
         }
     };
     const exportFile = () => saveText(JSON.stringify(serializeGraph(graph), null, 2), 'ubersdr-playground.json', 'application/json');
+    const chooseFile = () => fileInput.current && fileInput.current.click();
     const importFile = async (file) => {
         if (!file) return;
         try {
             const { graph: g, errors } = parseGraph(JSON.parse(await file.text()));
-            replace(g.nodes.some((n) => n.x || n.y) ? g : autoLayout(g), errors.length ? errors.map((e) => e.message).join(' ') : `Loaded ${file.name}.`);
+            replaceKeepingBack(g.nodes.some((n) => n.x || n.y) ? g : autoLayout(g), errors.length ? errors.map((e) => e.message).join(' ') : `Loaded ${file.name}.`);
         } catch (err) {
             setNotice(`${file.name} is not a playground graph.`);
         }
@@ -448,9 +475,9 @@ export function PlaygroundWindow({ onClose }) {
                     onRedo={redo}
                     onFit={() => fit()}
                     onFromDemod={() => replace(graphFromIQDemod(rate), 'Loaded IQ Demod’s selected demodulator.')}
-                    onNew={() => replace(emptyGraph(), null)}
+                    onNew={() => (graph.nodes.length ? setAsking('new') : replace(emptyGraph(), null))}
                     onTemplate={(t) => replaceKeepingBack(t.build(), `Loaded “${t.title}”. ${t.summary}`)}
-                    onImport={() => fileInput.current && fileInput.current.click()}
+                    onImport={() => (graph.nodes.length ? setAsking('import') : chooseFile())}
                     onExport={exportFile}
                     onShare={share}
                 />
@@ -462,6 +489,19 @@ export function PlaygroundWindow({ onClose }) {
                     onChange={(e) => { importFile(e.target.files && e.target.files[0]); e.target.value = ''; }}
                 />
             </div>
+            {asking && (
+                <ConfirmReplace
+                    kind={asking}
+                    count={graph.nodes.length}
+                    onExport={exportFile}
+                    onCancel={() => setAsking(null)}
+                    onConfirm={() => {
+                        setAsking(null);
+                        if (asking === 'import') chooseFile();
+                        else replaceKeepingBack(emptyGraph(), 'Started a new graph.');
+                    }}
+                />
+            )}
             {ui.pending && (
                 <SharedOffer
                     pending={ui.pending}

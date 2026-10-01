@@ -312,7 +312,7 @@ t('a shared graph is offered rather than loaded, and the offer can be taken or r
     assert.strictEqual(playgroundUiState().open, true, 'a link did not open the playground');
     const { tree, cleanups } = render(PlaygroundWindow, {}, radio());
     assert.strictEqual(JSON.stringify(getPlayground(radio().player).graph), before, 'the graph was replaced without asking');
-    const offer = deep(tree).find((n) => cls(n) === 'pg-offer');
+    const offer = deep(tree).find((n) => cls(n).split(' ').includes('pg-offer'));
     assert.ok(offer, 'no offer');
     assert.match(words(offer), /graph of 1 block\./);
     cleanups.forEach((f) => f());
@@ -338,6 +338,64 @@ t('a loaded shared graph can be swapped back for the one that was open, even aft
     pg.setGraph(g([{ id: 's', type: 'signal' }, { id: 't', type: 'signal' }]));
     btn('Put mine back').props.onClick();
     assert.strictEqual(JSON.stringify(pg.graph), before, 'the graph that was open did not come back');
+    r.cleanups.forEach((f) => f());
+    closePlayground();
+});
+
+t('New and Import ask before replacing a graph, and offer Export first; an empty canvas is not asked about', () => {
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    pg.setGraph(g([{ id: 'mine', type: 'signal', x: 40, y: 80 }]));
+    const before = JSON.stringify(pg.graph);
+    let saved = null;
+    window.ubersdrSaveFile = async (blob) => { saved = blob; };
+    let r = render(PlaygroundWindow, {}, ctx);
+    const btn = (label) => deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === label);
+    const dialog = () => deep(r.tree).find((n) => cls(n).split(' ').includes('pg-confirm'));
+    const again = () => { r.cleanups.forEach((f) => f()); r = render(PlaygroundWindow, {}, ctx); };
+
+    btn('New').props.onClick();
+    again();
+    assert.ok(dialog(), 'New did not ask');
+    assert.match(words(dialog()), /Start a new graph\?.*1 block,/);
+    assert.strictEqual(JSON.stringify(pg.graph), before, 'New cleared before the answer');
+    btn('Export').props.onClick();
+    assert.ok(saved, 'Export in the question saved nothing');
+    btn('Cancel').props.onClick();
+    again();
+    assert.ok(!dialog(), 'Cancel left the question up');
+    assert.strictEqual(JSON.stringify(pg.graph), before, 'Cancel changed the graph');
+
+    btn('New').props.onClick();
+    again();
+    btn('Clear it').props.onClick();
+    again();
+    assert.strictEqual(pg.graph.nodes.length, 0, 'Clear it did not clear');
+    btn('Put mine back').props.onClick();
+    assert.strictEqual(JSON.stringify(pg.graph), before, 'a cleared graph could not be put back');
+
+    // Import asks too, and only its answer opens the file picker.
+    let picked = 0;
+    const input = deep(r.tree).find((n) => n.type === 'input' && n.props && n.props.type === 'file');
+    input.props.ref.current = { click: () => { picked++; } };
+    again();
+    btn('Import').props.onClick();
+    again();
+    assert.match(words(dialog()), /Import a graph\?/);
+    assert.strictEqual(picked, 0, 'the file picker opened before the answer');
+    btn('Choose file…').props.onClick();
+    assert.strictEqual(picked, 1);
+
+    // Nothing to lose: no question.
+    again();
+    pg.setGraph(g([]));
+    again();
+    btn('New').props.onClick();
+    btn('Import').props.onClick();
+    again();
+    assert.ok(!dialog(), 'an empty canvas was asked about');
+    assert.strictEqual(picked, 2);
     r.cleanups.forEach((f) => f());
     closePlayground();
 });

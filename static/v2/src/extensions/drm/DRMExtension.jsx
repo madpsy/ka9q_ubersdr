@@ -238,7 +238,10 @@ export default function DRMExtension({ minimal }) {
     // audioChannels is what the server last said the session is.
     const { state: attachState, error } = useAudioExtension({
         name: 'drm',
-        active: decoding && live && isIQ(tuning.mode) && modeConfirmed(tuning.mode, audioChannels),
+        // Plain IQ only: on a wide preset the server would hand the decoder
+        // 48 kHz and up, which it would read as 12. ExtensionsContext closes
+        // this panel there in any case; this keeps the attach honest meanwhile.
+        active: decoding && live && tuning.mode === REQUIRED_MODE && modeConfirmed(tuning.mode, audioChannels),
         parse: decodeFrame,
         onResult,
     });

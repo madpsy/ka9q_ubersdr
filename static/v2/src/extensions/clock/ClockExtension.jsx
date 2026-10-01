@@ -262,7 +262,9 @@ export default function ClockExtension({ minimal }) {
     // the control socket, so an attach on the local mode alone could reach the
     // server first and be refused. audioChannels is the server's own account,
     // from the status it sends after every tune it applies.
-    const localOk = isIqStation(dialStation) ? iq : !iq;
+    // IQ means plain 12 kHz IQ: a wide preset would reach the decoder at its own
+    // rate. ExtensionsContext closes the panel there anyway — see blockedByMode.
+    const localOk = isIqStation(dialStation) ? tuning.mode === DCF77_MODE : !iq;
     const inputOk = localOk && modeConfirmed(tuning.mode, audioChannels);
     const params = useMemo(() => ({ station: dialStation }), [dialStation]);
 

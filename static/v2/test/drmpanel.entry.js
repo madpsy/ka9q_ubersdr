@@ -7,6 +7,7 @@
 import { deep, render, reset, walk, words } from './hookStub.js';
 import DRMExtension from '../src/extensions/drm/DRMExtension.jsx';
 import ExtensionsPanel from '../src/panels/ExtensionsPanel.jsx';
+import { ExtensionsProvider, blockedByMode } from '../src/extensions/ExtensionsContext.jsx';
 import { EXTENSIONS, EXTENSION_BY_ID } from '../src/extensions/registry.jsx';
 import {
     decodeFrame, hasAudioLock, languageName, progressLabel, qualityFraction,
@@ -20,7 +21,7 @@ import {
 
 module.exports = {
     deep, render, reset, walk, words,
-    DRMExtension, ExtensionsPanel, EXTENSIONS, EXTENSION_BY_ID, decodeFrame, hasAudioLock, languageName, progressLabel, qualityFraction,
+    DRMExtension, ExtensionsPanel, ExtensionsProvider, blockedByMode, EXTENSIONS, EXTENSION_BY_ID, decodeFrame, hasAudioLock, languageName, progressLabel, qualityFraction,
     WMER_THRESHOLD_FRACTION,
     formatScheduleFreq, formatSlot, formatSlotTime, isTunedTo, onAirCount, resetSchedule, scheduleDetail, scheduleRows,
     describeSlot, formatOffsetLabel, localOffsetMinutes, shiftHHMM,

@@ -19,8 +19,24 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { isIQ } from '../radio/constants.js';
+import { isIQ, isWideIQ } from '../radio/constants.js';
 import { EXTENSIONS, EXTENSION_BY_ID } from './registry.jsx';
+
+/**
+ * Why an extension cannot run in this mode, or null when it can.
+ *
+ * Two ways round. A decoder of demodulated audio has nothing to read in any IQ.
+ * One that reads the quadrature stream itself (`needsIQ` — DRM, the time
+ * signals) is written for plain IQ's 12 kHz: the server hands an extension the
+ * session's own rate, so on a wide preset it would be fed 48 to 384 kHz and
+ * told nothing had changed. Used by the panel to grey a row out and by the
+ * provider below to close one that is open, so the two cannot disagree.
+ */
+export function blockedByMode(ext, mode) {
+    if (!ext || !isIQ(mode)) return null;
+    if (!ext.needsIQ) return 'iq';
+    return isWideIQ(mode) ? 'wide-iq' : null;
+}
 
 const STORAGE_KEY = 'ubersdr.v2.extensions';
 
@@ -110,11 +126,15 @@ export function ExtensionsProvider({ children }) {
     //
     // Here rather than in the panel because the panel is unmounted whenever its
     // dock is collapsed, and an extension outlives the launcher that opened it.
-    const iq = isIQ(tuning.mode);
+    //
+    // And one that reads IQ is closed by a wide preset, for the reason given at
+    // blockedByMode. Keyed on the open extension as well as the mode, so one
+    // opened from anywhere while the mode already rules it out is shut too.
     useEffect(() => {
-        if (!iq) return;
-        setActiveId((id) => (id && EXTENSION_BY_ID[id] && EXTENSION_BY_ID[id].needsIQ ? id : null));
-    }, [iq]);
+        if (!activeId || !blockedByMode(EXTENSION_BY_ID[activeId], tuning.mode)) return;
+        setActiveId(null);
+        setMinimised(false);
+    }, [tuning.mode, activeId]);
 
     // The registry, annotated. `enabled` is null while the fetch is in flight,
     // and nothing is openable until it is known.

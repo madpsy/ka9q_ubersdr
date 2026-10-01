@@ -20,7 +20,8 @@
 import React from '../react.js';
 import { useExtensions } from '../extensions/ExtensionsContext.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { isIQ } from '../radio/constants.js';
+import { isWideIQ } from '../radio/constants.js';
+import { blockedByMode } from '../extensions/ExtensionsContext.jsx';
 
 export default function ExtensionsPanel() {
     const { list, activeId, minimised, toggle } = useExtensions();
@@ -32,24 +33,38 @@ export default function ExtensionsPanel() {
     //
     // An extension flagged needsIQ is the other way round — it decodes the
     // quadrature stream — so IQ is exactly where it belongs and it stays live.
-    const iq = isIQ(tuning.mode);
-    const blockedByIQ = (e) => iq && !e.needsIQ;
+    //
+    // Except on a wide preset: those read 12 kHz IQ and nothing else, so there
+    // every row goes dead — see blockedByMode.
+    const blockedByIQ = (e) => !!blockedByMode(e, tuning.mode);
     const anyBlocked = list.some(blockedByIQ);
+    const wide = isWideIQ(tuning.mode);
 
     return (
         <div className="stack exts">
             {anyBlocked && (
                 <div className="note note--tight">
-                    Most of these are unavailable in IQ mode — they decode
-                    demodulated audio, and IQ carries raw quadrature samples
-                    instead. Anything that reads IQ itself stays available.
+                    {wide ? (
+                        <>
+                            None of these are available in wide IQ. Most decode
+                            demodulated audio, and the ones that read IQ need the
+                            standard 12 kHz IQ.
+                        </>
+                    ) : (
+                        <>
+                            Most of these are unavailable in IQ mode — they decode
+                            demodulated audio, and IQ carries raw quadrature samples
+                            instead. Anything that reads IQ itself stays available.
+                        </>
+                    )}
                 </div>
             )}
             <div className="list">
                 {list.map((e) => {
                     const open = activeId === e.id;
-                    const reason = blockedByIQ(e)
-                        ? 'Not available in IQ mode'
+                    const why = blockedByMode(e, tuning.mode);
+                    const reason = why
+                        ? (why === 'wide-iq' ? 'Needs 12 kHz IQ, not wide IQ' : 'Not available in IQ mode')
                         : !e.enabled
                             ? 'Not enabled on this receiver'
                             : (e.requiresAudio && !running ? 'Start the receiver to use this' : null);

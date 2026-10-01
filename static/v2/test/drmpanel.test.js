@@ -32,7 +32,7 @@ globalThis.TextDecoder = globalThis.TextDecoder || require('util').TextDecoder;
 // the frame helpers, which are covered directly below.
 
 const {
-    render, reset, walk, words, DRMExtension, ExtensionsPanel,
+    render, reset, walk, words, DRMExtension, ExtensionsPanel, ExtensionsProvider, blockedByMode,
     EXTENSIONS, EXTENSION_BY_ID,
     decodeFrame, hasAudioLock, progressLabel, qualityFraction,
     formatScheduleFreq, formatSlot, formatSlotTime, isTunedTo, onAirCount,
@@ -292,6 +292,49 @@ t('outside IQ every enabled extension is offered, DRM included', () => {
     for (const r of rows) {
         assert.strictEqual(r.disabled, false, `disabled in USB: ${r.text}`);
     }
+});
+
+t('in wide IQ nothing is offered, not even the IQ decoders', () => {
+    // DRM and the clock read plain IQ's 12 kHz. On a wide preset the server
+    // hands them the session's own rate, so they go dead with everything else.
+    for (const mode of ['iq48', 'iq96', 'iq192', 'iq384']) {
+        const rows = rowsOf(mode);
+        assert.ok(rows.length >= 2, `expected extension rows in ${mode}`);
+        for (const r of rows) assert.strictEqual(r.disabled, true, `live in ${mode}: ${r.text}`);
+        const drm = rows.find((r) => r.text.startsWith('DRM Decoder'));
+        assert.ok(drm.text.includes('Needs 12 kHz IQ'), `DRM in ${mode} says: ${drm.text}`);
+        const ft8 = rows.find((r) => r.text.startsWith('FT8 Decoder'));
+        assert.ok(ft8.text.includes('Not available in IQ mode'), `FT8 in ${mode} says: ${ft8.text}`);
+    }
+    reset();
+    const { tree } = render(ExtensionsPanel, {}, launcher('iq48'));
+    assert.ok(/wide IQ/.test(words(tree)), 'the note does not say why');
+});
+
+t('blockedByMode: audio decoders out in any IQ, IQ decoders out in wide IQ', () => {
+    const { drm, clock } = EXTENSION_BY_ID;
+    const ft8 = EXTENSION_BY_ID.ft8 || EXTENSIONS.find((e) => !e.needsIQ);
+    for (const e of [drm, clock, ft8]) assert.strictEqual(blockedByMode(e, 'usb'), null, e.id);
+    assert.strictEqual(blockedByMode(drm, 'iq'), null);
+    assert.strictEqual(blockedByMode(clock, 'iq'), null);
+    assert.strictEqual(blockedByMode(ft8, 'iq'), 'iq');
+    assert.strictEqual(blockedByMode(drm, 'iq48'), 'wide-iq');
+    assert.strictEqual(blockedByMode(clock, 'iq384'), 'wide-iq');
+    assert.strictEqual(blockedByMode(ft8, 'iq96'), 'iq');
+});
+
+t('an open DRM window closes when the receiver moves to wide IQ', () => {
+    // The provider owns it, so the launcher being collapsed changes nothing.
+    // Rendered three times on the one set of hook state, as React would.
+    const provider = (mode) => {
+        const { tree } = render(ExtensionsProvider, { children: null }, { tuning: { frequency: 6_055_000, mode } });
+        return tree.props.value;
+    };
+    reset();
+    provider('iq').open('drm');
+    assert.strictEqual(provider('iq').activeId, 'drm', 'DRM did not stay open in 12 kHz IQ');
+    provider('iq48');                       // the mode changes; its effect closes DRM
+    assert.strictEqual(provider('iq48').activeId, null, 'DRM still open in IQ 48');
 });
 
 // ── schedule ────────────────────────────────────────────────────────────────

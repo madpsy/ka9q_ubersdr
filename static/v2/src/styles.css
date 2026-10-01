@@ -13999,7 +13999,20 @@ a.btn { text-decoration: none; }
    editing one, without having to remember which.
 
    `--vfo` is set inline per row, from the four tokens above. */
-.iq-vfos { display: flex; flex-direction: column; gap: 4px; }
+/* Columns once there is room for them — a floating panel pulled wide, or a
+   wide dock — up to three: each column at least 300px, which is about where a
+   row's header stops giving up its readouts, and never more than a third of
+   the width. auto-fit rather than auto-fill, so the tracks nobody is in
+   collapse: one demodulator in a wide window still gets the whole width, two
+   get half each. min(100%, …) keeps a dock narrower than 300px to the single
+   column it always had instead of overflowing it. Each row keeps its own
+   height (align-items), since an open row is several times a shut one. */
+.iq-vfos {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, max(300px, calc((100% - 8px) / 3))), 1fr));
+    align-items: start;
+    gap: 4px;
+}
 
 .iq-vfo {
     border: 1px solid var(--border);
@@ -14237,7 +14250,7 @@ a.btn { text-decoration: none; }
     border-top: 1px solid var(--border);
 }
 
-.iq-add { width: 100%; }
+.iq-add { width: 100%; grid-column: 1 / -1; }
 
 /* The listening frequency, which is a reading until it is pressed and a kHz box
    after that. Both wear .readout__value, so the card does not change size when

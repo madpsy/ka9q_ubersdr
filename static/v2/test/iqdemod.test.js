@@ -2858,6 +2858,26 @@ t('every demodulator slot has a colour, in both themes', () => {
         'a colour defined for a demodulator that cannot exist');
 });
 
+t('the demodulators go into columns when the panel is wide, three at most', () => {
+    // Read from the stylesheet because it is all there is: the layout is a
+    // grid rule, with no measuring in JS to test instead.
+    const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+    const rule = (sel) => {
+        const m = css.match(new RegExp(`(^|\\n)${sel.replace('.', '\\.')}\\s*\\{([^}]*)\\}`));
+        return m ? m[2] : '';
+    };
+    const list = rule('.iq-vfos');
+    assert.ok(/display:\s*grid/.test(list), 'the rows are not a grid');
+    // auto-fit, so one demodulator keeps the whole width; at least 300px a
+    // column; no more than a third of the width, so three is the most; and
+    // min(100%, …) so a narrow dock stays one column rather than overflowing.
+    assert.ok(/repeat\(auto-fit,/.test(list), `columns: ${list}`);
+    assert.ok(/min\(100%,\s*max\(300px,\s*calc\(\(100% - 8px\) \/ 3\)\)\)/.test(list), `column width: ${list}`);
+    assert.ok(/align-items:\s*start/.test(list), 'an open row would stretch its neighbours');
+    // The add button is a whole row, not a fourth column.
+    assert.ok(/grid-column:\s*1 \/ -1/.test(rule('.iq-add')), 'the add button sits in a column');
+});
+
 t('no two demodulators share a colour', () => {
     const fs = require('fs');
     const path = require('path');

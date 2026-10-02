@@ -1722,6 +1722,7 @@ export default function IQPanel({ minimal }) {
                         variant="ghost"
                         icon={<Icon.Puzzle />}
                         title="Build a demodulator from blocks"
+                        aria-label="Playground"
                         onClick={openPlayground}
                     >
                         Playground

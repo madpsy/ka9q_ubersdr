@@ -554,6 +554,10 @@ t('Status: every item from the list; each settled heard or not as the next comes
     assert.ok(/^1 of 3 heard/.test(r.summary), r.summary);
     assert.ok(r.rows[0].lastHeard === 1700000000 * 1000, 'heard at the Clock’s time');
     assert.strictEqual(st.inst.activity(), 1);
+    // Clear: every thing back to not checked, its times and history gone; the current one still listened for.
+    st.inst.command('clear');
+    r = st.inst.read();
+    assert.deepStrictEqual(r.rows.map((x) => [x.key, x.state, x.history.length, x.lastHeard]), [['CBL', 'listening', 0, null], ['DND', 'pending', 0, null], ['EDN', 'pending', 0, null]]);
 });
 
 t('the NDB template wires the match and the board: label → console match and Status current, matched → hit, labels → items', () => {
@@ -569,6 +573,22 @@ t('Status takes a Frequency list’s list output as well as its labels', () => {
     const st = blockOf('status');
     st.step({ items: { type: 'schedule', schedule: NDBS } });
     assert.deepStrictEqual(st.inst.read().rows.map((x) => x.key), ['CBL', 'DND', 'EDN']);
+});
+
+t('Status forgets “last heard” after its time (5 minutes unless set); 0 keeps it', () => {
+    for (const [forgetMin, kept] of [[5, false], [0, true], [20, true]]) {
+        const st = blockOf('status', { forgetMin });
+        const T = 1700000000;
+        st.step({ items: { type: 'items', items: ['CBL', 'DND'] }, current: 'CBL', unix: T });
+        st.step({ hit: 'CBL', unix: T + 1 });
+        st.step({ current: 'DND', unix: T + 30 });
+        assert.strictEqual(st.inst.read().rows[0].lastHeard, (T + 1) * 1000);
+        st.step({ unix: T + 6 * 60 });
+        const r = st.inst.read().rows[0];
+        assert.strictEqual(r.lastHeard != null, kept, `forget after ${forgetMin} min`);
+        assert.strictEqual(r.state, 'heard', 'the round’s result is not forgotten');
+        assert.deepStrictEqual(r.history, [1]);
+    }
 });
 
 console.log(`\n${pass} passed`);

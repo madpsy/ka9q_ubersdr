@@ -832,11 +832,19 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0, onParam
                                 <span className="pg-status__icon">{icon[row.state]}</span>
                                 <span className="pg-status__name">{large ? row.name : row.key}</span>
                                 <span className="pg-status__dots">{row.history.map((h, i) => <i key={i} className={h ? 'is-yes' : 'is-no'} />)}</span>
-                                <span className="pg-status__state">{say(row)}{row.lastHeard ? ' ' + when(row.lastHeard) : ''}</span>
+                                <span className="pg-status__state">
+                                    {say(row)}
+                                    {row.lastHeard ? (row.state === 'missed' || (row.state === 'listening' && !row.hits) ? ' · last ' : ' ') + when(row.lastHeard) : ''}
+                                </span>
                             </li>
                         ))}
                     </ul>
                     {r.rows.length > shown.length && <div className="pg-list__dim">{`+${r.rows.length - shown.length} more`}</div>}
+                    {large && pg && pg.command && (
+                        <div className="pg-insp__row">
+                            <button type="button" className="btn btn--sm btn--ghost" onClick={() => pg.command(node.id, 'clear')} title="Every thing back to not checked: its history and times cleared">Clear</button>
+                        </div>
+                    )}
                 </div>
             );
         }

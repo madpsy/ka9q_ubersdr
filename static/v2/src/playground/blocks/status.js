@@ -16,6 +16,10 @@
 // the next came along with no hit was not heard. Each thing keyed by its
 // name's first word (an ident: CBL of "CBL Campbeltown") or the whole name.
 //
+// When each was last heard is forgotten after `forgetMin` minutes (5 unless
+// set; 0 keeps it), and all of it when the board is cleared (its Clear, opened
+// large) or the playground starts again.
+//
 // Out: a line of text each time a thing is settled ("12:30:00 CBL heard"),
 // `heard` (1 or 0, as each is settled) and `summary` ("3 of 5 heard").
 
@@ -42,6 +46,9 @@ export const StatusBlock = {
             kind: 'choice', label: 'Things are named by', default: 'word', control: false,
             options: [{ value: 'word', label: 'First word', title: 'An ident: CBL from “CBL Campbeltown”' }, { value: 'all', label: 'Whole name' }],
         },
+        // When a thing was last heard, forgotten once it is this old: the
+        // board shows what has been heard lately. 0 keeps it.
+        forgetMin: { kind: 'number', label: 'Forget “last heard” after', unit: 'min', default: 5, min: 0, max: 1440, step: 1, live: true },
     },
     create() {
         let p = {};
@@ -93,6 +100,7 @@ export const StatusBlock = {
             command(name) {
                 if (name !== 'clear') return;
                 for (const r of rows.values()) Object.assign(r, { state: r.key === current ? 'listening' : 'pending', hits: 0, lastHeard: null, history: [], heard: 0, checks: 0 });
+                lastSummary = '';
             },
             activity() { return current ? 1 : 0; },
             read() {
@@ -144,6 +152,11 @@ export const StatusBlock = {
                         r.lastHeard = now();
                         r.state = 'listening';
                     }
+                }
+                // Last heard too long ago: forgotten.
+                if (p.forgetMin > 0) {
+                    const old = now() - p.forgetMin * 60000;
+                    for (const r of rows.values()) if (r.lastHeard != null && r.lastHeard < old) r.lastHeard = null;
                 }
                 summarise(outs);
                 return 0;

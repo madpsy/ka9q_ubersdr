@@ -2230,7 +2230,7 @@ t('the Status card: a row a thing — heard, not heard, listening, not checked �
             summary: '1 of 4 heard (1 not checked yet)',
             rows: [
                 { key: 'CBL', name: 'CBL Campbeltown', state: 'heard', hits: 2, lastHeard: Date.UTC(2026, 0, 1, 12, 30), history: [1, 0, 1], heard: 2, checks: 3 },
-                { key: 'DND', name: 'DND Dundee', state: 'missed', hits: 0, lastHeard: null, history: [0], heard: 0, checks: 1 },
+                { key: 'DND', name: 'DND Dundee', state: 'missed', hits: 0, lastHeard: Date.UTC(2026, 0, 1, 12, 0), history: [1, 0], heard: 1, checks: 2 },
                 { key: 'EDN', name: 'EDN Edinburgh', state: 'listening', hits: 1, lastHeard: Date.UTC(2026, 0, 1, 12, 31), history: [], heard: 0, checks: 0 },
                 { key: 'PIK', name: 'PIK Prestwick', state: 'pending', hits: 0, lastHeard: null, history: [], heard: 0, checks: 0 },
             ],
@@ -2241,10 +2241,17 @@ t('the Status card: a row a thing — heard, not heard, listening, not checked �
     const items = all.filter((x) => x.type === 'li');
     assert.deepStrictEqual(items.map(cls), ['is-heard', 'is-missed', 'is-listening is-hit', 'is-pending']);
     assert.ok(/✓.*CBL.*heard\s+12:30/.test(words(items[0])), words(items[0]));
-    assert.ok(/✗.*DND.*not heard/.test(words(items[1])));
+    // Missed this time, heard before: the time is when it was last heard, and says so.
+    assert.ok(/✗.*DND.*not heard\s*· last 12:00/.test(words(items[1])), words(items[1]));
     assert.ok(/hearing it/.test(words(items[2])));
     assert.ok(/not checked yet/.test(words(items[3])));
-    assert.strictEqual(all.filter((x) => x.type === 'i' && cls(x) === 'is-yes').length, 2);
+    assert.strictEqual(all.filter((x) => x.type === 'i' && cls(x) === 'is-yes').length, 3);
+    // Opened large, a Clear for the board.
+    const cmds = [];
+    const pgc = { ...pg, readings: pg.readings, command: (id, name) => cmds.push([id, name]) };
+    const big = deep(React.createElement(CardVisual, { pg: pgc, node: { id: 'st', type: 'status', params: {} }, rate: 12000, large: true }));
+    big.find((x) => x.type === 'button' && words(x) === 'Clear').props.onClick();
+    assert.deepStrictEqual(cmds, [['st', 'clear']]);
     assert.ok(all.some((x) => cls(x) === 'pg-status__sum' && words(x) === '1 of 4 heard (1 not checked yet)'));
     // Not running, a list wired in: its things shown, none checked yet.
     const saved = pg.readings;

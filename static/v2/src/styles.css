@@ -15075,16 +15075,17 @@ a.btn { text-decoration: none; }
 .pg-status { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: calc(11px * var(--ui-scale)); }
 .pg-status__sum { font-weight: 600; color: var(--text); }
 .pg-status__rows { list-style: none; margin: 0; padding: 0; }
-.pg-status__rows li { display: grid; grid-template-columns: 12px minmax(36px, 1fr) auto auto; gap: 6px; align-items: center; line-height: 1.4; color: var(--text-dim); }
+.pg-status__rows li { display: grid; grid-template-columns: 12px minmax(36px, 1fr) minmax(0, auto) minmax(0, auto); gap: 6px; align-items: center; line-height: 1.4; color: var(--text-dim); }
 .pg-status__rows li.is-heard .pg-status__icon, .pg-status__rows li.is-heard .pg-status__state { color: var(--good); }
 .pg-status__rows li.is-missed .pg-status__icon, .pg-status__rows li.is-missed .pg-status__state { color: var(--bad); }
 .pg-status__rows li.is-listening { color: var(--accent); font-weight: 600; }
 .pg-status__rows li.is-hit .pg-status__state, .pg-status__rows li.is-hit .pg-status__icon { color: var(--good); }
 .pg-status__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-.pg-status__dots { display: flex; gap: 2px; }
+.pg-status__dots { display: flex; gap: 2px; justify-content: flex-end; overflow: hidden; }
+.pg-status__dots i { flex: none; }
 .pg-status__dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--bad); opacity: 0.7; }
 .pg-status__dots i.is-yes { background: var(--good); opacity: 1; }
-.pg-status__state { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pg-status__state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .pg-console__match { font-size: calc(11px * var(--ui-scale)); font-weight: 600; color: var(--accent); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pg-sched-card { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pg-sched-card__next { color: var(--text-dim); font-size: calc(11px * var(--ui-scale)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

@@ -846,7 +846,7 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0, onParam
                             <li key={row.key} className={`is-${row.state}${row.state === 'listening' && row.hits ? ' is-hit' : ''}`} title={row.name}>
                                 <span className="pg-status__icon">{mark(row)}</span>
                                 <span className="pg-status__name">{large ? row.name : row.key}</span>
-                                <span className="pg-status__dots">{row.history.map((h, i) => <i key={i} className={h ? 'is-yes' : 'is-no'} />)}</span>
+                                <span className="pg-status__dots">{(large ? row.history : row.history.slice(-6)).map((h, i) => <i key={i} className={h ? 'is-yes' : 'is-no'} />)}</span>
                                 <span className="pg-status__state">
                                     {say(row)}
                                     {row.lastHeard ? (row.state === 'missed' || (row.state === 'listening' && !row.hits) ? ' · last ' : ' ') + when(row.lastHeard) : ''}

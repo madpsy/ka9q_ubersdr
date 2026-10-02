@@ -1391,7 +1391,7 @@ t('a carrier tracker’s card says SAM or ECSS and which sideband, and SAM has n
         pg.readings = { n: reading };
         const node = g([{ id: 'n', type: 'carrier-tracker', params }]).nodes[0];
         // Spacing as a browser shows it: the stub puts a space between pieces of text.
-        return words(React.createElement(CardVisual, { pg, node })).replace(/\s+/g, ' ');
+        return words(React.createElement(CardVisual, { pg, node })).replace(/\s+/g, ' ').trim();
     };
     const locked = { state: 'locked', locked: true, carrierHz: 12.3, side: 'lsb' };
     assert.strictEqual(card({ mode: 'sam' }, locked), 'SAM · both sidebands Locked · 12.3 Hz');
@@ -1886,6 +1886,74 @@ const tAsync = async (name, fn) => {
         r.cleanups.forEach((f) => f());
         offerSharedGraph(null);
         closePlayground();
+    });
+    await tAsync('the JSON pane edits the graph as it is typed, and shows what the canvas does', async () => {
+        const { JsonPane, graphText, readGraphText } = P;
+        assert.match(readGraphText('{"v":1,').error, /^Not JSON yet/);
+        assert.match(readGraphText('{"v":1,"nodes":[{"id":"a","type":"lowpas"}],"wires":[]}').error, /Unknown block/);
+        assert.deepStrictEqual(readGraphText('{"v":1,"nodes":[{"id":"a","type":"lowpass"}],"wires":[]}').graph.nodes.map((n) => n.id), ['a']);
+
+        // The window: the button shows the pane, and what the pane hands back
+        // becomes the graph.
+        localStorage.removeItem('ubersdr.v2.playground.sides');
+        const ctx = radio();
+        const pg = getPlayground(ctx.player);
+        pg.setGraph(g([{ id: 'lp', type: 'lowpass', x: 10, y: 20 }]));
+        openPlayground();
+        reset();
+        let r = render(PlaygroundWindow, { onClose() {} }, ctx);
+        const pane = () => walk(r.tree).find((n) => n.type === JsonPane);
+        assert.strictEqual(pane(), undefined, 'the JSON showed before it was asked for');
+        deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === 'JSON').props.onClick();
+        r.cleanups.forEach((f) => f());
+        r = render(PlaygroundWindow, { onClose() {} }, ctx);
+        assert.ok(pane(), 'the JSON button showed no JSON');
+        assert.strictEqual(pane().props.graph, pg.graph);
+        pane().props.onApply(g([{ id: 'lp', type: 'lowpass', params: { cutoffHz: 900 }, x: 10, y: 20 }]));
+        assert.strictEqual(pg.graph.nodes[0].params.cutoffHz, 900, 'what the pane applied did not reach the graph');
+        r.cleanups.forEach((f) => f());
+        localStorage.removeItem('ubersdr.v2.playground.sides');
+        closePlayground();
+
+        // The pane on its own, as the root, so its hooks are its own.
+        reset();
+        let graph = g([{ id: 'lp', type: 'lowpass', x: 10, y: 20 }]);
+        const applied = [];
+        const props = () => ({ graph, settleMs: 0, onApply: (next) => { applied.push(next); graph = next; } });
+        let p = render(JsonPane, props());
+        const area = () => walk(p.tree).find((n) => n.type === 'textarea');
+        const again = () => { p.cleanups.forEach((f) => f()); p = render(JsonPane, props()); };
+        assert.strictEqual(area().props.value, graphText(graph));
+        const typed = area().props.value.replace('"type": "lowpass",', '"type": "lowpass",\n      "params": { "cutoffHz": 900 },');
+        area().props.onFocus();
+        area().props.onChange({ target: { value: typed } });
+        await new Promise((res) => setTimeout(res, 10));
+        assert.strictEqual(applied.length, 1, 'what was typed was not applied');
+        assert.strictEqual(graph.nodes[0].params.cutoffHz, 900);
+        again();
+        assert.strictEqual(area().props.value, typed, 'the box was rewritten under the typing');
+
+        // Half-typed: nothing applied, and the box keeps the text.
+        const broken = typed.replace('"lowpass"', '"lowpa');
+        area().props.onChange({ target: { value: broken } });
+        await new Promise((res) => setTimeout(res, 10));
+        again();
+        assert.strictEqual(applied.length, 1, 'half-typed JSON was applied');
+        assert.strictEqual(area().props.value, broken);
+        assert.match(words(walk(p.tree).find((n) => cls(n).includes('pg-json__state'))), /Not JSON yet/);
+        // A change elsewhere while it is being typed in leaves it be.
+        graph = g([{ id: 'lp', type: 'lowpass', params: { cutoffHz: 900 }, x: 50, y: 20 }]);
+        again();
+        assert.strictEqual(area().props.value, broken, 'the canvas wrote over the typing');
+
+        // Out of the box, a change on the canvas shows in it.
+        area().props.onBlur();
+        graph = g([{ id: 'lp', type: 'lowpass', params: { cutoffHz: 900 }, x: 77, y: 88 }]);
+        again();
+        again();
+        assert.strictEqual(area().props.value, graphText(graph));
+        assert.match(area().props.value, /"x": 77/);
+        p.cleanups.forEach((f) => f());
     });
     console.log(`\n${pass} passed`);
 })();

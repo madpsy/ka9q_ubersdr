@@ -2,7 +2,7 @@
 // summary says it does.
 
 const assert = require('assert');
-const { compile, Runtime, TEMPLATES, TEST_MESSAGES, controlPort } = require('./.build/playground.cjs');
+const { compile, Runtime, TEMPLATES, TEST_MESSAGES, controlPort, MORSE } = require('./.build/playground.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -115,6 +115,67 @@ t('every IQ Demod mode has a template, drawn out in blocks, its decimator on Aut
     }
     const ecss = byId['mode-ecss'].build().nodes.find((n) => n.type === 'carrier-tracker');
     assert.strictEqual(ecss.params.sideband, 'both', 'ECSS starts on the panel’s default sideband');
+});
+
+/**
+ * A non-directional beacon as received: a carrier that never stops, AM by a
+ * tone keyed with `ident` at `wpm`, the ident repeated after `gapSec`, over
+ * noise. The sidebands sit `depth / 2` under the carrier — EDN on 341 kHz
+ * measured 18 dB down, which is 0.25 here.
+ */
+function beacon({ ident, toneHz, wpm = 7, gapSec = 6, depth = 0.25, carrierHz = 0, noise = 0.01, rate = RATE }) {
+    const dit = (1.2 / wpm) * rate;
+    const marks = [];
+    let at = rate;
+    const add = () => {
+        for (const ch of ident) {
+            for (const s of MORSE[ch]) {
+                const len = (s === '.' ? 1 : 3) * dit;
+                marks.push([Math.round(at), Math.round(at + len)]);
+                at += len + dit;
+            }
+            at += 2 * dit;
+        }
+        at += gapSec * rate;
+    };
+    let k = 0;
+    let m = 0;
+    let seed = 5;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+    return () => {
+        const n = Math.round(rate * 0.02);
+        const I = new Float32Array(n);
+        const Q = new Float32Array(n);
+        for (let j = 0; j < n; j++, k++) {
+            while (!marks.length || marks[marks.length - 1][1] <= k) add();
+            while (marks[m][1] <= k) m++;
+            const on = k >= marks[m][0];
+            const t = k / rate;
+            const a = 0.05 * (1 + (on ? 2 * depth : 0) * Math.cos(2 * Math.PI * toneHz * t));
+            I[j] = a * Math.cos(2 * Math.PI * carrierHz * t) + noise * rnd();
+            Q[j] = a * Math.sin(2 * Math.PI * carrierHz * t) + noise * rnd();
+        }
+        return { i: I, q: Q, frames: n, rate };
+    };
+}
+
+t('“Decode an NDB ident” reads the ident off the tone, on 400 Hz as loaded and on 1020 Hz once set', () => {
+    const read = (graph, opts, secs = 40) => {
+        const rt = new Runtime(graph, RATE);
+        const next = beacon(opts);
+        for (let p = 0; p < 50 * secs; p++) rt.process(next());
+        return rt.read('console').text;
+    };
+    const tpl = byId.ndb.build();
+    assert.match(read(tpl, { ident: 'EDN', toneHz: 400 }), /EDN EDN EDN/);
+    // A few hertz out, a slow sender, a weak one: as beacons are.
+    assert.match(read(tpl, { ident: 'EDN', toneHz: 404, carrierHz: 20, wpm: 5, noise: 0.03 }), /EDN EDN/);
+    const tone1020 = byId.ndb.build();
+    tone1020.nodes.find((n) => n.id === 'ident').params.offsetHz = 1020;
+    assert.match(read(tone1020, { ident: 'GLW', toneHz: 1020, wpm: 10 }), /GLW GLW GLW/);
+    // On 400 Hz, a 1020 Hz beacon's ident is not read — a stray E from the
+    // noise at most: it is the tone that is read, not the carrier.
+    assert.doesNotMatch(read(tpl, { ident: 'GLW', toneHz: 1020 }, 20), /GLW|[^E\s]/);
 });
 
 t('each decoder test bench decodes its transmitter, with no receiver', () => {

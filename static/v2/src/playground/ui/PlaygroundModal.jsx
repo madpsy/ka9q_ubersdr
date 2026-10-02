@@ -29,6 +29,7 @@ import { INSTRUMENTS } from './viewers.jsx';
 import { useDisplay } from '../../display/DisplayContext.jsx';
 import Canvas, { formatCpu, formatLatency } from './Canvas.jsx';
 import Inspector from './Inspector.jsx';
+import JsonPane from './JsonPane.jsx';
 import Palette from './Palette.jsx';
 import { closePlayground, offerSharedGraph, usePlaygroundUi } from './store.js';
 import { holdSpectrum } from '../../lib/spectrumPause.js';
@@ -187,7 +188,7 @@ function AnnotateTools({ onAdd }) {
 
 function Toolbar({
     pg, live, offline, iq, onStart, onStop, history, onUndo, onRedo, onFit, onFromDemod, onNew, onImport, onExport, onShare,
-    onTemplate, onAnnotate,
+    onTemplate, onAnnotate, json, onJson,
 }) {
     const on = pg.running;
     return (
@@ -223,6 +224,14 @@ function Toolbar({
                 <Button size="sm" variant="ghost" icon={<Icon.Upload />} title="Load a graph from a .json file" onClick={onImport}>Import</Button>
                 <Button size="sm" variant="ghost" icon={<Icon.Download />} title="Save the graph as a .json file" onClick={onExport}>Export</Button>
                 <Button size="sm" variant="ghost" icon={<Icon.Share />} title="Copy a link to this graph" onClick={onShare}>Share</Button>
+                <Button
+                    size="sm"
+                    variant={json ? 'primary' : 'ghost'}
+                    icon={<Icon.Code />}
+                    aria-pressed={json}
+                    title={json ? 'Hide the graph’s JSON' : 'Edit the graph as JSON, beside the canvas'}
+                    onClick={onJson}
+                >JSON</Button>
             </span>
         </div>
     );
@@ -597,6 +606,14 @@ export function PlaygroundWindow({ onClose }) {
             setNotice(`Could not make a link: ${err.message || err}`);
         }
     };
+    // Typed into the JSON pane: an edit like any other, with a pause in typing
+    // its own step of undo. What it removed is no longer selected.
+    const fromJson = (next) => {
+        apply(next, 'json');
+        const ids = new Set(next.nodes.map((n) => n.id));
+        const wired = JSON.stringify(next.wires) === JSON.stringify(graph.wires);
+        setPicked((s) => ({ nodes: new Set([...s.nodes].filter((id) => ids.has(id))), wire: wired ? s.wire : null }));
+    };
     const exportFile = () => saveText(JSON.stringify(serializeGraph(graph), null, 2), 'ubersdr-playground.json', 'application/json');
     const chooseFile = () => fileInput.current && fileInput.current.click();
     const importFile = async (file) => {
@@ -659,6 +676,8 @@ export function PlaygroundWindow({ onClose }) {
                     onImport={() => (graph.nodes.length ? setAsking('import') : chooseFile())}
                     onExport={exportFile}
                     onShare={share}
+                    json={sides.json}
+                    onJson={() => fold('json')}
                 />
                 <input
                     ref={fileInput}
@@ -724,7 +743,7 @@ export function PlaygroundWindow({ onClose }) {
                     </button>
                 </div>
             )}
-            <div className={`pg__body${sides.left ? ' is-left-shut' : ''}${sides.right ? ' is-right-shut' : ''}`}>
+            <div className={`pg__body${sides.left ? ' is-left-shut' : ''}${sides.right ? ' is-right-shut' : ''}${sides.json ? ' is-json' : ''}`}>
                 <SidePanel side="left" label="Blocks" shut={sides.left} onToggle={() => fold('left')}>
                     <Palette onAdd={add} />
                 </SidePanel>
@@ -766,6 +785,11 @@ export function PlaygroundWindow({ onClose }) {
                         >−</button>
                     </div>
                 </div>
+                {sides.json && (
+                    <aside className="pg__side pg__side--json" aria-label="JSON">
+                        <JsonPane graph={graph} onApply={fromJson} />
+                    </aside>
+                )}
                 <SidePanel side="right" label={selection.nodes.size || selection.wire != null ? 'Selected' : 'This graph'} shut={sides.right} onToggle={() => fold('right')}>
                     <Inspector
                         pg={pg}
@@ -795,16 +819,17 @@ export function PlaygroundWindow({ onClose }) {
 
 // ── the side panels, open or folded away ────────────────────────────────────
 
-// Which side panels are folded, kept for this browser: a convenience, so a
-// lost or blocked store just means both open.
+// Which side panels are folded, and whether the JSON is showing, kept for this
+// browser: a convenience, so a lost or blocked store just means both open and
+// no JSON.
 const SIDES_KEY = 'ubersdr.v2.playground.sides';
 
 export function readSides() {
     try {
         const v = JSON.parse(localStorage.getItem(SIDES_KEY) || '{}');
-        return { left: !!(v && v.left), right: !!(v && v.right) };
+        return { left: !!(v && v.left), right: !!(v && v.right), json: !!(v && v.json) };
     } catch (e) {
-        return { left: false, right: false };
+        return { left: false, right: false, json: false };
     }
 }
 

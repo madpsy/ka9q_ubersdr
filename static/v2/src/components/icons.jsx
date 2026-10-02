@@ -139,6 +139,8 @@ export const Icon = {
     // so nobody has to be told what the button is.
     Share: (p) => <Svg {...p}><circle cx="18" cy="5" r="2.6" /><circle cx="6" cy="12" r="2.6" /><circle cx="18" cy="19" r="2.6" /><path d="m8.3 10.8 7.4-4.3" /><path d="m8.3 13.2 7.4 4.3" /></Svg>,
     Tick: (p) => <Svg {...p}><path d="m5 12.5 4.5 4.5L19 7" /></Svg>,
+    // Braces: something shown as the text it is stored as.
+    Code: (p) => <Svg {...p}><path d="M8 4H7a2 2 0 0 0-2 2v4l-2 2 2 2v4a2 2 0 0 0 2 2h1" /><path d="M16 4h1a2 2 0 0 1 2 2v4l2 2-2 2v4a2 2 0 0 1-2 2h-1" /></Svg>,
     // A lidded box: settings put away somewhere they survive the browser.
     Archive: (p) => <Svg {...p}><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" /><path d="M10 12h4" /></Svg>,
     // Packets in flight: a burst of data between two stations.

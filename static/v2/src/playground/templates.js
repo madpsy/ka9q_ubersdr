@@ -185,6 +185,32 @@ export const TEMPLATES = [
         ),
     },
     {
+        // An NDB's ident is AM: the carrier stays on, and a tone keyed in
+        // Morse puts a sideband either side of it. The decoder reads one
+        // sideband as a keyed carrier of its own, so it needs no AM
+        // demodulator in front — the one here is only for listening. Pointed
+        // at the carrier itself it would see a key held down. The speed is
+        // set rather than followed: an ident is two or three letters every
+        // several seconds, too little for following to settle from 20 wpm.
+        id: 'ndb',
+        title: 'Decode an NDB ident',
+        summary: 'A non-directional beacon’s Morse ident. Tune the dial to the carrier in IQ. The ident is a tone on the carrier, so the decoder listens 400 Hz above it — set its offset to 1020 for a beacon on that tone (most in North America). Idents run at about 7 wpm; set the speed if one is faster.',
+        build: () => g(
+            [
+                { id: 'iq', type: 'iq-in' },
+                { id: 'spectrum', type: 'iq-spectrum', params: { display: 'both' } },
+                { id: 'ident', type: 'cw-decoder', params: { offsetHz: 400, wpm: 7 } },
+                { id: 'console', type: 'console' },
+                { id: 'demod', type: 'demodulator', params: { mode: 'am', widthHz: 3000 } },
+                { id: 'audio', type: 'audio-out' },
+            ],
+            [
+                ['iq', 'out', 'spectrum', 'in'], ['iq', 'out', 'ident', 'in'], ['ident', 'text', 'console', 'in'],
+                ['iq', 'out', 'demod', 'in'], ['demod', 'audio', 'audio', 'in'],
+            ],
+        ),
+    },
+    {
         id: 'navtex',
         title: 'Decode NAVTEX',
         summary: 'Maritime safety broadcasts on 518 kHz (and 490, and 4209.5). Tune 1 kHz below the channel in IQ, leave the offset at +1000, and wait for the next transmission — they run to a schedule.',

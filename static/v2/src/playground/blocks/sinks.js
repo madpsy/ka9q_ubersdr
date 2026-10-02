@@ -3,7 +3,7 @@
 // Sinks have no outputs. What they hold is read by the runtime's caller — the
 // audio to schedule, the level to draw — through `read()`.
 
-import { COMPLEX, CONTROL, REAL, emitControl } from '../block.js';
+import { COMPLEX, CONTROL, MESSAGE, REAL, emitControl } from '../block.js';
 import { SpectrumRing } from '../../lib/dsp/scope.js';
 
 /**
@@ -218,6 +218,47 @@ export const AudioSpectrumBlock = {
             read() { return { db: ring.spectrum(), binHz: rate / ring.size, rate, size: ring.size, sided: 1 }; },
             process(ins, outs, n) {
                 ring.push(ins[0].re, n);
+                return 0;
+            },
+        };
+    },
+};
+
+/**
+ * Text read aloud: whatever a decoder or a console sends it. The speaking is
+ * the page's (playground/speech.js), since a worker has no voice; this only
+ * hands on what arrived each packet, as Audio out hands on its samples.
+ */
+export const TtsBlock = {
+    type: 'tts',
+    label: 'Text to speech',
+    category: 'Sinks',
+    summary: 'Reads text aloud — a decoder’s, or a console’s — in the voice the Announcements panel speaks with. Letters spells each word, for CW and callsigns; Words reads phrases, for RTTY and NAVTEX.',
+    inputs: [{ name: 'in', kind: MESSAGE }],
+    outputs: [],
+    params: {
+        read: {
+            kind: 'choice',
+            label: 'Read as',
+            default: 'letters',
+            options: [{ value: 'letters', label: 'Letters' }, { value: 'words', label: 'Words' }],
+        },
+        rate: { kind: 'number', label: 'Speed', unit: '×', default: 1, min: 0.5, max: 2, step: 0.1, live: true },
+        muted: { kind: 'bool', label: 'Muted', default: false },
+    },
+    create() {
+        let said = '';
+        let p = {};
+        return {
+            configure(params) { p = params; },
+            reset() { said = ''; },
+            // This packet's text, and how to say it.
+            read() { return { text: said, read: p.read, rate: p.rate, muted: p.muted }; },
+            process(ins) {
+                said = '';
+                const input = ins[0];
+                if (!input || !input.list) return 0;
+                for (const m of input.list) if (m && m.type === 'text' && m.text) said += m.text;
                 return 0;
             },
         };

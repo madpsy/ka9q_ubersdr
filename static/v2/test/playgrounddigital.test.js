@@ -741,4 +741,110 @@ function defaults(type) {
     return Object.fromEntries(Object.entries(BLOCK_BY_TYPE[type].params).map(([k, v]) => [k, v.default]));
 }
 
+// ── Morse encoder ───────────────────────────────────────────────────────────
+
+const ENC = (() => {
+    const P = require('./.build/playground.cjs');
+    const make = (type, params, rate = 12000) => {
+        const d = P.BLOCK_BY_TYPE[type];
+        const i = d.create();
+        i.configure(P.sanitizeParams(d, params), rate);
+        return { d, i };
+    };
+    /**
+     * Run an encoder for `secs`, its text arriving as `feed(k)` says for
+     * packet k and its wpm input as `wpm(k)`; decode its key with a Morse
+     * decoder. Returns what was decoded, what it said it sent, and the key.
+     */
+    const run = (params, { feed, wpm = () => null, secs = 20 }) => {
+        const enc = make('morse-encoder', params);
+        const dec = make('morse-decoder', { wpm: 0 });
+        let decoded = '';
+        let sent = '';
+        const key = [];
+        for (let k = 0; k < 50 * secs; k++) {
+            const t = feed(k);
+            const w = wpm(k);
+            const a = P.makeBuffer('real', 240);
+            const kb = P.makeBuffer('real', 240);
+            const sb = { kind: 'message', list: [] };
+            enc.i.process([{ list: t ? [{ type: 'text', text: t }] : [] }, w == null ? null : { value: w, seq: k }], [a, kb, sb], 240);
+            for (const m of sb.list) sent += m.text;
+            for (let j = 0; j < 240; j++) key.push(kb.re[j]);
+            const msg = { kind: 'message', list: [] };
+            dec.i.process([kb], [msg, { kind: 'control', value: null, seq: 0 }], 240);
+            for (const m of msg.list) decoded += m.text;
+        }
+        return { decoded, sent, key, enc };
+    };
+    /** The key's marks and spaces, as [on, samples] runs, from a shaped key. */
+    const runs = (key) => {
+        const out = [];
+        for (const v of key) {
+            const on = v > 0.5;
+            if (out.length && out[out.length - 1][0] === on) out[out.length - 1][1]++;
+            else out.push([on, 1]);
+        }
+        return out;
+    };
+    return { run, runs, P };
+})();
+
+t('the Morse encoder sends text the decoder copies back, at any speed', () => {
+    const msg = 'CQ CQ DE M9PSY M9PSY K 599 TU 73';
+    for (const wpm of [20, 30, 45]) {
+        const r = ENC.run({ wpm }, { feed: (k) => (k === 0 ? msg : ''), secs: 25 });
+        assert.strictEqual(r.decoded.trim(), msg, `${wpm} wpm`);
+        assert.strictEqual(r.sent.trim(), msg, `${wpm} wpm: sent says otherwise`);
+    }
+    // Lower case is sent; what Morse has no code for is left out.
+    const r = ENC.run({ wpm: 30 }, { feed: (k) => (k === 0 ? 'cq de m9psy ~# k' : ''), secs: 10 });
+    assert.strictEqual(r.decoded.trim(), 'CQ DE M9PSY K');
+});
+
+t('text arriving a character at a time keeps its word gaps, even when the space comes late', () => {
+    // As a console fed by a decoder sends it: a character every 120 ms.
+    const msg = 'CQ DE M9PSY K';
+    const r = ENC.run({ wpm: 20 }, { feed: (k) => (k % 6 === 0 && k / 6 < msg.length ? msg[k / 6] : ''), secs: 15 });
+    assert.strictEqual(r.decoded.trim(), msg);
+});
+
+t('the wpm input sets the speed over the setting, from the next element on', () => {
+    const dit = (wpm) => Math.round((1.2 / wpm) * 12000);
+    // The setting says 20; the input says 12.
+    const slow = ENC.run({ wpm: 20 }, { feed: (k) => (k === 0 ? 'EEEE' : ''), wpm: () => 12, secs: 4 });
+    const marks = ENC.runs(slow.key).filter(([on]) => on).map(([, n]) => n);
+    assert.ok(marks.length === 4 && marks.every((n) => Math.abs(n - dit(12)) < 30), `dits ${marks}, want ${dit(12)}`);
+    assert.strictEqual(slow.enc.i.read().fromInput, true);
+    // Changed mid-message: the dits after the change are the new length.
+    const change = ENC.run({ wpm: 20 }, { feed: (k) => (k === 0 ? 'E E E E E E E E' : ''), wpm: (k) => (k < 25 ? 20 : 40), secs: 4 });
+    const m2 = ENC.runs(change.key).filter(([on]) => on).map(([, n]) => n);
+    assert.ok(Math.abs(m2[0] - dit(20)) < 30, `first dit ${m2[0]}`);
+    assert.ok(Math.abs(m2[m2.length - 1] - dit(40)) < 30, `last dit ${m2[m2.length - 1]}`);
+});
+
+t('Farnsworth: the characters at the speed set, the gaps stretched as the ARRL has it', () => {
+    const { gaps } = require('./.build/playground.cjs');
+    const r = ENC.run({ wpm: 25, farnsworthWpm: 12 }, { feed: (k) => (k === 0 ? 'EE E' : ''), secs: 5 });
+    const rs = ENC.runs(r.key);
+    // E, gap, E, word gap, E.
+    const g = gaps(25, 12);
+    const spaces = rs.filter(([on], i) => !on && i > 0 && i < rs.length - 1).map(([, n]) => n / 12000);
+    assert.strictEqual(spaces.length, 2);
+    assert.ok(Math.abs(spaces[0] - g.char) < 0.01, `character gap ${spaces[0]}, want ${g.char}`);
+    assert.ok(Math.abs(spaces[1] - g.word) < 0.01, `word gap ${spaces[1]}, want ${g.word}`);
+    assert.ok(g.char > 3 * (1.2 / 25), 'not stretched');
+    // Off: the standard three and seven.
+    assert.deepStrictEqual(gaps(20, 0), { char: 3 * 0.06, word: 7 * 0.06 });
+});
+
+t('the keying is shaped: no step from one sample to the next bigger than the rise time allows', () => {
+    const r = ENC.run({ wpm: 30, riseMs: 5 }, { feed: (k) => (k === 0 ? 'PARIS' : ''), secs: 3 });
+    let worst = 0;
+    for (let k = 1; k < r.key.length; k++) worst = Math.max(worst, Math.abs(r.key[k] - r.key[k - 1]));
+    // A sin² edge over 60 samples moves at most π/2 · (1/60) a sample.
+    assert.ok(worst <= (Math.PI / 2) / 60 + 1e-9, `a step of ${worst}`);
+    assert.ok(Math.max(...r.key) === 1, 'never fully keyed');
+});
+
 console.log(`\n${pass} passed`);

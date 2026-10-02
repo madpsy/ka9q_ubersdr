@@ -10,6 +10,7 @@ import { MessageLogBlock, SignalDetectorBlock } from './messages.js';
 import {
     BitSyncBlock, ConsoleBlock, CostasLoopBlock, FskDetectorBlock, Ita2DecoderBlock, MorseDecoderBlock, OokDetectorBlock,
     PskSlicerBlock, SitorDecoderBlock, SymbolSyncBlock, UartBlock, VaricodeDecoderBlock, BitViewBlock, TextDiffBlock,
+    MorseEncoderBlock,
 } from './digital.js';
 import { CwDecoderBlock, NavtexDecoderBlock, Psk31DecoderBlock, RttyDecoderBlock } from './decoders.js';
 import { AudioDelayBlock, AudioResampleBlock, DelayBlock, ResampleBlock } from './timing.js';
@@ -28,7 +29,7 @@ import {
 import {
     ControlPlotBlock, DropdownBlock, IntegratorBlock, NumberBlock, ScaleBlock, SliderBlock, ToggleBlock,
 } from './controls.js';
-import { AudioOutBlock, AudioSpectrumBlock, IqRecorderBlock, MeterBlock, WavRecorderBlock } from './sinks.js';
+import { AudioOutBlock, AudioSpectrumBlock, IqRecorderBlock, MeterBlock, TtsBlock, WavRecorderBlock } from './sinks.js';
 import { ANNOTATIONS } from './annotate.js';
 import {
     ConstellationBlock, FrequencyCounterBlock, IqPhaseMeterBlock, IqSpectrumBlock, PhaseMeterBlock, ScopeBlock,
@@ -39,7 +40,7 @@ export const BLOCKS = [
     DemodulatorBlock, RttyDecoderBlock, Psk31DecoderBlock, CwDecoderBlock, NavtexDecoderBlock,
     FskDetectorBlock, UartBlock, Ita2DecoderBlock,
     CostasLoopBlock, SymbolSyncBlock, PskSlicerBlock, VaricodeDecoderBlock,
-    OokDetectorBlock, MorseDecoderBlock, BitSyncBlock, SitorDecoderBlock,
+    OokDetectorBlock, MorseDecoderBlock, MorseEncoderBlock, BitSyncBlock, SitorDecoderBlock,
     ShiftBlock, ToAudioBlock, DecimateBlock, ResampleBlock, DelayBlock,
     LowpassBlock, ComplexHighpassBlock, ComplexBandpassBlock,
     AudioLowpassBlock, AudioHighpassBlock, AudioBandpassBlock, AudioBandstopBlock, BiquadBlock, NotchBlock,
@@ -52,7 +53,7 @@ export const BLOCKS = [
     PhaseMeterBlock, IqPhaseMeterBlock, MeterBlock, SignalDetectorBlock, MessageLogBlock, ConsoleBlock, TextDiffBlock, BitViewBlock,
     ControlPlotBlock,
     SliderBlock, NumberBlock, ToggleBlock, DropdownBlock, ScaleBlock, IntegratorBlock,
-    AudioOutBlock, WavRecorderBlock, IqRecorderBlock,
+    AudioOutBlock, WavRecorderBlock, IqRecorderBlock, TtsBlock,
     // Not in the palette: the toolbar adds them (see CATEGORIES).
     ...ANNOTATIONS,
 ];

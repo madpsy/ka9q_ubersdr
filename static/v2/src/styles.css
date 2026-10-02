@@ -14890,6 +14890,9 @@ a.btn { text-decoration: none; }
 .pg-vis__bar.is-off i { opacity: 0.35; }
 /* The compressor's gain reduction: amber, growing as it takes more. */
 .pg-vis__comp { display: flex; flex-direction: column; gap: 2px; }
+.pg-vis__tts { display: flex; flex-direction: column; gap: 2px; }
+.pg-vis__tts .pg-vis__state { line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-vis__dim { color: var(--text-faint); }
 .pg-vis__comp .pg-vis__bar { margin-top: 0; }
 .pg-vis__bar--gr i { background: var(--warn); }
 .pg-vis__comp .pg-vis__state { line-height: 14px; }

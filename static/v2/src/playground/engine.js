@@ -25,6 +25,7 @@
 import { Emitter } from '../radio/emitter.js';
 import { claimIQ, releaseIQ } from '../lib/iqExclusive.js';
 import { AudioRoutes } from '../lib/audioRoutes.js';
+import { Speaker } from './speech.js';
 import { planFor } from '../lib/iqDemod.js';
 import { parseGraph, serializeGraph } from './graph.js';
 import { graphForPlan } from './fromPlan.js';
@@ -85,7 +86,7 @@ export class PlaygroundEngine extends Emitter {
      * `player` is the receiver's AudioPlayer. `hostFactory` is how a host is
      * made, for the tests to run the graph inline.
      */
-    constructor(player, { hostFactory = createHost, now = () => performance.now() } = {}) {
+    constructor(player, { hostFactory = createHost, now = () => performance.now(), speakerFactory = () => new Speaker() } = {}) {
         super();
         this.player = player;
         this._hostFactory = hostFactory;
@@ -128,6 +129,9 @@ export class PlaygroundEngine extends Emitter {
         this.offline = false;
         this._clock = null;
         this.routes = new AudioRoutes(player, () => this.emit('change'));
+        // Each TTS block's voice, made when it first has something to say.
+        this.speakers = new Map();
+        this._speakerFactory = speakerFactory;
     }
 
     get running() {
@@ -169,6 +173,8 @@ export class PlaygroundEngine extends Emitter {
         const n = this.graph.nodes.find((x) => x.id === id);
         if (!n) return;
         n.params = sanitizeParams(BLOCK_BY_TYPE[n.type], { ...n.params, ...patch });
+        // A TTS block muted stops talking now, not at its next word.
+        if (n.type === 'tts' && n.params.muted && this.speakers.has(id)) this.speakers.get(id).stop();
         this._persist();
         if (this.host) this.host.send({ t: 'params', id, patch: n.params });
         this.emit('change');
@@ -254,6 +260,11 @@ export class PlaygroundEngine extends Emitter {
         const ids = new Set(this.graph.nodes.map((n) => n.id));
         for (const id of Array.from(this.files.keys())) if (!ids.has(id)) this.files.delete(id);
         this.routes.prune(this.graph.nodes.filter((n) => n.type === 'audio-out').map((n) => n.id));
+        for (const [id, sp] of Array.from(this.speakers)) {
+            if (this.graph.nodes.some((n) => n.id === id && n.type === 'tts')) continue;
+            sp.stop();
+            this.speakers.delete(id);
+        }
         for (const [id, rec] of Array.from(this.recordings)) {
             if (ids.has(id)) continue;
             if (rec.state === 'recording') rec.stop('Stopped: the recorder was removed.');
@@ -294,6 +305,8 @@ export class PlaygroundEngine extends Emitter {
         this._closeHost();
         this._applyDuck();
         this.routes.teardown();
+        // Stopped mid-sentence, with nothing left waiting to be said.
+        for (const sp of this.speakers.values()) sp.stop();
         this.inFlight = 0;
         this.readings = {};
         this.levels = {};
@@ -424,6 +437,16 @@ export class PlaygroundEngine extends Emitter {
         };
     }
 
+    /** A TTS block's speaker on this page, made on first asking. */
+    speakerOf(id) {
+        let sp = this.speakers.get(id);
+        if (!sp) {
+            sp = this._speakerFactory();
+            this.speakers.set(id, sp);
+        }
+        return sp;
+    }
+
     /** Whether a player node has a file in it. */
     hasFile(id) {
         return this.files.has(id);
@@ -490,6 +513,12 @@ export class PlaygroundEngine extends Emitter {
             const p = this.paramsOf(a.id);
             if (!p) continue;
             this.routes.play(a.id, a.samples, a.frames, a.rate, p);
+        }
+        // Said with the settings the block has here and now, not the ones
+        // the worker had when it read them.
+        for (const s of m.speech || []) {
+            const p = this.paramsOf(s.id);
+            if (p) this.speakerOf(s.id).feed(s.text, p);
         }
         let stopped = false;
         for (const r of m.record || []) {

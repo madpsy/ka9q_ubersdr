@@ -189,6 +189,7 @@ function ownVisualHeight(type, params) {
             return 30;
         case 'costas-loop':
         case 'morse-decoder':
+        case 'morse-encoder':
         case 'uart':
         case 'sitor-decoder':
         case 'fsk-detector':
@@ -207,6 +208,9 @@ function ownVisualHeight(type, params) {
         case 'parametric-eq':
             // The response curve.
             return 56;
+        case 'tts':
+            // What it is saying, and what it said last.
+            return 32;
         case 'message-log':
             return 84;
         case 'iq-spectrum':

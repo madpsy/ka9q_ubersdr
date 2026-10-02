@@ -487,6 +487,14 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
             return <div className="pg-vis__state">{reading ? `tracking ${reading.hz >= 0 ? '+' : ''}${reading.hz.toFixed(2)} Hz` : '—'}</div>;
         case 'morse-decoder':
             return <div className="pg-vis__state">{reading ? `${reading.wpm.toFixed(0)} wpm${reading.pattern ? ` · ${reading.pattern}` : ''}` : '—'}</div>;
+        case 'morse-encoder': {
+            if (!reading) return <div className="pg-vis__state">—</div>;
+            const speed = `${Math.round(reading.wpm)} wpm${reading.fromInput ? ' (input)' : ''}`;
+            const what = reading.sending ? `Sending ${reading.sending}` : 'Idle';
+            const waiting = reading.waiting ? ` · ${reading.waiting} waiting` : '';
+            const dropped = reading.dropped ? ` · ${reading.dropped} dropped` : '';
+            return <div className={`pg-vis__state${reading.sending ? ' is-open' : ''}`}>{`${what} · ${speed}${waiting}${dropped}`}</div>;
+        }
         case 'uart':
             return <div className="pg-vis__state">{reading ? `${reading.chars} characters${reading.errors ? ` · ${reading.errors} framing errors` : ''}` : '—'}</div>;
         case 'sitor-decoder':
@@ -512,6 +520,8 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
             return <Nr2State pg={pg} id={node.id} reading={reading} />;
         case 'compressor':
             return <CompressorState reading={reading} />;
+        case 'tts':
+            return <TtsState pg={pg} node={node} />;
         case 'graphic-eq':
         case 'parametric-eq':
             return <EqCurve node={node} rate={rate} height={(large ? 140 : 56) + (large ? 0 : Math.max(0, grow))} />;
@@ -649,6 +659,31 @@ export function EqCurve({ node, rate, height = 56 }) {
         }
     });
     return <canvas ref={ref} className="pg-vis__spark pg-vis__eq" style={{ height: `${height}px` }} title={`Response, ±${EQ_SPAN_DB} dB, ${EQ_LOW_HZ} Hz to ${Math.round(Math.min(r / 2, 20000))} Hz`} />;
+}
+
+/**
+ * What a TTS block is saying, from its speaker on the page — the worker
+ * only hands the text on. Re-drawn with the readings, which come several
+ * times a second while the window is open.
+ */
+export function TtsState({ pg, node }) {
+    const sp = pg.speakers && pg.speakers.get(node.id);
+    const st = sp ? sp.state() : null;
+    const available = st ? st.available : typeof window !== 'undefined' && 'speechSynthesis' in window;
+    let now;
+    if (!available) now = 'No speech in this browser';
+    else if (node.params.muted) now = 'Muted';
+    else if (st && st.speaking) now = `Saying “${st.speaking}”`;
+    else now = 'Listening for text';
+    const after = st && (st.last || st.skipped)
+        ? `${st.last && !st.speaking ? `Last: “${st.last}”` : ''}${st.skipped ? `${st.last && !st.speaking ? ' · ' : ''}${st.skipped} skipped to catch up` : ''}`
+        : '';
+    return (
+        <div className="pg-vis__tts">
+            <div className={`pg-vis__state${st && st.speaking ? ' is-open' : ''}`}>{now}</div>
+            <div className="pg-vis__state pg-vis__dim">{after || '\u00a0'}</div>
+        </div>
+    );
 }
 
 // The most gain reduction the compressor's bar shows.

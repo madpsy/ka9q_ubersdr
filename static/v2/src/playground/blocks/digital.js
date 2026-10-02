@@ -19,6 +19,7 @@ import { Decimator } from '../../lib/dsp/decimator.js';
 import { Nco } from '../../lib/dsp/nco.js';
 import { Ita2Decoder, SitorDecoder, VaricodeDecoder, ccirValid, morseChar } from '../codes.js';
 import { alignText, normaliseText } from '../textdiff.js';
+import { KEYER_DEFAULTS as KD, Keyer, WPM_MAX, WPM_MIN } from '../keyer.js';
 
 /**
  * A complex signal brought down to the lowest rate at least `need` Hz, by a
@@ -820,6 +821,50 @@ function twoClusters(xs) {
     }
     return hi / lo >= 1.8 ? [lo, hi] : null;
 }
+
+/**
+ * Text to Morse: a keyed tone, as the text arrives (playground/keyer.js). The
+ * speed is the setting, or — with the `wpm` input wired, from a slider or a
+ * Morse decoder's own estimate — whatever arrives there. `key` is the key's
+ * level, 0 to 1, for a scope or a decoder; `sent` the text, a character at a
+ * time as each goes out, for a text diff against what was copied.
+ */
+export const MorseEncoderBlock = {
+    type: 'morse-encoder',
+    label: 'Morse encoder',
+    category: 'Digital',
+    summary: 'Text to a CW tone, sent as it arrives: from a console, a decoder, anything with text. Wire a slider or a Morse decoder’s wpm into “wpm” to set the speed from there.',
+    inputs: [{ name: 'text', kind: MESSAGE }, { name: 'wpm', kind: CONTROL, optional: true }],
+    outputs: [{ name: 'audio', kind: REAL }, { name: 'key', kind: REAL, audio: false }, { name: 'sent', kind: MESSAGE }],
+    params: {
+        wpm: { kind: 'number', label: 'Speed', unit: 'wpm', default: KD.wpm, min: WPM_MIN, max: WPM_MAX, step: 1, live: true },
+        farnsworthWpm: { kind: 'number', label: 'Farnsworth (0 = off)', unit: 'wpm', default: KD.farnsworthWpm, min: 0, max: WPM_MAX, step: 1, live: true },
+        pitchHz: { kind: 'number', label: 'Pitch', unit: 'Hz', default: KD.pitchHz, min: 200, max: 2000, step: 10, live: true },
+        levelDb: { kind: 'number', label: 'Level', unit: 'dBFS', default: KD.levelDb, min: -40, max: 0, step: 1, live: true },
+        riseMs: { kind: 'number', label: 'Rise time', unit: 'ms', default: KD.riseMs, min: 1, max: 20, step: 0.5, live: true },
+    },
+    create() {
+        const keyer = new Keyer();
+        let wpmIn = null;
+        return {
+            configure(p, r) { keyer.configure(p, r); },
+            reset() { keyer.reset(); },
+            command(name) { if (name === 'clear') keyer.reset(); },
+            read() { return { ...keyer.state(wpmIn), fromInput: wpmIn != null }; },
+            // A source of samples: as many as the stream brings, sent or silent.
+            process(ins, outs, n) {
+                const text = ins[0];
+                if (text && text.list) for (const m of text.list) if (m && m.type === 'text' && m.text) keyer.queue(m.text);
+                const w = ins[1];
+                wpmIn = w && w.value != null && Number(w.value) > 0 ? Number(w.value) : null;
+                keyer.process(outs[0].re, n, wpmIn, outs[1] ? outs[1].re : null);
+                const sent = keyer.takeSent();
+                if (sent && outs[2]) outs[2].list.push({ type: 'text', text: sent });
+                return n;
+            },
+        };
+    },
+};
 
 /**
  * Morse from a key level.

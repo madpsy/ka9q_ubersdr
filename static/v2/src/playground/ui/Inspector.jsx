@@ -847,6 +847,27 @@ export default function Inspector({
                 </div>
             )}
             {node.type === 'graphic-eq' && <EqPresets node={node} onParams={onParams} />}
+            {node.type === 'tts' && (
+                <div className="pg-insp__section">
+                    <p className="pg-insp__summary">The voice is the one the Announcements panel speaks with. Text that comes faster than it can be said is skipped to keep up, oldest first.</p>
+                    <div className="pg-insp__row">
+                        <Button
+                            size="sm"
+                            icon={<Icon.Play />}
+                            onClick={() => {
+                                const sp = pg.speakerOf(node.id);
+                                sp.feed('CQ CQ DE TEST ', { ...node.params, muted: false });
+                                sp.flush();
+                            }}
+                        >
+                            Test
+                        </Button>
+                        <Button size="sm" variant="ghost" icon={<Icon.Stop />} onClick={() => { const sp = pg.speakers.get(node.id); if (sp) sp.stop(); }}>
+                            Stop
+                        </Button>
+                    </div>
+                </div>
+            )}
             {node.type === 'nr2' && (
                 <div className="pg-insp__section">
                     <p className="pg-insp__summary">It learns the noise from what it hears first — 1.3 s at 12 kHz, less at higher rates. If a signal was there then, it is subtracting the signal: learn again while there is only noise.</p>

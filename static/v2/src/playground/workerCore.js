@@ -25,7 +25,7 @@
 // ── Worker to page ───────────────────────────────────────────────────────────
 //
 //   { t: 'status', ok, errors }             after every graph or parameter change
-//   { t: 'out', seq, audio, record, readings, stats, ms }
+//   { t: 'out', seq, audio, record, speech, readings, stats, ms }
 //                                           after every packet: each Audio out's
 //                                           samples, each recorder's, the watched
 //                                           readings when they are due, every
@@ -73,6 +73,7 @@ export function createWorkerCore(post, now = () => performance.now()) {
     let lastStats = null;
     let audioIds = [];
     let recordIds = [];
+    let speechIds = [];
     let parseErrors = [];
 
     const status = () => {
@@ -86,6 +87,7 @@ export function createWorkerCore(post, now = () => performance.now()) {
     const sinks = (graph) => {
         audioIds = graph.nodes.filter((n) => n.type === 'audio-out').map((n) => n.id);
         recordIds = graph.nodes.filter((n) => n.type === 'wav-recorder' || n.type === 'iq-recorder').map((n) => n.id);
+        speechIds = graph.nodes.filter((n) => n.type === 'tts').map((n) => n.id);
     };
 
     const packet = (m) => {
@@ -140,7 +142,13 @@ export function createWorkerCore(post, now = () => performance.now()) {
             lastStats = started;
             stats = rt.stats();
         }
-        post({ t: 'out', seq: m.seq, audio, record, readings, stats, ms: now() - started }, transfer);
+        // Text for each TTS block to say, where any arrived.
+        const speech = [];
+        for (const id of speechIds) {
+            const r = rt.read(id);
+            if (r && r.text) speech.push({ id, text: r.text, read: r.read, rate: r.rate, muted: r.muted });
+        }
+        post({ t: 'out', seq: m.seq, audio, record, speech, readings, stats, ms: now() - started }, transfer);
     };
 
     return {

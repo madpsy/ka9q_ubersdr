@@ -448,6 +448,106 @@ t('the stream’s counts since Start: packets and samples in, packets let go whi
     pg.destroy();
 });
 
+// ── text to speech ──────────────────────────────────────────────────────────
+
+const { IDLE_MS, Speaker, chunkSpeech } = require('./.build/playgroundengine.cjs');
+
+/** A browser voice that says what it is given and ends when told to. */
+function fakeVoice() {
+    const said = [];
+    const timers = [];
+    class Utterance { constructor(text) { this.text = text; } }
+    const synth = {
+        speaking: null,
+        speak(u) { said.push(u.text); this.speaking = u; },
+        cancel() { said.push('<cancel>'); this.speaking = null; },
+        end() { const u = this.speaking; this.speaking = null; if (u && u.onend) u.onend(); },
+    };
+    const sp = new Speaker({
+        synth, Utterance, voice: () => ({ name: 'Test', lang: 'en-GB' }),
+        setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+        clearTimer: (k) => { if (timers[k - 1]) timers[k - 1].fn = null; },
+    });
+    const runIdle = () => { for (const t of timers.splice(0)) if (t.fn && t.ms === IDLE_MS) t.fn(); };
+    return { sp, said, synth, runIdle };
+}
+
+t('text to speech: decoded text is spoken in pieces — words spelled, or phrases — one at a time, and not left unsaid', () => {
+    assert.deepStrictEqual(chunkSpeech('', 'CQ', 'letters'), { buffer: 'CQ', pieces: [] }, 'a word still arriving spoken');
+    assert.deepStrictEqual(chunkSpeech('CQ', ' CQ DE M9', 'letters'), { buffer: 'M9', pieces: ['C Q', 'C Q', 'D E'] });
+    assert.deepStrictEqual(chunkSpeech('M9', 'PSY ', 'letters').pieces, ['M 9 P S Y']);
+    assert.deepStrictEqual(chunkSpeech('', 'ZCZC SECURITE. MORE', 'words'), { buffer: ' MORE', pieces: ['ZCZC SECURITE.'] });
+    assert.deepStrictEqual(chunkSpeech('', 'one two three four five six seven eight nine', 'words').pieces, ['one two three four five six seven eight']);
+    assert.deepStrictEqual(chunkSpeech('', 'K', 'letters', true), { buffer: '', pieces: ['K'] });
+
+    const { sp, said, synth, runIdle } = fakeVoice();
+    // A character at a time, as a Morse decoder sends it.
+    for (const ch of 'CQ DE M9PSY') sp.feed(ch, { read: 'letters', rate: 1 });
+    assert.deepStrictEqual(said, ['C Q'], 'not one piece at a time');
+    synth.end();
+    assert.deepStrictEqual(said, ['C Q', 'D E']);
+    synth.end();
+    // The callsign has no space after it yet: said once the text goes quiet.
+    assert.deepStrictEqual(said, ['C Q', 'D E']);
+    runIdle();
+    assert.deepStrictEqual(said, ['C Q', 'D E', 'M 9 P S Y']);
+    assert.strictEqual(sp.state().speaking, 'M 9 P S Y');
+});
+
+t('text to speech: behind by too much, it drops the oldest and says so; muted, it stops', () => {
+    const { MAX_BACKLOG } = require('./.build/playgroundengine.cjs');
+    const { sp, said, synth } = fakeVoice();
+    // RTTY-fast: far more than can be said.
+    sp.feed('THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG. '.repeat(20), { read: 'words', rate: 1 });
+    const waiting = sp.queue.reduce((n, p) => n + p.length, 0);
+    assert.ok(waiting <= MAX_BACKLOG, `${waiting} characters waiting`);
+    assert.ok(sp.state().skipped > 10, `${sp.state().skipped} skipped`);
+    assert.strictEqual(said.length, 1, 'more than one piece at once');
+    // Muted: what is being said stops, and nothing waits.
+    sp.feed('MORE ', { read: 'words', rate: 1, muted: true });
+    assert.strictEqual(said[said.length - 1], '<cancel>');
+    assert.strictEqual(sp.queue.length, 0);
+    synth.end();
+    assert.strictEqual(said[said.length - 1], '<cancel>', 'spoke while muted');
+});
+
+t('text to speech: the worker hands each TTS block its text, and the engine says it with the block’s settings', () => {
+    // The worker: a transmitter's text, into a TTS block, comes back with the packet.
+    const sent = [];
+    const core = createWorkerCore((m) => sent.push(m), () => 0);
+    core.onMessage({ t: 'graph', graph: parseGraph({ v: GRAPH_VERSION, nodes: [
+        { id: 'tx', type: 'data-tx', params: { mode: 'cw', wpm: 20 } }, { id: 'say', type: 'tts' },
+    ], wires: [['tx', 'sent', 'say', 'in']] }).graph });
+    let text = '';
+    for (let k = 0; k < 50 * 4; k++) {
+        core.onMessage({ t: 'packet', seq: k + 1, i: null, q: null, frames: 240, rate: 12000 });
+        for (const s of sent.pop().speech || []) { assert.strictEqual(s.id, 'say'); text += s.text; }
+    }
+    // The message opens with its VVV: four seconds of 20 wpm reaches that much.
+    assert.ok(/^VVV/.test(text), `nothing to say: ${JSON.stringify(text)}`);
+
+    // The engine: to the right speaker, with the block's settings as they are here.
+    fresh();
+    const a = fakeAudio();
+    const fed = [];
+    const stops = [];
+    const pg = new PlaygroundEngine(a.player, {
+        hostFactory: inline,
+        speakerFactory: () => ({ feed: (t, p) => fed.push([t, p.read, p.muted]), stop: () => stops.push(1), state: () => ({}) }),
+    });
+    pg.setGraph(parseGraph({ v: GRAPH_VERSION, nodes: [{ id: 'say', type: 'tts', params: { read: 'words' } }], wires: [] }).graph);
+    pg._deliver({ speech: [{ id: 'say', text: 'HELLO ' }] });
+    assert.deepStrictEqual(fed, [['HELLO ', 'words', false]]);
+    // Muted: stopped there and then.
+    pg.setParams('say', { muted: true });
+    assert.strictEqual(stops.length, 1);
+    // Taken out of the graph: stopped, and forgotten.
+    pg.setGraph(parseGraph({ v: GRAPH_VERSION, nodes: [], wires: [] }).graph);
+    assert.strictEqual(stops.length, 2);
+    assert.strictEqual(pg.speakers.size, 0);
+    pg.destroy();
+});
+
 t('a worker that never loads is replaced by running the graph on the page', () => {
     fresh();
     const a = fakeAudio();

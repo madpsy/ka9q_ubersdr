@@ -809,7 +809,12 @@ export default function Inspector({
                         // Hidden when the block's other settings make it moot —
                         // unless exposed, so its wire and toggle stay in reach.
                         if (spec.showIf && !exposed && !spec.showIf(node.params)) return null;
-                        const w = exposed && graph.wires.find((x) => x[2] === node.id && x[3] === controlPort(name));
+                        // Driven through its exposed control input, or through
+                        // an input of the block's own that drives it (the
+                        // Morse encoder's wpm).
+                        const own = def.inputs.find((p) => p.param === name);
+                        const w = graph.wires.find((x) => x[2] === node.id
+                            && ((exposed && x[3] === controlPort(name)) || (own && x[3] === own.name)));
                         const driven = pg.driven && pg.driven[node.id] ? pg.driven[node.id][name] : undefined;
                         return (
                             <ParamRow

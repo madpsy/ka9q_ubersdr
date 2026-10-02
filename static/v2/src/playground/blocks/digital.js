@@ -834,10 +834,13 @@ export const MorseEncoderBlock = {
     label: 'Morse encoder',
     category: 'Digital',
     summary: 'Text to a CW tone, sent as it arrives: from a console, a decoder, anything with text. Wire a slider or a Morse decoder’s wpm into “wpm” to set the speed from there.',
-    inputs: [{ name: 'text', kind: MESSAGE }, { name: 'wpm', kind: CONTROL, optional: true }],
+    // The wpm input drives the Speed setting, as an exposed control would —
+    // the runtime applies it, and the inspector says so — so Speed offers no
+    // second control input of its own.
+    inputs: [{ name: 'text', kind: MESSAGE }, { name: 'wpm', kind: CONTROL, optional: true, param: 'wpm', label: 'wpm' }],
     outputs: [{ name: 'audio', kind: REAL }, { name: 'key', kind: REAL, audio: false }, { name: 'sent', kind: MESSAGE }],
     params: {
-        wpm: { kind: 'number', label: 'Speed', unit: 'wpm', default: KD.wpm, min: WPM_MIN, max: WPM_MAX, step: 1, live: true },
+        wpm: { kind: 'number', label: 'Speed', unit: 'wpm', default: KD.wpm, min: WPM_MIN, max: WPM_MAX, step: 1, live: true, control: false },
         farnsworthWpm: { kind: 'number', label: 'Farnsworth (0 = off)', unit: 'wpm', default: KD.farnsworthWpm, min: 0, max: WPM_MAX, step: 1, live: true },
         pitchHz: { kind: 'number', label: 'Pitch', unit: 'Hz', default: KD.pitchHz, min: 200, max: 2000, step: 10, live: true },
         levelDb: { kind: 'number', label: 'Level', unit: 'dBFS', default: KD.levelDb, min: -40, max: 0, step: 1, live: true },
@@ -845,19 +848,18 @@ export const MorseEncoderBlock = {
     },
     create() {
         const keyer = new Keyer();
-        let wpmIn = null;
         return {
+            // A speed from the wpm input arrives here as the setting, put in
+            // by the runtime (Runtime._applyControls).
             configure(p, r) { keyer.configure(p, r); },
             reset() { keyer.reset(); },
             command(name) { if (name === 'clear') keyer.reset(); },
-            read() { return { ...keyer.state(wpmIn), fromInput: wpmIn != null }; },
+            read() { return keyer.state(); },
             // A source of samples: as many as the stream brings, sent or silent.
             process(ins, outs, n) {
                 const text = ins[0];
                 if (text && text.list) for (const m of text.list) if (m && m.type === 'text' && m.text) keyer.queue(m.text);
-                const w = ins[1];
-                wpmIn = w && w.value != null && Number(w.value) > 0 ? Number(w.value) : null;
-                keyer.process(outs[0].re, n, wpmIn, outs[1] ? outs[1].re : null);
+                keyer.process(outs[0].re, n, null, outs[1] ? outs[1].re : null);
                 const sent = keyer.takeSent();
                 if (sent && outs[2]) outs[2].list.push({ type: 'text', text: sent });
                 return n;

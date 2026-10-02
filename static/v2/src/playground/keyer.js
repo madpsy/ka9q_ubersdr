@@ -43,7 +43,7 @@ export function elementsOf(ch) {
  * The gaps between characters and between words, in seconds, at `wpm` with
  * Farnsworth spacing for `effective` (0 or not slower: none).
  */
-export function gaps(wpm, effective) {
+export function morseGaps(wpm, effective) {
     const dit = 1.2 / wpm;
     if (!(effective > 0) || effective >= wpm) return { char: 3 * dit, word: 7 * dit };
     // The ARRL's: the time a word's worth of spacing takes at the effective
@@ -129,7 +129,7 @@ export class Keyer {
             if (!this.text.length) return false;
             const ch = this.text[0];
             this.text = this.text.slice(1);
-            const g = gaps(wpm, this.p.farnsworthWpm);
+            const g = morseGaps(wpm, this.p.farnsworthWpm);
             if (ch === ' ') {
                 // A space that came after its word had gone with a
                 // character's gap: the rest of a word's. Spaces after that

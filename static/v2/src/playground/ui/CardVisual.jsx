@@ -489,7 +489,8 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
             return <div className="pg-vis__state">{reading ? `${reading.wpm.toFixed(0)} wpm${reading.pattern ? ` · ${reading.pattern}` : ''}` : '—'}</div>;
         case 'morse-encoder': {
             if (!reading) return <div className="pg-vis__state">—</div>;
-            const speed = `${Math.round(reading.wpm)} wpm${reading.fromInput ? ' (input)' : ''}`;
+            const fromInput = !!(pg.driven && pg.driven[node.id] && pg.driven[node.id].wpm != null);
+            const speed = `${Math.round(reading.wpm)} wpm${fromInput ? ' (input)' : ''}`;
             const what = reading.sending ? `Sending ${reading.sending}` : 'Idle';
             const waiting = reading.waiting ? ` · ${reading.waiting} waiting` : '';
             const dropped = reading.dropped ? ` · ${reading.dropped} dropped` : '';

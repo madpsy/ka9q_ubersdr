@@ -1696,6 +1696,38 @@ t('the IQ stream’s inspector has the receiver panel’s quality slider: same r
     window.__testContext = null;
 });
 
+t('a Morse encoder whose speed comes from its wpm input says so: “driven by” in the settings, “(input)” on the card', () => {
+    reset();
+    const pg = getPlayground(radio().player);
+    const graph = g([{ id: 'sl', type: 'slider' }, { id: 'enc', type: 'morse-encoder' }], [['sl', 'out', 'enc', 'wpm']]);
+    const was = { driven: pg.driven, readings: pg.readings };
+    pg.driven = { enc: { wpm: 15 } };
+    pg.readings = { enc: { sending: 'Q', waiting: 0, dropped: 0, wpm: 15 } };
+    try {
+        const all = deep(React.createElement(Inspector, {
+            pg, graph, selection: { nodes: new Set(['enc']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+            onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+        }));
+        const driven = all.find((x) => cls(x) === 'pg-driven');
+        assert.ok(driven, 'the settings do not say Speed is driven');
+        assert.strictEqual(words(driven), 'driven by sl.out');
+        const field = all.find((x) => cls(x).startsWith('field') && /Speed/.test(words(x)) && /driven by/.test(words(x)));
+        assert.match(words(field), /15/, 'not the speed in force');
+        const card = deep(React.createElement(CardVisual, { pg, node: graph.nodes[1] }));
+        assert.match(words(card.find((x) => cls(x).includes('pg-vis__state'))), /15 wpm \(input\)/);
+        // Unwired: the setting, no "driven".
+        pg.driven = {};
+        const loose = deep(React.createElement(Inspector, {
+            pg, graph: g([{ id: 'enc', type: 'morse-encoder' }]), selection: { nodes: new Set(['enc']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+            onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+        }));
+        assert.ok(!loose.some((x) => cls(x) === 'pg-driven'));
+    } finally {
+        pg.driven = was.driven;
+        pg.readings = was.readings;
+    }
+});
+
 t('the inspector shows a block’s name, its type beside it, and a box to rename it in', () => {
     reset();
     const pg = getPlayground(radio().player);

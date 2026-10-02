@@ -765,10 +765,12 @@ const ENC = (() => {
         for (let k = 0; k < 50 * secs; k++) {
             const t = feed(k);
             const w = wpm(k);
+            // A wpm input sets the Speed setting, as the runtime puts it in.
+            if (w != null) enc.i.configure(P.sanitizeParams(enc.d, { ...params, wpm: w }), 12000);
             const a = P.makeBuffer('real', 240);
             const kb = P.makeBuffer('real', 240);
             const sb = { kind: 'message', list: [] };
-            enc.i.process([{ list: t ? [{ type: 'text', text: t }] : [] }, w == null ? null : { value: w, seq: k }], [a, kb, sb], 240);
+            enc.i.process([{ list: t ? [{ type: 'text', text: t }] : [] }, null], [a, kb, sb], 240);
             for (const m of sb.list) sent += m.text;
             for (let j = 0; j < 240; j++) key.push(kb.re[j]);
             const msg = { kind: 'message', list: [] };
@@ -815,7 +817,7 @@ t('the wpm input sets the speed over the setting, from the next element on', () 
     const slow = ENC.run({ wpm: 20 }, { feed: (k) => (k === 0 ? 'EEEE' : ''), wpm: () => 12, secs: 4 });
     const marks = ENC.runs(slow.key).filter(([on]) => on).map(([, n]) => n);
     assert.ok(marks.length === 4 && marks.every((n) => Math.abs(n - dit(12)) < 30), `dits ${marks}, want ${dit(12)}`);
-    assert.strictEqual(slow.enc.i.read().fromInput, true);
+    assert.strictEqual(slow.enc.i.read().wpm, 12);
     // Changed mid-message: the dits after the change are the new length.
     const change = ENC.run({ wpm: 20 }, { feed: (k) => (k === 0 ? 'E E E E E E E E' : ''), wpm: (k) => (k < 25 ? 20 : 40), secs: 4 });
     const m2 = ENC.runs(change.key).filter(([on]) => on).map(([, n]) => n);
@@ -823,8 +825,25 @@ t('the wpm input sets the speed over the setting, from the next element on', () 
     assert.ok(Math.abs(m2[m2.length - 1] - dit(40)) < 30, `last dit ${m2[m2.length - 1]}`);
 });
 
+t('a slider wired into the wpm input drives the Speed setting through the runtime, and is recorded as driving it', () => {
+    const { Runtime, parseGraph, GRAPH_VERSION } = ENC.P;
+    const g = parseGraph({ v: GRAPH_VERSION, nodes: [
+        { id: 'sl', type: 'slider', params: { value: 15, min: 5, max: 60 } },
+        { id: 'enc', type: 'morse-encoder', params: { wpm: 25 } },
+    ], wires: [['sl', 'out', 'enc', 'wpm']] }).graph;
+    const rt = new Runtime(g, 12000);
+    assert.ok(rt.ok, JSON.stringify(rt.errors));
+    rt.process({ i: null, q: null, frames: 240, rate: 12000 });
+    assert.deepStrictEqual(rt.driven().enc, { wpm: 15 }, 'not recorded as driven');
+    assert.strictEqual(rt.read('enc').wpm, 15);
+    // The stored graph keeps what the operator set.
+    assert.strictEqual(g.nodes.find((n) => n.id === 'enc').params.wpm, 25);
+    // And Speed has no second control input of its own to expose.
+    assert.strictEqual(ENC.P.BLOCK_BY_TYPE['morse-encoder'].params.wpm.control, false);
+});
+
 t('Farnsworth: the characters at the speed set, the gaps stretched as the ARRL has it', () => {
-    const { gaps } = require('./.build/playground.cjs');
+    const { morseGaps: gaps } = require('./.build/playground.cjs');
     const r = ENC.run({ wpm: 25, farnsworthWpm: 12 }, { feed: (k) => (k === 0 ? 'EE E' : ''), secs: 5 });
     const rs = ENC.runs(r.key);
     // E, gap, E, word gap, E.

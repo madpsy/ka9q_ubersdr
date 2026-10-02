@@ -747,6 +747,9 @@ export default function Inspector({
             <p className="pg-insp__summary">{def.summary}</p>
             {!def.annotation && onRename && <NameField key={node.id} node={node} def={def} onRename={onRename} />}
             {errs.map((e, i) => <div key={i} className="note note--tight note--warn">{e.message}</div>)}
+            {/* What the stream is — frequency, IQ width, quality — before
+                the figures about it. */}
+            {node.type === 'iq-in' && <ReceiverControls graph={graph} node={node} onParams={onParams} />}
             {!def.annotation && (
                 <div className="readout-grid">
                     <Readout label="Rate" value={formatRate(rates[node.id]) || '—'} unit={rates[node.id] ? 'Hz' : undefined} />
@@ -798,7 +801,6 @@ export default function Inspector({
                 </div>
             )}
             {node.type === 'iq-in' && <StreamStats pg={pg} />}
-            {node.type === 'iq-in' && <ReceiverControls graph={graph} node={node} onParams={onParams} />}
             {Object.keys(def.params).length > 0 && node.type !== 'iq-in' && (
                 <div className="pg-insp__section">
                     <div className="pg-insp__title">Settings</div>

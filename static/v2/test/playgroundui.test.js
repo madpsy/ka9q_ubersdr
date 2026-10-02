@@ -1633,6 +1633,25 @@ t('the graphic EQ’s presets are the receiver’s, makeup and all, and say whic
     assert.ok(deep(React.createElement(CardVisual, { pg, node: g([{ id: 'a', type: 'graphic-eq', params: voice }]).nodes[0], rate: 12000 })).some((x) => x.type === 'canvas'));
 });
 
+t('the IQ stream’s inspector puts the receiver — frequency, IQ width, quality — first, before the figures', () => {
+    reset();
+    const ctx = radio();
+    window.__testContext = ctx;
+    const pg = getPlayground(ctx.player);
+    const all = deep(React.createElement(Inspector, {
+        pg, graph: g([{ id: 'a', type: 'iq-in' }]), selection: { nodes: new Set(['a']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+        onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+    }));
+    window.__testContext = null;
+    const at = (pred) => all.findIndex(pred);
+    const receiver = at((x) => cls(x) === 'pg-insp__title' && words(x) === 'Receiver');
+    const firstReadout = at((x) => cls(x) === 'readout-grid');
+    const stream = at((x) => cls(x) === 'pg-insp__title' && words(x) === 'Stream');
+    assert.ok(receiver >= 0 && firstReadout >= 0 && stream >= 0);
+    assert.ok(receiver < firstReadout, 'the receiver comes after the readouts');
+    assert.ok(receiver < stream, 'the receiver comes after the stream’s figures');
+});
+
 t('the IQ stream’s inspector has the receiver panel’s quality slider: same range, lossless at the top, the warning past 26 dB, usable before IQ', () => {
     const { MARGIN_MIN_DB, MARGIN_LOSSLESS, MarginPicker, Slider } = P;
     const show = (over) => {

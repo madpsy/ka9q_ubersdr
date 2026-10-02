@@ -102,11 +102,23 @@ export const MARKER_H = 14;
  * its settings for the viewers that can show a spectrum, a waterfall or both.
  */
 export function visualHeight(type, params) {
+    const own = ownVisualHeight(type, params);
+    if (own !== null) return own;
+    // A block with no picture of its own shows its level in and out — what
+    // it is doing to what goes through it.
+    return carriesSamples(type) ? LEVEL_LINE_H : 0;
+}
+
+/** The height of a card's own picture, or null for a type that has none. */
+function ownVisualHeight(type, params) {
     switch (type) {
         case 'meter':
         case 'level-detector':
         case 'squelch':
             return 16;
+        case 'audio-out':
+            // A bar for each ear.
+            return 30;
         case 'carrier-tracker':
             // What it is, and whether it has the carrier: a line each.
             return 34;
@@ -174,8 +186,23 @@ export function visualHeight(type, params) {
         case 'iq-phase-meter':
             return 150;
         default:
-            return 0;
+            return null;
     }
+}
+
+// The height of that line.
+export const LEVEL_LINE_H = 16;
+
+/** Whether a block has audio or IQ in or out: a level to measure. */
+export function carriesSamples(type) {
+    const def = BLOCK_BY_TYPE[type];
+    return !!def && !def.annotation
+        && [...def.inputs, ...def.outputs].some((p) => p.kind === 'complex' || p.kind === 'real');
+}
+
+/** Whether a card's picture is its level line: see visualHeight. */
+export function hasLevelLine(type) {
+    return ownVisualHeight(type) === null && carriesSamples(type);
 }
 
 /**

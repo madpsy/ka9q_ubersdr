@@ -536,6 +536,99 @@ t('a new stream rate reconfigures every block', () => {
     assert.strictEqual(rt.read('audio').rate, 24000);
 });
 
+t('every running block’s level in and out, in dBFS, measured only when asked for', () => {
+    const graph = parseGraph({
+        v: GRAPH_VERSION,
+        nodes: [
+            { id: 'sig', type: 'signal', params: { amplitude: 0.5, frequencyHz: 1000 } },
+            { id: 're', type: 'real-part' },
+            { id: 'half', type: 'gain', params: { gain: 0.5 } },
+            { id: 'out', type: 'audio-out' },
+            // Not wired: blocked, so nothing to say about it.
+            { id: 'lone', type: 'lsa' },
+        ],
+        wires: [['sig', 'out', 're', 'in'], ['re', 'out', 'half', 'in'], ['half', 'out', 'out', 'in']],
+    }).graph;
+    const rt = new Runtime(graph, 12000);
+    rt.process({ i: null, q: null, frames: 2400, rate: 12000 });
+    assert.deepStrictEqual(rt.levels(), {}, 'measured without being asked');
+    rt.measureLevels = true;
+    rt.process({ i: null, q: null, frames: 2400, rate: 12000 });
+    const lv = rt.levels();
+    const near = (a, b, what) => assert.ok(Math.abs(a - b) < 0.05, `${what}: ${a} against ${b}`);
+    // A complex tone of 0.5: |x|² is 0.25 throughout. Its real part is half that.
+    near(lv.sig.out, 10 * Math.log10(0.25), 'signal out');
+    assert.strictEqual(lv.sig.in, null, 'a source has no level in');
+    near(lv.re.in, 10 * Math.log10(0.25), 'real part in');
+    near(lv.re.out, 10 * Math.log10(0.125), 'real part out');
+    near(lv.half.out - lv.half.in, 20 * Math.log10(0.5), 'the gain block’s change');
+    near(lv.out.in, lv.half.out, 'Audio out hears what the gain puts out');
+    assert.strictEqual(lv.out.out, null, 'a sink has no level out');
+    assert.ok(!('lone' in lv), 'a blocked block has a level');
+});
+
+t('activity: a console counts the characters it is sent, and a Morse decoder lights while the key is down', () => {
+    const graph = parseGraph({
+        v: GRAPH_VERSION,
+        nodes: [
+            { id: 'tx', type: 'data-tx', params: { mode: 'cw', offsetHz: 1000, wpm: 20, gapSec: 2 } },
+            { id: 'shift', type: 'shift', params: { frequencyHz: -1000 } },
+            { id: 'ook', type: 'ook-detector' },
+            { id: 'morse', type: 'morse-decoder', params: { wpm: 20 } },
+            { id: 'console', type: 'console' },
+        ],
+        wires: [['tx', 'out', 'shift', 'in'], ['shift', 'out', 'ook', 'in'], ['ook', 'key', 'morse', 'key'], ['morse', 'text', 'console', 'in']],
+    }).graph;
+    const rt = new Runtime(graph, 12000);
+    rt.measureLevels = true;
+    let chars = 0;
+    let keyedReads = 0;
+    let quietReads = 0;
+    let printed = 0;
+    // Read as the worker does, every 80 ms: four 20 ms packets.
+    for (let p = 0; p < 50 * 8; p++) {
+        rt.process({ i: null, q: null, frames: 240, rate: 12000 });
+        if (p % 4 !== 3) continue;
+        const lv = rt.levels();
+        chars += lv.console.act;
+        if (lv.morse.act) keyedReads++; else quietReads++;
+        assert.ok(!('act' in lv.tx) || lv.tx.act === 0, 'a block with no messages in has activity');
+    }
+    printed = rt.read('console').count;
+    assert.ok(printed >= 5, `only ${printed} characters decoded`);
+    assert.strictEqual(chars, printed, 'the console’s activity is not its characters');
+    // Morse at 20 wpm is about half key-down; with the gaps, some of each.
+    assert.ok(keyedReads > 10 && quietReads > 5, `key down in ${keyedReads} reads, up in ${quietReads}`);
+    // Counted since the last asking: asked again at once, nothing new.
+    assert.strictEqual(rt.levels().console.act, 0);
+});
+
+t('audio over full scale is counted where it is, with its peak; IQ and audio under it are not', () => {
+    const graph = parseGraph({
+        v: GRAPH_VERSION,
+        nodes: [
+            { id: 'sig', type: 'signal', params: { amplitude: 0.5, frequencyHz: 1000 } },
+            { id: 're', type: 'real-part' },
+            { id: 'loud', type: 'gain', params: { gain: 4 } },
+            { id: 'out', type: 'audio-out' },
+        ],
+        wires: [['sig', 'out', 're', 'in'], ['re', 'out', 'loud', 'in'], ['loud', 'out', 'out', 'in']],
+    }).graph;
+    const rt = new Runtime(graph, 12000);
+    rt.measureLevels = true;
+    rt.process({ i: null, q: null, frames: 2400, rate: 12000 });
+    const lv = rt.levels();
+    assert.ok(!('clip' in lv.sig), 'IQ with no audio watched for clipping');
+    assert.strictEqual(lv.re.clip, 0, 'a 0.5 tone clipped');
+    assert.ok(Math.abs(lv.re.peak - 20 * Math.log10(0.5)) < 0.05, `peak ${lv.re.peak}`);
+    // Four times 0.5 is twice full scale: over it for a third of every cycle.
+    assert.ok(lv.loud.clip > 2400 / 4, `${lv.loud.clip} samples over full scale`);
+    assert.ok(Math.abs(lv.loud.peak - 20 * Math.log10(2)) < 0.05, `peak ${lv.loud.peak}`);
+    assert.strictEqual(lv.out.clip, lv.loud.clip, 'Audio out does not see what it is sent');
+    // Counted since the last asking.
+    assert.strictEqual(rt.levels().loud.clip, 0);
+});
+
 t('a graph that does not compile does nothing, and says why', () => {
     const rt = new Runtime(parseGraph({ v: GRAPH_VERSION, nodes: [{ id: 'g', type: 'gain' }], wires: [] }).graph, 12000);
     assert.strictEqual(rt.ok, false);

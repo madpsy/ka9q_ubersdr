@@ -683,17 +683,37 @@ function useFollow() {
     return { box, toggle };
 }
 
+/**
+ * A card's text box held at its end, always: four rows with no scrollback,
+ * so the newest text is what shows. Decoded text is often one long line —
+ * CW has no line ends — that wraps far past the box, so the last lines of
+ * the text are not the last rows of the box; this is.
+ */
+function useStickBottom() {
+    const box = useRef(null);
+    useEffect(() => {
+        const el = box.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    });
+    return box;
+}
+
+// The most of the text a card puts in its box: far more than four rows hold,
+// so the box is always full, without laying out all of it.
+const CARD_CHARS = 400;
+
 /** A teleprinter's paper: the last few lines on a card, all of it large. */
 export function ConsoleView({ pg, id, reading, large = false }) {
     const text = (reading && reading.text) || '';
     const lines = text.split('\n');
     const [copied, setCopied] = useState(false);
     const { box, toggle } = useFollow();
+    const tailBox = useStickBottom();
     if (!large) {
-        const tail = lines.slice(-4);
+        const tail = lines.slice(-4).join('\n').slice(-CARD_CHARS);
         return (
-            <pre className="pg-console">
-                {text ? tail.join('\n') : <span className="pg-list__empty">Nothing decoded yet</span>}
+            <pre className="pg-console" ref={tailBox}>
+                {text ? tail : <span className="pg-list__empty">Nothing decoded yet</span>}
             </pre>
         );
     }
@@ -762,11 +782,12 @@ export function DiffView({ pg, id, reading, large = false }) {
     const segs = (reading && reading.segments) || [];
     const bad = reading && reading.errors > 0;
     const { box, toggle } = useFollow();
+    const tailBox = useStickBottom();
     if (!large) {
         return (
             <div className="pg-diff">
                 <div className={`pg-vis__state${bad ? ' is-shut' : reading && reading.cer === 0 ? ' is-open' : ''}`}>{diffSummary(reading)}</div>
-                <pre className="pg-console pg-diff__text">{segs.length ? <DiffText segments={segs} max={90} /> : <span className="pg-list__empty">Wire sent text and received text in</span>}</pre>
+                <pre className="pg-console pg-diff__text" ref={tailBox}>{segs.length ? <DiffText segments={segs} max={CARD_CHARS} /> : <span className="pg-list__empty">Wire sent text and received text in</span>}</pre>
             </div>
         );
     }

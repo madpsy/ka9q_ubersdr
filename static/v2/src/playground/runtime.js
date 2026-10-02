@@ -24,7 +24,7 @@
 // out hands its last block to the speakers again on every packet.
 
 import { BLOCK_BY_TYPE } from './blocks/index.js';
-import { CONTROL, MESSAGE, ensureBuffer, isStream, makeBuffer, outputsOf, sanitizeParams } from './block.js';
+import { COMPLEX, CONTROL, MESSAGE, REAL, ensureBuffer, isStream, makeBuffer, outputsOf, sanitizeParams } from './block.js';
 import { compile } from './graph.js';
 
 // ── What each block costs ───────────────────────────────────────────────────
@@ -45,6 +45,22 @@ import { compile } from './graph.js';
 // whole tick or none with odds in proportion to the real time, which is why it
 // is a window's total and never a single packet's. The timing itself is two
 // clock reads per block per packet: nothing beside the arithmetic it measures.
+
+/** The mean of |x|² over a buffer's first n frames: complex or real. */
+function meanSquare(buf, n) {
+    const re = buf.re;
+    const im = buf.im;
+    let sum = 0;
+    for (let k = 0; k < n; k++) sum += re[k] * re[k];
+    if (im) for (let k = 0; k < n; k++) sum += im[k] * im[k];
+    return sum / n;
+}
+
+/** Full scale: an audio sample this far from zero is clipped at the output. */
+export const CLIP_AT = 1;
+
+/** A mean square in dB, or null for none; silence reads as the floor. */
+const toDb = (ms) => (ms == null ? null : ms > 1e-20 ? 10 * Math.log10(ms) : -200);
 
 /**
  * The blocks that cannot run: every one with an error, or left out of the
@@ -146,6 +162,13 @@ export class Runtime {
         this.errors = [];
         // The ids that do not run: see the note at the top.
         this.blocked = new Set();
+        // Whether to measure each block's level in and out, and what was
+        // measured: per node id, the mean square of the last packet's samples
+        // on its first sample input and first sample output. Off unless an
+        // editor is open to show them, so a graph left running costs nothing
+        // for it. See levels().
+        this.measureLevels = false;
+        this._levels = new Map();
         this.build();
     }
 
@@ -173,6 +196,10 @@ export class Runtime {
                 this.nodes.set(n.id, node);
             }
             node.params = sanitizeParams(type, n.params);
+            // Which outputs carry audio or IQ — what has a level to measure.
+            node.levelOut = outputsOf(n, type).findIndex((p) => p.kind === COMPLEX || p.kind === REAL);
+            // Which audio output to watch for clipping, if any.
+            node.audioOut = outputsOf(n, type).findIndex((p) => p.kind === REAL);
             node.outs = outputsOf(n, type).map((p, i) => (node.outs && node.outs[i] && node.outs[i].kind === makeBuffer(p.kind, 0).kind ? node.outs[i] : makeBuffer(p.kind, 0)));
             node.ports = this.plan.ports[n.id] || [];
             // Which inputs carry samples. Only those set how much a block
@@ -415,8 +442,77 @@ export class Runtime {
             const m = node.inst.process(ins, node.outs, n, stream);
             node.busyMs += this._now() - t0;
             for (const o of node.outs) if (o.re) o.n = m;
+            if (this.measureLevels) this._measure(id, node, ins, n);
             if (node.queues) node.queues.forEach((q, i) => { if (q && from[i]) q.take(n); });
         }
         return true;
+    }
+
+    /** One block's level in and out, from this packet. */
+    _measure(id, node, ins, n) {
+        let lv = this._levels.get(id);
+        if (!lv) {
+            lv = { in: null, out: null, act: 0, peak: 0, clip: 0, audio: false };
+            this._levels.set(id, lv);
+        }
+        // Activity: what arrived on its message inputs — a character of text
+        // each, one for any other message — or the block's own measure of it,
+        // where it has one (a Morse decoder's key going down).
+        if (node.inst.activity) {
+            lv.act += node.inst.activity();
+        } else {
+            node.ports.forEach((p, i) => {
+                if (p.kind !== MESSAGE || !ins[i] || !ins[i].list) return;
+                for (const m of ins[i].list) lv.act += m && typeof m.text === 'string' ? m.text.length : 1;
+            });
+        }
+        const at = node.ports.findIndex((p, i) => (p.kind === COMPLEX || p.kind === REAL) && ins[i]);
+        if (at >= 0 && n > 0) lv.in = meanSquare(ins[at], n);
+        const out = node.levelOut >= 0 ? node.outs[node.levelOut] : null;
+        if (out && out.n > 0) lv.out = meanSquare(out, out.n);
+        // Audio over full scale: on its audio output, or — for a sink, with
+        // none — its audio input. Nothing clips in floating point until it
+        // reaches the speakers or a file; there, anything past ±1 does.
+        let audio = node.audioOut >= 0 ? node.outs[node.audioOut] : null;
+        let m = audio ? audio.n : 0;
+        if (!audio) {
+            const ai = node.ports.findIndex((p, i) => p.kind === REAL && ins[i]);
+            if (ai >= 0) { audio = ins[ai]; m = n; }
+        }
+        if (audio) {
+            lv.audio = true;
+            const x = audio.re;
+            for (let k = 0; k < m; k++) {
+                const a = x[k] < 0 ? -x[k] : x[k];
+                if (a > lv.peak) lv.peak = a;
+                if (a >= CLIP_AT) lv.clip++;
+            }
+        }
+    }
+
+    /**
+     * Every running block's level, in dBFS — the mean power of its last
+     * packet, as the Level meter block measures it — on its first sample
+     * input (`in`) and output (`out`), null for a side it does not have or
+     * that has had nothing; `act`, how much activity since the last call
+     * (see _measure); and for a block with audio, `peak` — its loudest
+     * sample since the last call, dBFS — and `clip`, how many samples were
+     * at or past full scale. Each call starts those three again. Measured
+     * only while `measureLevels` is set.
+     */
+    levels() {
+        const out = {};
+        for (const [id, lv] of this._levels) {
+            if (this.blocked.has(id) || !this.nodes.has(id)) continue;
+            out[id] = { in: toDb(lv.in), out: toDb(lv.out), act: lv.act };
+            if (lv.audio) {
+                out[id].peak = lv.peak > 0 ? 20 * Math.log10(lv.peak) : -200;
+                out[id].clip = lv.clip;
+            }
+            lv.act = 0;
+            lv.peak = 0;
+            lv.clip = 0;
+        }
+        return out;
     }
 }

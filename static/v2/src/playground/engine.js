@@ -107,6 +107,10 @@ export class PlaygroundEngine extends Emitter {
         this.costMs = 0;
         this.streamRate = 0;
         this.readings = {};
+        // Each block's level in and out, in dBFS, while an editor asks for
+        // them (watch's `levels`): { id: { in, out } }.
+        this.levels = {};
+        this._watchLevels = false;
         // Parameters that control inputs have moved, by node — what is in
         // force rather than what was set. See Runtime.driven.
         this.driven = {};
@@ -195,9 +199,11 @@ export class PlaygroundEngine extends Emitter {
     }
 
     /** Which nodes' readings to keep up to date in `readings`. */
-    watch(ids) {
+    watch(ids, { levels = false } = {}) {
         this._watch = Array.isArray(ids) ? ids.slice() : [];
-        if (this.host) this.host.send({ t: 'watch', ids: this._watch });
+        this._watchLevels = !!levels;
+        if (!this._watchLevels) this.levels = {};
+        if (this.host) this.host.send({ t: 'watch', ids: this._watch, levels: this._watchLevels });
     }
 
     /** The parameters of one node as they stand. */
@@ -272,6 +278,7 @@ export class PlaygroundEngine extends Emitter {
         this.routes.teardown();
         this.inFlight = 0;
         this.readings = {};
+        this.levels = {};
         this.stats = null;
         this.emit('change');
     }
@@ -297,7 +304,7 @@ export class PlaygroundEngine extends Emitter {
     _openHost(kind) {
         this.host = this._hostFactory((m) => this._onMessage(m), kind === 'inline' ? { worker: false } : undefined);
         this.host.send({ t: 'graph', graph: this.graph });
-        this.host.send({ t: 'watch', ids: this._watch });
+        this.host.send({ t: 'watch', ids: this._watch, levels: !!this._watchLevels });
         for (const id of this.files.keys()) this._sendFile(id);
     }
 
@@ -443,8 +450,10 @@ export class PlaygroundEngine extends Emitter {
         }
         if (stopped) this.emit('change');
         if (m.readings) {
-            const { __driven: driven, ...readings } = m.readings;
+            const { __driven: driven, __levels: levels, ...readings } = m.readings;
             this.readings = readings;
+            // Each block's level in and out, in dBFS, while an editor asks.
+            this.levels = levels || {};
             this.driven = driven || {};
             this.emit('readings');
         }

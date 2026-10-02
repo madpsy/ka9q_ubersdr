@@ -1269,6 +1269,123 @@ t('a card shows its name, and its pencil or a click on its title renames it', ()
     c.done();
 });
 
+t('levels show: Audio out’s bar per ear, an in → out line on a card with no picture, and level cards in the inspector', () => {
+    reset();
+    const pg = getPlayground(radio().player);
+    const was = pg.levels;
+    pg.levels = { a: { in: -20, out: -26 } };
+    try {
+        const card = (node) => deep(React.createElement(CardVisual, { pg, node }));
+        const bars = (node) => card(node).filter((x) => cls(x).startsWith('pg-vis__bar')).map((x) => words(x).replace(/\s+/g, ' ').trim());
+        const ao = (params) => g([{ id: 'a', type: 'audio-out', params }]).nodes[0];
+        assert.deepStrictEqual(bars(ao({ channel: 'both' })), ['L -20 dB', 'R -20 dB']);
+        assert.deepStrictEqual(bars(ao({ channel: 'left' })), ['L -20 dB', 'R silent']);
+        assert.deepStrictEqual(bars(ao({ channel: 'right' })), ['L silent', 'R -20 dB']);
+        const muted = card(ao({ muted: true })).filter((x) => cls(x).startsWith('pg-vis__bar'));
+        assert.ok(muted.every((x) => cls(x).includes('is-off')), 'muted, and the bars do not say so');
+
+        // A block with no picture of its own: what it does to the level.
+        const lsa = g([{ id: 'a', type: 'lsa' }]).nodes[0];
+        assert.strictEqual(words(card(lsa).find((x) => cls(x).includes('pg-vis__inout'))), '-20 → -26 dB (−6.0)');
+
+        const show = (graph) => deep(React.createElement(Inspector, {
+            pg, graph, selection: { nodes: new Set(['a']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+            onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+        }));
+        const readouts = (all) => Object.fromEntries(all.filter((x) => cls(x) === 'readout').map((r) => [
+            words(deep(r).find((x) => cls(x) === 'readout__label')),
+            words(deep(r).find((x) => cls(x) === 'readout__value')).replace(/\s+/g, ' ').trim(),
+        ]));
+        const r1 = readouts(show(g([{ id: 'a', type: 'lsa' }])));
+        assert.strictEqual(r1['Level in'], '-20.0 dBFS');
+        assert.strictEqual(r1['Level out'], '-26.0 dBFS');
+        assert.strictEqual(r1.Change, '−6.0 dB');
+        const r2 = readouts(show(g([{ id: 'a', type: 'audio-out', params: { channel: 'left' } }])));
+        assert.strictEqual(r2.Left, '-20.0 dBFS');
+        assert.strictEqual(r2.Right, 'silent');
+        assert.ok(!('Level out' in r2), 'a sink with a level out');
+
+        // A card picture that is not an instrument is in the inspector too,
+        // larger: the control plot's graph.
+        const plot = show(g([{ id: 'a', type: 'control-plot' }]));
+        const spark = plot.find((x) => cls(x) === 'pg-vis__spark');
+        assert.ok(spark, 'the plot is not in the inspector');
+        assert.strictEqual(spark.props.style.height, '140px');
+        // Not for a picture the inspector already shows another way.
+        assert.ok(!show(g([{ id: 'a', type: 'slider' }])).some((x) => cls(x).includes('pg-insp__now')), 'a slider twice');
+    } finally {
+        pg.levels = was;
+    }
+});
+
+t('an activity dot on the cards that receive — text and messages, and the Morse decoder’s key — lit while something arrives', () => {
+    const { activityMeaning, ActivityDot } = P;
+    assert.strictEqual(activityMeaning(BLOCK_BY_TYPE.console), 'Receiving');
+    assert.strictEqual(activityMeaning(BLOCK_BY_TYPE['message-log']), 'Receiving');
+    assert.strictEqual(activityMeaning(BLOCK_BY_TYPE['morse-decoder']), 'The key is down');
+    assert.strictEqual(activityMeaning(BLOCK_BY_TYPE.gain), null);
+    reset();
+    const pg = getPlayground(radio().player);
+    const was = pg.levels;
+    try {
+        const dot = (act) => {
+            pg.levels = { c: { in: null, out: null, act } };
+            reset();
+            return render(ActivityDot, { pg, id: 'c', meaning: 'Receiving' }).tree;
+        };
+        assert.ok(cls(dot(3)).includes('is-on'));
+        assert.ok(!cls(dot(0)).includes('is-on'));
+        // On the card, beside its id.
+        const card = deep(React.createElement(P.Canvas, {
+            pg, graph: g([{ id: 'c', type: 'console' }, { id: 'k', type: 'gain' }]), view: { x: 0, y: 0, zoom: 1 }, setView() {},
+            selection: { nodes: new Set(), wire: null }, setPicked() {}, onEdit() {}, onMoved() {}, onOpenNode() {},
+            errorsByNode: {}, rates: {}, latencies: {}, stats: null, look: null, origins: null, onParams() {},
+        }));
+        const dots = card.filter((x) => x.type === ActivityDot);
+        assert.strictEqual(dots.length, 0, 'deep() expands the dot');
+        assert.strictEqual(card.filter((x) => cls(x).startsWith('pg-act')).length, 1, 'a dot on the console, and only there');
+    } finally {
+        pg.levels = was;
+    }
+});
+
+t('a CLIP pill while audio is over full scale, held a moment after; a red Peak in the inspector', () => {
+    const { ClipPill, canClip } = P;
+    assert.ok(canClip(BLOCK_BY_TYPE['audio-out']) && canClip(BLOCK_BY_TYPE['audio-lowpass']) && canClip(BLOCK_BY_TYPE.lsa));
+    assert.ok(!canClip(BLOCK_BY_TYPE.shift), 'an IQ block can clip');
+    reset();
+    const pg = getPlayground(radio().player);
+    const was = pg.levels;
+    let clock = 10000;
+    try {
+        const pill = (clip, peak) => {
+            pg.levels = { a: { in: -3, out: -3, act: 0, peak, clip } };
+            const r = render(ClipPill, { pg, id: 'a', now: () => clock });
+            r.cleanups.forEach((f) => f());
+            return r.tree;
+        };
+        reset();
+        assert.strictEqual(pill(0, -6), null, 'a pill with nothing clipped');
+        assert.strictEqual(words(pill(40, 6)), 'CLIP');
+        clock += 1000;
+        assert.strictEqual(words(pill(0, -6)), 'CLIP', 'not held after the clipping stopped');
+        clock += 600;
+        assert.strictEqual(pill(0, -6), null, 'held too long');
+
+        pg.levels = { a: { in: -3, out: 1, act: 0, peak: 6.02, clip: 40 } };
+        const all = deep(React.createElement(Inspector, {
+            pg, graph: g([{ id: 'a', type: 'gain' }]), selection: { nodes: new Set(['a']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+            onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+        }));
+        const peak = all.find((x) => cls(x) === 'readout' && words(x).startsWith('Peak'));
+        assert.ok(peak, 'no Peak readout');
+        assert.match(words(peak), /Peak — clipping/);
+        assert.match(words(peak), /\+6\.0/);
+    } finally {
+        pg.levels = was;
+    }
+});
+
 t('the inspector shows a block’s name, its type beside it, and a box to rename it in', () => {
     reset();
     const pg = getPlayground(radio().player);
@@ -1799,6 +1916,35 @@ t('figures read as people say them', () => {
     assert.strictEqual(formatCpu(0.27), '27%');
     assert.strictEqual(formatRate(12000), '12k');
     assert.strictEqual(formatRate(27428.57), '27.43k');
+});
+
+t('the console and text-diff cards show the newest text: held at the bottom of their four rows, however long the line', () => {
+    const { ConsoleView, DiffView } = P;
+    const pgx = { command() {} };
+    // CW copy: one line, far longer than four rows of a card.
+    const line = 'CQ CQ DE M9PSY M9PSY K '.repeat(60);
+    for (const [View, reading] of [
+        [ConsoleView, { text: line, count: line.length }],
+        [DiffView, { segments: [{ kind: 'same', text: line }], errors: 0, cer: 0, compared: line.length, pending: 0 }],
+    ]) {
+        reset();
+        let r = render(View, { pg: pgx, id: 'v', reading });
+        const pre = walk(r.tree).find((n) => n.type === 'pre');
+        const box = { scrollTop: 0, scrollHeight: 420 };
+        pre.props.ref.current = box;
+        assert.ok(!walk(r.tree).some((n) => n.type === P.Switch), `${View.name}: a switch on the card`);
+        // The text it holds ends with the newest, and is not all of it.
+        const shown = words(pre);
+        assert.ok(line.trimEnd().endsWith(shown.trim()) && shown.length <= 400, `${View.name}: shows ${shown.length} characters, not the end`);
+        r.cleanups.forEach((f) => f());
+        r = render(View, { pg: pgx, id: 'v', reading });
+        assert.strictEqual(box.scrollTop, 420, `${View.name}: not at the bottom`);
+        box.scrollHeight = 700;
+        r.cleanups.forEach((f) => f());
+        r = render(View, { pg: pgx, id: 'v', reading });
+        assert.strictEqual(box.scrollTop, 700, `${View.name}: did not follow`);
+        r.cleanups.forEach((f) => f());
+    }
 });
 
 t('the console and the text diff, large, keep the newest text in view until Auto-scroll is switched off', () => {

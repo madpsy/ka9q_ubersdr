@@ -13,7 +13,8 @@
 //   { t: 'graph', graph }                   replace the graph (parseGraph form)
 //   { t: 'params', id, patch }              change one node's parameters
 //   { t: 'reset' }                          forget all history
-//   { t: 'watch', ids }                     which nodes' readings to send back
+//   { t: 'watch', ids, levels }             which nodes' readings to send back,
+//                                           and whether every block's level too
 //   { t: 'command', id, name }              a one-off action for one node (a
 //                                           scope's arm, stop, run)
 //   { t: 'load', id, data }                 a file for a node to play — an IQ
@@ -67,6 +68,7 @@ export function createWorkerCore(post, now = () => performance.now()) {
     let rt = null;
     let faulted = false;
     let watch = [];
+    let levels = false;
     let lastRead = -Infinity;
     let lastStats = null;
     let audioIds = [];
@@ -120,7 +122,7 @@ export function createWorkerCore(post, now = () => performance.now()) {
             // readings, and whenever there is any even if nothing is watched.
             const driven = rt.driven();
             const anyDriven = Object.keys(driven).length > 0;
-            if (watch.length || anyDriven) {
+            if (watch.length || anyDriven || levels) {
                 lastRead = started;
                 readings = {};
                 for (const id of watch) {
@@ -128,6 +130,8 @@ export function createWorkerCore(post, now = () => performance.now()) {
                     if (r) readings[id] = detach(r);
                 }
                 if (anyDriven) readings.__driven = driven;
+                // Every block's level in and out, for the cards to show.
+                if (levels) readings.__levels = rt.levels();
             }
         }
         let stats = null;
@@ -150,6 +154,7 @@ export function createWorkerCore(post, now = () => performance.now()) {
                         faulted = false;
                         if (rt) rt.setGraph(parsed.graph);
                         else rt = new Runtime(parsed.graph, m.rate || 0, { now });
+                        rt.measureLevels = levels;
                         rt.stats();
                         lastStats = null;
                         sinks(parsed.graph);
@@ -176,6 +181,8 @@ export function createWorkerCore(post, now = () => performance.now()) {
                         break;
                     case 'watch':
                         watch = Array.isArray(m.ids) ? m.ids.slice() : [];
+                        levels = !!m.levels;
+                        if (rt) rt.measureLevels = levels;
                         lastRead = -Infinity;
                         break;
                     case 'packet':

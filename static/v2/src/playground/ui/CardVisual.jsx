@@ -13,6 +13,7 @@ import { parseChoices } from '../blocks/controls.js';
 import { WAVEFORMS } from '../blocks/sources.js';
 import { cssVar, sizedCanvas } from '../../lib/audioWaterfall.js';
 import { airSpan, rfLabel, rfOf, shiftLabel, sourceZero } from '../probes.js';
+import { hasLevelLine, visualHeight } from '../geometry.js';
 
 const FLOOR_DB = -80;
 
@@ -25,12 +26,147 @@ function useReadings(pg, id) {
     return pg.readings ? pg.readings[id] : null;
 }
 
-function Bar({ db, label }) {
+function Bar({ db, label, tag = '', off = false }) {
+    const said = db == null ? '—' : db <= -199 ? 'silent' : `${Math.round(db)} dB`;
     return (
-        <div className="pg-vis__bar" title={label}>
+        <div className={`pg-vis__bar${off ? ' is-off' : ''}`} title={label}>
             <i style={{ width: `${share(db) * 100}%` }} />
-            <span>{db == null ? '—' : `${Math.round(db)} dB`}</span>
+            <span>{`${tag ? `${tag} ` : ''}${said}`}</span>
         </div>
+    );
+}
+
+/**
+ * One block's level, in and out, from the engine's `levels` — dBFS, null for
+ * a side it does not have or before anything has arrived. Re-renders with the
+ * readings, and only the part that shows it.
+ */
+export function useLevel(pg, id) {
+    const [, bump] = useReducer((n) => n + 1, 0);
+    useEffect(() => pg.on('readings', bump), [pg]);
+    return (pg.levels && pg.levels[id]) || { in: null, out: null, act: 0 };
+}
+
+/**
+ * What Audio out sends each ear: its one input, to the left, the right or
+ * both, and to neither while muted. For its card's bars and its readouts.
+ */
+export function earLevels(node, level) {
+    const p = node.params || {};
+    const db = level ? level.in : null;
+    const to = (side) => (p.muted || db == null ? null : p.channel === 'both' || p.channel === side ? db : -200);
+    return { left: to('left'), right: to('right'), muted: !!p.muted };
+}
+
+function EarBars({ pg, node }) {
+    const ears = earLevels(node, useLevel(pg, node.id));
+    const why = ears.muted ? ' — muted' : '';
+    return (
+        <div className="pg-vis__ears">
+            <Bar db={ears.left} tag="L" off={ears.muted} label={`To the left ear${why}`} />
+            <Bar db={ears.right} tag="R" off={ears.muted} label={`To the right ear${why}`} />
+        </div>
+    );
+}
+
+/** A level for reading: whole dB, 'silent', or a dash for none yet. */
+export function dbWords(db) {
+    return db == null ? '—' : db <= -199 ? 'silent' : `${Math.round(db)}`;
+}
+
+/** How much a block changes the level, in dB, where both sides have one. */
+export function levelChange(lv) {
+    if (!lv || lv.in == null || lv.out == null || lv.in <= -199 || lv.out <= -199) return null;
+    return lv.out - lv.in;
+}
+
+const signed = (d) => `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}`;
+
+/**
+ * The picture for a block with none of its own: its level in and out, and
+ * what it changed — the cut a noise reducer or a filter makes, the gain an
+ * AGC is giving.
+ */
+function InOut({ pg, id }) {
+    const lv = useLevel(pg, id);
+    const d = levelChange(lv);
+    let text;
+    if (lv.in != null && lv.out != null) text = `${dbWords(lv.in)} → ${dbWords(lv.out)} dB${d == null ? '' : ` (${signed(d)})`}`;
+    else if (lv.out != null) text = `out ${dbWords(lv.out)} dB`;
+    else if (lv.in != null) text = `in ${dbWords(lv.in)} dB`;
+    else text = '—';
+    return <div className="pg-vis__state pg-vis__inout" title="Level in → level out, dBFS, and the change">{text}</div>;
+}
+
+// How long the clip pill stays lit after the last clipped sample: long
+// enough that one overload is seen, not just one that lasts.
+export const CLIP_HOLD_MS = 1500;
+
+/** Whether a block has audio in or out: something that can clip. */
+export function canClip(def) {
+    return !!def && [...def.inputs, ...def.outputs].some((p) => p.kind === 'real');
+}
+
+/**
+ * CLIP, in red, while the block's audio is over full scale and for a moment
+ * after — nothing at all otherwise. `now` is for the test.
+ */
+export function ClipPill({ pg, id, now = () => Date.now() }) {
+    const lv = useLevel(pg, id);
+    const last = useRef(-Infinity);
+    const [, bump] = useReducer((n) => n + 1, 0);
+    const t = now();
+    if (lv.clip > 0) last.current = t;
+    const lit = t - last.current < CLIP_HOLD_MS;
+    // Put out on time even if no more readings come — a graph stopped while
+    // it was clipping.
+    useEffect(() => {
+        if (!lit) return undefined;
+        const timer = setTimeout(bump, CLIP_HOLD_MS - (t - last.current) + 20);
+        return () => clearTimeout(timer);
+    });
+    if (!lit) return null;
+    return (
+        <span className="pg-clip" title={`Over full scale: clips at the speakers or in a file${lv.peak != null ? ` · peak ${lv.peak >= 0 ? '+' : ''}${lv.peak.toFixed(1)} dBFS` : ''}`}>
+            CLIP
+        </span>
+    );
+}
+
+/**
+ * Whether a block's card has an activity dot, and what it means: lit while
+ * text or messages arrive — a character at a time for text — or, for a type
+ * that says what its activity is (a Morse decoder: the key going down),
+ * that. Null for no dot.
+ */
+export function activityMeaning(def) {
+    if (!def) return null;
+    if (def.activity) return def.activity;
+    return def.inputs.some((p) => p.kind === 'message') ? 'Receiving' : null;
+}
+
+/** The dot itself: lit while there was activity since the last readings. */
+export function ActivityDot({ pg, id, meaning }) {
+    const lv = useLevel(pg, id);
+    const on = lv.act > 0;
+    return <i className={`pg-act${on ? ' is-on' : ''}`} title={on ? meaning : `${meaning}: not just now`} aria-hidden="true" />;
+}
+
+/**
+ * A hairline along the foot of a card, as long as the block's level: enough
+ * to see at a glance that something is going through. The output's level, or
+ * the input's for a block with no output of samples.
+ */
+export function LevelStrip({ pg, id }) {
+    const lv = useLevel(pg, id);
+    const db = lv.out != null ? lv.out : lv.in;
+    const which = lv.out != null ? 'Out' : 'In';
+    return (
+        <i
+            className="pg-card__level"
+            style={{ width: `${share(db) * 100}%` }}
+            title={db == null ? 'Nothing through it yet' : `${which}: ${db <= -199 ? 'silent' : `${db.toFixed(1)} dBFS`}`}
+        />
     );
 }
 
@@ -85,11 +221,28 @@ function Recorder({ pg, id, label }) {
  * air (probes.js) — both for the instruments. `rate` is the block's own, for
  * the sources to say how much of the air they cover.
  */
-export default function CardVisual({ pg, node, look, origin, rate, onParams }) {
-    if (INSTRUMENTS.has(node.type)) return <Instrument pg={pg} node={node} look={look} origin={origin} />;
+export default function CardVisual({ pg, node, look, origin, rate, onParams, large = false }) {
+    if (INSTRUMENTS.has(node.type)) return <Instrument pg={pg} node={node} look={look} origin={origin} large={large} />;
     if (KNOBS.has(node.type)) return <Knob node={node} onParams={onParams} />;
     if (node.type === 'iq-in') return <Coverage zeroHz={sourceZero(node, look && look.dialHz)} rate={rate} />;
-    return <SimpleVisual pg={pg} node={node} origin={origin} rate={rate} />;
+    return <SimpleVisual pg={pg} node={node} origin={origin} rate={rate} large={large} />;
+}
+
+// Cards whose picture the inspector shows some other way: knobs as its
+// settings, recorders and the player with controls of their own, the
+// stream with the receiver's.
+// (KNOBS is declared further down, so it is read when asked, not here.)
+const SHOWN_ELSEWHERE = new Set(['iq-in', 'wav-recorder', 'iq-recorder', 'iq-player']);
+
+/**
+ * Whether the inspector repeats a block's card picture, larger: any block
+ * with a picture of its own that it does not already show another way. The
+ * instruments have their own large views; the level line is the inspector's
+ * level readouts.
+ */
+export function inspectorShowsPicture(node) {
+    return !INSTRUMENTS.has(node.type) && !SHOWN_ELSEWHERE.has(node.type) && !KNOBS.has(node.type)
+        && !hasLevelLine(node.type) && visualHeight(node.type, node.params) > 0;
 }
 
 /**
@@ -229,12 +382,12 @@ function Knob({ node, onParams }) {
     }
 }
 
-function Sparkline({ history }) {
+function Sparkline({ history, height = 44 }) {
     const ref = useRef(null);
     useEffect(() => {
         const canvas = ref.current;
         if (!canvas) return;
-        const { w, h, dpr } = sizedCanvas(canvas, 44);
+        const { w, h, dpr } = sizedCanvas(canvas, height);
         const c = canvas.getContext('2d');
         if (!c) return;
         c.setTransform(1, 0, 0, 1, 0, 0);
@@ -255,12 +408,14 @@ function Sparkline({ history }) {
         c.strokeStyle = cssVar('--good', '#45d69a');
         c.stroke();
     });
-    return <canvas ref={ref} className="pg-vis__spark" style={{ height: '44px' }} />;
+    return <canvas ref={ref} className="pg-vis__spark" style={{ height: `${height}px` }} />;
 }
 
-function SimpleVisual({ pg, node, origin, rate }) {
+function SimpleVisual({ pg, node, origin, rate, large = false }) {
     const reading = useReadings(pg, node.id);
     switch (node.type) {
+        case 'audio-out':
+            return <EarBars pg={pg} node={node} />;
         case 'meter':
             return <Bar db={reading ? reading.db : null} label="RMS level" />;
         case 'level-detector':
@@ -333,11 +488,7 @@ function SimpleVisual({ pg, node, origin, rate }) {
                 </div>
             );
         case 'nr2':
-            return (
-                <div className={`pg-vis__state${reading && reading.on && !reading.learning ? ' is-open' : ''}`}>
-                    {!reading ? '—' : !reading.on ? 'Off' : reading.learning ? 'Learning the noise…' : 'Subtracting'}
-                </div>
-            );
+            return <Nr2State pg={pg} id={node.id} reading={reading} />;
         case 'ook-detector':
             return <div className="pg-vis__state">{reading && reading.snrDb != null ? `${reading.snrDb.toFixed(0)} dB over the noise` : '—'}</div>;
         case 'rtty-decoder':
@@ -415,10 +566,22 @@ function SimpleVisual({ pg, node, origin, rate }) {
             return (
                 <div className="pg-vis__plot">
                     <div className="pg-vis__state pg-vis__value">{reading && reading.value != null ? Number(reading.value.toPrecision(7)) : '—'}</div>
-                    <Sparkline history={reading && reading.history} />
+                    <Sparkline history={reading && reading.history} height={large ? 140 : 44} />
                 </div>
             );
         default:
-            return null;
+            return hasLevelLine(node.type) ? <InOut pg={pg} id={node.id} /> : null;
     }
+}
+
+/** NR's state, and once it is subtracting, by how much. */
+function Nr2State({ pg, id, reading }) {
+    const d = levelChange(useLevel(pg, id));
+    const subtracting = reading && reading.on && !reading.learning;
+    return (
+        <div className={`pg-vis__state${subtracting ? ' is-open' : ''}`}>
+            {!reading ? '—' : !reading.on ? 'Off' : reading.learning ? 'Learning the noise…'
+                : `Subtracting${d == null ? '' : ` · ${signed(d)} dB`}`}
+        </div>
+    );
 }

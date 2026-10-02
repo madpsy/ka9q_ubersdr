@@ -840,6 +840,8 @@ export const MorseDecoderBlock = {
     category: 'Digital',
     summary: 'A key level to text, following the sender’s speed.',
     inputs: [{ name: 'key', kind: REAL }],
+    // What its card's activity dot means: see activity() below.
+    activity: 'The key is down',
     outputs: [{ name: 'text', kind: MESSAGE }, { name: 'wpm', kind: CONTROL }],
     params: {
         wpm: { kind: 'number', label: 'Speed (0 = follow)', unit: 'wpm', default: 0, min: 0, max: 60, step: 1 },
@@ -852,6 +854,8 @@ export const MorseDecoderBlock = {
         let deb = 96;
         let baseDeb = 96;
         let down = false;
+        // Whether the key went down since activity() last asked.
+        let keyed = false;
         let run = 0;
         let cand = 0;
         let pattern = '';
@@ -932,6 +936,13 @@ export const MorseDecoderBlock = {
             },
             reset() { down = false; run = 0; cand = 0; pattern = ''; letter = []; wordPending = false; start(); },
             read() { return { wpm: (1.2 * rate) / dit, pattern }; },
+            // The card's activity dot: lit while the key is down, so it
+            // flashes in time with the Morse.
+            activity() {
+                const was = keyed || down;
+                keyed = false;
+                return was ? 1 : 0;
+            },
             process(ins, outs, n) {
                 const x = ins[0].re;
                 let text = '';
@@ -947,6 +958,7 @@ export const MorseDecoderBlock = {
                             cand = 0;
                         }
                     } else cand = 0;
+                    if (down) keyed = true;
                     if (!down) {
                         if (letter.length && run > 2 * dit) {
                             text += finish();

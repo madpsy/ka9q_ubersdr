@@ -433,7 +433,8 @@ export function PlaygroundWindow({ onClose }) {
     // Readings for the cards that draw them, for as long as the window is open.
     const watchKey = graph.nodes.filter((n) => WATCHED_TYPES.has(n.type)).map((n) => n.id).join(',');
     useEffect(() => {
-        pg.watch(watchKey ? watchKey.split(',') : []);
+        // Every block's level too, for the cards' strips and Audio out's bar.
+        pg.watch(watchKey ? watchKey.split(',') : [], { levels: true });
         return () => pg.watch([]);
     }, [pg, watchKey]);
 

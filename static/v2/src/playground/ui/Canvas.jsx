@@ -27,7 +27,7 @@ import {
 } from '../geometry.js';
 import { canConnect, connectPorts, removeWire, renameNode } from '../editing.js';
 import { NAME_MAX, nodeName } from '../graph.js';
-import CardVisual, { RfLine } from './CardVisual.jsx';
+import CardVisual, { ActivityDot, ClipPill, LevelStrip, RfLine, activityMeaning, canClip } from './CardVisual.jsx';
 import { inputOrigin } from '../probes.js';
 import { inputsOf, outputsOf } from '../block.js';
 
@@ -76,6 +76,11 @@ function Card({ pg, graph, node, selected, errors, rate, latency, cpu, wiredIn, 
     const ins = inputsOf(node, def);
     const outs = outputsOf(node, def);
     const err = errors && errors.length ? errors.map((e) => e.message).join(' ') : null;
+    // Audio or IQ in or out: something with a level to show along the foot.
+    // Audio out shows its own, a bar for each ear.
+    const carries = (p) => p.kind === 'complex' || p.kind === 'real';
+    const leveled = node.type !== 'audio-out' && (ins.some(carries) || outs.some(carries));
+    const activity = activityMeaning(def);
     const port = (side, p, i) => {
         const wired = side === 'in' && wiredIn.has(`${node.id}.${p.name}`);
         // The port a wire being dragged would land on, lit to say whether it can.
@@ -122,6 +127,8 @@ function Card({ pg, graph, node, selected, errors, rate, latency, cpu, wiredIn, 
                         </button>
                     </>
                 )}
+                {canClip(def) && <ClipPill pg={pg} id={node.id} />}
+                {activity && <ActivityDot pg={pg} id={node.id} meaning={activity} />}
                 <span className="pg-card__id">{node.id}</span>
             </div>
             {ins.map((p, i) => port('in', p, i))}
@@ -138,6 +145,7 @@ function Card({ pg, graph, node, selected, errors, rate, latency, cpu, wiredIn, 
                 </div>
             )}
             <div className="pg-card__foot" style={{ height: `${FOOT_H}px` }}>
+                {leveled && <LevelStrip pg={pg} id={node.id} />}
                 <span title="The rate this block works at">{formatRate(rate)}</span>
                 <span title={latencyTitle}>{latency ? `⏱ ${formatLatency(latency.own)}${def.latencyNote ? '*' : ''}` : ''}</span>
                 <span title="Share of one CPU core, measured over the last second">{cpu == null ? '' : `⚙ ${formatCpu(cpu)}`}</span>

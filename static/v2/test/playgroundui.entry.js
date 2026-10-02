@@ -12,7 +12,7 @@ import JsonPane, { graphText, readGraphText } from '../src/playground/ui/JsonPan
 import { Switch } from '../src/components/ui.jsx';
 import Canvas, { BlockPreview, InPlace, formatCpu, formatLatency, formatRate } from '../src/playground/ui/Canvas.jsx';
 import { HEAD_H as CARD_HEAD_H } from '../src/playground/geometry.js';
-import CardVisual, { RfLine } from '../src/playground/ui/CardVisual.jsx';
+import CardVisual, { ActivityDot, ClipPill, RfLine, activityMeaning, canClip } from '../src/playground/ui/CardVisual.jsx';
 import Palette from '../src/playground/ui/Palette.jsx';
 import { closePlayground, offerSharedGraph, openPlayground, playgroundUiState } from '../src/playground/ui/store.js';
 import {
@@ -39,7 +39,7 @@ module.exports = {
     deep, render, reset, walk, words,
     withArrival, zoomToward, ZOOM_MAX, ZOOM_MIN,
     IQPanel, PlaygroundWatch, takeShareCode, PlaygroundModal, PlaygroundWindow, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, TemplatesMenu, TEMPLATES,
-    Inspector, ParamField, JsonPane, graphText, readGraphText, Canvas, BlockPreview, CARD_HEAD_H, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, Palette,
+    Inspector, ParamField, JsonPane, graphText, readGraphText, Canvas, BlockPreview, CARD_HEAD_H, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, ActivityDot, activityMeaning, ClipPill, canClip, Palette,
     airSpan, rfLabel, rfOf, shiftLabel, hasRfLine, encodeShare, decodeShare,
     closePlayground, offerSharedGraph, openPlayground, playgroundUiState,
     EditHistory, addNode, canConnect, cloneGraph, connectPorts, disconnectInput, duplicateNodes, freshId, renameNode,

@@ -229,6 +229,28 @@ t('a block dropped on the canvas with nothing wired leaves the running graph pla
     }
 });
 
+t('levels go back with the readings while an editor asks for them, and not otherwise', () => {
+    const sent = [];
+    let clock = 0;
+    const core = createWorkerCore((m) => sent.push(m), () => clock);
+    const plan = planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700, lowCutHz: 50 });
+    core.onMessage({ t: 'graph', graph: parseGraph(graphForPlan(plan, 12000)).graph });
+    const packet = () => {
+        clock += 100;
+        core.onMessage({ t: 'packet', seq: 1, i: new Float32Array(240).fill(0.1), q: new Float32Array(240), frames: 240, rate: 12000 });
+        return sent.filter((m) => m.t === 'out').pop();
+    };
+    core.onMessage({ t: 'watch', ids: ['meter'] });
+    packet();
+    assert.ok(!('__levels' in packet().readings), 'levels sent unasked');
+    core.onMessage({ t: 'watch', ids: [], levels: true });
+    packet();
+    const lv = packet().readings.__levels;
+    assert.ok(lv && lv.audio && lv.audio.in != null, `no level for the Audio out: ${JSON.stringify(lv && lv.audio)}`);
+    core.onMessage({ t: 'watch', ids: [] });
+    assert.strictEqual(packet().readings, null, 'readings sent with nothing asked for');
+});
+
 t('a graph that cannot run says why; one that throws is stopped and says so', () => {
     const sent = [];
     const core = createWorkerCore((m) => sent.push(m), () => 0);

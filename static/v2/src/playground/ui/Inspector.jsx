@@ -14,8 +14,8 @@ import { decimateFactor } from '../blocks/mixing.js';
 import { formatCpu, formatLatency, formatRate } from './Canvas.jsx';
 import { INSTRUMENTS, Instrument } from './viewers.jsx';
 import { PROBES, acrossPair, airSpan, inputOrigin, outputKind, sourceZero } from '../probes.js';
-import { RfLine, recordingLabel } from './CardVisual.jsx';
-import { hasRfLine } from '../geometry.js';
+import CardVisual, { ActivityDot, RfLine, activityMeaning, earLevels, inspectorShowsPicture, levelChange, recordingLabel, useLevel } from './CardVisual.jsx';
+import { carriesSamples, hasRfLine } from '../geometry.js';
 import { controlPort, controllable, inputsOf, outputsOf } from '../block.js';
 import { NAME_MAX, nodeName } from '../graph.js';
 import { decodeWav } from '../wavfile.js';
@@ -456,6 +456,57 @@ function NameField({ node, def, onRename }) {
     );
 }
 
+/** The loudest sample lately, in red at full scale and over: clipping. */
+function PeakReadout({ lv }) {
+    const over = lv.clip > 0 || lv.peak >= 0;
+    const value = lv.peak <= -199 ? 'silent' : `${lv.peak >= 0 ? '+' : ''}${lv.peak.toFixed(1)}`;
+    return (
+        <Readout
+            label={over ? 'Peak — clipping' : 'Peak'}
+            value={value}
+            unit={lv.peak <= -199 ? undefined : 'dBFS'}
+            color={over ? 'var(--bad)' : undefined}
+        />
+    );
+}
+
+/** A level as a readout shows it: to a tenth of a dB, or what it is instead. */
+function dbValue(db) {
+    return db == null ? '—' : db <= -199 ? 'silent' : db.toFixed(1);
+}
+
+/**
+ * The block's level in and out, as cards — Audio out's per ear, since its
+ * one input goes to the left, the right or both. Its own component so that
+ * only it re-renders with the readings.
+ */
+function LevelReadouts({ pg, node, def }) {
+    const lv = useLevel(pg, node.id);
+    const unit = (db) => (db == null || db <= -199 ? undefined : 'dBFS');
+    if (node.type === 'audio-out') {
+        const ears = earLevels(node, lv);
+        return (
+            <>
+                <Readout label={ears.muted ? 'Left (muted)' : 'Left'} value={dbValue(ears.left)} unit={unit(ears.left)} />
+                <Readout label={ears.muted ? 'Right (muted)' : 'Right'} value={dbValue(ears.right)} unit={unit(ears.right)} />
+                {lv.peak != null && <PeakReadout lv={lv} />}
+            </>
+        );
+    }
+    const carries = (p) => p.kind === 'complex' || p.kind === 'real';
+    const hasIn = def.inputs.some(carries);
+    const hasOut = def.outputs.some(carries);
+    const d = levelChange(lv);
+    return (
+        <>
+            {hasIn && <Readout label="Level in" value={dbValue(lv.in)} unit={unit(lv.in)} />}
+            {hasOut && <Readout label="Level out" value={dbValue(lv.out)} unit={unit(lv.out)} />}
+            {hasIn && hasOut && <Readout label="Change" value={d == null ? '—' : `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}`} unit={d == null ? undefined : 'dB'} />}
+            {lv.peak != null && <PeakReadout lv={lv} />}
+        </>
+    );
+}
+
 export default function Inspector({
     pg, graph, selection, errorsByNode, rates, latencies, stats, onParams, onRemove, onDuplicate, summary,
     look, origins, onProbe, onAcross, onExpose, onExpand, onRename,
@@ -494,7 +545,10 @@ export default function Inspector({
     return (
         <div className="pg-insp">
             <div className="pg-insp__head">
-                <div className="pg-insp__title">{nodeName(node)}</div>
+                <div className="pg-insp__title">
+                    {nodeName(node)}
+                    {activityMeaning(def) && <ActivityDot pg={pg} id={node.id} meaning={activityMeaning(def)} />}
+                </div>
                 <div className="pg-insp__id">{node.name ? `${def.label} · ${node.id}` : node.id}</div>
             </div>
             <p className="pg-insp__summary">{def.summary}</p>
@@ -506,6 +560,7 @@ export default function Inspector({
                     <Readout label="Latency" value={lat ? formatLatency(lat.own) : '—'} />
                     <Readout label="From source" value={lat ? formatLatency(lat.total) : '—'} />
                     <Readout label="CPU" value={s ? formatCpu(s.cpu) : '—'} />
+                    {carriesSamples(node.type) && <LevelReadouts pg={pg} node={node} def={def} />}
                 </div>
             )}
             {def.latencyNote && <div className="pg-insp__note">{def.latencyNote}</div>}
@@ -532,6 +587,19 @@ export default function Inspector({
                         node={node}
                         look={look}
                         origin={origins ? inputOrigin(graph, origins, node.id) : null}
+                        large
+                    />
+                </div>
+            )}
+            {inspectorShowsPicture(node) && (
+                <div className="pg-insp__section pg-insp__large pg-insp__now">
+                    <CardVisual
+                        pg={pg}
+                        node={node}
+                        look={look}
+                        origin={origins ? inputOrigin(graph, origins, node.id) : null}
+                        rate={rates[node.id]}
+                        onParams={onParams}
                         large
                     />
                 </div>

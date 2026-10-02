@@ -734,7 +734,7 @@ export function LogView({ pg, id, reading, origin, large = false, grow = 0 }) {
         const d = new Date(w);
         return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
     };
-    return (
+    const list = (
         <div className={`pg-list pg-log${large ? ' is-large' : ''}`}>
             {!lines.length && <div className="pg-list__empty">No messages yet</div>}
             {shown.map((m, k) => (
@@ -743,7 +743,15 @@ export function LogView({ pg, id, reading, origin, large = false, grow = 0 }) {
                     <span>{messageLine(m, origin)}</span>
                 </div>
             ))}
-            {large && (
+        </div>
+    );
+    if (!large) return list;
+    // Large, only the messages scroll: the count and the buttons stay put
+    // beneath them, however many there are.
+    return (
+        <div className="pg-view">
+            {list}
+            {(
                 <div className="pg-insp__row">
                     <span className="pg-list__dim">{reading ? `${reading.count} in all${reading.count > lines.length ? `, last ${lines.length} kept` : ''}` : ''}</span>
                     {/* Oldest first, a time and a tab before each — so a file

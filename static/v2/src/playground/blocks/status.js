@@ -3,8 +3,9 @@
 //
 // Three inputs say all it needs:
 //
-//   items     every thing on the board (a Frequency list's labels), so the
-//             ones not yet checked show too. Optional: a thing is added the
+//   items     every thing on the board (a Frequency list's labels — or its
+//             list, the names read from that), so the ones not yet checked
+//             show too. Optional: a thing is added the
 //             first time it is current.
 //   current   what is being listened for now (a Scheduler's label). When it
 //             changes, the one before is settled.
@@ -19,6 +20,7 @@
 // `heard` (1 or 0, as each is settled) and `summary` ("3 of 5 heard").
 
 import { CONTROL, MESSAGE, emitControl } from '../block.js';
+import { parseSchedule } from './scheduler.js';
 
 const HISTORY = 12;
 
@@ -106,7 +108,10 @@ export const StatusBlock = {
                 // The board's things, in the list's order.
                 if (items && items.list && items.list.length) {
                     const m = items.list[items.list.length - 1];
-                    const names = Array.isArray(m.items) ? m.items : String(m.text || '').split('\n');
+                    // A Frequency list's labels — or its list, its entries' names taken from that.
+                    const names = Array.isArray(m.items) ? m.items
+                        : typeof m.schedule === 'string' ? parseSchedule(m.schedule, 'dwell').entries.map((e) => e.label || `${(e.frequency / 1e6).toFixed(4)} MHz`)
+                            : String(m.text || '').split('\n');
                     const keep = new Map();
                     for (const name of names) {
                         const r = row(name);

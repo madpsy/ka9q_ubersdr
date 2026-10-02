@@ -807,7 +807,17 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0, onParam
         case 'status': {
             // A row a thing: heard, not heard, listening or not yet checked,
             // its last few checks as dots, and when it was last heard.
-            const r = reading || { rows: [] };
+            // Not running: the things a wired Frequency list names, from its settings, none yet checked.
+            const r = reading && reading.rows ? reading : (() => {
+                const graph = pg && pg.graph;
+                const w = graph && graph.wires.find((x) => x[2] === node.id && x[3] === 'items');
+                const src = w && graph.nodes.find((n) => n.id === w[0] && n.type === 'frequency-list');
+                if (!src) return { rows: [] };
+                const names = parseSchedule(src.params.preset === 'ncdxf' ? ncdxfFollowSchedule(+src.params.beacon) : src.params.entries, 'dwell')
+                    .entries.map((e) => e.label || freqLabel(e.frequency));
+                const keyOf = (n) => (node.params.keyOn === 'all' ? n.trim() : n.trim().split(/\s+/)[0]).toUpperCase();
+                return { rows: names.map((name) => ({ key: keyOf(name), name, state: 'pending', hits: 0, history: [], lastHeard: null })), summary: '' };
+            })();
             const icon = { heard: '✓', missed: '✗', listening: '…', pending: '—' };
             const say = (row) => (row.state === 'listening' ? (row.hits ? 'hearing it' : 'listening') : row.state === 'heard' ? 'heard' : row.state === 'missed' ? 'not heard' : 'not checked yet');
             const when = (ms) => (ms ? new Date(ms).toISOString().slice(11, 16) : '');

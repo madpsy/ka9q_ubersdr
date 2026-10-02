@@ -565,4 +565,10 @@ t('the NDB template wires the match and the board: label → console match and S
     }
 });
 
+t('Status takes a Frequency list’s list output as well as its labels', () => {
+    const st = blockOf('status');
+    st.step({ items: { type: 'schedule', schedule: NDBS } });
+    assert.deepStrictEqual(st.inst.read().rows.map((x) => x.key), ['CBL', 'DND', 'EDN']);
+});
+
 console.log(`\n${pass} passed`);

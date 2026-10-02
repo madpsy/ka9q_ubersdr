@@ -2246,6 +2246,14 @@ t('the Status card: a row a thing — heard, not heard, listening, not checked �
     assert.ok(/not checked yet/.test(words(items[3])));
     assert.strictEqual(all.filter((x) => x.type === 'i' && cls(x) === 'is-yes').length, 2);
     assert.ok(all.some((x) => cls(x) === 'pg-status__sum' && words(x) === '1 of 4 heard (1 not checked yet)'));
+    // Not running, a list wired in: its things shown, none checked yet.
+    const saved = pg.readings;
+    pg.readings = null;
+    pg.graph = g([{ id: 'l', type: 'frequency-list', params: { entries: '380kHz am CBL Campbeltown\n394kHz am DND Dundee' } }, { id: 'st', type: 'status' }], [['l', 'list', 'st', 'items']]);
+    const idle = deep(React.createElement(CardVisual, { pg, node: pg.graph.nodes[1], rate: 12000 })).filter((x) => x.type === 'li');
+    assert.deepStrictEqual(idle.map(cls), ['is-pending', 'is-pending']);
+    assert.ok(/CBL/.test(words(idle[0])) && /not checked yet/.test(words(idle[0])));
+    pg.readings = saved;
     const con = deep(React.createElement(CardVisual, { pg, node: { id: 'c', type: 'console', params: {} }, rate: 12000 }));
     assert.ok(con.some((x) => cls(x) === 'pg-console__match' && /Matching: EDN\s*· 1 match/.test(words(x))));
     pg.readings = null;

@@ -154,7 +154,7 @@ export function TemplatesMenu({ onPick }) {
     const { open, setOpen, box } = useDropdown();
     return (
         <span className="pg-tpl" ref={box}>
-            <Button size="sm" variant="ghost" icon={<Icon.Layers />} aria-expanded={open} onClick={() => setOpen(!open)}>Templates</Button>
+            <Button size="sm" variant="ghost" icon={<Icon.Layers />} title="Start from a ready-made graph" aria-expanded={open} onClick={() => setOpen(!open)}>Templates</Button>
             {open && (
                 <div className="pg-tpl__list" role="menu">
                     {TEMPLATES.map((t, k) => [
@@ -310,21 +310,36 @@ function Toolbar({
             {/* One line, cut short with an ellipsis where it has to be — the
                 whole of it is in the tooltip. */}
             <span className="pg-bar__status" title={status}>{status}</span>
+            {/* Grouped by what the buttons are for, with a rule between each
+                group: editing, drawing, where a graph comes from, keeping it,
+                moving it about, and its JSON. */}
+            <span className="pg-bar__sep" aria-hidden="true" />
             <span className="pg-bar__group">
                 <Button size="sm" variant="ghost" icon={<Icon.RotateLeft />} disabled={!history.canUndo} title="Undo (Ctrl+Z)" onClick={onUndo} />
                 <Button size="sm" variant="ghost" icon={<Icon.RotateRight />} disabled={!history.canRedo} title="Redo (Ctrl+Shift+Z)" onClick={onRedo} />
                 <Button size="sm" variant="ghost" icon={<Icon.Expand />} title="Fit the graph to the window (F)" onClick={onFit} />
             </span>
+            <span className="pg-bar__sep" aria-hidden="true" />
             {compact < 2 ? <AnnotateTools onAdd={onAnnotate} /> : <AnnotateMenu onAdd={onAnnotate} />}
+            <span className="pg-bar__sep" aria-hidden="true" />
             <span className="pg-bar__group pg-bar__files">
                 <TemplatesMenu onPick={onTemplate} />
                 <Button size="sm" variant="ghost" icon={<Icon.Waves />} title="Replace the graph with IQ Demod’s selected demodulator" onClick={onFromDemod}>From IQ Demod</Button>
+            </span>
+            <span className="pg-bar__sep" aria-hidden="true" />
+            <span className="pg-bar__group pg-bar__files">
                 <Button size="sm" variant="ghost" icon={<Icon.Plus />} title="Start again from an empty canvas" onClick={onNew}>New</Button>
                 <Button size="sm" variant="ghost" icon={<Icon.Folder />} title="Open a graph saved in this browser" onClick={onOpen}>Open</Button>
                 <Button size="sm" variant="ghost" icon={<Icon.Save />} title="Save the graph in this browser, under its name (Ctrl+S)" onClick={onSave}>Save</Button>
+            </span>
+            <span className="pg-bar__sep" aria-hidden="true" />
+            <span className="pg-bar__group pg-bar__files">
                 <Button size="sm" variant="ghost" icon={<Icon.Upload />} title="Load a graph, or a file of graphs, from a .json file" onClick={onImport}>Import</Button>
                 <Button size="sm" variant="ghost" icon={<Icon.Download />} title="Save the graph, or saved graphs, as a .json file" onClick={onExport}>Export</Button>
                 <Button size="sm" variant="ghost" icon={<Icon.Share />} title="Copy a link to this graph" onClick={onShare}>Share</Button>
+            </span>
+            <span className="pg-bar__sep" aria-hidden="true" />
+            <span className="pg-bar__group pg-bar__files">
                 <Button
                     size="sm"
                     variant={json ? 'primary' : 'ghost'}

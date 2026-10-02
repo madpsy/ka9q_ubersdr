@@ -14454,10 +14454,11 @@ a.btn { text-decoration: none; }
 .pg__dirty--unsaved { border: 1.5px solid var(--text-faint); }
 
 /* One row. When it does not fit, the toolbar folds itself up a step at a time
-   (useCompactRow in PlaygroundModal.jsx): the graph buttons lose their words,
-   then the drawing tools fold into one Draw button, and on a phone the status
-   and the "Playground" label go. It never wraps. The status gives way first of all — it is
-   one line, cut short, and whole in its tooltip. Its minimum is what makes the
+   (useCompactRow in PlaygroundModal.jsx): the "Playground" label goes, then
+   the status line, then the graph buttons lose their words, and last the
+   drawing tools fold into one Draw button. It never wraps. Before any of that
+   the graph's name shortens (.pg__name-box), and within the toolbar the status
+   is cut short — one line, whole in its tooltip. Its minimum is what makes the
    row overflow, and so fold, rather than squeeze the status to nothing. */
 .pg-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
 .pg-bar__status {
@@ -14472,10 +14473,10 @@ a.btn { text-decoration: none; }
 .pg-bar__group { display: flex; flex: none; gap: 2px; flex-wrap: nowrap; }
 /* The rule between groups of buttons. */
 .pg-bar__sep { flex: none; align-self: stretch; width: 1px; margin: 4px 2px; background: var(--border); }
-.pg-bar.is-compact .pg-bar__files .btn > span { display: none; }
-.pg-bar.is-compact .pg-bar__files .btn { padding: 5px; }
-.pg-bar.is-compact-3 .pg-bar__status { display: none; }
-.pg__head:has(.pg-bar.is-compact-3) .pg__title { display: none; }
+.pg__head:has(.pg-bar.is-fold-1) .pg__title { display: none; }
+.pg-bar.is-fold-2 .pg-bar__status { display: none; }
+.pg-bar.is-fold-3 .pg-bar__files .btn > span { display: none; }
+.pg-bar.is-fold-3 .pg-bar__files .btn { padding: 5px; }
 .pg-draw__list { width: auto; min-width: 170px; }
 .pg-tpl__item.pg-draw__item { flex-direction: row; align-items: center; gap: 10px; }
 .pg-bar__tool {

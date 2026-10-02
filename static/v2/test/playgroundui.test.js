@@ -635,28 +635,49 @@ t('the toolbar folds up a step at a time as it overflows, and back only once the
     let fire = null;
     const hadRO = globalThis.ResizeObserver;
     globalThis.ResizeObserver = class { constructor(fn) { fire = fn; } observe() {} disconnect() {} };
-    // A row whose content is wider the less it has folded.
-    const want = [1500, 1100, 900, 700];
+    // The title bar, and in it a toolbar whose content is narrower the further
+    // it has folded. Putting the "Playground" label away (step 1) hands the
+    // toolbar 100 px more without the title bar changing — the room that made
+    // it flicker when it was measured against itself.
+    const want = [1500, 1300, 1050, 900, 700];
     let level = 0;
-    const el = { clientWidth: 1600, get scrollWidth() { return Math.max(this.clientWidth, want[level]); } };
+    const row = { clientWidth: 1800 };
+    const el = {
+        parentElement: row,
+        get clientWidth() { return row.clientWidth - 300 + (level >= 1 ? 100 : 0); },
+        get scrollWidth() { return Math.max(this.clientWidth, want[level]); },
+    };
     const ref = { current: el };
     const Probe = () => { level = P.useCompactRow(ref); return null; };
-    const step = () => { let r = render(Probe, {}); r.cleanups.forEach((f) => f()); r = render(Probe, {}); r.cleanups.forEach((f) => f()); };
+    const settle = (n = 10) => {
+        const seen = [];
+        for (let k = 0; k < n; k++) {
+            const r = render(Probe, {});
+            r.cleanups.forEach((f) => f());
+            seen.push(level);
+        }
+        return seen;
+    };
     try {
-        step();
+        settle();
         assert.strictEqual(level, 0, 'folded with room to spare');
-        el.clientWidth = 1200;
-        for (let k = 0; k < 4; k++) step();
-        assert.strictEqual(level, 1, 'the graph buttons kept their words in too little room');
-        el.clientWidth = 800;
-        for (let k = 0; k < 6; k++) step();
-        assert.strictEqual(level, 3, 'not folded all the way on a phone');
+        // Just too narrow for everything: the label goes, and stays gone.
+        row.clientWidth = 1750;
+        const seen = settle(12);
+        assert.strictEqual(level, 1);
+        assert.ok(!seen.slice(2).includes(0), `flickered: ${seen.join(' ')}`);
+        row.clientWidth = 1300;
+        settle();
+        assert.strictEqual(level, 2, 'the status line stayed in too little room');
+        row.clientWidth = 900;
+        settle(14);
+        assert.strictEqual(level, 4, 'not folded all the way on a phone');
         // A little wider: not yet the room the step before needed.
-        el.clientWidth = 850;
-        for (let k = 0; k < 4; k++) step();
-        assert.strictEqual(level, 3, 'unfolded into a row it overflows');
-        el.clientWidth = 1600;
-        for (let k = 0; k < 8; k++) step();
+        row.clientWidth = 950;
+        settle();
+        assert.strictEqual(level, 4, 'unfolded into a row it overflows');
+        row.clientWidth = 1800;
+        settle(14);
         assert.strictEqual(level, 0, 'did not come all the way back');
         assert.ok(fire, 'no resize watch');
     } finally {

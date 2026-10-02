@@ -245,20 +245,29 @@ function AnnotateTools({ onAdd }) {
     );
 }
 
-// How much of the toolbar a row this wide can show, measured rather than
+// How much of the title bar a row this wide can show, measured rather than
 // guessed at a breakpoint: the room it needs moves with the UI scale, the
-// status text and the platform's font. 0 is everything; 1 drops the words from
-// the graph buttons (New, Open, Save…) and leaves their icons, whose tooltips
-// still name them; 2 folds the seven drawing tools into one Draw button with a
-// list under it; 3, on a phone, gives up the status line and the "Playground"
-// label as well. It never wraps. The graph's name gives way before any of this
-// (see .pg__name-box), so the row only overflows once the name is as short as
+// status text and the platform's font. Each step puts one more thing away:
+//
+//   1  the "Playground" label
+//   2  the status line — Start/Stop says most of it, and the rest is in the
+//      button's tooltip
+//   3  the words on the graph buttons (New, Open, Save…) — their icons stay,
+//      and their tooltips still name them
+//   4  the seven drawing tools, folded into one Draw button with a list
+//
+// It never wraps. The graph's name gives way before any of this (see
+// .pg__name-box), so the toolbar only overflows once the name is as short as
 // it goes.
 //
-// A step down is taken when the row overflows, remembering how wide it would
-// have had to be; a step back up only once it is that wide again — so it
-// cannot flap between the two at the width where one fits and the other not.
-const COMPACT_MAX = 3;
+// A step is taken when the toolbar overflows, and remembers how wide the whole
+// title bar would have had to be to avoid it; the step is undone only once the
+// title bar is that wide. The title bar's width, not the toolbar's: putting the
+// label away (step 1) widens the toolbar without the window changing at all,
+// and measured against itself the toolbar would take that as room to unfold
+// into — bringing the label back, overflowing again, and flickering for as
+// long as the window stayed at that width.
+const COMPACT_MAX = 4;
 export function useCompactRow(ref) {
     const [level, setLevel] = useState(0);
     const needed = useRef([]);
@@ -267,17 +276,20 @@ export function useCompactRow(ref) {
     useEffect(() => {
         const el = ref.current;
         if (!el || typeof ResizeObserver === 'undefined') return undefined;
+        const row = el.parentElement || el;
         const check = () => {
             const at = levelNow.current;
-            if (at < COMPACT_MAX && el.scrollWidth > el.clientWidth + 1) {
-                needed.current[at] = el.scrollWidth;
+            const short = el.scrollWidth - el.clientWidth;
+            if (at < COMPACT_MAX && short > 1) {
+                needed.current[at] = row.clientWidth + short;
                 setLevel(at + 1);
-            } else if (at > 0 && el.clientWidth >= (needed.current[at - 1] || Infinity)) {
+            } else if (at > 0 && row.clientWidth >= (needed.current[at - 1] || Infinity)) {
                 setLevel(at - 1);
             }
         };
         const ro = new ResizeObserver(check);
-        ro.observe(el);
+        ro.observe(row);
+        if (row !== el) ro.observe(el);
         check();
         return () => ro.disconnect();
     }, [ref, level]);
@@ -295,23 +307,29 @@ function Toolbar({
         : !on ? (offline ? 'Ready — this graph runs by itself, without the receiver.'
             : iq ? 'Ready — the receiver is in IQ.' : 'Starting will switch the receiver to IQ.')
             : pg.fault ? `Stopped by an error: ${pg.fault}`
-                : pg.offline ? `Running by itself ${pg.hostKind === 'worker' ? 'in a worker' : 'on the page'}${pg.overloaded ? ' — overloaded, dropping packets' : ''}`
-                    : !pg.quadrature ? 'Waiting for the quadrature stream…'
-                        : `Running ${pg.hostKind === 'worker' ? 'in a worker' : 'on the page'}${pg.overloaded ? ' — overloaded, dropping packets' : ''}`;
+                : !pg.offline && !pg.quadrature ? 'Waiting for the quadrature stream…'
+                    : `Running${pg.overloaded ? ' — overloaded, dropping packets' : ''}`;
+    // Where and how, for anybody who wants it: in the tooltip, and on Start/Stop
+    // too, which is where it still is once the status line has been put away.
+    const detail = on && !pg.fault && (pg.offline || pg.quadrature)
+        ? `${status} — ${pg.offline ? 'by itself, without the receiver, ' : ''}${pg.hostKind === 'worker' ? 'in a worker' : 'on the page'}`
+        : status;
     return (
-        <div className={`pg-bar${compact ? ` is-compact is-compact-${compact}` : ''}`} ref={bar}>
+        // Cumulative: a bar folded to step 3 is is-fold-1, -2 and -3 at once.
+        <div className={['pg-bar', ...Array.from({ length: compact }, (_, k) => `is-fold-${k + 1}`)].join(' ')} ref={bar}>
             <Button
                 size="sm"
                 variant={on ? 'default' : 'primary'}
                 icon={on ? <Icon.Stop /> : <Icon.Play />}
                 disabled={!live}
+                title={detail}
                 onClick={on ? onStop : onStart}
             >
                 {on ? 'Stop' : 'Start'}
             </Button>
             {/* One line, cut short with an ellipsis where it has to be — the
                 whole of it is in the tooltip. */}
-            <span className="pg-bar__status" title={status}>{status}</span>
+            <span className="pg-bar__status" title={detail}>{status}</span>
             {/* Grouped by what the buttons are for, with a rule between each
                 group: editing, drawing, where a graph comes from, keeping it,
                 moving it about, and its JSON. */}
@@ -322,7 +340,7 @@ function Toolbar({
                 <Button size="sm" variant="ghost" icon={<Icon.Expand />} title="Fit the graph to the window (F)" onClick={onFit} />
             </span>
             <span className="pg-bar__sep" aria-hidden="true" />
-            {compact < 2 ? <AnnotateTools onAdd={onAnnotate} /> : <AnnotateMenu onAdd={onAnnotate} />}
+            {compact < 4 ? <AnnotateTools onAdd={onAnnotate} /> : <AnnotateMenu onAdd={onAnnotate} />}
             <span className="pg-bar__sep" aria-hidden="true" />
             <span className="pg-bar__group pg-bar__files">
                 <TemplatesMenu onPick={onTemplate} />

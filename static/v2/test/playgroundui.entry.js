@@ -5,7 +5,7 @@
 import { deep, render, reset, walk, words } from './hookStub.js';
 import IQPanel from '../src/panels/IQPanel.jsx';
 import PlaygroundWatch, { takeShareCode } from '../src/components/PlaygroundWatch.jsx';
-import PlaygroundModal, { PlaygroundWindow, TemplatesMenu, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, withArrival } from '../src/playground/ui/PlaygroundModal.jsx';
+import PlaygroundModal, { AnnotateMenu, useCompactRow, PlaygroundWindow, TemplatesMenu, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, withArrival } from '../src/playground/ui/PlaygroundModal.jsx';
 import { TEMPLATES } from '../src/playground/templates.js';
 import Inspector, { ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams, formatKbps, VoiceField } from '../src/playground/ui/Inspector.jsx';
 import { holdPlayback, playbackHeld } from '../src/lib/playbackHold.js';
@@ -43,7 +43,7 @@ import { ExportDialog, GraphName, OpenDialog, SaveNameDialog } from '../src/play
 import { resetDemodSettings, saveDemodSettings } from '../src/lib/iqDemod.js';
 
 module.exports = {
-    deep, render, reset, walk, words, LIB, GraphName, ExportDialog, OpenDialog, SaveNameDialog,
+    deep, render, reset, walk, words, AnnotateMenu, useCompactRow, LIB, GraphName, ExportDialog, OpenDialog, SaveNameDialog,
     withArrival, zoomToward, ZOOM_MAX, ZOOM_MIN,
     IQPanel, PlaygroundWatch, takeShareCode, PlaygroundModal, PlaygroundWindow, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, TemplatesMenu, TEMPLATES,
     Inspector, ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams, formatKbps, VoiceField, holdPlayback, playbackHeld, JsonPane, graphText, readGraphText, Canvas, BlockPreview, CARD_HEAD_H, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, ActivityDot, activityMeaning, ClipPill, canClip, Palette,

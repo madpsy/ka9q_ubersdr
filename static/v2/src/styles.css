@@ -14451,9 +14451,29 @@ a.btn { text-decoration: none; }
 .pg__dirty--changed { background: var(--accent); }
 .pg__dirty--unsaved { border: 1.5px solid var(--text-faint); }
 
-.pg-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; flex: 1; }
-.pg-bar__status { flex: 1; min-width: 140px; font-size: calc(11px * var(--ui-scale)); color: var(--text-dim); }
-.pg-bar__group { display: flex; gap: 2px; flex-wrap: wrap; }
+/* One row. When it does not fit, the toolbar folds itself up a step at a time
+   (useCompactRow in PlaygroundModal.jsx): the graph buttons lose their words,
+   then the drawing tools fold into one Draw button, and only on a phone does
+   the status go and the row wrap. The status gives way first of all — it is
+   one line, cut short, and whole in its tooltip. Its minimum is what makes the
+   row overflow, and so fold, rather than squeeze the status to nothing. */
+.pg-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.pg-bar__status {
+    flex: 1 1 auto;
+    min-width: 9em;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: calc(11px * var(--ui-scale));
+    color: var(--text-dim);
+}
+.pg-bar__group { display: flex; flex: none; gap: 2px; flex-wrap: nowrap; }
+.pg-bar.is-compact .pg-bar__files .btn > span { display: none; }
+.pg-bar.is-compact .pg-bar__files .btn { padding: 5px; }
+.pg-bar.is-compact-3 { flex-wrap: wrap; }
+.pg-bar.is-compact-3 .pg-bar__status { display: none; }
+.pg-draw__list { width: auto; min-width: 170px; }
+.pg-tpl__item.pg-draw__item { flex-direction: row; align-items: center; gap: 10px; }
 .pg-bar__tool {
     display: inline-flex; align-items: center; justify-content: center;
     width: 28px; height: 28px; padding: 0;

@@ -24,6 +24,7 @@ import { ExportDialog, GraphName, OpenDialog, SaveNameDialog, SaveReplaceDialog 
 import { Runtime } from '../runtime.js';
 import { encodeShare } from '../share.js';
 import { getPlayground, graphIqWidth, needsReceiver } from '../engine.js';
+import { BLOCK_BY_TYPE } from '../blocks/index.js';
 import {
     EditHistory, addNode, cloneGraph, duplicateNodes, exposeControl, removeNodes, removeWire, renameNode,
 } from '../editing.js';
@@ -123,11 +124,10 @@ const DRAG_PX = 4;
 /** Everything about a graph except where its cards sit. */
 const structureKey = (g) => JSON.stringify([g.nodes.map((n) => [n.id, n.type, n.params]), g.wires]);
 
-/**
- * The templates, as a list under a button. Its own rather than the app's Menu:
- * that one is layered for the dock and opens behind this window.
- */
-export function TemplatesMenu({ onPick }) {
+// A list under a toolbar button, shut by a press elsewhere or by Escape. Its
+// own rather than the app's Menu: that one is layered for the dock and opens
+// behind this window.
+function useDropdown() {
     const [open, setOpen] = useState(false);
     const box = useRef(null);
     useEffect(() => {
@@ -146,6 +146,12 @@ export function TemplatesMenu({ onPick }) {
             document.removeEventListener('keydown', key, true);
         };
     }, [open]);
+    return { open, setOpen, box };
+}
+
+/** The templates, as a list under a button. */
+export function TemplatesMenu({ onPick }) {
+    const { open, setOpen, box } = useDropdown();
     return (
         <span className="pg-tpl" ref={box}>
             <Button size="sm" variant="ghost" icon={<Icon.Layers />} aria-expanded={open} onClick={() => setOpen(!open)}>Templates</Button>
@@ -183,18 +189,97 @@ const ANNOTATE_TOOLS = [
     { type: 'marker', title: 'Add a numbered step marker', glyph: <><circle cx="12" cy="12" r="8.5" /><path d="M11 9l2-1.5V16" /></> },
 ];
 
+const glyph = (g, size = 16) => (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {g}
+    </svg>
+);
+
+/**
+ * The same tools folded into one button, for a toolbar too narrow to show
+ * seven of them: each named in the list, beside its glyph.
+ */
+export function AnnotateMenu({ onAdd }) {
+    const { open, setOpen, box } = useDropdown();
+    return (
+        <span className="pg-tpl" ref={box}>
+            <Button
+                size="sm"
+                variant="ghost"
+                icon={glyph(<><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></>)}
+                title="Draw: notes, headings, groups and shapes"
+                aria-label="Draw"
+                aria-expanded={open}
+                onClick={() => setOpen(!open)}
+            />
+            {open && (
+                <div className="pg-tpl__list pg-draw__list" role="menu">
+                    {ANNOTATE_TOOLS.map((t) => (
+                        <button
+                            key={t.type}
+                            type="button"
+                            role="menuitem"
+                            className="pg-tpl__item pg-draw__item"
+                            title={t.title}
+                            onClick={() => { setOpen(false); onAdd(t.type); }}
+                        >
+                            {glyph(t.glyph)}
+                            <span className="pg-tpl__title">{(BLOCK_BY_TYPE[t.type] || {}).label || t.type}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </span>
+    );
+}
+
 function AnnotateTools({ onAdd }) {
     return (
         <span className="pg-bar__group" role="group" aria-label="Annotate">
             {ANNOTATE_TOOLS.map((t) => (
                 <button key={t.type} type="button" className="pg-bar__tool" title={t.title} aria-label={t.title} onClick={() => onAdd(t.type)}>
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        {t.glyph}
-                    </svg>
+                    {glyph(t.glyph)}
                 </button>
             ))}
         </span>
     );
+}
+
+// How much of the toolbar a row this wide can show, measured rather than
+// guessed at a breakpoint: the room it needs moves with the UI scale, the
+// status text and the platform's font. 0 is everything; 1 drops the words from
+// the graph buttons (New, Open, Save…) and leaves their icons, whose tooltips
+// still name them; 2 folds the seven drawing tools into one Draw button with a
+// list under it; 3, on a phone, gives the status line up as well and lets what
+// is left wrap.
+//
+// A step down is taken when the row overflows, remembering how wide it would
+// have had to be; a step back up only once it is that wide again — so it
+// cannot flap between the two at the width where one fits and the other not.
+const COMPACT_MAX = 3;
+export function useCompactRow(ref) {
+    const [level, setLevel] = useState(0);
+    const needed = useRef([]);
+    const levelNow = useRef(0);
+    levelNow.current = level;
+    useEffect(() => {
+        const el = ref.current;
+        if (!el || typeof ResizeObserver === 'undefined') return undefined;
+        const check = () => {
+            const at = levelNow.current;
+            if (at < COMPACT_MAX && el.scrollWidth > el.clientWidth + 1) {
+                needed.current[at] = el.scrollWidth;
+                setLevel(at + 1);
+            } else if (at > 0 && el.clientWidth >= (needed.current[at - 1] || Infinity)) {
+                setLevel(at - 1);
+            }
+        };
+        const ro = new ResizeObserver(check);
+        ro.observe(el);
+        check();
+        return () => ro.disconnect();
+    }, [ref, level]);
+    return level;
 }
 
 function Toolbar({
@@ -202,8 +287,17 @@ function Toolbar({
     onTemplate, onAnnotate, json, onJson, onSave, onOpen,
 }) {
     const on = pg.running;
+    const bar = useRef(null);
+    const compact = useCompactRow(bar);
+    const status = !live ? 'Start the receiver to run a graph that listens to it — or use an IQ player, which needs none.'
+        : !on ? (offline ? 'Ready — this graph runs by itself, without the receiver.'
+            : iq ? 'Ready — the receiver is in IQ.' : 'Starting will switch the receiver to IQ.')
+            : pg.fault ? `Stopped by an error: ${pg.fault}`
+                : pg.offline ? `Running by itself ${pg.hostKind === 'worker' ? 'in a worker' : 'on the page'}${pg.overloaded ? ' — overloaded, dropping packets' : ''}`
+                    : !pg.quadrature ? 'Waiting for the quadrature stream…'
+                        : `Running ${pg.hostKind === 'worker' ? 'in a worker' : 'on the page'}${pg.overloaded ? ' — overloaded, dropping packets' : ''}`;
     return (
-        <div className="pg-bar">
+        <div className={`pg-bar${compact ? ` is-compact is-compact-${compact}` : ''}`} ref={bar}>
             <Button
                 size="sm"
                 variant={on ? 'default' : 'primary'}
@@ -213,22 +307,16 @@ function Toolbar({
             >
                 {on ? 'Stop' : 'Start'}
             </Button>
-            <span className="pg-bar__status">
-                {!live ? 'Start the receiver to run a graph that listens to it — or use an IQ player, which needs none.'
-                    : !on ? (offline ? 'Ready — this graph runs by itself, without the receiver.'
-                        : iq ? 'Ready — the receiver is in IQ.' : 'Starting will switch the receiver to IQ.')
-                        : pg.fault ? `Stopped by an error: ${pg.fault}`
-                            : pg.offline ? `Running by itself ${pg.hostKind === 'worker' ? 'in a worker' : 'on the page'}${pg.overloaded ? ' — overloaded, dropping packets' : ''}`
-                            : !pg.quadrature ? 'Waiting for the quadrature stream…'
-                                : `Running ${pg.hostKind === 'worker' ? 'in a worker' : 'on the page'}${pg.overloaded ? ' — overloaded, dropping packets' : ''}`}
-            </span>
+            {/* One line, cut short with an ellipsis where it has to be — the
+                whole of it is in the tooltip. */}
+            <span className="pg-bar__status" title={status}>{status}</span>
             <span className="pg-bar__group">
                 <Button size="sm" variant="ghost" icon={<Icon.RotateLeft />} disabled={!history.canUndo} title="Undo (Ctrl+Z)" onClick={onUndo} />
                 <Button size="sm" variant="ghost" icon={<Icon.RotateRight />} disabled={!history.canRedo} title="Redo (Ctrl+Shift+Z)" onClick={onRedo} />
                 <Button size="sm" variant="ghost" icon={<Icon.Expand />} title="Fit the graph to the window (F)" onClick={onFit} />
             </span>
-            <AnnotateTools onAdd={onAnnotate} />
-            <span className="pg-bar__group">
+            {compact < 2 ? <AnnotateTools onAdd={onAnnotate} /> : <AnnotateMenu onAdd={onAnnotate} />}
+            <span className="pg-bar__group pg-bar__files">
                 <TemplatesMenu onPick={onTemplate} />
                 <Button size="sm" variant="ghost" icon={<Icon.Waves />} title="Replace the graph with IQ Demod’s selected demodulator" onClick={onFromDemod}>From IQ Demod</Button>
                 <Button size="sm" variant="ghost" icon={<Icon.Plus />} title="Start again from an empty canvas" onClick={onNew}>New</Button>

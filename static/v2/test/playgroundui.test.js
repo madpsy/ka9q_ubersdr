@@ -628,6 +628,58 @@ t('a shared graph on a listed receiver can be opened in the app instead', () => 
     closePlayground();
 });
 
+// ── the toolbar on a narrow screen ──────────────────────────────────────────
+
+t('the toolbar folds up a step at a time as it overflows, and back only once there is the room it needed', () => {
+    reset();
+    let fire = null;
+    const hadRO = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class { constructor(fn) { fire = fn; } observe() {} disconnect() {} };
+    // A row whose content is wider the less it has folded.
+    const want = [1500, 1100, 900, 700];
+    let level = 0;
+    const el = { clientWidth: 1600, get scrollWidth() { return Math.max(this.clientWidth, want[level]); } };
+    const ref = { current: el };
+    const Probe = () => { level = P.useCompactRow(ref); return null; };
+    const step = () => { let r = render(Probe, {}); r.cleanups.forEach((f) => f()); r = render(Probe, {}); r.cleanups.forEach((f) => f()); };
+    try {
+        step();
+        assert.strictEqual(level, 0, 'folded with room to spare');
+        el.clientWidth = 1200;
+        for (let k = 0; k < 4; k++) step();
+        assert.strictEqual(level, 1, 'the graph buttons kept their words in too little room');
+        el.clientWidth = 800;
+        for (let k = 0; k < 6; k++) step();
+        assert.strictEqual(level, 3, 'not folded all the way on a phone');
+        // A little wider: not yet the room the step before needed.
+        el.clientWidth = 850;
+        for (let k = 0; k < 4; k++) step();
+        assert.strictEqual(level, 3, 'unfolded into a row it overflows');
+        el.clientWidth = 1600;
+        for (let k = 0; k < 8; k++) step();
+        assert.strictEqual(level, 0, 'did not come all the way back');
+        assert.ok(fire, 'no resize watch');
+    } finally {
+        globalThis.ResizeObserver = hadRO;
+    }
+});
+
+t('folded, the drawing tools are one Draw button whose list adds each, by name', () => {
+    reset();
+    const added = [];
+    let r = render(P.AnnotateMenu, { onAdd: (type) => added.push(type) });
+    const button = deep(r.tree).find((n) => n.props && n.props['aria-label'] === 'Draw');
+    assert.ok(button, 'no Draw button');
+    button.props.onClick();
+    r.cleanups.forEach((f) => f());
+    r = render(P.AnnotateMenu, { onAdd: (type) => added.push(type) });
+    const items = deep(r.tree).filter((n) => n.props && n.props.role === 'menuitem');
+    assert.deepStrictEqual(items.map(words), ['Note', 'Heading', 'Group', 'Rectangle', 'Ellipse', 'Arrow', 'Step marker']);
+    items[2].props.onClick();
+    assert.deepStrictEqual(added, ['group']);
+    r.cleanups.forEach((f) => f());
+});
+
 // ── named graphs, kept in this browser ──────────────────────────────────────
 
 const { LIB } = P;

@@ -2,7 +2,8 @@
 
 const assert = require('assert');
 const {
-    ClockBlock, chooseTime, clockText, timeParts, IntervalCounterBlock, TimeSource,
+    ClockBlock, chooseTime, clockText, timeParts, parseNmea, IntervalCounterBlock, TimeSource,
+    PulseClassifierBlock, parseClasses, classify, PULSE_PRESETS,
     createWorkerCore, BLOCK_BY_TYPE, makeBuffer, sanitizeParams, GRAPH_VERSION, compile, parseGraph,
 } = require('./.build/playgroundclock.cjs');
 
@@ -147,6 +148,15 @@ t('the time is said each minute by default, each second if asked', () => {
     assert.deepStrictEqual(each.step(timeOf({ capture: T - 500 }), 1000)[5].list.map((m) => m.text), ['2213Z\n']);
 });
 
+t('the time is said once straight away, whatever the schedule, so a console shows it now', () => {
+    const c = clock({ announce: 'hour' });
+    // 22:13:20.5 — nowhere near the hour.
+    assert.deepStrictEqual(c.step(timeOf({ capture: T + 500 }), 100)[5].list.map((m) => m.text), ['22:13:20 UTC\n']);
+    assert.deepStrictEqual(c.step(timeOf({ capture: T + 600 }), 100)[5].list, [], 'said again off schedule');
+    const off = clock({ announce: 'off' });
+    assert.deepStrictEqual(off.step(timeOf({ capture: T + 500 }), 100)[5].list, []);
+});
+
 t('following the page, a reading that wobbles is followed gently; a step is taken at once', () => {
     const c = clock({ align: 'page' });
     c.step(timeOf({ device: { t0: T, err: null } }), 20);
@@ -176,6 +186,104 @@ t('a packet\'s time reaches each Clock through the worker', () => {
     assert.strictEqual(r.src, 'ntp');
     assert.strictEqual(r.err, 1.5);
     assert.ok(Math.abs(r.t - (T + 20)) < 1e-6);
+});
+
+// ── what is wired into a Clock ──────────────────────────────────────────────
+
+/** A Clock fed messages on `time` and a level on `pps`. */
+function wiredClock(params = {}, rate = 1000) {
+    const inst = ClockBlock.create();
+    inst.configure(clockParams(params), rate);
+    const step = ({ time = null, msgs = [], pps = null, n = 1000 } = {}) => {
+        if (time) inst.feed({ time });
+        const tIn = makeBuffer('message', 0);
+        tIn.list = msgs;
+        let pIn = null;
+        if (pps) { pIn = makeBuffer('real', pps.length); pIn.re.set(pps); pIn.n = pps.length; }
+        const outs = ClockBlock.outputs.map((p) => makeBuffer(p.kind, n));
+        inst.process([tIn, pIn], outs, pps ? pps.length : n);
+        return outs;
+    };
+    return { inst, step };
+}
+
+t('NMEA RMC and ZDA give their UTC; a bad checksum or no fix gives nothing', () => {
+    const body = 'GPRMC,221320.00,A,5130.0,N,00007.0,W,0.0,0.0,141123,,,A';
+    let sum = 0;
+    for (const c of body) sum ^= c.charCodeAt(0);
+    const cs = sum.toString(16).toUpperCase().padStart(2, '0');
+    assert.strictEqual(parseNmea(`$${body}*${cs}`), T);
+    assert.strictEqual(parseNmea(`$${body}*00`), null, 'a bad checksum was believed');
+    assert.strictEqual(parseNmea('$GPRMC,221320.00,V,,,,,,,141123,,,N'), null, 'no fix was believed');
+    assert.strictEqual(parseNmea('$GNZDA,221320.50,14,11,2023,00,00'), T + 500);
+});
+
+t('a time code wired in sets the clock to its edge, plus the path', () => {
+    const c = wiredClock({ source: 'wired', propagationMs: 5 });
+    // The decoder says: the edge 0.3 s before the end of this packet was T.
+    c.step({ msgs: [{ type: 'timecode', utcMs: T, ago: 0.3, quality: 0.9, station: 'WWV' }] });
+    const r = c.inst.read();
+    assert.strictEqual(r.src, 'wired');
+    assert.ok(Math.abs(r.t - (T + 305)) < 1e-6, `at ${r.t - T}`);
+    assert.match(r.label, /WWV, quality 90%.*\+5 ms path/);
+    // Silent too long: it falls back, and says so.
+    for (let k = 0; k < 6; k++) c.step({ time: timeOf({ device: { t0: T + 1305 + k * 1000, err: null } }) });
+    assert.notStrictEqual(c.inst.read().src, 'wired');
+    assert.match(c.inst.read().note, /Nothing wired in is speaking/);
+});
+
+t('PPS edges pull the clock onto the second, and their spread is the error bound', () => {
+    const c = wiredClock({ source: 'wired' });
+    // The clock starts 40 ms fast of where the pulses say the seconds are.
+    c.step({ time: timeOf({ device: { t0: T - 460, err: null } }), pps: new Float64Array(1000) });
+    for (let s = 0; s < 20; s++) {
+        const pps = new Float64Array(1000);
+        // The edge 500 samples in is the true second T + s + 1.
+        pps.fill(1, 500, 600);
+        c.step({ pps });
+    }
+    const r = c.inst.read();
+    assert.strictEqual(r.src, 'wired');
+    assert.match(r.label, /PPS/);
+    // After 21 packets of 1 s, the clock's end is T + 20.5 s, give or take what is left.
+    assert.ok(Math.abs(r.t - (T + 20540 - 40)) < 2, `still ${r.t - (T + 20500)} ms out`);
+    assert.ok(r.err != null && r.err < 20);
+});
+
+// ── the pulse classifier ────────────────────────────────────────────────────
+
+t('classes are read from their text, and a width is sorted into the first that holds it', () => {
+    const cls = parseClasses('0: 100-350, 1: 350-650; M: 650-950\nbad, x: 9-3');
+    assert.deepStrictEqual(cls.map((c) => c.name), ['0', '1', 'M']);
+    assert.strictEqual(classify(cls, 200), '0');
+    assert.strictEqual(classify(cls, 350), '1');
+    assert.strictEqual(classify(cls, 990), null);
+    assert.ok(PULSE_PRESETS.wwvb && PULSE_PRESETS.dcf77 && PULSE_PRESETS.msf);
+});
+
+t('a WWVB-style signal is read as its symbols, to a fraction of a sample, and rejects counted', () => {
+    const def = PulseClassifierBlock;
+    const inst = def.create();
+    inst.configure(sanitizeParams(def, { preset: 'wwvb' }), 1000);
+    // Five seconds: carrier down for 0.2, 0.5, 0.8, 0.2, then a 0.05 s glitch.
+    const x = new Float64Array(5000).fill(1);
+    [200, 500, 800, 200, 50].forEach((len, s) => x.fill(0, s * 1000 + 100, s * 1000 + 100 + len));
+    const outs = def.outputs.map((p) => makeBuffer(p.kind, 5000));
+    // In two packets, so a pulse straddling them is measured whole.
+    const a = makeBuffer('real', 2600); a.re.set(x.subarray(0, 2600)); a.n = 2600;
+    const b = makeBuffer('real', 2400); b.re.set(x.subarray(2600)); b.n = 2400;
+    inst.process([a], outs, 2600);
+    const first = outs[0].list.map((m) => m.symbol);
+    const bitsFirst = Array.from(outs[3].re.slice(0, 2));
+    outs.forEach((o) => { if (o.list) o.list = []; });
+    inst.process([b], outs, 2400);
+    const syms = first.concat(outs[0].list.map((m) => m.symbol));
+    assert.deepStrictEqual(syms, ['0', '1', 'M', '0']);
+    assert.deepStrictEqual(bitsFirst, [0, 1]);
+    const r = inst.read();
+    assert.strictEqual(r.recent, '01M0');
+    assert.strictEqual(r.rejects, 1, 'the glitch was not counted out');
+    assert.ok(Math.abs(r.last.widthMs - 200) < 1e-6);
 });
 
 // ── the interval counter ────────────────────────────────────────────────────

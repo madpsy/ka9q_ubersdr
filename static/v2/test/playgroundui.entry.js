@@ -16,7 +16,7 @@ import { MARGIN_MIN_DB, MARGIN_LOSSLESS } from '../src/radio/constants.js';
 import { setUberSDRVersion, uberSDRVersion, versionNote } from '../src/playground/version.js';
 import Canvas, { BlockPreview, InPlace, formatCpu, formatLatency, formatRate } from '../src/playground/ui/Canvas.jsx';
 import { HEAD_H as CARD_HEAD_H } from '../src/playground/geometry.js';
-import CardVisual, { ActivityDot, ClipPill, RfLine, activityMeaning, canClip, plotValue } from '../src/playground/ui/CardVisual.jsx';
+import CardVisual, { ActivityDot, ClipPill, RfLine, activityMeaning, canClip, plotValue, earLevels } from '../src/playground/ui/CardVisual.jsx';
 import Palette from '../src/playground/ui/Palette.jsx';
 import { closePlayground, offerSharedGraph, openPlayground, playgroundUiState } from '../src/playground/ui/store.js';
 import {
@@ -44,7 +44,7 @@ import SerialCard from '../src/playground/ui/SerialCard.jsx';
 import { resetDemodSettings, saveDemodSettings } from '../src/lib/iqDemod.js';
 
 module.exports = {
-    deep, render, reset, walk, words, SerialCard, plotValue, messageLine, measureLine, logText, AnnotateMenu, useCompactRow, LIB, GraphName, ExportDialog, OpenDialog, SaveNameDialog,
+    deep, render, reset, walk, words, earLevels, SerialCard, plotValue, messageLine, measureLine, logText, AnnotateMenu, useCompactRow, LIB, GraphName, ExportDialog, OpenDialog, SaveNameDialog,
     withArrival, zoomToward, ZOOM_MAX, ZOOM_MIN,
     IQPanel, PlaygroundWatch, takeShareCode, PlaygroundModal, PlaygroundWindow, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, TemplatesMenu, TEMPLATES,
     Inspector, ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams, formatKbps, VoiceField, holdPlayback, playbackHeld, JsonPane, graphText, readGraphText, Canvas, BlockPreview, CARD_HEAD_H, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, ActivityDot, activityMeaning, ClipPill, canClip, Palette,

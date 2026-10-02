@@ -37,6 +37,8 @@ import {
 
 import { SerialPortBlock } from './serial.js';
 import { ClockBlock } from './clock.js';
+import { PulseClassifierBlock } from './pulse.js';
+import { TimecodeBlock } from './timecode.js';
 
 export const BLOCKS = [
     IqInBlock, IqPlayerBlock, SignalBlock, DataTransmitterBlock, ClockBlock,
@@ -58,6 +60,8 @@ export const BLOCKS = [
     SliderBlock, NumberBlock, ToggleBlock, DropdownBlock, ScaleBlock, ShapeBlock, IntegratorBlock,
     AudioOutBlock, WavRecorderBlock, IqRecorderBlock, TtsBlock,
     SerialPortBlock,
+    PulseClassifierBlock,
+    TimecodeBlock,
     // Not in the palette: the toolbar adds them (see CATEGORIES).
     ...ANNOTATIONS,
 ];

@@ -14996,7 +14996,23 @@ a.btn { text-decoration: none; }
 .pg-vis__bar--gr i { background: var(--warn); }
 .pg-vis__comp .pg-vis__state { line-height: 14px; }
 /* Audio out: what each ear gets, one bar above the other. */
-.pg-vis__ears { display: flex; flex-direction: column; gap: 2px; }
+.pg-vis__ears { position: relative; display: flex; flex-direction: column; gap: 2px; }
+.pg-vis__muted {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border: 1px solid var(--bad);
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--bad) 22%, var(--surface-2));
+    color: var(--bad);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
 .pg-vis__ears .pg-vis__bar { margin-top: 0; }
 /* In → out on a card with no picture of its own. */
 .pg-vis__inout { font-family: var(--mono); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -15215,6 +15231,21 @@ a.btn { text-decoration: none; }
     cursor: pointer;
 }
 .pg-vis__plot { display: flex; flex-direction: column; gap: 2px; }
+/* A time-code decoder's card. */
+.pg-tc { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pg-tc__row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pg-tc__state { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pg-tc__state.is-acquiring { color: var(--warn); }
+.pg-tc__state.is-locked { color: var(--good); }
+.pg-tc__state.is-off { white-space: normal; }
+.pg-tc__q { flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--good); }
+.pg-tc__time { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--text); }
+.pg-tc__syms { font-family: var(--mono); font-size: 11px; color: var(--text-dim); overflow: hidden; white-space: nowrap; direction: rtl; text-align: left; }
+.pg-tc__facts { font-size: 10.5px; color: var(--text-faint); }
+/* A pulse classifier's card. */
+.pg-pulse { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pg-pulse__recent { font-family: var(--mono); font-size: 12px; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: clip; direction: rtl; text-align: left; }
+.pg-pulse__info { font-size: 10.5px; color: var(--text-faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* A Clock's card. */
 .pg-clock { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pg-clock__time { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }

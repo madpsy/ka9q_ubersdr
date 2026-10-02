@@ -36,7 +36,8 @@
 //             a standard-frequency carrier
 //   window    1 during a schedule — `windowLength` seconds from `windowFrom`,
 //             every `windowEvery` — and 0 outside it
-//   text      the time in words, each second, minute, hour or period
+//   text      the time in words, each second, minute, hour or period — and
+//             once straight away, so whatever it is wired to shows it now
 //   unix, second, minute, hour    as controls, once a second
 //   open      the window as a control, when it changes
 //   accuracy  how far out the time could be, in ms, once a second (not sent
@@ -48,7 +49,53 @@ const SOURCE_LABEL = {
     ntp: 'NTP add-on (off-air)',
     receiver: 'Receiver clock',
     device: 'This device',
+    wired: 'Wired in',
 };
+
+/**
+ * The UTC of an NMEA sentence, Unix ms, or null: $--RMC (time, status A, date)
+ * or $--ZDA (time, day, month, year), any talker. The checksum, where there is
+ * one, must match. What a GPS's sentence names is the second that began at its
+ * last PPS edge, and it arrives a fraction of a second after it.
+ */
+export function parseNmea(line) {
+    const m = /^\$([A-Z]{2})(RMC|ZDA),([^*]*)(?:\*([0-9A-Fa-f]{2}))?\s*$/.exec(String(line).trim());
+    if (!m) return null;
+    if (m[4] != null) {
+        const body = `${m[1]}${m[2]},${m[3]}`;
+        let sum = 0;
+        for (let k = 0; k < body.length; k++) sum ^= body.charCodeAt(k);
+        if (sum !== parseInt(m[4], 16)) return null;
+    }
+    const parts = m[3].split(',');
+    const hms = (v) => {
+        const r = /^(\d{2})(\d{2})(\d{2}(?:\.\d+)?)$/.exec(v || '');
+        return r ? (Number(r[1]) * 3600 + Number(r[2]) * 60 + Number(r[3])) * 1000 : null;
+    };
+    let tod;
+    let y;
+    let mo;
+    let d;
+    if (m[2] === 'RMC') {
+        if (parts[1] !== 'A') return null;
+        tod = hms(parts[0]);
+        const r = /^(\d{2})(\d{2})(\d{2})$/.exec(parts[8] || '');
+        if (!r) return null;
+        d = Number(r[1]); mo = Number(r[2]); y = 2000 + Number(r[3]);
+    } else {
+        tod = hms(parts[0]);
+        d = Number(parts[1]); mo = Number(parts[2]); y = Number(parts[3]);
+    }
+    if (tod == null || !(mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && y >= 1970)) return null;
+    return Date.UTC(y, mo - 1, d) + tod;
+}
+
+// How long what is wired in counts as fresh: a time code decoder speaks each
+// second, a GPS each second, a PPS each second.
+const WIRED_FRESH_MS = 5000;
+const PPS_FRESH_MS = 2500;
+// How hard a PPS edge pulls the clock onto its second.
+const PPS_GAIN = 0.3;
 
 /**
  * Which time a Clock with settings `p` takes from a packet's `time`, as
@@ -59,7 +106,8 @@ const SOURCE_LABEL = {
  */
 export function chooseTime(time, p) {
     if (!time) return null;
-    const want = p.source || 'auto';
+    // "Wired in" falls back as "best there is" does when nothing wired speaks.
+    const want = !p.source || p.source === 'wired' ? 'auto' : p.source;
     const ntpMissing = !time.ntpOffered
         ? 'No NTP add-on on this receiver'
         : 'The NTP add-on is not answering yet';
@@ -159,7 +207,12 @@ export const ClockBlock = {
     label: 'Clock',
     category: 'Sources',
     summary: 'The time — off the air from the NTP add-on where there is one — as a 1 PPS pulse, pips, a time-locked tone or carrier, a schedule window, words and numbers.',
-    inputs: [],
+    // Optional: time wired in from the graph — a Time code decoder's, or a
+    // GPS's NMEA from a Serial port — and a PPS whose edges mark the seconds.
+    inputs: [
+        { name: 'time', kind: MESSAGE, optional: true },
+        { name: 'pps', kind: REAL, optional: true, audio: false },
+    ],
     outputs: [
         { name: 'pps', kind: REAL, audio: false },
         { name: 'pips', kind: REAL },
@@ -180,7 +233,9 @@ export const ClockBlock = {
             { value: 'ntp', label: 'NTP add-on (off-air)' },
             { value: 'receiver', label: 'Receiver clock' },
             { value: 'device', label: 'This device' },
+            { value: 'wired', label: 'Wired in (time code, GPS, PPS)' },
         ]),
+        propagationMs: num('Propagation delay', 0, { unit: 'ms', min: 0, max: 200, step: 0.01 }),
         align: choice('Align to', 'signal', [
             { value: 'signal', label: 'The signal (when it was captured)' },
             { value: 'page', label: 'The page (now)' },
@@ -219,9 +274,29 @@ export const ClockBlock = {
         let pending = null;
         let stepKey = '';
         let open = null;
+        // Whether the time has been said since starting, or since "Say the
+        // time" changed: it is said once at once, so a console wired to it
+        // shows something now rather than at the top of the next minute.
+        let saidFirst = false;
+        let announce = null;
+        // What is wired in: when it last spoke (in this clock's time), what it
+        // was, and the PPS's prior level and residuals.
+        let wiredAt = -Infinity;
+        let wiredWhat = '';
+        let ppsAt = -Infinity;
+        let ppsPrev = null;
+        let ppsResid = [];
+        let nmeaPartial = '';
         return {
-            configure(params, r) { p = params; rate = r || rate; },
-            reset() { t = null; chosen = null; pending = null; stepKey = ''; open = null; },
+            configure(params, r) {
+                p = params;
+                rate = r || rate;
+                if (params.announce !== announce) { announce = params.announce; saidFirst = false; }
+            },
+            reset() {
+                t = null; chosen = null; pending = null; stepKey = ''; open = null; saidFirst = false;
+                wiredAt = -Infinity; wiredWhat = ''; ppsAt = -Infinity; ppsPrev = null; ppsResid = []; nmeaPartial = '';
+            },
             feed(data) { if (data && data.time) pending = data.time; },
             read() {
                 return {
@@ -239,7 +314,11 @@ export const ClockBlock = {
                 if (pending) {
                     const c = chooseTime(pending, p);
                     pending = null;
-                    if (c) {
+                    // While something wired in is fresh it has the clock; the
+                    // page's readings wait in the wings.
+                    const wiredNow = (p.source === 'wired' || p.source === 'auto') && t !== null
+                        && (t - wiredAt < WIRED_FRESH_MS || t - ppsAt < PPS_FRESH_MS);
+                    if (c && !wiredNow) {
                         chosen = c;
                         const key = `${c.src}/${c.signal}`;
                         if (t === null || key !== stepKey || Math.abs(c.t0 - t) > STEP_MS) t = c.t0;
@@ -253,6 +332,77 @@ export const ClockBlock = {
                     // Nothing from the page yet: this machine's clock, for now.
                     t = Date.now() - n * dt;
                     chosen = { t0: t, err: null, src: 'device', signal: false, label: SOURCE_LABEL.device, note: '' };
+                }
+
+                // ── what is wired in ──
+                const prop = p.propagationMs || 0;
+                const wantWired = p.source === 'wired' || p.source === 'auto';
+                const timeIn = ins && ins[0];
+                if (timeIn && timeIn.list && wantWired) {
+                    for (const msg of timeIn.list) {
+                        if (!msg) continue;
+                        if (msg.type === 'timecode' && Number.isFinite(msg.utcMs)) {
+                            // UTC at the end of this packet, from the decoder's edge;
+                            // a received code is late by its path, which is added back.
+                            const end = msg.utcMs + (msg.ago || 0) * 1000 + prop;
+                            t = end - n * dt;
+                            wiredAt = t;
+                            wiredWhat = `${msg.station || 'Time code'}${msg.quality != null ? `, quality ${Math.round(msg.quality * 100)}%` : ''}`;
+                        } else if (msg.type === 'text' && typeof msg.text === 'string') {
+                            const lines = (nmeaPartial + msg.text).split(/\r?\n/);
+                            nmeaPartial = lines.pop().slice(-200);
+                            for (const line of lines) {
+                                const utc = parseNmea(line);
+                                if (utc == null) continue;
+                                // To the second only: the sentence arrives late by
+                                // an unknown fraction, so it names the second and a
+                                // PPS, if there is one, places it.
+                                const here = t + n * dt;
+                                if (Math.abs(utc - here) > 1500 || here - ppsAt > PPS_FRESH_MS) t = utc + 500 - n * dt;
+                                wiredAt = t;
+                                wiredWhat = 'GPS (NMEA)';
+                            }
+                        }
+                    }
+                }
+                // A PPS: each rising edge is a whole second. Placed by the clock
+                // as it stands, then the clock is pulled onto it.
+                const ppsIn = ins && ins[1] && ins[1].re;
+                if (ppsIn) {
+                    const m = ins[1].n != null ? ins[1].n : n;
+                    for (let k = 0; k < m; k++) {
+                        const v = ppsIn[k];
+                        const a = ppsPrev;
+                        ppsPrev = v;
+                        if (a === null || !(a < 0.5 && v >= 0.5)) continue;
+                        const frac = (0.5 - a) / (v - a);
+                        const at = t + (k - 1 + frac) * dt;
+                        const label = Math.round(at / 1000) * 1000;
+                        const e = label - at;
+                        ppsResid.push(e);
+                        if (ppsResid.length > 30) ppsResid.shift();
+                        t += Math.abs(e) > STEP_MS ? e : e * PPS_GAIN;
+                        ppsAt = t + k * dt;
+                    }
+                }
+                const here = t + n * dt;
+                const wiredFresh = here - wiredAt < WIRED_FRESH_MS;
+                const ppsFresh = here - ppsAt < PPS_FRESH_MS;
+                if ((wiredFresh || ppsFresh) && wantWired) {
+                    const rms = ppsResid.length > 2 ? Math.sqrt(ppsResid.reduce((x, e) => x + e * e, 0) / ppsResid.length) : null;
+                    chosen = {
+                        t0: t,
+                        err: ppsFresh && rms != null ? rms : null,
+                        src: 'wired',
+                        signal: false,
+                        label: `${SOURCE_LABEL.wired}: ${[wiredFresh ? wiredWhat : '', ppsFresh ? 'PPS' : ''].filter(Boolean).join(' + ')}${prop ? `, +${prop} ms path` : ''}`,
+                        note: '',
+                    };
+                    stepKey = 'wired';
+                } else if (p.source === 'wired' && chosen && chosen.src !== 'wired') {
+                    chosen = { ...chosen, note: `Nothing wired in is speaking — ${chosen.label} meanwhile` };
+                } else if (p.source === 'wired' && chosen && chosen.src === 'wired') {
+                    chosen = { ...chosen, label: `${SOURCE_LABEL.wired} (silent — holding)`, note: 'Nothing wired in has spoken for a while' };
                 }
                 const pps = outs[0] && outs[0].re;
                 const pips = outs[1] && outs[1].re;
@@ -298,6 +448,11 @@ export const ClockBlock = {
                         || (p.announce === 'minute' && parts.s === 0)
                         || (p.announce === 'hour' && parts.s === 0 && parts.m === 0);
                     if (due && outs[5] && outs[5].list) outs[5].list.push({ type: 'text', text: `${clockText(ms, p.format, p.zone)}\n` });
+                }
+                // The first time, said at once rather than waiting for its turn.
+                if (!saidFirst && p.announce !== 'off' && outs[5] && outs[5].list) {
+                    if (!outs[5].list.length) outs[5].list.push({ type: 'text', text: `${clockText(Math.floor(end / 1000) * 1000, p.format, p.zone)}\n` });
+                    saidFirst = true;
                 }
                 if (outs[10] && wNow !== open) {
                     open = wNow;

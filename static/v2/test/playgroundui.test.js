@@ -670,6 +670,21 @@ t('a control plot writes its value to the decimals and unit it is given', () => 
     assert.strictEqual(p.decimals.default, 'auto');
 });
 
+t('a muted Audio out says MUTED across its bars, and says so when a control muted it', () => {
+    const node = { id: 'out', type: 'audio-out', params: { channel: 'both', muted: false } };
+    assert.strictEqual(P.earLevels(node, { in: -20 }).muted, false);
+    assert.strictEqual(P.earLevels(node, { in: -20 }, { muted: true }).muted, true, 'a control\'s mute was not seen');
+    reset();
+    const pg = { driven: { out: { muted: true } }, levels: {}, on: () => () => {} };
+    const { tree } = render(P.CardVisual, { pg, node });
+    const badge = deep(tree).find((n) => cls(n) === 'pg-vis__muted');
+    assert.ok(badge, 'no MUTED badge');
+    assert.match(words(badge), /MUTED \(control\)/);
+    reset();
+    const quiet = render(P.CardVisual, { pg: { driven: {}, levels: {}, on: () => () => {} }, node });
+    assert.ok(!deep(quiet.tree).some((n) => cls(n) === 'pg-vis__muted'), 'MUTED on an output that is not');
+});
+
 // ── a serial port's card ────────────────────────────────────────────────────
 
 t('a serial card says why there are no ports where there are none, and asks for nothing', () => {

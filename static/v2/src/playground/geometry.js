@@ -211,6 +211,12 @@ function ownVisualHeight(type, params) {
         case 'tts':
             // What it is saying, and what it said last.
             return 32;
+        case 'timecode':
+            // Its state, the time, and the symbols lately read.
+            return 58;
+        case 'pulse-classifier':
+            // The symbols lately read, and the last width.
+            return 34;
         case 'clock':
             // The time, where it comes from, and a note when it is not what was asked.
             return 50;

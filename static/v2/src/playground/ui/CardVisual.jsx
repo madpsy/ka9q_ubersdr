@@ -9,6 +9,7 @@
 
 import React, { useEffect, useReducer, useRef, useState } from '../../react.js';
 import { INSTRUMENTS, Instrument } from './viewers.jsx';
+import { Icon } from '../../components/ui.jsx';
 import { parseChoices } from '../blocks/controls.js';
 import { WAVEFORMS } from '../blocks/sources.js';
 import { cssVar, sizedCanvas } from '../../lib/audioWaterfall.js';
@@ -61,20 +62,31 @@ export function useLevel(pg, id) {
  * What Audio out sends each ear: its one input, to the left, the right or
  * both, and to neither while muted. For its card's bars and its readouts.
  */
-export function earLevels(node, level) {
-    const p = node.params || {};
+// `driven` is what a control has set the block's parameters to, where one has
+// (engine.driven): a mute switched by a control is as muted as one ticked.
+export function earLevels(node, level, driven = null) {
+    const p = { ...(node.params || {}), ...(driven || {}) };
     const db = level ? level.in : null;
     const to = (side) => (p.muted || db == null ? null : p.channel === 'both' || p.channel === side ? db : -200);
     return { left: to('left'), right: to('right'), muted: !!p.muted };
 }
 
 function EarBars({ pg, node }) {
-    const ears = earLevels(node, useLevel(pg, node.id));
+    const driven = pg && pg.driven ? pg.driven[node.id] : null;
+    const ears = earLevels(node, useLevel(pg, node.id), driven);
     const why = ears.muted ? ' — muted' : '';
     return (
-        <div className="pg-vis__ears">
+        <div className={`pg-vis__ears${ears.muted ? ' is-muted' : ''}`}>
             <Bar db={ears.left} tag="L" off={ears.muted} label={`To the left ear${why}`} />
             <Bar db={ears.right} tag="R" off={ears.muted} label={`To the right ear${why}`} />
+            {/* Across the bars rather than beside them: a muted output is the
+                one thing about this card that has to be seen at a glance. */}
+            {ears.muted && (
+                <span className="pg-vis__muted" title={driven && driven.muted ? 'Muted by a control input' : 'Muted'}>
+                    <Icon.Mute size={12} />
+                    {driven && driven.muted ? 'MUTED (control)' : 'MUTED'}
+                </span>
+            )}
         </div>
     );
 }
@@ -243,6 +255,56 @@ function Recorder({ pg, id, label }) {
 function clockErr(err) {
     if (err == null) return 'accuracy unknown';
     return err < 1 ? `±${(err * 1000).toFixed(0)} µs` : err < 1000 ? `±${err.toFixed(err < 10 ? 1 : 0)} ms` : `±${(err / 1000).toFixed(1)} s`;
+}
+
+const TIMECODE_STATE = { off: 'Not running', nosignal: 'No signal', acquiring: 'Acquiring', locked: 'Locked' };
+const TIMECODE_REFUSAL = {
+    none: '', staleness: 'no fresh minute', contested: 'minutes disagree', quality: 'too unsure', plausibility: 'more than a day from this clock',
+};
+
+/** A time-code decoder's card: its state, the time it decoded, and how sure it is. */
+function TimecodeFace({ reading, large }) {
+    const r = reading || {};
+    if (r.why) return <div className="pg-tc"><div className="pg-tc__state is-off">{r.why}</div></div>;
+    const pad = (n) => String(n).padStart(2, '0');
+    let time = '--:--:--';
+    if (r.utcMs != null) {
+        const t = timeParts(r.utcMs, 'utc');
+        time = `${pad(t.h)}:${pad(t.m)}:${pad(t.s)}`;
+    }
+    const d = r.detail || {};
+    const why = r.state !== 'locked' && r.refusal && TIMECODE_REFUSAL[r.refusal] ? ` · ${TIMECODE_REFUSAL[r.refusal]}` : '';
+    const facts = [
+        d.carrierOffsetHz != null ? `carrier ${d.carrierOffsetHz >= 0 ? '+' : ''}${Number(d.carrierOffsetHz).toFixed(1)} Hz` : '',
+        d.framesInWindow != null ? `${d.framesInWindow} min` : (d.frames != null ? `${d.frames} min` : ''),
+    ].filter(Boolean).join(' · ');
+    return (
+        <div className="pg-tc">
+            <div className="pg-tc__row">
+                <span className={`pg-tc__state is-${r.state || 'off'}`}>{`${r.station ? `${r.station} · ` : ''}${TIMECODE_STATE[r.state] || ''}${why}`}</span>
+                {r.quality != null && r.state === 'locked' && <span className="pg-tc__q">{`${Math.round(r.quality * 100)}%`}</span>}
+            </div>
+            <div className="pg-tc__time">{time}<span className="pg-clock__zone">UTC</span></div>
+            <div className="pg-tc__syms">{r.recent || ''}</div>
+            {large && facts && <div className="pg-tc__facts">{facts}</div>}
+        </div>
+    );
+}
+
+/** A pulse classifier's card: the symbols lately read, the last width, and the tally. */
+function PulseFace({ reading, large }) {
+    const r = reading || {};
+    const tally = r.counts ? Object.entries(r.counts).map(([k, v]) => `${k} ${v}`).join(' · ') : '';
+    return (
+        <div className="pg-pulse">
+            <div className="pg-pulse__recent">{r.recent || '—'}</div>
+            <div className="pg-pulse__info">
+                {r.last ? `last ${r.last.symbol} · ${r.last.widthMs.toFixed(1)} ms` : 'No pulses yet'}
+                {r.rejects ? ` · ${r.rejects} out of range` : ''}
+            </div>
+            {large && tally && <div className="pg-pulse__info">{tally}</div>}
+        </div>
+    );
 }
 
 /** A Clock's card: the time, ticking, and where it comes from. */
@@ -644,6 +706,10 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
             );
         case 'clock':
             return <ClockFace reading={reading} large={large} />;
+        case 'pulse-classifier':
+            return <PulseFace reading={reading} large={large} />;
+        case 'timecode':
+            return <TimecodeFace reading={reading} large={large} />;
         case 'control-plot':
             return (
                 <div className="pg-vis__plot">

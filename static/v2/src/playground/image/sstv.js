@@ -226,13 +226,17 @@ function matchVis(tone) {
 // MMSSTV's FSK ID (its fskid.txt; QSSTV's sendFSKID the same): after the
 // picture, 45.45 baud FSK — 1900 Hz a 1, 2100 Hz a 0 — in 6-bit symbols, low
 // bit first (as both programs' code sends them, whatever fskid.txt's table
-// suggests). 300 ms of 1500 Hz, 100 ms of 2100 Hz and one 1900 Hz bit — which
-// read as symbols are 0x20 — then 0x2A, the callsign (each character minus
-// 0x20), 0x01, and the XOR of the callsign's symbols.
+// suggests). 300 ms of 1500 Hz, 100 ms of 2100 Hz and one 1900 Hz bit, then
+// 0x2A, the callsign (each character minus 0x20), 0x01, and the XOR of the
+// callsign's symbols. The 100 ms of 2100 Hz is four and a half bits, not
+// five: read as a symbol ending on the 1900 Hz bit, the lead-in is 0x20 only
+// in its top five bits — its lowest starts 10 ms into the 1500 Hz — so only
+// those five are asked of it.
 const FSK_BIT = 0.022;
 const FSK_SUB = 8;                 // readings a bit
 const FSK_LISTEN = 6;              // seconds after the picture to look
 const FSK_SPAN = 300;              // Hz either side of the centre that count as the tones
+const FSK_MAX_CALL = 16;           // characters MMSSTV takes in a callsign
 
 /**
  * Looks for an FSK ID in the demodulator's frequency from `from` to `until`,
@@ -240,8 +244,8 @@ const FSK_SPAN = 300;              // Hz either side of the centre that count as
  * 2000 Hz (+ the header's shift), each sample's offset clamped to ±300 Hz so a
  * noise spike cannot outvote the rest — or no reading, where too few samples
  * are near the tones to be them. A bit is eight readings; at every reading
- * the twelve bits that end there are tried for 0x20 0x2A, and the timing is
- * put in the middle of the readings that match.
+ * the eleven bits that end there are tried for the lead-in's 0 0 0 0 1 and
+ * 0x2A, and the timing is put in the middle of the readings that match.
  */
 class SstvFskId {
     constructor(fs, shift, from, until) {
@@ -262,16 +266,29 @@ class SstvFskId {
         this.callsign = null;
     }
 
-    /** The bit that ends at reading j: 1, 0, or -1 if not there to read. */
+    /**
+     * The bit that ends at reading j: 1, 0, or -1 if not there to read. The
+     * readings that are the tones vote; a few lost to noise do not lose the
+     * bit, so long as at least half of them are there.
+     */
     _bit(j) {
         if (j < FSK_SUB - 1 || j >= this.subs.length) return -1;
         let sum = 0;
+        let got = 0;
         for (let k = j - FSK_SUB + 1; k <= j; k++) {
             const v = this.subs[k];
-            if (v !== v) return -1;
+            if (v !== v) continue;
             sum += v;
+            got++;
         }
+        if (got * 2 < FSK_SUB) return -1;
         return sum < 0 ? 1 : 0;
+    }
+
+    /** The lead-in's 0 0 0 0 1, its four 2100 Hz bits and the 1900 Hz one, the first ending at reading j. */
+    _leadIn(j) {
+        for (let b = 0; b < 5; b++) if (this._bit(j + b * FSK_SUB) !== (b === 4 ? 1 : 0)) return false;
+        return true;
     }
 
     _symbol(j) {
@@ -303,15 +320,18 @@ class SstvFskId {
             }
             if (this.scan > last) return;
             const j = this.scan++;
-            // The header's twelve bits, ending at reading j.
-            const first = j - 11 * FSK_SUB;
-            const ok = first >= 0 && this._symbol(first) === 0x20 && this._symbol(first + 6 * FSK_SUB) === 0x2a;
+            // The header's eleven bits, ending at reading j: the lead-in's top
+            // five (2100 Hz four times, the 1900 Hz bit), then 0x2A.
+            const first = j - 10 * FSK_SUB;
+            const ok = first >= 0 && this._leadIn(first) && this._symbol(first + 5 * FSK_SUB) === 0x2a;
             if (ok) {
                 if (!this.match) this.match = { from: j, to: j };
                 else this.match.to = j;
                 if (this.match.to - this.match.from < FSK_SUB - 1) continue;
             }
             if (this.match) {
+                // Matched over about a bit's worth of readings: its middle is
+                // where each bit ends, give or take half a reading.
                 const centre = Math.round((this.match.from + this.match.to) / 2);
                 this.read = { next: centre + 6 * FSK_SUB, symbols: [], end: false, restart: j + 1 };
                 this.match = null;
@@ -332,8 +352,9 @@ class SstvFskId {
             return true;
         }
         if (sym === 0x01) { r.end = true; return false; }
-        // Anything else below 0x0d ends it (slowrx's rule), and a callsign is ten at most.
-        if (sym < 0x0d || r.symbols.length >= 10) return true;
+        // Anything else below 0x0d ends it (slowrx's rule), and a callsign is
+        // as long as MMSSTV allows at most.
+        if (sym < 0x0d || r.symbols.length >= FSK_MAX_CALL) return true;
         r.symbols.push(sym);
         return false;
     }

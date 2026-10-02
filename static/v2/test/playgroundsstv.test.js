@@ -175,8 +175,8 @@ function synth(segments, rate, { ppm = 0, snrDb = null, lead = 0.4, tail = 0.4, 
  * symbols, 0x01 and their XOR — each symbol six 22 ms bits, low bit first,
  * 1900 Hz a 1 and 2100 Hz a 0 — and 100 ms of 1900 Hz to finish.
  */
-function fskIdSegments(call, { badChecksum = false } = {}) {
-    const s = [[1500, 0.3], [2100, 0.1], [1900, 0.022]];
+function fskIdSegments(call, { badChecksum = false, fskLate = 0 } = {}) {
+    const s = [[1500, 0.3 + fskLate], [2100, 0.1], [1900, 0.022]];
     const sym = (v) => { for (let b = 0; b < 6; b++) s.push([(v >> b) & 1 ? 1900 : 2100, 0.022]); };
     sym(0x2a);
     let x = 0;
@@ -510,6 +510,24 @@ for (const [mode, rate, opts, call] of [
         assert.ok(r.texts.findIndex((x) => x.startsWith('END')) < r.texts.findIndex((x) => x.startsWith('ID ')));
     });
 }
+
+// Where the ID falls against the detector's readings is chance on the air:
+// the lead-in's 2100 Hz is four and a half bits, so a detector asking for a
+// whole 0x20 before the 0x2A found it at some offsets and not others (these
+// four among them), and with noise at fewer still.
+for (const [late, snrDb] of [[0.001, null], [0.003, null], [0.006, 5], [0.014, 1]]) {
+    t(`FSK ID ${late * 1000} ms later after the picture${snrDb == null ? '' : `, noise ${snrDb} dB`}: still read`, () => {
+        const { audio } = encode('Robot 36', 12000, { fskId: 'M9PSY', fskLate: late, snrDb, seed: 3 });
+        const r = decode(audio, 12000);
+        assert.deepStrictEqual(r.texts.filter((x) => x.startsWith('ID ')), ['ID M9PSY\n'], r.texts.join(''));
+    });
+}
+
+t('FSK ID: a 16-character callsign, as long as MMSSTV allows, read whole', () => {
+    const call = 'M9PSY/MM/QRP1234';
+    const r = decode(encode('Robot 36', 12000, { fskId: call }).audio, 12000);
+    assert.deepStrictEqual(r.texts.filter((x) => x.startsWith('ID ')), [`ID ${call}\n`]);
+});
 
 t('FSK ID with a wrong checksum is not believed; no ID at all, nothing said', () => {
     const bad = decode(encode('Robot 36', 12000, { fskId: 'M9PSY', badChecksum: true }).audio, 12000);

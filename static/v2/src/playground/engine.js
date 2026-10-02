@@ -193,6 +193,23 @@ export class PlaygroundEngine extends Emitter {
         this.emit('change');
     }
 
+    /**
+     * Resize a card: `size` is `{ w, h }` as fitSize gives it — a side left
+     * out is natural — or null for its natural size. Like positions, the
+     * editor's alone: stored, not sent.
+     */
+    setSize(id, size) {
+        const n = this.graph.nodes.find((x) => x.id === id);
+        if (!n) return;
+        const w = size && size.w ? size.w : undefined;
+        const h = size && size.h ? size.h : undefined;
+        if (n.w === w && n.h === h) return;
+        if (w) n.w = w; else delete n.w;
+        if (h) n.h = h; else delete n.h;
+        this._persist();
+        this.emit('change');
+    }
+
     /** A one-off action for one node, such as arming a scope's single sweep. */
     command(id, name) {
         if (this.host) this.host.send({ t: 'command', id, name });
@@ -257,6 +274,7 @@ export class PlaygroundEngine extends Emitter {
         this.fault = null;
         this.inFlight = 0;
         this._heard = false;
+        this._resetCounts();
         this.routes.allowOwnContext(this.offline);
         this._openHost();
         if (this.offline) this._startClock();
@@ -379,6 +397,33 @@ export class PlaygroundEngine extends Emitter {
         this.host.send({ t: 'load', id, data: { i, q, frames: f.frames, rate: f.rate } }, [i.buffer, q.buffer]);
     }
 
+    _resetCounts() {
+        this._counts = {
+            since: this._now(), packets: 0, frames: 0, behind: 0,
+            underrunsAt: (this.player && this.player.underruns) || 0,
+        };
+    }
+
+    /**
+     * What the IQ stream has brought since Start: packets and samples handed
+     * to the graph, packets dropped because the graph was too far behind to
+     * take them (`behind`), and the receiver player's underruns — its
+     * dropouts — counted from Start. `sinceMs` is when Start was, on this
+     * engine's clock.
+     */
+    streamCounts() {
+        const c = this._counts || { since: this._now(), packets: 0, frames: 0, behind: 0, underrunsAt: 0 };
+        const now = (this.player && this.player.underruns) || 0;
+        return {
+            sinceMs: c.since,
+            packets: c.packets,
+            frames: c.frames,
+            behind: c.behind,
+            underruns: Math.max(0, now - c.underrunsAt),
+            rate: this.streamRate || 0,
+        };
+    }
+
     /** Whether a player node has a file in it. */
     hasFile(id) {
         return this.files.has(id);
@@ -394,10 +439,13 @@ export class PlaygroundEngine extends Emitter {
     _onAudio(planes, frames, sampleRate) {
         if (!this.active || !this._quad || !frames || !this.host) return;
         if (planes.length < 2) return;
+        this._counts.packets++;
+        this._counts.frames += frames;
         // Re-asserted, as the IQ Demod engine does: another panel's preview
         // can lift the duck on its way out.
         if (!this.player.ducked) this.player.setDucked(true);
         if (this.inFlight >= MAX_IN_FLIGHT) {
+            this._counts.behind++;
             this._send(null, null, frames, sampleRate);
             return;
         }

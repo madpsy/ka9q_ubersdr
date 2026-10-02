@@ -1276,12 +1276,21 @@ t('levels show: Audio out’s bar per ear, an in → out line on a card with no 
     pg.levels = { a: { in: -20, out: -26 } };
     try {
         const card = (node) => deep(React.createElement(CardVisual, { pg, node }));
-        const bars = (node) => card(node).filter((x) => cls(x).startsWith('pg-vis__bar')).map((x) => words(x).replace(/\s+/g, ' ').trim());
+        const barEls = (node) => card(node).filter((x) => cls(x).split(' ')[0] === 'pg-vis__bar');
+        // The words as written over the track: the first copy.
+        const bars = (node) => barEls(node).map((x) => words(walk(x).find((y) => y.type === 'span')).replace(/\s+/g, ' ').trim());
         const ao = (params) => g([{ id: 'a', type: 'audio-out', params }]).nodes[0];
         assert.deepStrictEqual(bars(ao({ channel: 'both' })), ['L -20 dB', 'R -20 dB']);
         assert.deepStrictEqual(bars(ao({ channel: 'left' })), ['L -20 dB', 'R silent']);
         assert.deepStrictEqual(bars(ao({ channel: 'right' })), ['L silent', 'R -20 dB']);
-        const muted = card(ao({ muted: true })).filter((x) => cls(x).startsWith('pg-vis__bar'));
+        // Readable on the fill: the same words again, dark, clipped to it.
+        const bar = barEls(ao({ channel: 'both' }))[0];
+        const fill = walk(bar).find((y) => y.type === 'i').props.style.width;
+        const dark = walk(bar).find((y) => cls(y) === 'pg-vis__bar-on');
+        assert.ok(dark, 'no dark copy of the words over the fill');
+        assert.strictEqual(words(dark).trim(), 'L -20 dB');
+        assert.strictEqual(dark.props.style.clipPath, `inset(0 ${100 - parseFloat(fill)}% 0 0)`, 'the dark words not clipped to the fill');
+        const muted = barEls(ao({ muted: true }));
         assert.ok(muted.every((x) => cls(x).includes('is-off')), 'muted, and the bars do not say so');
 
         // A block with no picture of its own: what it does to the level.
@@ -1387,6 +1396,273 @@ t('a CLIP pill while audio is over full scale, held a moment after; a red Peak i
     } finally {
         pg.levels = was;
     }
+});
+
+t('a card resized: its size kept only where it differs, clamped, the ports and wires following, and stored', () => {
+    const { cardWidth, cardGrow, fitSize, naturalHeight, CARD_MIN_W, CARD_MAX_W, serializeGraph } = P;
+    const lp = g([{ id: 'a', type: 'lowpass', x: 10, y: 20 }]).nodes[0];
+    const natW = nodeWidth('lowpass');
+    const natH = naturalHeight(lp);
+    // Natural: nothing kept.
+    assert.deepStrictEqual(fitSize(lp, natW, natH), {});
+    assert.deepStrictEqual(fitSize(lp, natW + 1, natH + 1), {}, 'a nudge kept as a size');
+    // Wider and taller: both kept, and drawn.
+    const big = { ...lp, ...fitSize(lp, 400, natH + 100) };
+    assert.strictEqual(big.w, 400);
+    assert.strictEqual(big.h, natH + 100);
+    assert.strictEqual(cardWidth(big), 400);
+    assert.strictEqual(nodeHeight(big), natH + 100);
+    assert.strictEqual(cardGrow(big), 100, 'the extra height is not the picture’s');
+    // An output sits on the right edge, wherever that now is; an input stays put.
+    assert.strictEqual(portPosition(big, 'out', 0).x, 10 + 400);
+    assert.strictEqual(portPosition(big, 'in', 0).x, 10);
+    assert.deepStrictEqual(nodeBox(big), { x: 10, y: 20, w: 400, h: natH + 100 });
+    // Clamped: never shorter than its ports need, never narrower or wider than allowed.
+    assert.deepStrictEqual(fitSize(lp, 10, 10), { w: CARD_MIN_W });
+    assert.strictEqual(fitSize(lp, 99999, natH).w, CARD_MAX_W);
+    assert.strictEqual(nodeHeight({ ...lp, h: 5 }), natH, 'a stored height shorter than natural was used');
+    assert.strictEqual(cardWidth({ ...lp, w: 5 }), CARD_MIN_W);
+
+    // Kept through parse and serialize — only where set — and through a link.
+    const graph = g([{ id: 'a', type: 'lowpass', x: 10, y: 20, w: 400, h: natH + 100 }, { id: 'b', type: 'gain' }, { id: 'n', type: 'note', w: 999 }]);
+    assert.strictEqual(graph.nodes[0].w, 400);
+    const stored = serializeGraph(graph);
+    assert.deepStrictEqual([stored.nodes[0].w, stored.nodes[0].h], [400, natH + 100]);
+    assert.ok(!('w' in stored.nodes[1]) && !('h' in stored.nodes[1]), 'a card never resized carries a size');
+    assert.ok(!('w' in stored.nodes[2]), 'an annotation’s own size is in its settings, not here');
+    assert.deepStrictEqual(g([{ id: 'a', type: 'gain', w: 'wide', h: -3 }]).nodes[0].w, undefined, 'nonsense kept as a size');
+});
+
+t('a taller card’s picture fills it: spectrum and waterfall share the room, a console shows more lines', () => {
+    const { SpectrumView, ConsoleView } = P;
+    const heights = (props) => deep(React.createElement(SpectrumView, props)).filter((x) => x.type === 'canvas').map((x) => x.props.style.height);
+    assert.deepStrictEqual(heights({ display: 'both', grow: 0 }), ['80px', '80px']);
+    assert.deepStrictEqual(heights({ display: 'both', grow: 101 }), ['131px', '130px']);
+    assert.deepStrictEqual(heights({ display: 'waterfall', grow: 100 }), ['180px']);
+    const text = Array.from({ length: 20 }, (_, k) => `line ${k}`).join('\n');
+    reset();
+    const small = render(ConsoleView, { pg: { command() {} }, id: 'c', reading: { text, count: 1 } }).tree;
+    reset();
+    const tall = render(ConsoleView, { pg: { command() {} }, id: 'c', reading: { text, count: 1 }, grow: 56 }).tree;
+    assert.strictEqual(words(small).trim().split(/\s*line /).filter(Boolean).length, 4);
+    assert.strictEqual(words(tall).trim().split(/\s*line /).filter(Boolean).length, 8, 'four rows more room, not four more lines');
+    assert.strictEqual(tall.props.style.maxHeight, '116px');
+});
+
+t('a card’s corner resizes it by dragging, and a double-click puts it back to its natural size', () => {
+    const { cardWidth, cardGrow } = P;
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    pg.setGraph(g([{ id: 'sc', type: 'scope', x: 0, y: 0 }]));
+    const moved = [];
+    const props = {
+        pg, graph: pg.graph, view: { x: 0, y: 0, zoom: 1 }, setView() {}, selection: { nodes: new Set(), wire: null }, setPicked() {},
+        onEdit() {}, onMoved: () => moved.push(1), onOpenNode() {}, errorsByNode: {}, rates: {}, latencies: {}, stats: null, look: null, origins: null, onParams() {},
+    };
+    const r = render(P.Canvas, props, ctx);
+    const canvas = walk(r.tree).find((n) => cls(n) === 'pg-canvas');
+    const sc = pg.graph.nodes[0];
+    const w0 = cardWidth(sc);
+    const h0 = nodeHeight(sc);
+    const corner = { closest: (sel) => (sel === '[data-handle]' || sel === '[data-handle="card-size"]' ? { getAttribute: (a) => (a === 'data-node' ? 'sc' : 'card-size') } : null) };
+    const ev = (x, y, target = { closest: () => null }) => ({ button: 0, pointerId: 1, clientX: x, clientY: y, shiftKey: false, target });
+    canvas.props.onPointerDown(ev(w0, h0, corner));
+    canvas.props.onPointerMove(ev(w0 + 60, h0 + 80));
+    canvas.props.onPointerUp(ev(w0 + 60, h0 + 80));
+    assert.strictEqual(pg.graph.nodes[0].w, w0 + 60);
+    assert.strictEqual(pg.graph.nodes[0].h, h0 + 80);
+    assert.strictEqual(moved.length, 1, 'the resize is not a step of undo');
+    // The scope's screen is what got taller.
+    const card = deep(React.createElement(P.CardVisual, { pg, node: pg.graph.nodes[0], grow: cardGrow(pg.graph.nodes[0]) }));
+    const screen = card.find((x) => x.type === 'canvas');
+    assert.strictEqual(screen.props.style.height, `${130 - 16 + 80}px`);
+    // Back to natural.
+    canvas.props.onDoubleClick({ ...ev(0, 0, corner) });
+    assert.ok(!('w' in pg.graph.nodes[0]) && !('h' in pg.graph.nodes[0]), 'still resized');
+    assert.strictEqual(moved.length, 2);
+    r.cleanups.forEach((f) => f());
+});
+
+t('the stream’s rates are over the last second, and its chart is the throughput between each reading', () => {
+    const { streamRates, throughputHistory } = P;
+    // Readings a quarter-second apart at 48 kB/s, 12 k samples/s, 50 packets/s —
+    // then a second where nothing came.
+    const snaps = [];
+    for (let k = 0; k <= 8; k++) snaps.push({ t: k * 250, bytes: 12000 * k, frames: 3000 * k, packets: 12.5 * k });
+    for (let k = 9; k <= 12; k++) snaps.push({ t: k * 250, bytes: 96000, frames: 24000, packets: 100 });
+    assert.strictEqual(streamRates(snaps.slice(0, 1)), null, 'a rate from one reading');
+    assert.strictEqual(streamRates(snaps.slice(0, 2)), null, 'a rate from a quarter of a second');
+    assert.deepStrictEqual(streamRates(snaps.slice(0, 9)), { bytes: 48000, frames: 12000, packets: 50 });
+    assert.deepStrictEqual(streamRates(snaps), { bytes: 0, frames: 0, packets: 0 }, 'the last second was nothing');
+    const h = throughputHistory(snaps);
+    assert.strictEqual(h.length, snaps.length - 1);
+    assert.deepStrictEqual(h.slice(0, 8), new Array(8).fill(48000));
+    assert.deepStrictEqual(h.slice(8), [0, 0, 0, 0], 'the stall is not a dip on the chart');
+});
+
+t('the IQ stream’s inspector shows what the stream brings in and what was lost', () => {
+    const { formatBytesPerSec, countShare } = P;
+    assert.strictEqual(formatBytesPerSec(48000), '48.0 kB/s');
+    assert.strictEqual(formatBytesPerSec(1536000), '1.54 MB/s');
+    assert.strictEqual(countShare(3, 1000), '3 · 0.3%');
+    assert.strictEqual(countShare(0, 1000), '0 · 0.0%');
+    assert.strictEqual(countShare(1, 5000), '1 · <0.1%');
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    pg.setGraph(g([{ id: 'a', type: 'iq-in' }]));
+    const show = () => deep(React.createElement(Inspector, {
+        pg, graph: pg.graph, selection: { nodes: new Set(['a']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+        onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+    }));
+    // Not running: says how to see it.
+    assert.match(words(show().find((x) => cls(x) === 'pg-insp__section' && /Stream/.test(words(x)))), /Start the graph/);
+    // Running: the losses since Start, as counts and shares.
+    const was = { running: Object.getOwnPropertyDescriptor(pg, 'running'), counts: pg.streamCounts };
+    Object.defineProperty(pg, 'running', { value: true, configurable: true });
+    pg.offline = false;
+    pg.streamCounts = () => ({ sinceMs: 0, packets: 2000, frames: 480000, behind: 4, underruns: 1, rate: 12000 });
+    try {
+        const readouts = Object.fromEntries(show().filter((x) => cls(x).split(' ')[0] === 'readout').map((r) => [
+            words(deep(r).find((x) => cls(x) === 'readout__label')),
+            words(deep(r).find((x) => cls(x) === 'readout__value')).trim(),
+        ]));
+        assert.strictEqual(readouts.Dropped, '1 · <0.1%');
+        assert.strictEqual(readouts['Graph behind'], '4 · 0.2%');
+        assert.ok('Throughput' in readouts && 'Samples' in readouts && 'Packets' in readouts && 'Of the rate' in readouts);
+        // The rolling chart of throughput, from zero.
+        const chart = show().find((x) => cls(x) === 'pg-insp__chart');
+        assert.ok(chart, 'no throughput chart');
+        assert.ok(deep(chart).some((x) => x.type === 'canvas'), 'the chart draws nothing');
+    } finally {
+        if (was.running) Object.defineProperty(pg, 'running', was.running); else delete pg.running;
+        pg.streamCounts = was.counts;
+    }
+});
+
+t('a recording played back quiets the rest: the receiver ducked and put back as it was, the outputs held, overlapping players counted', () => {
+    const { useQuietWhilePlaying, holdPlayback, playbackHeld } = P;
+    // The hold, counted.
+    const a = holdPlayback();
+    const b = holdPlayback();
+    a();
+    a();
+    assert.strictEqual(playbackHeld(), true, 'the first player stopping let the audio back over the second');
+    b();
+    assert.strictEqual(playbackHeld(), false);
+
+    const player = { ducked: false, setDucked(v) { this.ducked = v; } };
+    const Probe = (props) => { Probe.h = useQuietWhilePlaying(props.player); return null; };
+    reset();
+    let r = render(Probe, { player });
+    Probe.h.onPlay();
+    assert.strictEqual(player.ducked, true, 'the receiver not ducked');
+    assert.strictEqual(playbackHeld(), true, 'the outputs not held');
+    Probe.h.onPlay();
+    Probe.h.onEnded();
+    assert.strictEqual(player.ducked, false, 'the receiver left ducked');
+    assert.strictEqual(playbackHeld(), false, 'a second play took a second hold');
+    // Already ducked — a playground running — and left so.
+    player.ducked = true;
+    Probe.h.onPlay();
+    Probe.h.onPause();
+    assert.strictEqual(player.ducked, true, 'somebody else’s duck lifted');
+    // The panel closed mid-play: everything put back.
+    player.ducked = false;
+    Probe.h.onPlay();
+    r.cleanups.forEach((f) => f());
+    assert.strictEqual(playbackHeld(), false, 'a player gone mid-play kept the audio held');
+    assert.strictEqual(player.ducked, false);
+
+    // The playground's outputs follow the hold: muted while it is up.
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    const outputs = [];
+    const was = pg.setOutput;
+    pg.setOutput = (volume, muted) => outputs.push([volume, muted]);
+    try {
+        const release = holdPlayback();
+        r = render(P.PlaygroundWatch, {}, ctx);
+        assert.deepStrictEqual(outputs.pop(), [0.8, true], 'the Audio outs not held');
+        r.cleanups.forEach((f) => f());
+        release();
+        // Mounted afresh: the stub does not re-render on a state change.
+        reset();
+        r = render(P.PlaygroundWatch, {}, ctx);
+        assert.deepStrictEqual(outputs.pop(), [0.8, false]);
+        r.cleanups.forEach((f) => f());
+    } finally {
+        pg.setOutput = was;
+    }
+});
+
+t('the graphic EQ’s presets are the receiver’s, makeup and all, and say which is on', () => {
+    const { eqPresetParams } = P;
+    const voice = eqPresetParams('voice');
+    assert.strictEqual(voice.g1500, 4);
+    assert.strictEqual(voice.g60, -6);
+    assert.ok(voice.makeupDb < 0, 'a preset full of boosts left at full gain');
+    assert.ok(Object.entries(eqPresetParams('flat')).every(([, v]) => v === 0));
+    reset();
+    const pg = getPlayground(radio().player);
+    const set = [];
+    const all = deep(React.createElement(Inspector, {
+        pg, graph: g([{ id: 'a', type: 'graphic-eq', params: voice }]), selection: { nodes: new Set(['a']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+        onParams: (id, patch) => set.push(patch), onRemove() {}, onDuplicate() {}, summary: null,
+    }));
+    const buttons = all.filter((x) => x.props && x.props.onClick && ['Flat', 'Voice', 'CW', 'Music'].includes(words(x)));
+    assert.strictEqual(buttons.length, 4);
+    assert.ok(cls(buttons.find((b) => words(b) === 'Voice')).includes('btn--primary'), 'the preset that is on is not shown as on');
+    buttons.find((b) => words(b) === 'CW').props.onClick();
+    assert.deepStrictEqual(set.pop(), eqPresetParams('cw'));
+    // The card draws a curve.
+    assert.ok(deep(React.createElement(CardVisual, { pg, node: g([{ id: 'a', type: 'graphic-eq', params: voice }]).nodes[0], rate: 12000 })).some((x) => x.type === 'canvas'));
+});
+
+t('the IQ stream’s inspector has the receiver panel’s quality slider: same range, lossless at the top, the warning past 26 dB, usable before IQ', () => {
+    const { MARGIN_MIN_DB, MARGIN_LOSSLESS, MarginPicker, Slider } = P;
+    const show = (over) => {
+        reset();
+        const ctx = radio(over);
+        window.__testContext = ctx;
+        const pg = getPlayground(ctx.player);
+        return deep(React.createElement(Inspector, {
+            pg, graph: g([{ id: 'a', type: 'iq-in' }]), selection: { nodes: new Set(['a']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+            onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+        }));
+    };
+    const quality = (all) => {
+        const field = all.find((x) => cls(x).startsWith('field') && /Quality/.test(words(x)));
+        const slider = deep(field).find((x) => x.type === 'input' && x.props.type === 'range');
+        return { field, slider, warn: all.some((x) => cls(x).includes('note--warn') && /more or less lossless/.test(words(x))) };
+    };
+    const set = [];
+    const actions = { setMode() {}, setFrequency() {}, setAudioMargin: (v) => set.push(v) };
+    // 30 dB: past the transparent setting, so warned.
+    let q = quality(show({ audio: { volume: 1, muted: false, minMargin: 30 }, actions }));
+    assert.ok(q.field, 'no quality slider in the IQ stream’s inspector');
+    assert.strictEqual(Number(q.slider.props.min), MARGIN_MIN_DB);
+    assert.strictEqual(Number(q.slider.props.max), MARGIN_LOSSLESS);
+    assert.match(words(q.field), /30 dB/);
+    assert.ok(q.warn, 'no warning past 26 dB');
+    // At 26 itself: no warning.
+    assert.ok(!quality(show({ audio: { volume: 1, muted: false, minMargin: 26 }, actions })).warn, 'warned at 26 dB');
+    // Lossless at the top: says so, and is not warned about — it is lossless on purpose.
+    // Stored as 0: no reduction asked for at all.
+    q = quality(show({ audio: { volume: 1, muted: false, minMargin: 0 }, actions }));
+    assert.match(words(q.field), /Lossless/);
+    assert.ok(!q.warn);
+    // The receiver not in IQ yet — the graph puts it there on Start — and still usable.
+    q = quality(show({ tuning: { frequency: 7100000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 }, audio: { volume: 1, muted: false, minMargin: 20 }, actions }));
+    assert.ok(!q.slider.props.disabled, 'disabled outside IQ, where the graph will put the receiver in IQ itself');
+    // The receiver panel's own: still disabled outside IQ, as it was.
+    reset();
+    window.__testContext = radio({ tuning: { frequency: 7100000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 }, audio: { volume: 1, muted: false, minMargin: 20 }, actions });
+    const own = deep(React.createElement(MarginPicker, {})).find((x) => x.type === 'input' && x.props.type === 'range');
+    assert.ok(own.props.disabled, 'the receiver panel’s slider enabled outside IQ');
+    window.__testContext = null;
 });
 
 t('the inspector shows a block’s name, its type beside it, and a box to rename it in', () => {
@@ -2225,6 +2501,12 @@ const tAsync = async (name, fn) => {
             globalThis.removeEventListener = wasRemove;
             closePlayground();
         }
+    });
+    await tAsync('a resized card keeps its size through a shared link', async () => {
+        const { encodeShare, decodeShare } = P;
+        const graph = g([{ id: 'a', type: 'lowpass', w: 400, h: 300 }]);
+        const shared = await decodeShare(await encodeShare(graph));
+        assert.deepStrictEqual([shared.graph.nodes[0].w, shared.graph.nodes[0].h], [400, 300]);
     });
     console.log(`\n${pass} passed`);
 })();

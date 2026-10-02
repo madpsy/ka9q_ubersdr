@@ -214,15 +214,18 @@ function drawWaterfall(canvas, h, db, st, palette, fresh) {
  * A spectrum, a waterfall, or both stacked, with a frequency scale under them.
  * `scale` multiplies the card heights for the large view.
  */
-export function SpectrumView({ reading, display = 'spectrum', origin, palette, scale = 1, hover = false, peakHold = false }) {
+export function SpectrumView({ reading, display = 'spectrum', origin, palette, scale = 1, hover = false, peakHold = false, grow = 0 }) {
     const specRef = useRef(null);
     const wfRef = useRef(null);
     const st = useRef({ level: { floor: -100, ceil: -30 }, wf: { level: { floor: -100, ceil: -30 } }, last: null, levels: null });
     const [tip, setTip] = useState(null);
     const showSpec = display !== 'waterfall';
     const showWf = display !== 'spectrum';
-    const specH = Math.round(SPECTRUM_H * scale);
-    const wfH = Math.round(WATERFALL_H * scale);
+    // A card made taller shares the room between the two, or gives it all to
+    // the one there is.
+    const both = showSpec && showWf;
+    const specH = Math.round(SPECTRUM_H * scale + (both ? grow / 2 : grow));
+    const wfH = Math.round(WATERFALL_H * scale + (both ? grow - Math.round(grow / 2) : grow));
     const db = reading && reading.db;
     const axis = spectrumAxis(reading, origin, scale > 1 ? 7 : 5);
 
@@ -371,12 +374,12 @@ const SCOPE_STATE = {
 };
 
 /** The oscilloscope's screen, with its scale and state, and in the large view its controls. */
-export function ScopeView({ pg, id, reading, params, scale = 1, large = false }) {
+export function ScopeView({ pg, id, reading, params, scale = 1, large = false, grow = 0 }) {
     const ref = useRef(null);
     const held = useRef({});
     const [range, setRange] = useState(null);
     const [tip, setTip] = useState(null);
-    const h = Math.round(130 * scale) - (large ? 0 : 16);
+    const h = Math.round(130 * scale) - (large ? 0 : 16) + grow;
     useEffect(() => {
         if (!ref.current) return;
         const r = drawScope(ref.current, h, reading && reading.a ? reading : null, params, held.current);
@@ -470,9 +473,9 @@ function drawConstellation(canvas, size, reading) {
     c.globalAlpha = 1;
 }
 
-export function ConstellationView({ reading, scale = 1 }) {
+export function ConstellationView({ reading, scale = 1, grow = 0 }) {
     const ref = useRef(null);
-    const size = Math.round(196 * scale);
+    const size = Math.round(196 * scale) + grow;
     useEffect(() => {
         if (ref.current) drawConstellation(ref.current, size, reading);
     });
@@ -576,9 +579,9 @@ function drawDial(canvas, size, phaseDeg) {
     c.beginPath(); c.arc(cx, cy, 4 * dpr, 0, Math.PI * 2); c.fill();
 }
 
-export function PhaseView({ reading, large = false }) {
+export function PhaseView({ reading, large = false, grow = 0 }) {
     const ref = useRef(null);
-    const size = large ? 220 : 112;
+    const size = (large ? 220 : 112) + grow;
     const r = reading || {};
     useEffect(() => {
         if (ref.current) drawDial(ref.current, size, r.phaseDeg == null ? null : r.phaseDeg);
@@ -602,9 +605,15 @@ function signalName(hz, zeroHz) {
     return zeroHz > 0 ? `${freqLabel(zeroHz + hz, 10)}Hz` : `${hz >= 0 ? '+' : ''}${freqLabel(hz, 10)} Hz`;
 }
 
-export function DetectorView({ reading, origin, large = false }) {
+// A row of a list or of text on a card, for counting how many more a taller
+// card has room for.
+const ROW_PX = 14;
+const extraRows = (grow) => Math.max(0, Math.floor(grow / ROW_PX));
+
+export function DetectorView({ reading, origin, large = false, grow = 0 }) {
     const list = (reading && reading.signals) || [];
-    const shown = large ? list : list.slice(0, 3);
+    const room = 3 + extraRows(grow);
+    const shown = large ? list : list.slice(0, room);
     return (
         <div className="pg-list">
             {!list.length && <div className="pg-list__empty">{reading ? 'Nothing over the threshold' : 'Looking…'}</div>}
@@ -616,7 +625,7 @@ export function DetectorView({ reading, origin, large = false }) {
                     {large && <span className="pg-list__dim">{`${freqLabel(s.widthHz, 1)} Hz wide`}</span>}
                 </div>
             ))}
-            {!large && list.length > 3 && <div className="pg-list__dim">{`and ${list.length - 3} more`}</div>}
+            {!large && list.length > room && <div className="pg-list__dim">{`and ${list.length - room} more`}</div>}
             {large && reading && reading.floorDb != null && <div className="pg-list__dim">{`Floor ${reading.floorDb.toFixed(0)} dBFS`}</div>}
         </div>
     );
@@ -636,9 +645,9 @@ export function messageLine(m, zeroHz) {
     }
 }
 
-export function LogView({ pg, id, reading, origin, large = false }) {
+export function LogView({ pg, id, reading, origin, large = false, grow = 0 }) {
     const lines = (reading && reading.lines) || [];
-    const shown = large ? lines : lines.slice(0, 4);
+    const shown = large ? lines : lines.slice(0, 4 + extraRows(grow));
     const time = (w) => {
         const d = new Date(w);
         return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
@@ -703,16 +712,17 @@ function useStickBottom() {
 const CARD_CHARS = 400;
 
 /** A teleprinter's paper: the last few lines on a card, all of it large. */
-export function ConsoleView({ pg, id, reading, large = false }) {
+export function ConsoleView({ pg, id, reading, large = false, grow = 0 }) {
     const text = (reading && reading.text) || '';
     const lines = text.split('\n');
     const [copied, setCopied] = useState(false);
     const { box, toggle } = useFollow();
     const tailBox = useStickBottom();
     if (!large) {
-        const tail = lines.slice(-4).join('\n').slice(-CARD_CHARS);
+        const rows = 4 + extraRows(grow);
+        const tail = lines.slice(-rows).join('\n').slice(-CARD_CHARS * (rows / 4));
         return (
-            <pre className="pg-console" ref={tailBox}>
+            <pre className="pg-console" ref={tailBox} style={grow ? { minHeight: `${60 + grow}px`, maxHeight: `${60 + grow}px` } : undefined}>
                 {text ? tail : <span className="pg-list__empty">Nothing decoded yet</span>}
             </pre>
         );
@@ -778,7 +788,7 @@ function diffSummary(r) {
  * missing character marked, and the character error rate. On a card the
  * newest few lines; large, all of it lined up, a legend and a Clear.
  */
-export function DiffView({ pg, id, reading, large = false }) {
+export function DiffView({ pg, id, reading, large = false, grow = 0 }) {
     const segs = (reading && reading.segments) || [];
     const bad = reading && reading.errors > 0;
     const { box, toggle } = useFollow();
@@ -787,7 +797,7 @@ export function DiffView({ pg, id, reading, large = false }) {
         return (
             <div className="pg-diff">
                 <div className={`pg-vis__state${bad ? ' is-shut' : reading && reading.cer === 0 ? ' is-open' : ''}`}>{diffSummary(reading)}</div>
-                <pre className="pg-console pg-diff__text" ref={tailBox}>{segs.length ? <DiffText segments={segs} max={CARD_CHARS} /> : <span className="pg-list__empty">Wire sent text and received text in</span>}</pre>
+                <pre className="pg-console pg-diff__text" ref={tailBox} style={grow ? { minHeight: `${60 + grow}px`, maxHeight: `${60 + grow}px` } : undefined}>{segs.length ? <DiffText segments={segs} max={CARD_CHARS} /> : <span className="pg-list__empty">Wire sent text and received text in</span>}</pre>
             </div>
         );
     }
@@ -812,9 +822,10 @@ export function DiffView({ pg, id, reading, large = false }) {
 }
 
 /** The newest bits, as a row of cells: filled for 1, empty for 0. */
-export function BitView({ reading, large = false }) {
+export function BitView({ reading, large = false, grow = 0 }) {
     const bits = (reading && reading.bits) || [];
-    const shown = large ? bits : bits.slice(-48);
+    // A row of cells is 13px: a taller card holds that many more rows.
+    const shown = large ? bits : bits.slice(-48 * (1 + Math.floor(grow / 13)));
     return (
         <div className="pg-bits">
             <div className={`pg-bits__row${large ? ' is-large' : ''}`}>
@@ -841,11 +852,14 @@ export const INSTRUMENTS = new Set([
  * The picture for one instrument node. Listens for readings itself — see
  * CardVisual — so only it redraws when one arrives.
  */
-export function Instrument({ pg, node, look, origin, large = false }) {
+export function Instrument({ pg, node, look, origin, large = false, grow = 0 }) {
     const [, bump] = useReducer((n) => n + 1, 0);
     useEffect(() => pg.on('readings', bump), [pg]);
     const reading = pg.readings ? pg.readings[node.id] : null;
     const scale = large ? 2 : 1;
+    // A resized card's extra height, for its picture to fill. The large view
+    // has its own sizes.
+    const g = large ? 0 : Math.max(0, grow);
     switch (node.type) {
         case 'iq-spectrum':
         case 'audio-spectrum':
@@ -858,27 +872,28 @@ export function Instrument({ pg, node, look, origin, large = false }) {
                     scale={scale}
                     hover={large}
                     peakHold={!!node.params.peakHold}
+                    grow={g}
                 />
             );
         case 'scope':
-            return <ScopeView pg={pg} id={node.id} reading={reading} params={node.params} scale={scale} large={large} />;
+            return <ScopeView pg={pg} id={node.id} reading={reading} params={node.params} scale={scale} large={large} grow={g} />;
         case 'constellation':
-            return <ConstellationView reading={reading} scale={large ? 1.4 : 1} />;
+            return <ConstellationView reading={reading} scale={large ? 1.4 : 1} grow={g} />;
         case 'frequency-counter':
             return <CounterView reading={reading} origin={origin} large={large} />;
         case 'phase-meter':
         case 'iq-phase-meter':
-            return <PhaseView reading={reading} large={large} />;
+            return <PhaseView reading={reading} large={large} grow={g} />;
         case 'signal-detector':
-            return <DetectorView reading={reading} origin={origin} large={large} />;
+            return <DetectorView reading={reading} origin={origin} large={large} grow={g} />;
         case 'message-log':
-            return <LogView pg={pg} id={node.id} reading={reading} origin={origin} large={large} />;
+            return <LogView pg={pg} id={node.id} reading={reading} origin={origin} large={large} grow={g} />;
         case 'console':
-            return <ConsoleView pg={pg} id={node.id} reading={reading} large={large} />;
+            return <ConsoleView pg={pg} id={node.id} reading={reading} large={large} grow={g} />;
         case 'text-diff':
-            return <DiffView pg={pg} id={node.id} reading={reading} large={large} />;
+            return <DiffView pg={pg} id={node.id} reading={reading} large={large} grow={g} />;
         case 'bit-view':
-            return <BitView reading={reading} large={large} />;
+            return <BitView reading={reading} large={large} grow={g} />;
         default:
             return null;
     }

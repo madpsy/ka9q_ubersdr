@@ -40,9 +40,15 @@ const IQ_CHANNELS = [
 //
 // Exported for the Receiver panel, which shows the same control in IQ: there
 // it sits beside the fixed filter width, the other number IQ decides for you.
-export function MarginPicker() {
+/**
+ * `forIQ` for a place that is only ever about IQ — the playground's IQ
+ * stream block — where the setting is live whatever mode the receiver is in
+ * just now: the graph puts it in IQ when it starts, and the quality chosen
+ * beforehand is the one it starts with.
+ */
+export function MarginPicker({ forIQ = false } = {}) {
     const { audio, actions, tuning } = useRadio();
-    const iq = isIQ(tuning.mode);
+    const iq = forIQ || isIQ(tuning.mode);
     // Dragging shows locally and commits on release, so a drag across the track
     // sends one message rather than one per pixel. The debounce is there for the
     // keyboard: arrow keys move the slider without ever raising a pointer-up, so

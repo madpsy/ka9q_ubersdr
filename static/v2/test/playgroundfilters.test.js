@@ -439,4 +439,90 @@ t('NR (nr2) learns the noise first, says so, and learns it again when asked', ()
     for (let i = 0; i < x.length; i += 97) assert.ok(Math.abs(up[i] - plain[i] * Math.pow(10, 6 / 20)) < 1e-9);
 });
 
+// ── compressor / limiter ────────────────────────────────────────────────────
+
+t('the limiter keeps every sample under the ceiling, by looking ahead rather than clipping', () => {
+    let seed = 3;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+    // Bursts of loud noise and spikes to three times full scale.
+    const x = Float64Array.from({ length: 5 * RATE }, (_, i) => (Math.sin(i / 900) > 0 ? 2.4 : 0.1) * rnd() + (i % 2777 === 5 ? 3 : 0));
+    for (const p of [{ ratio: 1, kneeDb: 0 }, { makeupDb: 12 }, { makeupDb: 24, ceilingDb: -6 }]) {
+        const b = block('compressor', p);
+        const out = new Float64Array(x.length);
+        for (let s = 0; s < x.length; s += 240) out.set(run(b, x.subarray(s, s + 240)).re.subarray(0, 240), s);
+        const ceiling = Math.pow(10, (p.ceilingDb == null ? -1 : p.ceilingDb) / 20);
+        let peak = 0;
+        for (const v of out) peak = Math.max(peak, Math.abs(v));
+        assert.ok(peak <= ceiling * (1 + 1e-9), `${JSON.stringify(p)}: peak ${peak} over ${ceiling}`);
+        assert.ok(peak > ceiling * 0.99, `${JSON.stringify(p)}: never reached the ceiling — not limiting`);
+        assert.ok(b.inst.read().limitDb <= 0);
+    }
+    // Under the ceiling and nothing to compress, it is a delay of its look-ahead.
+    const { at, said } = impulseDelay('compressor', { ratio: 1, kneeDb: 0 });
+    assert.strictEqual(at, said, `impulse at ${at}, latency says ${said}`);
+    assert.strictEqual(said, Math.round(0.0015 * RATE) - 1);
+});
+
+t('the compressor gives one dB out for every “ratio” dB in above the threshold, and says how much it takes', () => {
+    const level = (inDb, p) => {
+        const b = block('compressor', { limit: false, kneeDb: 0, ...p });
+        const a = Math.pow(10, inDb / 20) * Math.SQRT2;
+        const x = Float64Array.from({ length: 2 * RATE }, (_, i) => a * Math.sin((2 * Math.PI * 440 * i) / RATE));
+        const out = new Float64Array(x.length);
+        for (let s = 0; s < x.length; s += 240) out.set(run(b, x.subarray(s, s + 240)).re.subarray(0, 240), s);
+        let ms = 0;
+        for (let i = RATE; i < 2 * RATE; i++) ms += out[i] * out[i];
+        return { db: 10 * Math.log10(ms / RATE), read: b.inst.read() };
+    };
+    // Well under the threshold: untouched.
+    assert.ok(Math.abs(level(-50, {}).db + 50) < 0.1);
+    // Well over it: 12 dB more in is 4 dB more out at 3:1, 2 dB at 6:1.
+    const slope = (ratio) => (level(-4, { ratio }).db - level(-16, { ratio }).db) / 12;
+    assert.ok(Math.abs(slope(3) - 1 / 3) < 0.05, `3:1 gives ${slope(3)}`);
+    assert.ok(Math.abs(slope(6) - 1 / 6) < 0.05, `6:1 gives ${slope(6)}`);
+    const r = level(-4, {}).read;
+    assert.ok(r.reductionDb < -10, `reduction ${r.reductionDb}`);
+    // Makeup is a plain gain on top.
+    assert.ok(Math.abs(level(-4, { makeupDb: 6 }).db - level(-4, {}).db - 6) < 0.1);
+    // Off: a straight copy, no delay.
+    const off = block('compressor', { on: false });
+    const x = Float64Array.from({ length: 480 }, (_, i) => Math.sin(i));
+    assert.deepStrictEqual(Array.from(run(off, x).re), Array.from(x));
+    assert.strictEqual(off.inst.latency(), 0);
+});
+
+// ── equalisers ──────────────────────────────────────────────────────────────
+
+const dbAt = (type, params, hz, rate = RATE) => 20 * Math.log10(gainAt(type, params, hz, rate));
+
+t('the graphic EQ: flat is untouched, a band lifts its own frequency, and what the card draws is what it does', () => {
+    const { eqResponse } = require('./.build/playground.cjs');
+    const flat = block('graphic-eq');
+    const x = Float64Array.from({ length: 480 }, (_, i) => Math.sin(i * 0.37));
+    assert.deepStrictEqual(Array.from(run(flat, x).re), Array.from(x), 'flat is not a copy');
+    const p = { g1000: 6 };
+    assert.ok(Math.abs(dbAt('graphic-eq', p, 1000) - 6) < 0.2, `1 kHz: ${dbAt('graphic-eq', p, 1000)}`);
+    assert.ok(Math.abs(dbAt('graphic-eq', p, 60)) < 0.3, 'a 1 kHz band lifted 60 Hz');
+    // The card's curve, against tones through the audio.
+    const mix = { g170: -9, g1000: 6, g3000: 4, makeupDb: -2 };
+    for (const hz of [100, 400, 1000, 2500, 4000]) {
+        const [drawn] = eqResponse('graphic-eq', mix, RATE, [hz]);
+        assert.ok(Math.abs(drawn - dbAt('graphic-eq', mix, hz)) < 0.2, `${hz} Hz: drawn ${drawn}, heard ${dbAt('graphic-eq', mix, hz)}`);
+    }
+    // 8 kHz is past 12 kHz audio's reach: left out, not bent under Nyquist.
+    assert.ok(Math.abs(dbAt('graphic-eq', { g8000: 12 }, 5000)) < 0.3, 'an 8 kHz band squeezed into 12 kHz audio');
+    assert.ok(dbAt('graphic-eq', { g8000: 12 }, 8000, 48000) > 11, 'and at 48 kHz it is there');
+});
+
+t('the parametric EQ: shelves and peaks where they are set, as wide as their Q, with an output gain', () => {
+    assert.ok(Math.abs(dbAt('parametric-eq', { lowDb: -10, lowHz: 150 }, 40) + 10) < 0.5, 'low shelf');
+    assert.ok(Math.abs(dbAt('parametric-eq', { lowDb: -10, lowHz: 150 }, 3000)) < 0.3, 'low shelf reached the top');
+    assert.ok(Math.abs(dbAt('parametric-eq', { highDb: 8, highHz: 2000 }, 5000) - 8) < 0.6, 'high shelf');
+    const peak = (q) => ({ b3Hz: 1500, b3Db: 9, b3Q: q });
+    assert.ok(Math.abs(dbAt('parametric-eq', peak(2), 1500) - 9) < 0.2, 'peak');
+    // A wider band (lower Q) lifts its neighbours more.
+    assert.ok(dbAt('parametric-eq', peak(0.5), 900) > dbAt('parametric-eq', peak(4), 900) + 3, 'Q made no difference');
+    assert.ok(Math.abs(dbAt('parametric-eq', { outDb: -6 }, 1000) + 6) < 0.1, 'output gain');
+});
+
 console.log(`\n${pass} passed`);

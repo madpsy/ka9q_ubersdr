@@ -9,7 +9,7 @@
 
 import { BLOCK_BY_TYPE } from './blocks/index.js';
 import { addNode, connectPorts } from './editing.js';
-import { nodeHeight, nodeWidth } from './geometry.js';
+import { cardWidth, nodeHeight } from './geometry.js';
 import { inputsOf, outputsOf } from './block.js';
 
 /** The instruments that can look at each kind of signal, most useful first. */
@@ -64,7 +64,7 @@ export function addProbe(graph, fromId, fromPort, type, intoPort = null) {
         const v = graph.nodes.find((n) => n.id === w[2]);
         y = Math.max(y, v.y + nodeHeight(v) + 20);
     }
-    const x = src.x + Math.round(nodeWidth(src.type) / 2);
+    const x = src.x + Math.round(cardWidth(src) / 2);
     const r = addNode(graph, type, x, y);
     const def = BLOCK_BY_TYPE[type];
     const kind = outputKind(graph, fromId, fromPort);

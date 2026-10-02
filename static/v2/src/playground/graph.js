@@ -9,7 +9,11 @@
 //                                                  parameters as control inputs;
 //                                                  `name: 'Voice filter'` is what
 //                                                  the operator called it, where
-//                                                  they did
+//                                                  they did; `w`, `h` the size
+//                                                  they gave its card, where
+//                                                  they did — older code leaves
+//                                                  them out and shows it at its
+//                                                  natural size
 //     wires: [['n1', 'out', 'n2', 'in']],          from node, port, to node, port
 //   }
 //
@@ -104,6 +108,15 @@ export function parseGraph(raw) {
             ? [...new Set(n.controls.filter((c) => typeof c === 'string' && controllable(type.params[c])))]
             : [];
         const name = cleanName(n.name, n.type);
+        // A card's size, where it was given one (geometry.js clamps it to
+        // what a card may be when it draws it).
+        const size = {};
+        if (!type.annotation) {
+            for (const k of ['w', 'h']) {
+                const v = Number(n[k]);
+                if (n[k] != null && Number.isFinite(v) && v > 0) size[k] = Math.round(Math.min(v, 10000));
+            }
+        }
         nodes.push({
             id: n.id,
             type: n.type,
@@ -112,6 +125,7 @@ export function parseGraph(raw) {
             ...(controls.length ? { controls } : {}),
             x: Number.isFinite(Number(n.x)) ? Number(n.x) : 0,
             y: Number.isFinite(Number(n.y)) ? Number(n.y) : 0,
+            ...size,
         });
     }
     const wires = [];
@@ -152,6 +166,9 @@ export function serializeGraph(graph) {
             // one that lost them.
             out.x = Math.round(n.x || 0);
             out.y = Math.round(n.y || 0);
+            // Only where the card was resized.
+            if (n.w) out.w = Math.round(n.w);
+            if (n.h) out.h = Math.round(n.h);
             return out;
         }),
         wires: graph.wires.map((w) => [...w]),

@@ -10,6 +10,7 @@ import {
     AGC_ATTACK_SEC, AGC_CARRIER_LEVEL, AGC_DECAY_SEC, AGC_MAX_GAIN, AGC_REFERRED_SMOOTH_SEC, AGC_TARGET,
     Agc, DC_CORNER_HZ, DEEMPHASIS_SEC, DcBlock, Deemphasis,
 } from '../../lib/dsp/conditioning.js';
+import { COMPRESSOR_DEFAULTS as CD, Compressor } from '../../lib/dsp/compressor.js';
 import {
     PowerDetector, SQUELCH_ATTACK_SEC, SQUELCH_DECAY_SEC, SQUELCH_HANG_SEC, SQUELCH_HYSTERESIS_DB,
     SQUELCH_OPEN_SEC, SQUELCH_SHUT_SEC, SquelchGate,
@@ -110,6 +111,58 @@ export const AgcBlock = {
                 copyInto(ins[0], outs[0], n);
                 if (ins[1]) agc.processReferred(outs[0].re, ins[1].re, n, rate, apply);
                 else agc.process(outs[0].re, n, rate, apply);
+                return n;
+            },
+        };
+    },
+};
+
+/**
+ * A compressor with a limiter after it (lib/dsp/compressor.js): above the
+ * threshold every `ratio` dB in gives one out, the makeup gain brings the
+ * level back up, and the limiter — on unless switched off — looks 1.5 ms
+ * ahead so nothing leaves above the ceiling. The receiver's compressor's
+ * defaults.
+ */
+export const CompressorBlock = {
+    type: 'compressor',
+    label: 'Compressor / limiter',
+    category: 'Audio',
+    summary: 'Evens out the level: above the threshold, every “ratio” dB in gives one out, and the makeup gain brings it back up. The limiter after it keeps every peak under the ceiling.',
+    inputs: IN,
+    outputs: OUT,
+    params: {
+        on: { kind: 'bool', label: 'On', default: true },
+        thresholdDb: { kind: 'number', label: 'Threshold', unit: 'dBFS', default: CD.thresholdDb, min: -60, max: 0, step: 1, live: true },
+        ratio: { kind: 'number', label: 'Ratio', unit: ':1', default: CD.ratio, min: 1, max: 20, step: 0.5, live: true },
+        kneeDb: { kind: 'number', label: 'Knee', unit: 'dB', default: CD.kneeDb, min: 0, max: 24, step: 1, live: true },
+        attackMs: { kind: 'number', label: 'Attack', unit: 'ms', default: CD.attackMs, min: 0.1, max: 200, step: 0.1, live: true },
+        releaseMs: { kind: 'number', label: 'Release', unit: 'ms', default: CD.releaseMs, min: 5, max: 2000, step: 5, live: true },
+        makeupDb: { kind: 'number', label: 'Makeup gain', unit: 'dB', default: CD.makeupDb, min: -12, max: 30, step: 0.5, live: true },
+        limit: { kind: 'bool', label: 'Limit', default: CD.limit },
+        ceilingDb: { kind: 'number', label: 'Ceiling', unit: 'dBFS', default: CD.ceilingDb, min: -24, max: 0, step: 0.5, live: true, showIf: (p) => p.limit },
+    },
+    create() {
+        const comp = new Compressor();
+        let on = true;
+        let wasOn = true;
+        return {
+            configure(p, r) {
+                on = p.on;
+                // Switched back on, it starts from nothing, as the noise blocks do.
+                if (on && !wasOn) comp.reset();
+                wasOn = on;
+                comp.configure({
+                    thresholdDb: p.thresholdDb, ratio: p.ratio, kneeDb: p.kneeDb, attackMs: p.attackMs,
+                    releaseMs: p.releaseMs, makeupDb: p.makeupDb, limit: p.limit, ceilingDb: p.ceilingDb,
+                }, r);
+            },
+            reset() { comp.reset(); },
+            latency() { return on ? comp.latency() : 0; },
+            read() { return { on, reductionDb: on ? comp.reductionDb : 0, limitDb: on ? comp.limitDb : 0, limit: comp.p.limit }; },
+            process(ins, outs, n) {
+                copyInto(ins[0], outs[0], n);
+                if (on) comp.process(outs[0].re, n);
                 return n;
             },
         };

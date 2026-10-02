@@ -1,9 +1,10 @@
 // Where things are on the editor's canvas.
 //
-// A block's card has a fixed width and a height that follows from its type —
-// how many ports, and whether it draws something live — so every port's
-// position is arithmetic on the node's (x, y) and never a measurement of the
-// DOM. That keeps the wires exactly on the dots without a layout pass, makes
+// A block's card has a natural width and a height that follow from its type —
+// how many ports, and whether it draws something live — and the operator may
+// make it bigger (or narrower) by its corner, which the node keeps as `w` and
+// `h`. Either way every port's position is arithmetic on the node and never a
+// measurement of the DOM. That keeps the wires exactly on the dots without a layout pass, makes
 // "which port is under the pointer" a pure function, and lets the tests check
 // all of it with no page.
 //
@@ -39,10 +40,47 @@ const WIDTH = {
     'bit-view': 260,
 };
 
-/** A card's width — or, given its settings, an annotation's. */
+/** A card's natural width — or, given its settings, an annotation's. */
 export function nodeWidth(type, params) {
     if (params && isAnnotation(type)) return annotationBox({ type, params, x: 0, y: 0 }).w;
     return WIDTH[type] || NODE_W;
+}
+
+// How far a card may be resized. Narrower than natural is allowed, to a point
+// — the header and port names still have to fit — but not shorter: the ports
+// and what the card says need the height they have. Extra height goes to the
+// card's picture.
+export const CARD_MIN_W = 150;
+export const CARD_MAX_W = 1600;
+export const CARD_MAX_H = 1600;
+
+/** A card's width as drawn: as the operator sized it, or natural. */
+export function cardWidth(node) {
+    if (isAnnotation(node.type)) return annotationBox(node).w;
+    const w = Number(node.w);
+    return Number.isFinite(w) && w > 0 ? Math.max(CARD_MIN_W, Math.min(CARD_MAX_W, w)) : nodeWidth(node.type);
+}
+
+/**
+ * The size to keep for a card dragged to `w` × `h`: clamped to what it may
+ * be, and with each side left out where it is the natural one — so a card
+ * dragged back to where it started is a card never resized, and nothing more
+ * goes into a saved graph or a link than has to.
+ */
+export function fitSize(node, w, h) {
+    const natW = nodeWidth(node.type);
+    const natH = naturalHeight(node);
+    const out = {};
+    const cw = Math.round(Math.max(CARD_MIN_W, Math.min(CARD_MAX_W, w)));
+    const ch = Math.round(Math.max(natH, Math.min(CARD_MAX_H, h)));
+    if (Math.abs(cw - natW) > 1) out.w = cw;
+    if (ch - natH > 1) out.h = ch;
+    return out;
+}
+
+/** How much taller than natural a card is: what its picture has to fill. */
+export function cardGrow(node) {
+    return isAnnotation(node.type) ? 0 : nodeHeight(node) - naturalHeight(node);
 }
 
 /** Whether a type is an annotation: drawn, never run (blocks/annotate.js). */
@@ -70,7 +108,7 @@ function annotationBox(n) {
 /** The box a node takes on the canvas: a card's, or an annotation's. */
 export function nodeBox(n) {
     if (isAnnotation(n.type)) return annotationBox(n);
-    return { x: n.x, y: n.y, w: nodeWidth(n.type), h: nodeHeight(n) };
+    return { x: n.x, y: n.y, w: cardWidth(n), h: nodeHeight(n) };
 }
 
 /**
@@ -126,10 +164,14 @@ function ownVisualHeight(type, params) {
         case 'iq-recorder':
             return 24;
         case 'iq-in':
-            return 30;
+            // The span (15px) over the centre and width (14px), and room
+            // for their descenders before the footer.
+            return 32;
         case 'iq-player':
             // A line more for where on the air, when the file says.
-            return params && params.centreHz > 0 ? 42 : 26;
+            // The file (14px), its progress (3px), and with a centre the
+            // span and centre beneath (15 + 1 + 14), 4px apart.
+            return params && params.centreHz > 0 ? 56 : 26;
         case 'demodulator':
             return 30;
         case 'data-tx':
@@ -158,6 +200,13 @@ function ownVisualHeight(type, params) {
         case 'noise-blanker':
         case 'nr2':
             return 18;
+        case 'compressor':
+            // How much it is taking: a bar, and the limiter's line under it.
+            return 32;
+        case 'graphic-eq':
+        case 'parametric-eq':
+            // The response curve.
+            return 56;
         case 'message-log':
             return 84;
         case 'iq-spectrum':
@@ -219,11 +268,20 @@ export function hasRfLine(type) {
 const NO_RF = new Set(['Viewers', 'Sinks', 'Sources', 'Control']);
 
 /**
- * A card's height: from a node — whose exposed controls add input rows — or
- * from a type and its parameters, for a card with none.
+ * A card's height as drawn: from a node — whose exposed controls add input
+ * rows, and which may have been made taller — or from a type and its
+ * parameters, for a card with neither.
  */
 export function nodeHeight(typeOrNode, params) {
     const node = typeof typeOrNode === 'object' && typeOrNode ? typeOrNode : { type: typeOrNode, params };
+    if (isAnnotation(node.type)) return annotationBox({ x: 0, y: 0, ...node }).h;
+    const natural = naturalHeight(node);
+    const h = Number(node.h);
+    return Number.isFinite(h) && h > natural ? Math.min(CARD_MAX_H, h) : natural;
+}
+
+/** A card's height as its type and settings make it, before any resizing. */
+export function naturalHeight(node) {
     if (isAnnotation(node.type)) return annotationBox({ x: 0, y: 0, ...node }).h;
     const def = BLOCK_BY_TYPE[node.type];
     const rows = def ? Math.max(inputsOf(node, def).length, outputsOf(node, def).length, 1) : 1;
@@ -240,7 +298,7 @@ export function visualTop(node) {
 /** Where port `index` on `side` ('in' or 'out') of a node sits. */
 export function portPosition(node, side, index) {
     return {
-        x: side === 'in' ? node.x : node.x + nodeWidth(node.type),
+        x: side === 'in' ? node.x : node.x + cardWidth(node),
         y: node.y + HEAD_H + PAD + index * ROW_H + ROW_H / 2,
     };
 }
@@ -416,7 +474,7 @@ export function autoLayout(graph) {
     for (const n of graph.nodes) {
         if (isAnnotation(n.type)) continue;
         const c = depth.get(n.id);
-        colW.set(c, Math.max(colW.get(c) || 0, nodeWidth(n.type)));
+        colW.set(c, Math.max(colW.get(c) || 0, cardWidth(n)));
     }
     const colX = new Map();
     let x = 0;

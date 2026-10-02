@@ -28,6 +28,7 @@ import { useEffect } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { MODE_BY_ID, isIQ } from '../radio/constants.js';
 import { getIQDemod, setIQSpan } from '../lib/iqDemod.js';
+import { usePlaybackHold } from '../lib/playbackHold.js';
 
 export default function IQDemodWatch() {
     const { running, tuning, audio, player, iqPrompt } = useRadio();
@@ -48,9 +49,11 @@ export default function IQDemodWatch() {
         if (def) setIQSpan(def.high - def.low);
     }, [iq, tuning.mode]);
 
+    // Silent too while a recording is being played back (lib/playbackHold.js).
+    const held = usePlaybackHold();
     useEffect(() => {
-        demod.setOutput(audio.volume, audio.muted);
-    }, [demod, audio.volume, audio.muted]);
+        demod.setOutput(audio.volume, audio.muted || held);
+    }, [demod, audio.volume, audio.muted, held]);
 
     // A mode change stops it — but not while the operator is still being asked
     // whether they want IQ at all. Start from a listening mode asks for IQ, and

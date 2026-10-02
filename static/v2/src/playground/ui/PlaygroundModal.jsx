@@ -40,7 +40,7 @@ import { channelSummary, graphFromAllChannels, graphFromIQDemod, iqDemodChannels
 export const WATCHED_TYPES = new Set([
     'meter', 'level-detector', 'squelch', 'carrier-tracker', 'control-scale', 'integrator', 'control-plot', 'iq-player', 'data-tx', 'demodulator',
     'costas-loop', 'morse-decoder', 'uart', 'sitor-decoder', 'fsk-detector', 'ook-detector',
-    'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder', 'noise-blanker', 'nr2',
+    'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder', 'noise-blanker', 'nr2', 'compressor',
     ...INSTRUMENTS,
 ]);
 

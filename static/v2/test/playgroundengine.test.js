@@ -419,6 +419,35 @@ t('a worker that falls behind is not allowed to build a queue', () => {
     pg.destroy();
 });
 
+t('the stream’s counts since Start: packets and samples in, packets let go while behind, the player’s dropouts', () => {
+    fresh();
+    const a = fakeAudio();
+    let clock = 0;
+    const deaf = (onMessage) => ({
+        kind: 'worker',
+        send(m) { if (m.t === 'graph') onMessage({ t: 'status', ok: true, errors: [] }); },
+        close() {},
+    });
+    a.player.underruns = 7;
+    const pg = new PlaygroundEngine(a.player, { hostFactory: deaf, now: () => clock });
+    pg.setQuadrature(true);
+    pg.start();
+    for (let k = 0; k < MAX_IN_FLIGHT + 10; k++) a.packet(new Float32Array(240), new Float32Array(240));
+    // Two dropouts since Start; the seven before it are not this run's.
+    a.player.underruns = 9;
+    const c = pg.streamCounts();
+    assert.strictEqual(c.packets, MAX_IN_FLIGHT + 10);
+    assert.strictEqual(c.frames, 240 * (MAX_IN_FLIGHT + 10));
+    assert.strictEqual(c.behind, 10, 'packets let go while the graph was behind');
+    assert.strictEqual(c.underruns, 2);
+    assert.strictEqual(c.rate, 12000);
+    // A new Start counts afresh.
+    pg.stop();
+    pg.start();
+    assert.deepStrictEqual([pg.streamCounts().packets, pg.streamCounts().behind, pg.streamCounts().underruns], [0, 0, 0]);
+    pg.destroy();
+});
+
 t('a worker that never loads is replaced by running the graph on the page', () => {
     fresh();
     const a = fakeAudio();

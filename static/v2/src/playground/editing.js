@@ -184,6 +184,8 @@ export function duplicateNodes(graph, ids, offset = 40) {
         const copy = g.nodes.find((x) => x.id === r.id);
         if (n.controls) copy.controls = [...n.controls];
         if (n.name) copy.name = n.name;
+        if (n.w) copy.w = n.w;
+        if (n.h) copy.h = n.h;
         map.set(n.id, r.id);
     }
     for (const w of graph.wires) {

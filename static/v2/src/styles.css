@@ -14804,6 +14804,24 @@ a.btn { text-decoration: none; }
     font: inherit; font-size: calc(12px * var(--ui-scale)); font-weight: 600; outline: none;
 }
 .pg-card__visual { position: absolute; left: 8px; right: 8px; }
+/* The corner a card is resized by: faint until the card is under the pointer. */
+.pg-card__grip {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 12px;
+    height: 12px;
+    cursor: nwse-resize;
+    border-bottom-right-radius: var(--radius);
+    background: linear-gradient(135deg, transparent 0 50%, var(--text-faint) 50% 56%, transparent 56% 70%, var(--text-faint) 70% 76%, transparent 76%);
+    opacity: 0.35;
+    z-index: 2;
+}
+.pg-card:hover .pg-card__grip, .pg-card.is-selected .pg-card__grip { opacity: 0.9; }
+@media (any-pointer: coarse) {
+    /* A fingertip's worth of corner. */
+    .pg-card__grip { width: 20px; height: 20px; opacity: 0.6; }
+}
 .pg-card__rfbox { position: absolute; left: 0; right: 0; display: flex; align-items: center; padding: 0 8px; border-top: 1px dashed var(--border); }
 .pg-card__rf { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; width: 100%; min-width: 0; font-family: var(--mono); font-size: 10.5px; white-space: nowrap; }
 .pg-card__rf-hz { color: var(--accent, var(--text)); overflow: hidden; text-overflow: ellipsis; }
@@ -14867,7 +14885,16 @@ a.btn { text-decoration: none; }
 }
 .pg-vis__bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--good); }
 .pg-vis__bar span { position: relative; padding-left: 4px; font-family: var(--mono); font-size: 9px; line-height: 12px; color: var(--text); }
+/* The same words in dark, over the fill only: readable on green or amber. */
+.pg-vis__bar .pg-vis__bar-on { position: absolute; left: 0; top: 0; bottom: 0; right: 0; color: #0a0d12; font-weight: 600; white-space: nowrap; }
+/* A muted bar's fill is dimmed: the light words read on it as they are. */
+.pg-vis__bar.is-off .pg-vis__bar-on { display: none; }
 .pg-vis__bar.is-off i { opacity: 0.35; }
+/* The compressor's gain reduction: amber, growing as it takes more. */
+.pg-vis__comp { display: flex; flex-direction: column; gap: 2px; }
+.pg-vis__comp .pg-vis__bar { margin-top: 0; }
+.pg-vis__bar--gr i { background: var(--warn); }
+.pg-vis__comp .pg-vis__state { line-height: 14px; }
 /* Audio out: what each ear gets, one bar above the other. */
 .pg-vis__ears { display: flex; flex-direction: column; gap: 2px; }
 .pg-vis__ears .pg-vis__bar { margin-top: 0; }
@@ -14922,6 +14949,9 @@ a.btn { text-decoration: none; }
 .pg-insp__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pg-insp__clock { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
 .pg-insp__audio { width: 100%; }
+/* The IQ stream's throughput, the last ten seconds, its figure over it. */
+.pg-insp__chart { position: relative; margin-bottom: 6px; }
+.pg-insp__chart-label { position: absolute; top: 2px; right: 6px; font-family: var(--mono); font-size: 10px; color: var(--text-dim); pointer-events: none; }
 .pg-insp__port { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .pg-insp__kind { padding: 0 5px; border-radius: 3px; font-size: 10px; color: #fff; }
 .pg-insp__kind--complex { background: var(--accent); }
@@ -15103,11 +15133,11 @@ a.btn { text-decoration: none; }
 .pg-ctl.is-on { border-style: solid; border-color: var(--good); color: var(--good); }
 .pg-driven { font-family: var(--mono); font-size: 11px; color: var(--good); }
 .pg-vis__player { display: flex; flex-direction: column; gap: 4px; }
-.pg-vis__player .pg-vis__state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-vis__player .pg-vis__state { line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pg-vis__demod { display: flex; flex-direction: column; gap: 2px; }
 .pg-vis__cover { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.pg-vis__cover-range { font-family: var(--mono); font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pg-vis__cover .pg-vis__state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-vis__cover-range { font-family: var(--mono); font-size: 12px; line-height: 15px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-vis__cover .pg-vis__state { line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pg-vis__demod .pg-vis__state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── detector and log: lines of findings ── */

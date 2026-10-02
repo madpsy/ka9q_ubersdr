@@ -14,6 +14,7 @@ import { WAVEFORMS } from '../blocks/sources.js';
 import { cssVar, sizedCanvas } from '../../lib/audioWaterfall.js';
 import { airSpan, rfLabel, rfOf, shiftLabel, sourceZero } from '../probes.js';
 import { hasLevelLine, visualHeight } from '../geometry.js';
+import { eqResponse, eqSections } from '../blocks/eq.js';
 
 const FLOOR_DB = -80;
 
@@ -28,10 +29,15 @@ function useReadings(pg, id) {
 
 function Bar({ db, label, tag = '', off = false }) {
     const said = db == null ? '—' : db <= -199 ? 'silent' : `${Math.round(db)} dB`;
+    const text = `${tag ? `${tag} ` : ''}${said}`;
+    const pct = share(db) * 100;
+    // The words twice: as they are over the empty track, and dark, clipped to
+    // the filled part — so whichever the bar has under it, they can be read.
     return (
         <div className={`pg-vis__bar${off ? ' is-off' : ''}`} title={label}>
-            <i style={{ width: `${share(db) * 100}%` }} />
-            <span>{`${tag ? `${tag} ` : ''}${said}`}</span>
+            <i style={{ width: `${pct}%` }} />
+            <span>{text}</span>
+            <span className="pg-vis__bar-on" aria-hidden="true" style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}>{text}</span>
         </div>
     );
 }
@@ -225,11 +231,15 @@ function Recorder({ pg, id, label }) {
  * air (probes.js) — both for the instruments. `rate` is the block's own, for
  * the sources to say how much of the air they cover.
  */
-export default function CardVisual({ pg, node, look, origin, rate, onParams, large = false }) {
-    if (INSTRUMENTS.has(node.type)) return <Instrument pg={pg} node={node} look={look} origin={origin} large={large} />;
+/**
+ * `grow` is how much taller than natural the card has been made: the room
+ * its picture has to fill (geometry.js cardGrow).
+ */
+export default function CardVisual({ pg, node, look, origin, rate, onParams, large = false, grow = 0 }) {
+    if (INSTRUMENTS.has(node.type)) return <Instrument pg={pg} node={node} look={look} origin={origin} large={large} grow={grow} />;
     if (KNOBS.has(node.type)) return <Knob node={node} onParams={onParams} />;
     if (node.type === 'iq-in') return <Coverage zeroHz={sourceZero(node, look && look.dialHz)} rate={rate} />;
-    return <SimpleVisual pg={pg} node={node} origin={origin} rate={rate} large={large} />;
+    return <SimpleVisual pg={pg} node={node} origin={origin} rate={rate} large={large} grow={grow} />;
 }
 
 // Cards whose picture the inspector shows some other way: knobs as its
@@ -386,7 +396,11 @@ function Knob({ node, onParams }) {
     }
 }
 
-function Sparkline({ history, height = 44 }) {
+/**
+ * A line of a history, newest at the right. Scaled to its own range, or from
+ * zero with `fromZero` — for a rate, where a halving should look like one.
+ */
+export function Sparkline({ history, height = 44, fromZero = false }) {
     const ref = useRef(null);
     useEffect(() => {
         const canvas = ref.current;
@@ -401,6 +415,7 @@ function Sparkline({ history, height = 44 }) {
         let lo = Infinity;
         let hi = -Infinity;
         for (const v of history) { if (v < lo) lo = v; if (v > hi) hi = v; }
+        if (fromZero) lo = Math.min(0, lo);
         const span = hi - lo || Math.abs(hi) || 1;
         c.beginPath();
         for (let k = 0; k < history.length; k++) {
@@ -415,7 +430,7 @@ function Sparkline({ history, height = 44 }) {
     return <canvas ref={ref} className="pg-vis__spark" style={{ height: `${height}px` }} />;
 }
 
-function SimpleVisual({ pg, node, origin, rate, large = false }) {
+function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
     const reading = useReadings(pg, node.id);
     switch (node.type) {
         case 'audio-out':
@@ -493,6 +508,11 @@ function SimpleVisual({ pg, node, origin, rate, large = false }) {
             );
         case 'nr2':
             return <Nr2State pg={pg} id={node.id} reading={reading} />;
+        case 'compressor':
+            return <CompressorState reading={reading} />;
+        case 'graphic-eq':
+        case 'parametric-eq':
+            return <EqCurve node={node} rate={rate} height={(large ? 140 : 56) + (large ? 0 : Math.max(0, grow))} />;
         case 'ook-detector':
             return <div className="pg-vis__state">{reading && reading.snrDb != null ? `${reading.snrDb.toFixed(0)} dB over the noise` : '—'}</div>;
         case 'rtty-decoder':
@@ -570,12 +590,91 @@ function SimpleVisual({ pg, node, origin, rate, large = false }) {
             return (
                 <div className="pg-vis__plot">
                     <div className="pg-vis__state pg-vis__value">{reading && reading.value != null ? Number(reading.value.toPrecision(7)) : '—'}</div>
-                    <Sparkline history={reading && reading.history} height={large ? 140 : 44} />
+                    <Sparkline history={reading && reading.history} height={large ? 140 : 44 + Math.max(0, grow)} />
                 </div>
             );
         default:
             return hasLevelLine(node.type) ? <InOut pg={pg} id={node.id} /> : null;
     }
+}
+
+// The EQ curve's scale: ±this many dB, from this frequency up.
+const EQ_SPAN_DB = 15;
+const EQ_LOW_HZ = 30;
+
+/**
+ * An EQ's response, drawn: dB against frequency on a log scale, from 30 Hz to
+ * the top of the audio, with the 0 dB line — and for the parametric EQ a dot
+ * at each band it is using. Computed from the settings, so it is right before
+ * any audio has run.
+ */
+export function EqCurve({ node, rate, height = 56 }) {
+    const ref = useRef(null);
+    const r = rate > 0 ? rate : 12000;
+    useEffect(() => {
+        const canvas = ref.current;
+        if (!canvas) return;
+        const { w, h, dpr } = sizedCanvas(canvas, height);
+        const c = canvas.getContext('2d');
+        if (!c) return;
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.fillStyle = cssVar('--surface-3', '#1a2130');
+        c.fillRect(0, 0, w, h);
+        const top = Math.min(r / 2, 20000);
+        const lx = (hz) => (Math.log(hz / EQ_LOW_HZ) / Math.log(top / EQ_LOW_HZ)) * w;
+        const ly = (db) => h / 2 - (Math.max(-EQ_SPAN_DB, Math.min(EQ_SPAN_DB, db)) / EQ_SPAN_DB) * (h / 2 - 3 * dpr);
+        // The 0 dB line, and faint ±6.
+        c.lineWidth = dpr;
+        c.strokeStyle = cssVar('--border', '#2a3240');
+        for (const db of [-6, 6]) { c.beginPath(); c.moveTo(0, ly(db)); c.lineTo(w, ly(db)); c.stroke(); }
+        c.strokeStyle = cssVar('--text-faint', '#5c6779');
+        c.beginPath(); c.moveTo(0, ly(0)); c.lineTo(w, ly(0)); c.stroke();
+        const n = Math.max(32, Math.round(w / (2 * dpr)));
+        const freqs = Array.from({ length: n }, (_, k) => EQ_LOW_HZ * Math.pow(top / EQ_LOW_HZ, k / (n - 1)));
+        const db = eqResponse(node.type, node.params, r, freqs);
+        c.beginPath();
+        freqs.forEach((hz, k) => { if (k === 0) c.moveTo(lx(hz), ly(db[k])); else c.lineTo(lx(hz), ly(db[k])); });
+        c.lineWidth = Math.max(1, 1.5 * dpr);
+        c.strokeStyle = cssVar('--accent', '#4aa8ff');
+        c.stroke();
+        if (node.type === 'parametric-eq') {
+            c.fillStyle = cssVar('--accent', '#4aa8ff');
+            for (const s of eqSections(node.type, node.params)) {
+                if (s.hz < EQ_LOW_HZ || s.hz > top) continue;
+                const [d] = eqResponse(node.type, node.params, r, [s.hz]);
+                c.beginPath(); c.arc(lx(s.hz), ly(d), 2.5 * dpr, 0, 2 * Math.PI); c.fill();
+            }
+        }
+    });
+    return <canvas ref={ref} className="pg-vis__spark pg-vis__eq" style={{ height: `${height}px` }} title={`Response, ±${EQ_SPAN_DB} dB, ${EQ_LOW_HZ} Hz to ${Math.round(Math.min(r / 2, 20000))} Hz`} />;
+}
+
+// The most gain reduction the compressor's bar shows.
+const REDUCTION_SPAN_DB = 24;
+
+/**
+ * What the compressor is taking: a bar that grows with the reduction — the
+ * other way from a level — and the limiter's share on the line under it.
+ */
+function CompressorState({ reading }) {
+    if (!reading) return <div className="pg-vis__state">—</div>;
+    if (!reading.on) return <div className="pg-vis__state">Off</div>;
+    const gr = Math.min(0, reading.reductionDb || 0);
+    const lim = Math.min(0, reading.limitDb || 0);
+    return (
+        <div className="pg-vis__comp">
+            <div className="pg-vis__bar pg-vis__bar--gr" title="Gain reduction: how much the compressor is taking off">
+                <i style={{ width: `${Math.min(1, -gr / REDUCTION_SPAN_DB) * 100}%` }} />
+                <span>{`GR ${gr > -0.05 ? '0.0' : gr.toFixed(1)} dB`}</span>
+                <span className="pg-vis__bar-on" aria-hidden="true" style={{ clipPath: `inset(0 ${100 - Math.min(1, -gr / REDUCTION_SPAN_DB) * 100}% 0 0)` }}>
+                    {`GR ${gr > -0.05 ? '0.0' : gr.toFixed(1)} dB`}
+                </span>
+            </div>
+            <div className={`pg-vis__state${lim < -0.05 ? ' is-shut' : ''}`}>
+                {!reading.limit ? 'Limiter off' : lim < -0.05 ? `Limiting ${lim.toFixed(1)} dB` : 'Limiter idle'}
+            </div>
+        </div>
+    );
 }
 
 /** NR's state, and once it is subtracting, by how much. */

@@ -10,6 +10,8 @@
 //   drag a handle            resize an annotation, or move an arrow's end
 //   double-click a note      write in it (headings, group titles, markers too)
 //   click a card's title     rename the block (or press its pencil)
+//   drag a card's corner     resize it; double-click the corner for its
+//                            natural size again
 //
 // Blocks also arrive by being dragged in from the palette, which the window
 // handles (PlaygroundModal.jsx): the canvas is only where they are let go.
@@ -22,7 +24,7 @@
 import React, { useEffect, useRef, useState } from '../../react.js';
 import { BLOCK_BY_TYPE } from '../blocks/index.js';
 import {
-    FOOT_H, HEAD_H, PAD, PORT_GRAB_PX, RF_H, ROW_H, hasRfLine, isAnnotation, nodeAt, nodeBox, nodeHeight, nodeWidth, nodesInside, portAt,
+    FOOT_H, HEAD_H, PAD, PORT_GRAB_PX, RF_H, ROW_H, cardGrow, cardWidth, fitSize, hasRfLine, isAnnotation, nodeAt, nodeBox, nodeHeight, nodesInside, portAt,
     portPositionByName, visualTop, screenToWorld, wirePath, zoomAbout, ZOOM_STEP,
 } from '../geometry.js';
 import { canConnect, connectPorts, removeWire, renameNode } from '../editing.js';
@@ -106,7 +108,7 @@ function Card({ pg, graph, node, selected, errors, rate, latency, cpu, wiredIn, 
         <div
             className={`pg-card${selected ? ' is-selected' : ''}${err ? ' is-error' : ''}`}
             data-node={node.id}
-            style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${nodeWidth(node.type)}px`, height: `${h}px` }}
+            style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${cardWidth(node)}px`, height: `${h}px` }}
             title={err || undefined}
         >
             <div className="pg-card__head" style={{ height: `${HEAD_H}px` }}>
@@ -137,7 +139,7 @@ function Card({ pg, graph, node, selected, errors, rate, latency, cpu, wiredIn, 
                 className="pg-card__visual"
                 style={{ top: `${visualTop(node)}px` }}
             >
-                <CardVisual pg={pg} node={node} look={look} origin={origin} rate={rate} onParams={onParams} />
+                <CardVisual pg={pg} node={node} look={look} origin={origin} rate={rate} onParams={onParams} grow={cardGrow(node)} />
             </div>
             {hasRfLine(node.type) && (
                 <div className="pg-card__rfbox" style={{ bottom: `${FOOT_H}px`, height: `${RF_H}px` }}>
@@ -150,6 +152,12 @@ function Card({ pg, graph, node, selected, errors, rate, latency, cpu, wiredIn, 
                 <span title={latencyTitle}>{latency ? `⏱ ${formatLatency(latency.own)}${def.latencyNote ? '*' : ''}` : ''}</span>
                 <span title="Share of one CPU core, measured over the last second">{cpu == null ? '' : `⚙ ${formatCpu(cpu)}`}</span>
             </div>
+            <i
+                className="pg-card__grip"
+                data-node={node.id}
+                data-handle="card-size"
+                title="Drag to resize · double-click for its natural size"
+            />
         </div>
     );
 }
@@ -454,7 +462,9 @@ export default function Canvas({
             const n = graph.nodes.find((x) => x.id === id);
             if (n) {
                 setPicked({ nodes: new Set([id]), wire: null });
-                drag.current = { kind: 'resize', id, handle: grip.getAttribute('data-handle'), at, from: { x: n.x, y: n.y, ...n.params }, moved: false };
+                const handle = grip.getAttribute('data-handle');
+                const from = handle === 'card-size' ? { w: cardWidth(n), h: nodeHeight(n) } : { x: n.x, y: n.y, ...n.params };
+                drag.current = { kind: 'resize', id, handle, at, from, moved: false };
                 return;
             }
         }
@@ -545,7 +555,10 @@ export default function Canvas({
             if (!d.moved && Math.hypot(dx, dy) < 2) return;
             d.moved = true;
             const f = d.from;
-            if (d.handle === 'start') {
+            if (d.handle === 'card-size') {
+                const n = graph.nodes.find((x) => x.id === d.id);
+                if (n) pg.setSize(d.id, fitSize(n, f.w + dx, f.h + dy));
+            } else if (d.handle === 'start') {
                 // The start moves; the end stays where it is.
                 pg.setPositions({ [d.id]: { x: f.x + dx, y: f.y + dy } });
                 pg.setParams(d.id, { dx: f.dx - dx, dy: f.dy - dy });
@@ -615,6 +628,17 @@ export default function Canvas({
     const onDouble = (e) => {
         const near = (sel) => !!(e.target && e.target.closest && e.target.closest(sel));
         if (near('button, input, select, textarea')) return;
+        // A card's corner: back to its natural size.
+        const corner = e.target && e.target.closest && e.target.closest('[data-handle="card-size"]');
+        if (corner) {
+            const id = corner.getAttribute('data-node');
+            const n = graph.nodes.find((x) => x.id === id);
+            if (n && (n.w || n.h)) {
+                pg.setSize(id, null);
+                onMoved();
+            }
+            return;
+        }
         const at = world(e);
         const id = nodeAt(graph, at.x, at.y);
         const n = id && graph.nodes.find((x) => x.id === id);

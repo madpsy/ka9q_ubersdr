@@ -28,6 +28,7 @@ import { getPlayground, graphIqWidth } from '../playground/engine.js';
 import { decodeShare } from '../playground/share.js';
 import PlaygroundModal, { SHARE_PARAM } from '../playground/ui/PlaygroundModal.jsx';
 import { offerSharedGraph } from '../playground/ui/store.js';
+import { usePlaybackHold } from '../lib/playbackHold.js';
 
 /**
  * The share code in a page's query string, taken off the address bar, or null.
@@ -102,9 +103,11 @@ export default function PlaygroundWatch() {
         pg.setQuadrature(iq && running);
     }, [pg, iq, running]);
 
+    // Silent too while a recording is being played back (lib/playbackHold.js).
+    const held = usePlaybackHold();
     useEffect(() => {
-        pg.setOutput(audio.volume, audio.muted);
-    }, [pg, audio.volume, audio.muted]);
+        pg.setOutput(audio.volume, audio.muted || held);
+    }, [pg, audio.volume, audio.muted, held]);
 
     useEffect(() => {
         if (!pg.running) return;

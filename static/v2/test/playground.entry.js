@@ -27,6 +27,7 @@ import { NoiseBlanker as PanelNB } from '../src/lib/noiseBlanker.js';
 import { NRProcessor as CopyNR } from '../src/playground/noise/nr.js';
 import { NR2Processor as CopyNR2 } from '../src/playground/noise/nr2.js';
 import { NoiseBlanker as CopyNB } from '../src/playground/noise/noiseBlanker.js';
+import { eqResponse, eqSections } from '../src/playground/blocks/eq.js';
 
 module.exports = {
     DemodChain, planFor, setIQSpan,
@@ -37,5 +38,5 @@ module.exports = {
     canConnect, exposeControl, controlPort, inputsOf, parseChoices, demodPlan, expandDemodulator, expandDecoder, resampleRatio, findSignals, TEMPLATES,
     MORSE, VARICODE, encodeIta2, encodeMorse, encodeSitorB, encodeVaricode,
     SNR_BANDWIDTH_HZ, TEST_MESSAGES, Transmitter, alignText, normaliseText,
-    PanelNR, PanelNR2, PanelNB, CopyNR, CopyNR2, CopyNB,
+    PanelNR, PanelNR2, PanelNB, CopyNR, CopyNR2, CopyNB, eqResponse, eqSections,
 };

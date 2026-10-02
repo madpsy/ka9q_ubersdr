@@ -19,7 +19,8 @@ import {
     AudioBandpassBlock, AudioBandstopBlock, AudioHighpassBlock, AudioLowpassBlock, BiquadBlock,
     ComplexBandpassBlock, ComplexHighpassBlock, NotchBlock,
 } from './filters.js';
-import { AgcBlock, DcBlockerBlock, DeemphasisBlock, LevelDetectorBlock, SquelchBlock } from './levels.js';
+import { AgcBlock, CompressorBlock, DcBlockerBlock, DeemphasisBlock, LevelDetectorBlock, SquelchBlock } from './levels.js';
+import { GraphicEqBlock, ParametricEqBlock } from './eq.js';
 import { LsaBlock, NoiseBlankerBlock, Nr2Block } from './noise.js';
 import {
     AddBlock, ClipBlock, ComplexMultiplyBlock, ConjugateBlock, GainBlock, ImagPartBlock, MultiplyBlock, RealPartBlock, ToComplexBlock,
@@ -44,7 +45,7 @@ export const BLOCKS = [
     AudioLowpassBlock, AudioHighpassBlock, AudioBandpassBlock, AudioBandstopBlock, BiquadBlock, NotchBlock,
     NoiseBlankerBlock, LsaBlock, Nr2Block,
     PowerBlock, EnvelopeBlock, DiscriminatorBlock, CarrierTrackerBlock,
-    DcBlockerBlock, DeemphasisBlock, AgcBlock, AudioResampleBlock, AudioDelayBlock,
+    DcBlockerBlock, DeemphasisBlock, AgcBlock, CompressorBlock, GraphicEqBlock, ParametricEqBlock, AudioResampleBlock, AudioDelayBlock,
     LevelDetectorBlock, SquelchBlock,
     GainBlock, MultiplyBlock, AddBlock, ClipBlock, ComplexMultiplyBlock, ConjugateBlock, RealPartBlock, ImagPartBlock, ToComplexBlock,
     IqSpectrumBlock, AudioSpectrumBlock, ScopeBlock, ConstellationBlock, FrequencyCounterBlock,

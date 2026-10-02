@@ -14,16 +14,19 @@ import { decimateFactor } from '../blocks/mixing.js';
 import { formatCpu, formatLatency, formatRate } from './Canvas.jsx';
 import { INSTRUMENTS, Instrument } from './viewers.jsx';
 import { PROBES, acrossPair, airSpan, inputOrigin, outputKind, sourceZero } from '../probes.js';
-import CardVisual, { ActivityDot, RfLine, activityMeaning, earLevels, inspectorShowsPicture, levelChange, recordingLabel, useLevel } from './CardVisual.jsx';
+import CardVisual, { ActivityDot, RfLine, Sparkline, activityMeaning, earLevels, inspectorShowsPicture, levelChange, recordingLabel, useLevel } from './CardVisual.jsx';
 import { carriesSamples, hasRfLine } from '../geometry.js';
 import { controlPort, controllable, inputsOf, outputsOf } from '../block.js';
 import { NAME_MAX, nodeName } from '../graph.js';
 import { decodeWav } from '../wavfile.js';
 import { expandable } from '../expand.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
+import { holdPlayback } from '../../lib/playbackHold.js';
+import { EQ_FREQUENCIES, EQ_PRESETS, presetMakeup } from '../../radio/audio-filters.js';
 import { isIQ } from '../../radio/constants.js';
 import FrequencyDial from '../../components/FrequencyDial.jsx';
 import { IQWidths } from '../../panels/ReceiverPanel.jsx';
+import { MarginPicker } from '../../panels/AudioPanel.jsx';
 
 /**
  * Buttons that hang an instrument off one output. On an input, `from` is the
@@ -314,6 +317,122 @@ export function ParamField({ name, spec, value, params, rate, onChange, sinkErro
  * the receiver's and is tuned at once. The width is the graph's — it travels
  * with a shared or saved graph — and PlaygroundWatch puts the receiver on it.
  */
+/** Bytes a second, as the Stats panel's throughput reads. */
+export function formatBytesPerSec(b) {
+    if (!(b >= 0) || !Number.isFinite(b)) return '—';
+    if (b >= 1e6) return `${(b / 1e6).toFixed(2)} MB/s`;
+    if (b >= 1e3) return `${(b / 1e3).toFixed(b >= 1e5 ? 0 : 1)} kB/s`;
+    return `${Math.round(b)} B/s`;
+}
+
+/** A count and its share of a whole, as "3 · 0.4%". */
+export function countShare(n, of) {
+    if (!(of > 0)) return n > 0 ? String(n) : '0';
+    const pct = (100 * n) / of;
+    return `${n} · ${pct > 0 && pct < 0.1 ? '<0.1' : pct.toFixed(pct < 10 ? 1 : 0)}%`;
+}
+
+// How often the stream's counters are read, and how far back the chart goes.
+const SNAP_MS = 250;
+const CHART_MS = 10000;
+
+/**
+ * What the IQ stream is bringing in, while the graph runs from the receiver:
+ * the connection's throughput — the audio stream's share of the Stats panel's
+ * NET — samples and packets a second against the rate it should run at, and
+ * what was lost: the player's dropouts (underruns, as Stats counts them) and
+ * the packets the playground let go because the graph was too far behind.
+ * Rates over the last second; losses since Start.
+ */
+function StreamStats({ pg }) {
+    const { audioConn } = useRadio();
+    const [, tick] = useReducer((n) => n + 1, 0);
+    // Snapshots of the counters, a quarter-second apart, back ten seconds:
+    // the chart is the throughput between each pair, the cards the last second.
+    const snaps = useRef([]);
+    useEffect(() => {
+        const t = setInterval(tick, SNAP_MS);
+        return () => clearInterval(t);
+    }, []);
+    if (!pg.running || pg.offline) {
+        snaps.current = [];
+        return (
+            <div className="pg-insp__section">
+                <div className="pg-insp__title">Stream</div>
+                <div className="pg-insp__note">{pg.running ? 'Not used: this graph runs by itself.' : 'Start the graph to see what the stream brings in.'}</div>
+            </div>
+        );
+    }
+    const c = pg.streamCounts();
+    const now = { t: typeof performance !== 'undefined' ? performance.now() : Date.now(), bytes: (audioConn && audioConn.bytesIn) || 0, ...c };
+    const list = snaps.current;
+    const prev = list[list.length - 1];
+    // A Start since the last one: begin again.
+    if (prev && now.packets < prev.packets) list.length = 0;
+    if (!list.length || now.t - list[list.length - 1].t >= SNAP_MS / 2) list.push(now);
+    while (list.length > 1 && now.t - list[0].t > CHART_MS + SNAP_MS) list.shift();
+    const r = streamRates(list);
+    const history = throughputHistory(list);
+    // How much of what the stream should carry arrived, over the last second.
+    const share = r && c.rate > 0 ? r.frames / c.rate : null;
+    return (
+        <div className="pg-insp__section">
+            <div className="pg-insp__title">Stream</div>
+            <div className="pg-insp__chart" title="Throughput, the last ten seconds, from zero">
+                <Sparkline history={history} height={36} fromZero />
+                <span className="pg-insp__chart-label">{r ? formatBytesPerSec(r.bytes) : '—'}</span>
+            </div>
+            <div className="readout-grid">
+                <Readout label="Throughput" value={r ? formatBytesPerSec(r.bytes) : '—'} />
+                <Readout
+                    label="Samples"
+                    value={r ? `${formatRate(r.frames) || '0'}/s` : '—'}
+                    tone={share != null && share < 0.98 ? 'weak' : undefined}
+                />
+                <Readout label="Packets" value={r ? `${r.packets.toFixed(r.packets < 10 ? 1 : 0)}/s` : '—'} />
+                <Readout label="Of the rate" value={share == null ? '—' : `${Math.min(999, share * 100).toFixed(1)}%`} tone={share != null && share < 0.98 ? 'weak' : undefined} />
+                <Readout label="Dropped" value={countShare(c.underruns, c.packets)} tone={c.underruns > 0 ? 'weak' : undefined} />
+                <Readout label="Graph behind" value={countShare(c.behind, c.packets)} tone={c.behind > 0 ? 'weak' : undefined} />
+            </div>
+            <div className="pg-insp__note">
+                Dropped is the player running dry — the stream arriving late or not at all — as the Stats panel counts it. Graph behind is packets let go because the graph could not keep up. Both since Start, as a share of the packets received.
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Bytes, samples and packets a second over the last second of `snaps` —
+ * snapshots of { t, bytes, frames, packets } — or null before there is half
+ * a second to go on.
+ */
+export function streamRates(snaps) {
+    if (snaps.length < 2) return null;
+    const now = snaps[snaps.length - 1];
+    let was = snaps[0];
+    for (let k = snaps.length - 2; k >= 0; k--) {
+        was = snaps[k];
+        if (now.t - was.t >= 1000) break;
+    }
+    const sec = (now.t - was.t) / 1000;
+    if (sec < 0.5) return null;
+    return {
+        bytes: (now.bytes - was.bytes) / sec,
+        frames: (now.frames - was.frames) / sec,
+        packets: (now.packets - was.packets) / sec,
+    };
+}
+
+/** Bytes a second between each pair of snapshots, oldest first: the chart. */
+export function throughputHistory(snaps) {
+    const out = [];
+    for (let k = 1; k < snaps.length; k++) {
+        const sec = (snaps[k].t - snaps[k - 1].t) / 1000;
+        if (sec > 0) out.push(Math.max(0, (snaps[k].bytes - snaps[k - 1].bytes) / sec));
+    }
+    return out;
+}
+
 function ReceiverControls({ graph, node, onParams }) {
     const { tuning, actions, allowedIQModes } = useRadio();
     const allowed = allowedIQModes || [];
@@ -338,6 +457,9 @@ function ReceiverControls({ graph, node, onParams }) {
                 <IQWidths mode={width} allowed={allowed} onChoose={choose} />
             </Field>
             {note && <div className="pg-insp__note">{note}</div>}
+            {/* The receiver panel's quality slider, the same control: one
+                setting for the session's stream, which is this one. */}
+            <MarginPicker forIQ />
         </div>
     );
 }
@@ -368,6 +490,75 @@ function clock(sec) {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+/**
+ * Everything else quiet while a recording plays back: the receiver ducked,
+ * as the Recorder panel ducks it for its own playback, and the playground's
+ * and IQ Demod's outputs held (lib/playbackHold.js) — they join the output
+ * after the duck, so it alone would leave them playing over the recording.
+ * The duck is put back only if it was this that put it down: a running
+ * playground holds it down too. Released on pause, end, error, and if the
+ * player goes away mid-play.
+ *
+ * Returns the <audio> element's handlers.
+ */
+export function useQuietWhilePlaying(player) {
+    const held = useRef(null);
+    const quiet = () => {
+        if (held.current) return;
+        const ducked = !!(player && player.ducked);
+        if (player && !ducked) player.setDucked(true);
+        held.current = { release: holdPlayback(), ducked };
+    };
+    const loud = () => {
+        const h = held.current;
+        if (!h) return;
+        held.current = null;
+        h.release();
+        if (player && !h.ducked) player.setDucked(false);
+    };
+    useEffect(() => loud, []);
+    return { onPlay: quiet, onPause: loud, onEnded: loud, onError: loud };
+}
+
+/** The graphic EQ's settings for one of the receiver's presets, or flat. */
+export function eqPresetParams(name) {
+    const preset = EQ_PRESETS[name];
+    const out = {};
+    for (const hz of EQ_FREQUENCIES) out[`g${hz}`] = preset ? preset[hz] : 0;
+    out.makeupDb = preset ? presetMakeup(preset) : 0;
+    return out;
+}
+
+/**
+ * The receiver's EQ presets, for the graphic EQ: the same bands and the same
+ * makeup the receiver's EQ panel sets — pulled down so a preset full of
+ * boosts does not clip.
+ */
+function EqPresets({ node, onParams }) {
+    const names = ['flat', ...Object.keys(EQ_PRESETS)];
+    const current = names.find((n) => {
+        const want = eqPresetParams(n);
+        return Object.keys(want).every((k) => node.params[k] === want[k]);
+    });
+    return (
+        <div className="pg-insp__section">
+            <div className="pg-insp__title">Presets</div>
+            <div className="pg-insp__row">
+                {names.map((n) => (
+                    <Button
+                        key={n}
+                        size="sm"
+                        variant={current === n ? 'primary' : 'ghost'}
+                        onClick={() => onParams(node.id, eqPresetParams(n), `eq-preset:${node.id}`)}
+                    >
+                        {n === 'cw' ? 'CW' : n[0].toUpperCase() + n.slice(1)}
+                    </Button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 function RecorderControls({ pg, id, maxSeconds, label }) {
     const [, bump] = useReducer((n) => n + 1, 0);
     useEffect(() => {
@@ -381,6 +572,7 @@ function RecorderControls({ pg, id, maxSeconds, label }) {
     const rec = pg.recordings.get(id);
     const state = rec ? rec.state : 'idle';
     const [error, setError] = useState(null);
+    const quiet = useQuietWhilePlaying(pg.player);
     return (
         <div className="pg-insp__section">
             <div className="pg-insp__title">Recording</div>
@@ -409,7 +601,7 @@ function RecorderControls({ pg, id, maxSeconds, label }) {
                 <>
                     {/* The browser's own player: it already does scrubbing,
                         volume and the keyboard, on every platform. */}
-                    <audio className="pg-insp__audio" controls src={rec.url() || undefined} />
+                    <audio className="pg-insp__audio" controls src={rec.url() || undefined} {...quiet} />
                     <div className="pg-insp__row">
                         <Button
                             size="sm"
@@ -604,6 +796,7 @@ export default function Inspector({
                     />
                 </div>
             )}
+            {node.type === 'iq-in' && <StreamStats pg={pg} />}
             {node.type === 'iq-in' && <ReceiverControls graph={graph} node={node} onParams={onParams} />}
             {Object.keys(def.params).length > 0 && node.type !== 'iq-in' && (
                 <div className="pg-insp__section">
@@ -650,6 +843,7 @@ export default function Inspector({
                     </div>
                 </div>
             )}
+            {node.type === 'graphic-eq' && <EqPresets node={node} onParams={onParams} />}
             {node.type === 'nr2' && (
                 <div className="pg-insp__section">
                     <p className="pg-insp__summary">It learns the noise from what it hears first — 1.3 s at 12 kHz, less at higher rates. If a signal was there then, it is subtracting the signal: learn again while there is only noise.</p>

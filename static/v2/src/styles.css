@@ -15079,7 +15079,7 @@ a.btn { text-decoration: none; }
 .pg-status__rows li.is-heard .pg-status__icon, .pg-status__rows li.is-heard .pg-status__state { color: var(--good); }
 .pg-status__rows li.is-missed .pg-status__icon, .pg-status__rows li.is-missed .pg-status__state { color: var(--bad); }
 .pg-status__rows li.is-listening { color: var(--accent); font-weight: 600; }
-.pg-status__rows li.is-hit .pg-status__state { color: var(--good); }
+.pg-status__rows li.is-hit .pg-status__state, .pg-status__rows li.is-hit .pg-status__icon { color: var(--good); }
 .pg-status__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .pg-status__dots { display: flex; gap: 2px; }
 .pg-status__dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--bad); opacity: 0.7; }

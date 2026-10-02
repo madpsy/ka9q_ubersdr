@@ -819,6 +819,8 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0, onParam
                 return { rows: names.map((name) => ({ key: keyOf(name), name, state: 'pending', hits: 0, history: [], lastHeard: null })), summary: '' };
             })();
             const icon = { heard: '✓', missed: '✗', listening: '…', pending: '—' };
+            // The one listened for now, already heard this round: a tick at once.
+            const mark = (row) => (row.state === 'listening' && row.hits ? '✓' : icon[row.state]);
             const say = (row) => (row.state === 'listening' ? (row.hits ? 'hearing it' : 'listening') : row.state === 'heard' ? 'heard' : row.state === 'missed' ? 'not heard' : 'not checked yet');
             const when = (ms) => (ms ? new Date(ms).toISOString().slice(11, 16) : '');
             const shown = large ? r.rows : r.rows.slice(0, 6);
@@ -829,7 +831,7 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0, onParam
                     <ul className="pg-status__rows">
                         {shown.map((row) => (
                             <li key={row.key} className={`is-${row.state}${row.state === 'listening' && row.hits ? ' is-hit' : ''}`} title={row.name}>
-                                <span className="pg-status__icon">{icon[row.state]}</span>
+                                <span className="pg-status__icon">{mark(row)}</span>
                                 <span className="pg-status__name">{large ? row.name : row.key}</span>
                                 <span className="pg-status__dots">{row.history.map((h, i) => <i key={i} className={h ? 'is-yes' : 'is-no'} />)}</span>
                                 <span className="pg-status__state">

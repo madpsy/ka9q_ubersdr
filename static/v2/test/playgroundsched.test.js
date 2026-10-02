@@ -551,7 +551,7 @@ t('Status: every item from the list; each settled heard or not as the next comes
     r = st.inst.read();
     assert.deepStrictEqual(r.rows.map((x) => [x.key, x.state, x.history.join('')]), [['CBL', 'listening', '1'], ['DND', 'missed', '0'], ['EDN', 'missed', '0']]);
     assert.strictEqual(r.current, 'CBL');
-    assert.ok(/^1 of 3 heard/.test(r.summary), r.summary);
+    assert.strictEqual(r.summary, '0 of 3 heard · listening to CBL', 'CBL heard last round, not yet this one');
     assert.ok(r.rows[0].lastHeard === 1700000000 * 1000, 'heard at the Clock’s time');
     assert.strictEqual(st.inst.activity(), 1);
     // Clear: every thing back to not checked, its times and history gone; the current one still listened for.
@@ -589,6 +589,26 @@ t('Status forgets “last heard” after its time (5 minutes unless set); 0 keep
         assert.strictEqual(r.state, 'heard', 'the round’s result is not forgotten');
         assert.deepStrictEqual(r.history, [1]);
     }
+});
+
+t('Status: the one listened for counts as heard the moment it is, not only when the Scheduler moves on', () => {
+    const st = blockOf('status');
+    st.step({ items: { type: 'items', items: ['CBL', 'DND'] }, current: 'CBL' });
+    assert.strictEqual(st.inst.read().summary, '0 of 2 heard · listening to CBL · 1 not checked yet');
+    let out = st.step({ hit: 'CBL' });
+    assert.deepStrictEqual(out.summary.map((m) => m.text), ['1 of 2 heard · 1 not checked yet']);
+    st.step({ current: 'DND' });
+    out = st.step({ hit: 'DND' });
+    assert.deepStrictEqual(out.summary.map((m) => m.text), ['2 of 2 heard']);
+    // Round two: CBL, heard last round but not yet this one, is not counted as heard.
+    st.step({ current: 'CBL' });
+    assert.strictEqual(st.inst.read().summary, '1 of 2 heard · listening to CBL');
+    st.step({ hit: 'CBL' });
+    assert.strictEqual(st.inst.read().summary, '2 of 2 heard');
+    // Moved on unheard: settled not heard.
+    st.step({ current: 'DND' });
+    st.step({ current: 'CBL' });
+    assert.strictEqual(st.inst.read().summary, '0 of 2 heard · listening to CBL');
 });
 
 console.log(`\n${pass} passed`);

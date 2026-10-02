@@ -2227,7 +2227,7 @@ t('the Status card: a row a thing — heard, not heard, listening, not checked �
     pg.readings = {
         st: {
             current: 'EDN',
-            summary: '1 of 4 heard (1 not checked yet)',
+            summary: '1 of 4 heard · 1 not checked yet',
             rows: [
                 { key: 'CBL', name: 'CBL Campbeltown', state: 'heard', hits: 2, lastHeard: Date.UTC(2026, 0, 1, 12, 30), history: [1, 0, 1], heard: 2, checks: 3 },
                 { key: 'DND', name: 'DND Dundee', state: 'missed', hits: 0, lastHeard: Date.UTC(2026, 0, 1, 12, 0), history: [1, 0], heard: 1, checks: 2 },
@@ -2244,6 +2244,7 @@ t('the Status card: a row a thing — heard, not heard, listening, not checked �
     // Missed this time, heard before: the time is when it was last heard, and says so.
     assert.ok(/✗.*DND.*not heard\s*· last 12:00/.test(words(items[1])), words(items[1]));
     assert.ok(/hearing it/.test(words(items[2])));
+    assert.ok(/^✓/.test(words(items[2]).trim()), 'heard this round, but no tick yet');
     assert.ok(/not checked yet/.test(words(items[3])));
     assert.strictEqual(all.filter((x) => x.type === 'i' && cls(x) === 'is-yes').length, 3);
     // Opened large, a Clear for the board.
@@ -2252,7 +2253,7 @@ t('the Status card: a row a thing — heard, not heard, listening, not checked �
     const big = deep(React.createElement(CardVisual, { pg: pgc, node: { id: 'st', type: 'status', params: {} }, rate: 12000, large: true }));
     big.find((x) => x.type === 'button' && words(x) === 'Clear').props.onClick();
     assert.deepStrictEqual(cmds, [['st', 'clear']]);
-    assert.ok(all.some((x) => cls(x) === 'pg-status__sum' && words(x) === '1 of 4 heard (1 not checked yet)'));
+    assert.ok(all.some((x) => cls(x) === 'pg-status__sum' && words(x) === '1 of 4 heard · 1 not checked yet'));
     // Not running, a list wired in: its things shown, none checked yet.
     const saved = pg.readings;
     pg.readings = null;

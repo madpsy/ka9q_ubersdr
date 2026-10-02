@@ -82,12 +82,15 @@ export const StatusBlock = {
             if (outs[1]) emitControl(outs[1], was ? 1 : 0);
         };
         const summarise = (outs) => {
-            // By each thing's last settled check: one listened for again is
-            // still heard (or not) until this round settles it.
+            // By each thing's latest result. The one listened for now counts
+            // as heard the moment it is heard this round, and not before —
+            // its last round's result is not this round's.
             const all = [...rows.values()];
-            const settled = all.filter((r) => r.history.length);
-            const heard = settled.filter((r) => r.history[r.history.length - 1] === 1).length;
-            const text = `${heard} of ${all.length} heard${settled.length < all.length ? ` (${all.length - settled.length} not checked yet)` : ''}`;
+            const result = (r) => (r.key === current ? (r.hits > 0 ? 1 : 'now') : r.history.length ? r.history[r.history.length - 1] : null);
+            const heard = all.filter((r) => result(r) === 1).length;
+            const unchecked = all.filter((r) => result(r) == null).length;
+            const listening = current && rows.get(current) && result(rows.get(current)) === 'now' ? current : null;
+            const text = `${heard} of ${all.length} heard${listening ? ` · listening to ${listening}` : ''}${unchecked ? ` · ${unchecked} not checked yet` : ''}`;
             if (text !== lastSummary && outs[2]) { lastSummary = text; outs[2].list.push({ type: 'text', text }); }
         };
         return {

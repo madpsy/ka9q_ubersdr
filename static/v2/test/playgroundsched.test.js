@@ -461,4 +461,108 @@ t('Running off: nothing sent while stopped; started again, the entry in force se
     assert.strictEqual(si.read().running, true);
 });
 
+t('a list with no times, for a Scheduler set to a cycle: nothing sent, and one plain hint why', () => {
+    runList.ctl = null;
+    const { changes, si } = runList({ entries: NDBS }, { preset: 'input', kind: 'repeat' }, 2);
+    assert.deepStrictEqual(changes, []);
+    assert.ok(/No times on these lines — set Timing to “In turn”/.test(si.read().hint), si.read().hint);
+});
+
+// ── matching and the status board ───────────────────────────────────────────
+
+/** One block's instance, and a step that runs it on message lists by input name. */
+function blockOf(type, params = {}) {
+    const def = BLOCK_BY_TYPE[type];
+    const inst = def.create();
+    inst.configure(sanitizeParams(def, params), 12000);
+    const ctl = {};
+    const step = (byName = {}) => {
+        const ins = def.inputs.map((port) => {
+            const v = byName[port.name];
+            if (v == null) return byName.__wired && byName.__wired.includes(port.name) ? { kind: 'message', list: [] } : null;
+            if (port.kind === 'control') { ctl[port.name] = ctl[port.name] || { seq: 0, value: null }; ctl[port.name].seq++; ctl[port.name].value = v; return ctl[port.name]; }
+            return { kind: 'message', list: (Array.isArray(v) ? v : [v]).map((t) => (typeof t === 'string' ? { type: 'text', text: t } : t)) };
+        });
+        const outs = def.outputs.map((o) => makeBuffer(o.kind, 1));
+        inst.process(ins, outs, 0, { frames: 240, rate: 12000 });
+        const got = {};
+        def.outputs.forEach((o, i) => { got[o.name] = o.kind === 'control' ? (outs[i].seq > 0 ? outs[i].value : null) : outs[i].list; });
+        return got;
+    };
+    return { inst, step };
+}
+
+t('console: matching the first word of a label, only the matched words shown, each sent on matched', () => {
+    const c = blockOf('console');
+    c.step({ match: 'CBL Campbeltown\n', in: 'E T CBL TT ' });
+    let r = c.inst.read();
+    assert.strictEqual(r.matching, 'CBL');
+    assert.strictEqual(r.matches, 1);
+    assert.ok(/\d\d:\d\d:\d\d {2}CBL\n$/.test(r.text) && !/TT/.test(r.text), JSON.stringify(r.text));
+    // Glued to noise, still a match; a wrong letter is not, unless allowed.
+    let out = c.step({ __wired: ['match'], in: 'ECBL CBI ' });
+    assert.deepStrictEqual(out.matched.map((m) => m.heard), ['ECBL']);
+    const f = blockOf('console', { fuzzy: true });
+    f.step({ match: 'CBL', in: '' });
+    out = f.step({ __wired: ['match'], in: 'CBI XYZ ' });
+    assert.deepStrictEqual(out.matched.map((m) => [m.text, m.heard, m.exact]), [['CBL', 'CBI', false]]);
+    assert.ok(/CBI \(CBL\?\)/.test(f.inst.read().text));
+    // A new label: a new word watched for.
+    c.step({ match: 'DND Dundee', in: '' });
+    assert.strictEqual(c.inst.read().matching, 'DND');
+    // Showing everything while still matching.
+    const all = blockOf('console', { onlyMatches: false });
+    all.step({ match: 'EDN', in: 'QQ EDN QQ ' });
+    assert.ok(/QQ EDN QQ/.test(all.inst.read().text));
+    assert.strictEqual(all.inst.read().matches, 1);
+    // Whole text, spacing aside.
+    const whole = blockOf('console', { matchOn: 'all' });
+    out = whole.step({ match: 'CQ DE M9PSY', in: 'XX CQ  DE M9PSY K' });
+    assert.strictEqual(out.matched.length, 1);
+    // Nothing wired to match: a console as it always was.
+    const plain = blockOf('console');
+    plain.step({ in: 'HELLO ' });
+    assert.strictEqual(plain.inst.read().text, 'HELLO ');
+    assert.strictEqual(plain.inst.read().matching, null);
+});
+
+t('Frequency list: labels, every entry’s name, for a board', () => {
+    const l = blockOf('frequency-list', { entries: NDBS });
+    const out = l.step({});
+    assert.deepStrictEqual(out.labels[0].items, ['CBL Campbeltown', 'DND Dundee', 'EDN Edinburgh']);
+});
+
+t('Status: every item from the list; each settled heard or not as the next comes; history, summary, a line each, heard as a control', () => {
+    const st = blockOf('status');
+    st.step({ items: { type: 'items', items: ['CBL Campbeltown', 'DND Dundee', 'EDN Edinburgh'] }, unix: 1700000000 });
+    let r = st.inst.read();
+    assert.deepStrictEqual(r.rows.map((x) => [x.key, x.state]), [['CBL', 'pending'], ['DND', 'pending'], ['EDN', 'pending']]);
+    st.step({ current: 'CBL Campbeltown\n' });
+    st.step({ hit: { type: 'text', text: 'CBL' } });
+    assert.strictEqual(st.inst.read().rows[0].state, 'listening');
+    assert.strictEqual(st.inst.read().rows[0].hits, 1);
+    let out = st.step({ current: 'DND Dundee\n' });
+    assert.deepStrictEqual(out.text.map((m) => m.text.slice(9)), ['CBL heard\n']);
+    assert.strictEqual(out.heard, 1);
+    out = st.step({ current: 'EDN Edinburgh' });
+    assert.deepStrictEqual(out.text.map((m) => m.text.slice(9)), ['DND not heard\n']);
+    assert.strictEqual(out.heard, 0);
+    st.step({ current: 'CBL Campbeltown' });
+    r = st.inst.read();
+    assert.deepStrictEqual(r.rows.map((x) => [x.key, x.state, x.history.join('')]), [['CBL', 'listening', '1'], ['DND', 'missed', '0'], ['EDN', 'missed', '0']]);
+    assert.strictEqual(r.current, 'CBL');
+    assert.ok(/^1 of 3 heard/.test(r.summary), r.summary);
+    assert.ok(r.rows[0].lastHeard === 1700000000 * 1000, 'heard at the Clock’s time');
+    assert.strictEqual(st.inst.activity(), 1);
+});
+
+t('the NDB template wires the match and the board: label → console match and Status current, matched → hit, labels → items', () => {
+    const g = TEMPLATES.find((x) => x.id === 'ndb-hop').build();
+    assert.ok(compile(g, 12000).ok, JSON.stringify(compile(g, 12000).errors));
+    const has = (w) => g.wires.some((x) => x.join() === w.join());
+    for (const w of [['schedule', 'label', 'idents', 'match'], ['idents', 'matched', 'heard', 'hit'], ['schedule', 'label', 'heard', 'current'], ['ndbs', 'labels', 'heard', 'items'], ['heard', 'text', 'log', 'in']]) {
+        assert.ok(has(w), w.join(' '));
+    }
+});
+
 console.log(`\n${pass} passed`);

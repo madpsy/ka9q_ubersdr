@@ -322,7 +322,7 @@ export const TEMPLATES = [
         // from when it is visited, so another round is another list.
         id: 'ndb-hop',
         title: 'Hop the NDBs',
-        summary: 'A round of non-directional beacons, 30 seconds on each, hopping on the minute and the half minute by the Clock — long enough for an ident or three — retuning the receiver to each carrier in turn and reading its Morse ident 400 Hz above it (the usual tone this side of the Atlantic; set an entry’s offset=1020 for a beacon on that tone). The list is on the Frequency list block: add, remove or reorder lines there. Idents collect in the log; the console says where it went. This retunes your receiver: the dial and everything on the page follow.',
+        summary: 'A round of non-directional beacons, 30 seconds on each, hopping on the minute and the half minute by the Clock — long enough for an ident or three — retuning the receiver to each carrier in turn and reading its Morse ident 400 Hz above it (the usual tone this side of the Atlantic; set an entry’s offset=1020 for a beacon on that tone). The list is on the Frequency list block: add, remove or reorder lines there. The console watches for each NDB’s own ident while it is on and shows only those; the Status board marks each heard or not, round by round, and the log keeps every result. This retunes your receiver: the dial and everything on the page follow.',
         build: () => g(
             [
                 {
@@ -341,7 +341,9 @@ export const TEMPLATES = [
                 { id: 'schedule', type: 'scheduler', params: { preset: 'input', kind: 'dwell', dwell: 30, align: true } },
                 { id: 'iq', type: 'iq-in' },
                 { id: 'ident', type: 'cw-decoder', params: { offsetHz: 400, wpm: 7 }, controls: ['offsetHz'] },
-                { id: 'idents', type: 'message-log' },
+                { id: 'idents', type: 'console', params: { matchOn: 'word', onlyMatches: true } },
+                { id: 'heard', type: 'status' },
+                { id: 'log', type: 'message-log' },
                 { id: 'hops', type: 'console' },
                 { id: 'demod', type: 'demodulator', params: { mode: 'am', widthHz: 3000 }, controls: ['mode'] },
                 { id: 'audio', type: 'audio-out' },
@@ -351,6 +353,10 @@ export const TEMPLATES = [
                 ['schedule', 'frequency', 'iq', 'frequency'], ['schedule', 'offset', 'ident', controlPort('offsetHz')],
                 ['schedule', 'mode', 'demod', controlPort('mode')], ['schedule', 'label', 'hops', 'in'],
                 ['iq', 'out', 'ident', 'in'], ['ident', 'text', 'idents', 'in'],
+                // Each NDB's ident watched for while it is on, and the board told.
+                ['schedule', 'label', 'idents', 'match'], ['idents', 'matched', 'heard', 'hit'],
+                ['schedule', 'label', 'heard', 'current'], ['ndbs', 'labels', 'heard', 'items'], ['clock', 'unix', 'heard', 'unix'],
+                ['heard', 'text', 'log', 'in'],
                 ['iq', 'out', 'demod', 'in'], ['demod', 'audio', 'audio', 'in'],
             ],
         ),

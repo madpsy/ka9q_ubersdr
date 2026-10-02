@@ -217,6 +217,9 @@ export const SchedulerBlock = {
         const parse = () => {
             const text = p.preset === 'input' ? (listText || '') : p.preset === 'ncdxf' ? ncdxfFollowSchedule(+p.beacon) : p.schedule;
             parsed = parseSchedule(text, kind);
+            // Lines that would all read but for wanting times: one plain hint.
+            parsed.hint = kind !== 'dwell' && !parsed.entries.length && parsed.errors.length && !parseSchedule(text, 'dwell').errors.length
+                ? 'No times on these lines — set Timing to “In turn”, or start each with a time' : '';
             current = -1;
         };
         // The next entry this receiver can tune after `k`, round the list.
@@ -295,6 +298,7 @@ export const SchedulerBlock = {
                 return {
                     entries: es.map((e, i) => ({ ...e, reachable: reachable(e), index: i })),
                     errors: parsed.errors,
+                    hint: parsed.hint || '',
                     current,
                     next,
                     kind,
@@ -420,7 +424,8 @@ export const SchedulerBlock = {
  *     380kHz am offset=400 CBL Campbeltown
  *
  * Sent on (as `{ type: 'schedule', schedule }`) when it changes, and every few
- * seconds besides, so a Scheduler added later has it too.
+ * seconds besides, so a Scheduler added later has it too — and every entry's
+ * name on `labels` (`{ type: 'items', items }`), for a Status board.
  */
 export const FrequencyListBlock = {
     type: 'frequency-list',
@@ -428,7 +433,8 @@ export const FrequencyListBlock = {
     category: 'Control',
     summary: 'Frequencies to visit, with their modes, widths, offsets and names — typed, or a preset — for a Scheduler to work through. The list kept apart from when it is visited.',
     inputs: [],
-    outputs: [{ name: 'list', kind: MESSAGE }],
+    // `labels`: every entry's name, for a Status board to show them all from the start.
+    outputs: [{ name: 'list', kind: MESSAGE }, { name: 'labels', kind: MESSAGE }],
     params: {
         preset: {
             kind: 'choice', label: 'List', default: 'custom', control: false,
@@ -463,6 +469,10 @@ export const FrequencyListBlock = {
                     dirty = false;
                     packets = 0;
                     outs[0].list.push({ type: 'schedule', schedule: text });
+                    if (outs[1]) {
+                        const items = parseSchedule(text, 'dwell').entries.map((e) => e.label || `${(e.frequency / 1e6).toFixed(4)} MHz`);
+                        outs[1].list.push({ type: 'items', items, text: items.join('\n') });
+                    }
                 }
                 return 0;
             },

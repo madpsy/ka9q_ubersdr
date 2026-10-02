@@ -54,6 +54,7 @@ import {
 import { CorrelatorBlock, EqualiserBlock, FllBandEdgeBlock, GoertzelBlock } from './sync.js';
 import { BeaconMonitorBlock } from './beacons.js';
 import { FrequencyListBlock, SchedulerBlock } from './scheduler.js';
+import { StatusBlock } from './status.js';
 import { HellBlock, ImageViewerBlock } from './imaging.js';
 import { SstvDemodBlock, SstvRasterBlock } from './sstvstages.js';
 import { FaxRasterBlock } from './fax.js';
@@ -84,7 +85,7 @@ export const BLOCKS = [
     TimecodeBlock,
     PhaseBlock, MovingAverageBlock, IntegrateDumpBlock, DifferentiatorBlock, SampleHoldBlock, KeepOneInNBlock, SelectorBlock, NoiseSourceBlock,
     MatchedFilterBlock, MatchedFilterAudioBlock, HilbertBlock,
-    DscBlock, PackBitsBlock, UnpackBitsBlock, SyncFramerBlock, CrcCheckBlock, BytesTextBlock, ConvEncoderBlock, ViterbiBlock, SoftViterbiBlock, FllBandEdgeBlock, CorrelatorBlock, GoertzelBlock, EqualiserBlock, BeaconMonitorBlock, SchedulerBlock, FrequencyListBlock,
+    DscBlock, PackBitsBlock, UnpackBitsBlock, SyncFramerBlock, CrcCheckBlock, BytesTextBlock, ConvEncoderBlock, ViterbiBlock, SoftViterbiBlock, FllBandEdgeBlock, CorrelatorBlock, GoertzelBlock, EqualiserBlock, BeaconMonitorBlock, SchedulerBlock, FrequencyListBlock, StatusBlock,
     MfskDetectorBlock, MfskDemapperBlock, IfkDecoderBlock, MfskInterleaverBlock, MfskVaricodeBlock, DominoVaricodeBlock, OliviaFecBlock,
     ImageViewerBlock, HellBlock, WefaxBlock, FaxRasterBlock, SstvBlock, SstvDemodBlock, SstvRasterBlock, HfChannelBlock,
     // Not in the palette: the toolbar adds them (see CATEGORIES).

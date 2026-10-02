@@ -231,6 +231,9 @@ function ownVisualHeight(type, params) {
         case 'frequency-list':
             // Whether it reads, and its first entries, the one in force marked.
             return 96;
+        case 'status':
+            // The summary, and a row for each of the first few things.
+            return 100;
         case 'hell':
         case 'wefax':
         case 'fax-raster':

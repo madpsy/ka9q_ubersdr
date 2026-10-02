@@ -804,6 +804,32 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0, onParam
                 </div>
             );
         }
+        case 'status': {
+            // A row a thing: heard, not heard, listening or not yet checked,
+            // its last few checks as dots, and when it was last heard.
+            const r = reading || { rows: [] };
+            const icon = { heard: '✓', missed: '✗', listening: '…', pending: '—' };
+            const say = (row) => (row.state === 'listening' ? (row.hits ? 'hearing it' : 'listening') : row.state === 'heard' ? 'heard' : row.state === 'missed' ? 'not heard' : 'not checked yet');
+            const when = (ms) => (ms ? new Date(ms).toISOString().slice(11, 16) : '');
+            const shown = large ? r.rows : r.rows.slice(0, 6);
+            return (
+                <div className="pg-status">
+                    {r.summary && <div className="pg-status__sum">{r.summary}</div>}
+                    {!r.rows.length && <div className="pg-list__empty">Nothing on the board yet</div>}
+                    <ul className="pg-status__rows">
+                        {shown.map((row) => (
+                            <li key={row.key} className={`is-${row.state}${row.state === 'listening' && row.hits ? ' is-hit' : ''}`} title={row.name}>
+                                <span className="pg-status__icon">{icon[row.state]}</span>
+                                <span className="pg-status__name">{large ? row.name : row.key}</span>
+                                <span className="pg-status__dots">{row.history.map((h, i) => <i key={i} className={h ? 'is-yes' : 'is-no'} />)}</span>
+                                <span className="pg-status__state">{say(row)}{row.lastHeard ? ' ' + when(row.lastHeard) : ''}</span>
+                            </li>
+                        ))}
+                    </ul>
+                    {r.rows.length > shown.length && <div className="pg-list__dim">{`+${r.rows.length - shown.length} more`}</div>}
+                </div>
+            );
+        }
         case 'scheduler': {
             // What is on now, what is next and when, and where the entries come from.
             const r = reading && reading.entries ? reading : { entries: [], errors: [], current: -1, idle: true };
@@ -813,7 +839,7 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0, onParam
             const nxt = r.next ? r.entries[r.next.index] : null;
             const wait = r.next ? r.next.wait : 0;
             const left = wait >= 3600 ? Math.floor(wait / 3600) + ' h ' + Math.floor((wait % 3600) / 60) + ' m' : wait >= 60 ? Math.floor(wait / 60) + ' m ' + Math.floor(wait % 60) + ' s' : Math.ceil(wait) + ' s';
-            const trouble = r.errors && r.errors.length ? 'Line ' + r.errors[0].line + ': ' + r.errors[0].message : r.skipped || r.why;
+            const trouble = r.hint || (r.errors && r.errors.length ? 'Line ' + r.errors[0].line + ': ' + r.errors[0].message : r.skipped || r.why);
             const source = r.fromList ? 'from a list'
                 : r.listWanted ? (r.listWired ? 'waiting for its list' : 'no list wired in')
                     : r.listWired ? 'a list is wired in but not used' : '';

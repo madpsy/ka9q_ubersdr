@@ -2153,6 +2153,18 @@ t('a Frequency list’s inspector says whether the list reads: valid with each e
         [['l', 'list', 's', 'list']],
     ), 'l');
     assert.ok(cls(status(all)).includes('is-bad'), 'a line with no time, for a Scheduler wanting times, passed');
+    // Explained once, with the fix: a button that sets the Scheduler to In turn.
+    assert.ok(/No times on these lines/.test(words(status(all))));
+    assert.ok(all.some((x) => cls(x) === 'pg-insp__note' && /Timing set to “In a cycle”/.test(words(x))));
+    assert.ok(!all.some((x) => cls(x) === 'pg-sched__errors'), 'the same complaint listed line by line');
+    const fixes = [];
+    const fixed = deep(React.createElement(Inspector, {
+        pg, graph: g([{ id: 'l', type: 'frequency-list', params: { entries: '380kHz am CBL' } }, { id: 's', type: 'scheduler', params: { preset: 'input', kind: 'repeat' } }], [['l', 'list', 's', 'list']]),
+        selection: { nodes: new Set(['l']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+        onParams: (id, patch) => fixes.push([id, patch]), onRemove() {}, onDuplicate() {}, summary: null,
+    }));
+    fixed.find((x) => x.props && x.props.onClick && words(x) === 'Use “In turn”').props.onClick();
+    assert.deepStrictEqual(fixes, [['s', { kind: 'dwell' }]]);
     // And the Scheduler says its entries come from the list.
     all = show(g(
         [{ id: 'l', type: 'frequency-list', params: { entries: '380kHz am CBL' } }, { id: 's', type: 'scheduler', params: { preset: 'input', kind: 'dwell' } }],
@@ -2206,6 +2218,36 @@ t('a Frequency list’s inspector says whether the list reads: valid with each e
     // The playground not running: no reading, and it says so rather than going blank.
     pg.readings = null;
     assert.ok(/Idle — the playground is not running/.test(words(deep(React.createElement(CardVisual, { pg, node: { ...node, params: { running: true } }, rate: 12000 })))));
+    pg.readings = null;
+});
+
+t('the Status card: a row a thing — heard, not heard, listening, not checked — with its dots and the summary; a console says what it matches', () => {
+    reset();
+    const pg = getPlayground(radio().player);
+    pg.readings = {
+        st: {
+            current: 'EDN',
+            summary: '1 of 4 heard (1 not checked yet)',
+            rows: [
+                { key: 'CBL', name: 'CBL Campbeltown', state: 'heard', hits: 2, lastHeard: Date.UTC(2026, 0, 1, 12, 30), history: [1, 0, 1], heard: 2, checks: 3 },
+                { key: 'DND', name: 'DND Dundee', state: 'missed', hits: 0, lastHeard: null, history: [0], heard: 0, checks: 1 },
+                { key: 'EDN', name: 'EDN Edinburgh', state: 'listening', hits: 1, lastHeard: Date.UTC(2026, 0, 1, 12, 31), history: [], heard: 0, checks: 0 },
+                { key: 'PIK', name: 'PIK Prestwick', state: 'pending', hits: 0, lastHeard: null, history: [], heard: 0, checks: 0 },
+            ],
+        },
+        c: { text: '12:31:02  EDN\n', count: 40, matching: 'EDN', matches: 1, lastMatch: null },
+    };
+    const all = deep(React.createElement(CardVisual, { pg, node: { id: 'st', type: 'status', params: {} }, rate: 12000 }));
+    const items = all.filter((x) => x.type === 'li');
+    assert.deepStrictEqual(items.map(cls), ['is-heard', 'is-missed', 'is-listening is-hit', 'is-pending']);
+    assert.ok(/✓.*CBL.*heard\s+12:30/.test(words(items[0])), words(items[0]));
+    assert.ok(/✗.*DND.*not heard/.test(words(items[1])));
+    assert.ok(/hearing it/.test(words(items[2])));
+    assert.ok(/not checked yet/.test(words(items[3])));
+    assert.strictEqual(all.filter((x) => x.type === 'i' && cls(x) === 'is-yes').length, 2);
+    assert.ok(all.some((x) => cls(x) === 'pg-status__sum' && words(x) === '1 of 4 heard (1 not checked yet)'));
+    const con = deep(React.createElement(CardVisual, { pg, node: { id: 'c', type: 'console', params: {} }, rate: 12000 }));
+    assert.ok(con.some((x) => cls(x) === 'pg-console__match' && /Matching: EDN\s*· 1 match/.test(words(x))));
     pg.readings = null;
 });
 

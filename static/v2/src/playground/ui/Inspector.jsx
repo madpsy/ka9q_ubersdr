@@ -523,15 +523,16 @@ function whenText(e, kind, i) {
  * cannot tune it. A list wired to a Scheduler is read as that Scheduler
  * reads it (times or none).
  */
-function ScheduleCheck({ graph, node }) {
+function ScheduleCheck({ graph, node, onParams }) {
     const p = node.params;
     let text;
     let kind;
     let note = '';
+    let sched = null;
     if (node.type === 'frequency-list') {
         text = p.preset === 'ncdxf' ? ncdxfFollowSchedule(+p.beacon) : p.entries;
         const w = graph.wires.find((x) => x[0] === node.id && x[1] === 'list');
-        const sched = w && graph.nodes.find((n) => n.id === w[2] && n.type === 'scheduler');
+        sched = w && graph.nodes.find((n) => n.id === w[2] && n.type === 'scheduler');
         kind = sched ? (sched.params.kind || 'repeat') : 'dwell';
         note = sched && sched.params.preset !== 'input'
             ? `Wired to ${sched.name || sched.id}, but its Schedule is not set to “From the list input”: it is not using this list.`
@@ -555,6 +556,28 @@ function ScheduleCheck({ graph, node }) {
         if (p.preset === 'ncdxf') { text = ncdxfFollowSchedule(+p.beacon); kind = 'repeat'; } else { text = p.schedule; kind = p.kind; }
     }
     const { entries, errors } = parseSchedule(text, kind);
+    // Lines with no times, for a Scheduler that wants them: one explanation
+    // and the fix, not the same complaint for every line.
+    const timesWanted = kind !== 'dwell' && errors.length > 0 && entries.length === 0
+        && parseSchedule(text, 'dwell').errors.length === 0;
+    const owner = node.type === 'scheduler' ? node : sched;
+    const timingLabel = (BLOCK_BY_TYPE.scheduler.params.kind.options.find((o) => o.value === kind) || {}).label;
+    if (timesWanted) {
+        return (
+            <div className="pg-insp__section">
+                <div className="pg-insp__title">Entries</div>
+                <div className="pg-sched__status is-bad"><span className="pg-sched__mark">✗</span>No times on these lines</div>
+                <div className="pg-insp__note">
+                    {`${owner && owner !== node ? owner.name || owner.id : 'This Scheduler'} has Timing set to “${timingLabel}”, which wants each line to start with ${kind === 'daily' ? 'a time of day (09:30)' : 'a time into the cycle (0:30)'}. For a round visited in turn, so long on each, set its Timing to “In turn” — or put a time at the start of each line.`}
+                </div>
+                {owner && onParams && (
+                    <div className="pg-insp__row">
+                        <Button size="sm" onClick={() => onParams(owner.id, { kind: 'dwell' }, `param:${owner.id}:kind`)}>Use “In turn”</Button>
+                    </div>
+                )}
+            </div>
+        );
+    }
     const outside = (e) => e.frequency != null && (e.frequency < MIN_FREQ || e.frequency > MAX_FREQ);
     const unreachable = entries.filter(outside).length;
     const valid = !errors.length && entries.length > 0;
@@ -996,7 +1019,7 @@ export default function Inspector({
                     })}
                 </div>
             )}
-            {(node.type === 'frequency-list' || node.type === 'scheduler') && <ScheduleCheck graph={graph} node={node} />}
+            {(node.type === 'frequency-list' || node.type === 'scheduler') && <ScheduleCheck graph={graph} node={node} onParams={onParams} />}
             {(node.type === 'wav-recorder' || node.type === 'iq-recorder') && (
                 <RecorderControls
                     pg={pg}

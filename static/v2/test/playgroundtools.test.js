@@ -515,4 +515,64 @@ t('Equaliser: QPSK through an echo half as strong a symbol late — CMA restores
     assert.ok(tail(before, evm) > 0.2 && l < 0.1, `LMS: ${l}`);
 });
 
+// ── the on-off detector against noise ───────────────────────────────────────
+
+/** An on-off detector over `seconds` of complex noise (σ 0.1 a part) plus `carrier` (amplitude, steady), at 12 kHz. */
+function ookOn(params, { seconds = 6, carrier = 0, seed = 7 } = {}) {
+    const def = BLOCK_BY_TYPE['ook-detector'];
+    const inst = def.create();
+    inst.configure(sanitizeParams(def, params), 12000);
+    const gn = gauss(seed);
+    let down = 0;
+    let total = 0;
+    let present = null;
+    for (let p = 0; p < seconds * 50; p++) {
+        const x = makeBuffer('complex', 240);
+        for (let k = 0; k < 240; k++) { x.re[k] = carrier + 0.1 * gn(); x.im[k] = 0.1 * gn(); }
+        x.n = 240;
+        const outs = def.outputs.map((o) => makeBuffer(o.kind, 260));
+        const m = inst.process([x], outs, 240);
+        if (p > 50) for (let k = 0; k < m; k++) { total++; if (outs[0].re[k] > 0.5) down++; }
+        if (outs[2].seq > 0) present = outs[2].value;
+    }
+    return { share: down / total, inst, present };
+}
+
+t('on-off detector: noise alone hardly keys it at the default; the old 6 dB let a third through; raising it shuts noise out', () => {
+    const def = ookOn({ bandwidthHz: 100 });
+    assert.ok(def.share < 0.05, `noise keyed it ${(def.share * 100).toFixed(1)}% of the time`);
+    assert.ok(ookOn({ bandwidthHz: 100, minSnrDb: 6 }).share > 0.2, 'the 6 dB comparison proves nothing');
+    assert.ok(ookOn({ bandwidthHz: 100, minSnrDb: 12 }).share < 0.005);
+    assert.strictEqual(def.present, 0);
+});
+
+t('on-off detector: a narrow filter and heavy smoothing no longer lock it on — its floor learned after the filter fills, not from its silence', () => {
+    const r = ookOn({ bandwidthHz: 30, smoothMs: 15 });
+    const snr = r.inst.read().snrDb;
+    assert.ok(snr < 15, `noise read as ${snr.toFixed(1)} dB`);
+    assert.ok(r.share < 0.1, `keyed ${(r.share * 100).toFixed(1)}% of the time`);
+});
+
+t('on-off detector: a carrier keyed on and off well above the noise reads present, and the key follows it', () => {
+    const det = BLOCK_BY_TYPE['ook-detector'];
+    const inst = det.create();
+    inst.configure(sanitizeParams(det, { bandwidthHz: 100 }), 12000);
+    const gn = gauss(3);
+    const presents = [];
+    let onKey = 0; let onN = 0; let offKey = 0; let offN = 0;
+    for (let p = 0; p < 400; p++) {
+        // 200 ms on, 200 ms off.
+        const keyed = Math.floor(p / 10) % 2 === 0;
+        const x = makeBuffer('complex', 240);
+        for (let k = 0; k < 240; k++) { x.re[k] = (keyed ? 0.5 : 0) + 0.05 * gn(); x.im[k] = 0.05 * gn(); }
+        x.n = 240;
+        const outs = det.outputs.map((o) => makeBuffer(o.kind, 260));
+        const m = inst.process([x], outs, 240);
+        if (outs[2].seq > 0) presents.push(outs[2].value);
+        if (p > 60 && p % 10 > 3 && p % 10 < 8) for (let k = 0; k < m; k++) { if (keyed) { onN++; onKey += outs[0].re[k]; } else { offN++; offKey += outs[0].re[k]; } }
+    }
+    assert.ok(presents.includes(1), JSON.stringify(presents));
+    assert.ok(onKey / onN > 0.8 && offKey / offN < 0.1, `on ${onKey / onN}, off ${offKey / offN}`);
+});
+
 console.log(`\n${pass} passed`);

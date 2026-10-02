@@ -295,27 +295,81 @@ export const ConsoleBlock = {
     type: 'console',
     label: 'Text console',
     category: 'Viewers',
-    summary: 'Prints the text a decoder puts out, as a teleprinter would, and passes it on.',
-    inputs: [{ name: 'in', kind: MESSAGE }],
-    outputs: [{ name: 'out', kind: MESSAGE }],
-    params: {},
+    summary: 'Prints the text a decoder puts out, as a teleprinter would, and passes it on. Wire a word to match (a Scheduler’s label, say) and it watches for it: only the matches shown, if you like, and each one sent on `matched`.',
+    inputs: [{ name: 'in', kind: MESSAGE }, { name: 'match', kind: MESSAGE, optional: true }],
+    outputs: [{ name: 'out', kind: MESSAGE }, { name: 'matched', kind: MESSAGE }],
+    params: {
+        matchOn: {
+            kind: 'choice', label: 'Match on', default: 'word', control: false,
+            options: [{ value: 'word', label: 'First word', title: 'An ident: CBL from “CBL Campbeltown”' }, { value: 'all', label: 'Whole text' }],
+        },
+        onlyMatches: { kind: 'bool', label: 'Only show matches', default: true },
+        fuzzy: { kind: 'bool', label: 'Allow one wrong letter', default: false },
+    },
     create() {
         let text = '';
         let count = 0;
+        let p = {};
+        let target = '';          // what is matched, upper case
+        let word = '';            // the word being received
+        let matches = 0;
+        let lastMatch = null;
+        const near = (w, t) => {
+            // The target inside the word, or — allowed one wrong letter — a
+            // stretch of it the target's length differing in one place.
+            if (w.includes(t)) return true;
+            if (!p.fuzzy || t.length < 3 || w.length < t.length || w.length > t.length + 2) return false;
+            for (let i = 0; i + t.length <= w.length; i++) {
+                let wrong = 0;
+                for (let j = 0; j < t.length && wrong < 2; j++) if (w[i + j] !== t[j]) wrong++;
+                if (wrong <= 1) return true;
+            }
+            return false;
+        };
         return {
-            configure() {},
-            reset() { text = ''; count = 0; },
-            command(name) { if (name === 'clear') text = ''; },
-            read() { return { text: text.slice(-4000), count }; },
+            configure(params) { p = params; },
+            reset() { text = ''; count = 0; word = ''; matches = 0; lastMatch = null; },
+            command(name) { if (name === 'clear') { text = ''; matches = 0; lastMatch = null; } },
+            read() { return { text: text.slice(-4000), count, matching: target || null, matches, lastMatch }; },
             process(ins, outs) {
                 const input = ins[0];
+                const m2 = ins[1];
+                // What to match: the last text sent to `match`, its first word or all of it.
+                if (m2 && m2.list && m2.list.length) {
+                    const t = m2.list[m2.list.length - 1];
+                    const raw = String((t && (t.text != null ? t.text : t.value)) || '').trim().toUpperCase();
+                    const next = p.matchOn === 'all' ? raw.replace(/\s+/g, ' ') : raw.split(/\s+/)[0] || '';
+                    if (next !== target) { target = next; word = ''; }
+                }
+                const filtering = !!m2 && !!target && p.onlyMatches;
                 if (!input || !input.list.length) return 0;
                 for (const m of input.list) {
                     if (m.type !== 'text' || !m.text) continue;
                     const printed = m.text.replace(/\r/g, '');
-                    text += printed;
                     count += m.text.length;
+                    if (!filtering) text += printed;
                     if (printed && outs[0]) outs[0].list.push({ type: 'text', text: printed });
+                    if (!m2 || !target) continue;
+                    // Word by word, each judged as it ends; the whole text by
+                    // the tail of what has arrived, spacing aside.
+                    for (const ch of printed.toUpperCase()) {
+                        let got = null;
+                        if (p.matchOn === 'all') {
+                            word = (word + ch).slice(-(2 * target.length + 16));
+                            if (word.replace(/\s+/g, ' ').endsWith(target)) { got = target; word = ''; }
+                        } else if (!/\s/.test(ch)) {
+                            word += ch;
+                        } else if (word) {
+                            if (near(word, target)) got = word;
+                            word = '';
+                        }
+                        if (got == null) continue;
+                        const exact = got.includes(target);
+                        matches++;
+                        lastMatch = { text: got, at: Date.now(), exact };
+                        if (filtering) text += `${new Date().toISOString().slice(11, 19)}  ${got}${exact ? '' : ' (' + target + '?)'}\n`;
+                        if (outs[1]) outs[1].list.push({ type: 'text', text: target, heard: got, exact });
+                    }
                 }
                 if (text.length > CONSOLE_KEEP) text = text.slice(-CONSOLE_KEEP);
                 return 0;
@@ -732,12 +786,20 @@ export const OokDetectorBlock = {
     type: 'ook-detector',
     label: 'On-off detector (CW)',
     category: 'Digital',
-    summary: 'A keyed carrier to a key level, 0 to 1, following fades — CW’s first stage. Centre it on zero first.',
+    summary: 'A keyed carrier to a key level, 0 to 1, following fades — CW’s first stage. Centre it on zero first. Keying counts only when it stands far enough above the noise; `present` says when it does.',
     inputs: [{ name: 'in', kind: COMPLEX }],
-    outputs: [{ name: 'key', kind: REAL, audio: false }, { name: 'snr', kind: CONTROL }],
+    outputs: [{ name: 'key', kind: REAL, audio: false }, { name: 'snr', kind: CONTROL }, { name: 'present', kind: CONTROL }],
     params: {
         bandwidthHz: { kind: 'number', label: 'Bandwidth', unit: 'Hz', default: 100, min: 10, max: 1000, step: 5, control: false },
         smoothMs: { kind: 'number', label: 'Smoothing', unit: 'ms', default: 4, min: 0, max: 50, step: 0.5, live: true },
+        // How far the key-down level must stand above the noise for anything
+        // to count as keying. Noise alone measures 4–9 dB on this scale (its
+        // louder moments against its quieter ones): at 9, noise keys it about
+        // 2% of the time in 100 Hz (at the old fixed 6, a third), and CW at
+        // 9 dB SNR in 100 Hz still copies. Raise it if noise still gets
+        // through — more smoothing helps too — lower it for a weaker signal.
+        // It closes again 3 dB lower, so a signal at the edge does not flutter.
+        minSnrDb: { kind: 'number', label: 'Needs at least', unit: 'dB', default: 9, min: 3, max: 40, step: 0.5, live: true },
     },
     rate: (inRate, p) => inRate / Math.max(1, Math.floor(inRate / Math.max(500, 2 * p.bandwidthHz + 200))),
     maxOut: (n) => n + 1,
@@ -766,6 +828,15 @@ export const OokDetectorBlock = {
         let lag = 0;
         let hist = new Float64Array(1);
         let hpos = 0;
+        // Samples to let by before the levels take their first value: the
+        // filters filling. Primed on their start-up silence, the floor began
+        // at next to nothing and — a steady signal never dipping below the
+        // midpoint — could stay there, every sample then reading key-down.
+        let settle = 0;
+        let open = false;
+        let sentOpen = -1;
+        let gateOn = 4;
+        let gateOff = 2.8;
         return {
             configure(p, r) {
                 inRate = r;
@@ -778,7 +849,12 @@ export const OokDetectorBlock = {
                     lag = Math.max(0, (fir.n - 1) / 2);
                     hist = new Float64Array(lag + 1);
                     hpos = 0;
+                    settle = fir.n + Math.ceil(rate * 0.02);
+                    primed = false;
                 }
+                // The gate on the ratio of the levels (amplitudes), with 3 dB between opening and closing.
+                gateOn = 10 ** (p.minSnrDb / 20);
+                gateOff = 10 ** ((p.minSnrDb - 3) / 20);
                 const coef = (sec) => 1 - Math.exp(-1 / (rate * sec));
                 smooth = p.smoothMs > 0 ? coef(p.smoothMs / 1000) : 1;
                 up = coef(0.002);
@@ -789,9 +865,9 @@ export const OokDetectorBlock = {
                 downF = coef(0.15);
                 upF = coef(3);
             },
-            reset() { narrow.reset(); fir.reset(); peak = 0; floor = 0; env = 0; primed = false; hist.fill(0); hpos = 0; },
+            reset() { narrow.reset(); fir.reset(); peak = 0; floor = 0; env = 0; primed = false; hist.fill(0); hpos = 0; settle = fir.n + Math.ceil(rate * 0.02); open = false; },
             latency() { return (Math.max(0, (fir.n - 1) / 2) + lag) * (inRate / rate); },
-            read() { return { snrDb: peak > 0 && floor > 0 ? 20 * Math.log10(peak / floor) : null }; },
+            read() { return { snrDb: peak > 0 && floor > 0 ? 20 * Math.log10(peak / floor) : null, present: open }; },
             process(ins, outs, n) {
                 const x = narrow.process(ins[0].re, ins[0].im, n, inRate);
                 const m = x.n;
@@ -800,6 +876,7 @@ export const OokDetectorBlock = {
                 const out = outs[0].re;
                 for (let k = 0; k < m; k++) {
                     env += smooth * (Math.hypot(fi[k], fq[k]) - env);
+                    if (settle > 0) { settle--; out[k] = 0; continue; }
                     if (!primed) { floor = env; peak = env; primed = true; }
                     const mid = (peak + floor) / 2;
                     // The key-down level is the marks' average, not their
@@ -825,10 +902,13 @@ export const OokDetectorBlock = {
                     hpos = hpos + 1 === hist.length ? 0 : hpos + 1;
                     const was = hist[hpos];
                     const span = peak - floor;
-                    // Under 6 dB between peak and floor is no signal at all.
-                    out[k] = peak > floor * 2 && span > 0 ? Math.max(0, Math.min(1, (was - floor) / span)) : 0;
+                    // Too little between peak and floor is no signal at all.
+                    if (open ? peak < floor * gateOff : peak >= floor * gateOn) open = !open;
+                    out[k] = open && span > 0 ? Math.max(0, Math.min(1, (was - floor) / span)) : 0;
                 }
                 if (outs[1] && floor > 0) emitControl(outs[1], 20 * Math.log10(Math.max(peak, 1e-12) / floor));
+                // A signal there or not, sent when that changes.
+                if (outs[2] && (open ? 1 : 0) !== sentOpen) { sentOpen = open ? 1 : 0; emitControl(outs[2], sentOpen); }
                 return m;
             },
         };

@@ -982,17 +982,24 @@ export function ConsoleView({ pg, id, reading, large = false, grow = 0 }) {
     const [copied, setCopied] = useState(false);
     const { box, toggle } = useFollow();
     const tailBox = useStickBottom();
+    // What it is watching for, when a match is wired: one line above the paper.
+    const matching = reading && reading.matching
+        ? <div className="pg-console__match">{`Matching: ${reading.matching}`}<span className="pg-list__dim">{` · ${reading.matches} ${reading.matches === 1 ? 'match' : 'matches'}`}</span></div>
+        : null;
     if (!large) {
-        const rows = 4 + extraRows(grow);
+        const rows = (matching ? 3 : 4) + extraRows(grow);
         const tail = lines.slice(-rows).join('\n').slice(-CARD_CHARS * (rows / 4));
-        return (
-            <pre className="pg-console" ref={tailBox} style={grow ? { minHeight: `${60 + grow}px`, maxHeight: `${60 + grow}px` } : undefined}>
-                {text ? tail : <span className="pg-list__empty">Nothing decoded yet</span>}
+        const h = (matching ? 44 : 60) + grow;
+        const paper = (
+            <pre className="pg-console" ref={tailBox} style={grow || matching ? { minHeight: `${h}px`, maxHeight: `${h}px` } : undefined}>
+                {text ? tail : <span className="pg-list__empty">{matching ? 'Nothing matched yet' : 'Nothing decoded yet'}</span>}
             </pre>
         );
+        return matching ? <>{matching}{paper}</> : paper;
     }
     return (
         <div className="pg-view">
+            {matching}
             <pre className="pg-console is-large" ref={box}>{text || 'Nothing decoded yet.'}</pre>
             <div className="pg-insp__row">
                 <span className="pg-list__dim">{reading ? `${reading.count} characters` : ''}</span>

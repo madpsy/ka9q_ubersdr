@@ -167,7 +167,7 @@ export const DECODER_INSIDES = {
         return d;
     },
     'cw-decoder': (p) => inside(p, [
-        { id: 'ook', type: 'ook-detector', params: { bandwidthHz: p.bandwidthHz }, out: 'key' },
+        { id: 'ook', type: 'ook-detector', params: { bandwidthHz: p.bandwidthHz, minSnrDb: p.minSnrDb }, out: 'key' },
         { id: 'morse', type: 'morse-decoder', params: { wpm: p.wpm }, into: 'key', out: 'text' },
     ], ['morse', 'text']),
     'navtex-decoder': (p) => inside(p, [
@@ -329,6 +329,8 @@ export const CwDecoderBlock = base('cw-decoder', 'CW decoder',
     'Morse to text, in one block, following the sender’s speed. Expand it to see inside.', {
         bandwidthHz: { kind: 'number', label: 'Bandwidth', unit: 'Hz', default: 100, min: 10, max: 1000, step: 5, control: false },
         wpm: { kind: 'number', label: 'Speed (0 = follow)', unit: 'wpm', default: 0, min: 0, max: 60, step: 1 },
+        // The on-off detector's: how far above the noise keying must stand to count.
+        minSnrDb: { kind: 'number', label: 'Needs at least', unit: 'dB', default: 9, min: 3, max: 40, step: 0.5 },
     });
 
 export const NavtexDecoderBlock = base('navtex-decoder', 'NAVTEX decoder',

@@ -199,7 +199,7 @@ export class Runtime {
             // Which outputs carry audio or IQ — what has a level to measure.
             node.levelOut = outputsOf(n, type).findIndex((p) => p.kind === COMPLEX || p.kind === REAL);
             // Which audio output to watch for clipping, if any.
-            node.audioOut = outputsOf(n, type).findIndex((p) => p.kind === REAL);
+            node.audioOut = outputsOf(n, type).findIndex((p) => p.kind === REAL && p.audio !== false);
             node.outs = outputsOf(n, type).map((p, i) => (node.outs && node.outs[i] && node.outs[i].kind === makeBuffer(p.kind, 0).kind ? node.outs[i] : makeBuffer(p.kind, 0)));
             node.ports = this.plan.ports[n.id] || [];
             // Which inputs carry samples. Only those set how much a block
@@ -476,7 +476,7 @@ export class Runtime {
         let audio = node.audioOut >= 0 ? node.outs[node.audioOut] : null;
         let m = audio ? audio.n : 0;
         if (!audio) {
-            const ai = node.ports.findIndex((p, i) => p.kind === REAL && ins[i]);
+            const ai = node.ports.findIndex((p, i) => p.kind === REAL && p.audio !== false && ins[i]);
             if (ai >= 0) { audio = ins[ai]; m = n; }
         }
         if (audio) {

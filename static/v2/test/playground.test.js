@@ -593,6 +593,8 @@ t('activity: a console counts the characters it is sent, and a Morse decoder lig
         chars += lv.console.act;
         if (lv.morse.act) keyedReads++; else quietReads++;
         assert.ok(!('act' in lv.tx) || lv.tx.act === 0, 'a block with no messages in has activity');
+        // A key level sits at 1 while the key is down: not audio, not clipping.
+        assert.ok(!('clip' in lv.ook) && !('clip' in lv.morse), 'a key level watched for clipping');
     }
     printed = rt.read('console').count;
     assert.ok(printed >= 5, `only ${printed} characters decoded`);

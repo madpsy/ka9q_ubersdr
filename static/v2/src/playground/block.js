@@ -14,7 +14,10 @@
 //     type:     'lowpass',            stable id, stored in saved and shared
 //                                     graphs — never rename one
 //     label, category, summary        for the palette
-//     inputs:   [{ name, kind, optional? }]
+//     inputs:   [{ name, kind, optional?, audio? }]  `audio: false` marks a
+//                                     real port that is not sound — a key
+//                                     level, a power — so it is never watched
+//                                     for clipping
 //     outputs:  [{ name, kind }]
 //     params:   { name: ParamSpec }
 //     rate(inRate, params)            the rate it puts out; same as in if absent

@@ -79,7 +79,7 @@ export const AgcBlock = {
     label: 'AGC',
     category: 'Audio',
     summary: 'Automatic gain control, against the audio or against a reference.',
-    inputs: [{ name: 'in', kind: REAL }, { name: 'ref', kind: REAL, optional: true }],
+    inputs: [{ name: 'in', kind: REAL }, { name: 'ref', kind: REAL, optional: true, audio: false }],
     outputs: OUT,
     params: {
         apply: { kind: 'bool', label: 'On', default: true },

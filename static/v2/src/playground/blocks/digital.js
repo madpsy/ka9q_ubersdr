@@ -89,7 +89,7 @@ export const FskDetectorBlock = {
     category: 'Digital',
     summary: 'Two tones to a soft bit, +1 mark and −1 space — RTTY, NAVTEX, any two-tone FSK. Centre it on zero first.',
     inputs: [{ name: 'in', kind: COMPLEX }],
-    outputs: [{ name: 'out', kind: REAL }],
+    outputs: [{ name: 'out', kind: REAL, audio: false }],
     params: {
         shiftHz: { kind: 'number', label: 'Shift', unit: 'Hz', default: 170, min: 10, max: 2000, step: 1, control: false },
         baud: { kind: 'number', label: 'Baud', default: 45.45, min: 1, max: 600, step: 0.01, control: false },
@@ -183,7 +183,7 @@ export const UartBlock = {
     label: 'Start-stop decoder',
     category: 'Digital',
     summary: 'Teleprinter framing: start bit, data bits, stop bits — soft bits in, character codes out.',
-    inputs: [{ name: 'in', kind: REAL }],
+    inputs: [{ name: 'in', kind: REAL, audio: false }],
     outputs: [{ name: 'codes', kind: MESSAGE }],
     params: {
         baud: { kind: 'number', label: 'Baud', default: 45.45, min: 1, max: 600, step: 0.01, control: false },
@@ -696,7 +696,7 @@ export const OokDetectorBlock = {
     category: 'Digital',
     summary: 'A keyed carrier to a key level, 0 to 1, following fades — CW’s first stage. Centre it on zero first.',
     inputs: [{ name: 'in', kind: COMPLEX }],
-    outputs: [{ name: 'key', kind: REAL }, { name: 'snr', kind: CONTROL }],
+    outputs: [{ name: 'key', kind: REAL, audio: false }, { name: 'snr', kind: CONTROL }],
     params: {
         bandwidthHz: { kind: 'number', label: 'Bandwidth', unit: 'Hz', default: 100, min: 10, max: 1000, step: 5, control: false },
         smoothMs: { kind: 'number', label: 'Smoothing', unit: 'ms', default: 4, min: 0, max: 50, step: 0.5, live: true },
@@ -839,7 +839,7 @@ export const MorseDecoderBlock = {
     label: 'Morse decoder',
     category: 'Digital',
     summary: 'A key level to text, following the sender’s speed.',
-    inputs: [{ name: 'key', kind: REAL }],
+    inputs: [{ name: 'key', kind: REAL, audio: false }],
     // What its card's activity dot means: see activity() below.
     activity: 'The key is down',
     outputs: [{ name: 'text', kind: MESSAGE }, { name: 'wpm', kind: CONTROL }],
@@ -990,7 +990,7 @@ export const BitSyncBlock = {
     label: 'Bit sync',
     category: 'Digital',
     summary: 'Clock recovery for synchronous FSK: soft bits in, one decided bit per bit time out.',
-    inputs: [{ name: 'in', kind: REAL }],
+    inputs: [{ name: 'in', kind: REAL, audio: false }],
     outputs: [{ name: 'bits', kind: BITS }],
     params: {
         baud: { kind: 'number', label: 'Baud', default: 100, min: 1, max: 10000, step: 0.01, control: false },

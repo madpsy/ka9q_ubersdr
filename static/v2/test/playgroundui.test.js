@@ -1353,6 +1353,9 @@ t('a CLIP pill while audio is over full scale, held a moment after; a red Peak i
     const { ClipPill, canClip } = P;
     assert.ok(canClip(BLOCK_BY_TYPE['audio-out']) && canClip(BLOCK_BY_TYPE['audio-lowpass']) && canClip(BLOCK_BY_TYPE.lsa));
     assert.ok(!canClip(BLOCK_BY_TYPE.shift), 'an IQ block can clip');
+    // Real streams that are not sound — a key level, a soft decision.
+    for (const type of ['ook-detector', 'morse-decoder', 'fsk-detector', 'uart', 'power']) assert.ok(!canClip(BLOCK_BY_TYPE[type]), `${type} can clip`);
+    assert.ok(canClip(BLOCK_BY_TYPE['carrier-tracker']) && canClip(BLOCK_BY_TYPE.agc), 'their audio is not watched');
     reset();
     const pg = getPlayground(radio().player);
     const was = pg.levels;

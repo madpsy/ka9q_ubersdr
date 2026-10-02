@@ -102,9 +102,13 @@ function InOut({ pg, id }) {
 // enough that one overload is seen, not just one that lasts.
 export const CLIP_HOLD_MS = 1500;
 
-/** Whether a block has audio in or out: something that can clip. */
+/**
+ * Whether a block has audio in or out: something that can clip. Not a key
+ * level, a power or a soft decision — real streams that are not sound, and
+ * sit at 1 by design (their ports say `audio: false`).
+ */
 export function canClip(def) {
-    return !!def && [...def.inputs, ...def.outputs].some((p) => p.kind === 'real');
+    return !!def && [...def.inputs, ...def.outputs].some((p) => p.kind === 'real' && p.audio !== false);
 }
 
 /**

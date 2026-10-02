@@ -51,7 +51,7 @@ export const PowerBlock = {
     category: 'Detectors',
     summary: 'Instantaneous power, |z|², per sample — what a squelch measures.',
     inputs: [{ name: 'in', kind: COMPLEX }],
-    outputs: [{ name: 'out', kind: REAL }],
+    outputs: [{ name: 'out', kind: REAL, audio: false }],
     params: {},
     create() {
         return {
@@ -132,9 +132,9 @@ export const CarrierTrackerBlock = {
     inputs: [{ name: 'in', kind: COMPLEX }],
     outputs: [
         { name: 'audio', kind: REAL },
-        { name: 'power', kind: REAL },
-        { name: 'carrier', kind: REAL },
-        { name: 'lock', kind: REAL },
+        { name: 'power', kind: REAL, audio: false },
+        { name: 'carrier', kind: REAL, audio: false },
+        { name: 'lock', kind: REAL, audio: false },
     ],
     params: {
         mode: {

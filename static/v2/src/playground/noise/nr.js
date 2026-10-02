@@ -1,4 +1,4 @@
-// The playground's copy of lib/nr.js — the Noise panel's NR — made into a
+// The playground's copy of lib/nr.js — the Noise panel's LSA — made into a
 // block's engine (blocks/noise.js). Copied rather than shared so the panel's
 // engine can change without moving a saved graph's sound, and the other way
 // about. What changed, and only that:
@@ -182,11 +182,11 @@ export class FFT {
 // may fall to — because that is the one number whose effect is unmistakable
 // on every band. The estimator's own constants are not offered: they
 // interact, and every published implementation ships them fixed. The
-// panel's defaults, for NR and for NR2 beside it.
+// panel's defaults, for LSA and for NR (nr2.js) beside it.
 export const NR_DEFAULTS = {
-    strength: 40,       // nr: gain floor −6…−30 dB; nr2: over-subtraction
+    strength: 40,       // lsa: gain floor −6…−30 dB; nr2: over-subtraction
     makeupDb: 0,        // plain output gain
-    // NR2's own knobs.
+    // NR's own knobs (nr2.js).
     floor: 10,
     adaptRate: 1.0,
 };

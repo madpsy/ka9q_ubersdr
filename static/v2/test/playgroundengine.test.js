@@ -159,6 +159,76 @@ t('readings come back for watched nodes only, and no more often than READ_EVERY_
     assert.ok(sent.pop().readings, 'readings not sent once due');
 });
 
+t('taking the wire out of an Audio out silences it — no block played again — and the rest keeps running', () => {
+    const sent = [];
+    // Readings go back no more often than READ_EVERY_MS: a clock that moves.
+    let clock = 0;
+    const core = createWorkerCore((m) => sent.push(m), () => clock);
+    const plan = planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700, lowCutHz: 50 });
+    const g = parseGraph(graphForPlan(plan, 12000)).graph;
+    const into = g.wires.find((w) => BLOCK_BY_TYPE[g.nodes.find((n) => n.id === w[2]).type] === BLOCK_BY_TYPE['audio-out']);
+    assert.ok(into, 'no wire into an Audio out');
+    const { scene } = require('./dspscene.js');
+    const { I, Q } = scene(12000, 0.5);
+    let seq = 0;
+    const packet = () => {
+        clock += 20;
+        const at = (seq % 25) * 240;
+        core.onMessage({ t: 'packet', seq: ++seq, i: I.slice(at, at + 240), q: Q.slice(at, at + 240), frames: 240, rate: 12000 });
+        return sent.filter((m) => m.t === 'out').pop();
+    };
+    core.onMessage({ t: 'graph', graph: g });
+    core.onMessage({ t: 'watch', ids: ['spectrum'] });
+    for (let k = 0; k < 5; k++) assert.strictEqual(packet().audio.length, 1, 'no audio from the whole graph');
+
+    // The wire out, as pressing Delete on it does.
+    const cut = { ...g, wires: g.wires.filter((w) => w !== into) };
+    sent.length = 0;
+    core.onMessage({ t: 'graph', graph: cut });
+    const st = sent.find((m) => m.t === 'status');
+    assert.strictEqual(st.ok, false);
+    assert.match(st.errors.map((e) => e.message).join(' '), /needs a wire/);
+    let spectrumSeen = 0;
+    for (let k = 0; k < 10; k++) {
+        const out = packet();
+        assert.deepStrictEqual(out.audio, [], `packet ${k}: audio sent with nothing wired into it`);
+        if (out.readings && out.readings.spectrum) spectrumSeen++;
+    }
+    assert.ok(spectrumSeen > 0, 'the spectrum stopped with the audio');
+
+    // And back.
+    core.onMessage({ t: 'graph', graph: g });
+    assert.strictEqual(packet().audio.length, 1, 'the audio did not come back with the wire');
+});
+
+t('a block dropped on the canvas with nothing wired leaves the running graph playing as it was', () => {
+    const plan = planFor({ mode: 'usb', offsetHz: 0, widthHz: 2700, lowCutHz: 50 });
+    const g = parseGraph(graphForPlan(plan, 12000)).graph;
+    const withNr = { ...g, nodes: [...g.nodes, { id: 'lsa1', type: 'lsa', params: {}, x: 0, y: 0 }] };
+    const { scene } = require('./dspscene.js');
+    const { I, Q } = scene(12000, 0.2);
+    const run = (graph) => {
+        const sent = [];
+        const core = createWorkerCore((m) => sent.push(m), () => 0);
+        core.onMessage({ t: 'graph', graph: g });
+        const outs = [];
+        for (let k = 0; k < 10; k++) {
+            // Dropped in halfway, as it is into a running graph.
+            if (k === 5) core.onMessage({ t: 'graph', graph });
+            core.onMessage({ t: 'packet', seq: k + 1, i: I.slice(k * 240, k * 240 + 240), q: Q.slice(k * 240, k * 240 + 240), frames: 240, rate: 12000 });
+            outs.push(sent.filter((m) => m.t === 'out').pop());
+        }
+        return { outs, status: sent.filter((m) => m.t === 'status').pop() };
+    };
+    const plain = run(g);
+    const dropped = run(withNr);
+    assert.strictEqual(dropped.status.ok, false, 'an unwired block went unremarked');
+    for (let k = 0; k < 10; k++) {
+        assert.strictEqual(dropped.outs[k].audio.length, 1, `packet ${k}: no audio`);
+        assert.deepStrictEqual(Array.from(dropped.outs[k].audio[0].samples), Array.from(plain.outs[k].audio[0].samples), `packet ${k}: not the audio it was`);
+    }
+});
+
 t('a graph that cannot run says why; one that throws is stopped and says so', () => {
     const sent = [];
     const core = createWorkerCore((m) => sent.push(m), () => 0);

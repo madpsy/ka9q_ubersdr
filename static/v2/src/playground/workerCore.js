@@ -88,7 +88,12 @@ export function createWorkerCore(post, now = () => performance.now()) {
 
     const packet = (m) => {
         const started = now();
-        rt.process({ i: m.i, q: m.q, frames: m.frames, rate: m.rate });
+        // Nothing ran: nothing to hand on. A sink's last block is still in it,
+        // and sent again it is the same 20 ms on every packet — a buzz.
+        if (!rt.process({ i: m.i, q: m.q, frames: m.frames, rate: m.rate })) {
+            post({ t: 'out', seq: m.seq, audio: [], record: [], readings: null, ms: now() - started });
+            return;
+        }
         const transfer = [];
         const audio = [];
         for (const id of audioIds) {

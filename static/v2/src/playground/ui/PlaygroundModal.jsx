@@ -256,7 +256,7 @@ function Summary({ pg, graph, info, stats }) {
             </div>
             {info.errors.length > 0 && (
                 <div className="pg-insp__section">
-                    <div className="pg-insp__title">Not ready to run</div>
+                    <div className="pg-insp__title">Not running until fixed</div>
                     {info.errors.map((e, i) => <div key={i} className="note note--tight note--warn">{e.node ? `${e.node}: ` : ''}{e.message}</div>)}
                 </div>
             )}

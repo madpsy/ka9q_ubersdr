@@ -1,7 +1,7 @@
-// The playground's copy of lib/nr2.js — the Noise panel's NR2 — made into a
-// block's engine (blocks/noise.js). What changed, and only that:
+// The playground's copy of lib/nr2.js — the Noise panel's NR, which it
+// stores as 'nr2' — made into a block's engine (blocks/noise.js). What changed, and only that:
 //
-//   * process() takes a packet of any length, as the NR copy beside it does
+//   * process() takes a packet of any length, as the LSA copy beside it (nr.js) does
 //     (see nr.js): input gathered into whole hops, output from a FIFO primed
 //     with one hop of silence, every packet given back the samples it gave,
 //     `fftSize` late (latency()).

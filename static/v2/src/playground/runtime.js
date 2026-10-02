@@ -14,6 +14,14 @@
 // hand over different numbers of samples in one packet. So such a block reads
 // through a queue per input and takes as many frames as all of them have,
 // leaving the rest for the next packet. A block with one input never waits.
+//
+// A graph with a mistake in it still runs, all but the mistake. A block with
+// an error — an input with no wire, inputs at two rates, part of a loop —
+// is blocked, and so is everything downstream of it by any wire: those do not
+// run and have nothing to read. The rest carries on. Taking one wire out of a
+// running graph should silence what it fed, not stop the spectrum beside it;
+// and a block that has not run must not be read as though it had, or an Audio
+// out hands its last block to the speakers again on every packet.
 
 import { BLOCK_BY_TYPE } from './blocks/index.js';
 import { CONTROL, MESSAGE, ensureBuffer, isStream, makeBuffer, outputsOf, sanitizeParams } from './block.js';
@@ -37,6 +45,34 @@ import { compile } from './graph.js';
 // whole tick or none with odds in proportion to the real time, which is why it
 // is a window's total and never a single packet's. The timing itself is two
 // clock reads per block per packet: nothing beside the arithmetic it measures.
+
+/**
+ * The blocks that cannot run: every one with an error, or left out of the
+ * order (a loop), and everything any of them feeds, however far on.
+ */
+function blockedBy(graph, plan) {
+    const blocked = new Set();
+    const ordered = new Set(plan.order);
+    for (const n of graph.nodes) if (!ordered.has(n.id)) blocked.add(n.id);
+    for (const e of plan.errors) if (e.node) blocked.add(e.node);
+    const feeds = new Map();
+    for (const [to, list] of Object.entries(plan.inputs)) {
+        for (const f of list) {
+            if (!f) continue;
+            if (!feeds.has(f[0])) feeds.set(f[0], []);
+            feeds.get(f[0]).push(to);
+        }
+    }
+    const todo = Array.from(blocked);
+    while (todo.length) {
+        for (const to of feeds.get(todo.pop()) || []) {
+            if (blocked.has(to)) continue;
+            blocked.add(to);
+            todo.push(to);
+        }
+    }
+    return blocked;
+}
 
 /** One input's backlog, for a block whose inputs have to be lined up. */
 class Queue {
@@ -108,6 +144,8 @@ export class Runtime {
         this.nodes = new Map();
         this.plan = null;
         this.errors = [];
+        // The ids that do not run: see the note at the top.
+        this.blocked = new Set();
         this.build();
     }
 
@@ -167,6 +205,16 @@ export class Runtime {
                 const at = up ? outputsOf(upNode, up.type).findIndex((p) => p.name === f[1]) : -1;
                 return at >= 0 ? up.outs[at] : null;
             });
+        }
+        this.blocked = blockedBy(this.graph, this.plan);
+        // Nothing left on a blocked block's outputs for anything to read.
+        for (const id of this.blocked) {
+            const node = this.nodes.get(id);
+            if (!node) continue;
+            for (const o of node.outs) {
+                o.n = 0;
+                if (o.kind === MESSAGE) o.list = [];
+            }
         }
         this._latencies();
         return this.ok;
@@ -310,6 +358,7 @@ export class Runtime {
 
     /** What one node has to report — a meter's level, a sink's audio — or null. */
     read(id) {
+        if (this.blocked.has(id)) return null;
         const node = this.nodes.get(id);
         return node && node.inst.read ? node.inst.read() : null;
     }
@@ -320,9 +369,11 @@ export class Runtime {
      */
     process(stream) {
         if (stream.rate > 0 && stream.rate !== this.streamRate) this.setStreamRate(stream.rate);
-        if (!this.ok) return false;
+        // False when nothing can run: every block blocked.
+        if (!this.plan || (this.blocked.size > 0 && this.blocked.size >= this.graph.nodes.length)) return false;
         if (stream.frames > 0 && this.streamRate > 0) this._windowSec += stream.frames / this.streamRate;
         for (const id of this.plan.order) {
+            if (this.blocked.has(id)) continue;
             const node = this.nodes.get(id);
             const type = node.type;
             const from = node.from;

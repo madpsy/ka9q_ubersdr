@@ -1,5 +1,7 @@
-// The Noise panel's client-side stage as blocks: the impulse blanker, NR and
-// NR2. Each runs the playground's own copy of the panel's engine (playground/
+// The Noise panel's client-side stage as blocks: the impulse blanker, and its
+// two noise reducers by the panel's own names — LSA (lib/nr.js) and NR
+// (lib/nr2.js, stored by the panel as 'nr2', which is what this type is
+// called too). Each runs the playground's own copy of the panel's engine (playground/
 // noise/), which is the panel's arithmetic made to take a packet of any
 // length — see the notes at the top of each copy.
 //
@@ -22,7 +24,7 @@ const ON = { kind: 'bool', label: 'On', default: true };
 const MAKEUP = { kind: 'number', label: 'Makeup gain', unit: 'dB', default: NR_DEFAULTS.makeupDb, min: -12, max: 12, step: 0.5, live: true };
 const STRENGTH = { kind: 'number', label: 'Strength', unit: '%', default: NR_DEFAULTS.strength, min: 0, max: 100, step: 5, live: true };
 
-// The panel's NR2 is a 2048-point FFT at four-times overlap.
+// The panel's NR is a 2048-point FFT at four-times overlap.
 const NR2_FFT = 2048;
 const NR2_OVERLAP = 4;
 
@@ -73,11 +75,11 @@ export const NoiseBlankerBlock = {
     },
 };
 
-export const NrBlock = {
-    type: 'nr',
-    label: 'Noise reduction (NR)',
+export const LsaBlock = {
+    type: 'lsa',
+    label: 'Noise reduction (LSA)',
     category: 'Filters',
-    summary: 'Takes the steady band noise out from under the audio, following it as it changes — the Noise panel’s NR. Strength is how deep it may cut. A carrier that never moves fades with the noise.',
+    summary: 'Takes the steady band noise out from under the audio, following it as it changes — the Noise panel’s LSA, its default: no learning phase, best on voice. Strength is how deep it may cut. A carrier that never moves fades with the noise.',
     inputs: IN,
     outputs: OUT,
     params: {
@@ -116,9 +118,9 @@ export const NrBlock = {
 
 export const Nr2Block = {
     type: 'nr2',
-    label: 'Noise reduction (NR2)',
+    label: 'Noise reduction (NR)',
     category: 'Filters',
-    summary: 'The classic spectral subtraction — the Noise panel’s NR2. Learns the noise first — 1.3 s at 12 kHz, less at higher rates — then subtracts it; a long window that suits CW and other narrow signals. Start it on noise, not on a signal, or press Learn again.',
+    summary: 'The classic spectral subtraction — the Noise panel’s NR. Learns the noise first — 1.3 s at 12 kHz, less at higher rates — then subtracts it; a long window that suits CW and other narrow signals. Start it on noise, not on a signal, or press Learn again.',
     inputs: IN,
     outputs: OUT,
     params: {

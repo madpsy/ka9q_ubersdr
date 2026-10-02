@@ -30,7 +30,7 @@ const UUID = '4907ba0a-32e6-40bb-a4ca-47f823331728';
 // ---- what a link says -------------------------------------------------------
 
 t('the ordinary form', () => {
-    assert.deepStrictEqual(parse(`ubersdr://connect?uuid=${UUID}`), { action: 'connect', uuid: UUID });
+    assert.deepStrictEqual(parse(`ubersdr://connect?uuid=${UUID}`), { action: 'connect', uuid: UUID, query: '' });
 });
 
 // `ubersdr:connect?…` is as valid as `ubersdr://connect?…` and puts the action
@@ -47,6 +47,27 @@ t('case and a trailing slash do not matter', () => {
 
 t('parameters nobody asked about are ignored', () => {
     assert.strictEqual(parse(`ubersdr://connect?uuid=${UUID}&freq=14200000`).uuid, UUID);
+    assert.strictEqual(parse(`ubersdr://connect?uuid=${UUID}&layout=docks`).query, '');
+});
+
+// A shared link's tuning, view and playground graph go on to the page, under
+// the names the web link uses; nothing else does.
+t('tuning, view and a graph are handed on to the page', () => {
+    const q = 'freq=14074000&mode=usb&bwl=100&bwh=2800&zoom_freq=14074000&zoom_bw=12.5&playground=pg1.z.abc-_';
+    const out = new URLSearchParams(parse(`ubersdr://connect?uuid=${UUID}&${q}`).query);
+    assert.deepStrictEqual(Object.fromEntries(out), Object.fromEntries(new URLSearchParams(q)));
+});
+
+// The page reads ?password= and logs in with it (radio/session.js). A link
+// must never be able to set that, or anything else it was not built to carry.
+t('a password in a link never reaches the page', () => {
+    const { query } = parse(`ubersdr://connect?uuid=${UUID}&password=hunter2&freq=7100000&uuid2=x`);
+    assert.strictEqual(query, 'freq=7100000');
+});
+
+t('an over-long value is dropped rather than passed on', () => {
+    const { query } = parse(`ubersdr://connect?uuid=${UUID}&mode=${'u'.repeat(40)}&playground=pg1.j.${'A'.repeat(40000)}`);
+    assert.strictEqual(query, '');
 });
 
 // The reason the regex is there. Every one of these would otherwise be
@@ -106,8 +127,9 @@ const deps = ({ entries = [], row = null, connectFails = new Set() } = {}) => {
         calls,
         store: { findByUuid: (uuid) => entries.find((e) => e.uuid === uuid) || null },
         lookupUuid: async () => { calls.lookups++; return row; },
-        connect: async (desc) => {
+        connect: async (desc, opts) => {
             calls.connect.push(desc);
+            calls.opts = opts;
             if (connectFails.has(desc.id)) throw new Error('probe failed');
             return desc.id || 'new-id';
         },
@@ -119,6 +141,15 @@ ta('a receiver already saved opens without asking the directory', async () => {
     assert.strictEqual(await open(UUID, d), 'saved-id');
     assert.deepStrictEqual(d.calls.connect, [{ id: 'saved-id' }]);
     assert.strictEqual(d.calls.lookups, 0, 'the directory should not have been asked');
+});
+
+ta('the page query travels with the connect, saved or looked up', async () => {
+    const a = deps({ entries: [saved] });
+    await open(UUID, { ...a, query: 'freq=7100000' });
+    assert.deepStrictEqual(a.calls.opts, { query: 'freq=7100000' });
+    const b = deps({ row: fresh });
+    await open(UUID, { ...b, query: 'mode=lsb' });
+    assert.deepStrictEqual(b.calls.opts, { query: 'mode=lsb' });
 });
 
 ta('one that is not saved is looked up and opened', async () => {

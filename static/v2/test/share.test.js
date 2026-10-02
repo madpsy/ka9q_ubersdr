@@ -12,7 +12,7 @@
 
 const assert = require('assert');
 const {
-    SHARE_KEYS, SHARE_TARGETS, _resetUrlView, buildShareUrl, readShareUrl, shareOrigin, shareText,
+    SHARE_KEYS, SHARE_TARGETS, _resetUrlView, arrivalQuery, buildShareUrl, readShareUrl, shareOrigin, shareQuery, shareText,
 } = require('./.build/share.cjs');
 
 let pass = 0;
@@ -271,6 +271,23 @@ t('no view in the link is not an error', () => {
     _resetUrlView();
     const { takeUrlView } = require('./.build/share.cjs');
     assert.strictEqual(takeUrlView(), null);
+});
+
+// --- the query on its own, for the app link ---------------------------------------
+
+t('the app link carries exactly the web link\'s query', () => {
+    assert.strictEqual(`?${shareQuery({ tuning: TUNING, view: VIEW })}`, query(buildShareUrl({ ...AT, tuning: TUNING, view: VIEW })));
+    assert.strictEqual(shareQuery({}), '');
+});
+
+// What a page opened from a link hands on to the app: the link's tuning, view
+// and graph, and nothing else from the address bar — above all not a password.
+t('a page hands on the link it arrived with, and never its password', () => {
+    const q = new URLSearchParams(arrivalQuery('?password=hunter2&freq=7100000&mode=lsb&playground=pg1.z.abc&layout=x'));
+    assert.deepStrictEqual(Object.fromEntries(q), { freq: '7100000', mode: 'lsb', playground: 'pg1.z.abc' });
+    assert.strictEqual(arrivalQuery('?password=hunter2'), '');
+    // Under node there is no address bar, so nothing arrived.
+    assert.strictEqual(arrivalQuery(), '');
 });
 
 console.log(`\n${pass} ok`);

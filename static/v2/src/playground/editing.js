@@ -11,7 +11,14 @@ import { BLOCK_BY_TYPE } from './blocks/index.js';
 import { controlPort, controllable, inputsOf, isStream, outputsOf, sanitizeParams } from './block.js';
 import { cleanName } from './graph.js';
 
-/** A copy of a graph that shares nothing with it. */
+/**
+ * A copy of a graph's blocks and wires that shares nothing with it.
+ *
+ * Without its name or `savedAs`, deliberately: this is what the undo history
+ * holds and what every edit hands the engine, and the engine keeps the name it
+ * has for a graph that does not say one (engine.js, setGraph) — so undo never
+ * takes a rename back.
+ */
 export const cloneGraph = (g) => ({
     v: g.v,
     nodes: g.nodes.map((n) => ({ ...n, params: { ...n.params }, ...(n.controls ? { controls: [...n.controls] } : {}) })),

@@ -97,7 +97,7 @@ async function withSaved(rows) {
  * instance id and the native side reads the secret itself, so a value the
  * chooser must not hold does not pass through it on the way to the page.
  */
-export async function connect(desc) {
+export async function connect(desc, { query = '' } = {}) {
     const entry = desc.id ? await store.get(desc.id) : await store.ensure(desc);
     if (!entry) throw new Error('unknown instance');
 
@@ -120,6 +120,9 @@ export async function connect(desc) {
         localPort: entry.localPort,
         label: entry.label,
         product: PRODUCT,
+        // What a followed link hands the page — a shared frequency, view or
+        // playground graph, cut down to the names the page reads (deeplink.js).
+        query,
     });
     // The stored port is the receiver's origin, and so where its settings live.
     // It is kept unless something else already had it, in which case what came

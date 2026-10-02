@@ -14,6 +14,7 @@ import {
     ANDROID_APK, ANDROID_BADGE, APP_DOWNLOADS, appDownloads, detectDesktopOS,
     IOS_APP_STORE, IOS_APP_STORE_BADGE, ubersdrAppUri, vibesdrUri,
 } from '../lib/appLinks.js';
+import { arrivalQuery } from '../lib/share.js';
 
 // v1's QR renderer, loaded on demand. 20 KB that only a phone-facing dialog
 // needs, so it stays out of the bundle and off the critical path — the same
@@ -190,7 +191,9 @@ function DownloadButton({ download, label }) {
  * they sit next to it.
  */
 export function UberSdrAppModal({ publicUuid, onClose }) {
-    const uri = ubersdrAppUri(publicUuid);
+    // With whatever link this page was opened from, so a shared frequency or
+    // playground graph opens in the app rather than only the receiver.
+    const uri = ubersdrAppUri(publicUuid, arrivalQuery());
     // Read once, when the dialog opens: it is a property of the machine, and
     // nothing about it can change while this is on screen.
     // Plural: Linux has four builds — an AppImage and a .deb, each for x86_64
@@ -273,7 +276,9 @@ export function UberSdrAppModal({ publicUuid, onClose }) {
  * Neither can be told from the other from inside a browser.
  */
 export function IosAppModal({ publicUuid, onClose }) {
-    const uri = ubersdrAppUri(publicUuid);
+    // With whatever link this page was opened from, so a shared frequency or
+    // playground graph opens in the app rather than only the receiver.
+    const uri = ubersdrAppUri(publicUuid, arrivalQuery());
 
     return (
         <Modal onClose={onClose} label="Open in the UberSDR app">
@@ -321,7 +326,9 @@ export function IosAppModal({ publicUuid, onClose }) {
  * tap is the difference between an expected step and a warning.
  */
 export function AndroidAppModal({ publicUuid, onClose }) {
-    const uri = ubersdrAppUri(publicUuid);
+    // With whatever link this page was opened from, so a shared frequency or
+    // playground graph opens in the app rather than only the receiver.
+    const uri = ubersdrAppUri(publicUuid, arrivalQuery());
 
     return (
         <Modal onClose={onClose} label="Open in the UberSDR app">

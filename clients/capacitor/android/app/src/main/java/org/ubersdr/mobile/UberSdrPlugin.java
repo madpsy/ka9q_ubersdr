@@ -214,6 +214,10 @@ public class UberSdrPlugin extends Plugin {
         final int preferredPort = call.getInt("localPort", 0);
         final String label = call.getString("label", "UberSDR");
         final String product = call.getString("product", "");
+        // The page's query, from a followed link (src/deeplink.js has already
+        // cut it down to what the page reads). Empty for an ordinary connect.
+        final String query = call.getString("query", "");
+        final String page = "/v2/" + (query.isEmpty() ? "" : "?" + query);
 
         if (id.isEmpty() || host.isEmpty() || port <= 0) {
             call.reject("an id, host and port are required");
@@ -232,8 +236,15 @@ public class UberSdrPlugin extends Plugin {
         //
         // The Activity is singleTask, so an Intent carrying no id comes out at
         // its onNewIntent, which ignores it and simply arrives in front.
+        //
+        // Unless a link asked for something on it — a frequency, a playground
+        // graph — which the page reads only as it loads. Then the Intent
+        // carries the address to reload onto, and onNewIntent loads it into
+        // the same page, on the same proxy, with nothing restarted.
         if (proxy != null && id.equals(openId) && ReceiverActivity.isOpen()) {
-            getActivity().startActivity(new Intent(getContext(), ReceiverActivity.class));
+            Intent front = new Intent(getContext(), ReceiverActivity.class);
+            if (!query.isEmpty()) front.putExtra(ReceiverActivity.EXTRA_URL, proxy.origin() + page);
+            getActivity().startActivity(front);
             JSObject shown = new JSObject();
             shown.put("localPort", proxy.localPort());
             call.resolve(shown);
@@ -271,7 +282,7 @@ public class UberSdrPlugin extends Plugin {
         Intent intent = new Intent(getContext(), ReceiverActivity.class);
         intent.putExtra(ReceiverActivity.EXTRA_ID, id);
         intent.putExtra(ReceiverActivity.EXTRA_EPOCH, epoch);
-        intent.putExtra(ReceiverActivity.EXTRA_URL, started.origin() + "/v2/");
+        intent.putExtra(ReceiverActivity.EXTRA_URL, started.origin() + page);
         intent.putExtra(ReceiverActivity.EXTRA_ORIGIN, started.origin());
         intent.putExtra(ReceiverActivity.EXTRA_UPSTREAM, started.upstreamOrigin());
         intent.putExtra(ReceiverActivity.EXTRA_LABEL, label);

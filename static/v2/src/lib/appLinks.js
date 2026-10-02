@@ -11,16 +11,24 @@
 // is *now* rather than being told an address that was true when the link was
 // made. A tunnel hostname changes; the UUID does not.
 //
-// Which is also why the link carries nothing else. The apps resolve the UUID
+// Which is also why the link carries no address. The apps resolve the UUID
 // against the directory themselves (clients/electron/deeplink.js and
 // clients/capacitor/src/deeplink.js are the two ends of ubersdr://), and an
 // address here would be the one part of it guaranteed to go stale.
+//
+// What an UberSDR link may carry besides is what a shared web link carries —
+// frequency, mode, filter, view (lib/share.js, shareQuery) and a playground
+// graph — which the app hands on to the receiver page as its query string:
+//
+//   ubersdr://connect?uuid=<public uuid>&freq=14074000&mode=usb&playground=pg1…
+//
+// The apps pass on those names and no others. VibeSDR's link stays bare.
 //
 // Plain JS rather than part of StartExtras.jsx so that these can be tested —
 // the v2 test harness bundles .js modules under node, and a link that is wrong
 // fails silently: the OS simply does nothing with a scheme nobody claims.
 
-const connectUri = (scheme, publicUuid) => {
+const connectUri = (scheme, publicUuid, query = '') => {
     const uuid = String(publicUuid || '').trim();
     // No UUID, no link: an instance that is not registered with the directory
     // has nothing for an app to connect *to*, and callers use the null to leave
@@ -30,7 +38,8 @@ const connectUri = (scheme, publicUuid) => {
     // this produces the identical string for every real instance. It is here
     // for the one that is not real — the value arrives from the server, and a
     // link is a URL whether or not what went into it was one.
-    return `${scheme}://connect?uuid=${encodeURIComponent(uuid)}`;
+    const rest = String(query || '').replace(/^[?&]+/, '');
+    return `${scheme}://connect?uuid=${encodeURIComponent(uuid)}${rest ? `&${rest}` : ''}`;
 };
 
 /** The VibeSDR app's link for this receiver, or null. */
@@ -41,13 +50,16 @@ export function vibesdrUri(publicUuid) {
 /**
  * The UberSDR app's link for this receiver, or null.
  *
+ * `query` is a share link's query string (shareQuery, arrivalQuery in
+ * lib/share.js) for the app to open the receiver on; empty for the bare link.
+ *
  * Followed by the desktop client (Windows, macOS, Linux) and the Android
  * client, which register the scheme with the platform. Nothing happens if
  * neither is installed — an unclaimed scheme is not an error anywhere, which is
  * why the dialog that offers this also shows the link itself.
  */
-export function ubersdrAppUri(publicUuid) {
-    return connectUri('ubersdr', publicUuid);
+export function ubersdrAppUri(publicUuid, query = '') {
+    return connectUri('ubersdr', publicUuid, query);
 }
 
 // Where the desktop client comes from, per platform.

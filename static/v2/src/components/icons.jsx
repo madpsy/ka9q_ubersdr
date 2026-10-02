@@ -123,6 +123,8 @@ export const Icon = {
     Play: (p) => <Svg {...p}><path d="M8.5 6.2 18 12l-9.5 5.8z" fill="currentColor" stroke="none" /></Svg>,
     Pause: (p) => <Svg {...p}><rect x="7.5" y="6.5" width="3.2" height="11" rx="1" fill="currentColor" stroke="none" /><rect x="13.3" y="6.5" width="3.2" height="11" rx="1" fill="currentColor" stroke="none" /></Svg>,
     Download: (p) => <Svg {...p}><path d="M12 3v11" /><path d="m7.5 10 4.5 4 4.5-4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></Svg>,
+    Save: (p) => <Svg {...p}><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V3z" /><path d="M8 3v5h7V3" /><path d="M8 21v-7h8v7" /></Svg>,
+    Folder: (p) => <Svg {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" /></Svg>,
     Search: (p) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></Svg>,
     Mic: (p) => <Svg {...p}><rect x="9" y="3" width="6" height="10" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" /><path d="M12 18v3" /></Svg>,
     // A closed padlock: the tuning lock. Its open twin below is the same body

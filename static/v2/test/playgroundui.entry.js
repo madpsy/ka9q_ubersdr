@@ -38,10 +38,12 @@ import { GRAPH_VERSION, compile, parseGraph, serializeGraph } from '../src/playg
 import { getPlayground } from '../src/playground/engine.js';
 import { encodeShare, decodeShare } from '../src/playground/share.js';
 import { PROBES, airSpan, rfLabel, rfOf, shiftLabel } from '../src/playground/probes.js';
+import * as LIB from '../src/playground/library.js';
+import { ExportDialog, GraphName, OpenDialog, SaveNameDialog } from '../src/playground/ui/GraphLibrary.jsx';
 import { resetDemodSettings, saveDemodSettings } from '../src/lib/iqDemod.js';
 
 module.exports = {
-    deep, render, reset, walk, words,
+    deep, render, reset, walk, words, LIB, GraphName, ExportDialog, OpenDialog, SaveNameDialog,
     withArrival, zoomToward, ZOOM_MAX, ZOOM_MIN,
     IQPanel, PlaygroundWatch, takeShareCode, PlaygroundModal, PlaygroundWindow, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, TemplatesMenu, TEMPLATES,
     Inspector, ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams, formatKbps, VoiceField, holdPlayback, playbackHeld, JsonPane, graphText, readGraphText, Canvas, BlockPreview, CARD_HEAD_H, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, ActivityDot, activityMeaning, ClipPill, canClip, Palette,

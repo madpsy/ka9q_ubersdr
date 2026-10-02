@@ -12,9 +12,15 @@ import { useRadio } from '../../radio/RadioContext.jsx';
 import { MODE_BY_ID, isIQ } from '../../radio/constants.js';
 import { serverClock } from '../../radio/serverClock.js';
 import { Button, Icon, Modal } from '../../components/ui.jsx';
-import { buildShareUrl } from '../../lib/share.js';
+import { arrivalQuery, shareOriginHere, shareQuery } from '../../lib/share.js';
+import { ubersdrAppUri } from '../../lib/appLinks.js';
+import { insideApp } from '../../lib/hostPanels.js';
 import { saveText } from '../../lib/saveFile.js';
-import { emptyGraph, parseGraph, serializeGraph } from '../graph.js';
+import { cleanGraphName, emptyGraph, parseGraph, serializeGraph } from '../graph.js';
+import {
+    bundleGraphs, deleteSaved, fileNameFor, findSaved, importBundle, isBundle, openSaved, sameGraphName, saveGraph, saveState, savedGraphs,
+} from '../library.js';
+import { ExportDialog, GraphName, OpenDialog, SaveNameDialog, SaveReplaceDialog } from './GraphLibrary.jsx';
 import { Runtime } from '../runtime.js';
 import { encodeShare } from '../share.js';
 import { getPlayground, graphIqWidth, needsReceiver } from '../engine.js';
@@ -193,7 +199,7 @@ function AnnotateTools({ onAdd }) {
 
 function Toolbar({
     pg, live, offline, iq, onStart, onStop, history, onUndo, onRedo, onFit, onFromDemod, onNew, onImport, onExport, onShare,
-    onTemplate, onAnnotate, json, onJson,
+    onTemplate, onAnnotate, json, onJson, onSave, onOpen,
 }) {
     const on = pg.running;
     return (
@@ -226,8 +232,10 @@ function Toolbar({
                 <TemplatesMenu onPick={onTemplate} />
                 <Button size="sm" variant="ghost" icon={<Icon.Waves />} title="Replace the graph with IQ Demod’s selected demodulator" onClick={onFromDemod}>From IQ Demod</Button>
                 <Button size="sm" variant="ghost" icon={<Icon.Plus />} title="Start again from an empty canvas" onClick={onNew}>New</Button>
-                <Button size="sm" variant="ghost" icon={<Icon.Upload />} title="Load a graph from a .json file" onClick={onImport}>Import</Button>
-                <Button size="sm" variant="ghost" icon={<Icon.Download />} title="Save the graph as a .json file" onClick={onExport}>Export</Button>
+                <Button size="sm" variant="ghost" icon={<Icon.Folder />} title="Open a graph saved in this browser" onClick={onOpen}>Open</Button>
+                <Button size="sm" variant="ghost" icon={<Icon.Save />} title="Save the graph in this browser, under its name (Ctrl+S)" onClick={onSave}>Save</Button>
+                <Button size="sm" variant="ghost" icon={<Icon.Upload />} title="Load a graph, or a file of graphs, from a .json file" onClick={onImport}>Import</Button>
+                <Button size="sm" variant="ghost" icon={<Icon.Download />} title="Save the graph, or saved graphs, as a .json file" onClick={onExport}>Export</Button>
                 <Button size="sm" variant="ghost" icon={<Icon.Share />} title="Copy a link to this graph" onClick={onShare}>Share</Button>
                 <Button
                     size="sm"
@@ -278,7 +286,10 @@ function Summary({ pg, graph, info, stats }) {
 // Over the middle of the window rather than in a strip along the top: a link
 // that was followed is the reason the window opened, and until it is answered
 // the graph underneath is still the operator's own.
-function SharedOffer({ pending, onLoad }) {
+// `appUri` is the link this page arrived on, as an ubersdr:// link: the same
+// graph and tuning, opened in the UberSDR app instead of here. Null inside an
+// app already, or for a receiver the directory does not list (no UUID to name).
+function SharedOffer({ pending, onLoad, appUri }) {
     const ok = pending.graph && pending.graph.nodes.length > 0;
     const count = ok ? pending.graph.nodes.length : 0;
     const older = ok ? versionNote(pending.ubersdr) : null;
@@ -287,12 +298,26 @@ function SharedOffer({ pending, onLoad }) {
             <div className="pg-dialog__card">
                 <div className="pg-dialog__title">{ok ? 'Shared graph' : 'Shared graph unreadable'}</div>
                 <p>
-                    {ok ? `A link brought a graph of ${count} ${count === 1 ? 'block' : 'blocks'}. Loading it replaces the one open now; you can put yours back afterwards.` : 'A playground link could not be read.'}
+                    {ok ? `A link brought ${pending.graph.name ? `“${pending.graph.name}”, ` : ''}a graph of ${count} ${count === 1 ? 'block' : 'blocks'}. Loading it replaces the one open now; you can put yours back afterwards.` : 'A playground link could not be read.'}
                     {pending.errors && pending.errors.length ? ` ${pending.errors.map((e) => e.message).join(' ')}` : ''}
                 </p>
                 {older && <div className="note note--tight note--warn pg-offer__version">{older}</div>}
                 <div className="pg-dialog__actions">
                     <Button size="sm" variant="ghost" onClick={() => offerSharedGraph(null)}>{ok ? 'Keep mine' : 'Dismiss'}</Button>
+                    {/* A link rather than a button: following a scheme is what
+                        hands it to the app. The offer stays up, because nothing
+                        here can tell whether an app answered — an unclaimed
+                        scheme does nothing at all — and loading it here is still
+                        the way on if none did. */}
+                    {ok && appUri && (
+                        <a
+                            className="btn btn--default btn--sm"
+                            href={appUri}
+                            title="Open this graph, and the receiver it was shared from, in the UberSDR app"
+                        >
+                            Open in App
+                        </a>
+                    )}
                     {ok && <Button size="sm" variant="primary" onClick={onLoad}>Load it</Button>}
                 </div>
             </div>
@@ -305,7 +330,7 @@ function SharedOffer({ pending, onLoad }) {
 // a copy is right here. A title may name what is coming (`subject`).
 const REPLACING = {
     new: { title: 'Start a new graph?', what: 'will be cleared from the canvas', go: 'Clear it' },
-    import: { title: 'Import a graph?', what: 'will be replaced by the file you choose', go: 'Choose file…' },
+    import: { title: 'Import a graph?', what: 'will be replaced by the file you choose, if it holds one graph — a file of several adds them to the saved graphs instead', go: 'Choose file…' },
     demod: { title: 'Load IQ Demod’s demodulator?', what: 'will be replaced by IQ Demod’s selected demodulator', go: 'Replace it' },
     template: { title: (subject) => `Load “${subject}”?`, what: 'will be replaced by the template', go: 'Load it' },
 };
@@ -360,7 +385,10 @@ function ConfirmReplace({ kind, subject, count, onExport, onCancel, onConfirm })
 }
 
 export function PlaygroundWindow({ onClose }) {
-    const { running, audioState, tuning, actions, player, allowedIQModes, audioConn, spectrumConn } = useRadio();
+    const { running, audioState, tuning, actions, player, allowedIQModes, audioConn, spectrumConn, serverInfo } = useRadio();
+    // Listed in the directory, so an ubersdr:// link can name this receiver.
+    const publicUuid = (serverInfo && serverInfo.public_uuid) || '';
+    const callsign = ((serverInfo && serverInfo.receiver && serverInfo.receiver.callsign) || '').trim();
     const pg = getPlayground(player);
 
     // The spectrum is paused while this window is open — it covers the display,
@@ -466,9 +494,12 @@ export function PlaygroundWindow({ onClose }) {
         history.current.push(cloneGraph(next), why);
         pg.setGraph(next);
     };
+    // Something else in the canvas, and what it is called with it — nothing, if
+    // it says nothing. A replacement is never the saved graph the last one was,
+    // unless it says so (openSaved does).
     const replace = (next, message) => {
         history.current.replace(cloneGraph(next));
-        pg.setGraph(next);
+        pg.setGraph({ ...next, name: next.name || '', savedAs: next.savedAs || '' });
         setPicked({ nodes: new Set(), wire: null });
         fit(next);
         if (message) setNotice(message);
@@ -477,7 +508,10 @@ export function PlaygroundWindow({ onClose }) {
     // that brings back what they had. As an edit of its own rather than an
     // undo, so it still restores their graph after they have changed the new
     // one.
-    const replaceKeepingBack = (next, text) => replace(next, { text, back: cloneGraph(graph) });
+    const replaceKeepingBack = (next, text) => replace(next, {
+        text,
+        back: { ...cloneGraph(graph), name: graph.name || '', savedAs: graph.savedAs || '' },
+    });
     const putBack = (back) => {
         apply(back);
         setPicked({ nodes: new Set(), wire: null });
@@ -688,20 +722,42 @@ export function PlaygroundWindow({ onClose }) {
     };
     const moved = () => history.current.push(cloneGraph(pg.graph), null);
 
+    // Two kinds of link to the same graph and tuning, and the sender picks:
+    //
+    //   web   https://<receiver>/v2/?freq=…&playground=pg1…   opens anywhere,
+    //         and the page it opens offers the app to whoever has it
+    //   app   ubersdr://connect?uuid=…&freq=…&playground=pg1…   opens straight
+    //         in the UberSDR app, but most chat and mail apps will not make a
+    //         custom scheme tappable
+    //
+    // The web link's address is shareOriginHere's rather than location.origin:
+    // inside the desktop or mobile app this page is served from a loopback
+    // proxy, and a link to 127.0.0.1 reaches nobody. The app link exists only
+    // for a receiver the directory lists — it names the receiver by UUID.
+    const copyLink = async (link) => {
+        try {
+            await navigator.clipboard.writeText(link);
+            return true;
+        } catch (err) { return false; /* not allowed here: the link is shown to copy by hand */ }
+    };
     const share = async () => {
         try {
             const code = await encodeShare(graph);
-            const base = buildShareUrl({ origin: location.origin, pathname: location.pathname, tuning });
-            const link = `${base}${base.includes('?') ? '&' : '?'}${SHARE_PARAM}=${code}`;
-            let copied = false;
-            try {
-                await navigator.clipboard.writeText(link);
-                copied = true;
-            } catch (err) { /* not allowed here: the link is shown to copy by hand */ }
-            setNotice({ link, copied });
+            const tuned = shareQuery({ tuning });
+            const qs = `${tuned ? `${tuned}&` : ''}${SHARE_PARAM}=${code}`;
+            const web = `${shareOriginHere(serverInfo)}${location.pathname}?${qs}`;
+            const app = ubersdrAppUri(publicUuid, qs);
+            // Nothing to choose between: straight to the web link, as before.
+            if (!app) { setNotice({ web, app: null, kind: 'web', copied: await copyLink(web) }); return; }
+            setNotice({ web, app, kind: null, copied: false });
         } catch (err) {
             setNotice(`Could not make a link: ${err.message || err}`);
         }
+    };
+    const pickLink = async (kind) => {
+        const n = notice;
+        if (!n || !n[kind]) return;
+        setNotice({ ...n, kind, copied: await copyLink(n[kind]) });
     };
     // Typed into the JSON pane: an edit like any other, with a pause in typing
     // its own step of undo. What it removed is no longer selected.
@@ -711,12 +767,84 @@ export function PlaygroundWindow({ onClose }) {
         const wired = JSON.stringify(next.wires) === JSON.stringify(graph.wires);
         setPicked((s) => ({ nodes: new Set([...s.nodes].filter((id) => ids.has(id))), wire: wired ? s.wire : null }));
     };
-    const exportFile = () => saveText(JSON.stringify(serializeGraph(graph), null, 2), 'ubersdr-playground.json', 'application/json');
+    const exportFile = () => saveText(JSON.stringify(serializeGraph(graph), null, 2), fileNameFor(graph.name), 'application/json');
+    // Export asks what to export only where there is a choice: with nothing
+    // saved, it is the graph open now, as it always was.
+    const exportChoice = () => (savedGraphs().length ? setAsking('export') : exportFile());
+    const exportPicked = ({ current, names }) => {
+        setAsking(null);
+        const saved = names.map((n) => findSaved(n)).filter(Boolean).map((e) => openSaved(e).graph);
+        const all = [...(current ? [graph] : []), ...saved];
+        if (all.length === 1) {
+            saveText(JSON.stringify(serializeGraph(all[0]), null, 2), fileNameFor(all[0].name), 'application/json');
+            return;
+        }
+        saveText(JSON.stringify(bundleGraphs(all), null, 2), 'ubersdr-playground-graphs.json', 'application/json');
+    };
+
+    // ── named graphs, kept in this browser (library.js) ──
+    //
+    // Save keeps the graph under its name. It writes straight over the saved
+    // graph this one was opened from or last saved as, and asks before writing
+    // over any other of the same name. A graph with no name is asked for one.
+    const [library, bumpLibrary] = useReducer((n) => n + 1, 0);
+    const standing = saveState(graph);
+    const saveAs = (name) => {
+        setAsking(null);
+        try {
+            const n = saveGraph(name, graph);
+            pg.setName(n, n);
+            bumpLibrary();
+            setNotice(`Saved “${n}” in this browser.`);
+        } catch (err) {
+            setNotice(err.message || String(err));
+        }
+    };
+    const save = () => {
+        const name = cleanGraphName(graph.name);
+        if (!name) { setAsking('save-name'); return; }
+        const theirs = findSaved(name);
+        if (theirs && !(graph.savedAs && sameGraphName(graph.savedAs, name))) { setAsking('save-replace'); return; }
+        saveAs(name);
+    };
+    const openEntry = (entry) => {
+        setAsking(null);
+        const { graph: g, errors, ubersdr } = openSaved(entry);
+        const said = errors.length ? `Opened “${entry.name}”. ${errors.map((e) => e.message).join(' ')}` : `Opened “${entry.name}”.`;
+        const older = versionNote(ubersdr);
+        const text = older ? `${said} ${older}` : said;
+        // Put-back where there is something to lose: anything not saved as it is.
+        if (graph.nodes.length && standing !== 'saved') replaceKeepingBack(g, text);
+        else replace(g, text);
+    };
+    const deleteEntry = (entry) => {
+        try {
+            deleteSaved(entry.name);
+            // The graph open now is no longer a copy of anything.
+            if (graph.savedAs && sameGraphName(graph.savedAs, entry.name)) pg.setName(graph.name || '', '');
+            bumpLibrary();
+            setNotice(`Deleted the saved graph “${entry.name}”.`);
+        } catch (err) {
+            setNotice(err.message || String(err));
+        }
+    };
     const chooseFile = () => fileInput.current && fileInput.current.click();
     const importFile = async (file) => {
         if (!file) return;
         try {
-            const { graph: g, errors, ubersdr } = parseGraph(JSON.parse(await file.text()));
+            const raw = JSON.parse(await file.text());
+            // A file of several graphs goes to the saved graphs, not the canvas.
+            if (isBundle(raw)) {
+                const { added, errors } = importBundle(raw);
+                bumpLibrary();
+                const list = added.map((n) => `“${n}”`).join(', ');
+                setNotice([
+                    added.length ? `Added ${added.length} saved ${added.length === 1 ? 'graph' : 'graphs'} from ${file.name}: ${list}. Open shows them.` : `Nothing in ${file.name} could be added.`,
+                    ...errors,
+                ].join(' '));
+                return;
+            }
+            const { graph: g, errors, ubersdr } = parseGraph(raw);
             // A file from another version says so, after what was loaded.
             const said = errors.length ? errors.map((e) => e.message).join(' ') : `Loaded ${file.name}.`;
             const older = versionNote(ubersdr);
@@ -736,6 +864,7 @@ export function PlaygroundWindow({ onClose }) {
             if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); remove(); }
             else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
             else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+            else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
             else if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicate(); }
             else if (!mod && e.key.toLowerCase() === 'f') fit();
         };
@@ -746,7 +875,12 @@ export function PlaygroundWindow({ onClose }) {
     return (
         <div className={`pg${carry ? ' is-carrying' : ''}`} ref={pgRoot}>
             <div className="pg__head">
+                {/* Which receiver this is, ahead of what it is: with the app
+                    open on two receivers, or a browser tab on each, the
+                    playgrounds look alike. */}
+                {callsign && <div className="pg__call" title="This receiver">{callsign}</div>}
                 <div className="pg__title">Playground</div>
+                <GraphName name={graph.name || ''} state={standing} onRename={(n) => pg.setName(n)} />
                 <Toolbar
                     pg={pg}
                     live={live || offline}
@@ -766,7 +900,7 @@ export function PlaygroundWindow({ onClose }) {
                     onNew={() => (graph.nodes.length ? setAsking('new') : replace(emptyGraph(), null))}
                     onTemplate={(t) => {
                         if (!graph.nodes.length) {
-                            replace(t.build(rate), `Loaded “${t.title}”. ${t.summary}`);
+                            replace({ ...t.build(rate), name: t.title }, `Loaded “${t.title}”. ${t.summary}`);
                             return;
                         }
                         setTemplate(t);
@@ -774,8 +908,10 @@ export function PlaygroundWindow({ onClose }) {
                     }}
                     onAnnotate={add}
                     onImport={() => (graph.nodes.length ? setAsking('import') : chooseFile())}
-                    onExport={exportFile}
+                    onExport={exportChoice}
                     onShare={share}
+                    onSave={save}
+                    onOpen={() => setAsking('open')}
                     json={sides.json}
                     onJson={() => fold('json')}
                 />
@@ -803,7 +939,7 @@ export function PlaygroundWindow({ onClose }) {
                     }}
                 />
             )}
-            {asking && asking !== 'pick' && (
+            {asking && REPLACING[asking] && (
                 <ConfirmReplace
                     kind={asking}
                     subject={template && template.title}
@@ -814,15 +950,51 @@ export function PlaygroundWindow({ onClose }) {
                         setAsking(null);
                         if (asking === 'import') chooseFile();
                         else if (asking === 'demod') replaceKeepingBack(graphFromIQDemod(rate), 'Loaded IQ Demod’s selected demodulator.');
-                        else if (asking === 'template' && template) replaceKeepingBack(template.build(rate), `Loaded “${template.title}”. ${template.summary}`);
+                        else if (asking === 'template' && template) replaceKeepingBack({ ...template.build(rate), name: template.title }, `Loaded “${template.title}”. ${template.summary}`);
                         else replaceKeepingBack(emptyGraph(), 'Started a new graph.');
                     }}
+                />
+            )}
+            {asking === 'save-name' && (
+                <SaveNameDialog
+                    title={graph.name ? 'Save as' : 'Name this graph'}
+                    initial={graph.name || ''}
+                    onCancel={() => setAsking(null)}
+                    onSave={saveAs}
+                />
+            )}
+            {asking === 'save-replace' && (
+                <SaveReplaceDialog
+                    name={cleanGraphName(graph.name)}
+                    onCancel={() => setAsking(null)}
+                    onRename={() => setAsking('save-name')}
+                    onReplace={() => saveAs(graph.name)}
+                />
+            )}
+            {asking === 'open' && (
+                <OpenDialog
+                    key={library}
+                    graphs={savedGraphs()}
+                    current={graph.savedAs || ''}
+                    onOpen={openEntry}
+                    onDelete={deleteEntry}
+                    onSaveAs={() => setAsking('save-name')}
+                    onCancel={() => setAsking(null)}
+                />
+            )}
+            {asking === 'export' && (
+                <ExportDialog
+                    current={graph}
+                    graphs={savedGraphs()}
+                    onCancel={() => setAsking(null)}
+                    onExport={exportPicked}
                 />
             )}
             {ui.pending && (
                 <SharedOffer
                     pending={ui.pending}
                     onLoad={() => loadShared(ui.pending.graph)}
+                    appUri={!insideApp() && publicUuid ? ubersdrAppUri(publicUuid, arrivalQuery()) : null}
                 />
             )}
             {notice && (
@@ -834,8 +1006,34 @@ export function PlaygroundWindow({ onClose }) {
                         </>
                     ) : (
                         <>
-                            {notice.copied ? 'Link copied.' : 'Copy this link:'}
-                            <input className="input pg-notice__link" readOnly value={notice.link} onFocus={(e) => e.target.select()} />
+                            <span>
+                                {!notice.kind ? 'Share as:'
+                                    : notice.copied ? `${notice.kind === 'app' ? 'App link' : 'Link'} copied.`
+                                        : 'Copy this link:'}
+                            </span>
+                            {notice.app && (
+                                <>
+                                    <Button
+                                        size="sm"
+                                        variant={notice.kind === 'web' ? 'primary' : 'default'}
+                                        onClick={() => pickLink('web')}
+                                        title="An https link to this receiver. Opens in any browser, and offers the UberSDR app to anyone who has it."
+                                    >
+                                        Web link
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant={notice.kind === 'app' ? 'primary' : 'default'}
+                                        onClick={() => pickLink('app')}
+                                        title="An ubersdr:// link. Opens straight in the UberSDR app on desktop, Android or iOS — but chat and mail apps may not make it tappable."
+                                    >
+                                        App link
+                                    </Button>
+                                </>
+                            )}
+                            {notice.kind && (
+                                <input className="input pg-notice__link" readOnly value={notice[notice.kind]} onFocus={(e) => e.target.select()} />
+                            )}
                         </>
                     )}
                     <button type="button" className="pg-notice__close" title="Dismiss" onClick={() => setNotice(null)}>

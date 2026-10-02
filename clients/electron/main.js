@@ -170,6 +170,7 @@ async function followDeepLink(url) {
             store,
             lookupUuid: discovery.lookupUuid,
             connect: connectInstance,
+            query: target.query,
         });
     } catch (err) {
         dialog.showErrorBox('UberSDR link', `Could not open that receiver.\n\n${err.message}`);
@@ -264,12 +265,20 @@ function notifyChooser() {
     }
 }
 
-async function connectInstance(desc) {
+// `query` is what a followed link hands the page — a shared frequency, view or
+// playground graph, already cut down to the names the page reads (see
+// deeplink.js). Empty for every other connect.
+async function connectInstance(desc, { query = '' } = {}) {
     const entry = desc.id ? store.get(desc.id) : store.ensure(desc);
     if (!entry) throw new Error('unknown instance');
+    const page = `/v2/${query ? `?${query}` : ''}`;
 
     const existing = running.get(entry.id);
     if (existing) {
+        // A link for the receiver already open is a link to something on it,
+        // and the page reads a link only as it loads — so it is reloaded onto
+        // it. A plain connect (the chooser's Show) leaves the page alone.
+        if (query) existing.win.loadURL(existing.proxy.localOrigin + page);
         existing.win.focus();
         return entry.id;
     }
@@ -347,7 +356,7 @@ async function connectInstance(desc) {
     // Loaded only once the record is in place: the preload asks the main process
     // which receiver this window is on (window:context), and it asks before the
     // page's first script runs.
-    win.loadURL(proxy.localOrigin + '/v2/');
+    win.loadURL(proxy.localOrigin + page);
     watchMenuFocus(rec);
     store.recordUse(entry.id);
     notifyChooser();

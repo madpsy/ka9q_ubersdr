@@ -106,6 +106,18 @@ export function _resetUrlView() {
  * rung of the ladder from the one being shared.
  */
 export function buildShareUrl({ origin, pathname, tuning, view } = {}) {
+    const base = `${origin || ''}${pathname || '/'}`;
+    const qs = shareQuery({ tuning, view });
+    return qs ? `${base}?${qs}` : base;
+}
+
+/**
+ * The query string of a share link on its own, without the address in front —
+ * what the web link puts after its `?`, and what the app link
+ * (appLinks.js, ubersdrAppUri) carries after the receiver's UUID. One builder,
+ * so the two kinds of link cannot drift apart in what they say.
+ */
+export function shareQuery({ tuning, view } = {}) {
     const q = new URLSearchParams();
     if (tuning) {
         if (tuning.frequency > 0) q.set('freq', String(Math.round(tuning.frequency)));
@@ -122,9 +134,41 @@ export function buildShareUrl({ origin, pathname, tuning, view } = {}) {
         q.set('zoom_freq', String(Math.round(view.centerFreq)));
         q.set('zoom_bw', String(Number(view.binBandwidth.toFixed(3))));
     }
-    const base = `${origin || ''}${pathname || '/'}`;
-    const qs = q.toString();
-    return qs ? `${base}?${qs}` : base;
+    return q.toString();
+}
+
+// --- what this page arrived with, for handing on to the app ----------------------
+//
+// A page opened from a shared link can be passed on to the UberSDR app ("Open
+// in App" on the Start overlay), and what it is passed on with is the link: the
+// tuning, the view and a playground graph, under the names the apps hand back
+// to the page (clients/electron/deeplink.js and clients/capacitor/src/
+// deeplink.js keep the same list, and refuse everything else).
+//
+// Read once, as this module loads, because by the time anybody presses the
+// button the address bar has been tidied: PlaygroundWatch takes ?playground=
+// off it as soon as it has read the code. Module evaluation is before any
+// effect runs.
+//
+// Never `password`, which is in the address bar on some visits and is exactly
+// what a link must not carry on somebody's behalf — see the note at the top.
+export const ARRIVAL_KEYS = [...SHARE_KEYS, 'frequency', 'playground'];
+
+const readArrival = (search) => {
+    const from = new URLSearchParams(search || '');
+    const out = new URLSearchParams();
+    for (const key of ARRIVAL_KEYS) {
+        const value = from.get(key);
+        if (value) out.set(key, value);
+    }
+    return out.toString();
+};
+
+const arrival = readArrival(typeof location === 'undefined' ? '' : location.search);
+
+/** The link this page was opened from, as a query string to hand on, or ''. */
+export function arrivalQuery(search) {
+    return search === undefined ? arrival : readArrival(search);
 }
 
 // --- which origin the link points at ---------------------------------------------
@@ -217,6 +261,29 @@ export function shareOrigin({ origin, publicUrl, upstreamOrigin } = {}) {
     // Loopback: nothing about this address travels, so the only thing left worth
     // sending is whatever the receiver publishes about itself. Usually nothing.
     return usableOrigin(publicUrl) || reached || '';
+}
+
+// The address the desktop client is connected to, exposed by its receiver
+// preload (clients/electron/receiver-preload.js), and by the mobile apps' seed
+// scripts in the same place. Absent in a browser, where the address in the bar
+// is already the right one.
+function appUpstream() {
+    if (typeof window === 'undefined') return null;
+    const desktop = window.ubersdrDesktop;
+    return (desktop && desktop.upstreamOrigin) || null;
+}
+
+/**
+ * shareOrigin for this page, as it is running: its own address, the receiver's
+ * published one, and the address an app dialled if this is inside one. What
+ * every share button wants, rather than each of them reading the three itself.
+ */
+export function shareOriginHere(serverInfo) {
+    return shareOrigin({
+        origin: typeof location === 'undefined' ? '' : location.origin,
+        publicUrl: serverInfo && serverInfo.receiver && serverInfo.receiver.public_url,
+        upstreamOrigin: appUpstream(),
+    });
 }
 
 // What goes with the link, where the target takes a line of text as well.

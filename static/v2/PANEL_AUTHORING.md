@@ -144,9 +144,9 @@ beside it. The names, as of this version:
 Anchor Announce Antenna Archive Bars Bell Bolt Bookmark Callipers Captions
 Chat Chevron ChevronLeft ChevronRight ChevronUp Clock Close Cloud Code
 Collapse Compass Copy Custom Dice Download Drag Expand External Eye EyeOff Fax
-Gauge Grid Info Keyboard Knob Layers Link List Lock LockScreen Mic Minus
+Folder Gauge Grid Info Keyboard Knob Layers Link List Lock LockScreen Mic Minus
 Moon Morse Mute News Packet Pad Pause Picture Pin Play Plug Plus Podium
-Pointer Power Puzzle Radio Record Reset RotateLeft RotateRight Scan
+Pointer Power Puzzle Radio Record Reset RotateLeft RotateRight Save Scan
 Search Share Sliders Snail Span Stop Sun Target Teleprinter Tick TimeSignal
 Trace Trash Unlock Upload Users ViewSpectrum ViewSplit ViewWaterfall Volume
 Waves Wf2D Wf3D WfBoth Wheel Wind ZoomIn ZoomOut

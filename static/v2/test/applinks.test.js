@@ -31,6 +31,14 @@ t('the UberSDR app link is what the clients parse', () => {
 
 // v1 builds this one (app.js _buildVibeSDRUri) and both frontends have to
 // produce the same string for the same instance.
+t('the UberSDR app link carries a share link\'s query after the UUID', () => {
+    assert.strictEqual(ubersdrAppUri(UUID, 'freq=7100000&playground=pg1.z.a-_'), `ubersdr://connect?uuid=${UUID}&freq=7100000&playground=pg1.z.a-_`);
+    assert.strictEqual(ubersdrAppUri(UUID, '?freq=7100000'), `ubersdr://connect?uuid=${UUID}&freq=7100000`);
+    assert.strictEqual(ubersdrAppUri(UUID, ''), `ubersdr://connect?uuid=${UUID}`);
+    assert.strictEqual(ubersdrAppUri('', 'freq=1'), null);
+    assert.strictEqual(new URL(ubersdrAppUri(UUID, 'freq=7100000')).searchParams.get('uuid'), UUID);
+});
+
 t('the VibeSDR link is v1\'s, character for character', () => {
     assert.strictEqual(vibesdrUri(UUID), `vibesdr://connect?uuid=${UUID}`);
 });

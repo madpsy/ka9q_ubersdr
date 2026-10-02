@@ -27,7 +27,7 @@ import { claimIQ, releaseIQ } from '../lib/iqExclusive.js';
 import { AudioRoutes } from '../lib/audioRoutes.js';
 import { Speaker } from './speech.js';
 import { planFor } from '../lib/iqDemod.js';
-import { parseGraph, serializeGraph } from './graph.js';
+import { cleanGraphName, parseGraph, serializeGraph } from './graph.js';
 import { graphForPlan } from './fromPlan.js';
 import { autoLayout } from './geometry.js';
 import { createHost } from './host.js';
@@ -74,7 +74,7 @@ function loadGraph() {
     try {
         const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
         if (raw) {
-            const { graph } = parseGraph(raw);
+            const { graph } = parseGraph(raw, { local: true });
             if (graph.nodes.length) return graph;
         }
     } catch (err) { /* private mode, or something unreadable: start fresh */ }
@@ -155,16 +155,46 @@ export class PlaygroundEngine extends Emitter {
 
     // ── the graph ───────────────────────────────────────────────────────────
 
-    /** Replace the graph. It is stored, and a running worker gets it at once. */
+    /**
+     * Replace the graph. It is stored, and a running worker gets it at once.
+     *
+     * The graph's name and the saved graph it is the working copy of
+     * (`savedAs`, library.js) come with it only where it says: a graph with
+     * no `name` key at all — an edit, an undo, which are cloneGraph's and
+     * carry neither — keeps the ones it has. So renaming is not an edit, and
+     * undo does not take a name back; loading something else says what it is
+     * called, even if that is nothing.
+     */
     setGraph(graph) {
         const was = needsReceiver(this.graph);
-        this.graph = parseGraph(graph).graph;
+        const prev = this.graph || {};
+        const next = parseGraph(graph, { local: true }).graph;
+        const says = (k) => !!graph && Object.prototype.hasOwnProperty.call(graph, k);
+        if (!says('name') && prev.name) next.name = prev.name;
+        if (!says('savedAs') && prev.savedAs) next.savedAs = prev.savedAs;
+        this.graph = next;
         // From playing a file to listening to the receiver, or back, is a
         // different way of running: stop, and let Start begin the new one.
         if (this.active && needsReceiver(this.graph) !== was) this.stop();
         this._persist();
         this._afterGraph();
         if (this.host) this.host.send({ t: 'graph', graph: this.graph });
+        this.emit('change');
+    }
+
+    /**
+     * Name the graph, and say which saved graph it now is, without touching
+     * what runs: a worker is not sent a graph whose blocks have not changed.
+     * `savedAs` undefined leaves it as it is; '' unties it.
+     */
+    setName(name, savedAs) {
+        const n = cleanGraphName(name);
+        if (n) this.graph.name = n; else delete this.graph.name;
+        if (savedAs !== undefined) {
+            const s = cleanGraphName(savedAs);
+            if (s) this.graph.savedAs = s; else delete this.graph.savedAs;
+        }
+        this._persist();
         this.emit('change');
     }
 
@@ -251,7 +281,12 @@ export class PlaygroundEngine extends Emitter {
         clearTimeout(this._writeTimer);
         this._writeTimer = null;
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeGraph(this.graph)));
+            const stored = serializeGraph(this.graph);
+            // Which saved graph this is the working copy of, kept beside it
+            // here and nowhere else: it is about this browser's library, so it
+            // goes in no file and no link (serializeGraph leaves it out).
+            if (this.graph.savedAs) stored.savedAs = this.graph.savedAs;
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
         } catch (err) { /* private browsing, a full quota — not worth failing over */ }
     }
 

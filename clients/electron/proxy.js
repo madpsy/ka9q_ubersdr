@@ -75,7 +75,10 @@ class InstanceProxy {
     }
 
     start() {
-        this.server = http.createServer((req, res) => this.handle(req, res));
+        // Node's default of 16 KB for the request line and headers together is
+        // less than a link can carry: /v2/?playground=pg1… loads with a code of
+        // up to 32 KB (static/v2/src/playground/share.js, MAX_CODE_LENGTH).
+        this.server = http.createServer({ maxHeaderSize: 64 * 1024 }, (req, res) => this.handle(req, res));
         this.server.on('upgrade', (req, socket, head) => this.upgrade(req, socket, head));
         // SSE responses stream forever; never time a request out server-side.
         this.server.requestTimeout = 0;

@@ -32,6 +32,10 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// page must be seeded before its first script runs and there is no asking
     /// anything by then.
     private let prefsScope: String?
+    /// The page's query string from a followed link — a shared frequency, view
+    /// or playground graph, already cut down by src/deeplink.js to the names
+    /// the page reads. Empty for an ordinary connect.
+    private let query: String
 
     /// Raised when this screen goes away, whichever way it went — v2's own
     /// power button, or the operator swiping back. `api.js` listens for it.
@@ -41,8 +45,10 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     private var host: HostChannel?
 
     init(instanceId: String, label: String, proxy: LocalProxy, product: String,
-         password: String?, notificationState: String, prefsScope: String?) {
+         password: String?, notificationState: String, prefsScope: String?,
+         query: String = "") {
         self.prefsScope = prefsScope
+        self.query = query
         self.instanceId = instanceId
         self.label = label
         self.proxy = proxy
@@ -268,7 +274,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
             self.present(share, animated: true)
         }
 
-        if let url = URL(string: proxy.origin + "/v2/") {
+        if let url = URL(string: proxy.origin + "/v2/" + (query.isEmpty ? "" : "?" + query)) {
             webView.load(URLRequest(url: url))
         }
 

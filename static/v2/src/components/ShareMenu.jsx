@@ -19,24 +19,17 @@
 import React, { useEffect, useRef, useState } from '../react.js';
 import { Button, Icon, Menu, MenuItem } from './ui.jsx';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { SHARE_TARGETS, buildShareUrl, shareOrigin, shareText } from '../lib/share.js';
+import { SHARE_TARGETS, buildShareUrl, shareOriginHere, shareQuery, shareText } from '../lib/share.js';
+import { ubersdrAppUri } from '../lib/appLinks.js';
 
 // How long the button says it copied. Long enough to be read, short enough that
 // it is back to being a share button before the next glance.
 const COPIED_MS = 1600;
 
-// The address the desktop client is connected to, exposed by its receiver
-// preload (clients/electron/receiver-preload.js). Absent in a browser, where
-// the address in the bar is already the right one.
-function desktopUpstream() {
-    if (typeof window === 'undefined') return null;
-    const desktop = window.ubersdrDesktop;
-    return (desktop && desktop.upstreamOrigin) || null;
-}
-
 export default function ShareMenu() {
     const { tuning, view, serverInfo } = useRadio();
     const [copied, setCopied] = useState(false);
+    const [copiedApp, setCopiedApp] = useState(false);
     const timer = useRef(null);
     useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -47,19 +40,20 @@ export default function ShareMenu() {
     // is served from a loopback proxy, so `location.origin` there is not an
     // address of the receiver at all. See shareOrigin.
     const link = () => buildShareUrl({
-        origin: shareOrigin({
-            origin: location.origin,
-            publicUrl: serverInfo && serverInfo.receiver && serverInfo.receiver.public_url,
-            upstreamOrigin: desktopUpstream(),
-        }),
+        origin: shareOriginHere(serverInfo),
         pathname: location.pathname,
         tuning,
         view,
     });
     const text = () => shareText({ tuning, receiver: serverInfo && serverInfo.receiver });
+    // The same signal as an ubersdr:// link, which opens straight in the UberSDR
+    // app rather than in a browser. Only for a receiver listed in the directory:
+    // the link names it by its public UUID, and without one there is nothing for
+    // the app to look up. See lib/appLinks.js.
+    const publicUuid = (serverInfo && serverInfo.public_uuid) || '';
+    const appLink = () => ubersdrAppUri(publicUuid, shareQuery({ tuning, view }));
 
-    const copy = async () => {
-        const url = link();
+    const copy = async (url = link(), done = setCopied) => {
         try {
             await navigator.clipboard.writeText(url);
         } catch (e) {
@@ -70,9 +64,12 @@ export default function ShareMenu() {
             window.prompt('Copy this link', url);
             return;
         }
-        setCopied(true);
+        // One "copied" at a time: the other is cleared, so a quick second copy
+        // does not leave the first one's label stuck.
+        setCopied(done === setCopied);
+        setCopiedApp(done === setCopiedApp);
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => setCopied(false), COPIED_MS);
+        timer.current = setTimeout(() => { setCopied(false); setCopiedApp(false); }, COPIED_MS);
     };
 
     // The system sheet. Anything the user cancels rejects, which is not an error
@@ -102,7 +99,7 @@ export default function ShareMenu() {
                 <Button
                     size="sm"
                     variant="ghost"
-                    icon={copied ? <Icon.Tick /> : <Icon.Share />}
+                    icon={copied || copiedApp ? <Icon.Tick /> : <Icon.Share />}
                     title="Share this frequency — the link opens on the same signal, filter and view"
                     aria-label="Share"
                 />
@@ -111,9 +108,19 @@ export default function ShareMenu() {
             {/* The link on its own, first: it is what the other entries are made
                 of, and the one that works into anything — a logbook, a cluster
                 comment, a message the sender is already writing. */}
-            <MenuItem icon={<Icon.Copy size={14} />} onClick={copy}>
+            <MenuItem icon={<Icon.Copy size={14} />} onClick={() => copy()}>
                 {copied ? 'Link copied' : 'Copy link'}
             </MenuItem>
+            {/* Second, and only as a copy: a custom scheme is not something a
+                chat app or a mail client will make tappable, so it is offered
+                for pasting where the person receiving it has the app — and the
+                web link above still has its own "Open in App" for everyone
+                else. */}
+            {publicUuid && (
+                <MenuItem icon={<Icon.Copy size={14} />} onClick={() => copy(appLink(), setCopiedApp)}>
+                    {copiedApp ? 'App link copied' : 'Copy app link'}
+                </MenuItem>
+            )}
             {native && (
                 <MenuItem icon={<Icon.Share size={14} />} onClick={sheet}>
                     Share…

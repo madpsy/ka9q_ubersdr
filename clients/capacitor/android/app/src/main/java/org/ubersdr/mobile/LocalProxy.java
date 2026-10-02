@@ -566,7 +566,10 @@ final class LocalProxy {
         while ((c = in.read()) != -1) {
             if (c == '\n') break;
             if (c != '\r') buf.write(c);
-            if (buf.size() > 16 * 1024) throw new IOException("header line too long");
+            // Room for a request line carrying a playground graph: a followed
+            // link loads /v2/?playground=pg1… and the code alone may be up to
+            // 32 KB (static/v2/src/playground/share.js, MAX_CODE_LENGTH).
+            if (buf.size() > 64 * 1024) throw new IOException("header line too long");
         }
         if (c == -1 && buf.size() == 0) return null;
         return buf.toString("ISO-8859-1");

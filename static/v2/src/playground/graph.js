@@ -4,6 +4,12 @@
 //
 //   {
 //     v: 1,
+//     name: 'Voice filter',                        what the operator called the
+//                                                  graph, where they did — the
+//                                                  name it is saved under in
+//                                                  this browser (library.js),
+//                                                  and what a file or a link
+//                                                  carries it as
 //     ubersdr: '1.2.3',                            the UberSDR it was made on,
 //                                                  where known (version.js) —
 //                                                  read, never required
@@ -60,6 +66,15 @@ const isName = (v) => typeof v === 'string' && v.length > 0 && v.length <= 64;
 export const NAME_MAX = 60;
 
 /**
+ * A graph's name as given, made fit to keep: on one line, trimmed, and no
+ * longer than NAME_MAX — or '' for none.
+ */
+export function cleanGraphName(name) {
+    if (typeof name !== 'string') return '';
+    return name.replace(/\s+/g, ' ').trim().slice(0, NAME_MAX).trim();
+}
+
+/**
  * A block's name as given, made fit to keep: on one line, trimmed, and no
  * longer than NAME_MAX — or '' for none, which is also what a name that only
  * repeats the block's own label comes to, so that a block not renamed keeps
@@ -83,8 +98,11 @@ export function nodeName(node) {
  * graph as far as it could be read, what had to be left out, and the UberSDR
  * version it was made on ('' where it does not say). Nothing here throws —
  * whatever arrives in a link has to be survivable.
+ *
+ * `local` is for this browser's own storage and the editor's own graphs, and
+ * is the one way `savedAs` survives the read — see below.
  */
-export function parseGraph(raw) {
+export function parseGraph(raw, { local = false } = {}) {
     const errors = [];
     if (!raw || typeof raw !== 'object') {
         return { graph: emptyGraph(), errors: [{ message: 'Not a graph.' }], ubersdr: '' };
@@ -151,7 +169,14 @@ export function parseGraph(raw) {
         }
         wires.push([w[0], w[1], w[2], w[3]]);
     }
-    return { graph: { v: GRAPH_VERSION, nodes, wires }, errors, ubersdr: made };
+    const graphName = cleanGraphName(raw.name);
+    const graph = { v: GRAPH_VERSION, ...(graphName ? { name: graphName } : {}), nodes, wires };
+    // Which saved graph this one is the working copy of (library.js). Only ever
+    // from this browser's own storage — `local` — and never from a file or a
+    // link: a link that could claim to be the operator's "Voice filter" would
+    // be a link that Save then writes over it with, unasked.
+    if (local && typeof raw.savedAs === 'string' && cleanGraphName(raw.savedAs)) graph.savedAs = cleanGraphName(raw.savedAs);
+    return { graph, errors, ubersdr: made };
 }
 
 /**
@@ -164,6 +189,7 @@ export function serializeGraph(graph) {
         v: GRAPH_VERSION,
         // Which UberSDR this was made on, where the page knows.
         ...(made ? { ubersdr: made } : {}),
+        ...(cleanGraphName(graph.name) ? { name: cleanGraphName(graph.name) } : {}),
         nodes: graph.nodes.map((n) => {
             const type = BLOCK_BY_TYPE[n.type];
             const params = {};

@@ -33,6 +33,32 @@ import * as discovery from './discovery.js';
 // failing later for a reason that reads like the receiver is down.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// What else a link may carry, handed on to the receiver page as its query
+// string: the tuning and view a shared web link carries (static/v2/src/lib/
+// share.js, SHARE_KEYS) and a playground graph (?playground=pg1…). The same
+// names the web link uses, so the page reads one exactly as it reads the other.
+//
+// Only these, and each only up to a length: the rest of a query string is
+// anybody's, and `password` in particular is read by the page (radio/session.js)
+// — a link that could set it would be a link that logs somebody in as whoever
+// wrote it. A graph is the one long value; share.js refuses a code longer than
+// 32 KB, so nothing longer is worth passing on. The desktop's deeplink.js has
+// the same list, as it has the same everything else.
+const PASS_THROUGH = {
+    freq: 32, frequency: 32, mode: 16, bwl: 16, bwh: 16, zoom_freq: 32, zoom_bw: 32,
+    playground: 32 * 1024,
+};
+
+/** The part of a link's query the page is given, re-encoded, or ''. */
+function pageQuery(searchParams) {
+    const out = new URLSearchParams();
+    for (const [key, max] of Object.entries(PASS_THROUGH)) {
+        const value = searchParams.get(key);
+        if (value && value.length <= max) out.set(key, value);
+    }
+    return out.toString();
+}
+
 /**
  * What a link is asking for, or an Error saying why it is not asking for
  * anything.
@@ -60,7 +86,7 @@ export function parse(url) {
     if (!uuid) throw new Error('the link carries no receiver UUID');
     if (!UUID.test(uuid)) throw new Error('the link carries something that is not a UUID');
 
-    return { action, uuid };
+    return { action, uuid, query: pageQuery(parsed.searchParams) };
 }
 
 /**
@@ -77,11 +103,11 @@ export function parse(url) {
  * connect is a step on the way rather than the end: the address in the store
  * can be out of date, and the whole point is that the name in the link is not.
  */
-async function open(uuid, say) {
+async function open(uuid, query, say) {
     const saved = await store.findByUuid(uuid);
     if (saved) {
         say(`opening ${saved.label || saved.host}…`);
-        const first = await connect({ id: saved.id }).then(() => true, () => false);
+        const first = await connect({ id: saved.id }, { query }).then(() => true, () => false);
         if (first) return;
     }
 
@@ -97,7 +123,7 @@ async function open(uuid, say) {
     }
 
     say(`opening ${row.name || row.callsign || row.host}…`);
-    await connect(row);
+    await connect(row, { query });
 }
 
 // ---- the banner ------------------------------------------------------------
@@ -172,7 +198,7 @@ export function follow(url) {
 
         await show('opening a receiver…');
         try {
-            await open(target.uuid, (msg) => { show(msg); });
+            await open(target.uuid, target.query, (msg) => { show(msg); });
             // The receiver Activity is in front by now and the banner is behind
             // it; clearing it means backing out lands on the chooser rather than
             // on a stale "opening…".

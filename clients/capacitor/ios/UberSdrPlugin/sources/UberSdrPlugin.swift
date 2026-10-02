@@ -298,7 +298,8 @@ public class UberSdrPlugin: CAPPlugin, CAPBridgedPlugin {
                                                   proxy: proxy, product: product,
                                                   password: password,
                                                   notificationState: state,
-                                                  prefsScope: call.getString("prefsScope"))
+                                                  prefsScope: call.getString("prefsScope"),
+                                                  query: call.getString("query") ?? "")
             receiver.modalPresentationStyle = .fullScreen
             receiver.onClosed = { [weak self] in
                 guard let self = self else { return }

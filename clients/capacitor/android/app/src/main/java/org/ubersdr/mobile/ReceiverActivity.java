@@ -870,6 +870,15 @@ public class ReceiverActivity extends Activity {
             return;
         }
 
+        // The same receiver, from a followed link carrying something for the
+        // page — see UberSdrPlugin.openReceiver. Only ever sent without an id,
+        // so it cannot be mistaken for the launch Intent above.
+        String url = intent == null || id != null ? null : intent.getStringExtra(EXTRA_URL);
+        if (url != null && web != null) {
+            web.loadUrl(url);
+            return;
+        }
+
         String tag = intent == null ? null : intent.getStringExtra(EXTRA_NOTICE_TAG);
         if (tag != null && reply != null) reply.postMessage("notice-click:" + tag);
     }

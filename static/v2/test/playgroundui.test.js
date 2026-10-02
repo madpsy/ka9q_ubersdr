@@ -600,9 +600,296 @@ t('a shared graph is offered rather than loaded, and the offer can be taken or r
     const offer = deep(tree).find((n) => cls(n).split(' ').includes('pg-offer'));
     assert.ok(offer, 'no offer');
     assert.match(words(offer), /graph of 1 block\./);
+    // No UUID, no app link: there is nothing an ubersdr:// link could name.
+    assert.ok(!deep(offer).some((n) => n.type === 'a'), 'an app link for an unlisted receiver');
+    assert.ok(!deep(tree).some((n) => cls(n) === 'pg__call'), 'a callsign where the receiver has none');
     cleanups.forEach((f) => f());
     offerSharedGraph(null);
     closePlayground();
+});
+
+t('a shared graph on a listed receiver can be opened in the app instead', () => {
+    reset();
+    const UUID = '4907ba0a-32e6-40bb-a4ca-47f823331728';
+    offerSharedGraph({ graph: g([{ id: 's', type: 'signal' }]), errors: [] });
+    const { tree, cleanups } = render(PlaygroundWindow, {}, radio({ serverInfo: { public_uuid: UUID, receiver: { callsign: ' M9PSY ' } } }));
+    // The receiver's callsign leads the title bar.
+    const head = deep(tree).find((n) => cls(n) === 'pg__head');
+    assert.deepStrictEqual(deep(head).filter((n) => /^pg__(call|title)$/.test(cls(n))).map(words), ['M9PSY', 'Playground']);
+    const offer = deep(tree).find((n) => cls(n).split(' ').includes('pg-offer'));
+    const link = deep(offer).find((n) => n.type === 'a');
+    assert.ok(link, 'no Open in App');
+    assert.strictEqual(words(link), 'Open in App');
+    assert.ok(link.props.href.startsWith(`ubersdr://connect?uuid=${UUID}`), link.props.href);
+    // Still offered here as well: nothing can tell whether an app answered.
+    assert.ok(deep(offer).some((n) => n.props && n.props.onClick && words(n) === 'Load it'));
+    cleanups.forEach((f) => f());
+    offerSharedGraph(null);
+    closePlayground();
+});
+
+// ── named graphs, kept in this browser ──────────────────────────────────────
+
+const { LIB } = P;
+const clearLibrary = () => localStorage.removeItem(LIB.LIBRARY_KEY);
+
+t('a graph carries its name through the stored form, cleaned; savedAs only from this browser', () => {
+    const raw = { v: GRAPH_VERSION, name: '  Voice\n  filter  ', savedAs: 'Mine', nodes: [{ id: 'a', type: 'gain' }], wires: [] };
+    const read = parseGraph(raw).graph;
+    assert.strictEqual(read.name, 'Voice filter');
+    assert.ok(!('savedAs' in read), 'a file or a link claimed to be a saved graph');
+    assert.strictEqual(parseGraph(raw, { local: true }).graph.savedAs, 'Mine');
+    const out = P.serializeGraph({ ...read, savedAs: 'Mine' });
+    assert.strictEqual(out.name, 'Voice filter');
+    assert.ok(!('savedAs' in out), 'savedAs leaked into a file or link');
+    assert.ok(!('name' in P.serializeGraph(g([{ id: 'a', type: 'gain' }]))), 'an unnamed graph grew a name');
+    assert.strictEqual(parseGraph({ ...raw, name: 'x'.repeat(200) }).graph.name.length, 60);
+});
+
+t('the engine keeps a graph\'s name through edits and undo, and takes a new one with a replacement', () => {
+    reset();
+    const pg = getPlayground(radio().player);
+    pg.setGraph({ ...g([{ id: 'a', type: 'gain' }]), name: 'First', savedAs: 'First' });
+    // An edit, as the editor makes one: cloneGraph's, which says no name.
+    pg.setGraph(P.cloneGraph(g([{ id: 'a', type: 'gain' }, { id: 'b', type: 'gain' }])));
+    assert.strictEqual(pg.graph.name, 'First');
+    assert.strictEqual(pg.graph.savedAs, 'First');
+    // A replacement that says it has none.
+    pg.setGraph({ ...g([]), name: '', savedAs: '' });
+    assert.ok(!pg.graph.name && !pg.graph.savedAs);
+    pg.setName('  Renamed ', 'Renamed');
+    assert.strictEqual(pg.graph.name, 'Renamed');
+    pg.flush();
+    const stored = JSON.parse(localStorage.getItem('ubersdr.v2.playground'));
+    assert.strictEqual(stored.name, 'Renamed');
+    assert.strictEqual(stored.savedAs, 'Renamed', 'the working copy forgot which saved graph it is');
+    pg.setName('', '');
+});
+
+t('the library saves by name without regard to case, and says where the graph open now stands', () => {
+    clearLibrary();
+    try {
+        const one = { ...g([{ id: 'a', type: 'gain' }]), name: 'Voice filter' };
+        assert.strictEqual(LIB.saveState(one), 'unsaved');
+        assert.strictEqual(LIB.saveGraph('Voice filter', one, 1000), 'Voice filter');
+        assert.strictEqual(LIB.savedGraphs().length, 1);
+        assert.strictEqual(LIB.findSaved('VOICE FILTER').name, 'Voice filter');
+        const tied = { ...one, savedAs: 'Voice filter' };
+        assert.strictEqual(LIB.saveState(tied), 'saved');
+        assert.strictEqual(LIB.saveState({ ...tied, nodes: [...tied.nodes, ...g([{ id: 'b', type: 'gain' }]).nodes] }), 'changed');
+        assert.strictEqual(LIB.saveState({ ...tied, name: 'Other' }), 'changed', 'a rename is a change to save');
+        // Over the same name in another case: one entry, the new spelling.
+        LIB.saveGraph('voice FILTER', { ...one, nodes: g([{ id: 'z', type: 'gain' }]).nodes }, 2000);
+        assert.deepStrictEqual(LIB.savedGraphs().map((e) => e.name), ['voice FILTER']);
+        LIB.saveGraph('Second', one, 3000);
+        assert.deepStrictEqual(LIB.savedGraphs().map((e) => e.name), ['Second', 'voice FILTER'], 'not newest first');
+        assert.strictEqual(LIB.freeName('second'), 'second (2)');
+        assert.strictEqual(LIB.freeName('Third'), 'Third');
+        const opened = LIB.openSaved(LIB.findSaved('Second')).graph;
+        assert.strictEqual(opened.savedAs, 'Second');
+        assert.strictEqual(opened.name, 'Second');
+        LIB.deleteSaved('SECOND');
+        assert.deepStrictEqual(LIB.savedGraphs().map((e) => e.name), ['voice FILTER']);
+        assert.throws(() => LIB.saveGraph('  ', one), /needs a name/);
+        assert.strictEqual(LIB.fileNameFor('Voice filter / 40m!'), 'ubersdr-playground-voice-filter-40m.json');
+        assert.strictEqual(LIB.fileNameFor(''), 'ubersdr-playground.json');
+    } finally {
+        clearLibrary();
+    }
+});
+
+t('a file of several graphs adds them to the library, numbering a name already taken', () => {
+    clearLibrary();
+    try {
+        LIB.saveGraph('Voice filter', g([{ id: 'a', type: 'gain' }]));
+        const bundle = LIB.bundleGraphs([
+            { ...g([{ id: 'x', type: 'gain' }]), name: 'Voice filter' },
+            { ...g([{ id: 'y', type: 'gain' }]), name: 'CW' },
+            { ...g([{ id: 'w', type: 'gain' }]), name: 'CW' },
+        ]);
+        assert.ok(LIB.isBundle(bundle));
+        assert.ok(!LIB.isBundle(P.serializeGraph(g([]))));
+        const back = LIB.importBundle(JSON.parse(JSON.stringify(bundle)));
+        assert.deepStrictEqual(back.added, ['Voice filter (2)', 'CW', 'CW (2)']);
+        assert.deepStrictEqual(back.errors, []);
+        assert.strictEqual(LIB.savedGraphs().length, 4);
+        assert.strictEqual(LIB.findSaved('Voice filter').graph.nodes[0].id, 'a', 'an import replaced a saved graph');
+        assert.match(LIB.importBundle({ ubersdrPlayground: 'graphs', v: 9, graphs: [] }).errors[0], /newer version/);
+    } finally {
+        clearLibrary();
+    }
+});
+
+t('the Export dialog: the graph open now ticked to start, All saved ticks the rest, and the count follows', () => {
+    reset();
+    const graphs = [{ name: 'A', savedAt: 1, graph: g([]) }, { name: 'B', savedAt: 2, graph: g([]) }];
+    let got = null;
+    const props = { current: { ...g([{ id: 'x', type: 'gain' }]), name: 'Now' }, graphs, onCancel() {}, onExport: (v) => { got = v; } };
+    const btn = (tree, label) => deep(tree).find((n) => n.props && n.props.onClick && words(n) === label);
+    let r = render(P.ExportDialog, props);
+    assert.ok(btn(r.tree, 'Export'), 'one graph should read as plain Export');
+    btn(r.tree, 'All saved').props.onClick();
+    r = render(P.ExportDialog, props);
+    btn(r.tree, 'Export 3').props.onClick();
+    assert.deepStrictEqual(got, { current: true, names: ['A', 'B'] });
+    btn(r.tree, 'None saved').props.onClick();
+    r = render(P.ExportDialog, props);
+    deep(r.tree).find((n) => n.type === 'input' && n.props.type === 'checkbox').props.onChange();
+    r = render(P.ExportDialog, props);
+    assert.strictEqual(btn(r.tree, 'Export').props.disabled, true, 'nothing ticked, and Export still live');
+});
+
+t('the name dialog: a taken name says it replaces, and an empty one cannot be saved', () => {
+    localStorage.removeItem(P.LIB.LIBRARY_KEY);
+    try {
+        P.LIB.saveGraph('Taken', g([]));
+        reset();
+        let saved = null;
+        const props = { initial: '', title: 'Name this graph', onCancel() {}, onSave: (n) => { saved = n; } };
+        let r = render(P.SaveNameDialog, props);
+        const go = (tree, label) => deep(tree).find((n) => n.props && n.props.onClick && words(n) === label);
+        assert.strictEqual(go(r.tree, 'Save').props.disabled, true);
+        deep(r.tree).find((n) => n.type === 'input').props.onChange({ target: { value: ' taken ' } });
+        r = render(P.SaveNameDialog, props);
+        assert.match(words(deep(r.tree).find((n) => cls(n).includes('pg-save__taken'))), /Replaces the saved graph called “Taken”/);
+        go(r.tree, 'Replace it').props.onClick();
+        assert.strictEqual(saved, 'taken');
+    } finally {
+        localStorage.removeItem(P.LIB.LIBRARY_KEY);
+    }
+});
+
+t('the name in the bar: kept on leaving it, cleaned, and Escape puts it back', () => {
+    reset();
+    const renamed = [];
+    const props = { name: 'Old', state: 'saved', onRename: (n) => renamed.push(n) };
+    let r = render(P.GraphName, props);
+    const box = () => deep(r.tree).find((n) => n.type === 'input');
+    box().props.onFocus();
+    box().props.onChange({ target: { value: '  New   name ' } });
+    r = render(P.GraphName, props);
+    assert.deepStrictEqual(renamed, [], 'renamed per keystroke');
+    box().props.onBlur();
+    assert.deepStrictEqual(renamed, ['New name']);
+    r = render(P.GraphName, props);
+    box().props.onFocus();
+    box().props.onChange({ target: { value: 'Abandoned' } });
+    r = render(P.GraphName, props);
+    const target = { blur() { box().props.onBlur(); } };
+    box().props.onKeyDown({ key: 'Escape', stopPropagation() {}, currentTarget: target });
+    assert.deepStrictEqual(renamed, ['New name'], 'Escape kept the name');
+    r = render(P.GraphName, props);
+    assert.strictEqual(box().props.value, 'Old');
+});
+
+t('the window: the name in the title bar, Save asks for a name once, then saves over its own and asks before another\'s', () => {
+    clearLibrary();
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    pg.setGraph({ ...g([{ id: 'a', type: 'gain', x: 10, y: 10 }]), name: '', savedAs: '' });
+    let r = render(PlaygroundWindow, {}, ctx);
+    const again = () => { r.cleanups.forEach((f) => f()); r = render(PlaygroundWindow, {}, ctx); };
+    const btn = (label) => deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === label);
+    const dialog = (label) => deep(r.tree).find((n) => n.props && n.props.role === 'dialog' && n.props['aria-label'] === label);
+    // The window's own elements, unexpanded: a dialog's typed-in state lives in
+    // its own hooks, which the stub keeps only for one expansion per render, so
+    // the window is driven through the props it hands each one.
+    const el = (type) => walk(r.tree).find((n) => n.type === type);
+    const nameBox = () => deep(el(P.GraphName)).find((n) => cls(n) === 'pg__name');
+    const notice = () => words(deep(r.tree).find((n) => cls(n) === 'pg-notice'));
+    try {
+        assert.ok(nameBox(), 'no name in the title bar');
+        assert.strictEqual(nameBox().props.value, '');
+        assert.strictEqual(nameBox().props.placeholder, 'Untitled graph');
+        assert.ok(deep(r.tree).some((n) => cls(n).includes('pg__dirty--unsaved')));
+
+        // Unnamed: Save asks for one.
+        btn('Save').props.onClick();
+        again();
+        assert.ok(dialog('Name this graph'), 'Save on an unnamed graph did not ask for a name');
+        el(P.SaveNameDialog).props.onSave('My filter');
+        again();
+        assert.strictEqual(pg.graph.name, 'My filter');
+        assert.strictEqual(pg.graph.savedAs, 'My filter');
+        assert.ok(LIB.findSaved('My filter'), 'not saved');
+        assert.match(notice(), /Saved “My filter” in this browser/);
+        assert.ok(!deep(r.tree).some((n) => cls(n).includes('pg__dirty')), 'a saved graph marked as unsaved');
+        assert.strictEqual(nameBox().props.value, 'My filter');
+
+        // Changed: marked, and Save writes straight over its own.
+        pg.setParams('a', { gain: 6 });
+        again();
+        assert.ok(deep(r.tree).some((n) => cls(n).includes('pg__dirty--changed')));
+        btn('Save').props.onClick();
+        again();
+        assert.ok(!dialog('Replace a saved graph?') && !dialog('Name this graph'), 'asked about saving over its own');
+        assert.strictEqual(LIB.saveState(pg.graph), 'saved');
+
+        // Renamed in the bar to another saved graph's name: asked first.
+        LIB.saveGraph('Theirs', g([{ id: 'q', type: 'gain' }]));
+        el(P.GraphName).props.onRename('theirs');
+        again();
+        assert.strictEqual(pg.graph.name, 'theirs');
+        btn('Save').props.onClick();
+        again();
+        assert.ok(dialog('Replace a saved graph?'), 'wrote over another saved graph without asking');
+        btn('Cancel').props.onClick();
+        again();
+        assert.strictEqual(LIB.findSaved('Theirs').graph.nodes[0].id, 'q');
+    } finally {
+        r.cleanups.forEach((f) => f());
+        pg.setName('', '');
+        clearLibrary();
+        closePlayground();
+    }
+});
+
+t('Open lists the saved graphs and opens one, with its name; Export asks what to export once something is saved', () => {
+    clearLibrary();
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    pg.setGraph({ ...g([{ id: 'mine', type: 'gain', x: 10, y: 10 }]), name: 'Scratch', savedAs: '' });
+    LIB.saveGraph('Older', g([{ id: 'o', type: 'gain', x: 5, y: 5 }]), 1000);
+    LIB.saveGraph('Newer', g([{ id: 'n', type: 'gain', x: 5, y: 5 }]), 2000);
+    let r = render(PlaygroundWindow, {}, ctx);
+    const again = () => { r.cleanups.forEach((f) => f()); r = render(PlaygroundWindow, {}, ctx); };
+    const btn = (label, within = r.tree) => deep(within).find((n) => n.props && n.props.onClick && words(n) === label);
+    const dialog = (label) => deep(r.tree).find((n) => n.props && n.props.role === 'dialog' && n.props['aria-label'] === label);
+    try {
+        btn('Open').props.onClick();
+        again();
+        const lib = dialog('Saved graphs');
+        assert.ok(lib, 'no list of saved graphs');
+        assert.deepStrictEqual(deep(lib).filter((n) => cls(n) === 'pg-lib__name').map(words), ['Newer', 'Older']);
+        const rows = deep(lib).filter((n) => cls(n).startsWith('pg-lib__row'));
+        btn('Open', rows[1]).props.onClick();
+        again();
+        assert.ok(!dialog('Saved graphs'), 'the list stayed up after opening');
+        assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['o']);
+        assert.strictEqual(pg.graph.name, 'Older');
+        assert.strictEqual(pg.graph.savedAs, 'Older');
+        // Unsaved work was replaced, so it can be put back — name and all.
+        btn('Put mine back').props.onClick();
+        again();
+        assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['mine']);
+        assert.strictEqual(pg.graph.name, 'Scratch');
+
+        btn('Export').props.onClick();
+        again();
+        const ex = dialog('Export');
+        assert.ok(ex, 'Export did not ask, with graphs saved');
+        assert.deepStrictEqual(deep(ex).filter((n) => cls(n) === 'pg-lib__name').map(words), ['Scratch', 'Newer', 'Older']);
+        btn('Cancel', ex).props.onClick();
+        again();
+        assert.ok(!dialog('Export'));
+    } finally {
+        r.cleanups.forEach((f) => f());
+        pg.setName('', '');
+        clearLibrary();
+        closePlayground();
+    }
 });
 
 t('a loaded shared graph can be swapped back for the one that was open, even after editing it', () => {
@@ -2802,6 +3089,118 @@ const tAsync = async (name, fn) => {
             assert.strictEqual(uberSDRVersion(), '2.0.1');
         } finally {
             setUberSDRVersion('');
+        }
+    });
+    await tAsync('several graphs export as one file, which Import adds to the saved graphs; a link carries the name', async () => {
+        clearLibrary();
+        reset();
+        const ctx = radio();
+        const pg = getPlayground(ctx.player);
+        pg.setGraph({ ...g([{ id: 'mine', type: 'gain', x: 10, y: 10 }]), name: 'Open now', savedAs: '' });
+        LIB.saveGraph('Kept', g([{ id: 'k', type: 'gain', x: 5, y: 5 }]));
+        let saved = null;
+        globalThis.window = globalThis.window || {};
+        const hadSave = window.ubersdrSaveFile;
+        window.ubersdrSaveFile = async (blob, name) => { saved = { text: await blob.text(), name }; };
+        let r = render(PlaygroundWindow, {}, ctx);
+        const again = () => { r.cleanups.forEach((f) => f()); r = render(PlaygroundWindow, {}, ctx); };
+        const btn = (label, within = r.tree) => deep(within).find((n) => n.props && n.props.onClick && words(n) === label);
+        const dialog = (label) => deep(r.tree).find((n) => n.props && n.props.role === 'dialog' && n.props['aria-label'] === label);
+        try {
+            // The graph open now alone: a graph file, named for it.
+            btn('Export').props.onClick();
+            again();
+            btn('Export', dialog('Export')).props.onClick();
+            await new Promise((res) => setTimeout(res, 0));
+            assert.strictEqual(saved.name, 'ubersdr-playground-open-now.json');
+            assert.strictEqual(JSON.parse(saved.text).name, 'Open now');
+
+            // Everything: one file of graphs. (The ticks are the dialog's own
+            // state; it is tested on its own below.)
+            again();
+            btn('Export').props.onClick();
+            again();
+            walk(r.tree).find((n) => n.type === P.ExportDialog).props.onExport({ current: true, names: ['Kept'] });
+            await new Promise((res) => setTimeout(res, 0));
+            const bundle = JSON.parse(saved.text);
+            assert.ok(LIB.isBundle(bundle), 'several graphs did not export as a file of graphs');
+            assert.deepStrictEqual(bundle.graphs.map((x) => x.name), ['Open now', 'Kept']);
+
+            // Imported: to the saved graphs, the canvas left alone.
+            clearLibrary();
+            again();
+            const input = deep(r.tree).find((n) => n.type === 'input' && n.props && n.props.type === 'file');
+            input.props.onChange({ target: { files: [{ name: 'graphs.json', text: async () => saved.text }], value: 'x' } });
+            await new Promise((res) => setTimeout(res, 0));
+            again();
+            assert.deepStrictEqual(LIB.savedGraphs().map((e) => e.name).sort(), ['Kept', 'Open now']);
+            assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['mine'], 'a file of graphs replaced the canvas');
+            assert.match(words(deep(r.tree).find((n) => cls(n) === 'pg-notice')), /Added 2 saved graphs from graphs\.json/);
+
+            // A link carries the name.
+            const shared = await P.decodeShare(await P.encodeShare(pg.graph));
+            assert.strictEqual(shared.graph.name, 'Open now');
+            assert.ok(!('savedAs' in shared.graph));
+        } finally {
+            r.cleanups.forEach((f) => f());
+            window.ubersdrSaveFile = hadSave;
+            pg.setName('', '');
+            clearLibrary();
+            closePlayground();
+        }
+    });
+    await tAsync('Share asks for a web or an app link on a listed receiver, and never links to loopback', async () => {
+        const UUID = '4907ba0a-32e6-40bb-a4ca-47f823331728';
+        const had = Object.getOwnPropertyDescriptor(globalThis, 'location');
+        // As inside the desktop client: served from its loopback proxy.
+        Object.defineProperty(globalThis, 'location', {
+            configurable: true, writable: true,
+            value: { origin: 'http://127.0.0.1:17820', pathname: '/v2/', search: '' },
+        });
+        const settle = () => new Promise((res) => setTimeout(res, 20));
+        let r = null;
+        try {
+            const listed = radio({ serverInfo: { public_uuid: UUID, receiver: { public_url: 'https://rx.example.org/' } } });
+            getPlayground(listed.player).setGraph(g([{ id: 's', type: 'signal', x: 10, y: 10 }]));
+            reset();
+            r = render(PlaygroundWindow, {}, listed);
+            const again = (ctx) => { r.cleanups.forEach((f) => f()); r = render(PlaygroundWindow, {}, ctx); };
+            const btn = (label) => deep(r.tree).find((n) => n.props && n.props.onClick && words(n) === label);
+            const notice = () => deep(r.tree).find((n) => cls(n) === 'pg-notice');
+            const shown = () => {
+                const input = deep(notice()).find((n) => n.type === 'input');
+                return input && input.props.value;
+            };
+
+            btn('Share').props.onClick();
+            await settle();
+            again(listed);
+            assert.match(words(notice()), /Share as:/);
+            assert.strictEqual(shown(), undefined, 'a link before one was chosen');
+
+            btn('App link').props.onClick();
+            await settle();
+            again(listed);
+            assert.match(shown(), new RegExp(`^ubersdr://connect\\?uuid=${UUID}&freq=7100000&.*playground=pg1\\.[zj]\\.`));
+
+            btn('Web link').props.onClick();
+            await settle();
+            again(listed);
+            assert.match(shown(), /^https:\/\/rx\.example\.org\/v2\/\?freq=7100000&.*playground=pg1\.[zj]\./);
+
+            // Not in the directory: no question, the web link straight away.
+            const unlisted = radio({ serverInfo: { receiver: {} } });
+            again(unlisted);
+            btn('Share').props.onClick();
+            await settle();
+            again(unlisted);
+            assert.ok(!btn('App link'), 'an app link for an unlisted receiver');
+            assert.match(shown(), /\/v2\/\?freq=7100000&.*playground=pg1\./);
+        } finally {
+            if (r) r.cleanups.forEach((f) => f());
+            closePlayground();
+            if (had) Object.defineProperty(globalThis, 'location', had);
+            else delete globalThis.location;
         }
     });
     console.log(`\n${pass} passed`);

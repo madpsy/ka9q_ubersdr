@@ -223,6 +223,15 @@ export class Runtime {
             // is what it does itself, in time rather than in samples.
             node.queues = wired > 1 && !type.mixedRates ? node.ports.map((p) => (isStream(p.kind) ? new Queue(p.kind) : null)) : null;
             node.inRates = this.plan.inRates ? this.plan.inRates[n.id] || [] : [];
+            // Inputs fed from an output that is not audio (a frequency in Hz,
+            // a key level): no level in dBFS to read, nothing to clip.
+            node.notAudio = (this.plan.inputs[n.id] || []).map((f) => {
+                if (!f) return false;
+                const upNode = this.graph.nodes.find((x) => x.id === f[0]);
+                const upType = upNode && BLOCK_BY_TYPE[upNode.type];
+                const port = upType && outputsOf(upNode, upType).find((p) => p.name === f[1]);
+                return !!port && port.audio === false;
+            });
             node.hasStreamOut = type.outputs.some((p) => isStream(p.kind));
             // What each control input last delivered, by its seq, and what the
             // parameters it drives have been set to.
@@ -519,7 +528,7 @@ export class Runtime {
                 for (const m of ins[i].list) lv.act += m && typeof m.text === 'string' ? m.text.length : 1;
             });
         }
-        const at = node.ports.findIndex((p, i) => (p.kind === COMPLEX || p.kind === REAL) && ins[i]);
+        const at = node.ports.findIndex((p, i) => (p.kind === COMPLEX || p.kind === REAL) && ins[i] && !node.notAudio[i]);
         if (at >= 0 && n > 0) lv.in = meanSquare(ins[at], n);
         const out = node.levelOut >= 0 ? node.outs[node.levelOut] : null;
         if (out && out.n > 0) lv.out = meanSquare(out, out.n);
@@ -529,7 +538,7 @@ export class Runtime {
         let audio = node.audioOut >= 0 ? node.outs[node.audioOut] : null;
         let m = audio ? audio.n : 0;
         if (!audio) {
-            const ai = node.ports.findIndex((p, i) => p.kind === REAL && p.audio !== false && ins[i]);
+            const ai = node.ports.findIndex((p, i) => p.kind === REAL && p.audio !== false && ins[i] && !node.notAudio[i]);
             if (ai >= 0) { audio = ins[ai]; m = n; }
         }
         if (audio) {

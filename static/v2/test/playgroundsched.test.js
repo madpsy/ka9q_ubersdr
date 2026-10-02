@@ -662,4 +662,24 @@ t('the SSTV template tunes by a Frequency list: 14.230 MHz chosen, frequency to 
     assert.strictEqual(out.mode[0].value, 'usb');
 });
 
+t('a frequency in Hz into a strip chart is not audio: no level in dBFS, no clipping (the SSTV template’s chart)', () => {
+    const g = TEMPLATES.find((x) => x.id === 'sstv').build();
+    const rt = new Runtime(g, 12000);
+    assert.ok(rt.ok, JSON.stringify(rt.errors));
+    rt.measureLevels = true;
+    // A 1900 Hz tone as the audio: the demodulator reads ~1900, far past 1 if taken for audio.
+    const f = new Float32Array(240);
+    for (let k = 0; k < 100; k++) {
+        const i = new Float32Array(240);
+        const q = new Float32Array(240);
+        for (let j = 0; j < 240; j++) { const ph = (2 * Math.PI * 1900 * (k * 240 + j)) / 12000; i[j] = 0.3 * Math.cos(ph); q[j] = 0.3 * Math.sin(ph); }
+        rt.process({ i, q, frames: 240, rate: 12000 });
+    }
+    const lv = rt.levels().freq;
+    assert.ok(lv, JSON.stringify(Object.keys(rt.levels())));
+    assert.ok(!lv.clip, `the chart clipped: ${JSON.stringify(lv)}`);
+    assert.ok(lv.in == null || lv.in < 10, `level in read as audio, in dBFS: ${JSON.stringify(lv)}`);
+    assert.strictEqual(lv.peak, undefined, "judged as audio at all");
+});
+
 console.log(`\n${pass} passed`);

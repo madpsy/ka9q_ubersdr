@@ -531,7 +531,8 @@ export const StripChartBlock = {
     label: 'Strip chart',
     category: 'Viewers',
     summary: 'One or two signals scrolling past over a set span, a chart recorder’s paper — a key, a level, a phase, over the last few seconds or minutes.',
-    inputs: [{ name: 'a', kind: REAL }, { name: 'b', kind: REAL, optional: true }],
+    // Any numbers, not audio: nothing here reaches a speaker, so nothing clips.
+    inputs: [{ name: 'a', kind: REAL, audio: false }, { name: 'b', kind: REAL, optional: true, audio: false }],
     outputs: [],
     mixedRates: true,
     params: {
@@ -608,7 +609,7 @@ export const HistogramBlock = {
     label: 'Histogram',
     category: 'Viewers',
     summary: 'How a signal’s values are spread — two clean levels, a bell of noise, a slicer’s margin — with its mean and spread.',
-    inputs: [{ name: 'in', kind: REAL }],
+    inputs: [{ name: 'in', kind: REAL, audio: false }],
     outputs: [],
     params: {
         bins: { kind: 'number', label: 'Bins', default: 64, min: 8, max: 512, step: 1, control: false },
@@ -707,7 +708,7 @@ export const ReadoutBlock = {
     label: 'Readout',
     category: 'Viewers',
     summary: 'A signal as a number — its latest, mean, RMS, peak or extremes over a window — written large, and as a control.',
-    inputs: [{ name: 'in', kind: REAL }],
+    inputs: [{ name: 'in', kind: REAL, audio: false }],
     outputs: [{ name: 'value', kind: CONTROL }],
     params: {
         measure: { kind: 'choice', label: 'Shows', default: 'mean', options: READOUT_MEASURES },

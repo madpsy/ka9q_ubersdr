@@ -511,6 +511,42 @@ t('text to speech: behind by too much, it drops the oldest and says so; muted, i
     assert.strictEqual(said[said.length - 1], '<cancel>', 'spoke while muted');
 });
 
+t('text to speech: the chosen voice, pitch and volume — the receiver’s voice when none is chosen, or the chosen one is not here', () => {
+    // The voice the speaker asks for, by name.
+    const asked = [];
+    const spoken = [];
+    class Utterance { constructor(text) { this.text = text; } }
+    const sp = new Speaker({
+        synth: { speak: (u) => spoken.push(u), cancel() {} },
+        Utterance,
+        voice: (name) => { asked.push(name); return { name: name || 'Receiver voice', lang: 'en-GB' }; },
+        setTimer: () => 0,
+        clearTimer() {},
+    });
+    sp.feed('CQ ', { read: 'letters', voice: 'Microsoft Ryan Online', pitch: 1.4, volume: 60, rate: 1 });
+    assert.deepStrictEqual(asked, ['Microsoft Ryan Online']);
+    assert.strictEqual(spoken[0].voice.name, 'Microsoft Ryan Online');
+    assert.strictEqual(spoken[0].pitch, 1.4);
+    assert.strictEqual(spoken[0].volume, 0.6);
+
+    // The real lookup, against a browser's list: there, used; not there, the receiver's.
+    const { voiceNamed } = require('./.build/playgroundengine.cjs');
+    const was = globalThis.window ? globalThis.window.speechSynthesis : undefined;
+    globalThis.window = globalThis.window || globalThis;
+    const voices = [
+        { name: 'Google UK English Female', lang: 'en-GB' },
+        { name: 'Microsoft Ryan Online (Natural) - English (United Kingdom)', lang: 'en-GB' },
+    ];
+    window.speechSynthesis = { getVoices: () => voices, speak() {}, cancel() {} };
+    try {
+        assert.strictEqual(voiceNamed('Microsoft Ryan Online (Natural) - English (United Kingdom)').name, voices[1].name);
+        assert.strictEqual(voiceNamed('A voice from another machine').name, 'Google UK English Female', 'not the receiver’s voice');
+        assert.strictEqual(voiceNamed('').name, 'Google UK English Female');
+    } finally {
+        if (was === undefined) delete window.speechSynthesis; else window.speechSynthesis = was;
+    }
+});
+
 t('text to speech: the worker hands each TTS block its text, and the engine says it with the block’s settings', () => {
     // The worker: a transmitter's text, into a TTS block, comes back with the packet.
     const sent = [];

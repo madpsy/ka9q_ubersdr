@@ -233,7 +233,7 @@ export const TtsBlock = {
     type: 'tts',
     label: 'Text to speech',
     category: 'Sinks',
-    summary: 'Reads text aloud — a decoder’s, or a console’s — in the voice the Announcements panel speaks with. Letters spells each word, for CW and callsigns; Words reads phrases, for RTTY and NAVTEX.',
+    summary: 'Reads text aloud — a decoder’s, or a console’s — in the receiver’s voice or one of your choosing. Letters spells each word, for CW and callsigns; Words reads phrases, for RTTY and NAVTEX.',
     inputs: [{ name: 'in', kind: MESSAGE }],
     outputs: [],
     params: {
@@ -243,7 +243,13 @@ export const TtsBlock = {
             default: 'letters',
             options: [{ value: 'letters', label: 'Letters' }, { value: 'words', label: 'Words' }],
         },
+        // By name: voices are the browser's and differ from machine to
+        // machine, so a graph from another one may name a voice this one has
+        // not got — and is then read in the receiver's (playground/speech.js).
+        voice: { kind: 'voice', label: 'Voice', default: '' },
         rate: { kind: 'number', label: 'Speed', unit: '×', default: 1, min: 0.5, max: 2, step: 0.1, live: true },
+        pitch: { kind: 'number', label: 'Pitch', unit: '×', default: 1, min: 0.5, max: 2, step: 0.1, live: true },
+        volume: { kind: 'number', label: 'Volume', unit: '%', default: 100, min: 0, max: 100, step: 5, live: true },
         muted: { kind: 'bool', label: 'Muted', default: false },
     },
     create() {

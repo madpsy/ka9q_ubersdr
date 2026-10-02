@@ -193,6 +193,9 @@ export function sanitizeParam(spec, value) {
             return spec.options.some((o) => o.value === value) ? value : spec.default;
         case 'device':
             return typeof value === 'string' ? value.slice(0, 512) : spec.default;
+        case 'voice':
+            // A voice's name, as the browser lists it; '' for the receiver's.
+            return typeof value === 'string' ? value.slice(0, 200) : spec.default;
         case 'text':
             return typeof value === 'string' ? value.slice(0, spec.max || 200) : spec.default;
         default: {

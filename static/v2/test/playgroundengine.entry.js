@@ -14,7 +14,7 @@ import { MAX_JSON_BYTES, decodeShare, encodeShare } from '../src/playground/shar
 import { MAX_IN_FLIGHT, OFFLINE_RATE, PlaygroundEngine, STORAGE_KEY, defaultGraph, needsReceiver } from '../src/playground/engine.js';
 import { centreFromName, decodeWav } from '../src/playground/wavfile.js';
 import { frequencyOrigins } from '../src/playground/probes.js';
-import { IDLE_MS, MAX_BACKLOG, Speaker, chunkSpeech, spellOut } from '../src/playground/speech.js';
+import { IDLE_MS, MAX_BACKLOG, Speaker, chunkSpeech, spellOut, voiceNamed } from '../src/playground/speech.js';
 
 module.exports = {
     DemodChain, IQDemod, planFor, resetIQOwner, AudioRoutes, CHANNEL_PAN, BLOCK_BY_TYPE,
@@ -24,5 +24,5 @@ module.exports = {
     MAX_JSON_BYTES, decodeShare, encodeShare,
     MAX_IN_FLIGHT, PlaygroundEngine, STORAGE_KEY, defaultGraph,
     OFFLINE_RATE, needsReceiver, centreFromName, decodeWav, frequencyOrigins,
-    IDLE_MS, MAX_BACKLOG, Speaker, chunkSpeech, spellOut,
+    IDLE_MS, MAX_BACKLOG, Speaker, chunkSpeech, spellOut, voiceNamed,
 };

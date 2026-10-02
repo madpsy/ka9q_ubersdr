@@ -829,8 +829,9 @@ t('a slider wired into the wpm input drives the Speed setting through the runtim
     const { Runtime, parseGraph, GRAPH_VERSION } = ENC.P;
     const g = parseGraph({ v: GRAPH_VERSION, nodes: [
         { id: 'sl', type: 'slider', params: { value: 15, min: 5, max: 60 } },
+        { id: 'tx', type: 'data-tx', params: { mode: 'cw' } },
         { id: 'enc', type: 'morse-encoder', params: { wpm: 25 } },
-    ], wires: [['sl', 'out', 'enc', 'wpm']] }).graph;
+    ], wires: [['sl', 'out', 'enc', 'wpm'], ['tx', 'sent', 'enc', 'text']] }).graph;
     const rt = new Runtime(g, 12000);
     assert.ok(rt.ok, JSON.stringify(rt.errors));
     rt.process({ i: null, q: null, frames: 240, rate: 12000 });

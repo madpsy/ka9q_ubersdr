@@ -1710,7 +1710,7 @@ t('a Morse encoder whose speed comes from its wpm input says so: “driven by”
         }));
         const driven = all.find((x) => cls(x) === 'pg-driven');
         assert.ok(driven, 'the settings do not say Speed is driven');
-        assert.strictEqual(words(driven), 'driven by sl.out');
+        assert.strictEqual(words(driven).replace(/\s+/g, ' '), 'driven by sl.out');
         const field = all.find((x) => cls(x).startsWith('field') && /Speed/.test(words(x)) && /driven by/.test(words(x)));
         assert.match(words(field), /15/, 'not the speed in force');
         const card = deep(React.createElement(CardVisual, { pg, node: graph.nodes[1] }));
@@ -1725,6 +1725,42 @@ t('a Morse encoder whose speed comes from its wpm input says so: “driven by”
     } finally {
         pg.driven = was.driven;
         pg.readings = was.readings;
+    }
+});
+
+t('the TTS block’s voice: a dropdown of this browser’s voices, the receiver’s first and named, a voice from elsewhere kept and said to be missing', () => {
+    const { VoiceField } = P;
+    const voices = [
+        { name: 'Google UK English Female', lang: 'en-GB' },
+        { name: 'Google US English', lang: 'en-US' },
+    ];
+    const was = window.speechSynthesis;
+    window.speechSynthesis = { getVoices: () => voices, speak() {}, cancel() {}, addEventListener() {}, removeEventListener() {} };
+    try {
+        const picked = [];
+        reset();
+        const tree = render(VoiceField, { label: 'Voice', value: '', onChange: (v) => picked.push(v) }).tree;
+        const select = deep(tree).find((x) => x.type === 'select');
+        const options = deep(select).filter((x) => x.type === 'option').map((o) => [o.props.value, words(o)]);
+        assert.deepStrictEqual(options[0], ['', 'As the receiver — Google UK English Female']);
+        assert.deepStrictEqual(options.slice(1).map(([v]) => v), ['Google UK English Female', 'Google US English']);
+        select.props.onChange({ target: { value: 'Google US English' } });
+        assert.deepStrictEqual(picked, ['Google US English']);
+        // A voice this browser has not got: kept, and said to be missing.
+        reset();
+        const elsewhere = deep(render(VoiceField, { label: 'Voice', value: 'Samantha', onChange() {} }).tree);
+        assert.ok(elsewhere.some((x) => x.type === 'option' && x.props.value === 'Samantha' && /not on this device/.test(words(x))));
+        // And in the TTS block's settings.
+        reset();
+        const pg = getPlayground(radio().player);
+        const all = deep(React.createElement(Inspector, {
+            pg, graph: g([{ id: 't', type: 'tts' }]), selection: { nodes: new Set(['t']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+            onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+        }));
+        assert.ok(all.some((x) => x.type === 'select' && deep(x).some((o) => o.type === 'option' && /As the receiver/.test(words(o)))), 'no voice dropdown in the TTS block');
+        for (const label of ['Speed', 'Pitch', 'Volume']) assert.ok(all.some((x) => cls(x).startsWith('field') && words(x).startsWith(label)), `no ${label}`);
+    } finally {
+        if (was === undefined) delete window.speechSynthesis; else window.speechSynthesis = was;
     }
 });
 

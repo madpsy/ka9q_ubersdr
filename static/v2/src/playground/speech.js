@@ -24,7 +24,21 @@
 // the oldest unsaid pieces are dropped once the backlog passes MAX_BACKLOG,
 // and counted, so the card can say so.
 
-import { currentVoice, refreshVoice, speechAvailable } from '../lib/announce.js';
+import { currentVoice, refreshVoice, speechAvailable, usableVoices } from '../lib/announce.js';
+
+/**
+ * The voice called `name`, if this browser has it; otherwise the receiver's
+ * — the Announcements panel's choice, or its pick of the best. A name from
+ * another machine falls back rather than going silent: an utterance nobody
+ * hears is indistinguishable from the block not working.
+ */
+export function voiceNamed(name) {
+    if (name && speechAvailable()) {
+        const found = usableVoices(window.speechSynthesis.getVoices()).find((v) => v.name === name);
+        if (found) return found;
+    }
+    return currentVoice() || refreshVoice();
+}
 
 export const IDLE_MS = 1200;
 export const MAX_BACKLOG = 240;
@@ -88,7 +102,7 @@ export class Speaker {
     constructor({
         synth = speechAvailable() ? window.speechSynthesis : null,
         Utterance = typeof SpeechSynthesisUtterance !== 'undefined' ? SpeechSynthesisUtterance : null,
-        voice = () => currentVoice() || refreshVoice(),
+        voice = voiceNamed,
         setTimer = (fn, ms) => setTimeout(fn, ms),
         clearTimer = (t) => clearTimeout(t),
     } = {}) {
@@ -102,7 +116,7 @@ export class Speaker {
         this.speaking = null;       // the piece being said, or null
         this.last = '';             // the last piece said
         this.skipped = 0;           // pieces dropped to catch up
-        this.params = { read: 'letters', rate: 1, muted: false };
+        this.params = { read: 'letters', rate: 1, pitch: 1, volume: 100, voice: '', muted: false };
         this._idle = null;
         this._watchdog = null;
     }
@@ -116,7 +130,14 @@ export class Speaker {
     feed(text, params = this.params) {
         const read = params.read === 'words' ? 'words' : 'letters';
         if (read !== this.params.read) this.buffer = '';
-        this.params = { read, rate: params.rate || 1, muted: !!params.muted };
+        this.params = {
+            read,
+            rate: params.rate || 1,
+            pitch: params.pitch || 1,
+            volume: params.volume == null ? 100 : Number(params.volume),
+            voice: params.voice || '',
+            muted: !!params.muted,
+        };
         if (this.params.muted || !this.available) {
             if (this.queue.length || this.speaking) this.stop();
             return;
@@ -154,13 +175,14 @@ export class Speaker {
         if (this.speaking || !this.queue.length || !this.available) return;
         const piece = this.queue.shift();
         const u = new this.Utterance(piece);
-        const v = this.voice();
+        const v = this.voice(this.params.voice);
         if (v) {
             u.voice = v;
             u.lang = v.lang || 'en-GB';
         }
         u.rate = this.params.rate;
-        u.volume = 1;
+        u.pitch = this.params.pitch;
+        u.volume = Math.max(0, Math.min(1, this.params.volume / 100));
         const done = () => {
             if (this._utterance !== u) return;
             this._utterance = null;

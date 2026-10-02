@@ -22,6 +22,7 @@ import { decodeWav } from '../wavfile.js';
 import { expandable } from '../expand.js';
 import { useRadio } from '../../radio/RadioContext.jsx';
 import { holdPlayback } from '../../lib/playbackHold.js';
+import { currentVoice, listVoices, speechAvailable } from '../../lib/announce.js';
 import { EQ_FREQUENCIES, EQ_PRESETS, presetMakeup } from '../../radio/audio-filters.js';
 import { isIQ } from '../../radio/constants.js';
 import FrequencyDial from '../../components/FrequencyDial.jsx';
@@ -219,6 +220,48 @@ export function ParamRow({ name, spec, value, params, rate, onChange, sinkError,
     );
 }
 
+/**
+ * The voices this browser can speak with, best first — the list the rest of
+ * the interface chooses from (lib/announce.js) — and again whenever the
+ * browser finishes loading them: Chrome hands back an empty list until it has.
+ */
+export function useVoices() {
+    const [voices, setVoices] = useState(() => listVoices());
+    useEffect(() => {
+        if (!speechAvailable()) return undefined;
+        const synth = window.speechSynthesis;
+        const update = () => setVoices(listVoices());
+        update();
+        if (synth.addEventListener) synth.addEventListener('voiceschanged', update);
+        return () => { if (synth.removeEventListener) synth.removeEventListener('voiceschanged', update); };
+    }, []);
+    return voices;
+}
+
+/**
+ * A TTS block's voice: the receiver's — the Announcements panel's, named so
+ * it is clear which that is — or one of this browser's by name. A name this
+ * browser has not got, from a graph made on another machine, is kept and
+ * shown as such; it is read in the receiver's voice here.
+ */
+export function VoiceField({ label, value, onChange }) {
+    const voices = useVoices();
+    const receiver = currentVoice();
+    const known = !value || voices.some((v) => v.name === value);
+    if (!speechAvailable()) {
+        return <Field label={label}><div className="pg-insp__note">This browser has no speech.</div></Field>;
+    }
+    return (
+        <Field label={label}>
+            <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
+                <option value="">{`As the receiver${receiver ? ` — ${receiver.name}` : ''}`}</option>
+                {voices.map((v) => <option key={v.name} value={v.name}>{`${v.name} (${v.lang})`}</option>)}
+                {!known && <option value={value}>{`${value} — not on this device`}</option>}
+            </select>
+        </Field>
+    );
+}
+
 export function ParamField({ name, spec, value, params, rate, onChange, sinkError }) {
     switch (spec.kind) {
         case 'text':
@@ -253,6 +296,8 @@ export function ParamField({ name, spec, value, params, rate, onChange, sinkErro
             return <Switch checked={value} onChange={onChange} label={spec.label} />;
         case 'device':
             return <DeviceField value={value} onChange={onChange} error={sinkError} />;
+        case 'voice':
+            return <VoiceField label={spec.label} value={value} onChange={onChange} />;
         case 'choice':
             if (spec.swatches) {
                 return (

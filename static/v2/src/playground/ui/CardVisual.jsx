@@ -18,12 +18,19 @@ import { hasLevelLine, visualHeight } from '../geometry.js';
 import SerialCard from './SerialCard.jsx';
 import ImageView from './ImageView.jsx';
 import { timeParts } from '../blocks/clock.js';
+import { ncdxfFollowSchedule, parseSchedule } from '../blocks/scheduler.js';
 import { eqResponse, eqSections } from '../blocks/eq.js';
 
 const FLOOR_DB = -80;
 
 /** A level in dB as a share of the bar. */
 const share = (db, floor = FLOOR_DB) => (db == null || !Number.isFinite(db) ? 0 : Math.max(0, Math.min(1, (db - floor) / -floor)));
+
+/** A frequency as a card shows it: kHz under 1 MHz, else MHz. */
+function freqLabel(hz) {
+    if (!(hz > 0)) return '';
+    return hz < 1e6 ? Number((hz / 1e3).toFixed(2)) + ' kHz' : Number((hz / 1e6).toFixed(4)) + ' MHz';
+}
 
 export function useReadings(pg, id) {
     const [, bump] = useReducer((n) => n + 1, 0);
@@ -347,7 +354,7 @@ export default function CardVisual({ pg, node, look, origin, rate, onParams, lar
     if (node.type === 'iq-in') return <Coverage zeroHz={sourceZero(node, look && look.dialHz)} rate={rate} />;
     if (node.type === 'serial-port') return <SerialCard pg={pg} node={node} large={large} />;
     if (node.type === 'image-viewer') return <ImageView pg={pg} node={node} large={large} />;
-    return <SimpleVisual pg={pg} node={node} origin={origin} rate={rate} large={large} grow={grow} />;
+    return <SimpleVisual pg={pg} node={node} origin={origin} rate={rate} large={large} grow={grow} onParams={onParams} />;
 }
 
 // Cards whose picture the inspector shows some other way: knobs as its
@@ -538,7 +545,7 @@ export function Sparkline({ history, height = 44, fromZero = false }) {
     return <canvas ref={ref} className="pg-vis__spark" style={{ height: `${height}px` }} />;
 }
 
-function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
+function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0, onParams = null }) {
     const reading = useReadings(pg, node.id);
     switch (node.type) {
         case 'audio-out':
@@ -763,35 +770,76 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
             );
         }
         case 'frequency-list': {
-            const r = reading || {};
-            if (r.count == null) return null;
+            // Its entries, the one in force marked — from the Scheduler it
+            // feeds, where one is using it.
+            // Read from its own settings while the playground is not running.
+            const r = reading && reading.count != null ? reading : (() => {
+                const own = parseSchedule(node.params.preset === 'ncdxf' ? ncdxfFollowSchedule(+node.params.beacon) : node.params.entries, 'dwell');
+                return { count: own.entries.length, errors: own.errors, entries: own.entries };
+            })();
             const bad = r.errors && r.errors.length ? 'Line ' + r.errors[0].line + ': ' + r.errors[0].message : '';
+            const graph = pg && pg.graph;
+            const w = graph && graph.wires.find((x) => x[0] === node.id && x[1] === 'list');
+            const sched = w && graph.nodes.find((n) => n.id === w[2] && n.type === 'scheduler');
+            const sr = sched && pg.readings ? pg.readings[sched.id] : null;
+            const on = sr && sr.fromList ? sr.current : -1;
+            const entries = r.entries || [];
+            const name = (e) => e.label || freqLabel(e.frequency);
             return (
-                <div className="pg-tc">
+                <div className="pg-sched-card">
                     <div className="pg-tc__row">
-                        <span className={`pg-tc__state is-${bad ? 'off' : 'locked'}`}>{bad || `${r.count} ${r.count === 1 ? 'entry' : 'entries'}`}</span>
-                        <span className="pg-tc__q">{(r.entries || []).slice(0, 3).map((e) => e.label.split(' ')[0] || (e.frequency / 1e6).toFixed(3)).join(' · ')}</span>
+                        <span className={`pg-tc__state is-${bad ? 'off' : 'locked'}`}>{bad ? '✗ ' + bad : `✓ ${r.count} ${r.count === 1 ? 'entry' : 'entries'}`}</span>
+                        <span className="pg-tc__q">{!sched ? 'not wired' : !sr ? 'idle' : sr.fromList && sr.running ? 'in use' : sr.fromList ? 'scheduler stopped' : 'not in use'}</span>
                     </div>
+                    <ol className="pg-sched-card__list">
+                        {entries.slice(0, large ? 40 : 6).map((e, i) => (
+                            <li key={i} className={i === on ? 'is-on' : ''}>
+                                <span className="pg-sched-card__mark">{i === on ? '▶' : ''}</span>
+                                <span className="pg-sched-card__name">{name(e)}</span>
+                                <span className="pg-sched-card__freq">{freqLabel(e.frequency)}</span>
+                            </li>
+                        ))}
+                        {entries.length > (large ? 40 : 6) && <li className="pg-sched-card__more">{`+${entries.length - (large ? 40 : 6)} more`}</li>}
+                    </ol>
                 </div>
             );
         }
         case 'scheduler': {
-            // The entry in force, and the next with how long until it.
-            const r = reading || {};
-            if (!r.entries) return null;
-            const name = (e) => (e ? (e.label || (e.frequency ? (e.frequency / 1e6).toFixed(4) + ' MHz' : 'Entry ' + (e.index + 1))) + (e.mode ? ' ' + e.mode.toUpperCase() : '') : '—');
+            // What is on now, what is next and when, and where the entries come from.
+            const r = reading && reading.entries ? reading : { entries: [], errors: [], current: -1, idle: true };
+            const name = (e) => (e ? (e.label || freqLabel(e.frequency)) : '—');
+            const detail = (e) => (e ? [e.label ? freqLabel(e.frequency) : '', e.mode ? e.mode.toUpperCase() : ''].filter(Boolean).join(' ') : '');
             const cur = r.entries[r.current];
             const nxt = r.next ? r.entries[r.next.index] : null;
             const wait = r.next ? r.next.wait : 0;
             const left = wait >= 3600 ? Math.floor(wait / 3600) + ' h ' + Math.floor((wait % 3600) / 60) + ' m' : wait >= 60 ? Math.floor(wait / 60) + ' m ' + Math.floor(wait % 60) + ' s' : Math.ceil(wait) + ' s';
             const trouble = r.errors && r.errors.length ? 'Line ' + r.errors[0].line + ': ' + r.errors[0].message : r.skipped || r.why;
+            const source = r.fromList ? 'from a list'
+                : r.listWanted ? (r.listWired ? 'waiting for its list' : 'no list wired in')
+                    : r.listWired ? 'a list is wired in but not used' : '';
+            const running = node.params.running !== false;
+            const toggle = (e) => {
+                e.stopPropagation();
+                if (onParams) onParams(node.id, { running: !running }, `param:${node.id}:running`);
+            };
             return (
-                <div className="pg-tc">
+                <div className="pg-sched-card">
                     <div className="pg-tc__row">
-                        <span className={`pg-tc__state is-${cur ? 'locked' : 'acquiring'}`}>{cur ? name(cur) : r.entries.length ? 'Waiting' : 'No entries'}</span>
-                        {nxt && <span className="pg-tc__q">{`next ${name(nxt)} in ${left}`}</span>}
+                        <button type="button" className={`pg-sched-card__run${running ? ' is-on' : ''}`} onPointerDown={hold} onClick={toggle} title={running ? 'Stop the schedule' : 'Start the schedule'}>
+                            {running ? '■ Stop' : '▶ Start'}
+                        </button>
+                        <span className={`pg-tc__state is-${!running || r.idle ? 'off' : cur ? 'locked' : 'acquiring'}`}>
+                            {!running ? 'Stopped' : r.idle ? 'Idle — the playground is not running' : cur ? '▶ ' + name(cur) : r.entries.length ? 'Waiting' : 'No entries'}
+                        </span>
+                        <span className="pg-tc__q">{running ? detail(cur) : ''}</span>
                     </div>
-                    {trouble && <div className={`pg-tc__syms${large ? ' is-wrap' : ''}`}>{trouble}</div>}
+                    {running && nxt && (
+                        <div className="pg-tc__row">
+                            <span className="pg-sched-card__next">{`next ${name(nxt)}`}</span>
+                            <span className="pg-tc__q">{`in ${left}`}</span>
+                        </div>
+                    )}
+                    {(trouble || source) && <div className={`pg-tc__syms${large ? ' is-wrap' : ''}`}>{[source, trouble].filter(Boolean).join(' · ')}</div>}
                 </div>
             );
         }

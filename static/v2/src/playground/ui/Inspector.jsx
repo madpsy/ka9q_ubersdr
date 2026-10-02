@@ -25,6 +25,7 @@ import { holdPlayback } from '../../lib/playbackHold.js';
 import { currentVoice, listVoices, speechAvailable } from '../../lib/announce.js';
 import { EQ_FREQUENCIES, EQ_PRESETS, presetMakeup } from '../../radio/audio-filters.js';
 import { MAX_FREQ, MIN_FREQ, isIQ } from '../../radio/constants.js';
+import { ncdxfFollowSchedule, parseSchedule } from '../blocks/scheduler.js';
 import FrequencyDial from '../../components/FrequencyDial.jsx';
 import { IQWidths } from '../../panels/ReceiverPanel.jsx';
 import { MarginPicker } from '../../panels/AudioPanel.jsx';
@@ -319,9 +320,14 @@ export function ParamField({ name, spec, value, params, rate, onChange, sinkErro
                 );
             }
             if (spec.options.length <= 4) {
+                // Long labels wrap onto rows rather than squeeze into a
+                // quarter of the panel each: every button as wide as the
+                // longest label needs, as many to a row as fit.
+                const longest = Math.max(...spec.options.map((o) => String(o.label).length));
+                const minItemWidth = longest > 10 ? Math.min(280, Math.round(longest * 6.6 + 18)) : undefined;
                 return (
                     <Field label={spec.label}>
-                        <Segmented options={spec.options} value={value} onChange={onChange} size="sm" />
+                        <Segmented options={spec.options} value={value} onChange={onChange} size="sm" minItemWidth={minItemWidth} />
                     </Field>
                 );
             }
@@ -492,6 +498,99 @@ function TuningNote({ pg, node }) {
             <div className="pg-insp__note">{`This receiver tunes ${mhz(MIN_FREQ)}–${mhz(MAX_FREQ)} MHz. A frequency wired in retunes it — the dial and everything on the page follow — at most five times a second.`}</div>
             {r && r.why && <div className="pg-insp__note is-warn">{r.why}</div>}
         </>
+    );
+}
+
+/** A frequency as a schedule shows it: kHz under 1 MHz, else MHz. */
+function freqText(hz) {
+    if (hz == null) return '—';
+    return hz < 1e6 ? `${Number((hz / 1e3).toFixed(3))} kHz` : `${Number((hz / 1e6).toFixed(6))} MHz`;
+}
+
+/** An entry's time as its schedule kind writes it. */
+function whenText(e, kind, i) {
+    if (kind === 'dwell') return `${i + 1}`;
+    const s = Math.round(e.at);
+    const two = (v) => String(v).padStart(2, '0');
+    if (kind === 'daily') return `${two(Math.floor(s / 3600))}:${two(Math.floor((s % 3600) / 60))}${s % 60 ? ':' + two(s % 60) : ''}`;
+    return s >= 3600 ? `${Math.floor(s / 3600)}:${two(Math.floor((s % 3600) / 60))}:${two(s % 60)}` : `${Math.floor(s / 60)}:${two(s % 60)}`;
+}
+
+/**
+ * Whether a Frequency list's (or a Scheduler's own) entries read, as typed:
+ * valid or not at a glance, the lines that do not read and why, and each
+ * entry as it was understood — its frequency marked where this receiver
+ * cannot tune it. A list wired to a Scheduler is read as that Scheduler
+ * reads it (times or none).
+ */
+function ScheduleCheck({ graph, node }) {
+    const p = node.params;
+    let text;
+    let kind;
+    let note = '';
+    if (node.type === 'frequency-list') {
+        text = p.preset === 'ncdxf' ? ncdxfFollowSchedule(+p.beacon) : p.entries;
+        const w = graph.wires.find((x) => x[0] === node.id && x[1] === 'list');
+        const sched = w && graph.nodes.find((n) => n.id === w[2] && n.type === 'scheduler');
+        kind = sched ? (sched.params.kind || 'repeat') : 'dwell';
+        note = sched && sched.params.preset !== 'input'
+            ? `Wired to ${sched.name || sched.id}, but its Schedule is not set to “From the list input”: it is not using this list.`
+            : sched
+            ? (kind === 'dwell' ? `Read as ${sched.name || sched.id} reads it: in turn, no times.` : `Read as ${sched.name || sched.id} reads it: each line starts with its ${kind === 'daily' ? 'time of day' : 'time into the cycle'}.`)
+            : 'Not wired to a Scheduler yet: read as a list in turn, no times.';
+    } else {
+        const w = graph.wires.find((x) => x[2] === node.id && x[3] === 'list');
+        const src = w && graph.nodes.find((n) => n.id === w[0]);
+        if (p.preset === 'input') {
+            return (
+                <div className="pg-insp__section">
+                    <div className="pg-insp__title">Entries</div>
+                    <div className={`pg-insp__note${w ? '' : ' is-warn'}`}>
+                        {w ? `From ${src ? src.name || src.id : w[0]} — its settings check them.` : 'Nothing is wired to the list input yet: wire a Frequency list’s list output to it.'}
+                    </div>
+                </div>
+            );
+        }
+        if (w) note = `A list is wired in, but Schedule is set to “${(BLOCK_BY_TYPE.scheduler.params.preset.options.find((o) => o.value === p.preset) || {}).label}”: these entries are used, not the list’s. Choose “From the list input” to use it.`;
+        if (p.preset === 'ncdxf') { text = ncdxfFollowSchedule(+p.beacon); kind = 'repeat'; } else { text = p.schedule; kind = p.kind; }
+    }
+    const { entries, errors } = parseSchedule(text, kind);
+    const outside = (e) => e.frequency != null && (e.frequency < MIN_FREQ || e.frequency > MAX_FREQ);
+    const unreachable = entries.filter(outside).length;
+    const valid = !errors.length && entries.length > 0;
+    const head = !entries.length && !errors.length ? 'No entries yet'
+        : valid ? `Valid — ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}${unreachable ? `, ${unreachable} outside this receiver’s ${freqText(MIN_FREQ)}–${freqText(MAX_FREQ)} (skipped)` : ''}`
+            : `${errors.length} ${errors.length === 1 ? 'line does' : 'lines do'} not read — ${errors.length === 1 ? 'it is' : 'they are'} left out`;
+    return (
+        <div className="pg-insp__section">
+            <div className="pg-insp__title">Entries</div>
+            <div className={`pg-sched__status ${valid ? (unreachable ? 'is-warn' : 'is-good') : 'is-bad'}`}>
+                <span className="pg-sched__mark">{valid ? (unreachable ? '!' : '✓') : '✗'}</span>{head}
+            </div>
+            {errors.length > 0 && (
+                <ul className="pg-sched__errors">
+                    {errors.map((e) => <li key={e.line}>{`Line ${e.line}: ${e.message}`}</li>)}
+                </ul>
+            )}
+            {entries.length > 0 && (
+                <table className="pg-sched">
+                    <thead><tr><th>{kind === 'dwell' ? '#' : 'At'}</th><th>Frequency</th><th>Mode</th><th>Width</th><th>Offset</th><th>Name</th></tr></thead>
+                    <tbody>
+                        {entries.map((e, i) => (
+                            <tr key={`${e.line}-${i}`} className={outside(e) ? 'is-out' : ''} title={outside(e) ? 'Outside this receiver’s range: skipped' : `Line ${e.line}`}>
+                                <td>{whenText(e, kind, i)}</td>
+                                <td>{e.frequency == null ? 'unchanged' : freqText(e.frequency)}</td>
+                                <td>{e.mode ? e.mode.toUpperCase() : '—'}</td>
+                                <td>{e.width != null ? `${e.width} Hz` : '—'}</td>
+                                <td>{e.offset != null ? `${e.offset} Hz` : '—'}</td>
+                                <td>{e.label || ''}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+            {note && <div className={`pg-insp__note${/not using|not the list/.test(note) ? ' is-warn' : ''}`}>{note}</div>}
+        </div>
     );
 }
 
@@ -897,6 +996,7 @@ export default function Inspector({
                     })}
                 </div>
             )}
+            {(node.type === 'frequency-list' || node.type === 'scheduler') && <ScheduleCheck graph={graph} node={node} />}
             {(node.type === 'wav-recorder' || node.type === 'iq-recorder') && (
                 <RecorderControls
                     pg={pg}

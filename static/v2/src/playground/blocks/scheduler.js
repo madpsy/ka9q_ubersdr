@@ -15,8 +15,9 @@
 // Clock's unix and pps like the rest, and which entry is the time's to say. A `next` input moves on
 // at once, whatever the kind of schedule — a squelch closing, a decoder done.
 //
-// The entries can come from a Frequency list block, wired to `list`, rather
-// than this block's own text: lists kept apart from when they are visited. The frequency is
+// The entries can come from a Frequency list block wired to `list` (Schedule:
+// From the list input) rather than this block's own text: lists kept apart
+// from when they are visited. The frequency is
 // in MHz when it has a point and is under 1000 (14.100), else kHz under
 // 100000 (14100), else Hz — or say so (14.1MHz, 14100kHz); a `-` keeps the
 // frequency and changes only what follows. Anything after the settings is the
@@ -140,6 +141,7 @@ export const SchedulerBlock = {
     inputs: [
         { name: 'unix', kind: CONTROL, optional: true },
         { name: 'pps', kind: REAL, optional: true, audio: false },
+        // Used when Schedule is set to From the list input.
         { name: 'list', kind: MESSAGE, optional: true },
         { name: 'next', kind: CONTROL, optional: true },
     ],
@@ -156,7 +158,11 @@ export const SchedulerBlock = {
     params: {
         preset: {
             kind: 'choice', label: 'Schedule', default: 'custom', control: false,
-            options: [{ value: 'custom', label: 'As written below' }, { value: 'ncdxf', label: 'Follow an NCDXF beacon' }],
+            options: [
+                { value: 'custom', label: 'As written below' },
+                { value: 'input', label: 'From the list input' },
+                { value: 'ncdxf', label: 'Follow an NCDXF beacon' },
+            ],
         },
         beacon: {
             kind: 'choice', label: 'Beacon', default: 0,
@@ -164,26 +170,31 @@ export const SchedulerBlock = {
             showIf: (p) => p.preset === 'ncdxf',
         },
         kind: {
-            kind: 'choice', label: 'Times are', default: 'repeat', control: false,
+            kind: 'choice', label: 'Timing', default: 'repeat', control: false,
             options: [
-                { value: 'repeat', label: 'Into a repeating cycle' },
-                { value: 'daily', label: 'Times of day (UTC)' },
-                { value: 'dwell', label: 'None: in turn, so long on each' },
+                { value: 'repeat', label: 'In a cycle', title: 'Each entry at a time into a repeating cycle (m:ss)' },
+                { value: 'daily', label: 'Time of day (UTC)', title: 'Each entry at a time of day, UTC (hh:mm)' },
+                { value: 'dwell', label: 'In turn', title: 'No times: each entry in turn, so long on each' },
             ],
-            showIf: (p) => p.preset === 'custom',
+            showIf: (p) => p.preset !== 'ncdxf',
         },
-        period: { kind: 'number', label: 'Cycle', unit: 's', default: 180, min: 1, max: 86400, step: 1, control: false, showIf: (p) => p.preset === 'custom' && p.kind === 'repeat' },
-        dwell: { kind: 'number', label: 'On each', unit: 's', default: 30, min: 1, max: 86400, step: 1, showIf: (p) => p.preset === 'custom' && p.kind === 'dwell' },
+        period: { kind: 'number', label: 'Cycle', unit: 's', default: 180, min: 1, max: 86400, step: 1, control: false, showIf: (p) => p.preset !== 'ncdxf' && p.kind === 'repeat' },
+        dwell: { kind: 'number', label: 'On each', unit: 's', default: 30, min: 1, max: 86400, step: 1, showIf: (p) => p.preset !== 'ncdxf' && p.kind === 'dwell' },
         // In turn, on the clock: each hop at a whole multiple of the time on
         // each (:00 and :30 for 30 s), the entry chosen by the time itself —
         // so it is the same on any receiver keeping good time.
-        align: { kind: 'bool', label: 'Aligned to the clock', default: false, control: false, showIf: (p) => p.preset === 'custom' && p.kind === 'dwell' },
+        align: { kind: 'bool', label: 'Aligned to the clock', default: false, control: false, showIf: (p) => p.preset !== 'ncdxf' && p.kind === 'dwell' },
         schedule: {
             kind: 'text', label: 'Entries (time  frequency  [mode]  [width=]  [offset=]  [label])', default: '0:00 14.100 usb\n1:00 18.110 usb\n2:00 21.150 usb', max: 8000, multiline: true,
             showIf: (p) => p.preset === 'custom',
         },
         leadMs: { kind: 'number', label: 'Change early by', unit: 'ms', default: 0, min: 0, max: 5000, step: 10, control: false },
+        // Stopped, it sends nothing; started again, it sends the entry in
+        // force at once. A switch here and a button on the card, and an input
+        // when exposed — a toggle, or a Clock's window, to run it by the clock.
+        running: { kind: 'bool', label: 'Running', default: true, live: true },
     },
+    activity: 'Running',
     create() {
         let p = {};
         let parsed = { entries: [], errors: [] };
@@ -198,12 +209,13 @@ export const SchedulerBlock = {
         let sent = {};           // what each output last sent
         let skipped = '';
         let listText = null;     // entries from a Frequency list, when one is wired
+        let wired = false;       // whether one is
         let since = 0;           // when the entry in force began (in turn)
         let seenNext = -1;
         let held = null;         // the clock's entry when `next` moved past it
         let shift = 0;           // moves on by hand, aligned in turn
         const parse = () => {
-            const text = listText != null ? listText : p.preset === 'ncdxf' ? ncdxfFollowSchedule(+p.beacon) : p.schedule;
+            const text = p.preset === 'input' ? (listText || '') : p.preset === 'ncdxf' ? ncdxfFollowSchedule(+p.beacon) : p.schedule;
             parsed = parseSchedule(text, kind);
             current = -1;
         };
@@ -251,14 +263,17 @@ export const SchedulerBlock = {
         };
         return {
             configure(params) {
+                // Started again: the entry in force sent afresh, the receiver put where the schedule says.
+                if (p.running === false && params.running !== false) { current = -1; seenNext = -1; }
                 p = params;
-                kind = p.preset === 'ncdxf' && listText == null ? 'repeat' : p.kind;
-                period = p.preset === 'ncdxf' && listText == null ? 180 : Math.max(1, p.period);
+                kind = p.preset === 'ncdxf' ? 'repeat' : p.kind;
+                period = p.preset === 'ncdxf' ? 180 : Math.max(1, p.period);
                 // Sent again in full under the new schedule.
                 parse();
             },
             reset() { t = null; seen = -1; seenNext = -1; current = -1; sent = {}; fromClock = false; shift = 0; },
             feed(data) { if (data && data.tuning) tuning = data.tuning; },
+            activity() { return p.running !== false && current >= 0 ? 1 : 0; },
             read() {
                 const now = t != null ? t : Date.now() / 1000;
                 const es = parsed.entries;
@@ -285,7 +300,10 @@ export const SchedulerBlock = {
                     kind,
                     period,
                     skipped,
-                    fromList: listText != null,
+                    running: p.running !== false,
+                    fromList: p.preset === 'input' && listText != null,
+                    listWanted: p.preset === 'input',
+                    listWired: wired,
                     // In turn, only how long has passed matters: any clock will do — unless aligned to it.
                     why: fromClock || (kind === 'dwell' && !p.align) ? '' : 'No Clock wired: on this device’s clock',
                 };
@@ -298,14 +316,19 @@ export const SchedulerBlock = {
                 const pps = ins[1];
                 const list = ins[2];
                 const nx = ins[3];
-                // A Frequency list's entries, the last it sent, in place of this block's own.
+                wired = !!list;
+                // Unwired, nothing from it any more.
+                if (!list && listText != null) {
+                    listText = null;
+                    if (p.preset === 'input') parse();
+                }
+                // A Frequency list's entries, the last it sent — used when the
+                // Schedule is From the list input.
                 if (list && list.list && list.list.length) {
                     const m = list.list[list.list.length - 1];
                     if (m && typeof m.schedule === 'string' && m.schedule !== listText) {
                         listText = m.schedule;
-                        kind = p.kind;
-                        period = Math.max(1, p.period);
-                        parse();
+                        if (p.preset === 'input') parse();
                     }
                 }
                 // Where in the packet a pulse rose, if one did.
@@ -339,6 +362,11 @@ export const SchedulerBlock = {
                     fromClock = false;
                 }
                 const now = t + dur + p.leadMs / 1000;
+                if (p.running === false) {
+                    // Stopped: the time kept, nothing sent.
+                    t += dur;
+                    return 0;
+                }
                 // `next`: move on at once (a new value, after the first seen).
                 let move = false;
                 if (nx && nx.seq !== seenNext) {

@@ -226,11 +226,11 @@ function ownVisualHeight(type, params) {
             // The beacon on now, and those heard.
             return 34;
         case 'scheduler':
-            // The entry in force and the next; a problem, if there is one.
-            return 34;
+            // The entry in force, the next and when, and where they come from.
+            return 50;
         case 'frequency-list':
-            // How many entries, and the first few.
-            return 18;
+            // Whether it reads, and its first entries, the one in force marked.
+            return 96;
         case 'hell':
         case 'wefax':
         case 'fax-raster':

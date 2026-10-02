@@ -2125,6 +2125,129 @@ t('the IQ stream’s inspector puts the receiver — frequency, IQ width, qualit
     assert.ok(receiver < stream, 'the receiver comes after the stream’s figures');
 });
 
+t('a Frequency list’s inspector says whether the list reads: valid with each entry as understood, or which lines do not and why', () => {
+    reset();
+    const pg = getPlayground(radio().player);
+    const show = (graph, id) => deep(React.createElement(Inspector, {
+        pg, graph, selection: { nodes: new Set([id]), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+        onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+    }));
+    const status = (all) => all.find((x) => cls(x).startsWith('pg-sched__status'));
+    // Valid: a tick, the count, and a row per entry in its own units.
+    let all = show(g([{ id: 'l', type: 'frequency-list', params: { entries: '380kHz am offset=400 CBL Campbeltown\n394kHz am offset=400 DND Dundee' } }]), 'l');
+    assert.ok(cls(status(all)).includes('is-good'), cls(status(all)));
+    assert.ok(/Valid — 2 entries/.test(words(status(all))), words(status(all)));
+    const rows = all.filter((x) => x.type === 'tr');
+    assert.ok(words(all.find((x) => cls(x) === 'pg-sched')).includes('380 kHz'), 'the frequency in kHz');
+    assert.ok(words(all.find((x) => cls(x) === 'pg-sched')).includes('CBL Campbeltown'));
+    assert.ok(rows.length >= 3);
+    // A line that does not read: a cross, the line and why; a frequency out of range struck through.
+    all = show(g([{ id: 'l', type: 'frequency-list', params: { entries: '380kHz am CBL\nsoon\n50MHz usb Six' } }]), 'l');
+    assert.ok(cls(status(all)).includes('is-bad'));
+    const errs = all.find((x) => cls(x) === 'pg-sched__errors');
+    assert.ok(/Line 2/.test(words(errs)), words(errs));
+    assert.ok(all.some((x) => x.type === 'tr' && cls(x) === 'is-out'), 'the 50 MHz entry is not marked out of range');
+    // Wired to a Scheduler timing it, it is read as that Scheduler reads it.
+    all = show(g(
+        [{ id: 'l', type: 'frequency-list', params: { entries: '380kHz am CBL' } }, { id: 's', type: 'scheduler', params: { preset: 'input', kind: 'repeat' } }],
+        [['l', 'list', 's', 'list']],
+    ), 'l');
+    assert.ok(cls(status(all)).includes('is-bad'), 'a line with no time, for a Scheduler wanting times, passed');
+    // And the Scheduler says its entries come from the list.
+    all = show(g(
+        [{ id: 'l', type: 'frequency-list', params: { entries: '380kHz am CBL' } }, { id: 's', type: 'scheduler', params: { preset: 'input', kind: 'dwell' } }],
+        [['l', 'list', 's', 'list']],
+    ), 's');
+    assert.ok(all.some((x) => cls(x) === 'pg-insp__note' && /^From l/.test(words(x))));
+    assert.ok(!status(all));
+    // From the list input, its own entries box is not offered.
+    assert.ok(!all.some((x) => x.props && x.props.label && /^Entries \(time/.test(x.props.label)), 'the Scheduler’s own entries still offered');
+    // Wired, but the Schedule set to its own entries: it says the list is not used.
+    all = show(g(
+        [{ id: 'l', type: 'frequency-list', params: { entries: '380kHz am CBL' } }, { id: 's', type: 'scheduler', params: { preset: 'custom', kind: 'dwell' } }],
+        [['l', 'list', 's', 'list']],
+    ), 's');
+    assert.ok(all.some((x) => /is-warn/.test(cls(x)) && /Choose “From the list input”/.test(words(x))));
+    all = show(g(
+        [{ id: 'l', type: 'frequency-list', params: { entries: '380kHz am CBL' } }, { id: 's', type: 'scheduler', params: { preset: 'custom', kind: 'dwell' } }],
+        [['l', 'list', 's', 'list']],
+    ), 'l');
+    assert.ok(all.some((x) => /is-warn/.test(cls(x)) && /not using this list/.test(words(x))));
+    // The card says where its entries come from — or that it is waiting for them.
+    const node = { id: 's', type: 'scheduler', params: {} };
+    const card = (reading) => {
+        pg.readings = { s: reading };
+        return words(deep(React.createElement(CardVisual, { pg, node, rate: 12000 })));
+    };
+    const entries = [{ at: 0, frequency: 380000, mode: 'am', label: 'CBL Campbeltown', index: 0, reachable: true }];
+    assert.ok(/from a list/.test(card({ entries, errors: [], current: 0, next: null, fromList: true, listWanted: true, listWired: true })));
+    assert.ok(/waiting for its list/.test(card({ entries: [], errors: [], current: -1, next: null, fromList: false, listWanted: true, listWired: true })));
+    assert.ok(/no list wired in/.test(card({ entries: [], errors: [], current: -1, next: null, fromList: false, listWanted: true, listWired: false })));
+    assert.ok(/wired in but not used/.test(card({ entries, errors: [], current: 0, next: null, fromList: false, listWanted: false, listWired: true })));
+    assert.ok(!/list/.test(card({ entries, errors: [], current: 0, next: null, fromList: false, listWanted: false, listWired: false })));
+    // What is on now and what is next, each on a line of its own.
+    const both = card({ entries: [...entries, { at: 1, frequency: 394000, mode: 'am', label: 'DND Dundee', index: 1, reachable: true }], errors: [], current: 0, next: { index: 1, wait: 12 }, fromList: true, listWanted: true, listWired: true });
+    assert.ok(/▶ CBL Campbeltown/.test(both) && /380 kHz AM/.test(both) && /next DND Dundee/.test(both) && /in 12 s/.test(both), both);
+    // Start and stop on the card itself.
+    const set = [];
+    const btn = (params, reading) => {
+        pg.readings = { s: reading };
+        return deep(React.createElement(CardVisual, { pg, node: { ...node, params }, rate: 12000, onParams: (id, patch) => set.push(patch) }))
+            .find((x) => cls(x).startsWith('pg-sched-card__run'));
+    };
+    const stop = btn({ running: true }, { entries, errors: [], current: 0, next: null, running: true });
+    assert.strictEqual(words(stop), '■ Stop');
+    stop.props.onClick({ stopPropagation() {} });
+    assert.deepStrictEqual(set.pop(), { running: false });
+    const start = btn({ running: false }, { entries, errors: [], current: 0, next: null, running: false });
+    assert.strictEqual(words(start), '▶ Start');
+    pg.readings = { s: { entries, errors: [], current: 0, running: false } };
+    assert.ok(/Stopped/.test(words(deep(React.createElement(CardVisual, { pg, node: { ...node, params: { running: false } }, rate: 12000 })))));
+    // The playground not running: no reading, and it says so rather than going blank.
+    pg.readings = null;
+    assert.ok(/Idle — the playground is not running/.test(words(deep(React.createElement(CardVisual, { pg, node: { ...node, params: { running: true } }, rate: 12000 })))));
+    pg.readings = null;
+});
+
+t('a Frequency list’s card lists its entries, the one its Scheduler is on marked', () => {
+    reset();
+    const pg = getPlayground(radio().player);
+    pg.graph = g(
+        [{ id: 'l', type: 'frequency-list' }, { id: 's', type: 'scheduler', params: { preset: 'input', kind: 'dwell' } }],
+        [['l', 'list', 's', 'list']],
+    );
+    const entries = [
+        { at: 0, frequency: 380000, mode: 'am', label: 'CBL Campbeltown' },
+        { at: 1, frequency: 394000, mode: 'am', label: 'DND Dundee' },
+        { at: 2, frequency: 341000, mode: 'am', label: 'EDN Edinburgh' },
+    ];
+    pg.readings = { l: { count: 3, errors: [], entries }, s: { entries, errors: [], current: 1, fromList: true, running: true } };
+    const all = deep(React.createElement(CardVisual, { pg, node: pg.graph.nodes[0], rate: 12000 }));
+    const items = all.filter((x) => x.type === 'li');
+    assert.strictEqual(items.length, 3);
+    assert.strictEqual(cls(items[1]), 'is-on');
+    assert.ok(/▶/.test(words(items[1])) && /DND Dundee/.test(words(items[1])) && /394 kHz/.test(words(items[1])));
+    assert.ok(/✓ 3 entries/.test(words(all[0])) && /in use/.test(words(all[0])));
+    // Not running: its entries from its own settings, and idle.
+    pg.readings = null;
+    const idle = deep(React.createElement(CardVisual, { pg, node: { ...pg.graph.nodes[0], params: { entries: '380kHz am CBL\n394kHz am DND' } }, rate: 12000 }));
+    assert.strictEqual(idle.filter((x) => x.type === 'li').length, 2);
+    assert.ok(/idle/.test(words(idle[0])));
+});
+
+t('the IQ stream’s inspector says what this receiver tunes, and that a frequency wired in retunes it', () => {
+    reset();
+    const ctx = radio();
+    window.__testContext = ctx;
+    const pg = getPlayground(ctx.player);
+    const all = deep(React.createElement(Inspector, {
+        pg, graph: g([{ id: 'a', type: 'iq-in' }]), selection: { nodes: new Set(['a']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+        onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+    }));
+    window.__testContext = null;
+    assert.ok(all.some((x) => cls(x) === 'pg-insp__note' && /This receiver tunes .* MHz\. A frequency wired in retunes it/.test(words(x))));
+});
+
 t('the IQ stream’s inspector has the receiver panel’s quality slider: same range, lossless at the top, the warning past 26 dB, usable before IQ', () => {
     const { MARGIN_MIN_DB, MARGIN_LOSSLESS, MarginPicker, Slider } = P;
     const show = (over) => {

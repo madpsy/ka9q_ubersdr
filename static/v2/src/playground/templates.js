@@ -338,7 +338,7 @@ export const TEMPLATES = [
                     },
                 },
                 { id: 'clock', type: 'clock' },
-                { id: 'schedule', type: 'scheduler', params: { kind: 'dwell', dwell: 30, align: true } },
+                { id: 'schedule', type: 'scheduler', params: { preset: 'input', kind: 'dwell', dwell: 30, align: true } },
                 { id: 'iq', type: 'iq-in' },
                 { id: 'ident', type: 'cw-decoder', params: { offsetHz: 400, wpm: 7 }, controls: ['offsetHz'] },
                 { id: 'idents', type: 'message-log' },

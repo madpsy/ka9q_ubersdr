@@ -373,26 +373,27 @@ function runList(listParams, schedParams, seconds, nextAt = [], T = null) {
 
 t('a Frequency list worked in turn, 30 s on each, round again — frequency, offset and name each time', () => {
     runList.ctl = null;
-    const { changes, si } = runList({ entries: NDBS }, { kind: 'dwell', dwell: 30 }, 100);
+    const { changes, si } = runList({ entries: NDBS }, { preset: 'input', kind: 'dwell', dwell: 30 }, 100);
     assert.deepStrictEqual(changes.map((c) => c.frequency), [380000, 394000, 341000, 380000]);
     assert.deepStrictEqual(changes.map((c) => Math.round(c.at)), [0, 30, 60, 90]);
     assert.ok(changes.every((c) => c.offset === 400));
     assert.strictEqual(changes[1].label, 'DND Dundee\n');
     const r = si.read();
     assert.strictEqual(r.fromList, true);
+    assert.strictEqual(r.listWired, true);
     assert.strictEqual(r.why, '', 'in turn needs no Clock');
     assert.strictEqual(r.entries.length, 3);
 });
 
 t('next moves on at once, and the 30 s starts again from there', () => {
-    const { changes } = runList({ entries: NDBS }, { kind: 'dwell', dwell: 30 }, 50, [5]);
+    const { changes } = runList({ entries: NDBS }, { preset: 'input', kind: 'dwell', dwell: 30 }, 50, [5]);
     assert.deepStrictEqual(changes.map((c) => [Math.round(c.at), c.frequency]), [[0, 380000], [5, 394000], [35, 341000]]);
 });
 
 t('in turn, aligned to the clock: hops on :00 and :30 to the pulse’s edge, each entry the time’s to say; next still moves on', () => {
     const T = 1700000000 - (1700000000 % 90) + 20.5; // 20.5 s into a 90 s round of three
     runList.ctl = null;
-    const { changes, si } = runList({ entries: NDBS }, { kind: 'dwell', dwell: 30, align: true }, 75, [], T);
+    const { changes, si } = runList({ entries: NDBS }, { preset: 'input', kind: 'dwell', dwell: 30, align: true }, 75, [], T);
     // Waits for the Clock (half a second), then the entry for that half minute: period number mod 3.
     const period = (x) => Math.floor(x / 30);
     const want = (x) => [380000, 394000, 341000][((period(x) % 3) + 3) % 3];
@@ -402,10 +403,10 @@ t('in turn, aligned to the clock: hops on :00 and :30 to the pulse’s edge, eac
     assert.strictEqual(si.read().why, '');
     // Without a Clock, aligned, it says it is on the device's.
     runList.ctl = null;
-    assert.ok(/device/.test(runList({ entries: NDBS }, { kind: 'dwell', dwell: 30, align: true }, 1).si.read().why));
+    assert.ok(/device/.test(runList({ entries: NDBS }, { preset: 'input', kind: 'dwell', dwell: 30, align: true }, 1).si.read().why));
     // next: one entry on, and the hops stay on the half minutes.
     runList.ctl = null;
-    const moved = runList({ entries: NDBS }, { kind: 'dwell', dwell: 30, align: true }, 45, [3], T).changes;
+    const moved = runList({ entries: NDBS }, { preset: 'input', kind: 'dwell', dwell: 30, align: true }, 45, [3], T).changes;
     assert.strictEqual(moved[1].frequency, [380000, 394000, 341000][(((period(T + 3) + 1) % 3) + 3) % 3]);
     assert.ok(Math.abs(moved[2].at - 9.5) < 0.021, `after next, hop at ${moved[2].at}`);
 });
@@ -437,6 +438,27 @@ t('the NDB template: through the worker, the receiver retuned to each NDB every 
         for (const m of posted.slice(before)) if (m.t === 'out' && m.tune) tunes.push([Math.round(k / 50), m.tune]);
     }
     assert.deepStrictEqual(tunes, [[0, 380000], [30, 394000], [60, 341000]]);
+});
+
+t('Running off: nothing sent while stopped; started again, the entry in force sent at once', () => {
+    const S = BLOCK_BY_TYPE.scheduler;
+    const si = S.create();
+    const params = { kind: 'dwell', dwell: 30, schedule: '380kHz am CBL\n394kHz am DND' };
+    si.configure(sanitizeParams(S, params), 0);
+    const step = () => {
+        const outs = S.outputs.map((o) => makeBuffer(o.kind, 1));
+        si.process([null, null, null, null], outs, 0, { frames: 240, rate: 12000 });
+        return outs[0].seq > 0 ? outs[0].value : null;
+    };
+    assert.strictEqual(step(), 380000);
+    assert.strictEqual(si.activity(), 1);
+    si.configure(sanitizeParams(S, { ...params, running: false }), 0);
+    for (let k = 0; k < 50 * 40; k++) assert.strictEqual(step(), null, 'sent while stopped');
+    assert.strictEqual(si.read().running, false);
+    assert.strictEqual(si.activity(), 0);
+    si.configure(sanitizeParams(S, { ...params, running: true }), 0);
+    assert.ok(step() != null, 'nothing sent on starting again');
+    assert.strictEqual(si.read().running, true);
 });
 
 console.log(`\n${pass} passed`);

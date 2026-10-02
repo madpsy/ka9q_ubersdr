@@ -63,12 +63,12 @@ t('a setting can be given a control input, which is stored, shared and can be ta
     assert.deepStrictEqual(off.wires, [], 'the driving wire was left dangling');
 });
 
-t('a setting that moves a rate cannot be driven, nor can one that is not a number', () => {
+t('a number that moves a rate cannot be driven; a choice can, by a message naming it', () => {
     let g = graph([{ id: 'd', type: 'decimate' }, { id: 'o', type: 'audio-out' }], []);
     assert.strictEqual(exposeControl(g, 'd', 'factor', true), g);
-    assert.strictEqual(exposeControl(g, 'o', 'channel', true), g);
     g = exposeControl(g, 'o', 'muted', true);
-    assert.deepStrictEqual(g.nodes.find((n) => n.id === 'o').controls, ['muted']);
+    g = exposeControl(g, 'o', 'channel', true);
+    assert.deepStrictEqual(g.nodes.find((n) => n.id === 'o').controls, ['muted', 'channel']);
     // A stored graph naming one is cleaned on the way in.
     const r = parseGraph({ v: GRAPH_VERSION, nodes: [{ id: 'd', type: 'decimate', controls: ['factor', 'frequencyHz', 'nope'] }], wires: [] });
     assert.deepStrictEqual(r.graph.nodes[0].controls, ['frequencyHz']);

@@ -26,7 +26,7 @@ import {
 import {
     NODE_W, hasRfLine, autoLayout, graphBounds, fitView, nodeAt, nodeHeight, nodeWidth, portAt, portPosition, screenToWorld, wirePath,
     zoomAbout, zoomToward, ZOOM_MAX, ZOOM_MIN, isAnnotation, nodeBox, nodesInside,
-    cardWidth, cardGrow, fitSize, naturalHeight, CARD_MIN_W, CARD_MAX_W,
+    cardWidth, cardGrow, fitSize, naturalHeight, CARD_MIN_W, CARD_MAX_W, pinchView,
 } from '../src/playground/geometry.js';
 import {
     ConstellationView, ConsoleView, DiffView, INSTRUMENTS, Instrument, ScopeView, SpectrumView, freqLabel, scopeRange, spectrumAxis, timeLabel,
@@ -50,7 +50,7 @@ module.exports = {
     EditHistory, addNode, canConnect, cloneGraph, connectPorts, disconnectInput, duplicateNodes, freshId, renameNode,
     moveNodes, removeNodes, removeWire,
     NODE_W, nodeWidth, autoLayout, graphBounds, fitView, nodeAt, nodeHeight, portAt, portPosition, screenToWorld, wirePath, isAnnotation, nodeBox, nodesInside, zoomAbout,
-    cardWidth, cardGrow, fitSize, naturalHeight, CARD_MIN_W, CARD_MAX_W,
+    cardWidth, cardGrow, fitSize, naturalHeight, CARD_MIN_W, CARD_MAX_W, pinchView,
     setUberSDRVersion, uberSDRVersion, versionNote, Switch, Slider, MarginPicker, MARGIN_MIN_DB, MARGIN_LOSSLESS, Instrument, SpectrumView, ScopeView, ConstellationView, ConsoleView, DiffView, spectrumAxis, scopeRange, freqLabel, timeLabel, INSTRUMENTS,
     spectrumMarks, counterText, groupDigits,
     holdSpectrum, setSpectrumPaused, spectrumPaused, BLOCKS, BLOCK_BY_TYPE, CATEGORIES, GRAPH_VERSION, compile, parseGraph, serializeGraph, getPlayground, resetDemodSettings, saveDemodSettings, PROBES,

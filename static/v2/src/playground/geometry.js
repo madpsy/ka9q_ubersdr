@@ -430,6 +430,23 @@ export function zoomToward(view, w, h, factor, focus = null) {
     };
 }
 
+/**
+ * Two fingers: the view a pinch has made of `start`, from where the fingers
+ * first were (`a0`, `b0`, screen points) to where they are now (`a1`, `b1`).
+ * The zoom follows the spread between them, within the zoom's limits; and
+ * the world point that was between them stays between them — so spreading
+ * zooms about the fingers, and moving both pans, as a map does.
+ */
+export function pinchView(start, a0, b0, a1, b1) {
+    const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y);
+    const d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y);
+    const zoom = d0 > 0 ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, (start.zoom * d1) / d0)) : start.zoom;
+    const m0 = { x: (a0.x + b0.x) / 2, y: (a0.y + b0.y) / 2 };
+    const m1 = { x: (a1.x + b1.x) / 2, y: (a1.y + b1.y) / 2 };
+    const w = screenToWorld(start, m0.x, m0.y);
+    return { x: m1.x - w.x * zoom, y: m1.y - w.y * zoom, zoom };
+}
+
 /** Zoom by `factor` about a screen point, so what is under the pointer stays there. */
 export function zoomAbout(view, sx, sy, factor) {
     const zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, view.zoom * factor));

@@ -1813,6 +1813,80 @@ t('a graph built for an IQ width this visit cannot have runs at plain IQ and kee
     s.pg.stop();
 });
 
+t('pinch: the fingers’ spread is the zoom, the point between them stays between them, and moving both pans', () => {
+    const { pinchView, ZOOM_MAX, ZOOM_MIN } = P;
+    const start = { x: 100, y: 50, zoom: 1 };
+    const pt = (x, y) => ({ x, y });
+    // Spread to twice the distance about the same middle: twice the zoom, the middle fixed.
+    let v = pinchView(start, pt(200, 200), pt(300, 200), pt(150, 200), pt(350, 200));
+    assert.strictEqual(v.zoom, 2);
+    const mid = screenToWorld(start, 250, 200);
+    const after = screenToWorld(v, 250, 200);
+    assert.ok(Math.abs(after.x - mid.x) < 1e-9 && Math.abs(after.y - mid.y) < 1e-9, 'the point between the fingers moved');
+    // Both fingers moved 40 right, 30 down, no spread: a pan of the same, no zoom.
+    v = pinchView(start, pt(200, 200), pt(300, 200), pt(240, 230), pt(340, 230));
+    assert.deepStrictEqual(v, { x: 140, y: 80, zoom: 1 });
+    // Held to the zoom's limits.
+    assert.strictEqual(pinchView(start, pt(0, 0), pt(10, 0), pt(0, 0), pt(1000, 0)).zoom, ZOOM_MAX);
+    assert.strictEqual(pinchView(start, pt(0, 0), pt(1000, 0), pt(0, 0), pt(1, 0)).zoom, ZOOM_MIN);
+    // Two fingers on one spot: no zoom from nothing.
+    assert.strictEqual(pinchView(start, pt(5, 5), pt(5, 5), pt(5, 5), pt(50, 5)).zoom, 1);
+});
+
+t('pinch on the canvas: two fingers zoom; one lifted, the other moves nothing; a block being dragged stays where it got to', () => {
+    reset();
+    const ctx = radio();
+    const pg = getPlayground(ctx.player);
+    pg.setGraph(g([{ id: 'k', type: 'gain', x: 0, y: 0 }]));
+    const views = [];
+    const moved = [];
+    let view = { x: 0, y: 0, zoom: 1 };
+    const props = () => ({
+        pg, graph: pg.graph, view, setView: (v) => { view = typeof v === 'function' ? v(view) : v; views.push(view); },
+        selection: { nodes: new Set(), wire: null }, setPicked() {}, onEdit() {}, onMoved: () => moved.push(1), onOpenNode() {},
+        errorsByNode: {}, rates: {}, latencies: {}, stats: null, look: null, origins: null, onParams() {},
+    });
+    let r = render(P.Canvas, props(), ctx);
+    const canvas = () => walk(r.tree).find((n) => cls(n) === 'pg-canvas');
+    const again = () => { r.cleanups.forEach((f) => f()); r = render(P.Canvas, props(), ctx); };
+    const touch = (id, x, y, target = { closest: () => null }) => ({ button: 0, pointerId: id, pointerType: 'touch', clientX: x, clientY: y, shiftKey: false, target });
+
+    // Two fingers on the background, spread to twice the distance.
+    canvas().props.onPointerDown(touch(1, 400, 300));
+    canvas().props.onPointerDown(touch(2, 500, 300));
+    canvas().props.onPointerMove(touch(2, 600, 300));
+    canvas().props.onPointerMove(touch(1, 300, 300));
+    assert.strictEqual(view.zoom, 2, `zoom ${view.zoom}`);
+    again();
+    // One finger lifted: the other moves nothing.
+    canvas().props.onPointerUp(touch(2, 600, 300));
+    const held = { ...view };
+    canvas().props.onPointerMove(touch(1, 100, 100));
+    assert.deepStrictEqual(view, held, 'the view jumped to follow the last finger');
+    canvas().props.onPointerUp(touch(1, 100, 100));
+    // Both up: one finger pans again, as it always has.
+    canvas().props.onPointerDown(touch(3, 300, 300));
+    canvas().props.onPointerMove(touch(3, 350, 300));
+    canvas().props.onPointerUp(touch(3, 350, 300));
+    assert.strictEqual(view.x, held.x + 50, 'one finger no longer pans');
+    again();
+
+    // A block being dragged when the second finger comes down: kept where it got to, one undo step.
+    const card = { closest: (sel) => (sel === '[data-node]' ? { getAttribute: () => 'k' } : null) };
+    const at = (wx) => view.x + wx * view.zoom;
+    canvas().props.onPointerDown(touch(4, at(20), view.y + 10 * view.zoom, card));
+    canvas().props.onPointerMove(touch(4, at(80), view.y + 10 * view.zoom));
+    const xDragged = pg.graph.nodes[0].x;
+    assert.ok(xDragged > 10, `not dragged: ${xDragged}`);
+    canvas().props.onPointerDown(touch(5, at(300), view.y + 300));
+    assert.strictEqual(moved.length, 1, 'the drag so far was not kept as a step');
+    canvas().props.onPointerMove(touch(4, at(20), view.y + 10 * view.zoom));
+    assert.strictEqual(pg.graph.nodes[0].x, xDragged, 'the block went on moving under a pinch');
+    canvas().props.onPointerUp(touch(4, 0, 0));
+    canvas().props.onPointerUp(touch(5, 0, 0));
+    r.cleanups.forEach((f) => f());
+});
+
 t('the inspector shows a block’s name, its type beside it, and a box to rename it in', () => {
     reset();
     const pg = getPlayground(radio().player);

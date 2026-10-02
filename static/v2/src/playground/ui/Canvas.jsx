@@ -7,6 +7,7 @@
 //   press a wire             select it
 //   drag the background      pan; the wheel zooms about the pointer, and a
 //                            double-click on empty grid zooms a step toward it
+//   pinch (two fingers)      zoom about the fingers, and pan as they move
 //   drag a handle            resize an annotation, or move an arrow's end
 //   double-click a note      write in it (headings, group titles, markers too)
 //   click a card's title     rename the block (or press its pencil)
@@ -25,7 +26,7 @@ import React, { useEffect, useRef, useState } from '../../react.js';
 import { BLOCK_BY_TYPE } from '../blocks/index.js';
 import {
     FOOT_H, HEAD_H, PAD, PORT_GRAB_PX, RF_H, ROW_H, cardGrow, cardWidth, fitSize, hasRfLine, isAnnotation, nodeAt, nodeBox, nodeHeight, nodesInside, portAt,
-    portPositionByName, visualTop, screenToWorld, wirePath, zoomAbout, ZOOM_STEP,
+    pinchView, portPositionByName, visualTop, screenToWorld, wirePath, zoomAbout, ZOOM_STEP,
 } from '../geometry.js';
 import { canConnect, connectPorts, removeWire, renameNode } from '../editing.js';
 import { NAME_MAX, nodeName } from '../graph.js';
@@ -360,6 +361,9 @@ export default function Canvas({
 }) {
     const root = useRef(null);
     const drag = useRef(null);
+    // The fingers (or the pointer) on the canvas just now, by pointer id, in
+    // screen coordinates — two of them make a pinch.
+    const touches = useRef(new Map());
     const [ghost, setGhost] = useState(null);
     const [hover, setHover] = useState(null);
     const [hint, setHint] = useState(null);
@@ -447,9 +451,36 @@ export default function Canvas({
         else startBack({ id: w[2], port: w[3], kind }, at, index);
     };
 
+    /**
+     * A second finger: whatever the first was doing becomes a pinch. A block
+     * it was dragging stays where it got to, as one undo step; a wire it was
+     * drawing is dropped.
+     */
+    const startPinch = () => {
+        const d = drag.current;
+        if (d && (d.kind === 'move' || d.kind === 'resize') && d.moved) onMoved();
+        setGhost(null);
+        setHover(null);
+        setHint(null);
+        const [a, b] = Array.from(touches.current.values());
+        drag.current = { kind: 'pinch', start: view, a0: { x: a.sx, y: a.sy }, b0: { x: b.sx, y: b.sy } };
+    };
+
     /** A press on the canvas, or on wire `wireIndex`. */
     const onDown = (e, wireIndex = null) => {
         if (e.button !== undefined && e.button !== 0) return;
+        // Every finger is kept track of, for a pinch; a third is ignored.
+        if (e.pointerType === 'touch') {
+            if (touches.current.size >= 2) return;
+            touches.current.set(e.pointerId, local(e));
+            capture(e);
+            if (touches.current.size === 2) {
+                startPinch();
+                return;
+            }
+            // The rest of a pinch: one finger left down moves nothing.
+            if (drag.current && drag.current.kind === 'pinch-done') return;
+        }
         // Controls on a card are the card's business.
         if (e.target && e.target.closest && e.target.closest('button, input, select, textarea')) return;
         capture(e);
@@ -534,8 +565,16 @@ export default function Canvas({
     };
 
     const onMove = (e) => {
+        if (touches.current.has(e.pointerId)) touches.current.set(e.pointerId, local(e));
         const d = drag.current;
         if (!d) return;
+        if (d.kind === 'pinch') {
+            const [a, b] = Array.from(touches.current.values());
+            if (!a || !b) return;
+            setView(pinchView(d.start, d.a0, d.b0, { x: a.sx, y: a.sy }, { x: b.sx, y: b.sy }));
+            return;
+        }
+        if (d.kind === 'pinch-done') return;
         if (d.kind === 'pan') {
             const { sx, sy } = local(e);
             setView({ ...view, x: d.vx + sx - d.sx, y: d.vy + sy - d.sy });
@@ -591,6 +630,13 @@ export default function Canvas({
     };
 
     const onUp = (e) => {
+        touches.current.delete(e.pointerId);
+        // A finger off a pinch ends it; the one left down does nothing until
+        // it is lifted too, so the view does not jump to follow it.
+        if (drag.current && (drag.current.kind === 'pinch' || drag.current.kind === 'pinch-done')) {
+            drag.current = touches.current.size ? { kind: 'pinch-done' } : null;
+            return;
+        }
         const d = drag.current;
         drag.current = null;
         if (!d) return;

@@ -499,6 +499,14 @@ export const SymbolSyncBlock = {
     params: {
         baud: { kind: 'number', label: 'Baud', default: 31.25, min: 1, max: 100000, step: 0.01, control: false },
         bandwidth: { kind: 'number', label: 'Loop bandwidth', unit: '× baud', default: 0.02, min: 0.001, max: 0.2, step: 0.001, live: true },
+        detector: {
+            kind: 'choice', label: 'Timing detector', default: 'gardner',
+            options: [
+                { value: 'gardner', label: 'Gardner (any PSK, no decisions)' },
+                { value: 'mm-bpsk', label: 'Mueller & Müller, BPSK' },
+                { value: 'mm-qpsk', label: 'Mueller & Müller, QPSK' },
+            ],
+        },
     },
     rate: (inRate, p) => p.baud,
     maxOut: (n, p, inRate) => Math.ceil(((n * p.baud) / Math.max(1, inRate || 1)) * 1.5) + 2,
@@ -563,7 +571,23 @@ export const SymbolSyncBlock = {
                             // next to none, and a detector divided by that
                             // alone flails instead of pulling away.
                             level += 0.05 * ((yi * yi + yq * yq + hi * hi + hq * hq) / 2 - level);
-                            const e = level > 0 ? ((prevI - yi) * hi + (prevQ - yq) * hq) / level : 0;
+                            let e;
+                            if (p.detector === 'mm-bpsk' || p.detector === 'mm-qpsk') {
+                                // Mueller & Müller: each strobe against the
+                                // decision before it, and the one before against
+                                // this decision — equal when the strobes are on
+                                // the centres. Decisions on the in-phase axis
+                                // alone for BPSK, both axes for QPSK.
+                                const a = Math.sqrt(level);
+                                const q = p.detector === 'mm-qpsk';
+                                const dI = yi >= 0 ? a : -a;
+                                const dQ = q ? (yq >= 0 ? a : -a) : 0;
+                                const pI = prevI >= 0 ? a : -a;
+                                const pQ = q ? (prevQ >= 0 ? a : -a) : 0;
+                                e = level > 0 ? ((pI * yi + pQ * yq) - (dI * prevI + dQ * prevQ)) / level : 0;
+                            } else {
+                                e = level > 0 ? ((prevI - yi) * hi + (prevQ - yq) * hq) / level : 0;
+                            }
                             adjust += g.beta * e;
                             step = period * (1 + adjust + g.alpha * e);
                         }
@@ -591,6 +615,7 @@ export const SymbolSyncBlock = {
 const SLICER_MODES = [
     { value: 'dbpsk', label: 'Differential BPSK (PSK31)', bits: 1 },
     { value: 'bpsk', label: 'BPSK', bits: 1 },
+    { value: 'dqpsk', label: 'Differential QPSK (QPSK31, coded pairs)', bits: 2 },
     { value: 'qpsk', label: 'QPSK', bits: 2 },
     { value: '8psk', label: '8PSK', bits: 3 },
 ];
@@ -607,7 +632,7 @@ export const PskSlicerBlock = {
     type: 'psk-slicer',
     label: 'PSK slicer',
     category: 'Digital',
-    summary: 'Symbols to bits: differential BPSK (PSK31), BPSK, QPSK or 8PSK.',
+    summary: 'Symbols to bits: differential BPSK (PSK31), differential QPSK (QPSK31 — its coded pairs, for a Viterbi decoder), BPSK, QPSK or 8PSK.',
     inputs: [{ name: 'in', kind: COMPLEX }],
     outputs: [{ name: 'bits', kind: BITS }],
     params: {
@@ -633,6 +658,18 @@ export const PskSlicerBlock = {
                         case 'bpsk':
                             out[m++] = r > 0 ? 1 : 0;
                             break;
+                        case 'dqpsk': {
+                            // QPSK31 as fldigi sends it: the phase step is
+                            // 180° + 90° × ((4 − pair) & 3), the pair being
+                            // the convolutional code's two bits, low first.
+                            let ph = Math.atan2(i * pr - r * pi, r * pr + i * pi);
+                            if (ph < 0) ph += 2 * Math.PI;
+                            const step = Math.round(ph / (Math.PI / 2)) & 3;
+                            const pair = ((4 - step) & 3) ^ 2;
+                            out[m++] = pair & 1;
+                            out[m++] = (pair >> 1) & 1;
+                            break;
+                        }
                         case 'qpsk':
                         case '8psk': {
                             const M = p.mode === 'qpsk' ? 4 : 8;

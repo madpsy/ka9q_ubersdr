@@ -16,6 +16,7 @@ import { cssVar, sizedCanvas } from '../../lib/audioWaterfall.js';
 import { airSpan, rfLabel, rfOf, shiftLabel, sourceZero } from '../probes.js';
 import { hasLevelLine, visualHeight } from '../geometry.js';
 import SerialCard from './SerialCard.jsx';
+import ImageView from './ImageView.jsx';
 import { timeParts } from '../blocks/clock.js';
 import { eqResponse, eqSections } from '../blocks/eq.js';
 
@@ -24,7 +25,7 @@ const FLOOR_DB = -80;
 /** A level in dB as a share of the bar. */
 const share = (db, floor = FLOOR_DB) => (db == null || !Number.isFinite(db) ? 0 : Math.max(0, Math.min(1, (db - floor) / -floor)));
 
-function useReadings(pg, id) {
+export function useReadings(pg, id) {
     const [, bump] = useReducer((n) => n + 1, 0);
     useEffect(() => pg.on('readings', bump), [pg]);
     return pg.readings ? pg.readings[id] : null;
@@ -345,6 +346,7 @@ export default function CardVisual({ pg, node, look, origin, rate, onParams, lar
     if (KNOBS.has(node.type)) return <Knob node={node} onParams={onParams} />;
     if (node.type === 'iq-in') return <Coverage zeroHz={sourceZero(node, look && look.dialHz)} rate={rate} />;
     if (node.type === 'serial-port') return <SerialCard pg={pg} node={node} large={large} />;
+    if (node.type === 'image-viewer') return <ImageView pg={pg} node={node} large={large} />;
     return <SimpleVisual pg={pg} node={node} origin={origin} rate={rate} large={large} grow={grow} />;
 }
 
@@ -630,12 +632,28 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
         case 'graphic-eq':
         case 'parametric-eq':
             return <EqCurve node={node} rate={rate} height={(large ? 140 : 56) + (large ? 0 : Math.max(0, grow))} />;
+        case 'mfsk-detector':
+            return (
+                <div className="pg-vis__state">
+                    {!reading ? '—' : `${reading.frames} frames${node.params.afc && node.params.pulse === 'rect' ? ` · AFC ${reading.afcHz >= 0 ? '+' : ''}${reading.afcHz.toFixed(1)} Hz` : ''}`}
+                </div>
+            );
+        case 'olivia-fec':
+            return (
+                <div className={`pg-vis__state${reading && reading.snr >= node.params.threshold ? ' is-open' : ''}`}>
+                    {!reading ? '—' : `S/N ${reading.snr.toFixed(1)} · ${reading.offsetHz >= 0 ? '+' : ''}${reading.offsetHz.toFixed(1)} Hz · ${reading.chars} characters`}
+                </div>
+            );
         case 'ook-detector':
             return <div className="pg-vis__state">{reading && reading.snrDb != null ? `${reading.snrDb.toFixed(0)} dB over the noise` : '—'}</div>;
         case 'rtty-decoder':
         case 'psk31-decoder':
         case 'cw-decoder':
         case 'navtex-decoder':
+        case 'olivia-decoder':
+        case 'mfsk-decoder':
+        case 'dominoex-decoder':
+        case 'thor-decoder':
             return (
                 <div className="pg-vis__state">
                     {!reading ? '—' : `${reading.chars} characters${reading.tunedHz != null ? ` · tuned ${reading.tunedHz >= 0 ? '+' : ''}${reading.tunedHz.toFixed(1)} Hz` : ''}`}
@@ -710,6 +728,95 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
             return <PulseFace reading={reading} large={large} />;
         case 'timecode':
             return <TimecodeFace reading={reading} large={large} />;
+        case 'dsc-decoder': {
+            const r = reading || {};
+            if (r.why) return <div className="pg-tc"><div className="pg-tc__state is-off">{r.why}</div></div>;
+            return (
+                <div className="pg-tc">
+                    <div className="pg-tc__row">
+                        <span className={`pg-tc__state is-${r.receiving ? 'locked' : 'acquiring'}`}>{r.receiving ? 'Receiving a call…' : 'Listening'}</span>
+                        <span className="pg-tc__q">{`${r.good || 0} calls${r.bad ? ` · ${r.bad} failed` : ''}`}</span>
+                    </div>
+                    <div className={`pg-tc__syms${large ? ' is-wrap' : ''}`} style={{ direction: 'ltr' }} title={r.last ? r.last.text : ''}>{r.last ? r.last.text : 'No calls yet'}</div>
+                </div>
+            );
+        }
+        case 'beacon-monitor': {
+            // The beacon on now, and those heard, loudest first.
+            const r = reading || {};
+            if (!r.heard) return null;
+            const heard = r.heard.filter((h) => h.heard).sort((a, b) => b.snr - a.snr);
+            // Following a beacon round the bands, each is named with its band.
+            const bands = new Set(heard.map((h) => h.band)).size > 1;
+            return (
+                <div className="pg-tc">
+                    <div className="pg-tc__row">
+                        {r.on
+                            ? <span className="pg-tc__state is-locked" title={r.on.where}>{`${r.band} · ${r.on.call}`}</span>
+                            : <span className="pg-tc__state is-acquiring">{r.why || 'Not on a beacon frequency'}</span>}
+                        {r.on && <span className="pg-tc__q">{`${Math.ceil(r.on.secondsLeft)} s`}</span>}
+                    </div>
+                    <div className={`pg-tc__syms${large ? ' is-wrap' : ''}`} title={r.why || ''}>
+                        {heard.length ? heard.map((h) => `${h.call}${bands ? ' ' + h.band : ''} ${h.snr.toFixed(0)}`).join(' · ') : (r.why || 'None heard yet')}
+                    </div>
+                </div>
+            );
+        }
+        case 'frequency-list': {
+            const r = reading || {};
+            if (r.count == null) return null;
+            const bad = r.errors && r.errors.length ? 'Line ' + r.errors[0].line + ': ' + r.errors[0].message : '';
+            return (
+                <div className="pg-tc">
+                    <div className="pg-tc__row">
+                        <span className={`pg-tc__state is-${bad ? 'off' : 'locked'}`}>{bad || `${r.count} ${r.count === 1 ? 'entry' : 'entries'}`}</span>
+                        <span className="pg-tc__q">{(r.entries || []).slice(0, 3).map((e) => e.label.split(' ')[0] || (e.frequency / 1e6).toFixed(3)).join(' · ')}</span>
+                    </div>
+                </div>
+            );
+        }
+        case 'scheduler': {
+            // The entry in force, and the next with how long until it.
+            const r = reading || {};
+            if (!r.entries) return null;
+            const name = (e) => (e ? (e.label || (e.frequency ? (e.frequency / 1e6).toFixed(4) + ' MHz' : 'Entry ' + (e.index + 1))) + (e.mode ? ' ' + e.mode.toUpperCase() : '') : '—');
+            const cur = r.entries[r.current];
+            const nxt = r.next ? r.entries[r.next.index] : null;
+            const wait = r.next ? r.next.wait : 0;
+            const left = wait >= 3600 ? Math.floor(wait / 3600) + ' h ' + Math.floor((wait % 3600) / 60) + ' m' : wait >= 60 ? Math.floor(wait / 60) + ' m ' + Math.floor(wait % 60) + ' s' : Math.ceil(wait) + ' s';
+            const trouble = r.errors && r.errors.length ? 'Line ' + r.errors[0].line + ': ' + r.errors[0].message : r.skipped || r.why;
+            return (
+                <div className="pg-tc">
+                    <div className="pg-tc__row">
+                        <span className={`pg-tc__state is-${cur ? 'locked' : 'acquiring'}`}>{cur ? name(cur) : r.entries.length ? 'Waiting' : 'No entries'}</span>
+                        {nxt && <span className="pg-tc__q">{`next ${name(nxt)} in ${left}`}</span>}
+                    </div>
+                    {trouble && <div className={`pg-tc__syms${large ? ' is-wrap' : ''}`}>{trouble}</div>}
+                </div>
+            );
+        }
+        case 'hell':
+        case 'wefax':
+        case 'fax-raster':
+        case 'sstv':
+        case 'sstv-raster': {
+            // A picture decoder: what it is doing, in which mode, how far in.
+            const r = reading || {};
+            if (r.why) return <div className="pg-tc"><div className="pg-tc__state is-off">{r.why}</div></div>;
+            const busy = r.state === 'receiving' || r.state === 'phasing';
+            const d = r.detail || {};
+            const far = d.line != null ? 'line ' + d.line + (d.of ? '/' + d.of : '') : d.strip != null ? `strip ${d.strip + 1}` : '';
+            // The last sender's callsign, once a picture has ended with an FSK ID.
+            const from = !busy && d.callsign ? 'last from ' + d.callsign : '';
+            return (
+                <div className="pg-tc">
+                    <div className="pg-tc__row">
+                        <span className={`pg-tc__state is-${busy ? 'locked' : 'acquiring'}`}>{r.state ? r.state[0].toUpperCase() + r.state.slice(1) : 'Off'}</span>
+                        <span className="pg-tc__q">{[r.mode, busy ? far : '', from].filter(Boolean).join(' · ')}</span>
+                    </div>
+                </div>
+            );
+        }
         case 'control-plot':
             return (
                 <div className="pg-vis__plot">

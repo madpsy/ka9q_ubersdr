@@ -13,7 +13,7 @@ import { graphForPlan } from './fromPlan.js';
 import { parseGraph } from './graph.js';
 import { autoLayout } from './geometry.js';
 import { cloneGraph } from './editing.js';
-import { DECODER_INSIDES } from './blocks/decoders.js';
+import { DECODER_INSIDES, insideOutputs } from './blocks/decoders.js';
 
 // What graphForPlan draws around the chain, which the expansion leaves out:
 // the stream it starts from, and the sinks it ends in. The block's own wires
@@ -93,12 +93,13 @@ export function expandDecoder(graph, id) {
         rename.set(n.id, name);
     }
     const added = laid.nodes.map((n) => ({ ...n, id: rename.get(n.id), x: node.x + n.x, y: node.y + n.y }));
-    const feeding = g.wires.find((w) => w[2] === id && w[3] === 'in');
+    const feeding = g.wires.find((w) => w[2] === id && w[3] === (BLOCK_BY_TYPE[node.type].inputs[0] || {}).name);
     const fed = g.wires.filter((w) => w[0] === id);
     const wires = g.wires.filter((w) => w[0] !== id && w[2] !== id);
     for (const [a, ap, b, bp] of laid.wires) wires.push([rename.get(a), ap, rename.get(b), bp]);
     if (feeding) wires.push([feeding[0], feeding[1], rename.get(d.input[0]), d.input[1]]);
-    for (const w of fed) if (w[1] === 'text') wires.push([rename.get(d.text[0]), d.text[1], w[2], w[3]]);
+    const outs = insideOutputs(d);
+    for (const w of fed) if (outs[w[1]]) wires.push([rename.get(outs[w[1]][0]), outs[w[1]][1], w[2], w[3]]);
     const nodes = [...g.nodes.filter((n) => n.id !== id), ...added];
     return { graph: { ...g, nodes, wires }, ids: added.map((n) => n.id) };
 }

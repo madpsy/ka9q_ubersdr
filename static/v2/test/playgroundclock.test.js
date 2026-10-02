@@ -46,10 +46,10 @@ t('asked for the NTP add-on on a receiver without one, it falls back, and says s
     const p = clockParams({ source: 'ntp', align: 'page' });
     const c = chooseTime(timeOf({ receiver: { t0: T, err: 9 } }), p);
     assert.strictEqual(c.src, 'receiver');
-    assert.match(c.note, /No NTP add-on on this receiver — using the receiver's clock/);
+    assert.match(c.note, /No NTP add-on on this receiver — using the receiver’s clock/);
     const later = chooseTime(timeOf({ ntpOffered: true }), p);
     assert.strictEqual(later.src, 'device');
-    assert.match(later.note, /not answering yet — using this device's clock/);
+    assert.match(later.note, /not answering yet — using this device’s clock/);
 });
 
 t('aligned to the signal, the capture stamps — corrected to the add-on\'s time where both are measured', () => {
@@ -62,7 +62,7 @@ t('aligned to the signal, the capture stamps — corrected to the add-on\'s time
     assert.match(chooseTime(timeOf({ capture: T }), clockParams({ source: 'ntp' })).note, /No NTP add-on/);
     // No stamps — a graph without the receiver — and it follows the page, saying so.
     assert.match(chooseTime(timeOf(), clockParams({ source: 'receiver' })).note, /follows the page/);
-    // This device's clock has nothing to do with the stamps.
+    // This device’s clock has nothing to do with the stamps.
     assert.strictEqual(chooseTime(timeOf({ capture: T }), clockParams({ source: 'device' })).signal, false);
 });
 

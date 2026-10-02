@@ -24,7 +24,7 @@
 // out hands its last block to the speakers again on every packet.
 
 import { BLOCK_BY_TYPE } from './blocks/index.js';
-import { COMPLEX, CONTROL, MESSAGE, REAL, ensureBuffer, isStream, makeBuffer, outputsOf, sanitizeParams } from './block.js';
+import { COMPLEX, CONTROL, MESSAGE, REAL, choiceFrom, ensureBuffer, isStream, makeBuffer, outputsOf, sanitizeParams } from './block.js';
 import { compile } from './graph.js';
 
 // ── What each block costs ───────────────────────────────────────────────────
@@ -184,6 +184,18 @@ export class Runtime {
     build() {
         const rate = this.streamRate || 12000;
         this.plan = compile(this.graph, rate);
+        // What inputs have driven, kept across rebuilds (a choice set by a
+        // message would otherwise be lost: its message was one packet's) —
+        // but only while the input driving it is still wired. The graph is
+        // compiled with them in force, so a rate they set is planned for.
+        const over = this.overlay || (this.overlay = {});
+        for (const id of Object.keys(over)) {
+            const wired = new Set((this.plan.ports[id] || []).filter((p, i) => p.param && (this.plan.inputs[id] || [])[i]).map((p) => p.param));
+            for (const k of Object.keys(over[id])) if (!wired.has(k)) delete over[id][k];
+            if (!Object.keys(over[id]).length) delete over[id];
+        }
+        const params = (n) => (over[n.id] ? { ...n.params, ...over[n.id] } : n.params);
+        if (Object.keys(over).length) this.plan = compile({ ...this.graph, nodes: this.graph.nodes.map((n) => (over[n.id] ? { ...n, params: params(n) } : n)) }, rate);
         this.errors = this.plan.errors;
         const seen = new Set();
         for (const n of this.graph.nodes) {
@@ -195,7 +207,7 @@ export class Runtime {
                 node = { type, inst: type.create(), params: null, rate: null };
                 this.nodes.set(n.id, node);
             }
-            node.params = sanitizeParams(type, n.params);
+            node.params = sanitizeParams(type, params(n));
             // Which outputs carry audio or IQ — what has a level to measure.
             node.levelOut = outputsOf(n, type).findIndex((p) => p.kind === COMPLEX || p.kind === REAL);
             // Which audio output to watch for clipping, if any.
@@ -215,7 +227,7 @@ export class Runtime {
             // What each control input last delivered, by its seq, and what the
             // parameters it drives have been set to.
             node.seen = node.ports.map(() => -1);
-            node.driven = {};
+            node.driven = over[n.id] ? Object.fromEntries(Object.keys(over[n.id]).map((k) => [k, node.params[k]])) : {};
             const r = this.plan.inRate[n.id];
             if (r > 0) {
                 node.inst.configure(node.params, r, node.inRates);
@@ -341,8 +353,20 @@ export class Runtime {
     _applyControls(id, node) {
         let patch = null;
         node.ports.forEach((p, i) => {
-            if (!p.param || p.kind !== CONTROL) return;
+            if (!p.param) return;
             const buf = node.from[i];
+            if (p.kind === MESSAGE) {
+                // A choice, named by this packet's last message that names one of its options.
+                if (!buf || !buf.list || !buf.list.length) return;
+                const spec = node.type.params[p.param];
+                let value;
+                for (const m of buf.list) { const v = choiceFrom(spec, m); if (v !== undefined) value = v; }
+                if (value === undefined || node.params[p.param] === value) return;
+                patch = patch || {};
+                patch[p.param] = value;
+                return;
+            }
+            if (p.kind !== CONTROL) return;
             if (!buf || buf.seq === node.seen[i]) return;
             node.seen[i] = buf.seq;
             const v = buf.value;
@@ -354,7 +378,16 @@ export class Runtime {
             patch[p.param] = value;
         });
         if (!patch) return;
-        node.params = sanitizeParams(node.type, { ...node.params, ...patch });
+        const next = sanitizeParams(node.type, { ...node.params, ...patch });
+        this.overlay[id] = { ...(this.overlay[id] || {}) };
+        for (const k of Object.keys(patch)) this.overlay[id][k] = next[k];
+        // A setting that moves the block's output rate (a Demodulator's
+        // mode or width can) needs the graph planned again: after this
+        // packet, with the new value in force.
+        const before = this.plan.outRate[id];
+        const after = node.type.rate ? node.type.rate(node.rate, next) : before;
+        if (after !== before) { this._replan = true; return; }
+        node.params = next;
         for (const k of Object.keys(patch)) node.driven[k] = node.params[k];
         node.inst.configure(node.params, node.rate, node.inRates);
     }
@@ -369,6 +402,13 @@ export class Runtime {
             if (node.driven && Object.keys(node.driven).length) out[id] = { ...node.driven };
         }
         return out;
+    }
+
+    /** What a node has queued for the page since it was last asked — an Image viewer's pictures. */
+    drainEvents(id) {
+        const node = this.nodes.get(id);
+        if (!node || !node.inst.drainEvents || this.blocked.has(id)) return null;
+        return node.inst.drainEvents();
     }
 
     /** Hand a node what came in from outside since the last packet — a serial port's. */
@@ -457,6 +497,7 @@ export class Runtime {
             if (this.measureLevels) this._measure(id, node, ins, n);
             if (node.queues) node.queues.forEach((q, i) => { if (q && from[i]) q.take(n); });
         }
+        if (this._replan) { this._replan = false; this.build(); }
         return true;
     }
 

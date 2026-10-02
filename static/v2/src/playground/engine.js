@@ -28,6 +28,7 @@ import { AudioRoutes } from '../lib/audioRoutes.js';
 import { Speaker } from './speech.js';
 import { SerialLink, trackLink } from './serialLink.js';
 import { TimeSource } from './timeSource.js';
+import { Gallery } from './image/gallery.js';
 import { ntpAvailable } from '../lib/ntpTime.js';
 import { planFor } from '../lib/iqDemod.js';
 import { cleanGraphName, parseGraph, serializeGraph } from './graph.js';
@@ -49,6 +50,8 @@ const WRITE_DELAY_MS = 250;
 export const MAX_IN_FLIGHT = 25;
 // How long "overloaded" is shown after the last dropped packet.
 const OVERLOAD_HOLD_MS = 2000;
+// The least time between two retunes a graph asks for: five a second at most.
+const TUNE_MIN_MS = 200;
 
 // A graph with no IQ stream in it — one playing a file, or a generator — runs
 // on a clock of its own, in packets this long, at this rate for its sources
@@ -147,6 +150,9 @@ export class PlaygroundEngine extends Emitter {
         this._packetMs = 20;
         // Where Clock blocks get the time (timeSource.js): measured only while one runs.
         this.time = timeSource || new TimeSource();
+        // Each Image viewer's pictures (image/gallery.js), kept here so they
+        // outlive the window and the worker.
+        this.galleries = new Map();
         this._speakerFactory = speakerFactory;
     }
 
@@ -332,6 +338,12 @@ export class PlaygroundEngine extends Emitter {
             sp.stop();
             this.speakers.delete(id);
         }
+        // An Image viewer gone takes its pictures; one still here keeps its count.
+        for (const [id, g] of Array.from(this.galleries)) {
+            const n = this.graph.nodes.find((x) => x.id === id && x.type === 'image-viewer');
+            if (!n) this.galleries.delete(id);
+            else g.setKeep(n.params.keep);
+        }
         // A serial block gone takes its port with it; one still here learns
         // whether anything listens to its input lines (polled fast if so).
         for (const [id, link] of Array.from(this.serial)) {
@@ -385,6 +397,10 @@ export class PlaygroundEngine extends Emitter {
         if (this._untap) this._untap();
         this._untap = null;
         this._stopClock();
+        // A retune still waiting its turn is not made once stopped.
+        if (this._tuneTimer) clearTimeout(this._tuneTimer);
+        this._tuneTimer = null;
+        this._pendingTune = null;
         for (const rec of this.recordings.values()) rec.stop('Stopped: the playground was stopped.');
         this._closeHost();
         this._applyDuck();
@@ -468,6 +484,39 @@ export class PlaygroundEngine extends Emitter {
      * What this receiver offers the Clock blocks: the NTP addon or not, and
      * whether its own clock says it is synchronised. From /api/description.
      */
+    /**
+     * The receiver's frequency and the range this instance tunes (MIN_FREQ,
+     * MAX_FREQ: /api/description's tuning_range), sent with every packet to
+     * the blocks that ask — the IQ stream, to refuse what it cannot reach.
+     */
+    setTuning(frequency, min, max) {
+        const t = this.tuning;
+        if (t && t.frequency === frequency && t.min === min && t.max === max) return;
+        this.tuning = { frequency, min, max };
+    }
+
+    /**
+     * A retune an IQ stream block asked for, passed on as 'tune' — at most
+     * one every TUNE_MIN_MS, the latest kept for when the next is allowed,
+     * so a schedule or a wiring mistake cannot hammer the receiver.
+     */
+    _requestTune(hz) {
+        this._pendingTune = hz;
+        if (this._tuneTimer) return;
+        const now = this._now();
+        const due = (this._lastTune == null ? -Infinity : this._lastTune) + TUNE_MIN_MS;
+        const flush = () => {
+            this._tuneTimer = null;
+            const f = this._pendingTune;
+            this._pendingTune = null;
+            if (f == null) return;
+            this._lastTune = this._now();
+            this.emit('tune', f);
+        };
+        if (now >= due) flush();
+        else this._tuneTimer = setTimeout(flush, due - now);
+    }
+
     setTimeContext(serverInfo) {
         this.time.configure({ ntp: ntpAvailable(serverInfo), hostSynced: !!(serverInfo && serverInfo.server_time_sync === true) });
     }
@@ -490,7 +539,7 @@ export class PlaygroundEngine extends Emitter {
         }
         // The time, every way it can be had, for each Clock to choose from.
         const time = this._hasClock() ? this.time.packetTime(this._packetMs, captureMs) : null;
-        this.host.send({ t: 'packet', seq: ++this._seq, i, q, frames, rate, ...(serial ? { serial } : {}), ...(time ? { time } : {}) }, i ? [i.buffer, q.buffer] : []);
+        this.host.send({ t: 'packet', seq: ++this._seq, i, q, frames, rate, ...(serial ? { serial } : {}), ...(time ? { time } : {}), ...(this.tuning ? { tuning: this.tuning } : {}) }, i ? [i.buffer, q.buffer] : []);
     }
 
     /**
@@ -575,6 +624,22 @@ export class PlaygroundEngine extends Emitter {
         return link;
     }
 
+    /** An Image viewer's pictures, made on first asking. */
+    galleryOf(id) {
+        let g = this.galleries.get(id);
+        if (!g) {
+            const p = this.paramsOf(id);
+            g = new Gallery(p && p.keep ? p.keep : 6);
+            this.galleries.set(id, g);
+        }
+        return g;
+    }
+
+    clearImages(id) {
+        const g = this.galleries.get(id);
+        if (g) { g.clear(); this.emit('image', id); }
+    }
+
     /** Whether a player node has a file in it. */
     hasFile(id) {
         return this.files.has(id);
@@ -651,6 +716,13 @@ export class PlaygroundEngine extends Emitter {
         for (const s of m.serial || []) {
             const link = this.serial.get(s.id);
             if (link) link.deliver(s, this._packetMs);
+        }
+        if (m.tune) this._requestTune(m.tune);
+        for (const im of m.images || []) {
+            const g = this.galleryOf(im.id);
+            let changed = false;
+            for (const e of im.events) if (g.apply(e)) changed = true;
+            if (changed) this.emit('image', im.id);
         }
         let stopped = false;
         for (const r of m.record || []) {

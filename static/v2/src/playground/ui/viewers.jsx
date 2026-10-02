@@ -315,7 +315,15 @@ function drawScope(canvas, h, reading, params, held) {
     if (!c) return null;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = cssVar('--surface-3', '#1a2130');
+    // Persistence: the last sweeps fade rather than vanish — over a few frames
+    // or many — so overlaid sweeps build an eye diagram. Only on a new sweep, so
+    // a redraw of the same one does not fade it.
+    const fade = params.view !== 'xy' ? { short: 0.35, long: 0.08 }[params.persistence] : null;
+    if (fade && reading && held.lastSweep === reading.a) return held.lastRange || null;
+    c.globalAlpha = fade || 1;
     c.fillRect(0, 0, w, ph);
+    c.globalAlpha = 1;
+    if (fade && reading) held.lastSweep = reading.a;
     c.strokeStyle = cssVar('--border', '#2a3242');
     c.lineWidth = 1;
     for (let i = 1; i < DIVS_X; i++) {
@@ -373,6 +381,7 @@ function drawScope(canvas, h, reading, params, held) {
         // A last, so it is on top of the rest.
         for (const ch of [...SCOPE_CHANNELS].reverse()) trace(reading[ch], scopeColour(params, ch));
     }
+    held.lastRange = range;
     return range;
 }
 
@@ -685,6 +694,148 @@ export function messageLine(m, zeroHz) {
     }
 }
 
+/** A number to a few significant figures, or a dash. */
+const fig = (v) => (v == null || !Number.isFinite(v) ? '—' : Math.abs(v) >= 1e5 || (Math.abs(v) < 1e-3 && v !== 0) ? v.toExponential(2) : String(Number(v.toPrecision(4))));
+
+/** The strip chart: each column's min to max, newest at the right, A over B. */
+export function StripView({ pg, id, reading, large = false, grow = 0 }) {
+    const ref = useRef(null);
+    const h = (large ? 160 : 70) + grow;
+    useEffect(() => {
+        const canvas = ref.current;
+        if (!canvas) return;
+        const { w, h: ph, dpr } = sizedCanvas(canvas, h);
+        const c = canvas.getContext('2d');
+        if (!c) return;
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.fillStyle = cssVar('--surface-3', '#1a2130');
+        c.fillRect(0, 0, w, ph);
+        if (!reading) return;
+        const chans = [['a', SCOPE_COLOURS[0].hex], ['b', SCOPE_COLOURS[1].hex]].filter(([k]) => reading[k]);
+        let lo = Infinity;
+        let hi = -Infinity;
+        if (reading.range) [lo, hi] = reading.range;
+        else {
+            for (const [k] of chans) {
+                const { lo: l, hi: u } = reading[k];
+                for (let i = 0; i < l.length; i++) {
+                    if (l[i] < lo) lo = l[i];
+                    if (u[i] > hi) hi = u[i];
+                }
+            }
+        }
+        if (!Number.isFinite(lo) || !Number.isFinite(hi)) return;
+        if (hi - lo < 1e-12) { hi += 0.5; lo -= 0.5; }
+        const pad = (hi - lo) * 0.05;
+        const yOf = (v) => ph - ((v - (lo - pad)) / (hi - lo + 2 * pad)) * ph;
+        c.strokeStyle = cssVar('--border', '#2a3242');
+        c.lineWidth = 1;
+        for (let i = 1; i < 4; i++) {
+            const y = Math.round((i * ph) / 4) + 0.5;
+            c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke();
+        }
+        for (const [k, colour] of chans) {
+            const { lo: l, hi: u } = reading[k];
+            const cols = l.length;
+            c.strokeStyle = colour;
+            c.lineWidth = Math.max(1, dpr);
+            c.beginPath();
+            for (let i = 0; i < cols; i++) {
+                if (!Number.isFinite(l[i])) continue;
+                const x = Math.round((i / cols) * w) + 0.5;
+                const y0 = yOf(l[i]);
+                const y1 = yOf(u[i]);
+                c.moveTo(x, y0);
+                c.lineTo(x, Math.min(y0 - 1, y1));
+            }
+            c.stroke();
+        }
+    });
+    const r = reading || {};
+    return (
+        <div className="pg-view">
+            <div className="pg-view__screen"><canvas ref={ref} className="pg-view__canvas" style={{ height: `${h}px` }} /></div>
+            <div className="pg-view__legend">
+                <span>{r.span ? `${r.span} s` : ''}</span>
+                <span>{r.a ? `A ${fig(r.a.last)}` : ''}{r.b ? ` · B ${fig(r.b.last)}` : ''}</span>
+            </div>
+            {large && (
+                <div className="pg-insp__row">
+                    <span className="pg-list__dim">Newest at the right; each column the lowest to the highest in its time.</span>
+                    <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={() => pg.command(id, 'clear')}>Clear</Button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/** The histogram: a bar a bin, the mean marked, its spread written. */
+export function HistogramView({ pg, id, reading, large = false, grow = 0 }) {
+    const ref = useRef(null);
+    const h = (large ? 150 : 64) + grow;
+    useEffect(() => {
+        const canvas = ref.current;
+        if (!canvas) return;
+        const { w, h: ph } = sizedCanvas(canvas, h);
+        const c = canvas.getContext('2d');
+        if (!c) return;
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.fillStyle = cssVar('--surface-3', '#1a2130');
+        c.fillRect(0, 0, w, ph);
+        if (!reading || !reading.found || !reading.counts) return;
+        const counts = reading.counts;
+        let top = 0;
+        for (const v of counts) if (v > top) top = v;
+        if (!(top > 0)) return;
+        c.fillStyle = cssVar('--accent', '#08a2fb');
+        const bw = w / counts.length;
+        for (let i = 0; i < counts.length; i++) {
+            const bh = (counts[i] / top) * (ph - 2);
+            c.fillRect(Math.floor(i * bw), ph - bh, Math.max(1, Math.ceil(bw) - 1), bh);
+        }
+        if (reading.mean != null) {
+            const x = ((reading.mean - reading.lo) / (reading.hi - reading.lo)) * w;
+            c.strokeStyle = cssVar('--warn', '#f2b544');
+            c.beginPath(); c.moveTo(Math.round(x) + 0.5, 0); c.lineTo(Math.round(x) + 0.5, ph); c.stroke();
+        }
+    });
+    const r = reading || {};
+    return (
+        <div className="pg-view">
+            <div className="pg-view__screen"><canvas ref={ref} className="pg-view__canvas" style={{ height: `${h}px` }} /></div>
+            <div className="pg-view__legend">
+                <span>{r.found ? fig(r.lo) : ''}</span>
+                <span>{r.mean != null ? `mean ${fig(r.mean)} · σ ${fig(r.sd)}` : (r.found === false ? 'Finding the range…' : '')}</span>
+                <span>{r.found ? fig(r.hi) : ''}</span>
+            </div>
+            {large && (
+                <div className="pg-insp__row">
+                    <span className="pg-list__dim">{r.total ? `${Math.round(r.total)} samples` : ''}</span>
+                    <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={() => pg.command(id, 'clear')}>Clear</Button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/** The readout: a signal's value written large. */
+export function ReadoutView({ reading, params = {}, large = false }) {
+    const v = reading ? reading.value : null;
+    const d = params.decimals;
+    let text = '—';
+    if (v != null && Number.isFinite(v)) {
+        text = d === 'auto' || d == null ? fig(v) : v.toFixed(Number(d));
+        if (/^-0(\.0+)?$/.test(text)) text = text.slice(1);
+    }
+    const unit = (params.unit || '').trim();
+    return (
+        <div className={`pg-readout${large ? ' is-large' : ''}`}>
+            <span className="pg-readout__value">{text}</span>
+            {unit && <span className="pg-readout__unit">{unit}</span>}
+        </div>
+    );
+}
+
 /** A time interval in ms, to a sensible number of places for its size. */
 export function intervalText(ms) {
     if (ms == null || !Number.isFinite(ms)) return '—';
@@ -959,6 +1110,7 @@ export function BitView({ reading, large = false, grow = 0 }) {
 export const INSTRUMENTS = new Set([
     'iq-spectrum', 'audio-spectrum', 'scope', 'constellation', 'frequency-counter', 'phase-meter', 'iq-phase-meter',
     'signal-detector', 'message-log', 'console', 'text-diff', 'bit-view', 'interval-counter',
+    'strip-chart', 'histogram', 'readout',
 ]);
 
 /**
@@ -992,6 +1144,12 @@ export function Instrument({ pg, node, look, origin, large = false, grow = 0 }) 
             return <ScopeView pg={pg} id={node.id} reading={reading} params={node.params} scale={scale} large={large} grow={g} />;
         case 'interval-counter':
             return <IntervalView pg={pg} id={node.id} reading={reading} large={large} grow={g} />;
+        case 'strip-chart':
+            return <StripView pg={pg} id={node.id} reading={reading} large={large} grow={g} />;
+        case 'histogram':
+            return <HistogramView pg={pg} id={node.id} reading={reading} large={large} grow={g} />;
+        case 'readout':
+            return <ReadoutView reading={reading} params={node.params} large={large} />;
         case 'constellation':
             return <ConstellationView reading={reading} scale={large ? 1.4 : 1} grow={g} />;
         case 'frequency-counter':

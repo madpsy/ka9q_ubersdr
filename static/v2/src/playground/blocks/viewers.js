@@ -219,6 +219,12 @@ export const ScopeBlock = {
             kind: 'choice', label: 'Outputs carry', default: 'rms',
             options: SCOPE_MEASURES.map(({ value, label }) => ({ value, label })),
         },
+        // Earlier sweeps left fading on the screen: an eye diagram, with the
+        // sweep at two symbols and the trigger free-running.
+        persistence: {
+            kind: 'choice', label: 'Persistence', default: 'off',
+            options: [{ value: 'off', label: 'Off' }, { value: 'short', label: 'Short' }, { value: 'long', label: 'Long' }],
+        },
         // Each channel's trace colour.
         ...Object.fromEntries(SCOPE_CHANNELS.map((c, i) => [`colour${c.toUpperCase()}`, {
             kind: 'choice',
@@ -503,6 +509,241 @@ export const ScopeBlock = {
                         if (out && value != null && Number.isFinite(value)) emitControl(out, value);
                     });
                     if (outs && outs[0] && outs[0].list) outs[0].list.push(reading);
+                }
+                return 0;
+            },
+        };
+    },
+};
+
+// How many columns a strip chart keeps: about a column a pixel on a large card.
+export const STRIP_COLUMNS = 480;
+
+/**
+ * A strip chart: one signal, or two, scrolling — a chart recorder's paper, the
+ * newest at the right. Each column is the minimum to maximum over its share of
+ * the span, so a fast signal shows its envelope and nothing between samples is
+ * lost. What a scope cannot do: a key, a level or a phase over the last half
+ * minute, read off as it went. The two may arrive at different rates.
+ */
+export const StripChartBlock = {
+    type: 'strip-chart',
+    label: 'Strip chart',
+    category: 'Viewers',
+    summary: 'One or two signals scrolling past over a set span, a chart recorder’s paper — a key, a level, a phase, over the last few seconds or minutes.',
+    inputs: [{ name: 'a', kind: REAL }, { name: 'b', kind: REAL, optional: true }],
+    outputs: [],
+    mixedRates: true,
+    params: {
+        spanSec: { kind: 'number', label: 'Span', unit: 's', default: 10, min: 0.5, max: 600, step: 0.5, control: false },
+        range: { kind: 'choice', label: 'Range', default: 'auto', options: [{ value: 'auto', label: 'Auto' }, { value: 'fixed', label: 'Fixed' }] },
+        min: { kind: 'number', label: 'Bottom', default: -1, min: -1e6, max: 1e6, step: 0.01, live: true, showIf: (p) => p.range === 'fixed' },
+        max: { kind: 'number', label: 'Top', default: 1, min: -1e6, max: 1e6, step: 0.01, live: true, showIf: (p) => p.range === 'fixed' },
+    },
+    create() {
+        let p = {};
+        let rates = [12000, 12000];
+        let span = 10;
+        // Per channel: a ring of columns, and the column being filled.
+        const make = () => ({ lo: new Float32Array(STRIP_COLUMNS).fill(NaN), hi: new Float32Array(STRIP_COLUMNS).fill(NaN), pos: 0, cLo: Infinity, cHi: -Infinity, got: 0 });
+        let ch = [make(), make()];
+        let wired = [true, false];
+        return {
+            configure(params, r, inRates) {
+                p = params;
+                rates = [0, 1].map((i) => (inRates && inRates[i] > 0 ? inRates[i] : r));
+                if (params.spanSec !== span) { span = params.spanSec; ch = [make(), make()]; }
+            },
+            reset() { ch = [make(), make()]; },
+            command(name) { if (name === 'clear') ch = [make(), make()]; },
+            read() {
+                const out = { span, columns: STRIP_COLUMNS, range: p.range === 'fixed' ? [p.min, p.max] : null };
+                ['a', 'b'].forEach((name, i) => {
+                    if (!wired[i]) { out[name] = null; return; }
+                    const c = ch[i];
+                    const lo = new Float32Array(STRIP_COLUMNS);
+                    const hi = new Float32Array(STRIP_COLUMNS);
+                    for (let k = 0; k < STRIP_COLUMNS; k++) {
+                        lo[k] = c.lo[(c.pos + k) % STRIP_COLUMNS];
+                        hi[k] = c.hi[(c.pos + k) % STRIP_COLUMNS];
+                    }
+                    out[name] = { lo, hi, last: c.got ? (c.cLo + c.cHi) / 2 : hi[STRIP_COLUMNS - 1] };
+                });
+                return out;
+            },
+            process(ins) {
+                wired = [!!(ins[0] && ins[0].re), !!(ins[1] && ins[1].re)];
+                for (let i = 0; i < 2; i++) {
+                    if (!wired[i]) continue;
+                    const x = ins[i].re;
+                    const m = ins[i].n;
+                    const c = ch[i];
+                    const per = Math.max(1, (rates[i] * span) / STRIP_COLUMNS);
+                    for (let k = 0; k < m; k++) {
+                        const v = x[k];
+                        if (v < c.cLo) c.cLo = v;
+                        if (v > c.cHi) c.cHi = v;
+                        if (++c.got >= per) {
+                            c.lo[c.pos] = c.cLo;
+                            c.hi[c.pos] = c.cHi;
+                            c.pos = (c.pos + 1) % STRIP_COLUMNS;
+                            c.cLo = Infinity; c.cHi = -Infinity; c.got = 0;
+                        }
+                    }
+                }
+                return 0;
+            },
+        };
+    },
+};
+
+/**
+ * A histogram: how a signal's values are spread — a key's two levels, a
+ * slicer's eye opening, noise's bell. Counted for ever, or with older counts
+ * fading so it follows a change. The range is set, or found from the first
+ * second of the signal (Clear finds it again).
+ */
+export const HistogramBlock = {
+    type: 'histogram',
+    label: 'Histogram',
+    category: 'Viewers',
+    summary: 'How a signal’s values are spread — two clean levels, a bell of noise, a slicer’s margin — with its mean and spread.',
+    inputs: [{ name: 'in', kind: REAL }],
+    outputs: [],
+    params: {
+        bins: { kind: 'number', label: 'Bins', default: 64, min: 8, max: 512, step: 1, control: false },
+        range: { kind: 'choice', label: 'Range', default: 'auto', options: [{ value: 'auto', label: 'Found from the signal' }, { value: 'fixed', label: 'Fixed' }] },
+        min: { kind: 'number', label: 'From', default: -1, min: -1e6, max: 1e6, step: 0.01, control: false, showIf: (p) => p.range === 'fixed' },
+        max: { kind: 'number', label: 'To', default: 1, min: -1e6, max: 1e6, step: 0.01, control: false, showIf: (p) => p.range === 'fixed' },
+        decaySec: { kind: 'number', label: 'Fade over', unit: 's', default: 0, min: 0, max: 3600, step: 1, live: true },
+    },
+    create() {
+        let p = {};
+        let rate = 12000;
+        let counts = new Float64Array(64);
+        let lo = -1;
+        let hi = 1;
+        let found = false;
+        let probe = [];
+        let sum = 0; let sumSq = 0; let total = 0;
+        let wasFixed = false;
+        const clear = () => { counts.fill(0); found = false; probe = []; sum = 0; sumSq = 0; total = 0; };
+        const count = (x, n) => {
+            const bins = counts.length;
+            const scale = bins / (hi - lo);
+            for (let k = 0; k < n; k++) {
+                const v = x[k];
+                counts[Math.max(0, Math.min(bins - 1, Math.floor((v - lo) * scale)))]++;
+                sum += v; sumSq += v * v; total++;
+            }
+        };
+        return {
+            configure(params, r) {
+                p = params;
+                rate = r || rate;
+                const bins = Math.max(8, Math.round(params.bins));
+                if (bins !== counts.length) { counts = new Float64Array(bins); clear(); }
+                const fixed = params.range === 'fixed';
+                if (fixed) { lo = Math.min(params.min, params.max); hi = Math.max(params.min, params.max, lo + 1e-9); found = true; }
+                // Back to found-from-the-signal: found afresh.
+                else if (wasFixed) clear();
+                wasFixed = fixed;
+            },
+            reset() { clear(); },
+            command(name) { if (name === 'clear') clear(); },
+            read() {
+                const mean = total ? sum / total : null;
+                return {
+                    counts: Float32Array.from(counts), lo, hi, found, total,
+                    mean, sd: total ? Math.sqrt(Math.max(0, sumSq / total - mean * mean)) : null,
+                };
+            },
+            process(ins, outs, n) {
+                const x = ins[0].re;
+                if (!found) {
+                    // The first second of signal sets the range: its 0.5 to
+                    // 99.5 percentiles, a little wider.
+                    for (let k = 0; k < n; k++) probe.push(x[k]);
+                    if (probe.length < Math.min(rate, 48000)) return 0;
+                    const a = probe.slice().sort((u, v) => u - v);
+                    const pl = a[Math.floor(a.length * 0.005)];
+                    const ph = a[Math.floor(a.length * 0.995)];
+                    const pad = (ph - pl) * 0.1 || Math.abs(ph) * 0.1 || 1;
+                    lo = pl - pad;
+                    hi = ph + pad;
+                    found = true;
+                    count(probe, probe.length);
+                    probe = [];
+                    return 0;
+                }
+                if (p.decaySec > 0) {
+                    const f = Math.exp(-n / (rate * p.decaySec));
+                    for (let b = 0; b < counts.length; b++) counts[b] *= f;
+                    sum *= f; sumSq *= f; total *= f;
+                }
+                count(x, n);
+                return 0;
+            },
+        };
+    },
+};
+
+const READOUT_MEASURES = [
+    { value: 'last', label: 'Latest' },
+    { value: 'mean', label: 'Mean' },
+    { value: 'rms', label: 'RMS' },
+    { value: 'peak', label: 'Peak (absolute)' },
+    { value: 'min', label: 'Minimum' },
+    { value: 'max', label: 'Maximum' },
+    { value: 'pp', label: 'Peak to peak' },
+];
+
+/**
+ * A number: a signal's value over a window — its mean, RMS, peak, extremes —
+ * written large, and sent as a control every window to plot or to steer by.
+ */
+export const ReadoutBlock = {
+    type: 'readout',
+    label: 'Readout',
+    category: 'Viewers',
+    summary: 'A signal as a number — its latest, mean, RMS, peak or extremes over a window — written large, and as a control.',
+    inputs: [{ name: 'in', kind: REAL }],
+    outputs: [{ name: 'value', kind: CONTROL }],
+    params: {
+        measure: { kind: 'choice', label: 'Shows', default: 'mean', options: READOUT_MEASURES },
+        windowMs: { kind: 'number', label: 'Over', unit: 'ms', default: 500, min: 1, max: 60000, step: 1, live: true },
+        decimals: {
+            kind: 'choice', label: 'Decimals', default: 'auto',
+            options: [{ value: 'auto', label: 'As it comes' }, ...[0, 1, 2, 3, 4, 5, 6].map((d) => ({ value: d, label: String(d) }))],
+        },
+        unit: { kind: 'text', label: 'Unit', default: '', max: 16 },
+    },
+    create() {
+        let p = {};
+        let rate = 12000;
+        let got = 0; let sum = 0; let sumSq = 0; let lo = Infinity; let hi = -Infinity; let peak = 0; let last = 0;
+        let value = null;
+        const reset = () => { got = 0; sum = 0; sumSq = 0; lo = Infinity; hi = -Infinity; peak = 0; };
+        return {
+            configure(params, r) { p = params; rate = r || rate; },
+            reset() { reset(); value = null; },
+            read() { return { value, measure: p.measure }; },
+            process(ins, outs, n) {
+                const x = ins[0].re;
+                const per = Math.max(1, Math.round((p.windowMs / 1000) * rate));
+                for (let k = 0; k < n; k++) {
+                    const v = x[k];
+                    last = v;
+                    sum += v; sumSq += v * v;
+                    if (v < lo) lo = v;
+                    if (v > hi) hi = v;
+                    if (Math.abs(v) > peak) peak = Math.abs(v);
+                    if (++got >= per) {
+                        const mean = sum / got;
+                        value = { last, mean, rms: Math.sqrt(sumSq / got), peak, min: lo, max: hi, pp: hi - lo }[p.measure] ?? mean;
+                        if (outs[0]) emitControl(outs[0], value);
+                        reset();
+                    }
                 }
                 return 0;
             },

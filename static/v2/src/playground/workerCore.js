@@ -31,7 +31,7 @@
 // ── Worker to page ───────────────────────────────────────────────────────────
 //
 //   { t: 'status', ok, errors }             after every graph or parameter change
-//   { t: 'out', seq, audio, record, speech, serial, readings, stats, ms }
+//   { t: 'out', seq, audio, record, speech, serial, images, readings, stats, tune, ms }
 //                                           after every packet: each Audio out's
 //                                           samples, each recorder's, the watched
 //                                           readings when they are due, every
@@ -43,6 +43,7 @@
 
 import { Runtime } from './runtime.js';
 import { parseGraph } from './graph.js';
+import { BLOCK_BY_TYPE } from './blocks/index.js';
 
 // Readings — meters, spectra, a tracker's state — go back at most this often.
 // The Signal panel's meters are sampled at the same rate, and a spectrum is a
@@ -82,6 +83,9 @@ export function createWorkerCore(post, now = () => performance.now()) {
     let speechIds = [];
     let serialIds = [];
     let clockIds = [];
+    let imageIds = [];
+    let tuneIds = [];
+    let tuningIds = [];
     let parseErrors = [];
 
     const status = () => {
@@ -98,6 +102,9 @@ export function createWorkerCore(post, now = () => performance.now()) {
         speechIds = graph.nodes.filter((n) => n.type === 'tts').map((n) => n.id);
         serialIds = graph.nodes.filter((n) => n.type === 'serial-port').map((n) => n.id);
         clockIds = graph.nodes.filter((n) => n.type === 'clock').map((n) => n.id);
+        imageIds = graph.nodes.filter((n) => n.type === 'image-viewer').map((n) => n.id);
+        tuneIds = graph.nodes.filter((n) => n.type === 'iq-in').map((n) => n.id);
+        tuningIds = graph.nodes.filter((n) => BLOCK_BY_TYPE[n.type] && BLOCK_BY_TYPE[n.type].wantsTuning).map((n) => n.id);
     };
 
     const packet = (m) => {
@@ -106,6 +113,8 @@ export function createWorkerCore(post, now = () => performance.now()) {
         // The time this packet's first sample stands for, every way it can be
         // had (timeSource.js), for each Clock to choose its own.
         if (m.time) for (const id of clockIds) rt.feed(id, { time: m.time });
+        // The receiver's frequency and the range it tunes, for the blocks that ask (the IQ stream, a Scheduler).
+        if (m.tuning) for (const id of tuningIds) rt.feed(id, { tuning: m.tuning });
         // Nothing ran: nothing to hand on. A sink's last block is still in it,
         // and sent again it is the same 20 ms on every packet — a buzz.
         if (!rt.process({ i: m.i, q: m.q, frames: m.frames, rate: m.rate })) {
@@ -169,7 +178,18 @@ export function createWorkerCore(post, now = () => performance.now()) {
             const r = rt.read(id);
             if (r) serial.push({ id, ...r });
         }
-        post({ t: 'out', seq: m.seq, audio, record, speech, serial, readings, stats, ms: now() - started }, transfer);
+        // Each Image viewer's picture events, every packet: see blocks/imaging.js.
+        const images = [];
+        for (const id of imageIds) {
+            const events = rt.drainEvents(id);
+            if (events && events.length) images.push({ id, events });
+        }
+        // A frequency an IQ stream block was asked to retune to: the last this packet.
+        let tune = null;
+        for (const id of tuneIds) {
+            for (const e of rt.drainEvents(id) || []) if (e.type === 'tune') tune = e.frequency;
+        }
+        post({ t: 'out', seq: m.seq, audio, record, speech, serial, images, readings, stats, ...(tune ? { tune } : {}), ms: now() - started }, transfer);
     };
 
     return {

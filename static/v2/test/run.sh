@@ -94,7 +94,7 @@ esbuild playground.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/playground.cjs --log-level=warning
 esbuild playgroundengine.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/playgroundengine.cjs --log-level=warning
-for tc in timecodewwv timecodelf timecodepm timecodeblock; do
+for tc in timecodewwv timecodelf timecodepm timecodeblock playgroundtools playgrounddsc playgroundimage playgroundwefax playgroundsstv playgroundmfsk playgroundsched; do
     esbuild "$tc.entry.js" --bundle --format=cjs --platform=node \
         --outfile=".build/$tc.cjs" --log-level=warning
 done
@@ -705,6 +705,13 @@ node timecodewwv.test.js
 node timecodelf.test.js
 node timecodepm.test.js
 node timecodeblock.test.js
+node playgroundtools.test.js
+node playgrounddsc.test.js
+node playgroundimage.test.js
+node playgroundwefax.test.js
+node playgroundsstv.test.js
+node playgroundmfsk.test.js
+node playgroundsched.test.js
 node playgroundui.test.js
 node wavlossless.test.js
 node tuningrange.test.js

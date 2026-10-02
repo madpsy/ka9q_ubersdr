@@ -15060,6 +15060,7 @@ a.btn { text-decoration: none; }
 }
 .pg-insp__id { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
 .pg-insp__summary, .pg-insp__note, .pg-insp__help p { margin: 0; font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
+.pg-insp__note.is-warn { color: var(--warn); }
 .pg-insp__help p + p { margin-top: 6px; }
 .pg-insp__section { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .pg-insp__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -15241,6 +15242,7 @@ a.btn { text-decoration: none; }
 .pg-tc__q { flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--good); }
 .pg-tc__time { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--text); }
 .pg-tc__syms { font-family: var(--mono); font-size: 11px; color: var(--text-dim); overflow: hidden; white-space: nowrap; direction: rtl; text-align: left; }
+.pg-tc__syms.is-wrap { white-space: normal; }
 .pg-tc__facts { font-size: 10.5px; color: var(--text-faint); }
 /* A pulse classifier's card. */
 .pg-pulse { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -15253,6 +15255,19 @@ a.btn { text-decoration: none; }
 .pg-clock__zone { margin-left: 6px; font-size: 10px; font-weight: 400; color: var(--text-faint); }
 .pg-clock__src, .pg-clock__note { font-size: 10.5px; color: var(--text-faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pg-clock__note { color: var(--warn); }
+/* An Image viewer: the picture at its own aspect, scaled to the card. */
+.pg-img { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pg-img__frame { display: flex; align-items: center; justify-content: center; height: 128px; background: var(--surface-3); border-radius: 3px; overflow: hidden; }
+.pg-img.is-large .pg-img__frame { height: auto; max-height: 70vh; }
+.pg-img__canvas { display: block; max-width: 100%; max-height: 100%; image-rendering: auto; }
+.pg-img.is-large .pg-img__canvas { width: 100%; height: auto; max-height: 70vh; object-fit: contain; }
+.pg-img__empty { font-size: 11px; color: var(--text-faint); }
+.pg-img__caption { font-size: 10.5px; color: var(--text-faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A readout. */
+.pg-readout { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.pg-readout__value { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--text); }
+.pg-readout.is-large .pg-readout__value { font-size: 32px; }
+.pg-readout__unit { font-size: 11px; color: var(--text-dim); }
 /* A time interval counter. */
 .pg-tic { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pg-tic__last { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--text); }

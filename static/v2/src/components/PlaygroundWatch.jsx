@@ -23,7 +23,7 @@
 
 import React, { useEffect, useReducer, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
-import { isIQ } from '../radio/constants.js';
+import { MAX_FREQ, MIN_FREQ, isIQ } from '../radio/constants.js';
 import { getPlayground, graphIqWidth } from '../playground/engine.js';
 import { decodeShare } from '../playground/share.js';
 import PlaygroundModal, { SHARE_PARAM } from '../playground/ui/PlaygroundModal.jsx';
@@ -59,6 +59,9 @@ export default function PlaygroundWatch() {
     // Which clocks this receiver offers the Clock blocks: the NTP addon or not.
     pg.setTimeContext(serverInfo);
     const iq = isIQ(tuning.mode);
+    // Where the receiver is and what this instance can tune, for the IQ
+    // stream block (and anything else that asks) to know.
+    pg.setTuning(tuning.frequency, MIN_FREQ, MAX_FREQ);
 
     // Read at once, so the address bar is tidied, but offered only once the
     // receiver is running: until then the Start overlay is up, and the
@@ -114,6 +117,17 @@ export default function PlaygroundWatch() {
     useEffect(() => {
         pg.setQuadrature(iq && running);
     }, [pg, iq, running]);
+
+    // A graph retuning the receiver (an IQ stream block's frequency input):
+    // only while it is running on the receiver's own stream — never from a
+    // graph playing a file, nor one not started. The engine has already
+    // limited how often; setFrequency clamps as tuning by hand does.
+    const live = useRef({ iq, running });
+    live.current = { iq, running };
+    useEffect(() => pg.on('tune', (hz) => {
+        if (!pg.running || pg.offline || !live.current.iq || !live.current.running) return;
+        actions.setFrequency(hz);
+    }), [pg, actions]);
 
     // Silent too while a recording is being played back (lib/playbackHold.js).
     const held = usePlaybackHold();

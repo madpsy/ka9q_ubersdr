@@ -2745,7 +2745,7 @@ t('a selected wire says what it carries and offers instruments for it', () => {
     });
     assert.match(words(el), /a real signal/);
     deep(el).filter((n) => cls(n) === 'pg-probe__btn').forEach((b) => b.props.onClick());
-    assert.deepStrictEqual(probed, ['r.out:scope', 'r.out:audio-spectrum', 'r.out:meter']);
+    assert.deepStrictEqual(probed, ['r.out:scope', 'r.out:strip-chart', 'r.out:audio-spectrum', 'r.out:meter', 'r.out:histogram', 'r.out:readout']);
 });
 
 t('spectrum labels are real frequencies where the zero is known, offsets where not', () => {

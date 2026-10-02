@@ -70,7 +70,7 @@ export const PulseClassifierBlock = {
     type: 'pulse-classifier',
     label: 'Pulse classifier',
     category: 'Digital',
-    summary: 'Measures each pulse and names it by its length — a time signal\'s 0, 1 and marker, CW\'s dit and dah, any pulse-width code.',
+    summary: 'Measures each pulse and names it by its length — a time signal’s 0, 1 and marker, CW’s dit and dah, any pulse-width code.',
     inputs: [{ name: 'in', kind: REAL, audio: false }],
     outputs: [
         { name: 'symbols', kind: MESSAGE },

@@ -108,9 +108,35 @@ export const BITS = 'bits';
 /** Whether a kind carries samples (or bits), as against control values or messages. */
 export const isStream = (kind) => kind === COMPLEX || kind === REAL || kind === BITS;
 
-/** Whether a parameter can be driven by a control input. */
+/**
+ * Whether a parameter can be driven by an input: a number or a switch by a
+ * control, a choice by a message naming one of its options (a Scheduler's
+ * mode into a Demodulator's, say).
+ */
 export function controllable(spec) {
-    return !!spec && (spec.kind === 'number' || spec.kind === 'bool') && spec.control !== false;
+    return !!spec && (spec.kind === 'number' || spec.kind === 'bool' || spec.kind === 'choice') && spec.control !== false;
+}
+
+/** The kind of input that drives a parameter: a message for a choice, else a control. */
+export const controlKind = (spec) => (spec && spec.kind === 'choice' ? MESSAGE : CONTROL);
+
+/**
+ * The option of choice `spec` a message names, or undefined: its `value`, or
+ * its text, matched against each option's value and then its label, case
+ * and surrounding space ignored — so "USB", "usb" and a value of 1 for an
+ * option of 1 all choose.
+ */
+export function choiceFrom(spec, m) {
+    if (!spec || !spec.options || m == null) return undefined;
+    const raw = typeof m === 'object' ? (m.value !== undefined ? m.value : m.text) : m;
+    if (raw == null) return undefined;
+    const want = String(raw).trim().toLowerCase();
+    if (!want) return undefined;
+    const opts = spec.options;
+    const byValue = opts.find((o) => String(o.value).toLowerCase() === want);
+    if (byValue) return byValue.value;
+    const byLabel = opts.find((o) => String(o.label).trim().toLowerCase() === want);
+    return byLabel ? byLabel.value : undefined;
 }
 
 /** The port name of a parameter's control input. */
@@ -129,7 +155,7 @@ export function inputsOf(node, def) {
     for (const name of node.controls || []) {
         const spec = def.params[name];
         if (!controllable(spec)) continue;
-        extra.push({ name: controlPort(name), kind: CONTROL, optional: true, param: name, label: spec.label });
+        extra.push({ name: controlPort(name), kind: controlKind(spec), optional: true, param: name, label: spec.label });
     }
     return extra.length ? [...own, ...extra] : own;
 }

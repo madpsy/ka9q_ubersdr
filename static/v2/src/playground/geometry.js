@@ -198,6 +198,12 @@ function ownVisualHeight(type, params) {
         case 'psk31-decoder':
         case 'cw-decoder':
         case 'navtex-decoder':
+        case 'olivia-decoder':
+        case 'mfsk-decoder':
+        case 'dominoex-decoder':
+        case 'thor-decoder':
+        case 'mfsk-detector':
+        case 'olivia-fec':
         case 'noise-blanker':
         case 'nr2':
             return 18;
@@ -211,6 +217,27 @@ function ownVisualHeight(type, params) {
         case 'tts':
             // What it is saying, and what it said last.
             return 32;
+        case 'image-viewer':
+            // The picture, and a line saying what it is.
+            return 150;
+        case 'dsc-decoder':
+            return 34;
+        case 'beacon-monitor':
+            // The beacon on now, and those heard.
+            return 34;
+        case 'scheduler':
+            // The entry in force and the next; a problem, if there is one.
+            return 34;
+        case 'frequency-list':
+            // How many entries, and the first few.
+            return 18;
+        case 'hell':
+        case 'wefax':
+        case 'fax-raster':
+        case 'sstv':
+        case 'sstv-raster':
+            // Its state and mode.
+            return 18;
         case 'timecode':
             // Its state, the time, and the symbols lately read.
             return 58;
@@ -220,6 +247,12 @@ function ownVisualHeight(type, params) {
         case 'clock':
             // The time, where it comes from, and a note when it is not what was asked.
             return 50;
+        case 'strip-chart':
+            return 86;
+        case 'histogram':
+            return 80;
+        case 'readout':
+            return 30;
         case 'interval-counter':
             // The last interval, its statistics and their trace.
             return 64;

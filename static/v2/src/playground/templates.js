@@ -8,6 +8,7 @@
 import { GRAPH_VERSION, parseGraph } from './graph.js';
 import { autoLayout } from './geometry.js';
 import { controlPort } from './block.js';
+import { wefaxFrontEndStages } from './blocks/fax.js';
 import { graphForPlan } from './fromPlan.js';
 import { DEMOD_MODES, VFO_DEFAULTS, planForVfo } from '../lib/iqDemod.js';
 
@@ -168,6 +169,209 @@ export const TEMPLATES = [
                 { id: 'console', type: 'console' },
             ],
             [['iq', 'out', 'spectrum', 'in'], ['iq', 'out', 'psk', 'in'], ['psk', 'text', 'console', 'in']],
+        ),
+    },
+    {
+        id: 'qpsk31',
+        title: 'Decode QPSK31',
+        summary: 'QPSK31: PSK31 with four phases and error correction, read through a Viterbi decoder. The same decoder as PSK31, set to QPSK — expand it to see the slicer, the Viterbi decoder and the Varicode stage, each a block of its own.',
+        build: () => g(
+            [
+                { id: 'iq', type: 'iq-in' },
+                { id: 'spectrum', type: 'iq-spectrum', params: { display: 'both' } },
+                { id: 'psk', type: 'psk31-decoder', params: { offsetHz: 1000, psk: 'qpsk' } },
+                { id: 'console', type: 'console' },
+            ],
+            [['iq', 'out', 'spectrum', 'in'], ['iq', 'out', 'psk', 'in'], ['psk', 'text', 'console', 'in']],
+        ),
+    },
+    {
+        id: 'olivia',
+        title: 'Decode Olivia',
+        summary: 'Olivia (or Contestia) to text — readable far below the noise. Set the mode to match (8/250 and 8/500 are the usual) and the offset near the signal; it searches a few tones either side itself. Expand the decoder to see the tone detector and the error correction.',
+        build: () => g(
+            [
+                { id: 'iq', type: 'iq-in' },
+                { id: 'spectrum', type: 'iq-spectrum', params: { display: 'both' } },
+                { id: 'dec', type: 'olivia-decoder', params: { offsetHz: 1500, tones: 8, bandwidth: 250 } },
+                { id: 'console', type: 'console' },
+            ],
+            [['iq', 'out', 'spectrum', 'in'], ['iq', 'out', 'dec', 'in'], ['dec', 'text', 'console', 'in']],
+        ),
+    },
+    {
+        id: 'mfsk16',
+        title: 'Decode MFSK16',
+        summary: 'MFSK16 (or 32, 64, 128) to text. Put the offset on the signal and AFC trims it. Expand the decoder to see its tone detector, demapper, interleaver, Viterbi decoder and varicode, each a block of its own.',
+        build: () => g(
+            [
+                { id: 'iq', type: 'iq-in' },
+                { id: 'spectrum', type: 'iq-spectrum', params: { display: 'both' } },
+                { id: 'dec', type: 'mfsk-decoder', params: { offsetHz: 1500 } },
+                { id: 'console', type: 'console' },
+            ],
+            [['iq', 'out', 'spectrum', 'in'], ['iq', 'out', 'dec', 'in'], ['dec', 'text', 'console', 'in']],
+        ),
+    },
+    {
+        id: 'dominoex',
+        title: 'Decode DominoEX',
+        summary: 'DominoEX to text — no fine tuning needed: it reads the steps between tones, not the tones themselves. Set the speed to match and the offset near the signal.',
+        build: () => g(
+            [
+                { id: 'iq', type: 'iq-in' },
+                { id: 'spectrum', type: 'iq-spectrum', params: { display: 'both' } },
+                { id: 'dec', type: 'dominoex-decoder', params: { offsetHz: 1500 } },
+                { id: 'console', type: 'console' },
+            ],
+            [['iq', 'out', 'spectrum', 'in'], ['iq', 'out', 'dec', 'in'], ['dec', 'text', 'console', 'in']],
+        ),
+    },
+    {
+        id: 'thor',
+        title: 'Decode THOR',
+        summary: 'THOR to text: DominoEX’s keying with error correction behind it. Set the speed to match and the offset near the signal; expand it to see the stages.',
+        build: () => g(
+            [
+                { id: 'iq', type: 'iq-in' },
+                { id: 'spectrum', type: 'iq-spectrum', params: { display: 'both' } },
+                { id: 'dec', type: 'thor-decoder', params: { offsetHz: 1500 } },
+                { id: 'console', type: 'console' },
+            ],
+            [['iq', 'out', 'spectrum', 'in'], ['iq', 'out', 'dec', 'in'], ['dec', 'text', 'console', 'in']],
+        ),
+    },
+    {
+        // Drawn out stage by stage — the WEFAX block's inside (decoders.js)
+        // with every step on the canvas to probe and adjust.
+        id: 'wefax',
+        title: 'Receive weather fax',
+        summary: 'WEFAX charts, drawn as they come, every stage laid out: the USB audio made analytic, the 1900 Hz carrier shifted to zero, the channel filtered and FM-discriminated into a level (−1 black, +1 white — watch it on the strip chart), and the raster that starts on the START tone, lines up on the phasing and stops on STOP. Tune the dial 1.9 kHz below a station’s listed frequency. The Image viewer keeps the last few; open it to save one.',
+        build: () => g(
+            [
+                { id: 'iq', type: 'iq-in' },
+                { id: 'demod', type: 'demodulator', params: { mode: 'usb', widthHz: 2700 } },
+                ...wefaxFrontEndStages().map((st) => ({ id: st.id, type: st.type, params: st.params })),
+                { id: 'level', type: 'strip-chart', params: { spanSec: 2, range: 'fixed', min: -1.2, max: 1.2 } },
+                { id: 'raster', type: 'fax-raster' },
+                { id: 'viewer', type: 'image-viewer' },
+                { id: 'console', type: 'console' },
+                { id: 'audio', type: 'audio-out' },
+            ],
+            [
+                ['iq', 'out', 'demod', 'in'], ['demod', 'audio', 'analytic', 'in'], ['analytic', 'out', 'tocarrier', 'in'],
+                ['tocarrier', 'out', 'channel', 'in'], ['channel', 'out', 'fm', 'in'], ['fm', 'out', 'raster', 'level'],
+                ['fm', 'out', 'level', 'a'], ['raster', 'images', 'viewer', 'in'], ['raster', 'text', 'console', 'in'],
+                ['demod', 'audio', 'audio', 'in'],
+            ],
+        ),
+    },
+    {
+        // Drawn out stage by stage — the SSTV block's inside (decoders.js).
+        id: 'sstv',
+        title: 'Receive SSTV',
+        summary: 'Slow-scan TV pictures, drawn as they come and straightened when done, every stage laid out: slowrx’s demodulator turns the USB audio into a frequency (watch the sync pulses and scan lines on the strip chart) and a sync strength, and the raster reads the mode from each picture’s VIS header, lays out the lines and reads the sender’s FSK ID. Callsigns collect in the log. Tune to an SSTV frequency in USB (14.230 MHz is the busiest). The Image viewer keeps the last few; open it to save one.',
+        build: () => g(
+            [
+                { id: 'iq', type: 'iq-in' },
+                { id: 'demod', type: 'demodulator', params: { mode: 'usb', widthHz: 2700 } },
+                { id: 'sstvdemod', type: 'sstv-demod' },
+                { id: 'freq', type: 'strip-chart', params: { spanSec: 2, range: 'fixed', min: 1000, max: 2400 } },
+                { id: 'raster', type: 'sstv-raster' },
+                { id: 'viewer', type: 'image-viewer' },
+                { id: 'console', type: 'console' },
+                { id: 'calls', type: 'message-log' },
+                { id: 'audio', type: 'audio-out' },
+            ],
+            [
+                ['iq', 'out', 'demod', 'in'], ['demod', 'audio', 'sstvdemod', 'audio'],
+                ['sstvdemod', 'hz', 'raster', 'hz'], ['sstvdemod', 'sync', 'raster', 'sync'], ['sstvdemod', 'hz', 'freq', 'a'],
+                ['raster', 'images', 'viewer', 'in'], ['raster', 'text', 'console', 'in'], ['raster', 'callsign', 'calls', 'in'],
+                ['demod', 'audio', 'audio', 'in'],
+            ],
+        ),
+    },
+    {
+        // The Scheduler driving the receiver: its frequency into the IQ
+        // stream's, its mode into the Demodulator's (exposed as an input), and
+        // the monitor taking its band from where the receiver really went.
+        id: 'beacon-hop',
+        title: 'Hop the bands with an NCDXF beacon',
+        summary: 'Follow one NCDXF beacon round the world’s five beacon bands — 14.100, 18.110, 21.150, 24.930, 28.200 MHz — retuning the receiver every time it moves up a band, so you hear how one path does on each. Choose the beacon on the Scheduler; the Clock times the hops, and the monitor logs whether it was heard on each band and how strongly. This retunes your receiver: the dial and everything on the page follow.',
+        build: () => g(
+            [
+                { id: 'clock', type: 'clock' },
+                { id: 'schedule', type: 'scheduler', params: { preset: 'ncdxf', beacon: 0 } },
+                { id: 'iq', type: 'iq-in' },
+                { id: 'demod', type: 'demodulator', params: { mode: 'cwu', widthHz: 500, pitchHz: 700 }, controls: ['mode'] },
+                { id: 'beacons', type: 'beacon-monitor', params: { band: -1, toneHz: 700 } },
+                { id: 'log', type: 'message-log' },
+                { id: 'hops', type: 'console' },
+                { id: 'audio', type: 'audio-out' },
+            ],
+            [
+                ['clock', 'unix', 'schedule', 'unix'], ['clock', 'pps', 'schedule', 'pps'],
+                ['schedule', 'frequency', 'iq', 'frequency'], ['schedule', 'mode', 'demod', controlPort('mode')], ['schedule', 'label', 'hops', 'in'],
+                ['iq', 'out', 'demod', 'in'], ['demod', 'audio', 'beacons', 'audio'], ['clock', 'unix', 'beacons', 'unix'], ['iq', 'tuned', 'beacons', 'tuned'],
+                ['beacons', 'text', 'log', 'in'], ['demod', 'audio', 'audio', 'in'],
+            ],
+        ),
+    },
+    {
+        // A Frequency list worked in turn by a Scheduler: the list kept apart
+        // from when it is visited, so another round is another list.
+        id: 'ndb-hop',
+        title: 'Hop the NDBs',
+        summary: 'A round of non-directional beacons, 30 seconds on each, hopping on the minute and the half minute by the Clock — long enough for an ident or three — retuning the receiver to each carrier in turn and reading its Morse ident 400 Hz above it (the usual tone this side of the Atlantic; set an entry’s offset=1020 for a beacon on that tone). The list is on the Frequency list block: add, remove or reorder lines there. Idents collect in the log; the console says where it went. This retunes your receiver: the dial and everything on the page follow.',
+        build: () => g(
+            [
+                {
+                    id: 'ndbs', type: 'frequency-list',
+                    params: {
+                        entries: [
+                            '380kHz am offset=400 CBL Campbeltown',
+                            '394kHz am offset=400 DND Dundee',
+                            '341kHz am offset=400 EDN Edinburgh',
+                            '355kHz am offset=400 PIK Prestwick',
+                            '368kHz am offset=400 UW Edinburgh',
+                        ].join('\n'),
+                    },
+                },
+                { id: 'clock', type: 'clock' },
+                { id: 'schedule', type: 'scheduler', params: { kind: 'dwell', dwell: 30, align: true } },
+                { id: 'iq', type: 'iq-in' },
+                { id: 'ident', type: 'cw-decoder', params: { offsetHz: 400, wpm: 7 }, controls: ['offsetHz'] },
+                { id: 'idents', type: 'message-log' },
+                { id: 'hops', type: 'console' },
+                { id: 'demod', type: 'demodulator', params: { mode: 'am', widthHz: 3000 }, controls: ['mode'] },
+                { id: 'audio', type: 'audio-out' },
+            ],
+            [
+                ['ndbs', 'list', 'schedule', 'list'], ['clock', 'unix', 'schedule', 'unix'], ['clock', 'pps', 'schedule', 'pps'],
+                ['schedule', 'frequency', 'iq', 'frequency'], ['schedule', 'offset', 'ident', controlPort('offsetHz')],
+                ['schedule', 'mode', 'demod', controlPort('mode')], ['schedule', 'label', 'hops', 'in'],
+                ['iq', 'out', 'ident', 'in'], ['ident', 'text', 'idents', 'in'],
+                ['iq', 'out', 'demod', 'in'], ['demod', 'audio', 'audio', 'in'],
+            ],
+        ),
+    },
+    {
+        id: 'beacons',
+        title: 'Watch the NCDXF beacons',
+        summary: 'The eighteen NCDXF/IARU beacons on one band, each heard or not, and how strongly — where the band is open to. Tune to the beacon frequency in CW (14.100, 18.110, 21.150, 24.930 or 28.200 MHz) and set the monitor’s band to match. The Clock gives it the time.',
+        build: () => g(
+            [
+                { id: 'iq', type: 'iq-in' },
+                { id: 'demod', type: 'demodulator', params: { mode: 'cwu', widthHz: 500, pitchHz: 700 } },
+                { id: 'clock', type: 'clock' },
+                { id: 'beacons', type: 'beacon-monitor', params: { toneHz: 700 } },
+                { id: 'log', type: 'message-log' },
+                { id: 'audio', type: 'audio-out' },
+            ],
+            [
+                ['iq', 'out', 'demod', 'in'], ['demod', 'audio', 'beacons', 'audio'], ['clock', 'unix', 'beacons', 'unix'],
+                ['beacons', 'text', 'log', 'in'], ['demod', 'audio', 'audio', 'in'],
+            ],
         ),
     },
     {

@@ -14,7 +14,7 @@ import { decimateFactor } from '../blocks/mixing.js';
 import { formatCpu, formatLatency, formatRate } from './Canvas.jsx';
 import { INSTRUMENTS, Instrument } from './viewers.jsx';
 import { PROBES, acrossPair, airSpan, inputOrigin, outputKind, sourceZero } from '../probes.js';
-import CardVisual, { ActivityDot, RfLine, Sparkline, activityMeaning, earLevels, inspectorShowsPicture, levelChange, recordingLabel, useLevel } from './CardVisual.jsx';
+import CardVisual, { ActivityDot, RfLine, Sparkline, activityMeaning, earLevels, inspectorShowsPicture, levelChange, recordingLabel, useLevel, useReadings } from './CardVisual.jsx';
 import { carriesSamples, hasRfLine } from '../geometry.js';
 import { controlPort, controllable, inputsOf, outputsOf } from '../block.js';
 import { NAME_MAX, nodeName } from '../graph.js';
@@ -24,7 +24,7 @@ import { useRadio } from '../../radio/RadioContext.jsx';
 import { holdPlayback } from '../../lib/playbackHold.js';
 import { currentVoice, listVoices, speechAvailable } from '../../lib/announce.js';
 import { EQ_FREQUENCIES, EQ_PRESETS, presetMakeup } from '../../radio/audio-filters.js';
-import { isIQ } from '../../radio/constants.js';
+import { MAX_FREQ, MIN_FREQ, isIQ } from '../../radio/constants.js';
 import FrequencyDial from '../../components/FrequencyDial.jsx';
 import { IQWidths } from '../../panels/ReceiverPanel.jsx';
 import { MarginPicker } from '../../panels/AudioPanel.jsx';
@@ -479,7 +479,23 @@ export function throughputHistory(snaps) {
     return out;
 }
 
-function ReceiverControls({ graph, node, onParams }) {
+/**
+ * What this instance tunes, and a retune the graph asked for that it could not
+ * make (an IQ stream block's frequency input) — its own component so only it
+ * re-renders with the readings.
+ */
+function TuningNote({ pg, node }) {
+    const r = useReadings(pg, node.id);
+    const mhz = (hz) => (hz / 1e6).toFixed(3).replace(/\.?0+$/, '');
+    return (
+        <>
+            <div className="pg-insp__note">{`This receiver tunes ${mhz(MIN_FREQ)}–${mhz(MAX_FREQ)} MHz. A frequency wired in retunes it — the dial and everything on the page follow — at most five times a second.`}</div>
+            {r && r.why && <div className="pg-insp__note is-warn">{r.why}</div>}
+        </>
+    );
+}
+
+function ReceiverControls({ pg, graph, node, onParams }) {
     const { tuning, actions, allowedIQModes } = useRadio();
     const allowed = allowedIQModes || [];
     const width = node.params.width || 'iq';
@@ -503,6 +519,7 @@ function ReceiverControls({ graph, node, onParams }) {
                 <IQWidths mode={width} allowed={allowed} onChoose={choose} />
             </Field>
             {note && <div className="pg-insp__note">{note}</div>}
+            {pg && <TuningNote pg={pg} node={node} />}
             {/* The receiver panel's quality slider, the same control: one
                 setting for the session's stream, which is this one. */}
             <MarginPicker forIQ />
@@ -794,7 +811,7 @@ export default function Inspector({
             {errs.map((e, i) => <div key={i} className="note note--tight note--warn">{e.message}</div>)}
             {/* What the stream is — frequency, IQ width, quality — before
                 the figures about it. */}
-            {node.type === 'iq-in' && <ReceiverControls graph={graph} node={node} onParams={onParams} />}
+            {node.type === 'iq-in' && <ReceiverControls pg={pg} graph={graph} node={node} onParams={onParams} />}
             {!def.annotation && (
                 <div className="readout-grid">
                     <Readout label="Rate" value={formatRate(rates[node.id]) || '—'} unit={rates[node.id] ? 'Hz' : undefined} />

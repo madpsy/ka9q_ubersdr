@@ -1,19 +1,32 @@
 // Where a graph's samples come from.
 
-import { COMPLEX, MESSAGE } from '../block.js';
+import { COMPLEX, CONTROL, MESSAGE, emitControl } from '../block.js';
 import { SNR_BANDWIDTH_HZ, TEST_MESSAGES, TX_MODES, Transmitter } from '../transmit.js';
+
+const mhz = (hz) => `${(hz / 1e6).toFixed(hz % 1000 ? 4 : 3).replace(/0+$/, '').replace(/\.$/, '')} MHz`;
 
 /**
  * The receiver's IQ stream, as it arrives: I and Q at the stream's own rate.
  * Every graph that listens to the receiver starts here.
+ *
+ * Its `frequency` input retunes the receiver — the dial, the spectrum, all of
+ * it, as tuning by hand would — when a new value arrives (a Scheduler's, say).
+ * The page tells it the receiver's frequency and the range this instance
+ * tunes (/api/description's tuning_range) with every packet; a frequency
+ * outside the range is refused, and said so, rather than clamped to the edge
+ * and the graph left believing it got there. `tuned` is the frequency the
+ * receiver is actually on, as the page reports it, sent when it changes —
+ * what anything downstream should take as where it is listening.
  */
 export const IqInBlock = {
     type: 'iq-in',
     label: 'IQ stream',
     category: 'Sources',
-    summary: 'The receiver’s quadrature stream, centred on the dial.',
-    inputs: [],
-    outputs: [{ name: 'out', kind: COMPLEX }],
+    summary: 'The receiver’s quadrature stream, centred on the dial. Wire a frequency in (from a Scheduler) to retune the receiver; `tuned` says where it is.',
+    inputs: [{ name: 'frequency', kind: CONTROL, optional: true }],
+    outputs: [{ name: 'out', kind: COMPLEX }, { name: 'tuned', kind: CONTROL }],
+    // The page sends this block the receiver's tuning (workerCore.js).
+    wantsTuning: true,
     // The receiver's IQ width this graph is built for. Not used here — the
     // stream arrives at whatever rate the receiver sends — but kept in the
     // graph so a shared or saved one says what it needs, and the playground
@@ -35,10 +48,44 @@ export const IqInBlock = {
         },
     },
     create() {
+        let tuning = null;       // { frequency, min, max } from the page
+        let seen = -1;
+        let asked = null;        // the last frequency asked for
+        let why = '';
+        let sentTuned = null;
+        let events = [];
         return {
             configure() {},
-            reset() {},
+            reset() { seen = -1; asked = null; why = ''; sentTuned = null; events = []; },
+            feed(data) { if (data && data.tuning) tuning = data.tuning; },
+            read() {
+                return {
+                    frequency: tuning ? tuning.frequency : null,
+                    min: tuning ? tuning.min : null,
+                    max: tuning ? tuning.max : null,
+                    asked,
+                    why,
+                };
+            },
+            drainEvents() { const e = events; events = []; return e; },
             process(ins, outs, n, stream) {
+                const f = ins[0];
+                if (f && f.seq !== seen && f.value != null) {
+                    seen = f.seq;
+                    const hz = Math.round(Number(f.value));
+                    if (!Number.isFinite(hz) || hz <= 0) {
+                        why = 'Not a frequency';
+                    } else if (tuning && tuning.min > 0 && tuning.max > tuning.min && (hz < tuning.min || hz > tuning.max)) {
+                        why = `${mhz(hz)} is outside this receiver’s ${mhz(tuning.min).replace(' MHz', '')}–${mhz(tuning.max)}`;
+                    } else {
+                        why = '';
+                        if (hz !== asked) { asked = hz; events.push({ type: 'tune', frequency: hz }); }
+                    }
+                }
+                if (outs[1] && tuning && tuning.frequency > 0 && tuning.frequency !== sentTuned) {
+                    sentTuned = tuning.frequency;
+                    emitControl(outs[1], sentTuned);
+                }
                 const out = outs[0];
                 if (!stream || !stream.i) {
                     out.re.fill(0, 0, n);

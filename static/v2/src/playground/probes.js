@@ -22,8 +22,11 @@ export const PROBES = {
     ],
     real: [
         { type: 'scope', label: 'Scope' },
+        { type: 'strip-chart', label: 'Strip chart' },
         { type: 'audio-spectrum', label: 'Spectrum' },
         { type: 'meter', label: 'Meter' },
+        { type: 'histogram', label: 'Histogram' },
+        { type: 'readout', label: 'Readout' },
     ],
     control: [
         { type: 'control-plot', label: 'Plot' },
@@ -187,7 +190,9 @@ export function sourceOf(graph, id) {
 }
 
 // Blocks that listen somewhere in their input rather than at its zero.
-const TUNED = new Set(['demodulator', 'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder']);
+const TUNED = new Set([
+    'demodulator', 'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder', 'olivia-decoder', 'mfsk-decoder', 'dominoex-decoder', 'thor-decoder',
+]);
 
 /**
  * Where on the air a block is working, and how far that is from the centre

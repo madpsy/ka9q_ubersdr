@@ -133,7 +133,7 @@ export function chooseTime(time, p) {
         if (!c) continue;
         let note = '';
         if (k !== order[0] && want !== 'auto') {
-            note = `${order[0] === 'ntp' ? ntpMissing : 'The receiver\'s clock has not been measured yet'} — using ${k === 'device' ? 'this device\'s clock' : 'the receiver\'s clock'}`;
+            note = `${order[0] === 'ntp' ? ntpMissing : 'The receiver’s clock has not been measured yet'} — using ${k === 'device' ? 'this device’s clock' : 'the receiver’s clock'}`;
         }
         if (p.align !== 'page' && want !== 'device') {
             note = note ? `${note}. ` : '';
@@ -240,7 +240,7 @@ export const ClockBlock = {
             { value: 'signal', label: 'The signal (when it was captured)' },
             { value: 'page', label: 'The page (now)' },
         ]),
-        zone: choice('Time zone', 'utc', [{ value: 'utc', label: 'UTC' }, { value: 'local', label: 'This machine\'s' }]),
+        zone: choice('Time zone', 'utc', [{ value: 'utc', label: 'UTC' }, { value: 'local', label: 'This machine’s' }]),
         ppsEvery: choice('Pulse every', 1, [1, 2, 5, 10, 15, 30, 60].map((s) => ({ value: s, label: s === 60 ? 'minute' : `${s} s` }))),
         ppsWidthMs: num('Pulse width', 100, { unit: 'ms', min: 0.1, max: 900, step: 0.1 }),
         ppsOffsetMs: num('Pulse offset', 0, { unit: 'ms', min: -500, max: 500, step: 0.1 }),

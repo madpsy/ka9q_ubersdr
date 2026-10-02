@@ -978,7 +978,8 @@ export default function PlaygroundModal() {
     const ui = usePlaygroundUi();
     if (!ui.open) return null;
     return (
-        <Modal onClose={closePlayground} label="Playground">
+        // As much of the window as there is: a workspace, not a dialog.
+        <Modal onClose={closePlayground} label="Playground" className="modal--full">
             <PlaygroundWindow onClose={closePlayground} />
         </Modal>
     );

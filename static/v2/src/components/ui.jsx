@@ -532,7 +532,7 @@ export function Menu({ trigger, children, align = 'end', openOnHover = false }) 
 // Rendered through a portal into <body> rather than in place: panels that fill
 // their dock clip their body (`overflow: hidden`), and a dialog inside one has
 // no business being cropped to it or inheriting its stacking order.
-export function Modal({ children, onClose, label }) {
+export function Modal({ children, onClose, label, className = '' }) {
     useEffect(() => {
         const onKey = (e) => { if (e.key === 'Escape') onClose(); };
         document.addEventListener('keydown', onKey);
@@ -541,7 +541,7 @@ export function Modal({ children, onClose, label }) {
 
     return ReactDOM.createPortal(
         <div
-            className="modal"
+            className={`modal${className ? ` ${className}` : ''}`}
             role="dialog"
             aria-modal="true"
             aria-label={label}

@@ -1887,6 +1887,18 @@ t('pinch on the canvas: two fingers zoom; one lifted, the other moves nothing; a
     r.cleanups.forEach((f) => f());
 });
 
+t('the playground takes the whole window, near enough; other dialogs keep their margin', () => {
+    reset();
+    openPlayground();
+    const dialog = deep(render(PlaygroundModal, {}, radio()).tree).find((x) => x.props && x.props.role === 'dialog');
+    assert.strictEqual(dialog.props.className, 'modal modal--full');
+    closePlayground();
+    const { Modal } = P;
+    reset();
+    const plain = deep(render(Modal, { onClose() {}, label: 'x', children: null }).tree).find((x) => x.props && x.props.role === 'dialog');
+    assert.strictEqual(plain.props.className, 'modal', 'every dialog made full-window');
+});
+
 t('the inspector shows a block’s name, its type beside it, and a box to rename it in', () => {
     reset();
     const pg = getPlayground(radio().player);

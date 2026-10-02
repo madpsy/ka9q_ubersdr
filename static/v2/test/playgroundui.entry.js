@@ -10,7 +10,7 @@ import { TEMPLATES } from '../src/playground/templates.js';
 import Inspector, { ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams, formatKbps, VoiceField } from '../src/playground/ui/Inspector.jsx';
 import { holdPlayback, playbackHeld } from '../src/lib/playbackHold.js';
 import JsonPane, { graphText, readGraphText } from '../src/playground/ui/JsonPane.jsx';
-import { Switch, Slider } from '../src/components/ui.jsx';
+import { Switch, Slider, Modal } from '../src/components/ui.jsx';
 import { MarginPicker } from '../src/panels/AudioPanel.jsx';
 import { MARGIN_MIN_DB, MARGIN_LOSSLESS } from '../src/radio/constants.js';
 import { setUberSDRVersion, uberSDRVersion, versionNote } from '../src/playground/version.js';
@@ -51,7 +51,7 @@ module.exports = {
     moveNodes, removeNodes, removeWire,
     NODE_W, nodeWidth, autoLayout, graphBounds, fitView, nodeAt, nodeHeight, portAt, portPosition, screenToWorld, wirePath, isAnnotation, nodeBox, nodesInside, zoomAbout,
     cardWidth, cardGrow, fitSize, naturalHeight, CARD_MIN_W, CARD_MAX_W, pinchView,
-    setUberSDRVersion, uberSDRVersion, versionNote, Switch, Slider, MarginPicker, MARGIN_MIN_DB, MARGIN_LOSSLESS, Instrument, SpectrumView, ScopeView, ConstellationView, ConsoleView, DiffView, spectrumAxis, scopeRange, freqLabel, timeLabel, INSTRUMENTS,
+    setUberSDRVersion, uberSDRVersion, versionNote, Switch, Slider, Modal, MarginPicker, MARGIN_MIN_DB, MARGIN_LOSSLESS, Instrument, SpectrumView, ScopeView, ConstellationView, ConsoleView, DiffView, spectrumAxis, scopeRange, freqLabel, timeLabel, INSTRUMENTS,
     spectrumMarks, counterText, groupDigits,
     holdSpectrum, setSpectrumPaused, spectrumPaused, BLOCKS, BLOCK_BY_TYPE, CATEGORIES, GRAPH_VERSION, compile, parseGraph, serializeGraph, getPlayground, resetDemodSettings, saveDemodSettings, PROBES,
 };

@@ -4422,6 +4422,11 @@ a.btn { text-decoration: none; }
     transition: background var(--dur) var(--ease);
 }
 .modal__close:hover { background: rgba(0, 0, 0, 0.8); }
+/* A window that takes the whole screen, near enough: the playground. */
+.modal.modal--full { padding: 6px; }
+@media (max-width: 760px) {
+    .modal.modal--full { padding: 4px; }
+}
 
 /* =========================================================================
    Callsign lookup panel
@@ -14381,8 +14386,10 @@ a.btn { text-decoration: none; }
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    width: min(1480px, calc(100vw - 24px));
-    height: calc(var(--vv-height, 100vh) - 48px);
+    /* All of the window but a hairline of the page round it — a workspace
+       wants every pixel, and the edge still shows it is over the page. */
+    width: calc(100vw - 12px);
+    height: calc(var(--vv-height, 100vh) - 12px);
     background: var(--panel, var(--surface));
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -14965,7 +14972,7 @@ a.btn { text-decoration: none; }
 
 /* A phone: the canvas on top, the blocks and the controls beneath it. */
 @media (max-width: 760px) {
-    .pg { width: calc(100vw - 8px); height: calc(var(--vv-height, 100vh) - 16px); }
+    .pg { width: calc(100vw - 8px); height: calc(var(--vv-height, 100vh) - 8px); }
     .pg__head { flex-wrap: wrap; }
     .pg__body { grid-template-columns: 1fr; grid-template-rows: minmax(240px, 1fr) auto auto; overflow: auto; }
     .pg__canvas { order: 0; min-height: 280px; }

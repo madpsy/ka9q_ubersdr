@@ -325,6 +325,19 @@ function SimpleVisual({ pg, node, origin, rate }) {
                     {reading && reading.markDb != null ? `mark ${reading.markDb.toFixed(0)} · space ${reading.spaceDb.toFixed(0)} dB` : '—'}
                 </div>
             );
+        case 'noise-blanker':
+            return (
+                <div className="pg-vis__state">
+                    {!reading ? '—' : !reading.on ? 'Off'
+                        : `${reading.pulses} ${reading.pulses === 1 ? 'pulse' : 'pulses'} · ${(reading.cut * 100).toFixed(1)}% cut · ${reading.reductionDb.toFixed(1)} dB`}
+                </div>
+            );
+        case 'nr2':
+            return (
+                <div className={`pg-vis__state${reading && reading.on && !reading.learning ? ' is-open' : ''}`}>
+                    {!reading ? '—' : !reading.on ? 'Off' : reading.learning ? 'Learning the noise…' : 'Subtracting'}
+                </div>
+            );
         case 'ook-detector':
             return <div className="pg-vis__state">{reading && reading.snrDb != null ? `${reading.snrDb.toFixed(0)} dB over the noise` : '—'}</div>;
         case 'rtty-decoder':

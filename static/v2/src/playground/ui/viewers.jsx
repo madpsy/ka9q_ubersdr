@@ -11,7 +11,7 @@
 import React, { useEffect, useReducer, useRef, useState } from '../../react.js';
 import { cssVar, levelWindow, sizedCanvas } from '../../lib/audioWaterfall.js';
 import { getPalette } from '../../lib/palettes.js';
-import { Button, Icon, Readout } from '../../components/ui.jsx';
+import { Button, Icon, Readout, Switch } from '../../components/ui.jsx';
 import { MARKER_H, SPECTRUM_H, SCALE_H, WATERFALL_H } from '../geometry.js';
 
 // ── frequency labels ────────────────────────────────────────────────────────
@@ -664,11 +664,31 @@ export function LogView({ pg, id, reading, origin, large = false }) {
 
 // ── text and bits ───────────────────────────────────────────────────────────
 
+/**
+ * A scroll box that keeps its newest text — at the end — in view as it
+ * arrives, while following is on; on by default, as a teleprinter's paper
+ * is. Off, it stays where it was put, to read back. The message log needs
+ * none of this: it puts the newest at the top.
+ */
+function useFollow() {
+    const [follow, setFollow] = useState(true);
+    const box = useRef(null);
+    useEffect(() => {
+        const el = box.current;
+        if (follow && el) el.scrollTop = el.scrollHeight;
+    });
+    const toggle = (
+        <Switch checked={follow} onChange={setFollow} label="Auto-scroll" title="Keep the newest text in view as it arrives" />
+    );
+    return { box, toggle };
+}
+
 /** A teleprinter's paper: the last few lines on a card, all of it large. */
 export function ConsoleView({ pg, id, reading, large = false }) {
     const text = (reading && reading.text) || '';
     const lines = text.split('\n');
     const [copied, setCopied] = useState(false);
+    const { box, toggle } = useFollow();
     if (!large) {
         const tail = lines.slice(-4);
         return (
@@ -679,9 +699,10 @@ export function ConsoleView({ pg, id, reading, large = false }) {
     }
     return (
         <div className="pg-view">
-            <pre className="pg-console is-large">{text || 'Nothing decoded yet.'}</pre>
+            <pre className="pg-console is-large" ref={box}>{text || 'Nothing decoded yet.'}</pre>
             <div className="pg-insp__row">
                 <span className="pg-list__dim">{reading ? `${reading.count} characters` : ''}</span>
+                {toggle}
                 <Button
                     size="sm"
                     variant="ghost"
@@ -740,6 +761,7 @@ function diffSummary(r) {
 export function DiffView({ pg, id, reading, large = false }) {
     const segs = (reading && reading.segments) || [];
     const bad = reading && reading.errors > 0;
+    const { box, toggle } = useFollow();
     if (!large) {
         return (
             <div className="pg-diff">
@@ -751,7 +773,7 @@ export function DiffView({ pg, id, reading, large = false }) {
     return (
         <div className="pg-view">
             <div className={`pg-vis__state${bad ? ' is-shut' : reading && reading.cer === 0 ? ' is-open' : ''}`}>{diffSummary(reading)}</div>
-            <pre className="pg-console is-large pg-diff__text">{segs.length ? <DiffText segments={segs} /> : 'Nothing to compare yet.'}</pre>
+            <pre className="pg-console is-large pg-diff__text" ref={box}>{segs.length ? <DiffText segments={segs} /> : 'Nothing to compare yet.'}</pre>
             <div className="pg-diff__legend">
                 <span className="pg-diff__same">right</span>
                 <span className="pg-diff__wrong">wrong</span>
@@ -761,6 +783,7 @@ export function DiffView({ pg, id, reading, large = false }) {
             </div>
             <div className="pg-insp__row">
                 <span className="pg-list__dim">{reading && reading.pending ? `${reading.pending} sent characters still to come` : ''}</span>
+                {toggle}
                 <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={() => pg.command(id, 'clear')}>Clear</Button>
             </div>
         </div>

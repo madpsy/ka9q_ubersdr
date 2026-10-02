@@ -1,10 +1,11 @@
 // The left-hand column: every block, by category, and a box to find one.
-// Pressing one adds it to the canvas where it can be seen.
+// Pressing one adds it to the canvas where it can be seen; dragging one puts
+// it where it is let go (`onPickUp`, which the window turns into the drag).
 
 import React, { useState } from '../../react.js';
 import { BLOCKS, CATEGORIES } from '../blocks/index.js';
 
-export default function Palette({ onAdd }) {
+export default function Palette({ onAdd, onPickUp }) {
     const [q, setQ] = useState('');
     const needle = q.trim().toLowerCase();
     const match = (b) => !needle
@@ -32,6 +33,7 @@ export default function Palette({ onAdd }) {
                                 type="button"
                                 className="pg-pal__item"
                                 title={b.summary}
+                                onPointerDown={onPickUp ? (e) => onPickUp(b.type, e) : undefined}
                                 onClick={() => onAdd(b.type)}
                             >
                                 {b.label}

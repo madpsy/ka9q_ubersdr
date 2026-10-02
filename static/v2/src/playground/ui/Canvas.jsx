@@ -11,6 +11,9 @@
 //   double-click a note      write in it (headings, group titles, markers too)
 //   click a card's title     rename the block (or press its pencil)
 //
+// Blocks also arrive by being dragged in from the palette, which the window
+// handles (PlaygroundModal.jsx): the canvas is only where they are let go.
+//
 // Positions are arithmetic (geometry.js), not measurements, so wires meet the
 // dots exactly whatever the zoom, and "which port is this" is portAt() rather
 // than a question for the DOM. The world — cards and wires together — is one
@@ -140,6 +143,42 @@ function Card({ pg, graph, node, selected, errors, rate, latency, cpu, wiredIn, 
                 <span title="Share of one CPU core, measured over the last second">{cpu == null ? '' : `⚙ ${formatCpu(cpu)}`}</span>
             </div>
         </div>
+    );
+}
+
+const NONE = new Set();
+const nothing = () => {};
+
+/**
+ * A block as it will look on the canvas, drawn with nothing wired and nothing
+ * measured: what a block being dragged in from the palette carries. At the
+ * world's origin, in world units — the caller places and scales it.
+ */
+export function BlockPreview({ pg, node, look }) {
+    if (isAnnotation(node.type)) {
+        return <Annotation node={node} selected={false} editing={false} session={0} onWritten={nothing} />;
+    }
+    return (
+        <Card
+            pg={pg}
+            graph={{ nodes: [node], wires: [] }}
+            node={node}
+            selected={false}
+            errors={null}
+            rate={null}
+            latency={null}
+            cpu={null}
+            wiredIn={NONE}
+            target={null}
+            look={look}
+            origin={null}
+            origins={null}
+            onParams={nothing}
+            naming={false}
+            session={0}
+            onRename={nothing}
+            onNamed={nothing}
+        />
     );
 }
 

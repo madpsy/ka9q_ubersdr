@@ -14,6 +14,7 @@ const assert = require('assert');
 const {
     BLOCK_BY_TYPE, makeBuffer, sanitizeParams, GRAPH_VERSION, parseGraph,
     Runtime, createWorkerCore, STATS_EVERY_MS, biquadCoefficients, biquadGainAt,
+    PanelNR, PanelNR2, PanelNB, CopyNR, CopyNR2, CopyNB,
 } = require('./.build/playground.cjs');
 
 let pass = 0;
@@ -308,6 +309,134 @@ t('the worker sends each block’s CPU and latency about once a second', () => {
     assert.deepStrictEqual(Object.keys(s.nodes).sort(), ['a', 'iq', 'lp', 'o']);
     assert.ok(s.nodes.lp.latencySec > 0);
     assert.strictEqual(s.nodes.o.totalLatencySec, s.nodes.lp.totalLatencySec);
+});
+
+// ── the Noise panel's stage, as blocks ──────────────────────────────────────
+//
+// The blocks run copies of the panel's engines (playground/noise/), changed
+// only to take a packet of any length. So: given what the panel gives them —
+// whole hops — the copies are the panel's, sample for sample, a hop later;
+// cut any other way, they give the same; and the blocks do what the panel's
+// do to noise.
+
+/** Band noise with a tone over part of it and a click every quarter second. */
+function noisy(n, { tone = 0.2, clicks = true, from = RATE, to = 2 * RATE } = {}) {
+    let seed = 3;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+    return Float64Array.from({ length: n }, (_, i) => 0.05 * rnd()
+        + (i >= from && i < to ? tone * Math.sin((2 * Math.PI * 700 * i) / RATE) : 0)
+        + (clicks && i % 3000 === 7 ? 0.9 : 0));
+}
+
+/** An engine run over `x` a `chunk` at a time. */
+function feed(engine, x, chunk) {
+    const out = new Float32Array(x.length);
+    for (let s = 0; s < x.length; s += chunk) {
+        const m = Math.min(chunk, x.length - s);
+        const o = new Float32Array(m);
+        engine.process(Float32Array.from(x.subarray(s, s + m)), o, m);
+        out.set(o, s);
+    }
+    return out;
+}
+
+/** A block run over `x`, `chunk` frames to a packet. */
+function blockRun(type, params, x, chunk) {
+    const b = block(type, params);
+    const out = new Float64Array(x.length);
+    for (let s = 0; s < x.length; s += chunk) {
+        const m = Math.min(chunk, x.length - s);
+        out.set(run(b, x.subarray(s, s + m)).re.subarray(0, m), s);
+    }
+    return { out, b };
+}
+
+const rmsOf = (a, s, e) => { let t = 0; for (let i = s; i < e; i++) t += a[i] * a[i]; return Math.sqrt(t / (e - s)); };
+
+t('the noise blocks run the Noise panel’s arithmetic: the copies match the panel’s engines', () => {
+    const x = noisy(4 * RATE);
+    for (const [name, Panel, Copy, args, hop] of [['NR', PanelNR, CopyNR, [RATE], 256], ['NR2', PanelNR2, CopyNR2, [2048, 4], 512]]) {
+        const panel = new Panel(...args);
+        panel.enabled = true;
+        // The panel's buffers are whole hops; so are these.
+        const a = feed(panel, x, 1024);
+        const b = feed(new Copy(...args), x, 1024);
+        for (let i = 0; i + hop < x.length; i++) assert.strictEqual(b[i + hop], a[i], `${name}: sample ${i}`);
+        // Cut any other way, the copy gives the same.
+        for (const chunk of [240, 997, 1]) {
+            const c = feed(new Copy(...args), x, chunk);
+            for (let i = 0; i < x.length; i++) assert.strictEqual(c[i], b[i], `${name}, ${chunk} at a time: sample ${i}`);
+        }
+    }
+    const panel = new PanelNB(RATE);
+    panel.enabled = true;
+    const a = feed(panel, x, 1024);
+    const b = feed(new CopyNB(RATE), x, 240);
+    for (let i = 0; i < x.length; i++) assert.strictEqual(b[i], a[i], `blanker: sample ${i}`);
+});
+
+t('each noise block’s latency is where its signal comes out, and off is a straight copy', () => {
+    // A quiet second, then loud noise: what every one of them passes nearly
+    // whole, so the delay shows by correlation.
+    let seed = 9;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+    const x = Float64Array.from({ length: 3 * RATE }, (_, i) => (i < RATE ? 0.001 : 0.3) * rnd());
+    for (const [type, from] of [['noise-blanker', RATE + 2400], ['nr', RATE + 2400], ['nr2', 0]]) {
+        const { out, b } = blockRun(type, {}, x, 240);
+        let best = 0;
+        let at = -1;
+        for (let lag = 0; lag < 4096; lag++) {
+            let c = 0;
+            for (let i = from; i < from + 4000 && i + lag < x.length; i++) c += x[i] * out[i + lag];
+            if (c > best) { best = c; at = lag; }
+        }
+        assert.strictEqual(at, b.inst.latency(), `${type}: comes out ${at} late, says ${b.inst.latency()}`);
+        const off = blockRun(type, { on: false }, x, 240);
+        assert.deepStrictEqual(Array.from(off.out), Array.from(x), `${type}: off is not a copy`);
+        assert.strictEqual(off.b.inst.latency(), 0, `${type}: off, and still says it delays`);
+    }
+    assert.strictEqual(block('nr').inst.latency(), 512);
+    assert.strictEqual(block('nr2').inst.latency(), 2048);
+});
+
+t('the blanker cuts the clicks and leaves the rest; NR and NR2 take the noise down and leave the tone', () => {
+    const x = noisy(4 * RATE);
+    const nb = blockRun('noise-blanker', {}, x, 240);
+    const r = nb.b.inst.read();
+    // Sixteen clicks: less the one in the 0.15 s warmup, and the four that
+    // land on the tone — against it a click stands only 16 dB proud, under
+    // the 19 dB threshold, which is the threshold being relative as meant.
+    assert.strictEqual(r.pulses, 11, `${r.pulses} pulses blanked`);
+    const L = nb.b.inst.latency();
+    let peak = 0;
+    for (let i = 3 * RATE; i < 4 * RATE; i++) peak = Math.max(peak, Math.abs(nb.out[i + L] || 0));
+    assert.ok(peak < 0.1, `a click still reaches ${peak.toFixed(3)}`);
+
+    // The clicks taken out first, as the panel does it; then each NR.
+    const clean = noisy(6 * RATE, { clicks: false, from: 3 * RATE, to: 5 * RATE });
+    for (const [type, cut] of [['nr', 5], ['nr2', 5]]) {
+        const { out, b } = blockRun(type, {}, clean, 240);
+        const L2 = b.inst.latency();
+        const noiseDb = 20 * Math.log10(rmsOf(out, 2 * RATE + L2, 3 * RATE + L2) / rmsOf(clean, 2 * RATE, 3 * RATE));
+        const toneDb = 20 * Math.log10(rmsOf(out, 3.5 * RATE + L2, 4.5 * RATE + L2) / rmsOf(clean, 3.5 * RATE, 4.5 * RATE));
+        assert.ok(noiseDb < -cut, `${type}: the noise only ${noiseDb.toFixed(1)} dB down`);
+        assert.ok(toneDb > noiseDb + 10, `${type}: the tone ${toneDb.toFixed(1)} dB against the noise’s ${noiseDb.toFixed(1)}`);
+    }
+});
+
+t('NR2 learns the noise first, says so, and learns it again when asked', () => {
+    // Thirty 512-sample frames: 1.28 s at 12 kHz.
+    const early = blockRun('nr2', {}, noisy(RATE, { clicks: false }), 240);
+    assert.strictEqual(early.b.inst.read().learning, true, 'done learning inside a second');
+    const { b } = blockRun('nr2', {}, noisy(2 * RATE, { clicks: false }), 240);
+    assert.strictEqual(b.inst.read().learning, false, 'still learning after two seconds');
+    b.inst.command('relearn');
+    assert.strictEqual(b.inst.read().learning, true, 'Learn again did not');
+    // Makeup gain is a plain gain on the output.
+    const x = noisy(2 * RATE, { clicks: false });
+    const plain = blockRun('nr', {}, x, 240).out;
+    const up = blockRun('nr', { makeupDb: 6 }, x, 240).out;
+    for (let i = 0; i < x.length; i += 97) assert.ok(Math.abs(up[i] - plain[i] * Math.pow(10, 6 / 20)) < 1e-9);
 });
 
 console.log(`\n${pass} passed`);

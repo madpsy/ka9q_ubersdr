@@ -21,13 +21,13 @@ import { getPlayground, graphIqWidth, needsReceiver } from '../engine.js';
 import {
     EditHistory, addNode, cloneGraph, duplicateNodes, exposeControl, removeNodes, removeWire, renameNode,
 } from '../editing.js';
-import { ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, autoLayout, fitView, isAnnotation, nodeBox, screenToWorld, zoomToward } from '../geometry.js';
+import { HEAD_H, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, autoLayout, fitView, isAnnotation, nodeBox, screenToWorld, zoomToward } from '../geometry.js';
 import { addAcross, addProbe, frequencyOrigins } from '../probes.js';
 import { expandNode } from '../expand.js';
 import { TEMPLATES } from '../templates.js';
 import { INSTRUMENTS } from './viewers.jsx';
 import { useDisplay } from '../../display/DisplayContext.jsx';
-import Canvas, { formatCpu, formatLatency } from './Canvas.jsx';
+import Canvas, { BlockPreview, formatCpu, formatLatency } from './Canvas.jsx';
 import Inspector from './Inspector.jsx';
 import JsonPane from './JsonPane.jsx';
 import Palette from './Palette.jsx';
@@ -40,7 +40,7 @@ import { channelSummary, graphFromAllChannels, graphFromIQDemod, iqDemodChannels
 export const WATCHED_TYPES = new Set([
     'meter', 'level-detector', 'squelch', 'carrier-tracker', 'control-scale', 'integrator', 'control-plot', 'iq-player', 'data-tx', 'demodulator',
     'costas-loop', 'morse-decoder', 'uart', 'sitor-decoder', 'fsk-detector', 'ook-detector',
-    'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder',
+    'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder', 'noise-blanker', 'nr2',
     ...INSTRUMENTS,
 ]);
 
@@ -108,6 +108,10 @@ export function withArrival(info, graph, arrivalSec) {
     }
     return out;
 }
+
+// How far a press on a palette block moves before it is a drag rather than a
+// click, in screen pixels — the canvas's own threshold.
+const DRAG_PX = 4;
 
 /** Everything about a graph except where its cards sit. */
 const structureKey = (g) => JSON.stringify([g.nodes.map((n) => [n.id, n.type, n.params]), g.wires]);
@@ -544,11 +548,100 @@ export function PlaygroundWindow({ onClose }) {
         const n = graph.nodes.length % 6;
         const r = addNode(graph, type, 0, 0);
         const box = nodeBox(r.graph.nodes.find((x) => x.id === r.id));
-        const placed = r.graph.nodes.find((x) => x.id === r.id);
-        placed.x = Math.round(centre.x - box.w / 2 + n * 18);
-        placed.y = Math.round(centre.y - box.h / 2 + n * 18);
+        addAt(type, centre.x - box.w / 2 + n * 18, centre.y - box.h / 2 + n * 18);
+    };
+    const addAt = (type, x, y) => {
+        const r = addNode(graph, type, x, y);
+        if (!r.id) return;
         apply(r.graph, null);
         setPicked({ nodes: new Set([r.id]), wire: null });
+    };
+
+    // A block dragged in from the palette: the block itself follows the
+    // pointer, at the canvas's zoom, and lands where it is let go — held by
+    // the middle of its title, or the middle of an annotation. Let go anywhere
+    // but the canvas, or Escape, and nothing is added. A press that never
+    // moves far is the palette's click, and adds as it always has.
+    const [carry, setCarry] = useState(null);
+    const pgRoot = useRef(null);
+    // Whether the press just ended was a drag, so its click adds nothing.
+    const dragged = useRef(false);
+    // The latest render's, for the listeners a drag outlives renders with.
+    const latest = useRef(null);
+    latest.current = { addAt, view, graph };
+    const overCanvas = (x, y) => {
+        const el = canvasBox.current;
+        const r = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+        return !!r && x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+    };
+    const pickUp = (type, e) => {
+        if (e.button !== 0) return;
+        // No text selection starting under a mouse drag.
+        if (e.pointerType === 'mouse' && e.preventDefault) e.preventDefault();
+        dragged.current = false;
+        const sx = e.clientX;
+        const sy = e.clientY;
+        let held = null;
+        const follow = (x, y) => {
+            const root = pgRoot.current;
+            const r = root && root.getBoundingClientRect ? root.getBoundingClientRect() : { left: 0, top: 0 };
+            const { zoom } = latest.current.view;
+            held = {
+                ...held,
+                x, y,
+                left: x - r.left - held.grab.x * zoom,
+                top: y - r.top - held.grab.y * zoom,
+                zoom,
+                over: overCanvas(x, y),
+            };
+            setCarry(held);
+        };
+        const move = (ev) => {
+            if (ev.pointerId !== e.pointerId) return;
+            if (!held) {
+                if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < DRAG_PX) return;
+                dragged.current = true;
+                const r = addNode(latest.current.graph, type, 0, 0);
+                const node = r.graph.nodes.find((n) => n.id === r.id);
+                if (!node) return;
+                const b = nodeBox(node);
+                const grab = {
+                    x: b.x + b.w / 2,
+                    y: isAnnotation(type) ? b.y + b.h / 2 : Math.min(HEAD_H / 2, b.h / 2),
+                };
+                held = { node, grab };
+            }
+            follow(ev.clientX, ev.clientY);
+        };
+        const end = (drop, ev) => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+            window.removeEventListener('pointercancel', cancel);
+            document.removeEventListener('keydown', key, true);
+            setCarry(null);
+            // The click that follows the release, if any, comes before this.
+            setTimeout(() => { dragged.current = false; }, 0);
+            if (!held || !drop || !overCanvas(ev.clientX, ev.clientY)) return;
+            const c = canvasBox.current.getBoundingClientRect();
+            const at = screenToWorld(latest.current.view, ev.clientX - c.left, ev.clientY - c.top);
+            latest.current.addAt(type, at.x - held.grab.x, at.y - held.grab.y);
+        };
+        const up = (ev) => { if (ev.pointerId === e.pointerId) end(true, ev); };
+        const cancel = (ev) => { if (ev.pointerId === e.pointerId) end(false, ev); };
+        const key = (ev) => {
+            if (ev.key !== 'Escape') return;
+            // Drop the block, not the window.
+            ev.stopPropagation();
+            end(false, null);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+        window.addEventListener('pointercancel', cancel);
+        document.addEventListener('keydown', key, true);
+    };
+    const pick = (type) => {
+        if (dragged.current) return;
+        add(type);
     };
     const remove = () => {
         if (selection.wire != null) apply(removeWire(graph, selection.wire));
@@ -644,7 +737,7 @@ export function PlaygroundWindow({ onClose }) {
     });
 
     return (
-        <div className="pg">
+        <div className={`pg${carry ? ' is-carrying' : ''}`} ref={pgRoot}>
             <div className="pg__head">
                 <div className="pg__title">Playground</div>
                 <Toolbar
@@ -745,7 +838,7 @@ export function PlaygroundWindow({ onClose }) {
             )}
             <div className={`pg__body${sides.left ? ' is-left-shut' : ''}${sides.right ? ' is-right-shut' : ''}${sides.json ? ' is-json' : ''}`}>
                 <SidePanel side="left" label="Blocks" shut={sides.left} onToggle={() => fold('left')}>
-                    <Palette onAdd={add} />
+                    <Palette onAdd={pick} onPickUp={pickUp} />
                 </SidePanel>
                 <div className="pg__canvas" ref={canvasBox}>
                     <Canvas
@@ -813,6 +906,15 @@ export function PlaygroundWindow({ onClose }) {
                     />
                 </SidePanel>
             </div>
+            {carry && (
+                <div
+                    className={`pg-carry${carry.over ? '' : ' is-away'}`}
+                    style={{ transform: `translate(${carry.left}px, ${carry.top}px) scale(${carry.zoom})` }}
+                    aria-hidden="true"
+                >
+                    <BlockPreview pg={pg} node={carry.node} look={look} />
+                </div>
+            )}
         </div>
     );
 }

@@ -143,6 +143,8 @@ export function visualHeight(type, params) {
         case 'psk31-decoder':
         case 'cw-decoder':
         case 'navtex-decoder':
+        case 'noise-blanker':
+        case 'nr2':
             return 18;
         case 'message-log':
             return 84;

@@ -9,7 +9,9 @@ import PlaygroundModal, { PlaygroundWindow, TemplatesMenu, WATCHED_TYPES, graphF
 import { TEMPLATES } from '../src/playground/templates.js';
 import Inspector, { ParamField } from '../src/playground/ui/Inspector.jsx';
 import JsonPane, { graphText, readGraphText } from '../src/playground/ui/JsonPane.jsx';
-import Canvas, { InPlace, formatCpu, formatLatency, formatRate } from '../src/playground/ui/Canvas.jsx';
+import { Switch } from '../src/components/ui.jsx';
+import Canvas, { BlockPreview, InPlace, formatCpu, formatLatency, formatRate } from '../src/playground/ui/Canvas.jsx';
+import { HEAD_H as CARD_HEAD_H } from '../src/playground/geometry.js';
 import CardVisual, { RfLine } from '../src/playground/ui/CardVisual.jsx';
 import Palette from '../src/playground/ui/Palette.jsx';
 import { closePlayground, offerSharedGraph, openPlayground, playgroundUiState } from '../src/playground/ui/store.js';
@@ -22,7 +24,7 @@ import {
     zoomAbout, zoomToward, ZOOM_MAX, ZOOM_MIN, isAnnotation, nodeBox, nodesInside,
 } from '../src/playground/geometry.js';
 import {
-    ConstellationView, INSTRUMENTS, Instrument, ScopeView, SpectrumView, freqLabel, scopeRange, spectrumAxis, timeLabel,
+    ConstellationView, ConsoleView, DiffView, INSTRUMENTS, Instrument, ScopeView, SpectrumView, freqLabel, scopeRange, spectrumAxis, timeLabel,
     spectrumMarks, counterText, groupDigits,
 } from '../src/playground/ui/viewers.jsx';
 import { BLOCKS, BLOCK_BY_TYPE, CATEGORIES } from '../src/playground/blocks/index.js';
@@ -37,13 +39,13 @@ module.exports = {
     deep, render, reset, walk, words,
     withArrival, zoomToward, ZOOM_MAX, ZOOM_MIN,
     IQPanel, PlaygroundWatch, takeShareCode, PlaygroundModal, PlaygroundWindow, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, TemplatesMenu, TEMPLATES,
-    Inspector, ParamField, JsonPane, graphText, readGraphText, Canvas, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, Palette,
+    Inspector, ParamField, JsonPane, graphText, readGraphText, Canvas, BlockPreview, CARD_HEAD_H, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, Palette,
     airSpan, rfLabel, rfOf, shiftLabel, hasRfLine, encodeShare, decodeShare,
     closePlayground, offerSharedGraph, openPlayground, playgroundUiState,
     EditHistory, addNode, canConnect, cloneGraph, connectPorts, disconnectInput, duplicateNodes, freshId, renameNode,
     moveNodes, removeNodes, removeWire,
     NODE_W, nodeWidth, autoLayout, graphBounds, fitView, nodeAt, nodeHeight, portAt, portPosition, screenToWorld, wirePath, isAnnotation, nodeBox, nodesInside, zoomAbout,
-    Instrument, SpectrumView, ScopeView, ConstellationView, spectrumAxis, scopeRange, freqLabel, timeLabel, INSTRUMENTS,
+    Switch, Instrument, SpectrumView, ScopeView, ConstellationView, ConsoleView, DiffView, spectrumAxis, scopeRange, freqLabel, timeLabel, INSTRUMENTS,
     spectrumMarks, counterText, groupDigits,
     holdSpectrum, setSpectrumPaused, spectrumPaused, BLOCKS, BLOCK_BY_TYPE, CATEGORIES, GRAPH_VERSION, compile, parseGraph, getPlayground, resetDemodSettings, saveDemodSettings, PROBES,
 };

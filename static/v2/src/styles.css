@@ -14671,6 +14671,23 @@ a.btn { text-decoration: none; }
     cursor: pointer;
 }
 .pg-pal__item:hover { background: var(--surface-hover); border-color: var(--border); }
+/* Dragged sideways onto the canvas; up and down still scrolls the list. */
+.pg-pal__item { touch-action: pan-y; }
+
+/* A block on its way from the palette: the card itself, at the canvas's zoom,
+   under the pointer. Faded while it is somewhere it would not be added. */
+.pg-carry {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 40;
+    transform-origin: 0 0;
+    opacity: 0.92;
+    filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.35));
+}
+.pg-carry, .pg-carry * { pointer-events: none !important; }
+.pg-carry.is-away { opacity: 0.45; }
+.pg.is-carrying, .pg.is-carrying * { cursor: grabbing !important; user-select: none; }
 
 /* ── the canvas ── */
 .pg-canvas {

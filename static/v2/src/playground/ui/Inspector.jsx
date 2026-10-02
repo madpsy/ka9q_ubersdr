@@ -582,6 +582,14 @@ export default function Inspector({
                     </div>
                 </div>
             )}
+            {node.type === 'nr2' && (
+                <div className="pg-insp__section">
+                    <p className="pg-insp__summary">It learns the noise from what it hears first — 1.3 s at 12 kHz, less at higher rates. If a signal was there then, it is subtracting the signal: learn again while there is only noise.</p>
+                    <div className="pg-insp__row">
+                        <Button size="sm" variant="ghost" icon={<Icon.RotateLeft />} onClick={() => pg.command(node.id, 'relearn')}>Learn again</Button>
+                    </div>
+                </div>
+            )}
             {node.type === 'decimate' && rates[node.id] > 0 && (
                 <div className="pg-insp__note">{decimateNote(node.params, rates[node.id])}</div>
             )}

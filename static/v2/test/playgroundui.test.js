@@ -1801,6 +1801,44 @@ t('figures read as people say them', () => {
     assert.strictEqual(formatRate(27428.57), '27.43k');
 });
 
+t('the console and the text diff, large, keep the newest text in view until Auto-scroll is switched off', () => {
+    const { ConsoleView, DiffView, Switch } = P;
+    const pgx = { command() {} };
+    const cases = [
+        [ConsoleView, { text: 'CQ CQ DE M9PSY\n'.repeat(40), count: 600 }],
+        [DiffView, { segments: [{ kind: 'same', text: 'CQ CQ DE M9PSY '.repeat(40) }], errors: 0, cer: 0, compared: 600, pending: 0 }],
+    ];
+    for (const [View, reading] of cases) {
+        reset();
+        const props = { pg: pgx, id: 'v', reading, large: true };
+        let r = render(View, props);
+        const box = { scrollTop: 0, scrollHeight: 900 };
+        walk(r.tree).find((n) => n.type === 'pre').props.ref.current = box;
+        const again = () => { r.cleanups.forEach((f) => f()); r = render(View, props); };
+        const toggle = () => walk(r.tree).find((n) => n.type === Switch);
+        assert.strictEqual(toggle().props.label, 'Auto-scroll');
+        assert.strictEqual(toggle().props.checked, true, 'not on to begin with');
+        again();
+        assert.strictEqual(box.scrollTop, 900, `${View.name}: not at the end`);
+        // More arrives: it follows.
+        box.scrollHeight = 1400;
+        again();
+        assert.strictEqual(box.scrollTop, 1400, `${View.name}: did not follow`);
+        // Off: read back, and it stays where it was put.
+        toggle().props.onChange(false);
+        again();
+        box.scrollTop = 200;
+        box.scrollHeight = 2000;
+        again();
+        assert.strictEqual(box.scrollTop, 200, `${View.name}: moved while off`);
+        // On again: straight to the newest.
+        toggle().props.onChange(true);
+        again();
+        assert.strictEqual(box.scrollTop, 2000);
+        r.cleanups.forEach((f) => f());
+    }
+});
+
 // ── where blocks are, through export, import and a link ─────────────────────
 
 // Through the editor itself, as a person does it: drag a block with the
@@ -1954,6 +1992,90 @@ const tAsync = async (name, fn) => {
         assert.strictEqual(area().props.value, graphText(graph));
         assert.match(area().props.value, /"x": 77/);
         p.cleanups.forEach((f) => f());
+    });
+    await tAsync('a block dragged from the palette is carried as itself and lands under the pointer; a click still adds, Escape and off the canvas do not', async () => {
+        const { BlockPreview, Canvas, CARD_HEAD_H } = P;
+        // Every block draws as a preview: the palette offers them all.
+        const pgx = getPlayground(radio().player);
+        for (const b of BLOCKS) {
+            const node = addNode({ v: GRAPH_VERSION, nodes: [], wires: [] }, b.type, 0, 0).graph.nodes[0];
+            deep(React.createElement(BlockPreview, { pg: pgx, node, look: { palette: 'classic', dialHz: 0 } }));
+        }
+
+        // The window's listeners, which the stub's window would drop.
+        const winL = [];
+        const wasAdd = globalThis.addEventListener;
+        const wasRemove = globalThis.removeEventListener;
+        globalThis.addEventListener = (n, f) => winL.push([n, f]);
+        globalThis.removeEventListener = (n, f) => { const i = winL.findIndex(([a, b]) => a === n && b === f); if (i >= 0) winL.splice(i, 1); };
+        const fire = (name, ev) => { for (const [n, f] of winL.slice()) if (n === name) f(ev); };
+        try {
+            localStorage.removeItem('ubersdr.v2.playground.sides');
+            const ctx = radio();
+            const pg = getPlayground(ctx.player);
+            pg.setGraph(g([]));
+            openPlayground();
+            reset();
+            let r = render(PlaygroundWindow, { onClose() {} }, ctx);
+            const again = () => { r.cleanups.forEach((f) => f()); r = render(PlaygroundWindow, { onClose() {} }, ctx); };
+            // The canvas at 100,50, 800 by 600; the window at 10,10.
+            const rect = (left, top, w, h) => ({ getBoundingClientRect: () => ({ left, top, right: left + w, bottom: top + h, width: w, height: h }) });
+            walk(r.tree).find((n) => cls(n) === 'pg__canvas').props.ref.current = rect(100, 50, 800, 600);
+            walk(r.tree).find((n) => cls(n) === 'pg').props.ref.current = rect(10, 10, 1000, 700);
+            const palette = () => walk(r.tree).find((n) => n.type === Palette).props;
+            const press = (type, x, y) => palette().onPickUp(type, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: x, clientY: y, preventDefault() {} });
+            const at = (x, y) => ({ pointerId: 1, clientX: x, clientY: y });
+
+            // Dragged onto the canvas: carried as the card, then put down there.
+            press('lowpass', 30, 200);
+            fire('pointermove', at(32, 201));
+            again();
+            assert.ok(!walk(r.tree).some((n) => cls(n).startsWith('pg-carry')), 'a press that has hardly moved is already a drag');
+            fire('pointermove', at(200, 120));
+            again();
+            const carried = walk(r.tree).find((n) => cls(n).startsWith('pg-carry'));
+            assert.ok(carried, 'nothing carried');
+            assert.strictEqual(walk(carried).find((n) => n.type === BlockPreview).props.node.type, 'lowpass');
+            fire('pointermove', at(400, 300));
+            fire('pointerup', at(400, 300));
+            palette().onAdd('lowpass');
+            assert.strictEqual(pg.graph.nodes.length, 1, 'the drag added nothing, or its click added a second');
+            const view = walk(r.tree).find((n) => n.type === Canvas).props.view;
+            const w = screenToWorld(view, 400 - 100, 300 - 50);
+            const lp = pg.graph.nodes[0];
+            assert.ok(Math.abs(lp.x + nodeWidth('lowpass') / 2 - w.x) <= 1, `x ${lp.x}, pointer at ${w.x}`);
+            assert.ok(Math.abs(lp.y + CARD_HEAD_H / 2 - w.y) <= 1, `y ${lp.y}, pointer at ${w.y}`);
+            again();
+            assert.ok(!walk(r.tree).some((n) => cls(n).startsWith('pg-carry')), 'still carrying after the drop');
+            assert.strictEqual(winL.length, 0, 'the drag left listeners behind');
+            await new Promise((res) => setTimeout(res, 0));
+
+            // A click, after: adds as ever.
+            palette().onAdd('gain');
+            assert.strictEqual(pg.graph.nodes.length, 2, 'a click after a drag added nothing');
+
+            // Let go off the canvas — over the palette — and nothing is added.
+            press('gain', 30, 200);
+            fire('pointermove', at(200, 200));
+            fire('pointermove', at(60, 220));
+            fire('pointerup', at(60, 220));
+            assert.strictEqual(pg.graph.nodes.length, 2, 'let go off the canvas, and it was added');
+
+            // Escape drops it, and the window stays open.
+            press('gain', 30, 200);
+            fire('pointermove', at(300, 300));
+            let stopped = false;
+            for (const [n, f] of docListeners.slice()) if (n === 'keydown') f({ key: 'Escape', stopPropagation() { stopped = true; } });
+            assert.ok(stopped, 'Escape went on to close the window');
+            fire('pointerup', at(300, 300));
+            assert.strictEqual(pg.graph.nodes.length, 2, 'Escape, and it was added anyway');
+            assert.strictEqual(winL.length, 0);
+            r.cleanups.forEach((f) => f());
+        } finally {
+            globalThis.addEventListener = wasAdd;
+            globalThis.removeEventListener = wasRemove;
+            closePlayground();
+        }
     });
     console.log(`\n${pass} passed`);
 })();

@@ -31,13 +31,15 @@ function Bar({ db, label, tag = '', off = false }) {
     const said = db == null ? '—' : db <= -199 ? 'silent' : `${Math.round(db)} dB`;
     const text = `${tag ? `${tag} ` : ''}${said}`;
     const pct = share(db) * 100;
-    // The words twice: as they are over the empty track, and dark, clipped to
-    // the filled part — so whichever the bar has under it, they can be read.
+    // The words twice, each clipped to its own side of the fill's edge: light
+    // over the empty track, dark over the fill. Never both in one place — the
+    // light one left whole under the dark showed round its letters as white.
+    // A muted bar's fill is dimmed, and the light words read on all of it.
     return (
         <div className={`pg-vis__bar${off ? ' is-off' : ''}`} title={label}>
             <i style={{ width: `${pct}%` }} />
-            <span>{text}</span>
-            <span className="pg-vis__bar-on" aria-hidden="true" style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}>{text}</span>
+            <span style={off ? undefined : { clipPath: `inset(0 0 0 ${pct}%)` }}>{text}</span>
+            {!off && <span className="pg-vis__bar-on" aria-hidden="true" style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}>{text}</span>}
         </div>
     );
 }
@@ -665,7 +667,7 @@ function CompressorState({ reading }) {
         <div className="pg-vis__comp">
             <div className="pg-vis__bar pg-vis__bar--gr" title="Gain reduction: how much the compressor is taking off">
                 <i style={{ width: `${Math.min(1, -gr / REDUCTION_SPAN_DB) * 100}%` }} />
-                <span>{`GR ${gr > -0.05 ? '0.0' : gr.toFixed(1)} dB`}</span>
+                <span style={{ clipPath: `inset(0 0 0 ${Math.min(1, -gr / REDUCTION_SPAN_DB) * 100}%)` }}>{`GR ${gr > -0.05 ? '0.0' : gr.toFixed(1)} dB`}</span>
                 <span className="pg-vis__bar-on" aria-hidden="true" style={{ clipPath: `inset(0 ${100 - Math.min(1, -gr / REDUCTION_SPAN_DB) * 100}% 0 0)` }}>
                     {`GR ${gr > -0.05 ? '0.0' : gr.toFixed(1)} dB`}
                 </span>

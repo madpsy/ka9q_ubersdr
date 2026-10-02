@@ -1290,8 +1290,13 @@ t('levels show: Audio out’s bar per ear, an in → out line on a card with no 
         assert.ok(dark, 'no dark copy of the words over the fill');
         assert.strictEqual(words(dark).trim(), 'L -20 dB');
         assert.strictEqual(dark.props.style.clipPath, `inset(0 ${100 - parseFloat(fill)}% 0 0)`, 'the dark words not clipped to the fill');
+        // And the light words kept off it — left under the dark, they showed as white round its letters.
+        const light = walk(bar).find((y) => y.type === 'span' && cls(y) !== 'pg-vis__bar-on');
+        assert.strictEqual(light.props.style.clipPath, `inset(0 0 0 ${parseFloat(fill)}%)`, 'the light words also drawn over the fill');
         const muted = barEls(ao({ muted: true }));
         assert.ok(muted.every((x) => cls(x).includes('is-off')), 'muted, and the bars do not say so');
+        // Muted: the fill is dimmed and the light words read on all of it — one copy, unclipped.
+        assert.ok(muted.every((x) => !walk(x).some((y) => cls(y) === 'pg-vis__bar-on')), 'the dark words on a dimmed fill');
 
         // A block with no picture of its own: what it does to the level.
         const lsa = g([{ id: 'a', type: 'lsa' }]).nodes[0];
@@ -1505,6 +1510,9 @@ t('the IQ stream’s inspector shows what the stream brings in and what was lost
     const { formatBytesPerSec, countShare } = P;
     assert.strictEqual(formatBytesPerSec(48000), '48.0 kB/s');
     assert.strictEqual(formatBytesPerSec(1536000), '1.54 MB/s');
+    assert.strictEqual(P.formatKbps(48000), '384 kbps');
+    assert.strictEqual(P.formatKbps(384000), '3072 kbps');
+    assert.strictEqual(P.formatKbps(6000), '48.0 kbps');
     assert.strictEqual(countShare(3, 1000), '3 · 0.3%');
     assert.strictEqual(countShare(0, 1000), '0 · 0.0%');
     assert.strictEqual(countShare(1, 5000), '1 · <0.1%');
@@ -1524,13 +1532,17 @@ t('the IQ stream’s inspector shows what the stream brings in and what was lost
     pg.offline = false;
     pg.streamCounts = () => ({ sinceMs: 0, packets: 2000, frames: 480000, behind: 4, underruns: 1, rate: 12000 });
     try {
+        // Both throughputs, kB/s then kbps beside it.
+        const throughputs = show().filter((x) => cls(x).split(' ')[0] === 'readout' && words(x).startsWith('Throughput'));
+        assert.strictEqual(throughputs.length, 2, 'not both throughputs');
         const readouts = Object.fromEntries(show().filter((x) => cls(x).split(' ')[0] === 'readout').map((r) => [
             words(deep(r).find((x) => cls(x) === 'readout__label')),
             words(deep(r).find((x) => cls(x) === 'readout__value')).trim(),
         ]));
         assert.strictEqual(readouts.Dropped, '1 · <0.1%');
         assert.strictEqual(readouts['Graph behind'], '4 · 0.2%');
-        assert.ok('Throughput' in readouts && 'Samples' in readouts && 'Packets' in readouts && 'Of the rate' in readouts);
+        assert.ok('Throughput' in readouts && 'Samples' in readouts && 'Packets' in readouts);
+        assert.ok(!('Of the rate' in readouts), 'Of the rate is back');
         // The rolling chart of throughput, from zero.
         const chart = show().find((x) => cls(x) === 'pg-insp__chart');
         assert.ok(chart, 'no throughput chart');

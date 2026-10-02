@@ -14884,11 +14884,9 @@ a.btn { text-decoration: none; }
     overflow: hidden;
 }
 .pg-vis__bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--good); }
-.pg-vis__bar span { position: relative; padding-left: 4px; font-family: var(--mono); font-size: 9px; line-height: 12px; color: var(--text); }
+.pg-vis__bar span { position: absolute; left: 0; top: 0; bottom: 0; right: 0; padding-left: 4px; font-family: var(--mono); font-size: 9px; line-height: 12px; color: var(--text); white-space: nowrap; }
 /* The same words in dark, over the fill only: readable on green or amber. */
 .pg-vis__bar .pg-vis__bar-on { position: absolute; left: 0; top: 0; bottom: 0; right: 0; color: #0a0d12; font-weight: 600; white-space: nowrap; }
-/* A muted bar's fill is dimmed: the light words read on it as they are. */
-.pg-vis__bar.is-off .pg-vis__bar-on { display: none; }
 .pg-vis__bar.is-off i { opacity: 0.35; }
 /* The compressor's gain reduction: amber, growing as it takes more. */
 .pg-vis__comp { display: flex; flex-direction: column; gap: 2px; }

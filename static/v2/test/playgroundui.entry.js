@@ -7,7 +7,7 @@ import IQPanel from '../src/panels/IQPanel.jsx';
 import PlaygroundWatch, { takeShareCode } from '../src/components/PlaygroundWatch.jsx';
 import PlaygroundModal, { PlaygroundWindow, TemplatesMenu, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, withArrival } from '../src/playground/ui/PlaygroundModal.jsx';
 import { TEMPLATES } from '../src/playground/templates.js';
-import Inspector, { ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams } from '../src/playground/ui/Inspector.jsx';
+import Inspector, { ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams, formatKbps } from '../src/playground/ui/Inspector.jsx';
 import { holdPlayback, playbackHeld } from '../src/lib/playbackHold.js';
 import JsonPane, { graphText, readGraphText } from '../src/playground/ui/JsonPane.jsx';
 import { Switch, Slider } from '../src/components/ui.jsx';
@@ -43,7 +43,7 @@ module.exports = {
     deep, render, reset, walk, words,
     withArrival, zoomToward, ZOOM_MAX, ZOOM_MIN,
     IQPanel, PlaygroundWatch, takeShareCode, PlaygroundModal, PlaygroundWindow, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, TemplatesMenu, TEMPLATES,
-    Inspector, ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams, holdPlayback, playbackHeld, JsonPane, graphText, readGraphText, Canvas, BlockPreview, CARD_HEAD_H, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, ActivityDot, activityMeaning, ClipPill, canClip, Palette,
+    Inspector, ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams, formatKbps, holdPlayback, playbackHeld, JsonPane, graphText, readGraphText, Canvas, BlockPreview, CARD_HEAD_H, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, ActivityDot, activityMeaning, ClipPill, canClip, Palette,
     airSpan, rfLabel, rfOf, shiftLabel, hasRfLine, encodeShare, decodeShare,
     closePlayground, offerSharedGraph, openPlayground, playgroundUiState,
     EditHistory, addNode, canConnect, cloneGraph, connectPorts, disconnectInput, duplicateNodes, freshId, renameNode,

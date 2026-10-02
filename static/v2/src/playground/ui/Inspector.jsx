@@ -325,6 +325,13 @@ export function formatBytesPerSec(b) {
     return `${Math.round(b)} B/s`;
 }
 
+/** Bytes a second as kilobits a second, always kbps: "384 kbps", "3072 kbps". */
+export function formatKbps(bytesPerSec) {
+    if (!(bytesPerSec >= 0) || !Number.isFinite(bytesPerSec)) return '—';
+    const k = (bytesPerSec * 8) / 1000;
+    return `${k < 100 ? k.toFixed(1) : Math.round(k)} kbps`;
+}
+
 /** A count and its share of a whole, as "3 · 0.4%". */
 export function countShare(n, of) {
     if (!(of > 0)) return n > 0 ? String(n) : '0';
@@ -339,7 +346,7 @@ const CHART_MS = 10000;
 /**
  * What the IQ stream is bringing in, while the graph runs from the receiver:
  * the connection's throughput — the audio stream's share of the Stats panel's
- * NET — samples and packets a second against the rate it should run at, and
+ * NET — samples and packets a second, and
  * what was lost: the player's dropouts (underruns, as Stats counts them) and
  * the packets the playground let go because the graph was too far behind.
  * Rates over the last second; losses since Start.
@@ -373,8 +380,6 @@ function StreamStats({ pg }) {
     while (list.length > 1 && now.t - list[0].t > CHART_MS + SNAP_MS) list.shift();
     const r = streamRates(list);
     const history = throughputHistory(list);
-    // How much of what the stream should carry arrived, over the last second.
-    const share = r && c.rate > 0 ? r.frames / c.rate : null;
     return (
         <div className="pg-insp__section">
             <div className="pg-insp__title">Stream</div>
@@ -384,13 +389,9 @@ function StreamStats({ pg }) {
             </div>
             <div className="readout-grid">
                 <Readout label="Throughput" value={r ? formatBytesPerSec(r.bytes) : '—'} />
-                <Readout
-                    label="Samples"
-                    value={r ? `${formatRate(r.frames) || '0'}/s` : '—'}
-                    tone={share != null && share < 0.98 ? 'weak' : undefined}
-                />
+                <Readout label="Throughput" value={r ? formatKbps(r.bytes) : '—'} />
+                <Readout label="Samples" value={r ? `${formatRate(r.frames) || '0'}/s` : '—'} />
                 <Readout label="Packets" value={r ? `${r.packets.toFixed(r.packets < 10 ? 1 : 0)}/s` : '—'} />
-                <Readout label="Of the rate" value={share == null ? '—' : `${Math.min(999, share * 100).toFixed(1)}%`} tone={share != null && share < 0.98 ? 'weak' : undefined} />
                 <Readout label="Dropped" value={countShare(c.underruns, c.packets)} tone={c.underruns > 0 ? 'weak' : undefined} />
                 <Readout label="Graph behind" value={countShare(c.behind, c.packets)} tone={c.behind > 0 ? 'weak' : undefined} />
             </div>

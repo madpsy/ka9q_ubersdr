@@ -700,4 +700,46 @@ t('a Clock’s pps into a Scheduler is its level line: the pulse shows on its ca
     assert.ok(!on.schedule.clip, 'a pulse is not audio: nothing to clip');
 });
 
+t('a real Clock into a Scheduler: its unix keeps the time, not this device’s, and its pps puts a change in the right packet', () => {
+    // This device's clock 0.5 s short of 0:10, then jumping 30 s two seconds
+    // in. 5 ms early: the 0:20 change due at 19.995 s, in the packet ending at
+    // 20 — only the pulse's edge places the time finely enough to say so.
+    const base = 1700000000 - (1700000000 % 60);
+    const run = (wires) => {
+        let fake = (base + 9.5) * 1000;
+        const real = Date.now;
+        Date.now = () => fake;
+        try {
+            const rt = new Runtime(graph([
+                { id: 'iq', type: 'iq-in' },
+                { id: 'clock', type: 'clock', params: { source: 'device' } },
+                { id: 'schedule', type: 'scheduler', params: { kind: 'repeat', period: 60, leadMs: 5, schedule: '0:00 14.100\n0:10 18.110\n0:20 21.150' } },
+            ], wires), 12000);
+            assert.ok(rt.ok, JSON.stringify(rt.errors));
+            const sch = rt.nodes.get('schedule');
+            const changes = [];
+            let seq = -1;
+            for (let k = 0; k < 600; k++) {
+                fake += k === 100 ? 30000 : 20;
+                rt.process({ i: new Float32Array(240), q: new Float32Array(240), frames: 240, rate: 12000 });
+                const f = sch.outs[0];
+                if (f.seq !== seq && f.value != null) { seq = f.seq; changes.push([k, f.value]); }
+            }
+            return { changes, why: sch.inst.read().why };
+        } finally { Date.now = real; }
+    };
+    const both = run([['clock', 'unix', 'schedule', 'unix'], ['clock', 'pps', 'schedule', 'pps']]);
+    const unix = run([['clock', 'unix', 'schedule', 'unix']]);
+    const none = run([]);
+    // Waits for the Clock, then 0:10 on its first second; the device's jump ignored.
+    assert.deepStrictEqual(both.changes, [[25, 18110000], [524, 21150000]]);
+    assert.strictEqual(both.why, '');
+    // Without the pulse, the second placed mid-packet: a packet late.
+    assert.deepStrictEqual(unix.changes, [[25, 18110000], [525, 21150000]]);
+    // No Clock: this device's clock, jump and all.
+    assert.deepStrictEqual(none.changes.map((c) => c[1]), [14100000, 18110000, 21150000]);
+    assert.ok(none.changes[2][0] <= 101, JSON.stringify(none.changes));
+    assert.ok(none.why);
+});
+
 console.log(`\n${pass} passed`);

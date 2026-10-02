@@ -250,8 +250,10 @@ function AnnotateTools({ onAdd }) {
 // status text and the platform's font. 0 is everything; 1 drops the words from
 // the graph buttons (New, Open, Save…) and leaves their icons, whose tooltips
 // still name them; 2 folds the seven drawing tools into one Draw button with a
-// list under it; 3, on a phone, gives the status line up as well and lets what
-// is left wrap.
+// list under it; 3, on a phone, gives up the status line and the "Playground"
+// label as well. It never wraps. The graph's name gives way before any of this
+// (see .pg__name-box), so the row only overflows once the name is as short as
+// it goes.
 //
 // A step down is taken when the row overflows, remembering how wide it would
 // have had to be; a step back up only once it is that wide again — so it

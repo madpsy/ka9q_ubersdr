@@ -14420,17 +14420,19 @@ a.btn { text-decoration: none; }
     letter-spacing: 0.04em;
     color: var(--text);
 }
-/* The graph's name: as wide as it is, up to what the bar can spare, and an
-   ellipsis past that — whole in its tooltip, and while being edited. */
+/* The graph's name: as wide as it is, and the first thing in the bar to give
+   way when there is not room — its shrink is a hundred times the toolbar's, so
+   it takes nearly all of a squeeze until it is down to its minimum, and only
+   then does the toolbar start folding up. An ellipsis past that; the whole name
+   is in its tooltip, and shows while it is being edited. */
 .pg__name-box {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: min(30vw, 380px);
+    flex: 0 100 auto;
     display: flex;
     align-items: center;
     gap: 6px;
 }
 .pg__name {
+    flex: 0 1 auto;
     min-width: 9ch;
     max-width: 100%;
     padding: 2px 6px;
@@ -14453,11 +14455,11 @@ a.btn { text-decoration: none; }
 
 /* One row. When it does not fit, the toolbar folds itself up a step at a time
    (useCompactRow in PlaygroundModal.jsx): the graph buttons lose their words,
-   then the drawing tools fold into one Draw button, and only on a phone does
-   the status go and the row wrap. The status gives way first of all — it is
+   then the drawing tools fold into one Draw button, and on a phone the status
+   and the "Playground" label go. It never wraps. The status gives way first of all — it is
    one line, cut short, and whole in its tooltip. Its minimum is what makes the
    row overflow, and so fold, rather than squeeze the status to nothing. */
-.pg-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.pg-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
 .pg-bar__status {
     flex: 1 1 auto;
     min-width: 9em;
@@ -14472,8 +14474,8 @@ a.btn { text-decoration: none; }
 .pg-bar__sep { flex: none; align-self: stretch; width: 1px; margin: 4px 2px; background: var(--border); }
 .pg-bar.is-compact .pg-bar__files .btn > span { display: none; }
 .pg-bar.is-compact .pg-bar__files .btn { padding: 5px; }
-.pg-bar.is-compact-3 { flex-wrap: wrap; }
 .pg-bar.is-compact-3 .pg-bar__status { display: none; }
+.pg__head:has(.pg-bar.is-compact-3) .pg__title { display: none; }
 .pg-draw__list { width: auto; min-width: 170px; }
 .pg-tpl__item.pg-draw__item { flex-direction: row; align-items: center; gap: 10px; }
 .pg-bar__tool {

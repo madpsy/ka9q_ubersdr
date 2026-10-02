@@ -1705,7 +1705,7 @@ export default function IQPanel({ minimal }) {
                     {on ? 'Stop' : 'Start'}
                 </Button>
                 <span className="iq-run__hint">
-                    {!on ? (iq ? 'Ready — the receiver is in IQ.' : 'Starting will switch the receiver to IQ.')
+                    {!on ? (iq ? 'Ready' : 'Starting will switch the receiver to IQ.')
                         : hearing ? `Demodulating ${vfos.length > 1 ? `${vfos.length} signals ` : ''}in the browser.`
                             : 'Waiting for the quadrature stream…'}
                 </span>

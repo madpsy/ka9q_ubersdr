@@ -33,6 +33,7 @@ import JsonPane from './JsonPane.jsx';
 import Palette from './Palette.jsx';
 import { closePlayground, offerSharedGraph, usePlaygroundUi } from './store.js';
 import { holdSpectrum } from '../../lib/spectrumPause.js';
+import { versionNote } from '../version.js';
 import { channelSummary, graphFromAllChannels, graphFromIQDemod, iqDemodChannels } from '../fromIQDemod.js';
 
 // The nodes whose readings the cards draw. Others have nothing live to show,
@@ -280,6 +281,7 @@ function Summary({ pg, graph, info, stats }) {
 function SharedOffer({ pending, onLoad }) {
     const ok = pending.graph && pending.graph.nodes.length > 0;
     const count = ok ? pending.graph.nodes.length : 0;
+    const older = ok ? versionNote(pending.ubersdr) : null;
     return (
         <div className="pg-dialog pg-offer" role="dialog" aria-label="Shared graph">
             <div className="pg-dialog__card">
@@ -288,6 +290,7 @@ function SharedOffer({ pending, onLoad }) {
                     {ok ? `A link brought a graph of ${count} ${count === 1 ? 'block' : 'blocks'}. Loading it replaces the one open now; you can put yours back afterwards.` : 'A playground link could not be read.'}
                     {pending.errors && pending.errors.length ? ` ${pending.errors.map((e) => e.message).join(' ')}` : ''}
                 </p>
+                {older && <div className="note note--tight note--warn pg-offer__version">{older}</div>}
                 <div className="pg-dialog__actions">
                     <Button size="sm" variant="ghost" onClick={() => offerSharedGraph(null)}>{ok ? 'Keep mine' : 'Dismiss'}</Button>
                     {ok && <Button size="sm" variant="primary" onClick={onLoad}>Load it</Button>}
@@ -713,8 +716,11 @@ export function PlaygroundWindow({ onClose }) {
     const importFile = async (file) => {
         if (!file) return;
         try {
-            const { graph: g, errors } = parseGraph(JSON.parse(await file.text()));
-            replaceKeepingBack(g.nodes.some((n) => n.x || n.y) ? g : autoLayout(g), errors.length ? errors.map((e) => e.message).join(' ') : `Loaded ${file.name}.`);
+            const { graph: g, errors, ubersdr } = parseGraph(JSON.parse(await file.text()));
+            // A file from another version says so, after what was loaded.
+            const said = errors.length ? errors.map((e) => e.message).join(' ') : `Loaded ${file.name}.`;
+            const older = versionNote(ubersdr);
+            replaceKeepingBack(g.nodes.some((n) => n.x || n.y) ? g : autoLayout(g), older ? `${said} ${older}` : said);
         } catch (err) {
             setNotice(`${file.name} is not a playground graph.`);
         }

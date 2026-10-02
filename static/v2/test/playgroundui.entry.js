@@ -13,6 +13,7 @@ import JsonPane, { graphText, readGraphText } from '../src/playground/ui/JsonPan
 import { Switch, Slider } from '../src/components/ui.jsx';
 import { MarginPicker } from '../src/panels/AudioPanel.jsx';
 import { MARGIN_MIN_DB, MARGIN_LOSSLESS } from '../src/radio/constants.js';
+import { setUberSDRVersion, uberSDRVersion, versionNote } from '../src/playground/version.js';
 import Canvas, { BlockPreview, InPlace, formatCpu, formatLatency, formatRate } from '../src/playground/ui/Canvas.jsx';
 import { HEAD_H as CARD_HEAD_H } from '../src/playground/geometry.js';
 import CardVisual, { ActivityDot, ClipPill, RfLine, activityMeaning, canClip } from '../src/playground/ui/CardVisual.jsx';
@@ -50,7 +51,7 @@ module.exports = {
     moveNodes, removeNodes, removeWire,
     NODE_W, nodeWidth, autoLayout, graphBounds, fitView, nodeAt, nodeHeight, portAt, portPosition, screenToWorld, wirePath, isAnnotation, nodeBox, nodesInside, zoomAbout,
     cardWidth, cardGrow, fitSize, naturalHeight, CARD_MIN_W, CARD_MAX_W,
-    Switch, Slider, MarginPicker, MARGIN_MIN_DB, MARGIN_LOSSLESS, Instrument, SpectrumView, ScopeView, ConstellationView, ConsoleView, DiffView, spectrumAxis, scopeRange, freqLabel, timeLabel, INSTRUMENTS,
+    setUberSDRVersion, uberSDRVersion, versionNote, Switch, Slider, MarginPicker, MARGIN_MIN_DB, MARGIN_LOSSLESS, Instrument, SpectrumView, ScopeView, ConstellationView, ConsoleView, DiffView, spectrumAxis, scopeRange, freqLabel, timeLabel, INSTRUMENTS,
     spectrumMarks, counterText, groupDigits,
     holdSpectrum, setSpectrumPaused, spectrumPaused, BLOCKS, BLOCK_BY_TYPE, CATEGORIES, GRAPH_VERSION, compile, parseGraph, serializeGraph, getPlayground, resetDemodSettings, saveDemodSettings, PROBES,
 };

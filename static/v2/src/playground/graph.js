@@ -4,6 +4,9 @@
 //
 //   {
 //     v: 1,
+//     ubersdr: '1.2.3',                            the UberSDR it was made on,
+//                                                  where known (version.js) —
+//                                                  read, never required
 //     nodes: [{ id: 'n1', type: 'lowpass', params: { cutoffHz: 1350 }, x: 120, y: 40 }],
 //                                                  `controls: ['cutoffHz']` exposes
 //                                                  parameters as control inputs;
@@ -42,6 +45,7 @@
 
 import { BLOCK_BY_TYPE } from './blocks/index.js';
 import { controllable, inputsOf, isStream, outputsOf, sanitizeParams } from './block.js';
+import { uberSDRVersion } from './version.js';
 
 export const GRAPH_VERSION = 1;
 
@@ -75,20 +79,27 @@ export function nodeName(node) {
 }
 
 /**
- * Read a stored or shared graph. Returns `{ graph, errors }`: the graph as far
- * as it could be read, and what had to be left out. Nothing here throws —
+ * Read a stored or shared graph. Returns `{ graph, errors, ubersdr }`: the
+ * graph as far as it could be read, what had to be left out, and the UberSDR
+ * version it was made on ('' where it does not say). Nothing here throws —
  * whatever arrives in a link has to be survivable.
  */
 export function parseGraph(raw) {
     const errors = [];
     if (!raw || typeof raw !== 'object') {
-        return { graph: emptyGraph(), errors: [{ message: 'Not a graph.' }] };
+        return { graph: emptyGraph(), errors: [{ message: 'Not a graph.' }], ubersdr: '' };
     }
+    const made = typeof raw.ubersdr === 'string' ? raw.ubersdr.trim().slice(0, 40) : '';
     if (raw.v !== GRAPH_VERSION) {
         const newer = Number(raw.v) > GRAPH_VERSION;
         return {
             graph: emptyGraph(),
-            errors: [{ message: newer ? 'This graph was made by a newer version of the playground.' : 'Not a graph this playground can read.' }],
+            errors: [{
+                message: newer
+                    ? `This graph was made by a newer version of the playground${made ? `, on UberSDR v${made}` : ''}.`
+                    : 'Not a graph this playground can read.',
+            }],
+            ubersdr: made,
         };
     }
     const nodes = [];
@@ -140,7 +151,7 @@ export function parseGraph(raw) {
         }
         wires.push([w[0], w[1], w[2], w[3]]);
     }
-    return { graph: { v: GRAPH_VERSION, nodes, wires }, errors };
+    return { graph: { v: GRAPH_VERSION, nodes, wires }, errors, ubersdr: made };
 }
 
 /**
@@ -148,8 +159,11 @@ export function parseGraph(raw) {
  * parseGraph(JSON.parse(JSON.stringify(serializeGraph(g)))) gives back g.
  */
 export function serializeGraph(graph) {
+    const made = uberSDRVersion();
     return {
         v: GRAPH_VERSION,
+        // Which UberSDR this was made on, where the page knows.
+        ...(made ? { ubersdr: made } : {}),
         nodes: graph.nodes.map((n) => {
             const type = BLOCK_BY_TYPE[n.type];
             const params = {};

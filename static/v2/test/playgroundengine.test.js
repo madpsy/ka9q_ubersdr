@@ -365,6 +365,42 @@ t('Audio out reaches any device, falls back when one refuses, and follows volume
     pg.destroy();
 });
 
+t('a graph loaded with an output device this machine has not got plays on the receiver’s output from the start, and says why', () => {
+    // As an imported file brings it: a device id from somebody else's machine.
+    const file = { v: GRAPH_VERSION, nodes: [
+        { id: 'iq', type: 'iq-in' }, { id: 're', type: 'real-part' },
+        { id: 'out', type: 'audio-out', params: { device: 'b3f9c0ffee-not-here' } },
+    ], wires: [['iq', 'out', 're', 'in'], ['re', 'out', 'out', 'in']] };
+    for (const browser of ['refuses the device', 'cannot choose devices at all']) {
+        fresh();
+        const a = fakeAudio();
+        if (browser === 'refuses the device') a.env.refuse = 'NotFoundError';
+        else {
+            // A browser with no setSinkId: creating the element is fine, choosing a device is not.
+            const make = globalThis.document.createElement;
+            globalThis.document.createElement = (tag) => { const el = make(tag); delete el.setSinkId; return el; };
+        }
+        const pg = new PlaygroundEngine(a.player, { hostFactory: inline });
+        const { graph, errors } = parseGraph(JSON.parse(JSON.stringify(file)));
+        assert.deepStrictEqual(errors, [], 'the file was not read whole');
+        pg.setGraph(graph);
+        pg.setQuadrature(true);
+        pg.start();
+        a.packet(new Float32Array(240).fill(0.1), new Float32Array(240));
+        const v = pg.routes.voices.get('out');
+        const to = [...v.panner.out][0];
+        assert.ok([...to.out].some((n) => n.out.has(a.bus)), `${browser}: the audio went nowhere`);
+        assert.ok(pg.sinkErrorOf('out'), `${browser}: no reason given`);
+        // The setting is kept, so it works again on the machine that has it.
+        assert.strictEqual(pg.graph.nodes.find((n) => n.id === 'out').params.device, 'b3f9c0ffee-not-here');
+        // And the audio keeps flowing there.
+        const before = a.sources.length;
+        for (let k = 0; k < 10; k++) a.packet(new Float32Array(240).fill(0.1), new Float32Array(240));
+        assert.ok(a.sources.length > before, `${browser}: nothing more played`);
+        pg.destroy();
+    }
+});
+
 t('only one of the playground and the IQ Demod panel runs, and the way back is handed over', () => {
     fresh();
     const a = fakeAudio();

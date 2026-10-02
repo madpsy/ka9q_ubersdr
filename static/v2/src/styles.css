@@ -14519,6 +14519,7 @@ a.btn { text-decoration: none; }
 }
 .pg-dialog__title { font-weight: 600; font-size: calc(15px * var(--ui-scale)); margin-bottom: 6px; }
 .pg-dialog__card p { margin: 0 0 14px; color: var(--text-dim); line-height: 1.45; }
+.pg-offer__version { margin: -6px 0 14px; }
 .pg-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }
 .pg-pick__list { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin: 4px 0 12px; }
 .pg-pick__list .btn { justify-content: flex-start; font-family: var(--mono); }

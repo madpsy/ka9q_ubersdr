@@ -29,6 +29,7 @@ import { decodeShare } from '../playground/share.js';
 import PlaygroundModal, { SHARE_PARAM } from '../playground/ui/PlaygroundModal.jsx';
 import { offerSharedGraph } from '../playground/ui/store.js';
 import { usePlaybackHold } from '../lib/playbackHold.js';
+import { setUberSDRVersion } from '../playground/version.js';
 
 /**
  * The share code in a page's query string, taken off the address bar, or null.
@@ -50,7 +51,10 @@ export function takeShareCode(loc = typeof location === 'undefined' ? null : loc
 }
 
 export default function PlaygroundWatch() {
-    const { running, tuning, actions, audio, player, iqPrompt, allowedIQModes } = useRadio();
+    const { running, tuning, actions, audio, player, iqPrompt, allowedIQModes, serverInfo } = useRadio();
+    // The receiver's version, for every graph saved from here to carry and
+    // every one loaded to be checked against (playground/version.js).
+    setUberSDRVersion(serverInfo && serverInfo.version);
     const pg = getPlayground(player);
     const iq = isIQ(tuning.mode);
 
@@ -93,6 +97,12 @@ export default function PlaygroundWatch() {
         if (tuning.mode === lastMode.current) return;
         lastMode.current = tuning.mode;
         if (!pg.running || pg.offline || !iq || !want || want === tuning.mode) return;
+        // Not the fallback: a graph built for a width this visit cannot have
+        // runs at plain IQ (the window's Start), and that is the receiver
+        // making do, not the operator choosing. Written back, it would turn a
+        // wide graph into a 12 kHz one for everybody it is saved or shared
+        // with afterwards.
+        if (tuning.mode === 'iq' && want !== 'iq' && !(allowedIQModes || []).includes(want)) return;
         lastWant.current = tuning.mode;
         for (const n of pg.graph.nodes) {
             if (n.type === 'iq-in') pg.setParams(n.id, { width: tuning.mode });

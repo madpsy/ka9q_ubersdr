@@ -1764,6 +1764,55 @@ t('the TTS block’s voice: a dropdown of this browser’s voices, the receiver�
     }
 });
 
+t('a graph built for an IQ width this visit cannot have runs at plain IQ and keeps its width; a width the operator picks mid-run is still kept', () => {
+    const { serializeGraph } = P;
+    const usb = { frequency: 7100000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 };
+    const at = (mode) => ({ ...usb, mode });
+    /** The watcher on one hook state, the receiver's mode moving under it. */
+    const scene = (width, allowed) => {
+        reset();
+        const ctx = radio({ tuning: usb, allowedIQModes: allowed });
+        const pg = getPlayground(ctx.player);
+        pg.setGraph(g([{ id: 'iq', type: 'iq-in', params: { width } }, { id: 'sp', type: 'iq-spectrum' }], [['iq', 'out', 'sp', 'in']]));
+        let w = render(P.PlaygroundWatch, {}, ctx);
+        w.cleanups.forEach((f) => f());
+        const receiver = (mode) => {
+            w = render(P.PlaygroundWatch, {}, { ...ctx, tuning: at(mode) });
+            w.cleanups.forEach((f) => f());
+        };
+        return { ctx, pg, receiver };
+    };
+
+    // IQ 96, not on offer: Start runs it at plain IQ, as the window's Start does.
+    let s = scene('iq96', []);
+    s.pg.restoreMode = 'usb';
+    s.pg.start();
+    s.receiver('iq');
+    assert.ok(s.pg.running);
+    assert.strictEqual(s.pg.graph.nodes[0].params.width, 'iq96', 'the fallback was written into the graph');
+    assert.strictEqual(serializeGraph(s.pg.graph).nodes[0].params.width, 'iq96', 'saved or shared as plain IQ');
+    // The IQ stream block still says what it is built for.
+    window.__testContext = { ...s.ctx, tuning: at('iq') };
+    const panel = deep(React.createElement(Inspector, {
+        pg: s.pg, graph: s.pg.graph, selection: { nodes: new Set(['iq']), wire: null }, errorsByNode: {}, rates: {}, latencies: {}, stats: null,
+        onParams() {}, onRemove() {}, onDuplicate() {}, summary: null,
+    }));
+    window.__testContext = null;
+    assert.ok(panel.some((x) => cls(x) === 'pg-insp__note' && /built for .*does not offer you/.test(words(x))), 'the note about the width went');
+    s.pg.stop();
+
+    // The operator moving the width in the Receiver panel mid-run: kept, as before.
+    s = scene('iq48', ['iq48', 'iq96']);
+    s.pg.start();
+    s.receiver('iq48');
+    s.receiver('iq96');
+    assert.strictEqual(s.pg.graph.nodes[0].params.width, 'iq96', 'a width chosen mid-run was not kept');
+    // Even to plain IQ, where the graph's own width is on offer: a choice, not a fallback.
+    s.receiver('iq');
+    assert.strictEqual(s.pg.graph.nodes[0].params.width, 'iq');
+    s.pg.stop();
+});
+
 t('the inspector shows a block’s name, its type beside it, and a box to rename it in', () => {
     reset();
     const pg = getPlayground(radio().player);
@@ -2606,6 +2655,68 @@ const tAsync = async (name, fn) => {
         const graph = g([{ id: 'a', type: 'lowpass', w: 400, h: 300 }]);
         const shared = await decodeShare(await encodeShare(graph));
         assert.deepStrictEqual([shared.graph.nodes[0].w, shared.graph.nodes[0].h], [400, 300]);
+    });
+    await tAsync('graphs carry the UberSDR version they were made on, and one from another version says so when loaded', async () => {
+        const { setUberSDRVersion, uberSDRVersion, versionNote, serializeGraph, encodeShare, decodeShare } = P;
+        try {
+            // What is said, and when nothing is.
+            assert.strictEqual(versionNote('1.4.0', '1.4.0'), null);
+            assert.strictEqual(versionNote('', '1.4.0'), null, 'a graph from before versions judged');
+            assert.strictEqual(versionNote('1.3.0', ''), null, 'judged before the page knew its own');
+            assert.match(versionNote('1.3.0', '1.4.0'), /Made on UberSDR v1\.3\.0; this receiver runs v1\.4\.0/);
+
+            // Saved with it, read back with it — through JSON and through a link.
+            setUberSDRVersion('');
+            assert.ok(!('ubersdr' in serializeGraph(g([{ id: 'a', type: 'gain' }]))), 'a version saved before the page knew one');
+            setUberSDRVersion('1.4.0');
+            const stored = serializeGraph(g([{ id: 'a', type: 'gain' }]));
+            assert.strictEqual(stored.ubersdr, '1.4.0');
+            assert.strictEqual(parseGraph(JSON.parse(JSON.stringify(stored))).ubersdr, '1.4.0');
+            const shared = await decodeShare(await encodeShare(g([{ id: 'a', type: 'gain' }])));
+            assert.strictEqual(shared.ubersdr, '1.4.0');
+            // A format too new to read names the version it came from.
+            assert.match(parseGraph({ v: GRAPH_VERSION + 1, ubersdr: '9.0.0', nodes: [], wires: [] }).errors[0].message, /UberSDR v9\.0\.0/);
+
+            // The shared-link offer: warned for another version, not for this one.
+            const offer = (made) => {
+                offerSharedGraph({ graph: g([{ id: 's', type: 'signal' }]), errors: [], ubersdr: made });
+                reset();
+                const r = render(PlaygroundWindow, {}, radio());
+                const tree = deep(r.tree);
+                r.cleanups.forEach((f) => f());
+                offerSharedGraph(null);
+                return tree.find((x) => cls(x).includes('pg-offer__version'));
+            };
+            assert.match(words(offer('1.3.0')), /Made on UberSDR v1\.3\.0; this receiver runs v1\.4\.0/);
+            assert.strictEqual(offer('1.4.0'), undefined, 'warned about the same version');
+            assert.strictEqual(offer(''), undefined, 'warned about a graph that does not say');
+
+            // Importing a file from another version: loaded, and said.
+            const ctx = radio();
+            const pg = getPlayground(ctx.player);
+            pg.setGraph(g([]));
+            reset();
+            let r = render(PlaygroundWindow, {}, ctx);
+            const input = deep(r.tree).find((n) => n.type === 'input' && n.props && n.props.type === 'file');
+            const file = JSON.stringify({ v: GRAPH_VERSION, ubersdr: '1.2.0', nodes: [{ id: 'k', type: 'gain', x: 10, y: 10 }], wires: [] });
+            input.props.onChange({ target: { files: [{ name: 'old.json', text: async () => file }], value: 'x' } });
+            await new Promise((res) => setTimeout(res, 0));
+            r.cleanups.forEach((f) => f());
+            r = render(PlaygroundWindow, {}, ctx);
+            assert.deepStrictEqual(pg.graph.nodes.map((n) => n.id), ['k'], 'the file was not loaded');
+            assert.match(words(deep(r.tree).find((n) => cls(n) === 'pg-notice')), /Loaded old\.json\. Made on UberSDR v1\.2\.0/);
+            r.cleanups.forEach((f) => f());
+            closePlayground();
+
+            // The page learns it from the receiver's description.
+            setUberSDRVersion('');
+            reset();
+            r = render(P.PlaygroundWatch, {}, radio({ serverInfo: { version: '2.0.1' } }));
+            r.cleanups.forEach((f) => f());
+            assert.strictEqual(uberSDRVersion(), '2.0.1');
+        } finally {
+            setUberSDRVersion('');
+        }
     });
     console.log(`\n${pass} passed`);
 })();

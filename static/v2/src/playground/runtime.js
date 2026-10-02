@@ -528,7 +528,10 @@ export class Runtime {
                 for (const m of ins[i].list) lv.act += m && typeof m.text === 'string' ? m.text.length : 1;
             });
         }
-        const at = node.ports.findIndex((p, i) => (p.kind === COMPLEX || p.kind === REAL) && ins[i] && !node.notAudio[i]);
+        // Not from a number (a frequency in Hz) — unless the port asks to be
+        // shown all the same: a Scheduler's pps, its only line, blinking as
+        // the Clock's does.
+        const at = node.ports.findIndex((p, i) => (p.kind === COMPLEX || p.kind === REAL) && ins[i] && (!node.notAudio[i] || p.level));
         if (at >= 0 && n > 0) lv.in = meanSquare(ins[at], n);
         const out = node.levelOut >= 0 ? node.outs[node.levelOut] : null;
         if (out && out.n > 0) lv.out = meanSquare(out, out.n);

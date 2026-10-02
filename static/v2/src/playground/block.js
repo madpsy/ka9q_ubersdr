@@ -17,7 +17,9 @@
 //     inputs:   [{ name, kind, optional?, audio? }]  `audio: false` marks a
 //                                     real port that is not sound — a key
 //                                     level, a power — so it is never watched
-//                                     for clipping
+//                                     for clipping; `level: true` still shows
+//                                     it as the card's level line, for a
+//                                     block with no other (a Scheduler's pps)
 //     outputs:  [{ name, kind }]
 //     params:   { name: ParamSpec }
 //     rate(inRate, params)            the rate it puts out; same as in if absent

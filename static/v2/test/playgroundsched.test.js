@@ -682,4 +682,22 @@ t('a frequency in Hz into a strip chart is not audio: no level in dBFS, no clipp
     assert.strictEqual(lv.peak, undefined, "judged as audio at all");
 });
 
+t('a Clock’s pps into a Scheduler is its level line: the pulse shows on its card, as on the Clock’s', () => {
+    const g = TEMPLATES.find((x) => x.id === 'beacon-hop').build();
+    const rt = new Runtime(g, 12000);
+    assert.ok(rt.ok, JSON.stringify(rt.errors));
+    rt.measureLevels = true;
+    // Over two seconds, then a packet at a time until the pulse is high: it
+    // must read on the Scheduler the same as on the Clock.
+    let on = null;
+    for (let k = 0; k < 150 && !on; k++) {
+        rt.process({ i: new Float32Array(240), q: new Float32Array(240), frames: 240, rate: 12000 });
+        const lv = rt.levels();
+        if (k >= 100 && lv.clock && lv.clock.out != null && lv.clock.out > -1) on = lv;
+    }
+    assert.ok(on, 'the Clock’s pulse never went high');
+    assert.ok(on.schedule.in != null && on.schedule.in > -1, `the Scheduler shows no pulse: ${JSON.stringify(on.schedule)}`);
+    assert.ok(!on.schedule.clip, 'a pulse is not audio: nothing to clip');
+});
+
 console.log(`\n${pass} passed`);

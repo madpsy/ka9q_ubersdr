@@ -140,7 +140,7 @@ export const SchedulerBlock = {
     summary: 'Frequencies, modes, widths and offsets by the clock — a repeating cycle (hop the bands with an NCDXF beacon), times of day in UTC (a fax broadcast), or in turn, so long on each (a round of NDBs). Its entries typed here or from a Frequency list; a Clock’s unix (and pps) in; frequency out to an IQ stream, mode to a Demodulator.',
     inputs: [
         { name: 'unix', kind: CONTROL, optional: true },
-        { name: 'pps', kind: REAL, optional: true, audio: false },
+        { name: 'pps', kind: REAL, optional: true, audio: false, level: true },
         // Used when Schedule is set to From the list input.
         { name: 'list', kind: MESSAGE, optional: true },
         { name: 'next', kind: CONTROL, optional: true },

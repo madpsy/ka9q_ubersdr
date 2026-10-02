@@ -14473,6 +14473,8 @@ a.btn { text-decoration: none; }
 .pg-bar__group { display: flex; flex: none; gap: 2px; flex-wrap: nowrap; }
 /* The rule between groups of buttons. */
 .pg-bar__sep { flex: none; align-self: stretch; width: 1px; margin: 4px 2px; background: var(--border); }
+/* Templates onwards sit at the right-hand end; the spare room goes before them. */
+.pg-bar__sep--push { margin-left: auto; }
 .pg__head:has(.pg-bar.is-fold-1) .pg__title { display: none; }
 .pg-bar.is-fold-2 .pg-bar__status { display: none; }
 .pg-bar.is-fold-3 .pg-bar__files .btn > span { display: none; }

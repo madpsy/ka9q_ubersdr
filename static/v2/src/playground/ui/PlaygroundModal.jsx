@@ -341,7 +341,10 @@ function Toolbar({
             </span>
             <span className="pg-bar__sep" aria-hidden="true" />
             {compact < 4 ? <AnnotateTools onAdd={onAnnotate} /> : <AnnotateMenu onAdd={onAnnotate} />}
-            <span className="pg-bar__sep" aria-hidden="true" />
+            {/* From here on the graph's own buttons, at the right-hand end:
+                whatever room is spare opens up here, and when there is none
+                the rule is still there to divide them. */}
+            <span className="pg-bar__sep pg-bar__sep--push" aria-hidden="true" />
             <span className="pg-bar__group pg-bar__files">
                 <TemplatesMenu onPick={onTemplate} />
                 <Button size="sm" variant="ghost" icon={<Icon.Waves />} title="Replace the graph with IQ Demod’s selected demodulator" onClick={onFromDemod}>From IQ Demod</Button>

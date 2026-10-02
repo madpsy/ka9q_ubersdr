@@ -211,6 +211,15 @@ function ownVisualHeight(type, params) {
         case 'tts':
             // What it is saying, and what it said last.
             return 32;
+        case 'clock':
+            // The time, where it comes from, and a note when it is not what was asked.
+            return 50;
+        case 'interval-counter':
+            // The last interval, its statistics and their trace.
+            return 64;
+        case 'serial-port':
+            // The port and its buttons, the lines, and room for a note.
+            return 58;
         case 'message-log':
             return 84;
         case 'iq-spectrum':
@@ -231,6 +240,7 @@ function ownVisualHeight(type, params) {
         case 'toggle':
             return 24;
         case 'control-scale':
+        case 'control-shape':
         case 'integrator':
             return 20;
         case 'control-plot':

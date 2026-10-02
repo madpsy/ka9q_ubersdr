@@ -122,18 +122,22 @@ export const controlPort = (param) => `set:${param}`;
  */
 export function inputsOf(node, def) {
     if (!def) return [];
+    // A type whose inputs depend on its settings — an oscilloscope with two,
+    // three or four channels — says which it has; `inputs` is then all it can.
+    const own = def.inputsFor ? def.inputsFor(node.params || {}) : def.inputs;
     const extra = [];
     for (const name of node.controls || []) {
         const spec = def.params[name];
         if (!controllable(spec)) continue;
         extra.push({ name: controlPort(name), kind: CONTROL, optional: true, param: name, label: spec.label });
     }
-    return extra.length ? [...def.inputs, ...extra] : def.inputs;
+    return extra.length ? [...own, ...extra] : own;
 }
 
-/** A node's outputs: its type's. Here for symmetry with inputsOf. */
+/** A node's outputs: its type's, or as many as its settings give it (see inputsOf). */
 export function outputsOf(node, def) {
-    return def ? def.outputs : [];
+    if (!def) return [];
+    return def.outputsFor ? def.outputsFor(node.params || {}) : def.outputs;
 }
 
 /** A buffer for a port of `kind`, holding at least `size` frames. */

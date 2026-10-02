@@ -225,6 +225,9 @@ export function serializeGraph(graph) {
  *   ports    per node id, its input ports — its type's and its exposed
  *            controls' — in that same order
  *   inRate   per node id, the rate arriving at its inputs
+ *   inRates  per node id, per input port, the rate arriving there (null for
+ *            one unwired, or not a stream) — the same for every port except
+ *            on a block marked `mixedRates`
  *   outRate  per node id, the rate it puts out
  *
  * Errors name the node, and the wire where there is one, so the editor can
@@ -321,19 +324,23 @@ export function compile(graph, streamRate) {
     }
 
     const inRate = {};
+    const inRates = {};
     const outRate = {};
     for (const id of order) {
         const n = byId.get(id);
         const type = BLOCK_BY_TYPE[n.type];
         if (!type) continue;
         // Only samples have a rate: control and message inputs do not count.
-        const feeding = (inputs[id] || [])
-            .map((f, i) => (f && isStream(ports[id][i].kind) ? outRate[f[0]] : null))
-            .filter((r) => r != null);
+        const perPort = (inputs[id] || []).map((f, i) => (f && isStream(ports[id][i].kind) ? outRate[f[0]] : null));
+        inRates[id] = perPort;
+        const feeding = perPort.filter((r) => r != null);
         let rate = streamRate;
         if (feeding.length) {
-            rate = feeding[0];
-            if (feeding.some((r) => r !== rate)) {
+            // A block that takes its inputs at their own rates (an
+            // oscilloscope, which lines them up in time itself) runs at the
+            // fastest of them; every other block needs them all the same.
+            rate = type.mixedRates ? Math.max(...feeding) : feeding[0];
+            if (!type.mixedRates && feeding.some((r) => r !== rate)) {
                 errors.push({ node: id, message: `Inputs arrive at different rates (${[...new Set(feeding)].join(', ')} Hz).` });
             }
         }
@@ -345,5 +352,5 @@ export function compile(graph, streamRate) {
         outRate[id] = out;
     }
 
-    return { ok: errors.length === 0, errors, order, inputs, ports, inRate, outRate };
+    return { ok: errors.length === 0, errors, order, inputs, ports, inRate, inRates, outRate };
 }

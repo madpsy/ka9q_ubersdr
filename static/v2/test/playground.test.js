@@ -638,4 +638,65 @@ t('a graph that does not compile does nothing, and says why', () => {
     assert.match(rt.errors[0].message, /needs a wire/);
 });
 
+// ── Threshold ───────────────────────────────────────────────────────────────
+
+// One run of a Threshold over `xs` at 1 kHz (so a millisecond is a sample).
+const threshold = (xs, params = {}) => {
+    const type = BLOCK_BY_TYPE.threshold;
+    const inst = type.create();
+    inst.configure(sanitizeParams(type, params), 1000);
+    const n = xs.length;
+    const input = makeBuffer('real', n);
+    input.re.set(xs);
+    const outs = type.outputs.map((p) => makeBuffer(p.kind, n));
+    inst.process([input], outs, n);
+    return { out: [...outs[0].re.slice(0, n)], gate: [...outs[1].re.slice(0, n)], bits: [...outs[2].re.slice(0, n)], state: outs[3], inst };
+};
+
+t('Threshold: on above the high level, off below the low one, and between them it holds', () => {
+    const xs = [0, 0.5, 0.7, 0.5, 0.45, 0.3, 0.5, 0.65, 0.1];
+    assert.deepStrictEqual(threshold(xs).out, [0, 0, 1, 1, 1, 0, 0, 1, 0]);
+    // The same level for both is a plain comparator; the wrong way round is
+    // taken the right way round.
+    assert.deepStrictEqual(threshold([0.4, 0.6, 0.4], { high: 0.5, low: 0.5 }).out, [0, 1, 0]);
+    assert.deepStrictEqual(threshold(xs, { high: 0.4, low: 0.6 }).out, threshold(xs).out);
+});
+
+t('Threshold: a crossing shorter than its minimum time changes nothing, each edge with its own', () => {
+    // A 2 ms spike, then a 6 ms mark with a 1 ms dropout in it.
+    const xs = [0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0];
+    const r = threshold(xs, { onMs: 2, offMs: 3 });
+    assert.deepStrictEqual(r.out, [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        'the spike counted, the dropout broke the mark, or an edge did not wait its time');
+});
+
+t('Threshold: the four outputs say the same thing — values, a gate, bits and a control', () => {
+    const xs = [0.1, 0.9, 0.8, 0.2];
+    const r = threshold(xs, { onValue: 1, offValue: -1 });
+    assert.deepStrictEqual(r.out, [-1, 1, 1, -1]);
+    assert.deepStrictEqual(r.gate, [0, 0.9, 0.8, 0]);
+    assert.deepStrictEqual(r.bits, [0, 1, 1, 0]);
+    assert.strictEqual(r.state.value, 0);
+    assert.ok(r.state.seq >= 1, 'the state was never sent');
+    const inv = threshold(xs, { invert: true });
+    assert.deepStrictEqual(inv.out, [1, 0, 0, 1]);
+    assert.deepStrictEqual(inv.gate, [0.1, 0, 0, 0.2]);
+    // A brief on still lights the card's dot when it next asks.
+    const blip = threshold([0, 1, 0]);
+    assert.strictEqual(blip.inst.activity(), 1);
+    assert.strictEqual(blip.inst.activity(), 0);
+});
+
+t('a Threshold\'s out wires into a Morse decoder\'s key', () => {
+    const g = parseGraph({
+        v: GRAPH_VERSION,
+        nodes: [
+            { id: 'th', type: 'threshold', params: { onMs: 3, offMs: 3 } },
+            { id: 'mo', type: 'morse-decoder', params: { wpm: 20 } },
+        ],
+        wires: [['th', 'out', 'mo', 'key']],
+    });
+    assert.deepStrictEqual(g.errors, []);
+});
+
 console.log(`\n${pass} passed`);

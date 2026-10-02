@@ -11,7 +11,7 @@
 // viewers the editor has asked about, at most a dozen times a second (see
 // READ_EVERY_MS in workerCore.js).
 
-import { COMPLEX, CONTROL, REAL, emitControl } from '../block.js';
+import { COMPLEX, CONTROL, MESSAGE, REAL, emitControl } from '../block.js';
 import { IQSpectrum } from '../../lib/iqSpectrum.js';
 
 const DISPLAY = {
@@ -84,6 +84,41 @@ const TRACE_COLUMNS = 1024;
 // 384 kHz and far more at any audio rate. A sweep may use a quarter of it, so
 // there is always room to look back for a trigger.
 const SCOPE_RING = 1 << 18;
+// The channels, in order: the input names and the trigger's sources.
+export const SCOPE_CHANNELS = ['a', 'b', 'c', 'd'];
+// The colours a channel's trace can be, and what each channel starts as —
+// four that are told apart at a glance, on the dark screen and the light.
+export const SCOPE_COLOURS = [
+    { value: 'blue', label: 'Blue', hex: '#08a2fb' },
+    { value: 'violet', label: 'Violet', hex: '#a78bfa' },
+    { value: 'green', label: 'Green', hex: '#34c77b' },
+    { value: 'pink', label: 'Pink', hex: '#f472b6' },
+    { value: 'yellow', label: 'Yellow', hex: '#e2b93b' },
+    { value: 'orange', label: 'Orange', hex: '#f08a3c' },
+    { value: 'red', label: 'Red', hex: '#f0646a' },
+    { value: 'cyan', label: 'Cyan', hex: '#2fd0d8' },
+    { value: 'grey', label: 'Grey', hex: '#9aa4b5' },
+];
+const SCOPE_DEFAULT_COLOURS = ['blue', 'violet', 'green', 'pink'];
+// What a scope's control outputs can carry.
+export const SCOPE_MEASURES = [
+    { value: 'rms', label: 'RMS' },
+    { value: 'vpp', label: 'Peak to peak' },
+    { value: 'mean', label: 'Mean' },
+    { value: 'min', label: 'Minimum' },
+    { value: 'max', label: 'Maximum' },
+    { value: 'hz', label: 'Frequency' },
+];
+// The most a scope has: its inputs, and an output for each beside the readings.
+const SCOPE_INPUTS = SCOPE_CHANNELS.map((c, i) => ({ name: c, kind: REAL, ...(i ? { optional: true } : {}) }));
+const SCOPE_OUTPUTS = [
+    { name: 'readings', kind: MESSAGE },
+    ...SCOPE_CHANNELS.map((c) => ({ name: `${c}-out`, kind: CONTROL })),
+];
+/** How many channels a scope's settings give it: 2 to 4. */
+export const scopeChannels = (p) => Math.max(1, Math.min(SCOPE_CHANNELS.length, Number(p && p.channels) || 2));
+// How many samples a slower channel may have waiting to be lined up.
+const SCOPE_QUEUE = 1 << 16;
 
 // The vertical ranges a scope offers, as ± full scale. "Auto" follows the
 // trace; the rest pin the screen, which is what makes two captures comparable.
@@ -92,8 +127,16 @@ export const SCOPE_RANGES = [1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0
 const AUTO_HOLD_SEC = 0.25;
 
 /**
- * An oscilloscope: one real signal, or two on one screen, with the controls a
- * scope has.
+ * An oscilloscope: up to four real signals on one screen, each in its own
+ * colour, with the controls a scope has.
+ *
+ *   channels    A always, B to D where wired. They need not arrive at the same
+ *               rate — a key level from an On-off detector at 500 Hz beside the
+ *               audio it came from at 12 kHz — because the scope lines them up
+ *               in time itself: it runs at the fastest input's rate, and each
+ *               slower one holds its value until its next sample. Each keeps a
+ *               little queue so that packets arriving a few samples apart, as
+ *               decimating blocks deliver them, do not shift it.
  *
  *   time        `timebaseMs` is the sweep, `position` how far into it the
  *               trigger sits — 10% shows a little of what came before.
@@ -103,6 +146,14 @@ const AUTO_HOLD_SEC = 0.25;
  *               normal (sweeps only on a trigger, holding the last until the
  *               next) or single (catches one sweep after it is armed and holds
  *               it). `source`, `slope` and `level` say what counts.
+ *
+ *   outputs     what it measures, every `reportMs`: `readings` as a message —
+ *               p-p, RMS, mean, min, max and frequency for each wired channel,
+ *               for a Message log to keep or save — and `a-out` to `d-out` as
+ *               controls carrying the one measurement `measure` picks, to plot
+ *               or to drive something with. Measured over the report interval
+ *               (up to a quarter of what the scope keeps), not the sweep, so
+ *               it runs whatever the trigger is doing.
  *
  * Arming a single sweep, and stopping or running the display, are commands
  * (see command()) rather than settings: they are things done once, not states
@@ -118,9 +169,19 @@ export const ScopeBlock = {
     label: 'Oscilloscope',
     category: 'Viewers',
     summary: 'Real signals against time, with sweep, range, trigger and single-shot capture.',
-    inputs: [{ name: 'a', kind: REAL }, { name: 'b', kind: REAL, optional: true }],
-    outputs: [],
+    inputs: SCOPE_INPUTS,
+    outputs: SCOPE_OUTPUTS,
+    // Two channels to start with, up to four: the inputs and their outputs
+    // follow `channels`, and the editor drops a wire to one that goes.
+    inputsFor: (p) => SCOPE_INPUTS.slice(0, scopeChannels(p)),
+    outputsFor: (p) => SCOPE_OUTPUTS.slice(0, 1 + scopeChannels(p)),
+    // Its inputs at their own rates: see "channels" above, and compile().
+    mixedRates: true,
     params: {
+        channels: {
+            kind: 'choice', label: 'Channels', default: 2,
+            options: [{ value: 2, label: '2' }, { value: 3, label: '3' }, { value: 4, label: '4' }],
+        },
         timebaseMs: { kind: 'number', label: 'Sweep', unit: 'ms', default: 10, min: 0.1, max: 500, step: 0.1, live: true },
         position: { kind: 'number', label: 'Trigger position', unit: '%', default: 10, min: 0, max: 90, step: 1, live: true },
         range: {
@@ -140,7 +201,7 @@ export const ScopeBlock = {
         },
         source: {
             kind: 'choice', label: 'Source', default: 'a',
-            options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }],
+            options: SCOPE_CHANNELS.map((c) => ({ value: c, label: c.toUpperCase() })),
         },
         slope: {
             kind: 'choice', label: 'Slope', default: 'rising',
@@ -153,15 +214,35 @@ export const ScopeBlock = {
             kind: 'choice', label: 'View', default: 'time',
             options: [{ value: 'time', label: 'Time' }, { value: 'xy', label: 'X–Y' }],
         },
+        reportMs: { kind: 'number', label: 'Report every', unit: 'ms', default: 500, min: 10, max: 60000, step: 10, control: false },
+        measure: {
+            kind: 'choice', label: 'Outputs carry', default: 'rms',
+            options: SCOPE_MEASURES.map(({ value, label }) => ({ value, label })),
+        },
+        // Each channel's trace colour.
+        ...Object.fromEntries(SCOPE_CHANNELS.map((c, i) => [`colour${c.toUpperCase()}`, {
+            kind: 'choice',
+            label: `${c.toUpperCase()} colour`,
+            default: SCOPE_DEFAULT_COLOURS[i],
+            options: SCOPE_COLOURS.map(({ value, label }) => ({ value, label })),
+            ...(i >= 2 ? { showIf: (p) => scopeChannels(p) > i } : {}),
+        }])),
     },
     create() {
-        const A = new Float32Array(SCOPE_RING);
-        const B = new Float32Array(SCOPE_RING);
+        const rings = SCOPE_CHANNELS.map(() => new Float32Array(SCOPE_RING));
+        const [A, B] = rings;
+        // Per channel: whether it is wired, its own rate, and — for one slower
+        // than the scope's — its waiting samples, how far its next one is
+        // due, and the value it is holding meanwhile.
+        let wired = SCOPE_CHANNELS.map((c, i) => i === 0);
+        let rates = SCOPE_CHANNELS.map(() => 12000);
+        const queues = SCOPE_CHANNELS.map(() => ({ buf: new Float64Array(SCOPE_QUEUE), start: 0, count: 0 }));
+        const due = SCOPE_CHANNELS.map(() => 0);
+        const holding = SCOPE_CHANNELS.map(() => 0);
         // `pos` counts samples ever written; the ring holds the last
         // SCOPE_RING of them. Kept as a plain count (a double is exact far
         // past any session) so "the sample at count c" means one thing.
         let pos = 0;
-        let two = false;
         let rate = 12000;
         let p = {};
         let searched = 0;     // the trigger search has looked up to here
@@ -185,24 +266,52 @@ export const ScopeBlock = {
                 : before < p.level && now >= p.level;
         };
 
+        // A stretch of one channel, measured: what the readouts show, and what
+        // the outputs report.
+        const measureOf = (ring, start, n) => {
+            let sum = 0;
+            let sumSq = 0;
+            let lo = Infinity;
+            let hi = -Infinity;
+            for (let c = 0; c < n; c++) {
+                const v = at(ring, start + c);
+                sum += v;
+                sumSq += v * v;
+                if (v < lo) lo = v;
+                if (v > hi) hi = v;
+            }
+            const mean = sum / n;
+            // Frequency: rising crossings of the mean, first to last, over the
+            // time between them.
+            let first = -1;
+            let last = -1;
+            let count = 0;
+            for (let c = 1; c < n; c++) {
+                if (at(ring, start + c - 1) < mean && at(ring, start + c) >= mean) {
+                    if (first < 0) first = c;
+                    last = c;
+                    count++;
+                }
+            }
+            return {
+                mean,
+                min: lo,
+                max: hi,
+                vpp: hi - lo,
+                rms: Math.sqrt(Math.max(0, sumSq / n - (p.coupling === 'ac' ? mean * mean : 0))),
+                hz: count >= 2 ? ((count - 1) * rate) / (last - first) : null,
+            };
+        };
+        // Samples written since the last report.
+        let sinceReport = 0;
+
         const sweep = (start, n, triggered) => {
             const cols = Math.min(TRACE_COLUMNS, n);
             const one = (ring) => {
+                const m = measureOf(ring, start, n);
+                const shift = p.coupling === 'ac' ? m.mean : 0;
                 const min = new Float32Array(cols);
                 const max = new Float32Array(cols);
-                let sum = 0;
-                let sumSq = 0;
-                let lo = Infinity;
-                let hi = -Infinity;
-                for (let c = 0; c < n; c++) {
-                    const v = at(ring, start + c);
-                    sum += v;
-                    sumSq += v * v;
-                    if (v < lo) lo = v;
-                    if (v > hi) hi = v;
-                }
-                const mean = sum / n;
-                const shift = p.coupling === 'ac' ? mean : 0;
                 for (let k = 0; k < cols; k++) {
                     const c0 = Math.floor((k * n) / cols);
                     const c1 = Math.max(c0 + 1, Math.floor(((k + 1) * n) / cols));
@@ -216,30 +325,11 @@ export const ScopeBlock = {
                     min[k] = mn - shift;
                     max[k] = mx - shift;
                 }
-                // Frequency from the sweep itself: rising crossings of its
-                // mean, first to last, over the time between them.
-                let first = -1;
-                let last = -1;
-                let count = 0;
-                for (let c = 1; c < n; c++) {
-                    if (at(ring, start + c - 1) < mean && at(ring, start + c) >= mean) {
-                        if (first < 0) first = c;
-                        last = c;
-                        count++;
-                    }
-                }
-                const hz = count >= 2 ? ((count - 1) * rate) / (last - first) : null;
-                return {
-                    min, max,
-                    vpp: hi - lo,
-                    rms: Math.sqrt(Math.max(0, sumSq / n - (p.coupling === 'ac' ? mean * mean : 0))),
-                    mean,
-                    hz,
-                };
+                return { min, max, vpp: m.vpp, rms: m.rms, mean: m.mean, hz: m.hz };
             };
             // X–Y wants the samples themselves, paired, not columns.
             let xy = null;
-            if (p.view === 'xy' && two) {
+            if (p.view === 'xy' && wired[1]) {
                 const m = Math.min(XY_POINTS, n);
                 const x = new Float32Array(m);
                 const y = new Float32Array(m);
@@ -252,9 +342,10 @@ export const ScopeBlock = {
                 }
                 xy = { x, y };
             }
+            const traces = {};
+            SCOPE_CHANNELS.forEach((ch, i) => { traces[ch] = wired[i] ? one(rings[i]) : null; });
             return {
-                a: one(A),
-                b: two ? one(B) : null,
+                ...traces,
                 xy,
                 rate, seconds: n / rate, triggered,
                 pre: Math.round((p.position / 100) * n) / rate,
@@ -262,16 +353,22 @@ export const ScopeBlock = {
         };
 
         return {
-            configure(params, r) {
+            configure(params, r, inRates) {
                 p = params;
                 rate = r;
+                rates = SCOPE_CHANNELS.map((c, i) => (inRates && inRates[i] > 0 ? inRates[i] : r));
                 // Leaving single lets go of what it caught.
                 if (p.mode !== 'single' && (state === 'armed' || state === 'held')) {
                     state = 'running';
                     held = null;
                 }
             },
-            reset() { pos = 0; searched = 0; held = null; armedAt = null; state = 'running'; lastTrigger = -Infinity; },
+            reset() {
+                pos = 0; searched = 0; held = null; armedAt = null; state = 'running'; lastTrigger = -Infinity; sinceReport = 0;
+                for (const q of queues) { q.start = 0; q.count = 0; }
+                due.fill(0);
+                holding.fill(0);
+            },
             /** 'arm' a single sweep; 'stop' and 'run' the display. */
             command(cmd) {
                 if (cmd === 'arm') {
@@ -289,7 +386,8 @@ export const ScopeBlock = {
             read() {
                 const n = Math.max(2, Math.min(SCOPE_RING >> 2, Math.round((p.timebaseMs / 1000) * rate)));
                 const pre = Math.round((p.position / 100) * n);
-                const ring = p.source === 'b' && two ? B : A;
+                const si = SCOPE_CHANNELS.indexOf(p.source);
+                const ring = si > 0 && wired[si] ? rings[si] : A;
                 const out = (s) => ({ ...s, state, mode: p.mode });
                 if (state === 'stopped' || state === 'held') return held ? out(held) : { state, mode: p.mode };
                 if (pos - oldest() < n) return { state, mode: p.mode };
@@ -334,15 +432,189 @@ export const ScopeBlock = {
                 return out(sweep(pos - n, n, false));
             },
             process(ins, outs, n) {
-                two = !!ins[1];
-                const x = ins[0].re;
-                const y = two ? ins[1].re : null;
-                for (let k = 0; k < n; k++) {
-                    const i = (pos + k) % SCOPE_RING;
-                    A[i] = x[k];
-                    B[i] = y ? y[k] : 0;
+                wired = SCOPE_CHANNELS.map((c, i) => !!(ins[i] && ins[i].re));
+                // The clock: the first wired channel at the scope's own rate
+                // (the fastest). Its samples are written as they are; every
+                // other channel is lined up against them.
+                let clock = wired.findIndex((w, i) => w && rates[i] >= rate);
+                if (clock < 0) clock = 0;
+                const count = (i) => (ins[i].n != null ? ins[i].n : n);
+                // Everything else into its queue first.
+                SCOPE_CHANNELS.forEach((c, i) => {
+                    if (!wired[i] || i === clock) return;
+                    const q = queues[i];
+                    const x = ins[i].re;
+                    const m = count(i);
+                    for (let k = 0; k < m; k++) {
+                        if (q.count === SCOPE_QUEUE) { q.start = (q.start + 1) % SCOPE_QUEUE; q.count--; }
+                        q.buf[(q.start + q.count) % SCOPE_QUEUE] = x[k];
+                        q.count++;
+                    }
+                });
+                const x = ins[clock] ? ins[clock].re : null;
+                const m = x ? count(clock) : 0;
+                for (let k = 0; k < m; k++) {
+                    const at = (pos + k) % SCOPE_RING;
+                    for (let i = 0; i < rings.length; i++) {
+                        if (i === clock) { rings[i][at] = x[k]; continue; }
+                        if (!wired[i]) { rings[i][at] = 0; continue; }
+                        // This channel's next sample is due once its own
+                        // period has passed in the clock's samples.
+                        const q = queues[i];
+                        due[i] += rates[i] / rate;
+                        while (due[i] >= 1 && q.count > 0) {
+                            holding[i] = q.buf[q.start];
+                            q.start = (q.start + 1) % SCOPE_QUEUE;
+                            q.count--;
+                            due[i] -= 1;
+                        }
+                        // Ran dry — a packet late: hold, and do not bank the
+                        // time, or it would rush to catch up when it comes.
+                        if (due[i] > 1) due[i] = 1;
+                        rings[i][at] = holding[i];
+                    }
                 }
-                pos += n;
+                // A queue that keeps growing is a channel running ahead of the
+                // clock (or the clock stalled): keep only its latest, so it
+                // cannot drift further and further behind what it shows.
+                SCOPE_CHANNELS.forEach((c, i) => {
+                    const q = queues[i];
+                    const most = Math.max(64, Math.round(rates[i] * 0.25));
+                    if (q.count > most) {
+                        const keep = Math.max(8, Math.round(rates[i] * 0.02));
+                        q.start = (q.start + q.count - keep) % SCOPE_QUEUE;
+                        q.count = keep;
+                    }
+                });
+                pos += m;
+                // Every report interval: what each channel measured over it.
+                sinceReport += m;
+                const every = Math.max(1, Math.round(((p.reportMs || 500) / 1000) * rate));
+                if (sinceReport >= every && pos > 1) {
+                    const span = Math.min(sinceReport, SCOPE_RING >> 2, pos);
+                    sinceReport = 0;
+                    const reading = { type: 'measure', at: pos / rate };
+                    SCOPE_CHANNELS.forEach((ch, i) => {
+                        if (!wired[i]) return;
+                        const v = measureOf(rings[i], pos - span, span);
+                        reading[ch] = v;
+                        const out = outs && outs[1 + i];
+                        const value = v[p.measure || 'rms'];
+                        if (out && value != null && Number.isFinite(value)) emitControl(out, value);
+                    });
+                    if (outs && outs[0] && outs[0].list) outs[0].list.push(reading);
+                }
+                return 0;
+            },
+        };
+    },
+};
+
+/**
+ * A time interval counter, the instrument a timing lab measures with: the time
+ * from an edge on `start` to the next edge on `stop`.
+ *
+ * An edge is where a signal crosses `level` the way its slope says, placed
+ * between the two samples either side of it by straight-line interpolation —
+ * so the reading is finer than a sample. Each start pairs with the first stop
+ * after it, within `maxMs`; a stop with no start that recent is not counted.
+ *
+ * The two may arrive at different rates — a Clock's pulses at the stream's
+ * rate beside a detector's output decimated far below it — and are timed
+ * each on its own sample count, which every packet advances by the same span.
+ *
+ * What it is for: a Clock's `pps` on start and a time signal's ticks (an
+ * envelope, a Threshold) on stop is the signal's propagation delay; a Morse
+ * encoder's key on start and a decoder's on stop is a chain's latency.
+ */
+export const IntervalCounterBlock = {
+    type: 'interval-counter',
+    label: 'Time interval counter',
+    category: 'Viewers',
+    summary: 'The time from an edge on start to the next on stop, finer than a sample, with its mean and spread — a propagation delay, a latency.',
+    inputs: [{ name: 'start', kind: REAL }, { name: 'stop', kind: REAL }],
+    outputs: [{ name: 'interval', kind: CONTROL }],
+    mixedRates: true,
+    params: {
+        level: { kind: 'number', label: 'Level', default: 0.5, min: -1000, max: 1000, step: 0.001, live: true },
+        startSlope: { kind: 'choice', label: 'Start on', default: 'rising', options: [{ value: 'rising', label: 'Rising edge' }, { value: 'falling', label: 'Falling edge' }] },
+        stopSlope: { kind: 'choice', label: 'Stop on', default: 'rising', options: [{ value: 'rising', label: 'Rising edge' }, { value: 'falling', label: 'Falling edge' }] },
+        maxMs: { kind: 'number', label: 'Longest interval', unit: 'ms', default: 1000, min: 0.01, max: 60000, step: 0.01, live: true },
+        average: { kind: 'number', label: 'Statistics over', unit: 'intervals', default: 20, min: 1, max: 1000, step: 1, live: true },
+    },
+    create() {
+        let p = {};
+        let rates = [12000, 12000];
+        const count = [0, 0];
+        const prev = [null, null];
+        let starts = [];
+        let recent = [];
+        let history = [];
+        let last = null;
+        let total = 0;
+        let missed = 0;
+        const crossing = (a, b, slope, level) => (slope === 'falling' ? a > level && b <= level : a < level && b >= level);
+        return {
+            configure(params, r, inRates) {
+                p = params;
+                rates = [0, 1].map((i) => (inRates && inRates[i] > 0 ? inRates[i] : r));
+            },
+            reset() {
+                count[0] = count[1] = 0; prev[0] = prev[1] = null;
+                starts = []; recent = []; history = []; last = null; total = 0; missed = 0;
+            },
+            command(name) { if (name === 'clear') { recent = []; history = []; last = null; total = 0; missed = 0; } },
+            read() {
+                if (!recent.length) return { last: null, count: total, missed, history: Float32Array.from(history) };
+                const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+                const sd = Math.sqrt(recent.reduce((a, b) => a + (b - mean) ** 2, 0) / recent.length);
+                return {
+                    last, mean, sd,
+                    min: Math.min(...recent), max: Math.max(...recent),
+                    count: total, missed,
+                    history: Float32Array.from(history),
+                };
+            },
+            process(ins, outs, n) {
+                const level = p.level;
+                const maxS = p.maxMs / 1000;
+                // Start first, so a stop in the same packet finds the start before it.
+                for (const i of [0, 1]) {
+                    const x = ins[i];
+                    if (!x || !x.re) continue;
+                    const m = x.n != null ? x.n : n;
+                    const slope = i === 0 ? p.startSlope : p.stopSlope;
+                    for (let k = 0; k < m; k++) {
+                        const v = x.re[k];
+                        const a = prev[i];
+                        prev[i] = v;
+                        if (a === null || !crossing(a, v, slope, level)) continue;
+                        const frac = v === a ? 0 : (level - a) / (v - a);
+                        const at = (count[i] + k - 1 + frac) / rates[i];
+                        if (i === 0) {
+                            starts.push(at);
+                            continue;
+                        }
+                        // The latest start before this stop, recent enough.
+                        let j = starts.length - 1;
+                        while (j >= 0 && starts[j] > at) j--;
+                        if (j < 0 || at - starts[j] > maxS) { missed++; continue; }
+                        const ms = (at - starts[j]) * 1000;
+                        starts.splice(0, j + 1);
+                        last = ms;
+                        total++;
+                        recent.push(ms);
+                        const keep = Math.max(1, Math.round(p.average || 20));
+                        if (recent.length > keep) recent = recent.slice(-keep);
+                        history.push(ms);
+                        if (history.length > 240) history = history.slice(-240);
+                        if (outs[0]) emitControl(outs[0], ms);
+                    }
+                    count[i] += m;
+                }
+                // Starts too old to be paired with anything now.
+                const nowS = count[0] / rates[0];
+                starts = starts.filter((s) => nowS - s <= maxS + 1);
                 return 0;
             },
         };

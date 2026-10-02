@@ -56,6 +56,8 @@ export default function PlaygroundWatch() {
     // every one loaded to be checked against (playground/version.js).
     setUberSDRVersion(serverInfo && serverInfo.version);
     const pg = getPlayground(player);
+    // Which clocks this receiver offers the Clock blocks: the NTP addon or not.
+    pg.setTimeContext(serverInfo);
     const iq = isIQ(tuning.mode);
 
     // Read at once, so the address bar is tidied, but offered only once the

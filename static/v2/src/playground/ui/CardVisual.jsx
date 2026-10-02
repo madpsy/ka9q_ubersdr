@@ -14,6 +14,8 @@ import { WAVEFORMS } from '../blocks/sources.js';
 import { cssVar, sizedCanvas } from '../../lib/audioWaterfall.js';
 import { airSpan, rfLabel, rfOf, shiftLabel, sourceZero } from '../probes.js';
 import { hasLevelLine, visualHeight } from '../geometry.js';
+import SerialCard from './SerialCard.jsx';
+import { timeParts } from '../blocks/clock.js';
 import { eqResponse, eqSections } from '../blocks/eq.js';
 
 const FLOOR_DB = -80;
@@ -237,10 +239,50 @@ function Recorder({ pg, id, label }) {
  * `grow` is how much taller than natural the card has been made: the room
  * its picture has to fill (geometry.js cardGrow).
  */
+/** How far out a clock could be, in words. */
+function clockErr(err) {
+    if (err == null) return 'accuracy unknown';
+    return err < 1 ? `±${(err * 1000).toFixed(0)} µs` : err < 1000 ? `±${err.toFixed(err < 10 ? 1 : 0)} ms` : `±${(err / 1000).toFixed(1)} s`;
+}
+
+/** A Clock's card: the time, ticking, and where it comes from. */
+function ClockFace({ reading, large }) {
+    if (!reading || reading.t == null) return <div className="pg-clock"><div className="pg-clock__time">--:--:--</div></div>;
+    const t = timeParts(reading.t, reading.zone);
+    const tenth = Math.floor((((reading.t % 1000) + 1000) % 1000) / 100);
+    const pad = (n) => String(n).padStart(2, '0');
+    return (
+        <div className="pg-clock" title={reading.note || reading.label}>
+            <div className="pg-clock__time">
+                {`${pad(t.h)}:${pad(t.m)}:${pad(t.s)}`}<span className="pg-clock__tenth">{`.${tenth}`}</span>
+                <span className="pg-clock__zone">{reading.zone === 'local' ? 'local' : 'UTC'}</span>
+            </div>
+            <div className="pg-clock__src">{`${reading.label} · ${clockErr(reading.err)}`}</div>
+            {reading.note && <div className="pg-clock__note">{reading.note}</div>}
+        </div>
+    );
+}
+
+/**
+ * A control plot's value as its card writes it: rounded to its Decimals, or to
+ * seven figures as it comes, and its unit after.
+ */
+export function plotValue(value, params = {}) {
+    if (value == null || !Number.isFinite(Number(value))) return '—';
+    const v = Number(value);
+    const d = params.decimals;
+    const text = d === 'auto' || d == null ? String(Number(v.toPrecision(7))) : v.toFixed(Number(d));
+    const unit = typeof params.unit === 'string' ? params.unit.trim() : '';
+    // `toFixed` writes a negative that rounds to nothing as "-0".
+    const tidy = /^-0(\.0+)?$/.test(text) ? text.slice(1) : text;
+    return unit ? `${tidy} ${unit}` : tidy;
+}
+
 export default function CardVisual({ pg, node, look, origin, rate, onParams, large = false, grow = 0 }) {
     if (INSTRUMENTS.has(node.type)) return <Instrument pg={pg} node={node} look={look} origin={origin} large={large} grow={grow} />;
     if (KNOBS.has(node.type)) return <Knob node={node} onParams={onParams} />;
     if (node.type === 'iq-in') return <Coverage zeroHz={sourceZero(node, look && look.dialHz)} rate={rate} />;
+    if (node.type === 'serial-port') return <SerialCard pg={pg} node={node} large={large} />;
     return <SimpleVisual pg={pg} node={node} origin={origin} rate={rate} large={large} grow={grow} />;
 }
 
@@ -582,6 +624,7 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
             );
         }
         case 'control-scale':
+        case 'control-shape':
         case 'integrator':
             return (
                 <div className="pg-vis__state pg-vis__value">
@@ -599,10 +642,12 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0 }) {
                     )}
                 </div>
             );
+        case 'clock':
+            return <ClockFace reading={reading} large={large} />;
         case 'control-plot':
             return (
                 <div className="pg-vis__plot">
-                    <div className="pg-vis__state pg-vis__value">{reading && reading.value != null ? Number(reading.value.toPrecision(7)) : '—'}</div>
+                    <div className="pg-vis__state pg-vis__value">{plotValue(reading && reading.value, node.params)}</div>
                     <Sparkline history={reading && reading.history} height={large ? 140 : 44 + Math.max(0, grow)} />
                 </div>
             );

@@ -235,20 +235,22 @@ export class AudioPlayer extends Emitter {
     /**
      * Listen to the decoded audio, before volume, mute and ducking.
      *
-     * `fn(planes, frames, sampleRate)` — `planes` is one Float32Array per
-     * channel, valid only for the duration of the call, so a listener that
-     * keeps it must copy. Returns a function that stops the listening.
+     * `fn(planes, frames, sampleRate, captureMs)` — `planes` is one
+     * Float32Array per channel, valid only for the duration of the call, so a
+     * listener that keeps it must copy. `captureMs` is when the packet's first
+     * sample was captured (the version 4 header; see capture_time.go), or null.
+     * Returns a function that stops the listening.
      */
     onAudio(fn) {
         this.taps.add(fn);
         return () => this.taps.delete(fn);
     }
 
-    _tap(planes, frames, sampleRate) {
+    _tap(planes, frames, sampleRate, captureMs = null) {
         for (const fn of Array.from(this.taps)) {
             // One listener throwing must not cost the others their audio, nor
             // interrupt playback — this runs on the decode path.
-            try { fn(planes, frames, sampleRate); } catch (e) { /* not ours to fix */ }
+            try { fn(planes, frames, sampleRate, captureMs); } catch (e) { /* not ours to fix */ }
         }
     }
 
@@ -1090,7 +1092,7 @@ export class AudioPlayer extends Emitter {
         // the operator has the receiver muted, turned down, or ducked by a
         // transmitting rig. Muting the speakers is about this room; the stream
         // is about somebody else's software.
-        if (this.taps.size) this._tap(planes, frames, sampleRate);
+        if (this.taps.size) this._tap(planes, frames, sampleRate, captureMs);
 
         const ctx = this.ctx;
         if (!ctx || ctx.state === 'closed') return;

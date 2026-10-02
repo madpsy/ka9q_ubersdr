@@ -148,6 +148,123 @@ export const ScaleBlock = {
     create: transform((p, v) => (v == null ? null : v * p.scale + p.offset)),
 };
 
+// The functions Shape & round can put a value through, and what each does.
+// Anything without an answer (the log of nothing, the root of a negative)
+// gives no value, and nothing is sent for it.
+export const SHAPE_FUNCTIONS = [
+    { value: 'none', label: 'None', fn: (x) => x },
+    { value: 'abs', label: 'Absolute value', fn: Math.abs },
+    { value: 'negate', label: 'Negate', fn: (x) => -x },
+    { value: 'reciprocal', label: '1 / x', fn: (x) => (x === 0 ? null : 1 / x) },
+    { value: 'square', label: 'Square', fn: (x) => x * x },
+    { value: 'sqrt', label: 'Square root', fn: (x) => (x < 0 ? null : Math.sqrt(x)) },
+    { value: 'log10', label: 'log₁₀', fn: (x) => (x > 0 ? Math.log10(x) : null) },
+    { value: 'ln', label: 'ln', fn: (x) => (x > 0 ? Math.log(x) : null) },
+    { value: 'exp', label: 'eˣ', fn: Math.exp },
+    { value: 'db-amp', label: 'To dB (amplitude, 20 log₁₀)', fn: (x) => (x > 0 ? 20 * Math.log10(x) : null) },
+    { value: 'db-pow', label: 'To dB (power, 10 log₁₀)', fn: (x) => (x > 0 ? 10 * Math.log10(x) : null) },
+    { value: 'from-db', label: 'From dB (amplitude)', fn: (x) => 10 ** (x / 20) },
+];
+const SHAPE_BY = Object.fromEntries(SHAPE_FUNCTIONS.map((f) => [f.value, f.fn]));
+
+// How a value is rounded to a multiple of the step.
+const ROUNDING = {
+    'nearest': Math.round,
+    'down': Math.floor,
+    'up': Math.ceil,
+    'toward-zero': Math.trunc,
+};
+
+// The most values Shape & round averages over.
+const SHAPE_AVERAGE_MAX = 1000;
+
+/**
+ * A control's value, worked on in steps, each off until it is set:
+ *
+ *   average    the mean of the last N values — a jumpy reading, steadied
+ *   function   abs, 1/x, a root, a log, to or from dB…
+ *   scale      × scale + offset, as Scale & offset does
+ *   clamp      held within min … max
+ *   round      to a multiple of the step — 1 for whole numbers, 0.1 for one
+ *              place, 5 or 100 for coarser — nearest, down, up or toward zero
+ *   deadband   a change smaller than this is not passed on: a value sitting
+ *              on a rounding boundary would otherwise flick between the two
+ *              every time it wobbles
+ *   only on change   nothing is sent while the result is what it was — so a
+ *              rounded value goes out when it moves, not on every reading
+ *
+ * In that order, which is the order a reading wants: steadied, converted,
+ * bounded, then made tidy to show or to set something by.
+ */
+export const ShapeBlock = {
+    type: 'control-shape',
+    label: 'Shape & round',
+    category: 'Control',
+    summary: 'Average, a function, scale, clamp, round, deadband — a control made the shape it needs to be.',
+    inputs: [{ name: 'in', kind: CONTROL }],
+    outputs: OUT,
+    params: {
+        average: { kind: 'number', label: 'Average of last', unit: 'values', default: 1, min: 1, max: SHAPE_AVERAGE_MAX, step: 1, live: true },
+        fn: {
+            kind: 'choice', label: 'Function', default: 'none',
+            options: SHAPE_FUNCTIONS.map(({ value, label }) => ({ value, label })),
+        },
+        scale: NUM('Scale', 1),
+        offset: NUM('Offset', 0),
+        min: NUM('Min', -BIG),
+        max: NUM('Max', BIG),
+        rounding: {
+            kind: 'choice', label: 'Round', default: 'none',
+            options: [
+                { value: 'none', label: 'No' },
+                { value: 'nearest', label: 'To nearest' },
+                { value: 'down', label: 'Down' },
+                { value: 'up', label: 'Up' },
+                { value: 'toward-zero', label: 'Toward zero' },
+            ],
+        },
+        step: NUM('To a multiple of', 1, { min: 1e-9, showIf: (p) => p.rounding !== 'none' }),
+        deadband: NUM('Ignore changes under', 0, { min: 0 }),
+        onChange: { kind: 'bool', label: 'Send only when it changes', default: true, live: true },
+    },
+    create() {
+        let p = {};
+        let seen = -1;
+        let value = null;
+        let recent = [];
+        return {
+            configure(params) { p = params; },
+            reset() { seen = -1; value = null; recent = []; },
+            read() { return { value }; },
+            process(ins, outs) {
+                const input = ins[0];
+                if (!input || input.seq === seen || input.value == null) return 0;
+                seen = input.seq;
+                let x = Number(input.value);
+                if (!Number.isFinite(x)) return 0;
+                const n = Math.max(1, Math.round(p.average || 1));
+                recent.push(x);
+                if (recent.length > n) recent = recent.slice(-n);
+                if (n > 1) x = recent.reduce((a, b) => a + b, 0) / recent.length;
+                x = (SHAPE_BY[p.fn] || SHAPE_BY.none)(x);
+                if (x == null || !Number.isFinite(x)) return 0;
+                x = x * p.scale + p.offset;
+                x = Math.max(Math.min(p.min, p.max), Math.min(Math.max(p.min, p.max), x));
+                const r = ROUNDING[p.rounding];
+                if (r && p.step > 0) {
+                    // Tidied, so 97 steps of 0.1 is 9.7 and not 9.700000000000001.
+                    x = Number((r(x / p.step) * p.step).toPrecision(12));
+                }
+                if (value != null && p.deadband > 0 && Math.abs(x - value) < p.deadband) return 0;
+                if (p.onChange && x === value) return 0;
+                value = x;
+                emitControl(outs[0], x);
+                return 0;
+            },
+        };
+    },
+};
+
 /**
  * Adds `gain × in` to its total on every new value in, within `min`..`max`,
  * starting at `initial`. A loop's integrator: fed an error, it moves its
@@ -186,7 +303,16 @@ export const ControlPlotBlock = {
     summary: 'A control’s value and its recent history — watch a loop settle.',
     inputs: [{ name: 'in', kind: CONTROL }],
     outputs: [],
-    params: {},
+    // How the value is written on the card: rounded to so many places (or as
+    // it comes, to seven figures), and a unit after it. The plot is drawn from
+    // the values as they are either way.
+    params: {
+        decimals: {
+            kind: 'choice', label: 'Decimals', default: 'auto',
+            options: [{ value: 'auto', label: 'As it comes' }, ...[0, 1, 2, 3, 4].map((d) => ({ value: d, label: String(d) }))],
+        },
+        unit: { kind: 'text', label: 'Unit', default: '', max: 16 },
+    },
     create() {
         const hist = new Float32Array(PLOT_HISTORY);
         let count = 0;

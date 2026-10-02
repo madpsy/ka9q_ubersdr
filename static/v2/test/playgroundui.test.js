@@ -628,6 +628,104 @@ t('a shared graph on a listed receiver can be opened in the app instead', () => 
     closePlayground();
 });
 
+// ── a scope's channels ──────────────────────────────────────────────────────
+
+t('a scope starts with two channels and grows to four; fewer drops the wires to the ones that went', () => {
+    reset();
+    const pg = getPlayground(radio().player);
+    const graph = (channels) => g([
+        { id: 'sig', type: 'signal' },
+        { id: 're', type: 'real-part' },
+        { id: 'sc', type: 'scope', params: { channels } },
+        { id: 'log', type: 'message-log' },
+    ], [['sig', 'out', 're', 'in'], ['re', 'out', 'sc', 'a'], ['re', 'out', 'sc', 'c'], ['sc', 'readings', 'log', 'in']]);
+    const ins = () => compile(pg.graph, 12000).ports.sc.map((p) => p.name);
+    try {
+        // As added, it has two.
+        assert.strictEqual(addNode(g([]), 'scope').graph.nodes[0].params.channels, 2);
+        pg.setGraph(graph(4));
+        assert.deepStrictEqual(ins(), ['a', 'b', 'c', 'd']);
+        assert.deepStrictEqual(compile(pg.graph, 12000).errors, []);
+        pg.setParams('sc', { channels: 2 });
+        assert.deepStrictEqual(ins(), ['a', 'b']);
+        assert.deepStrictEqual(pg.graph.wires.map((w) => w.join(' ')), ['sig out re in', 're out sc a', 'sc readings log in'], 'the wire to C was kept, or another went');
+        assert.deepStrictEqual(compile(pg.graph, 12000).errors, []);
+        // C's colour shows only with a C.
+        const colourC = BLOCK_BY_TYPE.scope.params.colourC;
+        assert.strictEqual(colourC.showIf({ channels: 2 }), false);
+        assert.strictEqual(colourC.showIf({ channels: 3 }), true);
+    } finally {
+        pg.setGraph({ ...g([]), name: '', savedAs: '' });
+    }
+});
+
+t('a control plot writes its value to the decimals and unit it is given', () => {
+    assert.strictEqual(P.plotValue(9.6, { decimals: 'auto' }), '9.6');
+    assert.strictEqual(P.plotValue(9.6, { decimals: 0 }), '10');
+    assert.strictEqual(P.plotValue(9.6449, { decimals: 2, unit: ' wpm ' }), '9.64 wpm');
+    assert.strictEqual(P.plotValue(-0.2, { decimals: 0 }), '0', 'a negative rounded to nothing read as -0');
+    assert.strictEqual(P.plotValue(1 / 3, {}), '0.3333333');
+    assert.strictEqual(P.plotValue(null, { decimals: 1 }), '—');
+    const p = BLOCK_BY_TYPE['control-plot'].params;
+    assert.strictEqual(p.decimals.default, 'auto');
+});
+
+// ── a serial port's card ────────────────────────────────────────────────────
+
+t('a serial card says why there are no ports where there are none, and asks for nothing', () => {
+    reset();
+    let asked = false;
+    const pg = { serialOf: () => { asked = true; return null; } };
+    const node = { id: 'ser', type: 'serial-port', params: {} };
+    const why = 'This browser has no serial ports.';
+    let r = render(P.SerialCard, { pg, node, support: { ok: false, why } });
+    assert.match(words(r.tree), /No serial ports here/);
+    r = render(P.SerialCard, { pg, node, large: true, support: { ok: false, why } });
+    assert.strictEqual(words(r.tree), why);
+    assert.strictEqual(asked, false, 'a port was looked for where there can be none');
+});
+
+t('a serial card connects, reconnects or picks another, and shows the lines', () => {
+    reset();
+    const calls = [];
+    const link = {
+        state: 'idle', message: '', label: '', rxBytes: 0, txBytes: 0,
+        lines: { cts: true, dsr: false, dcd: false, ri: false }, outLines: { dtr: false, rts: false },
+        on: () => () => {}, remembered: () => 'USB 1a86:7523',
+        connect: (p, o) => calls.push(['connect', !!(o && o.pick)]), disconnect: () => calls.push(['disconnect']),
+    };
+    const pg = { running: true, serialOf: () => link };
+    const node = { id: 'ser', type: 'serial-port', params: { baud: 9600 } };
+    let r = render(P.SerialCard, { pg, node, support: { ok: true, why: '' } });
+    const btn = (label) => deep(r.tree).find((n) => n.type === 'button' && words(n) === label);
+    btn('connect').props.onClick();
+    btn('other…').props.onClick();
+    assert.deepStrictEqual(calls, [['connect', false], ['connect', true]]);
+    link.state = 'open';
+    link.label = 'USB 1a86:7523';
+    r = render(P.SerialCard, { pg, node, support: { ok: true, why: '' } });
+    btn('disconnect').props.onClick();
+    assert.deepStrictEqual(calls[2], ['disconnect']);
+    const lit = deep(r.tree).filter((n) => typeof n.props.className === 'string' && n.props.className.includes('pg-ser__light is-on')).map(words);
+    assert.deepStrictEqual(lit, ['CTS']);
+});
+
+// ── the message log as text ─────────────────────────────────────────────────
+
+t('a message log reads decoded text as itself and a scope\'s readings as one line per report', () => {
+    assert.strictEqual(P.messageLine({ type: 'text', text: 'CQ CQ' }), 'CQ CQ');
+    const line = P.measureLine({ type: 'measure', a: { vpp: 1, rms: 0.354, mean: 0, hz: 1000 }, c: { vpp: 0, rms: 0.25, mean: 0.25, hz: null } });
+    assert.match(line, /^A p-p 1\.00 · RMS 0\.354 · mean 0\.00 · 1\.000 kHz|^A p-p 1\.00 · RMS 0\.354 · mean 0\.00 · .*Hz/);
+    assert.match(line, /\|  C p-p 0\.00 · RMS 0\.250 · mean 0\.250 · — Hz$/);
+});
+
+t('a log as text is oldest first, each line a time, a tab and what it said', () => {
+    const wall = new Date(2026, 9, 2, 10, 5, 7).getTime();
+    const text = P.logText([{ type: 'text', text: 'second', wall: wall + 1000 }, { type: 'text', text: 'first', wall }]);
+    assert.strictEqual(text, '2026-10-02 10:05:07\tfirst\n2026-10-02 10:05:08\tsecond\n');
+    assert.strictEqual(P.logText([]), '');
+});
+
 // ── the toolbar on a narrow screen ──────────────────────────────────────────
 
 t('the toolbar folds up a step at a time as it overflows, and back only once there is the room it needed', () => {

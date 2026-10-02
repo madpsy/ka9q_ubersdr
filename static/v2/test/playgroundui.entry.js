@@ -16,7 +16,7 @@ import { MARGIN_MIN_DB, MARGIN_LOSSLESS } from '../src/radio/constants.js';
 import { setUberSDRVersion, uberSDRVersion, versionNote } from '../src/playground/version.js';
 import Canvas, { BlockPreview, InPlace, formatCpu, formatLatency, formatRate } from '../src/playground/ui/Canvas.jsx';
 import { HEAD_H as CARD_HEAD_H } from '../src/playground/geometry.js';
-import CardVisual, { ActivityDot, ClipPill, RfLine, activityMeaning, canClip } from '../src/playground/ui/CardVisual.jsx';
+import CardVisual, { ActivityDot, ClipPill, RfLine, activityMeaning, canClip, plotValue } from '../src/playground/ui/CardVisual.jsx';
 import Palette from '../src/playground/ui/Palette.jsx';
 import { closePlayground, offerSharedGraph, openPlayground, playgroundUiState } from '../src/playground/ui/store.js';
 import {
@@ -30,7 +30,7 @@ import {
 } from '../src/playground/geometry.js';
 import {
     ConstellationView, ConsoleView, DiffView, INSTRUMENTS, Instrument, ScopeView, SpectrumView, freqLabel, scopeRange, spectrumAxis, timeLabel,
-    spectrumMarks, counterText, groupDigits,
+    spectrumMarks, counterText, groupDigits, messageLine, measureLine, logText,
 } from '../src/playground/ui/viewers.jsx';
 import { BLOCKS, BLOCK_BY_TYPE, CATEGORIES } from '../src/playground/blocks/index.js';
 import { holdSpectrum, setSpectrumPaused, spectrumPaused } from '../src/lib/spectrumPause.js';
@@ -40,10 +40,11 @@ import { encodeShare, decodeShare } from '../src/playground/share.js';
 import { PROBES, airSpan, rfLabel, rfOf, shiftLabel } from '../src/playground/probes.js';
 import * as LIB from '../src/playground/library.js';
 import { ExportDialog, GraphName, OpenDialog, SaveNameDialog } from '../src/playground/ui/GraphLibrary.jsx';
+import SerialCard from '../src/playground/ui/SerialCard.jsx';
 import { resetDemodSettings, saveDemodSettings } from '../src/lib/iqDemod.js';
 
 module.exports = {
-    deep, render, reset, walk, words, AnnotateMenu, useCompactRow, LIB, GraphName, ExportDialog, OpenDialog, SaveNameDialog,
+    deep, render, reset, walk, words, SerialCard, plotValue, messageLine, measureLine, logText, AnnotateMenu, useCompactRow, LIB, GraphName, ExportDialog, OpenDialog, SaveNameDialog,
     withArrival, zoomToward, ZOOM_MAX, ZOOM_MIN,
     IQPanel, PlaygroundWatch, takeShareCode, PlaygroundModal, PlaygroundWindow, WATCHED_TYPES, graphFromIQDemod, graphFromAllChannels, TemplatesMenu, TEMPLATES,
     Inspector, ParamField, countShare, formatBytesPerSec, useQuietWhilePlaying, streamRates, throughputHistory, eqPresetParams, formatKbps, VoiceField, holdPlayback, playbackHeld, JsonPane, graphText, readGraphText, Canvas, BlockPreview, CARD_HEAD_H, InPlace, formatCpu, formatLatency, formatRate, CardVisual, RfLine, ActivityDot, activityMeaning, ClipPill, canClip, Palette,

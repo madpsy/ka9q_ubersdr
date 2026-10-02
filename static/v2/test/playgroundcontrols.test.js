@@ -251,4 +251,52 @@ t('the worker sends what controls have set, even with nothing watched', () => {
     assert.deepStrictEqual(out.readings.__driven, { gen: { amplitude: 1 } });
 });
 
+// ── Shape & round ───────────────────────────────────────────────────────────
+
+/** Values through a Shape & round, one at a time: what each sent, null for nothing. */
+function shape(params, values) {
+    const def = BLOCK_BY_TYPE['control-shape'];
+    const inst = def.create();
+    const p = {};
+    for (const [k, spec] of Object.entries(def.params)) p[k] = spec.default;
+    inst.configure({ ...p, ...params });
+    const inp = makeBuffer('control', 0);
+    const out = makeBuffer('control', 0);
+    return values.map((v, k) => {
+        const before = out.seq;
+        inp.value = v;
+        inp.seq = k + 1;
+        inst.process([inp], [out], 0);
+        return out.seq === before ? null : out.value;
+    });
+}
+
+t('Shape & round passes a value through untouched until a step is set', () => {
+    assert.deepStrictEqual(shape({}, [9.6, 9.7, -3]), [9.6, 9.7, -3]);
+});
+
+t('Shape & round rounds to a multiple of its step, each way, tidily', () => {
+    assert.deepStrictEqual(shape({ rounding: 'nearest', step: 1, onChange: false }, [9.6, 9.4, -2.5]), [10, 9, -2]);
+    assert.deepStrictEqual(shape({ rounding: 'down', step: 1, onChange: false }, [9.6, -9.6]), [9, -10]);
+    assert.deepStrictEqual(shape({ rounding: 'up', step: 1, onChange: false }, [9.1, -9.6]), [10, -9]);
+    assert.deepStrictEqual(shape({ rounding: 'toward-zero', step: 1, onChange: false }, [9.6, -9.6]), [9, -9]);
+    assert.deepStrictEqual(shape({ rounding: 'nearest', step: 0.1, onChange: false }, [9.66]), [9.7], 'not tidied');
+    assert.deepStrictEqual(shape({ rounding: 'nearest', step: 5, onChange: false }, [12, 13]), [10, 15]);
+});
+
+t('Shape & round sends only when the result changes, and ignores changes under its deadband', () => {
+    assert.deepStrictEqual(shape({ rounding: 'nearest', step: 1 }, [9.6, 9.7, 10.2, 10.6]), [10, null, null, 11]);
+    // On a boundary, a deadband stops it flicking.
+    assert.deepStrictEqual(shape({ deadband: 0.5 }, [9.5, 9.7, 9.3, 10.1]), [9.5, null, null, 10.1]);
+});
+
+t('Shape & round averages, puts the value through a function, scales and clamps — in that order', () => {
+    assert.deepStrictEqual(shape({ average: 2, onChange: false }, [10, 20, 40]), [10, 15, 30]);
+    assert.deepStrictEqual(shape({ fn: 'db-amp', rounding: 'nearest', step: 0.1, onChange: false }, [10, 0.5]), [20, -6]);
+    assert.deepStrictEqual(shape({ fn: 'sqrt', onChange: false }, [16, -4]), [4, null], 'a root of a negative sent something');
+    assert.deepStrictEqual(shape({ scale: 2, offset: 1, min: 0, max: 10, onChange: false }, [3, 7, -5]), [7, 10, 0]);
+    // The function before the scale: abs, then negated by scale −1.
+    assert.deepStrictEqual(shape({ fn: 'abs', scale: -1, onChange: false }, [-4]), [-4]);
+});
+
 console.log(`\n${pass} passed`);

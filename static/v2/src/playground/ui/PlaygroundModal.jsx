@@ -46,7 +46,7 @@ import { channelSummary, graphFromAllChannels, graphFromIQDemod, iqDemodChannels
 // The nodes whose readings the cards draw. Others have nothing live to show,
 // and asking for an Audio out's reading would copy its samples back for nothing.
 export const WATCHED_TYPES = new Set([
-    'meter', 'level-detector', 'squelch', 'carrier-tracker', 'control-scale', 'integrator', 'control-plot', 'iq-player', 'data-tx', 'demodulator',
+    'meter', 'level-detector', 'squelch', 'carrier-tracker', 'control-scale', 'control-shape', 'integrator', 'control-plot', 'clock', 'iq-player', 'data-tx', 'demodulator',
     'costas-loop', 'morse-decoder', 'uart', 'sitor-decoder', 'fsk-detector', 'ook-detector',
     'rtty-decoder', 'psk31-decoder', 'cw-decoder', 'navtex-decoder', 'noise-blanker', 'nr2', 'compressor', 'morse-encoder',
     ...INSTRUMENTS,

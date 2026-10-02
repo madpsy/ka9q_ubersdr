@@ -162,7 +162,9 @@ export const MessageLogBlock = {
             configure() {},
             reset() { lines = []; count = 0; },
             command(name) { if (name === 'clear') { lines = []; } },
-            read() { return { lines: lines.slice(0, 100), count }; },
+            // All it keeps — the card shows a few, the inspector them all, and
+            // Copy and Save take every one.
+            read() { return { lines: lines.slice(), count }; },
             process(ins) {
                 const input = ins[0];
                 if (!input || !input.list.length) return 0;

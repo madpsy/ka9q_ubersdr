@@ -42,17 +42,18 @@
 import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { Icon, Switch } from '../components/ui.jsx';
 import {
-    BURST_GAP_MS, FETCH_TIMEOUT_MS, POLL_MS, WINDOW,
+    BURST_GAP_MS, POLL_MS, WINDOW,
     addSample, addonUrl, bestEstimate, clockAsleep, clockFaces, deviceError, deviceHistoryAdd,
     deviceLabel, deviceSeries, deviceTone, deviceVerdict, deviceWithin, dialEdge, dialPos, dialSpan, dispersionTone, faceDateAt,
     facePartsAt, faceFor, faceText, formatDur, formatMs, newClock, nextFaceKey,
-    nextSecondDelay, ntpAvailable, offsetText, referenceKey, referenceOf, sampleFrom,
+    nextSecondDelay, ntpAvailable, offsetText, referenceKey, referenceOf,
     saveBigClock, saveShowRef, saveShowMs, savedBigClock, savedShowRef, savedShowMs,
-    servingNote, staleStatus, statusUrl, timeUrl,
+    servingNote, staleStatus, statusUrl,
 } from '../lib/ntpTime.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import useFeedsAllowed from '../lib/useServerFeeds.js';
 import useInView from '../lib/useInView.js';
+import { takeNtpSample } from '../lib/ntpSample.js';
 
 export { ntpAvailable };
 
@@ -428,41 +429,8 @@ export default function TimePanel({ minimal }) {
             timer = setTimeout(run, ms);
         };
 
-        const takeSample = async () => {
-            const url = new URL(timeUrl(++seq), window.location.href).href;
-            const ctl = new AbortController();
-            const kill = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
-            let d;
-            let t0;
-            let t3;
-            try {
-                t0 = performance.now();
-                const r = await fetch(url, { cache: 'no-store', signal: ctl.signal });
-                t3 = performance.now();
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                d = await r.json();
-            } finally {
-                clearTimeout(kill);
-            }
-
-            // Resource Timing gives the instants the request reached the socket and the first
-            // response byte came back, which is a tighter pair than fetch()'s own — see
-            // lib/ntpTime.js. Where the entry is missing, the fetch's own instants still work.
-            // The entry is recorded when the body completes, which some browsers do a task
-            // or two after the promise resolves — hence the wait rather than one look.
-            let entry = null;
-            for (let i = 0; i < 5 && !entry; i++) {
-                const list = performance.getEntriesByName(url, 'resource');
-                if (list.length) entry = list[list.length - 1];
-                else await new Promise((res) => { setTimeout(res, 20); });
-            }
-            // Or the buffer fills and entries stop being recorded at all.
-            performance.clearResourceTimings();
-            const precise = entry && entry.requestStart > 0 && entry.responseStart >= entry.requestStart;
-            const sent = precise ? entry.requestStart : t0;
-            const got = precise ? entry.responseStart : t3;
-            return { d, sample: sampleFrom(d, sent, got) };
-        };
+        // One timed request to the addon — lib/ntpSample.js, shared with the playground's Clock.
+        const takeSample = () => takeNtpSample(++seq);
 
         const run = async () => {
             timer = 0;

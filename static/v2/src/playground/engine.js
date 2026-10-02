@@ -26,6 +26,9 @@ import { Emitter } from '../radio/emitter.js';
 import { claimIQ, releaseIQ } from '../lib/iqExclusive.js';
 import { AudioRoutes } from '../lib/audioRoutes.js';
 import { Speaker } from './speech.js';
+import { SerialLink, trackLink } from './serialLink.js';
+import { TimeSource } from './timeSource.js';
+import { ntpAvailable } from '../lib/ntpTime.js';
 import { planFor } from '../lib/iqDemod.js';
 import { cleanGraphName, parseGraph, serializeGraph } from './graph.js';
 import { graphForPlan } from './fromPlan.js';
@@ -33,7 +36,8 @@ import { autoLayout } from './geometry.js';
 import { createHost } from './host.js';
 import { WavRecording } from './recording.js';
 import { BLOCK_BY_TYPE } from './blocks/index.js';
-import { sanitizeParams } from './block.js';
+import { inputsOf, outputsOf, sanitizeParams } from './block.js';
+import { cloneGraph } from './editing.js';
 import { saveFile } from '../lib/saveFile.js';
 
 export const STORAGE_KEY = 'ubersdr.v2.playground';
@@ -70,6 +74,13 @@ export function defaultGraph() {
     return autoLayout(parseGraph(graphForPlan(plan, 12000, { adaptive: true })).graph);
 }
 
+/** A node's port names, in and out, and a key that changes when either does. */
+function portNames(n, def) {
+    const ins = inputsOf(n, def).map((p) => p.name);
+    const outs = outputsOf(n, def).map((p) => p.name);
+    return { ins: new Set(ins), outs: new Set(outs), key: `${ins.join(',')}|${outs.join(',')}` };
+}
+
 function loadGraph() {
     try {
         const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
@@ -86,7 +97,7 @@ export class PlaygroundEngine extends Emitter {
      * `player` is the receiver's AudioPlayer. `hostFactory` is how a host is
      * made, for the tests to run the graph inline.
      */
-    constructor(player, { hostFactory = createHost, now = () => performance.now(), speakerFactory = () => new Speaker() } = {}) {
+    constructor(player, { hostFactory = createHost, now = () => performance.now(), speakerFactory = () => new Speaker(), timeSource = null } = {}) {
         super();
         this.player = player;
         this._hostFactory = hostFactory;
@@ -131,6 +142,11 @@ export class PlaygroundEngine extends Emitter {
         this.routes = new AudioRoutes(player, () => this.emit('change'));
         // Each TTS block's voice, made when it first has something to say.
         this.speakers = new Map();
+        // Each Serial port block's port, made when first asked for (serialOf).
+        this.serial = new Map();
+        this._packetMs = 20;
+        // Where Clock blocks get the time (timeSource.js): measured only while one runs.
+        this.time = timeSource || new TimeSource();
         this._speakerFactory = speakerFactory;
     }
 
@@ -202,7 +218,22 @@ export class PlaygroundEngine extends Emitter {
     setParams(id, patch) {
         const n = this.graph.nodes.find((x) => x.id === id);
         if (!n) return;
-        n.params = sanitizeParams(BLOCK_BY_TYPE[n.type], { ...n.params, ...patch });
+        const def = BLOCK_BY_TYPE[n.type];
+        const portsBefore = portNames(n, def);
+        n.params = sanitizeParams(def, { ...n.params, ...patch });
+        // A setting that changes what ports there are (a scope's channels) is a
+        // new shape of graph, not a new value: the wires to ports that went go
+        // too, and the whole graph is handed over again so it is rebuilt.
+        const portsAfter = portNames(n, def);
+        if (portsAfter.key !== portsBefore.key) {
+            const wires = this.graph.wires.filter((w) => !(w[2] === id && !portsAfter.ins.has(w[3]))
+                && !(w[0] === id && !portsAfter.outs.has(w[1])));
+            // cloneGraph carries no name, so setGraph keeps the one it has.
+            this.setGraph({ ...cloneGraph(this.graph), wires });
+            return;
+        }
+        // A serial port opened differently is reopened.
+        if (n.type === 'serial-port' && this.serial.has(id)) this.serial.get(id).setParams(n.params);
         // A TTS block muted stops talking now, not at its next word.
         if (n.type === 'tts' && n.params.muted && this.speakers.has(id)) this.speakers.get(id).stop();
         this._persist();
@@ -293,12 +324,28 @@ export class PlaygroundEngine extends Emitter {
     /** Voices and recordings for nodes that have gone are let go. */
     _afterGraph() {
         const ids = new Set(this.graph.nodes.map((n) => n.id));
+        if (this.active) this.time.want(this._hasClock());
         for (const id of Array.from(this.files.keys())) if (!ids.has(id)) this.files.delete(id);
         this.routes.prune(this.graph.nodes.filter((n) => n.type === 'audio-out').map((n) => n.id));
         for (const [id, sp] of Array.from(this.speakers)) {
             if (this.graph.nodes.some((n) => n.id === id && n.type === 'tts')) continue;
             sp.stop();
             this.speakers.delete(id);
+        }
+        // A serial block gone takes its port with it; one still here learns
+        // whether anything listens to its input lines (polled fast if so).
+        for (const [id, link] of Array.from(this.serial)) {
+            const n = this.graph.nodes.find((x) => x.id === id && x.type === 'serial-port');
+            if (!n) {
+                link.disconnect();
+                if (link._untrack) link._untrack();
+                this.serial.delete(id);
+                continue;
+            }
+            link.setListening(this.graph.wires.some((w) => w[0] === id && ['key', 'cts', 'dsr', 'dcd', 'ri'].includes(w[1])));
+            // Settings changed another way (undo, the JSON pane): reopened if
+            // the port is to be opened differently.
+            if (n.params !== link.params) link.setParams(n.params);
         }
         for (const [id, rec] of Array.from(this.recordings)) {
             if (ids.has(id)) continue;
@@ -324,7 +371,9 @@ export class PlaygroundEngine extends Emitter {
         this.routes.allowOwnContext(this.offline);
         this._openHost();
         if (this.offline) this._startClock();
-        else this._untap = this.player.onAudio((planes, frames, rate) => this._onAudio(planes, frames, rate));
+        else this._untap = this.player.onAudio((planes, frames, rate, captureMs) => this._onAudio(planes, frames, rate, captureMs));
+        for (const link of this.serial.values()) link.setActive(true);
+        this.time.want(this._hasClock());
         this._applyDuck();
         this.emit('change');
     }
@@ -342,6 +391,9 @@ export class PlaygroundEngine extends Emitter {
         this.routes.teardown();
         // Stopped mid-sentence, with nothing left waiting to be said.
         for (const sp of this.speakers.values()) sp.stop();
+        // Nothing deciding the lines any more: they drop.
+        for (const link of this.serial.values()) link.setActive(false);
+        this.time.want(false);
         this.inFlight = 0;
         this.readings = {};
         this.levels = {};
@@ -407,7 +459,20 @@ export class PlaygroundEngine extends Emitter {
     }
 
     /** One packet to the host, unless it is too far behind to take one. */
-    _send(i, q, frames, rate) {
+    /** Whether the graph has a Clock, which needs the time measured and sent. */
+    _hasClock() {
+        return this.graph.nodes.some((n) => n.type === 'clock');
+    }
+
+    /**
+     * What this receiver offers the Clock blocks: the NTP addon or not, and
+     * whether its own clock says it is synchronised. From /api/description.
+     */
+    setTimeContext(serverInfo) {
+        this.time.configure({ ntp: ntpAvailable(serverInfo), hostSynced: !!(serverInfo && serverInfo.server_time_sync === true) });
+    }
+
+    _send(i, q, frames, rate, captureMs = null) {
         this.streamRate = rate;
         if (this.inFlight >= MAX_IN_FLIGHT) {
             const first = !this.overloaded;
@@ -416,7 +481,16 @@ export class PlaygroundEngine extends Emitter {
             return;
         }
         this.inFlight++;
-        this.host.send({ t: 'packet', seq: ++this._seq, i, q, frames, rate }, i ? [i.buffer, q.buffer] : []);
+        // What each serial port took in since the last packet, placed in this one.
+        this._packetMs = rate > 0 ? (frames / rate) * 1000 : this._packetMs;
+        let serial = null;
+        for (const [id, link] of this.serial) {
+            const got = link.takeInbound(this._packetMs);
+            if (got) (serial || (serial = {}))[id] = got;
+        }
+        // The time, every way it can be had, for each Clock to choose from.
+        const time = this._hasClock() ? this.time.packetTime(this._packetMs, captureMs) : null;
+        this.host.send({ t: 'packet', seq: ++this._seq, i, q, frames, rate, ...(serial ? { serial } : {}), ...(time ? { time } : {}) }, i ? [i.buffer, q.buffer] : []);
     }
 
     /**
@@ -482,6 +556,25 @@ export class PlaygroundEngine extends Emitter {
         return sp;
     }
 
+    /**
+     * A Serial port block's port, made on first asking. Its changes are the
+     * window's to redraw by.
+     */
+    serialOf(id) {
+        let link = this.serial.get(id);
+        if (!link) {
+            link = new SerialLink(id);
+            link._untrack = trackLink(link);
+            link.on('change', () => this.emit('change'));
+            const p = this.paramsOf(id);
+            if (p) link.params = p;
+            link.setActive(this.active);
+            link.setListening(this.graph.wires.some((w) => w[0] === id && ['key', 'cts', 'dsr', 'dcd', 'ri'].includes(w[1])));
+            this.serial.set(id, link);
+        }
+        return link;
+    }
+
     /** Whether a player node has a file in it. */
     hasFile(id) {
         return this.files.has(id);
@@ -494,7 +587,7 @@ export class PlaygroundEngine extends Emitter {
         this.player.setDucked(want);
     }
 
-    _onAudio(planes, frames, sampleRate) {
+    _onAudio(planes, frames, sampleRate, captureMs = null) {
         if (!this.active || !this._quad || !frames || !this.host) return;
         if (planes.length < 2) return;
         this._counts.packets++;
@@ -504,10 +597,10 @@ export class PlaygroundEngine extends Emitter {
         if (!this.player.ducked) this.player.setDucked(true);
         if (this.inFlight >= MAX_IN_FLIGHT) {
             this._counts.behind++;
-            this._send(null, null, frames, sampleRate);
+            this._send(null, null, frames, sampleRate, captureMs);
             return;
         }
-        this._send(planes[0].slice(0, frames), planes[1].slice(0, frames), frames, sampleRate);
+        this._send(planes[0].slice(0, frames), planes[1].slice(0, frames), frames, sampleRate, captureMs);
     }
 
     _onMessage(m) {
@@ -554,6 +647,10 @@ export class PlaygroundEngine extends Emitter {
         for (const s of m.speech || []) {
             const p = this.paramsOf(s.id);
             if (p) this.speakerOf(s.id).feed(s.text, p);
+        }
+        for (const s of m.serial || []) {
+            const link = this.serial.get(s.id);
+            if (link) link.deliver(s, this._packetMs);
         }
         let stopped = false;
         for (const r of m.record || []) {
@@ -628,6 +725,8 @@ export class PlaygroundEngine extends Emitter {
 
     destroy() {
         this.stop();
+        this.time.stop();
+        for (const link of this.serial.values()) link.disconnect();
         this.flush();
         for (const rec of this.recordings.values()) rec.clear();
         this.recordings.clear();

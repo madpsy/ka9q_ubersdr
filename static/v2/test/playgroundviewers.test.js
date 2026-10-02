@@ -213,6 +213,125 @@ t('the scope draws a second trace from its b input, and can trigger on it', () =
     assert.ok(r.triggered, 'did not trigger on B');
 });
 
+t('the scope takes four channels, each where it is wired, and triggers on any', () => {
+    const b = block('scope', { timebaseMs: 5, source: 'd', level: 0 });
+    const n = 240;
+    for (let at = 0; at < 4800; at += n) {
+        const buf = (fn) => { const x = makeBuffer('real', n); for (let k = 0; k < n; k++) x.re[k] = fn(at + k); x.n = n; return x; };
+        b.inst.process([buf(() => 0.1), null, buf(() => -0.2), buf((k) => 0.5 * Math.sin((2 * Math.PI * 1000 * k) / RATE))], [], n);
+    }
+    const r = b.inst.read();
+    assert.ok(r.a && !r.b && r.c && r.d, `channels: ${['a', 'b', 'c', 'd'].filter((c) => r[c]).join(',')}`);
+    assert.ok(Math.abs(r.c.mean + 0.2) < 1e-6);
+    assert.ok(r.triggered, 'did not trigger on D');
+});
+
+// A key level at 250 Hz beside a signal at 1 kHz: the slower channel is held
+// between its samples, so each of its values spans four of the faster's —
+// lined up in time, not squashed into the first quarter of the sweep.
+t('the scope lines up channels at different rates in time', () => {
+    const def = BLOCK_BY_TYPE.scope;
+    const inst = def.create();
+    inst.configure(sanitizeParams(def, { timebaseMs: 400, position: 0, mode: 'auto' }), 1000, [1000, 250]);
+    // Packets of 100 ms: 100 samples of A, 25 of B — B counting up.
+    let next = 0;
+    for (let p = 0; p < 20; p++) {
+        const a = makeBuffer('real', 100);
+        a.n = 100;
+        const bb = makeBuffer('real', 25);
+        for (let k = 0; k < 25; k++) bb.re[k] = next++;
+        bb.n = 25;
+        inst.process([a, bb], [], 100);
+    }
+    const r = inst.read();
+    assert.ok(r.b, 'no B');
+    // Free-running: the latest 400 samples of A, so the latest 100 of B.
+    const cols = r.b.max.length;
+    assert.strictEqual(cols, 400);
+    const changes = [];
+    for (let k = 0; k < cols; k++) {
+        assert.strictEqual(r.b.max[k], r.b.min[k]);
+        if (k > 0 && r.b.max[k] !== r.b.max[k - 1]) changes.push(k);
+    }
+    // Every step of B the same four samples of A long.
+    for (let i = 1; i < changes.length; i++) assert.strictEqual(changes[i] - changes[i - 1], 4, `B held ${changes[i] - changes[i - 1]} samples at ${changes[i]}`);
+    const steps = new Set(Array.from(r.b.max));
+    assert.ok(steps.size >= 99 && steps.size <= 101, `B took ${steps.size} values over 400 ms, not 100`);
+    assert.strictEqual(r.b.max[cols - 1], next - 1, 'B is behind A');
+});
+
+t('a scope compiles with inputs at different rates; any other block still refuses them', () => {
+    const graph = (sink) => parseGraph({
+        v: GRAPH_VERSION,
+        nodes: [
+            { id: 'sig', type: 'signal' },
+            { id: 're', type: 'real-part' },
+            { id: 'ook', type: 'ook-detector' },
+            sink,
+        ],
+        wires: [['sig', 'out', 'ook', 'in'], ['sig', 'out', 're', 'in'], ['ook', 'key', sink.id, 'a'], ['re', 'out', sink.id, 'b']],
+    }).graph;
+    const ok = compile(graph({ id: 'sc', type: 'scope' }), RATE);
+    assert.deepStrictEqual(ok.errors, []);
+    assert.strictEqual(ok.inRate.sc, ok.outRate.re, 'the scope did not run at its fastest input');
+    assert.ok(ok.inRates.sc[0] < ok.inRates.sc[1], `rates ${ok.inRates.sc}`);
+    const no = compile(graph({ id: 'ph', type: 'phase-meter' }), RATE);
+    assert.ok(no.errors.some((e) => /different rates/.test(e.message)), 'a phase meter took two rates');
+});
+
+t('each scope channel has a colour of its own to pick', () => {
+    const def = BLOCK_BY_TYPE.scope;
+    const p = sanitizeParams(def, {});
+    assert.deepStrictEqual([p.colourA, p.colourB, p.colourC, p.colourD], ['blue', 'violet', 'green', 'pink']);
+    assert.strictEqual(sanitizeParams(def, { colourC: 'orange' }).colourC, 'orange');
+    assert.strictEqual(sanitizeParams(def, { colourC: 'nonsense' }).colourC, 'green');
+});
+
+t('the scope reports what it measures every interval: a message of everything, and the picked measure on each channel\'s control', () => {
+    const def = BLOCK_BY_TYPE.scope;
+    const inst = def.create();
+    inst.configure(sanitizeParams(def, { reportMs: 100, measure: 'vpp' }), RATE, [RATE, null, RATE]);
+    const outs = def.outputs.map((p) => makeBuffer(p.kind, 0));
+    const got = [];
+    const n = 240;
+    for (let at = 0; at < RATE; at += n) {
+        outs[0].list = [];
+        const a = makeBuffer('real', n);
+        const c = makeBuffer('real', n);
+        for (let k = 0; k < n; k++) {
+            a.re[k] = 0.5 * Math.sin((2 * Math.PI * 1000 * (at + k)) / RATE);
+            c.re[k] = 0.25;
+        }
+        a.n = n;
+        c.n = n;
+        inst.process([a, null, c, null], outs, n);
+        got.push(...outs[0].list);
+    }
+    // A second at one report every 100 ms.
+    assert.ok(got.length >= 9 && got.length <= 11, `${got.length} reports`);
+    const last = got[got.length - 1];
+    assert.strictEqual(last.type, 'measure');
+    assert.ok(last.a && !last.b && last.c && !last.d);
+    assert.ok(Math.abs(last.a.vpp - 1) < 0.01, `A p-p ${last.a.vpp}`);
+    assert.ok(Math.abs(last.a.hz - 1000) < 5, `A ${last.a.hz} Hz`);
+    assert.ok(Math.abs(last.c.mean - 0.25) < 1e-6);
+    assert.ok(Math.abs(outs[1].value - 1) < 0.01, `a-out ${outs[1].value}`);
+    assert.strictEqual(outs[3].value, 0, 'c-out should carry C\'s p-p, which is nothing');
+    assert.strictEqual(outs[2].seq, 0, 'an unwired channel reported');
+});
+
+t('a message log keeps every message for Copy and Save, not only the ones on screen', () => {
+    const def = BLOCK_BY_TYPE['message-log'];
+    const inst = def.create();
+    inst.configure({}, RATE);
+    const input = makeBuffer('message', 0);
+    input.list = Array.from({ length: 300 }, (_, k) => ({ type: 'text', text: String(k) }));
+    inst.process([input], [], 0);
+    const r = inst.read();
+    assert.strictEqual(r.lines.length, 300);
+    assert.strictEqual(r.lines[0].text, '299', 'newest first');
+});
+
 // ── constellation ───────────────────────────────────────────────────────────
 
 t('a constellation of a tone is a circle of its amplitude, oldest first', () => {

@@ -13,6 +13,8 @@ import { cssVar, levelWindow, sizedCanvas } from '../../lib/audioWaterfall.js';
 import { getPalette } from '../../lib/palettes.js';
 import { Button, Icon, Readout, Switch } from '../../components/ui.jsx';
 import { MARKER_H, SPECTRUM_H, SCALE_H, WATERFALL_H } from '../geometry.js';
+import { SCOPE_CHANNELS, SCOPE_COLOURS } from '../blocks/viewers.js';
+import { saveText } from '../../lib/saveFile.js';
 
 // ── frequency labels ────────────────────────────────────────────────────────
 
@@ -300,6 +302,13 @@ export function scopeRange(params, reading, held) {
     return step;
 }
 
+/** A scope channel's trace colour, as its `colourA`…`colourD` setting says. */
+export function scopeColour(params, ch) {
+    const want = params && params[`colour${ch.toUpperCase()}`];
+    const c = SCOPE_COLOURS.find((x) => x.value === want) || SCOPE_COLOURS[SCOPE_CHANNELS.indexOf(ch)] || SCOPE_COLOURS[0];
+    return c.hex;
+}
+
 function drawScope(canvas, h, reading, params, held) {
     const { w, h: ph, dpr } = sizedCanvas(canvas, h);
     const c = canvas.getContext('2d');
@@ -361,8 +370,8 @@ function drawScope(canvas, h, reading, params, held) {
         return range;
     }
     if (reading) {
-        trace(reading.b, cssVar('--violet', '#a78bfa'));
-        trace(reading.a, cssVar('--accent', '#08a2fb'));
+        // A last, so it is on top of the rest.
+        for (const ch of [...SCOPE_CHANNELS].reverse()) trace(reading[ch], scopeColour(params, ch));
     }
     return range;
 }
@@ -411,6 +420,14 @@ export function ScopeView({ pg, id, reading, params, scale = 1, large = false, g
                 {tip && <div className="pg-view__tip" style={{ left: `${tip.x}px`, top: `${tip.y}px` }}>{tip.text}</div>}
             </div>
             <div className="pg-view__legend">
+                {/* Which colour is which, once there is more than one. */}
+                {reading && SCOPE_CHANNELS.filter((ch) => reading[ch]).length > 1 && params.view !== 'xy' && (
+                    <span className="pg-view__keys">
+                        {SCOPE_CHANNELS.filter((ch) => reading[ch]).map((ch) => (
+                            <span key={ch} className="pg-view__key" style={{ color: scopeColour(params, ch) }}>{ch.toUpperCase()}</span>
+                        ))}
+                    </span>
+                )}
                 <span>{params.view === 'xy' ? (reading && reading.xy ? 'X–Y: A across, B up' : 'X–Y needs B wired') : `${timeLabel(secs / DIVS_X)}/div`}</span>
                 <span>{range ? `${(range * 2 / DIVS_Y).toPrecision(2)}/div` : ''}</span>
                 <span className={state === 'armed' ? 'is-warn' : ''}>{status}</span>
@@ -431,8 +448,7 @@ export function ScopeView({ pg, id, reading, params, scale = 1, large = false, g
                     </div>
                     {reading && reading.a && (
                         <div className="readout-grid">
-                            {meas(reading.a, 'A')}
-                            {meas(reading.b, 'B')}
+                            {SCOPE_CHANNELS.map((ch) => <React.Fragment key={ch}>{meas(reading[ch], ch.toUpperCase())}</React.Fragment>)}
                         </div>
                     )}
                 </>
@@ -631,6 +647,26 @@ export function DetectorView({ reading, origin, large = false, grow = 0 }) {
     );
 }
 
+const num = (v) => (v == null || !Number.isFinite(v) ? '—' : Math.abs(v) >= 1e4 || (Math.abs(v) < 1e-3 && v !== 0) ? v.toExponential(2) : v.toPrecision(3));
+
+/** A scope's readings as one line: each wired channel's measurements. */
+export function measureLine(m) {
+    return SCOPE_CHANNELS.filter((ch) => m[ch]).map((ch) => {
+        const v = m[ch];
+        return `${ch.toUpperCase()} p-p ${num(v.vpp)} · RMS ${num(v.rms)} · mean ${num(v.mean)} · ${v.hz ? `${freqLabel(v.hz)} Hz` : '— Hz'}`;
+    }).join('  |  ') || 'measure';
+}
+
+/** A log as text, oldest first: each line its time and what it said, a tab between. */
+export function logText(lines, zeroHz) {
+    const stamp = (w) => {
+        const d = new Date(w);
+        const two = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+    };
+    return [...lines].reverse().map((m) => `${stamp(m.wall)}\t${messageLine(m, zeroHz)}`).join('\n') + (lines.length ? '\n' : '');
+}
+
 /** One message as a line: what it is, and what it says. */
 export function messageLine(m, zeroHz) {
     switch (m.type) {
@@ -638,6 +674,10 @@ export function messageLine(m, zeroHz) {
             return `${signalName(m.hz, zeroHz)} appeared · ${m.db.toFixed(0)} dB, SNR ${m.snrDb.toFixed(0)}`;
         case 'gone':
             return `${signalName(m.hz, zeroHz)} gone · after ${m.lastedSec.toFixed(1)} s`;
+        case 'text':
+            return String(m.text);
+        case 'measure':
+            return measureLine(m);
         default: {
             const { type, at, wall, ...rest } = m;
             return `${type || 'message'} ${JSON.stringify(rest)}`;
@@ -645,8 +685,50 @@ export function messageLine(m, zeroHz) {
     }
 }
 
+/** A time interval in ms, to a sensible number of places for its size. */
+export function intervalText(ms) {
+    if (ms == null || !Number.isFinite(ms)) return '—';
+    const a = Math.abs(ms);
+    return a >= 1000 ? `${(ms / 1000).toFixed(4)} s` : a >= 10 ? `${ms.toFixed(3)} ms` : a >= 0.1 ? `${ms.toFixed(4)} ms` : `${(ms * 1000).toFixed(2)} µs`;
+}
+
+/** The interval counter: the last reading large, its mean and spread, and a trace of them. */
+export function IntervalView({ pg, id, reading, large = false, grow = 0 }) {
+    const r = reading || {};
+    const hist = r.history || [];
+    const h = (large ? 60 : 26) + grow;
+    let path = '';
+    if (hist.length > 1) {
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (const v of hist) { if (v < lo) lo = v; if (v > hi) hi = v; }
+        const span = hi - lo || 1;
+        path = Array.from(hist, (v, k) => `${k ? 'L' : 'M'}${((k / (hist.length - 1)) * 100).toFixed(2)},${(h - 2 - ((v - lo) / span) * (h - 4)).toFixed(2)}`).join(' ');
+    }
+    return (
+        <div className="pg-tic">
+            <div className="pg-tic__last">{intervalText(r.last)}</div>
+            <div className="pg-tic__stats">
+                {r.mean != null ? `mean ${intervalText(r.mean)} · σ ${intervalText(r.sd)}` : (reading ? 'Waiting for a start and a stop' : 'Not running')}
+            </div>
+            <svg className="pg-tic__trace" viewBox={`0 0 100 ${h}`} preserveAspectRatio="none" style={{ height: `${h}px` }}>
+                {path && <path d={path} vectorEffect="non-scaling-stroke" />}
+            </svg>
+            {large && (
+                <div className="pg-insp__row">
+                    <span className="pg-list__dim">
+                        {r.mean != null ? `min ${intervalText(r.min)} · max ${intervalText(r.max)} · ` : ''}{`${r.count || 0} measured${r.missed ? `, ${r.missed} stops without a start` : ''}`}
+                    </span>
+                    <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={() => pg.command(id, 'clear')}>Clear</Button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function LogView({ pg, id, reading, origin, large = false, grow = 0 }) {
     const lines = (reading && reading.lines) || [];
+    const [copied, setCopied] = useState(false);
     const shown = large ? lines : lines.slice(0, 4 + extraRows(grow));
     const time = (w) => {
         const d = new Date(w);
@@ -663,7 +745,30 @@ export function LogView({ pg, id, reading, origin, large = false, grow = 0 }) {
             ))}
             {large && (
                 <div className="pg-insp__row">
-                    <span className="pg-list__dim">{reading ? `${reading.count} in all` : ''}</span>
+                    <span className="pg-list__dim">{reading ? `${reading.count} in all${reading.count > lines.length ? `, last ${lines.length} kept` : ''}` : ''}</span>
+                    {/* Oldest first, a time and a tab before each — so a file
+                        reads top to bottom, and drops into a spreadsheet. */}
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Icon.Copy />}
+                        disabled={!lines.length}
+                        onClick={() => {
+                            Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(logText(lines, origin)))
+                                .then(() => setCopied(true), () => {});
+                        }}
+                    >
+                        {copied ? 'Copied' : 'Copy'}
+                    </Button>
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Icon.Download />}
+                        disabled={!lines.length}
+                        onClick={() => saveText(logText(lines, origin), 'ubersdr-message-log.txt', 'text/plain')}
+                    >
+                        Save
+                    </Button>
                     <Button size="sm" variant="ghost" icon={<Icon.Trash size={13} />} onClick={() => pg.command(id, 'clear')}>Clear</Button>
                 </div>
             )}
@@ -845,7 +950,7 @@ export function BitView({ reading, large = false, grow = 0 }) {
 /** Whether a block type is an instrument with a picture. */
 export const INSTRUMENTS = new Set([
     'iq-spectrum', 'audio-spectrum', 'scope', 'constellation', 'frequency-counter', 'phase-meter', 'iq-phase-meter',
-    'signal-detector', 'message-log', 'console', 'text-diff', 'bit-view',
+    'signal-detector', 'message-log', 'console', 'text-diff', 'bit-view', 'interval-counter',
 ]);
 
 /**
@@ -877,6 +982,8 @@ export function Instrument({ pg, node, look, origin, large = false, grow = 0 }) 
             );
         case 'scope':
             return <ScopeView pg={pg} id={node.id} reading={reading} params={node.params} scale={scale} large={large} grow={g} />;
+        case 'interval-counter':
+            return <IntervalView pg={pg} id={node.id} reading={reading} large={large} grow={g} />;
         case 'constellation':
             return <ConstellationView reading={reading} scale={large ? 1.4 : 1} grow={g} />;
         case 'frequency-counter':

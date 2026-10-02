@@ -94,6 +94,10 @@ esbuild playground.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/playground.cjs --log-level=warning
 esbuild playgroundengine.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/playgroundengine.cjs --log-level=warning
+esbuild playgroundclock.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/playgroundclock.cjs --log-level=warning
+esbuild playgroundserial.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/playgroundserial.cjs --log-level=warning
 esbuild playgroundui.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/playgroundui.cjs --log-level=warning
 # The playground's worker exactly as build.sh ships it, for the test that loads
@@ -691,6 +695,8 @@ node playgroundtemplates.test.js
 node playgrounddigital.test.js
 node playgroundengine.test.js
 node playgroundfiles.test.js
+node playgroundserial.test.js
+node playgroundclock.test.js
 node playgroundui.test.js
 node wavlossless.test.js
 node tuningrange.test.js

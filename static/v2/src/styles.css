@@ -15105,6 +15105,7 @@ a.btn { text-decoration: none; }
     color: var(--text-faint);
 }
 .pg-view__legend .is-warn { color: var(--warn); }
+.pg-view__keys { display: inline-flex; gap: 6px; font-weight: 700; }
 .pg-view__empty {
     position: absolute;
     left: 50%;
@@ -15214,6 +15215,39 @@ a.btn { text-decoration: none; }
     cursor: pointer;
 }
 .pg-vis__plot { display: flex; flex-direction: column; gap: 2px; }
+/* A Clock's card. */
+.pg-clock { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pg-clock__time { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
+.pg-clock__tenth { font-size: 14px; color: var(--text-dim); }
+.pg-clock__zone { margin-left: 6px; font-size: 10px; font-weight: 400; color: var(--text-faint); }
+.pg-clock__src, .pg-clock__note { font-size: 10.5px; color: var(--text-faint); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pg-clock__note { color: var(--warn); }
+/* A time interval counter. */
+.pg-tic { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pg-tic__last { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--text); }
+.pg-tic__stats { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pg-tic__trace { display: block; width: 100%; }
+.pg-tic__trace path { fill: none; stroke: var(--accent); stroke-width: 1.25; }
+/* A serial port's card: the port, its lines, and a note. */
+.pg-ser { display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
+.pg-ser--off { color: var(--text-faint); font-style: italic; line-height: 1.35; }
+.pg-ser__row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.pg-ser__state { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--mono); color: var(--text-dim); }
+.pg-ser__state.is-open { color: var(--good); }
+.pg-ser__state.is-error { color: var(--bad, #f0646a); }
+.pg-ser__lines { gap: 3px; }
+.pg-ser__gap { flex: 1; }
+.pg-ser__light {
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--text-faint);
+}
+.pg-ser__light.is-on { border-color: var(--good); background: var(--good); color: #05070c; }
+.pg-ser__note { color: var(--text-faint); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; }
+.pg-ser__note.is-error { color: var(--bad, #f0646a); }
 .pg-vis__spark { display: block; width: 100%; border-radius: 3px; }
 .pg-param { display: flex; align-items: flex-start; gap: 6px; }
 .pg-param__field { flex: 1; min-width: 0; }

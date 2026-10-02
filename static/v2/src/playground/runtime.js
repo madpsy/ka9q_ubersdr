@@ -206,7 +206,11 @@ export class Runtime {
             // processes, and only those have to be lined up.
             node.streams = node.ports.map((p) => isStream(p.kind));
             const wired = (this.plan.inputs[n.id] || []).filter((f, i) => f && node.streams[i]).length;
-            node.queues = wired > 1 ? node.ports.map((p) => (isStream(p.kind) ? new Queue(p.kind) : null)) : null;
+            // A block taking its inputs at their own rates gets them as they
+            // come, each with its own count: lining them up sample for sample
+            // is what it does itself, in time rather than in samples.
+            node.queues = wired > 1 && !type.mixedRates ? node.ports.map((p) => (isStream(p.kind) ? new Queue(p.kind) : null)) : null;
+            node.inRates = this.plan.inRates ? this.plan.inRates[n.id] || [] : [];
             node.hasStreamOut = type.outputs.some((p) => isStream(p.kind));
             // What each control input last delivered, by its seq, and what the
             // parameters it drives have been set to.
@@ -214,7 +218,7 @@ export class Runtime {
             node.driven = {};
             const r = this.plan.inRate[n.id];
             if (r > 0) {
-                node.inst.configure(node.params, r);
+                node.inst.configure(node.params, r, node.inRates);
                 node.rate = r;
             }
             if (node.busyMs === undefined) node.busyMs = 0;
@@ -263,7 +267,7 @@ export class Runtime {
         const before = this.plan.outRate[id];
         const after = node.type.rate ? node.type.rate(node.rate, node.params) : node.rate;
         if (after !== before) return this.build();
-        node.inst.configure(node.params, node.rate);
+        node.inst.configure(node.params, node.rate, node.inRates);
         this._latencies();
         return true;
     }
@@ -352,7 +356,7 @@ export class Runtime {
         if (!patch) return;
         node.params = sanitizeParams(node.type, { ...node.params, ...patch });
         for (const k of Object.keys(patch)) node.driven[k] = node.params[k];
-        node.inst.configure(node.params, node.rate);
+        node.inst.configure(node.params, node.rate, node.inRates);
     }
 
     /**
@@ -365,6 +369,14 @@ export class Runtime {
             if (node.driven && Object.keys(node.driven).length) out[id] = { ...node.driven };
         }
         return out;
+    }
+
+    /** Hand a node what came in from outside since the last packet — a serial port's. */
+    feed(id, data) {
+        const node = this.nodes.get(id);
+        if (!node || !node.inst.feed) return false;
+        node.inst.feed(data);
+        return true;
     }
 
     /** Hand a node data it plays from — an IQ player's file. */

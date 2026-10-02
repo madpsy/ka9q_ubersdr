@@ -19,13 +19,19 @@
 //                                           scope's arm, stop, run)
 //   { t: 'load', id, data }                 a file for a node to play — an IQ
 //                                           player's samples, transferred
-//   { t: 'packet', seq, i, q, frames, rate } one packet of IQ; i and q are
-//                                           transferred, not copied
+//   { t: 'packet', seq, i, q, frames, rate, serial }
+//                                           one packet of IQ; i and q are
+//                                           transferred, not copied. `serial`,
+//                                           where there is any, is what each
+//                                           serial port took in since the last,
+//                                           by node id (Runtime.feed). `time`,
+//                                           where a Clock needs it, is the time
+//                                           the packet stands for (timeSource.js)
 //
 // ── Worker to page ───────────────────────────────────────────────────────────
 //
 //   { t: 'status', ok, errors }             after every graph or parameter change
-//   { t: 'out', seq, audio, record, speech, readings, stats, ms }
+//   { t: 'out', seq, audio, record, speech, serial, readings, stats, ms }
 //                                           after every packet: each Audio out's
 //                                           samples, each recorder's, the watched
 //                                           readings when they are due, every
@@ -74,6 +80,8 @@ export function createWorkerCore(post, now = () => performance.now()) {
     let audioIds = [];
     let recordIds = [];
     let speechIds = [];
+    let serialIds = [];
+    let clockIds = [];
     let parseErrors = [];
 
     const status = () => {
@@ -88,10 +96,16 @@ export function createWorkerCore(post, now = () => performance.now()) {
         audioIds = graph.nodes.filter((n) => n.type === 'audio-out').map((n) => n.id);
         recordIds = graph.nodes.filter((n) => n.type === 'wav-recorder' || n.type === 'iq-recorder').map((n) => n.id);
         speechIds = graph.nodes.filter((n) => n.type === 'tts').map((n) => n.id);
+        serialIds = graph.nodes.filter((n) => n.type === 'serial-port').map((n) => n.id);
+        clockIds = graph.nodes.filter((n) => n.type === 'clock').map((n) => n.id);
     };
 
     const packet = (m) => {
         const started = now();
+        if (m.serial) for (const [id, data] of Object.entries(m.serial)) rt.feed(id, data);
+        // The time this packet's first sample stands for, every way it can be
+        // had (timeSource.js), for each Clock to choose its own.
+        if (m.time) for (const id of clockIds) rt.feed(id, { time: m.time });
         // Nothing ran: nothing to hand on. A sink's last block is still in it,
         // and sent again it is the same 20 ms on every packet — a buzz.
         if (!rt.process({ i: m.i, q: m.q, frames: m.frames, rate: m.rate })) {
@@ -148,7 +162,14 @@ export function createWorkerCore(post, now = () => performance.now()) {
             const r = rt.read(id);
             if (r && r.text) speech.push({ id, text: r.text, read: r.read, rate: r.rate, muted: r.muted });
         }
-        post({ t: 'out', seq: m.seq, audio, record, speech, readings, stats, ms: now() - started }, transfer);
+        // What each serial port is to send and switch, every packet: small,
+        // and the lines' state has to reach the page even when nothing is said.
+        const serial = [];
+        for (const id of serialIds) {
+            const r = rt.read(id);
+            if (r) serial.push({ id, ...r });
+        }
+        post({ t: 'out', seq: m.seq, audio, record, speech, serial, readings, stats, ms: now() - started }, transfer);
     };
 
     return {

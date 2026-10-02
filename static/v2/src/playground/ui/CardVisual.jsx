@@ -785,16 +785,29 @@ function SimpleVisual({ pg, node, origin, rate, large = false, grow = 0, onParam
             const on = sr && sr.fromList ? sr.current : -1;
             const entries = r.entries || [];
             const name = (e) => e.label || freqLabel(e.frequency);
+            // As a preset picker — its entry outputs wired — the chosen one marked, and a click chooses.
+            const picking = !!(graph && graph.wires.some((x) => x[0] === node.id && x[1] !== 'list' && x[1] !== 'labels'));
+            const picked = r.selected != null ? r.selected : Math.round(node.params.select || 1) - 1;
+            const choose = (i) => (e) => {
+                e.stopPropagation();
+                if (onParams) onParams(node.id, { select: i + 1 }, `param:${node.id}:select`);
+            };
             return (
                 <div className="pg-sched-card">
                     <div className="pg-tc__row">
                         <span className={`pg-tc__state is-${bad ? 'off' : 'locked'}`}>{bad ? '✗ ' + bad : `✓ ${r.count} ${r.count === 1 ? 'entry' : 'entries'}`}</span>
-                        <span className="pg-tc__q">{!sched ? 'not wired' : !sr ? 'idle' : sr.fromList && sr.running ? 'in use' : sr.fromList ? 'scheduler stopped' : 'not in use'}</span>
+                        <span className="pg-tc__q">{!sched ? (picking ? 'tuning by hand' : 'not wired') : !sr ? 'idle' : sr.fromList && sr.running ? 'in use' : sr.fromList ? 'scheduler stopped' : 'not in use'}</span>
                     </div>
                     <ol className="pg-sched-card__list">
                         {entries.slice(0, large ? 40 : 6).map((e, i) => (
-                            <li key={i} className={i === on ? 'is-on' : ''}>
-                                <span className="pg-sched-card__mark">{i === on ? '▶' : ''}</span>
+                            <li
+                                key={i}
+                                className={`${i === on ? 'is-on' : ''}${picking && i === picked ? ' is-picked' : ''}${onParams ? ' is-choosable' : ''}`.trim()}
+                                onPointerDown={hold}
+                                onClick={onParams ? choose(i) : undefined}
+                                title={onParams ? `Tune to ${name(e)}` : undefined}
+                            >
+                                <span className="pg-sched-card__mark">{i === on ? '▶' : picking && i === picked ? '●' : ''}</span>
                                 <span className="pg-sched-card__name">{name(e)}</span>
                                 <span className="pg-sched-card__freq">{freqLabel(e.frequency)}</span>
                             </li>

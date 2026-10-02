@@ -270,11 +270,20 @@ export const TEMPLATES = [
         // Drawn out stage by stage — the SSTV block's inside (decoders.js).
         id: 'sstv',
         title: 'Receive SSTV',
-        summary: 'Slow-scan TV pictures, drawn as they come and straightened when done, every stage laid out: slowrx’s demodulator turns the USB audio into a frequency (watch the sync pulses and scan lines on the strip chart) and a sync strength, and the raster reads the mode from each picture’s VIS header, lays out the lines and reads the sender’s FSK ID. Callsigns collect in the log. Tune to an SSTV frequency in USB (14.230 MHz is the busiest). The Image viewer keeps the last few; open it to save one.',
+        summary: 'Slow-scan TV pictures, drawn as they come and straightened when done, every stage laid out: slowrx’s demodulator turns the USB audio into a frequency (watch the sync pulses and scan lines on the strip chart) and a sync strength, and the raster reads the mode from each picture’s VIS header, lays out the lines and reads the sender’s FSK ID. Callsigns collect in the log. The Frequency list tunes the receiver to 14.230 MHz, and sets the Demodulator to USB through its Mode input — add other frequencies to the list and click one on its card to move (this retunes your receiver). The Image viewer keeps the last few; open it to save one.',
         build: () => g(
             [
+                {
+                    // The calling frequencies, as presets: the one chosen tunes
+                    // the receiver — click another on the card to move.
+                    id: 'freqs', type: 'frequency-list',
+                    params: {
+                        entries: '14.230 usb SSTV 20m',
+                        select: 1,
+                    },
+                },
                 { id: 'iq', type: 'iq-in' },
-                { id: 'demod', type: 'demodulator', params: { mode: 'usb', widthHz: 2700 } },
+                { id: 'demod', type: 'demodulator', params: { mode: 'usb', widthHz: 2700 }, controls: ['mode'] },
                 { id: 'sstvdemod', type: 'sstv-demod' },
                 { id: 'freq', type: 'strip-chart', params: { spanSec: 2, range: 'fixed', min: 1000, max: 2400 } },
                 { id: 'raster', type: 'sstv-raster' },
@@ -284,6 +293,7 @@ export const TEMPLATES = [
                 { id: 'audio', type: 'audio-out' },
             ],
             [
+                ['freqs', 'frequency', 'iq', 'frequency'], ['freqs', 'mode', 'demod', controlPort('mode')],
                 ['iq', 'out', 'demod', 'in'], ['demod', 'audio', 'sstvdemod', 'audio'],
                 ['sstvdemod', 'hz', 'raster', 'hz'], ['sstvdemod', 'sync', 'raster', 'sync'], ['sstvdemod', 'hz', 'freq', 'a'],
                 ['raster', 'images', 'viewer', 'in'], ['raster', 'text', 'console', 'in'], ['raster', 'callsign', 'calls', 'in'],

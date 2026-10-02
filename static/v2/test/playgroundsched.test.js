@@ -611,4 +611,55 @@ t('Status: the one listened for counts as heard the moment it is, not only when 
     assert.strictEqual(st.inst.read().summary, '0 of 2 heard · listening to CBL');
 });
 
+t('Frequency list as a preset picker: the chosen entry’s frequency, mode, offset, label and number; chosen by setting or by name/number on select', () => {
+    const l = blockOf('frequency-list', { entries: NDBS });
+    let out = l.step({});
+    assert.deepStrictEqual([out.frequency, out.mode.map((m) => m.value)[0], out.offset, out.label[0].text, out.index], [380000, 'am', 400, 'CBL Campbeltown\n', 1]);
+    // Nothing sent again while nothing changes.
+    out = l.step({});
+    assert.strictEqual(out.frequency, null);
+    // By name, first word or whole; by number.
+    out = l.step({ select: 'DND' });
+    assert.strictEqual(out.frequency, 394000);
+    out = l.step({ select: 'EDN Edinburgh' });
+    assert.strictEqual(out.frequency, 341000);
+    out = l.step({ select: '1' });
+    assert.strictEqual(out.frequency, 380000);
+    out = l.step({ select: 'nowhere' });
+    assert.strictEqual(out.frequency, null, 'a name not on the list changes nothing');
+    // The setting (a click on the card) wins over an earlier select.
+    l.inst.configure(sanitizeParams(BLOCK_BY_TYPE['frequency-list'], { entries: NDBS, select: 3 }), 12000);
+    out = l.step({});
+    assert.strictEqual(out.frequency, 341000);
+    assert.strictEqual(l.inst.read().selected, 2);
+});
+
+t('a Frequency list wired straight to the IQ stream compiles, and through the worker retunes the receiver to the chosen entry', () => {
+    const posted = [];
+    const core = createWorkerCore((m) => posted.push(m), () => 0);
+    core.onMessage({
+        t: 'graph', rate: 12000,
+        graph: {
+            v: GRAPH_VERSION,
+            nodes: [{ id: 'l', type: 'frequency-list', params: { entries: NDBS, select: 2 } }, { id: 'iq', type: 'iq-in' }],
+            wires: [['l', 'frequency', 'iq', 'frequency']],
+        },
+    });
+    assert.ok(posted.find((m) => m.t === 'status').ok);
+    const tuning = { frequency: 7000000, min: 10000, max: 30000000 };
+    for (let k = 0; k < 3; k++) core.onMessage({ t: 'packet', seq: k, i: new Float32Array(240), q: new Float32Array(240), frames: 240, rate: 12000, tuning });
+    assert.deepStrictEqual(posted.filter((m) => m.t === 'out' && m.tune).map((m) => m.tune), [394000]);
+});
+
+t('the SSTV template tunes by a Frequency list: 14.230 MHz chosen, frequency to the IQ stream, mode to the Demodulator', () => {
+    const g = TEMPLATES.find((x) => x.id === 'sstv').build();
+    assert.ok(compile(g, 12000).ok, JSON.stringify(compile(g, 12000).errors));
+    const has = (w) => g.wires.some((x) => x.join() === w.join());
+    assert.ok(has(['freqs', 'frequency', 'iq', 'frequency']) && has(['freqs', 'mode', 'demod', controlPort('mode')]));
+    const l = blockOf('frequency-list', g.nodes.find((n) => n.id === 'freqs').params);
+    const out = l.step({});
+    assert.strictEqual(out.frequency, 14230000);
+    assert.strictEqual(out.mode[0].value, 'usb');
+});
+
 console.log(`\n${pass} passed`);

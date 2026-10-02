@@ -15097,6 +15097,9 @@ a.btn { text-decoration: none; }
 .pg-sched-card__run { flex: none; padding: 1px 7px; margin-right: 6px; border-radius: 4px; border: 1px solid var(--border-strong); background: var(--surface-3); color: var(--text); font-size: calc(10.5px * var(--ui-scale)); font-weight: 600; cursor: pointer; }
 .pg-sched-card__run.is-on { color: var(--bad); border-color: currentColor; }
 .pg-sched-card__run:not(.is-on) { color: var(--good); border-color: currentColor; }
+.pg-sched-card__list li.is-choosable { cursor: pointer; border-radius: 3px; }
+.pg-sched-card__list li.is-choosable:hover { background: var(--surface-hover); }
+.pg-sched-card__list li.is-picked { color: var(--text); font-weight: 600; }
 .pg-sched-card__more { display: block !important; color: var(--text-faint); padding-left: 16px; }
 .pg-insp__help p + p { margin-top: 6px; }
 .pg-insp__section { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }

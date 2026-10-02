@@ -2286,6 +2286,23 @@ t('a Frequency list’s card lists its entries, the one its Scheduler is on mark
     assert.strictEqual(cls(items[1]), 'is-on');
     assert.ok(/▶/.test(words(items[1])) && /DND Dundee/.test(words(items[1])) && /394 kHz/.test(words(items[1])));
     assert.ok(/✓ 3 entries/.test(words(all[0])) && /in use/.test(words(all[0])));
+    // Wired as a preset picker: the chosen entry marked, and a click on another chooses it.
+    pg.graph = g(
+        [{ id: 'l', type: 'frequency-list', params: { select: 1 } }, { id: 'iq', type: 'iq-in' }],
+        [['l', 'frequency', 'iq', 'frequency']],
+    );
+    pg.readings = { l: { count: 3, errors: [], entries, selected: 0 } };
+    const chosen = [];
+    const pick = deep(React.createElement(CardVisual, { pg, node: pg.graph.nodes[0], rate: 12000, onParams: (id, patch) => chosen.push(patch) }));
+    const lis = pick.filter((x) => x.type === 'li');
+    assert.ok(cls(lis[0]).includes('is-picked') && /●/.test(words(lis[0])));
+    assert.ok(/tuning by hand/.test(words(pick[0])));
+    lis[2].props.onClick({ stopPropagation() {} });
+    assert.deepStrictEqual(chosen, [{ select: 3 }]);
+    pg.graph = g(
+        [{ id: 'l', type: 'frequency-list' }, { id: 's', type: 'scheduler', params: { preset: 'input', kind: 'dwell' } }],
+        [['l', 'list', 's', 'list']],
+    );
     // Not running: its entries from its own settings, and idle.
     pg.readings = null;
     const idle = deep(React.createElement(CardVisual, { pg, node: { ...pg.graph.nodes[0], params: { entries: '380kHz am CBL\n394kHz am DND' } }, rate: 12000 }));

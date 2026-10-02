@@ -432,9 +432,22 @@ export const FrequencyListBlock = {
     label: 'Frequency list',
     category: 'Control',
     summary: 'Frequencies to visit, with their modes, widths, offsets and names — typed, or a preset — for a Scheduler to work through. The list kept apart from when it is visited.',
-    inputs: [],
-    // `labels`: every entry's name, for a Status board to show them all from the start.
-    outputs: [{ name: 'list', kind: MESSAGE }, { name: 'labels', kind: MESSAGE }],
+    // `select`: an entry by its number (from 1) or its name (“DND”, or the whole label).
+    inputs: [{ name: 'select', kind: MESSAGE, optional: true }],
+    // `labels`: every entry's name, for a Status board to show them all from
+    // the start. The rest are the selected entry's, as a Scheduler's are its
+    // current one's — so a list can tune the receiver by itself, a preset
+    // picker: frequency to an IQ stream, mode to a Demodulator.
+    outputs: [
+        { name: 'list', kind: MESSAGE },
+        { name: 'labels', kind: MESSAGE },
+        { name: 'frequency', kind: CONTROL },
+        { name: 'mode', kind: MESSAGE },
+        { name: 'width', kind: CONTROL },
+        { name: 'offset', kind: CONTROL },
+        { name: 'label', kind: MESSAGE },
+        { name: 'index', kind: CONTROL },
+    ],
     params: {
         preset: {
             kind: 'choice', label: 'List', default: 'custom', control: false,
@@ -449,22 +462,62 @@ export const FrequencyListBlock = {
             kind: 'text', label: 'Entries (frequency  [mode]  [width=]  [offset=]  [label])', default: '14.100 usb\n18.110 usb\n21.150 usb', max: 8000, multiline: true,
             showIf: (p) => p.preset === 'custom',
         },
+        // The entry its frequency, mode, width, offset and label outputs
+        // carry — clicked on its card, set here, or chosen by `select`.
+        select: { kind: 'number', label: 'Tune to entry', default: 1, min: 1, max: 9999, step: 1, live: true },
     },
     create() {
         let text = '';
         let dirty = true;
         let packets = 0;
+        let p = {};
+        let entries = [];
+        let picked = -1;          // the entry last sent, from 0
+        let chosen = null;        // one chosen by `select`, overriding the setting until it next changes
+        let lastSetting = null;
+        const send = (outs, i) => {
+            const e = entries[i];
+            if (!e) return;
+            if (e.frequency != null && outs[2]) emitControl(outs[2], e.frequency);
+            if (e.mode && outs[3]) outs[3].list.push({ type: 'text', text: e.mode, value: e.mode });
+            if (e.width != null && outs[4]) emitControl(outs[4], e.width);
+            if (e.offset != null && outs[5]) emitControl(outs[5], e.offset);
+            if (outs[6]) outs[6].list.push({ type: 'text', text: `${e.label || `${(e.frequency / 1e6).toFixed(4)} MHz`}\n` });
+            if (outs[7]) emitControl(outs[7], i + 1);
+        };
+        // An entry named by a message: its number, or its name's first word or the whole of it.
+        const named = (m) => {
+            const raw = String((m && (m.value != null ? m.value : m.text)) || '').trim();
+            if (/^\d+$/.test(raw)) return Number(raw) - 1;
+            const want = raw.toUpperCase().replace(/\s+/g, ' ');
+            if (!want) return -1;
+            return entries.findIndex((e) => {
+                const l = (e.label || '').toUpperCase().replace(/\s+/g, ' ');
+                return l === want || l.split(' ')[0] === want;
+            });
+        };
         return {
-            configure(p) {
+            configure(params) {
+                p = params;
                 const next = p.preset === 'ncdxf' ? ncdxfFollowSchedule(+p.beacon) : String(p.entries || '');
-                if (next !== text) { text = next; dirty = true; }
+                if (next !== text) { text = next; dirty = true; picked = -1; entries = parseSchedule(text, 'dwell').entries; }
+                // The setting moved (a click on the card, say): that wins over a `select` from before.
+                if (p.select !== lastSetting) { lastSetting = p.select; chosen = null; }
             },
-            reset() { dirty = true; packets = 0; },
+            reset() { dirty = true; packets = 0; picked = -1; chosen = null; },
             read() {
-                const { entries, errors } = parseSchedule(text, 'dwell');
-                return { count: entries.length, errors, entries };
+                const parsed = parseSchedule(text, 'dwell');
+                const sel = chosen != null ? chosen : Math.round(p.select) - 1;
+                return { count: parsed.entries.length, errors: parsed.errors, entries: parsed.entries, selected: sel >= 0 && sel < parsed.entries.length ? sel : -1 };
             },
             process(ins, outs) {
+                const sel = ins[0];
+                if (sel && sel.list && sel.list.length) {
+                    const i = named(sel.list[sel.list.length - 1]);
+                    if (i >= 0 && i < entries.length) chosen = i;
+                }
+                const want = chosen != null ? chosen : Math.round(p.select) - 1;
+                if (want >= 0 && want < entries.length && want !== picked) { picked = want; send(outs, want); }
                 if (dirty || ++packets >= 100) {
                     dirty = false;
                     packets = 0;

@@ -1,6 +1,20 @@
 {
   "addons": [
     {
+      "name": "skimmer",
+      "status": "Unstable - Testing",
+      "description": "Wideband CW skimmer — requests one wideband IQ stream per band (by default every band CW Skimmer Server skims, 160–6 m with 60 m and the beacon segments), finds every CW signal in them and reads them all at once with the IQ playground's streaming CW decoder, weighing each mark and gap against the sender's timing and likely callsigns. Spots go out on a CW Skimmer Server–compatible telnet port (point cwskimmer.yaml at skimmer:7300 to feed UberSDR's CW spots) and, optionally, to the Reverse Beacon Network as RBN Aggregator does. Serves a live web UI with every band's spectrum, the decoder's tracks, the calls being weighed, each spot and why it was sent, the RBN reporter, CPU and the log.",
+      "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr-skimmer/master/install.sh",
+      "host": "skimmer",
+      "port": 6101,
+      "enabled": true,
+      "require_admin": false,
+      "strip_prefix": true,
+      "rewrite_origin": false,
+      "rate_limit": 100,
+      "allowed_ips": ["0.0.0.0/0"]
+    },
+    {
       "name": "ndb",
       "status": "Stable",
       "description": "Multi-beacon NDB decoder — requests one or more wideband IQ streams (default iq192 centred at 356 kHz, covering ~270–442 kHz), finds every non-directional beacon carrier in the passband, and decodes each beacon's Morse ident in parallel with ggmorse. Idents are matched against the OurAirports navaid database and located relative to the receiver. Serves a live dark-themed web UI with per-stream spectrum, beacon table, live copy, a persistent heard log, and a map with range rings and great-circle paths.",

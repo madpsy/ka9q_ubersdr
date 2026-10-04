@@ -4,7 +4,7 @@
       "name": "skimmer",
       "status": "Unstable - Testing",
       "description": "Wideband CW skimmer — requests one wideband IQ stream per band (by default every band CW Skimmer Server skims, 160–6 m with 60 m and the beacon segments), finds every CW signal in them and reads them all at once with the IQ playground's streaming CW decoder, weighing each mark and gap against the sender's timing and likely callsigns. Spots go out on a CW Skimmer Server–compatible telnet port (point cwskimmer.yaml at skimmer:7300 to feed UberSDR's CW spots) and, optionally, to the Reverse Beacon Network as RBN Aggregator does. Serves a live web UI with every band's spectrum, the decoder's tracks, the calls being weighed, each spot and why it was sent, the RBN reporter, CPU and the log.",
-      "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr-skimmer/master/install.sh",
+      "install_script_url": "https://raw.githubusercontent.com/madpsy/ubersdr_skimmer_public/main/install.sh",
       "host": "skimmer",
       "port": 6101,
       "enabled": true,

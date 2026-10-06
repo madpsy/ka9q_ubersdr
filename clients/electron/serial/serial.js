@@ -1,7 +1,8 @@
 'use strict';
 
-// The serial picker page. Built with createElement throughout, like the
-// chooser: these strings come off the device layer and are never markup.
+// The device picker page — a serial port, or a USB (HID) device such as the
+// RC-28. Built with createElement throughout, like the chooser: these strings
+// come off the device layer and are never markup.
 //
 // Selecting and connecting are two steps. They used to be one — a click on a
 // row handed that port straight to the page — which is a lot of consequence to
@@ -30,6 +31,30 @@ const connectEl = document.getElementById('connect');
 const cancelEl = document.getElementById('cancel');
 const subtitleEl = document.getElementById('subtitle');
 const hintEl = document.getElementById('hint');
+const headingEl = document.getElementById('heading');
+
+// The words that differ by what is being picked. Everything else — the list,
+// the filter, arming and connecting — is the same for both.
+const WORDS = {
+    serial: {
+        heading: 'Select a serial port',
+        title: 'Select serial port',
+        none: 'No serial ports found',
+        noMatch: 'No matching ports',
+        plugIn: 'Plug the device in — this list updates on its own.',
+    },
+    hid: {
+        heading: 'Select a USB device',
+        title: 'Select USB device',
+        none: 'No supported USB device found',
+        noMatch: 'No matching devices',
+        // The one thing worth saying that a serial port never needs: on Linux
+        // an RC-28 that is plugged in but missing here is nearly always the
+        // udev rule, and nothing else on screen would say so.
+        plugIn: 'Plug the RC-28 in — this list updates on its own. On Linux it also needs the udev rule from the README.',
+    },
+};
+let words = WORDS.serial;
 
 // Everything attached, and the subset the filter box currently lets through.
 // Selection and the arrow keys work off `shown`, never off `ports`: an armed
@@ -214,10 +239,10 @@ function render(list, reason) {
         // Saying "no ports found" while a filter is hiding six of them is how a
         // picker gets called broken.
         const filtering = tokens.length > 0;
-        emptyTitleEl.textContent = filtering ? 'No matching ports' : 'No serial ports found';
+        emptyTitleEl.textContent = filtering ? words.noMatch : words.none;
         emptyBodyEl.textContent = filtering
             ? `Nothing here matches that. ${plural(ports.length, 'device')} attached.`
-            : 'Plug the device in — this list updates on its own.';
+            : words.plugIn;
     }
 
     const stillThere = shown.some((p) => p.portId === selectedId);
@@ -321,6 +346,9 @@ api.onPorts((list) => render(list, 'ports'));
 (async () => {
     const info = await api.info();
     origin = info.origin || '';
+    words = WORDS[info.kind] || WORDS.serial;
+    headingEl.textContent = words.heading;
+    document.title = words.title;
     render(info.ports, 'init');
     // The filter box takes focus: typing narrows the list straight away, and
     // the arrow keys and Enter work from in there too, so this costs the

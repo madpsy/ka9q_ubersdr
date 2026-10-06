@@ -1,0 +1,14 @@
+# Icom RC-28 REMOTE ENCODER (USB 0c26:001e) for the UberSDR desktop client.
+#
+# Chromium's WebHID opens /dev/hidraw*, which is root's by default, so without
+# this the dial is plugged in, visible to lsusb, and missing from the client's
+# device picker. `uaccess` hands the node to whoever is logged in at the seat,
+# the same way a desktop session gets its sound card — no group to join, and
+# nobody else on the machine gets it.
+#
+# 70 rather than a later number: uaccess is acted on by 73-seat-late.rules, so a
+# tag added after that is never seen.
+#
+# Installed by the .deb to /usr/lib/udev/rules.d/. For the AppImage, copy it to
+# /etc/udev/rules.d/ and unplug and replug the dial.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c26", ATTRS{idProduct}=="001e", TAG+="uaccess"

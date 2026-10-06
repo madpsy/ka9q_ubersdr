@@ -269,6 +269,8 @@ esbuild ../src/controls/flexcontrol.js --bundle --format=cjs --platform=node \
     --outfile=.build/flexcontrol.cjs --log-level=warning
 esbuild ../src/controls/webmidi.js --bundle --format=cjs --platform=node \
     --outfile=.build/webmidi.cjs --log-level=warning
+esbuild rc28.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/rc28.cjs --log-level=warning
 esbuild ../src/controls/hardware.js --bundle --format=cjs --platform=node \
     --outfile=.build/hardware.cjs --log-level=warning
 esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
@@ -538,6 +540,7 @@ node callsign.test.js
 node compat.test.js
 node recorder.test.js
 node controls.test.js
+node rc28.test.js
 node spots.test.js
 node spotspanel.test.js
 node extensions.test.js

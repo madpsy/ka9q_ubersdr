@@ -312,6 +312,19 @@ one where no receiver window ever appears.
   port made the dialog wider. Every port is offered, including when only one
   is attached: auto-selecting it saved a click at the cost of handing a serial
   device to remote page content without anyone naming it.
+- **WebHID** (Icom RC-28 dial): no built-in chooser either, so
+  `select-hid-device` opens the same window with HID wording. Unlike serial,
+  HID is held to a list (`hid.js`): only the RC-28 (USB `0c26:001e`) is ever
+  offered, whatever filter the page asked with, and the device permission
+  handler refuses every other HID device — WebHID reaches raw USB devices,
+  and the page is content served by whichever instance was connected to.
+  That permission is also what `navigator.hid.getDevices()` consults, so a
+  dial picked once reconnects on its own. On Linux, Chromium opens
+  `/dev/hidraw*`, which is root's by default: the `.deb` installs
+  `linux/70-ubersdr-rc28.rules` to `/usr/lib/udev/rules.d/`, which gives the
+  logged-in user the dial. The AppImage cannot install anything, so copy that
+  file to `/etc/udev/rules.d/` and replug the dial — without it the RC-28 is
+  visible to `lsusb` and absent from the picker.
 - **Web MIDI** (MIDI control surfaces): granted through the permission
   handler. Note that the permission to allow is `midiSysex`, not `midi` —
   Chromium requests the sysex permission even for

@@ -1,8 +1,9 @@
 // SDR Control — drive this receiver from a hardware surface.
 //
-// Two of them, one at a time:
+// Three of them, one at a time:
 //
 //   FlexControl   a FlexRadio USB dial, over Web Serial
+//   RC-28         an Icom USB dial with three buttons, over WebHID
 //   MIDI          any USB MIDI surface — DJ controller, knob box, fader bank
 //
 // They are the same idea — a control moves, a mapped function runs — and share
@@ -37,9 +38,11 @@ import { setLearnHandler, setManualOff, tryAutoConnect } from '../controls/dispa
 import {
     defaultThrottle, exportMappings, importMappings, normaliseMidiMappings,
 } from '../controls/mappings.js';
-import { flexAvailable, flexKeyLabel } from '../controls/flexcontrol.js';
-import { isCCKey, midiAvailable, midiKeyLabel } from '../controls/webmidi.js';
-import { getSurface } from '../controls/sources.js';
+import { flexAvailable } from '../controls/flexcontrol.js';
+import { rc28Available } from '../controls/rc28.js';
+import { TX_LED_SOURCES, ledSettings } from '../controls/rc28leds.js';
+import { isCCKey, midiAvailable } from '../controls/webmidi.js';
+import { getSurface, surfaceKeyLabel } from '../controls/sources.js';
 import {
     bridgeAttached, bridgeSettings, onBridgeAttached, onBridgeSettings, setBridgeSettings,
 } from '../bridge/settings.js';
@@ -50,6 +53,7 @@ import {
 const SURFACE_OPTIONS = [
     { value: 'off', label: 'Off' },
     { value: 'flexcontrol', label: 'FlexControl' },
+    { value: 'rc28', label: 'RC-28' },
     { value: 'midi', label: 'MIDI' },
 ];
 
@@ -83,7 +87,7 @@ export default function SDRControlPanel({ minimal }) {
 
     // Surfaces something else is hosting — the desktop client offering itself
     // as a TCI radio, say. Registered over the page API; see
-    // controls/surfaces.js. They join the same picker as the two this page can
+    // controls/surfaces.js. They join the same picker as the ones this page can
     // open itself, and are exclusive with them for the same reason those are
     // exclusive with each other: two things mapped to frequency fight.
     const [external, setExternal] = useState(listSurfaces);
@@ -91,7 +95,7 @@ export default function SDRControlPanel({ minimal }) {
     const provided = external.find((e) => e.id === surface) || null;
     // Chosen, and then whatever was providing it went away.
     const orphaned = surface !== 'off' && !SURFACES.includes(surface) && !provided;
-    // One of the two this page opens itself, and so the only kind with
+    // One of the ones this page opens itself, and so the only kind with
     // mappings, a learn mode and a hardware connection behind it.
     const mapped = isMappedSurface(surface);
 
@@ -180,11 +184,11 @@ export default function SDRControlPanel({ minimal }) {
                 <div className="note note--tight">
                     Pick a surface to control this receiver from hardware. One at a time — two
                     surfaces mapped to the same thing would fight each other. A radio synced
-                    from the Radio control panel is unaffected and can run alongside either.
+                    from the Radio control panel is unaffected and can run alongside any of them.
                 </div>
             )}
 
-            {/* Only the two this page hosts itself.
+            {/* Only the ones this page hosts itself.
                 SurfaceControl is the learn-and-map editor for a knob or a MIDI
                 box: it reads `cfg[id].mappings` and drives `getSurface(id)`,
                 neither of which exists for a surface somebody else is hosting.
@@ -277,10 +281,12 @@ function BridgeSwitch({ minimal }) {
     );
 }
 
-// --- the two mapped control surfaces ---------------------------------------
+// --- the mapped control surfaces --------------------------------------------
 
 function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal }) {
     const isMidi = id === 'midi';
+    const isRc28 = id === 'rc28';
+    const keyLabel = surfaceKeyLabel(id);
     const conf = cfg[id];
     const mappings = conf.mappings;
 
@@ -349,10 +355,10 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         // list pages, so a new mapping can sort past the end of the page — and
         // learning a control only to watch nothing appear is exactly the
         // failure the message log exists to prevent.
-        const sorted = sortRows(Object.entries(next[id].mappings), isMidi);
+        const sorted = sortRows(Object.entries(next[id].mappings), isMidi, keyLabel);
         const last = Math.max(...keys.map((k) => sorted.findIndex(([rk]) => rk === k)));
         setLimit((n) => Math.max(n, last + 1));
-        onMessage(`Mapped ${keys.map(labelFor(isMidi)).join(' + ')} → ${functionLabel(fn, dspSchemas, hw)}`, 'good');
+        onMessage(`Mapped ${keys.map(keyLabel).join(' + ')} → ${functionLabel(fn, dspSchemas, hw)}`, 'good');
         setLearn(null);
     };
 
@@ -427,13 +433,13 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         });
     }, [isMidi, surface]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-    const available = isMidi ? midiAvailable() : flexAvailable();
+    const available = isMidi ? midiAvailable() : (isRc28 ? rc28Available() : flexAvailable());
     if (!available) {
         return (
             <div className="note note--warn">
-                {isMidi
-                    ? 'This browser has no Web MIDI API. Chrome or Edge is needed — Firefox has never shipped it.'
-                    : 'This browser has no Web Serial API. Chrome or Edge is needed.'}
+                {isMidi && 'This browser has no Web MIDI API. Chrome or Edge is needed — Firefox has never shipped it.'}
+                {isRc28 && 'This browser has no WebHID API. Chrome or Edge is needed — Firefox and Safari have not shipped it.'}
+                {!isMidi && !isRc28 && 'This browser has no Web Serial API. Chrome or Edge is needed.'}
             </div>
         );
     }
@@ -442,7 +448,9 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         <div className="rc-conn">
             <span className={`dot dot--${connected ? 'good' : 'bad'}`} />
             <span className="rc-conn__state">
-                {connected ? (isMidi ? surface.deviceName : 'FlexControl connected') : 'Not connected'}
+                {connected
+                    ? (isMidi ? surface.deviceName : `${isRc28 ? 'RC-28' : 'FlexControl'} connected`)
+                    : 'Not connected'}
             </span>
         </div>
     );
@@ -481,7 +489,9 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     // none the switch is honest about having nothing to do yet.
     const autoHint = isMidi
         ? (conf.device ? `Reconnects to ${conf.device}` : 'Connect once first, so there is a device to remember')
-        : 'Reopens the dial once you have picked its port here';
+        : (isRc28
+            ? 'Reopens the dial once you have picked it here'
+            : 'Reopens the dial once you have picked its port here');
 
     const auto = (
         <Switch
@@ -508,7 +518,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     }
 
     const groups = groupCatalogue(dspSchemas, hw);
-    const rows = sortRows(Object.entries(mappings), isMidi);
+    const rows = sortRows(Object.entries(mappings), isMidi, keyLabel);
 
     return (
         <>
@@ -533,6 +543,16 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
             <div className="chip-row">{button}</div>
 
             {auto}
+
+            {isRc28 && (
+                <RC28Leds
+                    leds={ledSettings(conf.leds)}
+                    onChange={(patch) => update((prev) => ({
+                        ...prev,
+                        rc28: { ...prev.rc28, leds: { ...ledSettings(prev.rc28.leds), ...patch } },
+                    }))}
+                />
+            )}
 
             <div className="divider" />
 
@@ -617,6 +637,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                             mapKey={key}
                             mapping={m}
                             isMidi={isMidi}
+                            keyLabel={keyLabel}
                             dspSchemas={dspSchemas}
                             hw={hw}
                             onRelative={(v) => update((prev) => ({
@@ -706,6 +727,45 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     );
 }
 
+// What the RC-28's four lamps show. Every one is the operator's to turn off —
+// see controls/rc28leds.js for what each means and why the defaults are what
+// they are. Usable before connecting, so it can be set up and then plugged in.
+function RC28Leds({ leds, onChange }) {
+    return (
+        <>
+            <div className="divider" />
+            <span className="section-label">LEDs</span>
+            <Switch
+                checked={leds.linkBlink}
+                onChange={(v) => onChange({ linkBlink: v })}
+                label="Blink Link while the receiver is not streaming"
+                title="Link is lit while the dial is connected; this makes it blink while the receiver's audio is down or reconnecting"
+            />
+            <Switch
+                checked={leds.follow}
+                onChange={(v) => onChange({ follow: v })}
+                label="Light F1 and F2 while what they control is on"
+                title="For on/off functions and modes — tuning lock, mute, squelch, noise reduction, announcements, USB and the rest. Uses the tap mapping, or the hold mapping if the tap has none"
+            />
+            <Switch
+                checked={leds.hold}
+                onChange={(v) => onChange({ hold: v })}
+                label="Flip a button's LED once a press counts as a hold"
+                title="Holds fire on release; this shows the moment letting go stops being a tap"
+            />
+            <Field label="TX LED">
+                <select
+                    className="select"
+                    value={leds.tx}
+                    onChange={(e) => onChange({ tx: e.target.value })}
+                >
+                    {TX_LED_SOURCES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+            </Field>
+        </>
+    );
+}
+
 // One mapping, on two lines: what it does, then which control does it.
 //
 // It was one line — control, function, chips, delete — and that only ever fit
@@ -714,7 +774,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
 // "Passb…". So the function goes on top with the full width to itself and wraps
 // rather than truncates, and the address drops to a second line with the chips
 // it qualifies. Nothing is hidden at any width the panel can be dragged to.
-function MappingRow({ mapKey, mapping, isMidi, dspSchemas, hw, onRelative, onDelete }) {
+function MappingRow({ mapKey, mapping, isMidi, keyLabel, dspSchemas, hw, onRelative, onDelete }) {
     const retired = RETIRED[mapping.function];
     const label = functionLabel(mapping.function, dspSchemas, hw);
     // A mapping that came from a receiver with a rotator, an antenna past
@@ -734,7 +794,7 @@ function MappingRow({ mapKey, mapping, isMidi, dspSchemas, hw, onRelative, onDel
                 <Icon.Close size={13} />
             </button>
             <div className="rc-map__meta">
-                <span className="rc-map__key">{labelFor(isMidi)(mapKey)}</span>
+                <span className="rc-map__key">{keyLabel(mapKey)}</span>
                 {isCC && (
                     <button
                         type="button"
@@ -758,8 +818,6 @@ function MappingRow({ mapKey, mapping, isMidi, dspSchemas, hw, onRelative, onDel
     );
 }
 
-const labelFor = (isMidi) => (isMidi ? midiKeyLabel : flexKeyLabel);
-
 // Rows in the order they were learned, which is the order they arrive in from
 // storage, are unordered by the time there are twenty of them — you learn the
 // dial, then a button, then the dial's other direction. So they are laid out by
@@ -770,9 +828,9 @@ const labelFor = (isMidi) => (isMidi ? midiKeyLabel : flexKeyLabel);
 // what keeps a "map both" pair adjacent, since a button's press and release
 // share a number and differ only in type. Anything unparseable sorts last
 // rather than throwing the order out.
-function sortRows(entries, isMidi) {
+function sortRows(entries, isMidi, keyLabel) {
     if (!isMidi) {
-        return entries.slice().sort((a, b) => flexKeyLabel(a[0]).localeCompare(flexKeyLabel(b[0])));
+        return entries.slice().sort((a, b) => keyLabel(a[0]).localeCompare(keyLabel(b[0])));
     }
     const rank = (key) => {
         const [type, channel, number] = String(key).split(':').map(Number);

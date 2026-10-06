@@ -58,6 +58,16 @@ const SECS = 150;
 const SIG = wwvb(SECS);
 const PACKET = 960;
 
+// The block arms its decoder's ±1 day plausibility gate from the host clock
+// (blocks/timecode.js, `referenceNow: () => Date.now()`), which is right on air
+// and a time bomb here: the signal above is fixed at T0, so the day after this
+// test was written the decoder rightly refused it as implausible and never
+// locked. So the host clock is made to agree with the station — it reads the
+// signal's own time at however much of it has been fed in.
+let fedSamples = 0;
+const realNow = Date.now;
+Date.now = () => T0 + (fedSamples / RATE) * 1000;
+
 t('the decimator keeps one sample in its factor and says how late they are', () => {
     const d = new Decimator(RATE, 12000);
     assert.strictEqual(d.factor, 4);
@@ -89,6 +99,7 @@ t('at 48 kHz the block decodes WWVB, and each time it sends points at the right 
         const outs = TimecodeBlock.outputs.map((p) => makeBuffer(p.kind, 0));
         inst.process([x], outs, PACKET);
         consumed += PACKET;
+        fedSamples = consumed;
         for (const m of outs[0].list) sent.push({ ...m, end: consumed });
         for (const m of outs[1].list) text.push(m.text);
     }
@@ -127,8 +138,10 @@ t('wired to a Clock in the worker, the Clock keeps the time the decoder read', (
     assert.ok(status && status.ok, `graph refused: ${JSON.stringify(status && status.errors)}`);
     core.onMessage({ t: 'watch', ids: ['clk', 'tc'], levels: false });
     let seq = 0;
+    fedSamples = 0;
     for (let at = 0; at + PACKET <= SIG.i.length; at += PACKET) {
         core.onMessage({ t: 'packet', seq: ++seq, i: SIG.i.slice(at, at + PACKET), q: SIG.q.slice(at, at + PACKET), frames: PACKET, rate: RATE });
+        fedSamples = at + PACKET;
     }
     const last = posted.filter((m) => m.t === 'out' && m.readings && m.readings.clk).pop();
     const clk = last.readings.clk;
@@ -139,5 +152,7 @@ t('wired to a Clock in the worker, the Clock keeps the time the decoder read', (
     const end = T0 + ((last.seq * PACKET) / RATE) * 1000;
     assert.ok(Math.abs(clk.t - end) < 2, `the clock is ${(clk.t - end).toFixed(3)} ms off`);
 });
+
+Date.now = realNow;
 
 console.log(`\n${pass} passed`);

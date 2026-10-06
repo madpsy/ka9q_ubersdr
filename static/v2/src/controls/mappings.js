@@ -14,6 +14,8 @@
 
 import { isEncoderFunction, runFunction } from './functions.js';
 import { isCCKey } from './webmidi.js';
+import { RC28_DEFAULT_MAPPINGS } from './rc28.js';
+import { DEFAULT_LEDS, ledSettings } from './rc28leds.js';
 import { saveFile } from '../lib/saveFile.js';
 
 const STORE_KEY = 'ubersdr.v2.radioControl';
@@ -31,7 +33,7 @@ const V1_KEYS = {
 // Not the whole list any more. A surface may also be registered from outside
 // (controls/surfaces.js), and its id goes in the same setting, so anything
 // validating this must ask the registry rather than only this array.
-export const SURFACES = ['off', 'flexcontrol', 'midi'];
+export const SURFACES = ['off', 'flexcontrol', 'rc28', 'midi'];
 
 /**
  * Whether a chosen surface is one this page opens itself, and so has mappings,
@@ -45,7 +47,7 @@ export const SURFACES = ['off', 'flexcontrol', 'midi'];
  * should ask this first.
  */
 export function isMappedSurface(id) {
-    return id === 'flexcontrol' || id === 'midi';
+    return id === 'flexcontrol' || id === 'rc28' || id === 'midi';
 }
 
 export const DEFAULT_STATE = {
@@ -58,6 +60,10 @@ export const DEFAULT_STATE = {
     // load is how a knob left against the desk starts retuning a receiver
     // nobody is watching, so the operator turns it on per surface.
     flexcontrol: { mappings: {}, autoConnect: false },
+    // The one surface that arrives mapped: its dial tunes out of the box. Only
+    // a default — a saved table, even an empty one somebody cleared, wins.
+    // `leds` is what its four lamps show — see controls/rc28leds.js.
+    rc28: { mappings: RC28_DEFAULT_MAPPINGS, autoConnect: false, leds: DEFAULT_LEDS },
     midi: { mappings: {}, device: '', autoConnect: false },
     radiosync: {
         rig: '', baud: 0, direction: 'sdr-to-radio', muteOnTx: true,
@@ -137,6 +143,7 @@ export function loadState() {
         ...DEFAULT_STATE,
         ...(saved || {}),
         flexcontrol: { ...DEFAULT_STATE.flexcontrol, ...((saved && saved.flexcontrol) || {}) },
+        rc28: { ...DEFAULT_STATE.rc28, ...((saved && saved.rc28) || {}) },
         midi: { ...DEFAULT_STATE.midi, ...((saved && saved.midi) || {}) },
         radiosync: { ...DEFAULT_STATE.radiosync, ...((saved && saved.radiosync) || {}) },
         surfaces: { ...((saved && saved.surfaces) || {}) },
@@ -157,6 +164,9 @@ export function loadState() {
     // surface something else registers, which has not happened yet at load.
     // The panel says so if nothing claims it — see SDRControlPanel.
     if (typeof state.surface !== 'string' || !state.surface) state.surface = 'off';
+    // Its own merge, one level down: a blob saved before a setting existed has
+    // a `leds` without it, and the spread above would take that whole.
+    state.rc28.leds = ledSettings(state.rc28.leds);
     const out = saved ? state : adoptV1(state);
     out.midi.mappings = normaliseMidiMappings(out.midi.mappings);
     return out;
@@ -251,7 +261,8 @@ export class Dispatcher {
 export function exportMappings(source, mappings) {
     const payload = {
         version: 1,
-        source: source === 'flexcontrol' ? 'flexcontrol' : 'midi-control',
+        // v1's names for the two it has; the RC-28 is v2's alone and goes by its id.
+        source: source === 'midi' ? 'midi-control' : source,
         exported: new Date().toISOString(),
         mappings,
     };

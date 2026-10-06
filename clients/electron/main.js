@@ -10,7 +10,7 @@
 // while believing it is same-origin with it.
 
 const {
-    app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, safeStorage, shell, session,
+    app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, safeStorage, shell, session, webContents,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -27,6 +27,7 @@ const discovery = require('./discovery');
 const deeplink = require('./deeplink');
 const updates = require('./updates');
 const { browserUserAgent } = require('./useragent');
+const { installHidHandlers, patchRows, pickerTitle } = require('./hid');
 
 // The v2 start overlay already gates audio behind a click; this just keeps
 // Chromium's autoplay heuristics from ever muting a reconnect.
@@ -393,7 +394,13 @@ app.on('web-contents-created', (_event, contents) => {
     });
 });
 
-// ---- the serial port picker ------------------------------------------------
+// ---- the device picker -----------------------------------------------------
+//
+// One window for both kinds of device a page can ask for: a serial port (Web
+// Serial — the FlexControl, a rig for Radio Sync) and a HID device (WebHID —
+// the RC-28). Electron has a chooser for neither. The two lists are the same
+// shape by the time they reach the window (describePort, describeHidDevice),
+// so the page only needs to know which words to use; `kind` tells it.
 //
 // Electron has no port chooser of its own and no list-selection dialog, so this
 // was a message box with one button per port. A message box puts its buttons in
@@ -406,7 +413,7 @@ app.on('web-contents-created', (_event, contents) => {
 // It also shows what a button label could not — the device path and the
 // vendor/product IDs beneath each name — and stays live while it is open.
 
-/** The open picker, or null. @type {{win: BrowserWindow, ports: object[], origin: string, finish: (id: string) => void} | null} */
+/** The open picker, or null. @type {{win: BrowserWindow, kind: 'serial'|'hid', ports: object[], origin: string, finish: (id: string) => void} | null} */
 let serialPicker = null;
 
 // The window is sized to the list rather than left at one guessed height: one
@@ -454,26 +461,29 @@ function describePort(port) {
     };
 }
 
-function serialPortsChanged(kind, port) {
-    if (!serialPicker) return;
-    const row = describePort(port);
-    const rest = serialPicker.ports.filter((p) => p.portId !== row.portId);
-    serialPicker.ports = kind === 'add' ? [...rest, row] : rest;
+// `kind` is which picker this change is for: a serial port plugged in while
+// somebody is choosing an RC-28 is not something to show them.
+function pickerDevicesChanged(kind, change, row) {
+    if (!serialPicker || serialPicker.kind !== kind) return;
+    serialPicker.ports = patchRows(serialPicker.ports, change, row);
     if (!serialPicker.win.isDestroyed()) {
         serialPicker.win.webContents.send('serial:ports', serialPicker.ports);
     }
 }
 
 /**
- * Asks which port, and resolves with its id — or with '' for "none of them",
+ * Asks which device, and resolves with its id — or with '' for "none of them",
  * which is what `select-serial-port`'s callback wants for a refusal.
+ *
+ * `rows` are already described (describePort / describeHidDevice), and `kind`
+ * is 'serial' or 'hid', for the window's words.
  *
  * Every port is offered, including when there is only one. Picking the single
  * attached device automatically saved a click at the cost of the page being
  * handed a serial device without anybody naming it, and the page is content
  * served by whichever instance was connected to.
  */
-function chooseSerialPort(parent, portList, origin) {
+function chooseDevice(parent, rows, origin, kind) {
     // One at a time: a second request while a picker is open is refused rather
     // than stacking modal windows on top of each other. The open one is brought
     // forward, because a refusal with nothing on screen looks like the click did
@@ -483,7 +493,7 @@ function chooseSerialPort(parent, portList, origin) {
         return Promise.resolve('');
     }
 
-    const ports = portList.map(describePort);
+    const ports = rows;
 
     return new Promise((resolve) => {
         const win = new BrowserWindow({
@@ -511,7 +521,7 @@ function chooseSerialPort(parent, portList, origin) {
             // as a window that failed to load.
             show: false,
             backgroundColor: '#0b0e14',
-            title: 'Select serial port',
+            title: pickerTitle(kind),
             icon: APP_ICON,
             webPreferences: { preload: path.join(__dirname, 'serial-preload.js') },
         });
@@ -529,7 +539,7 @@ function chooseSerialPort(parent, portList, origin) {
             if (!win.isDestroyed()) win.close();
         };
 
-        serialPicker = { win, ports, origin: String(origin || ''), finish };
+        serialPicker = { win, kind, ports, origin: String(origin || ''), finish };
         // Closed by the window controls, or by the parent going away: either
         // way the page is told nothing was chosen rather than left hanging.
         win.on('closed', () => finish(''));
@@ -564,10 +574,11 @@ function setupSession() {
     // requestPort() would hang without these.
     ses.on('select-serial-port', (event, portList, webContents, callback) => {
         event.preventDefault();
-        chooseSerialPort(
+        chooseDevice(
             BrowserWindow.fromWebContents(webContents),
-            portList,
+            portList.map(describePort),
             serialRequestOrigin(webContents),
+            'serial',
         ).then(callback);
     });
     // The list can change while the picker is open — this is a knob somebody
@@ -575,9 +586,18 @@ function setupSession() {
     // not plugged it in yet. Both events carry the port that changed; the
     // authoritative list is the one we keep, so it is patched rather than
     // re-enumerated.
-    ses.on('serial-port-added', (_event, port) => serialPortsChanged('add', port));
-    ses.on('serial-port-removed', (_event, port) => serialPortsChanged('remove', port));
-    ses.setDevicePermissionHandler((details) => details.deviceType === 'serial');
+    ses.on('serial-port-added', (_event, port) => pickerDevicesChanged('serial', 'add', describePort(port)));
+    ses.on('serial-port-removed', (_event, port) => pickerDevicesChanged('serial', 'remove', describePort(port)));
+
+    // WebHID (the RC-28 dial): no chooser either, so the same picker — see
+    // hid.js, which also sets the device permission handler for both kinds.
+    installHidHandlers(ses, {
+        choose: chooseDevice,
+        changed: pickerDevicesChanged,
+        fromFrame: (frame) => webContents.fromFrame(frame) || null,
+        windowOf: (wc) => BrowserWindow.fromWebContents(wc),
+        originOf: serialRequestOrigin,
+    });
 
     // Anything not listed is refused. A browser prompts; there is nobody to
     // prompt here, so the list is the answer.
@@ -1188,9 +1208,11 @@ function setupIpc() {
 
     // The page's one read: the list plus who asked for it. The origin never
     // changes while a picker is open, so only the list is pushed after this.
+    // The channels are still called serial:* — they were first — but they
+    // carry whichever kind of device the open picker is for.
     ipcMain.handle('serial:info', () => (serialPicker
-        ? { ports: serialPicker.ports, origin: serialPicker.origin }
-        : { ports: [], origin: '' }));
+        ? { ports: serialPicker.ports, origin: serialPicker.origin, kind: serialPicker.kind }
+        : { ports: [], origin: '', kind: 'serial' }));
     ipcMain.on('serial:choose', (_e, portId) => {
         if (serialPicker) serialPicker.finish(portId);
     });

@@ -18,6 +18,11 @@
 // Each function declares what it `accepts`. Learn mode uses that to refuse a
 // pairing that cannot work — mapping a fader to "Next mode" would otherwise
 // look mapped and do nothing.
+//
+// A function that switches something on and off may also say whether it is on
+// now, as `lit(ctx)`. That is for a surface with lamps on its buttons — the
+// RC-28's F1 and F2 — so the button for the tuning lock is lit while the lock
+// is. Only where the answer is plain: "Next mode" has no on, "USB" does.
 
 import {
     MODES, MODE_BY_ID, bandwidthLimits, isIQ, maxFilterWidth,
@@ -153,6 +158,7 @@ const FREQUENCY = group('Frequency', [
         hint: 'holds frequency, mode and filter',
         accepts: PRESS,
         run: (ev, ctx) => ctx.actions.toggleTuneLock(),
+        lit: (ctx) => !!ctx.state().locked,
     },
 ]);
 
@@ -162,6 +168,7 @@ const MODE = group('Mode', [
         label: m.label,
         accepts: PRESS,
         run: (ev, ctx) => ctx.actions.setMode(m.id),
+        lit: (ctx) => ctx.state().tuning.mode === m.id,
     })),
     {
         id: 'mode_next',
@@ -207,6 +214,7 @@ const AUDIO = group('Audio', [
         label: 'Mute toggle',
         accepts: PRESS,
         run: (ev, ctx) => ctx.actions.toggleMute(),
+        lit: (ctx) => !!ctx.state().audio.muted,
     },
     {
         // The passband edges are clamped to the mode's own limits rather than a
@@ -256,6 +264,7 @@ const AUDIO = group('Audio', [
             // rather than the floor it would otherwise sit on.
             ctx.actions.setSquelch(squelchEnabled(sq.value) ? SQUELCH_MIN : SQUELCH_DEFAULT_ON);
         },
+        lit: (ctx) => squelchEnabled(ctx.state().squelch.value),
     },
     {
         // Discrete steps, for a button or a key. `volume_set` is the same
@@ -322,6 +331,7 @@ const ANNOUNCE = group('Announcements', [
         hint: 'spoken frequency and mode',
         accepts: PRESS,
         run: () => setAnnounceSettings({ enabled: !announceSettings().enabled }),
+        lit: () => !!announceSettings().enabled,
     },
 ]);
 
@@ -527,6 +537,7 @@ function dspGroup(schemas) {
                 if (!filter) return;
                 ctx.actions.setDsp(filter, !d.enabled);
             },
+            lit: (ctx) => !!ctx.state().dsp.enabled,
         },
         {
             id: 'dsp_next',
@@ -627,6 +638,21 @@ function resolvable(dspSchemas, hw) {
 export function findFunction(id, dspSchemas, hw) {
     const wanted = ALIAS[id] || id;
     return resolvable(dspSchemas, hw).find((f) => f.id === wanted) || null;
+}
+
+/**
+ * Whether a mapped function is on right now: true or false, or null for one
+ * that has no on and off to report. Never throws — a lamp is not worth a crash,
+ * and a receiver half-way through connecting has state that is not there yet.
+ */
+export function functionLit(id, ctx) {
+    try {
+        const fn = findFunction(id, ctx.state().dsp.schemas);
+        if (!fn || !fn.lit) return null;
+        return !!fn.lit(ctx);
+    } catch (e) {
+        return null;
+    }
 }
 
 // Human-readable name for a function id, including ones this build retired.

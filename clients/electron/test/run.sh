@@ -15,3 +15,5 @@ node tciserver.test.js
 node wsserver.test.js
 node tuningrange.test.js
 node omnirig.test.js
+node hid.test.js
+node devicepicker.test.js

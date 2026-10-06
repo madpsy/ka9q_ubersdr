@@ -16,7 +16,15 @@ import (
  * - 1900 Hz = 1, 2100 Hz = 0
  * - Text starts with 0x20 0x2A and ends with 0x01
  * - Add 0x20 to get ASCII
+ *
+ * Unlike slowrx, the 0x01 and the checksum after it (the XOR of the
+ * callsign's symbols), which MMSSTV and QSSTV both send and check, are
+ * required: without them noise that happens to match the header after a
+ * picture was reported as a callsign of whatever followed.
  */
+
+// fskMaxCall is the longest callsign MMSSTV accepts.
+const fskMaxCall = 16
 
 // Bit-reversal lookup table for 6-bit values
 var bitRev = []uint8{
@@ -70,8 +78,10 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 	testPtr := 0
 	asciiByte := uint8(0)
 	bitPtr := 0
-	bytePtr := 0
-	fskID := make([]byte, 10)
+	fskID := make([]byte, 0, fskMaxCall)
+	var checksum uint8
+	endFound := false
+	result := ""
 
 	// Bin indices for FSK detection (slowrx fsk.c:61-63)
 	loBin := f.getBin(1900.0 + float64(f.headerShift) - 1)
@@ -171,7 +181,9 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 				inSync = true
 				asciiByte = 0
 				bitPtr = 0
-				bytePtr = 0
+				fskID = fskID[:0]
+				checksum = 0
+				endFound = false
 			}
 
 			testPtr++
@@ -187,21 +199,29 @@ func (f *FSKDecoder) DecodeFSKID(pcmBuffer *SlidingPCMBuffer) string {
 			bitPtr++
 
 			if bitPtr == 6 {
-				// Complete byte received (slowrx fsk.c:98-102)
-				if asciiByte < 0x0d || bytePtr > 9 {
-					break
-				}
-
-				fskID[bytePtr] = asciiByte + 0x20
-				bytePtr++
+				// Complete byte received (slowrx fsk.c:98-102), then the
+				// 0x01 and the checksum MMSSTV and QSSTV check.
+				sym := asciiByte
 				bitPtr = 0
 				asciiByte = 0
+				if endFound {
+					if sym == checksum&0x3f && len(fskID) > 0 {
+						result = string(fskID)
+					}
+					break
+				}
+				if sym == 0x01 {
+					endFound = true
+					continue
+				}
+				if sym < 0x0d || len(fskID) >= fskMaxCall {
+					break
+				}
+				checksum ^= sym
+				fskID = append(fskID, sym+0x20)
 			}
 		}
 	}
-
-	// Null-terminate and convert to string
-	result := string(fskID[:bytePtr])
 
 	if result != "" {
 		log.Printf("[SSTV FSK] Decoded callsign: %s", result)

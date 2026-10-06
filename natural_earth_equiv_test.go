@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -248,13 +249,19 @@ func TestNEEquivRingContains(t *testing.T) {
 }
 
 // TestNEEquivAllSquares4 compares the optimised LookupMaidenhead against the
-// reference implementation for every one of the 32,400 4-character locators.
-// Slow (reference is ~50ms per lookup); run with NE_EXHAUSTIVE=1.
+// reference implementation over the 4-character locators. By default it checks
+// an evenly spaced sample covering the whole globe; the exhaustive sweep of
+// all 32,400 is slow (reference is ~50ms per lookup), so run it with
+// NE_EXHAUSTIVE=1.
 func TestNEEquivAllSquares4(t *testing.T) {
 	svc := testService(t)
 	locs := allSquares4()
-	if testing.Short() {
-		locs = locs[:200]
+	if os.Getenv("NE_EXHAUSTIVE") == "" {
+		n := 800
+		if testing.Short() {
+			n = 200
+		}
+		locs = everyNth(locs, n)
 	}
 	t.Logf("comparing %d locators against the reference implementation", len(locs))
 
@@ -374,4 +381,17 @@ func TestNEEquivRandomLocators(t *testing.T) {
 	close(work)
 	wg.Wait()
 	t.Logf("compared %d locators in %v, %d mismatches", len(locs), time.Since(start), mismatches.Load())
+}
+
+// everyNth returns about n elements of s, evenly spaced from first to last, so a
+// sample of the ordered locator list still spans every field.
+func everyNth(s []string, n int) []string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	out := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, s[i*len(s)/n])
+	}
+	return out
 }

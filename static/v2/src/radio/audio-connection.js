@@ -109,6 +109,14 @@ export class AudioConnection extends Emitter {
         // reader only has to take deltas — see the Receiver info panel, which
         // is the only thing that looks at it.
         this.bytesIn = 0;
+        // What the version 4 lossless path has carried, ever: the bytes it took
+        // against what the same samples would have been as raw 16-bit PCM, the
+        // packets by how they were coded, and the time spent decoding them.
+        // Cumulative like bytesIn and for the same reason — the Stats panel
+        // takes deltas and averages them, and is the only thing that looks.
+        this.v4Stats = {
+            raw: 0, coded: 0, rice: 0, silent: 0, escape: 0, decodeMs: 0,
+        };
         // performance.now() of every ping not yet answered, oldest first. The
         // socket is ordered and a pong answers nothing but a ping, so the next
         // pong is the oldest ping's -- no id has to travel. Per socket, since a
@@ -605,8 +613,14 @@ export class AudioConnection extends Emitter {
     // everything downstream — the player, the IQ spectrum tap, the browser-side
     // demodulator — is unaware of which version produced it.
     _onPCMv4Binary(buffer) {
+        const t0 = performance.now();
         const frame = this.pcmV4.decode(buffer);
         if (!frame) return;
+        const st = this.v4Stats;
+        st.decodeMs += performance.now() - t0;
+        st.raw += frame.samples * 2;
+        st.coded += buffer.byteLength;
+        st[frame.kind]++;
         if (frame.signal) this.emit('quality', frame.signal);
         this.attempts = 0;
         const frames = frame.planes.length ? frame.planes[0].length : 0;

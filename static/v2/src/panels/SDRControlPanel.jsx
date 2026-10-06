@@ -435,6 +435,15 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
 
     const available = isMidi ? midiAvailable() : (isRc28 ? rc28Available() : flexAvailable());
     if (!available) {
+        // Chrome hides WebHID, Web Serial and Web MIDI from plain-http pages,
+        // so there the browser is right and the address is what is wrong.
+        if (typeof window !== 'undefined' && window.isSecureContext === false) {
+            return (
+                <div className="note note--warn">
+                    {isMidi ? 'MIDI devices' : (isRc28 ? 'The RC-28' : 'Serial ports')} need this receiver to be opened over https — browsers only offer them to secure pages.
+                </div>
+            );
+        }
         return (
             <div className="note note--warn">
                 {isMidi && 'This browser has no Web MIDI API. Chrome or Edge is needed — Firefox has never shipped it.'}

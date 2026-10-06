@@ -49,8 +49,10 @@ type lookupErrorResponse struct {
 //  1. Reject if lookup services are disabled.
 //  2. Auth:
 //     a. If the request comes directly from a trusted addon container
-//     (lookup_services.trusted_containers, matched on the RAW source IP via
-//     IsContainerIP), no session UUID is required.
+//     (lookup_services.trusted_containers, or any enabled addon in addons.yaml
+//     when lookup_services.trust_all_addons is on; matched on the RAW source
+//     IP via IsContainerIP), no session UUID is required. Proxy containers
+//     are never trusted this way.
 //     b. Otherwise validate uuid — must correspond to an active audio session
 //     (not spectrum-only).
 //  3. Validate and normalise the callsign.
@@ -70,6 +72,7 @@ func handleLookup(
 	sessions *SessionManager,
 	rateLimiter *LookupRateLimiter,
 	containerRateLimiter *LookupRateLimiter,
+	addonsFn func() []AddonProxyEntry,
 ) {
 	// Only GET is supported.
 	if r.Method != http.MethodGet {
@@ -92,13 +95,7 @@ func handleLookup(
 	if host, _, err := net.SplitHostPort(rawSourceIP); err == nil {
 		rawSourceIP = host
 	}
-	trustedContainerName := ""
-	for _, name := range cfg.LookupServices.TrustedContainers {
-		if name != "" && cfg.Server.IsContainerIP(rawSourceIP, name) {
-			trustedContainerName = name
-			break
-		}
-	}
+	trustedContainerName := trustedLookupContainer(cfg, rawSourceIP, addonsFn)
 	isTrustedContainer := trustedContainerName != ""
 
 	// rawUUID is only required for non-container callers.
@@ -263,4 +260,32 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// trustedLookupContainer returns the name of the trusted container that ip
+// belongs to, or "" if none. Candidates are lookup_services.trusted_containers
+// plus, when trust_all_addons is on, the host of every enabled addon.
+//
+// Proxy containers are skipped even if listed: a request arriving through
+// Caddy or a tunnel carries the proxy's IP, so trusting one would grant
+// UUID-free lookups to every public caller behind it.
+func trustedLookupContainer(cfg *Config, ip string, addonsFn func() []AddonProxyEntry) string {
+	check := func(name string) bool {
+		return name != "" &&
+			!cfg.Server.IsProxyContainerName(name) &&
+			cfg.Server.IsContainerIP(ip, name)
+	}
+	for _, name := range cfg.LookupServices.TrustedContainers {
+		if check(name) {
+			return name
+		}
+	}
+	if cfg.LookupServices.TrustAllAddonsEnabled() && addonsFn != nil {
+		for _, e := range addonsFn() {
+			if check(e.Host) {
+				return e.Host
+			}
+		}
+	}
+	return ""
 }

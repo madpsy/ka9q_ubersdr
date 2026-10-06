@@ -136,6 +136,45 @@ t('the capture time is carried exactly, across deltas and resyncs', () => {
     console.log(`      worst error ${(worst * 1e6).toFixed(0)} ns over ${all.length} packets`);
 });
 
+t('the raw size the Stats panel saves against counts every channel', () => {
+    // The Saving card divides the bytes received by what the same samples would
+    // have been as raw 16-bit PCM. That figure comes from the packet's own
+    // sample count, which spans all channels interleaved, so IQ has to come out
+    // at twice the bytes per frame of mono audio. The sample rate does not
+    // enter into it: both sides of the ratio are the same packets.
+    //
+    // Checked against the server's input rather than the decoder's own count,
+    // and through AudioConnection, which is where the panel reads it.
+    const { AudioConnection } = require('./.build/audio.cjs');
+    const conn = new AudioConnection();
+    const dec = new PCMv4StreamDecoder();
+    let raw = 0, coded = 0;
+    const kinds = { rice: 0, silent: 0, escape: 0 };
+    const perFrame = {};
+    all.forEach((p, n) => {
+        const frame = dec.decode(p.packet);
+        assert.ok(frame, `packet ${n} was rejected`);
+        assert.strictEqual(frame.samples, p.want.length,
+            `packet ${n}: counted ${frame.samples} samples, server encoded ${p.want.length}`);
+        raw += p.want.length * 2;
+        coded += p.packet.byteLength;
+        kinds[frame.kind]++;
+        perFrame[frame.channels] = (frame.samples * 2) / frame.planes[0].length;
+        conn._onPCMv4Binary(p.packet);
+    });
+    // Both layouts are in the sample, and each is costed by its width.
+    assert.deepStrictEqual(perFrame, { 1: 2, 2: 4 });
+    const st = conn.v4Stats;
+    assert.strictEqual(st.raw, raw);
+    assert.strictEqual(st.coded, coded);
+    assert.strictEqual(st.rice, kinds.rice);
+    assert.strictEqual(st.silent, kinds.silent);
+    assert.strictEqual(st.escape, kinds.escape);
+    assert.ok(kinds.rice && kinds.silent && kinds.escape, `not every kind is in the sample: ${JSON.stringify(kinds)}`);
+    assert.ok(st.decodeMs > 0, 'no decode time recorded');
+    console.log(`      saving ${((1 - coded / raw) * 100).toFixed(1)}% over ${all.length} packets`);
+});
+
 t('signal quality survives, including the no-reading sentinel', () => {
     const dec = new PCMv4StreamDecoder();
     let readings = 0, sentinels = 0;

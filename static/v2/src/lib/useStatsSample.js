@@ -33,6 +33,17 @@ import { serverClock } from '../radio/serverClock.js';
 // How often the host is asked to measure itself, however often we sample.
 const APP_MS = 1000;
 
+// The difference between two readings of AudioConnection.v4Stats, or null when
+// either is missing. A counter that went backwards is a new connection object
+// starting again from zero, and is read as nothing having happened rather than
+// as a negative burst.
+function v4Delta(was, at, ms) {
+    if (!was || !at) return null;
+    const d = { ms };
+    for (const k of Object.keys(at)) d[k] = Math.max(0, (at[k] || 0) - (was[k] || 0));
+    return d;
+}
+
 /**
  * Call `onSample` every `intervalMs` with a sample shaped for statLines().
  *
@@ -114,6 +125,7 @@ export default function useStatsSample(intervalMs, onSample) {
                 audio: (audioConn && audioConn.bytesIn) || 0,
                 frames: spectrumConn.framesIn || 0,
                 ticks: frameTicks(),
+                v4: audioConn && audioConn.v4Stats ? { ...audioConn.v4Stats } : null,
             };
             const was = prev.current;
             prev.current = at;
@@ -137,6 +149,11 @@ export default function useStatsSample(intervalMs, onSample) {
                 framesIn: perSecond(at.frames - was.frames, ms),
                 bytesIn: perSecond(at.bytes - was.bytes, ms),
                 audioBytes: perSecond(at.audio - was.audio, ms),
+                // The lossless path's counters over this interval, as deltas
+                // rather than rates: what anybody wants of them is a ratio or a
+                // share, which only means something summed over several
+                // samples — see the Stats panel's averaging window.
+                v4: v4Delta(was.v4, at.v4, ms),
                 // Already a rate, measured by the panel that owns that stream —
                 // null whenever it is closed, which is whenever the stream is.
                 bandBytes: bandRate(),

@@ -51,6 +51,41 @@ const KEEP_MS = 1000;
 // second whatever the caller asks for.
 const SAMPLE_MS = 500;
 
+// The lossless codec's cards are averaged over this rather than read per sample.
+//
+// Half a second of a squelched channel is a run of silent packets saving 95%,
+// and the next half second of a voice is 50% — both true, and neither the
+// answer to "what is this codec doing for me". Five seconds is long enough to
+// hold through a syllable and short enough that tuning somewhere new shows on
+// the cards before you have stopped looking for it.
+const V4_AVG_MS = 5000;
+
+// Sum the lossless path's per-sample deltas over the window. Null when no
+// version 4 packet arrived in it — Opus, the JSON fallback, version 3, or no
+// audio at all — which is what hides the cards.
+function v4Summary(window) {
+    const sum = { raw: 0, coded: 0, rice: 0, silent: 0, escape: 0, decodeMs: 0, ms: 0 };
+    for (const d of window) for (const k in sum) sum[k] += d[k] || 0;
+    const packets = sum.rice + sum.silent + sum.escape;
+    if (!packets || !(sum.raw > 0) || !(sum.ms > 0)) return null;
+    return {
+        saving: (1 - sum.coded / sum.raw) * 100,
+        rice: (sum.rice / packets) * 100,
+        silent: (sum.silent / packets) * 100,
+        escape: (sum.escape / packets) * 100,
+        // A share of one core, the CPU chart's unit, so the two can be read
+        // against each other on the clients that draw that chart.
+        decodePct: (sum.decodeMs / sum.ms) * 100,
+    };
+}
+
+// A share as a whole number, unless it is a small one that is not nothing:
+// an escape rate of 0.4% is a different reading from none at all.
+function pctText(v) {
+    if (!Number.isFinite(v)) return '—';
+    return v > 0 && v < 1 ? v.toFixed(1) : String(Math.round(v));
+}
+
 // The stacked NET chart's three streams, bottom to top, with the colour each is
 // drawn in. Ordered by how much they usually are and how much can be done about
 // them: the spectrum is the bulk of it and has zoom, poll rate and a pause
@@ -388,6 +423,9 @@ export default function StatsPanel({ minimal }) {
     const cpuHistory = useRef([]);
     const memRef = useRef(null);
     const memHistory = useRef([]);
+    // The lossless codec's deltas over the last V4_AVG_MS, summed into the
+    // cards each sample. Not a chart: see V4_AVG_MS for why these are averages.
+    const v4Window = useRef([]);
     const [facts, setFacts] = useState({});
 
     useEffect(() => {
@@ -434,6 +472,12 @@ export default function StatsPanel({ minimal }) {
         const app = s.app || {};
         if (app.cpu != null) push(cpuHistory, { t, v: app.cpu });
         if (app.mem != null) push(memHistory, { t, v: app.mem });
+        // Trimmed exactly rather than with trimBefore, which keeps a point
+        // from before the cutoff for a line to start from. An average wants
+        // the window and nothing older.
+        const w4 = v4Window.current;
+        if (s.v4) w4.push({ t, ...s.v4 });
+        while (w4.length && w4[0].t <= t - V4_AVG_MS) w4.shift();
 
         setFacts({
             fps: s.fps,
@@ -460,6 +504,7 @@ export default function StatsPanel({ minimal }) {
             ip: s.ip,
             cpu: app.cpu,
             mem: app.mem,
+            v4: v4Summary(v4Window.current),
         });
     });
 
@@ -642,6 +687,37 @@ export default function StatsPanel({ minimal }) {
                 <div className="stats-cards__wide">
                     <Readout label="Your address" value={facts.ip || '—'} />
                 </div>
+                {/* The lossless codec, and only while it is the one running:
+                    on Opus none of these has anything to measure. Last in the
+                    grid, so a mode change that brings them and takes them away
+                    moves nothing above them. Averaged over V4_AVG_MS. */}
+                {facts.v4 && (
+                    <>
+                        {/* Against the same samples as raw 16-bit PCM, header
+                            included — so a run of escapes can go negative,
+                            and that is the truth about it. */}
+                        <Readout label="Saving" value={pctText(facts.v4.saving)} unit="%" />
+                        {/* Time in the JavaScript decoder as a share of one
+                            core. The predictor runs per sample, so on wide IQ
+                            on a phone this is the figure that says whether the
+                            stutter is this device keeping up. */}
+                        <Readout
+                            label="Decode"
+                            value={perSecondText(facts.v4.decodePct)}
+                            unit="% CPU"
+                        />
+                        {/* Rice is the codec working; silent is squelch; escape
+                            is the predictor losing to the signal and sending it
+                            verbatim — the one that is worth watching. */}
+                        <div className="stats-cards__wide">
+                            <Readout
+                                label="Packets"
+                                value={`rice ${pctText(facts.v4.rice)} · silent ${pctText(facts.v4.silent)} · escape ${pctText(facts.v4.escape)}`}
+                                unit="%"
+                            />
+                        </div>
+                    </>
+                )}
             </div>
             )}
 

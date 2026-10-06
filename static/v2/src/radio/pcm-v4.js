@@ -632,6 +632,10 @@ export class PCMv4StreamDecoder {
                 noisePower: quality(this.noise),
             },
             captureMs: this.ts.ms,
+            // How the packet was coded and how many 16-bit samples it held, for
+            // the Stats panel's comparison against sending them raw.
+            kind: silent ? 'silent' : escape ? 'escape' : 'rice',
+            samples: count,
         };
     }
 

@@ -2253,6 +2253,16 @@ func main() {
 		if len(config.LookupServices.TrustedContainers) > 0 {
 			log.Printf("Lookup endpoint trusted containers %v: %d requests/min per container", config.LookupServices.TrustedContainers, config.LookupServices.TrustedContainerRateLimit)
 		}
+		if config.LookupServices.TrustAllAddonsEnabled() {
+			log.Printf("Lookup endpoint trusts all enabled addons: %d requests/min per container", config.LookupServices.TrustedContainerRateLimit)
+		}
+	}
+	if config.LookupServices.Enabled {
+		for _, name := range config.LookupServices.TrustedContainers {
+			if config.Server.IsProxyContainerName(name) {
+				log.Printf("WARNING: lookup_services.trusted_containers lists proxy container %q — ignored, as it would grant UUID-free lookups to every client behind it", name)
+			}
+		}
 	}
 
 	// Initialize SSH proxy if enabled (declare before rate limiter cleanup goroutine)
@@ -2807,6 +2817,28 @@ func main() {
 		addonRouter.Register(ap)
 	}
 
+	// Resolve addon container names for IsContainerIP matching. Installed
+	// unconditionally — not only when MQTT ingest is on — so anything that
+	// identifies addon containers by source IP works on every instance. The
+	// callback is re-read by the DNS refresh loop every few seconds, so addons
+	// added or removed at runtime are picked up without a restart.
+	config.Server.SetAddonContainerResolver(func() []string {
+		entries := adminHandler.EnabledAddonEntries()
+		hosts := make([]string, 0, len(entries))
+		for _, e := range entries {
+			if e.Host != "" {
+				hosts = append(hosts, e.Host)
+			}
+		}
+		return hosts
+	})
+
+	// Resolve them now rather than waiting for the next refresh tick, so addons
+	// that call in immediately after startup are not rejected for the first few
+	// seconds. Off the startup path because each unresolvable name costs a DNS
+	// timeout.
+	go config.Server.resolveContainerIPs()
+
 	// ── Addon → MQTT ingest ───────────────────────────────────────────────────
 	// Lets addon containers publish their own events (and declare Home Assistant
 	// entities) through UberSDR's MQTT connection. See mqtt_addon_ingest.go.
@@ -2819,26 +2851,6 @@ func main() {
 	// against the addon container names.
 	if mqttPublisher != nil && config.MQTT.AddonIngest.IsEnabled() {
 		ingestCfg := &config.MQTT.AddonIngest
-
-		// Resolve addon container names for IsContainerIP matching. The callback
-		// is re-read by the DNS refresh loop every few seconds, so addons added
-		// or removed at runtime are picked up without a restart.
-		config.Server.SetAddonContainerResolver(func() []string {
-			entries := adminHandler.EnabledAddonEntries()
-			hosts := make([]string, 0, len(entries))
-			for _, e := range entries {
-				if e.Host != "" {
-					hosts = append(hosts, e.Host)
-				}
-			}
-			return hosts
-		})
-
-		// Resolve them now rather than waiting for the next refresh tick, so
-		// addons that publish immediately after startup are not rejected for the
-		// first few seconds. Off the startup path because each unresolvable name
-		// costs a DNS timeout.
-		go config.Server.resolveContainerIPs()
 
 		addonHAEnabled := ingestCfg.IsHomeAssistantEnabled(config.MQTT.HomeAssistant)
 
@@ -2965,7 +2977,7 @@ func main() {
 		handleSessionsGeoJSON(w, r, config, sessions, dxClusterWsHandler, geoIPService, sessionStatsRateLimiter)
 	})
 	http.HandleFunc("/api/lookup", func(w http.ResponseWriter, r *http.Request) {
-		handleLookup(w, r, config, sessions, lookupRateLimiter, lookupContainerRateLimiter)
+		handleLookup(w, r, config, sessions, lookupRateLimiter, lookupContainerRateLimiter, adminHandler.EnabledAddonEntries)
 	})
 	http.HandleFunc("/api/lookup/image/", func(w http.ResponseWriter, r *http.Request) {
 		if globalImageProxy == nil {

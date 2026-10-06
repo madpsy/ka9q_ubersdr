@@ -147,6 +147,16 @@ type LookupServicesConfig struct {
 	// Default: ["dxcluster"].  Set to [] to disable.
 	TrustedContainers []string `yaml:"trusted_containers"`
 
+	// TrustAllAddons grants the same UUID-free lookup access to every enabled
+	// addon in addons.yaml, matched on its container hostname, in addition to
+	// TrustedContainers.  The addon list is re-read live, so installing an
+	// addon is all an operator has to do.  Proxy containers (the built-in
+	// tunnel/caddy names and server.trusted_containers) are never trusted this
+	// way, even if an addon entry names one as its host.
+	//
+	// Default: true.  Set to false to trust only TrustedContainers.
+	TrustAllAddons *bool `yaml:"trust_all_addons"`
+
 	// TrustedContainerRateLimit is the maximum number of lookups per minute
 	// allowed for EACH trusted container (keyed per container name).
 	// Cached/in-flight callsigns still receive the usual 10× allowance.
@@ -414,7 +424,7 @@ type ServerConfig struct {
 	injectResolveNames              []string          // DX inject-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from dxcluster.inject_trusted_hosts)
 	widgetResolveNames              []string          // Widget-admin-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from admin.widget_trusted_hosts)
 	whisperResolveNames             []string          // Whisper-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from whisper.trusted_containers)
-	addonResolveFn                  func() []string   // Returns the CURRENT addon container hostnames (internal use, set from the live addons.yaml); nil when addon ingest is off
+	addonResolveFn                  func() []string   // Returns the CURRENT addon container hostnames (internal use, set from the live addons.yaml); nil until main installs the resolver
 	addonResolveMu                  sync.RWMutex      // Protects addonResolveFn
 }
 
@@ -2206,6 +2216,29 @@ func (sc *ServerConfig) IsTrustedProxy(ipStr string) bool {
 	return false
 }
 
+// builtInProxyContainers are always trusted as proxies, whatever
+// server.trusted_containers says.
+var builtInProxyContainers = []string{"tunnel-support-client", "tunnel-client", "caddy"}
+
+// IsProxyContainerName reports whether a container name is trusted as a proxy
+// (built-in or listed in server.trusted_containers). Traffic from a proxy
+// container carries the proxy's IP, not the end user's, so features that
+// identify callers by container IP must never trust these names — doing so
+// would extend the privilege to every request the proxy forwards.
+func (sc *ServerConfig) IsProxyContainerName(name string) bool {
+	for _, n := range builtInProxyContainers {
+		if n == name {
+			return true
+		}
+	}
+	for _, n := range sc.TrustedContainers {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
 // IsContainerIP checks if an IP address belongs to a specific named trusted container.
 // Uses the containerNameByIP map populated by the DNS refresh loop.
 func (sc *ServerConfig) IsContainerIP(ipStr, containerName string) bool {
@@ -2237,7 +2270,8 @@ const containerDNSLookupTimeout = 2 * time.Second
 // of the others.
 func (sc *ServerConfig) resolveContainerIPs() {
 	// Always-trusted built-in container names.
-	builtIn := []string{"tunnel-support-client", "tunnel-client", "caddy"}
+	// Copied so the append below can never write into the package-level slice.
+	builtIn := append([]string(nil), builtInProxyContainers...)
 
 	// Merge built-ins with user-configured names, deduplicating.
 	seen := make(map[string]bool, len(builtIn)+len(sc.TrustedContainers))
@@ -2313,7 +2347,7 @@ func (sc *ServerConfig) resolveContainerIPs() {
 	// Merge in addon container names (from the live addons.yaml, via the
 	// resolver callback). Unlike the lists above this one is re-read on every
 	// pass, so addons installed or removed at runtime start or stop being
-	// recognised by the MQTT ingest listener within one refresh interval.
+	// recognised within one refresh interval.
 	// Same semantics again: resolved for IsContainerIP matching, never trusted
 	// as a proxy.
 	for _, n := range sc.addonContainerNames() {
@@ -2919,6 +2953,12 @@ func (lsc *LookupServicesConfig) applyDefaults() {
 	if lsc.TrustedContainerRateLimit == 0 {
 		lsc.TrustedContainerRateLimit = 60 // Default 60 lookups per minute per container
 	}
+}
+
+// TrustAllAddonsEnabled reports whether every enabled addon may call
+// /api/lookup without a session UUID. Defaults to true when unset.
+func (lsc *LookupServicesConfig) TrustAllAddonsEnabled() bool {
+	return lsc.TrustAllAddons == nil || *lsc.TrustAllAddons
 }
 
 // GetWhisperConfig returns the Whisper configuration

@@ -526,6 +526,64 @@ t('an unset overlay setting says it is taking the device default', () => {
     assert.strictEqual(select.props.value, stats.statsPlace(null, false));
 });
 
+// --- the lossless codec ------------------------------------------------------
+
+const V4_CARDS = ['Saving', 'Decode', 'Packets'];
+
+function v4Context() {
+    return context({
+        audioConn: {
+            bytesIn: 0,
+            v4Stats: { raw: 0, coded: 0, rice: 0, silent: 0, escape: 0, decodeMs: 0 },
+        },
+    });
+}
+
+// Every half second: 1200 samples sent in 1000 bytes, nine packets coded and
+// one squelched, 5 ms in the decoder.
+const V4_TRAFFIC = {
+    step: (ctx) => {
+        const st = ctx.audioConn.v4Stats;
+        st.raw += 2400;
+        st.coded += 1000;
+        st.rice += 9;
+        st.silent += 1;
+        st.decodeMs += 5;
+    },
+};
+
+t('no lossless cards on a connection without the version 4 counters', () => {
+    const labels = cards(mount().tree).map((c) => c.label);
+    for (const label of V4_CARDS) assert.ok(!labels.includes(label), `drew ${label}`);
+});
+
+t('no lossless cards while no version 4 packet is arriving', () => {
+    // An Opus session: the counters exist and stand still.
+    const labels = cards(mount(v4Context()).tree).map((c) => c.label);
+    for (const label of V4_CARDS) assert.ok(!labels.includes(label), `drew ${label}`);
+});
+
+t('the lossless cards are averaged over the window', () => {
+    const { tree } = mount(v4Context(), {}, V4_TRAFFIC);
+    // 1 - 1000/2400.
+    assert.strictEqual(cardNamed(tree, 'Saving').num, '58');
+    // 10 ms in a second of samples: 1% of one core.
+    assert.strictEqual(cardNamed(tree, 'Decode').num, '1.0');
+    assert.strictEqual(cardNamed(tree, 'Packets').num, 'rice 90 · silent 10 · escape 0');
+});
+
+t('the lossless cards go when the packets stop', () => {
+    // Lossless for a second, then six seconds of nothing new — past the
+    // averaging window, so the cards must not be left showing the old figures.
+    let n = 0;
+    const { tree } = mount(v4Context(), {}, {
+        ticks: 16,
+        step: (ctx) => { if (n++ < 2) V4_TRAFFIC.step(ctx); },
+    });
+    const labels = cards(tree).map((c) => c.label);
+    for (const label of V4_CARDS) assert.ok(!labels.includes(label), `still drew ${label}`);
+});
+
 // --- the receiver not being on -----------------------------------------------
 
 t('a stopped receiver says so rather than drawing empty charts silently', () => {

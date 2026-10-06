@@ -2586,7 +2586,8 @@ dsp:
 # Public HTTP endpoint:
 #   GET /api/lookup?callsign=W1AW&uuid=<user_session_id>
 #   Returns JSON with operator data from the configured provider.
-#   Requires a valid active session UUID (same UUID used by audio/spectrum WebSockets).
+#   Requires a valid active session UUID (same UUID used by audio/spectrum WebSockets),
+#   except from trusted addon containers (see trusted_containers / trust_all_addons).
 #   Bypassed users (trusted IPs or bypass password) are exempt from rate limiting.
 #
 lookup_services:
@@ -2635,6 +2636,14 @@ lookup_services:
   trusted_containers:
     - "dxcluster"
     - "voiceskimmer"
+
+  # Also trust every enabled addon in addons.yaml, matched on its container
+  # hostname, in the same way as trusted_containers above. The addon list is
+  # re-read live, so installing an addon is all that is needed. Proxy
+  # containers (caddy, tunnel-client, tunnel-support-client and anything in
+  # server.trusted_containers) are never trusted for lookups, whichever list
+  # names them. Set to false to trust only trusted_containers. Default: true.
+  trust_all_addons: true
 
   # Maximum lookups per minute for EACH trusted container above (keyed per
   # container name). This is separate from rate_limit_per_minute (which applies

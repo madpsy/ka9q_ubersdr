@@ -7,15 +7,24 @@
 // CerberusSolutions/FlexRC-28, README "RC-28 HID Protocol"); it is restated
 // here because nothing else in this tree describes it.
 //
-// Input report, 32 bytes, sent while anything moves:
+// Input report, 32 bytes, every 10 ms or so while anything moves:
 //
-//   [0] 0x01            always
-//   [1] dial speed      0 stopped, 1–16 or so the faster it spins
+//   [0] 0x01            a state report
+//   [1] dial counts     how far it turned since the last report, 0 stopped;
+//                       about 670 to the turn (sdroxide, below, summed them)
 //   [3] direction       0x01 clockwise (up), 0x02 anticlockwise (down)
 //   [5] buttons         active low — bit 0 PTT, bit 1 F1, bit 2 F2; 0x07 idle
 //
+// or, in answer to the firmware query below, [0x02]["102 3210"][0 …].
+//
 // Output report, 32 bytes: [0x01][leds][0 …] — bit 0 TX, bit 1 F1, bit 2 F2,
-// bit 3 Link, also active low, so 0x0F is everything off.
+// bit 3 Link, also active low, so 0x0F is everything off. [0x02][0 …] asks for
+// the firmware version.
+//
+// All of that is also what sdroxide's RC-28 support reads and writes over
+// WebHID (github.com/dividebysandwich/sdroxide, pull 553), checked against a
+// real unit in Chrome: no report IDs, and nothing to send before the dial
+// starts reporting or the LEDs light.
 //
 // What the LEDs show is the operator's choice (controls/rc28leds.js); this file
 // only drives them — the receiver state from setIndicators(), a held button's
@@ -41,6 +50,19 @@ export const HOLD_MS = 600;
 
 // Half a blink: on this long, off this long.
 export const BLINK_MS = 500;
+
+// The dial has no detents, and counts about ten times as finely as one that
+// does; ten counts make one, about 67 to the turn, as sdroxide has it.
+export const COUNTS_PER_DETENT = 10;
+
+// How often the gathered counts go out as detents. A report every 10 ms would
+// be a hundred retunes a second, so they are summed and sent at this pace — and
+// summed rather than thinned, so no turn of the dial is lost on the way.
+export const DIAL_FLUSH_MS = 50;
+
+// How long a dial that was sent the firmware query has to answer, or send
+// anything at all, before the log says it has not been heard from.
+export const ANSWER_MS = 2000;
 
 const REPORT_BYTES = 32;
 
@@ -72,11 +94,21 @@ export function rc28KeyLabel(key) {
 }
 
 // The dial comes out of the box mapped to the frequency, so the first thing it
-// does when turned is tune. The buttons are left for the operator to assign.
+// does when turned is tune — 100 Hz a detent, so about 6.7 kHz a turn. The
+// buttons are left for the operator to assign.
+//
+// No rate limit: the driver paces the dial itself (DIAL_FLUSH_MS), and a limit
+// on top would throw away the counts it had gathered.
+export const RC28_DIAL_MAPPING = { function: 'freq_enc_100', throttleMs: 0, mode: 'none' };
 export const RC28_DEFAULT_MAPPINGS = {
-    dial_up: { function: 'freq_enc_1k', throttleMs: 100, mode: 'rate_limit' },
-    dial_down: { function: 'freq_enc_1k', throttleMs: 100, mode: 'rate_limit' },
+    dial_up: RC28_DIAL_MAPPING,
+    dial_down: RC28_DIAL_MAPPING,
 };
+
+// What the defaults were before the dial was paced here: a 1 kHz encoder behind
+// a 100 ms limit, which let one report in ten through. A table still holding
+// exactly that is upgraded on load — see mappings.js.
+export const RC28_OLD_DIAL_MAPPING = { function: 'freq_enc_1k', throttleMs: 100, mode: 'rate_limit' };
 
 /**
  * One input report as `{ speed, direction, buttons }`, or null for anything
@@ -105,25 +137,29 @@ export function parseReport(bytes, reportId = 0) {
 }
 
 /**
- * Detents for one dial report: signed, 1–6 in magnitude.
- *
- * The catalogue's encoders multiply their step by the delta, and that scale was
- * set by the FlexControl, whose speeds run 1–6. The RC-28 reports up to about
- * 16, and handed through raw a quick flick of the wrist would move a 1 kHz
- * encoder 16 kHz at a time. So the speed is folded onto the same 1–6, along the
- * bands FlexRC-28's own velocity curve uses — slow turns stay one detent each,
- * and only a real spin accelerates.
+ * The firmware version, if this report is the answer to the query, else null.
+ * Text from byte 1 to the first zero; with a numbered report 2 the ID has taken
+ * the 0x02 off the front, as parseReport explains.
  */
-export function dialDelta(speed, direction) {
-    if (!speed || !direction) return 0;
-    let mag;
-    if (speed <= 2) mag = 1;
-    else if (speed <= 4) mag = 2;
-    else if (speed <= 7) mag = 3;
-    else if (speed <= 11) mag = 4;
-    else if (speed <= 15) mag = 5;
-    else mag = 6;
-    return direction * mag;
+export function parseFirmware(bytes, reportId = 0) {
+    if (!bytes) return null;
+    let start;
+    if (reportId === 2) start = 0;
+    else if (reportId === 0 && bytes[0] === 0x02) start = 1;
+    else return null;
+    let text = '';
+    for (let i = start; i < bytes.length && bytes[i] !== 0; i++) text += String.fromCharCode(bytes[i]);
+    return text.trim();
+}
+
+/**
+ * Whole detents out of `carry` dial counts: `{ detents, carry }`, the remainder
+ * carried. Toward zero, so a turn back spends the carry first and a wiggle
+ * nets out rather than moving the receiver.
+ */
+export function takeDetents(carry) {
+    const detents = Math.trunc(carry / COUNTS_PER_DETENT) || 0;   // never -0
+    return { detents, carry: carry - detents * COUNTS_PER_DETENT };
 }
 
 /** The LED byte for a set of lit LEDs. Active low: 0x0F is all off. */
@@ -144,16 +180,16 @@ export function isRc28(device) {
     return !!device && device.vendorId === RC28_VENDOR_ID && device.productId === RC28_PRODUCT_ID;
 }
 
-// The output report's ID, read off the descriptor rather than assumed. 0 — no
-// ID — is what FlexRC-28 writes, and it is also the answer when the descriptor
-// says nothing.
-function outputReportId(device) {
+// The output report IDs the descriptor declares. None — what FlexRC-28 and
+// sdroxide write to — is also the answer when the descriptor says nothing.
+function outputReportIds(device) {
+    const ids = [];
     for (const c of (device && device.collections) || []) {
         for (const r of c.outputReports || []) {
-            if (Number.isInteger(r.reportId)) return r.reportId;
+            if (Number.isInteger(r.reportId) && r.reportId) ids.push(r.reportId);
         }
     }
-    return 0;
+    return ids;
 }
 
 export class RC28Control extends Emitter {
@@ -183,6 +219,15 @@ export class RC28Control extends Emitter {
         // The LED byte last written. LEDs are set from a poll several times a
         // second; a report goes out only when the byte would change.
         this._lastSent = null;
+        // Dial counts not yet sent as detents, and the timer that sends them.
+        this._counts = 0;
+        this._dialTimer = null;
+        // Whether anything has come back from the dial since it was opened, and
+        // the timer that says so in the log if nothing has.
+        this._heard = false;
+        this._answerTimer = null;
+        // A failed LED write is said once per connection, not once per write.
+        this._writeFailed = false;
         this._onReport = (e) => this._report(e);
         this._onGone = (e) => { if (e.device === this.device) this._lost(); };
     }
@@ -235,8 +280,15 @@ export class RC28Control extends Emitter {
         }
 
         this.device = device;
-        this._outId = outputReportId(device);
+        const ids = outputReportIds(device);
+        this._outId = ids.length ? ids[0] : 0;
+        // With numbered reports the query goes out as report 2, so only if the
+        // descriptor has one; without, it is just a payload starting 0x02.
+        this._canQuery = !ids.length || ids.includes(2);
         this._buttons = BUTTONS_IDLE;
+        this._counts = 0;
+        this._heard = false;
+        this._writeFailed = false;
         this.connected = true;
         device.addEventListener('inputreport', this._onReport);
         if (navigator.hid.addEventListener) navigator.hid.addEventListener('disconnect', this._onGone);
@@ -245,7 +297,26 @@ export class RC28Control extends Emitter {
         this._lastSent = null;
         this._leds();
         this._blink();
+        this._query();
         return true;
+    }
+
+    // Asks the dial for its firmware version. The answer is logged, and is the
+    // proof that the page and the dial are talking both ways — a dial that
+    // stays dark and ignores the knob otherwise looks exactly like one that
+    // was never connected.
+    _query() {
+        if (!this._canQuery) return;
+        this._write(0x02, 0);
+        this._answerTimer = this._setTimeout(() => {
+            this._answerTimer = null;
+            if (this._heard || !this.connected) return;
+            this.emit('message', {
+                text: 'The RC-28 is open but has not answered. Unplug it and plug it back in, '
+                    + 'and close anything else that may be using it.',
+                tone: 'warn',
+            });
+        }, ANSWER_MS);
     }
 
     // The LEDs go dark first: a dial left showing Link after the page has let
@@ -287,6 +358,11 @@ export class RC28Control extends Emitter {
         this._down = {};
         this._held = {};
         this._buttons = BUTTONS_IDLE;
+        if (this._dialTimer !== null) this._clearTimeout(this._dialTimer);
+        this._dialTimer = null;
+        this._counts = 0;
+        if (this._answerTimer !== null) this._clearTimeout(this._answerTimer);
+        this._answerTimer = null;
     }
 
     // --- input -------------------------------------------------------------
@@ -294,21 +370,41 @@ export class RC28Control extends Emitter {
     _report(e) {
         const view = e.data;
         const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+        this._heard = true;
+        if (this._answerTimer !== null) {
+            this._clearTimeout(this._answerTimer);
+            this._answerTimer = null;
+        }
+        const firmware = parseFirmware(bytes, e.reportId);
+        if (firmware !== null) {
+            this.emit('message', { text: `RC-28 firmware ${firmware || '(blank)'}`, tone: 'info' });
+            return;
+        }
         const r = parseReport(bytes, e.reportId);
         if (!r) return;
 
-        const delta = dialDelta(r.speed, r.direction);
-        if (delta) {
-            this.emit('input', {
-                key: delta > 0 ? 'dial_up' : 'dial_down',
-                event: { kind: 'relative', delta },
-            });
+        if (r.speed && r.direction) {
+            this._counts += r.speed * r.direction;
+            if (this._dialTimer === null) {
+                this._dialTimer = this._setTimeout(() => this._flushDial(), DIAL_FLUSH_MS);
+            }
         }
         if (r.buttons !== this._buttons) {
             const was = this._buttons;
             this._buttons = r.buttons;
             this._buttonsChanged(was, r.buttons);
         }
+    }
+
+    _flushDial() {
+        this._dialTimer = null;
+        const { detents, carry } = takeDetents(this._counts);
+        this._counts = carry;
+        if (!detents) return;
+        this.emit('input', {
+            key: detents > 0 ? 'dial_up' : 'dial_down',
+            event: { kind: 'relative', delta: detents },
+        });
     }
 
     _buttonsChanged(was, now) {
@@ -414,21 +510,35 @@ export class RC28Control extends Emitter {
         this._blinkOn = true;
     }
 
-    async _send(leds) {
+    _send(leds) {
+        return this._write(0x01, leds);
+    }
+
+    // One output report: `cmd` 0x01 for the LEDs, 0x02 for the firmware query.
+    // With no report ID the command is the payload's first byte, as FlexRC-28
+    // writes it; with one, the ID stands in its place.
+    async _write(cmd, arg) {
         const device = this.device;
         if (!device || !device.sendReport) return;
         const report = new Uint8Array(REPORT_BYTES);
-        // With no report ID the 0x01 is part of the payload, as FlexRC-28
-        // writes it; with one, the ID stands in its place.
+        let id = 0;
+        let data = report;
         if (this._outId) {
-            report[0] = leds;
-            try { await device.sendReport(this._outId, report.subarray(0, REPORT_BYTES - 1)); } catch (e) { /* cosmetic */ }
-            return;
+            id = cmd === 0x01 ? this._outId : cmd;
+            report[0] = arg;
+            data = report.subarray(0, REPORT_BYTES - 1);
+        } else {
+            report[0] = cmd;
+            report[1] = arg;
         }
-        report[0] = 0x01;
-        report[1] = leds;
-        // A lamp that would not light is not worth a line in the log: the dial
-        // still works, and that is the part the operator came for.
-        try { await device.sendReport(0, report); } catch (e) { /* cosmetic */ }
+        try {
+            await device.sendReport(id, data);
+        } catch (err) {
+            // Said once: a dial whose LEDs never light is otherwise
+            // indistinguishable from one that was never connected.
+            if (this._writeFailed || device !== this.device) return;
+            this._writeFailed = true;
+            this.emit('message', { text: `Could not write to the RC-28: ${err.message}`, tone: 'warn' });
+        }
     }
 }

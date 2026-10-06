@@ -14,7 +14,7 @@
 
 import { isEncoderFunction, runFunction } from './functions.js';
 import { isCCKey } from './webmidi.js';
-import { RC28_DEFAULT_MAPPINGS } from './rc28.js';
+import { RC28_DEFAULT_MAPPINGS, RC28_DIAL_MAPPING, RC28_OLD_DIAL_MAPPING } from './rc28.js';
 import { DEFAULT_LEDS, ledSettings } from './rc28leds.js';
 import { saveFile } from '../lib/saveFile.js';
 
@@ -137,6 +137,23 @@ export function normaliseMidiMappings(mappings) {
     return changed ? out : mappings;
 }
 
+// The dial's first default let one report in ten through — see
+// RC28_OLD_DIAL_MAPPING. A row still exactly that was never chosen by anybody,
+// so it becomes today's default; a row somebody changed is theirs and stays.
+function upgradeRc28Dial(mappings) {
+    if (!mappings || typeof mappings !== 'object') return mappings;
+    const old = RC28_OLD_DIAL_MAPPING;
+    let out = mappings;
+    for (const key of ['dial_up', 'dial_down']) {
+        const m = mappings[key];
+        if (m && m.function === old.function && m.throttleMs === old.throttleMs && m.mode === old.mode
+            && Object.keys(m).length === 3) {
+            out = { ...out, [key]: RC28_DIAL_MAPPING };
+        }
+    }
+    return out;
+}
+
 export function loadState() {
     const saved = readJSON(STORE_KEY);
     const state = {
@@ -167,6 +184,7 @@ export function loadState() {
     // Its own merge, one level down: a blob saved before a setting existed has
     // a `leds` without it, and the spread above would take that whole.
     state.rc28.leds = ledSettings(state.rc28.leds);
+    state.rc28.mappings = upgradeRc28Dial(state.rc28.mappings);
     const out = saved ? state : adoptV1(state);
     out.midi.mappings = normaliseMidiMappings(out.midi.mappings);
     return out;

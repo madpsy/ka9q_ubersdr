@@ -13,8 +13,9 @@ const rc = require('./.build/rc28.cjs');
 const snapshots = require('./.build/bridgesnapshots.cjs');
 
 const {
-    parseReport, dialDelta, ledByte, rc28KeyLabel, RC28_KEYS, RC28Control,
+    parseReport, parseFirmware, takeDetents, ledByte, rc28KeyLabel, RC28_KEYS, RC28Control,
     RC28_VENDOR_ID, RC28_PRODUCT_ID, RC28_DEFAULT_MAPPINGS, HOLD_MS,
+    COUNTS_PER_DETENT, DIAL_FLUSH_MS, ANSWER_MS, RC28_OLD_DIAL_MAPPING,
 } = rc;
 
 let pass = 0;
@@ -44,10 +45,18 @@ function report({ speed = 0, dir = 0, buttons = IDLE } = {}) {
     return b;
 }
 
+// The dial's answer to the firmware query, as sdroxide captured it.
+function firmwareReply(text = '102 3210') {
+    const b = new Array(32).fill(0);
+    b[0] = 0x02;
+    for (let i = 0; i < text.length; i++) b[1 + i] = text.charCodeAt(i);
+    return b;
+}
+
 // WebHID's HIDDevice, as much of it as the driver touches. `sent` is every
 // output report, as [reportId, bytes].
 function fakeDevice({
-    vendorId = RC28_VENDOR_ID, productId = RC28_PRODUCT_ID, opens = true, collections = [],
+    vendorId = RC28_VENDOR_ID, productId = RC28_PRODUCT_ID, opens = true, collections = [], fails = false,
 } = {}) {
     const listeners = new Set();
     const dev = {
@@ -63,7 +72,10 @@ function fakeDevice({
             dev.opened = true;
         },
         async close() { dev.opened = false; dev.closed += 1; },
-        async sendReport(id, data) { dev.sent.push([id, Array.from(data)]); },
+        async sendReport(id, data) {
+            if (fails) throw new Error('Failed to write the report.');
+            dev.sent.push([id, Array.from(data)]);
+        },
         addEventListener(type, fn) { if (type === 'inputreport') listeners.add(fn); },
         removeEventListener(type, fn) { if (type === 'inputreport') listeners.delete(fn); },
         listening: () => listeners.size,
@@ -133,10 +145,14 @@ async function connected(opts = {}) {
     const ok = await rc28.connect();
     // The LED write on connect is not awaited by the driver.
     await Promise.resolve();
+    // A real dial answers the firmware query; the ones that do not have tests
+    // of their own.
+    if (ok && opts.answer !== false) dev.fire(firmwareReply());
     return { dev, hid, clock, rc28, inputs, msgs, states, ok };
 }
 
-const leds = (dev) => dev.sent.map(([, bytes]) => bytes[1]);
+// The LED reports among everything written — the firmware query is not one.
+const leds = (dev) => dev.sent.filter(([, bytes]) => bytes[0] === 0x01).map(([, bytes]) => bytes[1]);
 const keys = (inputs) => inputs.map((e) => e.key);
 
 // --- the input report -------------------------------------------------------
@@ -182,35 +198,24 @@ t('bits above F2 in the button byte are not buttons', () => {
 
 // --- the dial ---------------------------------------------------------------
 
-t('a slow turn is one detent at a time', () => {
-    assert.strictEqual(dialDelta(1, 1), 1);
-    assert.strictEqual(dialDelta(2, -1), -1);
+t('ten counts make a detent, the rest carried', () => {
+    assert.strictEqual(COUNTS_PER_DETENT, 10);
+    assert.deepStrictEqual(takeDetents(7), { detents: 0, carry: 7 });
+    assert.deepStrictEqual(takeDetents(14), { detents: 1, carry: 4 });
+    assert.deepStrictEqual(takeDetents(-25), { detents: -2, carry: -5 });
+    assert.deepStrictEqual(takeDetents(0), { detents: 0, carry: 0 });
 });
 
-t('a fast spin accelerates, but never past the FlexControl’s six', () => {
-    // The catalogue's encoders multiply their step by the delta; the scale was
-    // set by the FlexControl's 1–6, and the RC-28 reports up to ~16.
-    assert.strictEqual(dialDelta(4, 1), 2);
-    assert.strictEqual(dialDelta(7, 1), 3);
-    assert.strictEqual(dialDelta(11, -1), -4);
-    assert.strictEqual(dialDelta(15, 1), 5);
-    assert.strictEqual(dialDelta(16, 1), 6);
-    assert.strictEqual(dialDelta(255, -1), -6);
+t('a turn back spends the carry first', () => {
+    // 4 left over clockwise, then 9 anticlockwise: a net 5 back, no detent.
+    assert.deepStrictEqual(takeDetents(4 - 9), { detents: 0, carry: -5 });
 });
 
-t('the curve only ever rises with speed', () => {
-    let last = 0;
-    for (let speed = 1; speed <= 40; speed++) {
-        const d = dialDelta(speed, 1);
-        assert.ok(d >= last, `speed ${speed} gave ${d}, below ${last}`);
-        assert.strictEqual(dialDelta(speed, -1), -d, `speed ${speed} is not symmetric`);
-        last = d;
-    }
-});
-
-t('no speed or no direction is no movement', () => {
-    assert.strictEqual(dialDelta(0, 1), 0);
-    assert.strictEqual(dialDelta(5, 0), 0);
+t('the firmware answer reads as text', () => {
+    assert.strictEqual(parseFirmware(firmwareReply()), '102 3210');
+    assert.strictEqual(parseFirmware(firmwareReply().slice(1), 2), '102 3210', 'numbered: the ID took the 0x02');
+    assert.strictEqual(parseFirmware(report({ speed: 2, dir: CW })), null, 'a state report is not one');
+    assert.strictEqual(parseFirmware(null), null);
 });
 
 // --- the LEDs ---------------------------------------------------------------
@@ -246,7 +251,7 @@ t('the dial arrives mapped to the frequency, the buttons unmapped', () => {
     assert.deepStrictEqual(Object.keys(RC28_DEFAULT_MAPPINGS).sort(), ['dial_down', 'dial_up']);
     for (const m of Object.values(RC28_DEFAULT_MAPPINGS)) {
         assert.ok(rc.isEncoderFunction(m.function), `${m.function} is not an encoder function`);
-        assert.strictEqual(m.mode, 'rate_limit');
+        assert.strictEqual(m.mode, 'none', 'the driver paces the dial; a limit would drop counts');
     }
     assert.deepStrictEqual(rc.DEFAULT_STATE.rc28.mappings, RC28_DEFAULT_MAPPINGS);
     assert.strictEqual(rc.DEFAULT_STATE.rc28.autoConnect, false, 'hardware binds itself only when asked');
@@ -290,6 +295,24 @@ t('a saved state from before the RC-28 existed gets the dial mapped too', () => 
     assert.strictEqual(state.flexcontrol.autoConnect, true, 'the rest is untouched');
 });
 
+t('the first default dial mapping is upgraded on load', () => {
+    // It let one report in ten through; nobody chose it.
+    const state = withStorage({ surface: 'rc28', rc28: { mappings: {
+        dial_up: { ...RC28_OLD_DIAL_MAPPING }, dial_down: { ...RC28_OLD_DIAL_MAPPING },
+        f1_tap: { function: 'mute', throttleMs: 0, mode: 'none' },
+    } } }, () => rc.loadState());
+    assert.deepStrictEqual(state.rc28.mappings.dial_up, RC28_DEFAULT_MAPPINGS.dial_up);
+    assert.deepStrictEqual(state.rc28.mappings.dial_down, RC28_DEFAULT_MAPPINGS.dial_down);
+    assert.strictEqual(state.rc28.mappings.f1_tap.function, 'mute', 'the rest is untouched');
+});
+
+t('a dial mapping somebody changed is theirs', () => {
+    const mine = { function: 'freq_enc_1k', throttleMs: 50, mode: 'rate_limit' };
+    const state = withStorage({ surface: 'rc28', rc28: { mappings: { dial_up: mine } } },
+        () => rc.loadState());
+    assert.deepStrictEqual(state.rc28.mappings.dial_up, mine);
+});
+
 t('mappings somebody cleared stay cleared', () => {
     // The default is a default: pressing Clear must not be undone on reload.
     const state = withStorage({ surface: 'rc28', rc28: { mappings: {}, autoConnect: true } },
@@ -311,13 +334,49 @@ at('the chooser is filtered to the RC-28', async () => {
 at('connecting lights the Link LED with FlexRC-28’s report', async () => {
     const { dev } = await connected();
     assert.strictEqual(dev.opened, true);
-    assert.strictEqual(dev.sent.length, 1);
     const [id, bytes] = dev.sent[0];
     assert.strictEqual(id, 0, 'no report ID, as FlexRC-28 writes it');
     assert.strictEqual(bytes.length, 32);
     assert.strictEqual(bytes[0], 0x01);
     assert.strictEqual(bytes[1], 0x07, 'Link on, the rest off');
     assert.ok(bytes.slice(2).every((b) => b === 0), 'the rest of the report is zero');
+});
+
+at('connecting asks for the firmware version and logs the answer', async () => {
+    const { dev, msgs, clock } = await connected();
+    assert.strictEqual(dev.sent.length, 2);
+    const [id, bytes] = dev.sent[1];
+    assert.strictEqual(id, 0);
+    assert.strictEqual(bytes.length, 32);
+    assert.ok(bytes[0] === 0x02 && bytes.slice(1).every((b) => b === 0), 'the query is 0x02 and zeros');
+    assert.ok(msgs.some((m) => m.text === 'RC-28 firmware 102 3210'), JSON.stringify(msgs));
+    clock.advance(ANSWER_MS);
+    assert.ok(!msgs.some((m) => m.tone === 'warn'), 'an answered dial is not warned about');
+});
+
+at('a dial that never answers is said so', async () => {
+    const { msgs, clock } = await connected({ answer: false });
+    clock.advance(ANSWER_MS - 1);
+    assert.ok(!msgs.some((m) => m.tone === 'warn'), 'not before it has had its chance');
+    clock.advance(1);
+    assert.ok(msgs.some((m) => m.tone === 'warn' && /not answered/.test(m.text)), JSON.stringify(msgs));
+});
+
+at('any report from the dial counts as an answer', async () => {
+    const { dev, msgs, clock } = await connected({ answer: false });
+    dev.fire(report({ buttons: IDLE }));
+    clock.advance(ANSWER_MS);
+    assert.ok(!msgs.some((m) => m.tone === 'warn'));
+});
+
+at('a failed write is logged once', async () => {
+    const { msgs, rc28, clock } = await connected({ device: { fails: true }, answer: false });
+    rc28.setIndicators({ f1: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    const failed = msgs.filter((m) => /Could not write to the RC-28/.test(m.text));
+    assert.strictEqual(failed.length, 1, JSON.stringify(msgs));
+    clock.advance(ANSWER_MS);
 });
 
 at('a descriptor with a numbered output report is written by its number', async () => {
@@ -417,14 +476,39 @@ at('autoconnect with no WebHID is just false', async () => {
 
 // --- input ------------------------------------------------------------------
 
-at('the dial turns into signed relative events', async () => {
-    const { dev, inputs } = await connected();
-    dev.fire(report({ speed: 1, dir: CW }));
+at('the dial turns into signed relative events, paced', async () => {
+    const { dev, clock, inputs } = await connected();
+    dev.fire(report({ speed: 7, dir: CW }));
+    dev.fire(report({ speed: 6, dir: CW }));
+    assert.deepStrictEqual(inputs, [], 'gathered until the flush');
+    clock.advance(DIAL_FLUSH_MS);
+    assert.deepStrictEqual(inputs, [{ key: 'dial_up', event: { kind: 'relative', delta: 1 } }]);
+    // 3 carried; 33 back the other way is a net 30 down.
     dev.fire(report({ speed: 16, dir: CCW }));
-    assert.deepStrictEqual(inputs, [
-        { key: 'dial_up', event: { kind: 'relative', delta: 1 } },
-        { key: 'dial_down', event: { kind: 'relative', delta: -6 } },
-    ]);
+    dev.fire(report({ speed: 17, dir: CCW }));
+    clock.advance(DIAL_FLUSH_MS);
+    assert.deepStrictEqual(inputs.at(-1), { key: 'dial_down', event: { kind: 'relative', delta: -3 } });
+});
+
+at('no count is dropped however fast the reports come', async () => {
+    const { dev, clock, inputs } = await connected();
+    // A second of steady turning: a report every 10 ms, 4 counts each.
+    for (let i = 0; i < 100; i++) {
+        dev.fire(report({ speed: 4, dir: CW }));
+        clock.advance(10);
+    }
+    clock.advance(DIAL_FLUSH_MS);
+    const total = inputs.reduce((n, e) => n + e.event.delta, 0);
+    assert.strictEqual(total, 40, '400 counts are 40 detents');
+    assert.ok(inputs.length <= 1000 / DIAL_FLUSH_MS + 1, `${inputs.length} events is more than the pace allows`);
+});
+
+at('a wiggle moves nothing', async () => {
+    const { dev, clock, inputs } = await connected();
+    dev.fire(report({ speed: 6, dir: CW }));
+    dev.fire(report({ speed: 6, dir: CCW }));
+    clock.advance(DIAL_FLUSH_MS);
+    assert.deepStrictEqual(inputs, []);
 });
 
 at('a report with the dial stopped moves nothing', async () => {
@@ -491,16 +575,17 @@ at('buttons held together are tracked apart', async () => {
 
 at('the dial and a button in one report both count', async () => {
     const { dev, clock, inputs } = await connected();
-    dev.fire(report({ speed: 2, dir: CW, buttons: F1 }));
-    clock.advance(50);
-    dev.fire(report({ speed: 2, dir: CW, buttons: IDLE }));
-    assert.deepStrictEqual(keys(inputs), ['dial_up', 'dial_up', 'f1_tap']);
+    dev.fire(report({ speed: 10, dir: CW, buttons: F1 }));
+    clock.advance(DIAL_FLUSH_MS);
+    dev.fire(report({ speed: 10, dir: CW, buttons: IDLE }));
+    clock.advance(DIAL_FLUSH_MS);
+    assert.deepStrictEqual(keys(inputs), ['dial_up', 'f1_tap', 'dial_up']);
 });
 
 at('a report repeating the same buttons is not another press', async () => {
     const { dev, clock, inputs } = await connected();
     dev.fire(report({ buttons: F1 }));
-    dev.fire(report({ speed: 3, dir: CW, buttons: F1 }));
+    dev.fire(report({ speed: 10, dir: CW, buttons: F1 }));
     dev.fire(report({ buttons: F1 }));
     clock.advance(100);
     dev.fire(report({ buttons: IDLE }));
@@ -587,8 +672,11 @@ at('a fresh RC-28’s dial tunes the receiver through the dispatcher', async () 
     rc.setSurfaceMappings('rc28', rc.DEFAULT_STATE.rc28.mappings);
     const off = rc.watchSurface('rc28');
     try {
-        dev.fire(report({ speed: 5, dir: CCW }));
-        assert.deepStrictEqual(nudges, [-3000], '3 detents of 1 kHz, downwards');
+        dev.fire(firmwareReply());
+        dev.fire(report({ speed: 30, dir: CCW }));
+        // The singleton runs on the real clock.
+        await new Promise((r) => setTimeout(r, DIAL_FLUSH_MS + 20));
+        assert.deepStrictEqual(nudges, [-300], '3 detents of 100 Hz, downwards');
     } finally {
         off();
         rc._resetDispatch();

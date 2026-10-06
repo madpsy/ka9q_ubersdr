@@ -333,7 +333,9 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     useEffect(() => setLearnHandler((e) => onInput.current(e)), []);
 
     const commit = (keys, fn) => {
-        const record = { function: fn, ...defaultThrottle(fn) };
+        // The RC-28 paces its own dial (see rc28.js), so a limit here would
+        // only drop the counts it gathered.
+        const record = { function: fn, ...(isRc28 ? { throttleMs: 0, mode: 'none' } : defaultThrottle(fn)) };
         // Learn cannot tell an encoder from a fader by watching one message, but
         // the function can: the frequency encoders and the zoom dial take
         // nothing else, so a CC landing on one is an encoder and is recorded as

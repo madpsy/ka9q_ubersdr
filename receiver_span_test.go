@@ -179,8 +179,12 @@ func TestReceiverHasNoConfigYAMLInfluence(t *testing.T) {
 	}
 
 	// RadiodConfig carries only the multicast wiring — no span-related fields.
-	if n := reflect.TypeOf(RadiodConfig{}).NumField(); n != 3 {
-		t.Errorf("RadiodConfig gained a field (%d, want 3) — is the span settable again?", n)
+	wiring := map[string]bool{"StatusGroup": true, "DataGroup": true, "Interface": true, "UseDNS": true}
+	rt := reflect.TypeOf(RadiodConfig{})
+	for i := 0; i < rt.NumField(); i++ {
+		if name := rt.Field(i).Name; !wiring[name] {
+			t.Errorf("RadiodConfig gained field %s — is the span settable again?", name)
+		}
 	}
 }
 

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -129,54 +131,103 @@ func makeMaddr(hostname string) string {
 		addr&0xff)
 }
 
-// resolveMulticastAddr resolves a multicast address, with fallback to hash-based generation
-// This matches ka9q-radio's behavior when DNS resolution fails
-func resolveMulticastAddr(addrStr string) (*net.UDPAddr, error) {
-	// First try standard DNS resolution
-	addr, err := net.ResolveUDPAddr("udp", addrStr)
-	if err == nil {
-		return addr, nil
+// splitGroupAddr splits a status_group/data_group value into host and port.
+// Format is typically "hostname:port" or just "hostname"; a missing port
+// defaults to "0", as it always has. net.SplitHostPort is used rather than
+// splitting on ":" so a bracketed IPv6 literal ("[ff02::1]:5006") is not cut
+// off at its first colon.
+func splitGroupAddr(addrStr string) (host, port string) {
+	if h, p, err := net.SplitHostPort(addrStr); err == nil {
+		return h, p
+	}
+	// No port given. Brackets are only meaningful alongside a port, so drop
+	// them from a bare "[ff02::1]" too.
+	return strings.TrimSuffix(strings.TrimPrefix(addrStr, "["), "]"), "0"
+}
+
+// lookupHost is the DNS lookup behind resolveMulticastAddr. It is a variable
+// so tests can answer with fixed results instead of depending on real DNS.
+var lookupHost = net.DefaultResolver.LookupHost
+
+// resolveMulticastAddr turns a status_group/data_group value into the address
+// radiod uses for it.
+//
+// radiod derives a group's address from its name with an FNV-1 hash
+// (make_maddr) and only looks the name up in DNS when its own "dns" setting is
+// on, which it is not by default. Doing the same here, rather than trying DNS
+// first, is what keeps the two in agreement: a name like hf-status.local has no
+// DNS record, so a lookup can only ever succeed by accident -- typically a
+// wildcard in the host's search domain answering hf-status.local.<domain> with
+// a unicast address, which can't be joined and stops startup with "bind:
+// cannot assign requested address".
+//
+// useDNS (radiod.use_dns) is for a radiod that has dns = yes; even then only a
+// multicast answer is used, and anything else falls back to the hash. A
+// literal IP is used exactly as given, whatever kind it is.
+func resolveMulticastAddr(addrStr string, useDNS bool) (*net.UDPAddr, error) {
+	hostname, port := splitGroupAddr(addrStr)
+
+	// Literal IP: no DNS involved. netip accepts an IPv6 zone ("ff02::1%eth0"),
+	// which net.ParseIP does not.
+	if _, err := netip.ParseAddr(hostname); err == nil {
+		return net.ResolveUDPAddr("udp", net.JoinHostPort(hostname, port))
 	}
 
-	// DNS resolution failed - extract hostname and port
-	// Format is typically "hostname:port" or just "hostname"
-	parts := strings.Split(addrStr, ":")
-	if len(parts) == 0 {
-		return nil, fmt.Errorf("invalid address format: %s", addrStr)
-	}
-
-	hostname := parts[0]
-	port := "0" // default port
-	if len(parts) > 1 {
-		port = parts[1]
-	}
-
-	// Generate multicast IP using FNV-1 hash (same as ka9q-radio)
-	multicastIP := makeMaddr(hostname)
-
-	// Parse the port
 	portNum, err := strconv.Atoi(port)
 	if err != nil {
 		return nil, fmt.Errorf("invalid port in address %s: %w", addrStr, err)
 	}
 
-	// Create UDP address with generated IP
-	generatedAddr := fmt.Sprintf("%s:%d", multicastIP, portNum)
-	log.Printf("DNS resolution failed for %s, using FNV-1 hash-generated address: %s", addrStr, generatedAddr)
+	if useDNS {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ips, err := lookupHost(ctx, hostname)
+		cancel()
+		if err == nil {
+			if ip := firstMulticastIP(ips); ip != nil {
+				log.Printf("Resolved %s to %s via DNS (radiod.use_dns)", hostname, ip)
+				return &net.UDPAddr{IP: ip, Port: portNum}, nil
+			}
+			log.Printf("Warning: %s resolved to %v, none of which is multicast; ignoring the answer", hostname, ips)
+		} else {
+			log.Printf("Warning: DNS lookup for %s failed (%v)", hostname, err)
+		}
+	}
 
-	return net.ResolveUDPAddr("udp", generatedAddr)
+	// Generate multicast IP using FNV-1 hash (same as ka9q-radio)
+	addr := &net.UDPAddr{IP: net.ParseIP(makeMaddr(hostname)), Port: portNum}
+	log.Printf("Using FNV-1 hash address %s for %s, as radiod does", addr, addrStr)
+	return addr, nil
+}
+
+// firstMulticastIP returns the first multicast address in ips, preferring IPv4
+// the way net.ResolveUDPAddr("udp", ...) does. It returns nil if there is none.
+func firstMulticastIP(ips []string) net.IP {
+	var v6 net.IP
+	for _, s := range ips {
+		ip := net.ParseIP(s)
+		if ip == nil || !ip.IsMulticast() {
+			continue
+		}
+		if ip.To4() != nil {
+			return ip
+		}
+		if v6 == nil {
+			v6 = ip
+		}
+	}
+	return v6
 }
 
 // NewRadiodController creates a new radiod controller
-func NewRadiodController(statusGroup, dataGroup, ifaceName string) (*RadiodController, error) {
-	// Parse status multicast address (with FNV-1 hash fallback)
-	statusAddr, err := resolveMulticastAddr(statusGroup)
+func NewRadiodController(statusGroup, dataGroup, ifaceName string, useDNS bool) (*RadiodController, error) {
+	// Parse status multicast address (FNV-1 hash, as radiod)
+	statusAddr, err := resolveMulticastAddr(statusGroup, useDNS)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve status address: %w", err)
 	}
 
-	// Parse data multicast address (with FNV-1 hash fallback)
-	dataAddr, err := resolveMulticastAddr(dataGroup)
+	// Parse data multicast address (FNV-1 hash, as radiod)
+	dataAddr, err := resolveMulticastAddr(dataGroup, useDNS)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve data address: %w", err)
 	}

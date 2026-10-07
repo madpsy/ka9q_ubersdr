@@ -61,6 +61,11 @@ services:
     networks:
       - sdr-network
 
+    # Don't inherit the host's DNS search domain. A wildcard record there
+    # would answer for hf-status.local or an absent container name with a
+    # unicast address, instead of letting the lookup fail.
+    dns_search: .
+
     # Expose web interface ports
     ports:
       - 8080:8080   # Main UberSDR web interface

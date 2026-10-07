@@ -128,6 +128,13 @@ radiod:
   data_group: "pcm.local:5004"
   # Network interface to use (empty = auto-detect)
   interface: "lo"
+  # Look status_group/data_group names up in DNS (default: false).
+  # radiod turns a group name into an address by hashing it, and only uses DNS
+  # when its own config has dns = yes. Leave this false unless radiod does, so
+  # both sides agree on the address. Even when true, only a multicast answer is
+  # used; anything else falls back to the hashed address. A literal IP above is
+  # always used as given.
+  use_dns: false
 
   # ── How much spectrum this receiver covers ──────────────────────────────────
   #
@@ -342,7 +349,14 @@ server:
   # so containers that restart and get new IPs are picked up automatically.
   # Resolution uses the OS resolver (/etc/resolv.conf), which inside Docker
   # points to Docker's embedded DNS (127.0.0.11) — the same mechanism used
-  # by 'ping <container-name>'. Silent on success; warns only on failure.
+  # by 'ping <container-name>'. Silent on success.
+  # An answer is only trusted once Docker confirms it: the address must be on
+  # a Docker network shared with UberSDR, and Docker's reverse lookup of it
+  # must name this container. That stops a name with no running container
+  # being answered by the host's DNS (e.g. a wildcard record in its search
+  # domain) and trusted. So list the container name (docker ps / container_name),
+  # not a compose service name or alias. Rejected answers are logged.
+  # Outside Docker, names are not resolved; use trusted_proxy_ips instead.
   # Defaults (used when this key is absent): tunnel-client, caddy
   trusted_containers:
     - "tunnel-support-client"

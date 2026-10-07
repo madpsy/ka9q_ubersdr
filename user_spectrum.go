@@ -51,8 +51,8 @@ type UserSpectrumManager struct {
 
 // NewUserSpectrumManager creates a new per-user spectrum manager
 func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *SessionManager) (*UserSpectrumManager, error) {
-	// Parse status multicast address (with FNV-1 hash fallback)
-	statusAddr, err := resolveMulticastAddr(config.Radiod.StatusGroup)
+	// Parse status multicast address (FNV-1 hash, as radiod)
+	statusAddr, err := resolveMulticastAddr(config.Radiod.StatusGroup, config.Radiod.UseDNS)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve status address: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -350,6 +351,9 @@ type RadiodConfig struct {
 	StatusGroup string `yaml:"status_group"`
 	DataGroup   string `yaml:"data_group"`
 	Interface   string `yaml:"interface"`
+	// UseDNS mirrors radiod's own "dns" setting: when false (the default, as
+	// in radiod) group names are hashed to an address and never looked up.
+	UseDNS bool `yaml:"use_dns"`
 }
 
 // SSBAgcConfig holds the server-wide default AGC parameters applied to all new USB/LSB sessions.
@@ -419,7 +423,9 @@ type ServerConfig struct {
 	trustedProxyNets                []*net.IPNet      // Parsed CIDR networks for trusted proxies (internal use)
 	containerProxyIPs               []string          // Dynamically resolved container IPs (internal use)
 	containerNameByIP               map[string]string // Reverse map: IP -> container name (internal use)
-	containerProxyMu                sync.RWMutex      // Protects containerProxyIPs and containerNameByIP
+	containerRejected               map[string]string // Container name -> DNS answers last rejected as unconfirmed by Docker, so each change is warned about once (internal use)
+	containerEnvErr                 string            // Why container names last couldn't be verified ("" if they could), so it is logged once per change (internal use)
+	containerProxyMu                sync.RWMutex      // Protects containerProxyIPs, containerNameByIP, containerRejected and containerEnvErr
 	lookupResolveNames              []string          // Lookup-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from lookup_services.trusted_containers)
 	injectResolveNames              []string          // DX inject-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from dxcluster.inject_trusted_hosts)
 	widgetResolveNames              []string          // Widget-admin-only container names: resolved into containerNameByIP but NOT trusted as proxies (internal use, set from admin.widget_trusted_hosts)
@@ -2263,6 +2269,9 @@ const containerDNSLookupTimeout = 2 * time.Second
 // The containers "tunnel-support-client", "tunnel-client", and "caddy" are always
 // trusted regardless of what is in TrustedContainers; any user-configured names
 // are merged in (duplicates are deduplicated).
+// An answer is only trusted once Docker confirms the address belongs to that
+// container (see container_trust.go); answers it does not confirm are warned
+// about once per change.
 // Resolution failures are not logged: a container that is not running (or a
 // Docker embedded-DNS hiccup) is an expected, self-healing condition that the
 // 5-second refresh retries anyway. Lookups run concurrently, each bounded by
@@ -2387,40 +2396,81 @@ func (sc *ServerConfig) resolveContainerIPs() {
 	// resolution of the OTHER names — this used to be a sequential loop with
 	// no per-lookup timeout, so one slow name could delay trusted-container
 	// detection (and therefore e.g. widget-admin auth) for minutes.
-	var resolver net.Resolver
+	//
+	// Every answer must also be confirmed by Docker before it is trusted (see
+	// container_trust.go): a name with no running container is otherwise
+	// answered by the host's DNS, and a wildcard record there would hand the
+	// container's trust to whatever address it points at.
+	env := loadContainerNetEnv()
 	rawResults := make([]result, len(names))
+	rejected := make([][]string, len(names))
 	var wg sync.WaitGroup
 	for i, name := range names {
 		wg.Add(1)
 		go func(i int, name string) {
 			defer wg.Done()
 			lookupOnly := lookupOnlySet[name]
+			// A literal IP entry (inject_trusted_hosts and widget_trusted_hosts
+			// are documented as accepting IPs) is explicit configuration, not a
+			// DNS answer, and is kept as configured.
+			if net.ParseIP(name) != nil {
+				rawResults[i] = result{name: name, ips: []string{name}, lookupOnly: lookupOnly}
+				return
+			}
+			if env.err != nil {
+				rawResults[i] = result{name: name, err: env.err, lookupOnly: lookupOnly}
+				return
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), containerDNSLookupTimeout)
 			defer cancel()
-			ips, err := resolver.LookupHost(ctx, name)
+			ips, err := lookupHost(ctx, name)
+			if err == nil {
+				ips, rejected[i] = env.confirm(ctx, name, ips)
+				if len(ips) == 0 {
+					err = errContainerNotConfirmed
+				}
+			}
+			if err != nil {
+				// Not logged — a container that isn't running is an expected
+				// state. Keep previously resolved IPs only while Docker still
+				// says they belong to this container: once it stops, its address
+				// can be handed to a different one.
+				if prev := prevIPsByName[name]; len(prev) > 0 {
+					confirmCtx, confirmCancel := context.WithTimeout(context.Background(), containerDNSLookupTimeout)
+					defer confirmCancel()
+					if kept, _ := env.confirm(confirmCtx, name, prev); len(kept) > 0 {
+						rawResults[i] = result{name: name, ips: kept, fallback: true, lookupOnly: lookupOnly}
+						return
+					}
+				}
+			}
 			rawResults[i] = result{name: name, ips: ips, err: err, lookupOnly: lookupOnly}
 		}(i, name)
 	}
 	wg.Wait()
 
+	// Rejected answers are logged, unlike plain lookup failures, because they
+	// point at a DNS misconfiguration rather than a stopped container. Keyed
+	// by name so a warning is only repeated when the rejected set changes,
+	// not on every refresh.
+	rejectedByName := make(map[string]string)
+	for i, name := range names {
+		if len(rejected[i]) > 0 {
+			rejectedByName[name] = strings.Join(rejected[i], ", ")
+		}
+	}
+	envErr := ""
+	if env.err != nil {
+		envErr = env.err.Error()
+	}
+
 	results := make([]result, 0, len(names))
 	var resolved []string
 	for _, r := range rawResults {
+		results = append(results, r)
 		if r.err != nil {
-			// Not logged — a container that isn't running is an expected state.
-			// Fall back to previously resolved IPs for this name, if any.
-			if prev, ok := prevIPsByName[r.name]; ok && len(prev) > 0 {
-				results = append(results, result{r.name, prev, nil, true, r.lookupOnly})
-				// Lookup-only names are NOT trusted as proxies — skip the resolved set.
-				if !r.lookupOnly {
-					resolved = append(resolved, prev...)
-				}
-			} else {
-				results = append(results, result{r.name, nil, r.err, false, r.lookupOnly})
-			}
 			continue
 		}
-		results = append(results, r)
 		// Lookup-only names are resolved into the name→IP map (below) but are
 		// deliberately excluded from the trusted-proxy IP set (resolved).
 		if !r.lookupOnly {
@@ -2446,7 +2496,24 @@ func (sc *ServerConfig) resolveContainerIPs() {
 		!stringMapsEqual(sc.containerNameByIP, nameByIP)
 	sc.containerProxyIPs = resolved
 	sc.containerNameByIP = nameByIP
+	var newlyRejected []string
+	for name, ips := range rejectedByName {
+		if sc.containerRejected[name] != ips {
+			newlyRejected = append(newlyRejected, name)
+		}
+	}
+	sort.Strings(newlyRejected)
+	sc.containerRejected = rejectedByName
+	envErrChanged := envErr != sc.containerEnvErr
+	sc.containerEnvErr = envErr
 	sc.containerProxyMu.Unlock()
+
+	if envErrChanged && env.err != nil {
+		log.Printf("Trusted container names are not being resolved (%v); only literal IPs in the trusted-host lists apply. Proxies outside Docker belong in server.trusted_proxy_ips", env.err)
+	}
+	for _, name := range newlyRejected {
+		log.Printf("Warning: trusted container '%s' resolved to %s; not trusting it (a DNS search-domain wildcard?)", name, rejectedByName[name])
+	}
 
 	if changed {
 		for _, r := range results {

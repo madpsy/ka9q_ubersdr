@@ -732,6 +732,7 @@ func main() {
 		config.Radiod.StatusGroup,
 		config.Radiod.DataGroup,
 		config.Radiod.Interface,
+		config.Radiod.UseDNS,
 	)
 	if err != nil {
 		log.Fatalf("Failed to initialize radiod controller: %v", err)

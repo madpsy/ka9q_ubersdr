@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net"
 	"net/http"
 	"regexp"
@@ -196,7 +197,10 @@ func handleLookup(
 		}
 		result, err := globalQRZService.LookupFrom(lookupSource, normalised)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, lookupErrorResponse{Error: "lookup failed: " + err.Error()})
+			// Detail stays in the server log: upstream errors are not for
+			// anonymous listeners.
+			log.Printf("[lookup] %s: %v", normalised, err)
+			writeJSON(w, http.StatusBadGateway, lookupErrorResponse{Error: "lookup provider error"})
 			return
 		}
 		if result == nil {

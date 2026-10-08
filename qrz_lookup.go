@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1034,6 +1035,23 @@ func qrzStripNamespace(b []byte) []byte {
 	return []byte(strings.ReplaceAll(string(b), ` xmlns="http://xmldata.qrz.com"`, ""))
 }
 
+// qrzTransportError strips the request URL from an http.Client error.
+// *url.Error embeds the full URL in its message, and every QRZ request carries
+// either the session key or the account username and password in its query
+// string.  These errors reach API clients, Telegram replies, the admin UI and
+// the log, so the URL must never survive.  Anything that is not a *url.Error
+// is replaced outright rather than trusted.
+func qrzTransportError(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return errors.New("transport error")
+	}
+	// Unwrap nested *url.Error (e.g. from redirects) down to the cause.
+	for errors.As(ue.Err, &ue) {
+	}
+	return fmt.Errorf("%s %s: %w", ue.Op, qrzAPIBase, ue.Err)
+}
+
 // testQRZCredentials performs a one-shot QRZ login with the supplied credentials
 // and returns the subscription expiry string on success, or an error on failure.
 // It does NOT affect the global QRZService session state.
@@ -1046,7 +1064,7 @@ func testQRZCredentials(username, password string) (subExp string, err error) {
 	apiURL := qrzAPIBase + "?" + params.Encode()
 	resp, err := http.Get(apiURL) //nolint:gosec // URL is constructed from admin-supplied credentials
 	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
+		return "", fmt.Errorf("request failed: %w", qrzTransportError(err))
 	}
 	defer resp.Body.Close()
 
@@ -1084,7 +1102,7 @@ func (s *QRZService) doAuthHTTP() (key, subExp string, err error) {
 	apiURL := qrzAPIBase + "?" + params.Encode()
 	resp, err := s.httpClient.Get(apiURL)
 	if err != nil {
-		return "", "", fmt.Errorf("qrz: auth request failed: %w", err)
+		return "", "", fmt.Errorf("qrz: auth request failed: %w", qrzTransportError(err))
 	}
 	defer resp.Body.Close()
 
@@ -1219,7 +1237,7 @@ func (s *QRZService) fetchCallsign(call, sessionKey string) (*QRZCallsign, bool,
 		// record this as a transport-level failure rather than a status code.
 		s.apiCallStats.record(qrzNetworkErrorStatus)
 		s.apiCallMinuteStats.record(qrzNetworkErrorStatus)
-		return nil, false, fmt.Errorf("qrz: lookup request failed: %w", err)
+		return nil, false, fmt.Errorf("qrz: lookup request failed: %w", qrzTransportError(err))
 	}
 	defer resp.Body.Close()
 	s.apiCallStats.record(resp.StatusCode)

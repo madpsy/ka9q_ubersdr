@@ -19,7 +19,11 @@ var (
 	// bearing, since every one of those hangs off the callsign. It is the more
 	// interesting of the two to miss: a prefix call is by definition someone
 	// operating away from home.
-	callsignPattern = regexp.MustCompile(`^([A-Z0-9]{1,4}/)?[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z](/[A-Z0-9]{1,4})?$`)
+	//
+	// The suffix after the digit runs to seven characters, not four: special
+	// event calls (HB9SPACE, GB2025ROSE) are longer than everyday ones, and
+	// were dropped, CQs and all.
+	callsignPattern = regexp.MustCompile(`^([A-Z0-9]{1,4}/)?[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,6}[A-Z](/[A-Z0-9]{1,4})?$`)
 
 	// Grid locator pattern (4 characters for FT8)
 	gridPattern = regexp.MustCompile(`^[A-R]{2}[0-9]{2}$`)
@@ -74,6 +78,13 @@ func extractCallsignLocator(message string) (string, string) {
 			gridIndex = 3
 		}
 		// Otherwise transmitter is field[1], grid is field[2] (default)
+	} else if len(fields) >= 4 && fields[1] == "RR73;" {
+		// DXpedition (Fox/Hound) message: the fox ends one QSO and starts the
+		// next in one transmission, "K1ABC RR73; W9XYZ <KH1/KH7Z> -08". The
+		// fox is field[3], in brackets (or <...> if its hash is unresolved);
+		// there is no grid.
+		callIndex = 3
+		gridIndex = -1
 	} else if fields[0] == "<...>" {
 		// Truncated message: transmitter is field[1]
 		// (default indices are correct)
@@ -92,7 +103,7 @@ func extractCallsignLocator(message string) (string, string) {
 	}
 
 	// Extract grid locator
-	if len(fields) > gridIndex && isValidGridLocator(fields[gridIndex]) {
+	if gridIndex >= 0 && len(fields) > gridIndex && isValidGridLocator(fields[gridIndex]) {
 		locator = fields[gridIndex]
 	}
 
@@ -144,15 +155,17 @@ func isValidGridLocator(s string) bool {
 		return false
 	}
 
-	// Exclude FT8 protocol messages that look like grid locators
-	upper := strings.ToUpper(s)
-	if upper == "RR73" || upper == "RRR" || strings.HasPrefix(upper, "R-") ||
-		strings.HasPrefix(upper, "R+") || upper == "73" {
+	// Exclude FT8 protocol messages that look like grid locators. The whole
+	// RR field goes: RR73 is a sign-off, and the field's other squares are
+	// at the North Pole, where nobody transmits from, so an RR there is a
+	// sign-off garbled rather than a locator.
+	if strings.HasPrefix(s, "RR") || s == "RRR" || strings.HasPrefix(s, "R-") ||
+		strings.HasPrefix(s, "R+") || s == "73" {
 		return false
 	}
 
-	// Convert to proper case for pattern matching (uppercase letters, digits)
-	s = strings.ToUpper(s[0:2]) + s[2:]
+	// FT8 sends locators in capitals only (jt9 prints them so); lower case
+	// is not one.
 	return gridPattern.MatchString(s)
 }
 

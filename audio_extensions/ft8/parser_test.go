@@ -12,6 +12,7 @@ func TestIsValidCallsign(t *testing.T) {
 	valid := []string{
 		"DM4KJ", "4X5JK", "8S7DL", "DP75BAC", "EG1UME", "3DA0XY",
 		"TJ1GD/P", "R9KC/6", // suffix form: the operator's own call, qualified
+		"HB9SPACE", "GB2025ROSE", "OL900CO", // special event calls, longer suffixes
 		"OZ/DG1ATN", "ON/DL5RMH", "F/G4ABC", "VP2E/K1ABC", // prefix form: a visitor
 	}
 	for _, c := range valid {
@@ -79,6 +80,20 @@ func TestExtractCallsignLocator(t *testing.T) {
 		// A hash resolved from an earlier decode arrives in brackets, and is a
 		// real callsign again.
 		{"<PA1GLD> DP75BAC 73", "DP75BAC", ""},
+
+		// Special event calls, suffixes longer than four.
+		{"CQ HB9SPACE JN47", "HB9SPACE", "JN47"},
+		{"<...> HB9SPACE RR73", "HB9SPACE", ""},
+
+		// DXpedition (Fox/Hound): the fox, field[3], ends one QSO and starts
+		// the next; no grid, and nothing if its hash is unresolved.
+		{"K1ABC RR73; W9XYZ <KH1/KH7Z> -08", "KH1/KH7Z", ""},
+		{"K1ABC RR73; W9XYZ <...> -08", "", ""},
+
+		// RR is no grid (RR73's field, the North Pole's squares), and grids
+		// come in capitals.
+		{"K1ABC W9XYZ RR99", "W9XYZ", ""},
+		{"K1ABC W9XYZ jn48", "W9XYZ", ""},
 	}
 
 	for _, c := range cases {
@@ -88,6 +103,19 @@ func TestExtractCallsignLocator(t *testing.T) {
 		}
 		if grid != c.grid {
 			t.Errorf("%q: grid = %q, want %q", c.message, grid, c.grid)
+		}
+	}
+}
+
+func TestIsValidGridLocator(t *testing.T) {
+	for _, g := range []string{"IO86", "JN48", "AA00", "RQ99"} {
+		if !isValidGridLocator(g) {
+			t.Errorf("%q should be a grid", g)
+		}
+	}
+	for _, g := range []string{"RR73", "RR99", "RR00", "RRR", "R-15", "R+05", "73", "jn48", "Jn48", "SS99", "JN48aa", ""} {
+		if isValidGridLocator(g) {
+			t.Errorf("%q should not be a grid", g)
 		}
 	}
 }

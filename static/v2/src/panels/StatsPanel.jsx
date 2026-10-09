@@ -51,7 +51,7 @@ const KEEP_MS = 1000;
 // second whatever the caller asks for.
 const SAMPLE_MS = 500;
 
-// The lossless codec's cards are averaged over this rather than read per sample.
+// The codec cards are averaged over this rather than read per sample.
 //
 // Half a second of a squelched channel is a run of silent packets saving 95%,
 // and the next half second of a voice is 50% — both true, and neither the
@@ -60,19 +60,33 @@ const SAMPLE_MS = 500;
 // the cards before you have stopped looking for it.
 const V4_AVG_MS = 5000;
 
-// Sum the lossless path's per-sample deltas over the window. Null when no
-// version 4 packet arrived in it — Opus, the JSON fallback, version 3, or no
-// audio at all — which is what hides the cards.
-function v4Summary(window) {
-    const sum = { raw: 0, coded: 0, rice: 0, silent: 0, escape: 0, decodeMs: 0, ms: 0 };
-    for (const d of window) for (const k in sum) sum[k] += d[k] || 0;
-    const packets = sum.rice + sum.silent + sum.escape;
-    if (!packets || !(sum.raw > 0) || !(sum.ms > 0)) return null;
+// Sum the audio codec's per-sample deltas over the window, for whichever of the
+// two codecs most recently carried packets — a format change part way through
+// the window would otherwise blend the two into a figure that is neither. Null
+// when neither did — the JSON fallback, version 3, or no audio at all — which
+// is what hides the cards.
+function codecSummary(window) {
+    let kind = null;
+    for (let i = window.length - 1; i >= 0 && !kind; i--) {
+        const d = window[i];
+        if (d.v4 && d.v4.rice + d.v4.silent + d.v4.escape > 0) kind = 'v4';
+        else if (d.opus && d.opus.packets > 0) kind = 'opus';
+    }
+    if (!kind) return null;
+    const sum = { raw: 0, coded: 0, rice: 0, silent: 0, escape: 0, packets: 0, decodeMs: 0, ms: 0 };
+    for (const d of window) {
+        const c = d[kind];
+        if (!c) continue;
+        for (const k in sum) sum[k] += c[k] || 0;
+    }
+    if (kind === 'v4') sum.packets = sum.rice + sum.silent + sum.escape;
+    if (!sum.packets || !(sum.raw > 0) || !(sum.ms > 0)) return null;
     return {
+        kind,
         saving: (1 - sum.coded / sum.raw) * 100,
-        rice: (sum.rice / packets) * 100,
-        silent: (sum.silent / packets) * 100,
-        escape: (sum.escape / packets) * 100,
+        rice: (sum.rice / sum.packets) * 100,
+        silent: (sum.silent / sum.packets) * 100,
+        escape: (sum.escape / sum.packets) * 100,
         // A share of one core, the CPU chart's unit, so the two can be read
         // against each other on the clients that draw that chart.
         decodePct: (sum.decodeMs / sum.ms) * 100,
@@ -423,9 +437,9 @@ export default function StatsPanel({ minimal }) {
     const cpuHistory = useRef([]);
     const memRef = useRef(null);
     const memHistory = useRef([]);
-    // The lossless codec's deltas over the last V4_AVG_MS, summed into the
-    // cards each sample. Not a chart: see V4_AVG_MS for why these are averages.
-    const v4Window = useRef([]);
+    // The audio codec's deltas over the last V4_AVG_MS, summed into the cards
+    // each sample. Not a chart: see V4_AVG_MS for why these are averages.
+    const codecWindow = useRef([]);
     const [facts, setFacts] = useState({});
 
     useEffect(() => {
@@ -475,9 +489,9 @@ export default function StatsPanel({ minimal }) {
         // Trimmed exactly rather than with trimBefore, which keeps a point
         // from before the cutoff for a line to start from. An average wants
         // the window and nothing older.
-        const w4 = v4Window.current;
-        if (s.v4) w4.push({ t, ...s.v4 });
-        while (w4.length && w4[0].t <= t - V4_AVG_MS) w4.shift();
+        const wc = codecWindow.current;
+        if (s.v4 || s.opus) wc.push({ t, v4: s.v4, opus: s.opus });
+        while (wc.length && wc[0].t <= t - V4_AVG_MS) wc.shift();
 
         setFacts({
             fps: s.fps,
@@ -504,7 +518,7 @@ export default function StatsPanel({ minimal }) {
             ip: s.ip,
             cpu: app.cpu,
             mem: app.mem,
-            v4: v4Summary(v4Window.current),
+            codec: codecSummary(codecWindow.current),
         });
     });
 
@@ -687,38 +701,48 @@ export default function StatsPanel({ minimal }) {
                 <div className="stats-cards__wide">
                     <Readout label="Your address" value={facts.ip || '—'} />
                 </div>
-                {/* The lossless codec, and only while it is the one running:
-                    on Opus none of these has anything to measure. Last in the
-                    grid, so a mode change that brings them and takes them away
-                    moves nothing above them. Averaged over V4_AVG_MS. */}
-                {facts.v4 && (
-                    <>
+            </div>
+            )}
+
+            {/* The audio codec, and only while one with counters is running.
+                Boxed and titled, because "Saving" and "Decode" loose in the
+                grid did not say what they were the saving or the decoding of.
+                Below the grid, so a mode change that brings it and takes it
+                away moves nothing above it. Averaged over V4_AVG_MS. */}
+            {!minimal && facts.codec && (
+                <fieldset className="stats-codec">
+                    <legend className="stats-codec__title">
+                        {facts.codec.kind === 'v4' ? 'Lossless' : 'Opus'}
+                    </legend>
+                    <div className="readout-grid stats-cards">
                         {/* Against the same samples as raw 16-bit PCM, header
-                            included — so a run of escapes can go negative,
-                            and that is the truth about it. */}
-                        <Readout label="Saving" value={pctText(facts.v4.saving)} unit="%" />
-                        {/* Time in the JavaScript decoder as a share of one
-                            core. The predictor runs per sample, so on wide IQ
-                            on a phone this is the figure that says whether the
+                            included — so a run of lossless escapes can go
+                            negative, and that is the truth about it. */}
+                        <Readout label="Saving" value={pctText(facts.codec.saving)} unit="%" />
+                        {/* Time in the decoder as a share of one core. The
+                            lossless predictor runs per sample, so on wide IQ on
+                            a phone this is the figure that says whether the
                             stutter is this device keeping up. */}
                         <Readout
                             label="Decode"
-                            value={perSecondText(facts.v4.decodePct)}
+                            value={perSecondText(facts.codec.decodePct)}
                             unit="% CPU"
                         />
                         {/* Rice is the codec working; silent is squelch; escape
                             is the predictor losing to the signal and sending it
-                            verbatim — the one that is worth watching. */}
-                        <div className="stats-cards__wide">
-                            <Readout
-                                label="Packets"
-                                value={`rice ${pctText(facts.v4.rice)} · silent ${pctText(facts.v4.silent)} · escape ${pctText(facts.v4.escape)}`}
-                                unit="%"
-                            />
-                        </div>
-                    </>
-                )}
-            </div>
+                            verbatim — the one that is worth watching. Lossless
+                            only: Opus has no such split. */}
+                        {facts.codec.kind === 'v4' && (
+                            <div className="stats-cards__wide">
+                                <Readout
+                                    label="Packets"
+                                    value={`rice ${pctText(facts.codec.rice)} · silent ${pctText(facts.codec.silent)} · escape ${pctText(facts.codec.escape)}`}
+                                    unit="%"
+                                />
+                            </div>
+                        )}
+                    </div>
+                </fieldset>
             )}
 
             {/* The same setting the Display panel carries, because this is the

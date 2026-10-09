@@ -558,7 +558,7 @@ t('no lossless cards on a connection without the version 4 counters', () => {
 });
 
 t('no lossless cards while no version 4 packet is arriving', () => {
-    // An Opus session: the counters exist and stand still.
+    // The counters exist and stand still.
     const labels = cards(mount(v4Context()).tree).map((c) => c.label);
     for (const label of V4_CARDS) assert.ok(!labels.includes(label), `drew ${label}`);
 });
@@ -582,6 +582,54 @@ t('the lossless cards go when the packets stop', () => {
     });
     const labels = cards(tree).map((c) => c.label);
     for (const label of V4_CARDS) assert.ok(!labels.includes(label), `still drew ${label}`);
+});
+
+/** The title on the codec box, or null when there is no box. */
+function codecTitle(tree) {
+    const hit = deep(tree).find((n) => n && n.props && n.props.className === 'stats-codec__title');
+    return hit ? say(hit).trim() : null;
+}
+
+t('the lossless cards are boxed under a title saying so', () => {
+    const { tree } = mount(v4Context(), {}, V4_TRAFFIC);
+    assert.strictEqual(codecTitle(tree), 'Lossless');
+    const box = deep(tree).find((n) => n && n.props && n.props.className === 'stats-codec');
+    const inside = cards(box).map((c) => c.label);
+    assert.deepStrictEqual(inside, V4_CARDS);
+});
+
+function opusContext() {
+    return context({
+        audioConn: { bytesIn: 0, opusStats: { raw: 0, coded: 0, packets: 0 } },
+        player: { opusStats: { decodeMs: 0 } },
+    });
+}
+
+// Every half second: 1200 samples' worth of 16-bit PCM sent in 300 bytes over
+// ten packets, 2 ms in the decoder.
+const OPUS_TRAFFIC = {
+    step: (ctx) => {
+        const st = ctx.audioConn.opusStats;
+        st.raw += 2400;
+        st.coded += 300;
+        st.packets += 10;
+        ctx.player.opusStats.decodeMs += 2;
+    },
+};
+
+t('Opus gets the same saving and decode cards, titled Opus', () => {
+    const { tree } = mount(opusContext(), {}, OPUS_TRAFFIC);
+    assert.strictEqual(codecTitle(tree), 'Opus');
+    // 1 - 300/2400.
+    assert.strictEqual(cardNamed(tree, 'Saving').num, '88');
+    // 4 ms in a second: 0.4% of one core.
+    assert.strictEqual(cardNamed(tree, 'Decode').num, '0.4');
+    // The rice/silent/escape split is the lossless codec's own.
+    assert.ok(!cardNamed(tree, 'Packets'), 'drew a lossless-only card on Opus');
+});
+
+t('no codec box while no Opus packet is arriving', () => {
+    assert.strictEqual(codecTitle(mount(opusContext()).tree), null);
 });
 
 // --- the receiver not being on -----------------------------------------------

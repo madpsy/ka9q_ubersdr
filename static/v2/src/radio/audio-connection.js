@@ -117,6 +117,11 @@ export class AudioConnection extends Emitter {
         this.v4Stats = {
             raw: 0, coded: 0, rice: 0, silent: 0, escape: 0, decodeMs: 0,
         };
+        // The same first two figures for version 4 Opus, so the Stats panel can
+        // say what Opus is saving on the same terms. `raw` is worked out from
+        // the frame duration the TOC byte declares. The decode time is the
+        // player's, because that is where Opus is decoded: AudioPlayer.opusStats.
+        this.opusStats = { raw: 0, coded: 0, packets: 0 };
         // performance.now() of every ping not yet answered, oldest first. The
         // socket is ordered and a pong answers nothing but a ping, so the next
         // pong is the oldest ping's -- no id has to travel. Per socket, since a
@@ -576,7 +581,12 @@ export class AudioConnection extends Emitter {
             if (!h) return;
             this.emit('quality', h.signal);
             const data = new Uint8Array(buffer, h.bodyOffset);
-            this._noteArrival(h.captureMs, opusDurationSec(data));
+            const sec = opusDurationSec(data);
+            this._noteArrival(h.captureMs, sec);
+            const st = this.opusStats;
+            st.raw += Math.round(sec * h.sampleRate) * (h.channels || 1) * 2;
+            st.coded += buffer.byteLength;
+            st.packets++;
             this.emit('opus', {
                 data,
                 sampleRate: h.sampleRate,

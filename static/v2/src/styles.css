@@ -4131,6 +4131,24 @@ a.btn { text-decoration: none; }
    this it pushes the dock wider than the column it is in. */
 .stats-cards__wide .readout__num { overflow-wrap: anywhere; text-align: left; }
 
+/* The audio codec's cards, boxed and titled so it is plain which stream they
+   describe. A fieldset because that is what a titled group is; the browser's
+   own border and padding are replaced with the panel's. */
+.stats-codec {
+    margin: 0;
+    min-width: 0;
+    padding: 4px 6px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.stats-codec__title {
+    padding: 0 4px;
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 /* Cursor/peak readout over the spectrum, the waterfall and the audio scope —
    v1 shows the same two lines on all of them. */
 .spec-tip {

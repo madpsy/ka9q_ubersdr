@@ -97,6 +97,8 @@ export class AudioPlayer extends Emitter {
     constructor() {
         super();
         this.ctx = null;
+        // Time spent in the Opus decoder, ever. See AudioConnection.opusStats.
+        this.opusStats = { decodeMs: 0 };
         this.gain = null;
         this.analyser = null;
         this.analyserFft = ANALYSER_IDLE_FFT;
@@ -335,7 +337,11 @@ export class AudioPlayer extends Emitter {
             this.decoderChannels = channels;
         }
 
+        // decodeFrame is synchronous wasm on this thread, so this is the time
+        // it cost. Cumulative; the Stats panel takes deltas.
+        const t0 = performance.now();
         const decoded = await this.decoder.decodeFrame(bytes);
+        this.opusStats.decodeMs += performance.now() - t0;
         if (!decoded || !decoded.samplesDecoded) return;
 
         this._ensureContext(sampleRate);

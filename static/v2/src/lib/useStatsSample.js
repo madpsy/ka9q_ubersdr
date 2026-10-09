@@ -61,7 +61,7 @@ function v4Delta(was, at, ms) {
  * @param onSample    (sample) => void
  */
 export default function useStatsSample(intervalMs, onSample) {
-    const { spectrumConn, audioConn, meters } = useRadio();
+    const { spectrumConn, audioConn, player, meters } = useRadio();
 
     // How many of the listeners are in the chat room. Whatever the Chat panel
     // has — there is no second socket to open here, and none to open at all
@@ -126,6 +126,9 @@ export default function useStatsSample(intervalMs, onSample) {
                 frames: spectrumConn.framesIn || 0,
                 ticks: frameTicks(),
                 v4: audioConn && audioConn.v4Stats ? { ...audioConn.v4Stats } : null,
+                opus: audioConn && audioConn.opusStats
+                    ? { ...audioConn.opusStats, decodeMs: (player && player.opusStats && player.opusStats.decodeMs) || 0 }
+                    : null,
             };
             const was = prev.current;
             prev.current = at;
@@ -154,6 +157,8 @@ export default function useStatsSample(intervalMs, onSample) {
                 // share, which only means something summed over several
                 // samples — see the Stats panel's averaging window.
                 v4: v4Delta(was.v4, at.v4, ms),
+                // The Opus path's, on the same terms.
+                opus: v4Delta(was.opus, at.opus, ms),
                 // Already a rate, measured by the panel that owns that stream —
                 // null whenever it is closed, which is whenever the stream is.
                 bandBytes: bandRate(),

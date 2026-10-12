@@ -257,9 +257,14 @@ var ncdxfWindowRe = regexp.MustCompile(`^(\d+)h$`)
 // recent beacon reception.
 // Returns (botText, telegramAPIResponse, apiOK).
 func (l *TelegramBotListener) handleBeacons(chatID int64, args string) (string, string, bool) {
-	// The reception half of this command comes from the CW skimmer, so without
-	// it there is nothing meaningful to report.
-	if l.cwSkimmerConfig == nil || !l.cwSkimmerConfig.Enabled {
+	// The reception half of this command comes from the CW spots (a CW
+	// Skimmer server's, or the skimmer feed's), so without them there is
+	// nothing meaningful to report.
+	cwSpots := l.cwSkimmerConfig != nil && l.cwSkimmerConfig.Enabled
+	if l.config != nil {
+		cwSpots = l.config.CWSpotsEnabled(l.cwSkimmerConfig)
+	}
+	if !cwSpots {
 		msg := "📡 The CW skimmer is not enabled on this receiver, so beacon reception " +
 			"cannot be reported.\n\nEnable the CW skimmer (and make sure it covers " +
 			"14.100, 18.110, 21.150, 24.930 and 28.200 MHz) to use <code>/beacons</code>."

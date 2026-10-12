@@ -217,7 +217,9 @@ func (ah *AdminHandler) buildMonitorHealthItems() []MonitorHealthItem {
 	}
 
 	// ── Decoder ───────────────────────────────────────────────────────────────
-	if ah.multiDecoder != nil {
+	// (Not when it only delivers the skimmer feed's spots: the feed's item
+	// below is their health.)
+	if ah.multiDecoder != nil && !ah.multiDecoder.IsIngestOnly() {
 		dec := ah.multiDecoder.GetHealthStatus()
 		if dec.Enabled {
 			add("Decoder", dec.Healthy, false, dec.Issues)
@@ -233,6 +235,11 @@ func (ah *AdminHandler) buildMonitorHealthItems() []MonitorHealthItem {
 			issues = raw
 		}
 		add("CW Skimmer", healthy, false, issues)
+	}
+
+	// ── Skimmer feed ──────────────────────────────────────────────────────────
+	if it, ok := skimmerFeedMonitorItem(ah.config.SkimmerFeed.Enabled, ah.skimmerFeed); ok {
+		items = append(items, it)
 	}
 
 	// ── DSP ───────────────────────────────────────────────────────────────────

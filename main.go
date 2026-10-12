@@ -583,6 +583,7 @@ func main() {
 		decoderPath = *configDir + "/decoder.yaml"
 	}
 	decoderConfig, err := LoadConfig(decoderPath)
+	decoderYAMLLoaded := err == nil
 	if err == nil {
 		config.Decoder = decoderConfig.Decoder
 		log.Printf("Loaded decoder configuration from decoder.yaml (enabled: %v, bands: %d)",
@@ -600,6 +601,11 @@ func main() {
 	// band plan to check, and having this inside the `if` meant a missing decoder file
 	// silently skipped that.
 	pruneOutOfRangeChannels(config)
+
+	// The decoder's spot stores run with its decoders or the skimmer's feed
+	// (spot_delivery.go): their directories, and defaults when only the feed
+	// is on.  Before the retention loop below, which reads spots_log_max_age_days.
+	prepareDecoderStoreConfig(config, *configDir, decoderYAMLLoaded)
 
 	// Blocked ranges are bands.yaml entries in the "blocked" group, so this has
 	// to follow the band load above. The announcement clips are read once here;
@@ -1037,51 +1043,15 @@ func main() {
 	// when Prometheus scraping is disabled.
 	var mqttPublisher *MQTTPublisher
 
-	// Initialize multi-decoder
-	// Set data directory relative to config directory
-	if config.Decoder.Enabled && config.Decoder.DataDir == "" {
-		config.Decoder.DataDir = *configDir + "/decoder_data"
-	} else if config.Decoder.Enabled && !strings.HasPrefix(config.Decoder.DataDir, "/") {
-		// If relative path, make it relative to config directory
-		config.Decoder.DataDir = *configDir + "/" + config.Decoder.DataDir
+	// Initialize multi-decoder: its own decoders, or, with only the skimmer's
+	// feed, ingest-only (stores and delivery, no bands or reporters).  Its
+	// store settings were prepared with decoder.yaml above.
+	var multiDecoder *MultiDecoder
+	if config.Decoder.Enabled {
+		multiDecoder, err = NewMultiDecoder(&config.Decoder, radiod, sessions, prometheusMetrics)
+	} else if config.SkimmerFeed.Enabled {
+		multiDecoder, err = NewMultiDecoderIngestOnly(&config.Decoder, prometheusMetrics)
 	}
-
-	// Set spots log data directory relative to config directory (same pattern as spaceweather/noisefloor)
-	if config.Decoder.Enabled && config.Decoder.SpotsLogEnabled && config.Decoder.SpotsLogDataDir == "" {
-		config.Decoder.SpotsLogDataDir = *configDir + "/decoder_spots"
-	} else if config.Decoder.Enabled && config.Decoder.SpotsLogEnabled && !strings.HasPrefix(config.Decoder.SpotsLogDataDir, "/") {
-		// If relative path, make it relative to config directory
-		config.Decoder.SpotsLogDataDir = *configDir + "/" + config.Decoder.SpotsLogDataDir
-	}
-
-	// Set metrics log data directory relative to config directory (same pattern as spots log)
-	if config.Decoder.Enabled && config.Decoder.MetricsLogEnabled && config.Decoder.MetricsLogDataDir == "" {
-		config.Decoder.MetricsLogDataDir = *configDir + "/decoder_metrics"
-	} else if config.Decoder.Enabled && config.Decoder.MetricsLogEnabled && !strings.HasPrefix(config.Decoder.MetricsLogDataDir, "/") {
-		// If relative path, make it relative to config directory
-		config.Decoder.MetricsLogDataDir = *configDir + "/" + config.Decoder.MetricsLogDataDir
-	}
-
-	// Set metrics summary data directory relative to config directory (same pattern as metrics log)
-	if config.Decoder.Enabled && config.Decoder.MetricsLogEnabled && config.Decoder.MetricsSummaryDataDir == "" {
-		config.Decoder.MetricsSummaryDataDir = *configDir + "/decoder_summaries"
-	} else if config.Decoder.Enabled && config.Decoder.MetricsLogEnabled && !strings.HasPrefix(config.Decoder.MetricsSummaryDataDir, "/") {
-		// If relative path, make it relative to config directory
-		config.Decoder.MetricsSummaryDataDir = *configDir + "/" + config.Decoder.MetricsSummaryDataDir
-	}
-
-	// Set default value for spots locators only filter
-	// Default to true (only log/show spots with valid locators)
-	// Users must explicitly set to false in config to log/see all spots.
-	// Uses *bool so "not set" (nil) is distinguished from "explicitly false".
-	if config.Decoder.Enabled && config.Decoder.SpotsLogEnabled {
-		if config.Decoder.SpotsLogLocatorsOnly == nil {
-			t := true
-			config.Decoder.SpotsLogLocatorsOnly = &t
-		}
-	}
-
-	multiDecoder, err := NewMultiDecoder(&config.Decoder, radiod, sessions, prometheusMetrics)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize multi-decoder: %v", err)
 		log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
@@ -1310,6 +1280,7 @@ func main() {
 		cwskimmerPath = *configDir + "/cwskimmer.yaml"
 	}
 	cwskimmerConfig, err := LoadCWSkimmerConfig(cwskimmerPath)
+	cwskimmerLoaded := err == nil
 	if err != nil {
 		log.Printf("No cwskimmer.yaml found or error loading: %v", err)
 		// Create a disabled config
@@ -1318,33 +1289,16 @@ func main() {
 		log.Printf("Loaded CW Skimmer configuration from cwskimmer.yaml (enabled: %v)", cwskimmerConfig.Enabled)
 	}
 
-	// Set spots log data directory relative to config directory (same pattern as decoder)
-	if cwskimmerConfig.Enabled && cwskimmerConfig.SpotsLogEnabled && cwskimmerConfig.SpotsLogDataDir == "" {
-		cwskimmerConfig.SpotsLogDataDir = *configDir + "/decoder_spots"
-	} else if cwskimmerConfig.Enabled && cwskimmerConfig.SpotsLogEnabled && !strings.HasPrefix(cwskimmerConfig.SpotsLogDataDir, "/") {
-		// If relative path, make it relative to config directory
-		cwskimmerConfig.SpotsLogDataDir = *configDir + "/" + cwskimmerConfig.SpotsLogDataDir
-	}
+	// The CW spot stores run with the telnet client or the skimmer's feed
+	// (spot_delivery.go): their directories, and defaults when only the feed
+	// is on and there is no cwskimmer.yaml.
+	prepareCWSkimmerStoreConfig(cwskimmerConfig, config.SkimmerFeed.Enabled, *configDir, cwskimmerLoaded)
 
-	// Set metrics log data directory relative to config directory (same pattern as decoder)
-	if cwskimmerConfig.Enabled && cwskimmerConfig.MetricsLogEnabled && cwskimmerConfig.MetricsLogDataDir == "" {
-		cwskimmerConfig.MetricsLogDataDir = *configDir + "/cwskimmer_metrics"
-	} else if cwskimmerConfig.Enabled && cwskimmerConfig.MetricsLogEnabled && !strings.HasPrefix(cwskimmerConfig.MetricsLogDataDir, "/") {
-		// If relative path, make it relative to config directory
-		cwskimmerConfig.MetricsLogDataDir = *configDir + "/" + cwskimmerConfig.MetricsLogDataDir
-	}
-
-	// Set metrics summary data directory relative to config directory (same pattern as decoder)
-	if cwskimmerConfig.Enabled && cwskimmerConfig.MetricsLogEnabled && cwskimmerConfig.MetricsSummaryDataDir == "" {
-		cwskimmerConfig.MetricsSummaryDataDir = *configDir + "/cwskimmer_summaries"
-	} else if cwskimmerConfig.Enabled && cwskimmerConfig.MetricsLogEnabled && !strings.HasPrefix(cwskimmerConfig.MetricsSummaryDataDir, "/") {
-		// If relative path, make it relative to config directory
-		cwskimmerConfig.MetricsSummaryDataDir = *configDir + "/" + cwskimmerConfig.MetricsSummaryDataDir
-	}
-
-	// Initialize CW Skimmer client
+	// Initialize CW Skimmer client: with its telnet connection, or, with only
+	// the skimmer's feed, without one (stores and delivery only; Start does
+	// not connect when cwskimmer.yaml is disabled).
 	var cwSkimmer *CWSkimmerClient
-	if cwskimmerConfig.Enabled {
+	if config.CWSpotsEnabled(cwskimmerConfig) {
 		// Get receiver location from admin config
 		receiverLat := config.Admin.GPS.Lat
 		receiverLon := config.Admin.GPS.Lon
@@ -1395,8 +1349,9 @@ func main() {
 			}
 		}
 
-		// Initialize PSKReporter if enabled
-		if cwskimmerConfig.PSKReporterEnabled {
+		// Initialize PSKReporter if enabled: for the telnet connection's spots
+		// only, never for the skimmer feed's (the skimmer reports its own).
+		if cwskimmerConfig.Enabled && cwskimmerConfig.PSKReporterEnabled {
 			programName := fmt.Sprintf("%s %s", "UberSDR", Version)
 			pskReporter, err := NewPSKReporter(
 				cwskimmerConfig.PSKReporterCallsign,
@@ -2141,7 +2096,9 @@ func main() {
 
 	// Initialize WSJT-X UDP broadcaster if enabled
 	var wsjtxBroadcaster *WSJTXUDPBroadcaster
-	if config.Decoder.Enabled && config.Decoder.WSJTXUDPEnabled {
+	// The local decoders' and the skimmer feed's decodes alike (decoder.yaml's
+	// wsjtx_udp settings, read even with its decoders off).
+	if config.DigitalSpotsEnabled() && config.Decoder.WSJTXUDPEnabled {
 		wsjtxBroadcaster = NewWSJTXUDPBroadcaster(
 			config.Decoder.WSJTXUDPHost,
 			config.Decoder.WSJTXUDPPort,
@@ -2196,6 +2153,14 @@ func main() {
 			})
 			defer multiDecoder.Stop()
 		}
+	}
+
+	// The skimmer addon's feed (skimmer_feed in config.yaml): its spots into
+	// the decoder and CW deliveries above, after their handlers are
+	// registered.  Never reported on: the skimmer reports its own.
+	skimmerFeed := startSkimmerFeed(config, cwskimmerConfig, multiDecoder, cwSkimmer)
+	if skimmerFeed != nil {
+		defer skimmerFeed.Stop()
 	}
 
 	// Initialize rate limiter manager
@@ -2731,6 +2696,7 @@ func main() {
 	// Wire GPSDO monitor into admin handler so /admin/monitor-health can include
 	// GPSDO health using the same cached snapshot as the /monitor bot command.
 	adminHandler.SetGPSDOMonitor(gpsdoMonitor)
+	adminHandler.SetSkimmerFeed(skimmerFeed)
 	if kiwiHandler != nil {
 		kiwiHandler.SetGPSDOMonitor(gpsdoMonitor)
 	}
@@ -2765,6 +2731,7 @@ func main() {
 			spaceWeatherMonitor,
 			multiDecoder,
 			cwSkimmer,
+			skimmerFeed,
 			mqttPublisher,
 			rotctlHandler,
 			antSwitchHandler,
@@ -3357,6 +3324,7 @@ func main() {
 	http.HandleFunc("/admin/db-query", adminHandler.AuthMiddleware(adminHandler.HandleDBQuery))
 	http.HandleFunc("/admin/db-tables", adminHandler.AuthMiddleware(adminHandler.HandleDBTables))
 	http.HandleFunc("/admin/cwskimmer-health", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerHealth))
+	http.HandleFunc("/admin/skimmer-feed-health", adminHandler.AuthMiddleware(adminHandler.HandleSkimmerFeedHealth))
 	http.HandleFunc("/admin/mqtt-health", adminHandler.AuthMiddleware(adminHandler.HandleMQTTHealth))
 	http.HandleFunc("/admin/rotctl-health", adminHandler.AuthMiddleware(adminHandler.HandleRotctlHealth))
 	http.HandleFunc("/admin/rotctl-position", adminHandler.AuthMiddleware(adminHandler.HandleAdminRotctlPosition))
@@ -5078,6 +5046,10 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			}
 		}
 	}
+	// With no bands of its own, the modes the skimmer's feed has brought.
+	if adminHandler != nil && adminHandler.multiDecoder.IsIngestOnly() {
+		digitalModes = append(digitalModes, adminHandler.multiDecoder.IngestedModes()...)
+	}
 
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
@@ -5115,10 +5087,10 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"space_weather":        config.SpaceWeather.Enabled,
 		"noise_floor":          config.NoiseFloor.Enabled,
 		"spectrogram":          config.Spectrogram.IsEnabled(),
-		"digital_decodes":      config.Decoder.Enabled,
+		"digital_decodes":      config.DigitalSpotsEnabled(),
 		"digital_modes":        digitalModes,
 		"dx_cluster":           dxClusterAvailable,
-		"cw_skimmer":           cwskimmerConfig.Enabled,
+		"cw_skimmer":           config.CWSpotsEnabled(cwskimmerConfig),
 		"cw_skimmer_rbn_spots": cwskimmerConfig.Enabled && cwskimmerConfig.RBNSpots,
 		"cw_skimmer_callsign":  cwskimmerConfig.Callsign,
 		// True only when CW spots are actually being enriched with per-operator

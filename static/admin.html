@@ -641,6 +641,7 @@
         #monitor-space-weather,
         #monitor-decoder,
         #monitor-cwskimmer,
+        #monitor-skimmer-feed,
         #monitor-mqtt,
         #monitor-rotctl,
         #monitor-ant-switch,
@@ -23371,6 +23372,7 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/mqtt-health'),
                     authenticatedFetch('/admin/rotctl-health'),
                     authenticatedFetch('/admin/ntp-health'),
+                    authenticatedFetch('/admin/skimmer-feed-health'),
                     authenticatedFetch('/admin/gpsdo-health'),
                     authenticatedFetch('/admin/ant-switch-health'),
                     authenticatedFetch('/admin/dsp-health'),
@@ -23384,9 +23386,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, gpsdoResponse, antSwitchResponse, dspResponse, versionResponse, notifResponse] = await Promise.all(fetchPromises);
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, ntpResponse, skimmerFeedResponse, gpsdoResponse, antSwitchResponse, dspResponse, versionResponse, notifResponse] = await Promise.all(fetchPromises);
 
-                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !gpsdoResponse || !antSwitchResponse || !dspResponse || !versionResponse || !notifResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !ntpResponse || !skimmerFeedResponse || !gpsdoResponse || !antSwitchResponse || !dspResponse || !versionResponse || !notifResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -23399,6 +23401,7 @@ const tooltipLine2 = timeStr;
                 const freqRefHealth = (freqRefResponse.ok || freqRefResponse.status === 503) ? await freqRefResponse.json() : null;
                 const decoderHealth = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
                 const cwSkimmerHealth = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
+                const skimmerFeedHealth = (skimmerFeedResponse.ok || skimmerFeedResponse.status === 503) ? await skimmerFeedResponse.json() : null;
                 const mqttHealth = (mqttResponse.ok || mqttResponse.status === 503) ? await mqttResponse.json() : null;
                 const rotctlHealth = (rotctlResponse.ok || rotctlResponse.status === 503) ? await rotctlResponse.json() : null;
                 const ntpHealth = (ntpResponse.ok || ntpResponse.status === 503) ? await ntpResponse.json() : null;
@@ -23413,11 +23416,11 @@ const tooltipLine2 = timeStr;
 
                 lastGPSDOHealth = gpsdoHealth;
                 updateGPSDOTabVisibility();
-                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth, antSwitch: antSwitchHealth, dsp: dspHealth, softwareVersion: versionHealth, notifications: notifHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, tunnel: tunnelStatus, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, frequencyReference: freqRefHealth, frontendStatus: frontendStatusData, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth, skimmerFeed: skimmerFeedHealth, mqtt: mqttHealth, rotctl: rotctlHealth, ntp: ntpHealth, gpsdo: gpsdoHealth, antSwitch: antSwitchHealth, dsp: dspHealth, softwareVersion: versionHealth, notifications: notifHealth }, false);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false) && (!antSwitchHealth?.enabled || antSwitchHealth?.healthy !== false) && (!dspHealth?.enabled || dspHealth?.healthy !== false) && (versionHealth?.healthy !== false) && (!notifHealth?.enabled || notifHealth?.healthy !== false);
+                    const allHealthy = (tunnelStatus?.tunnel_up !== false) && (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (freqRefHealth?.healthy !== false) && (frontendStatusData?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false) && (!skimmerFeedHealth?.enabled || skimmerFeedHealth?.healthy !== false) && (mqttHealth?.healthy !== false) && (rotctlHealth?.healthy !== false) && (ntpHealth?.healthy !== false) && (!gpsdoHealth?.enabled || gpsdoHealth?.healthy !== false) && (!antSwitchHealth?.enabled || antSwitchHealth?.healthy !== false) && (!dspHealth?.enabled || dspHealth?.healthy !== false) && (versionHealth?.healthy !== false) && (!notifHealth?.enabled || notifHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -23472,7 +23475,8 @@ const tooltipLine2 = timeStr;
                     authenticatedFetch('/admin/mqtt-health'),
                     authenticatedFetch('/admin/rotctl-health'),
                     authenticatedFetch('/admin/ant-switch-health'),
-                    authenticatedFetch('/admin/notifications/health')
+                    authenticatedFetch('/admin/notifications/health'),
+                    authenticatedFetch('/admin/skimmer-feed-health')
                 ];
 
                 // Add tunnel status fetch if tunnel server is enabled
@@ -23481,9 +23485,9 @@ const tooltipLine2 = timeStr;
                     tunnelStatusPromise = fetchTunnelStatus();
                 }
 
-                const [instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, antSwitchResponse, notifResponse] = await Promise.all(fetchPromises);
+                const [instanceReporterResponse, nfResponse, swResponse, freqRefResponse, decoderResponse, cwSkimmerResponse, mqttResponse, rotctlResponse, antSwitchResponse, notifResponse, skimmerFeedResponse] = await Promise.all(fetchPromises);
 
-                if (!instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !antSwitchResponse || !notifResponse) return; // Auth failed, already handled
+                if (!instanceReporterResponse || !nfResponse || !swResponse || !freqRefResponse || !decoderResponse || !cwSkimmerResponse || !mqttResponse || !rotctlResponse || !antSwitchResponse || !notifResponse || !skimmerFeedResponse) return; // Auth failed, already handled
 
                 const instanceReporterDiag = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
                 const nfDiag = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
@@ -23495,11 +23499,12 @@ const tooltipLine2 = timeStr;
                 const rotctlDiag = (rotctlResponse.ok || rotctlResponse.status === 503) ? await rotctlResponse.json() : null;
                 const antSwitchDiag = (antSwitchResponse.ok || antSwitchResponse.status === 503) ? await antSwitchResponse.json() : null;
                 const notifDiag = (notifResponse.ok || notifResponse.status === 503) ? await notifResponse.json() : null;
+                const skimmerFeedDiag = (skimmerFeedResponse.ok || skimmerFeedResponse.status === 503) ? await skimmerFeedResponse.json() : null;
 
                 // Wait for tunnel status if it was fetched
                 const tunnelStatus = tunnelStatusPromise ? await tunnelStatusPromise : null;
 
-                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, frequencyReference: freqRefDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag, mqtt: mqttDiag, rotctl: rotctlDiag, antSwitch: antSwitchDiag, notifications: notifDiag }, true);
+                renderMonitorHealth({ tunnel: tunnelStatus, instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, frequencyReference: freqRefDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag, skimmerFeed: skimmerFeedDiag, mqtt: mqttDiag, rotctl: rotctlDiag, antSwitch: antSwitchDiag, notifications: notifDiag }, true);
                 showAlert('Detailed diagnostics loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
@@ -24055,6 +24060,7 @@ const tooltipLine2 = timeStr;
                 const hasFrontendStatusIssues = data.frontendStatus && !data.frontendStatus.healthy;
                 const hasDecoderIssues = data.decoder && !data.decoder.healthy;
                 const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
+                const hasSkimmerFeedIssues = data.skimmerFeed && data.skimmerFeed.enabled && !data.skimmerFeed.healthy;
                 const hasMQTTIssues = data.mqtt && data.mqtt.enabled && !data.mqtt.healthy;
                 const hasRotctlIssues = data.rotctl && data.rotctl.enabled && !data.rotctl.healthy;
                 const hasAntSwitchIssues = data.antSwitch && data.antSwitch.enabled && !data.antSwitch.healthy;
@@ -24064,7 +24070,7 @@ const tooltipLine2 = timeStr;
                 const hasDSPIssues = data.dsp && data.dsp.enabled && !data.dsp.healthy;
                 const hasNotificationsIssues = data.notifications && data.notifications.enabled && (data.notifications.status === 'warning' || data.notifications.status === 'critical');
 
-                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasMQTTIssues || hasRotctlIssues || hasAntSwitchIssues || hasNTPIssues || hasGPSDOIssues || hasSystemLoadIssues || hasDSPIssues || hasNotificationsIssues) {
+                if (hasTunnelIssues || hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasFrequencyReferenceIssues || hasFrontendStatusIssues || hasDecoderIssues || hasCWSkimmerIssues || hasSkimmerFeedIssues || hasMQTTIssues || hasRotctlIssues || hasAntSwitchIssues || hasNTPIssues || hasGPSDOIssues || hasSystemLoadIssues || hasDSPIssues || hasNotificationsIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -24136,6 +24142,12 @@ const tooltipLine2 = timeStr;
                     if (hasCWSkimmerIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>CW Skimmer:</strong> ' + (data.cwSkimmer.issues && data.cwSkimmer.issues.length > 0 ? data.cwSkimmer.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+
+                    if (hasSkimmerFeedIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>Skimmer Feed:</strong> ' + escapeHtml(data.skimmerFeed.issues && data.skimmerFeed.issues.length > 0 ? data.skimmerFeed.issues.join(', ') : 'Unhealthy');
                         issuesList.appendChild(li);
                     }
 
@@ -24304,6 +24316,17 @@ const tooltipLine2 = timeStr;
                     decoderSection.appendChild(decoderPre);
                     container.appendChild(decoderSection);
                 }
+
+                if (data.skimmerFeed && data.skimmerFeed.enabled) {
+                    const feedSection = document.createElement('div');
+                    feedSection.className = 'config-section';
+                    feedSection.innerHTML = '<h3>📡 Skimmer Feed - Detailed Diagnostics</h3>';
+                    const feedPre = document.createElement('pre');
+                    feedPre.style.cssText = 'background:#fff;padding:15px;border-radius:5px;overflow:auto;font-family:monospace;font-size:13px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;';
+                    feedPre.textContent = JSON.stringify(data.skimmerFeed, null, 2);
+                    feedSection.appendChild(feedPre);
+                    container.appendChild(feedSection);
+                }
             } else {
                 // Render tunnel health status (first, only if enabled)
                 if (data.tunnel) {
@@ -24333,6 +24356,11 @@ const tooltipLine2 = timeStr;
                 // Render CW Skimmer health status
                 if (data.cwSkimmer) {
                     renderCWSkimmerHealth(container, data.cwSkimmer);
+                }
+
+                // Render the skimmer feed's health (only when skimmer_feed is enabled)
+                if (data.skimmerFeed && data.skimmerFeed.enabled) {
+                    renderSkimmerFeedHealth(container, data.skimmerFeed);
                 }
 
                 // Render MQTT health status
@@ -24400,6 +24428,7 @@ const tooltipLine2 = timeStr;
                 { id: 'monitor-space-weather',     label: 'Space Weather' },
                 { id: 'monitor-decoder',           label: 'Decoder' },
                 { id: 'monitor-cwskimmer',         label: 'CW Skimmer' },
+                { id: 'monitor-skimmer-feed',      label: 'Skimmer Feed' },
                 { id: 'monitor-mqtt',              label: 'MQTT' },
                 { id: 'monitor-rotctl',            label: 'Rotator' },
                 { id: 'monitor-ant-switch',        label: 'Ant Switch' },
@@ -25512,6 +25541,12 @@ const tooltipLine2 = timeStr;
         }
 
         function renderDecoderHealth(container, data) {
+            // A decoder with no bands of its own only delivers the skimmer
+            // feed's spots: the Skimmer Feed section is their health.
+            if (data.ingest_only) {
+                return;
+            }
+
             // Render decoder health status
             const statusSection = document.createElement('div');
             statusSection.className = 'config-section';
@@ -25950,6 +25985,126 @@ const tooltipLine2 = timeStr;
             }
 
             container.appendChild(statusSection);
+        }
+
+        // The skimmer addon's feed (skimmer_feed in config.yaml): the feed's
+        // connection, and the skimmer's own health as its feed reports it,
+        // its PSK Reporter, wsprnet and RBN uploads among it.
+        function renderSkimmerFeedHealth(container, data) {
+            const section = document.createElement('div');
+            section.className = 'config-section';
+            section.id = 'monitor-skimmer-feed';
+
+            const level = data.status || (data.healthy ? 'ok' : 'critical');
+            const colours = {
+                ok: { fg: '#28a745', bg: '#d4edda', border: '#c3e6cb', icon: '✅', text: 'Healthy' },
+                warning: { fg: '#ff8c00', bg: '#fff3cd', border: '#ffeaa7', icon: '⚠️', text: 'Warning' },
+                critical: { fg: '#dc3545', bg: '#f8d7da', border: '#f5c6cb', icon: '❌', text: 'Unhealthy' }
+            };
+            const c = colours[level] || colours.critical;
+            section.innerHTML = `<h3 style="color: ${c.fg};">${c.icon} Skimmer Feed Health</h3>`;
+
+            const num = (v) => (typeof v === 'number' ? v.toLocaleString() : '0');
+            const spots = data.spots || {};
+            const totalSpots = Object.values(spots).reduce((a, b) => a + (b || 0), 0);
+            const spotList = Object.keys(spots).sort().map(k => `${escapeHtml(k)} ${num(spots[k])}`).join(', ') || 'none yet';
+
+            let connection = data.connected ? 'Connected' : 'Not connected';
+            if (data.stalled) connection = 'Stalled (the skimmer is stuck)';
+            const connColour = data.connected && !data.stalled ? '#28a745' : '#dc3545';
+
+            const status = document.createElement('div');
+            status.style.cssText = `padding:15px;background:${c.bg};border:1px solid ${c.border};border-radius:5px;margin-bottom:20px;`;
+            status.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${c.text}</strong><br>
+                <span style="color: #666; font-size: 14px;">Feed: ${escapeHtml(data.url || '')}</span><br>
+                <span style="color: ${connColour}; font-size: 14px; font-weight: bold;">${connection} for ${escapeHtml(data.time_in_state || 'N/A')}</span><br>
+                <span style="color: #666; font-size: 14px;">Reconnects: ${num(data.reconnects)}</span><br>
+                ${data.last_error ? `<span style="color: #dc3545; font-size: 14px;">Last error: ${escapeHtml(data.last_error)}</span><br>` : ''}
+                <span style="color: #667eea; font-size: 14px; font-weight: bold;">Last spot: ${data.last_spot ? escapeHtml(data.time_since_spot) + ' ago' : 'Never'}</span><br>
+                <span style="color: #666; font-size: 14px;">Spots delivered: ${spotList}</span><br>
+                <span style="color: #666; font-size: 14px;">Repeat CW spots held back: ${num(data.held)} · Skipped: ${num(data.skipped)} · Gaps: ${num(data.gaps)}</span>
+            `;
+            section.appendChild(status);
+
+            const statsDiv = document.createElement('div');
+            statsDiv.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-bottom:20px;';
+            const sk = data.skimmer || null;
+            const cards = [
+                { label: 'Feed', value: data.stalled ? 'Stalled' : (data.connected ? 'Connected' : 'Disconnected'), icon: data.connected && !data.stalled ? '🟢' : '🔴' },
+                { label: 'Spots Delivered', value: num(totalSpots), icon: '📨' },
+                { label: 'Skimmer Status', value: sk ? escapeHtml((sk.status || '?').toUpperCase()) : 'No report', icon: !sk ? '⚪' : sk.status === 'ok' ? '✅' : sk.status === 'warn' ? '⚠️' : '❌' },
+                { label: 'Receivers Sending', value: sk && sk.receivers ? `${num(sk.receivers.up)} / ${num(sk.receivers.total)}` : 'N/A', icon: '📡' }
+            ];
+            cards.forEach(card => {
+                const el = document.createElement('div');
+                el.style.cssText = 'padding:15px;background:#f8f9fa;border-radius:5px;text-align:center;';
+                el.innerHTML = `
+                    <div style="font-size: 24px; margin-bottom: 5px;">${card.icon}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: #667eea; margin-bottom: 5px;">${card.value}</div>
+                    <div style="font-size: 12px; color: #666;">${card.label}</div>
+                `;
+                statsDiv.appendChild(el);
+            });
+            section.appendChild(statsDiv);
+
+            // The skimmer's own report: version, CPU, memory, spots, and its uploads.
+            if (sk) {
+                const mb = (b) => (typeof b === 'number' ? (b / 1048576).toFixed(0) + ' MB' : 'N/A');
+                const up = typeof sk.uptime_s === 'number' ? formatDuration(sk.uptime_s * 1000) : 'N/A';
+                const cpu = sk.cpu && typeof sk.cpu.percent === 'number' ? sk.cpu.percent.toFixed(1) + '%' : 'N/A';
+                const skSpots = sk.spots ? Object.keys(sk.spots).sort().map(k =>
+                    `${escapeHtml(k)} ${num(sk.spots[k].total)} (${num(sk.spots[k].last_min)}/min)`).join(', ') : 'N/A';
+                const info = document.createElement('div');
+                info.style.cssText = 'padding:15px;background:#f8f9fa;border-radius:5px;margin-bottom:20px;font-size:14px;color:#333;line-height:1.7;';
+                info.innerHTML = `
+                    <strong>Skimmer</strong>: ${escapeHtml(sk.spotter || '?')} · ${escapeHtml(sk.version || '?')} · up ${escapeHtml(up)}<br>
+                    CPU ${escapeHtml(cpu)} of the machine · memory ${mb(sk.memory && sk.memory.rss)} (its decoders ${mb(sk.memory && sk.memory.decoders)})<br>
+                    Spots it has sent: ${skSpots}<br>
+                    <span style="color: #666;">Reported ${typeof data.seconds_since_health === 'number' ? data.seconds_since_health + 's ago' : 'N/A'}</span>
+                `;
+                section.appendChild(info);
+
+                // Its uploads: every counter the skimmer gives for each reporter.
+                const reporters = sk.reporters || {};
+                const names = { rbn: 'RBN', pskreporter: 'PSK Reporter', wsprnet: 'wsprnet' };
+                const keys = Object.keys(reporters);
+                if (keys.length > 0) {
+                    const table = document.createElement('table');
+                    table.style.cssText = 'width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;';
+                    let rows = '<tr style="background:#667eea;color:white;"><th style="padding:6px;text-align:left;">Reporting (by the skimmer)</th><th style="padding:6px;text-align:left;">Counts</th><th style="padding:6px;text-align:left;">Last error</th></tr>';
+                    keys.sort().forEach(k => {
+                        const r = reporters[k] || {};
+                        const counts = Object.keys(r).filter(f => f !== 'last_error' && typeof r[f] === 'number')
+                            .map(f => `${escapeHtml(f.replace(/_/g, ' '))}: ${num(r[f])}`).join(' · ');
+                        rows += `<tr style="border-bottom:1px solid #eee;"><td style="padding:6px;font-weight:bold;">${escapeHtml(names[k] || k)}</td><td style="padding:6px;">${counts}</td><td style="padding:6px;color:#dc3545;">${escapeHtml(r.last_error || '')}</td></tr>`;
+                    });
+                    table.innerHTML = rows;
+                    section.appendChild(table);
+                }
+            }
+
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.cssText = 'padding:15px;background:#fff3cd;border:1px solid #ffeaa7;border-radius:5px;margin-bottom:20px;';
+                const title = document.createElement('strong');
+                title.textContent = '⚠️ Issues Detected:';
+                title.style.display = 'block';
+                title.style.marginBottom = '10px';
+                issuesDiv.appendChild(title);
+                const list = document.createElement('ul');
+                list.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    list.appendChild(li);
+                });
+                issuesDiv.appendChild(list);
+                section.appendChild(issuesDiv);
+            }
+
+            container.appendChild(section);
         }
 
         function renderMQTTHealth(container, data) {

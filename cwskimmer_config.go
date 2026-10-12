@@ -71,7 +71,14 @@ func LoadCWSkimmerConfig(filename string) (*CWSkimmerConfig, error) {
 		}
 	}
 
-	// Set defaults if not specified
+	applyCWSkimmerDefaults(&config)
+
+	return &config, nil
+}
+
+// applyCWSkimmerDefaults fills in what cwskimmer.yaml leaves unset; for a
+// receiver with no cwskimmer.yaml it gives the settings a file would.
+func applyCWSkimmerDefaults(config *CWSkimmerConfig) {
 	if config.Port == 0 {
 		config.Port = 7300 // Default CW Skimmer port
 	}
@@ -100,8 +107,6 @@ func LoadCWSkimmerConfig(filename string) (*CWSkimmerConfig, error) {
 	// Always uppercase callsigns
 	config.Callsign = strings.ToUpper(config.Callsign)
 	config.PSKReporterCallsign = strings.ToUpper(config.PSKReporterCallsign)
-
-	return &config, nil
 }
 
 // Validate checks if the CW Skimmer configuration is valid

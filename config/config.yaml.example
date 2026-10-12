@@ -1093,6 +1093,25 @@ dxcluster:
   inject_trusted_hosts:
     - "dxcluster"
 
+# Skimmer feed
+# When enabled, UberSDR reads the skimmer addon's spot feed (/api/feed) and
+# collects its CW, RTTY and digital (FT8, FT4, FT2, WSPR, JS8) spots as its own
+# decoders' are: stored, shown in the UIs, and sent on to the DX cluster addon,
+# MQTT and notifications. They are never reported to PSK Reporter or wsprnet;
+# the skimmer does that itself. Meant for receivers whose own decoders
+# (decoder.enabled) and CW Skimmer client (cwskimmer.yaml) are turned off, so
+# no spot comes in twice. Their spot stores and metrics still run for the
+# feed's spots: with decoder.yaml and cwskimmer.yaml present (even disabled)
+# their spots_log_* and metrics_log_* settings apply; without them, spots and
+# metrics are logged as those files' examples have it (spots kept 90 days).
+skimmer_feed:
+  # Consume the skimmer's feed
+  # Default: false
+  enabled: false
+  # URL of the skimmer's feed
+  # Default: http://skimmer:6101/api/feed
+  url: "http://skimmer:6101/api/feed"
+
 # FreeDV Reporter activity monitor
 # When enabled, UberSDR connects to the FreeDV Reporter server as a view-only client
 # and makes the live activity list available to browser clients over the DX cluster

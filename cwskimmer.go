@@ -122,7 +122,7 @@ func (c *CWSkimmerClient) SetMetrics(m *CWSkimmerMetrics) {
 // Start begins the CW Skimmer client with supervisor pattern
 func (c *CWSkimmerClient) Start() error {
 	if !c.config.Enabled {
-		log.Println("CW Skimmer: Disabled in configuration")
+		log.Println("CW Skimmer: telnet client disabled in configuration")
 		return nil
 	}
 
@@ -521,28 +521,14 @@ func (c *CWSkimmerClient) processLine(line string, spotHandlers []func(CWSkimmer
 			// precise callsign-lookup result (no locks held).
 			c.enrichSpot(&spot)
 
-			// Record in metrics
-			if c.metrics != nil {
-				go c.metrics.RecordSpot(spot.Band, spot.DXCall, spot.WPM)
-			}
-
-			// Log to CSV (already queues to a channel internally)
-			if c.config.SpotsLogEnabled && c.spotsLogger != nil {
-				if err := c.spotsLogger.LogSpot(&spot); err != nil {
-					log.Printf("CW Skimmer: Failed to log spot: %v", err)
-				}
-			}
+			// Metrics, the spots store and the handlers
+			c.deliverSpot(spot, spotHandlers)
 
 			// Submit to PSKReporter
 			if c.config.PSKReporterEnabled && c.pskReporter != nil {
 				if err := c.submitToPSKReporter(&spot); err != nil {
 					log.Printf("CW Skimmer: Failed to submit to PSKReporter: %v", err)
 				}
-			}
-
-			// Call spot handlers (handlers already copied by caller, no locks needed)
-			for _, handler := range spotHandlers {
-				go handler(spot)
 			}
 		}(spot)
 	} else {
@@ -551,6 +537,55 @@ func (c *CWSkimmerClient) processLine(line string, spotHandlers []func(CWSkimmer
 			go handler(line)
 		}
 	}
+}
+
+// deliverSpot hands one spot to everything that stores or shows it: the
+// metrics, the spots store, and the spot handlers (WebSocket, SSE, MQTT,
+// notifications).  Reporting is not part of it: only spots from the telnet
+// connection go to PSK Reporter, after this.
+func (c *CWSkimmerClient) deliverSpot(spot CWSkimmerSpot, spotHandlers []func(CWSkimmerSpot)) {
+	if c.metrics != nil {
+		go c.metrics.RecordSpot(spot.Band, spot.DXCall, spot.WPM)
+	}
+
+	// Log to the store (already queues to a channel internally)
+	if c.config.SpotsLogEnabled && c.spotsLogger != nil {
+		if err := c.spotsLogger.LogSpot(&spot); err != nil {
+			log.Printf("CW Skimmer: Failed to log spot: %v", err)
+		}
+	}
+
+	for _, handler := range spotHandlers {
+		go handler(spot)
+	}
+}
+
+// IngestSpot delivers a spot made elsewhere (the skimmer's feed) as one from
+// the telnet connection is delivered.  It arrives enriched (country, position,
+// distance, QRZ) so it is not looked up again, and it is never reported to
+// PSK Reporter: whoever spotted it reports it.
+func (c *CWSkimmerClient) IngestSpot(spot CWSkimmerSpot) {
+	if c == nil {
+		return
+	}
+	if spot.Frequency <= 0 || (c.maxFrequency > 0 && spot.Frequency > float64(c.maxFrequency)) {
+		return // the receiver cannot tune it
+	}
+	now := time.Now()
+	c.mu.Lock()
+	c.lastActivityTime = now
+	c.lastSpotTime = now
+	spotHandlers := make([]func(CWSkimmerSpot), len(c.spotHandlers))
+	copy(spotHandlers, c.spotHandlers)
+	c.mu.Unlock()
+	c.deliverSpot(spot, spotHandlers)
+}
+
+// TelnetEnabled reports whether this client connects to a CW Skimmer server
+// of its own (cwskimmer.yaml enabled).  When it does not, it only delivers
+// ingested spots, and has no connection to be healthy or not.
+func (c *CWSkimmerClient) TelnetEnabled() bool {
+	return c != nil && c.config != nil && c.config.Enabled
 }
 
 // parseCWSpot attempts to parse a CW spot from a line

@@ -34,6 +34,7 @@ type Config struct {
 	Logging            LoggingConfig             `yaml:"logging"`
 	Database           DatabaseConfig            `yaml:"database"`
 	DXCluster          DXClusterConfig           `yaml:"dxcluster"`
+	SkimmerFeed        SkimmerFeedConfig         `yaml:"skimmer_feed"`
 	FreeDVReporter     FreeDVReporterConfig      `yaml:"freedv_reporter"`
 	Chat               ChatConfig                `yaml:"chat"`
 	SpaceWeather       SpaceWeatherConfig        `yaml:"spaceweather"`
@@ -645,6 +646,18 @@ type FreeDVReporterConfig struct {
 	Enabled        bool   `yaml:"enabled"`         // Enable/disable the FreeDV Reporter monitor (default: false)
 	URI            string `yaml:"uri"`             // WebSocket URI of the FreeDV Reporter server
 	ReconnectDelay int    `yaml:"reconnect_delay"` // Seconds between reconnection attempts (default: 30)
+}
+
+// skimmerFeedDefaultURL is the skimmer addon's /api/feed, used when
+// skimmer_feed.url is not set.
+const skimmerFeedDefaultURL = "http://skimmer:6101/api/feed"
+
+// SkimmerFeedConfig controls consuming the skimmer addon's /api/feed: its CW,
+// RTTY and digital spots collected and shown as UberSDR's own decoders' are,
+// but never reported to PSK Reporter or wsprnet (the skimmer does that itself).
+type SkimmerFeedConfig struct {
+	Enabled bool   `yaml:"enabled"` // Consume the skimmer's feed (default: false)
+	URL     string `yaml:"url"`     // The feed's URL (default: http://skimmer:6101/api/feed)
 }
 
 // ChatConfig contains live chat settings
@@ -1675,6 +1688,11 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	// inject_enabled uses *bool so nil (key absent) means "default true".
 	// No explicit defaulting needed here — IsInjectEnabled() handles the nil case.
+
+	// Set skimmer feed defaults if not specified
+	if config.SkimmerFeed.URL == "" {
+		config.SkimmerFeed.URL = skimmerFeedDefaultURL
+	}
 
 	// Set FreeDV Reporter defaults if not specified
 	if config.FreeDVReporter.URI == "" {

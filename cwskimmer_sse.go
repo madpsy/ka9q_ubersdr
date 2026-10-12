@@ -41,6 +41,7 @@ import (
 // CWSkimmerSSEEvent is the JSON payload sent to SSE clients
 type CWSkimmerSSEEvent struct {
 	Type        string   `json:"type"`
+	Mode        string   `json:"mode,omitempty"` // CW, RTTY or JTTY (the skimmer feed's); CW Skimmer servers' CW or RTTY
 	Band        string   `json:"band"`
 	Frequency   float64  `json:"frequency"`
 	Callsign    string   `json:"callsign"`
@@ -114,6 +115,7 @@ func (h *CWSkimmerSSEHub) Broadcast(spot CWSkimmerSpot) {
 
 	evt := CWSkimmerSSEEvent{
 		Type:        "cw_spot",
+		Mode:        spot.Mode,
 		Band:        spot.Band,
 		Frequency:   spot.Frequency,
 		Callsign:    spot.DXCall,

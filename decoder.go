@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +65,15 @@ type MultiDecoder struct {
 	// Callback for decoded spots
 	onDecodeCallback func(DecodeInfo)
 	callbackMu       sync.RWMutex
+
+	// ingestOnly: no decoder bands and no reporters of its own, only the
+	// spot stores, metrics and callback, for decodes made elsewhere (the
+	// skimmer's feed, IngestDecode) on a receiver whose decoders are off.
+	ingestOnly bool
+	// ingestedModes: the modes IngestDecode has delivered, for the receiver
+	// description's digital_modes when there are no bands to list them.
+	ingestedModes   map[string]bool
+	ingestedModesMu sync.RWMutex
 }
 
 // SetDB wires the SQLite write database into the multi-decoder.
@@ -170,12 +181,45 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		md.wsprNet = wspr
 	}
 
-	// Initialize spots logger (independent of reporting)
-	// Path resolution is handled in main.go before this is called
+	if err := md.initStores(); err != nil {
+		return nil, err
+	}
+
+	return md, nil
+}
+
+// NewMultiDecoderIngestOnly makes a MultiDecoder with no decoder bands and no
+// reporters: only the spots store, metrics, summaries and decode callback, so
+// decodes made elsewhere (IngestDecode) are stored and shown exactly as local
+// ones on a receiver whose own decoders are off.  config supplies the store
+// settings (decoder.yaml's, or their defaults); its bands and reporting
+// settings are not used.
+func NewMultiDecoderIngestOnly(config *DecoderConfig, prometheusMetrics *PrometheusMetrics) (*MultiDecoder, error) {
+	md := &MultiDecoder{
+		config:            config,
+		decoderBands:      make(map[string]*DecoderBand),
+		stats:             NewDecoderStats(),
+		prometheusMetrics: prometheusMetrics,
+		stopChan:          make(chan struct{}),
+		ingestOnly:        true,
+		ingestedModes:     make(map[string]bool),
+	}
+	if err := md.initStores(); err != nil {
+		return nil, err
+	}
+	return md, nil
+}
+
+// initStores makes the spots logger, metrics logger and summary aggregator
+// the config asks for.  Path resolution is done in main.go beforehand.
+func (md *MultiDecoder) initStores() error {
+	config := md.config
+
+	// Spots logger (independent of reporting)
 	if config.SpotsLogEnabled {
 		logger, err := NewSpotsLogger(config.SpotsLogDataDir, true, config.SpotsLogMaxAgeDays)
 		if err != nil {
-			return nil, fmt.Errorf("failed to initialize spots logger: %w", err)
+			return fmt.Errorf("failed to initialize spots logger: %w", err)
 		}
 		md.spotsLogger = logger
 		if config.SpotsLogMaxAgeDays > 0 {
@@ -193,7 +237,7 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		}
 		logger, err := NewMetricsLogger(config.MetricsLogDataDir, true, writeInterval)
 		if err != nil {
-			return nil, fmt.Errorf("failed to initialize metrics logger: %w", err)
+			return fmt.Errorf("failed to initialize metrics logger: %w", err)
 		}
 		md.metricsLogger = logger
 		log.Printf("Metrics logging enabled (SQLite, interval: %v)", writeInterval)
@@ -202,13 +246,13 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		// Path resolution is handled in main.go before this is called
 		aggregator, err := NewMetricsSummaryAggregator(config.MetricsLogDataDir, config.MetricsSummaryDataDir, logger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to initialize metrics summary aggregator: %w", err)
+			return fmt.Errorf("failed to initialize metrics summary aggregator: %w", err)
 		}
 		md.summaryAggregator = aggregator
 		log.Printf("Metrics summary aggregator enabled: %s", config.MetricsSummaryDataDir)
 	}
 
-	return md, nil
+	return nil
 }
 
 // Start begins the multi-decoder operation
@@ -218,6 +262,13 @@ func (md *MultiDecoder) Start() error {
 	}
 
 	md.running = true
+
+	if md.ingestOnly {
+		// No bands and no reporters: only the stores' own loops.
+		md.startStoreLoops()
+		log.Printf("Decoder spot delivery started for decodes from elsewhere (local decoders off)")
+		return nil
+	}
 
 	log.Printf("Creating decoder sessions for %d bands", len(md.config.GetEnabledBands()))
 
@@ -249,6 +300,16 @@ func (md *MultiDecoder) Start() error {
 		go md.bandMonitorLoop(band)
 	}
 
+	md.startStoreLoops()
+
+	log.Printf("Multi-decoder started (%d bands active)", len(md.decoderBands))
+
+	return nil
+}
+
+// startStoreLoops restores the metrics' recent state from the DB and starts
+// their periodic write.
+func (md *MultiDecoder) startStoreLoops() {
 	// Load recent metrics from DB to restore in-memory state after restart.
 	// readDB must be set via SetReadDB before Start() is called.
 	if md.metricsLogger != nil && md.readDB != nil {
@@ -267,10 +328,6 @@ func (md *MultiDecoder) Start() error {
 		md.wg.Add(1)
 		go md.metricsWriteLoop()
 	}
-
-	log.Printf("Multi-decoder started (%d bands active)", len(md.decoderBands))
-
-	return nil
 }
 
 // createBandSession creates an audio session for a decoder band
@@ -460,31 +517,9 @@ func (md *MultiDecoder) streamingMonitorLoop(band *DecoderBand) {
 			md.stats.IncrementDecodes(band.Config.Name, 1)
 			md.stats.IncrementSpots(band.Config.Name, 1)
 
-			// Record decode metrics (streaming modes don't have cycles, use 0)
-			if md.prometheusMetrics != nil {
-				md.prometheusMetrics.RecordDigitalDecode(decode.Mode, band.Config.Name, decode.Callsign, 0)
-			}
-
-			// Record decode in summary aggregator
-			if md.summaryAggregator != nil {
-				md.summaryAggregator.RecordDecode(decode.Mode, band.Config.Name, decode.Timestamp)
-			}
-
-			// Log to CSV
-			if md.spotsLogger != nil {
-				shouldLog := true
-				if (md.config.SpotsLogLocatorsOnly != nil && *md.config.SpotsLogLocatorsOnly) && !decode.HasLocator {
-					shouldLog = false
-				}
-				if shouldLog {
-					if err := md.spotsLogger.LogSpot(decode); err != nil {
-						log.Printf("Warning: Failed to log spot to CSV: %v", err)
-					}
-				}
-			}
-
-			// Notify callback for websocket broadcasting
-			md.notifyDecode(*decode)
+			// Metrics, summaries, the spots store and the callback
+			// (streaming modes don't have cycles, use 0)
+			md.deliverDecode(decode, band.Config.Name, 0)
 
 			// Submit to PSKReporter
 			// WSPR always requires locator
@@ -728,33 +763,8 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 
 			// Submit to PSKReporter/WSPRNet and notify callback
 			for _, decode := range decodes {
-				// Record individual decode with callsign for unique tracking and totals
-				if md.prometheusMetrics != nil {
-					md.prometheusMetrics.RecordDigitalDecode(decode.Mode, band.Config.Name, decode.Callsign, cycleSeconds)
-				}
-
-				// Record decode in summary aggregator (event-driven)
-				if md.summaryAggregator != nil {
-					md.summaryAggregator.RecordDecode(decode.Mode, band.Config.Name, decode.Timestamp)
-				}
-
-				// Log to CSV (independent of reporting)
-				if md.spotsLogger != nil {
-					// Check if we should only log spots with valid locators
-					shouldLog := true
-					if (md.config.SpotsLogLocatorsOnly != nil && *md.config.SpotsLogLocatorsOnly) && !decode.HasLocator {
-						shouldLog = false
-					}
-
-					if shouldLog {
-						if err := md.spotsLogger.LogSpot(decode); err != nil {
-							log.Printf("Warning: Failed to log spot to CSV: %v", err)
-						}
-					}
-				}
-
-				// Notify callback for websocket broadcasting
-				md.notifyDecode(*decode)
+				// Metrics, summaries, the spots store and the callback
+				md.deliverDecode(decode, band.Config.Name, cycleSeconds)
 
 				// Submit to PSKReporter
 				// WSPR always requires locator
@@ -878,6 +888,94 @@ func (md *MultiDecoder) Stop() {
 	}
 
 	log.Printf("Multi-decoder stopped (%d bands cleaned up)", len(md.decoderBands))
+}
+
+// deliverDecode hands one decode to everything that stores or shows it: the
+// Prometheus metrics (with its callsign, for unique counts), the summary
+// aggregator, the spots store (only those with a locator when
+// spots_log_locators_only), and the decode callback (WebSocket, SSE, MQTT,
+// WSJT-X UDP, notifications).  Reporting is not part of it: only the local
+// decoders' own loops send to PSK Reporter and WSPRNet, after this.
+func (md *MultiDecoder) deliverDecode(decode *DecodeInfo, bandName string, cycleSeconds int) {
+	if md.prometheusMetrics != nil {
+		md.prometheusMetrics.RecordDigitalDecode(decode.Mode, bandName, decode.Callsign, cycleSeconds)
+	}
+
+	if md.summaryAggregator != nil {
+		md.summaryAggregator.RecordDecode(decode.Mode, bandName, decode.Timestamp)
+	}
+
+	if md.spotsLogger != nil {
+		locatorsOnly := md.config.SpotsLogLocatorsOnly != nil && *md.config.SpotsLogLocatorsOnly
+		if !locatorsOnly || decode.HasLocator {
+			if err := md.spotsLogger.LogSpot(decode); err != nil {
+				log.Printf("Warning: Failed to log spot to CSV: %v", err)
+			}
+		}
+	}
+
+	md.notifyDecode(*decode)
+}
+
+// IngestDecode delivers a decode made elsewhere (the skimmer's feed) as a
+// local one is delivered, counted under its own BandName.  It is never
+// reported to PSK Reporter or WSPRNet: whoever decoded it reports it.
+func (md *MultiDecoder) IngestDecode(decode DecodeInfo) {
+	if md == nil {
+		return
+	}
+	md.stats.IncrementDecodes(decode.BandName, 1)
+	md.stats.IncrementSpots(decode.BandName, 1)
+	if md.ingestedModes != nil {
+		md.ingestedModesMu.RLock()
+		seen := md.ingestedModes[decode.Mode]
+		md.ingestedModesMu.RUnlock()
+		if !seen {
+			md.ingestedModesMu.Lock()
+			md.ingestedModes[decode.Mode] = true
+			md.ingestedModesMu.Unlock()
+		}
+	}
+	md.deliverDecode(&decode, decode.BandName, ingestCycleSeconds(decode.Mode, decode.Submode))
+}
+
+// IngestedModes lists, sorted, the modes IngestDecode has delivered.
+func (md *MultiDecoder) IngestedModes() []string {
+	if md == nil {
+		return nil
+	}
+	md.ingestedModesMu.RLock()
+	defer md.ingestedModesMu.RUnlock()
+	modes := make([]string, 0, len(md.ingestedModes))
+	for m := range md.ingestedModes {
+		modes = append(modes, m)
+	}
+	sort.Strings(modes)
+	return modes
+}
+
+// IsIngestOnly reports whether this MultiDecoder runs no decoders of its own.
+func (md *MultiDecoder) IsIngestOnly() bool {
+	return md != nil && md.ingestOnly
+}
+
+// ingestCycleSeconds is the cycle an ingested decode's metrics are averaged
+// over, as the local decoders use: the WSPR family's period (by its submode:
+// WSPR-15, FST4W-120 ... FST4W-1800; none is WSPR-2's 120 s); 0 for the
+// modes UberSDR decodes as a stream (FT8, FT4, FT2, JS8).
+func ingestCycleSeconds(mode, submode string) int {
+	if mode != "WSPR" {
+		return 0
+	}
+	switch {
+	case submode == "WSPR-15":
+		return 900
+	case strings.HasPrefix(submode, "FST4W-"):
+		if n, err := strconv.Atoi(strings.TrimPrefix(submode, "FST4W-")); err == nil {
+			return n
+		}
+	}
+	return 120
 }
 
 // GetStats returns current decoder statistics

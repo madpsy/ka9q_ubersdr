@@ -369,6 +369,7 @@ type AdminHandler struct {
 	notifManager        *NotificationManager       // for shutdown notifications
 	gpsdoMonitor        *GPSDOMonitor              // nil if GPSDO not enabled; used by /admin/monitor-health
 	dbManager           *DBManager                 // SQLite database (closed before os.Exit in restartServer)
+	skimmerFeed         *SkimmerFeedClient         // nil unless skimmer_feed is enabled; its health for the Monitor tab
 }
 
 // SetNotifManager wires the notification manager so restartServer() can publish
@@ -381,6 +382,12 @@ func (ah *AdminHandler) SetNotifManager(nm *NotificationManager) {
 // it cleanly before os.Exit (defer does not run on os.Exit).
 func (ah *AdminHandler) SetDBManager(db *DBManager) {
 	ah.dbManager = db
+}
+
+// SetSkimmerFeed wires the skimmer feed client so the Monitor tab,
+// /admin/monitor-health and Telegram /monitor can report its health.
+func (ah *AdminHandler) SetSkimmerFeed(f *SkimmerFeedClient) {
+	ah.skimmerFeed = f
 }
 
 // SetGPSDOMonitor wires the GPSDO monitor so /admin/monitor-health can include

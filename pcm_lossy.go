@@ -46,9 +46,10 @@ import (
 //
 //	margin(N) = 6.02*(N-1) + lossyCalibrationDB - crest - peakiness
 //
-// `crest` is the packet's peak over its RMS. `peakiness` is how far the median
-// power-spectrum bin sits below the mean. Checked against seven live captures
-// spanning 9 to 50 dB of measured margin, this predicts to within 0.7 dB.
+// `crest` is the packet's peak over its RMS. `peakiness` is how far the noise
+// floor -- the median power-spectrum bin, unless a station fills the span; see
+// refresh -- sits below the mean. Checked against seven live captures spanning
+// 9 to 50 dB of measured margin, this predicts to within 0.7 dB.
 //
 // Crest alone will not do, and is worse than useless: per packet it spans only
 // 1.6 to 7.3 dB across every capture measured, and medium wave -- the one band
@@ -130,7 +131,19 @@ const (
 	// first 100 ms of every stream to four bits, which on medium wave was 0.34%
 	// of packets carrying 99.7% of the error.
 	lossyColdPeakinessDB = 60.0
+
+	// lossyFloorTailDB is how far above the spectrum's 10th percentile the
+	// noise floor may be taken to sit; see refresh. It must sit between the
+	// 10.3 dB worst case on spans that are mostly noise and the 28 dB of a span
+	// filled by one station, and where it sits trades bytes for audio there. On
+	// 909 kHz at 12 kHz a 10 dB request costs 130 kbit/s at 12 dB, 100 kbit/s
+	// at 20 and 74 kbit/s uncapped, leaving the AM audio 37.5, 30.0 and 22.4 dB
+	// over the quantisation error; 28 dB was judged clean by ear and 22 watery.
+	lossyFloorTailDB = 20.0
 )
+
+// lossyFloorTailRatio is lossyFloorTailDB as a power ratio.
+var lossyFloorTailRatio = math.Pow(10, lossyFloorTailDB/10)
 
 // Window, twiddle and bit-reversal tables for the fixed transform size.
 //
@@ -322,7 +335,11 @@ func (s *lossyDepthSelector) appendFrames(samples []int16) {
 // Selection rather than a full sort: only the middle element is wanted, and
 // selection is linear where sorting 1024 bins is some ten thousand comparisons.
 func lossyMedian(buf []float64) float64 {
-	k := len(buf) / 2
+	return lossySelect(buf, len(buf)/2)
+}
+
+// lossySelect returns the k-th smallest element by quickselect, permuting buf.
+func lossySelect(buf []float64, k int) float64 {
 	lo, hi := 0, len(buf)-1
 	for lo < hi {
 		pivot := buf[(lo+hi)/2]
@@ -387,21 +404,39 @@ func (s *lossyDepthSelector) refresh() {
 		}
 	}
 
-	// Peakiness is the mean bin over the median bin. Both are taken from the
+	// Peakiness is the mean bin over the noise floor. Both are taken from the
 	// same smoothed spectrum, so the window's own gain cancels and no absolute
 	// calibration is needed -- which is what makes this immune to the operator
 	// gain and AGC offsets that make the header's dBFS readings unusable here.
 	copy(s.sel, s.psd)
-	median := lossyMedian(s.sel)
+	floor := lossyMedian(s.sel)
 	var sum float64
 	for _, v := range s.psd {
 		sum += v
 	}
 	mean := sum / float64(len(s.psd))
-	if median <= 0 || mean <= 0 {
+	if floor <= 0 || mean <= 0 {
 		return
 	}
-	s.peakinessDB = 10 * math.Log10(mean/median)
+	// The median is the floor only while at least half the bins are noise. A
+	// narrow span centred on a broadcast station is filled by the station's
+	// own sidebands, so the median there is the programme: 37 dB above the
+	// true floor on a 12 kHz span over 909 kHz, which put the quantisation
+	// noise 22 dB under the audio at a 10 dB request. The low tail still finds
+	// the gaps beside the station, so the floor is capped at
+	// lossyFloorTailDB above the 10th percentile.
+	//
+	// The cap never binds on a span that is mostly noise. Across every capture
+	// measured -- HF, 6 m, and medium wave at 48 and 192 kHz -- the median sat
+	// at most 10.3 dB above the 10th percentile, against 28 to 30 dB on the
+	// station-filled span, so those streams keep the median and the same bytes.
+	copy(s.sel, s.psd)
+	if tail := lossySelect(s.sel, len(s.sel)/10); tail > 0 {
+		if capped := tail * lossyFloorTailRatio; capped < floor {
+			floor = capped
+		}
+	}
+	s.peakinessDB = 10 * math.Log10(mean/floor)
 }
 
 // shiftFor returns the shift for one packet of interleaved I/Q samples, and

@@ -2577,10 +2577,8 @@ func (mp *MQTTPublisher) buildReceiverInfoPayload(cfg *Config) map[string]interf
 		chatUsers = mp.dxClusterWsHandler.GetChatUserCount()
 	}
 
-	cwSkimmer := false
-	if mp.cwSkimmerConfig != nil {
-		cwSkimmer = mp.cwSkimmerConfig.Enabled
-	}
+	// CW and digital spots: from UberSDR's own sources or the skimmer's feed.
+	cwSkimmer := cfg.CWSpotsEnabled(mp.cwSkimmerConfig)
 
 	return map[string]interface{}{
 		"timestamp":         time.Now().Unix(),
@@ -2604,7 +2602,7 @@ func (mp *MQTTPublisher) buildReceiverInfoPayload(cfg *Config) map[string]interf
 		"snr_1_8_30_mhz":    int(snr1830),
 		"space_weather":     cfg.SpaceWeather.Enabled,
 		"noise_floor":       cfg.NoiseFloor.Enabled,
-		"digital_decodes":   cfg.Decoder.Enabled,
+		"digital_decodes":   cfg.DigitalSpotsEnabled(),
 		"cw_skimmer":        cwSkimmer,
 		"chat_enabled":      cfg.Chat.Enabled,
 	}

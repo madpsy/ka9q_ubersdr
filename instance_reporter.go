@@ -693,11 +693,9 @@ func (ir *InstanceReporter) sendReport() error {
 			ir.mu.Unlock()
 		}
 	}
-	// Get capability information directly from config (no HTTP call needed)
-	cwSkimmerEnabled := false
-	if ir.cwskimmerConfig != nil {
-		cwSkimmerEnabled = ir.cwskimmerConfig.Enabled
-	}
+	// Get capability information directly from config (no HTTP call needed):
+	// spots from UberSDR's own sources or the skimmer's feed.
+	cwSkimmerEnabled := ir.config.CWSpotsEnabled(ir.cwskimmerConfig)
 
 	// Calculate available client slots (max - current non-bypassed users)
 	currentNonBypassedUsers := ir.sessions.GetNonBypassedUserCount()
@@ -707,7 +705,7 @@ func (ir *InstanceReporter) sendReport() error {
 	}
 
 	log.Printf("Reporting capabilities: CW=%v, Digital=%v, Noise=%v, MaxClients=%d, AvailableClients=%d",
-		cwSkimmerEnabled, ir.config.Decoder.Enabled, ir.config.NoiseFloor.Enabled, ir.config.Server.MaxSessions, availableClients)
+		cwSkimmerEnabled, ir.config.DigitalSpotsEnabled(), ir.config.NoiseFloor.Enabled, ir.config.Server.MaxSessions, availableClients)
 
 	// Build list of public IQ modes
 	publicIQModes := []string{}
@@ -762,7 +760,7 @@ func (ir *InstanceReporter) sendReport() error {
 		UseMyIP:                    ir.config.InstanceReporting.UseMyIP,
 		CreateDomain:               ir.config.InstanceReporting.CreateDomain,
 		CWSkimmer:                  cwSkimmerEnabled,
-		DigitalDecodes:             ir.config.Decoder.Enabled,
+		DigitalDecodes:             ir.config.DigitalSpotsEnabled(),
 		NoiseFloor:                 ir.config.NoiseFloor.Enabled,
 		MaxClients:                 ir.config.Server.MaxSessions,
 		AvailableClients:           availableClients,
@@ -1086,11 +1084,9 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		}
 	}
 
-	// Get capability information directly from config (no HTTP call needed)
-	cwSkimmerEnabled := false
-	if ir.cwskimmerConfig != nil {
-		cwSkimmerEnabled = ir.cwskimmerConfig.Enabled
-	}
+	// Get capability information directly from config (no HTTP call needed):
+	// spots from UberSDR's own sources or the skimmer's feed.
+	cwSkimmerEnabled := ir.config.CWSpotsEnabled(ir.cwskimmerConfig)
 
 	// Calculate available client slots (max - current non-bypassed users)
 	currentNonBypassedUsers := ir.sessions.GetNonBypassedUserCount()
@@ -1159,7 +1155,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		UseMyIP:                    useMyIP,
 		CreateDomain:               createDomain,
 		CWSkimmer:                  cwSkimmerEnabled,
-		DigitalDecodes:             ir.config.Decoder.Enabled,
+		DigitalDecodes:             ir.config.DigitalSpotsEnabled(),
 		NoiseFloor:                 ir.config.NoiseFloor.Enabled,
 		MaxClients:                 ir.config.Server.MaxSessions,
 		AvailableClients:           availableClients,
@@ -1470,10 +1466,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 		log.Println("Sending startup report...")
 
 		// Build the report with all available fields
-		cwSkimmerEnabled := false
-		if cwskimmerConfig != nil {
-			cwSkimmerEnabled = cwskimmerConfig.Enabled
-		}
+		cwSkimmerEnabled := config.CWSpotsEnabled(cwskimmerConfig)
 
 		// Calculate available client slots
 		currentNonBypassedUsers := sessions.GetNonBypassedUserCount()
@@ -1578,7 +1571,7 @@ func SendStartupReport(config *Config, cwskimmerConfig *CWSkimmerConfig, session
 			UseMyIP:                    config.InstanceReporting.UseMyIP,
 			CreateDomain:               config.InstanceReporting.CreateDomain,
 			CWSkimmer:                  cwSkimmerEnabled,
-			DigitalDecodes:             config.Decoder.Enabled,
+			DigitalDecodes:             config.DigitalSpotsEnabled(),
 			NoiseFloor:                 config.NoiseFloor.Enabled,
 			MaxClients:                 config.Server.MaxSessions,
 			AvailableClients:           availableClients,

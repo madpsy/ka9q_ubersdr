@@ -199,7 +199,8 @@ func (l *TelegramBotListener) handleMonitor(chatID int64, args string) (string, 
 	}
 
 	// ── Decoder ───────────────────────────────────────────────────────────────
-	if ah.multiDecoder != nil {
+	// (Not when it only delivers the skimmer feed's spots: see Skimmer Feed.)
+	if ah.multiDecoder != nil && !ah.multiDecoder.IsIngestOnly() {
 		dec := ah.multiDecoder.GetHealthStatus()
 		if dec.Enabled {
 			items = append(items, item{
@@ -222,6 +223,16 @@ func (l *TelegramBotListener) handleMonitor(chatID int64, args string) (string, 
 			name:   "CW Skimmer",
 			ok:     healthy,
 			issues: issues,
+		})
+	}
+
+	// ── Skimmer feed ──────────────────────────────────────────────────────────
+	if it, ok := skimmerFeedMonitorItem(ah.config.SkimmerFeed.Enabled, ah.skimmerFeed); ok {
+		items = append(items, item{
+			name:   it.Name,
+			ok:     it.Status == "ok",
+			warn:   it.Status == "warning",
+			issues: it.Issues,
 		})
 	}
 

@@ -147,6 +147,71 @@ func TestLossyColdStartIsConservative(t *testing.T) {
 	}
 }
 
+// feedSelector runs `seconds` of a synthetic 12 kHz IQ stream through a
+// selector: `tones` carriers of amplitude `amp` spread over the middle 70% of
+// the span, over a white floor of amplitude `floor`. Many tones close together
+// stand in for a broadcast station's sidebands filling the span.
+func feedSelector(sel *lossyDepthSelector, rng *rand.Rand, tones int, amp, floor float64, seconds int) {
+	const rate, frames = 12000, 240
+	freqs := make([]float64, tones)
+	phases := make([]float64, tones)
+	for i := range freqs {
+		freqs[i] = (rng.Float64() - 0.5) * 0.7 * 2 * math.Pi
+		phases[i] = rng.Float64() * 2 * math.Pi
+	}
+	pkt := make([]int16, frames*2)
+	for p := 0; p < seconds*rate/frames; p++ {
+		for i := 0; i < frames; i++ {
+			re, im := rng.NormFloat64()*floor, rng.NormFloat64()*floor
+			for k := range freqs {
+				phases[k] += freqs[k]
+				re += amp * math.Cos(phases[k])
+				im += amp * math.Sin(phases[k])
+			}
+			pkt[2*i], pkt[2*i+1] = clampInt16(re), clampInt16(im)
+		}
+		sel.shiftFor(pkt)
+	}
+}
+
+// medianPeakinessDB is what the selector reported before the floor was capped:
+// the mean bin over the median bin of its own smoothed spectrum.
+func medianPeakinessDB(sel *lossyDepthSelector) float64 {
+	buf := append([]float64(nil), sel.psd...)
+	var sum float64
+	for _, v := range buf {
+		sum += v
+	}
+	return 10 * math.Log10(sum/float64(len(buf))/lossyMedian(buf))
+}
+
+// TestLossyFloorFindsGapsBesideAStation is the 909 kHz case: a narrow span
+// filled by one station's sidebands, where the median bin is the programme and
+// a margin against it put the quantisation noise 22 dB under the audio. The
+// floor must come from the gaps instead, which reads as far more peakiness.
+func TestLossyFloorFindsGapsBesideAStation(t *testing.T) {
+	sel := newLossyDepthSelector(10, 12000)
+	feedSelector(sel, rand.New(rand.NewSource(21)), 300, 300, 3, 3)
+	median := medianPeakinessDB(sel)
+	if gain := sel.peakinessDB - median; gain < 10 {
+		t.Errorf("peakiness %.1f dB against %.1f dB from the median: the floor is still the programme",
+			sel.peakinessDB, median)
+	}
+}
+
+// TestLossyFloorUnchangedOnANoisySpan pins the bandwidth promise: on a span
+// that is mostly noise with a few carriers -- every amateur band measured --
+// the cap must not bind, so the depth and the bytes are what they were.
+func TestLossyFloorUnchangedOnANoisySpan(t *testing.T) {
+	for _, tones := range []int{0, 5} {
+		sel := newLossyDepthSelector(10, 12000)
+		feedSelector(sel, rand.New(rand.NewSource(22)), tones, 2000, 300, 3)
+		if got, want := sel.peakinessDB, medianPeakinessDB(sel); math.Abs(got-want) > 1e-9 {
+			t.Errorf("%d carriers: peakiness %.2f dB, want the median's %.2f dB", tones, got, want)
+		}
+	}
+}
+
 // TestLossySelectorSteadyStateIsAllocationFree guards the scratch buffers. A
 // fresh slice per refresh is 8 kB of garbage a second per session for a value
 // overwritten immediately, and it does not show up in a wall-clock budget.

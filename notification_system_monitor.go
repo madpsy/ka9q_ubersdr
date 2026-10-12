@@ -327,6 +327,7 @@ func BuildSystemHealthProbes(
 	spaceWeatherMonitor *SpaceWeatherMonitor,
 	multiDecoder *MultiDecoder,
 	cwSkimmer *CWSkimmerClient,
+	skimmerFeed *SkimmerFeedClient,
 	mqttPublisher *MQTTPublisher,
 	rotctlHandler *RotctlAPIHandler,
 	antSwitchHandler *AntSwitchHandler,
@@ -359,7 +360,8 @@ func BuildSystemHealthProbes(
 		})
 	}
 
-	if multiDecoder != nil {
+	// Not when it only delivers the skimmer feed's spots (see skimmer_feed).
+	if multiDecoder != nil && !multiDecoder.IsIngestOnly() {
 		probes = append(probes, systemHealthProbe{
 			component: "decoder",
 			probe: func() (bool, []string) {
@@ -369,7 +371,23 @@ func BuildSystemHealthProbes(
 		})
 	}
 
-	if cwSkimmer != nil {
+	// The skimmer feed: unhealthy only when critical (down, stalled, or the
+	// skimmer itself in error).  Its warnings come and go with a minute's
+	// upload failures, too often to notify on; the Monitor tab shows them.
+	if skimmerFeed != nil {
+		probes = append(probes, systemHealthProbe{
+			component: "skimmer_feed",
+			probe: func() (bool, []string) {
+				p := buildSkimmerFeedHealthPayload(true, skimmerFeed)
+				issues, _ := p["issues"].([]string)
+				return p["status"] != "critical", issues
+			},
+		})
+	}
+
+	// Only a telnet connection has a health to probe; a client delivering the
+	// skimmer feed's spots alone has none.
+	if cwSkimmer.TelnetEnabled() {
 		probes = append(probes, systemHealthProbe{
 			component: "cw_skimmer",
 			probe: func() (bool, []string) {

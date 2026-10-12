@@ -9,6 +9,7 @@ import (
 // DecoderHealthStatus represents the health status of the decoder system
 type DecoderHealthStatus struct {
 	Enabled           bool                  `json:"enabled"`
+	IngestOnly        bool                  `json:"ingest_only,omitempty"` // only the skimmer feed's spots: its health is /admin/skimmer-feed-health
 	Healthy           bool                  `json:"healthy"`
 	BandCount         int                   `json:"band_count"`
 	Bands             []DecoderBandHealth   `json:"bands"`
@@ -150,6 +151,7 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 
 	status := DecoderHealthStatus{
 		Enabled:        true,
+		IngestOnly:     md.ingestOnly,
 		Healthy:        true,
 		BandCount:      len(md.decoderBands),
 		Bands:          make([]DecoderBandHealth, 0, len(md.decoderBands)),

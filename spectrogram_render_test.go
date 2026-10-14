@@ -1,12 +1,16 @@
 package main
 
 // The spectrogram render path against its pre-optimisation copy in
-// spectrogram_render_ref_test.go: the same PNG bytes, the same auto range and
-// the same palette colour for every input, and a lazily rendered cached PNG
-// identical to the one every tick used to render.
+// spectrogram_render_ref_test.go: the same decoded pixels, the same auto range
+// and the same palette colour for every input, and a lazily rendered cached
+// PNG identical to the one every tick used to render. The bytes are not
+// compared: jet and plasma images are now written with indexed colour, which
+// decodes to the same pixels from a smaller file.
 
 import (
 	"bytes"
+	"fmt"
+	"image/png"
 	"math"
 	"math/rand"
 	"sync"
@@ -76,9 +80,9 @@ func TestSpectrogramRenderMatchesReference(t *testing.T) {
 
 		want := refRenderRowsAsPNGSlice(rows, palette, dbMin, dbMax, bins, startBin, endBin)
 		got := renderRowsAsPNGSlice(rows, palette, dbMin, dbMax, bins, startBin, endBin)
-		if !bytes.Equal(got, want) {
-			t.Fatalf("trial %d (palette %q, bins %d, slice %d..%d): PNG differs (%d bytes, reference %d)",
-				trial, palette, bins, startBin, endBin, len(got), len(want))
+		if msg := samePNGPixels(got, want); msg != "" {
+			t.Fatalf("trial %d (palette %q, bins %d, slice %d..%d): %s",
+				trial, palette, bins, startBin, endBin, msg)
 		}
 	}
 }
@@ -180,8 +184,8 @@ func TestSpectrogramCachedPNGIsLazyAndIdentical(t *testing.T) {
 		dbMin, dbMax := refAutoRangeRowsSlice(rows, 0, 0, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 		want := refRenderRowsAsPNGSlice(rows, spectrogramDefaultPalette, dbMin, dbMax, bins, 0, 0)
 		for k := range got {
-			if !bytes.Equal(got[k], want) {
-				t.Fatalf("row %d reader %d: cached PNG differs from the per-tick render", i, k)
+			if msg := samePNGPixels(got[k], want); msg != "" {
+				t.Fatalf("row %d reader %d: cached PNG differs from the per-tick render: %s", i, k, msg)
 			}
 		}
 		if sr.pngGen.Load() != sr.rowsGen.Load() {
@@ -257,4 +261,82 @@ func flatten(rows [][]float32) []float32 {
 		out = append(out, r...)
 	}
 	return out
+}
+
+// samePNGPixels decodes two PNGs and reports the first pixel that differs, or
+// "" when every pixel is the same colour.
+func samePNGPixels(a, b []byte) string {
+	ia, err := png.Decode(bytes.NewReader(a))
+	if err != nil {
+		return "decode: " + err.Error()
+	}
+	ib, err := png.Decode(bytes.NewReader(b))
+	if err != nil {
+		return "decode reference: " + err.Error()
+	}
+	if ia.Bounds() != ib.Bounds() {
+		return fmt.Sprintf("bounds %v, reference %v", ia.Bounds(), ib.Bounds())
+	}
+	r := ia.Bounds()
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			r1, g1, b1, a1 := ia.At(x, y).RGBA()
+			r2, g2, b2, a2 := ib.At(x, y).RGBA()
+			if r1 != r2 || g1 != g2 || b1 != b2 || a1 != a2 {
+				return fmt.Sprintf("pixel (%d,%d) is %v, reference %v", x, y, ia.At(x, y), ib.At(x, y))
+			}
+		}
+	}
+	return ""
+}
+
+// pngColourType is the IHDR colour type: 2 RGB, 3 indexed, 6 RGBA.
+func pngColourType(b []byte) byte { return b[25] }
+
+// TestSpectrogramIndexedColour: jet and plasma -- jet is every default --
+// are written as indexed PNGs, viridis (256 colours of its own, no room for
+// black) as before; the archived thumbnail made from the PNG is byte-identical
+// either way; and on band-like data the indexed file is the smaller one.
+func TestSpectrogramIndexedColour(t *testing.T) {
+	rng := rand.New(rand.NewSource(11))
+	const bins = 700
+	rows := make([][]float32, 300)
+	for i := range rows {
+		row := make([]float32, bins)
+		for j := range row {
+			row[j] = float32(-118 + 4*math.Sin(float64(j)/40) + rng.NormFloat64()*1.5)
+			if j%97 < 3 {
+				row[j] += 30 // carriers
+			}
+		}
+		if i%50 == 0 {
+			for j := range row {
+				row[j] = noDataSentinel
+			}
+		}
+		rows[i] = row
+	}
+	lo, hi := autoRangeRowsSlice(rows, 0, 0, -130, -60)
+	for _, c := range []struct {
+		palette string
+		indexed bool
+	}{{"jet", true}, {"plasma", true}, {"viridis", false}, {"", false}} {
+		got := renderRowsAsPNGSlice(rows, c.palette, lo, hi, bins, 0, 0)
+		want := refRenderRowsAsPNGSlice(rows, c.palette, lo, hi, bins, 0, 0)
+		if msg := samePNGPixels(got, want); msg != "" {
+			t.Fatalf("palette %q: %s", c.palette, msg)
+		}
+		// Not indexed means RGB (2) or RGBA (6); the encoder writes an opaque
+		// NRGBA image as RGB, as it always has.
+		if ct := pngColourType(got); (ct == 3) != c.indexed {
+			t.Fatalf("palette %q: colour type %d, indexed %v", c.palette, ct, c.indexed)
+		}
+		if !bytes.Equal(generateThumbnail(got), generateThumbnail(want)) {
+			t.Fatalf("palette %q: archived thumbnail differs", c.palette)
+		}
+		if c.indexed && len(got) >= len(want) {
+			t.Fatalf("palette %q: indexed PNG %d bytes, not smaller than RGBA's %d", c.palette, len(got), len(want))
+		}
+		t.Logf("palette %-8q %6d bytes, was %6d", c.palette, len(got), len(want))
+	}
 }

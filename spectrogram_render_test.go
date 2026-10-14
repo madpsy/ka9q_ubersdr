@@ -293,9 +293,7 @@ func samePNGPixels(a, b []byte) string {
 // pngColourType is the IHDR colour type: 2 RGB, 3 indexed, 6 RGBA.
 func pngColourType(b []byte) byte { return b[25] }
 
-// TestSpectrogramIndexedColour: jet and plasma -- jet is every default --
-// are written as indexed PNGs, viridis (256 colours of its own, no room for
-// black) as before; the archived thumbnail made from the PNG is byte-identical
+// TestSpectrogramIndexedColour: every palette is written as an indexed PNG; the archived thumbnail made from the PNG is byte-identical
 // either way; and on band-like data the indexed file is the smaller one.
 func TestSpectrogramIndexedColour(t *testing.T) {
 	rng := rand.New(rand.NewSource(11))
@@ -320,7 +318,7 @@ func TestSpectrogramIndexedColour(t *testing.T) {
 	for _, c := range []struct {
 		palette string
 		indexed bool
-	}{{"jet", true}, {"plasma", true}, {"viridis", false}, {"", false}} {
+	}{{"jet", true}, {"plasma", true}, {"viridis", true}, {"", true}} {
 		got := renderRowsAsPNGSlice(rows, c.palette, lo, hi, bins, 0, 0)
 		want := refRenderRowsAsPNGSlice(rows, c.palette, lo, hi, bins, 0, 0)
 		if msg := samePNGPixels(got, want); msg != "" {
@@ -339,4 +337,72 @@ func TestSpectrogramIndexedColour(t *testing.T) {
 		}
 		t.Logf("palette %-8q %6d bytes, was %6d", c.palette, len(got), len(want))
 	}
+}
+
+// TestSpectrogramViridisOverflowMerges is the one case an image needs more
+// than 256 colours: viridis has 256 distinct ones, and an explicit range that
+// clips at both ends uses all of them, then black and a skipped row need two
+// more. The two closest neighbouring colours give way, and only pixels of
+// those colours change, by no more than one viridis step.
+func TestSpectrogramViridisOverflowMerges(t *testing.T) {
+	// Dense enough that every palette entry is hit: 80 dB over 3000 bins is
+	// 0.03 dB a bin against 0.24 dB an entry.
+	const bins = 3000
+	rows := make([][]float32, 40)
+	for i := range rows {
+		row := make([]float32, bins)
+		for j := range row {
+			row[j] = -140 + 80*float32(j)/bins // -140..-60 across a -130..-70 range
+		}
+		rows[i] = row
+	}
+	for j := range rows[5] {
+		rows[5][j] = noDataSentinel
+	}
+	rows[9] = rows[9][:bins/2] // a skipped row
+
+	var used [256]bool
+	for i := range used {
+		used[i] = true
+	}
+	pc := newPNGColours(&viridisLUT, &used, true, true)
+	if len(pc.palette) != 256 || pc.merged != 2 {
+		t.Fatalf("%d entries after %d merges, want 256 after 2", len(pc.palette), pc.merged)
+	}
+
+	// Viridis's neighbours are 1-3 apart in each channel, and the closest are
+	// the ones merged. (Its last entry jumps 59 from the one before; that pair
+	// is the furthest apart and never merged.)
+	const maxStep = 3
+
+	got := renderRowsAsPNGSlice(rows, "viridis", -130, -70, bins, 0, 0)
+	want := refRenderRowsAsPNGSlice(rows, "viridis", -130, -70, bins, 0, 0)
+	if pngColourType(got) != 3 {
+		t.Fatalf("colour type %d, want indexed", pngColourType(got))
+	}
+	ig, _ := png.Decode(bytes.NewReader(got))
+	iw, _ := png.Decode(bytes.NewReader(want))
+	changed := map[[3]uint32]bool{}
+	for y := 0; y < len(rows); y++ {
+		for x := 0; x < bins; x++ {
+			r1, g1, b1, a1 := ig.At(x, y).RGBA()
+			r2, g2, b2, a2 := iw.At(x, y).RGBA()
+			if a1 != a2 {
+				t.Fatalf("pixel (%d,%d) alpha %d, reference %d", x, y, a1, a2)
+			}
+			if r1 == r2 && g1 == g2 && b1 == b2 {
+				continue
+			}
+			for _, d := range []int{int(r1>>8) - int(r2>>8), int(g1>>8) - int(g2>>8), int(b1>>8) - int(b2>>8)} {
+				if d > maxStep || -d > maxStep {
+					t.Fatalf("pixel (%d,%d) moved %d, more than a viridis step (%d)", x, y, d, maxStep)
+				}
+			}
+			changed[[3]uint32{r2, g2, b2}] = true
+		}
+	}
+	if len(changed) == 0 || len(changed) > pc.merged {
+		t.Fatalf("%d reference colours changed; %d were merged", len(changed), pc.merged)
+	}
+	t.Logf("%d colours merged, max step %d, %d colours changed in the image", pc.merged, maxStep, len(changed))
 }

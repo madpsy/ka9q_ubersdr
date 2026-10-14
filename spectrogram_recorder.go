@@ -1430,118 +1430,160 @@ func renderRowsAsPNGSlice(rows [][]float32, palette string, dbMin, dbMax float32
 	width := endBin - startBin
 	lut := paletteLUT(palette)
 
-	var buf bytes.Buffer
-	if ip := indexedPaletteFor(lut); ip != nil {
-		// Every pixel is a palette colour or no-data black, so where those fit
-		// in 256 entries the image is written with indexed colour: one byte a
-		// pixel rather than four for deflate to work through. It decodes to
-		// exactly the same colours, measured 7x faster to encode a full
-		// rolling wideband image, and 12-30% smaller.
-		img := image.NewPaletted(image.Rect(0, 0, width, rowCount), ip.palette)
-		for y, row := range rows {
-			if len(row) < endBin {
-				// A skipped row stays transparent, as it does in the NRGBA
-				// form below.
-				for x := range img.Pix[y*img.Stride : y*img.Stride+width] {
-					img.Pix[y*img.Stride+x] = ip.transparent
-				}
-				continue
-			}
-			pix := img.Pix[y*img.Stride : y*img.Stride+width]
-			for x, val := range row[startBin:endBin] {
-				if math.IsInf(float64(val), -1) || math.IsNaN(float64(val)) {
-					pix[x] = ip.black
-				} else {
-					pix[x] = ip.index[paletteIndex(val, dbMin, dbMax)]
-				}
-			}
-		}
-		if err := spectrogramPNGEncoder.Encode(&buf, img); err != nil {
-			return nil
-		}
-		return buf.Bytes()
-	}
-
-	img := image.NewNRGBA(image.Rect(0, 0, width, rowCount))
-
-	// Pixels are written straight into Pix -- the same values SetNRGBA and
-	// paletteColour produce, without a bounds check, a colour struct and a
-	// palette lookup by name for every one of them.
-	for y, row := range rows {
+	// Every pixel is a palette colour, no-data black, or transparent for a
+	// skipped row, so the image is written with indexed colour: one byte a
+	// pixel rather than four for deflate to work through, which was 99% of a
+	// render. Measured on a full rolling wideband image, 7x faster to encode
+	// and 12-30% smaller, decoding to the same colours.
+	//
+	// The first pass finds which of those colours this image uses, so the
+	// colour table holds only them; the second writes each pixel's entry.
+	var used [256]bool
+	var usesBlack, usesTransparent bool
+	for _, row := range rows {
 		if len(row) < endBin {
-			continue // skip malformed rows
+			usesTransparent = true
+			continue
 		}
-		pix := img.Pix[y*img.Stride : y*img.Stride+4*width]
-		for x, val := range row[startBin:endBin] {
-			p := pix[4*x : 4*x+4 : 4*x+4]
+		for _, val := range row[startBin:endBin] {
 			if math.IsInf(float64(val), -1) || math.IsNaN(float64(val)) {
-				p[0], p[1], p[2], p[3] = 0, 0, 0, 255
+				usesBlack = true
 			} else {
-				c := &lut[paletteIndex(val, dbMin, dbMax)]
-				p[0], p[1], p[2], p[3] = c[0], c[1], c[2], 255
+				used[paletteIndex(val, dbMin, dbMax)] = true
+			}
+		}
+	}
+	pc := newPNGColours(lut, &used, usesBlack, usesTransparent)
+
+	img := image.NewPaletted(image.Rect(0, 0, width, rowCount), pc.palette)
+	for y, row := range rows {
+		pix := img.Pix[y*img.Stride : y*img.Stride+width]
+		if len(row) < endBin {
+			for x := range pix {
+				pix[x] = pc.transparent
+			}
+			continue
+		}
+		for x, val := range row[startBin:endBin] {
+			if math.IsInf(float64(val), -1) || math.IsNaN(float64(val)) {
+				pix[x] = pc.black
+			} else {
+				pix[x] = pc.index[paletteIndex(val, dbMin, dbMax)]
 			}
 		}
 	}
 
+	var buf bytes.Buffer
 	if err := spectrogramPNGEncoder.Encode(&buf, img); err != nil {
 		return nil
 	}
 	return buf.Bytes()
 }
 
-// indexedPalette is a colour table for writing a spectrogram as an indexed
-// PNG: the distinct colours of one palette LUT, then black for no data and a
-// transparent entry for a skipped row. index maps a LUT position to its entry.
-type indexedPalette struct {
+// pngColours is the colour table of one indexed spectrogram PNG: the distinct
+// colours of the LUT entries the image uses, then black and transparent if it
+// uses them. index maps a LUT position to its table entry.
+type pngColours struct {
 	palette     color.Palette
 	index       [256]uint8
 	black       uint8
 	transparent uint8
+	merged      int // LUT colours given a neighbour's to fit 256 entries
 }
 
-var indexedPalettes = func() map[*[256][3]uint8]*indexedPalette {
-	m := map[*[256][3]uint8]*indexedPalette{}
-	for _, lut := range []*[256][3]uint8{&jetLUT, &plasmaLUT, &viridisLUT} {
-		ip := &indexedPalette{}
-		pos := map[color.NRGBA]uint8{}
-		add := func(c color.NRGBA) (uint8, bool) {
-			if i, ok := pos[c]; ok {
-				return i, true
+// newPNGColours builds the colour table for an image using the LUT entries
+// marked in used, and black and transparent as flagged.
+//
+// It fits in 256 entries with every colour exact unless the image uses all of
+// a 256-colour LUT and black too. Of the three palettes only viridis has 256
+// distinct colours, and auto-ranging never reaches its top entry -- the range
+// ends 3 dB above the strongest value -- so it takes an explicit range that
+// clips, with no-data rows in the same image. Then the closest pair of
+// neighbouring used colours is merged until the table fits: viridis's are a
+// unit or two apart in each channel, and nobody can see the difference.
+func newPNGColours(lut *[256][3]uint8, used *[256]bool, black, transparent bool) *pngColours {
+	colourOf := *lut
+	pc := &pngColours{}
+	for distinctUsed(&colourOf, used, black)+boolInt(transparent) > 256 {
+		bestDist, bestFrom, bestTo := -1, 0, 0
+		prev := -1
+		for i := 0; i < 256; i++ {
+			if !used[i] {
+				continue
 			}
-			if len(ip.palette) == 256 {
-				return 0, false
+			if prev >= 0 && colourOf[prev] != colourOf[i] {
+				if d := colourDist(colourOf[prev], colourOf[i]); bestDist < 0 || d < bestDist {
+					bestDist, bestFrom, bestTo = d, i, prev
+				}
 			}
-			i := uint8(len(ip.palette))
+			prev = i
+		}
+		old := colourOf[bestFrom]
+		for i := range colourOf {
+			if colourOf[i] == old {
+				colourOf[i] = colourOf[bestTo]
+			}
+		}
+		pc.merged++
+	}
+
+	pos := map[[3]uint8]uint8{}
+	add := func(c [3]uint8, a uint8) uint8 {
+		if i, ok := pos[c]; ok && a == 255 {
+			return i
+		}
+		i := uint8(len(pc.palette))
+		pc.palette = append(pc.palette, color.NRGBA{c[0], c[1], c[2], a})
+		if a == 255 {
 			pos[c] = i
-			ip.palette = append(ip.palette, c)
-			return i, true
 		}
-		ok := true
-		for i, c := range lut {
-			ip.index[i], ok = add(color.NRGBA{c[0], c[1], c[2], 255})
-			if !ok {
-				break
-			}
-		}
-		if ok {
-			ip.black, ok = add(color.NRGBA{0, 0, 0, 255})
-		}
-		if ok {
-			ip.transparent, ok = add(color.NRGBA{})
-		}
-		if ok {
-			m[lut] = ip
+		return i
+	}
+	for i := range colourOf {
+		if used[i] {
+			pc.index[i] = add(colourOf[i], 255)
 		}
 	}
-	return m
-}()
+	if black {
+		pc.black = add([3]uint8{}, 255)
+	}
+	if transparent {
+		pc.transparent = add([3]uint8{}, 0)
+	}
+	if len(pc.palette) == 0 {
+		add([3]uint8{}, 0) // an image of no rows still needs one entry
+	}
+	return pc
+}
 
-// indexedPaletteFor returns the indexed colour table for a LUT, or nil when its
-// colours with black and transparent do not fit in 256 entries (viridis has
-// 256 distinct colours of its own), in which case the image is written as
-// NRGBA.
-func indexedPaletteFor(lut *[256][3]uint8) *indexedPalette {
-	return indexedPalettes[lut]
+// distinctUsed counts the distinct opaque colours an image needs.
+func distinctUsed(colourOf *[256][3]uint8, used *[256]bool, black bool) int {
+	seen := map[[3]uint8]bool{}
+	for i := range colourOf {
+		if used[i] {
+			seen[colourOf[i]] = true
+		}
+	}
+	if black {
+		seen[[3]uint8{}] = true
+	}
+	return len(seen)
+}
+
+func colourDist(a, b [3]uint8) int {
+	d := 0
+	for i := range a {
+		x := int(a[i]) - int(b[i])
+		d += x * x
+	}
+	return d
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // spectrogramPNGEncoder is png.Encode with its compressor state pooled: the

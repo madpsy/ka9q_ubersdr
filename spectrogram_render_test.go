@@ -340,11 +340,12 @@ func TestSpectrogramIndexedColour(t *testing.T) {
 	}
 }
 
-// TestSpectrogramEveryColourFits renders viridis densely enough to use every
-// entry, clipped at both ends, with a no-data row and a skipped row: viridis
-// rounds to fewer than 254 distinct colours, so even that fits the indexed
-// table exactly, with no merging and every pixel as the reference renders it.
-func TestSpectrogramEveryColourFits(t *testing.T) {
+// TestSpectrogramEveryColourInUse renders each palette densely enough to use
+// every entry, clipped at both ends, with a no-data row and a skipped row --
+// the most colours an image can need. Jet and viridis still fit exactly;
+// plasma, 256 distinct colours of its own, merges two neighbouring pairs, and
+// only those pixels move, by no more than 3 in any channel.
+func TestSpectrogramEveryColourInUse(t *testing.T) {
 	// 80 dB over 3000 bins is 0.03 dB a bin against 0.24 dB an entry.
 	const bins = 3000
 	rows := make([][]float32, 40)
@@ -360,21 +361,51 @@ func TestSpectrogramEveryColourFits(t *testing.T) {
 	}
 	rows[9] = rows[9][:bins/2] // a skipped row
 
-	for _, palette := range []string{"jet", "plasma", "viridis"} {
+	for _, c := range []struct {
+		palette string
+		merges  int
+	}{{"jet", 0}, {"viridis", 0}, {"plasma", 2}} {
 		var used [256]bool
 		for i := range used {
 			used[i] = true
 		}
-		if pc := newPNGColours(paletteLUT(palette), &used, true, true); pc.merged != 0 {
-			t.Fatalf("%s: %d merges with every colour in use", palette, pc.merged)
+		if pc := newPNGColours(paletteLUT(c.palette), &used, true, true); pc.merged != c.merges {
+			t.Fatalf("%s: %d merges with every colour in use, want %d", c.palette, pc.merged, c.merges)
 		}
-		got := renderRowsAsPNGSlice(rows, palette, -130, -70, bins, 0, 0)
-		want := refRenderRowsAsPNGSlice(rows, palette, -130, -70, bins, 0, 0)
+		got := renderRowsAsPNGSlice(rows, c.palette, -130, -70, bins, 0, 0)
+		want := refRenderRowsAsPNGSlice(rows, c.palette, -130, -70, bins, 0, 0)
 		if pngColourType(got) != 3 {
-			t.Fatalf("%s: colour type %d, want indexed", palette, pngColourType(got))
+			t.Fatalf("%s: colour type %d, want indexed", c.palette, pngColourType(got))
 		}
-		if msg := samePNGPixels(got, want); msg != "" {
-			t.Fatalf("%s: %s", palette, msg)
+		if c.merges == 0 {
+			if msg := samePNGPixels(got, want); msg != "" {
+				t.Fatalf("%s: %s", c.palette, msg)
+			}
+			continue
+		}
+		ig, _ := png.Decode(bytes.NewReader(got))
+		iw, _ := png.Decode(bytes.NewReader(want))
+		changed := map[[3]uint32]bool{}
+		for y := 0; y < len(rows); y++ {
+			for x := 0; x < bins; x++ {
+				r1, g1, b1, a1 := ig.At(x, y).RGBA()
+				r2, g2, b2, a2 := iw.At(x, y).RGBA()
+				if a1 != a2 {
+					t.Fatalf("%s: pixel (%d,%d) alpha %d, reference %d", c.palette, x, y, a1, a2)
+				}
+				if r1 == r2 && g1 == g2 && b1 == b2 {
+					continue
+				}
+				for _, d := range []int{int(r1>>8) - int(r2>>8), int(g1>>8) - int(g2>>8), int(b1>>8) - int(b2>>8)} {
+					if d > 3 || d < -3 {
+						t.Fatalf("%s: pixel (%d,%d) moved %d", c.palette, x, y, d)
+					}
+				}
+				changed[[3]uint32{r2, g2, b2}] = true
+			}
+		}
+		if len(changed) == 0 || len(changed) > c.merges {
+			t.Fatalf("%s: %d colours changed, %d merged", c.palette, len(changed), c.merges)
 		}
 	}
 }
@@ -423,28 +454,46 @@ func TestPNGColoursMergeToFit(t *testing.T) {
 	}
 }
 
-// TestViridisTableIsViridis pins the viridis table to matplotlib's, rounded
-// to 8 bits. From entry 35 up it used to drift away from viridis, reaching
-// (194,255,28) at entry 254 before jumping to the real (253,231,37) at the
-// end -- a green no viridis entry has, and a 59-unit step where neighbours
-// are a few units apart.
-func TestViridisTableIsViridis(t *testing.T) {
+// TestPaletteTablesAreMatplotlib pins the three palettes to matplotlib's,
+// rounded to 8 bits. They used to be wrong in ways nothing noticed: viridis
+// drifted from entry 35 up, reaching (194,255,28) -- a green no viridis entry
+// has -- before a 59-unit jump to its last entry; plasma had 245 entries and
+// jet 251, so Go zero-filled the rest and the strongest signals drew black.
+func TestPaletteTablesAreMatplotlib(t *testing.T) {
 	for _, c := range []struct {
-		i    int
-		want [3]uint8
-	}{{0, [3]uint8{68, 1, 84}}, {35, [3]uint8{70, 48, 126}}, {128, [3]uint8{33, 145, 140}},
-		{254, [3]uint8{251, 231, 35}}, {255, [3]uint8{253, 231, 37}}} {
-		if viridisLUT[c.i] != c.want {
-			t.Fatalf("viridis[%d] = %v, want %v", c.i, viridisLUT[c.i], c.want)
-		}
-	}
-	for i := 1; i < 256; i++ {
-		for ch := 0; ch < 3; ch++ {
-			d := int(viridisLUT[i][ch]) - int(viridisLUT[i-1][ch])
-			if d > 3 || d < -3 {
-				t.Fatalf("viridis[%d] channel %d steps %d from its neighbour", i, ch, d)
+		name    string
+		lut     *[256][3]uint8
+		pins    map[int][3]uint8
+		maxStep int
+	}{
+		{"viridis", &viridisLUT, map[int][3]uint8{0: {68, 1, 84}, 35: {70, 48, 126}, 128: {33, 145, 140},
+			254: {251, 231, 35}, 255: {253, 231, 37}}, 3},
+		{"plasma", &plasmaLUT, map[int][3]uint8{0: {13, 8, 135}, 128: {204, 71, 120},
+			250: {243, 240, 39}, 255: {240, 249, 33}}, 3},
+		{"jet", &jetLUT, map[int][3]uint8{0: {0, 0, 128}, 64: {0, 128, 255}, 128: {125, 255, 122},
+			192: {255, 148, 0}, 255: {128, 0, 0}}, 5},
+	} {
+		for i, want := range c.pins {
+			if c.lut[i] != want {
+				t.Fatalf("%s[%d] = %v, want %v", c.name, i, c.lut[i], want)
 			}
 		}
+		for i := range c.lut {
+			if c.lut[i] == [3]uint8{} {
+				t.Fatalf("%s[%d] is black: a missing entry", c.name, i)
+			}
+			if i == 0 {
+				continue
+			}
+			for ch := 0; ch < 3; ch++ {
+				d := int(c.lut[i][ch]) - int(c.lut[i-1][ch])
+				if d > c.maxStep || d < -c.maxStep {
+					t.Fatalf("%s[%d] channel %d steps %d from its neighbour", c.name, i, ch, d)
+				}
+			}
+		}
+	}
+	for i := range viridisLUT {
 		if viridisLUT[i][1] > 231 {
 			t.Fatalf("viridis[%d] green %d, past viridis's 231", i, viridisLUT[i][1])
 		}

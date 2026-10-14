@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -98,8 +99,14 @@ type SpectrogramRecorder struct {
 	rowCount int       // rows written so far today (0..1440)
 	lastRow  time.Time // UTC timestamp of the last written row
 
-	// Cached PNG — atomically swapped after each render
+	// Cached PNG — rendered on the first read after the rows change, not on
+	// every tick: see GetCachedPNG. rowsGen counts changes to the rows and
+	// pngGen is the count cachedPNG was rendered from; renderMu keeps
+	// concurrent readers from rendering the same image twice.
 	cachedPNG    atomic.Pointer[[]byte]
+	rowsGen      atomic.Uint64
+	pngGen       atomic.Uint64
+	renderMu     sync.Mutex
 	lastModified time.Time
 	mu           sync.Mutex // protects rows, rowCount, lastRow, lastModified
 
@@ -181,8 +188,8 @@ func (sr *SpectrogramRecorder) Start() error {
 	// is restarted before midnight (and therefore never triggers a rollover).
 	sr.runCleanup(time.Now().UTC())
 
-	// Render initial PNG so the endpoint is immediately valid
-	sr.renderAndCache()
+	// The PNG of what was loaded is rendered when first asked for.
+	sr.markPNGStale()
 
 	// Populate latestComplete from disk so /api/spectrogram/latest works immediately.
 	today := time.Now().UTC().Format("2006-01-02")
@@ -207,8 +214,26 @@ func (sr *SpectrogramRecorder) Stop() {
 	log.Println("Spectrogram recorder stopped")
 }
 
-// GetCachedPNG returns the current in-memory PNG bytes (nil if not yet ready).
+// GetCachedPNG returns the current in-memory PNG bytes (nil if not yet ready),
+// rendering it first if the rows have changed since it was last rendered.
+//
+// Rendering on read rather than on every tick is what keeps an unwatched
+// recorder cheap: every band's recorder used to re-render and re-encode its
+// whole day once a minute, and the web frontend never asks for this image --
+// it always passes an explicit dB range, which renders afresh.
 func (sr *SpectrogramRecorder) GetCachedPNG() []byte {
+	if sr.pngGen.Load() != sr.rowsGen.Load() {
+		sr.renderMu.Lock()
+		// The generation is taken before the rows are read, so a tick that
+		// lands during the render leaves the PNG marked stale for the next
+		// reader; and it is published only after the PNG is, so no reader
+		// skips the render and then picks up the previous image.
+		if gen := sr.rowsGen.Load(); sr.pngGen.Load() != gen {
+			sr.renderAndCache()
+			sr.pngGen.Store(gen)
+		}
+		sr.renderMu.Unlock()
+	}
 	p := sr.cachedPNG.Load()
 	if p == nil {
 		return nil
@@ -332,8 +357,8 @@ func (sr *SpectrogramRecorder) tick(t time.Time) {
 		sr.appendRowToJSONL(today, newRowIndex, t, noiseFloor)
 	}
 
-	// Render PNG and persist to disk (outside lock — CPU-bound work)
-	sr.renderAndCache()
+	// The PNG is rendered when next asked for; persist the rows now.
+	sr.markPNGStale()
 	sr.persistToDisk(today)
 
 	// Refresh the in-memory rolling 24-hour window so requests for it are
@@ -350,7 +375,6 @@ func (sr *SpectrogramRecorder) rollover(newDayTime time.Time) {
 	log.Printf("Spectrogram: UTC day rollover — archiving %s", oldDate)
 
 	// Render final PNG for the completed day and archive it
-	sr.renderAndCache()
 	pngBytes := sr.GetCachedPNG()
 	if len(pngBytes) > 0 {
 		archivePath := sr.ArchivedPNGPath(oldDate)
@@ -798,8 +822,20 @@ func (sr *SpectrogramRecorder) loadTodayFromDisk() {
 
 // ─── PNG rendering ────────────────────────────────────────────────────────────
 
+// markPNGStale records that the rows have changed: the cached PNG is
+// re-rendered on its next read, and lastModified -- which the PNG's ETag and
+// Last-Modified come from -- moves now, when the data did.
+func (sr *SpectrogramRecorder) markPNGStale() {
+	sr.mu.Lock()
+	if sr.rowCount > 0 {
+		sr.lastModified = time.Now().UTC()
+	}
+	sr.mu.Unlock()
+	sr.rowsGen.Add(1)
+}
+
 // renderAndCache renders the current ring buffer to a PNG and atomically swaps
-// the cached pointer. Safe to call from any goroutine.
+// the cached pointer. Only GetCachedPNG calls it, under renderMu.
 func (sr *SpectrogramRecorder) renderAndCache() {
 	sr.mu.Lock()
 	rowCount := sr.rowCount
@@ -808,51 +844,25 @@ func (sr *SpectrogramRecorder) renderAndCache() {
 		sr.mu.Unlock()
 		return
 	}
-	// Snapshot rows under lock
+	// A written row is never modified again (tick only writes the row past
+	// rowCount, and rollover swaps in fresh slices), so the snapshot can share
+	// them rather than copy.
 	snapshot := make([][]float32, rowCount)
-	for i := 0; i < rowCount; i++ {
-		row := make([]float32, binCount)
-		copy(row, sr.rows[i])
-		snapshot[i] = row
-	}
+	copy(snapshot, sr.rows[:rowCount])
 	sr.mu.Unlock()
 
 	// Auto-range from actual data; fall back to hardcoded defaults if insufficient data.
 	dbMin, dbMax := autoRangeRows(snapshot, spectrogramDefaultDBMin, spectrogramDefaultDBMax)
 
-	// Only render rows that have data — image grows throughout the day.
-	// The frontend uses meta.max_rows (always 1440) for time-axis scaling,
-	// so a variable-height image is correct; CSS height:auto handles it.
-	// This avoids rendering ~950 black rows early in the day (saves ~80% of work).
-	img := image.NewNRGBA(image.Rect(0, 0, binCount, rowCount))
-
-	black := color.NRGBA{0, 0, 0, 255}
-
-	// Render filled rows — row 0 = UTC midnight (top), newest = bottom
-	palette := spectrogramDefaultPalette
-	for y, row := range snapshot {
-		for x, val := range row {
-			if math.IsInf(float64(val), -1) || math.IsNaN(float64(val)) {
-				img.SetNRGBA(x, y, black)
-			} else {
-				img.SetNRGBA(x, y, paletteColour(palette, val, dbMin, dbMax))
-			}
-		}
-	}
-
-	// Encode to PNG using a bytes.Buffer (no goroutine needed)
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		log.Printf("Spectrogram: PNG encode error: %v", err)
+	// Only rows that have data are rendered -- the image grows throughout the
+	// day. The frontend uses meta.max_rows (always 1440) for time-axis
+	// scaling, so a variable-height image is correct; CSS height:auto handles
+	// it. Row 0 = UTC midnight (top), newest = bottom.
+	pngBytes := renderRowsAsPNG(snapshot, spectrogramDefaultPalette, dbMin, dbMax, binCount)
+	if pngBytes == nil {
+		log.Printf("Spectrogram: PNG encode failed")
 		return
 	}
-
-	pngBytes := buf.Bytes()
-
-	sr.mu.Lock()
-	sr.lastModified = time.Now().UTC()
-	sr.mu.Unlock()
-
 	sr.cachedPNG.Store(&pngBytes)
 }
 
@@ -949,8 +959,32 @@ func atomicWriteFile(path string, data []byte) error {
 // paletteColour maps a dB value in [dbMin, dbMax] to a colour using the named palette.
 // Supported palettes: "viridis" (default), "plasma", "jet".
 func paletteColour(palette string, db, dbMin, dbMax float32) color.NRGBA {
+	c := paletteLUT(palette)[paletteIndex(db, dbMin, dbMax)]
+	return color.NRGBA{c[0], c[1], c[2], 255}
+}
+
+// paletteLUT returns the lookup table for a palette name, viridis by default.
+func paletteLUT(palette string) *[256][3]uint8 {
+	switch palette {
+	case "plasma":
+		return &plasmaLUT
+	case "jet":
+		return &jetLUT
+	default:
+		return &viridisLUT
+	}
+}
+
+// paletteIndex maps a dB value in [dbMin, dbMax] to a palette index, clamping
+// values outside the range.
+//
+// A NaN position -- an infinite value against an infinite range, or a
+// zero-width range -- maps to the bottom of the palette. Written as !(t >= 0)
+// so NaN takes that branch; int(NaN) is undefined, and indexing with it
+// panicked the render.
+func paletteIndex(db, dbMin, dbMax float32) int {
 	t := (db - dbMin) / (dbMax - dbMin)
-	if t < 0 {
+	if !(t >= 0) {
 		t = 0
 	}
 	if t > 1 {
@@ -960,16 +994,7 @@ func paletteColour(palette string, db, dbMin, dbMax float32) color.NRGBA {
 	if idx > 255 {
 		idx = 255
 	}
-	var lut *[256][3]uint8
-	switch palette {
-	case "plasma":
-		lut = &plasmaLUT
-	case "jet":
-		lut = &jetLUT
-	default:
-		lut = &viridisLUT
-	}
-	return color.NRGBA{lut[idx][0], lut[idx][1], lut[idx][2], 255}
+	return idx
 }
 
 // ─── viridis colour palette ───────────────────────────────────────────────────
@@ -1232,7 +1257,9 @@ func autoRangeRowsSlice(rows [][]float32, startBin, endBin int, configMin, confi
 			continue // skip malformed rows
 		}
 		for _, v := range row[startBin:endBin] {
-			if math.IsInf(float64(v), -1) || math.IsNaN(float64(v)) {
+			// +Inf as well as the -Inf no-data sentinel: one infinite bin
+			// would make the range infinite and every colour undefined.
+			if math.IsInf(float64(v), 0) || math.IsNaN(float64(v)) {
 				continue
 			}
 			valid = append(valid, v)
@@ -1362,9 +1389,10 @@ func rowP95(row []float32) float32 {
 	return valid[idx]
 }
 
-// sortFloat32Slice sorts a []float32 in ascending order using stdlib sort.
+// sortFloat32Slice sorts a []float32 in ascending order. Every caller has
+// already dropped NaNs, so the order is the one sort.Slice with < gave.
 func sortFloat32Slice(s []float32) {
-	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
+	slices.Sort(s)
 }
 
 // ─── HTTP handlers ────────────────────────────────────────────────────────────
@@ -1401,27 +1429,47 @@ func renderRowsAsPNGSlice(rows [][]float32, palette string, dbMin, dbMax float32
 	}
 	width := endBin - startBin
 	img := image.NewNRGBA(image.Rect(0, 0, width, rowCount))
-	black := color.NRGBA{0, 0, 0, 255}
 
+	// Pixels are written straight into Pix -- the same values SetNRGBA and
+	// paletteColour produce, without a bounds check, a colour struct and a
+	// palette lookup by name for every one of them.
+	lut := paletteLUT(palette)
 	for y, row := range rows {
 		if len(row) < endBin {
 			continue // skip malformed rows
 		}
+		pix := img.Pix[y*img.Stride : y*img.Stride+4*width]
 		for x, val := range row[startBin:endBin] {
+			p := pix[4*x : 4*x+4 : 4*x+4]
 			if math.IsInf(float64(val), -1) || math.IsNaN(float64(val)) {
-				img.SetNRGBA(x, y, black)
+				p[0], p[1], p[2], p[3] = 0, 0, 0, 255
 			} else {
-				img.SetNRGBA(x, y, paletteColour(palette, val, dbMin, dbMax))
+				c := &lut[paletteIndex(val, dbMin, dbMax)]
+				p[0], p[1], p[2], p[3] = c[0], c[1], c[2], 255
 			}
 		}
 	}
 
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
+	if err := spectrogramPNGEncoder.Encode(&buf, img); err != nil {
 		return nil
 	}
 	return buf.Bytes()
 }
+
+// spectrogramPNGEncoder is png.Encode with its compressor state pooled: the
+// same compression level and so the same bytes, without allocating a fresh
+// deflate window for every image.
+var spectrogramPNGEncoder = png.Encoder{BufferPool: &pngBufferPool{}}
+
+type pngBufferPool struct{ p sync.Pool }
+
+func (b *pngBufferPool) Get() *png.EncoderBuffer {
+	e, _ := b.p.Get().(*png.EncoderBuffer)
+	return e
+}
+
+func (b *pngBufferPool) Put(e *png.EncoderBuffer) { b.p.Put(e) }
 
 // renderRowsAsThumbnail renders rows straight to a spectrogramThumbW ×
 // spectrogramThumbH PNG, box-filtering in dB space rather than rendering the

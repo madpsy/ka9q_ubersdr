@@ -10,6 +10,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"image/color"
 	"image/png"
 	"math"
 	"math/rand"
@@ -339,14 +340,12 @@ func TestSpectrogramIndexedColour(t *testing.T) {
 	}
 }
 
-// TestSpectrogramViridisOverflowMerges is the one case an image needs more
-// than 256 colours: viridis has 256 distinct ones, and an explicit range that
-// clips at both ends uses all of them, then black and a skipped row need two
-// more. The two closest neighbouring colours give way, and only pixels of
-// those colours change, by no more than one viridis step.
-func TestSpectrogramViridisOverflowMerges(t *testing.T) {
-	// Dense enough that every palette entry is hit: 80 dB over 3000 bins is
-	// 0.03 dB a bin against 0.24 dB an entry.
+// TestSpectrogramEveryColourFits renders viridis densely enough to use every
+// entry, clipped at both ends, with a no-data row and a skipped row: viridis
+// rounds to fewer than 254 distinct colours, so even that fits the indexed
+// table exactly, with no merging and every pixel as the reference renders it.
+func TestSpectrogramEveryColourFits(t *testing.T) {
+	// 80 dB over 3000 bins is 0.03 dB a bin against 0.24 dB an entry.
 	const bins = 3000
 	rows := make([][]float32, 40)
 	for i := range rows {
@@ -361,48 +360,93 @@ func TestSpectrogramViridisOverflowMerges(t *testing.T) {
 	}
 	rows[9] = rows[9][:bins/2] // a skipped row
 
+	for _, palette := range []string{"jet", "plasma", "viridis"} {
+		var used [256]bool
+		for i := range used {
+			used[i] = true
+		}
+		if pc := newPNGColours(paletteLUT(palette), &used, true, true); pc.merged != 0 {
+			t.Fatalf("%s: %d merges with every colour in use", palette, pc.merged)
+		}
+		got := renderRowsAsPNGSlice(rows, palette, -130, -70, bins, 0, 0)
+		want := refRenderRowsAsPNGSlice(rows, palette, -130, -70, bins, 0, 0)
+		if pngColourType(got) != 3 {
+			t.Fatalf("%s: colour type %d, want indexed", palette, pngColourType(got))
+		}
+		if msg := samePNGPixels(got, want); msg != "" {
+			t.Fatalf("%s: %s", palette, msg)
+		}
+	}
+}
+
+// TestPNGColoursMergeToFit covers the fallback no current palette needs: a
+// LUT of 256 distinct colours, all in use, plus black and transparent, is two
+// entries too many. The two closest neighbouring colours give way to their
+// neighbours; nothing else moves.
+func TestPNGColoursMergeToFit(t *testing.T) {
+	var lut [256][3]uint8
+	for i := range lut {
+		lut[i] = [3]uint8{uint8(i), uint8(255 - i), uint8(i / 2)} // neighbours 1-2 apart
+	}
+	lut[100] = [3]uint8{100, 200, 30} // far from both neighbours: must not move
 	var used [256]bool
 	for i := range used {
 		used[i] = true
 	}
-	pc := newPNGColours(&viridisLUT, &used, true, true)
+	pc := newPNGColours(&lut, &used, true, true)
 	if len(pc.palette) != 256 || pc.merged != 2 {
 		t.Fatalf("%d entries after %d merges, want 256 after 2", len(pc.palette), pc.merged)
 	}
-
-	// Viridis's neighbours are 1-3 apart in each channel, and the closest are
-	// the ones merged. (Its last entry jumps 59 from the one before; that pair
-	// is the furthest apart and never merged.)
-	const maxStep = 3
-
-	got := renderRowsAsPNGSlice(rows, "viridis", -130, -70, bins, 0, 0)
-	want := refRenderRowsAsPNGSlice(rows, "viridis", -130, -70, bins, 0, 0)
-	if pngColourType(got) != 3 {
-		t.Fatalf("colour type %d, want indexed", pngColourType(got))
-	}
-	ig, _ := png.Decode(bytes.NewReader(got))
-	iw, _ := png.Decode(bytes.NewReader(want))
-	changed := map[[3]uint32]bool{}
-	for y := 0; y < len(rows); y++ {
-		for x := 0; x < bins; x++ {
-			r1, g1, b1, a1 := ig.At(x, y).RGBA()
-			r2, g2, b2, a2 := iw.At(x, y).RGBA()
-			if a1 != a2 {
-				t.Fatalf("pixel (%d,%d) alpha %d, reference %d", x, y, a1, a2)
-			}
-			if r1 == r2 && g1 == g2 && b1 == b2 {
-				continue
-			}
-			for _, d := range []int{int(r1>>8) - int(r2>>8), int(g1>>8) - int(g2>>8), int(b1>>8) - int(b2>>8)} {
-				if d > maxStep || -d > maxStep {
-					t.Fatalf("pixel (%d,%d) moved %d, more than a viridis step (%d)", x, y, d, maxStep)
-				}
-			}
-			changed[[3]uint32{r2, g2, b2}] = true
+	moved := 0
+	for i := range lut {
+		c := pc.palette[pc.index[i]].(color.NRGBA)
+		got := [3]uint8{c.R, c.G, c.B}
+		if c.A != 255 {
+			t.Fatalf("entry %d maps to a transparent colour", i)
+		}
+		if got == lut[i] {
+			continue
+		}
+		moved++
+		if i == 100 {
+			t.Fatal("the outlying entry moved")
+		}
+		if (i == 0 || got != lut[i-1]) && (i == 255 || got != lut[i+1]) {
+			t.Fatalf("entry %d became %v, not a neighbour's colour", i, got)
 		}
 	}
-	if len(changed) == 0 || len(changed) > pc.merged {
-		t.Fatalf("%d reference colours changed; %d were merged", len(changed), pc.merged)
+	if moved != 2 {
+		t.Fatalf("%d entries moved, want 2", moved)
 	}
-	t.Logf("%d colours merged, max step %d, %d colours changed in the image", pc.merged, maxStep, len(changed))
+	if pc.palette[pc.black] != (color.NRGBA{0, 0, 0, 255}) || pc.palette[pc.transparent] != (color.NRGBA{}) {
+		t.Fatal("black or transparent entry wrong")
+	}
+}
+
+// TestViridisTableIsViridis pins the viridis table to matplotlib's, rounded
+// to 8 bits. From entry 35 up it used to drift away from viridis, reaching
+// (194,255,28) at entry 254 before jumping to the real (253,231,37) at the
+// end -- a green no viridis entry has, and a 59-unit step where neighbours
+// are a few units apart.
+func TestViridisTableIsViridis(t *testing.T) {
+	for _, c := range []struct {
+		i    int
+		want [3]uint8
+	}{{0, [3]uint8{68, 1, 84}}, {35, [3]uint8{70, 48, 126}}, {128, [3]uint8{33, 145, 140}},
+		{254, [3]uint8{251, 231, 35}}, {255, [3]uint8{253, 231, 37}}} {
+		if viridisLUT[c.i] != c.want {
+			t.Fatalf("viridis[%d] = %v, want %v", c.i, viridisLUT[c.i], c.want)
+		}
+	}
+	for i := 1; i < 256; i++ {
+		for ch := 0; ch < 3; ch++ {
+			d := int(viridisLUT[i][ch]) - int(viridisLUT[i-1][ch])
+			if d > 3 || d < -3 {
+				t.Fatalf("viridis[%d] channel %d steps %d from its neighbour", i, ch, d)
+			}
+		}
+		if viridisLUT[i][1] > 231 {
+			t.Fatalf("viridis[%d] green %d, past viridis's 231", i, viridisLUT[i][1])
+		}
+	}
 }

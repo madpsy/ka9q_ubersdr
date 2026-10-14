@@ -128,13 +128,6 @@ import (
 //	IQ 12 kHz      50.5 kB/s -> 34.8 kB/s  (31% less)
 //	IQ 384 kHz     1590 kB/s -> 1116 kB/s  (30% less)
 
-var zzLeak uint
-
-func zzLeakOf(w int64) int64 {
-	m := w >> 63
-	return ((((w ^ m) - m) >> zzLeak) ^ m) - m
-}
-
 const (
 	// predTapShift is the fixed-point scale of the filter taps: they are
 	// integers in Q16, so 65536 represents a tap of 1.0.
@@ -479,15 +472,6 @@ func (f *complexStage) adapt(er, ei int64) {
 	si := f.si[lo:f.idx]
 	si = si[:len(wr)]
 	wi := f.wi[:len(wr)]
-	if zzLeak > 0 {
-		for j := range wr {
-			hrs := sr[j]
-			his := -si[j]
-			wr[j] += mr*hrs - mi*his - zzLeakOf(wr[j])
-			wi[j] += mr*his + mi*hrs - zzLeakOf(wi[j])
-		}
-		return
-	}
 	if f.fast {
 		for j := range wr {
 			hrs := sr[j]
@@ -557,6 +541,101 @@ func (f *complexStage) forward(xr, xi int64) (int64, int64) {
 	f.adapt(er, ei)
 	f.push(xr, xi)
 	return er, ei
+}
+
+// forwardBlock16 is forward over a whole packet of interleaved I/Q for an
+// order-16 stage, the filter every IQ profile uses, writing the residuals to
+// res. It produces exactly forward's values frame for frame.
+//
+// Two things make it faster than calling forward per frame. The taps and the
+// history window are fixed-size arrays, so the tap loops carry no bounds
+// checks. And each frame's adapt is fused with the next frame's predict: the
+// updated tap is multiplied into the next prediction while it is still in a
+// register, so the taps are walked once a frame rather than twice. The window
+// the next prediction reads is the current one slid by a sample, which is why
+// the new sample is written into the history before the fused loop runs.
+//
+// Integer sums do not depend on their order, so computing the prediction
+// inside the update loop cannot change it.
+func (f *complexStage) forwardBlock16(samples []int16, res []int32) {
+	if f.forwardBlock16Asm(samples, res) {
+		return
+	}
+	wr := (*[16]int64)(f.wr)
+	wi := (*[16]int64)(f.wi)
+	mu := f.mu
+	fast := f.fast
+
+	// The first frame's prediction; every later one comes out of the fused
+	// loop of the frame before.
+	lo := f.idx - 16
+	pr, pi := predict16(wr, wi, (*[16]int64)(f.hr[lo:]), (*[16]int64)(f.hi[lo:]))
+
+	for k := 0; k+1 < len(samples); k += 2 {
+		xr, xi := int64(samples[k]), int64(samples[k+1])
+		er := xr - predRoundShift(pr, predTapShift)
+		ei := xi - predRoundShift(pi, predTapShift)
+		res[k], res[k+1] = int32(er), int32(ei)
+
+		// Push without advancing idx yet: h[lo:lo+16] is this frame's window
+		// and h[lo+1:lo+17] the next one's. push keeps idx below len(h), so
+		// slot idx is always free here.
+		lo = f.idx - 16
+		f.hr[f.idx], f.hi[f.idx] = xr, xi
+		f.sr[f.idx], f.si[f.idx] = predSign(xr), predSign(xi)
+		nr := (*[16]int64)(f.hr[lo+1:])
+		ni := (*[16]int64)(f.hi[lo+1:])
+
+		if er == 0 && ei == 0 {
+			pr, pi = predict16(wr, wi, nr, ni)
+		} else {
+			mr := mu * predSign(er)
+			mi := mu * predSign(ei)
+			sr := (*[16]int64)(f.sr[lo:])
+			si := (*[16]int64)(f.si[lo:])
+			pr, pi = 0, 0
+			// adapt's update with his = -si folded in: wr += mr*sr + mi*si,
+			// wi += mi*sr - mr*si.
+			if fast {
+				for j := 0; j < 16; j++ {
+					a, b := wr[j], wi[j]
+					a += mr*sr[j] + mi*si[j] - predLeak(a, predLeakShiftComplex)
+					b += mi*sr[j] - mr*si[j] - predLeak(b, predLeakShiftComplex)
+					wr[j], wi[j] = a, b
+					pr += a*nr[j] - b*ni[j]
+					pi += a*ni[j] + b*nr[j]
+				}
+			} else {
+				for j := 0; j < 16; j++ {
+					a, b := wr[j], wi[j]
+					a = predClampTap(a + mr*sr[j] + mi*si[j] - predLeak(a, predLeakShiftComplex))
+					b = predClampTap(b + mi*sr[j] - mr*si[j] - predLeak(b, predLeakShiftComplex))
+					wr[j], wi[j] = a, b
+					pr += a*nr[j] - b*ni[j]
+					pi += a*ni[j] + b*nr[j]
+				}
+			}
+		}
+
+		f.idx++
+		if f.idx == len(f.hr) {
+			copy(f.hr, f.hr[f.idx-16:f.idx])
+			copy(f.hi, f.hi[f.idx-16:f.idx])
+			copy(f.sr, f.sr[f.idx-16:f.idx])
+			copy(f.si, f.si[f.idx-16:f.idx])
+			f.idx = 16
+		}
+	}
+}
+
+// predict16 is predict for an order-16 stage, unrounded.
+func predict16(wr, wi, hr, hi *[16]int64) (int64, int64) {
+	var pr, pi int64
+	for j := 0; j < 16; j++ {
+		pr += wr[j]*hr[j] - wi[j]*hi[j]
+		pi += wr[j]*hi[j] + wi[j]*hr[j]
+	}
+	return pr, pi
 }
 
 // inverse is the decoder direction: reconstruct a sample from its residual.
@@ -850,9 +929,10 @@ type PredictiveCodec struct {
 	cx   []*complexStage
 	rl   []*realStage
 
-	res []int32
-	buf []byte
-	hdr []byte // scratch for DecodeBody
+	res   []int32
+	buf   []byte
+	hdr   []byte  // scratch for DecodeBody
+	zeros []int16 // AdvanceSilence's input on the block path; never written
 }
 
 // NewPredictiveCodec builds a codec for the given profile id, rejecting one it
@@ -922,6 +1002,30 @@ func (c *PredictiveCodec) forward(a, b int64) (int64, int64) {
 	return a, 0
 }
 
+// block16 reports whether this codec is the single order-16 complex stage
+// that forwardBlock16 handles; every IQ profile is.
+func (c *PredictiveCodec) block16() bool {
+	return len(c.cx) == 1 && c.cx[0].order == 16
+}
+
+// forwardEach runs the cascade over one packet a sample position at a time,
+// writing the residuals to c.res. It is the general path, for any profile.
+func (c *PredictiveCodec) forwardEach(samples []int16) {
+	step := c.samplesPerStep()
+	for i := 0; i < len(samples); i += step {
+		a := int64(int32(samples[i]))
+		var b int64
+		if step == 2 {
+			b = int64(int32(samples[i+1]))
+		}
+		ra, rb := c.forward(a, b)
+		c.res[i] = int32(ra)
+		if step == 2 {
+			c.res[i+1] = int32(rb)
+		}
+	}
+}
+
 // EncodeBody codes one packet and returns the body WITHOUT the leading flags
 // byte, together with whether the escape was taken.
 //
@@ -983,17 +1087,10 @@ func (c *PredictiveCodec) Encode(samples []int16) ([]byte, error) {
 	c.res = c.res[:n]
 
 	c.beginPacket(n / step)
-	for i := 0; i < n; i += step {
-		a := int64(int32(samples[i]))
-		var b int64
-		if step == 2 {
-			b = int64(int32(samples[i+1]))
-		}
-		ra, rb := c.forward(a, b)
-		c.res[i] = int32(ra)
-		if step == 2 {
-			c.res[i+1] = int32(rb)
-		}
+	if c.block16() {
+		c.cx[0].forwardBlock16(samples, c.res)
+	} else {
+		c.forwardEach(samples)
 	}
 
 	out := c.buf[:1]
@@ -1035,6 +1132,18 @@ func (c *PredictiveCodec) AdvanceSilence(count int) error {
 		return fmt.Errorf("predictive codec: %d samples is not a whole number of %d-channel frames", count, step)
 	}
 	c.beginPacket(count / step)
+	if c.block16() {
+		// The block path writes residuals, so it needs a zero input and
+		// somewhere to put them; both are scratch, kept between calls.
+		if cap(c.zeros) < count {
+			c.zeros = make([]int16, count)
+		}
+		if cap(c.res) < count {
+			c.res = make([]int32, count)
+		}
+		c.cx[0].forwardBlock16(c.zeros[:count], c.res[:count])
+		return nil
+	}
 	for i := 0; i < count; i += step {
 		c.forward(0, 0)
 	}

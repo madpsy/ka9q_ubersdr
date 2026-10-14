@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -145,6 +146,31 @@ func (fb *FFTBuffer) AddSample(timestamp time.Time, data []float32) {
 	if validStart > 0 {
 		fb.Samples = fb.Samples[validStart:]
 	}
+}
+
+// snapshot copies the buffer for a reader that will use it after releasing
+// fftMu, under which the caller must take it. The samples are copied, not
+// shared: AddSample appends to and reslices Samples under the write lock, so
+// reading the live slice unlocked is a data race. Each sample's Data is
+// shared, since AddSample stores its own copy and nothing writes to it after.
+func (fb *FFTBuffer) snapshot() *FFTBuffer {
+	c := *fb
+	c.Samples = slices.Clone(fb.Samples)
+	return &c
+}
+
+// fftBufferSnapshot returns a snapshot of a band's FFT buffer, for a reader
+// that works on it for longer than is reasonable to hold fftMu -- a voice
+// scan takes milliseconds, and the ingest goroutine needs the write lock to
+// add each frame.
+func (nfm *NoiseFloorMonitor) fftBufferSnapshot(band string) (*FFTBuffer, bool) {
+	nfm.fftMu.RLock()
+	defer nfm.fftMu.RUnlock()
+	buffer, ok := nfm.fftBuffers[band]
+	if !ok {
+		return nil, false
+	}
+	return buffer.snapshot(), true
 }
 
 // GetMaxHoldFFT returns the maximum value for each bin over the specified duration
@@ -773,19 +799,24 @@ func (nfm *NoiseFloorMonitor) calculateAndLogStatistics() {
 	// Calculate wideband SNR measurements. Pinned to 0-30 MHz and 1.8-30 MHz on every
 	// receiver — see widebandSNRBands.
 	var snr_0_30, snr_1_8_30 float32
-	if nfm.wideBandFFTBuffer != nil {
-		widebandFFT := nfm.wideBandFFTBuffer.GetAveragedFFT(10 * time.Second)
-		if widebandFFT != nil && len(widebandFFT.Data) > 0 {
-			snr_0_30, snr_1_8_30 = widebandSNRBands(widebandFFT)
-			log.Printf("Wideband SNR: 0-30 MHz = %.1f dB, 1.8-30 MHz = %.1f dB", snr_0_30, snr_1_8_30)
+	// Under fftMu, as GetWidebandSNR averages it: the ingest goroutine
+	// appends to this buffer under the write lock.
+	widebandFFT := func() *BandFFT {
+		nfm.fftMu.RLock()
+		defer nfm.fftMu.RUnlock()
+		if nfm.wideBandFFTBuffer == nil {
+			return nil
 		}
+		return nfm.wideBandFFTBuffer.GetAveragedFFT(10 * time.Second)
+	}()
+	if widebandFFT != nil && len(widebandFFT.Data) > 0 {
+		snr_0_30, snr_1_8_30 = widebandSNRBands(widebandFFT)
+		log.Printf("Wideband SNR: 0-30 MHz = %.1f dB, 1.8-30 MHz = %.1f dB", snr_0_30, snr_1_8_30)
 	}
 
 	for _, band := range nfm.config.NoiseFloor.Bands {
 		// Get buffer with raw samples
-		nfm.fftMu.RLock()
-		buffer, ok := nfm.fftBuffers[band.Name]
-		nfm.fftMu.RUnlock()
+		buffer, ok := nfm.fftBufferSnapshot(band.Name)
 
 		if !ok {
 			continue

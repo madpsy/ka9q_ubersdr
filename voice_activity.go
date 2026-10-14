@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/bits"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -64,9 +66,7 @@ func StartVoiceActivityBackgroundScanner(nfm *NoiseFloorMonitor, hub *VoiceActiv
 				}
 
 				// Get FFT data for this band
-				nfm.fftMu.RLock()
-				buffer, ok := nfm.fftBuffers[bandConfig.Name]
-				nfm.fftMu.RUnlock()
+				buffer, ok := nfm.fftBufferSnapshot(bandConfig.Name)
 
 				if !ok {
 					continue
@@ -452,7 +452,7 @@ func detectVoiceActivity(fft *BandFFT, params DetectionParams) []VoiceActivity {
 
 	// Step 2: Detect candidate regions (1.5-4 kHz bandwidth, 6-10 dB above noise)
 	threshold := noiseFloor + params.ThresholdDB
-	candidates := detectCandidateRegions(fft.Data, threshold, fft.BinWidth, fft.StartFreq, params)
+	candidates := detectCandidateRegionsWithFloor(fft.Data, threshold, noiseFloor, fft.BinWidth, fft.StartFreq, params)
 
 	// Step 3: Apply voice-likeness filters
 	voiceCandidates := []CandidateRegion{}
@@ -528,34 +528,95 @@ func detectVoiceActivity(fft *BandFFT, params DetectionParams) []VoiceActivity {
 func estimateNoiseFloorMedianFilter(data []float32, minFreq, maxFreq uint64, binWidth float64, startFreq uint64) float32 {
 	// Use percentile approach for noise floor (more robust than median filter)
 	// Take 10th percentile as noise floor estimate
-	sorted := make([]float32, len(data))
-	copy(sorted, data)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i] < sorted[j]
-	})
-
-	if len(sorted) == 0 {
+	if len(data) == 0 {
 		return 0
 	}
 
 	// 10th percentile - robust noise floor that ignores signals
-	idx := len(sorted) * 10 / 100
-	if idx >= len(sorted) {
-		idx = len(sorted) - 1
+	idx := len(data) * 10 / 100
+	if idx >= len(data) {
+		idx = len(data) - 1
 	}
 
-	return sorted[idx]
+	// Only the one order statistic is needed, so it is selected in linear time
+	// rather than sorting the whole band for it -- the same value a sort puts
+	// at idx. A NaN has no place in an order, and what a sort did with one is
+	// whatever its algorithm happened to do, so a frame holding one is sorted
+	// exactly as it always was.
+	sorted := make([]float32, len(data))
+	copy(sorted, data)
+	for _, v := range sorted {
+		if v != v {
+			sort.Slice(sorted, func(i, j int) bool {
+				return sorted[i] < sorted[j]
+			})
+			return sorted[idx]
+		}
+	}
+	return selectFloat32(sorted, idx)
 }
 
-// detectCandidateRegions finds regions 1.5-4 kHz wide, 6-10 dB above noise
-func detectCandidateRegions(data []float32, threshold float32, binWidth float64, startFreq uint64, params DetectionParams) []CandidateRegion {
+// selectFloat32 returns the value that sorting s ascending would place at
+// index k, reordering s. s must hold no NaN.
+//
+// Quickselect with a median-of-three pivot, falling back to a full sort if
+// the partitions keep coming out lopsided, so no input costs more than a sort.
+func selectFloat32(s []float32, k int) float32 {
+	lo, hi := 0, len(s)-1
+	for budget := 2 * bits.Len(uint(len(s))); lo < hi; budget-- {
+		if budget == 0 {
+			slices.Sort(s[lo : hi+1])
+			return s[k]
+		}
+		// Median of three to s[mid], then Hoare partition around its value.
+		mid := lo + (hi-lo)/2
+		if s[mid] < s[lo] {
+			s[mid], s[lo] = s[lo], s[mid]
+		}
+		if s[hi] < s[lo] {
+			s[hi], s[lo] = s[lo], s[hi]
+		}
+		if s[hi] < s[mid] {
+			s[hi], s[mid] = s[mid], s[hi]
+		}
+		pivot := s[mid]
+		i, j := lo, hi
+		for i <= j {
+			for s[i] < pivot {
+				i++
+			}
+			for pivot < s[j] {
+				j--
+			}
+			if i <= j {
+				s[i], s[j] = s[j], s[i]
+				i++
+				j--
+			}
+		}
+		// Now s[lo..j] <= pivot <= s[i..hi], and anything between equals it.
+		switch {
+		case k <= j:
+			hi = j
+		case k >= i:
+			lo = i
+		default:
+			return s[k]
+		}
+	}
+	return s[k]
+}
+
+// detectCandidateRegionsWithFloor finds regions 1.5-4 kHz wide, 6-10 dB above
+// noise. noiseFloor is the frame's estimateNoiseFloorMedianFilter, which every
+// caller has already computed for the threshold; it used to be computed again
+// here, from the same data and so to the same value, at half the cost of a
+// voice-activity scan.
+func detectCandidateRegionsWithFloor(data []float32, threshold, noiseFloor float32, binWidth float64, startFreq uint64, params DetectionParams) []CandidateRegion {
 	candidates := []CandidateRegion{}
 
 	// K consecutive bins above threshold (edge finding)
 	K := 3 // Require 3 consecutive bins to start/end a region
-
-	// Calculate noise floor for SNR
-	noiseFloor := estimateNoiseFloorMedianFilter(data, 0, 0, binWidth, startFreq)
 
 	var current *CandidateRegion
 	consecutiveAbove := 0
@@ -1007,7 +1068,7 @@ func detectVoiceActivityMultiFrame(buffer *FFTBuffer, params DetectionParams, wi
 
 		// Detect candidates in this frame
 		threshold := noiseFloor + params.ThresholdDB
-		frameCandidates := detectCandidateRegions(frame.Data, threshold, buffer.BinWidth, buffer.StartFreq, params)
+		frameCandidates := detectCandidateRegionsWithFloor(frame.Data, threshold, noiseFloor, buffer.BinWidth, buffer.StartFreq, params)
 
 		// Update region tracker with fuzzy matching
 		// Voice signals may shift bins slightly, so match within ±2 bins
@@ -1300,9 +1361,7 @@ func handleVoiceActivity(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	}
 
 	// Get FFT buffer for the band
-	nfm.fftMu.RLock()
-	buffer, ok := nfm.fftBuffers[band]
-	nfm.fftMu.RUnlock()
+	buffer, ok := nfm.fftBufferSnapshot(band)
 
 	if !ok {
 		w.WriteHeader(http.StatusNoContent)
@@ -1389,9 +1448,7 @@ func GetVoiceActivityForBand(nfm *NoiseFloorMonitor, band string, params Detecti
 		return []VoiceActivity{}, nil
 	}
 
-	nfm.fftMu.RLock()
-	buffer, ok := nfm.fftBuffers[band]
-	nfm.fftMu.RUnlock()
+	buffer, ok := nfm.fftBufferSnapshot(band)
 
 	if !ok {
 		return nil, fmt.Errorf("no FFT buffer found for band %s", band)
@@ -1455,9 +1512,7 @@ func GetVoiceActivityResponseForBand(nfm *NoiseFloorMonitor, band string, params
 		}
 	}
 
-	nfm.fftMu.RLock()
-	buffer, ok := nfm.fftBuffers[band]
-	nfm.fftMu.RUnlock()
+	buffer, ok := nfm.fftBufferSnapshot(band)
 
 	if !ok {
 		return VoiceActivityResponse{

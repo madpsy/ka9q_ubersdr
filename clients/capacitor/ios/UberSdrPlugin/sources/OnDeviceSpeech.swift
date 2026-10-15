@@ -12,6 +12,19 @@ import AVFoundation
 /// Speech recogniser of its own, so without this there is no local mode on an
 /// iPhone at all.
 ///
+/// Two recognisers stand behind it, picked once per receiver window:
+///
+///   * **iOS 26 and later: SpeechAnalyzer with a SpeechTranscriber**, in
+///     OnDeviceSpeechAnalyzer.swift. Built for long-form and live audio, on the
+///     device by design, with its models managed by AssetInventory rather than
+///     by the keyboard's Dictation languages — and, crucially, independent of
+///     the Siri and Dictation switches. SFSpeechRecognizer runs on the same
+///     engine as Dictation and Siri, and on an iPad with Dictation on but Siri
+///     off it failed every task with kLSRErrorDomain 201 "Siri and Dictation
+///     are disabled".
+///   * **Before iOS 26, or on hardware whose SpeechTranscriber says it is not
+///     available: SFSpeechRecognizer**, everything else in this file.
+///
 /// Three rules this is built around, and each one is a promise the page makes
 /// to the person using it:
 ///
@@ -19,6 +32,8 @@ import AVFoundation
 ///     and a language that cannot be recognised on the device is refused at
 ///     start rather than quietly sent to Apple's servers. The user chose "on
 ///     this device", and the receiver's audio is not this app's to send.
+///     (SpeechTranscriber has no server mode at all. What it may fetch is its
+///     own model, from Apple, once — the audio still never leaves.)
 ///   * **Never the microphone, and never the audio session.** The audio
 ///     arrives as buffers, so there is no AVAudioEngine input, no category
 ///     change and nothing for BackgroundAudio or PlaybackSession to notice.
@@ -45,12 +60,26 @@ final class OnDeviceSpeech {
     ///
     /// The device's own languages are tried first, so the usual answer comes
     /// from the first recogniser made rather than from walking the whole list.
+    ///
+    /// On iOS 26 with SpeechTranscriber the second condition is only that the
+    /// hardware can run it: a language that is supported but not yet on the
+    /// device is downloaded by Start (see OnDeviceSpeechAnalyzer), so a device
+    /// with nothing installed is still one that can transcribe.
     static func offered() -> Bool {
         switch SFSpeechRecognizer.authorizationStatus() {
         case .denied, .restricted: return false
         default: break
         }
+        if usesAnalyzer { return true }
         return candidates().contains { onDevice($0) != nil }
+    }
+
+    /// Whether this device takes the SpeechAnalyzer path. `isAvailable` is a
+    /// synchronous hardware check, which matters here: offered() runs while
+    /// the document-start script is being written.
+    static var usesAnalyzer: Bool {
+        if #available(iOS 26.0, *) { return SpeechTranscriber.isAvailable }
+        return false
     }
 
     /// The BCP-47 tags recognisable on the device now, hyphenated as the page
@@ -62,7 +91,7 @@ final class OnDeviceSpeech {
             .sorted()
     }
 
-    private static func tag(_ identifier: String) -> String {
+    static func tag(_ identifier: String) -> String {
         identifier.replacingOccurrences(of: "_", with: "-")
     }
 
@@ -154,19 +183,31 @@ final class OnDeviceSpeech {
     private static let quickFailureSeconds = 1.5
     private static let maxStrikes = 5
 
+    /// The SpeechAnalyzer engine, on a device that takes that path; every
+    /// message from the page goes to it instead of to the code below. Typed by
+    /// the protocol because a stored property cannot be marked iOS 26-only.
+    private let analyzer: SpeechEngine?
+
     init(send: @escaping (String) -> Void) {
         self.send = send
+        if #available(iOS 26.0, *), Self.usesAnalyzer {
+            analyzer = OnDeviceSpeechAnalyzer(send: send)
+        } else {
+            analyzer = nil
+        }
     }
 
     // MARK: - From the page
 
     func languages() {
+        if let analyzer = analyzer { return analyzer.languages() }
         queue.async {
             self.reply("stt-languages", Self.languages())
         }
     }
 
     func start(session id: Int, lang: String, sampleRate: Int) {
+        if let analyzer = analyzer { return analyzer.start(session: id, lang: lang, sampleRate: sampleRate) }
         queue.async {
             self.teardown()
             self.session = id
@@ -175,7 +216,7 @@ final class OnDeviceSpeech {
                                message: "the app takes 16 kHz audio, and was offered \(sampleRate) Hz")
                 return
             }
-            self.authorise { granted in
+            Self.authorise(on: self.queue) { granted in
                 guard self.session == id else { return }
                 guard granted else {
                     self.failStart(id, code: "not-allowed",
@@ -215,6 +256,7 @@ final class OnDeviceSpeech {
     /// back-off) is dropped: there is nothing to hear it, and holding it would
     /// only put the recogniser further behind the receiver.
     func push(session id: Int, base64: String) {
+        if let analyzer = analyzer { return analyzer.push(session: id, base64: base64) }
         queue.async {
             guard self.session == id, let u = self.current,
                   let data = Data(base64Encoded: base64), data.count >= 2 else { return }
@@ -242,6 +284,7 @@ final class OnDeviceSpeech {
     /// and carry on. Includes one still finishing — it is speech from the
     /// frequency the operator has just left.
     func reset(session id: Int) {
+        if let analyzer = analyzer { return analyzer.reset(session: id) }
         queue.async {
             guard self.session == id else { return }
             self.discard(self.finishing)
@@ -254,6 +297,7 @@ final class OnDeviceSpeech {
     }
 
     func stop(session id: Int) {
+        if let analyzer = analyzer { return analyzer.stop(session: id) }
         queue.async {
             guard self.session == id else { return }
             self.teardown()
@@ -262,12 +306,16 @@ final class OnDeviceSpeech {
 
     /// The receiver is closing, whatever the page last said.
     func stopAll() {
+        if let analyzer = analyzer { return analyzer.stopAll() }
         queue.async { self.teardown() }
     }
 
     // MARK: - Tasks
 
-    private func authorise(_ done: @escaping (Bool) -> Void) {
+    /// Speech-recognition permission, asked for at the first Start; `done`
+    /// runs on `queue`. Shared with the SpeechAnalyzer engine — see its
+    /// start() for why that path asks too.
+    static func authorise(on queue: DispatchQueue, _ done: @escaping (Bool) -> Void) {
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized:
             done(true)
@@ -276,7 +324,7 @@ final class OnDeviceSpeech {
             // answer arrives on a queue of the framework's choosing.
             DispatchQueue.main.async {
                 SFSpeechRecognizer.requestAuthorization { status in
-                    self.queue.async { done(status == .authorized) }
+                    queue.async { done(status == .authorized) }
                 }
             }
         default:
@@ -469,13 +517,13 @@ final class OnDeviceSpeech {
                 // "Siri and Dictation are disabled". A code the page does not
                 // know, so this sentence is the one it shows.
                 //
-                // iOS also reports it with Dictation on — for the dictation
-                // task hint (avoided in start()) and, per developer reports,
-                // while the dictation language is still downloading — so the
-                // message names both, and carries iOS's own words in brackets
-                // for whoever has to work out which.
+                // It means what it says, both halves: SFSpeechRecognizer runs
+                // on Siri's and Dictation's engine, and an iPad with Dictation
+                // on but Siri off failed every task with it. (iOS 26 does not
+                // come here — SpeechTranscriber needs neither switch.) iOS's
+                // own words go in brackets for whoever has to work out which.
                 return ("dictation-off",
-                        "iOS says dictation is unavailable (\(error.localizedDescription)). Check Settings › General › Keyboard: Enable Dictation is on and the English dictation language has finished downloading, then press Start again.")
+                        "iOS needs Siri and Dictation turned on for on-device recognition (\(error.localizedDescription)). Turn on Siri under Settings › Apple Intelligence & Siri, and Dictation under Settings › General › Keyboard, then press Start again.")
             case 102:
                 // "Failed to access assets": the language's on-device model is
                 // not there after all.
@@ -534,4 +582,16 @@ final class OnDeviceSpeech {
               let json = String(data: data, encoding: .utf8) else { return }
         send("\(prefix):\(json)")
     }
+}
+
+/// What HostChannel's speech-to-text messages need from an engine: the public
+/// face of OnDeviceSpeech, so that the iOS 26 engine can stand in for the code
+/// in that class without HostChannel knowing which one it has.
+protocol SpeechEngine: AnyObject {
+    func languages()
+    func start(session id: Int, lang: String, sampleRate: Int)
+    func push(session id: Int, base64: String)
+    func reset(session id: Int)
+    func stop(session id: Int)
+    func stopAll()
 }

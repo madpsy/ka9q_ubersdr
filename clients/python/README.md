@@ -66,60 +66,37 @@ chmod +x radio_client.py
 
 ## Building Standalone Executable
 
-You can build a standalone executable using PyInstaller, which bundles Python and all dependencies into a single file.
+The release binaries, `radio_client` (Linux x86-64) and `radio_client.exe`
+(Windows x86-64), are built by `build.sh` with PyInstaller:
 
-### Requirements
-
-- PyInstaller: `pip install pyinstaller`
-- An icon file: `ubersdr.ico` (should be in the same directory)
-
-### Build Steps
-
-1. Create and activate a virtual environment:
 ```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+./build.sh                 # both, into dist/
+./build.sh linux           # or just one: linux or windows
+./build.sh --test          # run the decoder and tuning-range tests first
+./build.sh --clean         # remove dist/ and build/ first
+./build.sh --publish       # then upload to the `latest` release (asks first)
 ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+Linux is built natively in `.venv` from `requirements.txt`. PyInstaller cannot
+cross-compile, so Windows is built under wine in a container
+(`batonogov/pyinstaller-windows`); it needs Docker and, for the native decoder,
+MinGW (`apt install gcc-mingw-w64-x86-64`). Both builds compile
+`pcm_v4_native.c`, the C version of the audio/IQ decoder, and bundle it; the
+Windows build also bundles `opus.dll`. After building, the script checks that
+each binary really contains them, and that it starts without warnings.
 
-3. Install PyInstaller:
-```bash
-pip install pyinstaller
-```
+macOS and Linux arm64 binaries are not built: they would need a build on that
+platform. Run `radio_client.py` from source there, as above.
 
-4. Build the executable:
+### Building on Windows
 
-**For Windows:**
-```bash
-pyinstaller --onefile radio_client.py --icon=ubersdr.ico
-```
-
-**For Linux/macOS:**
-```bash
-pyinstaller --onefile radio_client.py --icon=ubersdr.ico --hidden-import=PIL._tkinter_finder
-```
-
-5. The built executable will be in the `dist/` directory:
-```bash
-# Linux/macOS
-./dist/radio_client
-
-# Windows
-dist\radio_client.exe
-```
-
-### Build Notes
-
-- The `--onefile` flag creates a single executable file
-- The `--icon` flag sets the application icon (optional, omit if you don't have an icon file)
-- The `--hidden-import=PIL._tkinter_finder` flag is required on Linux/macOS to properly bundle PIL's Tkinter integration
-- The build process may take a few minutes
-- The resulting executable is platform-specific (build on the target OS)
-- The executable size will be larger (~50-100MB) as it includes Python and all dependencies
+To build the `.exe` on Windows itself, run `build-windows.bat`. It creates a
+venv, installs `requirements.txt` and runs `build-windows.py`, which uses the
+same `radio_client.spec`. Keep `opus.dll` next to the spec (it is checked in;
+`download_opus_dll.py` fetches it again if needed) and, for the fast decoder,
+build `pcm_v4_native.dll` there first, for example with MinGW:
+`x86_64-w64-mingw32-gcc -O2 -shared -static-libgcc -o pcm_v4_native.dll pcm_v4_native.c`.
+Without it the executable falls back to the slower pure Python decoder.
 
 ## Usage
 

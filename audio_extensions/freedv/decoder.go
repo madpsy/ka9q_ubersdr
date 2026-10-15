@@ -33,7 +33,7 @@ import (
  *   opus_data   - Opus-encoded audio bytes
  *
  * Opus encoding:
- *   - 16 kHz mono, AppVoIP application type
+ *   - 16 kHz mono, AppAudio with audio.opus bitrate and complexity (CELT)
  *   - 20 ms frames (320 samples at 16 kHz)
  *   - PCM from stdout is accumulated in a shared ring buffer.
  *     A time.Ticker emits exactly one Opus frame every 20 ms, re-pacing
@@ -82,9 +82,25 @@ type FreeDVDecoder struct {
 // NewFreeDVDecoder creates a new FreeDVDecoder but does not start the subprocess yet.
 // An Opus encoder is initialised here so that any error surfaces before the subprocess starts.
 func NewFreeDVDecoder(config FreeDVConfig) (*FreeDVDecoder, error) {
-	enc, err := opus.NewEncoder(config.OutputSampleRate, 1, opus.AppVoIP)
+	// The same encoder settings as the main listener path
+	// (NewOpusEncoderForClient): audio mode with audio.opus's bitrate and
+	// complexity. Both halves matter. VoIP mode codes with SILK, the speech
+	// codec, and so does audio mode while the bitrate is left on libopus's
+	// automatic choice; only audio mode with an explicit bitrate codes with
+	// CELT, at a fraction of SILK's CPU.
+	enc, err := opus.NewEncoder(config.OutputSampleRate, 1, opus.AppAudio)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Opus encoder (%d Hz): %w", config.OutputSampleRate, err)
+	}
+	if config.OpusBitrate > 0 {
+		if err := enc.SetBitrate(config.OpusBitrate); err != nil {
+			return nil, fmt.Errorf("failed to set Opus bitrate %d: %w", config.OpusBitrate, err)
+		}
+	}
+	if config.OpusComplexity > 0 {
+		if err := enc.SetComplexity(config.OpusComplexity); err != nil {
+			return nil, fmt.Errorf("failed to set Opus complexity %d: %w", config.OpusComplexity, err)
+		}
 	}
 
 	return &FreeDVDecoder{

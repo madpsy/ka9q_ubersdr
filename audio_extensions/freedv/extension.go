@@ -57,7 +57,16 @@ type GlobalConfigProvider struct {
 	// MaxFrequencyHz is the top of the receiver's tuning range (config.Receiver.MaxFrequency).
 	// Zero means "not supplied": maxFreqHz falls back to defaultMaxFreqHz.
 	MaxFrequencyHz int
+	OpusBitrate    int // audio.opus.bitrate, the listener encoder's bitrate
+	OpusComplexity int // audio.opus.complexity, the listener encoder's complexity
 }
+
+// The main package's audio.opus defaults, for when GlobalConfig leaves them
+// unset.
+const (
+	defaultOpusBitrate    = 48000
+	defaultOpusComplexity = 5
+)
 
 // GlobalConfig is set by main package before the extension is registered
 var GlobalConfig *GlobalConfigProvider
@@ -110,6 +119,8 @@ type FreeDVConfig struct {
 	Locator          string // FreeDV Reporter Maidenhead grid square (from instance config)
 	FreqHz           int64  // FreeDV Reporter frequency in Hz (from frontend, 0 = disabled)
 	Message          string // Optional FreeDV Reporter user message (from frontend)
+	OpusBitrate      int    // Opus bitrate for the decoded audio, bits/s
+	OpusComplexity   int    // Opus complexity, 0-10
 }
 
 // NewFreeDVExtension creates a new FreeDV audio extension
@@ -187,12 +198,20 @@ func NewFreeDVExtension(audioParams AudioExtensionParams, extensionParams map[st
 	config := FreeDVConfig{
 		InputSampleRate:  audioParams.SampleRate,
 		OutputSampleRate: outputSampleRate, // fixed — not user-configurable
+		OpusBitrate:      defaultOpusBitrate,
+		OpusComplexity:   defaultOpusComplexity,
 	}
 
 	// Callsign and locator come from the UberSDR instance configuration, not the frontend
 	if GlobalConfig != nil {
 		config.Callsign = GlobalConfig.Callsign
 		config.Locator = GlobalConfig.Locator
+		if GlobalConfig.OpusBitrate > 0 {
+			config.OpusBitrate = GlobalConfig.OpusBitrate
+		}
+		if GlobalConfig.OpusComplexity > 0 {
+			config.OpusComplexity = GlobalConfig.OpusComplexity
+		}
 	}
 
 	// tuned_frequency_hz is injected automatically by the audio extension manager

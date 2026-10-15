@@ -24,7 +24,7 @@ func GetInfo() map[string]interface{} {
 		"output_format": map[string]interface{}{
 			"type":        "binary",
 			"description": "Binary protocol carrying Opus-encoded decoded DRM audio frames. Frames are only sent when a DRM signal is actively being decoded.",
-			"encoding":    "Opus (AppVoIP, 12 kHz mono, 20 ms frames / 240 samples)",
+			"encoding":    "Opus (AppAudio/CELT at audio.opus bitrate, 12 kHz mono, 20 ms frames / 240 samples)",
 			"protocol": map[string]interface{}{
 				"opus_frame": map[string]interface{}{
 					"type":        0x02,

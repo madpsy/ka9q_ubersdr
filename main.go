@@ -1939,6 +1939,8 @@ func main() {
 		Locator:        latLonToGridSquare(config.Admin.GPS.Lat, config.Admin.GPS.Lon),
 		MaxUsers:       freedvMaxUsers,
 		MaxFrequencyHz: int(config.Receiver.MaxFreq()),
+		OpusBitrate:    config.Audio.Opus.Bitrate,
+		OpusComplexity: config.Audio.Opus.Complexity,
 	}
 	freedvInfo := freedv.GetInfo()
 
@@ -1975,7 +1977,11 @@ func main() {
 	if drmMaxUsers == 0 {
 		drmMaxUsers = 5 // default: 5 concurrent users — heavier than FreeDV
 	}
-	drm.GlobalConfig = &drm.GlobalConfigProvider{MaxUsers: drmMaxUsers}
+	drm.GlobalConfig = &drm.GlobalConfigProvider{
+		MaxUsers:       drmMaxUsers,
+		OpusBitrate:    config.Audio.Opus.Bitrate,
+		OpusComplexity: config.Audio.Opus.Complexity,
+	}
 	drmInfo := drm.GetInfo()
 
 	drmFactoryWrapper := func(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (AudioExtension, error) {

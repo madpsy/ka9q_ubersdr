@@ -80,11 +80,13 @@ type AudioExtension interface {
 // GlobalConfigProvider carries the instance settings the extension needs.
 // Set by the main package before the extension is registered.
 type GlobalConfigProvider struct {
-	MaxUsers int // Maximum concurrent users (0 = unlimited)
+	MaxUsers       int // Maximum concurrent users (0 = unlimited)
+	OpusBitrate    int // audio.opus.bitrate, the listener encoder's bitrate
+	OpusComplexity int // audio.opus.complexity, the listener encoder's complexity
 }
 
 // GlobalConfig is set by the main package before registration; nil means no
-// limit is enforced.
+// limit is enforced and the Opus defaults below apply.
 var GlobalConfig *GlobalConfigProvider
 
 // activeUserCount tracks concurrent DRM users. Each one holds a Dream OFDM
@@ -110,7 +112,16 @@ type DRMExtension struct {
 type DRMConfig struct {
 	InputSampleRate  int // IQ sample rate fed to the binary (from audioParams.SampleRate)
 	OutputSampleRate int // Sample rate the binary outputs decoded audio at (always 12000)
+	OpusBitrate      int // Opus bitrate for the decoded audio, bits/s
+	OpusComplexity   int // Opus complexity, 0-10
 }
+
+// The main package's audio.opus defaults, for when GlobalConfig leaves them
+// unset.
+const (
+	defaultOpusBitrate    = 48000
+	defaultOpusComplexity = 5
+)
 
 // NewDRMExtension creates a new DRM audio extension.
 func NewDRMExtension(audioParams AudioExtensionParams, extensionParams map[string]interface{}) (*DRMExtension, error) {
@@ -161,6 +172,16 @@ func NewDRMExtension(audioParams AudioExtensionParams, extensionParams map[strin
 	config := DRMConfig{
 		InputSampleRate:  audioParams.SampleRate,
 		OutputSampleRate: outputSampleRate,
+		OpusBitrate:      defaultOpusBitrate,
+		OpusComplexity:   defaultOpusComplexity,
+	}
+	if GlobalConfig != nil {
+		if GlobalConfig.OpusBitrate > 0 {
+			config.OpusBitrate = GlobalConfig.OpusBitrate
+		}
+		if GlobalConfig.OpusComplexity > 0 {
+			config.OpusComplexity = GlobalConfig.OpusComplexity
+		}
 	}
 
 	decoder, err := NewDRMDecoder(config)

@@ -60,13 +60,14 @@
 #include <string>
 #include <vector>
 
-// The order-16 IQ block runs in SIMD registers: AVX2 on x86-64 with GCC or
-// Clang, chosen at run time (see ComplexStage::haveAVX2), so a build for any
-// x86-64 uses it where the CPU has it; NEON on arm64, which every core has.
+// The order-16 IQ block runs in SIMD registers: AVX2 on x86 (64-bit, and the
+// 32-bit CW Skimmer DLL), chosen at run time (see ComplexStage::haveAVX2), so a
+// build for any x86 uses it where the CPU has it; NEON on arm64, which every
+// core has.
 // Elsewhere, or with UBERSDR_PCMV4_NO_SIMD defined, the per-frame path runs
 // with the same output.
 #if !defined(UBERSDR_PCMV4_NO_SIMD)
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #define UBERSDR_PCMV4_AVX2 1
 #include <immintrin.h>
 #if defined(_MSC_VER) && defined(__clang__)
@@ -442,8 +443,13 @@ public:
             const __m128i sR = _mm_add_epi64(_mm256_castsi256_si128(accR), _mm256_extracti128_si256(accR, 1));
             const __m128i sI = _mm_add_epi64(_mm256_castsi256_si128(accI), _mm256_extracti128_si256(accI, 1));
             const __m128i sum = _mm_add_epi64(_mm_unpacklo_epi64(sR, sI), _mm_unpackhi_epi64(sR, sI));
-            const int64_t pr = _mm_cvtsi128_si64(sum);
-            const int64_t pi = _mm_extract_epi64(sum, 1);
+            // Through memory rather than _mm_cvtsi128_si64/_mm_extract_epi64,
+            // which need 64-bit registers: the same header builds the 32-bit
+            // CW Skimmer DLL, and on x86-64 the store costs nothing measurable.
+            int64_t sums[2];
+            _mm_storeu_si128((__m128i *)sums, sum);
+            const int64_t pr = sums[0];
+            const int64_t pi = sums[1];
             // predRoundShift without a branch: |v| rounded, its sign put back.
             const int64_t sgr = pr >> 63, sgi = pi >> 63;
             const int64_t qr = (int64_t)((((uint64_t)((pr ^ sgr) - sgr) + (uint64_t)half) >> kTapShift) ^ (uint64_t)sgr) - sgr;

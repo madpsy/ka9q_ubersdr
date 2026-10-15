@@ -54,8 +54,39 @@ if ! gcc -std=gnu11 -Wall -Wextra -O1 -g -fsanitize=address,undefined \
         -o "$BUILD/pcmv4_conformance_asan" pcmv4_conformance.c ../pcm_v4.c; then
     echo "FAIL sanitizer build"; exit 1
 fi
+# The order-16 IQ block against cstage_inverse, with the SIMD kernel this
+# machine has, without it, and under ASan and UBSan.
+for v in "block::" "block_nosimd::-DPCMV4_NO_SIMD" "block_san:-O1 -g -fsanitize=address,undefined -fno-sanitize-recover:"; do
+    name=${v%%:*}; rest=${v#*:}; extra=${rest%%:*}; def=${rest#*:}
+    if ! gcc -std=gnu11 -Wall -Wextra -O2 $extra $def -o "$BUILD/pcmv4_$name" pcmv4_block_test.c -lm; then
+        echo "FAIL $name build"; exit 1
+    fi
+done
+# And the fixtures decoded without it must hash the same.
+if ! gcc -std=gnu11 -Wall -Wextra -O2 -DPCMV4_NO_SIMD -o "$BUILD/pcmv4_conformance_nosimd" \
+        pcmv4_conformance.c ../pcm_v4.c; then
+    echo "FAIL no-SIMD build"; exit 1
+fi
 
 echo "== cases =="
+
+for name in block block_nosimd block_san; do
+    if out=$("$BUILD/pcmv4_$name" 2>&1); then
+        echo "PASS pcmv4-$name: $out"; pass=$((pass+1))
+    else
+        echo "FAIL pcmv4-$name: $out"; fail=$((fail+1))
+    fi
+done
+
+for fx in pcmv4_stream:EXPECTED_SHA256 pcmv4_rice_edge:RICE_EDGE_SHA256 pcmv4_scaled:SCALED_SHA256; do
+    f=${fx%%:*}; var=${fx##*:}; want=${!var}
+    got=$("$BUILD/pcmv4_conformance_nosimd" testdata/$f.bin 2>/dev/null | sha256sum | cut -d" " -f1)
+    if [ "$got" = "$want" ]; then
+        echo "PASS $f (no SIMD)"; pass=$((pass+1))
+    else
+        echo "FAIL $f (no SIMD): samples hash to $got, want $want"; fail=$((fail+1))
+    fi
+done
 
 got=$("$BUILD/pcmv4_conformance" testdata/pcmv4_stream.bin 2>/dev/null | sha256sum | cut -d" " -f1)
 if [ "$got" = "$EXPECTED_SHA256" ]; then

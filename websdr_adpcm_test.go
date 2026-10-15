@@ -651,3 +651,110 @@ func BenchmarkWebSDRADPCMEncodePacket(b *testing.B) {
 		msg = enc.Encode(msg[:0], pkts[i%len(pkts)], 900)
 	}
 }
+
+// AM, SAM and FM arrive at 24 kHz and leave at 12: the rate tag says 12000,
+// the client gets half the samples, and they are the decimator's output. A
+// switch back to a 12 kHz mode passes through untouched.
+func TestWebSDRStreamADPCMHalves24k(t *testing.T) {
+	const n24 = 2560 // 20 blocks at 12 kHz once halved
+	tone := make([]int16, n24)
+	for i := range tone {
+		tone[i] = int16(8000 * math.Sin(2*math.Pi*1000*float64(i)/24000))
+	}
+	pcm24 := make([]byte, 2*n24)
+	for i, x := range tone {
+		binary.BigEndian.PutUint16(pcm24[2*i:], uint16(x))
+	}
+	want := bytesToInt16Samples(newKiwiDecimator(24000, 12000).Process(pcm24))
+	tone12 := websdrADPCMSignals(1280)[1].pcm
+	pcm12 := make([]byte, 2*len(tone12))
+	for i, x := range tone12 {
+		binary.BigEndian.PutUint16(pcm12[2*i:], uint16(x))
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websdrUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		h := &WebSDRHandler{sessions: &SessionManager{}, config: &Config{}}
+		c := newWebSDRConn(conn, h, "127.0.0.1")
+		c.loKHz, c.hiKHz = -4.5, 4.5
+		c.session = &Session{AudioChan: make(chan AudioPacket, 4), Done: make(chan struct{})}
+		c.session.AudioChan <- AudioPacket{PCMData: pcm24, SampleRate: 24000, Channels: 1}
+		c.session.AudioChan <- AudioPacket{PCMData: pcm12, SampleRate: 12000, Channels: 1}
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			close(c.session.Done)
+		}()
+		c.streamADPCMAudio(make(chan struct{}))
+		conn.Close()
+	}))
+	defer srv.Close()
+
+	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer ws.Close()
+	var d websdrADPCMRefDecoder
+	var rates []int
+	var stream bytes.Buffer // the messages as sent, for the original client below
+	_ = ws.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		_, m, err := ws.ReadMessage()
+		if err != nil {
+			break
+		}
+		d.message(m)
+		rates = append(rates, d.C)
+		_ = binary.Write(&stream, binary.LittleEndian, uint32(len(m)))
+		stream.Write(m)
+	}
+	if len(rates) != 2 || rates[0] != 12000 || rates[1] != 12000 {
+		t.Fatalf("rates per message %v, want [12000 12000]", rates)
+	}
+	if len(d.out) != len(want)+len(tone12) {
+		t.Fatalf("decoded %d samples, want %d halved plus %d", len(d.out), len(want), len(tone12))
+	}
+	if snr := websdrADPCMSNR(want, d.out[:len(want)]); snr < 30 {
+		t.Errorf("halved tone SNR %.1f dB against the decimator's output", snr)
+	}
+	if snr := websdrADPCMSNR(tone12, d.out[len(want):]); snr < 30 {
+		t.Errorf("12 kHz tone after the switch SNR %.1f dB", snr)
+	}
+
+	// The same messages through PA3FWM's own client, the one served to
+	// browsers. Its recorder keeps every sample only below 10 kHz; at 12 kHz it
+	// records at 6 kHz and keeps the odd ones, which must match exactly.
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	cmd := exec.Command(node, "testdata/websdr_adpcm_harness.js", "websdr/websdr-sound-adpcm.js")
+	cmd.Stdin = &stream
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("harness: %v\n%s", err, stderr.String())
+	}
+	var res struct {
+		PCM  string `json:"pcm"`
+		Rate int    `json:"rate"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("harness output: %v", err)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(res.PCM)
+	got := make([]int16, len(raw)/2)
+	_ = binary.Read(bytes.NewReader(raw), binary.LittleEndian, got)
+	if res.Rate != 6000 || len(got) != len(d.out)/2 {
+		t.Fatalf("client recorded %d samples at %d Hz, want %d at 6000", len(got), res.Rate, len(d.out)/2)
+	}
+	for i, x := range got {
+		if x != d.out[2*i+1] {
+			t.Fatalf("client sample %d is %d, want %d", i, x, d.out[2*i+1])
+		}
+	}
+}

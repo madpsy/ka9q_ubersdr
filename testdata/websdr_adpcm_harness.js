@@ -69,10 +69,14 @@ for (let off = 0; off < input.length; ) {
   if (++fed === skip) applet.rec_start();
 }
 const rec = applet.rec_finish();
+// websdr-base.js reads the S-meter inside try/catch, falling back to 0: the 2014
+// client's smeter() throws until the first S-meter tag has arrived.
+let smeter = 0;
+try { smeter = applet.smeter(); } catch (e) { smeter = 0; }
 const pcm = Buffer.concat(rec.wavdata.map((b) => Buffer.from(b)));
 process.stdout.write(JSON.stringify({
   pcm: pcm.toString('base64'),
-  smeter: applet.smeter(),
+  smeter,
   rate: rec.sr,
   url: ws.url,
 }));

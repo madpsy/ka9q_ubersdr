@@ -530,11 +530,22 @@ func (h *WebSDRHandler) serveSoundJS(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filePath)
 }
 
+// websdrADPCMMaxRate is the highest rate streamADPCMAudio sends. The client's
+// widest output low-pass is 6.1 kHz (websdrADPCMFilter6k1), so 12 kHz carries
+// everything it can play. AM, SAM and FM arrive at 24 kHz and are halved
+// first, which halves their bitrate (about 145 kbps to 75) and most of their
+// encoding cost. The decimator's anti-alias filter cuts off at 5.4 kHz,
+// so only an AM passband widened past that loses its top few hundred Hz. A
+// live WebSDR sends about 7 kHz.
+const websdrADPCMMaxRate = 12000
+
 // streamADPCMAudio streams audio in the original WebSDR format, one message per
 // radiod packet.
 func (c *websdrConn) streamADPCMAudio(done <-chan struct{}) {
 	enc := newWebSDRADPCMEncoder(websdrADPCMStep)
 	var msg []byte
+	var decim *kiwiDecimator
+	decimIn := 0
 	for {
 		select {
 		case <-done:
@@ -564,14 +575,25 @@ func (c *websdrConn) streamADPCMAudio(done <-chan struct{}) {
 			if pkt.Channels > 1 { // IQ; no WebSDR mode asks for it, and ADPCM is mono
 				continue
 			}
-			enc.SetRate(sampleRate)
+			// A mode change brings a new rate; the filter history belongs to
+			// the old stream, so start a fresh decimator. A rate with no
+			// integer ratio to websdrADPCMMaxRate gets none and goes out as
+			// it is, which the client still plays correctly.
+			if sampleRate != decimIn {
+				decimIn = sampleRate
+				decim = nil
+				if sampleRate > websdrADPCMMaxRate {
+					decim = newKiwiDecimator(sampleRate, websdrADPCMMaxRate)
+				}
+			}
+			pcm := decim.Process(pkt.PCMData) // runs while muted too, so its phase stays even
+			enc.SetRate(sampleRate / decim.Factor())
 			enc.SetFilter(websdrADPCMFilterFor(loKHz*1000, hiKHz*1000))
 
-			samples := len(pkt.PCMData) / 2
 			if muted {
-				msg = enc.Silence(msg[:0], samples)
+				msg = enc.Silence(msg[:0], len(pcm)/2)
 			} else {
-				msg = enc.Encode(msg[:0], bytesToInt16Samples(pkt.PCMData), smeter)
+				msg = enc.Encode(msg[:0], bytesToInt16Samples(pcm), smeter)
 			}
 			if err := c.sendBinary(msg); err != nil {
 				return

@@ -389,6 +389,10 @@ class RadioClient:
         self.pcm_last_sample_rate = None
         self.pcm_last_channels = None
 
+        # (sample rate, channels) last announced for stdout/udp raw output, so a
+        # reader is told the real format once audio arrives and again on change
+        self.raw_output_format = None
+
         # Signal quality metrics from audio packets (version 2 protocol)
         self.baseband_power = -999.0  # dBFS
         self.noise_density = -999.0   # dBFS
@@ -1188,6 +1192,8 @@ class RadioClient:
         # carries them, forward-filled from the last resynchronisation point.
         self.pcm_last_sample_rate = header.sample_rate
         self.pcm_last_channels = header.channels
+        if self.sample_rate != header.sample_rate:
+            self.sample_rate = header.sample_rate
 
         # Version 3 and 4 both report passband noise power, so the SNR the rest
         # of the client shows is on the same scale either way.
@@ -1483,6 +1489,7 @@ class RadioClient:
 
         if self.output_mode == 'stdout':
             # Write raw PCM to stdout
+            self._announce_raw_output("stdout output", audio_array.shape[1] if audio_array.ndim == 2 else 1)
             sys.stdout.buffer.write(pcm_data)
             sys.stdout.buffer.flush()
 
@@ -1535,6 +1542,9 @@ class RadioClient:
                     # Use audio BEFORE channel selection was applied
                     udp_audio = self._prepare_udp_audio(audio_before_channel_selection)
                     udp_pcm = np.clip(udp_audio * 32768.0, -32768, 32767).astype(np.int16).tobytes()
+                    udp_channels = udp_audio.shape[1] if udp_audio.ndim == 2 else 1
+                    if self._announce_raw_output(f"UDP output to {self.udp_host}:{self.udp_port}", udp_channels):
+                        print(f"VLC command: vlc --demux=rawaud \"udp://@:{self.udp_port}\" --rawaud-channels={udp_channels} --rawaud-samplerate={self.sample_rate}", file=sys.stderr)
                     self.udp_socket.sendto(udp_pcm, (self.udp_host, self.udp_port))
                 except Exception as e:
                     print(f"UDP send error: {e}", file=sys.stderr)
@@ -1555,6 +1565,21 @@ class RadioClient:
             # Write to WAV file
             if self.wav_writer:
                 self.wav_writer.writeframes(pcm_data)
+
+    def _announce_raw_output(self, label: str, channels: int) -> bool:
+        """Print the format of raw stdout/udp output when first known or changed.
+
+        The rate comes from the stream (it differs between modes and can change
+        on a retune), so it is announced from the audio path, not at connect.
+        Returns True if a line was printed.
+        """
+        fmt = (self.sample_rate, channels)
+        if fmt == self.raw_output_format:
+            return False
+        changed = " changed" if self.raw_output_format is not None else ""
+        self.raw_output_format = fmt
+        print(f"{label}{changed}: {self.sample_rate} Hz, {channels} channel(s)", file=sys.stderr, flush=True)
+        return True
 
     def check_duration(self) -> bool:
         """Check if duration limit has been reached."""
@@ -1983,10 +2008,9 @@ class RadioClient:
                 elif self.output_mode == 'null':
                     pass  # discard all audio (used by headless extension modes)
                 elif self.output_mode == 'stdout':
-                    print(f"stdout output: {self.sample_rate} Hz, {self.output_channels} channel(s)", file=sys.stderr)
+                    print("stdout output: sample rate not known yet, printed when audio arrives", file=sys.stderr)
                 elif self.output_mode == 'udp':
-                    print(f"UDP output to {self.udp_host}:{self.udp_port}: {self.sample_rate} Hz, {self.output_channels} channel(s)", file=sys.stderr)
-                    print(f"VLC command: vlc --demux=rawaud \"udp://@:{self.udp_port}\" --rawaud-channels={self.output_channels} --rawaud-samplerate={self.sample_rate}", file=sys.stderr)
+                    print(f"UDP output to {self.udp_host}:{self.udp_port}: sample rate not known yet, printed when audio arrives", file=sys.stderr)
 
                 # Start keepalive task
                 keepalive_task = asyncio.create_task(self.send_keepalive(websocket))

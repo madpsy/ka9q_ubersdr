@@ -10,7 +10,7 @@
 // while believing it is same-origin with it.
 
 const {
-    app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, safeStorage, shell, session, webContents,
+    app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, net, safeStorage, shell, session, webContents,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -28,6 +28,8 @@ const deeplink = require('./deeplink');
 const updates = require('./updates');
 const { browserUserAgent } = require('./useragent');
 const { installHidHandlers, patchRows, pickerTitle } = require('./hid');
+const { SttService, registerSttIpc, sttPaths, readJson } = require('./stt');
+const { ModelManager } = require('./sttmodels');
 
 // The v2 start overlay already gates audio behind a click; this just keeps
 // Chromium's autoplay heuristics from ever muting a reconnect.
@@ -78,6 +80,8 @@ try { buildInfo = fs.readFileSync(path.join(__dirname, 'ui', 'BUILD_INFO'), 'utf
 let store;
 /** @type {SharedPrefs} */
 let prefs;
+/** @type {SttService} */
+let stt;
 // Set when a link started this run — see the chooser's auto-connect setting.
 let launchedFromLink = false;
 let chooserWin = null;
@@ -339,6 +343,9 @@ async function connectInstance(desc, { query = '' } = {}) {
         // A listening socket outlives the window that asked for it unless it is
         // closed here, and the next window on the same port then cannot start.
         if (gone && gone.surface) gone.surface.stop();
+        // Its speech recogniser, which is a process of its own and would
+        // otherwise sit on a model's worth of memory for a window that is gone.
+        if (gone && gone.stt) gone.stt.dispose();
         running.delete(entry.id);
         notifyChooser();
     });
@@ -346,6 +353,8 @@ async function connectInstance(desc, { query = '' } = {}) {
     const rec = {
         id: entry.id, proxy, win, links: null, layout: null, menu: null, radio: null,
         surface: null, audioPort: null,
+        // Its speech-to-text helper, made on first use — see sttFor.
+        stt: null,
         // The windows this one has opened — see trackPopup.
         popups: new Set(),
         // How far this receiver tunes, once asked. Null until then, which every reader
@@ -977,6 +986,62 @@ function recordFor(contents) {
     return null;
 }
 
+// A receiver window's speech recogniser, made the first time its page asks —
+// most windows never transcribe, and the helper itself is only started at the
+// first Start (see stt.js). Null for anything that is not a receiver window.
+function sttFor(contents) {
+    const rec = recordFor(contents);
+    if (!rec || !stt) return null;
+    if (!rec.stt) {
+        const { win } = rec;
+        rec.stt = stt.createWindow((msg) => {
+            if (!win.isDestroyed()) win.webContents.send('stt:event', msg);
+        });
+    }
+    return rec.stt;
+}
+
+// Whether the page behind an IPC call may manage the speech models: only this
+// client's own bundled UI, as the main frame of a receiver window. A receiver
+// window can also be showing pages the receiver served (see
+// InstanceProxy.isBundledPage), and those may transcribe but not delete a
+// download or choose the model every window uses. The URL is the page's as it
+// is now, asked at each call, not as it was when the preload ran.
+function sttModelsAllowed(event) {
+    const contents = event && event.sender;
+    if (!contents || !stt) return false;
+    const rec = recordFor(contents);
+    if (!rec) return false;
+    // By ids rather than identity: the same frame need not come back as the
+    // same WebFrameMain object.
+    const frame = event.senderFrame;
+    const main = contents.mainFrame;
+    if (frame && main && (frame.processId !== main.processId || frame.routingId !== main.routingId)) return false;
+    return rec.proxy.isBundledPage(contents.getURL());
+}
+
+/**
+ * Local speech-to-text: the helper and models for this platform, the pins for
+ * the one that is downloaded, and which one is chosen — kept with the
+ * chooser's settings, since it is the app's rather than any receiver's.
+ *
+ * net.fetch rather than Node's: it goes through Chromium's network stack, so a
+ * proxy configured on the system, or a certificate an organisation installed,
+ * applies to the model download as it does to everything else here.
+ */
+function createStt() {
+    const paths = sttPaths();
+    const models = new ModelManager({
+        pins: readJson(paths.pins) || {},
+        builtinDir: paths.modelsDir,
+        dir: path.join(app.getPath('userData'), 'whisper-models'),
+        getActive: () => store.chooser.sttModel || null,
+        setActive: (id) => { store.setChooser({ sttModel: id || undefined }); },
+        fetch: (url, init) => net.fetch(url, init),
+    });
+    return new SttService({ paths, models });
+}
+
 // The popups, and which receiver each one belongs to.
 //
 // `window.open` from the v2 page produces a top-level window with no parent, so
@@ -1217,6 +1282,11 @@ function setupIpc() {
         if (serialPicker) serialPicker.finish(portId);
     });
 
+    // Local speech-to-text: sessions for each receiver window's page, and the
+    // models they run on. The channels, and what a page can and cannot do with
+    // them, are in stt.js.
+    registerSttIpc({ ipcMain, service: stt, windowFor: sttFor, modelsAllowed: sttModelsAllowed });
+
     ipcMain.handle('instances:sort', () => store.sort);
     ipcMain.handle('instances:set-sort', (_e, value) => store.setSort(value));
 
@@ -1313,6 +1383,15 @@ function setupIpc() {
         event.returnValue = rec ? {
             upstreamOrigin: rec.proxy.upstreamOrigin,
             password: store.passwordFor(rec.id),
+            // Whether this build can transcribe on this computer: the preload
+            // declares `stt` to the page only if so. Asked here, at load, for
+            // the same reason as the rest — the page looks once.
+            stt: !!stt && stt.available(),
+            // ...and whether it may also manage the models, which only this
+            // client's own page may — see sttModelsAllowed, which the main
+            // process checks again at every call.
+            sttModels: !!stt && stt.available()
+                && rec.proxy.isBundledPage((event.senderFrame && event.senderFrame.url) || event.sender.getURL()),
         } : null;
     });
 
@@ -1393,6 +1472,7 @@ app.whenReady().then(() => {
     // store, because on Linux it is only answerable once the app is ready.
     store = new InstanceStore(app.getPath('userData'), safeStorage);
     prefs = new SharedPrefs(app.getPath('userData'));
+    stt = createStt();
     setupSession();
     setupMenu();
     setupIpc();
@@ -1430,3 +1510,10 @@ app.on('activate', () => showChooser());
 // platform. (`activate` above still opens the chooser while the app is running,
 // and a ubersdr:// link starts it again from cold.)
 app.on('window-all-closed', () => app.quit());
+
+// The windows' own close handlers end their helpers, but a quit from the menu
+// can come with a model downloading, and a helper process must never outlive
+// the app that started it. (Each also exits by itself when its stdin closes.)
+app.on('will-quit', () => {
+    if (stt) stt.disposeAll();
+});

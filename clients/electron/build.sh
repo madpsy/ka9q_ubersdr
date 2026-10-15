@@ -204,6 +204,44 @@ build_omnirig_helper() {
     fi
 }
 
+# Local speech-to-text's helper and models (whisper/), which every package
+# carries in resources/whisper/ — see the //whisper note in package.json.
+#
+# Built in Docker like the OmniRig helper, for the platforms this run packages.
+# Without Docker the helper is not rebuilt and whatever whisper/dist/ already
+# holds is packaged, but the models are still fetched — that is only curl, and
+# a helper with no model is as good as none. A failed build stops the run, as a
+# failed OmniRig build does: a release that has quietly lost a feature is worse
+# than one that is late.
+#
+# The Mac's helper is not built here. whisper/build.sh builds it over ssh on a
+# Mac, and that is build-mac.sh's half of a release; nothing a Linux run
+# packages needs it.
+#
+# What is missing is said per platform either way, because a package without
+# local speech-to-text is complete in every other respect and nothing else
+# would mention it: the preload simply offers no local mode.
+build_whisper_helper() {
+    local platforms="$1"
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+        whisper/build.sh --only="$platforms,models"
+    else
+        echo "no docker — the speech-to-text helper is not rebuilt; packaging what whisper/dist/ holds" >&2
+        whisper/build.sh --only=models || echo "could not fetch the speech-to-text models" >&2
+    fi
+    whisper_report "$platforms"
+}
+
+whisper_report() {
+    local dir
+    for dir in ${1//,/ }; do
+        compgen -G "whisper/dist/$dir/whisper-helper*" >/dev/null \
+            || echo "no whisper/dist/$dir/ — those packages will have no local speech-to-text" >&2
+    done
+    [[ -f whisper/dist/models/ggml-base-q5_1.bin && -f whisper/dist/models/ggml-silero-v6.2.0.bin ]] \
+        || echo "no models in whisper/dist/models/ — no package will have local speech-to-text" >&2
+}
+
 # What the dmg about to be built will and will not be, said before it is built.
 #
 # A signed-and-notarised dmg and an unsigned one are the same file to look at,
@@ -622,6 +660,7 @@ if [[ "$PACKAGE" -eq 1 ]]; then
             echo "--linux builds the AppImage and the .deb, which need a Linux host (this is $(uname -s))" >&2
             exit 1
         fi
+        build_whisper_helper linux-x64,linux-arm64
         build_linux
         # WIN_INSTALLER stays 0, so the Windows half below is skipped entirely.
     else
@@ -632,13 +671,18 @@ if [[ "$PACKAGE" -eq 1 ]]; then
             # An `[[ ]] && x` here would be the last command of the branch, and
             # under `set -e` a false test would end the script.
             Linux)  build_omnirig_helper
+                    build_whisper_helper linux-x64,linux-arm64,win-x64
                     build_linux --win zip
                     if [[ "$WIN_INSTALLER" -eq 0 ]]; then WIN_INSTALLER=1; fi ;;
             # Said before the build rather than after: notarisation adds
             # several minutes of uploading and waiting to it, and finding out
             # then that there were no credentials to notarise with is finding
             # out too late to do anything but start again.
+            # The speech-to-text helper is built by whisper/build.sh from
+            # Linux, over ssh to a Mac; on the Mac itself it is whatever
+            # whisper/dist/darwin-universal already holds.
             Darwin) mac_signing_report
+                    whisper_report darwin-universal
                     ./node_modules/.bin/electron-builder --mac ;;
             # Already on Windows: NSIS builds natively, and Docker would be a
             # detour through a Linux VM to reach the toolchain already present.
@@ -646,6 +690,7 @@ if [[ "$PACKAGE" -eq 1 ]]; then
             # whatever omnirig/dist already holds.
             *)      [[ -f omnirig/dist/omnirig-helper.exe ]] \
                         || echo "omnirig/dist/omnirig-helper.exe is missing — this build will have no OmniRig support" >&2
+                    whisper_report win-x64
                     ./node_modules/.bin/electron-builder --win nsis
                     WIN_INSTALLER=0 ;;
         esac

@@ -17,3 +17,6 @@ node tuningrange.test.js
 node omnirig.test.js
 node hid.test.js
 node devicepicker.test.js
+# Runs the real whisper-helper where whisper/build.sh has built one, and says
+# which tests it skipped where not.
+node stt.test.js

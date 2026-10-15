@@ -78,8 +78,8 @@ import { RATE, preferredVoice, voiceForLanguage, voiceGroups } from './speech.js
 import { useSpeech } from './useSpeech.js';
 import {
     LOCAL_NO_LANGUAGES, SOURCE_LOCAL, SOURCE_SERVER, SPOKEN_CANDIDATES, WATCHDOG_EMPTY, closestLanguage,
-    describeError, languageError, loadSource, loadSpoken, pickSource, saveSource, saveSpoken, sourcePhrase,
-    spokenName, translationPair, watchdogStep,
+    describeError, downloadPercent, languageError, loadSource, loadSpoken, modelLabel, pickSource, saveSource,
+    saveSpoken, sourcePhrase, spokenName, translationPair, watchdogStep,
 } from './local.js';
 import { LOCAL_EMPTY, finishSentence, foldResult, liveSegment } from './localSegments.js';
 import {
@@ -87,6 +87,7 @@ import {
     localEngineKind, localLanguages, localUnavailableReason, probeBrowserTrack,
 } from './engines/index.js';
 import { createLineTranslator } from './translate.js';
+import { useHostModels } from './useHostModels.js';
 import { saveFile } from '../../lib/saveFile.js';
 
 // Text size of the console, in px. v1's range and starting point. The console
@@ -315,6 +316,13 @@ export default function WhisperExtension({ minimal }) {
     // which is what this component always was.
     const source = picked.source;
     const local = source === SOURCE_LOCAL;
+
+    // The host recogniser's models, where it has a choice of them — see
+    // ./useHostModels.js. Only asked while local is the source.
+    const models = useHostModels({ stt: localKind === 'host' ? hostStt() : null, enabled: local });
+    const modelApplied = models.applied;
+    // A setter's wrapper, so safe to call from a callback an older render made.
+    const refreshModels = models.refresh;
 
     const [decoding, setDecoding] = useState(false);
     // Read when a translated line comes back, which may be after Stop.
@@ -608,7 +616,8 @@ export default function WhisperExtension({ minimal }) {
     // `spokenLang`; until then Start shows "Starting…", which is what it is.
     // And not with no language at all: the note says why. A fatal error ends
     // it from the inside, and is the one thing that turns Start off without
-    // the user pressing Stop.
+    // the user pressing Stop. A change of the host's model starts it again
+    // too, since the host takes the model at start.
     useEffect(() => {
         if (!local || !decoding || !live || !localKind || !spokenReady || noLanguages) return undefined;
         const engine = createLocalEngine(localKind, { player });
@@ -644,6 +653,8 @@ export default function WhisperExtension({ minimal }) {
                 if (run.stopped || !e) return;
                 if (e.fatal) fail(e);
                 else setLocalNote(e);
+                // The host started on another model than the menu shows.
+                if (e.code === 'model-fallback') refreshModels();
             },
             onEnd: () => {
                 if (run.stopped) return;
@@ -674,7 +685,7 @@ export default function WhisperExtension({ minimal }) {
             if (localRun.current === run) localRun.current = null;
             setLocalStatus('idle');
         };
-    }, [local, decoding, live, spokenLang, localKind, spokenReady, noLanguages, player]);
+    }, [local, decoding, live, spokenLang, localKind, spokenReady, noLanguages, player, modelApplied]);
 
     // The translator, when the output language is not the one being spoken.
     // Opened as Start is pressed rather than at the first settled line: a
@@ -1135,6 +1146,63 @@ export default function WhisperExtension({ minimal }) {
                     </label>
                 )}
 
+                {/* The host's models, where it offers a choice — see
+                    ./useHostModels.js. A div, not a label, for the reason
+                    the source selector's is: the buttons are inside it. */}
+                {local && models.on && models.items.length > 0 && (
+                    <div
+                        className="tp__field"
+                        title="Which speech model recognises on this device. A larger one copes better with a weak or noisy signal and needs more of the computer to keep up. Changing it restarts the recogniser"
+                    >
+                        <span className="tp__field-label">Model</span>
+                        <select
+                            className="select stt__model"
+                            value={models.selectedId}
+                            disabled={!!models.job}
+                            onChange={(e) => models.choose(e.target.value)}
+                        >
+                            {models.items.map((m) => <option key={m.id} value={m.id}>{modelLabel(m)}</option>)}
+                        </select>
+                        {models.job && (
+                            <>
+                                <span className="stt__model-progress">
+                                    {`Downloading ${downloadPercent(models.job)}%`}
+                                </span>
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={models.cancel}
+                                    title="Stop the download. What has arrived is kept, and Download carries on from there"
+                                >
+                                    Cancel
+                                </Button>
+                            </>
+                        )}
+                        {!models.job && models.selected && !models.selected.installed && (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={models.download}
+                                icon={<Icon.Download size={13} />}
+                                title="Download this model once, to this computer, and switch to it. Nothing you listen to is sent anywhere"
+                            >
+                                Download
+                            </Button>
+                        )}
+                        {!models.job && models.selected && models.selected.installed && !models.selected.builtIn && (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={models.remove}
+                                icon={<Icon.Trash size={13} />}
+                                title="Delete this model from this computer. The built-in one is used instead"
+                            >
+                                Remove
+                            </Button>
+                        )}
+                    </div>
+                )}
+
                 <label
                     className="tp__field"
                     title={local
@@ -1220,6 +1288,7 @@ export default function WhisperExtension({ minimal }) {
                 one in particular is the only sign of a failure that otherwise
                 looks exactly like a quiet frequency. */}
             {local && decoding && localNote && <LocalNote note={localNote} onServer={switchToServer} />}
+            {!minimal && local && models.note && <LocalNote note={{ message: models.note }} />}
             {local && decoding && silent && <LocalNote note={describeError('silent')} onServer={switchToServer} />}
             {local && decoding && translateNote && <LocalNote note={translateNote} onServer={switchToServer} />}
             {local && decoding && translateProgress != null && (

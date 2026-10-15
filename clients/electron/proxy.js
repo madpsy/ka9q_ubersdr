@@ -74,6 +74,23 @@ class InstanceProxy {
         this.builtin = !!on && !!this.uiDir;
     }
 
+    /**
+     * Whether `url` is the bundled UI's own page, served from the staged
+     * bundle by this proxy — rather than anything the receiver served, which
+     * shares this origin: the whole of /v2 when the entry uses the receiver's
+     * own UI, and any /v2 file the bundle does not have even when it does not
+     * (handle() passes those through). For what only this client's own page
+     * may do; see registerSttIpc in stt.js.
+     */
+    isBundledPage(url) {
+        if (!this.builtin || !this.localOrigin) return false;
+        let u;
+        try { u = new URL(String(url || '')); } catch { return false; }
+        if (u.origin !== this.localOrigin) return false;
+        return (u.pathname === '/v2/' || u.pathname === '/v2/index.html')
+            && fs.existsSync(path.join(this.uiDir, 'index.html'));
+    }
+
     start() {
         // Node's default of 16 KB for the request line and headers together is
         // less than a link can carry: /v2/?playground=pg1… loads with a code of

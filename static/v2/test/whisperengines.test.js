@@ -157,6 +157,23 @@ t('a host recogniser needs start and push', () => {
     assert.strictEqual(E.hostStt({ get ubersdrDesktop() { throw new Error('no'); } }), null);
 });
 
+t('a choice of models is all five calls or none', () => {
+    const stt = { start() {}, push() {} };
+    assert.strictEqual(E.hostModels({ ubersdrDesktop: { stt } }), null);
+    assert.strictEqual(E.hostHasModels(stt), false);
+    const calls = ['models', 'installModel', 'cancelInstall', 'removeModel', 'setModel'];
+    const full = { ...stt, ...Object.fromEntries(calls.map((k) => [k, () => {}])) };
+    assert.strictEqual(E.hostModels({ ubersdrDesktop: { stt: full } }), full);
+    // One missing is a host that cannot manage them, not one that half can.
+    for (const k of calls) {
+        const partial = { ...full };
+        delete partial[k];
+        assert.strictEqual(E.hostHasModels(partial), false, k);
+    }
+    assert.strictEqual(E.hostHasModels(null), false);
+    assert.strictEqual(E.hostModels({}), null);
+});
+
 t('Web Speech counts only with available() and a real processLocally', () => {
     const Rec = fakeRecognition();
     assert.strictEqual(E.browserRecognition({ SpeechRecognition: Rec }), Rec);

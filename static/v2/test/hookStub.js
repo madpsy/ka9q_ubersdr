@@ -92,11 +92,43 @@ export function render(Component, props, context) {
     hooks.effects = [];
     const tree = Component(props || {});
     const cleanups = [];
+    const effects = [];
     for (const e of hooks.effects) {
         const off = e.fn();
         if (typeof off === 'function') cleanups.push(off);
+        effects.push({ deps: e.deps, off: typeof off === 'function' ? off : null });
     }
-    return { tree, cleanups };
+    return { tree, cleanups, effects };
+}
+
+/**
+ * Render again after `prev` (render's or rerender's result) the way React
+ * would: an effect whose deps are the same as last time is not run again and
+ * keeps its cleanup; one whose deps changed, or that has none, is cleaned up
+ * and run again. render() runs every effect on every call, which is enough to
+ * prove a mount; this is for a test about *which* effect re-runs when — that
+ * a value is in an effect's deps at all. The caller must not run prev's
+ * cleanups itself: the ones still live are in the result's.
+ */
+export function rerender(Component, props, context, prev) {
+    window.__testContext = context;
+    hooks.i = 0;
+    hooks.effects = [];
+    const tree = Component(props || {});
+    const before = (prev && prev.effects) || [];
+    const effects = hooks.effects.map((e, i) => {
+        const was = before[i];
+        if (was && e.deps && was.deps && e.deps.length === was.deps.length
+            && e.deps.every((d, k) => Object.is(d, was.deps[k]))) {
+            return { deps: e.deps, off: was.off };
+        }
+        if (was && was.off) was.off();
+        const off = e.fn();
+        return { deps: e.deps, off: typeof off === 'function' ? off : null };
+    });
+    // Effects that were there last time and are not now: unmounted with it.
+    for (let i = effects.length; i < before.length; i++) if (before[i].off) before[i].off();
+    return { tree, cleanups: effects.map((e) => e.off).filter(Boolean), effects };
 }
 
 /** Forget the hook state, so the next render is a fresh mount. */

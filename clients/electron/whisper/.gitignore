@@ -1,0 +1,5 @@
+# The fetched whisper.cpp tree, the per-target CMake trees and the model
+# downloads build.sh caches. dist/ is ignored by ../.gitignore already.
+build/
+# Recorded by test/record.sh: live receiver audio, not ours to commit.
+test/fixtures/

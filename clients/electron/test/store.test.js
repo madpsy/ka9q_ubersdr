@@ -206,6 +206,20 @@ t('nonsense from the page, or from the file, is dropped', () => {
     assert.strictEqual(store.chooser.home, undefined);
 });
 
+t('the chosen speech model is kept, cleared, and only ever an id', () => {
+    const dir = tmp();
+    const store = new InstanceStore(dir);
+    store.setChooser({ sttModel: 'small' });
+    assert.strictEqual(new InstanceStore(dir).chooser.sttModel, 'small', 'not kept across a reopen');
+    // How sttmodels.js goes back to the built-in one.
+    store.setChooser({ sttModel: undefined });
+    assert.strictEqual(store.chooser.sttModel, undefined);
+    store.setChooser({ sttModel: '../../etc/passwd' });
+    assert.strictEqual(store.chooser.sttModel, undefined, 'a path got in');
+    store.setChooser({ sttModel: 42 });
+    assert.strictEqual(store.chooser.sttModel, undefined);
+});
+
 t('a store written before any of this existed still opens', () => {
     const dir = tmp();
     fs.writeFileSync(path.join(dir, 'instances.json'), JSON.stringify({

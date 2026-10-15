@@ -17,6 +17,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 // Bundled in by build.sh, so this is inlined rather than required at run time.
 const { TciLink } = require('./tci.js');
+const { createSttBridge } = require('./sttbridge.js');
 
 const PREFIX = 'ubersdr.v2.';
 // The news panel's fetched-article cache: bulky, transient, and nothing about
@@ -803,6 +804,34 @@ if (location.pathname.startsWith('/v2')) {
             // billing. This client is downloaded rather than published to a
             // store, so the question does not arise.
             noticeLinks: true,
+            // Speech-to-text on this computer, for the Speech-to-Text
+            // extension's "On this device" — whisper.cpp in a helper process
+            // (stt.js), since Chromium's own on-device recogniser cannot be
+            // used in Electron. The contract is the page's
+            // (extensions/whisper/engines/host.js); sttbridge.js is this end.
+            //
+            // The other thing here that reaches the main process, and it is
+            // narrow in the same way the stats below are: the page hands over
+            // audio and gets text back from a program this app ships. Nothing
+            // it passes names a file, a URL or a command.
+            //
+            // Choosing between, downloading and deleting the models pinned in
+            // whisper/models.json acts on this computer beyond the window, so
+            // those calls are on the object only for this client's own bundled
+            // page (`sttModels`), never for a page the receiver served — and
+            // the main process checks the same again at every call
+            // (sttModelsAllowed in main.js). Without them the page simply
+            // offers no choice of model.
+            //
+            // Declared only where it will work — the helper for this platform
+            // and the shipped models are present (window:context says) — and
+            // decided now, synchronously: the page looks for `stt` once, as it
+            // renders, and a build without the helper should simply have no
+            // local mode rather than one that fails at Start. No `translate`
+            // beside it: Whisper only translates into English, from the audio,
+            // which is not what the page asks a translator for, so the page
+            // says itself that lines are shown as spoken.
+            ...(context.stt ? { stt: createSttBridge({ ipc: ipcRenderer, win: window, models: !!context.sttModels }) } : {}),
         });
     } catch { /* nothing here is worth failing the whole preload for */ }
 

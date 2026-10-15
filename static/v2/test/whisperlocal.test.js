@@ -528,4 +528,29 @@ t('nothing in, nothing out', () => {
     assert.strictEqual(chunks.length, 0);
 });
 
+t('a model reads in the menu as what it is, and what it would cost', () => {
+    assert.strictEqual(L.formatModelSize(59707625), '60 MB');
+    assert.strictEqual(L.formatModelSize(190085487), '190 MB');
+    assert.strictEqual(L.formatModelSize(885098), '0.9 MB');
+    assert.strictEqual(L.formatModelSize(1550000000), '1.6 GB');
+    assert.strictEqual(L.formatModelSize(0), '');
+    assert.strictEqual(L.formatModelSize('x'), '');
+    const base = { id: 'base', label: 'Base', sizeBytes: 59707625, installed: true, builtIn: true };
+    const small = { id: 'small', label: 'Small', sizeBytes: 190085487, installed: false, builtIn: false };
+    assert.strictEqual(L.modelLabel(base), 'Base — built in');
+    assert.strictEqual(L.modelLabel(small), 'Small — 190 MB, not downloaded');
+    assert.strictEqual(L.modelLabel({ ...small, installed: true }), 'Small — 190 MB');
+    assert.strictEqual(L.modelLabel({ id: 'tiny', installed: true }), 'tiny');
+    assert.strictEqual(L.modelLabel(null), '');
+});
+
+t('a download\'s progress as a whole percentage, never past either end', () => {
+    assert.strictEqual(L.downloadPercent({ received: 0, total: 100 }), 0);
+    assert.strictEqual(L.downloadPercent({ received: 499, total: 1000 }), 49);
+    assert.strictEqual(L.downloadPercent({ received: 1000, total: 1000 }), 100);
+    assert.strictEqual(L.downloadPercent({ received: 2000, total: 1000 }), 100);
+    assert.strictEqual(L.downloadPercent({ received: 10, total: 0 }), 0);
+    assert.strictEqual(L.downloadPercent(null), 0);
+});
+
 console.log(`\n${pass} passed`);

@@ -4,7 +4,8 @@
 // the microphone:
 //
 //   'host'     the native app's own recogniser — Android's SpeechRecognizer,
-//              Apple's SFSpeechRecognizer — declared by the host as
+//              Apple's SFSpeechRecognizer, the desktop client's Whisper —
+//              declared by the host as
 //              window.ubersdrDesktop.stt. Preferred whenever it is there: it is
 //              the platform's best model, and in a WebView it is the only one.
 //              The contract is in ./host.js.
@@ -61,6 +62,24 @@ export function hostStt(win = theWindow()) {
     }
 }
 
+// The optional half of the host's contract: a choice of models. See ./host.js.
+const MODEL_CALLS = ['models', 'installModel', 'cancelInstall', 'removeModel', 'setModel'];
+
+/** Whether a host recogniser offers a choice of models — all five calls, or it does not. */
+export function hostHasModels(stt) {
+    try {
+        return !!stt && MODEL_CALLS.every((k) => typeof stt[k] === 'function');
+    } catch (e) {
+        return false;
+    }
+}
+
+/** The host's recogniser if it offers a choice of models, or null. */
+export function hostModels(win = theWindow()) {
+    const s = hostStt(win);
+    return hostHasModels(s) ? s : null;
+}
+
 const userAgent = (win) => {
     try {
         return String((win && win.navigator && win.navigator.userAgent) || '');
@@ -86,8 +105,9 @@ const userAgent = (win) => {
  *     touches on-device recognition — Blink asks for an interface only Chrome
  *     binds, and the browser process treats that as a bad message (fixed in
  *     Electron 42.10, 43.5 and 44). The desktop client offers a recogniser of
- *     its own through `stt` when it has one; until then, local is simply not
- *     offered there, which is better than a receiver window that vanishes.
+ *     its own through `stt` instead — Whisper, in a helper process — and a
+ *     build of it without one simply has no local mode, which is better than
+ *     a receiver window that vanishes.
  *
  * `start(track)` — recognising a MediaStreamTrack rather than the microphone —
  * cannot be detected at all, and is tried at start. It shipped in Chrome 135,

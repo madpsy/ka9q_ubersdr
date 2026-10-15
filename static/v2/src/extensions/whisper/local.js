@@ -476,3 +476,42 @@ export function translationPair(spokenLocale, outputCode) {
     if (!source || !target || source === target) return null;
     return { source, target };
 }
+
+// ---- the host's models -----------------------------------------------------
+//
+// A host may offer more than one model to recognise with — the desktop client
+// ships Whisper's base model and can download small — through `stt.models()`
+// and its siblings (the contract is in ./engines/host.js). These say how one
+// reads in the Model menu, and how far a download has got.
+
+/** "190 MB": a model's size, rounded the way a download page would. */
+export function formatModelSize(bytes) {
+    const n = Number(bytes);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const mb = n / 1e6;
+    if (mb >= 1000) return `${(mb / 1000).toFixed(1)} GB`;
+    if (mb >= 10) return `${Math.round(mb)} MB`;
+    return `${mb.toFixed(1)} MB`;
+}
+
+/**
+ * A model as a menu option: "Base — built in", "Small — 190 MB, not
+ * downloaded". The size only for one that is not built in, since it is the
+ * download that it describes.
+ */
+export function modelLabel(m) {
+    if (!m) return '';
+    const name = String(m.label || m.id || '');
+    if (m.builtIn) return `${name} — built in`;
+    const size = formatModelSize(m.sizeBytes);
+    const parts = [size, m.installed ? '' : 'not downloaded'].filter(Boolean);
+    return parts.length ? `${name} — ${parts.join(', ')}` : name;
+}
+
+/** A download's progress, `{received, total}`, as a whole percentage. */
+export function downloadPercent(p) {
+    const received = Number(p && p.received);
+    const total = Number(p && p.total);
+    if (!(total > 0) || !(received > 0)) return 0;
+    return Math.max(0, Math.min(100, Math.floor((received * 100) / total)));
+}

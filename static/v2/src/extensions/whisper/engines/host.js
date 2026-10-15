@@ -16,7 +16,10 @@
 // the page falls back to Web Speech or to the server. The mobile apps' half is
 // clients/capacitor/src/hostspeech.js, answered on iOS by
 // clients/capacitor/ios/UberSdrPlugin/sources/OnDeviceSpeech.swift and
-// OnDeviceTranslation.swift.
+// OnDeviceTranslation.swift. The desktop client's is
+// clients/electron/sttbridge.js, answered by clients/electron/stt.js with
+// whisper.cpp in a helper process — Electron has no platform recogniser the
+// page can use, so it brings one.
 //
 //     window.ubersdrDesktop.stt = {
 //         languages(): Promise<string[]>,
@@ -65,6 +68,51 @@
 //   reset      forget the utterance in progress, keep the session — the
 //              receiver has been retuned.
 //   stop       end the session; no callbacks after it.
+//
+// A host with more than one model to recognise with may offer the choice —
+// the desktop client runs Whisper, ships its base model and can download
+// small. All five or none; with them, local mode shows a Model setting
+// (../useHostModels.js):
+//
+//     window.ubersdrDesktop.stt = {
+//         ...,
+//         models(): Promise<[{ id, label, sizeBytes, installed, active, builtIn, downloading }]>,
+//         installModel(id, onProgress({ received, total })): Promise<void>,
+//         cancelInstall(id),
+//         removeModel(id): Promise<void>,
+//         setModel(id): Promise<void>,
+//     }
+//
+//   models        every model, downloaded or not, in the order to list them.
+//                 `active` is the one a start() would use now — which is the
+//                 built-in one when the one chosen has gone missing — and
+//                 exactly one is. `builtIn` ones ship with the host and are
+//                 always `installed`. `downloading` marks one with a download
+//                 running — perhaps started by another window, or by this page
+//                 before it was last closed — which the page follows by calling
+//                 installModel for it, joining that download rather than
+//                 starting another. The list is shared by every window and
+//                 can change behind this one's back; the page asks again when
+//                 it comes back into view.
+//   installModel  download one, calling onProgress as it goes. Resolves once
+//                 it is installed and checked; rejects with an Error whose
+//                 message is shown as it stands — except one whose `code` is
+//                 'cancelled', which the page does not show. It does not switch
+//                 to the model; setModel does.
+//   cancelInstall this page's part in the download: its installModel rejects
+//                 'cancelled'. The download itself stops only if nothing else
+//                 is waiting on it — one window's Cancel is not another's.
+//   removeModel   delete a downloaded one. A built-in one cannot be removed
+//                 (rejects). If it was active, the built-in one is from now on.
+//   setModel      use an installed model from the next start() on. The host
+//                 remembers it, for every receiver window: it is a fact about
+//                 the device, not about this page. The page restarts its
+//                 session to apply it at once. Rejects for one not installed.
+//
+// A start() on a chosen model that turns out to be missing or will not load
+// should start on the built-in one rather than fail, and say so with a
+// non-fatal onError whose code is 'model-fallback' — on which the page asks
+// for models() again, since what is active, or even installed, has changed.
 //
 // And for translating, which local mode does itself (the server's translator
 // is not in the loop):

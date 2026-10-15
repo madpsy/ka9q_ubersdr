@@ -13,6 +13,13 @@
 # no native module in the tree: `dependencies` is empty and electron-builder
 # fetches the Electron binary for the target itself.
 #
+# The one compiled thing the dmg carries is the speech-to-text helper
+# (whisper/), and that is built first, by whisper/build.sh, over ssh to the same
+# Mac — a universal binary in whisper/dist/darwin-universal/ that both dmgs
+# share. electron-builder then signs it with the app, as it signs every binary
+# inside the bundle; the models beside it are kept out of codesign by
+# mac.signIgnore in package.json.
+#
 # Usage:
 # The terminal client has its own version of all this, in
 # clients/tui/notarise-mac.sh: the same ssh helper, the same keychain unlock and
@@ -351,15 +358,39 @@ if [[ ! -d ui/v2 ]]; then
     exit 1
 fi
 
+# Local speech-to-text's helper and models, which the dmgs carry in
+# resources/whisper/ (package.json's //whisper note). whisper/build.sh builds
+# the Mac's universal binary on this same Mac, in a directory of its own, and
+# fetches the models here. A failed build is not the end of the release if a
+# helper from an earlier one is still in whisper/dist — it is the same source
+# unless whisper/ changed — but it is said, and with no helper at all the dmgs
+# simply have no local mode.
+echo "  building the speech-to-text helper (whisper/build.sh --only=darwin,models)"
+if ! MAC_HOST="$MAC_HOST" whisper/build.sh --only=darwin,models; then
+    if [[ -f whisper/dist/darwin-universal/whisper-helper ]]; then
+        echo "  the helper did not build — packaging the one already in whisper/dist/darwin-universal" >&2
+    else
+        echo "  the helper did not build — these dmgs will have no local speech-to-text" >&2
+    fi
+fi
+
 echo "  shipping to $MAC_HOST:~/$MAC_DIR"
 # node_modules is left behind deliberately. There is no native module in this
 # tree, but node_modules/electron holds a Linux Electron binary and its
 # postinstall is what puts the right one there — `npm ci` on the Mac is both
 # smaller over the wire and correct by construction.
+# whisper/'s build cache and the other platforms' helpers are left behind too:
+# a couple of hundred megabytes the Mac has no use for. Its models and its own
+# helper go, because the dmg is packaged from them.
 tar czf - \
     --exclude=./node_modules \
     --exclude=./dist \
     --exclude=./.git \
+    --exclude=./whisper/build \
+    --exclude='./whisper/dist/linux-*' \
+    --exclude='./whisper/dist/win-*' \
+    --exclude='./whisper/dist/*.log' \
+    --exclude=./whisper/test/fixtures \
     . \
 | ssh -o BatchMode=yes "$MAC_HOST" \
     "rm -rf ~/$MAC_DIR && mkdir -p ~/$MAC_DIR && cd ~/$MAC_DIR && tar xzf -" \

@@ -426,6 +426,101 @@ one where no receiver window ever appears.
 - The service worker is deliberately not served (`/sw.js` → 404): it exists
   to make the browser PWA installable, which a desktop app doesn't need.
 
+## Local speech-to-text
+
+The Speech-to-Text extension can transcribe **on this device** instead of on
+the receiver's WhisperLive. In a browser that is Chrome's on-device recogniser;
+Electron cannot use that one (touching it kills the renderer), so this client
+brings its own: [whisper.cpp](https://github.com/ggml-org/whisper.cpp) in a
+helper process, `whisper/whisper-helper`, fed the receiver's audio at 16 kHz
+and cutting it into utterances with Silero's voice-activity model. Nothing
+leaves the computer.
+
+The page sees it as `window.ubersdrDesktop.stt` — the contract is at the top
+of `static/v2/src/extensions/whisper/engines/host.js`. `sttbridge.js` is the
+preload's half, and `stt.js` the main process's: one helper per receiver
+window, started at that window's first Start, kept between sessions, ended
+when the window closes or the app quits, and started again quietly if it
+crashes mid-session (three times a minute; after that the session ends with
+"keeps crashing"). It recognises the hundred languages Whisper knows; the
+extension's Spoken menu lists them.
+
+### Models
+
+| Model | Size | | |
+|---|---|---|---|
+| base (multilingual, q5_1) | 60 MB | shipped in every package | keeps up on any x86 with AVX2 and any Apple chip: about 1.4 s per 10 s utterance on 4 threads |
+| small (multilingual, q5_1) | 190 MB | downloaded on request | noticeably better on a weak or noisy signal, at three to four times the CPU |
+
+The **Model** setting appears in the extension's settings while it is
+transcribing on this device. Choosing *Small* offers a **Download** button
+(with progress and Cancel); once it has arrived and been checked it is
+switched to. **Remove** deletes it again, and Base takes over. The choice is
+the app's, kept with the chooser's settings in `instances.json`
+(`chooser.sttModel`), so every receiver window uses the same model.
+
+The download comes from the Hugging Face URL pinned in
+`whisper/models.json` — a fixed commit, not `main` — through Chromium's network
+stack (`net.fetch`), so a system proxy applies. It is written to
+`whisper-models/ggml-small-q5_1.bin.part` in userData and renamed only once
+its size and SHA-256 match the pins; a damaged download is thrown away and
+said so. An interrupted or cancelled one is kept and carried on from with a
+Range request next time. userData is untouched by updates, so the model is
+downloaded once per computer, not once per version. If small is chosen but has
+gone missing, or will not load, sessions start on Base with a note saying why.
+A file that will not load is checked against its pins again: deleted if it
+fails them (the Model setting then offers the download again), kept and tried
+again at the next Start if it passes — a scanner holding the file, or too little
+memory, is no reason to download 190 MB again.
+
+Only UberSDR's own bundled page can download, remove or choose a model. A
+receiver window can also show pages the receiver serves (an entry set to the
+receiver's own UI, or a `/v2` file the bundle lacks); those can transcribe but
+get no model calls, and the main process refuses them if they try. Downloads
+are shared between windows: a second window's Download joins the one running,
+and a Cancel only stops it once no window is waiting on it.
+
+The helper uses `min(4, cores − 1)` threads. On x86 it checks the CPU at
+start and hands over to its AVX2 build where there is one (`whisper-helper-avx2`
+beside it, `execv` on Linux, a child in a job object on Windows): without
+AVX2 base takes about seven times as long and cannot keep up. The Mac binary
+is universal, with an `x86_64h` slice macOS picks on Haswell and later.
+
+### Building the helper
+
+```sh
+whisper/build.sh                          # every platform, and the models
+whisper/build.sh --only=linux-x64,models  # some of: linux-x64, linux-arm64,
+                                          #   win-x64, darwin, models
+whisper/build.sh --test                   # ...then whisper/test/run.sh
+```
+
+Linux and Windows are cross-compiled in Docker (Debian trixie: gcc, the
+aarch64 cross gcc, mingw-w64) and come out fully static; darwin is built over
+ssh on `$MAC_HOST` (default `macbook`) with Xcode's clang. whisper.cpp is
+fetched at a pinned commit into `whisper/build/` (git-ignored, about 180 MB),
+and the shipped models are fetched into `whisper/dist/models/` and refused if
+their size or hash differs from `whisper/models.json`. Everything lands in
+`whisper/dist/<platform>/`, which is where both `npm start` and the packaging
+look.
+
+`./build.sh --package` runs it for the platforms it packages (in Docker, like
+the OmniRig helper; without Docker it packages whatever `whisper/dist/`
+already holds and still fetches the models), and `build-mac.sh` runs
+`--only=darwin,models` before shipping the tree to the Mac. Packaging puts
+`whisper/dist/<platform>-<arch>/` and the two shipped models in
+`resources/whisper/`, beside `app.asar` rather than inside it (see the
+`//whisper` note in `package.json`). A build that has no helper for its
+platform, or no models, simply has no local mode: the preload only declares
+`stt` when both are there, and the build says which packages went without.
+
+Tests: `whisper/test/run.sh` drives the helper over its protocol;
+`test/stt.test.js` (part of `test/run.sh`) drives `stt.js` and `sttbridge.js`
+against the real helper where one is built, and the model download against a
+local server. Both need a speech sample at `whisper/test/fixtures/speech.wav`
+for the transcription tests — `whisper/test/record.sh` records one off the air
+(the tests that need it are skipped without it).
+
 ## Files
 
 ```
@@ -450,6 +545,14 @@ tci.js        the TCI protocol over a WebSocket — browser code, bundled into
 wsserver.js   a WebSocket server, RFC 6455, for the TCI server to listen on
 tciserver.js  this receiver offered *as* a TCI radio: handshake, commands,
               audio frames, and the 48 kHz resampling they arrive at
+stt.js        local speech-to-text: a whisper-helper per receiver window, its
+              sessions, and the IPC the preload's bridge talks to
+sttmodels.js  the Whisper models: which are installed and chosen, and the
+              checked, resumable download of the one that is not shipped
+sttbridge.js  `window.ubersdrDesktop.stt` — the preload's half, bundled into
+              receiver-preload.js
+whisper/      the helper: whisper.cpp, C++, frames in and JSON lines out; its
+              build, the pinned models (models.json) and its tests
 test/         node tests for the protocol handling, the store and the
               chooser page (./test/run.sh)
 preload.js    IPC surface for the chooser page

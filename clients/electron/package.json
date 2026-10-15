@@ -16,6 +16,7 @@
   "//debDepends": "build.deb.depends replaces electron-builder's default list rather than extending it, so the nine defaults are repeated verbatim and only the last two are ours. libasound2 and libgbm1 are hard DT_NEEDED entries of the Electron binary that nothing else in the closure pulls in — without them a minimal install fails at exec with a loader error, and libasound in particular is the only backend Chromium's Web MIDI has on Linux. Everything else the binary needs arrives transitively (libcups2, the X libs and libxkbcommon0 via libgtk-3-0, libdbus-1-3 via libatspi2.0-0, libnspr4 via libnss3). libasound2 is correct on Ubuntu 24.04 too, where libasound2t64 Provides it. libpulse0 is only dlopened — absent, Chromium falls back to raw ALSA and the output-device list gets much less useful — so it belongs in recommends, next to the speech-dispatcher pair that libspeechd.so.2 needs. (Note out here because electron-builder validates the `build` object and rejects keys it does not know.)",
   "//debUdev": "build.deb.fpm maps linux/70-ubersdr-rc28.rules into the package at /usr/lib/udev/rules.d/, where a package's udev rules belong (/etc/udev/rules.d is the administrator's). Without it the RC-28 dial cannot be opened: Chromium's WebHID reads /dev/hidraw*, which is root's until a rule says otherwise. No postinst is needed — udevd notices new rule files itself and applies them the next time the dial is plugged in — which matters, because setting afterInstall would replace electron-builder's own script (the /usr/bin link, the chrome-sandbox mode, the AppArmor profile) rather than add to it. The source path is relative to this directory, which is where build.sh runs electron-builder from. (Out here because electron-builder rejects keys it does not know inside `build`.)",
   "//omnirig": "build.win.extraResources puts omnirig-helper.exe beside app.asar rather than in it, because Windows cannot run an executable from inside an archive. omnirig/build.sh makes it and build.sh runs that before any Windows packaging; with no helper in omnirig/dist the filter matches nothing and the package simply has no OmniRig support, which omnirig.js reports in words when somebody picks it. (Out here because electron-builder rejects keys it does not know inside `build`.)",
+  "//whisper": "Local speech-to-text (stt.js) runs whisper/whisper-helper, so the helper and the models it ships with go beside app.asar rather than in it, as the OmniRig helper does: an executable cannot be run from inside an archive, and the x86 helper hands over to its AVX2 sibling, which it looks for next to itself. Each platform takes its own directory of whisper/dist — linux-${arch} (both x86 files, or the one arm64 file), win-${arch} (x64 only: there is no Windows arm64 build, and the filter then matches nothing), darwin-universal (one file for both dmgs) — into resources/whisper/, and every platform takes the base model and the VAD model from whisper/dist/models into resources/whisper/models/. whisper/build.sh makes all of it, and build.sh and build-mac.sh run it before packaging. A package built without it has no local mode rather than a broken one: the preload only declares the recogniser when the helper and both models are there. mac.signIgnore keeps the two model files out of codesign, which signs every non-text file it finds and would otherwise stamp a signature into the extended attributes of 60 MB of weights; they are data, sealed by the app's own signature like any resource, and only the helper is code. whisper/models.json is in build.files because the download of the small model is checked against the pins this version was built with. (Out here because electron-builder rejects keys it does not know inside `build`.)",
   "scripts": {
     "start": "electron ."
   },
@@ -55,6 +56,10 @@
       "wsserver.js",
       "useragent.js",
       "hid.js",
+      "stt.js",
+      "sttmodels.js",
+      "sttbridge.js",
+      "whisper/models.json",
       "preload.js",
       "receiver-preload.js",
       "serial-preload.js",
@@ -64,6 +69,13 @@
       "ui/**",
       "assets/icon.png"
     ],
+    "extraResources": [
+      {
+        "from": "whisper/dist/models",
+        "to": "whisper/models",
+        "filter": ["ggml-base-q5_1.bin", "ggml-silero-v6.2.0.bin"]
+      }
+    ],
     "linux": {
       "target": [
         "AppImage",
@@ -71,7 +83,14 @@
       ],
       "category": "AudioVideo;Audio;HamRadio",
       "synopsis": "Desktop client for UberSDR receivers",
-      "syncDesktopName": true
+      "syncDesktopName": true,
+      "extraResources": [
+        {
+          "from": "whisper/dist/linux-${arch}",
+          "to": "whisper",
+          "filter": ["whisper-helper", "whisper-helper-avx2"]
+        }
+      ]
     },
     "win": {
       "target": "nsis",
@@ -80,12 +99,25 @@
           "from": "omnirig/dist",
           "to": ".",
           "filter": ["omnirig-helper.exe"]
+        },
+        {
+          "from": "whisper/dist/win-${arch}",
+          "to": "whisper",
+          "filter": ["whisper-helper.exe", "whisper-helper-avx2.exe"]
         }
       ]
     },
     "mac": {
       "target": "dmg",
       "category": "public.app-category.utilities",
+      "extraResources": [
+        {
+          "from": "whisper/dist/darwin-universal",
+          "to": "whisper",
+          "filter": ["whisper-helper"]
+        }
+      ],
+      "signIgnore": ["/whisper/models/"],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "UberSDR asks for the microphone only so macOS will reveal the names of your audio output devices. Nothing is recorded and nothing is sent anywhere."
       }

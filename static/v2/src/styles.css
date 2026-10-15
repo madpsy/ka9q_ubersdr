@@ -10318,6 +10318,13 @@ a.btn { text-decoration: none; }
 /* ── Speech-to-text ───────────────────────────────────────────────────────── */
 
 .stt__lang { max-width: 190px; }
+.stt__model { max-width: 230px; }
+/* How far the model download has got: a number that counts up, so tabular. */
+.stt__model-progress {
+    font-size: calc(10.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+}
 .stt__limit { max-width: 130px; }
 .stt__voice { max-width: 260px; }
 .stt__rate { min-width: 130px; }

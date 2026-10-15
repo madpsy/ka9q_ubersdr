@@ -62,6 +62,11 @@ function sanitiseChooser(chooser) {
     // for a file written by an older version.
     if (raw.prefsScope === 'receiver') out.prefsScope = 'receiver';
     if (raw.autoConnect === true) out.autoConnect = true;
+    // The speech-to-text model chosen in the Speech-to-Text extension, by its
+    // id in whisper/models.json (sttmodels.js). Absent is the built-in one.
+    // Shaped like an id and no more: whether it names a model this version
+    // knows, and whether that one is downloaded, is decided where it is used.
+    if (typeof raw.sttModel === 'string' && /^[a-z0-9-]{1,32}$/.test(raw.sttModel)) out.sttModel = raw.sttModel;
     return out;
 }
 

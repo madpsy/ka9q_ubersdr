@@ -37,7 +37,7 @@ globalThis.fetch = () => Promise.reject(new Error('no network in a test'));
 globalThis.addEventListener = () => {};
 globalThis.removeEventListener = () => {};
 
-const { deep, render, reset, words, WhisperExtension, dxcluster } = require('./.build/whisperpanel.cjs');
+const { deep, render, rerender, reset, words, WhisperExtension, dxcluster } = require('./.build/whisperpanel.cjs');
 
 // The control socket, faked: connected, and recording what is sent, so the
 // server path can be seen attaching without a server.
@@ -105,6 +105,13 @@ let mounted = null;
 function show(ctx, props) {
     if (mounted) for (const off of mounted.cleanups) off();
     mounted = render(WhisperExtension, props || {}, ctx);
+    return mounted.tree;
+}
+// A render that follows the last as React would: an effect whose deps did not
+// change is left running (hookStub.js rerender). For what show() cannot see,
+// since it runs every effect afresh: whether something restarts.
+function keep(ctx, props) {
+    mounted = mounted ? rerender(WhisperExtension, props || {}, ctx, mounted) : render(WhisperExtension, props || {}, ctx);
     return mounted.tree;
 }
 function unmount() {
@@ -488,6 +495,380 @@ t('a language that needs a download says so before Start, and Install starts it'
     assert.ok(button(tree, 'Stop'), 'it did not start after installing');
     assert.strictEqual(started.length, 1, `starts: ${started.length}`);
     assert.deepStrictEqual(started[0], { lang: 'en-GB', local: true, track });
+    unmount();
+});
+
+// A host recogniser with a choice of models, as the desktop client's is: base
+// built in, small a download away. Downloads finish when the test says.
+function hostWithModels() {
+    const h = hostStt();
+    h.list = [
+        { id: 'base', label: 'Base', sizeBytes: 59707625, installed: true, active: true, builtIn: true },
+        { id: 'small', label: 'Small', sizeBytes: 190085487, installed: false, active: false, builtIn: false },
+    ];
+    h.calls = [];
+    h.models = () => Promise.resolve(h.list.map((m) => ({ ...m })));
+    h.installModel = (id, onProgress) => {
+        h.calls.push(['install', id]);
+        h.progress = onProgress;
+        return new Promise((resolve, reject) => {
+            h.finish = () => {
+                h.list = h.list.map((m) => (m.id === id ? { ...m, installed: true } : m));
+                resolve();
+            };
+            h.fail = (msg, code) => {
+                const e = new Error(msg);
+                if (code) e.code = code;
+                reject(e);
+            };
+        });
+    };
+    h.cancelInstall = (id) => { h.calls.push(['cancel', id]); h.fail('Download cancelled.'); };
+    h.setModel = (id) => {
+        h.calls.push(['set', id]);
+        h.list = h.list.map((m) => ({ ...m, active: m.id === id }));
+        return Promise.resolve();
+    };
+    h.removeModel = (id) => {
+        h.calls.push(['remove', id]);
+        const was = h.list.find((m) => m.id === id);
+        h.list = h.list.map((m) => {
+            if (m.id === id) return { ...m, installed: false, active: false };
+            return was && was.active && m.builtIn ? { ...m, active: true } : m;
+        });
+        return Promise.resolve();
+    };
+    return h;
+}
+
+const modelMenu = (tree) => deep(tree).find((n) => n.type === 'select' && /\bstt__model\b/.test(n.props.className || ''));
+const optionTexts = (sel) => deep(sel).filter((n) => n.type === 'option').map((o) => words(o).trim());
+const progressText = (tree) => {
+    const p = deep(tree).find((n) => /\bstt__model-progress\b/.test(n.props.className || ''));
+    return p ? words(p).trim() : null;
+};
+
+t('a host with models: the Model setting, a download with progress, then switched to', async () => {
+    fresh();
+    const host = hostWithModels();
+    globalThis.ubersdrDesktop = { stt: host };
+    const ctx = context();
+    let tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    let menu = modelMenu(tree);
+    assert.ok(menu, 'no Model setting');
+    assert.strictEqual(menu.props.value, 'base');
+    assert.deepStrictEqual(optionTexts(menu), ['Base — built in', 'Small — 190 MB, not downloaded']);
+    // Nothing to download or remove while the built-in one is selected.
+    assert.ok(!button(tree, 'Download') && !button(tree, 'Remove'));
+
+    // Choosing one that is not there only selects it: the download is a
+    // button press, not a side effect of the menu.
+    menu.props.onChange({ target: { value: 'small' } });
+    tree = show(ctx);
+    await settle();
+    assert.deepStrictEqual(host.calls, []);
+    assert.strictEqual(modelMenu(tree).props.value, 'small');
+    const dl = button(tree, 'Download');
+    assert.ok(dl, 'no Download for a model that is not there');
+
+    button(tree, 'Download').props.onClick();
+    tree = show(ctx);
+    await settle();
+    assert.deepStrictEqual(host.calls, [['install', 'small']]);
+    assert.strictEqual(progressText(tree), 'Downloading 0%');
+    assert.strictEqual(modelMenu(tree).props.disabled, true, 'the menu can change mid-download');
+    host.progress({ received: 95042744, total: 190085487 });
+    tree = show(ctx);
+    assert.strictEqual(progressText(tree), 'Downloading 50%');
+    assert.ok(button(tree, 'Cancel'), 'no Cancel');
+
+    host.finish();
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    // Downloaded, and switched to, since choosing it is what started this.
+    assert.deepStrictEqual(host.calls, [['install', 'small'], ['set', 'small']]);
+    assert.strictEqual(progressText(tree), null);
+    menu = modelMenu(tree);
+    assert.strictEqual(menu.props.value, 'small');
+    assert.deepStrictEqual(optionTexts(menu), ['Base — built in', 'Small — 190 MB']);
+    assert.ok(button(tree, 'Remove'), 'no Remove for a downloaded model');
+    assert.deepStrictEqual(notes(tree), []);
+
+    // Back to base: switched at once, it being there.
+    modelMenu(tree).props.onChange({ target: { value: 'base' } });
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    assert.deepStrictEqual(host.calls.slice(-1), [['set', 'base']]);
+    assert.strictEqual(modelMenu(tree).props.value, 'base');
+    unmount();
+});
+
+t('cancelling a model download says nothing; a failed one says why', async () => {
+    fresh();
+    const host = hostWithModels();
+    globalThis.ubersdrDesktop = { stt: host };
+    const ctx = context();
+    let tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    modelMenu(tree).props.onChange({ target: { value: 'small' } });
+    tree = show(ctx);
+    button(tree, 'Download').props.onClick();
+    tree = show(ctx);
+    await settle();
+    button(tree, 'Cancel').props.onClick();
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    assert.deepStrictEqual(host.calls, [['install', 'small'], ['cancel', 'small']]);
+    assert.deepStrictEqual(notes(tree), [], 'a cancel was reported as a failure');
+    assert.strictEqual(progressText(tree), null);
+    assert.ok(button(tree, 'Download'), 'no way to try again');
+
+    button(tree, 'Download').props.onClick();
+    tree = show(ctx);
+    await settle();
+    host.fail("Couldn't download the Small model: the server answered 503");
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    assert.match(notes(tree).map(words).join(' '), /Couldn't download the Small model: the server answered 503/);
+    assert.ok(!host.calls.some((c) => c[0] === 'set'), 'switched to a model that never arrived');
+    unmount();
+});
+
+t('removing the model in use goes back to the built-in one', async () => {
+    fresh();
+    const host = hostWithModels();
+    host.list = host.list.map((m) => ({ ...m, installed: true, active: m.id === 'small' }));
+    globalThis.ubersdrDesktop = { stt: host };
+    const ctx = context();
+    let tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    assert.strictEqual(modelMenu(tree).props.value, 'small');
+    button(tree, 'Remove').props.onClick();
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    assert.deepStrictEqual(host.calls, [['remove', 'small']]);
+    const menu = modelMenu(tree);
+    assert.strictEqual(menu.props.value, 'base');
+    assert.deepStrictEqual(optionTexts(menu), ['Base — built in', 'Small — 190 MB, not downloaded']);
+    unmount();
+});
+
+t('a model change while running restarts the recogniser on it; a refused one does not', async () => {
+    fresh();
+    const host = hostWithModels();
+    host.list = host.list.map((m) => ({ ...m, installed: true }));
+    globalThis.ubersdrDesktop = { stt: host };
+    const ctx = context();
+    let tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    button(tree, 'Start').props.onClick();
+    tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    assert.strictEqual(host.starts.length, 1, `starts: ${host.starts.length}`);
+    // Renders that change nothing leave it running.
+    tree = keep(ctx);
+    assert.strictEqual(host.starts.length, 1, 'restarted by a render');
+    const stops = host.stops;
+
+    modelMenu(tree).props.onChange({ target: { value: 'small' } });
+    await settle();
+    tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    assert.deepStrictEqual(host.calls, [['set', 'small']]);
+    assert.strictEqual(host.starts.length, 2, 'not restarted on the new model');
+    assert.ok(host.stops > stops, 'the old session was left running');
+
+    // The host refusing the change: nothing changed, so nothing restarts.
+    host.setModel = (id) => {
+        host.calls.push(['set', id]);
+        return Promise.reject(new Error('The Base model could not be chosen.'));
+    };
+    modelMenu(tree).props.onChange({ target: { value: 'base' } });
+    await settle();
+    tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    assert.strictEqual(host.starts.length, 2, 'restarted for a model that was not chosen');
+    assert.match(notes(tree).map(words).join(' '), /could not be chosen/);
+
+    // Removing the one in use: the built-in one from now on, at once.
+    button(tree, 'Remove').props.onClick();
+    await settle();
+    tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    assert.deepStrictEqual(host.calls.slice(-1), [['remove', 'small']]);
+    assert.strictEqual(host.starts.length, 3, 'not restarted after removing the model in use');
+    unmount();
+});
+
+t('a download already running is followed; a cancel from elsewhere says nothing', async () => {
+    fresh();
+    const host = hostWithModels();
+    host.list = host.list.map((m) => (m.id === 'small' ? { ...m, downloading: true } : m));
+    globalThis.ubersdrDesktop = { stt: host };
+    const ctx = context();
+    let tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    // Joined, not offered again.
+    assert.deepStrictEqual(host.calls, [['install', 'small']]);
+    assert.strictEqual(progressText(tree), 'Downloading 0%');
+    assert.ok(button(tree, 'Cancel'), 'no Cancel for a download in progress');
+    assert.ok(!button(tree, 'Download'), 'Download offered for a download in progress');
+    host.progress({ received: 95042744, total: 190085487 });
+    tree = show(ctx);
+    assert.strictEqual(progressText(tree), 'Downloading 50%');
+
+    // Somebody else's cancel ended it.
+    host.list = host.list.map((m) => ({ ...m, downloading: false }));
+    host.fail('Download cancelled.', 'cancelled');
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    assert.deepStrictEqual(notes(tree), [], 'a cancel from elsewhere was reported as a failure');
+    assert.strictEqual(progressText(tree), null);
+    assert.deepStrictEqual(host.calls, [['install', 'small']]);
+    unmount();
+
+    // This panel letting go of one another window is still downloading: not
+    // followed again just because the list still says so.
+    fresh();
+    const shared = hostWithModels();
+    shared.list = shared.list.map((m) => (m.id === 'small' ? { ...m, downloading: true } : m));
+    globalThis.ubersdrDesktop = { stt: shared };
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    button(tree, 'Cancel').props.onClick();
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    await settle();
+    tree = show(ctx);
+    assert.deepStrictEqual(shared.calls, [['install', 'small'], ['cancel', 'small']]);
+    assert.strictEqual(progressText(tree), null);
+    assert.deepStrictEqual(notes(tree), []);
+    unmount();
+});
+
+t('the menu is asked again on focus and on the host\'s fallback note', async () => {
+    fresh();
+    let focus = [];
+    globalThis.addEventListener = (type, fn) => { if (type === 'focus') focus.push(fn); };
+    globalThis.removeEventListener = (type, fn) => { focus = focus.filter((f) => f !== fn); };
+    try {
+        const host = hostWithModels();
+        globalThis.ubersdrDesktop = { stt: host };
+        const ctx = context();
+        let tree = show(ctx);
+        await settle();
+        tree = show(ctx);
+        modelMenu(tree).props.onChange({ target: { value: 'small' } });
+        tree = show(ctx);
+        assert.ok(button(tree, 'Download'));
+
+        // Another window downloads it meanwhile; this one comes to the front.
+        host.list = host.list.map((m) => ({ ...m, installed: true }));
+        assert.ok(focus.length > 0, 'nothing listens for focus');
+        focus.forEach((fn) => fn());
+        await settle();
+        tree = show(ctx);
+        await settle();
+        tree = show(ctx);
+        // The pick was an offer to download, and there is nothing to download:
+        // the menu shows the one in use, and choosing Small switches to it.
+        assert.strictEqual(modelMenu(tree).props.value, 'base');
+        assert.ok(!button(tree, 'Download') && !button(tree, 'Remove'));
+        modelMenu(tree).props.onChange({ target: { value: 'small' } });
+        await settle();
+        tree = show(ctx);
+        await settle();
+        tree = show(ctx);
+        assert.deepStrictEqual(host.calls, [['set', 'small']]);
+        assert.strictEqual(modelMenu(tree).props.value, 'small');
+
+        // Started on Small, which turns out damaged: the host falls back,
+        // removes it and says so — and the menu follows. Rendered as React
+        // would from here (keep), since show() restarts the engine every
+        // time, and a restart clears the note.
+        button(tree, 'Start').props.onClick();
+        tree = keep(ctx);
+        await settle();
+        tree = keep(ctx);
+        host.list = host.list.map((m) => (m.id === 'small'
+            ? { ...m, installed: false, active: false }
+            : { ...m, active: true }));
+        host.cb.onError({
+            code: 'model-fallback',
+            message: 'The Small model was damaged, so it has been removed and the Base model is being used instead.',
+            fatal: false,
+        });
+        await settle();
+        tree = keep(ctx);
+        await settle();
+        tree = keep(ctx);
+        const menu = modelMenu(tree);
+        assert.strictEqual(menu.props.value, 'base');
+        assert.deepStrictEqual(optionTexts(menu), ['Base — built in', 'Small — 190 MB, not downloaded']);
+        assert.ok(!button(tree, 'Remove'), 'Remove offered for a model that has gone');
+        assert.match(notes(tree).map(words).join(' '), /The Small model was damaged/);
+        unmount();
+    } finally {
+        globalThis.addEventListener = () => {};
+        globalThis.removeEventListener = () => {};
+    }
+});
+
+t('no Model setting without the calls, on the server, or in the minimal view', async () => {
+    fresh();
+    globalThis.ubersdrDesktop = { stt: hostStt() };
+    let tree = show(context());
+    await settle();
+    tree = show(context());
+    assert.ok(!modelMenu(tree), 'a Model setting for a host with no models');
+    unmount();
+
+    fresh();
+    globalThis.ubersdrDesktop = { stt: hostWithModels() };
+    store.set('ubersdr.v2.stt.source', 'server');
+    tree = show(context());
+    await settle();
+    tree = show(context());
+    assert.ok(!modelMenu(tree), 'a Model setting on the server');
+    unmount();
+
+    fresh();
+    globalThis.ubersdrDesktop = { stt: hostWithModels() };
+    tree = show(context(), { minimal: true });
+    await settle();
+    tree = show(context(), { minimal: true });
+    assert.ok(!modelMenu(tree), 'a Model setting in the minimal view');
     unmount();
 });
 

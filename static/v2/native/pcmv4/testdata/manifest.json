@@ -1,0 +1,147 @@
+[
+  {
+    "file": "iq12k-ft8.v4",
+    "desc": "iq 12 kHz, FT8 band",
+    "profiles": [
+      0
+    ],
+    "packets": 600,
+    "samples": 288000,
+    "rice": 594,
+    "escape": 2,
+    "silent": 4,
+    "serverSha256": "0850a1d67f011e4fdaf01ff9f9e99d61372e55a3958abd7755b154e9513c4c39"
+  },
+  {
+    "file": "iq384-ft8.v4",
+    "desc": "iq384, busy FT8 band",
+    "profiles": [
+      0
+    ],
+    "packets": 300,
+    "samples": 209760,
+    "rice": 294,
+    "escape": 2,
+    "silent": 4,
+    "serverSha256": "9394c69e6c039c35dd3e056bef1dce05465863300ee7ae884a3fa09872d2a126"
+  },
+  {
+    "file": "iq384-mw-carriers.v4",
+    "desc": "iq384, medium-wave carriers: long unary runs; split packets",
+    "profiles": [
+      0
+    ],
+    "packets": 341,
+    "samples": 209760,
+    "rice": 335,
+    "escape": 2,
+    "silent": 4,
+    "serverSha256": "045d3e96cc5b20c89de49f53ae89f1ae025211c4a17512effa76fcefc9040335"
+  },
+  {
+    "file": "iq384-quiet-band.v4",
+    "desc": "iq384, empty band: nearly white",
+    "profiles": [
+      0
+    ],
+    "packets": 300,
+    "samples": 209760,
+    "rice": 294,
+    "escape": 2,
+    "silent": 4,
+    "serverSha256": "a1d4f0d6d2c50c41b23d6be30f9ea4a4b890b9fa5a974f362b3e0c6fc6f403c7"
+  },
+  {
+    "file": "usb-ft8.v4",
+    "desc": "usb 12 kHz, FT8",
+    "profiles": [
+      1
+    ],
+    "packets": 686,
+    "samples": 144000,
+    "rice": 680,
+    "escape": 2,
+    "silent": 4,
+    "serverSha256": "f1ecdda67ccdcc71b21c4226c579f1289eaa243d2450a7fc4fbb7fbb19f68ff0"
+  },
+  {
+    "file": "lsb-voice.v4",
+    "desc": "lsb 12 kHz, voice",
+    "profiles": [
+      1
+    ],
+    "packets": 600,
+    "samples": 144000,
+    "rice": 594,
+    "escape": 2,
+    "silent": 4,
+    "serverSha256": "527ca27153eb25acff13ca2c81aa4c0a1444ff44c55ab448ab488d0c33c55018"
+  },
+  {
+    "file": "cw.v4",
+    "desc": "cwu 12 kHz, narrow tone",
+    "profiles": [
+      1
+    ],
+    "packets": 600,
+    "samples": 144000,
+    "rice": 594,
+    "escape": 2,
+    "silent": 4,
+    "serverSha256": "1b95789c1a5796d959dce11cb76cfa17ca38deab00dfa9447a504d2daca038f2"
+  },
+  {
+    "file": "am.v4",
+    "desc": "am 24 kHz",
+    "profiles": [
+      1
+    ],
+    "packets": 600,
+    "samples": 288000,
+    "rice": 594,
+    "escape": 2,
+    "silent": 4,
+    "serverSha256": "e699f4b264fb3f7fccf26a321e350cbcfd46f6a3c59823a63a5ed420c0b80c98"
+  },
+  {
+    "file": "nfm.v4",
+    "desc": "nfm 24 kHz, near full scale",
+    "profiles": [
+      1
+    ],
+    "packets": 600,
+    "samples": 288000,
+    "rice": 594,
+    "escape": 2,
+    "silent": 4,
+    "serverSha256": "96061f396556019e2a831cc42624487a990e683c9f9f4e2eed49539bf4fc935b"
+  },
+  {
+    "file": "iq384-scaled.v4",
+    "desc": "iq384 reduced depth; profile 2 -\u003e 0 -\u003e 2",
+    "profiles": [
+      0,
+      2
+    ],
+    "packets": 300,
+    "samples": 209760,
+    "rice": 295,
+    "escape": 2,
+    "silent": 3,
+    "serverSha256": "81c4d46116c459ee473bdeb32cb7fe6041ff5cbd92a7485cc0a36a550207db41"
+  },
+  {
+    "file": "mixed-modes.v4",
+    "desc": "usb -\u003e iq12k -\u003e am: profile 1 -\u003e 0 -\u003e 1",
+    "profiles": [
+      0,
+      1
+    ],
+    "packets": 450,
+    "samples": 180000,
+    "rice": 449,
+    "escape": 0,
+    "silent": 1,
+    "serverSha256": "b0c4ab3e9ac6e7272fb1883e6077f28f7e26f74dcffba775871cbb3133bec7d9"
+  }
+]

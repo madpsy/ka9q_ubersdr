@@ -135,6 +135,9 @@ library.
 | `ReceiverActivity.java` | the receiver's WebView, its document-start script, and the middle of every conversation with the page |
 | `PlaybackService.java` | the foreground service, the notification and the lock-screen session |
 | `Notices.java` | the page's own notifications, in the shade |
+| `Speech.java` | spoken announcements, over TextToSpeech |
+| `Recognition.java` | speech-to-text on the device, for the Whisper extension's local mode (Android 13+) |
+| `Translation.java` | translating its lines on the device, with ML Kit — in builds that ask for it |
 | `SystemBars.java` | keeping the page out from under the status and navigation bars |
 
 Everything else stayed in JavaScript. The store, the row shapes, the sort, the
@@ -367,15 +370,15 @@ with two more flags in the same `window.ubersdrDesktop` literal as the rest:
 | flag | set by | meaning |
 |---|---|---|
 | `sttHost` | iOS | there is at least one language `SFSpeechRecognizer` can recognise *on the device*, and speech recognition has not been refused in Settings (not yet asked still counts — the prompt comes at the first Start) |
+| | Android 13 and later | `SpeechRecognizer.isOnDeviceRecognitionAvailable` — the phone has an on-device recognition service. Which languages it has installed is asynchronous to find out, so that is left to `stt.languages()`, and an empty list makes the page say there are none |
 | `translateHost` | iOS 26 and later | `TranslationSession(installedSource:target:)` exists, so installed languages can be translated with no interface at all |
+| | Android, builds with ML Kit | ML Kit's translator is in the APK — see below |
 
-Absent, nothing is declared and the page offers what it offered before, which
-is the Android client today: it sets neither flag, so the shared file is inert
-there until `ReceiverActivity` has a recogniser to declare. Flags rather than
-asking at run time because v2 decides whether to offer local mode during a
-render, synchronously (`engines/index.js`, `hostStt`) — the objects have to be
-there before the page's first script, and only the host knows by then whether
-they can work.
+Absent, nothing is declared and the page offers what it offered before — on an
+Android phone older than 13, for instance. Flags rather than asking at run time
+because v2 decides whether to offer local mode during a render, synchronously
+(`engines/index.js`, `hostStt`) — the objects have to be there before the
+page's first script, and only the host knows by then whether they can work.
 
 On iOS the recogniser is `OnDeviceSpeech.swift` and the translator
 `OnDeviceTranslation.swift`, both reached through `HostChannel`. Every request
@@ -391,6 +394,58 @@ page stops its session on `pagehide`, and `ReceiverViewController` stops it
 again when the new page commits. The messages between the two
 halves are listed in `src/hostspeech.js` and `HostChannel.swift`;
 `test/run.sh` tests the page half, including v2's own engine driven through it.
+
+On Android the recogniser is `Recognition.java`, reached through
+`ReceiverActivity`. It is `SpeechRecognizer.createOnDeviceSpeechRecognizer` and
+nothing else — no fallback to the ordinary recogniser, which may be a cloud
+one — fed through a pipe (`EXTRA_AUDIO_SOURCE`, 16 kHz PCM16 mono) as one
+*segmented* session that lasts as long as the receiver's: a result for each
+stretch of speech, and a new session (a new pipe) on a retune or when the
+recogniser ends by itself, on the same bounded retry policy as iOS. As on iOS,
+`ReceiverActivity` also stops it when the window starts on a new page and when
+the receiver closes, whatever the page last said. The app
+does not declare `RECORD_AUDIO`, and must not: a recogniser that ignored the
+pipe would otherwise transcribe the room. Without it, it fails, and says
+"this phone's speech recogniser can't take the receiver's audio" rather than
+the page's usual advice to grant a permission. A language not installed for
+on-device recognition is refused at Start. Android 13 is the floor, at run time
+only — it is where a recogniser learned to take audio from a file descriptor —
+and the app's own `minSdk` is unchanged.
+
+What Google's recogniser does (measured on a Pixel 8a) is not quite what its
+documentation says, and the class comment in `Recognition.java` has the
+details: finals come as segment results, or as partials marked
+`final_result` with a null `onResults` after, and are taken from either
+without being sent twice; unbroken talk is cut into lines of about a minute;
+and a cold start — the first session after a reboot or an install, and on the
+test phone often the first after a few idle minutes — can say it is ready and
+then read nothing for six to twelve seconds. So the pipe is written from its
+own thread, through a queue that holds fifteen seconds while the recogniser
+warms up and four once it is reading, dropping the oldest audio rather than
+blocking the WebView — and saying once, as a note rather than an error, if it
+ever falls behind. Catching up on that backlog the recogniser is at its least
+tidy: it moves on to the next line without settling the last, sends a line's
+final late or twice, and drops a stretch of audio outright. A line it has moved
+on from waits three seconds for its own final and is then settled as last
+heard, and a late copy of a settled line is recognised and dropped. It keeps going behind the lock screen (the playback service
+keeps the page running), but a failure there ends the session with a sentence
+saying so rather than being retried while nobody is looking.
+
+Translation on Android is ML Kit (`Translation.java`), which translates on the
+device and fetches a language's model — about 30 MB — by itself, without
+showing anything. It is fetched when a line is first asked for, over Wi-Fi
+only; until it is there the pair is `downloadable` and lines are shown as
+spoken with a note saying why. ML Kit is **not in the default build**, because
+of its size: its native library is 11–17 MB per ABI, stored uncompressed, which
+takes the universal APK from about 5 MB to about 69 MB (a Play install, one ABI
+from the `.aab`, is about 7 MB more to download and 18 MB more on the phone).
+It also adds an init provider that runs at every launch, `ACCESS_NETWORK_STATE`
+and Google's usage logging for ML Kit. Build it in with
+
+    UBERSDR_TRANSLATION=1 ./build.sh --release
+
+Without it the code compiles against ML Kit (`compileOnly`) but the classes are
+not in the APK, `ReceiverActivity` sees that, and `translateHost` is not set.
 
 ## What the phone gets that the desktop does not
 
@@ -443,7 +498,7 @@ announcements, keeping the display awake. The mapping is close to one-to-one:
 | `ReceiverActivity.java` | `ReceiverViewController.swift` |
 | `PlaybackService.java` | `PlaybackSession.swift` + `HostChannel.swift` |
 | `Notices.java`, `Speech.java` | `HostChannel.swift` |
-| — (not yet) | `OnDeviceSpeech.swift`, `OnDeviceTranslation.swift` — speech-to-text and translation on the device |
+| `Recognition.java`, `Translation.java` | `OnDeviceSpeech.swift`, `OnDeviceTranslation.swift` — speech-to-text and translation on the device |
 
 `Mdns` is the one rewrite rather than a port. The Android version sends its own
 DNS-SD query from an ephemeral port, which buys it freedom from `MulticastLock`
@@ -553,6 +608,15 @@ it says so.
 - **iOS: signing.** Simulator builds need none. A device build or an App Store
   archive needs an Apple ID in Xcode, and Play-style key questions have an Apple
   equivalent — see the bundle section below for the Android one.
+- **Android: speech-to-text behind the lock screen, on a device.** The
+  recogniser is fed by the page, which the playback service keeps running, so
+  it should carry on; a failure there ends the session with a sentence rather
+  than a retry. Not yet watched happening. Nor is the cold start's own delay
+  measured through the whole app rather than the instrumentation harness.
+- **Android: very long lines.** Google's recogniser cuts unbroken speech only
+  about once a minute, so a continuous talker shows one growing interim line
+  for that long before it settles. iOS cuts its own at 30 s; doing the same
+  here would mean overlapping two sessions, which the service may refuse.
 - **Menus.** No Links menu and no Layout menu, and neither is wanted: a phone
   has no menu bar, and the Layout menu's job is done by the phone layout.
 - **A caution for anyone touching the WebView lifecycle.** Do not call

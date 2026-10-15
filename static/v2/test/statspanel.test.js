@@ -598,6 +598,18 @@ t('the lossless cards are boxed under a title saying so', () => {
     assert.deepStrictEqual(inside, V4_CARDS);
 });
 
+t('the lossless box names the decoder in use, once the connection has said', () => {
+    // WebAssembly on IQ, JavaScript on audio; see audio-connection.js.
+    for (const [backend, shown] of [['wasm-simd', 'WASM SIMD'], ['wasm-scalar', 'WASM scalar'], ['js', 'JavaScript']]) {
+        const ctx = v4Context();
+        ctx.audioConn.v4Decoder = backend;
+        const { tree } = mount(ctx, {}, V4_TRAFFIC);
+        const box = deep(tree).find((n) => n && n.props && n.props.className === 'stats-codec');
+        assert.deepStrictEqual(cards(box).map((c) => c.label), ['Saving', 'Decode', 'Decoder', 'Packets']);
+        assert.strictEqual(cardNamed(tree, 'Decoder').num, shown);
+    }
+});
+
 function opusContext() {
     return context({
         audioConn: { bytesIn: 0, opusStats: { raw: 0, coded: 0, packets: 0 } },

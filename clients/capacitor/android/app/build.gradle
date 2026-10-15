@@ -99,6 +99,26 @@ dependencies {
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
     // MediaSessionCompat and the MediaStyle notification, for PlaybackService.
     implementation "androidx.media:media:1.7.0"
+    // ML Kit's on-device translator, for the Whisper extension's local mode
+    // (Translation.java, and `translateHost` in ReceiverActivity) — in the APK
+    // only when the build is asked for it:
+    //
+    //   UBERSDR_TRANSLATION=1 ./build.sh --release
+    //
+    // Because it is large. Its native library is 11-17 MB for each of the four
+    // ABIs, stored uncompressed, so the universal APK goes from about 5 MB to
+    // about 69 MB; a Play install, which gets one ABI from the .aab, about 7 MB
+    // more to download and 18 MB more on the phone. It also brings an init
+    // provider that runs at every launch, ACCESS_NETWORK_STATE, and Google's
+    // usage logging for ML Kit (the translated text stays on the phone; the
+    // models come down from Google). Without it the code still compiles —
+    // compileOnly — the classes are simply not there, ReceiverActivity sees
+    // that, and the page is not offered a translator.
+    if (System.getenv("UBERSDR_TRANSLATION") == "1") {
+        implementation "com.google.mlkit:translate:17.0.3"
+    } else {
+        compileOnly "com.google.mlkit:translate:17.0.3"
+    }
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

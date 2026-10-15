@@ -22,6 +22,7 @@ import { Emitter } from './emitter.js';
 import { failureKind } from '../lib/connectFailure.js';
 import { PCMStreamDecoder, isZstdFrame } from './pcm-stream.js';
 import { PCMv4StreamDecoder, OpusV4HeaderDecoder, isV4Frame, opusDurationSec } from './pcm-v4.js';
+import { PCMv4WasmStreamDecoder, loadPCMv4Wasm } from './pcm-v4-wasm.js';
 import { addServerTimeSample } from './serverClock.js';
 import {
     HANDSHAKE_TIMEOUT_MS, abandon, checkSocket, reviveOnWake,
@@ -52,6 +53,24 @@ const PROTOCOL_VERSION = 4;
 // Version 2/3 header: timestamp(8) sampleRate(4) channels(1) power(4) noise(4).
 const HEADER_BYTES = 21;
 
+// The version 4 IQ profiles: 0 is the complex predictor, 2 the same with the
+// reduced-depth shift. Profile 1, demodulated audio, stays on the JavaScript
+// decoder. The profile is the low three bits of the byte after the magic.
+const V4_PROFILE_MASK = 0x07;
+function isV4IQProfile(id) { return id === 0 || id === 2; }
+
+// The WebAssembly decoder for IQ (pcm-v4-wasm.js), bit for bit the JavaScript
+// one at a quarter of the cost with SIMD -- on iq384 that is 8% of a core
+// against 2%, on the thread that also draws the spectrum. Compiled once, as
+// soon as this file loads, so that it is ready long before anybody has tuned
+// to IQ: about 16 kB, a few milliseconds.
+//
+// Until it is ready, and wherever it cannot load at all (no WebAssembly, or a
+// Content-Security-Policy without 'wasm-unsafe-eval'), IQ decodes in
+// JavaScript exactly as before. Nothing waits on it.
+let wasmRuntime = null;
+loadPCMv4Wasm().then((rt) => { wasmRuntime = rt; }, () => {});
+
 export class AudioConnection extends Emitter {
     constructor() {
         super();
@@ -73,6 +92,16 @@ export class AudioConnection extends Emitter {
         // what makes a reconnect a clean start rather than a desynchronised
         // one.
         this.pcmV4 = new PCMv4StreamDecoder();
+        // IQ goes to the WebAssembly decoder instead, made the first time it is
+        // needed. Which of the two a stream is on is decided where the stream
+        // can change hands without losing anything; see _v4DecoderFor.
+        this.pcmV4Wasm = null;
+        this.v4Current = null;
+        this.v4IQ = null;
+        // What decoded the last version 4 packet -- 'js', 'wasm-simd' or
+        // 'wasm-scalar' -- for the Stats panel. Not in v4Stats, whose every
+        // field the panel subtracts as a counter.
+        this.v4Decoder = null;
         // Opus headers are change-tracked from version 4 on, so this carries
         // forward whatever the last frame did not repeat. Same lifecycle as the
         // decoders above: one per socket, reset on reconnect.
@@ -189,9 +218,7 @@ export class AudioConnection extends Emitter {
         this.opening = true;
         this.params = { ...params };
         // Whatever the last session announced does not describe this one.
-        this.pcm.reset();
-        this.pcmV4.reset();
-        this.opusV4.reset();
+        this._resetDecoders();
 
         // Spent here, whatever the check then answers: a re-registration that
         // was refused is not one to make again on the next attempt, and the
@@ -624,8 +651,10 @@ export class AudioConnection extends Emitter {
     // demodulator — is unaware of which version produced it.
     _onPCMv4Binary(buffer) {
         const t0 = performance.now();
-        const frame = this.pcmV4.decode(buffer);
+        const dec = this._v4DecoderFor(buffer);
+        const frame = dec.decode(buffer);
         if (!frame) return;
+        this.v4Decoder = dec === this.pcmV4 ? 'js' : dec.backend;
         const st = this.v4Stats;
         st.decodeMs += performance.now() - t0;
         st.raw += frame.samples * 2;
@@ -641,6 +670,62 @@ export class AudioConnection extends Emitter {
             channels: frame.channels,
             captureMs: frame.captureMs,
         });
+    }
+
+    // Every per-socket decoder back to a clean start, and no stream in hand, so
+    // the next socket's first packet picks its decoder afresh.
+    _resetDecoders() {
+        this.pcm.reset();
+        this.pcmV4.reset();
+        if (this.pcmV4Wasm) this.pcmV4Wasm.reset();
+        this.v4Current = null;
+        this.v4IQ = null;
+        this.opusV4.reset();
+    }
+
+    // Which decoder takes this packet: the WebAssembly one for IQ when it has
+    // loaded, the JavaScript one otherwise.
+    //
+    // Both are stateful -- the predictor carries every sample so far -- so a
+    // stream can only change hands where neither side's state carries over.
+    // That is the first packet after reset(), and a change between IQ and
+    // audio on the live socket (a tune from usb to iq, say). The second is
+    // safe because the server goes through the same boundary: the profile
+    // follows the channel count, a new profile rebuilds its predictor from
+    // cold (pcm_v4_stream.go), and a new channel count forces a full header --
+    // metadata, absolute timestamp, sample count and signal quality
+    // (pcm_v4_header.go, needsResync). So a freshly reset decoder reads that
+    // packet exactly as the one in hand would have.
+    //
+    // A periodic resynchronisation is NOT such a point: it re-sends the header
+    // but the predictor runs on through it. So a module that finishes loading
+    // part way through an IQ stream waits for the next boundary, and the
+    // stream finishes in JavaScript. Profiles 0 and 2 (the reduced-depth
+    // shift, moved on a live socket by setMinMargin) are both IQ and stay on
+    // one decoder, which follows a change between them itself.
+    _v4DecoderFor(buffer) {
+        if (buffer.byteLength < 5) return this.v4Current || this.pcmV4;
+        const iq = isV4IQProfile(new Uint8Array(buffer, 4, 1)[0] & V4_PROFILE_MASK);
+        if (this.v4Current && iq === this.v4IQ) return this.v4Current;
+        let want = this.pcmV4;
+        if (iq && wasmRuntime) {
+            if (!this.pcmV4Wasm) {
+                try {
+                    this.pcmV4Wasm = new PCMv4WasmStreamDecoder(wasmRuntime);
+                } catch (e) {
+                    // The module could not give this connection a codec; it
+                    // keeps the JavaScript decoder.
+                }
+            }
+            if (this.pcmV4Wasm) want = this.pcmV4Wasm;
+        }
+        // Reset only on a change of hands: a decoder staying in place follows
+        // the profile change itself, exactly as it did before there was a
+        // choice, and one coming in may hold a stream from before.
+        if (this.v4Current && want !== this.v4Current) want.reset();
+        this.v4Current = want;
+        this.v4IQ = iq;
+        return want;
     }
 
     // Lossless frames, decoded into the same planar floats the JSON fallback

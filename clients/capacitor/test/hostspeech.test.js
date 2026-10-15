@@ -501,6 +501,52 @@ t('v2 host engine: the host ending by itself is restarted as a new session', asy
     engine.stop();
 });
 
+// What the Android host (Recognition.java) says that iOS does not: two codes
+// of its own, which the page has no table entry for and so shows in the host's
+// words.
+
+t('v2 host engine: a recogniser that would only take the microphone is the host\'s sentence, and the end', async () => {
+    const r = rig();
+    const engine = E.createLocalEngine('host', { player: fakePlayer(), win: r.win });
+    const s = sink();
+    const running = engine.start({ lang: 'en-US', ...s.cb });
+    const message = 'This phone\'s speech recogniser can\'t take the receiver\'s audio — it will only listen to the microphone, which is not what is being transcribed.';
+    r.say('stt-start-failed', { session: r.last('stt-start').session, code: 'audio-source-unsupported', message });
+    await running;
+    await r.c.advance(0);
+    assert.strictEqual(s.errors.length, 1);
+    assert.strictEqual(s.errors[0].code, 'audio-source-unsupported');
+    assert.strictEqual(s.errors[0].message, message);
+    // Not the permission advice: granting the microphone is what must not happen.
+    assert.notStrictEqual(s.errors[0].action, 'permission');
+    assert.strictEqual(s.ends, 1);
+});
+
+t('v2 host engine: falling behind is a note, and the session carries on', async () => {
+    const r = rig();
+    const engine = E.createLocalEngine('host', { player: fakePlayer(), win: r.win });
+    const s = sink();
+    const running = engine.start({ lang: 'en-US', ...s.cb });
+    const id = r.last('stt-start').session;
+    r.say('stt-started', { session: id });
+    await running;
+    r.say('stt-error', {
+        session: id,
+        code: 'falling-behind',
+        message: 'On-device recognition fell behind the receiver\'s audio, so some of it was skipped.',
+        fatal: false,
+        retryable: false,
+    });
+    assert.strictEqual(s.errors.length, 1);
+    assert.strictEqual(s.errors[0].fatal, false);
+    assert.match(s.errors[0].message, /fell behind/);
+    r.say('stt-result', { session: id, text: 'still here', final: true });
+    assert.deepStrictEqual(s.results, [{ text: 'still here', final: true }]);
+    assert.strictEqual(s.ends, 0);
+    assert.strictEqual(r.sent.filter((m) => m.type === 'stt-stop').length, 0);
+    engine.stop();
+});
+
 chain.then(() => {
     console.log(`\n${pass} passed${process.exitCode ? ', some FAILED' : ''}`);
 });

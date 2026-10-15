@@ -93,6 +93,13 @@ function codecSummary(window) {
     };
 }
 
+// How the lossless decoder in use is named on the codec card.
+const DECODER_NAMES = {
+    js: 'JavaScript',
+    'wasm-simd': 'WASM SIMD',
+    'wasm-scalar': 'WASM scalar',
+};
+
 // A share as a whole number, unless it is a small one that is not nothing:
 // an escape rate of 0.4% is a different reading from none at all.
 function pctText(v) {
@@ -519,6 +526,7 @@ export default function StatsPanel({ minimal }) {
             cpu: app.cpu,
             mem: app.mem,
             codec: codecSummary(codecWindow.current),
+            v4Decoder: s.v4Decoder,
         });
     });
 
@@ -728,6 +736,13 @@ export default function StatsPanel({ minimal }) {
                             value={perSecondText(facts.codec.decodePct)}
                             unit="% CPU"
                         />
+                        {/* Which decoder it is: WebAssembly on IQ wherever it
+                            loads, JavaScript otherwise and on demodulated
+                            audio. The same output either way, at different
+                            costs -- the Decode figure beside it. */}
+                        {facts.codec.kind === 'v4' && facts.v4Decoder && (
+                            <Readout label="Decoder" value={DECODER_NAMES[facts.v4Decoder] || facts.v4Decoder} />
+                        )}
                         {/* Rice is the codec working; silent is squelch; escape
                             is the predictor losing to the signal and sending it
                             verbatim — the one that is worth watching. Lossless

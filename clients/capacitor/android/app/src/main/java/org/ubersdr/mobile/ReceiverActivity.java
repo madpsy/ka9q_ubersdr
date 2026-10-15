@@ -106,6 +106,16 @@ public class ReceiverActivity extends Activity {
     private androidx.webkit.JavaScriptReplyProxy reply;
     private Prefs prefs;
     private Speech speech;
+    // Speech to text and translation for v2's Whisper extension, made on the
+    // page's first message for them. Null where the flags below were not set.
+    private Recognition recognition;
+    private Translation translation;
+    private boolean sttHost;
+    private boolean translateHost;
+    // Whether the receiver is on screen, for the recogniser: it carries on
+    // behind the lock screen, but does not retry a failure there. See
+    // Recognition.ended.
+    private boolean visible = true;
 
     /** The page's outstanding &lt;input type="file"&gt;. See onShowFileChooser. */
     private ValueCallback<android.net.Uri[]> filePick;
@@ -187,12 +197,19 @@ public class ReceiverActivity extends Activity {
         // is process-global, so this decides it for the chooser too.
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
 
+        // What this phone can do on the device for the Whisper extension,
+        // decided now because the page reads it before its first script. Both
+        // need the host channel to answer on, so neither is offered without it.
+        boolean channel = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER);
+        sttHost = channel && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && Recognition.offered(this);
+        translateHost = channel && translationPackaged();
+
         // The preload's jobs, before the page's first script runs.
         Set<String> rules = Collections.singleton(origin);
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(
                     web, seedScript(upstream, new Secrets(this).get(instanceId), notificationState(),
-                            prefs.snapshot()),
+                            prefs.snapshot(), sttHost, translateHost),
                     rules);
 
             // The page API client (src/receiver.js, bundled by build.sh), and
@@ -236,6 +253,22 @@ public class ReceiverActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return openExternally(request.getUrl()) ? true : false;
+            }
+
+            /**
+             * A new page in the receiver's window — a reload, or any other
+             * navigation. The recogniser belongs to this Activity, not to the
+             * page, so it would outlive the page that started it: a session
+             * with no audio coming, started again each time it gave up, until
+             * the receiver closed. The page stops its own session at
+             * `pagehide`, but a page torn down rather than unloaded never gets
+             * to, so it is stopped here as well — as iOS does when a new page
+             * commits.
+             */
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                if (recognition != null) recognition.stopAll();
             }
         });
 
@@ -626,6 +659,17 @@ public class ReceiverActivity extends Activity {
             case "notice-close":
                 Notices.close(this, message.optString("tag", ""));
                 break;
+            case "stt-languages":
+            case "stt-start":
+            case "stt-audio":
+            case "stt-reset":
+            case "stt-stop":
+                transcribe(type, message);
+                break;
+            case "translate-availability":
+            case "translate":
+                translate(type, message);
+                break;
             case "stats":
                 // Measured on the way past rather than on a timer: the page
                 // only asks while the stats readout is open. See AppLoad.
@@ -664,6 +708,96 @@ public class ReceiverActivity extends Activity {
                 break;
             default:
                 Log.w(TAG, "unknown message from the page: " + type);
+        }
+    }
+
+    /**
+     * The Whisper extension's local mode — see Recognition, and
+     * src/hostspeech.js for the page's end.
+     *
+     * <p>Checked on the way in: the sender is a remote instance's own page. A
+     * push is capped at a second of audio (the page sends a tenth of one), so a
+     * page cannot hand the recogniser megabytes in one message. Messages for a
+     * recogniser this host did not offer are not answered at all, which the
+     * page reads as a host that has none.
+     */
+    private void transcribe(String type, JSONObject message) {
+        if (!sttHost || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        if (recognition == null) {
+            recognition = new Recognition(this, (text) -> runOnUiThread(() -> {
+                if (reply != null) reply.postMessage(text);
+            }));
+            recognition.setVisible(visible);
+        }
+        int session = message.optInt("session", 0);
+        switch (type) {
+            case "stt-languages":
+                recognition.languages();
+                break;
+            case "stt-start":
+                recognition.start(session, message.optString("lang", ""), message.optInt("sampleRate", 16000));
+                break;
+            case "stt-audio":
+                String pcm = message.optString("pcm", "");
+                if (pcm.length() > 48000) return;
+                recognition.push(session, pcm);
+                break;
+            case "stt-reset":
+                recognition.reset(session);
+                break;
+            case "stt-stop":
+                recognition.stop(session);
+                break;
+            default:
+                break;
+        }
+    }
+
+    /**
+     * Translating the transcript's lines — see Translation. A line is a
+     * sentence or two; anything far longer is refused rather than handed to a
+     * model.
+     */
+    private void translate(String type, JSONObject message) {
+        if (!translateHost) return;
+        if (translation == null) {
+            translation = new Translation((text) -> runOnUiThread(() -> {
+                if (reply != null) reply.postMessage(text);
+            }));
+        }
+        int id = message.optInt("id", 0);
+        String source = message.optString("source", "");
+        String target = message.optString("target", "");
+        switch (type) {
+            case "translate-availability":
+                translation.availability(id, source, target);
+                break;
+            case "translate":
+                String text = message.optString("text", "");
+                if (text.length() > 5000) {
+                    if (reply != null) {
+                        reply.postMessage("translate-result:{\"id\":" + id + ",\"error\":\"the line was too long\"}");
+                    }
+                    return;
+                }
+                translation.translate(id, text, source, target);
+                break;
+            default:
+                break;
+        }
+    }
+
+    /**
+     * Whether this build carries ML Kit's translator — it is in the APK only
+     * when asked for (see the dependency in android/app/build.gradle). Asked by
+     * name, so that nothing is loaded from Translation unless it is there.
+     */
+    private static boolean translationPackaged() {
+        try {
+            Class.forName("com.google.mlkit.nl.translate.Translator");
+            return true;
+        } catch (ClassNotFoundException | LinkageError e) {
+            return false;
         }
     }
 
@@ -800,15 +934,21 @@ public class ReceiverActivity extends Activity {
     }
 
     private static String seedScript(String upstreamOrigin, String password, String notifications,
-                                     String sharedPrefs) {
+                                     String sharedPrefs, boolean sttHost, boolean translateHost) {
         StringBuilder sb = new StringBuilder();
         sb.append("(function(){try{window.ubersdrDesktop={upstreamOrigin:")
           .append(JSONObject.quote(upstreamOrigin == null ? "" : upstreamOrigin))
           .append(",autoStart:true,mediaSession:true,notifications:")
           .append(JSONObject.quote(notifications))
           .append(",chat:false")
-          .append(",hidePanels:").append(HIDDEN_PANELS)
-          .append("};}catch(e){}");
+          .append(",hidePanels:").append(HIDDEN_PANELS);
+        // The Whisper extension's local mode, read by src/hostspeech.js before
+        // the page's first script — see Recognition.offered and
+        // translationPackaged. Left out rather than false where there is
+        // nothing, as iOS does.
+        if (sttHost) sb.append(",sttHost:true");
+        if (translateHost) sb.append(",translateHost:true");
+        sb.append("};}catch(e){}");
         if (password != null && !password.isEmpty()) {
             sb.append("try{sessionStorage.setItem('ubersdr.v2.password',")
               .append(JSONObject.quote(password))
@@ -894,6 +1034,20 @@ public class ReceiverActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        visible = true;
+        if (recognition != null) recognition.setVisible(true);
+    }
+
+    @Override
+    protected void onStop() {
+        visible = false;
+        if (recognition != null) recognition.setVisible(false);
+        super.onStop();
+    }
+
+    @Override
     public void onBackPressed() {
         if (web != null && web.canGoBack()) web.goBack();
         else super.onBackPressed();
@@ -909,6 +1063,16 @@ public class ReceiverActivity extends Activity {
         if (speech != null) {
             speech.release();
             speech = null;
+        }
+        // Not left listening for a page that has gone: a recogniser runs, and
+        // its writer thread waits, until told otherwise.
+        if (recognition != null) {
+            recognition.stopAll();
+            recognition = null;
+        }
+        if (translation != null) {
+            translation.close();
+            translation = null;
         }
         if (web != null) {
             web.loadUrl("about:blank");

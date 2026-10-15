@@ -159,6 +159,9 @@ export default function useStatsSample(intervalMs, onSample) {
                 v4: v4Delta(was.v4, at.v4, ms),
                 // The Opus path's, on the same terms.
                 opus: v4Delta(was.opus, at.opus, ms),
+                // Which decoder the lossless path is on: 'js', 'wasm-simd' or
+                // 'wasm-scalar', or null before its first packet.
+                v4Decoder: (audioConn && audioConn.v4Decoder) || null,
                 // Already a rate, measured by the panel that owns that stream —
                 // null whenever it is closed, which is whenever the stream is.
                 bandBytes: bandRate(),

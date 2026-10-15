@@ -1,0 +1,3 @@
+# Built by build.sh (objects, raw and stripped .wasm) and by test.js / bench.js
+# (esbuild bundles). The committed output is ../../src/radio/pcm-v4-wasm.generated.js.
+.build/

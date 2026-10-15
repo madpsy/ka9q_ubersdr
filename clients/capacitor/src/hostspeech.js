@@ -10,19 +10,23 @@
 // static/v2/src/extensions/whisper/engines/host.js; this is the page half of
 // it, and the host half is whatever native code answers the messages below.
 // On iOS that is OnDeviceSpeech.swift and OnDeviceTranslation.swift, reached
-// through HostChannel.swift.
+// through HostChannel.swift; on Android, Recognition.java and Translation.java,
+// reached through ReceiverActivity.java.
 //
 // Declared only when the host says so, through two flags its document-start
 // script writes into `window.ubersdrDesktop` before this runs:
 //
 //   sttHost        the host has a recogniser that works without the network,
 //                  in at least one language, and has not been refused
-//                  permission for it. iOS sets it; Android does not yet.
-//   translateHost  the host can translate between installed languages without
-//                  showing anything. iOS 26 and later.
+//                  permission for it. iOS sets it, and Android 13 and later
+//                  where the phone has an on-device recognition service.
+//   translateHost  the host can translate without the network and without
+//                  showing anything. iOS 26 and later; Android builds that
+//                  carry ML Kit.
 //
 // Absent, nothing is declared, and the page is exactly where it was — which is
-// what keeps the Android app and any older native half unchanged by this file.
+// what keeps an older native half, or a phone without a recogniser, unchanged
+// by this file.
 // The decision has to be the host's and has to be made before the page's first
 // script: v2 looks for `stt` synchronously, during a render, to decide whether
 // to offer the source at all (engines/index.js, hostStt), so an object that
@@ -64,8 +68,9 @@
 // first session or request by coincidence.
 //
 // The page going away stops its session at the host (`pagehide` sends
-// stt-stop). The iOS host also stops the recogniser itself when the main frame
-// commits a new page, for the case where the old page never got to say so.
+// stt-stop). Both hosts also stop the recogniser themselves when the main
+// frame moves to a new page, for the case where the old page never got to say
+// so.
 //
 // Every request that expects an answer has a deadline, because the host is a
 // different process that can be busy, suspended or simply older than this
@@ -74,8 +79,9 @@
 // the page would sit on "starting" for ever.
 
 export const TIMEOUTS = {
-    // Long, because the first start shows the system's permission prompt and
-    // nobody reads one in a second.
+    // Long, because the first start shows the system's permission prompt on
+    // iOS and nobody reads one in a second — and on Android the first session
+    // after a reboot can take a dozen seconds to get going.
     startMs: 60000,
     languagesMs: 10000,
     availabilityMs: 8000,

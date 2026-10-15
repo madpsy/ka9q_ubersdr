@@ -3,7 +3,9 @@ import Speech
 import AVFoundation
 
 /// Speech-to-text on the device with iOS 26's SpeechAnalyzer — OnDeviceSpeech's
-/// engine wherever SpeechTranscriber is available. The page's half and the
+/// second engine wherever SpeechTranscriber is available, for when Siri is off
+/// (OnDeviceSpeech.handOver) or SFSpeechRecognizer lacks the language. The
+/// page's half and the
 /// three rules (never the network, never the microphone or the audio session,
 /// never a loop of errors) are as OnDeviceSpeech describes; this file is only
 /// the recogniser behind them.
@@ -74,15 +76,36 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
         return await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: lang))
     }
 
-    /// The one configuration this uses. Volatile results are the page's
-    /// interim line; without them nothing would show until a stretch was
-    /// settled. No `.fastResults`: it trades accuracy for latency, and a line
-    /// that appears a moment later but right is the better transcript. The
-    /// asset install, the audio format and the analysis all derive from this,
-    /// so it is made in one place.
+    /// The one configuration this uses, tuned for latency. The asset install,
+    /// the audio format and the analysis all derive from this, so it is made
+    /// in one place.
+    ///
+    /// Volatile results are the page's interim line; without them nothing
+    /// would show until a stretch was settled. `.fastResults` makes the
+    /// transcriber work from a smaller context window — "faster but also less
+    /// accurate results", in Apple's words. Without it the interim text lagged
+    /// a broadcast noticeably more than SFSpeechRecognizer's did on the same
+    /// iPad, and a transcript that keeps up with the receiver is worth more
+    /// here than the last few per cent of accuracy: the final results still
+    /// tidy up what the volatile ones guessed.
+    ///
+    /// This is exactly Apple's `.progressiveTranscription` preset ("immediate
+    /// transcription of live audio": volatile and fast results, nothing else),
+    /// written out rather than named so that what this relies on is on the
+    /// page, and stays put if a later iOS gives the preset more to do.
+    ///
+    /// SpeechTranscriber rather than DictationTranscriber, although the
+    /// latter is the model SFSpeechRecognizer uses — the one that felt quicker
+    /// — and Apple says it too needs neither Siri nor Dictation. Apple
+    /// presents it as the fallback for languages and devices SpeechTranscriber
+    /// lacks, and calls SpeechTranscriber's model the faster of the two; the
+    /// lag measured against SFSpeechRecognizer was SpeechTranscriber without
+    /// `.fastResults`, so it does not show the dictation model is quicker.
+    /// Its own low-latency option, `.frequentFinalization`, hurries the
+    /// final results, not the volatile line the page shows.
     private static func transcriber(_ locale: Locale) -> SpeechTranscriber {
         SpeechTranscriber(locale: locale, transcriptionOptions: [],
-                          reportingOptions: [.volatileResults], attributeOptions: [])
+                          reportingOptions: [.volatileResults, .fastResults], attributeOptions: [])
     }
 
     // MARK: - State
@@ -123,6 +146,15 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
     private var session: Int?
     /// Set from stt-start until stt-started or stt-start-failed has been sent.
     private var starting = false
+    /// The session was handed over from SFSpeechRecognizer after the page had
+    /// been told it started (OnDeviceSpeech.handOver): no stt-started for it,
+    /// and a start that fails ends the session instead — see failStart.
+    private var continuing = false
+    /// Pushes held while a continuing session's first analysis is being
+    /// prepared, so the words spoken across the handover still reach it.
+    /// Raw, because the analyzer's audio format is not known until then.
+    private var pending: [String] = []
+    private var pendingSamples = 0
     /// Counts starts, so a timer or an install finishing for an earlier start
     /// of the same session number cannot act on this one.
     private var attempt = 0
@@ -151,6 +183,10 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
     // can talk for minutes without one; past this it is asked to settle what
     // it has, so the page's line stays a line.
     private static let maxUnsettledSamples = rate * 30
+    // The most a handover holds while the model loads. An installed model is
+    // ready in well under a second; this only bounds a download, after which
+    // the oldest audio is let go rather than putting the transcript behind.
+    private static let maxPendingSamples = rate * 5
     // As in OnDeviceSpeech: an analysis that fails within this long, having
     // heard nothing, is a strike, and this many in a row is the end.
     private static let quickFailureSeconds = 1.5
@@ -180,34 +216,42 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
     /// "no" in Settings is honoured on either engine — and keeps this working
     /// if iOS turns out to require it.
     func start(session id: Int, lang: String, sampleRate: Int) {
-        queue.async {
-            self.teardown()
-            self.session = id
-            self.starting = true
-            self.attempt += 1
-            let attempt = self.attempt
-            guard sampleRate == Self.rate else {
-                self.failStart(id, code: "start-failed",
-                               message: "the app takes 16 kHz audio, and was offered \(sampleRate) Hz")
+        queue.async { self.startSession(id, lang: lang, sampleRate: sampleRate, continuing: false) }
+    }
+
+    func continueSession(_ id: Int, lang: String, sampleRate: Int) {
+        queue.async { self.startSession(id, lang: lang, sampleRate: sampleRate, continuing: true) }
+    }
+
+    /// start() and continueSession(), on the queue.
+    private func startSession(_ id: Int, lang: String, sampleRate: Int, continuing: Bool) {
+        self.teardown()
+        self.session = id
+        self.starting = true
+        self.continuing = continuing
+        self.attempt += 1
+        let attempt = self.attempt
+        guard sampleRate == Self.rate else {
+            self.failStart(id, code: "start-failed",
+                           message: "the app takes 16 kHz audio, and was offered \(sampleRate) Hz")
+            return
+        }
+        OnDeviceSpeech.authorise(on: self.queue) { granted in
+            guard self.attempt == attempt, self.session == id else { return }
+            guard granted else {
+                self.failStart(id, code: "not-allowed",
+                               message: "Speech recognition is turned off for UberSDR in Settings.")
                 return
             }
-            OnDeviceSpeech.authorise(on: self.queue) { granted in
-                guard self.attempt == attempt, self.session == id else { return }
-                guard granted else {
-                    self.failStart(id, code: "not-allowed",
-                                   message: "Speech recognition is turned off for UberSDR in Settings.")
-                    return
+            Task {
+                let locale = await Self.locale(for: lang)
+                let status: AssetInventory.Status
+                if let locale = locale {
+                    status = await AssetInventory.status(forModules: [Self.transcriber(locale)])
+                } else {
+                    status = .unsupported
                 }
-                Task {
-                    let locale = await Self.locale(for: lang)
-                    let status: AssetInventory.Status
-                    if let locale = locale {
-                        status = await AssetInventory.status(forModules: [Self.transcriber(locale)])
-                    } else {
-                        status = .unsupported
-                    }
-                    self.queue.async { self.located(attempt, lang: lang, locale: locale, status: status) }
-                }
+                self.queue.async { self.located(attempt, lang: lang, locale: locale, status: status) }
             }
         }
     }
@@ -220,31 +264,48 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
     /// a retune) is kept, not lost. Audio before there is any analysis — while
     /// a model downloads — is dropped: holding it would only put the
     /// transcript minutes behind the receiver.
+    ///
+    /// The exception is a handover: those seconds are the middle of a session
+    /// the page is already showing, so they are held (up to
+    /// `maxPendingSamples`) and fed in once the analysis exists.
     func push(session id: Int, base64: String) {
         queue.async {
-            guard self.session == id, let r = self.run, let format = self.format,
-                  let data = Data(base64Encoded: base64), data.count >= 2 else { return }
-            let frames = data.count / 2
-            guard let pcm = AVAudioPCMBuffer(pcmFormat: self.pushFormat, frameCapacity: AVAudioFrameCount(frames)),
-                  let out = pcm.floatChannelData?[0] else { return }
-            pcm.frameLength = AVAudioFrameCount(frames)
-            data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
-                for i in 0..<frames {
-                    let bits = UInt16(raw[i * 2]) | (UInt16(raw[i * 2 + 1]) << 8)
-                    out[i] = Float(Int16(bitPattern: bits)) / 32768
+            guard self.session == id else { return }
+            if self.continuing && self.starting && self.format == nil {
+                self.pending.append(base64)
+                self.pendingSamples += base64.utf8.count * 3 / 8
+                while self.pendingSamples > Self.maxPendingSamples, !self.pending.isEmpty {
+                    self.pendingSamples -= self.pending.removeFirst().utf8.count * 3 / 8
                 }
+                return
             }
-            guard let buffer = self.convert(pcm, to: format) else { return }
-            r.input.yield(AnalyzerInput(buffer: buffer))
+            self.feed(base64)
+        }
+    }
 
-            if !r.text.isEmpty { r.unsettled += frames }
-            if r.unsettled >= Self.maxUnsettledSamples && !r.finalizing {
-                r.finalizing = true
-                let analyzer = r.analyzer
-                // Through the last audio it has consumed: whatever it was
-                // still revising is settled and published as final.
-                Task { try? await analyzer.finalize(through: nil) }
+    private func feed(_ base64: String) {
+        guard let r = run, let format = format,
+              let data = Data(base64Encoded: base64), data.count >= 2 else { return }
+        let frames = data.count / 2
+        guard let pcm = AVAudioPCMBuffer(pcmFormat: pushFormat, frameCapacity: AVAudioFrameCount(frames)),
+              let out = pcm.floatChannelData?[0] else { return }
+        pcm.frameLength = AVAudioFrameCount(frames)
+        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            for i in 0..<frames {
+                let bits = UInt16(raw[i * 2]) | (UInt16(raw[i * 2 + 1]) << 8)
+                out[i] = Float(Int16(bitPattern: bits)) / 32768
             }
+        }
+        guard let buffer = convert(pcm, to: format) else { return }
+        r.input.yield(AnalyzerInput(buffer: buffer))
+
+        if !r.text.isEmpty { r.unsettled += frames }
+        if r.unsettled >= Self.maxUnsettledSamples && !r.finalizing {
+            r.finalizing = true
+            let analyzer = r.analyzer
+            // Through the last audio it has consumed: whatever it was
+            // still revising is settled and published as final.
+            Task { try? await analyzer.finalize(through: nil) }
         }
     }
 
@@ -254,6 +315,9 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
     func reset(session id: Int) {
         queue.async {
             guard self.session == id else { return }
+            // Audio held across a handover is from the frequency just left.
+            self.pending = []
+            self.pendingSamples = 0
             self.discard(self.run)
             self.run = nil
             // No locale yet means the start in hand has not reached its first
@@ -384,6 +448,13 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
                 self.format = format
                 self.strikes = 0
                 self.begin()
+                // A handover's held audio, in order, into the stream the
+                // analysis has just been given — it buffers until the
+                // analyzer is consuming.
+                let held = self.pending
+                self.pending = []
+                self.pendingSamples = 0
+                for push in held { self.feed(push) }
             }
         }
     }
@@ -438,7 +509,8 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
         }
         if starting {
             starting = false
-            reply("stt-started", ["session": sid])
+            // A handover was announced long ago, by the engine before.
+            if !continuing { reply("stt-started", ["session": sid]) }
         }
     }
 
@@ -583,7 +655,15 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
         Task { await analyzer.cancelAndFinishNow() }
     }
 
+    /// A start that cannot go on. For a handover the page believes the
+    /// session is running and would ignore a failed start, so it is told the
+    /// way a running session ends — and 'start-failed', which only names a
+    /// rejected start, becomes the page's generic stop.
     private func failStart(_ id: Int, code: String, message: String) {
+        if continuing {
+            end(code: code == "start-failed" ? "keeps-stopping" : code, message: message)
+            return
+        }
         reply("stt-start-failed", ["session": id, "code": code, "message": message])
         teardown()
     }
@@ -602,6 +682,9 @@ final class OnDeviceSpeechAnalyzer: SpeechEngine {
     private func teardown() {
         session = nil
         starting = false
+        continuing = false
+        pending = []
+        pendingSamples = 0
         discard(run)
         run = nil
         locale = nil

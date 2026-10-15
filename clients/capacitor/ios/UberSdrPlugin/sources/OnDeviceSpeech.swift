@@ -12,18 +12,28 @@ import AVFoundation
 /// Speech recogniser of its own, so without this there is no local mode on an
 /// iPhone at all.
 ///
-/// Two recognisers stand behind it, picked once per receiver window:
+/// Two recognisers stand behind it:
 ///
+///   * **SFSpeechRecognizer**, everything else in this file. On every iOS, and
+///     tried first even on iOS 26, because it is the quicker of the two to put
+///     words on the screen: on an iPad Air M4 its interim text kept visibly
+///     closer to the broadcast than SpeechTranscriber's did. Its catch is that
+///     it runs on Siri's and Dictation's engine, and with Siri off it fails
+///     every task with kLSRErrorDomain 201 "Siri and Dictation are disabled",
+///     even with Dictation on.
 ///   * **iOS 26 and later: SpeechAnalyzer with a SpeechTranscriber**, in
-///     OnDeviceSpeechAnalyzer.swift. Built for long-form and live audio, on the
-///     device by design, with its models managed by AssetInventory rather than
-///     by the keyboard's Dictation languages — and, crucially, independent of
-///     the Siri and Dictation switches. SFSpeechRecognizer runs on the same
-///     engine as Dictation and Siri, and on an iPad with Dictation on but Siri
-///     off it failed every task with kLSRErrorDomain 201 "Siri and Dictation
-///     are disabled".
-///   * **Before iOS 26, or on hardware whose SpeechTranscriber says it is not
-///     available: SFSpeechRecognizer**, everything else in this file.
+///     OnDeviceSpeechAnalyzer.swift. On the device by design, its models
+///     managed by AssetInventory rather than by the keyboard's Dictation
+///     languages, and independent of the Siri and Dictation switches. It takes
+///     over a session whose SFSpeechRecognizer task fails with 201 — mid-
+///     session, without the page seeing a seam (see `handOver`) — and from
+///     then on, for as long as the app runs, every session starts on it
+///     directly. It also takes a session from the start when the chosen
+///     language is one SFSpeechRecognizer cannot do on the device.
+///
+/// Before iOS 26, or on hardware whose SpeechTranscriber says it is not
+/// available, there is only SFSpeechRecognizer, and a 201 is reported to the
+/// page with the Siri-and-Dictation sentence, as it always was.
 ///
 /// Three rules this is built around, and each one is a promise the page makes
 /// to the person using it:
@@ -183,10 +193,30 @@ final class OnDeviceSpeech {
     private static let quickFailureSeconds = 1.5
     private static let maxStrikes = 5
 
-    /// The SpeechAnalyzer engine, on a device that takes that path; every
-    /// message from the page goes to it instead of to the code below. Typed by
-    /// the protocol because a stored property cannot be marked iOS 26-only.
+    /// The SpeechAnalyzer engine, on a device that has one; messages for a
+    /// session it owns go to it instead of to the code below. Typed by the
+    /// protocol because a stored property cannot be marked iOS 26-only.
     private let analyzer: SpeechEngine?
+    /// The session the analyzer owns, if any — handed to it at start or
+    /// mid-session. Read and written on `queue`, which is why every message
+    /// from the page hops onto it before deciding where it goes: the order of
+    /// the page's pushes, resets and stop is then kept across a handover.
+    private var delegated: Int?
+    /// The language of the session in hand, for a handover.
+    private var lang = ""
+
+    /// Set once an SFSpeechRecognizer task has failed with 201 on a device
+    /// that has the analyzer, and never cleared: Siri is off, and trying
+    /// SFSpeechRecognizer at every Start would only cost each session its
+    /// first second. For the life of the process, not saved: someone who
+    /// turns Siri on gets the quicker engine back at the next launch. Shared
+    /// by every receiver window, hence the lock.
+    private static var siriOff: Bool {
+        get { siriOffLock.lock(); defer { siriOffLock.unlock() }; return _siriOff }
+        set { siriOffLock.lock(); _siriOff = newValue; siriOffLock.unlock() }
+    }
+    private static var _siriOff = false
+    private static let siriOffLock = NSLock()
 
     init(send: @escaping (String) -> Void) {
         self.send = send
@@ -206,11 +236,25 @@ final class OnDeviceSpeech {
         }
     }
 
+    /// On a device with the analyzer, a session starts there directly once
+    /// Siri is known to be off, or when SFSpeechRecognizer has no on-device
+    /// model for the language (the page's list is the analyzer's, the wider
+    /// one, so it can offer such a language). Otherwise SFSpeechRecognizer
+    /// first, as the quicker — and handOver if it turns out Siri is off.
     func start(session id: Int, lang: String, sampleRate: Int) {
-        if let analyzer = analyzer { return analyzer.start(session: id, lang: lang, sampleRate: sampleRate) }
         queue.async {
             self.teardown()
+            if let old = self.delegated {
+                self.delegated = nil
+                self.analyzer?.stop(session: old)
+            }
+            if let analyzer = self.analyzer, Self.siriOff || Self.recognizer(for: lang) == nil {
+                self.delegated = id
+                analyzer.start(session: id, lang: lang, sampleRate: sampleRate)
+                return
+            }
             self.session = id
+            self.lang = lang
             guard sampleRate == Self.rate else {
                 self.failStart(id, code: "start-failed",
                                message: "the app takes 16 kHz audio, and was offered \(sampleRate) Hz")
@@ -256,8 +300,8 @@ final class OnDeviceSpeech {
     /// back-off) is dropped: there is nothing to hear it, and holding it would
     /// only put the recogniser further behind the receiver.
     func push(session id: Int, base64: String) {
-        if let analyzer = analyzer { return analyzer.push(session: id, base64: base64) }
         queue.async {
+            if self.delegated == id { self.analyzer?.push(session: id, base64: base64); return }
             guard self.session == id, let u = self.current,
                   let data = Data(base64Encoded: base64), data.count >= 2 else { return }
             let frames = data.count / 2
@@ -284,8 +328,8 @@ final class OnDeviceSpeech {
     /// and carry on. Includes one still finishing — it is speech from the
     /// frequency the operator has just left.
     func reset(session id: Int) {
-        if let analyzer = analyzer { return analyzer.reset(session: id) }
         queue.async {
+            if self.delegated == id { self.analyzer?.reset(session: id); return }
             guard self.session == id else { return }
             self.discard(self.finishing)
             self.finishing = nil
@@ -297,8 +341,12 @@ final class OnDeviceSpeech {
     }
 
     func stop(session id: Int) {
-        if let analyzer = analyzer { return analyzer.stop(session: id) }
         queue.async {
+            if self.delegated == id {
+                self.delegated = nil
+                self.analyzer?.stop(session: id)
+                return
+            }
             guard self.session == id else { return }
             self.teardown()
         }
@@ -306,8 +354,11 @@ final class OnDeviceSpeech {
 
     /// The receiver is closing, whatever the page last said.
     func stopAll() {
-        if let analyzer = analyzer { return analyzer.stopAll() }
-        queue.async { self.teardown() }
+        queue.async {
+            self.teardown()
+            self.delegated = nil
+            self.analyzer?.stopAll()
+        }
     }
 
     // MARK: - Tasks
@@ -472,6 +523,7 @@ final class OnDeviceSpeech {
     private func failed(_ u: Utterance, _ error: NSError) {
         NSLog("[UberSDR stt] task %d ended: %@ %d %@", u.id, error.domain, error.code,
               error.localizedDescription)
+        if Self.isSiriOff(error), handOver() { return }
         if let fatal = Self.fatal(error) {
             end(code: fatal.code, message: fatal.message)
             return
@@ -497,6 +549,36 @@ final class OnDeviceSpeech {
         }
     }
 
+    /// Siri is off: kLSRErrorDomain 201, "Siri and Dictation are disabled".
+    private static func isSiriOff(_ error: NSError) -> Bool {
+        error.domain == "kLSRErrorDomain" && error.code == 201
+    }
+
+    /// Move the session in hand to the SpeechAnalyzer engine after a 201,
+    /// saying nothing to the page about it. False where there is no analyzer
+    /// to move it to (before iOS 26), and the 201 is then reported as before.
+    ///
+    /// The page has already been told the session started — stt-started goes
+    /// out as soon as the first task exists, and a 201 only arrives after —
+    /// so the analyzer takes it in its continuing mode: same session id, no
+    /// second stt-started, and a failure from here on reported as the session
+    /// ending (stt-error then stt-end) rather than as a failed start, which
+    /// the page would by now ignore. Whatever the dead task had heard has gone
+    /// to the page already (taskEvent settles it before calling failed). From
+    /// here `delegated` routes the page's messages to the analyzer, on this
+    /// queue and so in order; pushes that arrive while it is still loading its
+    /// model are held there and fed to it once it can listen.
+    private func handOver() -> Bool {
+        guard let analyzer = analyzer, let id = session else { return false }
+        NSLog("[UberSDR stt] Siri is off; session %d continues on SpeechAnalyzer", id)
+        Self.siriOff = true
+        let lang = self.lang
+        teardown()
+        delegated = id
+        analyzer.continueSession(id, lang: lang, sampleRate: Self.rate)
+        return true
+    }
+
     /// Errors that a retry cannot fix, as the page's codes.
     ///
     /// The Speech framework's errors on the device come from private domains
@@ -520,8 +602,9 @@ final class OnDeviceSpeech {
                 // It means what it says, both halves: SFSpeechRecognizer runs
                 // on Siri's and Dictation's engine, and an iPad with Dictation
                 // on but Siri off failed every task with it. (iOS 26 does not
-                // come here — SpeechTranscriber needs neither switch.) iOS's
-                // own words go in brackets for whoever has to work out which.
+                // come here — handOver moves the session to SpeechTranscriber,
+                // which needs neither switch.) iOS's own words go in brackets
+                // for whoever has to work out which.
                 return ("dictation-off",
                         "iOS needs Siri and Dictation turned on for on-device recognition (\(error.localizedDescription)). Turn on Siri under Settings › Apple Intelligence & Siri, and Dictation under Settings › General › Keyboard, then press Start again.")
             case 102:
@@ -594,4 +677,7 @@ protocol SpeechEngine: AnyObject {
     func reset(session id: Int)
     func stop(session id: Int)
     func stopAll()
+    /// Take over a session the page already believes started: start(), but
+    /// without announcing it — see OnDeviceSpeech.handOver.
+    func continueSession(_ id: Int, lang: String, sampleRate: Int)
 }

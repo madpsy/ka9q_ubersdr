@@ -28,8 +28,13 @@
 #   ./build.sh --test          run the decoder and tuning-range tests first
 #   ./build.sh --publish       ...then upload what this run built to the `latest`
 #                              release, replacing what is there. Asks first.
+#   ./build.sh --publish-only  upload what is already in dist/ without building,
+#                              after the same bundle checks a build runs. For
+#                              binaries a build has just made and smoke-tested;
+#                              warns if the sources are newer than them.
 #   ./build.sh --yes           answer the publish prompt in advance, for a run
-#                              with nobody at the terminal. Only with --publish.
+#                              with nobody at the terminal. Only with --publish
+#                              or --publish-only.
 #   ./build.sh --clean         remove dist/ and build/ first
 #
 # Environment: UBERSDR_REPO and UBERSDR_TAG choose where --publish uploads
@@ -89,6 +94,7 @@ WIN_REQUIRED_IMPORTS="requests websockets websocket aiohttp numpy zstandard samp
 
 RUN_TESTS=0
 PUBLISH=0
+PUBLISH_ONLY=0
 ASSUME_YES=0
 CLEAN=0
 
@@ -136,6 +142,7 @@ for arg in "$@"; do
   case "$arg" in
     --test) RUN_TESTS=1 ;;
     --publish) PUBLISH=1 ;;
+    --publish-only) PUBLISH=1; PUBLISH_ONLY=1 ;;
     --yes) ASSUME_YES=1 ;;
     --clean) CLEAN=1 ;;
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -147,6 +154,10 @@ done
 if [ ${#WANTED[@]} -gt 0 ]; then TARGETS=("${WANTED[@]}"); else TARGETS=(linux windows); fi
 if [ "$ASSUME_YES" -eq 1 ] && [ "$PUBLISH" -eq 0 ]; then
   echo "--yes only answers the --publish prompt; nothing to answer without --publish." >&2
+  exit 2
+fi
+if [ "$PUBLISH_ONLY" -eq 1 ] && { [ "$RUN_TESTS" -eq 1 ] || [ "$CLEAN" -eq 1 ]; }; then
+  echo "--publish-only builds nothing, so --test and --clean have nothing to act on." >&2
   exit 2
 fi
 
@@ -173,7 +184,7 @@ if want windows && [ ! -f opus.dll ]; then
   exit 1
 fi
 
-if [ "$CLEAN" -eq 1 ]; then
+if [ "$CLEAN" -eq 1 ] && [ "$PUBLISH_ONLY" -eq 0 ]; then
   echo "Cleaning dist/ and build/"
   rm -rf dist build
 fi
@@ -244,9 +255,11 @@ build_native() {
   esac
 }
 
-for t in "${TARGETS[@]}"; do
-  build_native "$t" || exit 1
-done
+if [ "$PUBLISH_ONLY" -eq 0 ]; then
+  for t in "${TARGETS[@]}"; do
+    build_native "$t" || exit 1
+  done
+fi
 
 # --------------------------------------------------------------------------
 # Build checks
@@ -550,6 +563,62 @@ CONTAINER
 }
 
 # --------------------------------------------------------------------------
+# Already built (--publish-only)
+# --------------------------------------------------------------------------
+
+# The checks a build ends with, run on what is already in dist/ -- everything
+# but the wine run of the .exe, which needs the container the build had and is
+# the build's to vouch for. Not a substitute for building: it cannot tell which
+# source a binary came from. What it can say is whether anything the binaries
+# are built from was committed after them, which is the stale-binary mistake
+# this option makes easy, so that is said before the prompt rather than after.
+SOURCES=(radio_client.py radio_client.spec pcm_v4.py pcm_v4_native.c tuning_range.py requirements.txt)
+
+verify_existing() {
+  local target="$1" bin="$2"
+  echo -e "${GREEN}Checking the existing $bin${NC}"
+  if [ ! -f "$bin" ]; then
+    echo -e "${RED}  $bin is not there -- build it first (./build.sh $target)${NC}" >&2
+    return 1
+  fi
+  local built newest
+  built=$(stat -c %Y "$bin")
+  newest=$(git log -1 --format=%at -- "${SOURCES[@]}" 2>/dev/null || echo 0)
+  echo "  built $(date -d "@$built" '+%F %T'); sources last committed $(date -d "@${newest:-0}" '+%F %T')"
+  if [ -n "$newest" ] && [ "$newest" -gt "$built" ]; then
+    echo -e "${YELLOW}  the sources were committed after this binary was built -- it may not contain that change${NC}" >&2
+  fi
+  if ! git diff --quiet -- "${SOURCES[@]}" 2>/dev/null; then
+    echo -e "${YELLOW}  there are uncommitted changes to the sources; the binary cannot contain what is not committed either way${NC}" >&2
+  fi
+
+  if [ "$target" = linux ]; then
+    if ! file "$bin" | grep -q 'ELF 64-bit'; then
+      echo -e "${RED}  $bin is not a Linux executable${NC}" >&2; return 1
+    fi
+    check_bundle "$bin" \
+      '^pcm_v4_native\.so$' '^libopus\.so' '^samplerate\..*\.so$' 'portaudio' '_tkinter\.cpython' 'rtmidi/_rtmidi' || return 1
+    local warn
+    warn=$("$bin" --help 2>&1 >/dev/null | grep -iE 'warning|error|traceback' || true)
+    if [ -n "$warn" ]; then
+      echo -e "${RED}  $bin --help complained:${NC}" >&2; echo "$warn" >&2; return 1
+    fi
+  else
+    if ! file "$bin" | grep -q 'PE32+'; then
+      echo -e "${RED}  $bin is not a Windows executable${NC}" >&2; return 1
+    fi
+    if [ "$(stat -c %s "$bin")" -lt $((50 * 1024 * 1024)) ]; then
+      echo -e "${RED}  $bin is too small to be a complete build${NC}" >&2; return 1
+    fi
+    check_bundle "$bin" \
+      '^pcm_v4_native\.dll$' '^opus\.dll$' '^samplerate\..*\.pyd$' \
+      'portaudio-binaries.libportaudio64bit\.dll$' '^_tkinter\.pyd$' '^MSVCP140\.dll$' \
+      '^rtmidi.*\.pyd$' || return 1
+  fi
+  echo "  $bin  $(du -h "$bin" | cut -f1)"
+}
+
+# --------------------------------------------------------------------------
 # Publish
 # --------------------------------------------------------------------------
 
@@ -629,13 +698,30 @@ publish_release() {
 # A failed target does not stop the other, but it does fail the run, and only
 # what passed every check is offered for upload.
 FAILED=0
-if want linux; then
-  if build_linux; then BUILT+=("$OUT/$LINUX_ASSET"); else FAILED=1; fi
-  echo
-fi
-if want windows; then
-  if build_windows; then BUILT+=("$OUT/$WIN_ASSET"); else FAILED=1; fi
-  echo
+if [ "$PUBLISH_ONLY" -eq 1 ]; then
+  if want linux; then
+    if verify_existing linux "$OUT/$LINUX_ASSET"; then BUILT+=("$OUT/$LINUX_ASSET"); else FAILED=1; fi
+    echo
+  fi
+  if want windows; then
+    if verify_existing windows "$OUT/$WIN_ASSET"; then BUILT+=("$OUT/$WIN_ASSET"); else FAILED=1; fi
+    echo
+  fi
+  # Half a release is worse than none: the two binaries are meant to be the
+  # same client, and one stale beside one new says nothing about which is which.
+  if [ "$FAILED" -ne 0 ]; then
+    echo -e "${RED}Not publishing: a binary failed its checks.${NC}" >&2
+    exit 1
+  fi
+else
+  if want linux; then
+    if build_linux; then BUILT+=("$OUT/$LINUX_ASSET"); else FAILED=1; fi
+    echo
+  fi
+  if want windows; then
+    if build_windows; then BUILT+=("$OUT/$WIN_ASSET"); else FAILED=1; fi
+    echo
+  fi
 fi
 
 if [ "$FAILED" -eq 0 ]; then

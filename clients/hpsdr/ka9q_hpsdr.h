@@ -104,6 +104,13 @@ struct main_cb {
         int rcvr_num;
         int new_freq;
         int curr_freq;
+
+        /* Protocol 2: this DDC's socket, bound to port 1035+n by its
+         * rx_thread (-1 until then), and the sequence number of its next IQ
+         * packet. load_packet() sends on the socket directly from the
+         * WebSocket thread; see there. */
+        int p2_sock;
+        uint32_t p2_seq;
         int output_rate;
         u_int rcvr_mask;
         int reconnect_needed;   /* set by ws_callback on rate change / error */

@@ -1,6 +1,6 @@
 /*
- * hpsdr_client.c — an openHPSDR protocol 1 client: tune a bridge, demodulate
- * what it sends, and play or record the audio.
+ * hpsdr_client.c — an openHPSDR protocol 1 and protocol 2 client: tune a
+ * bridge, demodulate what it sends, and play or record the audio.
  *
  * This is the other end of hpsdr_p1.c. The bridge has always been tested by
  * pointing real SDR software at it, which answers "does it work" and almost
@@ -82,6 +82,24 @@
  */
 #define P1_C0_CONFIG       0x00   /* register 0x00: sample rate, receiver count */
 #define P1_C0_RX1_FREQ     0x04   /* register 0x02: RX1 NCO frequency, Hz BE32 */
+
+/*
+ * Protocol 2. The host configures the radio with three packets -- general
+ * (port 1024, which also takes discovery), DDC-specific (1025: which DDCs run
+ * and at what rate) and high-priority (1027: run, and each DDC's frequency) --
+ * and the radio sends DDC n's IQ from port 1035+n. The high-priority packet is
+ * resent as the keepalive.
+ */
+#define P2_PORT_GENERAL    1024
+#define P2_PORT_DDC_SPEC   1025
+#define P2_PORT_HIGH_PRIO  1027
+#define P2_PORT_DDC0       1035
+#define P2_DISCOVERY_LEN   60
+#define P2_CONTROL_LEN     1444
+#define P2_IQ_PACKET       1444
+#define P2_IQ_HEADER       16     /* seq[4] timestamp[8] bits[2] samples[2] */
+#define P2_SAMPLES_PER_PACKET 238
+#define P2_MAX_RX          10
 
 /* Audio is produced at this rate whatever the DDC runs at: every rate protocol
  * 1 offers is a power-of-two multiple of it, so the decimation is a chain of
@@ -455,6 +473,48 @@ static double now_seconds(void)
 }
 
 /* ------------------------------------------------------------------------ */
+/* Protocol 2 host side                                                      */
+/* ------------------------------------------------------------------------ */
+
+static void put_be32(unsigned char *p, uint32_t v)
+{
+    p[0] = (unsigned char)(v >> 24); p[1] = (unsigned char)(v >> 16);
+    p[2] = (unsigned char)(v >> 8);  p[3] = (unsigned char)v;
+}
+
+static void p2_send(int sock, struct sockaddr_in radio, int port,
+                    const unsigned char *b, size_t n)
+{
+    radio.sin_port = htons((uint16_t)port);
+    sendto(sock, b, n, 0, (const struct sockaddr *)&radio, sizeof(radio));
+}
+
+/*
+ * The frequency of each DDC: the first is the one asked for, and any more --
+ * there only to load the bridge -- step up from it 100 kHz at a time, folded
+ * back into the receiver's range so none is asked for beyond 30 MHz.
+ */
+static uint32_t p2_ddc_freq(long freq, int ddc)
+{
+    long f = freq + 100000L * ddc;
+    while (f > 30000000L) f -= 29000000L;
+    return (uint32_t)f;
+}
+
+/* The high-priority packet: run, and each DDC's frequency in Hz. Sent to start
+ * and stop the stream and, between, as the keepalive. */
+static void p2_high_priority(int sock, struct sockaddr_in radio, uint32_t seq,
+                             bool run, long freq, int nrx)
+{
+    unsigned char b[P2_CONTROL_LEN];
+    memset(b, 0, sizeof(b));
+    put_be32(b, seq);
+    b[4] = run ? 1 : 0;
+    for (int i = 0; i < nrx; i++) put_be32(b + 9 + 4 * i, p2_ddc_freq(freq, i));
+    p2_send(sock, radio, P2_PORT_HIGH_PRIO, b, sizeof(b));
+}
+
+/* ------------------------------------------------------------------------ */
 /* Finding radios                                                            */
 /* ------------------------------------------------------------------------ */
 
@@ -508,21 +568,30 @@ static void print_radio(int i, const struct radio *r)
  * make which one you get depend on which answered fastest.
  */
 static int discover(int sock, const struct sockaddr_in *only,
-                    struct radio *out, int max)
+                    struct radio *out, int max, int protocol)
 {
+    /* Each protocol has its own request, to the same port: protocol 1's opens
+     * EF FE 02, protocol 2's is sixty bytes with only byte 4 set. A radio
+     * answers in the protocol it was asked in. */
     unsigned char req[63];
+    size_t reqlen = sizeof(req);
     memset(req, 0, sizeof(req));
-    req[0] = 0xEF; req[1] = 0xFE; req[2] = 0x02;
+    if (protocol == 1) {
+        req[0] = 0xEF; req[1] = 0xFE; req[2] = 0x02;
+    } else {
+        req[4] = 0x02;
+        reqlen = P2_DISCOVERY_LEN;
+    }
 
     if (only) {
-        sendto(sock, req, sizeof(req), 0, (const struct sockaddr *)only, sizeof(*only));
+        sendto(sock, req, reqlen, 0, (const struct sockaddr *)only, sizeof(*only));
     } else {
         struct sockaddr_in b;
         memset(&b, 0, sizeof(b));
         b.sin_family = AF_INET;
         b.sin_port = htons(P1_PORT);
         b.sin_addr.s_addr = INADDR_BROADCAST;
-        sendto(sock, req, sizeof(req), 0, (struct sockaddr *)&b, sizeof(b));
+        sendto(sock, req, reqlen, 0, (struct sockaddr *)&b, sizeof(b));
 
         struct ifconf ifc;
         char ifbuf[8192];
@@ -536,7 +605,7 @@ static int discover(int sock, const struct sockaddr_in *only,
                 struct sockaddr_in *ba = (struct sockaddr_in *)&r.ifr_broadaddr;
                 if (ba->sin_family != AF_INET) continue;
                 ba->sin_port = htons(P1_PORT);
-                sendto(sock, req, sizeof(req), 0, (struct sockaddr *)ba, sizeof(*ba));
+                sendto(sock, req, reqlen, 0, (struct sockaddr *)ba, sizeof(*ba));
             }
         }
         /* Loopback takes neither broadcast, and a bridge on this machine is
@@ -546,7 +615,7 @@ static int discover(int sock, const struct sockaddr_in *only,
         lo.sin_family = AF_INET;
         lo.sin_port = htons(P1_PORT);
         lo.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        sendto(sock, req, sizeof(req), 0, (struct sockaddr *)&lo, sizeof(lo));
+        sendto(sock, req, reqlen, 0, (struct sockaddr *)&lo, sizeof(lo));
     }
 
     int nfound = 0;
@@ -562,8 +631,19 @@ static int discover(int sock, const struct sockaddr_in *only,
         socklen_t flen = sizeof(from);
         const ssize_t n = recvfrom(sock, b, sizeof(b), 0,
                                    (struct sockaddr *)&from, &flen);
-        if (n < P1_REPLY_LEN || b[0] != 0xEF || b[1] != 0xFE) continue;
-        if (b[2] != 0x02 && b[2] != 0x03) continue;   /* not a discovery reply */
+        const unsigned char *mac;
+        int status, gateware, board, receivers;
+        if (protocol == 1) {
+            if (n < P1_REPLY_LEN || b[0] != 0xEF || b[1] != 0xFE) continue;
+            if (b[2] != 0x02 && b[2] != 0x03) continue;   /* not a discovery reply */
+            mac = b + 3; status = b[2]; gateware = b[9]; board = b[10]; receivers = b[19];
+        } else {
+            /* Sequence zero, status 2 idle or 3 running, MAC at 5, board at
+             * 11, firmware at 13, receivers at 20. */
+            if (n < P2_DISCOVERY_LEN || b[0] || b[1] || b[2] || b[3]) continue;
+            if (b[4] != 0x02 && b[4] != 0x03) continue;
+            mac = b + 5; status = b[4]; gateware = b[13]; board = b[11]; receivers = b[20];
+        }
 
         /*
          * Deduplicated by MAC, not by address. A radio bound to every
@@ -575,18 +655,18 @@ static int discover(int sock, const struct sockaddr_in *only,
          */
         bool dup = false;
         for (int i = 0; i < nfound; i++)
-            if (memcmp(out[i].mac, b + 3, 6) == 0) dup = true;
+            if (memcmp(out[i].mac, mac, 6) == 0) dup = true;
         if (dup) continue;
 
         struct radio *r = &out[nfound++];
         memset(r, 0, sizeof(*r));
         r->addr = from;
         r->addr.sin_port = htons(P1_PORT);
-        memcpy(r->mac, b + 3, 6);
-        r->status = b[2];
-        r->gateware = b[9];
-        r->board = b[10];
-        r->receivers = b[19] ? b[19] : 1;
+        memcpy(r->mac, mac, 6);
+        r->status = status;
+        r->gateware = gateware;
+        r->board = board;
+        r->receivers = receivers ? receivers : 1;
     }
     return nfound;
 }
@@ -601,6 +681,11 @@ static void usage(const char *prog)
     printf("  --host ADDR       address of one radio; omit to sweep the network\n");
     printf("  --radio N         pick the Nth radio found, instead of being asked\n");
     printf("  --discover        list the radios found and exit\n");
+    printf("  --protocol N      1 or 2 (default 1)\n");
+    printf("  --receivers N     protocol 2 only: run N DDCs at once, 1-%d (default 1).\n", P2_MAX_RX);
+    printf("                    The first is the one demodulated and recorded; the\n");
+    printf("                    rest, 100 kHz apart, are counted, to load the bridge\n");
+    printf("                    the way a multi-receiver client does.\n");
     printf("  --freq HZ         tune the receiver (default 909000)\n");
     printf("  --rate KHZ        48, 96, 192 or 384 (default 192)\n");
     printf("  --mode MODE       usb, lsb, am or iq (default am)\n");
@@ -622,6 +707,7 @@ static void usage(const char *prog)
     printf("  %s --freq 7100000 --mode lsb --rate 192 --wav lsb.wav --seconds 30\n", prog);
     printf("  %s --rate 384 --mode iq --iq-wav iq384.wav --seconds 10\n", prog);
     printf("  %s --discover\n", prog);
+    printf("  %s --protocol 2 --receivers 10 --rate 192 --mode iq --iq-wav ddc0.wav --seconds 60\n", prog);
 }
 
 int main(int argc, char **argv)
@@ -638,11 +724,15 @@ int main(int argc, char **argv)
     float manual_gain = 0;
     double bandwidth = 0;            /* 0 means "the default for this mode" */
     double ssb_low = DEFAULT_SSB_LOW;
+    int protocol = 1;
+    int nrx = 1;
 
     static struct option opts[] = {
         {"host",     required_argument, 0, 'H'},
         {"radio",    required_argument, 0, 'R'},
         {"discover", no_argument,       0, 'D'},
+        {"protocol", required_argument, 0, 'X'},
+        {"receivers",required_argument, 0, 'N'},
         {"freq",     required_argument, 0, 'f'},
         {"rate",     required_argument, 0, 'r'},
         {"mode",     required_argument, 0, 'm'},
@@ -660,11 +750,13 @@ int main(int argc, char **argv)
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "H:R:Df:r:m:b:l:pP:w:W:s:g:qh", opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "H:R:DX:N:f:r:m:b:l:pP:w:W:s:g:qh", opts, NULL)) != -1) {
         switch (c) {
         case 'H': host = optarg; break;
         case 'R': radio_index = atoi(optarg); break;
         case 'D': discover_only = true; break;
+        case 'X': protocol = atoi(optarg); break;
+        case 'N': nrx = atoi(optarg); break;
         case 'f': freq = atol(optarg); break;
         case 'r': rate_khz = atoi(optarg); break;
         case 'p': do_play = true; break;
@@ -708,6 +800,15 @@ int main(int argc, char **argv)
         }
     }
 
+    if (protocol != 1 && protocol != 2) {
+        fprintf(stderr, "--protocol must be 1 or 2\n");
+        return 2;
+    }
+    if (nrx < 1 || nrx > P2_MAX_RX || (protocol == 1 && nrx != 1)) {
+        fprintf(stderr, "--receivers is 1-%d, and protocol 2 only\n", P2_MAX_RX);
+        return 2;
+    }
+
     const int speed_bits = rate_to_bits(rate_khz);
     if (speed_bits < 0) {
         fprintf(stderr, "--rate must be 48, 96, 192 or 384\n");
@@ -743,7 +844,7 @@ int main(int argc, char **argv)
 
     /* Find the radios before streaming to one. */
     struct radio found[MAX_RADIOS];
-    int nfound = discover(sock, host_given ? &dst : NULL, found, MAX_RADIOS);
+    int nfound = discover(sock, host_given ? &dst : NULL, found, MAX_RADIOS, protocol);
 
     if (nfound == 0) {
         if (host_given)
@@ -790,6 +891,10 @@ int main(int argc, char **argv)
     }
 
     dst = found[chosen].addr;
+    if (nrx > found[chosen].receivers) {
+        fprintf(stderr, "--receivers %d, but radio %d offers %d\n", nrx, chosen, found[chosen].receivers);
+        return 2;
+    }
     if (found[chosen].status == 0x03)
         printf("note: radio %d reports a client already streaming; "
                "starting will take it over\n", chosen);
@@ -798,19 +903,40 @@ int main(int argc, char **argv)
      * and frequency asked for rather than at whatever the bridge last used. */
     uint32_t seq = 0;
     unsigned char pkt[P1_USB_PACKET];
-    build_ep2(pkt, seq++, P1_C0_CONFIG, (unsigned char)speed_bits, 0, 0, 0);
-    sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dst, sizeof(dst));
-    build_ep2(pkt, seq++, P1_C0_RX1_FREQ,
-              (unsigned char)(freq >> 24), (unsigned char)(freq >> 16),
-              (unsigned char)(freq >> 8),  (unsigned char)freq);
-    sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dst, sizeof(dst));
-
     unsigned char start[64];
-    memset(start, 0, sizeof(start));
-    start[0] = 0xEF; start[1] = 0xFE; start[2] = 0x04; start[3] = 0x01;
-    sendto(sock, start, sizeof(start), 0, (struct sockaddr *)&dst, sizeof(dst));
+    if (protocol == 1) {
+        build_ep2(pkt, seq++, P1_C0_CONFIG, (unsigned char)speed_bits, 0, 0, 0);
+        sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dst, sizeof(dst));
+        build_ep2(pkt, seq++, P1_C0_RX1_FREQ,
+                  (unsigned char)(freq >> 24), (unsigned char)(freq >> 16),
+                  (unsigned char)(freq >> 8),  (unsigned char)freq);
+        sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dst, sizeof(dst));
 
-    printf("streaming: %ld Hz, %d kHz, %s", freq, rate_khz,
+        memset(start, 0, sizeof(start));
+        start[0] = 0xEF; start[1] = 0xFE; start[2] = 0x04; start[3] = 0x01;
+        sendto(sock, start, sizeof(start), 0, (struct sockaddr *)&dst, sizeof(dst));
+    } else {
+        /* General: frequencies in raw Hz (byte 37's phase-word bit clear). */
+        unsigned char g[P2_DISCOVERY_LEN];
+        memset(g, 0, sizeof(g));
+        p2_send(sock, dst, P2_PORT_GENERAL, g, sizeof(g));
+
+        /* DDC-specific: the DDCs to run, and each one's rate in kHz. */
+        unsigned char d[P2_CONTROL_LEN];
+        memset(d, 0, sizeof(d));
+        for (int i = 0; i < nrx; i++) {
+            d[7 + i / 8] |= (unsigned char)(1 << (i % 8));
+            d[18 + 6 * i] = (unsigned char)(rate_khz >> 8);
+            d[19 + 6 * i] = (unsigned char)rate_khz;
+        }
+        p2_send(sock, dst, P2_PORT_DDC_SPEC, d, sizeof(d));
+
+        p2_high_priority(sock, dst, seq++, true, freq, nrx);
+    }
+
+    printf("streaming (protocol %d", protocol);
+    if (nrx > 1) printf(", %d DDCs, demodulating the first", nrx);
+    printf("): %ld Hz, %d kHz, %s", freq, rate_khz,
            mode == MODE_USB ? "USB" : mode == MODE_LSB ? "LSB" :
            mode == MODE_AM  ? "AM"  : "raw I/Q");
     if (mode == MODE_AM)
@@ -866,92 +992,132 @@ int main(int argc, char **argv)
     long peak24 = 0;
     int16_t out[4096];
     int nout = 0;
-    int16_t iqout[2 * P1_SAMPLES_PER_PACKET];
+    int16_t iqout[2 * P2_SAMPLES_PER_PACKET];
+    int32_t si[P2_SAMPLES_PER_PACKET], sq[P2_SAMPLES_PER_PACKET];
+
+    /* Protocol 2's other DDCs: counted, not demodulated. */
+    long long ddc_packets[P2_MAX_RX] = {0}, ddc_lost[P2_MAX_RX] = {0};
+    uint32_t ddc_seq[P2_MAX_RX] = {0};
+    bool ddc_have[P2_MAX_RX] = {false};
 
     while (!stop_now) {
         const double t = now_seconds();
         if (seconds > 0 && t - t0 >= seconds) break;
 
-        /* The bridge stops sending to a client that goes quiet, so the command
-         * bank doubles as the keepalive. Real client software sends EP2
-         * continuously because it is also the transmit audio stream. */
+        /* The bridge stops sending to a client that goes quiet, so a control
+         * packet doubles as the keepalive: in protocol 1 the command bank,
+         * which real client software sends continuously because it is also
+         * the transmit audio stream; in protocol 2 the high-priority packet. */
         if (t >= next_cc) {
-            build_ep2(pkt, seq++, P1_C0_CONFIG, (unsigned char)speed_bits, 0, 0, 0);
-            sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dst, sizeof(dst));
-            next_cc = t + 0.05;
+            if (protocol == 1) {
+                build_ep2(pkt, seq++, P1_C0_CONFIG, (unsigned char)speed_bits, 0, 0, 0);
+                sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dst, sizeof(dst));
+                next_cc = t + 0.05;
+            } else {
+                p2_high_priority(sock, dst, seq++, true, freq, nrx);
+                next_cc = t + 0.1;
+            }
         }
 
         if (poll(&pfd, 1, 20) <= 0) continue;
-        ssize_t n = recv(sock, buf, sizeof(buf), 0);
-        if (n < P1_USB_PACKET) continue;
-        if (buf[0] != 0xEF || buf[1] != 0xFE || buf[3] != P1_EP6) continue;
+        struct sockaddr_in from;
+        socklen_t flen = sizeof(from);
+        ssize_t n = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen);
 
-        const uint32_t s = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
-                           ((uint32_t)buf[6] << 8)  |  (uint32_t)buf[7];
+        /* Each protocol fills si/sq; everything after is the same. */
+        int niq = 0;
+        uint32_t s;
+        if (protocol == 1) {
+            if (n < P1_USB_PACKET) continue;
+            if (buf[0] != 0xEF || buf[1] != 0xFE || buf[3] != P1_EP6) continue;
+            s = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
+                ((uint32_t)buf[6] << 8)  |  (uint32_t)buf[7];
+            for (int f = 0; f < 2; f++) {
+                const unsigned char *fr = buf + 8 + (size_t)f * P1_FRAME;
+                if (fr[0] != P1_SYNC || fr[1] != P1_SYNC || fr[2] != P1_SYNC) continue;
+                const unsigned char *round = fr + 8;
+                for (int r = 0; r < P1_ROUNDS_PER_FRAME; r++, round += P1_ROUND_BYTES) {
+                    si[niq] = get24(round);
+                    sq[niq] = get24(round + 3);
+                    niq++;
+                }
+            }
+        } else {
+            const int ddc = ntohs(from.sin_port) - P2_PORT_DDC0;
+            if (n < P2_IQ_PACKET || ddc < 0 || ddc >= nrx) continue;
+            s = ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16) |
+                ((uint32_t)buf[2] << 8)  |  (uint32_t)buf[3];
+            if (ddc_have[ddc] && s != ddc_seq[ddc] + 1)
+                ddc_lost[ddc] += (long long)(s - ddc_seq[ddc] - 1);
+            ddc_seq[ddc] = s;
+            ddc_have[ddc] = true;
+            ddc_packets[ddc]++;
+            if (ddc != 0) continue;
+            /* I then Q, 24-bit big-endian, 238 to a packet. */
+            const unsigned char *iq = buf + P2_IQ_HEADER;
+            for (; niq < P2_SAMPLES_PER_PACKET; niq++, iq += 6) {
+                si[niq] = get24(iq);
+                sq[niq] = get24(iq + 3);
+            }
+        }
+
         if (have_seq && s != last_seq + 1) lost += (long long)(s - last_seq - 1);
         last_seq = s;
         have_seq = true;
         packets++;
 
-        int niq = 0;
-        for (int f = 0; f < 2; f++) {
-            const unsigned char *fr = buf + 8 + (size_t)f * P1_FRAME;
-            if (fr[0] != P1_SYNC || fr[1] != P1_SYNC || fr[2] != P1_SYNC) continue;
-            const unsigned char *round = fr + 8;
-            for (int r = 0; r < P1_ROUNDS_PER_FRAME; r++, round += P1_ROUND_BYTES) {
-                const int32_t i24 = get24(round);
-                const int32_t q24 = get24(round + 3);
-                if (labs(i24) > peak24) peak24 = labs(i24);
-                sumsq += (double)i24 * i24;
-                samples++;
+        for (int k = 0; k < niq; k++) {
+            const int32_t i24 = si[k];
+            const int32_t q24 = sq[k];
+            if (labs(i24) > peak24) peak24 = labs(i24);
+            sumsq += (double)i24 * i24;
+            samples++;
 
-                if (iqwav.f) {
-                    /* The 24-bit field into 16 bits, which is what a WAV can
-                     * carry: the low eight bits are below the level anything
-                     * here resolves anyway. */
-                    iqout[2 * niq]     = (int16_t)(i24 >> 8);
-                    iqout[2 * niq + 1] = (int16_t)(q24 >> 8);
-                }
-                niq++;
+            if (iqwav.f) {
+                /* The 24-bit field into 16 bits, which is what a WAV can
+                 * carry: the low eight bits are below the level anything
+                 * here resolves anyway. */
+                iqout[2 * k]     = (int16_t)(i24 >> 8);
+                iqout[2 * k + 1] = (int16_t)(q24 >> 8);
+            }
 
-                if (mode == MODE_IQ) continue;
+            if (mode == MODE_IQ) continue;
 
-                float complex z = ((float)i24 + I * (float)q24) / 8388608.0f;
-                bool alive = true;
-                for (int st = 0; st < stages && alive; st++)
-                    alive = halfband_run(&dec[st], z, &z);
-                if (!alive) continue;
+            float complex z = ((float)i24 + I * (float)q24) / 8388608.0f;
+            bool alive = true;
+            for (int st = 0; st < stages && alive; st++)
+                alive = halfband_run(&dec[st], z, &z);
+            if (!alive) continue;
 
-                float a;
-                if (mode == MODE_AM) {
-                    /*
-                     * Envelope detection, then normalised by the carrier.
-                     *
-                     * The carrier is what the envelope of an AM signal rides
-                     * on, and it is not audio, so it has to come out. Dividing
-                     * by it rather than only subtracting it is what makes the
-                     * result modulation depth — the same audio whether the
-                     * station is strong or weak, and, which is the point here,
-                     * silence during a pause. Subtracting alone leaves a
-                     * near-zero signal that an AGC is then free to mistake for
-                     * a fade and amplify.
-                     */
-                    const float mag = cabsf(am_run(&amlp, z));
-                    dc += (mag - dc) * 0.001f;
-                    a = (mag - dc) / fmaxf(dc, 1e-6f);
-                    if (a >  2.0f) a =  2.0f;
-                    if (a < -2.0f) a = -2.0f;
-                } else {
-                    a = ssb_run(&sideband, z);
-                }
-                a = agc_run(&gain, a);
+            float a;
+            if (mode == MODE_AM) {
+                /*
+                 * Envelope detection, then normalised by the carrier.
+                 *
+                 * The carrier is what the envelope of an AM signal rides
+                 * on, and it is not audio, so it has to come out. Dividing
+                 * by it rather than only subtracting it is what makes the
+                 * result modulation depth — the same audio whether the
+                 * station is strong or weak, and, which is the point here,
+                 * silence during a pause. Subtracting alone leaves a
+                 * near-zero signal that an AGC is then free to mistake for
+                 * a fade and amplify.
+                 */
+                const float mag = cabsf(am_run(&amlp, z));
+                dc += (mag - dc) * 0.001f;
+                a = (mag - dc) / fmaxf(dc, 1e-6f);
+                if (a >  2.0f) a =  2.0f;
+                if (a < -2.0f) a = -2.0f;
+            } else {
+                a = ssb_run(&sideband, z);
+            }
+            a = agc_run(&gain, a);
 
-                out[nout++] = (int16_t)lrintf(a * 32767.0f);
-                if (nout == (int)(sizeof(out) / sizeof(out[0]))) {
-                    if (audio) { fwrite(out, 2, (size_t)nout, audio); fflush(audio); }
-                    wav_write(&wav, out, nout);
-                    nout = 0;
-                }
+            out[nout++] = (int16_t)lrintf(a * 32767.0f);
+            if (nout == (int)(sizeof(out) / sizeof(out[0]))) {
+                if (audio) { fwrite(out, 2, (size_t)nout, audio); fflush(audio); }
+                wav_write(&wav, out, nout);
+                nout = 0;
             }
         }
         if (iqwav.f && niq) wav_write(&iqwav, iqout, 2 * niq);
@@ -973,9 +1139,13 @@ int main(int argc, char **argv)
         wav_write(&wav, out, nout);
     }
 
-    memset(start, 0, sizeof(start));
-    start[0] = 0xEF; start[1] = 0xFE; start[2] = 0x04; start[3] = 0x00;
-    sendto(sock, start, sizeof(start), 0, (struct sockaddr *)&dst, sizeof(dst));
+    if (protocol == 1) {
+        memset(start, 0, sizeof(start));
+        start[0] = 0xEF; start[1] = 0xFE; start[2] = 0x04; start[3] = 0x00;
+        sendto(sock, start, sizeof(start), 0, (struct sockaddr *)&dst, sizeof(dst));
+    } else {
+        p2_high_priority(sock, dst, seq++, false, freq, nrx);
+    }
 
     if (audio) pclose(audio);
     wav_close(&wav);
@@ -988,6 +1158,17 @@ int main(int argc, char **argv)
     if (samples)
         printf("  delivered %.0f samples/s against %d asked for (%.4f)\n",
                samples / el, rate_khz * 1000, (samples / el) / (rate_khz * 1000.0));
+    if (nrx > 1) {
+        long long all = 0, all_lost = 0;
+        for (int i = 0; i < nrx; i++) {
+            printf("  DDC%d %8.3f MHz: %lld packets (%.0f samples/s), %lld lost\n", i,
+                   p2_ddc_freq(freq, i) / 1e6, ddc_packets[i],
+                   ddc_packets[i] * (double)P2_SAMPLES_PER_PACKET / el, ddc_lost[i]);
+            all += ddc_packets[i];
+            all_lost += ddc_lost[i];
+        }
+        printf("  all %d DDCs: %lld packets (%.0f/s), %lld lost\n", nrx, all, all / el, all_lost);
+    }
     if (wav_path)   printf("  wrote %s\n", wav_path);
     if (iqwav_path) printf("  wrote %s\n", iqwav_path);
     return 0;

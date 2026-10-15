@@ -53,8 +53,6 @@ static int hp_sock;
 static int ddcspec_sock = -1;   /* bound to port 1025; also the source for HP status sends */
 static int interface_offset = 0;
 
-static u_int send_flags = 0;
-static u_int done_send_flags = 0;
 
 /*
  * Mutex serialising lws_create_context() calls across ws_threads.
@@ -70,10 +68,6 @@ static u_int done_send_flags = 0;
  */
 static pthread_mutex_t lws_ctx_create_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static pthread_mutex_t send_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t send_cond = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t done_send_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t done_send_cond = PTHREAD_COND_INITIALIZER;
 static int running = 0;
 static bool gen_rcvd = false;
 static struct timespec last_client_activity = {0};  // updated by any UDP receive from client
@@ -94,7 +88,6 @@ static int ddc_port = 1025;
 static int mic_port = 1026;
 static int hp_port = 1027; // also wb_port
 static int ddc0_port = 1035;
-static unsigned char pbuf[MAX_RCVRS][238*6];
 
 static pthread_t ws_thread_id[MAX_RCVRS];
 static pthread_t highprio_thread_id = 0;
@@ -551,14 +544,6 @@ void p1_host_enable(int rcvr, bool on)
         rxrate[rcvr] = 0;
         rxfreq[rcvr] = 0;
     }
-    /* Wake anything blocked on the protocol 2 handshake so a disable cannot
-     * wedge a thread that is waiting for a packet that will never come. */
-    pthread_mutex_lock(&send_lock);
-    pthread_cond_broadcast(&send_cond);
-    pthread_mutex_unlock(&send_lock);
-    pthread_mutex_lock(&done_send_lock);
-    pthread_cond_broadcast(&done_send_cond);
-    pthread_mutex_unlock(&done_send_lock);
 }
 
 void p1_host_stop_all(void)
@@ -2022,10 +2007,6 @@ int main (int argc, char *argv[])
     sigaction (SIGQUIT, &sigact, NULL);
     sigaction (SIGPIPE, &sigact, NULL);
 
-    pthread_mutex_init (&send_lock, NULL);
-    pthread_cond_init (&send_cond, NULL);
-    pthread_mutex_init (&done_send_lock, NULL);
-    pthread_cond_init (&done_send_cond, NULL);
 
     for (i = 0; i < mcb.num_rxs; i++) {
         mcb.rcb[i].mcb = &mcb;
@@ -2033,6 +2014,8 @@ int main (int argc, char *argv[])
         mcb.rcb[i].curr_freq = 10000000;
         mcb.rcb[i].output_rate = 192000;
         mcb.rcb[i].rcvr_num = i;
+        mcb.rcb[i].p2_sock = -1;
+        mcb.rcb[i].p2_seq = 0;
         mcb.rcb[i].reconnect_needed = 0;
         mcb.rcb[i].rcvr_mask = 1 << i;
 
@@ -2176,19 +2159,52 @@ void t_perror(const char *string)
     t_print("%s: %s\n", string, strerror(errno));
 }
 
+/*
+ * Send one protocol 2 IQ packet: the next 238 samples of this receiver, from
+ * its DDC's own port, which is how the client tells the receivers apart.
+ *
+ * Called from the receiver's WebSocket thread as the samples are decoded, and
+ * sent from there. It used to hand each packet to the DDC's rx_thread through
+ * a pair of condition variables that every receiver shared: each packet woke
+ * all ten send threads so that one could claim it, and woke them again to hand
+ * the buffer back. With ten receivers that handshake, not the sending, was
+ * most of the bridge's CPU. The rx_thread now only owns the socket.
+ *
+ * Sent only while a protocol 2 stream is running, the DDC is enabled with a
+ * rate and a frequency, and the client's address is known -- the conditions
+ * the send thread waited on. While it is not, the sequence restarts at zero,
+ * as it did there.
+ */
 void load_packet (struct rcvr_cb *rcb)
 {
-    float complex *out_buf = &rcb->iqSamples[rcb->iqSample_offset];
-    int i, j, IQData;
-    int k = rcb->rcvr_num;
+    const int k = rcb->rcvr_num;
+    const int sock = __atomic_load_n(&rcb->p2_sock, __ATOMIC_ACQUIRE);
+    const struct sockaddr_in to = addr_new;
 
-    pthread_mutex_lock (&done_send_lock);
-    while (!(done_send_flags & rcb->rcvr_mask) && running
-           && ddcenable[rcb->rcvr_num]) {
-        pthread_cond_wait (&done_send_cond, &done_send_lock);
+    if (sock < 0 || !running || !gen_rcvd || ddcenable[k] <= 0 || rxrate[k] == 0
+        || rxfreq[k] == 0 || to.sin_port == 0) {
+        rcb->p2_seq = 0;
+        return;
     }
-    done_send_flags &= ~rcb->rcvr_mask;
-    pthread_mutex_unlock (&done_send_lock);
+
+    /*
+     * P2 DDC IQ packet header (16 bytes):
+     *   0-3   sequence number (big-endian)
+     *   4-11  timestamp (unused, zero)
+     *   12-13 bits per sample (16-bit BE = 24)
+     *   14-15 samples per frame (16-bit BE = 238)
+     */
+    unsigned char pkt[1444];
+    const uint32_t seq = rcb->p2_seq++;
+    pkt[0] = (unsigned char)(seq >> 24);
+    pkt[1] = (unsigned char)(seq >> 16);
+    pkt[2] = (unsigned char)(seq >> 8);
+    pkt[3] = (unsigned char)seq;
+    memset(pkt + 4, 0, 8);   /* no time stamps */
+    pkt[12] = 0;
+    pkt[13] = 24;
+    pkt[14] = 0;
+    pkt[15] = 238;
 
     /*
      * P2 wire order is I first, then Q (3 bytes each, big-endian).
@@ -2200,21 +2216,29 @@ void load_packet (struct rcvr_cb *rcb)
      * wire is equivalent to conjugation and un-mirrors the spectrum, so
      * the imaginary part deliberately goes first here.
      */
-    for (i = 0, j = 0; i < 238; i++, j+=6) {
-        IQData = (int)cimagf(out_buf[i]);
-        pbuf[k][j] = IQData >> 16;
-        pbuf[k][j+1] = IQData >> 8;
-        pbuf[k][j+2] = IQData & 0xff;
+    const float complex *out_buf = &rcb->iqSamples[rcb->iqSample_offset];
+    unsigned char *q = pkt + 16;
+    for (int i = 0; i < 238; i++, q += 6) {
+        int IQData = (int)cimagf(out_buf[i]);
+        q[0] = IQData >> 16;
+        q[1] = IQData >> 8;
+        q[2] = IQData & 0xff;
         IQData = (int)crealf(out_buf[i]);
-        pbuf[k][j+3] = IQData >> 16;
-        pbuf[k][j+4] = IQData >> 8;
-        pbuf[k][j+5] = IQData & 0xff;
+        q[3] = IQData >> 16;
+        q[4] = IQData >> 8;
+        q[5] = IQData & 0xff;
     }
 
-    pthread_mutex_lock (&send_lock);
-    send_flags |= rcb->rcvr_mask;
-    pthread_cond_broadcast (&send_cond);
-    pthread_mutex_unlock (&send_lock);
+    if (sendto(sock, pkt, sizeof(pkt), 0, (const struct sockaddr *)&to, sizeof(to)) < 0) {
+        /* Transient send errors must not kill the DDC stream. */
+        t_perror("***** ERROR: load_packet sendto");
+    }
+
+    if (rcb->new_freq) {
+        /* ws_thread picks up new_freq and sends a JSON tune message */
+        rcb->curr_freq = rcb->new_freq;
+        /* new_freq is cleared by ws_thread after sending the tune message */
+    }
 }
 
 void new_protocol_general_packet(unsigned char *buffer)
@@ -2377,12 +2401,6 @@ void *highprio_thread(void *data)
                     }
                     /* Wake any thread blocked on the send handshake so it
                      * can observe running == 0 and park itself. */
-                    pthread_mutex_lock (&send_lock);
-                    pthread_cond_broadcast (&send_cond);
-                    pthread_mutex_unlock (&send_lock);
-                    pthread_mutex_lock (&done_send_lock);
-                    pthread_cond_broadcast (&done_send_cond);
-                    pthread_mutex_unlock (&done_send_lock);
                 }
             }
             continue;
@@ -2474,12 +2492,6 @@ void *highprio_thread(void *data)
                 }
                 /* Wake any thread blocked on the send handshake so it
                  * can observe running == 0 and park itself. */
-                pthread_mutex_lock (&send_lock);
-                pthread_cond_broadcast (&send_cond);
-                pthread_mutex_unlock (&send_lock);
-                pthread_mutex_lock (&done_send_lock);
-                pthread_cond_broadcast (&done_send_cond);
-                pthread_mutex_unlock (&done_send_lock);
             } else {
                 // running just went 1 — reset packet counter, watchdog arms after 100 packets
                 hp_watchdog_armed = 0;
@@ -2627,21 +2639,6 @@ void *ddc_specific_thread(void *data)
                 modified = 1;
                 ddcenable[i] = rc;
                 mcb.rcb[i].rcvr_mask = 1 << i;
-                if (ddcenable[i]) {
-                    pthread_mutex_lock (&send_lock);
-                    send_flags |= 1 << i;
-                    pthread_cond_broadcast (&send_cond);
-                    pthread_mutex_unlock (&send_lock);
-                } else {
-                    /* Disable: wake anything blocked on the handshake so
-                     * neither rx_thread nor load_packet() wedges. */
-                    pthread_mutex_lock (&send_lock);
-                    pthread_cond_broadcast (&send_cond);
-                    pthread_mutex_unlock (&send_lock);
-                    pthread_mutex_lock (&done_send_lock);
-                    pthread_cond_broadcast (&done_send_cond);
-                    pthread_mutex_unlock (&done_send_lock);
-                }
             }
 
             if (modified) {
@@ -2795,11 +2792,8 @@ void *rx_thread(void *data)
     // One instance of this thread is started for each DDC
     int sock;
     struct sockaddr_in addr;
-    unsigned long seqnum;
-    unsigned char rx_buffer[1444];
     int myddc;
     int yes = 1;
-    unsigned char *p;
     struct rcvr_cb *rcb;
 
     myddc = (int) (uintptr_t) data;
@@ -2808,8 +2802,6 @@ void *rx_thread(void *data)
     if (myddc < 0 || myddc >= mcb.num_rxs) {
         return NULL;
     }
-
-    seqnum = 0;
 
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
@@ -2831,77 +2823,13 @@ void *rx_thread(void *data)
     }
 
     t_print("Starting rx_thread(%d)\n", myddc);
-    while (!do_exit) {
-        /* Protocol 1 owns the receivers and sends their samples itself. A
-         * protocol 2 client that got as far as a general packet leaves
-         * gen_rcvd and addr_new set, and protocol 1 then sets the enable, rate
-         * and frequency this guard checks — so without this the thread falls
-         * through to a handshake nothing will ever complete. It parks rather
-         * than misbehaves, but parking on a condition variable that cannot be
-         * signalled is not a state worth relying on. */
-        if (p1_active() || !gen_rcvd || ddcenable[myddc] <= 0 || rxrate[myddc] == 0
-            || rxfreq[myddc] == 0 || addr_new.sin_port == 0) {
-            usleep(50000);
-            seqnum = 0;
-            continue;
-        }
-
-        /*
-         * P2 DDC IQ packet header (16 bytes):
-         *   0-3   sequence number (big-endian)
-         *   4-11  timestamp (unused, zero)
-         *   12-13 bits per sample (16-bit BE = 24)
-         *   14-15 samples per frame (16-bit BE = 238)
-         */
-        p = rx_buffer;
-        *(uint32_t*)p = htonl(seqnum++);
-        p += 4;
-
-        memset(p, 0, 8);   // no time stamps
-        p += 8;
-
-        *p++ = 0;          // bits per sample, high byte
-        *p++ = 24;         // bits per sample, low byte
-        *p++ = 0;          // samples per frame, high byte
-        *p++ = 238;        // samples per frame, low byte
-
-        pthread_mutex_lock (&send_lock);
-
-        while (!(send_flags & rcb->rcvr_mask) && running && ddcenable[myddc]) {
-            pthread_cond_wait (&send_cond, &send_lock);
-        }
-        send_flags &= ~rcb->rcvr_mask;
-        pthread_mutex_unlock (&send_lock);
-
-        if (!running || !ddcenable[myddc]) {
-            /* Woken by stop/disable — don't send; release any blocked
-             * load_packet() and go back to the idle check. */
-            pthread_mutex_lock (&done_send_lock);
-            done_send_flags |= rcb->rcvr_mask;
-            pthread_cond_broadcast (&done_send_cond);
-            pthread_mutex_unlock (&done_send_lock);
-            continue;
-        }
-
-        memcpy(p, &pbuf[myddc][0], 1428); // I-Q data
-
-        if (sendto(sock, rx_buffer, 1444, 0, (struct sockaddr * )&addr_new, sizeof(addr_new)) < 0) {
-            /* Transient send errors must not kill the DDC stream — the
-             * thread is only respawned on a run 0->1 transition. */
-            t_perror("***** ERROR: RX thread sendto");
-        }
-
-        pthread_mutex_lock (&done_send_lock);
-        done_send_flags |= rcb->rcvr_mask;
-        pthread_cond_broadcast (&done_send_cond);
-        pthread_mutex_unlock (&done_send_lock);
-
-        if (rcb->new_freq) {
-            /* ws_thread picks up new_freq and sends a JSON tune message */
-            rcb->curr_freq = rcb->new_freq;
-            /* new_freq is cleared by ws_thread after sending the tune message */
-        }
-    }
+    /* The socket is all this thread still owns: load_packet() sends on it,
+     * from the receiver's WebSocket thread, as each packet's samples are
+     * decoded. */
+    __atomic_store_n(&rcb->p2_sock, sock, __ATOMIC_RELEASE);
+    while (!do_exit)
+        usleep(50000);
+    __atomic_store_n(&rcb->p2_sock, -1, __ATOMIC_RELEASE);
 
     close(sock);
     t_print("Ending rx_thread(%d)\n", myddc);

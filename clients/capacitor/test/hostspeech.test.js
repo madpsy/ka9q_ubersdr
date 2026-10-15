@@ -99,7 +99,7 @@ function fakePlayer() {
 
 // ---- declaration ------------------------------------------------------------
 
-t('nothing is declared without the flags — the Android client today', () => {
+t('nothing is declared without the flags — an older native half', () => {
     const win = { ubersdrDesktop: { speech: true, mediaSession: true } };
     const shim = installHostSpeech({ win, tellHost: () => assert.fail('told the host something') });
     assert.strictEqual(win.ubersdrDesktop.stt, undefined);
@@ -126,6 +126,19 @@ t('each flag declares its own object, and v2 detects stt synchronously', () => {
     assert.strictEqual(b.win.ubersdrDesktop.stt, undefined);
     assert.strictEqual(typeof b.win.ubersdrDesktop.translate.translate, 'function');
     assert.strictEqual(typeof b.win.ubersdrDesktop.translate.availability, 'function');
+    // iOS: no page of its own for adding languages.
+    assert.strictEqual(b.win.ubersdrDesktop.translate.openSettings, undefined);
+});
+
+t('translateSettings adds openSettings, which tells the host and expects nothing back', () => {
+    const r = rig({ translateHost: true, translateSettings: true });
+    const tr = r.win.ubersdrDesktop.translate;
+    assert.strictEqual(typeof tr.openSettings, 'function');
+    tr.openSettings();
+    assert.deepStrictEqual(r.sent, [{ type: 'translate-settings' }]);
+    // Without translateHost there is no translate to hang it on.
+    const s = rig({ translateSettings: true });
+    assert.strictEqual(s.win.ubersdrDesktop.translate, undefined);
 });
 
 // ---- the wire ---------------------------------------------------------------
@@ -399,7 +412,7 @@ t('translate: request ids, answers and errors', async () => {
     assert.strictEqual(r.say('translate-result', { id: m1.id, text: 'again' }), true);
 });
 
-t('translate: availability is one of three words, and unavailable when silent', async () => {
+t('translate: availability is one of four words, and unavailable when silent', async () => {
     const r = rig();
     const tr = r.win.ubersdrDesktop.translate;
     const a = tr.availability('de', 'en');
@@ -407,6 +420,11 @@ t('translate: availability is one of three words, and unavailable when silent', 
     assert.deepStrictEqual(ask, { type: 'translate-availability', id: ask.id, source: 'de', target: 'en' });
     r.say('translate-availability', { id: ask.id, status: 'downloadable' });
     assert.strictEqual(await a, 'downloadable');
+
+    // Android's: a language being added.
+    const a2 = tr.availability('de', 'en');
+    r.say('translate-availability', { id: r.last('translate-availability').id, status: 'downloading' });
+    assert.strictEqual(await a2, 'downloading');
 
     const b = tr.availability('de', 'en');
     r.say('translate-availability', { id: r.last('translate-availability').id, status: 'nonsense' });

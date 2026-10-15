@@ -162,15 +162,39 @@ const Transcript = memo(function Transcript({ segments, timestamps, autoScroll, 
 });
 
 /**
- * A note about transcribing on the device, with whatever can be done about it
- * beside it: installing the language, or handing the job to the server. Every
- * local failure is drawn by this one component, so none of them can leave out
- * the way out.
+ * The host's page for adding translation languages, for a note that says
+ * they are missing — or undefined, where the host has none (iOS, a browser).
  */
-function LocalNote({ note, onInstall, installing, onServer }) {
+function translationSettings(note) {
+    if (!note || !note.languages) return undefined;
+    try {
+        const w = typeof window !== 'undefined' ? window : globalThis;
+        const t = w.ubersdrDesktop && w.ubersdrDesktop.translate;
+        if (t && typeof t.openSettings === 'function') return () => t.openSettings();
+    } catch (e) { /* no host */ }
+    return undefined;
+}
+
+/**
+ * A note about transcribing on the device, with whatever can be done about it
+ * beside it: installing the language, adding translation languages, or
+ * handing the job to the server. Every local failure is drawn by this one
+ * component, so none of them can leave out the way out.
+ */
+function LocalNote({ note, onInstall, installing, onServer, onSettings }) {
     return (
         <div className="note note--warn stt__note">
             <span>{note.message}</span>
+            {onSettings && (
+                <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={onSettings}
+                    title="Open the device's settings for translation languages, to add the ones this transcript needs. Then press Start again"
+                >
+                    Add languages
+                </Button>
+            )}
             {onInstall && (
                 <Button
                     size="sm"
@@ -1290,7 +1314,9 @@ export default function WhisperExtension({ minimal }) {
             {local && decoding && localNote && <LocalNote note={localNote} onServer={switchToServer} />}
             {!minimal && local && models.note && <LocalNote note={{ message: models.note }} />}
             {local && decoding && silent && <LocalNote note={describeError('silent')} onServer={switchToServer} />}
-            {local && decoding && translateNote && <LocalNote note={translateNote} onServer={switchToServer} />}
+            {local && decoding && translateNote && (
+                <LocalNote note={translateNote} onServer={switchToServer} onSettings={translationSettings(translateNote)} />
+            )}
             {local && decoding && translateProgress != null && (
                 <div className="note note--tight">
                     Downloading the translation model… {Math.round(translateProgress * 100)}%

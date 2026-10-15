@@ -67,10 +67,6 @@
 #                           same filenames every time. The iOS half has the
 #                           same option — see build-mac.sh --screenshots.
 #   ./build.sh --clean      remove www/ and the Gradle outputs first
-#
-#   UBERSDR_TRANSLATION=1 ./build.sh ...
-#                           include ML Kit's on-device translator for the
-#                           Whisper extension — see android/app/build.gradle
 
 set -euo pipefail
 
@@ -1079,16 +1075,6 @@ if ! JDK21="$(find_jdk21)"; then
     exit 1
 fi
 export JAVA_HOME="$JDK21"
-
-# Whether ML Kit's translator goes in, said before the build for the same
-# reason as the signing: it is most of the APK when it does. See the
-# dependency in android/app/build.gradle for why it is asked for rather than
-# always there.
-if [[ "${UBERSDR_TRANSLATION:-0}" == "1" ]]; then
-    echo "  translation      ML Kit included (UBERSDR_TRANSLATION=1) — a universal APK of about 69 MB"
-else
-    echo "  translation      not included; UBERSDR_TRANSLATION=1 adds ML Kit (about 64 MB to the APK)"
-fi
 
 AAB_OUT=""
 if [[ "$RELEASE" -eq 1 ]]; then

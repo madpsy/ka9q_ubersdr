@@ -118,11 +118,18 @@
 // is not in the loop):
 //
 //     window.ubersdrDesktop.translate = {
-//         availability(source, target): Promise<'available'|'downloadable'|'unavailable'>,
+//         availability(source, target): Promise<'available'|'downloadable'|'downloading'|'unavailable'>,
 //         translate(text, source, target): Promise<string>,
+//         openSettings?(),
 //     }
 //
 // with BCP-47 language tags ('en', 'de', 'zh-Hant'). See ../translate.js.
+// 'downloadable' and 'downloading' both mean the languages are not on the
+// device yet, and that the host will not fetch them itself — the person adds
+// them in the device's settings. `openSettings`, optional, opens the device's
+// page for that (Android's translation service has one; iOS has none an app
+// can open, and leaves it out); with it, the page's note about missing
+// languages has a button.
 
 import { describeError, restartPlan } from '../local.js';
 import { Pcm16Batcher, STT_RATE } from '../pcm.js';

@@ -137,7 +137,7 @@ library.
 | `Notices.java` | the page's own notifications, in the shade |
 | `Speech.java` | spoken announcements, over TextToSpeech |
 | `Recognition.java` | speech-to-text on the device, for the Whisper extension's local mode (Android 13+) |
-| `Translation.java` | translating its lines on the device, with ML Kit — in builds that ask for it |
+| `Translation.java` | translating its lines on the device, with Android's own translator (Android 12+) |
 | `SystemBars.java` | keeping the page out from under the status and navigation bars |
 
 Everything else stayed in JavaScript. The store, the row shapes, the sort, the
@@ -372,7 +372,7 @@ with two more flags in the same `window.ubersdrDesktop` literal as the rest:
 | `sttHost` | iOS | there is at least one language `SFSpeechRecognizer` can recognise *on the device*, and speech recognition has not been refused in Settings (not yet asked still counts — the prompt comes at the first Start) |
 | | Android 13 and later | `SpeechRecognizer.isOnDeviceRecognitionAvailable` — the phone has an on-device recognition service. Which languages it has installed is asynchronous to find out, so that is left to `stt.languages()`, and an empty list makes the page say there are none |
 | `translateHost` | iOS 26 and later | `TranslationSession(installedSource:target:)` exists, so installed languages can be translated with no interface at all |
-| | Android, builds with ML Kit | ML Kit's translator is in the APK — see below |
+| | Android 12 and later | the system has a `TranslationManager` — an on-device translation service. Which pairs it has is left to `translate.availability()` |
 
 Absent, nothing is declared and the page offers what it offered before — on an
 Android phone older than 13, for instance. Flags rather than asking at run time
@@ -431,21 +431,18 @@ heard, and a late copy of a settled line is recognised and dropped. It keeps goi
 keeps the page running), but a failure there ends the session with a sentence
 saying so rather than being retried while nobody is looking.
 
-Translation on Android is ML Kit (`Translation.java`), which translates on the
-device and fetches a language's model — about 30 MB — by itself, without
-showing anything. It is fetched when a line is first asked for, over Wi-Fi
-only; until it is there the pair is `downloadable` and lines are shown as
-spoken with a note saying why. ML Kit is **not in the default build**, because
-of its size: its native library is 11–17 MB per ABI, stored uncompressed, which
-takes the universal APK from about 5 MB to about 69 MB (a Play install, one ABI
-from the `.aab`, is about 7 MB more to download and 18 MB more on the phone).
-It also adds an init provider that runs at every launch, `ACCESS_NETWORK_STATE`
-and Google's usage logging for ML Kit. Build it in with
-
-    UBERSDR_TRANSLATION=1 ./build.sh --release
-
-Without it the code compiles against ML Kit (`compileOnly`) but the classes are
-not in the APK, `ReceiverActivity` sees that, and `translateHost` is not set.
+Translation on Android is the system's own on-device translator,
+`TranslationManager` (`Translation.java`): public since Android 12, no
+permission, and nothing added to the APK — on a Pixel the models belong to
+Android System Intelligence. The app cannot download a language; the person
+adds it in that service's settings. Until they have, the pair is
+`downloadable` (or `downloading`) and the page says so — with a button that
+opens the service's language page (`translate.openSettings()`, the
+`translate-settings` message), since the screen is otherwise hard to find. A
+pair that is there has its translator opened, and warmed with one word, as
+soon as the page asks for its availability at Start: the first open after a
+download took up to 3.6 s on a Pixel 8a, and the first line 2 s, against the
+page's four seconds to open and six a line.
 
 ## What the phone gets that the desktop does not
 

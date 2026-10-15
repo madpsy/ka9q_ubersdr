@@ -21,8 +21,13 @@
 //                  permission for it. iOS sets it, and Android 13 and later
 //                  where the phone has an on-device recognition service.
 //   translateHost  the host can translate without the network and without
-//                  showing anything. iOS 26 and later; Android builds that
-//                  carry ML Kit.
+//                  showing anything. iOS 26 and later; Android 12 and later,
+//                  with the system's TranslationManager.
+//   translateSettings
+//                  the host can open the device's page for adding translation
+//                  languages, which the page offers when a pair is not there
+//                  yet: translate.openSettings(). Android only — iOS has no
+//                  such page an app can open, and leaves it out.
 //
 // Absent, nothing is declared, and the page is exactly where it was — which is
 // what keeps an older native half, or a phone without a recogniser, unchanged
@@ -45,6 +50,7 @@
 //   {type:'stt-stop', session}
 //   {type:'translate-availability', id, source, target}
 //   {type:'translate', id, text, source, target}
+//   {type:'translate-settings'}            no answer
 //
 // Host → page, as strings in the host channel's own `prefix:payload` style:
 //
@@ -54,7 +60,7 @@
 //   stt-result:{session, text, final}
 //   stt-error:{session, code, message, fatal, retryable}
 //   stt-end:{session}
-//   translate-availability:{id, status}    'available'|'downloadable'|'unavailable'
+//   translate-availability:{id, status}    'available'|'downloadable'|'downloading'|'unavailable'
 //   translate-result:{id, text} | {id, error}
 //
 // `session` is this file's own counter, one per start(). Everything the host
@@ -90,7 +96,7 @@ export const TIMEOUTS = {
     translateMs: 30000,
 };
 
-const STATUSES = ['available', 'downloadable', 'unavailable'];
+const STATUSES = ['available', 'downloadable', 'downloading', 'unavailable'];
 
 // Where a page load's counters begin: anywhere in [0, 2^30), leaving room to
 // count up without leaving the integers both ends parse exactly.
@@ -400,7 +406,7 @@ export function installHostSpeech({
             return entry;
         }
 
-        win.ubersdrDesktop.translate = {
+        const translate = {
             availability(source, target) {
                 return ask(
                     { type: 'translate-availability', source: String(source || ''), target: String(target || '') },
@@ -414,6 +420,8 @@ export function installHostSpeech({
                 );
             },
         };
+        if (flags.translateSettings) translate.openSettings = () => { tellHost({ type: 'translate-settings' }); };
+        win.ubersdrDesktop.translate = translate;
 
         return (data) => {
             if (data.startsWith('translate-availability:')) {

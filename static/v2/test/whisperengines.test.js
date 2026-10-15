@@ -952,6 +952,13 @@ t('an app\'s translator without the languages says so before the first line', as
     assert.deepStrictEqual(await lt.translate('hello'), { text: 'hello', translated: false });
     assert.strictEqual(notes.length, 1);
     assert.match(notes[0].message, /aren't on this device yet/);
+    assert.strictEqual(notes[0].languages, true, 'the note does not say it is about missing languages');
+    // Android's: being added is not there yet either.
+    await assert.rejects(T.openTranslator({ source: 'en', target: 'de' }, { win: host('downloading') }), /aren't on this device yet/);
+    const notes2 = [];
+    const lt2 = T.createLineTranslator({ pair: { source: 'en', target: 'de' }, win: host('unavailable'), onNote: (n) => notes2.push(n) });
+    await lt2.translate('hello');
+    assert.strictEqual(notes2[0].languages, false);
     const ok = await T.openTranslator({ source: 'en', target: 'de' }, { win: host('available') });
     assert.strictEqual(await ok.translate('hello'), 'hallo');
 });

@@ -415,6 +415,41 @@ t('a translation that comes back after Stop is dropped', async () => {
     unmount();
 });
 
+t('translation languages that are missing: the note, and the host\'s page for adding them where it has one', async () => {
+    for (const withSettings of [true, false]) {
+        fresh();
+        store.set('ubersdr.v2.stt.spoken', 'de-DE');
+        const host = hostStt();
+        const tr = hostTranslate();
+        tr.availability = () => Promise.resolve('downloadable');
+        let opened = 0;
+        // Android's host has openSettings; iOS's does not.
+        if (withSettings) tr.openSettings = () => { opened += 1; };
+        globalThis.ubersdrDesktop = { stt: host, translate: tr };
+        const ctx = context();
+        let tree = show(ctx);
+        await settle();
+        tree = show(ctx);
+        button(tree, 'Start').props.onClick();
+        tree = show(ctx);
+        await settle();
+        // As React would re-render: show() would run the translator's effect
+        // afresh, and its cleanup takes the note down.
+        tree = keep(ctx);
+        assert.match(notes(tree).map(words).join(' '), /aren't on this device yet/);
+        const add = button(tree, 'Add languages');
+        if (withSettings) {
+            assert.ok(add, 'no Add languages button');
+            add.props.onClick();
+            assert.strictEqual(opened, 1);
+        } else {
+            assert.ok(!add, 'a button for a host with no settings page');
+        }
+        assert.ok(button(tree, 'Use server instead'), 'no way out beside it');
+        unmount();
+    }
+});
+
 t('a translation from a replaced session keeps the new session\'s live line', async () => {
     fresh();
     store.set('ubersdr.v2.stt.spoken', 'de-DE');

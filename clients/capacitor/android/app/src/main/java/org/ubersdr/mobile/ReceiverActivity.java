@@ -202,7 +202,7 @@ public class ReceiverActivity extends Activity {
         // need the host channel to answer on, so neither is offered without it.
         boolean channel = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER);
         sttHost = channel && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && Recognition.offered(this);
-        translateHost = channel && translationPackaged();
+        translateHost = channel && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && Translation.offered(this);
 
         // The preload's jobs, before the page's first script runs.
         Set<String> rules = Collections.singleton(origin);
@@ -668,6 +668,7 @@ public class ReceiverActivity extends Activity {
                 break;
             case "translate-availability":
             case "translate":
+            case "translate-settings":
                 translate(type, message);
                 break;
             case "stats":
@@ -759,9 +760,13 @@ public class ReceiverActivity extends Activity {
      * model.
      */
     private void translate(String type, JSONObject message) {
-        if (!translateHost) return;
+        if (!translateHost || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+        if ("translate-settings".equals(type)) {
+            openTranslationSettings();
+            return;
+        }
         if (translation == null) {
-            translation = new Translation((text) -> runOnUiThread(() -> {
+            translation = new Translation(this, (text) -> runOnUiThread(() -> {
                 if (reply != null) reply.postMessage(text);
             }));
         }
@@ -788,16 +793,27 @@ public class ReceiverActivity extends Activity {
     }
 
     /**
-     * Whether this build carries ML Kit's translator — it is in the APK only
-     * when asked for (see the dependency in android/app/build.gradle). Asked by
-     * name, so that nothing is loaded from Translation unless it is there.
+     * The system translator's page for adding languages — the app cannot add
+     * them itself (see Translation). The page's button for it is pressed with
+     * the receiver on screen, which is what sending the system's PendingIntent
+     * needs; on Android 14 and later this app's being on screen has to be
+     * lent to it explicitly.
      */
-    private static boolean translationPackaged() {
+    private void openTranslationSettings() {
+        if (!visible) return;
+        android.app.PendingIntent pi = Translation.settingsIntent(this);
+        if (pi == null) return;
         try {
-            Class.forName("com.google.mlkit.nl.translate.Translator");
-            return true;
-        } catch (ClassNotFoundException | LinkageError e) {
-            return false;
+            android.os.Bundle options = null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                options = android.app.ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(
+                                android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                        .toBundle();
+            }
+            pi.send(this, 0, null, null, null, null, options);
+        } catch (android.app.PendingIntent.CanceledException | RuntimeException e) {
+            Log.w(TAG, "could not open the translation settings", e);
         }
     }
 
@@ -944,10 +960,12 @@ public class ReceiverActivity extends Activity {
           .append(",hidePanels:").append(HIDDEN_PANELS);
         // The Whisper extension's local mode, read by src/hostspeech.js before
         // the page's first script — see Recognition.offered and
-        // translationPackaged. Left out rather than false where there is
+        // Translation.offered. Left out rather than false where there is
         // nothing, as iOS does.
         if (sttHost) sb.append(",sttHost:true");
-        if (translateHost) sb.append(",translateHost:true");
+        // Android's translator cannot fetch a language itself, but the system
+        // can show its page for adding one: translate.openSettings().
+        if (translateHost) sb.append(",translateHost:true,translateSettings:true");
         sb.append("};}catch(e){}");
         if (password != null && !password.isEmpty()) {
             sb.append("try{sessionStorage.setItem('ubersdr.v2.password',")

@@ -112,7 +112,12 @@ export async function openTranslator(pair, { win = theWindow(), onProgress } = {
                 throw Object.assign(new Error('this language pair is not supported'), { name: 'NotSupportedError' });
             }
             if (status === 'downloadable' || status === 'downloading') {
-                throw new Error('the translation languages aren\'t on this device yet — add them in the device\'s settings, then press Start again');
+                // `languages` marks it for the note, which offers the host's
+                // page for adding them where there is one (openSettings).
+                throw Object.assign(
+                    new Error('the translation languages aren\'t on this device yet — add them in the device\'s settings, then press Start again'),
+                    { languages: true },
+                );
             }
         }
         return {
@@ -183,7 +188,7 @@ export function createLineTranslator({
         const reason = reasonOf(e);
         if (noted === reason || destroyed) return;
         noted = reason;
-        if (onNote) onNote({ ...describeError('translate-failed', reason), fatal: false });
+        if (onNote) onNote({ ...describeError('translate-failed', reason), fatal: false, languages: !!(e && e.languages) });
     };
     const recovered = () => {
         if (!noted || destroyed) return;

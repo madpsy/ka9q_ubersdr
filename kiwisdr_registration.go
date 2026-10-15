@@ -40,9 +40,9 @@ const (
 
 	// Values captured from a live KiwiSDR v2 registration packet and hardcoded
 	// here so we appear as a compatible, up-to-date receiver to the directory.
-	kiwiSDRReportedVersion = "1.902" // KiwiSDR firmware version (major.minor)
-	kiwiSDRReportedDeb     = "11.8"  // BeagleBone Debian Bullseye version
-	kiwiSDRReportedModel   = "2"     // KiwiSDR v2 hardware model
+	// The firmware version is server.kiwisdr_version (KiwiSDRVersionString).
+	kiwiSDRReportedDeb   = "11.8" // BeagleBone Debian Bullseye version
+	kiwiSDRReportedModel = "2"    // KiwiSDR v2 hardware model
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ func (k *KiwiSDRComRegistrar) updatePHP(register bool) error {
 	q.Set("dhcp", "1")
 	q.Set("jq", "1")
 	q.Set("email", cfg.Admin.Email)
-	q.Set("ver", kiwiSDRReportedVersion)
+	q.Set("ver", cfg.Server.KiwiSDRVersionString())
 	q.Set("deb", kiwiSDRReportedDeb)
 	q.Set("model", kiwiSDRReportedModel)
 	q.Set("plat", "0")
@@ -392,7 +392,7 @@ func (k *KiwiSDRComRegistrar) myKiwiPHP() error {
 	q.Set("dhcp", "1")
 	q.Set("jq", "1")
 	q.Set("email", cfg.Admin.Email)
-	q.Set("ver", kiwiSDRReportedVersion)
+	q.Set("ver", cfg.Server.KiwiSDRVersionString())
 	q.Set("deb", kiwiSDRReportedDeb)
 	q.Set("model", kiwiSDRReportedModel)
 	q.Set("plat", "0")

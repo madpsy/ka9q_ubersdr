@@ -490,6 +490,14 @@ server:
   # -73 - (-43) = -30, so use 30.
   kiwisdr_smeter_offset: 20.0
 
+  # KiwiSDR firmware version to report, as "major.minor" (default: "1.902").
+  # This one value is used everywhere a version is visible: the /VER reply,
+  # the version message sent to clients, /status (sdr_hw and sw_version) and
+  # the rx.kiwisdr.com registration. The browser frontend's version check is
+  # kept in step automatically. Raise it when real KiwiSDRs move on, so this
+  # receiver doesn't look out of date in the directory.
+  kiwisdr_version: "1.902"
+
   # Public hostname advertised to rx.kiwisdr.com (required for registration)
   # This is the hostname that KiwiSDR clients will use to connect to your SDR.
   # Must be a publicly reachable hostname or IP address.

@@ -3626,9 +3626,10 @@ func main() {
 
 			// Return version info in KiwiSDR format
 			// maj: major version, min: minor version, ts: timestamp in nanoseconds, sp: spare field
+			maj, min := config.Server.KiwiSDRVersionParts()
 			response := map[string]interface{}{
-				"maj": 1,
-				"min": 826,
+				"maj": maj,
+				"min": min,
 				"ts":  ts,
 				"sp":  0,
 			}
@@ -3690,7 +3691,13 @@ func main() {
 				return
 			}
 
-			// Otherwise, serve static files
+			// Otherwise, serve static files. The files carrying a
+			// kiwi_check_js_version stamp get the configured version
+			// written in, or the browser flags them as stale.
+			maj, min := config.Server.KiwiSDRVersionParts()
+			if serveKiwiStampedJS(w, r, kiwiDir, maj, min) {
+				return
+			}
 			kiwiFS.ServeHTTP(w, r)
 		})
 

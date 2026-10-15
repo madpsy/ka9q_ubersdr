@@ -396,6 +396,7 @@ type ServerConfig struct {
 	KiwiSDRPublicEmail              string            `yaml:"kiwisdr_public_email"`                // Public email for KiwiSDR status endpoint (default: "admin@example.com")
 	KiwiSDRSmeterOffset             float32           `yaml:"kiwisdr_smeter_offset"`               // S-meter calibration offset (dBFS to dBm, default: 30.0)
 	KiwiSDRSpectrumDivisor          int               `yaml:"kiwisdr_spectrum_divisor"`            // Waterfall poll rate for KiwiSDR clients, as a divisor of spectrum.poll_period_ms (default: 2)
+	KiwiSDRVersion                  string            `yaml:"kiwisdr_version"`                     // KiwiSDR firmware version the emulation reports, "major.minor" (default: "1.902")
 	EnableWebSDR                    bool              `yaml:"enable_websdr"`                       // Enable WebSDR protocol compatibility server (default: false)
 	WebSDRWaterfallCalibration      float32           `yaml:"websdr_waterfall_calibration"`        // Waterfall dBFS→pixel calibration offset (default: -13.0)
 	WebSDRSpectrumDivisor           int               `yaml:"websdr_spectrum_divisor"`             // Waterfall poll rate for WebSDR clients at their "fast" setting, as a divisor of spectrum.poll_period_ms (default: 2)
@@ -1417,6 +1418,13 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRSmeterOffset == 0 {
 		config.Server.KiwiSDRSmeterOffset = 30.0 // Default S-meter calibration offset
+	}
+	if config.Server.KiwiSDRVersion == "" {
+		config.Server.KiwiSDRVersion = defaultKiwiSDRVersion
+	} else if _, _, ok := parseKiwiSDRVersion(config.Server.KiwiSDRVersion); !ok {
+		log.Printf("Config: kiwisdr_version = %q is not \"major.minor\" (e.g. \"1.902\"); using %s",
+			config.Server.KiwiSDRVersion, defaultKiwiSDRVersion)
+		config.Server.KiwiSDRVersion = defaultKiwiSDRVersion
 	}
 	// WebSDR compatibility defaults
 	if config.Server.EnableWebSDR && config.Server.WebSDRWaterfallCalibration == 0 {

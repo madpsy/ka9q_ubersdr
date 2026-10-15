@@ -7,4 +7,4 @@ console.log('kiwi_js_load.js DONE');
 
 
 
-kiwi_check_js_version.push({ VERSION_MAJ:1, VERSION_MIN:826, file:'kiwi/kiwi_js_load.js' });
+kiwi_check_js_version.push({ VERSION_MAJ:1, VERSION_MIN:902, file:'kiwi/kiwi_js_load.js' });

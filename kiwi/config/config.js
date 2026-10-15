@@ -136,4 +136,4 @@ if (down_converter_6m) {
    bands.push({ s:svc.M, min:16332.0, max:16332.0, sel:"16332.0cwn", region:'m', name:"16332" });
    bands.push({ s:svc.M, min:20048.4, max:20048.4, sel:"20048.4cwn", region:'m', name:"20048" });
 }
-kiwi_check_js_version.push({ VERSION_MAJ:1, VERSION_MIN:826, file:'/root/kiwi.config/config.js' });
+kiwi_check_js_version.push({ VERSION_MAJ:1, VERSION_MIN:902, file:'/root/kiwi.config/config.js' });

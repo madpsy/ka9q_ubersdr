@@ -228,7 +228,7 @@ func (c *CWSkimmerClient) connectionWorker() {
 
 // connect establishes a connection to the CW Skimmer server
 func (c *CWSkimmerClient) connect() error {
-	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
+	addr := net.JoinHostPort(c.config.Host, fmt.Sprint(c.config.Port))
 	log.Printf("CW Skimmer: Connecting to %s (timeout: 10s)", addr)
 
 	// Use 10 second timeout for connection

@@ -97,7 +97,7 @@ func (r *RotctlClient) Connect() error {
 
 // connectLocked performs the actual connection (must be called with lock held)
 func (r *RotctlClient) connectLocked() error {
-	addr := fmt.Sprintf("%s:%d", r.host, r.port)
+	addr := net.JoinHostPort(r.host, fmt.Sprint(r.port))
 	conn, err := net.DialTimeout("tcp", addr, r.timeout)
 	if err != nil {
 		return fmt.Errorf("failed to connect to rotctld at %s: %w", addr, err)

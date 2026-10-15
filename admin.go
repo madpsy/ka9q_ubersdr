@@ -8716,7 +8716,7 @@ func (ah *AdminHandler) HandleDXClusterTest(w http.ResponseWriter, r *http.Reque
 
 	var transcript []string
 
-	addr := fmt.Sprintf("%s:%d", req.Host, req.Port)
+	addr := net.JoinHostPort(req.Host, fmt.Sprint(req.Port))
 	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		respond(false, fmt.Sprintf("Connection failed: %v", err), transcript)

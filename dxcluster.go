@@ -223,7 +223,7 @@ func (c *DXClusterClient) connectionLoop() {
 
 // connect establishes a connection to the DX cluster
 func (c *DXClusterClient) connect() error {
-	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
+	addr := net.JoinHostPort(c.config.Host, fmt.Sprint(c.config.Port))
 	log.Printf("DX Cluster: Connecting to %s", addr)
 
 	conn, err := net.DialTimeout("tcp", addr, 30*time.Second)

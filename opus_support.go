@@ -36,7 +36,16 @@ func NewOpusEncoderForClient(sampleRate int, bitrate int, complexity int) (*Opus
 
 	// Opus encoder: use actual sample rate and mono (1 channel)
 	// The client will create a matching decoder from the packet header
-	encoder, err := opus.NewEncoder(sampleRate, 1, opus.AppVoIP)
+	//
+	// AppAudio, not AppVoIP. VoIP mode codes with SILK, the speech codec;
+	// audio mode uses CELT at these bitrates. On 12 kHz captures from a live
+	// receiver at complexity 5, CELT cost 39 us a 20 ms frame against SILK's
+	// 90 at 48 kbps, and 90 against 212 at 24 kbps -- the most expensive part
+	// of an Opus listener. At 48 kbps it was also the more faithful by every
+	// measure (decoded SNR: FT8 20.7 vs 18.4 dB, SSB voice 18.6 vs 13.4, CW
+	// 29.7 vs 19.1); at 24 kbps level on voice, better on CW, 2 dB behind on
+	// FT8. The delay is the same, and any Opus decoder plays either.
+	encoder, err := opus.NewEncoder(sampleRate, 1, opus.AppAudio)
 	if err != nil {
 		log.Printf("WARNING: Opus encoding requested but failed to initialize: %v", err)
 		log.Printf("To enable Opus support: sudo apt install libopus-dev libopusfile-dev pkg-config")

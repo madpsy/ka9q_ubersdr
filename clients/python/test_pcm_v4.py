@@ -226,6 +226,37 @@ class TestServerFixtures(unittest.TestCase):
             self.assertEqual(got, RICE_EDGE_SHA)
 
 
+class TestNativeBlock(unittest.TestCase):
+    """pcm_v4_native.c's order-16 IQ block against its per-frame loop.
+
+    The fixtures above reach the block only as the stream they hold; this
+    builds test_pcm_v4_native_block.c, which drives both paths over millions
+    of frames of noise, tones and corrupt residuals and compares every
+    sample, with the SIMD kernel this machine has and without it. Skipped
+    where there is no C compiler, as on most Windows machines.
+    """
+
+    def _run(self, *flags):
+        import os, shutil, subprocess, tempfile
+        cc = shutil.which('gcc') or shutil.which('cc')
+        if not cc:
+            self.skipTest('no C compiler')
+        here = os.path.dirname(os.path.abspath(__file__))
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = os.path.join(tmp, 'block_test')
+            subprocess.run([cc, '-std=gnu11', '-O2', *flags, '-o', exe,
+                            os.path.join(here, 'test_pcm_v4_native_block.c'), '-lm'],
+                           check=True, capture_output=True)
+            out = subprocess.run([exe], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_block_matches_per_frame(self):
+        self._run()
+
+    def test_block_matches_per_frame_without_simd(self):
+        self._run('-DPCMV4_NO_SIMD')
+
+
 class TestQuality(unittest.TestCase):
     def test_no_reading_sentinel(self):
         self.assertEqual(quality_to_float(QUALITY_NO_READING), -999.0)

@@ -464,6 +464,13 @@ class RadioClient:
         # IMPORTANT: Never resample IQ modes - they need exact sample rates
         is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
         self.needs_resampling = (output_mode == 'sounddevice' and SAMPLERATE_AVAILABLE and not is_iq_mode)
+        # PyAudio on Windows gets the same treatment. The rate now follows the
+        # stream -- 24 kHz in AM, 12 kHz in SSB -- and a WASAPI shared-mode
+        # device refuses anything but the mixer rate, so opening at the stream's
+        # own rate fails there on a mode change. Elsewhere PyAudio opens at the
+        # stream rate and the sound server converts.
+        self.pyaudio_needs_resampling = (output_mode == 'pyaudio' and platform.system() == 'Windows'
+                                         and SAMPLERATE_AVAILABLE and not is_iq_mode)
         self.resampler_left = None  # Stateful resampler for left channel
         self.resampler_right = None  # Stateful resampler for right channel
 
@@ -969,9 +976,11 @@ class RadioClient:
 
         The rate comes from the audio packets and can change on a retune or
         mode change, so the stream is opened on the first audio, not at connect.
-        PyAudio output is not resampled, so it runs at the stream's own rate.
+        On Windows it runs at 48 kHz and output_audio resamples into it (see
+        pyaudio_needs_resampling); elsewhere it runs at the stream's own rate.
         """
-        fmt = (self.sample_rate, channels)
+        rate = 48000 if self.pyaudio_needs_resampling else self.sample_rate
+        fmt = (rate, channels)
         if self.pyaudio_instance is None or fmt == self.pyaudio_format:
             return
         old_format = self.pyaudio_format
@@ -996,9 +1005,13 @@ class RadioClient:
 
             self.pyaudio_stream = self.pyaudio_instance.open(**stream_kwargs)
             changed = f" (was {old_format[0]} Hz, {old_format[1]} ch)" if old_format else ""
-            print(f"PyAudio output started{device} (sample rate: {fmt[0]} Hz, channels: {channels}){changed}", file=sys.stderr, flush=True)
+            resampled = f", resampled from {self.sample_rate} Hz" if rate != self.sample_rate else ""
+            print(f"PyAudio output started{device} (sample rate: {fmt[0]} Hz{resampled}, channels: {channels}){changed}", file=sys.stderr, flush=True)
         except Exception as e:
             print(f"Error: Failed to open PyAudio stream at {fmt[0]} Hz: {e}", file=sys.stderr)
+            if platform.system() == 'Windows' and not self.pyaudio_needs_resampling:
+                print("  Windows devices often accept only 48 kHz. Install samplerate (pip install samplerate) "
+                      "so PyAudio output is resampled to it, or use -o sounddevice.", file=sys.stderr)
             # Leave pyaudio_format set so a failing format is not retried per packet
             self.pyaudio_stream = None
             if self.status_callback:
@@ -1600,23 +1613,33 @@ class RadioClient:
         # Resample for sounddevice if needed (12 kHz -> 48 kHz)
         # This avoids hardware rejection of unsupported sample rates
         # Using samplerate library for stateful, click-free resampling
+        # PyAudio on Windows resamples the same way, to 48 kHz.
+        resample_to = None
         if self.output_mode == 'sounddevice' and self.needs_resampling:
-            if self.sounddevice_output_rate != self.sample_rate:
-                if SAMPLERATE_AVAILABLE:
-                    # Initialize resamplers on first use
-                   if self.resampler_left is None:
-                       # Use 'sinc_best' for highest quality, or 'sinc_medium' for lower CPU usage
-                       self.resampler_left = samplerate.Resampler('sinc_best', channels=1)
-                       self.resampler_right = samplerate.Resampler('sinc_best', channels=1)
+            resample_to = self.sounddevice_output_rate
+        elif self.output_mode == 'pyaudio' and self.pyaudio_needs_resampling:
+            resample_to = 48000
+        if resample_to is not None and resample_to != self.sample_rate and SAMPLERATE_AVAILABLE:
+            # Initialize resamplers on first use
+            if self.resampler_left is None:
+                # Use 'sinc_best' for highest quality, or 'sinc_medium' for lower CPU usage
+                self.resampler_left = samplerate.Resampler('sinc_best', channels=1)
+                self.resampler_right = samplerate.Resampler('sinc_best', channels=1)
 
-                   # Calculate resampling ratio
-                   ratio = self.sounddevice_output_rate / self.sample_rate
+            # Calculate resampling ratio
+            ratio = resample_to / self.sample_rate
 
-                   # Resample each channel with stateful resamplers
-                   # This maintains filter state across chunks, eliminating clicks
-                   left_resampled = self.resampler_left.process(audio_float[:, 0], ratio)
-                   right_resampled = self.resampler_right.process(audio_float[:, 1], ratio)
-                   audio_float = np.column_stack((left_resampled, right_resampled))
+            # Resample each channel with stateful resamplers
+            # This maintains filter state across chunks, eliminating clicks
+            if audio_float.ndim == 1:
+                audio_float = self.resampler_left.process(audio_float, ratio)
+            else:
+                left_resampled = self.resampler_left.process(audio_float[:, 0], ratio)
+                right_resampled = self.resampler_right.process(audio_float[:, 1], ratio)
+                # A stateful resampler can return a sample more on one channel
+                # than the other during warm-up; column_stack would refuse that.
+                n = min(len(left_resampled), len(right_resampled))
+                audio_float = np.column_stack((left_resampled[:n], right_resampled[:n]))
 
         # Convert back to int16 and clip
         audio_array = np.clip(audio_float * 32768.0, -32768, 32767).astype(np.int16)

@@ -431,14 +431,33 @@ export function closestLanguage(available, want = 'en', userLocale = '') {
     const lang = w.split('-')[0];
     const region = lower(String(userLocale || '')).split('-')[1];
     const same = list.filter((l) => lower(l).split('-')[0] === lang);
-    if (same.length) {
-        return (region && same.find((l) => lower(l).split('-')[1] === region)) || same[0];
-    }
+    if (same.length) return bestRegion(same, lang, region);
     const english = list.filter((l) => lower(l).startsWith('en'));
-    if (english.length) {
-        return (region && english.find((l) => lower(l).split('-')[1] === region)) || english[0];
-    }
+    if (english.length) return bestRegion(english, 'en', region);
     return list[0];
+}
+
+// Which of several regions of one language to start on, when the user's own
+// is not among them.
+//
+// Never the list's first: a host's list has no order to speak of — iOS hands
+// back SFSpeechRecognizer.supportedLocales(), a Set, and an iPad offered
+// English (Indonesia) as the default because it happened to come out first.
+// So the user's region, then the one most people speaking the language would
+// expect — American for English, the language's own country otherwise
+// (de-DE, fr-FR) — and only then alphabetical, so the answer is the same on
+// every device that lists the same things.
+const HOME_REGION = { en: 'us' };
+
+function bestRegion(candidates, lang, region) {
+    const lower = (s) => s.toLowerCase().replace('_', '-');
+    const regionOf = (l) => lower(l).split('-')[1];
+    for (const want of [region, HOME_REGION[lang], lang]) {
+        if (!want) continue;
+        const hit = candidates.find((l) => regionOf(l) === want);
+        if (hit) return hit;
+    }
+    return [...candidates].sort((a, b) => lower(a).localeCompare(lower(b)))[0];
 }
 
 // ---- translation -----------------------------------------------------------

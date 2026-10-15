@@ -425,6 +425,22 @@ t('the closest spoken language: exact, then the user\'s region, then any variety
     assert.strictEqual(L.closestLanguage(['en_GB'], 'en-gb'), 'en_GB');
 });
 
+t('the starting region never depends on the order a host lists them in', () => {
+    // An iPad's supportedLocales() is a Set: it put English (Indonesia) first.
+    const ipad = ['en-ID', 'en-IN', 'en-GB', 'en-US', 'en-AU', 'de-DE'];
+    const shuffled = ['en-AU', 'de-DE', 'en-US', 'en-IN', 'en-GB', 'en-ID'];
+    for (const list of [ipad, shuffled]) {
+        assert.strictEqual(L.closestLanguage(list, 'en', 'en'), 'en-US', 'no region: American English');
+        assert.strictEqual(L.closestLanguage(list, 'en', 'en-GB'), 'en-GB', 'the user\'s own region first');
+        assert.strictEqual(L.closestLanguage(list, 'en', 'en-NZ'), 'en-US', 'a region not offered: American English');
+        assert.strictEqual(L.closestLanguage(list, 'en', ''), 'en-US');
+    }
+    // No American English: the language's own country, then alphabetical.
+    assert.strictEqual(L.closestLanguage(['en-IN', 'en-AU', 'en-ID'], 'en', ''), 'en-AU');
+    assert.strictEqual(L.closestLanguage(['de-AT', 'de-CH', 'de-DE'], 'de', ''), 'de-DE');
+    assert.strictEqual(L.closestLanguage(['fr-CA', 'fr-CH'], 'fr', ''), 'fr-CA');
+});
+
 t('spoken languages are named, with or without Intl', () => {
     assert.match(L.spokenName('en-GB'), /English/);
     assert.match(L.spokenName('de-DE'), /German/);

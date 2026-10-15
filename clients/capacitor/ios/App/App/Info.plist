@@ -144,5 +144,14 @@
 	     clients/electron/package.json, NSMicrophoneUsageDescription. -->
 	<key>NSMicrophoneUsageDescription</key>
 	<string>UberSDR asks for the microphone only so iOS will reveal the names of your audio output devices. Nothing is recorded and nothing is sent anywhere.</string>
+
+	<!-- Asked for at the first Start of the Whisper extension's on-device
+	     transcription, never at launch. What is recognised is the receiver's
+	     own audio, handed to SFSpeechRecognizer as buffers — not the
+	     microphone — and every request sets requiresOnDeviceRecognition, so
+	     none of it leaves the phone. See OnDeviceSpeech.swift. Without this key
+	     iOS terminates the app the moment it asks. -->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>UberSDR can turn what the receiver is playing into text, on this device. It listens to the receiver's audio, not the microphone, and nothing is sent anywhere.</string>
 </dict>
 </plist>

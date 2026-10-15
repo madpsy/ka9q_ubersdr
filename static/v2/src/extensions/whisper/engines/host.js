@@ -13,7 +13,10 @@
 // Declared by the host on `window.ubersdrDesktop`, alongside the flags it
 // already sets there (see clients/capacitor/src/receiver.js and
 // clients/electron/receiver-preload.js). Absent means "no host recogniser", and
-// the page falls back to Web Speech or to the server.
+// the page falls back to Web Speech or to the server. The mobile apps' half is
+// clients/capacitor/src/hostspeech.js, answered on iOS by
+// clients/capacitor/ios/UberSdrPlugin/sources/OnDeviceSpeech.swift and
+// OnDeviceTranslation.swift.
 //
 //     window.ubersdrDesktop.stt = {
 //         languages(): Promise<string[]>,

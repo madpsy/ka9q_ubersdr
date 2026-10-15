@@ -21,6 +21,7 @@
 
 import { createClient } from '../../../static/v2/src/bridge/client.js';
 import { INSTANCE_SECRETS } from '../../../static/v2/src/lib/backup.js';
+import { installHostSpeech } from './hostspeech.js';
 
 // The channel ReceiverActivity opens with addWebMessageListener. Absent on a
 // system WebView too old for it, in which case the receiver simply stays open
@@ -491,7 +492,16 @@ function onAppStats(json) {
     }
 }
 
+// ---- speech to text on the device -------------------------------------------
+//
+// The recogniser and the translator v2's Whisper extension uses in local mode,
+// declared only where the host's own flags say there is one. The protocol and
+// the reasons are in ./hostspeech.js; set up further down, with the rest of
+// what has to exist before the page's first script.
+let hostSpeech = null;
+
 function onHostMessage(data) {
+    if (hostSpeech && hostSpeech.onHostMessage(data)) return;
     if (data.startsWith('action:')) {
         runAction(data.slice(7));
         return;
@@ -661,6 +671,10 @@ observeMediaSession();
 polyfillNotifications();
 polyfillSpeech();
 declareSpeech();
+// After the flags script, which the host installs ahead of this one, and
+// before the page's: v2 looks for `stt` once, synchronously, while deciding
+// whether to offer on-device transcription at all.
+hostSpeech = installHostSpeech({ win: window, tellHost });
 installAppStats();
 installSaveFile();
 watchShared();

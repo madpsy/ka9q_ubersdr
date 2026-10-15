@@ -843,6 +843,17 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         // without reporting anything.
         js += "notifications:\(quote(notificationState)),"
         js += "chat:false,"
+        // Speech-to-text and translation on the device, for the Whisper
+        // extension's local mode. Flags rather than the objects themselves:
+        // src/hostspeech.js (run by receiver.js, the next script along) builds
+        // `stt` and `translate` from them, and builds nothing where they are
+        // absent — which is the Android client today, and this one on a device
+        // with no on-device dictation language, permission refused, or (for
+        // translation) an iOS before 26. Decided here because v2 looks for
+        // `stt` once, synchronously, before anything could be asked. See
+        // OnDeviceSpeech.offered and OnDeviceTranslation.offered.
+        if OnDeviceSpeech.offered() { js += "sttHost:true," }
+        if OnDeviceTranslation.offered() { js += "translateHost:true," }
         // Panels this client does not want, whatever the receiver offers — see
         // static/v2/src/lib/hostPanels.js. Hiding one more is a name in the
         // list below and nothing else: no change to v2, no new flag, and the
@@ -1156,8 +1167,17 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         NSLog("[UberSDR page] failed %@", error.localizedDescription)
     }
 
+    /// The old page is gone once the new one commits — not when it starts
+    /// loading, since a navigation that fails leaves the old page where it was,
+    /// still transcribing. Same-document changes (the page's own history
+    /// entries) never get here.
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        host?.pageChanged()
+    }
+
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         NSLog("[UberSDR page] content process terminated")
+        host?.pageChanged()
     }
 
     // MARK: - The page's console

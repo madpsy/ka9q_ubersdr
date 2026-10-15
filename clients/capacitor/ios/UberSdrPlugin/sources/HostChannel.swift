@@ -25,9 +25,38 @@ import UserNotifications
 ///   speak / speak-cancel / voices
 ///                         spoken announcements, which a WKWebView cannot do
 ///   prefs                 the shared settings snapshot
+///   stt-languages / stt-start / stt-audio / stt-reset / stt-stop
+///                         speech-to-text on the device, for the Whisper
+///                         extension's local mode (OnDeviceSpeech)
+///   translate-availability / translate
+///                         translating its lines (OnDeviceTranslation)
 ///
 /// and host → page, as strings: `action:<name>`, `notice-click:<tag>`,
-/// `voices:<json>`, `notice-permission:granted|denied`.
+/// `voices:<json>`, `notice-permission:granted|denied`, and for the two
+/// above `stt-languages:`, `stt-started:`, `stt-start-failed:`, `stt-result:`,
+/// `stt-error:`, `stt-end:`, `translate-availability:` and `translate-result:`,
+/// each followed by JSON.
+///
+/// The speech messages in full — every field, and why each request carries a
+/// session or an id — are written down once, in src/hostspeech.js, which is
+/// the other end of them:
+///
+///   stt-start {session, lang, sampleRate}  → stt-started {session}
+///                                          | stt-start-failed {session, code, message}
+///   stt-audio {session, pcm}               pcm is base64 of Int16 LE, 16 kHz mono
+///   stt-reset {session} / stt-stop {session}
+///                                          → stt-result {session, text, final}
+///                                          / stt-error {session, code, message, fatal, retryable}
+///                                          / stt-end {session}
+///   stt-languages                          → stt-languages [tag, …]
+///   translate-availability {id, source, target}
+///                                          → translate-availability {id, status}
+///   translate {id, text, source, target}   → translate-result {id, text} | {id, error}
+///
+/// This channel outlives the page — a reload keeps the window — so the page
+/// numbers its sessions and ids from a random point per load, and the
+/// recogniser is stopped when a new page commits (`pageChanged`) as well as on
+/// the page's own stt-stop at `pagehide`.
 final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
 
     /// The name on both sides. Changing it changes src/receiver.js too.
@@ -66,6 +95,10 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     private let appLoad = AppLoad()
     private var nowPlaying: [String: Any] = [:]
     private var haveRemoteCommands = false
+    /// Made on first use: most receivers are never asked to transcribe, and
+    /// neither of these should cost them anything.
+    private var speechToText: OnDeviceSpeech?
+    private var translator: OnDeviceTranslation?
 
     init(webView: WKWebView, instanceId: String, label: String, prefsScope: String?) {
         self.prefsScope = prefsScope
@@ -130,6 +163,10 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         case "voices":        sendVoices()
         case "prefs":         savePrefs(message)
         case "vibrate":       vibrate(message)
+        case "stt-languages", "stt-start", "stt-audio", "stt-reset", "stt-stop":
+            transcribe(type, message)
+        case "translate-availability", "translate":
+            translate(type, message)
         default:              break
         }
     }
@@ -241,6 +278,19 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         onStopped?()
     }
 
+    /// The window has a new page — a reload, or any other navigation — or has
+    /// lost the one it had to a crashed content process.
+    ///
+    /// The recogniser belongs to this channel, which lives as long as the
+    /// window, so it would outlast the page that started it: a task with no
+    /// audio coming, restarted each time it gave up, until the receiver
+    /// closed. The page sends stt-stop on `pagehide`, but a page that is torn
+    /// down rather than unloaded never gets to, so it is stopped here as well.
+    /// Translation keeps nothing per page, and its sessions are worth keeping.
+    func pageChanged() {
+        speechToText?.stopAll()
+    }
+
     /// The receiver is gone: take its card and its buttons off the lock screen.
     ///
     /// Not tidying. `MPRemoteCommandCenter` is process-wide and outlives this
@@ -253,6 +303,10 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     func close() {
         onTransport = nil
         onStopped = nil
+        // Not left listening for a page that has gone: a recognition task
+        // runs until it is told otherwise.
+        speechToText?.stopAll()
+        translator?.close()
         let centre = MPRemoteCommandCenter.shared()
         for command in [centre.playCommand, centre.pauseCommand, centre.togglePlayPauseCommand,
                         centre.stopCommand, centre.nextTrackCommand, centre.previousTrackCommand] {
@@ -443,6 +497,72 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         guard let data = try? JSONSerialization.data(withJSONObject: voices),
               let json = String(data: data, encoding: .utf8) else { return }
         deliver("voices:\(json)")
+    }
+
+    // MARK: - Speech to text
+
+    /// The Whisper extension's local mode — see OnDeviceSpeech, and
+    /// src/hostspeech.js for the page's end.
+    ///
+    /// Checked on the way in, like the settings snapshot: the sender is a
+    /// remote instance's own page. A push is capped at a second of audio
+    /// (the page sends a tenth of one), so a page cannot hand the recogniser
+    /// megabytes in one message.
+    private func transcribe(_ type: String, _ message: [String: Any]) {
+        let engine: OnDeviceSpeech
+        if let existing = speechToText {
+            engine = existing
+        } else {
+            engine = OnDeviceSpeech { [weak self] text in self?.deliver(text) }
+            speechToText = engine
+        }
+        let session = (message["session"] as? NSNumber)?.intValue ?? 0
+        switch type {
+        case "stt-languages":
+            engine.languages()
+        case "stt-start":
+            engine.start(session: session,
+                         lang: message["lang"] as? String ?? "",
+                         sampleRate: (message["sampleRate"] as? NSNumber)?.intValue ?? 16000)
+        case "stt-audio":
+            guard let pcm = message["pcm"] as? String, pcm.utf8.count <= 48_000 else { return }
+            engine.push(session: session, base64: pcm)
+        case "stt-reset":
+            engine.reset(session: session)
+        case "stt-stop":
+            engine.stop(session: session)
+        default:
+            break
+        }
+    }
+
+    /// Translating the transcript's lines — see OnDeviceTranslation. A line is
+    /// a sentence or two; anything far longer is refused rather than handed to
+    /// a model on the main thread.
+    private func translate(_ type: String, _ message: [String: Any]) {
+        let engine: OnDeviceTranslation
+        if let existing = translator {
+            engine = existing
+        } else {
+            engine = OnDeviceTranslation { [weak self] text in self?.deliver(text) }
+            translator = engine
+        }
+        let id = (message["id"] as? NSNumber)?.intValue ?? 0
+        let source = message["source"] as? String ?? ""
+        let target = message["target"] as? String ?? ""
+        switch type {
+        case "translate-availability":
+            engine.availability(id: id, source: source, target: target)
+        case "translate":
+            let text = message["text"] as? String ?? ""
+            guard text.count <= 5000 else {
+                deliver("translate-result:{\"id\":\(id),\"error\":\"the line was too long\"}")
+                return
+            }
+            engine.translate(id: id, text: text, source: source, target: target)
+        default:
+            break
+        }
     }
 
     // MARK: - Haptics

@@ -187,7 +187,14 @@ final class OnDeviceSpeech {
                                    message: "\(lang) can't be recognised on this device.")
                     return
                 }
-                recognizer.defaultTaskHint = .dictation
+                // .unspecified, not .dictation: with the dictation hint and
+                // requiresOnDeviceRecognition, iOS fails every task with
+                // kLSRErrorDomain 201 "Siri and Dictation are disabled" even
+                // with Dictation switched on (an iPad did exactly that; Apple
+                // forum threads 690736 and 691271 report the same). The hint
+                // only tunes the language model towards dictated prose, which
+                // broadcast and amateur speech is not anyway.
+                recognizer.defaultTaskHint = .unspecified
                 self.recognizer = recognizer
                 self.strikes = 0
                 self.beginUtterance()
@@ -284,7 +291,7 @@ final class OnDeviceSpeech {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = true
-        request.taskHint = .dictation
+        request.taskHint = .unspecified  // see start(): .dictation trips error 201
         if #available(iOS 16.0, *) {
             // A transcript is read rather than parsed, and a line with its
             // full stops reads very much better than one without.
@@ -461,8 +468,14 @@ final class OnDeviceSpeech {
             case 201:
                 // "Siri and Dictation are disabled". A code the page does not
                 // know, so this sentence is the one it shows.
+                //
+                // iOS also reports it with Dictation on — for the dictation
+                // task hint (avoided in start()) and, per developer reports,
+                // while the dictation language is still downloading — so the
+                // message names both, and carries iOS's own words in brackets
+                // for whoever has to work out which.
                 return ("dictation-off",
-                        "Dictation is turned off on this device. Turn it on under Settings › General › Keyboard, then press Start again.")
+                        "iOS says dictation is unavailable (\(error.localizedDescription)). Check Settings › General › Keyboard: Enable Dictation is on and the English dictation language has finished downloading, then press Start again.")
             case 102:
                 // "Failed to access assets": the language's on-device model is
                 // not there after all.

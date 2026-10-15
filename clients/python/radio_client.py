@@ -29,6 +29,20 @@ import numpy as np
 import subprocess
 import re
 
+# Windows: stdout and stderr redirected to a file or pipe use the ANSI code
+# page, which cannot encode the status marks printed below (the tick in
+# "Receiving ... packets"), and the UnicodeEncodeError kills the client. Write
+# UTF-8 there instead, replacing rather than failing on anything else. A real
+# console is left alone; Python already writes it as UTF-16. Only the text
+# layer changes: raw audio goes through sys.stdout.buffer either way.
+if sys.platform == 'win32':
+    for _stream in (sys.stdout, sys.stderr):
+        if _stream is not None and hasattr(_stream, 'reconfigure') and not _stream.isatty():
+            try:
+                _stream.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                pass
+
 # For PyInstaller: Add the temporary directory to DLL search path
 # This ensures opuslib can find opus.dll when running from frozen executable
 if getattr(sys, 'frozen', False):
@@ -3584,8 +3598,26 @@ il2p:        0=off  1=IL2P  2=IL2P+CRC  3=Both
         client.handle_message = handle_message_with_tci
 
     # Setup signal handler for graceful shutdown
+    #
+    # Safe against being re-entered. A Python signal handler runs between two
+    # bytecodes of whatever the main thread was doing, and in the PyInstaller
+    # build Ctrl-C arrives twice -- once from the terminal to the process group,
+    # once forwarded by the bootloader -- so the second call landed inside the
+    # first one's print() and died with "reentrant call inside
+    # BufferedWriter <stderr>". The same happens if the signal interrupts any
+    # print to stderr. So: act on the first signal only, and write the notice
+    # with os.write, which takes no buffer lock.
+    shutting_down = False
+
     def signal_handler(sig, frame):
-        print("\nInterrupted, shutting down...", file=sys.stderr)
+        nonlocal shutting_down
+        if shutting_down:
+            return
+        shutting_down = True
+        try:
+            os.write(2, b"\nInterrupted, shutting down...\n")
+        except OSError:
+            pass
         client.running = False
         if radio_control:
             radio_control.disconnect()

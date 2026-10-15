@@ -496,6 +496,18 @@ esbuild ../src/extensions/whisper/speech.js --bundle --format=cjs --platform=nod
     --outfile=.build/whisperspeech.cjs --log-level=warning
 esbuild ../src/extensions/whisper/languages.js --bundle --format=cjs --platform=node \
     --outfile=.build/whisperlang.cjs --log-level=warning
+esbuild ../src/extensions/whisper/localSegments.js --bundle --format=cjs --platform=node \
+    --outfile=.build/whisperlocalsegments.cjs --log-level=warning
+esbuild ../src/extensions/whisper/local.js --bundle --format=cjs --platform=node \
+    --outfile=.build/whisperlocal.cjs --log-level=warning
+esbuild ../src/extensions/whisper/pcm.js --bundle --format=cjs --platform=node \
+    --outfile=.build/whisperpcm.cjs --log-level=warning
+esbuild whisperengines.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/whisperengines.cjs --log-level=warning
+esbuild ../src/extensions/whisper/translate.js --bundle --format=cjs --platform=node \
+    --outfile=.build/whispertranslate.cjs --log-level=warning
+esbuild whisperpanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/whisperpanel.cjs --log-level=warning
 esbuild ../src/lib/measure.js --bundle --format=cjs --platform=node \
     --outfile=.build/measure.cjs --log-level=warning
 esbuild ../src/lib/measureTool.js --bundle --format=cjs --platform=node \
@@ -555,6 +567,9 @@ node freedv.test.js
 node sstv.test.js
 node soundmodem.test.js
 node whisper.test.js
+node whisperlocal.test.js
+node whisperengines.test.js
+node whisperpanel.test.js
 node waterfall.test.js
 node timeconstant.test.js
 node mediasession.test.js

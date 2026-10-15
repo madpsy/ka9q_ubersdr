@@ -12,6 +12,12 @@
 // case — enabled on the receiver but not written for v2 — is simply not shown:
 // this is a launcher, and a row nothing can open is not a control.
 //
+// One exception to "the receiver has to enable it": an entry flagged `local`
+// can run without the server at all — Speech-to-Text, on a device with an
+// on-device recogniser — so it is enabled if the receiver enables it *or* it
+// can run here. Each entry also carries `serverEnabled`, the receiver's answer
+// alone, because such an extension has to know which of its two halves it has.
+//
 // Exactly one extension is open at a time. That is not a UI preference: the
 // server allows one audio extension per session and tears the previous one down
 // when a second attaches, so anything else would show two windows where only
@@ -21,6 +27,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { useRadio } from '../radio/RadioContext.jsx';
 import { isIQ, isWideIQ } from '../radio/constants.js';
 import { EXTENSIONS, EXTENSION_BY_ID } from './registry.jsx';
+import { probeBrowserTrack, usableLocalKind } from './whisper/engines/index.js';
 
 /**
  * Why an extension cannot run in this mode, or null when it can.
@@ -136,12 +143,35 @@ export function ExtensionsProvider({ children }) {
         setMinimised(false);
     }, [tuning.mode, activeId]);
 
+    // Whether this browser can transcribe on its own. A host app's recogniser
+    // is known at once; a browser's has to be tried, because its APIs can all
+    // be there while recognising a track fails every time (see
+    // probeBrowserTrack). False until that answer is in, so the extension
+    // appears with it rather than offering a default that cannot work.
+    const [localStt, setLocalStt] = useState(() => {
+        const u = usableLocalKind();
+        return u.pending ? null : !!u.kind;
+    });
+    useEffect(() => {
+        if (localStt !== null) return undefined;
+        let live = true;
+        probeBrowserTrack().then((ok) => { if (live) setLocalStt(ok); });
+        return () => { live = false; };
+    }, [localStt]);
+
     // The registry, annotated. `enabled` is null while the fetch is in flight,
-    // and nothing is openable until it is known.
-    const list = useMemo(() => EXTENSIONS.map((e) => ({
-        ...e,
-        enabled: enabled == null ? false : enabled.includes(e.id),
-    })), [enabled]);
+    // and nothing is openable until it is known — a `local` entry included,
+    // although it could run: it would open choosing between its sources
+    // before it knew whether the server is one of them, and change its mind a
+    // moment later.
+    const list = useMemo(() => EXTENSIONS.map((e) => {
+        const serverEnabled = enabled == null ? false : enabled.includes(e.id);
+        return {
+            ...e,
+            serverEnabled,
+            enabled: enabled == null ? false : (serverEnabled || (!!e.local && localStt === true)),
+        };
+    }), [enabled, localStt]);
 
     // Opening always shows the window: asking for an extension that is already
     // open but minimised is asking to see it again, not to do nothing.
@@ -215,6 +245,17 @@ export function ExtensionsProvider({ children }) {
     }), [list, activeId, minimised, open, close, toggle, geometryOf, setFloat, minimalOf, toggleMinimal]);
 
     return <ExtensionsContext.Provider value={value}>{children}</ExtensionsContext.Provider>;
+}
+
+/**
+ * One registry entry as annotated above, or null — for an extension that needs
+ * to know how it is enabled (`serverEnabled`). Null outside the provider
+ * rather than throwing, so a component rendered on its own still renders.
+ */
+export function useExtensionEntry(id) {
+    const ctx = useContext(ExtensionsContext);
+    if (!ctx || !Array.isArray(ctx.list)) return null;
+    return ctx.list.find((e) => e.id === id) || null;
 }
 
 export function useExtensions() {

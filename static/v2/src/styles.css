@@ -10336,6 +10336,20 @@ a.btn { text-decoration: none; }
 .stt__detected { color: var(--accent); }
 
 .stt__tts { align-items: flex-end; gap: 8px 12px; }
+/* A note about transcribing on the device, with its way out beside it —
+   Install, or Use server instead. Wraps, because the sentence is long and the
+   window may be narrow: the buttons drop to their own line rather than
+   squeezing the text to a word a line. */
+.stt__note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stt__note > span { flex: 1 1 60%; min-width: 0; }
+/* Why "On this device" is greyed out, in words under the selector — the
+   button's tooltip is no use on a phone, which is where it is most often
+   greyed out. */
+.stt__source-why {
+    font-size: calc(10.5px * var(--ui-scale));
+    color: var(--text-faint);
+    max-width: 24em;
+}
 /* The view filter sits in a wrapping bar; without this it is the one item that
    would be squeezed instead of the row wrapping. */
 .stt .segmented { flex: none; }

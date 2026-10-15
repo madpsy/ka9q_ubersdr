@@ -26,6 +26,13 @@
 //                 stay available in IQ, and switch the receiver into it when
 //                 they start (DRM always; the time-signal decoder for DCF77).
 //   float         initial window size
+//   local         true when the extension can also run entirely in this
+//                 browser, with nothing on the server. It is then offered
+//                 whenever it can, enabled on the receiver or not, and the
+//                 component is told which of the two it has — see
+//                 ExtensionsContext and useExtensionEntry. Speech-to-Text is
+//                 the one: it can transcribe on the device as well as through
+//                 the receiver's WhisperLive.
 //   minimal       true when the extension has a minimal view. The window and
 //                 the mobile sheet then show a toggle, and Component is called
 //                 with `minimal` — the extension itself decides what survives.
@@ -221,6 +228,10 @@ export const EXTENSIONS = [
         icon: <Icon.Captions />,
         summary: 'Live transcription of speech, read aloud and summarised on request.',
         requiresAudio: true,
+        // Transcribes on the device where the browser or the app has an
+        // on-device recogniser, so a receiver with no WhisperLive still offers
+        // it. requiresAudio holds either way: both read the receiver's audio.
+        local: true,
         // Text, but wide: a transcript line is a sentence, and wrapping every
         // one of them across a narrow window is much harder to read than a page.
         float: { w: 860, h: 600 },

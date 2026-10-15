@@ -146,6 +146,14 @@ export class AudioPlayer extends Emitter {
         this.outLevel = 0;          // smoothed RMS of the output, 0..1
         this._clipUntil = 0;
         this.recordTap = null;      // unity node the recorder hangs off
+        // Unity node just ahead of the volume control: everything the client
+        // stages have done to the audio, and nothing the fader, the mute or
+        // the duck has. See recognitionTrack.
+        this.preFader = null;
+        // The on-device speech recogniser's feed, while one is held: the
+        // stream destination it reads, and the context epoch it belongs to.
+        this.recognition = null;
+        this.recognitionWanted = false;
         this.duck = null;           // output gate, for decoders that play their own audio
         this.ducked = false;
 
@@ -431,6 +439,8 @@ export class AudioPlayer extends Emitter {
         // packet path.
         this.head = this.ctx.createGain();
         this.gain = this.ctx.createGain();
+        this.preFader = this.ctx.createGain();
+        this.preFader.connect(this.gain);
         // Per-side output routing, as v1 does (app.js initializeStereoChannels):
         // split the stereo pair, gate each side with its own gain, merge back.
         // Because every buffer is scheduled with at least two channels, this
@@ -446,10 +456,13 @@ export class AudioPlayer extends Emitter {
         this.analyser.fftSize = this.analyserFft || ANALYSER_IDLE_FFT;
         this.analyser.smoothingTimeConstant = 0.5;
         // head reaches gain through the noise stage and the filter chain:
-        // head -> [blanker] -> [NR] -> filterHead -> [EQ/notch/...] -> gain.
-        // _applyNoise wires the first half, setFilters the second.
+        // head -> [blanker] -> [NR] -> filterHead -> [EQ/notch/...] -> preFader
+        // -> gain. _applyNoise wires the first half, setFilters the second.
+        // preFader is a fixed point for the speech recogniser to hang off: the
+        // chain's last node changes every time a filter is switched, and
+        // setFilters disconnects every output filterHead has.
         this.filterHead = this.ctx.createGain();
-        this.filterHead.connect(this.gain);
+        this.filterHead.connect(this.preFader);
         this._applyNoise();
         this.gain.connect(this.splitter);
         this.splitter.connect(this.leftGain, 0);
@@ -485,6 +498,9 @@ export class AudioPlayer extends Emitter {
         this.gain.connect(this.recordTap);
         this.contextEpoch++;
         this._watchContextState(this.ctx, this.contextEpoch);
+        // A recogniser listening to the old context is listening to a graph
+        // that has just been closed. Give it a feed in this one and say so.
+        if (this.recognitionWanted) this._rebuildRecognition();
         this._applyGain();
         this._applyChannelMode();
         if (this.filterSpec) this.setFilters(this.filterSpec);
@@ -704,12 +720,12 @@ export class AudioPlayer extends Emitter {
         const chain = active ? buildChain(this.ctx, active) : null;
         if (chain) {
             this.filterHead.connect(chain.input);
-            chain.output.connect(this.gain);
+            chain.output.connect(this.preFader);
             this.chain = chain;
             if (chain.gate) this._runGate(chain.gate);
             if (chain.compressor) this._runMakeup(chain.compressor);
         } else {
-            this.filterHead.connect(this.gain);
+            this.filterHead.connect(this.preFader);
         }
     }
 
@@ -1201,6 +1217,78 @@ export class AudioPlayer extends Emitter {
     }
 
     /**
+     * The receiver's audio as a MediaStreamTrack, for on-device speech
+     * recognition — or null before there is an audio graph, or in a browser
+     * that cannot make one.
+     *
+     * Web Speech's recogniser takes its audio as a track (`start(track)`), and
+     * the only way to turn this graph into one is a stream destination. Where
+     * it hangs is the point of the method: off `preFader`, after the noise
+     * stage and the filters but before volume, mute and the duck. Transcription
+     * is exactly the feature someone uses with the receiver muted — reading the
+     * captions in a quiet room — and reading the transcript aloud ducks the
+     * receiver, so a feed taken after either would go silent the moment it was
+     * needed and the recogniser would hear nothing at all. The recorder's tap
+     * is after the fader, which is why this is not that.
+     *
+     * Mono and explicit: the stream is a duplicated pair on every voice mode,
+     * and the recogniser would only downmix it again.
+     *
+     * Built lazily and held until releaseRecognitionTrack: a destination node
+     * keeps a branch of the graph rendering for nobody. Calling again returns
+     * the same track. A rate change rebuilds the context, and nodes do not
+     * survive that, so a held feed is rebuilt with it and the new track is
+     * announced as a `recognitiontrack` event — the old one belongs to a closed
+     * context and would carry silence for ever without ending.
+     */
+    recognitionTrack() {
+        this.recognitionWanted = true;
+        if (!this.recognition || this.recognition.epoch !== this.contextEpoch) {
+            this._buildRecognition();
+        }
+        return this.recognition ? this.recognition.track : null;
+    }
+
+    /** Stop feeding the recogniser and take its branch out of the graph. */
+    releaseRecognitionTrack() {
+        this.recognitionWanted = false;
+        this._dropRecognition();
+    }
+
+    _dropRecognition() {
+        const r = this.recognition;
+        this.recognition = null;
+        if (!r) return;
+        try { r.source.disconnect(r.dest); } catch (e) { /* context gone */ }
+        try { r.track.stop(); } catch (e) { /* already ended */ }
+    }
+
+    _buildRecognition() {
+        this._dropRecognition();
+        const ctx = this.ctx;
+        if (!ctx || !this.preFader || typeof ctx.createMediaStreamDestination !== 'function') return;
+        let dest;
+        try {
+            dest = ctx.createMediaStreamDestination();
+            dest.channelCount = 1;
+            dest.channelCountMode = 'explicit';
+        } catch (e) {
+            return;
+        }
+        const tracks = dest.stream && typeof dest.stream.getAudioTracks === 'function'
+            ? dest.stream.getAudioTracks()
+            : [];
+        if (!tracks.length) return;
+        this.preFader.connect(dest);
+        this.recognition = { epoch: this.contextEpoch, source: this.preFader, dest, track: tracks[0] };
+    }
+
+    _rebuildRecognition() {
+        this._buildRecognition();
+        if (this.recognition) this.emit('recognitiontrack', this.recognition.track);
+    }
+
+    /**
      * Where something else's audio joins the receiver's on its way out.
      *
      * The last node of the graph, after the duck: whatever is connected here
@@ -1282,6 +1370,7 @@ export class AudioPlayer extends Emitter {
             this.decoder = null;
         }
         this._releaseOutputElement();
+        this.releaseRecognitionTrack();
         if (this.ctx) {
             this.ctx.close().catch(() => {});
             this.ctx = null;

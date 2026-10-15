@@ -6,7 +6,10 @@
 // enabled is listed and disabled with the reason, rather than left out — the
 // operator's own answer to "why is FT8 not here?" is in extensions.yaml, and a
 // missing row cannot say that. What the receiver enables and v2 has no
-// component for is simply absent: this is a launcher, not an inventory.
+// component for is simply absent: this is a launcher, not an inventory. An
+// extension that can also run in the browser alone (`local` in the registry —
+// Speech-to-Text) counts as enabled wherever it can run, so `enabled` here
+// already folds that in.
 //
 // Picking one opens it as a window and closes whichever was open: the server
 // allows a single audio extension per session, so two open at once would show

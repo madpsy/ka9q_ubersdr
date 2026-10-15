@@ -1175,7 +1175,9 @@ const BUILT_IN = [
         // all still to be written for v2 — gets no panel rather than a list of
         // things that cannot be opened. `enabled` is false until
         // /api/extensions answers, so the panel appears with the reply instead
-        // of flashing up empty first.
+        // of flashing up empty first. An extension that can run in the browser
+        // alone (Speech-to-Text on a device with a recogniser) counts, so such
+        // a browser gets the panel on any receiver.
         requires: (serverInfo, env) => env.extensions.list.some((e) => e.enabled),
     },
     {

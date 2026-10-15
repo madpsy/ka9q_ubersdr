@@ -505,3 +505,149 @@ func TestWebSDRStreamADPCMAudio(t *testing.T) {
 		}
 	}
 }
+
+// websdrADPCMQuantiseRef is websdrADPCMQuantise without its fine-grid shortcut:
+// every candidate on every grid, the closest kept, ties to the first.
+func websdrADPCMQuantiseRef(e, step int32, w int) (code uint32, bits int, decoded int32, ok bool) {
+	bestErr := int64(-1)
+	for m := int32(0); m <= 2; m++ {
+		g := step << m
+		r := floorDiv(e-step/2+g/2, g) << m
+		for _, cand := range [2]int32{r, r + 1<<m} {
+			c, n, d, good := websdrADPCMCode(cand, w)
+			if !good {
+				continue
+			}
+			diff := int64(e) - int64(d*step+step/2)
+			if diff < 0 {
+				diff = -diff
+			}
+			if bestErr < 0 || diff < bestErr {
+				bestErr, code, bits, decoded, ok = diff, c, n, d, true
+			}
+		}
+	}
+	return
+}
+
+// The shortcut must pick exactly what the full search picks, everywhere a
+// residual can land: both signs, every mode, past the escape limit.
+func TestWebSDRADPCMQuantiseMatchesFullSearch(t *testing.T) {
+	for _, step := range []int32{2, 40, 128, 512} {
+		lim := step * 2100 // beyond k = 255 in mode 5
+		for w := 1; w <= 5; w++ {
+			for e := -lim; e <= lim; e += 1 + step/16 {
+				c, n, d, ok := websdrADPCMQuantise(e, step, w)
+				rc, rn, rd, rok := websdrADPCMQuantiseRef(e, step, w)
+				if c != rc || n != rn || d != rd || ok != rok {
+					t.Fatalf("step %d mode %d e %d: got (%x,%d,%d,%v), full search (%x,%d,%d,%v)",
+						step, w, e, c, n, d, ok, rc, rn, rd, rok)
+				}
+			}
+		}
+	}
+}
+
+// encodeBlockRef is encodeBlock without abandoning trials: every mode in
+// ascending order, run to the end, the strictly shortest kept.
+func (e *websdrADPCMEncoder) encodeBlockRef(dst []byte, pcm []int16) []byte {
+	silent := true
+	for _, x := range pcm {
+		if x != 0 {
+			silent = false
+			break
+		}
+	}
+	if silent {
+		return e.silentBlock(dst)
+	}
+	var (
+		best      []byte
+		bestState websdrADPCMState
+		bestMode  int
+	)
+	for w := 1; w <= 5; w++ {
+		st := e.state
+		bits := websdrADPCMBits{}
+		if w == e.mode {
+			bits.write(0, 1)
+		} else {
+			bits.write(uint32(14-w), 4)
+		}
+		ok := true
+		for _, x := range pcm {
+			pred := st.predict()
+			code, n, r, good := websdrADPCMQuantiseRef(int32(x)-pred-st.acc>>4, e.step, w)
+			if !good {
+				ok = false
+				break
+			}
+			if y := st.update(pred, r, e.step, e.conv); y != int32(int16(y)) {
+				ok = false
+				break
+			}
+			bits.write(code, n)
+		}
+		if ok && (best == nil || len(bits.buf) < len(best)) {
+			best, bestState, bestMode = bits.buf, st, w
+		}
+	}
+	if best == nil || len(best) > 1+websdrADPCMBlock {
+		return e.encodeALaw(dst, pcm)
+	}
+	e.state, e.mode = bestState, bestMode
+	return append(dst, best...)
+}
+
+// encodeBlock abandons trials that cannot win and tries the current mode
+// first; neither may change a single output byte. Real receiver audio at every
+// step size, plus the synthetic signals with their transients and full-scale
+// blocks, through both encoders side by side.
+func TestWebSDRADPCMPrunedSearchMatchesFull(t *testing.T) {
+	var signals [][]int16
+	for _, name := range []string{"usb-ft8-14074.bin", "lsb-voice-7150.bin", "cw-14025.bin", "am-14074.bin", "nfm-14074.bin"} {
+		var pcm []int16
+		for _, p := range rawOpusTestPCM(t, name) {
+			pcm = append(pcm, bytesToInt16Samples(p)...)
+		}
+		signals = append(signals, pcm)
+	}
+	for _, sig := range websdrADPCMSignals(128 * 200) {
+		signals = append(signals, sig.pcm)
+	}
+	for _, step := range []int{40, 128, 512} {
+		for _, integ := range []bool{true, false} {
+			for si, pcm := range signals {
+				fast, ref := newWebSDRADPCMEncoder(step), newWebSDRADPCMEncoder(step)
+				fast.SetIntegrator(integ)
+				ref.SetIntegrator(integ)
+				var a, b []byte
+				for off := 0; off+websdrADPCMBlock <= len(pcm); off += websdrADPCMBlock {
+					blk := pcm[off : off+websdrADPCMBlock]
+					a = fast.encodeBlock(a[:0], blk)
+					b = ref.encodeBlockRef(b[:0], blk)
+					if !bytes.Equal(a, b) {
+						t.Fatalf("step %d integ %v signal %d block %d: pruned search coded %d bytes in mode %d, full search %d in mode %d",
+							step, integ, si, off/websdrADPCMBlock, len(a), fast.mode, len(b), ref.mode)
+					}
+				}
+			}
+		}
+	}
+}
+
+// One 20 ms packet of 12 kHz SSB voice, as streamADPCMAudio encodes it.
+func BenchmarkWebSDRADPCMEncodePacket(b *testing.B) {
+	var pkts [][]int16
+	for _, p := range rawOpusTestPCM(&testing.T{}, "lsb-voice-7150.bin") {
+		pkts = append(pkts, bytesToInt16Samples(p))
+	}
+	enc := newWebSDRADPCMEncoder(websdrADPCMStep)
+	enc.SetRate(12000)
+	var msg []byte
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		msg = enc.Encode(msg[:0], pkts[i%len(pkts)], 900)
+	}
+}

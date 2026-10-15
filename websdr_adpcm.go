@@ -171,6 +171,20 @@ func websdrADPCMCode(r int32, w int) (code uint32, bits int, decoded int32, ok b
 func websdrADPCMQuantise(e, step int32, w int) (code uint32, bits int, decoded int32, ok bool) {
 	// Near the rounding point of each grid the decoder keeps (multiples of 1, 2, 4
 	// steps), so try each and keep the closest that survives encoding.
+	//
+	// The usual case is settled by the finest grid alone: when both residuals
+	// bracketing e are coded exactly (no mantissa bits lost), they are the two
+	// reconstructions nearest e of any, so a coarser grid cannot come closer --
+	// and it only replaces a strictly closer one, so the choice is the same.
+	r0 := floorDiv(e, step)
+	c0, n0, d0, ok0 := websdrADPCMCode(r0, w)
+	c1, n1, d1, ok1 := websdrADPCMCode(r0+1, w)
+	if ok0 && ok1 && d0 == r0 && d1 == r0+1 {
+		if e-(r0*step+step/2) <= (r0+1)*step+step/2-e {
+			return c0, n0, d0, true
+		}
+		return c1, n1, d1, true
+	}
 	bestErr := int64(-1)
 	for m := int32(0); m <= 2; m++ {
 		g := step << m
@@ -233,6 +247,10 @@ type websdrADPCMEncoder struct {
 	sentConvByte byte
 
 	pending []int16 // samples waiting for a full block
+
+	// Scratch for encodeBlock's trial encodings, kept so a block does not
+	// allocate: the trial in progress, and the best so far.
+	trialBuf, bestBuf []byte
 
 	// recon, when non-nil, collects every sample the decoder will output, so tests
 	// can compare it with the real decoder.
@@ -361,16 +379,36 @@ func (e *websdrADPCMEncoder) encodeBlock(dst []byte, pcm []int16) []byte {
 		return e.silentBlock(dst)
 	}
 
+	// Each mode is tried in full and the shortest kept, ties going to the lower
+	// mode. A trial is abandoned as soon as it can no longer win -- longer than
+	// the best so far, or as long and a higher mode -- or as soon as it is
+	// longer than the A-law block that would replace it. Trying the decoder's
+	// current mode first, the usual winner, makes that bound tight early;
+	// abandoning never changes which mode is chosen, only how much work it takes.
 	var (
 		best      []byte
 		bestState websdrADPCMState
 		bestMode  int
 		bestOut   [websdrADPCMBlock]int16
 		out       [websdrADPCMBlock]int16
+		order     [5]int
 	)
+	n := 0
+	if e.mode >= 1 && e.mode <= 5 {
+		order[n], n = e.mode, n+1
+	}
 	for w := 1; w <= 5; w++ {
+		if w != e.mode {
+			order[n], n = w, n+1
+		}
+	}
+	for _, w := range order {
+		limit := 1 + websdrADPCMBlock
+		if best != nil {
+			limit = len(best)
+		}
 		st := e.state
-		bits := websdrADPCMBits{}
+		bits := websdrADPCMBits{buf: e.trialBuf[:0]}
 		if w == e.mode {
 			bits.write(0, 1)
 		} else {
@@ -392,9 +430,17 @@ func (e *websdrADPCMEncoder) encodeBlock(dst []byte, pcm []int16) []byte {
 			}
 			bits.write(code, n)
 			out[i] = int16(y)
+			if l := len(bits.buf); l > limit || (best != nil && l == limit && w > bestMode) {
+				ok = false
+				break
+			}
 		}
-		if ok && (best == nil || len(bits.buf) < len(best)) {
-			best, bestState, bestMode, bestOut = bits.buf, st, w, out
+		e.trialBuf = bits.buf
+		if ok && (best == nil || len(bits.buf) < len(best) || (len(bits.buf) == len(best) && w < bestMode)) {
+			// The trial buffer becomes the best; the old best is reused for the
+			// next trial.
+			e.trialBuf, e.bestBuf = e.bestBuf, bits.buf
+			best, bestState, bestMode, bestOut = e.bestBuf, st, w, out
 		}
 	}
 	if best == nil || len(best) > 1+websdrADPCMBlock {
